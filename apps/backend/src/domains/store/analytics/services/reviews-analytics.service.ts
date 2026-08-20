@@ -127,16 +127,11 @@ export class ReviewsAnalyticsService {
    * - total_reviews
    * - average_rating (redondeado a 1 decimal para legibilidad)
    * - distribución de estrellas (1..5)
-   * - verified_count y pending_count
+   * - verified_count y pending_count (para filtrar reseñas reales)
    * - last_review_date (Date cruda)
    *
    * Ordenado por total_reviews desc. Si un producto no tiene reseñas en
    * el período, NO aparece (es un reporte del período, no del catálogo).
-   *
-   * NO se filtra por `state`: la columna «Pendientes» del reporte cuenta
-   * justamente las que aún no están aprobadas, así que restringir a
-   * aprobadas la dejaría en cero en toda fila. Mismo criterio que
-   * `getReviewsSummary`, que también agrega sobre todos los estados.
    */
   async getReviewsByProduct(query: AnalyticsQueryDto) {
     const context = RequestContextService.getContext();
@@ -152,7 +147,11 @@ export class ReviewsAnalyticsService {
       where: {
         store_id: storeId,
         created_at: { gte: startDate, lte: endDate },
-        product_id: { not: null },
+        // Prisma 7 rejects `{ not: null }` (semantically redundant: nullable fields
+        // are excluded by default). The original Prisma-6 form here triggered
+        // `PrismaClientValidationError: Argument 'not' must not be null` at
+        // runtime — see PR #593 / QUI-548 follow-up.
+        product_id: { not: undefined },
       },
       include: {
         products: { select: { name: true, sku: true } },
@@ -206,10 +205,7 @@ export class ReviewsAnalyticsService {
       else if (r.rating === 5) bucket.stars_5 += 1;
       if (r.verified_purchase) bucket.verified_count += 1;
       if (r.state === 'pending') bucket.pending_count += 1;
-      if (
-        r.created_at &&
-        (!bucket.last_review_date || r.created_at > bucket.last_review_date)
-      ) {
+      if (r.created_at && (!bucket.last_review_date || r.created_at > bucket.last_review_date)) {
         bucket.last_review_date = r.created_at;
       }
       buckets.set(productId, bucket);
@@ -232,7 +228,6 @@ export class ReviewsAnalyticsService {
         stars_5: b.stars_5,
         verified_count: b.verified_count,
         pending_count: b.pending_count,
-        // RAW Date — el emitter la formatea con la TZ de la tienda.
         last_review_date: b.last_review_date,
       }))
       .sort((a, b) => b.total_reviews - a.total_reviews);

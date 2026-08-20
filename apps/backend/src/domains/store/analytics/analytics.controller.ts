@@ -17,6 +17,10 @@ import {
   InventoryAnalyticsQueryDto,
   ProductsAnalyticsQueryDto,
 } from './dto/analytics-query.dto';
+import {
+  LowStockBySupplierQueryDto,
+  LowStockBySupplierAnalyticsQueryDto,
+} from './dto/low-stock-by-supplier-query.dto';
 import { ResponseService } from '../../../common/responses/response.service';
 import {
   buildReportBuffer,
@@ -25,7 +29,6 @@ import {
 import {
   sendXlsxReport,
   buildReportFilename,
-  paginatedOrAll,
 } from '@common/reports/report-response.util';
 import type {
   ReportColumn,
@@ -196,75 +199,6 @@ export class AnalyticsController {
   async getSalesByChannel(@Query() query: SalesAnalyticsQueryDto) {
     const result = await this.sales_analytics_service.getSalesByChannel(query);
     return this.response_service.success(result);
-  }
-
-  /**
-   * QUI-549: exporta el resumen de ventas por canal (POS, ecommerce, etc.)
-   * con conteo de órdenes, revenue total y % de participación. Reutiliza
-   * el `groupBy` de `getSalesByChannel` y aplica redondeo a 2 decimales
-   * en revenue y percentage.
-   */
-  @Get('sales/by-channel/export')
-  @Permissions('store:analytics:read')
-  async exportSalesByChannel(
-    @Query() query: SalesAnalyticsQueryDto,
-    @Res() res: Response,
-  ): Promise<void> {
-    const tz = await this.resolveReportTz();
-    const rows =
-      await this.sales_analytics_service.getSalesByChannelForExport(query);
-
-    const columns: ReportColumn[] = [
-      { key: 'display_name', header: 'Canal', type: 'text' },
-      { key: 'order_count', header: 'Órdenes', type: 'number' },
-      { key: 'revenue', header: 'Ingresos', type: 'currency' },
-      { key: 'percentage', header: '% Participación', type: 'percent' },
-    ];
-
-    await this.emitReport(res, 'ventas_por_canal', tz, [
-      this.toSheet('Ventas por Canal', columns, rows, tz),
-    ]);
-  }
-
-  /**
-   * QUI-551: ventas por vendedor (staff que creó la sales_order).
-   * Reutiliza getSalesBySellerForExport del service.
-   */
-  @Get('sales/by-seller/export')
-  @Permissions('store:analytics:read')
-  async exportSalesBySeller(
-    @Query() query: SalesAnalyticsQueryDto,
-    @Res() res: Response,
-  ): Promise<void> {
-    const tz = await this.resolveReportTz();
-    const rows =
-      await this.sales_analytics_service.getSalesBySellerForExport(query);
-
-    const columns: ReportColumn[] = [
-      { key: 'seller_id', header: 'ID Vendedor', type: 'number' },
-      { key: 'seller_name', header: 'Vendedor', type: 'text' },
-      { key: 'email', header: 'Correo', type: 'text' },
-      { key: 'order_count', header: 'Órdenes', type: 'number' },
-      { key: 'total_revenue', header: 'Ingresos', type: 'currency' },
-    ];
-
-    await this.emitReport(res, 'ventas_por_vendedor', tz, [
-      this.toSheet('Ventas por Vendedor', columns, rows, tz),
-    ]);
-  }
-
-  /**
-   * QUI-551: data endpoint (JSON paginado) para la vista de pantalla.
-   * Devuelve el mismo array plano que `getSalesBySellerForExport`
-   * envuelto en `success()` — la paginación es client-side sobre
-   * el array completo (típicamente <100 vendedores por tienda).
-   */
-  @Get('sales/by-seller')
-  @Permissions('store:analytics:read')
-  async getSalesBySeller(@Query() query: SalesAnalyticsQueryDto) {
-    const rows =
-      await this.sales_analytics_service.getSalesBySellerForExport(query);
-    return paginatedOrAll(this.response_service, query, rows);
   }
 
   @Get('sales/export')
@@ -664,36 +598,105 @@ export class AnalyticsController {
     ]);
   }
 
-  /**
-   * QUI-545: exporta el listado de productos activos con stock bajo o
-   * en cero (qty ≤ reorder_point) con su riesgo monetario.
-   * Reutiliza `resolveProductLowStockThreshold` para que el criterio
-   * sea consistente con la vista de pantalla.
-   */
-  @Get('inventory/low-stock/export')
+  // ==================== LOW STOCK BY SUPPLIER (CP-low-stock-by-supplier) ====================
+  // Reporte operativo para el comprador: une bajo stock (ADR-1) con proveedor
+  // preferido (ADR-3), última OC (PURCHASE_COMMITTED_STATES) y velocidad de
+  // rotación (COMPLETED_SALE_STATES). Tres endpoints: pantalla, XLSX, analytics.
+
+  @Get('inventory/low-stock-by-supplier')
   @Permissions('store:analytics:read')
-  async exportLowStock(
-    @Query() query: InventoryAnalyticsQueryDto,
+  async getLowStockBySupplier(@Query() query: LowStockBySupplierQueryDto) {
+    return this.inventory_analytics_service.getLowStockBySupplier(query);
+  }
+
+  @Get('inventory/low-stock-by-supplier/export')
+  @Permissions('store:analytics:read')
+  async exportLowStockBySupplierXlsx(
+    @Query() query: LowStockBySupplierQueryDto,
     @Res() res: Response,
   ): Promise<void> {
     const tz = await this.resolveReportTz();
-    const rows =
-      await this.inventory_analytics_service.getLowStockForExport(query);
+    // ADR-5: the service returns { rows, truncated }. When truncated, the
+    // LAST row of `rows` is a synthetic "AVISO" row painted by the service
+    // (see `buildLowStockTruncationAvisoRow`) so the warning lands inside
+    // the spreadsheet itself — easier to spot than a header banner. The
+    // controller does not need to branch on `truncated` here.
+    const { rows } =
+      await this.inventory_analytics_service.getLowStockBySupplierForExport(
+        query,
+      );
 
     const columns: ReportColumn[] = [
-      { key: 'product_id', header: 'ID', type: 'number' },
+      { key: 'product_id', header: 'ID Producto', type: 'number' },
       { key: 'product_name', header: 'Producto', type: 'text' },
       { key: 'sku', header: 'SKU', type: 'text' },
-      { key: 'stock_quantity', header: 'Stock Actual', type: 'number' },
-      { key: 'min_stock_level', header: 'Stock Mínimo', type: 'number' },
-      { key: 'reorder_point', header: 'Punto de Reorden', type: 'number' },
+      { key: 'current_stock', header: 'Stock Actual', type: 'number' },
+      { key: 'previous_stock', header: 'Stock Anterior', type: 'number' },
+      {
+        key: 'previous_stock_source',
+        header: 'Fuente Stock Ant.',
+        type: 'text',
+        width: 14,
+      },
+      { key: 'delta', header: 'Delta', type: 'number' },
+      { key: 'min_threshold', header: 'Stock Mínimo', type: 'number' },
       { key: 'status', header: 'Estado', type: 'text' },
-      { key: 'stock_value_at_risk', header: 'Valor en Riesgo', type: 'currency' },
+      { key: 'supplier_id', header: 'ID Proveedor', type: 'number' },
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'supplier_sku', header: 'SKU Proveedor', type: 'text' },
+      {
+        key: 'last_purchase_date',
+        header: 'Última Compra',
+        type: 'date-only',
+      },
+      {
+        key: 'last_purchase_cost',
+        header: 'Costo Última Compra',
+        type: 'currency',
+      },
+      {
+        key: 'last_purchase_po_number',
+        header: 'OC Última Compra',
+        type: 'text',
+      },
+      {
+        key: 'days_without_sale',
+        header: 'Días Sin Venta',
+        type: 'number',
+      },
+      {
+        key: 'units_per_package',
+        header: 'Unidades/Paquete',
+        type: 'number',
+      },
     ];
 
-    await this.emitReport(res, 'stock_bajo', tz, [
-      this.toSheet('Stock Bajo', columns, rows, tz),
+    await this.emitReport(res, 'stock_bajo_por_proveedor', tz, [
+      this.toSheet('Stock Bajo por Proveedor', columns, rows, tz),
     ]);
+  }
+
+  /**
+   * Analytics envelope para la vista paralela (Fase H, FB-06). Devuelve
+   * series pre-agregadas (kpis, by_supplier, by_category, top_critical,
+   * history_30d opcional). La caché de analytics del frontend debe incluir
+   * `supplier_id` en la llave para evitar filtraciones cruzadas.
+   */
+  @Get('inventory/low-stock-by-supplier/analytics')
+  @Permissions('store:analytics:read')
+  async getLowStockBySupplierAnalytics(
+    @Query() query: LowStockBySupplierAnalyticsQueryDto,
+  ) {
+    const result =
+      await this.inventory_analytics_service.getLowStockBySupplierAnalytics(
+        query,
+      );
+    // Envelope MUST travel under `data` so the two consumers
+    // (report page L386 + analytics page L261) read `res.data`. There is no
+    // global response interceptor that rewraps — every other endpoint in
+    // this controller calls `this.response_service.success(...)`. Blocker
+    // audit #3.
+    return this.response_service.success(result);
   }
 
   // ==================== CUSTOMERS ANALYTICS ====================
@@ -704,48 +707,6 @@ export class AnalyticsController {
     const result =
       await this.customers_analytics_service.getCustomersSummary(query);
     return this.response_service.success(result);
-  }
-
-  /**
-   * QUI-550: inventario agrupado por proveedor via supplier_products.
-   * Una fila por proveedor con conteo de productos, stock total,
-   * valorización y promedio de costo pactado.
-   */
-  @Get('inventory/by-supplier')
-  @Permissions('store:analytics:read')
-  async getInventoryBySupplier(@Query() query: InventoryAnalyticsQueryDto) {
-    const rows =
-      await this.inventory_analytics_service.getInventoryBySupplierForExport(
-        query,
-      );
-    return paginatedOrAll(this.response_service, query, rows);
-  }
-
-  @Get('inventory/by-supplier/export')
-  @Permissions('store:analytics:read')
-  async exportInventoryBySupplier(
-    @Query() query: InventoryAnalyticsQueryDto,
-    @Res() res: Response,
-  ): Promise<void> {
-    const tz = await this.resolveReportTz();
-    const rows =
-      await this.inventory_analytics_service.getInventoryBySupplierForExport(
-        query,
-      );
-
-    const columns: ReportColumn[] = [
-      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
-      { key: 'supplier_code', header: 'Código', type: 'text' },
-      { key: 'product_count', header: 'Productos', type: 'number' },
-      { key: 'total_stock_quantity', header: 'Stock Total', type: 'number' },
-      { key: 'avg_cost_per_unit', header: 'Costo Promedio', type: 'currency' },
-      { key: 'total_stock_value', header: 'Valor Stock', type: 'currency' },
-      { key: 'preferred_count', header: 'Productos Preferidos', type: 'number' },
-    ];
-
-    await this.emitReport(res, 'inventario_por_proveedor', tz, [
-      this.toSheet('Inventario por Proveedor', columns, rows, tz),
-    ]);
   }
 
   @Get('customers/trends')
@@ -766,9 +727,17 @@ export class AnalyticsController {
   @Get('customers/top')
   @Permissions('store:analytics:read')
   async getTopCustomers(@Query() query: AnalyticsQueryDto) {
-    const rows =
-      await this.customers_analytics_service.getTopCustomersForExport(query);
-    return paginatedOrAll(this.response_service, query, rows);
+    const result =
+      await this.customers_analytics_service.getTopCustomers(query);
+    if (Array.isArray(result)) {
+      return this.response_service.success(result);
+    }
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+    );
   }
 
   /**
@@ -833,14 +802,6 @@ export class AnalyticsController {
    * QUI-540: cuentas por cobrar de clientes (open + partial) con
    * bucketing de antigüedad (0-30 / 31-60 / 61-90 / 90+).
    */
-  @Get('customers/receivable')
-  @Permissions('store:analytics:read')
-  async getAccountsReceivable(@Query() query: AnalyticsQueryDto) {
-    const rows =
-      await this.customers_analytics_service.getAccountsReceivableForExport(query);
-    return paginatedOrAll(this.response_service, query, rows);
-  }
-
   @Get('customers/receivable/export')
   @Permissions('store:analytics:read')
   async exportAccountsReceivable(
@@ -868,46 +829,6 @@ export class AnalyticsController {
 
     await this.emitReport(res, 'cuentas_por_cobrar', tz, [
       this.toSheet('Cuentas por Cobrar', columns, rows, tz),
-    ]);
-  }
-
-  /**
-   * QUI-539: días sin comprar por cliente (riesgo de churn). Agrupa
-   * por cliente: última orden, días desde, total órdenes, lifetime
-   * value y bucket de antigüedad.
-   */
-  @Get('customers/aging')
-  @Permissions('store:analytics:read')
-  async getCustomersAging(@Query() query: AnalyticsQueryDto) {
-    const rows =
-      await this.customers_analytics_service.getCustomersAgingForExport(query);
-    return paginatedOrAll(this.response_service, query, rows);
-  }
-
-  @Get('customers/aging/export')
-  @Permissions('store:analytics:read')
-  async exportCustomersAging(
-    @Query() query: AnalyticsQueryDto,
-    @Res() res: Response,
-  ): Promise<void> {
-    const tz = await this.resolveReportTz();
-    const rows =
-      await this.customers_analytics_service.getCustomersAgingForExport(query);
-
-    const columns: ReportColumn[] = [
-      { key: 'customer_name', header: 'Cliente', type: 'text' },
-      { key: 'customer_email', header: 'Correo', type: 'text' },
-      { key: 'customer_document', header: 'NIT/Doc', type: 'text' },
-      { key: 'customer_since', header: 'Cliente Desde', type: 'date' },
-      { key: 'last_order_date', header: 'Última Orden', type: 'date' },
-      { key: 'days_since_last_order', header: 'Días Sin Comprar', type: 'number' },
-      { key: 'aging_bucket', header: 'Antigüedad', type: 'text' },
-      { key: 'total_orders', header: 'Órdenes', type: 'number' },
-      { key: 'lifetime_value', header: 'Valor Vida', type: 'currency' },
-    ];
-
-    await this.emitReport(res, 'cartera_clientes_aging', tz, [
-      this.toSheet('Cartera Clientes Aging', columns, rows, tz),
     ]);
   }
 
@@ -984,74 +905,6 @@ export class AnalyticsController {
     );
   }
 
-  /**
-   * QUI-547: serie temporal de compras agrupada por período
-   * (hour|day|week|month|year según query.granularity). Una fila por bucket
-   * con conteo de órdenes, gasto total, pendientes vs recibidas.
-   */
-  @Get('purchases/trends')
-  @Permissions('store:analytics:read')
-  async getPurchasesTrends(@Query() query: AnalyticsQueryDto) {
-    const rows =
-      await this.purchases_analytics_service.getPurchasesTrendsForExport(query);
-    return this.response_service.success(rows);
-  }
-
-  @Get('purchases/trends/export')
-  @Permissions('store:analytics:read')
-  async exportPurchasesTrends(
-    @Query() query: AnalyticsQueryDto,
-    @Res() res: Response,
-  ): Promise<void> {
-    const tz = await this.resolveReportTz();
-    const rows =
-      await this.purchases_analytics_service.getPurchasesTrendsForExport(query);
-
-    const columns: ReportColumn[] = [
-      { key: 'period', header: 'Período', type: 'date' },
-      { key: 'order_count', header: 'Órdenes', type: 'number' },
-      { key: 'total_spent', header: 'Gasto Total', type: 'currency' },
-      { key: 'pending_count', header: 'Pendientes', type: 'number' },
-      { key: 'completed_count', header: 'Recibidas', type: 'number' },
-    ];
-
-    await this.emitReport(res, 'tendencias_compra', tz, [
-      this.toSheet('Tendencias de Compra', columns, rows, tz),
-    ]);
-  }
-
-  /**
-   * QUI-542: cuentas por pagar a proveedores con bucketing de
-   * antigüedad. purchase_orders con payment_status IN ('unpaid',
-   * 'partial') y payment_due_date no nulo.
-   */
-  @Get('purchases/aging/export')
-  @Permissions('store:analytics:read')
-  async exportAccountsPayable(
-    @Query() query: AnalyticsQueryDto,
-    @Res() res: Response,
-  ): Promise<void> {
-    const tz = await this.resolveReportTz();
-    const rows =
-      await this.purchases_analytics_service.getAccountsPayableForExport(query);
-
-    const columns: ReportColumn[] = [
-      { key: 'order_number', header: 'OC', type: 'text' },
-      { key: 'supplier_invoice_number', header: 'Factura Prov.', type: 'text' },
-      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
-      { key: 'order_date', header: 'Fecha OC', type: 'date' },
-      { key: 'payment_due_date', header: 'Vencimiento', type: 'date' },
-      { key: 'days_overdue', header: 'Días Mora', type: 'number' },
-      { key: 'aging_bucket', header: 'Antigüedad', type: 'text' },
-      { key: 'total_amount', header: 'Total', type: 'currency' },
-      { key: 'payment_status', header: 'Estado', type: 'text' },
-    ];
-
-    await this.emitReport(res, 'cuentas_por_pagar', tz, [
-      this.toSheet('Cuentas por Pagar', columns, rows, tz),
-    ]);
-  }
-
   @Get('purchases/export')
   @Permissions('store:analytics:read')
   async exportPurchasesAnalytics(
@@ -1091,14 +944,6 @@ export class AnalyticsController {
    * QUI-548: reseñas agregadas por producto con promedio, distribución
    * de estrellas, conteo de verificadas/pendientes y fecha de la última.
    */
-  @Get('reviews/by-product')
-  @Permissions('store:analytics:read')
-  async getReviewsByProduct(@Query() query: AnalyticsQueryDto) {
-    const rows =
-      await this.reviews_analytics_service.getReviewsByProduct(query);
-    return paginatedOrAll(this.response_service, query, rows);
-  }
-
   @Get('reviews/by-product/export')
   @Permissions('store:analytics:read')
   async exportReviewsByProduct(

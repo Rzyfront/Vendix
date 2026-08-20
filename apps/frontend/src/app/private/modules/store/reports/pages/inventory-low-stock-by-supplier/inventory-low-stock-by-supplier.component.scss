@@ -1,0 +1,20 @@
+:host {
+  display: block;
+  // Annotation 1 — visually cancel the parent <main class="shell-content">
+  // padding (16px mobile / 24px desktop) so the page content extends to the
+  // sidebar edge. The shell itself is shared with other reports, so we
+  // compensate here instead of mutating the parent SCSS.
+  margin: -16px;
+  @media (min-width: 768px) {
+    margin: -24px;
+  }
+}
+
+// Annotation 1 — stats-container must have ZERO padding and ZERO margin.
+// The wrapping <div class="space-y-6 w-full"> already owns the inter-block
+// spacing via the `space-y-6` utility; the stats strip must not double it.
+:host ::ng-deep .stats-container {
+  padding: 0;
+  margin: 0;
+  margin-bottom: 0;
+}

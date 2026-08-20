@@ -198,9 +198,19 @@ export function createSalesTools(deps: SalesToolDeps): RegisteredTool[] {
               clientes_distintos: summary.total_customers,
             },
             variacion_vs_periodo_anterior: {
-              ingresos_pct: round2(summary.revenue_growth),
-              ordenes_pct: round2(summary.orders_growth),
-              nota: 'El periodo anterior es un tramo de la misma duración inmediatamente previo. 0 significa que el periodo anterior no tuvo ventas, no que no haya cambio.',
+              // QUI-628 review: los crecimientos son null cuando no hay base
+              // comparable (computeGrowth del contract). El ?? 0 aqui los
+              // convertiria a 0%, que es 'sin cambio' sobre un periodo vacio
+              // — eso miente. Mejor propagar null y que la UI pinte 'sin base'.
+              ingresos_pct:
+                summary.revenue_growth === null
+                  ? null
+                  : round2(summary.revenue_growth),
+              ordenes_pct:
+                summary.orders_growth === null
+                  ? null
+                  : round2(summary.orders_growth),
+              nota: 'El periodo anterior es un tramo de la misma duración inmediatamente previo. null significa que no hay base comparable (periodo anterior sin ventas); 0 seria un cambio real de cero, no un dato faltante.',
             },
           });
         } catch (error: any) {

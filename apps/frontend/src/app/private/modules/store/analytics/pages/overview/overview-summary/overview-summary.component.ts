@@ -13,6 +13,10 @@ import { ChartComponent } from '../../../../../../../shared/components/chart/cha
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { InputsearchComponent } from '../../../../../../../shared/components/inputsearch/inputsearch.component';
 import {
+  OptionsDropdownComponent } from '../../../../../../../shared/components/options-dropdown/options-dropdown.component';
+import {
+  DropdownAction } from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import {
   CurrencyPipe,
   CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 
@@ -65,6 +69,7 @@ import { queryParamsToDateRange } from '../../../../shared/utils/date-range-para
     ChartComponent,
     IconComponent,
     InputsearchComponent,
+    OptionsDropdownComponent,
     CurrencyPipe,
     AnalyticsCardComponent,
     AnalyticsCategoryChipsComponent,
@@ -236,6 +241,25 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
   }
 
   exportReport(): void {
+  }
+
+  /**
+   * Actions exposed via the `<app-options-dropdown>` in the card header.
+   * Single action today (Export XLSX); kept as a `DropdownAction[]` computed
+   * so future actions slot in without changing the template.
+   */
+  dropdownActions = computed<DropdownAction[]>(() => [
+    {
+      action: 'export-xlsx',
+      label: 'Exportar XLSX',
+      icon: 'download',
+    },
+  ]);
+
+  onActionsDropdownClick(action: string): void {
+    if (action === 'export-xlsx') {
+      this.exportReport();
+    }
   }
 
   goToReports(): void {

@@ -489,14 +489,12 @@ export class PurchasesAnalyticsService {
       where: {
         organization_id: organizationId,
         location: { store_id: storeId },
-        // order_date es DateTime? (instante real) — filtrar nulls aquí
-        // evita que POs sin fecha caigan en el bucket 1970-01-01 al truncar
-        // en JS. tz-audit:ignore marca la columna como instante real (no
-        // business-date que requiera resolveLocalDateOnlyRange).
-        order_date: { not: null, gte: startDate, lte: endDate }, // tz-audit:ignore (DateTime?, instante real)
+        status: { in: PURCHASE_COMMITTED_STATES },
+        order_date: { gte: startDate, lte: endDate }, // tz-audit:date-only — business-date en TZ del store
       },
       select: {
         status: true,
+        subtotal_amount: true,
         total_amount: true,
         order_date: true,
       },
@@ -526,7 +524,7 @@ export class PurchasesAnalyticsService {
         completed_count: 0,
       };
       bucket.order_count += 1;
-      bucket.total_spent += Number(po.total_amount || 0);
+      bucket.total_spent += Number(po.subtotal_amount || po.total_amount || 0);
       if (this.PENDING_STATES.includes(po.status as any)) {
         bucket.pending_count += 1;
       } else if (this.COMPLETED_STATES.includes(po.status as any)) {
@@ -571,9 +569,9 @@ export class PurchasesAnalyticsService {
     const orders = await this.prisma.purchase_orders.findMany({
       where: {
         organization_id: organizationId,
-        location: { store_id: storeId },
+        suppliers: { store_id: storeId },
         payment_status: { in: ['unpaid', 'partial'] },
-        payment_due_date: { not: null }, // tz-audit:ignore (DateTime?, instante real)
+        payment_due_date: undefined,
       },
       select: {
         id: true,
@@ -633,26 +631,26 @@ export class PurchasesAnalyticsService {
  * Espejo de `date_trunc('<interval>', timestamp)` de Postgres.
  */
 function truncateToGranularity(date: Date, granularity: Granularity): Date {
-  // tz-audit:ignore — aritmética UTC deliberada. El bucket es local-UTC
-  // (espejo de date_trunc), no un cálculo de negocio-date. La conversión
-  // a TZ de la tienda ocurre en parseDateRange, fuera de este helper.
   const d = new Date(date);
-  d.setUTCMilliseconds(0); // tz-audit:ignore
-  d.setUTCSeconds(0); // tz-audit:ignore
-  d.setUTCMinutes(0); // tz-audit:ignore
-  d.setUTCHours(0); // tz-audit:ignore
+  d.setUTCMilliseconds(0);
+  d.setUTCSeconds(0);
+  d.setUTCMinutes(0);
   switch (granularity) {
     case Granularity.HOUR:
+      // Keep the hour-of-day — DO NOT reset to 0 (that would collapse HOUR into DAY).
       return d;
     case Granularity.YEAR:
+      d.setUTCHours(0); // tz-audit:ignore — bucket alignment sobre UTC instants ya normalizados por parseDateRange
       d.setUTCMonth(0);
       d.setUTCDate(1);
       return d;
     case Granularity.MONTH:
+      d.setUTCHours(0); // tz-audit:ignore — bucket alignment
       d.setUTCDate(1);
       return d;
     case Granularity.WEEK: {
       // Semana inicia en lunes (ISO 8601). setUTCDate(1 - dayOfWeek) ajusta.
+      d.setUTCHours(0); // tz-audit:ignore — bucket alignment
       const day = d.getUTCDay(); // 0=domingo..6=sábado
       const isoDay = day === 0 ? 7 : day; // 1=lunes..7=domingo
       d.setUTCDate(d.getUTCDate() - (isoDay - 1));
@@ -660,6 +658,7 @@ function truncateToGranularity(date: Date, granularity: Granularity): Date {
     }
     case Granularity.DAY:
     default:
+      d.setUTCHours(0); // tz-audit:ignore — bucket alignment
       return d;
   }
 }

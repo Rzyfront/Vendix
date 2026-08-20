@@ -1043,6 +1043,108 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Stock insuficiente para una o más líneas del POS',
   },
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — gate obligatorio de cliente en POS.
+  // Política canónica: `settings.checkout.require_customer_data=true`. Una orden
+  // POS sin cliente queda huérfana y no se puede cobrar, facturar ni atender
+  // soporte. Se valida en backend ANTES de abrir la transacción de pago.
+  POS_CUSTOMER_REQUIRED_001: {
+    code: 'POS_CUSTOMER_REQUIRED_001',
+    httpStatus: 422,
+    devMessage:
+      'POS order requires a valid customer_id when checkout.require_customer_data is enabled',
+  },
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — invariante draft/payment. `is_draft=true`
+  // significa "guardar orden pendiente de cobro"; combinarlo con `requires_payment=true`
+  // es contradictorio y debe rechazarse antes de tomar numeración o escribir pagos.
+  POS_DRAFT_REQUIRES_PAYMENT_001: {
+    code: 'POS_DRAFT_REQUIRES_PAYMENT_001',
+    httpStatus: 409,
+    devMessage:
+      'A draft (is_draft=true) cannot be combined with requires_payment=true; save the order first, then charge it via flow/pay',
+  },
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — race en editor. Otro operador cambió la
+  // orden de `created`/`draft` mientras editábamos. 409 porque la petición está
+  // bien formada; lo que cambió es el estado del recurso.
+  ORD_EDIT_STATE_CHANGED_001: {
+    code: 'ORD_EDIT_STATE_CHANGED_001',
+    httpStatus: 409,
+    devMessage:
+      'Order state changed while it was being edited; refresh and retry',
+  },
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — la orden ya no es editable (pending, finished,
+  // cancelled, refunded…). El editor no debe ni siquiera cargarla.
+  ORD_EDIT_NOT_ALLOWED_001: {
+    code: 'ORD_EDIT_NOT_ALLOWED_001',
+    httpStatus: 409,
+    devMessage:
+      'This order is no longer in an editable state (created/draft required)',
+  },
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — el customer_id que manda el frontend no
+  // pertenece a la tienda del contexto. 403 (no es problema de autenticación, es
+  // de scope/tenant).
+  ORD_EDIT_CUSTOMER_STORE_MISMATCH_001: {
+    code: 'ORD_EDIT_CUSTOMER_STORE_MISMATCH_001',
+    httpStatus: 403,
+    devMessage: 'The selected customer does not belong to the current store',
+  },
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — dirección/método/rate de envío inválidos,
+  // método inactivo, rate no pertenece al método, o costo negativo.
+  ORD_EDIT_INVALID_SHIPPING_001: {
+    code: 'ORD_EDIT_INVALID_SHIPPING_001',
+    httpStatus: 422,
+    devMessage:
+      'Shipping address, method, rate or cost is invalid for the current order',
+  },
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — claim atómico del estado de la orden
+  // perdió la carrera. Diferente de ORD_EDIT_STATE_CHANGED_001: aquí no sabemos
+  // cuál fue el estado final, sólo que la transición atómica no se aplicó.
+  ORD_EDIT_INVALID_STATE_001: {
+    code: 'ORD_EDIT_INVALID_STATE_001',
+    httpStatus: 409,
+    devMessage: 'Order could not be claimed for editing; reload and try again',
+  },
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — promoción o cupón seleccionado ya no aplica
+  // al carrito editado. 422 porque la petición está bien formada; lo que cambió
+  // es la elegibilidad del descuento.
+  ORD_EDIT_PROMOTION_INVALID_001: {
+    code: 'ORD_EDIT_PROMOTION_INVALID_001',
+    httpStatus: 422,
+    devMessage:
+      'Selected promotion or coupon no longer applies to the edited order',
+  },
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — race al confirmar el cupón en el cobro.
+  // El cupón ya fue consumido por otro cargo concurrente y no debe duplicarse.
+  ORD_EDIT_COUPON_COMMIT_001: {
+    code: 'ORD_EDIT_COUPON_COMMIT_001',
+    httpStatus: 409,
+    devMessage:
+      'Coupon could not be committed; it may have been consumed by a concurrent charge',
+  },
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — el servicio detectó que la fila persistida
+  // difiere de la respuesta autoritativa. Nunca devolver éxito falso.
+  ORD_EDIT_RESPONSE_MISMATCH_001: {
+    code: 'ORD_EDIT_RESPONSE_MISMATCH_001',
+    httpStatus: 500,
+    devMessage:
+      'Order was persisted but the response payload does not match the stored row; refresh and verify',
+  },
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — el cobro canónico (flow/pay) falló por
+  // estado, monto o condición pendiente. La orden sigue lista para pagar.
+  ORD_FLOW_PAYMENT_FAILED_001: {
+    code: 'ORD_FLOW_PAYMENT_FAILED_001',
+    httpStatus: 409,
+    devMessage:
+      'Order payment could not be processed; the order remains ready-to-pay',
+  },
+  // CP-POS-MODAL-SCOPE-001 / Phase C.4 — edit→pay sin cliente cuando el escape
+  // hatch está apagado. 409: el cashier debe seleccionar cliente (vía
+  // Actualizar) antes de cobrar.
+  ORD_EDIT_PAY_NOT_ALLOWED_001: {
+    code: 'ORD_EDIT_PAY_NOT_ALLOWED_001',
+    httpStatus: 409,
+    devMessage:
+      'Order cannot be paid: customer is required and pos.allow_anonymous_sales is disabled',
+  },
   INV_LOC_001: {
     code: 'INV_LOC_001',
     httpStatus: 404,
@@ -4677,6 +4779,42 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'The expected cash amount changed after the client read it; refresh the summary before closing',
+  },
+
+  // Reporte "Stock Bajo por Proveedor" (CP-low-stock-by-supplier).
+  // 400 y no 404: el proveedor no existe o pertenece a otra tienda; la
+  // petición nunca llegó a ser una búsqueda real contra el row del
+  // proveedor, así que devolver 404 afirmaría que se buscó y no se
+  // encontró cuando lo cierto es que el identificador no es legal para
+  // el contexto del usuario. ERR-01 en el plan.
+  LOW_STOCK_BY_SUPPLIER_001: {
+    code: 'LOW_STOCK_BY_SUPPLIER_001',
+    httpStatus: 400,
+    devMessage:
+      'The supplier_id filter does not match any active supplier of the current store',
+  },
+
+  // Reporte "Stock Bajo por Proveedor" — estado inválido.
+  // 400: el DTO acepta `low_stock | out_of_stock | all`; cualquier otro
+  // valor cae al class-validator genérico (SYS_VALIDATION_001) si el
+  // cliente lo manda por query. Este código se emite cuando el servicio
+  // lo construye internamente y se topa con un valor que no debería
+  // existir. ERR-02 en el plan.
+  LOW_STOCK_BY_SUPPLIER_002: {
+    code: 'LOW_STOCK_BY_SUPPLIER_002',
+    httpStatus: 400,
+    devMessage:
+      'The status filter must be one of: low_stock, out_of_stock, all',
+  },
+
+  // Genérico para endpoints de analytics: rango de fechas con `from > to`.
+  // 400: el DTO acepta strings ISO; la invariante de orden es responsabilidad
+  // del servicio. ERR-05 en el plan (low-stock-by-supplier analytics).
+  ANALYTICS_DATE_RANGE_001: {
+    code: 'ANALYTICS_DATE_RANGE_001',
+    httpStatus: 400,
+    devMessage:
+      'Invalid date range: history_from must be less than or equal to history_to',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 

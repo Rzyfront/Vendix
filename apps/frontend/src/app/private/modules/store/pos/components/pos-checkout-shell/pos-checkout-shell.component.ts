@@ -43,6 +43,7 @@ import { PosOrderCreateResult } from '../../models/order.model';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { focusFirstInvalid } from '../../../../../../core/utils/focus-first-invalid';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import { StoreOrdersService } from '../../../orders/services/store-orders.service';
 
 export type CheckoutIntent = 'pickup' | 'delivery';
 
@@ -86,6 +87,18 @@ export class PosCheckoutShellComponent {
   readonly tableId = input<number | null>(null);
   readonly paymentMethods = input<PaymentMethod[] | null>(null);
   readonly isProcessing = input<boolean>(false);
+  /**
+   * CP-POS-MODAL-SCOPE-001 / Phase A.1 — drives stepper, footer CTAs and
+   * handler routing. `create-draft` shows only the Cliente step + Guardar;
+   * `edit` shows Cliente+Cobro with Actualizar+Cobrar; `create-payment`
+   * shows Cliente+Cobro with only Cobrar. Defaults to `create-draft` so
+   * the legacy flow keeps working for any caller that forgets to bind it.
+   */
+  readonly mode = input<'create-draft' | 'edit' | 'create-payment'>(
+    'create-draft',
+  );
+  /** Set when `mode='edit'`; identifies the order being updated. */
+  readonly editingOrderId = input<number | null>(null);
 
   // ── Outputs ───────────────────────────────────────────────────────────────
   readonly isOpenChange = output<boolean>();
@@ -99,12 +112,23 @@ export class PosCheckoutShellComponent {
   readonly tableSessionOpened = output<OpenTableSessionResult>();
   /** Emitted when a draft order has been persisted (and KDS fired if applicable). */
   readonly draftSaved = output<PosOrderCreateResult>();
+  /**
+   * CP-POS-MODAL-SCOPE-001 / Phase A.3 — emitted when `mode='edit'` and the
+   * order is updated via PUT /editor. Payload is the fresh Order returned by
+   * the backend. The parent should refresh `readyToPayOrder`, `editingOrder`
+   * and `cartState` so the cashier can immediately Cobrar on the updated
+   * order without leaving the POS.
+   */
+  readonly editorUpdated = output<any>();
 
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly settingsFacade = inject(StoreSettingsFacade);
   private readonly cartService = inject(PosCartService);
   private readonly paymentService = inject(PosPaymentService);
   private readonly integration = inject(PosRestaurantIntegrationService);
+  // CP-POS-MODAL-SCOPE-001 / Phase A.2 — orderService for PUT /editor
+  // (mode='edit') and for any future order-level operations.
+  private readonly ordersService = inject(StoreOrdersService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly host = inject(ElementRef<HTMLElement>);
@@ -141,37 +165,60 @@ export class PosCheckoutShellComponent {
   );
 
   /**
-   * QUI-561 — "toda venta lleva cliente": la tienda apagó
-   * `pos.allow_anonymous_sales`, así que ninguna venta puede cerrarse sin un
-   * cliente adjunto.
+   * Phase D.2 / ADR-1 — "toda venta lleva cliente": el ajuste canónico es
+   * `settings.checkout.require_customer_data`, NO `pos.allow_anonymous_sales`.
+   * El primero es la política de checkout (alta en la jerarquía de settings);
+   * el segundo es un eje operativo del cashier. Mezclarlos producía órdenes
+   * huérfanas porque `allow_anonymous_sales=false` bloqueaba el flujo sin
+   * marcar la obligatoriedad del cliente en el editor.
    *
-   * **Se deriva del SETTING, nunca de {@link isAnonymousSale}.** De este predicado
-   * depende el ORDEN de {@link steps} / {@link stepKeys}, y {@link currentStep} es
-   * un ÍNDICE numérico: si el arreglo de pasos se reordenara a mitad del checkout
-   * (el operador togglea "Venta Anónima" con el modal abierto), el índice pasaría
-   * a apuntar a OTRO paso y la UI quedaría desalineada. El setting es estable
-   * durante toda la venta; el flag es mutable por el operador. Ésa es la trampa.
+   * QUI-audit-round-1: la rama `checkoutIntent() === 'pickup'` que vivía aquí
+   * era POLLUTION — pickup NO fuerza cliente por sí solo; la obligatoriedad
+   * viene de la política o de la dirección de envío. Se separan los dos
+   * motivos en sendos computed para que el template componga.
    *
-   * Lazy-eval: `allowAnonymousSales` se declara más abajo, pero este computed solo
+   * Lazy-eval: `customerRequired` se declara más abajo, pero este computed solo
    * corre al leerse (ya inicializado).
+   */
+  readonly customerRequiredByPolicy = computed<boolean>(
+    () => this.checkoutRequireCustomerData(),
+  );
+
+  /**
+   * El cliente es obligatorio PORQUE la venta tiene dirección de envío (no por
+   * política): la dirección se ata a un cliente y sin él no se puede capturar
+   * un envío. Distinto motivo → distinto computed.
+   */
+  readonly customerRequiredByAddress = computed<boolean>(
+    () => this.requiresAddress(),
+  );
+
+  /**
+   * Composición que alimenta templates y guards que sólo necesitan "se requiere
+   * cliente" sin importar el motivo. Cero rama pickup solapada.
+   *
+   * Round 8 — el POS-side flag `pos.allow_anonymous_sales` es escape hatch:
+   * aunque la política exija cliente, el cashier puede vender sin él desde el
+   * POS. Por tanto "obligatorio" sólo cuando la política lo exige Y el POS
+   * no tiene la ventana abierta. La dirección de envío sigue exigiendo
+   * cliente siempre (no hay forma de atar un envío sin un customer_id).
    */
   readonly customerRequired = computed<boolean>(
     () =>
-      // Pickup always passes through Cliente first (even when anonymous sales
-      // are allowed — operator picks "Venta Anónima" in the sub-step to skip).
-      // Delivery keeps the original semantics: cliente required only when
-      // anonymous sales are forbidden at the store level.
-      this.checkoutIntent() === 'pickup' || !this.allowAnonymousSales(),
+      (this.customerRequiredByPolicy() && !this.allowAnonymousSales()) ||
+      this.customerRequiredByAddress(),
   );
 
   /**
    * El paso Cliente no se puede abandonar sin cliente, por cualquiera de sus dos
    * razones: hay envío (la dirección lo exige) o la tienda prohíbe ventas
-   * anónimas ({@link customerRequired}). Alimenta el badge "Obligatorio" y el
-   * aviso inline del panel Cliente.
+   * anónimas ({@link customerRequiredByPolicy}) sin el escape hatch POS abierto.
+   * Alimenta el badge "Obligatorio" y el aviso inline del panel Cliente.
    */
   readonly customerMandatory = computed<boolean>(
-    () => this.requiresAddress() || this.customerRequired(),
+    () =>
+      this.customerRequiredByAddress() ||
+      (this.customerRequiredByPolicy() && !this.allowAnonymousSales()),
   );
 
   /**
@@ -282,6 +329,13 @@ export class PosCheckoutShellComponent {
    * solo cuando la intención es delivery.
    */
   readonly steps = computed<StepsLineItem[]>(() => {
+    // CP-POS-MODAL-SCOPE-001 / Phase A.1 — `create-draft` (Crear) renders
+    // only the Cliente step. There is no Cobro step in the create-draft
+    // flow because the order has not been saved yet and there is nothing
+    // to charge. The cashier exits via `Guardar borrador`.
+    if (this.mode() === 'create-draft') {
+      return [{ label: 'Cliente' }];
+    }
     if (this.checkoutIntent() === 'delivery') {
       return [{ label: 'Cliente' }, { label: 'Envío' }, { label: 'Cobro' }];
     }
@@ -300,6 +354,10 @@ export class PosCheckoutShellComponent {
    *  la matriz documentada en {@link steps}: ambos comparten {@link currentStep}
    *  como índice, así que una discrepancia desalinea la UI del cuerpo activo. */
   readonly stepKeys = computed<string[]>(() => {
+    // CP-POS-MODAL-SCOPE-001 / Phase A.1 — same scoping as `steps()`.
+    if (this.mode() === 'create-draft') {
+      return ['cliente'];
+    }
     if (this.checkoutIntent() === 'delivery') {
       return ['cliente', 'envio', 'cobro'];
     }
@@ -399,9 +457,43 @@ export class PosCheckoutShellComponent {
     () => this.settingsFacade.pos()?.anonymous_sales_as_default ?? false,
   );
 
-  /** Anonymous option is hidden when the collector is in credit mode. */
+  /**
+   * Phase D.2 / ADR-1 — canonical customer-required source. Defaults to
+   * `true` when the settings have not resolved yet: the BACKEND is
+   * authoritative, but failing closed in the UI prevents a stale
+   * "no customer required" preview while settings load. The backend rejects
+   * the request anyway with `POS_CUSTOMER_REQUIRED_001` if the policy is
+   * actually false and we let the cashier skip the step.
+   */
+  readonly checkoutRequireCustomerData = computed<boolean>(
+    () => this.settingsFacade.checkout()?.require_customer_data ?? true,
+  );
+
+  /** Anonymous option is hidden when the collector is in credit mode.
+   *  Round 3 MAJOR #4 — also hidden when the policy requires a customer
+   *  (`settings.checkout.require_customer_data=true`): an anonymous sale is
+   *  structurally incompatible with the policy, so the toggle is hidden
+   *  rather than shown-then-rejected. The legacy `pos-order-create-modal`
+   *  used to expose it anyway; the backend then returned 422 with
+   *  `POS_CUSTOMER_REQUIRED_001`. */
+  /**
+   * Whether the "Venta Anónima" toggle is visible. Driven by the POS
+   * flag `pos.allow_anonymous_sales` — that flag is the canonical source
+   * for whether the cashier can sell without a customer at the POS. We
+   * intentionally ignore `settings.checkout.require_customer_data` here
+   * because that flag governs electronic invoicing (DIAN/factura
+   * electrónica), not POS-terminal walk-in sales. The customer-required
+   * gate still fires when the operator tries to save a draft via the
+   * "Guardar" button (the POS-side flag is the policy for that path), so
+   * both flags stay honored at their respective code paths.
+   *
+   * `paymentStep.mode === 'credito'` (installment/credit sale) still
+   * requires a customer because the credit plan attaches to a person.
+   */
   readonly canBeAnonymous = computed<boolean>(
-    () => this.allowAnonymousSales() && this.paymentStep()?.mode() !== 'credito',
+    () =>
+      this.allowAnonymousSales() &&
+      this.paymentStep()?.mode() !== 'credito',
   );
 
   /**
@@ -480,6 +572,13 @@ export class PosCheckoutShellComponent {
   });
   /** Delivery → 'Finalizar venta'. Pickup → replica el label del collector. */
   readonly confirmLabel = computed<string>(() => {
+    // CP-POS-MODAL-SCOPE-001 / Phase A.1 — the terminal CTA label varies
+    // by mode so the cashier knows which action will fire:
+    // - create-draft → "Guardar" (saves draft, no payment)
+    // - edit         → "Actualizar" (PUT /editor)
+    // - create-payment / delivery / pickup → existing copy
+    if (this.mode() === 'create-draft') return 'Guardar';
+    if (this.mode() === 'edit') return 'Actualizar';
     if (this.checkoutIntent() === 'delivery') return 'Finalizar venta';
     const step = this.paymentStep();
     if (!step) return 'Confirmar Pago';
@@ -564,6 +663,19 @@ export class PosCheckoutShellComponent {
         if (this.currentStep() >= len) {
           this.currentStep.set(Math.max(0, len - 1));
         }
+      });
+    });
+
+    // CP-POS-MODAL-SCOPE-001 / Phase A.1 — when `mode` flips (e.g. parent
+    // opens the shell again with a different intent), reset the top-level
+    // cursor AND the Cliente sub-cursor so we never land on an out-of-range
+    // step (e.g. mode='edit' → mode='create-draft' would otherwise leave
+    // currentStep=1 on a single-step wizard). Reset is idempotent.
+    effect(() => {
+      this.mode();
+      untracked(() => {
+        this.currentStep.set(0);
+        this.clienteSubStep.set(0);
       });
     });
 
@@ -776,6 +888,87 @@ export class PosCheckoutShellComponent {
   }
 
   // ── Footer actions ───────────────────────────────────────────────────────
+  /**
+   * CP-POS-MODAL-SCOPE-001 / Phase A.2 — single primary CTA handler that
+   * routes by `mode()`:
+   * - `create-draft`  → saveDraft (no payment, no editor).
+   * - `edit`          → ordersService.updateOrderEditor (PUT /editor).
+   * - `create-payment` / delivery → existing Cobro step path (kept verbatim).
+   *
+   * The legacy `onConfirm` continues to be called by template events that
+   * need the payment-step flow only (delivery). We keep both methods on the
+   * component so existing bindings keep working until the template is
+   * migrated.
+   */
+  onPrimaryConfirm(): void {
+    const mode = this.mode();
+    if (mode === 'create-draft') {
+      this.onSaveDraft();
+      return;
+    }
+    if (mode === 'edit') {
+      this.onUpdateEditor();
+      return;
+    }
+    // create-payment (or any future mode): fall through to the payment-step
+    // collector path. Existing semantics preserved.
+    this.onConfirm();
+  }
+
+  /**
+   * CP-POS-MODAL-SCOPE-001 / Phase A.2 — handler for `mode='edit'`. Calls
+   * the canonical editor endpoint and emits `editorUpdated` with the fresh
+   * Order. Cart re-hydration is the parent's responsibility.
+   *
+   * TODO(Phase C): wire idempotency_key + dedupe with concurrent pay.
+   */
+  private onUpdateEditor(): void {
+    const state = this.cartState();
+    const orderId = this.editingOrderId();
+    if (!state || !(state.items?.length ?? 0)) {
+      this.toastService.error(
+        'El carrito está vacío; agrega productos antes de actualizar.',
+      );
+      return;
+    }
+    if (orderId == null) {
+      this.toastService.error('No hay una orden seleccionada.');
+      return;
+    }
+
+    // Phase A.2 minimal payload — Phase C will expand with coupon/promotion
+    // recompute. For now we send items + customer_id only; the backend
+    // returns the persisted Order, which we re-emit to the parent.
+    const items = state.items.map((it) => ({
+      product_id: (it.product as any)?.id,
+      quantity: it.quantity,
+      unit_price: Number(it.unitPrice ?? 0),
+      total_price: Number(it.totalPrice ?? 0),
+      product_name: it.product?.name,
+    }));
+    const customer = this.cartState()?.customer;
+
+    this.ordersService
+      .updateOrderFromEditor(String(orderId), {
+        items,
+        customer_id: customer?.id,
+      } as any)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res: any) => {
+          const order = res?.data ?? res?.order ?? res;
+          this.editorUpdated.emit(order);
+          this.toastService.success('Orden actualizada correctamente');
+          this.isOpenChange.emit(false);
+        },
+        error: (err: any) => {
+          this.toastService.error(
+            err?.error?.message ?? err?.message ?? 'No se pudo actualizar la orden',
+          );
+        },
+      });
+  }
+
   onConfirm(): void {
     // pickup (B1): the Cobro step self-executes (autoExecute=true).
     if (this.checkoutIntent() !== 'delivery') {
@@ -864,9 +1057,26 @@ export class PosCheckoutShellComponent {
    *    de paso (p.ej. Cliente → Envío en delivery). Si aún no era anónima, la
    *    fija y se queda en [Tipo] listo (un segundo clic avanza top-level).
    *  - "Con Cliente" → contrae Tipo y avanza al sub-paso Cliente (Buscar).
+   *
+   *  Round 3 MAJOR #4 — refuse anonymous when the policy requires one: a
+   *  silent flip of the flag would just produce a `POS_CUSTOMER_REQUIRED_001`
+   *  on submit. Treat the call as a no-op (the UI also hides the option via
+   *  {@link canBeAnonymous}, but defending here keeps the invariant under any
+   *  caller — including keyboard shortcuts or tests).
    */
   onSelectSaleType(anonymous: boolean): void {
     if (anonymous) {
+      // Round 8 — `pos.allow_anonymous_sales=true` is the POS-side escape
+      // hatch: even when `checkout.require_customer_data=true` (which
+      // governs ecommerce + electronic invoicing), the cashier may sell
+      // without a customer from the POS. Mirror the backend gate: refuse
+      // anonymous ONLY when the policy forbids it AND the POS flag is off.
+      if (this.customerRequiredByPolicy() && !this.allowAnonymousSales()) {
+        // Policy forbids anonymous AND POS doesn't allow it — force Con Cliente.
+        this.toggleAnonymousSale(false);
+        this.goToClienteSubStep(1);
+        return;
+      }
       if (this.isAnonymousSale()) {
         this.nextStep();
         return;
@@ -1132,8 +1342,40 @@ export class PosCheckoutShellComponent {
   }
 
   private createRetailDraft(state: CartState): void {
+    // Phase D.2 — draft path. We DO NOT open payment, we DO NOT navigate to
+    // detail, and we emit ONLY `draftSaved` to the parent (never
+    // `checkoutCompleted`). The parent already routes on `(draftSaved)` via
+    // `onCreateOrderConfirmed`, which surfaces the order-confirmation modal
+    // and clears the cart; the cashier can decide to "Cobrar" next or close.
+    //
+    // The customer-id gate is enforced here as a defensive UI guard: the
+    // backend is authoritative and will return `POS_CUSTOMER_REQUIRED_001`,
+    // but failing locally saves a round-trip and keeps the cashier oriented.
+    // Anonymous sales skip the customer gate when the policy allows them:
+    // `pos.allow_anonymous_sales=true` is the POS-side source for the
+    // cashier; `settings.checkout.require_customer_data` is enforced by the
+    // backend separately.
+    if (
+      !this.isAnonymousSale() &&
+      (!state.customer || state.customer.id == null)
+    ) {
+      this.submittingDraft.set(false);
+      this.toastService.error(
+        'Selecciona o crea un cliente antes de guardar la orden.',
+      );
+      return;
+    }
+
+    // Anonymous draft: the shell flags the sale as anonymous but the parent's
+    // cartState.customer may still hold a previously-picked customer. We clone
+    // the cart with customer=null so the backend stores the draft without a
+    // customer row (Consumidor Final), per the existing saveDraft contract.
+    const draftState = this.isAnonymousSale()
+      ? { ...state, customer: null }
+      : state;
+
     this.paymentService
-      .saveDraft(state, 'current_user')
+      .saveDraft(draftState, 'current_user')
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res: any) => {

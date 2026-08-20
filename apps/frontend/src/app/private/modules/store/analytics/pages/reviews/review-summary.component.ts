@@ -1,4 +1,4 @@
-import { Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, inject, computed, signal  } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute } from '@angular/router';
@@ -17,6 +17,10 @@ import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 import { compactCountAxis, truncateLabel } from '../../../../../../shared/utils/chart-labels.util';
 
+import {
+  OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
+import {
+  DropdownAction } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 @Component({
   selector: 'vendix-review-summary',
   standalone: true,
@@ -29,12 +33,24 @@ import { compactCountAxis, truncateLabel } from '../../../../../../shared/utils/
     ExportButtonComponent,
     DateRangeFilterComponent,
     AnalyticsCardComponent,
+  
+    OptionsDropdownComponent,],
+  styles: [
+    `
+      :host {
+        display: block;
+        margin: -16px;
+        @media (min-width: 768px) { margin: -24px; }
+      }
+      :host ::ng-deep .stats-container { padding: 0; margin: 0; margin-bottom: 0; }
+      :host ::ng-deep .results-header { padding: 0.75rem 1rem; }
+    `,
   ],
   template: `
-    <div class="pb-6">
+    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
       <!-- Stats Cards -->
       @if (loading()) {
-        <div class="stats-container">
+        <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
           @for (i of [1, 2, 3, 4]; track i) {
             <div class="bg-surface border border-border rounded-xl p-4 animate-pulse">
               <div class="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
@@ -82,37 +98,30 @@ import { compactCountAxis, truncateLabel } from '../../../../../../shared/utils/
         </div>
       }
 
-      <!-- Filter Bar -->
-      <div
-        class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-surface px-4 py-3 border-b border-border rounded-lg mx-1 mb-4"
-      >
-        <div class="flex items-center gap-2.5 min-w-0">
-          <div
-            class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0"
-          >
-            <app-icon name="star" class="text-[var(--color-primary)]"></app-icon>
-          </div>
-          <div class="min-w-0">
-            <h2 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">
-              Analíticas de Reseñas
-            </h2>
-            <p class="hidden sm:block text-xs text-[var(--color-text-secondary)] font-medium truncate">
-              Opiniones, valoraciones y satisfacción del cliente
-            </p>
-          </div>
+          <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
+      <div slot="header" class="results-header flex items-center justify-between gap-3 flex-wrap">
+        <div class="flex items-center gap-2 min-w-0">
+          <app-icon name="star" [size]="20" class="shrink-0 text-[var(--color-primary)]"></app-icon>
+          <span class="results-header__title text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight whitespace-nowrap">Analíticas de Reseñas</span>
         </div>
-
-        <div class="flex items-end gap-2 md:gap-3 flex-shrink-0">
-          <vendix-date-range-filter
-            [value]="dateRange()"
-            (valueChange)="onDateRangeChange($event)"
-          ></vendix-date-range-filter>
-          <vendix-export-button
-            [loading]="exporting()"
-            (export)="exportReport()"
-          ></vendix-export-button>
+        <div class="flex items-end gap-2 flex-wrap shrink-0">
+        <vendix-date-range-filter
+                    [value]="dateRange()"
+                    (valueChange)="onDateRangeChange($event)"
+                  ></vendix-date-range-filter>
+                  <app-options-dropdown
+                    [filters]="[]"
+                    [actions]="dropdownActions()"
+                    [showActions]="true"
+                    triggerLabel="Acciones"
+                    triggerIcon="plus"
+                    [isLoading]="exporting()"
+                    (actionClick)="onActionsDropdownClick($event)"
+                  ></app-options-dropdown>
         </div>
       </div>
+      <div class="p-4 space-y-6">
+
 
       <!-- Content Grid -->
       <div class="grid grid-cols-1 gap-6">
@@ -125,7 +134,7 @@ import { compactCountAxis, truncateLabel } from '../../../../../../shared/utils/
           overflow="hidden"
           [showHeader]="true"
         >
-          <div slot="header" class="flex flex-col">
+          <div slot="header" class="results-header flex flex-col">
             <span class="text-sm font-bold text-[var(--color-text-primary)]">Distribución de Ratings</span>
             <span class="text-xs text-[var(--color-text-secondary)]">Conteo por estrellas</span>
           </div>
@@ -147,7 +156,7 @@ import { compactCountAxis, truncateLabel } from '../../../../../../shared/utils/
           overflow="hidden"
           [showHeader]="true"
         >
-          <div slot="header" class="flex flex-col">
+          <div slot="header" class="results-header flex flex-col">
             <span class="text-sm font-bold text-[var(--color-text-primary)]">Estado de Reseñas</span>
             <span class="text-xs text-[var(--color-text-secondary)]">Aprobadas, pendientes y rechazadas</span>
           </div>
@@ -173,8 +182,11 @@ import { compactCountAxis, truncateLabel } from '../../../../../../shared/utils/
           }
         </div>
       </app-card>
-    </div>
-  `,
+          </div>
+    </app-card>
+</div>
+
+`,
 })
 export class ReviewSummaryComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
@@ -242,6 +254,20 @@ export class ReviewSummaryComponent implements OnInit {
       },
     });
   }
+  readonly dropdownActions = computed<DropdownAction[]>(() => [
+    {
+      action: 'export-xlsx',
+      label: 'Exportar XLSX',
+      icon: 'download',
+    },
+  ]);
+
+  onActionsDropdownClick(action: string): void {
+    if (action === 'export-xlsx') {
+      this.exportReport();
+    }
+  }
+
 
   onDateRangeChange(range: DateRangeFilter): void {
     this.dateRange.set(range);

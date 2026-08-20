@@ -16,6 +16,10 @@ import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 import { compactCountAxis, truncateLabel } from '../../../../../../shared/utils/chart-labels.util';
 
+import {
+  OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
+import {
+  DropdownAction } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import { AnalyticsService } from '../../services/analytics.service';
 import {
   StockLevelReport,
@@ -35,9 +39,21 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
     DateRangeFilterComponent,
     ExportButtonComponent,
     AnalyticsCardComponent,
+  
+    OptionsDropdownComponent,],
+  styles: [
+    `
+      :host {
+        display: block;
+        margin: -16px;
+        @media (min-width: 768px) { margin: -24px; }
+      }
+      :host ::ng-deep .stats-container { padding: 0; margin: 0; margin-bottom: 0; }
+      :host ::ng-deep .results-header { padding: 0.75rem 1rem; }
+    `,
   ],
   template: `
-    <div class="w-full">
+    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
       <!-- Stats: Sticky on mobile, static on desktop -->
       <div
         class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
@@ -79,39 +95,36 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
         ></app-stats>
       </div>
 
-      <!-- Header -->
-      <div class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-surface px-4 py-3 border-b border-border rounded-lg mx-1 mb-4">
-        <div class="flex items-center gap-2.5 min-w-0">
-          <div class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0">
-            <app-icon name="alert-triangle" class="text-[var(--color-primary)]"></app-icon>
-          </div>
-          <div class="min-w-0">
-            <h1 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">
-              Stock Bajo y Agotados
-            </h1>
-            <p class="hidden sm:block text-xs text-[var(--color-text-secondary)] font-medium truncate">
-              Productos con bajo nivel de inventario
-            </p>
-          </div>
+          <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
+      <div slot="header" class="results-header flex items-center justify-between gap-3 flex-wrap">
+        <div class="flex items-center gap-2 min-w-0">
+          <app-icon name="alert-triangle" [size]="20" class="shrink-0 text-[var(--color-primary)]"></app-icon>
+          <span class="results-header__title text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight whitespace-nowrap">Stock Bajo y Agotados</span>
         </div>
-
-        <div class="flex items-end gap-2 md:gap-3 shrink-0">
-          <vendix-date-range-filter
-            [value]="dateRange()"
-            (valueChange)="onDateRangeChange($event)"
-          ></vendix-date-range-filter>
-          <vendix-export-button
-            [loading]="exporting()"
-            (export)="exportReport()"
-          ></vendix-export-button>
+        <div class="flex items-end gap-2 flex-wrap shrink-0">
+        <vendix-date-range-filter
+                    [value]="dateRange()"
+                    (valueChange)="onDateRangeChange($event)"
+                  ></vendix-date-range-filter>
+                  <app-options-dropdown
+                    [filters]="[]"
+                    [actions]="dropdownActions()"
+                    [showActions]="true"
+                    triggerLabel="Acciones"
+                    triggerIcon="plus"
+                    [isLoading]="exporting()"
+                    (actionClick)="onActionsDropdownClick($event)"
+                  ></app-options-dropdown>
         </div>
       </div>
+      <div class="p-4 space-y-6">
+
 
       <!-- Content Grid -->
       <div class="grid grid-cols-1 gap-6">
       <!-- Chart: Stock Alert Distribution -->
       <app-card shadow="none" [responsivePadding]="true" [showHeader]="true">
-        <div slot="header" class="flex flex-col">
+        <div slot="header" class="results-header flex flex-col">
           <span class="text-sm font-bold text-[var(--color-text-primary)]">
             Distribución por Estado
           </span>
@@ -135,8 +148,11 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
           }
         </div>
       </app-card>
-    </div>
-  `})
+          </div>
+    </app-card>
+</div>
+
+`})
 export class LowStockComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
@@ -288,4 +304,18 @@ legend: {
           this.exporting.set(false);
         }});
   }
+  readonly dropdownActions = computed<DropdownAction[]>(() => [
+    {
+      action: 'export-xlsx',
+      label: 'Exportar XLSX',
+      icon: 'download',
+    },
+  ]);
+
+  onActionsDropdownClick(action: string): void {
+    if (action === 'export-xlsx') {
+      this.exportReport();
+    }
+  }
+
 }

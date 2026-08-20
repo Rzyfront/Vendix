@@ -40,6 +40,7 @@ export const reportsRoutes: Routes = [
           { path: 'sales-by-category', loadComponent: () => import('./pages/sales/sales-by-category-report/sales-by-category-report.component').then(c => c.SalesByCategoryReportComponent) },
           { path: 'sales-by-customer', loadComponent: () => import('./pages/sales/sales-by-customer-report/sales-by-customer-report.component').then(c => c.SalesByCustomerReportComponent) },
           { path: 'sales-by-payment', loadComponent: () => import('./pages/sales/sales-by-payment-report/sales-by-payment-report.component').then(c => c.SalesByPaymentReportComponent) },
+          { path: 'sales-by-channel', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'sales-by-channel' } },
           { path: 'sales-trends', loadComponent: () => import('./pages/sales/sales-trends-report/sales-trends-report.component').then(c => c.SalesTrendsReportComponent) },
         ],
       },
@@ -51,6 +52,14 @@ export const reportsRoutes: Routes = [
           { path: '', redirectTo: 'inventory-overview', pathMatch: 'full' },
           { path: 'inventory-overview', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'inventory-overview' } },
           { path: 'inventory-stock-info', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'inventory-stock-info' } },
+          { path: 'inventory-low-stock', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'inventory-low-stock' } },
+          // CP-low-stock-by-supplier — custom page (not the generic viewer)
+          // because it needs a searchable supplier dropdown + a status
+          // filter that the viewer doesn't expose.
+          {
+            path: 'inventory-low-stock-by-supplier',
+            loadComponent: () => import('./pages/inventory-low-stock-by-supplier/inventory-low-stock-by-supplier.component').then(c => c.InventoryLowStockBySupplierComponent),
+          },
           { path: 'inventory-valuation', loadComponent: () => import('./pages/inventory/inventory-valuation-report/inventory-valuation-report.component').then(c => c.InventoryValuationReportComponent) },
           { path: 'inventory-movements', loadComponent: () => import('./pages/inventory/inventory-movements-report/inventory-movements-report.component').then(c => c.InventoryMovementsReportComponent) },
           { path: 'inventory-movement-analysis', loadComponent: () => import('./pages/inventory/inventory-movement-analysis-report/inventory-movement-analysis-report.component').then(c => c.InventoryMovementAnalysisReportComponent) },
@@ -77,7 +86,6 @@ export const reportsRoutes: Routes = [
           { path: 'customer-acquisition', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'customer-acquisition' } },
           { path: 'customer-abandoned-carts', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'customer-abandoned-carts' } },
           { path: 'customers-top', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'customers-top' } },
-          { path: 'customers-receivable', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'customers-receivable' } },
         ],
       },
       {
@@ -89,7 +97,6 @@ export const reportsRoutes: Routes = [
           { path: 'purchase-summary', loadComponent: () => import('./pages/purchases/purchase-summary-report/purchase-summary-report.component').then(c => c.PurchaseSummaryReportComponent) },
           { path: 'purchase-by-supplier', loadComponent: () => import('./pages/purchases/purchase-by-supplier-report/purchase-by-supplier-report.component').then(c => c.PurchaseBySupplierReportComponent) },
           { path: 'purchase-trends', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'purchase-trends' } },
-          { path: 'purchase-aging', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'purchase-aging' } },
         ],
       },
       {
@@ -99,6 +106,7 @@ export const reportsRoutes: Routes = [
         children: [
           { path: '', redirectTo: 'reviews-summary', pathMatch: 'full' },
           { path: 'reviews-summary', loadComponent: () => import('./pages/reviews/reviews-summary-report/reviews-summary-report.component').then(c => c.ReviewsSummaryReportComponent) },
+          { path: 'reviews-by-product', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'reviews-by-product' } },
         ],
       },
       {
@@ -122,6 +130,7 @@ export const reportsRoutes: Routes = [
           { path: 'tax-summary', loadComponent: () => import('./pages/accounting/tax-summary-report/tax-summary-report.component').then(c => c.TaxSummaryReportComponent) },
           { path: 'profit-loss', loadComponent: () => import('./pages/financial/profit-loss-report/profit-loss-report.component').then(c => c.ProfitLossReportComponent) },
           { path: 'financial-refunds', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'financial-refunds' } },
+          { path: 'cash-sessions', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'cash-sessions' } },
         ],
       },
       {

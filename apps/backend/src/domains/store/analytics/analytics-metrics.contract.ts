@@ -29,6 +29,30 @@ import { Prisma } from '@prisma/client';
 export const COMPLETED_SALE_STATES = ['delivered', 'finished'] as const;
 
 /**
+ * Revenue-recognition order states. Adds `refunded` to the completed set so
+ * the matching refunds.tax_refund / refunds.subtotal_refund row can
+ * subtract the tax collected at delivery. Using only COMPLETED_SALE_STATES
+ * here was a latent double-exclusion (QUI-630 review): an order created and
+ * refunded inside the same period would leave the collected bucket and the
+ * refund would subtract its tax again, driving net_tax negative. With
+ * `refunded` included, the gross/net pair balances to zero in the same
+ * period. Shared by `financial/tax-summary` and `financial/refunds`.
+ */
+export const REVENUE_STATES = [...COMPLETED_SALE_STATES, 'refunded'] as const;
+
+/**
+ * Refund states that count as a recognized refund OF THE PERIOD (accrual /
+ * causación): the refund is recognized when it completes (completed / approved),
+ * NOT when it's pending operator action.
+ *
+ * Shared by `financial/refunds` (QUI-631) and `products/performance` — both
+ * must use the SAME list so the per-product return rate and the totals
+ * reported in financial reconcile (defect of QUI-631 catalog: they were
+ * hand-rolled in each service and had already drifted apart).
+ */
+export const REFUND_RECOGNIZED_STATES = ['completed', 'approved'] as const;
+
+/**
  * Expense states that count as an expense OF THE PERIOD (accrual / causación):
  * the expense is recognized when it is approved, not when the cash leaves.
  * `pending` is excluded — an unapproved capture is not yet a recognized expense,
@@ -54,6 +78,21 @@ export const PURCHASE_COMMITTED_STATES = [
   'partial',
   'received',
 ] as const;
+
+/**
+ * Sales-order states that count as a CONSUMMATED sale of the period.
+ *
+ * A `sales_order` is a PoS / pre-invoice entity that progresses from draft to
+ * confirmed to shipped to invoiced. The economic sale is realized at `shipped`
+ * (goods left) and remains at `invoiced` (fiscal document emitted); the two
+ * states are interchangeable for revenue/totals reporting. `draft` is a
+ * shopping list, `confirmed` is an in-flight order, `cancelled` is undone.
+ *
+ * Mirrors the sames naming convention as `COMPLETED_SALE_STATES` (which
+ * concerns `orders`) — kept separate so the contract makes the universe
+ * explicit at the call site.
+ */
+export const SALES_ORDER_COMPLETED_STATES = ['shipped', 'invoiced'] as const;
 
 /**
  * Tipos de movimiento que SUMAN existencias.
@@ -149,6 +188,22 @@ export interface OperatingRevenueParts {
 export function computeOperatingRevenue(parts: OperatingRevenueParts): number {
   return parts.subtotal - parts.discounts + parts.shipping;
 }
+
+/**
+ * SQL expression for operating revenue (ex-VAT), ready to interpolate into
+ * a `$queryRaw` template. Kept in sync with {@link computeOperatingRevenue} so
+ * the JS aggregation and the SQL aggregation cannot drift apart.
+ *
+ * Usage:
+ *   `SELECT COALESCE(SUM(${OPERATING_REVENUE_SQL}), 0) AS revenue FROM orders ...`
+ *
+ * QUI-613 review: avoid the previous drift where day/week/month used the
+ * new formula but the hour branch still used `grand_total` (with VAT). A
+ * shared SQL fragment enforces one definition across all granularities.
+ */
+export const OPERATING_REVENUE_SQL = Prisma.raw(
+  '(o.subtotal_amount - o.discount_amount + o.shipping_cost)',
+) as unknown as Prisma.Sql;
 
 /**
  * How much of the sold volume has a KNOWN unit cost.

@@ -4,6 +4,7 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { AddToCartDto, UpdateCartItemDto, SyncCartDto } from './dto/cart.dto';
 import { S3Service } from '@common/services/s3.service';
@@ -26,6 +27,29 @@ import { PromotionEngineService } from '../../store/promotions/promotion-engine/
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
+
+/**
+ * CP-ECOM-PROMO-UX-001 convergence-R5: retry helpers for the cart promo
+ * summary load. The cart view MUST keep serving 200s on transient DB blips
+ * (advisory-lock contention, brief deadlocks), but a sustained failure has
+ * to be visible to the customer — that's the `promotions_load_state: 'degraded'`
+ * banner the frontend renders. Codes here are the ones Prisma emits for the
+ * two transient shapes we see in production: P2002 (unique-key contention)
+ * and P2028 (transaction timeout / advisory-lock conflict).
+ */
+const PROMO_SUMMARY_RETRY_BACKOFFS_MS = [100, 500, 1500] as const;
+const PROMO_SUMMARY_RETRYABLE_CODES = new Set<string>(['P2002', 'P2028']);
+
+function isRetryablePromoSummaryError(err: unknown): boolean {
+  return (
+    err instanceof Prisma.PrismaClientKnownRequestError &&
+    PROMO_SUMMARY_RETRYABLE_CODES.has(err.code)
+  );
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 @Injectable()
 export class CartService {
@@ -72,9 +96,16 @@ export class CartService {
 
     if (!cart) {
       const currency = await this.settingsService.getStoreCurrency();
+      // QUI-628: a newly-created cart is 'active' and its last_activity_at is
+      // `now`. Without this, a freshly-created cart would read as
+      // state=NULL/last_activity_at=NULL until the first item is added — and
+      // the abandoned-cart metric would silently treat every fresh cart as
+      // already overdue.
       cart = await this.prisma.carts.create({
         data: {
           currency,
+          state: 'active',
+          last_activity_at: new Date(),
           // store_id y user_id se inyectan automáticamente
         },
         include: this.cartInclude,
@@ -86,6 +117,17 @@ export class CartService {
     // Surface the automatic promotional discount alongside the existing cart
     // shape (additive: never removes fields). Degrade silently on any failure
     // so the cart view never breaks because of promotions.
+    //
+    // CP-ECOM-PROMO-UX-001 convergence-R5: a brief DB blip (P2002 unique-key
+    // contention, P2028 advisory-lock timeout) used to silently surface a
+    // zero-discount cart and the customer never knew promotions failed to
+    // load. We now retry up to 3 times with 100/500/1500 ms backoff on those
+    // two codes — both are transient in production — and emit
+    // `promotions_load_state: 'degraded'` when every attempt fails so the
+    // frontend can render a banner and the customer knows to refresh.
+    // Non-retryable errors (validation, schema, anything else) degrade
+    // immediately, with the same banner: a missing promo is the same UX
+    // outcome regardless of the underlying cause.
     let promotion_discount = 0;
     let promotional_subtotal = mapped.subtotal;
     let applied_promotions: Array<{
@@ -95,14 +137,35 @@ export class CartService {
       scope: 'order' | 'product' | 'category';
       discount_amount: number;
     }> = [];
+    let per_product_tier_ladder:
+      | Array<{
+          promotion_id: number;
+          target_product_id: number;
+          tiers: Array<{
+            min_quantity: number;
+            max_quantity: number | null;
+            type: 'percentage' | 'fixed_amount';
+            value: number;
+            sort_order: number;
+          }>;
+          current_tier_index: number | null;
+        }>
+      | undefined;
+    let promotions_load_state: 'ok' | 'degraded' = 'ok';
     try {
-      const summary = await this.getCartSummary();
+      const summary = await this.loadCartPromotionsSummaryWithRetry();
       promotion_discount = summary.promotion_discount;
       promotional_subtotal = summary.promotional_subtotal;
       applied_promotions = summary.applied_promotions;
+      per_product_tier_ladder = summary.per_product_tier_ladder;
     } catch (error) {
+      // Every retry exhausted (or a non-retryable error surfaced on attempt
+      // 1). The cart still returns 200 with zeros for the promo fields — the
+      // customer can keep shopping — and the frontend shows the degraded
+      // banner so the failure is visible.
+      promotions_load_state = 'degraded';
       this.logger.warn(
-        `Failed to resolve cart promotions summary: ${error?.message ?? error}`,
+        `Cart promotions summary degraded after retries: ${error?.message ?? error}`,
       );
     }
 
@@ -111,7 +174,54 @@ export class CartService {
       promotion_discount,
       promotional_subtotal,
       applied_promotions,
+      promotions_load_state,
+      // Conditional spread: omit the field when no tiered promos survived
+      // the filter in `getCartSummary`. Cart UI gets the SAME shape across
+      // auth and guest paths because both delegates to `getCartSummary`.
+      ...(per_product_tier_ladder
+        ? { per_product_tier_ladder }
+        : {}),
     };
+  }
+
+  /**
+   * CP-ECOM-PROMO-UX-001 convergence-R5: load the cart promotions summary
+   * with bounded retries on transient Prisma errors (P2002 unique-key
+   * contention, P2028 advisory-lock timeout). On the third failure the
+   * error propagates and `getCart` flips `promotions_load_state` to
+   * `'degraded'` so the frontend can render the banner.
+   *
+   * Why a private helper instead of inlining the loop in `getCart`: keeps
+   * the `getCart` shape readable (the merged response is the source of
+   * truth) and isolates the retry policy from the cart enrichment.
+   * Non-retryable errors fail fast on attempt 1 — the catch in `getCart`
+   * still degrades, so the UX is identical regardless of cause.
+   */
+  private async loadCartPromotionsSummaryWithRetry(): Promise<Awaited<
+    ReturnType<CartService['getCartSummary']>
+  >> {
+    let lastError: unknown;
+    for (
+      let attempt = 0;
+      attempt <= PROMO_SUMMARY_RETRY_BACKOFFS_MS.length;
+      attempt++
+    ) {
+      try {
+        return await this.getCartSummary();
+      } catch (error) {
+        lastError = error;
+        // Non-retryable: bail out on the first failure and let the caller
+        // mark the cart as degraded. Retrying won't help on a validation /
+        // schema error and would only delay the user-visible banner.
+        if (!isRetryablePromoSummaryError(error)) break;
+        // We just used attempt `attempt` and it failed with a retryable
+        // code; sleep only if another attempt remains.
+        if (attempt < PROMO_SUMMARY_RETRY_BACKOFFS_MS.length) {
+          await delay(PROMO_SUMMARY_RETRY_BACKOFFS_MS[attempt]);
+        }
+      }
+    }
+    throw lastError;
   }
 
   async addItem(dto: AddToCartDto) {
@@ -218,8 +328,13 @@ export class CartService {
 
     if (!cart) {
       const currency = await this.settingsService.getStoreCurrency();
+      // QUI-628: same rationale as the create in getOrCreateCart.
       cart = await this.prisma.carts.create({
-        data: { currency },
+        data: {
+          currency,
+          state: 'active',
+          last_activity_at: new Date(),
+        },
       });
     } else {
       cart = await this.clearCartIfExpired(cart);
@@ -416,9 +531,66 @@ export class CartService {
       return sum + Number(item.unit_price) * item.quantity;
     }, 0);
 
+    // QUI-628: every cart mutation that touches items (add / update qty /
+    // sync from localStorage / clear) flows through this helper, so refreshing
+    // `last_activity_at` here is the single point that keeps the
+    // abandoned-cart definition honest. Without this, "abandoned since N
+    // minutes ago" would use created_at, which never moves and over-counts
+    // active carts.
+    //
+    // QUI-628 review feedback (CRÍTICA): the cart row is reused per
+    // (store_id, user_id) — `@@unique([store_id, user_id])`. After the
+    // first checkout the row carried `converted_order_id IS NOT NULL` and
+    // `state = 'converted'` forever, so subsequent carts the user built
+    // and abandoned were never counted as abandoned, and subsequent
+    // checkouts were never counted as recovered (the abandoned-carts
+    // summary explicitly filters `converted_order_id IS NULL`). We reset
+    // the cycle here: any cart mutation that produces items reopens the
+    // cart for analytics purposes.
     await this.prisma.carts.update({
       where: { id: cart_id },
-      data: { subtotal, updated_at: new Date() },
+      data: {
+        subtotal,
+        updated_at: new Date(),
+        last_activity_at: new Date(),
+        state: 'active',
+        converted_order_id: null,
+        converted_at: null,
+      },
+    });
+  }
+
+  /**
+   * QUI-628: stamp the user's cart as converted when an order is created from
+   * it (ecommerce + whatsapp checkout flows). First-write-wins: only writes
+   * when `converted_order_id IS NULL` (subsequent checkouts reuse the cart
+   * row, and the FIRST order in the session is the one the metric attributes
+   * the conversion to). The cart row is preserved so the analytics endpoint
+   * can join carts to orders via converted_order_id. The cycle is reset by
+   * `updateCartSubtotal` on the next cart mutation.
+   *
+   * Guest checkouts have no user-scoped cart on the server, so this is a
+   * no-op for them — by design, guest checkouts are not "recovered carts" in
+   * the abandoned-carts metric because we never tracked the cart in the first
+   * place.
+   */
+  async markCartConverted(
+    customerId: number,
+    orderId: number,
+    convertedAt: Date = new Date(),
+  ): Promise<void> {
+    if (!customerId) return;
+    await this.prisma.carts.updateMany({
+      where: {
+        user_id: customerId,
+        // Don't overwrite an existing conversion — first checkout wins.
+        converted_order_id: null,
+      },
+      data: {
+        state: 'converted',
+        converted_order_id: orderId,
+        converted_at: convertedAt,
+      },
     });
   }
 
@@ -876,6 +1048,28 @@ export class CartService {
       benefit_type: 'percentage' | 'fixed_amount';
       benefit_value: number;
     }>;
+    /**
+     * Per-product tier ladder for the promotions that already touched the
+     * cart. Surfaced so the cart UI can render the full ladder next to each
+     * line ("Lleva 3 → -10% · Lleva 6 → -15% …") without re-querying the
+     * backend. Same shape as `ActiveProductPromotion.quantity_tiers`
+     * (`QuantityTierSummary[]`), plus the index of the tier the current
+     * quantity is sitting on (`null` when the cart has fewer units than
+     * the first threshold). Omitted from the response when the cart has
+     * no quantity_tiered promotions in scope.
+     */
+    per_product_tier_ladder?: Array<{
+      promotion_id: number;
+      target_product_id: number;
+      tiers: Array<{
+        min_quantity: number;
+        max_quantity: number | null;
+        type: 'percentage' | 'fixed_amount';
+        value: number;
+        sort_order: number;
+      }>;
+      current_tier_index: number | null;
+    }>;
   }> {
     // Auth users: prefer the backend cart so quantities are server-side
     // canonical. Guests: use the DTO items array as the source of truth.
@@ -1078,6 +1272,77 @@ export class CartService {
       customer_id: RequestContextService.getUserId() ?? null,
     });
 
+    // Per-product tier ladder for promotions that touched this cart. Fed by
+    // `getTierLaddersForQuote`, which fans out one batched read of
+    // `promotion_quantity_tiers` plus `promotion_products` and returns one
+    // entry per (promotion_id, target_product_id). We narrow the result to
+    // promos that already have items in scope — the SAME
+    // `(promotion_id, target_product_id)` pairs that `tier_progress` named,
+    // which keeps the ladder consistent with the "next tier" nudge the
+    // customer is already seeing. Without this filter the engine would emit
+    // ladders for EVERY tiered promo with `promotion_products`, even when
+    // the cart has no relevant line — and the UI would render orphan
+    // ladders. Wrapped in try/catch so a failed tier read NEVER breaks the
+    // cart: log WARN and continue with the field omitted.
+    let per_product_tier_ladder:
+      | Array<{
+          promotion_id: number;
+          target_product_id: number;
+          tiers: Array<{
+            min_quantity: number;
+            max_quantity: number | null;
+            type: 'percentage' | 'fixed_amount';
+            value: number;
+            sort_order: number;
+          }>;
+          current_tier_index: number | null;
+        }>
+      | undefined;
+    try {
+      const promotionIds = Array.from(
+        new Set<number>([
+          ...quote.applied_promotions.map((p) => Number(p.promotion_id)),
+          ...quote.tier_progress.map((t) => Number(t.promotion_id)),
+        ]),
+      );
+      if (promotionIds.length > 0) {
+        const ladders =
+          await this.promotionEngine.getTierLaddersForQuote(
+            promotionIds,
+            resolvedItems.map((i) => ({
+              product_id: i.product_id,
+              quantity: i.quantity,
+            })),
+          );
+        // Keep only ladders whose (promotion_id, target_product_id) is also
+        // named by `tier_progress`. This matches the engine's "items in
+        // scope" gate and prevents rendering orphan ladders when the cart
+        // has no qualifying line.
+        const scopedPairs = new Set<string>(
+          quote.tier_progress
+            .map((t) =>
+              t.target_product_id != null
+                ? `${Number(t.promotion_id)}:${Number(t.target_product_id)}`
+                : null,
+            )
+            .filter((k): k is string => k !== null),
+        );
+        const filtered = ladders.filter((l) =>
+          scopedPairs.has(
+            `${Number(l.promotion_id)}:${Number(l.target_product_id)}`,
+          ),
+        );
+        if (filtered.length > 0) {
+          per_product_tier_ladder = filtered;
+        }
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to resolve cart per_product_tier_ladder: ${error?.message ?? error}`,
+      );
+      // Leave the field undefined: cart must keep serving 200.
+    }
+
     // Pre-fetch category names only if any applied promotion has scope
     // 'category'. Avoids the join when not needed.
     const appliedCategories = quote.applied_promotions.filter(
@@ -1188,6 +1453,13 @@ export class CartService {
       // Each entry may include `target_product_id` (populated by the engine
       // for `per_product` promos) which the banner uses to name the SKU.
       tier_progress: quote.tier_progress,
+      // Conditional spread: omit the field when no ladders survive the
+      // (promotion_id, target_product_id) filter above. Empty array and
+      // absent field are distinguishable in the JSON response (the latter
+      // is what the cart UI sees when the cart has no tiered promos).
+      ...(per_product_tier_ladder
+        ? { per_product_tier_ladder }
+        : {}),
     };
   }
 }

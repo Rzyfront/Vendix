@@ -4,6 +4,7 @@ import { Observable, of, throwError, Subject } from 'rxjs';
 import { catchError, map, timeout, delay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
+import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import { PaymentMethodsCatalogService } from '../../../../../shared/services/payment-methods-catalog.service';
 import { PosCashRegisterService } from './pos-cash-register.service';
 import { CartItem, CartState } from '../models/cart.model';
@@ -24,6 +25,36 @@ export type {
   PaymentResponse,
   Transaction,
 } from '../models/payment.model';
+
+/**
+ * CP-POS-CREAR-EDITAR-COBRAR-001 / B.3 + vendix-error-handling:
+ * rethrow normalized HTTP errors instead of swallowing them into
+ * `of({ success: false, message })`. The previous shape buried a real 4xx
+ * behind a synthetic `success: false` payload so the cashier saw "Error al
+ * procesar el pago" for everything from `POS_CUSTOMER_REQUIRED_001` to
+ * `POS_STOCK_INSUFFICIENT_001` and couldn't branch on `error_code`.
+ *
+ * This helper runs `parseApiError` (which already maps `error_code` →
+ * `ERROR_MESSAGES[code]`, falls back to `details.blockers[0].problem` or the
+ * backend `message`, and otherwise uses `DEFAULT_ERROR_MESSAGE`) and rethrows
+ * an `Error` with `errorCode` and `details` attached as own properties so the
+ * caller can do `if (err.errorCode === 'POS_CUSTOMER_REQUIRED_001') ...`.
+ */
+function rethrowApiError<T = never>(error: unknown): Observable<T> {
+  const parsed = parseApiError(error);
+  const wrapped = new Error(parsed.userMessage) as Error & {
+    errorCode: string | null;
+    details: unknown;
+    devMessage: string | null;
+  };
+  wrapped.errorCode = parsed.errorCode;
+  wrapped.details = parsed.details;
+  wrapped.devMessage = parsed.devMessage;
+  // Preserve the original HttpErrorResponse so consumers that need the
+  // raw status (network errors, retry policies) still have it.
+  (wrapped as any).cause = error;
+  return throwError(() => wrapped);
+}
 
 @Injectable({
   providedIn: 'root',
@@ -257,12 +288,7 @@ export class PosPaymentService {
           };
         }
       }),
-      catchError((error) => {
-        return of({
-          success: false,
-          message: error.error?.message || 'Error al procesar el pago',
-        });
-      }),
+      catchError((error) => rethrowApiError(error)),
     );
   }
 
@@ -414,7 +440,7 @@ export class PosPaymentService {
           throw new Error(data.message || 'Error al procesar la venta');
         }
       }),
-      catchError((error) => throwError(() => error)),
+      catchError((error) => rethrowApiError(error)),
     );
   }
 
@@ -558,7 +584,7 @@ export class PosPaymentService {
           throw new Error(data.message || 'Error al procesar el envío');
         }
       }),
-      catchError((error) => throwError(() => error)),
+      catchError((error) => rethrowApiError(error)),
     );
   }
 
@@ -640,7 +666,7 @@ export class PosPaymentService {
           );
         }
       }),
-      catchError((error) => throwError(() => error)),
+      catchError((error) => rethrowApiError(error)),
     );
   }
 
@@ -735,7 +761,7 @@ export class PosPaymentService {
           );
         }
       }),
-      catchError((error) => throwError(() => error)),
+      catchError((error) => rethrowApiError(error)),
     );
   }
 
@@ -769,6 +795,11 @@ export class PosPaymentService {
       subtotal: Number(cartState.summary.subtotal.toFixed(2)),
       tax_amount: Number(cartState.summary.taxAmount.toFixed(2)),
       promotion_ids: this.getAppliedPromotionIds(cartState),
+      // QUI-audit-round-1: el backend recalcula el descuento a partir de
+      // `promotion_ids` + `coupon_code` y es la fuente de verdad; sin esto, el cupn
+      // se perdía al guardar el borrador y reaparecía como `coupon_code = null`.
+      coupon_id: cartState.appliedCoupon?.id ?? null,
+      coupon_code: cartState.appliedCoupon?.code ?? null,
       total_amount: Number(cartState.summary.total.toFixed(2)),
       is_draft: true,
       requires_payment: false,
@@ -791,7 +822,7 @@ export class PosPaymentService {
           throw new Error(data.message || 'Error al guardar el borrador');
         }
       }),
-      catchError((error) => throwError(() => error)),
+      catchError((error) => rethrowApiError(error)),
     );
   }
 
@@ -974,7 +1005,7 @@ export class PosPaymentService {
           nextAction: payment?.nextAction ?? data?.nextAction,
         };
       }),
-      catchError((error) => throwError(() => error)),
+      catchError((error) => rethrowApiError(error)),
     );
   }
 

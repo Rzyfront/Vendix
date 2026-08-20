@@ -10,6 +10,10 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import {
+  OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
+import {
+  DropdownAction } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
@@ -39,6 +43,7 @@ import { truncateLabel } from '../../../../../../shared/utils/chart-labels.util'
     DateRangeFilterComponent,
     ExportButtonComponent,
     AnalyticsCardComponent,
+    OptionsDropdownComponent,
   ],
   templateUrl: './top-sellers.component.html',
   styles: [
@@ -189,5 +194,19 @@ onDateRangeChange(range: DateRangeFilter): void {
   exportReport(): void {
     this.exporting.set(true);
     setTimeout(() => this.exporting.set(false), 1000);
+  }
+
+  readonly dropdownActions = computed<DropdownAction[]>(() => [
+    {
+      action: 'export-xlsx',
+      label: 'Exportar XLSX',
+      icon: 'download',
+    },
+  ]);
+
+  onActionsDropdownClick(action: string): void {
+    if (action === 'export-xlsx') {
+      this.exportReport();
+    }
   }
 }

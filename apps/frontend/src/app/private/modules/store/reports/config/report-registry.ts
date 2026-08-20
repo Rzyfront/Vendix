@@ -155,39 +155,6 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     exportEndpoint: 'store/analytics/purchases/trends/export',
   },
 
-  {
-    // QUI-542: Cuentas por pagar a proveedores con bucketing de
-    // antigüedad. purchase_orders con payment_status unpaid|partial.
-    id: 'purchase-aging',
-    category: 'purchases',
-    title: 'Cuentas por Pagar (Aging)',
-    description: 'CxP abiertas con bucketing de antigüedad por proveedor',
-    detailedDescription:
-      'Listado de órdenes de compra con pago pendiente (unpaid/partial) y fecha de vencimiento, agrupadas en buckets de antigüedad (corriente, 31-60, 61-90, 90+). Útil para priorizar pagos y evitar moras.',
-    icon: 'clock-alert',
-    route: '/admin/reports/purchases/purchase-aging',
-    requiresDateRange: false,
-    requiresFiscalPeriod: false,
-    type: 'list' as ReportType,
-    trackKey: 'id',
-    columns: [
-      { key: 'order_number', header: 'OC', type: 'text' },
-      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
-      { key: 'order_date', header: 'Fecha OC', type: 'date' },
-      { key: 'payment_due_date', header: 'Vencimiento', type: 'date' },
-      { key: 'days_overdue', header: 'Días Mora', type: 'number' },
-      { key: 'aging_bucket', header: 'Antigüedad', type: 'text' },
-      { key: 'total_amount', header: 'Total', type: 'currency', footer: 'sum' },
-      { key: 'payment_status', header: 'Estado', type: 'text' },
-    ],
-    exportFilename: 'cuentas_por_pagar',
-    stats: [
-      { key: 'total_amount', label: 'Total Pendiente', type: 'currency', icon: 'dollar-sign' },
-    ],
-    dataEndpoint: 'store/analytics/purchases/aging',
-    exportEndpoint: 'store/analytics/purchases/aging/export',
-  },
-
   // ─── RESEÑAS (2) ──────────────────────────────────────────────────────────────────
 
   {
@@ -224,6 +191,45 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     ],
     dataEndpoint: 'store/analytics/reviews/summary',
     exportEndpoint: 'store/analytics/reviews/export',
+  },
+
+  {
+    // QUI-548: Reseñas por producto. Una fila por producto con total,
+    // promedio, distribución de estrellas y conteo de verificadas.
+    id: 'reviews-by-product',
+    category: 'reviews',
+    title: 'Reseñas por Producto',
+    description: 'Calificación promedio y distribución de estrellas por producto',
+    detailedDescription:
+      'Detalle de reseñas agrupadas por producto: total, promedio (1 decimal), distribución 1-5 estrellas, cuántas son de compra verificada y cuántas siguen pendientes de moderación.',
+    icon: 'star',
+    route: '/admin/reports/reviews/reviews-by-product',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'product_id',
+    columns: [
+      { key: 'product_name', header: 'Producto', type: 'text' },
+      { key: 'sku', header: 'SKU', type: 'text' },
+      { key: 'total_reviews', header: 'Reseñas', type: 'number', footer: 'sum' },
+      { key: 'average_rating', header: 'Promedio', type: 'number' },
+      { key: 'stars_5', header: '5★', type: 'number', footer: 'sum' },
+      { key: 'stars_4', header: '4★', type: 'number', footer: 'sum' },
+      { key: 'stars_3', header: '3★', type: 'number', footer: 'sum' },
+      { key: 'stars_2', header: '2★', type: 'number', footer: 'sum' },
+      { key: 'stars_1', header: '1★', type: 'number', footer: 'sum' },
+      { key: 'verified_count', header: 'Verificadas', type: 'number', footer: 'sum' },
+      { key: 'pending_count', header: 'Pendientes', type: 'number', footer: 'sum' },
+      { key: 'last_review_date', header: 'Última Reseña', type: 'date' },
+    ],
+    exportFilename: 'resenas_por_producto',
+    stats: [
+      { key: 'total_reviews', label: 'Total Reseñas', type: 'number', icon: 'message-square' },
+      { key: 'average_rating', label: 'Promedio General', type: 'number', icon: 'star' },
+      { key: 'verified_count', label: 'Verificadas', type: 'number', icon: 'check-circle' },
+    ],
+    dataEndpoint: 'store/analytics/reviews/by-product',
+    exportEndpoint: 'store/analytics/reviews/by-product/export',
   },
 
   // ─── VENTAS (6) ───────────────────────────────────────────────────────────────
@@ -391,6 +397,38 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   },
 
   {
+    // QUI-549: Ventas por canal. groupBy de orders.channel con
+    // COMPLETED_SALE_STATES, mostrando órdenes, ingresos y % de
+    // participación por canal (POS, ecommerce, agent, whatsapp,
+    // marketplace).
+    id: 'sales-by-channel',
+    category: 'sales',
+    title: 'Por Canal',
+    description: 'Distribución de ventas por canal: POS, ecommerce, agente, etc.',
+    detailedDescription:
+      'Conoce por dónde venden más: punto de venta, tienda online, agente IA, WhatsApp o marketplace. Distribución con conteo de órdenes, ingresos y % de participación.',
+    icon: 'radio',
+    route: '/admin/reports/sales/sales-by-channel',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'channel',
+    columns: [
+      { key: 'display_name', header: 'Canal', type: 'text' },
+      { key: 'order_count', header: 'Órdenes', type: 'number', footer: 'sum' },
+      { key: 'revenue', header: 'Ingresos', type: 'currency', footer: 'sum' },
+      { key: 'percentage', header: '% Participación', type: 'percentage' },
+    ],
+    exportFilename: 'ventas_por_canal',
+    stats: [
+      { key: 'revenue', label: 'Ingresos Totales', type: 'currency', icon: 'dollar-sign' },
+      { key: 'order_count', label: 'Órdenes Totales', type: 'number', icon: 'shopping-cart' },
+    ],
+    dataEndpoint: 'store/analytics/sales/by-channel',
+    exportEndpoint: 'store/analytics/sales/by-channel/export',
+  },
+
+  {
     id: 'sales-trends',
     category: 'sales',
     title: 'Tendencias',
@@ -485,6 +523,83 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     ],
     dataEndpoint: 'store/analytics/inventory/stock-levels',
     exportEndpoint: 'store/analytics/inventory/export',
+  },
+
+  {
+    // QUI-545: Stock bajo / puntos de reorden. Reusa getLowStockAlerts del
+    // service (que ya filtra qty <= reorder_point con el helper compartido)
+    // y le agrega `stock_value_at_risk` (qty * cost_price) para mostrar el
+    // impacto monetario de reponer.
+    id: 'inventory-low-stock',
+    category: 'inventory',
+    title: 'Stock Bajo',
+    description: 'Productos en o por debajo del punto de reorden',
+    detailedDescription:
+      'Productos activos con stock_quantity ≤ reorder_point, incluyendo el valor en riesgo (stock_actual × costo) para priorizar la reposición.',
+    icon: 'alert-triangle',
+    route: '/admin/reports/inventory/inventory-low-stock',
+    requiresDateRange: false,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'product_id',
+    columns: [
+      { key: 'product_name', header: 'Producto', type: 'text' },
+      { key: 'sku', header: 'SKU', type: 'text' },
+      { key: 'stock_quantity', header: 'Stock Actual', type: 'number', footer: 'sum' },
+      { key: 'min_stock_level', header: 'Stock Mínimo', type: 'number' },
+      { key: 'reorder_point', header: 'Punto de Reorden', type: 'number' },
+      { key: 'status', header: 'Estado', type: 'text' },
+      { key: 'stock_value_at_risk', header: 'Valor en Riesgo', type: 'currency', footer: 'sum' },
+    ],
+    exportFilename: 'stock_bajo',
+    stats: [
+      { key: 'stock_quantity', label: 'Unidades en Riesgo', type: 'number', icon: 'layers' },
+      { key: 'stock_value_at_risk', label: 'Valor en Riesgo', type: 'currency', icon: 'dollar-sign' },
+    ],
+    dataEndpoint: 'store/analytics/inventory/low-stock',
+    exportEndpoint: 'store/analytics/inventory/low-stock/export',
+  },
+
+  {
+    // CP-low-stock-by-supplier: operativo para el comprador. Une bajo stock
+    // (ADR-1, contra `stock_levels.quantity_available` agregado) con
+    // proveedor preferido (ADR-3), última OC (`PURCHASE_COMMITTED_STATES`)
+    // y velocidad de rotación (`COMPLETED_SALE_STATES`). El selector de
+    // proveedor con búsqueda vive en la página custom
+    // `pages/inventory-low-stock-by-supplier/` (F.1), NO en el viewer
+    // genérico.
+    id: 'inventory-low-stock-by-supplier',
+    category: 'inventory',
+    title: 'Stock Bajo por Proveedor',
+    description:
+      'Productos con bajo stock o sin stock, agrupados por proveedor preferido, con última OC y días sin venta.',
+    detailedDescription:
+      'Filtra por proveedor, categoría y estado (bajo stock / sin stock). Útil para emitir un solo pedido agrupado: muestra qué hay que pedir, cuánto se va a tardar en rotar y cuándo fue la última compra.',
+    icon: 'truck',
+    route: '/admin/reports/inventory/inventory-low-stock-by-supplier',
+    requiresDateRange: false,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'product_id',
+    columns: [
+      { key: 'product_name', header: 'Producto', type: 'text' },
+      { key: 'sku', header: 'SKU', type: 'text' },
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'current_stock', header: 'Stock Actual', type: 'number' },
+      { key: 'min_threshold', header: 'Stock Mínimo', type: 'number' },
+      { key: 'status', header: 'Estado', type: 'text' },
+      { key: 'last_purchase_date', header: 'Última Compra', type: 'date-only' },
+      { key: 'days_without_sale', header: 'Días Sin Venta', type: 'number' },
+    ],
+    exportFilename: 'stock_bajo_por_proveedor',
+    stats: [
+      { key: 'total_low_stock', label: 'Productos Bajo Stock', type: 'number', icon: 'alert-triangle' },
+      { key: 'total_value_at_risk', label: 'Valor en Riesgo', type: 'currency', icon: 'dollar-sign' },
+      { key: 'products_without_supplier', label: 'Sin Proveedor', type: 'number', icon: 'package-x' },
+      { key: 'avg_days_without_sale', label: 'Días Prom. Sin Venta', type: 'number', icon: 'clock' },
+    ],
+    dataEndpoint: 'store/analytics/inventory/low-stock-by-supplier',
+    exportEndpoint: 'store/analytics/inventory/low-stock-by-supplier/export',
   },
 
   {
@@ -676,7 +791,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     exportEndpoint: 'store/analytics/products/profitability/export',
   },
 
-  // ─── CLIENTES (3) ─────────────────────────────────────────────────────────────
+  // ─── CLIENTES (4) ─────────────────────────────────────────────────────────────
 
   {
     id: 'customer-summary',
@@ -776,6 +891,43 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     ],
     dataEndpoint: 'store/analytics/customers/abandoned-carts/summary',
     exportEndpoint: 'store/analytics/customers/abandoned-carts/export',
+  },
+
+  {
+    // QUI-541: Top clientes por ventas. Reutiliza getTopCustomers (que ya
+    // tiene groupBy sobre orders con COMPLETED_STATES) y exporta TODOS
+    // los clientes con al menos una orden, no solo el top-10 que muestra
+    // la pantalla. Diferencia con sales-by-customer: este vive en la
+    // categoría 'customers' (análisis por cliente) y no incluye
+    // ticket_promedio (eso lo calcula la vista de sales-by-customer).
+    id: 'customers-top',
+    category: 'customers',
+    title: 'Top Clientes',
+    description: 'Clientes con mayor gasto total en el período',
+    detailedDescription:
+      'Lista completa de clientes con al menos una orden completada en el período, ordenados por gasto total descendente. Útil para identificar clientes VIP y segmentar campañas.',
+    icon: 'crown',
+    route: '/admin/reports/customers/customers-top',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'id',
+    columns: [
+      { key: 'id', header: 'ID', type: 'number' },
+      { key: 'customer_name', header: 'Cliente', type: 'text' },
+      { key: 'email', header: 'Correo', type: 'text' },
+      { key: 'total_orders', header: 'Órdenes', type: 'number', footer: 'sum' },
+      { key: 'total_spent', header: 'Gasto Total', type: 'currency', footer: 'sum' },
+      { key: 'last_order_date', header: 'Última Orden', type: 'date' },
+    ],
+    exportFilename: 'top_clientes',
+    stats: [
+      { key: 'total_spent', label: 'Gasto Total', type: 'currency', icon: 'dollar-sign' },
+      { key: 'total_orders', label: 'Órdenes Totales', type: 'number', icon: 'shopping-cart' },
+      { key: '_count', label: 'Clientes', type: 'number', icon: 'users' },
+    ],
+    dataEndpoint: 'store/analytics/customers/top',
+    exportEndpoint: 'store/analytics/customers/top/export',
   },
 
   // ─── CONTABILIDAD (11) ────────────────────────────────────────────────────────
@@ -974,6 +1126,47 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'shipping_refunds', label: 'Envios', type: 'currency', icon: 'truck' },
     ],
     dataEndpoint: 'store/analytics/financial/refunds',
+  },
+
+  {
+    // QUI-543: Arqueo de caja. Listado de sesiones de caja con apertura,
+    // cierre esperado vs real, y diferencia. El backend (FinancialAnalyticsService.
+    // getCashSessionsForExport) ya devuelve los 12 campos en el shape canónico;
+    // aquí solo se cablea el registry + ruta.
+    id: 'cash-sessions',
+    category: 'financial',
+    title: 'Arqueo de Caja',
+    description: 'Sesiones de caja con apertura, cierre esperado, real y diferencia',
+    detailedDescription:
+      'Detalle de cada sesión de caja: quién la abrió y cerró, monto de apertura, total de ventas y gastos, cierre esperado vs real, y la diferencia (descuadre). Útil para auditar cuadres diarios y detectar fugas.',
+    icon: 'cash',
+    route: '/admin/reports/financial/cash-sessions',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'opened_at',
+    columns: [
+      { key: 'opened_at', header: 'Apertura', type: 'date' },
+      { key: 'closed_at', header: 'Cierre', type: 'date' },
+      { key: 'register_name', header: 'Caja', type: 'text' },
+      { key: 'opened_by_name', header: 'Abrió', type: 'text' },
+      { key: 'closed_by_name', header: 'Cerró', type: 'text' },
+      { key: 'opening_amount', header: 'Monto Apertura', type: 'currency' },
+      { key: 'total_sales', header: 'Ventas', type: 'currency', footer: 'sum' },
+      { key: 'total_expenses', header: 'Gastos', type: 'currency', footer: 'sum' },
+      { key: 'expected_closing_amount', header: 'Cierre Esperado', type: 'currency' },
+      { key: 'actual_closing_amount', header: 'Cierre Real', type: 'currency' },
+      { key: 'difference', header: 'Diferencia', type: 'currency', footer: 'sum' },
+      { key: 'status', header: 'Estado', type: 'text' },
+    ],
+    exportFilename: 'arqueo_caja',
+    stats: [
+      { key: 'total_sales', label: 'Total Ventas', type: 'currency', icon: 'dollar-sign' },
+      { key: 'total_expenses', label: 'Total Gastos', type: 'currency', icon: 'trending-down' },
+      { key: 'difference', label: 'Descuadre Total', type: 'currency', icon: 'alert-triangle' },
+    ],
+    dataEndpoint: 'store/analytics/financial/cash-sessions',
+    exportEndpoint: 'store/analytics/financial/cash-sessions/export',
   },
 
   {

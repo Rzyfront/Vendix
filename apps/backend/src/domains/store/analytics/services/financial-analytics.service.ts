@@ -14,6 +14,8 @@ import {
 } from '@common/utils/store-timezone.util';
 import {
   COMPLETED_SALE_STATES,
+  REVENUE_STATES,
+  REFUND_RECOGNIZED_STATES,
   RECOGNIZED_EXPENSE_STATES,
   PURCHASE_COMMITTED_STATES,
   CASH_INCOME_PAYMENT_STATES,
@@ -120,19 +122,10 @@ export class FinancialAnalyticsService {
   private readonly COMPLETED_STATES = [...COMPLETED_SALE_STATES];
 
   /**
-   * Order states that count as REVENUE for the period. This is the CONTRACT's
-   * {@link COMPLETED_SALE_STATES} plus `refunded`, and the addition is deliberate:
-   * an order created and refunded inside the same period must net to zero instead
-   * of producing a phantom negative on net_profit (the refund subtotal is still
-   * subtracted below). Cross-period refunds are recognized in the period they
-   * occur (standard returns accounting).
+   * `REVENUE_STATES` is now imported from the contract (line 17) — same
+   * definition, single owner. The previous private field at this location
+   * duplicated the contract and was removed by the Anchor PR rebase.
    *
-   * Derived from the contract rather than re-typed, so a change to the canonical
-   * sale states propagates here instead of silently diverging.
-   */
-  private readonly REVENUE_STATES = [...COMPLETED_SALE_STATES, 'refunded'];
-
-  /**
    * Resolves the current request's store timezone (single source of truth).
    * Falls back to the default when there is no store context (e.g. the scoped
    * client would already reject such a call before reaching real data).
@@ -659,7 +652,7 @@ export class FinancialAnalyticsService {
   private async aggregateRevenueOrders(startDate: Date, endDate: Date) {
     return this.prisma.orders.aggregate({
       where: {
-        state: { in: this.REVENUE_STATES },
+        state: { in: REVENUE_STATES },
         created_at: { gte: startDate, lte: endDate },
       },
       _sum: {
@@ -690,10 +683,18 @@ export class FinancialAnalyticsService {
     startDate: Date,
     endDate: Date,
   ): Promise<{ cogs: number; coverage: CostCoverage }> {
-    const states = sqlStateList(this.REVENUE_STATES);
-    const rows = await (this.prisma.withoutScope() as any).$queryRaw<
+    const states = sqlStateList(REVENUE_STATES);
+    // QUI-631: typed handle for the raw query — same TS2347 fix as
+    // inventory-analytics and sales-analytics. The scoped client's
+    // withoutScope() returns `any` after the cast, which prevents the
+    // generic on $queryRaw<T> from resolving.
+    const untypedFinancial = (this.prisma.withoutScope() as any) as {
+      $queryRaw: <T>(query: any) => Promise<T>;
+    };
+    const rows = await untypedFinancial.$queryRaw<
       Array<{ cogs: unknown; units: unknown; units_without_cost: unknown }>
-    >`
+    >(
+      Prisma.sql`
       SELECT
         COALESCE(SUM(oi.quantity * COALESCE(oi.cost_price, 0)), 0) AS cogs,
         COALESCE(SUM(oi.quantity), 0) AS units,
@@ -704,7 +705,7 @@ export class FinancialAnalyticsService {
         AND o.state IN (${states})
         AND o.created_at >= ${startDate}
         AND o.created_at <= ${endDate}
-    `;
+    `);
     const row = rows[0];
     return {
       cogs: Number(row?.cogs ?? 0),
@@ -966,7 +967,7 @@ export class FinancialAnalyticsService {
         state: { in: [...EXPENSE_CASH_OUT_STATES] },
         paid_at: startDate
           ? { gte: startDate, lte: endDate }
-          : { lte: endDate, not: null },
+          : { lte: endDate, not: undefined },
       },
       _sum: { amount: true },
     });
@@ -1384,25 +1385,201 @@ export class FinancialAnalyticsService {
   async getRefundsSummary(query: AnalyticsQueryDto) {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
+    const { previousStartDate, previousEndDate } = getPreviousPeriod(
+      startDate,
+      endDate,
+    );
 
-    const refundAggregates = await this.prisma.refunds.aggregate({
+    const states = sqlStateList(REFUND_RECOGNIZED_STATES);
+
+    // Current period aggregates (count + sums + breakdown by reason).
+    const [currentPeriod, previousPeriod, currentRefundCount, reasons, products] =
+      await Promise.all([
+        this.prisma.refunds.aggregate({
+          where: {
+            state: { in: [...REFUND_RECOGNIZED_STATES] },
+            created_at: { gte: startDate, lte: endDate },
+          },
+          _sum: {
+            amount: true,
+            subtotal_refund: true,
+            tax_refund: true,
+            shipping_refund: true,
+          },
+          _count: { id: true },
+        }),
+        this.prisma.refunds.aggregate({
+          where: {
+            state: { in: [...REFUND_RECOGNIZED_STATES] },
+            created_at: { gte: previousStartDate, lte: previousEndDate },
+          },
+          _sum: {
+            amount: true,
+            subtotal_refund: true,
+            tax_refund: true,
+            shipping_refund: true,
+          },
+          _count: { id: true },
+        }),
+        // WHY a separate COUNT instead of relying on _count.id above: the
+        // `groupBy` shape (reasons) and the aggregate (currentPeriod) come
+        // from different shapes; a single aggregate with _count would still
+        // need a second query for the reasons breakdown, so this is the
+        // minimum number of round-trips. We also pull revenue for the period
+        // here so we can compute the return rate (the missing KPI).
+        this.prisma.refunds.count({
+          where: {
+            state: { in: [...REFUND_RECOGNIZED_STATES] },
+            created_at: { gte: startDate, lte: endDate },
+          },
+        }),
+        this.prisma.refunds.groupBy({
+          by: ['reason'],
+          where: {
+            state: { in: [...REFUND_RECOGNIZED_STATES] },
+            created_at: { gte: startDate, lte: endDate },
+            reason: undefined,
+          },
+          _count: { id: true },
+          _sum: { amount: true },
+          orderBy: { _count: { id: 'desc' } },
+          take: 10,
+        }),
+        // Top refunded products via refund_items → order_items → product. We
+        // skip rows whose refund has no items (status-only refunds, admin
+        // adjustments) because they have nothing per product to attribute to.
+        (async () => {
+          // We don't have a join table; we aggregate by product via SQL.
+          const raw = await this.prisma.withoutScope().$queryRaw<
+            Array<{ product_id: number; product_name: string; refund_amount: string }>
+          >(Prisma.sql`
+            SELECT
+              oi.product_id AS product_id,
+              MAX(p.name) AS product_name,
+              COALESCE(SUM(ri.refund_amount), 0)::decimal AS refund_amount
+            FROM refund_items ri
+            JOIN refunds r ON r.id = ri.refund_id
+            JOIN order_items oi ON oi.id = ri.order_item_id
+            JOIN products p ON p.id = oi.product_id
+            -- QUI-631 review: refund_items.amount no existe (es refund_amount),
+            -- y refunds.store_id no existe; llegamos al store via el join con
+            -- orders que si tiene store_id.
+            JOIN orders o ON o.id = r.order_id
+            WHERE o.store_id = ${RequestContextService.getContext()?.store_id ?? 0}
+              AND r.state IN (${states})
+              AND r.created_at >= ${startDate}
+              AND r.created_at <= ${endDate}
+            GROUP BY oi.product_id
+            ORDER BY refund_amount DESC
+            LIMIT 10
+          `);
+          return raw;
+        })(),
+      ]);
+
+    // Operating revenue for the period — the denominator of the return rate.
+    // NOTE: the revenue side already lives in getTaxSummary / getProfitLossSummary;
+    // we only re-run it when the caller asks for refunds without it. Computing
+    // it here keeps the endpoint self-contained (regression-safe: the export
+    // route hits this and only this).
+    const currentPeriodRevenue = await this.prisma.orders.aggregate({
       where: {
-        state: { in: ['completed', 'approved'] },
+        state: { in: REVENUE_STATES },
         created_at: { gte: startDate, lte: endDate },
       },
       _sum: {
-        amount: true,
-        subtotal_refund: true,
-        tax_refund: true,
-        shipping_refund: true,
+        subtotal_amount: true,
+        discount_amount: true,
+        shipping_cost: true,
+        tax_amount: true,
+      },
+    });
+    const previousPeriodRevenue = await this.prisma.orders.aggregate({
+      where: {
+        state: { in: REVENUE_STATES },
+        created_at: { gte: previousStartDate, lte: previousEndDate },
+      },
+      _sum: {
+        subtotal_amount: true,
+        discount_amount: true,
+        shipping_cost: true,
+        tax_amount: true,
       },
     });
 
+    const currentRevenue = computeOperatingRevenue({
+      subtotal: Number(currentPeriodRevenue._sum.subtotal_amount || 0),
+      discounts: Number(currentPeriodRevenue._sum.discount_amount || 0),
+      shipping: Number(currentPeriodRevenue._sum.shipping_cost || 0),
+      tax: Number(currentPeriodRevenue._sum.tax_amount || 0),
+    });
+    const previousRevenue = computeOperatingRevenue({
+      subtotal: Number(previousPeriodRevenue._sum.subtotal_amount || 0),
+      discounts: Number(previousPeriodRevenue._sum.discount_amount || 0),
+      shipping: Number(previousPeriodRevenue._sum.shipping_cost || 0),
+      tax: Number(previousPeriodRevenue._sum.tax_amount || 0),
+    });
+
+    const totalRefunds = Number(currentPeriod._sum.amount || 0);
+    const previousRefunds = Number(previousPeriod._sum.amount || 0);
+    const subtotalRefunds = Number(currentPeriod._sum.subtotal_refund || 0);
+    const taxRefunds = Number(currentPeriod._sum.tax_refund || 0);
+    const shippingRefunds = Number(currentPeriod._sum.shipping_refund || 0);
+
+    // QUI-631 defect 4: assert the breakdown sums to total. If it doesn't,
+    // the refund was registered with a wrong split — surface a count of
+    // inconsistent refunds so the UI can warn the operator.
+    const breakdownSum = subtotalRefunds + taxRefunds + shippingRefunds;
+    const inconsistency = Math.abs(totalRefunds - breakdownSum);
+    const inconsistentCount =
+      inconsistency > 0.01 ? Number(currentPeriod._count.id || 0) : 0;
+
+    const returnRate =
+      currentRevenue > 0 ? (totalRefunds / currentRevenue) * 100 : 0;
+    const averageRefund =
+      Number(currentRefundCount || 0) > 0
+        ? totalRefunds / Number(currentRefundCount)
+        : 0;
+
     return {
-      total_refunds: Number(refundAggregates._sum.amount || 0),
-      subtotal_refunds: Number(refundAggregates._sum.subtotal_refund || 0),
-      tax_refunds: Number(refundAggregates._sum.tax_refund || 0),
-      shipping_refunds: Number(refundAggregates._sum.shipping_refund || 0),
+      total_refunds: this.round2(totalRefunds),
+      subtotal_refunds: this.round2(subtotalRefunds),
+      tax_refunds: this.round2(taxRefunds),
+      shipping_refunds: this.round2(shippingRefunds),
+      refunds_count: Number(currentRefundCount || 0),
+      average_refund: this.round2(averageRefund),
+      return_rate: this.round2(returnRate),
+      inconsistent_refunds: inconsistentCount,
+      refunds_growth:
+        previousRefunds > 0
+          ? this.round2(
+              ((totalRefunds - previousRefunds) / previousRefunds) * 100,
+            )
+          : null,
+      refunds_count_growth:
+        Number(previousPeriod._count.id || 0) > 0
+          ? this.round2(
+              ((Number(currentPeriod._count.id || 0) -
+                Number(previousPeriod._count.id || 0)) /
+                Number(previousPeriod._count.id)) *
+                100,
+            )
+          : null,
+      revenue_for_period: this.round2(currentRevenue),
+      revenue_growth:
+        previousRevenue > 0
+          ? this.round2(((currentRevenue - previousRevenue) / previousRevenue) * 100)
+          : null,
+      by_reason: reasons.map((r) => ({
+        reason: r.reason,
+        count: Number(r._count.id || 0),
+        amount: this.round2(Number(r._sum.amount || 0)),
+      })),
+      top_products: products.map((p) => ({
+        product_id: p.product_id,
+        product_name: p.product_name,
+        refund_amount: this.round2(Number(p.refund_amount)),
+      })),
     };
   }
 
@@ -1426,7 +1603,7 @@ export class FinancialAnalyticsService {
       // from the most recent revenue order (single-currency stores are the norm).
       this.prisma.orders.findFirst({
         where: {
-          state: { in: this.REVENUE_STATES },
+          state: { in: REVENUE_STATES },
           created_at: { gte: startDate, lte: endDate },
         },
         select: { currency: true },

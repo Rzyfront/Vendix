@@ -143,6 +143,7 @@ import {
   PackageCheck,
   PackageOpen,
   PackagePlus,
+  PackageX,
   FilePlus,
   // Analytics icons
   Trophy,
@@ -653,6 +654,7 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
 
   // Reports module icons
   'package-search': PackageSearch,
+  'package-x': PackageX,
   'tags': Tags,
   'file-bar-chart': FileBarChart,
   'file-stack': FileStack,

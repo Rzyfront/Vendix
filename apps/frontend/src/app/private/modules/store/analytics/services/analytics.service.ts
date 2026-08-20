@@ -30,6 +30,7 @@ import {
   MovementSummaryItem,
   MovementTrend,
 } from '../interfaces/inventory-analytics.interface';
+import { LowStockBySupplierAnalyticsEnvelope } from '../interfaces/low-stock-by-supplier-analytics.interface';
 import {
   ProductsSummary,
   TopSellingProduct,
@@ -353,6 +354,15 @@ const analyticsCache = new Map<string, CacheEntry<Observable<any>>>();
 /** Store scope the cache currently holds; a change wipes it (see `withCache`). */
 let lastCachedScope: string | null = null;
 
+/**
+ * Flag de invalidación cross-service: cuando un servicio externo (ej. Products
+ * después de un create/update/delete) necesita que el cache descarte entries
+ * obsoletas en el próximo read, llama `requestInvalidation()`. Se consume
+ * dentro de `withCache` antes de evaluar cache y se resetea, así un read
+ * "limpio" subsiguiente no se ve afectado.
+ */
+let invalidateRequested = false;
+
 @Injectable({
   providedIn: 'root',
 })
@@ -406,6 +416,22 @@ export class AnalyticsService {
     return id != null ? `s${id}` : 's_';
   }
 
+  /**
+   * Marca el cache como invalidado. El siguiente read (vía `withCache`)
+   * borra todas las entries del scope actual antes de evaluar cache.
+   *
+   * Pensado para que servicios externos (Products, Orders, etc.) llamen
+   * este método después de mutaciones que afectan a los agregados de
+   * analytics — sin acoplamiento directa: cada servicio conoce solo este
+   * único entry point y la flag global se consume sincrónicamente.
+   *
+   * Uso típico desde ProductsService.create/update/delete:
+   *   this.analyticsService.requestInvalidation();
+   */
+  requestInvalidation(): void {
+    invalidateRequested = true;
+  }
+
   private withCache<T>(
     key: string,
     factory: () => Observable<T>,
@@ -418,6 +444,14 @@ export class AnalyticsService {
     if (scope !== lastCachedScope) {
       analyticsCache.clear();
       lastCachedScope = scope;
+    }
+
+    // Externo: invalidar todo el cache del scope cuando un servicio externo
+    // (Products, Orders, etc.) llama `requestInvalidation()`. La flag se
+    // consume acá y se resetea para no invalidar reads "limpios" subsiguientes.
+    if (invalidateRequested) {
+      analyticsCache.clear();
+      invalidateRequested = false;
     }
 
     const scopedKey = `${scope}|${key}`;
@@ -737,6 +771,36 @@ export class AnalyticsService {
 
   exportMovementsXlsx(query: InventoryAnalyticsQueryDto = {}): Observable<Blob> {
     return this.http.get(this.getApiUrl('inventory/movements/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
+  }
+
+  /**
+   * CP-low-stock-by-supplier / Phase H — pre-aggregated envelope for the
+   * analytics shell (FB-06). Cache key MUST include `supplier_id` /
+   * `category_id` / `date_from` / `date_to` so FB-07's
+   * "drill-down from chart → report" works without leaking a previous
+   * supplier's data through the cache.
+   */
+  getLowStockBySupplierAnalytics(
+    query: Record<string, any> = {},
+  ): Observable<ApiResponse<LowStockBySupplierAnalyticsEnvelope>> {
+    const cacheKey = `inventory-low-stock-by-supplier-analytics-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<LowStockBySupplierAnalyticsEnvelope>>(
+        this.getApiUrl('inventory/low-stock-by-supplier/analytics'),
+        { params: this.buildParams(query) },
+      ),
+    );
+  }
+
+  /**
+   * XLSX export for the "Stock Bajo por Proveedor" report.
+   * Filters mirror the rows endpoint (`supplier_id`, `category_id`, `status`).
+   */
+  exportLowStockBySupplier(query: Record<string, any> = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('inventory/low-stock-by-supplier/export'), {
       params: this.buildParams(query),
       responseType: 'blob',
     });

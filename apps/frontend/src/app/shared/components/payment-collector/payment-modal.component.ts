@@ -37,6 +37,7 @@ import type {
       [title]="title()"
       [subtitle]="subtitle()"
       [size]="size()"
+      [dialog]="dialog()"
       (closed)="onModalClosed()"
     >
       <app-payment-collector
@@ -109,6 +110,13 @@ export class PaymentModalComponent {
   readonly subtitle = input<string>();
   readonly size = input<ModalSize>('md');
   readonly submitLabel = input<string>();
+  /**
+   * Round 3 BLOCKER #1 — the payment modal is ALWAYS a dialog (ARIA + focus
+   * trap + Escape closes). Default `true` keeps every existing consumer
+   * working without explicit opt-in; consumers that genuinely do not want
+   * dialog semantics can opt-out.
+   */
+  readonly dialog = input<boolean>(true);
 
   // Forwarded collector data inputs
   readonly amount = input.required<number>();

@@ -1,4 +1,6 @@
-import { Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, inject, computed, signal  } from '@angular/core';
+import {
+  DropdownAction } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute } from '@angular/router';
@@ -19,12 +21,27 @@ import { ExportButtonComponent } from '../../components/export-button/export-but
 import { ResponsiveDataViewComponent } from '../../../../../../shared/components';
 import type { TableColumn, ItemListCardConfig } from '../../../../../../shared/components';
 
+import {
+  OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
+
 @Component({
   selector: 'vendix-purchases-by-supplier',
   standalone: true,
-  imports: [CommonModule, RouterModule, CardComponent, ChartComponent, StatsComponent, IconComponent, DateRangeFilterComponent, ExportButtonComponent, CurrencyPipe, ResponsiveDataViewComponent],
+  imports: [CommonModule, RouterModule, CardComponent, ChartComponent, StatsComponent, IconComponent, DateRangeFilterComponent, ExportButtonComponent, CurrencyPipe, ResponsiveDataViewComponent,
+    OptionsDropdownComponent,],
+  styles: [
+    `
+      :host {
+        display: block;
+        margin: -16px;
+        @media (min-width: 768px) { margin: -24px; }
+      }
+      :host ::ng-deep .stats-container { padding: 0; margin: 0; margin-bottom: 0; }
+      :host ::ng-deep .results-header { padding: 0.75rem 1rem; }
+    `,
+  ],
   template: `
-    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
+    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
       <!-- Stats Cards -->
       <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
@@ -62,31 +79,30 @@ import type { TableColumn, ItemListCardConfig } from '../../../../../../shared/c
         ></app-stats>
       </div>
 
-      <!-- Header -->
-      <div class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-surface px-4 py-3 border-b border-border rounded-lg mx-1 mb-4">
-        <div class="flex items-center gap-2.5 min-w-0">
-          <div class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0">
-            <app-icon name="truck" class="text-[var(--color-primary)]"></app-icon>
-          </div>
-          <div class="min-w-0">
-            <h1 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">Compras por Proveedor</h1>
-            <p class="hidden sm:block text-xs text-[var(--color-text-secondary)] font-medium truncate">
-              Análisis de compras por proveedor
-            </p>
-          </div>
+          <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
+      <div slot="header" class="results-header flex items-center justify-between gap-3 flex-wrap">
+        <div class="flex items-center gap-2 min-w-0">
+          <app-icon name="truck" [size]="20" class="shrink-0 text-[var(--color-primary)]"></app-icon>
+          <span class="results-header__title text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight whitespace-nowrap">Compras por Proveedor</span>
         </div>
-
-        <div class="flex items-end gap-2 md:gap-3 shrink-0">
-          <vendix-date-range-filter
-            [value]="dateRange()"
-            (valueChange)="onDateRangeChange($event)"
-          ></vendix-date-range-filter>
-          <vendix-export-button
-            [loading]="exporting()"
-            (export)="exportReport()"
-          ></vendix-export-button>
+        <div class="flex items-end gap-2 flex-wrap shrink-0">
+        <vendix-date-range-filter
+                    [value]="dateRange()"
+                    (valueChange)="onDateRangeChange($event)"
+                  ></vendix-date-range-filter>
+                  <app-options-dropdown
+                    [filters]="[]"
+                    [actions]="dropdownActions()"
+                    [showActions]="true"
+                    triggerLabel="Acciones"
+                    triggerIcon="plus"
+                    [isLoading]="exporting()"
+                    (actionClick)="onActionsDropdownClick($event)"
+                  ></app-options-dropdown>
         </div>
       </div>
+      <div class="p-4 space-y-6">
+
 
       <!-- Content Grid -->
       <div class="grid grid-cols-1 gap-6">
@@ -98,7 +114,7 @@ import type { TableColumn, ItemListCardConfig } from '../../../../../../shared/c
       } @else {
 
         <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
-          <div slot="header" class="flex flex-col">
+          <div slot="header" class="results-header flex flex-col">
             <span class="text-sm font-bold text-[var(--color-text-primary)]">Gasto por Proveedor</span>
           </div>
           <div class="p-4">
@@ -110,7 +126,7 @@ import type { TableColumn, ItemListCardConfig } from '../../../../../../shared/c
              tarjetas del Resumen de Compras: mismo universo, mismos estados,
              misma base sin IVA. Si difieren, una de las dos miente. -->
         <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
-          <div slot="header" class="flex flex-col">
+          <div slot="header" class="results-header flex flex-col">
             <span class="text-sm font-bold text-[var(--color-text-primary)]">Detalle por proveedor</span>
             <span class="text-xs text-[var(--color-text-secondary)]">
               El total cuadra con el Resumen de Compras
@@ -146,9 +162,12 @@ import type { TableColumn, ItemListCardConfig } from '../../../../../../shared/c
         </app-card>
       }
       </div>
-    </div>
+          </div>
+    </app-card>
+</div>
 
-  `,
+
+`,
 })
 export class PurchasesBySupplierComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
@@ -444,6 +463,20 @@ legend: {
           this.exporting.set(false);
         },
       });
+  }
+
+  readonly dropdownActions = computed<DropdownAction[]>(() => [
+    {
+      action: 'export-xlsx',
+      label: 'Exportar XLSX',
+      icon: 'download',
+    },
+  ]);
+
+  onActionsDropdownClick(action: string): void {
+    if (action === 'export-xlsx') {
+      this.exportReport();
+    }
   }
 
   onDateRangeChange(range: DateRangeFilter): void {

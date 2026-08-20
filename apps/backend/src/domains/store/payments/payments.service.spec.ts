@@ -28,6 +28,8 @@ import { TableSessionsService } from '../tables/table-sessions.service';
 import { SerialNumberEnforcementService } from '../inventory/serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../inventory/serial-numbers/inventory-serial-numbers.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { AuditService } from '@common/audit/audit.service';
 
 /**
  * Tests for PaymentsService focused on the POS sale recalculation flow:
@@ -130,7 +132,14 @@ describe('PaymentsService', () => {
         {
           provide: SettingsService,
           useValue: {
-            getSettings: jest.fn().mockResolvedValue({}),
+            // CP-POS-CREAR-EDITAR-COBRAR-001 — legacy fiscal-threshold tests
+            // were authored under the anonymous-allowed assumption
+            // (`require_customer_data=false`). Mirror that explicitly so the
+            // new customer gate in `processPosPayment` does not fire and
+            // re-target these tests' STOP_AFTER_GATE assertion.
+            getSettings: jest
+              .fn()
+              .mockResolvedValue({ checkout: { require_customer_data: false } }),
             getStoreCurrency: jest.fn().mockResolvedValue('COP'),
           },
         },
@@ -198,6 +207,19 @@ describe('PaymentsService', () => {
         {
           provide: InventorySerialNumbersService,
           useValue: { consumeForOrder: jest.fn() },
+        },
+        // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 añadió `AuditService` al
+        // constructor de `PaymentsService`; sin este provider el módulo de
+        // test no compila y TODA la suite falla en el `beforeEach`.
+        {
+          provide: AuditService,
+          useValue: {
+            logCustom: jest.fn(),
+            logCreate: jest.fn(),
+            logUpdate: jest.fn(),
+            logDelete: jest.fn(),
+            log: jest.fn(),
+          },
         },
       ],
     }).compile();
@@ -816,6 +838,202 @@ describe('PaymentsService', () => {
         coupon_code: null,
         discount_amount: 0,
       });
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — G.1
+  //
+  // Invariantes B.1 (customer gate) y B.2 (draft ≠ payment). Ambos gates
+  // corren ANTES de `$transaction`, así que la prueba de "cero escrituras"
+  // es exactamente: `prisma.$transaction` nunca fue invocada. No hay orden,
+  // ni pago, ni fila de cupón, ni evento, porque nada de eso ocurre fuera
+  // de la transacción.
+  //
+  // El caso positivo no simula la venta entera (eso sería un test frágil de
+  // 300 líneas de mocks): corta con un sentinel justo después de los gates y
+  // asserta que (a) el gate NO disparó, (b) se consultó la membresía del
+  // cliente en ESTE store y (c) ni el gateway de pago ni el registro de uso
+  // del cupón fueron llamados en el camino de draft.
+  // ------------------------------------------------------------------
+  describe('processPosPayment — customer gate y draft/payment invariant (B.1/B.2)', () => {
+    const STOP_AFTER_GATES = 'stop-after-pos-gates';
+    const CONTEXT_STORE_ID = 1;
+
+    let contextSpy: jest.SpyInstance;
+
+    const posUser: any = {
+      id: 1,
+      email: 'cajero@example.com',
+      organization_id: 1,
+      roles: ['super_admin'],
+    };
+
+    const buildDto = (overrides: any = {}): any => ({
+      store_id: CONTEXT_STORE_ID,
+      currency: 'COP',
+      items: [{ product_id: 1, quantity: 1, unit_price: 1000 }],
+      payments: [],
+      total_amount: 1000,
+      ...overrides,
+    });
+
+    const arrange = (settings: any) => {
+      contextSpy = jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({
+          store_id: CONTEXT_STORE_ID,
+          organization_id: 1,
+        } as any);
+
+      (
+        module_settings_getSettings() as jest.Mock
+      ).mockResolvedValue(settings);
+
+      // Si algún gate dejara pasar la petición, la transacción se abriría.
+      // El sentinel hace visible ese cruce en lugar de fallar en un mock
+      // profundo e inescrutable.
+      (prisma as any).$transaction = jest.fn(async () => {
+        throw new Error(STOP_AFTER_GATES);
+      });
+    };
+
+    // `settingsService` no está expuesto como variable del suite; se resuelve
+    // desde la instancia del servicio para no reestructurar el módulo de test.
+    const module_settings_getSettings = () =>
+      (service as any).settingsService.getSettings;
+
+    afterEach(() => {
+      contextSpy?.mockRestore();
+    });
+
+    it('acepta la creación con cliente válido: pasa los gates, no cobra y no consume cupón', async () => {
+      arrange({ checkout: { require_customer_data: true } });
+      (prisma.store_users.findFirst as jest.Mock) = jest
+        .fn()
+        .mockResolvedValue({ user_id: 77 });
+
+      await expect(
+        service.processPosPayment(
+          buildDto({
+            customer_id: 77,
+            coupon_code: 'DESCUENTO10',
+            is_draft: true,
+            requires_payment: false,
+          }),
+          posUser,
+        ),
+      ).rejects.toThrow(STOP_AFTER_GATES);
+
+      // El gate consultó la membresía del cliente EN ESTE STORE.
+      expect(prisma.store_users.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { store_id: CONTEXT_STORE_ID, user_id: 77 },
+        }),
+      );
+
+      // Ni cobro ni consumo de cupón en el camino de draft.
+      expect(paymentGateway.processPayment).not.toHaveBeenCalled();
+      expect((couponsService as any).registerUse).not.toHaveBeenCalled();
+    });
+
+    it('rechaza con POS_CUSTOMER_REQUIRED_001 y no abre transacción cuando falta el cliente', async () => {
+      arrange({ checkout: { require_customer_data: true } });
+
+      let caught: any = null;
+      try {
+        await service.processPosPayment(
+          buildDto({ is_draft: true, requires_payment: false }),
+          posUser,
+        );
+      } catch (err) {
+        caught = err;
+      }
+
+      expect(caught).toBeInstanceOf(VendixHttpException);
+      expect(caught.errorCode).toBe(
+        ErrorCodes.POS_CUSTOMER_REQUIRED_001.code,
+      );
+      // Cero escrituras: sin transacción no hay orden, ni pago, ni cupón.
+      expect((prisma as any).$transaction).not.toHaveBeenCalled();
+      expect(paymentGateway.processPayment).not.toHaveBeenCalled();
+    });
+
+    it('rechaza con POS_CUSTOMER_REQUIRED_001 cuando el cliente no pertenece al store', async () => {
+      arrange({ checkout: { require_customer_data: true } });
+      (prisma.store_users.findFirst as jest.Mock) = jest
+        .fn()
+        .mockResolvedValue(null);
+
+      let caught: any = null;
+      try {
+        await service.processPosPayment(
+          buildDto({ customer_id: 4242, is_draft: true, requires_payment: false }),
+          posUser,
+        );
+      } catch (err) {
+        caught = err;
+      }
+
+      expect(caught).toBeInstanceOf(VendixHttpException);
+      expect(caught.errorCode).toBe(
+        ErrorCodes.POS_CUSTOMER_REQUIRED_001.code,
+      );
+      expect((prisma as any).$transaction).not.toHaveBeenCalled();
+    });
+
+    it('rechaza con POS_DRAFT_REQUIRES_PAYMENT_001 la combinación is_draft + requires_payment', async () => {
+      arrange({ checkout: { require_customer_data: true } });
+      (prisma.store_users.findFirst as jest.Mock) = jest
+        .fn()
+        .mockResolvedValue({ user_id: 77 });
+
+      let caught: any = null;
+      try {
+        await service.processPosPayment(
+          buildDto({ customer_id: 77, is_draft: true, requires_payment: true }),
+          posUser,
+        );
+      } catch (err) {
+        caught = err;
+      }
+
+      expect(caught).toBeInstanceOf(VendixHttpException);
+      expect(caught.errorCode).toBe(
+        ErrorCodes.POS_DRAFT_REQUIRES_PAYMENT_001.code,
+      );
+      // El conflicto se detecta ANTES del gate de cliente y de la transacción.
+      expect((prisma as any).$transaction).not.toHaveBeenCalled();
+      expect(paymentGateway.processPayment).not.toHaveBeenCalled();
+    });
+
+    it('un draft con cupón válido no registra uso ni incrementa el contador', async () => {
+      arrange({ checkout: { require_customer_data: true } });
+      (prisma.store_users.findFirst as jest.Mock) = jest
+        .fn()
+        .mockResolvedValue({ user_id: 77 });
+      (couponsService.validate as jest.Mock).mockResolvedValue({
+        valid: true,
+        coupon_id: 9,
+        code: 'DESCUENTO10',
+        discount_amount: 100,
+      });
+
+      await expect(
+        service.processPosPayment(
+          buildDto({
+            customer_id: 77,
+            coupon_code: 'DESCUENTO10',
+            is_draft: true,
+            requires_payment: false,
+          }),
+          posUser,
+        ),
+      ).rejects.toThrow(STOP_AFTER_GATES);
+
+      // `coupon_uses` / `coupons.current_uses` sólo se tocan dentro de la
+      // transacción de cobro; el draft no llega allí y no registra uso.
+      expect((couponsService as any).registerUse).not.toHaveBeenCalled();
     });
   });
 });

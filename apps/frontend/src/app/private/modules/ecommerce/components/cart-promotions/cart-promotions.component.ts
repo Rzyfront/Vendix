@@ -4,13 +4,16 @@ import {
   computed,
   inject,
   input,
+  signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
-import { AppliedPromotion, Cart } from '../../services/cart.service';
-import { IconComponent } from '../../../../../shared/components/icon/icon.component';
-import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
-import type { BadgeVariant } from '../../../../../shared/components/badge/badge.component';
+import { Cart } from '../../services/cart.service';
+import { PromotionsAnalyticsService } from '../../services/promotions-analytics.service';
+import {
+  PromotionStackComponent,
+  PromotionStackItem,
+} from '../../../../../shared/components/promotion-stack/promotion-stack.component';
 import {
   CurrencyPipe,
   CurrencyFormatService,
@@ -19,74 +22,62 @@ import {
 /**
  * Shared, presentational promotions block for the ecommerce cart.
  *
- * Renders two POS-parity sections from a `Cart` signal:
- *  1. "Promociones aplicadas" — per-promotion discount lines with a type badge
- *     (reuses the exact classification logic from the cart page).
- *  2. Próximo tramo (nudge) — "Agrega N und más y obtén <benefit> en 'name'."
- *     for reachable `quantity_tiered` tiers, mirroring the POS cart nudge.
+ * Phase E.1 of `CP-ECOM-PROMO-UX-001`: this wrapper now delegates the
+ * per-promo and per-tier rendering to the shared `<app-promotion-stack>`
+ * component (Phase B) and ONLY owns the projection from
+ * `cart.applied_promotions` / `cart.tier_progress` into the
+ * `PromotionStackItem[]` shape, plus the inline-vs-block mode switch:
  *
- * Purely presentational: it derives everything from the injected `cart` signal
- * and performs NO data fetching. The `CartService` already enriches the shared
- * `cart` signal centrally with `applied_promotions` + `tier_progress`, so every
- * consumer (dropdown, page, checkout) can drop this component in and share the
- * same source of truth. Money is formatted here with the tenant `CurrencyPipe`
- * (custom Vendix pipe, NOT `@angular/common`); `benefit_value` arrives raw.
+ *  - `mode='compact-pills'`  → inline banner, ONLY the tier nudge;
+ *  - `mode='expanded-cards'` → block layout, applied promos first then
+ *                             the tier nudge as compact pills.
+ *
+ * Purely presentational: it derives everything from the injected `cart`
+ * signal and performs NO data fetching. The `CartService` already enriches
+ * the shared `cart` signal centrally with `applied_promotions` +
+ * `tier_progress`, so every consumer (dropdown, page, checkout, mobile
+ * footer) shares the same source of truth. Money is formatted with the
+ * tenant custom `CurrencyPipe` (Vendix pipe, NOT `@angular/common`).
  *
  * Renders nothing when both sections are empty.
  */
 @Component({
   selector: 'app-cart-promotions',
   standalone: true,
-  imports: [CommonModule, IconComponent, BadgeComponent, CurrencyPipe],
+  imports: [CommonModule, PromotionStackComponent, CurrencyPipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
+    <!-- CP-ECOM-PROMO-UX-001 convergence-R5: degraded-load banner. When the
+         backend exhausted its retries loading the promotions summary, the
+         customer is staring at a cart WITHOUT automatic discounts and without
+         the tier nudge. A yellow banner tells them why and what to do; without
+         it the failure is silent and the customer assumes "no promos apply". -->
+    @if (showDegradedBanner()) {
+      <div
+        role="alert"
+        class="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+        data-testid="cart-promotions-degraded-banner"
+      >
+        <span aria-hidden="true" class="mt-0.5">⚠</span>
+        <span>No pudimos cargar las promociones. Refresca para reintentar.</span>
+      </div>
+    }
     @if (inline()) {
       <!-- Modo inline: SOLO el nudge de próximo tramo, como pill compacto
            (para el bannersito del carrito). -->
-      @if (showTier() && tierProgress().length > 0) {
-        <span
-          class="flex min-w-0 flex-wrap items-center gap-1.5"
-          [attr.data-currency]="currencyCode()"
-        >
-          @for (tier of tierProgress(); track tier.promotion_id) {
-            <span
-              class="nudge-pill inline-flex min-w-0 max-w-full items-center gap-1 rounded-xl px-2 py-0.5 text-[11px] font-medium leading-tight text-primary"
-            >
-              <app-icon
-                name="trending-up"
-                [size]="12"
-                class="shrink-0 text-primary"
-              />
-              <span>
-                @if (tier.target_product_name) {
-                  Agrega
-                  <span class="font-semibold"
-                    >{{ tier.remaining_quantity }} und</span
-                  >
-                  más de
-                  <span class="font-semibold"
-                    >'{{ tier.target_product_name }}'</span
-                  >
-                  y obtén
-                  <span class="font-semibold">{{ tier.benefitLabel }}</span>
-                  en '{{ tier.name }}'.
-                } @else {
-                  Agrega
-                  <span class="font-semibold"
-                    >{{ tier.remaining_quantity }} und</span
-                  >
-                  más y obtén
-                  <span class="font-semibold">{{ tier.benefitLabel }}</span>
-                  en '{{ tier.name }}'.
-                }
-              </span>
-            </span>
-          }
-        </span>
+      @if (showTier() && tierProgressItems().length > 0) {
+        <app-promotion-stack
+          mode="compact-pills"
+          [items]="tierProgressItems()"
+          [ariaLabel]="'Próximo tramo de descuento'"
+          data-testid="cart-promotions-inline-pills"
+          (promotionViewed)="onPromotionViewed($event)"
+          (promotionIntent)="onPromotionIntent($event)"
+        />
       }
     } @else if (
-      (showApplied() && appliedPromotions().length > 0) ||
-      (showTier() && tierProgress().length > 0)
+      (showApplied() && appliedPromotionItems().length > 0) ||
+      (showTier() && tierProgressItems().length > 0)
     ) {
       <div
         class="flex flex-col"
@@ -94,130 +85,36 @@ import {
         [attr.data-currency]="currencyCode()"
       >
         <!-- Promociones aplicadas -->
-        @if (showApplied() && appliedPromotions().length > 0) {
-          <div class="flex flex-col gap-1">
-            <div class="flex items-center gap-1.5">
-              <app-icon name="tag" [size]="14" class="shrink-0 text-green-600" />
-              <span
-                class="font-semibold text-text-primary"
-                [ngClass]="compact() ? 'text-xs' : 'text-sm'"
-                >Promociones aplicadas</span
-              >
-              <span
-                class="ml-auto inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-green-600/10 px-1.5 text-[10px] font-semibold text-green-600"
-                >{{ appliedPromotions().length }}</span
-              >
-            </div>
-
-            @for (promo of appliedPromotions(); track promo.promotion_id) {
-              <div class="flex flex-col gap-0.5">
-                <div class="flex items-center justify-between gap-2">
-                  <div class="flex min-w-0 items-center gap-1.5">
-                    <span
-                      class="truncate text-text-secondary"
-                      [ngClass]="compact() ? 'text-[11px]' : 'text-sm'"
-                      >{{ promo.name }}</span
-                    >
-                    <app-badge
-                      [variant]="promo.typeVariant"
-                      size="xs"
-                      badgeStyle="outline"
-                    >
-                      {{ promo.typeLabel }}
-                    </app-badge>
-                    <app-badge
-                      variant="success"
-                      size="xs"
-                      badgeStyle="solid"
-                      title="Esta es la promoción aplicada. El motor descartó las demás promos elegibles porque solo se permite una promoción por orden."
-                    >
-                      Aplicada
-                    </app-badge>
-                  </div>
-                  <span
-                    class="shrink-0 font-semibold text-green-600"
-                    [ngClass]="compact() ? 'text-[11px]' : 'text-sm'"
-                    >-{{ promo.discount_amount | currency }}</span
-                  >
-                </div>
-                <!-- Phase 2d: cuando la promo es per_product el backend nos
-                     dice qué SKUs la activaron. Mostrar esta línea evita la
-                     confusión clásica del bug "tengo 3 productos distintos y
-                     solo uno califica" - el cliente ve exactamente a quién se
-                     le aplicó el descuento. -->
-                @if (promo.target_product_names.length > 0) {
-                  <span
-                    class="text-text-secondary/80"
-                    [ngClass]="compact() ? 'text-[10px]' : 'text-[11px]'"
-                  >
-                    en:
-                    <span class="font-medium text-text-primary">
-                      {{ formatTargetProductNames(promo.target_product_names) }}
-                    </span>
-                  </span>
-                }
-              </div>
-            }
-          </div>
+        @if (showApplied() && appliedPromotionItems().length > 0) {
+          <app-promotion-stack
+            mode="expanded-cards"
+            [items]="appliedPromotionItems()"
+            [ariaLabel]="'Promociones aplicadas'"
+            data-testid="cart-promotions-applied"
+            (promotionViewed)="onPromotionViewed($event)"
+            (promotionIntent)="onPromotionIntent($event)"
+          />
         }
 
         <!-- Próximo tramo (nudge) -->
-        @if (showTier() && tierProgress().length > 0) {
+        @if (showTier() && tierProgressItems().length > 0) {
           <div
-            class="flex flex-col gap-1 border-t border-border/30 pt-2"
-            [class.mt-1]="showApplied() && appliedPromotions().length > 0"
+            class="border-t border-border/30 pt-2"
+            [class.mt-1]="appliedPromotionItems().length > 0"
           >
-            @for (tier of tierProgress(); track tier.promotion_id) {
-              <div
-                class="flex items-start gap-1.5 leading-tight text-primary"
-                [ngClass]="compact() ? 'text-[10px]' : 'text-xs'"
-              >
-                <app-icon
-                  name="trending-up"
-                  [size]="12"
-                  class="mt-0.5 shrink-0 text-primary"
-                />
-                <span>
-                  @if (tier.target_product_name) {
-                    Agrega
-                    <span class="font-semibold"
-                      >{{ tier.remaining_quantity }} und</span
-                    >
-                    más de
-                    <span class="font-semibold"
-                      >'{{ tier.target_product_name }}'</span
-                    >
-                    y obtén
-                    <span class="font-semibold">{{ tier.benefitLabel }}</span>
-                    en '{{ tier.name }}'.
-                  } @else {
-                    Agrega
-                    <span class="font-semibold"
-                      >{{ tier.remaining_quantity }} und</span
-                    >
-                    más y obtén
-                    <span class="font-semibold">{{ tier.benefitLabel }}</span>
-                    en '{{ tier.name }}'.
-                  }
-                </span>
-              </div>
-            }
+            <app-promotion-stack
+              mode="compact-pills"
+              [items]="tierProgressItems()"
+              [ariaLabel]="'Próximo tramo de descuento'"
+              data-testid="cart-promotions-tier"
+              (promotionViewed)="onPromotionViewed($event)"
+              (promotionIntent)="onPromotionIntent($event)"
+            />
           </div>
         }
       </div>
     }
   `,
-  styles: [
-    `
-      /* Pill del nudge inline (modo banner). Fondo/borde vía token RGB para
-         evitar el defecto de bg-primary/opacity que no compone (ver
-         reference_primary_token_defect). */
-      .nudge-pill {
-        background: rgba(var(--color-primary-rgb), 0.1);
-        border: 1px solid rgba(var(--color-primary-rgb), 0.2);
-      }
-    `,
-  ],
 })
 export class CartPromotionsComponent {
   /** Source cart. Promotions/tier data are read reactively from this signal. */
@@ -232,6 +129,52 @@ export class CartPromotionsComponent {
   readonly inline = input<boolean>(false);
 
   private readonly currencyFormat = inject(CurrencyFormatService);
+  /** Sink for `<app-promotion-stack>` outputs (CP-ECOM-PROMO-UX-001 G.1). */
+  private readonly promotionsAnalytics = inject(PromotionsAnalyticsService);
+
+  /**
+   * Forward `promotionViewed` from the cart's promotion stacks (applied
+   * expanded-cards + tier-progress compact-pills) to the analytics sink.
+   * Both stacks co-exist (dropdown, page, checkout, mobile footer) and
+   * funnel through the same shared `<app-promotion-stack>`, so a single
+   * handler covers every surface.
+   */
+  onPromotionViewed(event: {
+    promotion_id: string | number;
+    mode: string;
+  }): void {
+    this.promotionsAnalytics.trackViewed(event.promotion_id, event.mode);
+  }
+
+  /**
+   * Forward `promotionIntent` from the cart's promotion stacks when a
+   * tier boundary is crossed (compact-pills mode does not emit intent,
+   * but the bound output keeps the seam consistent across the 3 consumers).
+   */
+  onPromotionIntent(event: {
+    promotion_id: string | number;
+    tier_index: number;
+    quantity: number;
+  }): void {
+    this.promotionsAnalytics.trackIntent(
+      event.promotion_id,
+      event.tier_index,
+      event.quantity,
+    );
+  }
+
+  /**
+   * CP-ECOM-PROMO-UX-001 R3-M6: contract-drift breadcrumb.
+   *
+   * Persistent counter incremented every time an applied promo is dropped
+   * because of an invalid `type` (or `scope`). Exposed as a read-only signal
+   * so the operator surface (admin / debug panels) can read it without
+   * granting write access. The component's own template does NOT need to
+   * surface it — the cart telemetry does. We keep `console.warn` for
+   * browser DevTools as a last-resort visibility path in production.
+   */
+  private readonly driftCount = signal(0);
+  readonly cartPromoDriftCount = this.driftCount.asReadonly();
 
   /**
    * Tenant currency code, read in the template so this OnPush component's
@@ -243,102 +186,149 @@ export class CartPromotionsComponent {
   protected readonly currencyCode = this.currencyFormat.currencyCode;
 
   /**
-   * Per-promotion applied-discount view. Reuses the EXACT classification logic
-   * from the cart page (`cart.component.ts`): percentage → Porcentaje/success,
-   * fixed_amount → Monto fijo/primary, otherwise → Promoción/success.
-   *
-   * Also resolves `target_product_ids` (set by the backend under
-   * `quantity_grouping='per_product'`) against `cart.items[]` so the UI can
-   * show "en: Kit de freno, Kit de arrastre" without an extra round-trip.
+   * CP-ECOM-PROMO-UX-001 convergence-R5: when the backend exhausts its
+   * promotion-summary retries it returns `promotions_load_state: 'degraded'`.
+   * Show a yellow banner so the customer knows the missing discount is a
+   * transient failure and not "this cart has no promotions". Defaults to
+   * `false` for the legacy response shape (older backend that doesn't emit
+   * the field at all).
    */
-  readonly appliedPromotions = computed<
-    Array<{
-      promotion_id: number;
-      name: string;
-      discount_amount: number;
-      typeLabel: string;
-      typeVariant: BadgeVariant;
-      target_product_names: string[];
-    }>
-  >(() =>
-    (this.cart()?.applied_promotions ?? []).map((promo) => ({
-      promotion_id: promo.promotion_id,
-      name: promo.name,
-      discount_amount: promo.discount_amount,
-      typeLabel:
-        promo.type === 'percentage'
-          ? 'Porcentaje'
-          : promo.type === 'fixed_amount'
-            ? 'Monto fijo'
-            : 'Promoción',
-      typeVariant: promo.type === 'fixed_amount' ? 'primary' : 'success',
-      target_product_names: this.resolveAffectedNames(promo),
-    })),
+  protected readonly showDegradedBanner = computed<boolean>(
+    () => this.cart()?.promotions_load_state === 'degraded',
   );
 
-  /**
-   * Nombres que se muestran en la línea "en: ..." debajo de la promo aplicada.
-   *
-   * QUI-515: hay DOS fuentes y no son intercambiables, así que se consultan en
-   * orden de especificidad:
-   *
-   *  1. `target_product_ids` — sólo lo llena el engine para promos
-   *     `per_product`, y dice exactamente qué SKU alcanzó la escala por su
-   *     cuenta. Es la información más precisa: los productos que NO calificaron
-   *     quedan fuera aunque compartan el scope.
-   *  2. `applicable_descriptions` — a qué líneas se aplicó el descuento. Es la
-   *     única fuente disponible para promos `cart_total` de scope
-   *     producto/categoría, donde el punto 1 viene vacío por definición.
-   *
-   * Sin el fallback al punto 2, toda promo que no sea `per_product` perdería la
-   * etiqueta que hoy ya se muestra, y el cliente dejaría de ver sobre qué se le
-   * aplicó el descuento. Para `scope: 'order'` ambas vienen vacías y la línea no
-   * se pinta, que es lo correcto: el descuento va sobre todo el carrito.
-   */
-  private resolveAffectedNames(promo: AppliedPromotion): string[] {
-    const targeted = this.resolveProductNames(promo.target_product_ids);
-    if (targeted.length > 0) return targeted;
-    return (promo.applicable_descriptions ?? [])
-      .map((d) => d.label?.trim())
-      .filter((label): label is string => !!label && label.length > 0);
-  }
+  // ── Primary projections (Phase E.1) ───────────────────────────────────
 
   /**
-   * Next-tier nudge view. `benefitLabel` mirrors the POS `formatTierBenefit`:
-   * percentage → `-<value>%`, fixed_amount → `-<currency>` via the tenant
-   * `CurrencyFormatService`.
+   * Next-tier nudge → `PromotionStackItem[]` for `mode="compact-pills"`.
    *
-   * Also resolves `target_product_id` (the SKU closest to qualifying under
-   * `quantity_grouping='per_product'`) against `cart.items[]` so the
-   * banner can say "Agrega 1 und más de 'Kit de freno NKD'" instead of a
-   * generic SKU-less nudge.
+   * Each item encodes the customer's current line quantity
+   * (`min_quantity = currentQty`) and the next-tier threshold
+   * (`max_quantity = currentQty + remaining_quantity`) so the shared
+   * `<app-promotion-stack>` can label the pill with "Desde N und: <benefit>"
+   * via its own `pillText()` helper.
+   *
+   * `target_product_name` is resolved against `cart.items[]` so the cart
+   * dropdown can surface the SKU name when the engine publishes
+   * `target_product_id` (per_product promos).
    */
-  readonly tierProgress = computed<
-    Array<{
-      promotion_id: number;
-      name: string;
-      remaining_quantity: number;
-      benefitLabel: string;
-      target_product_name: string | null;
-    }>
-  >(() =>
-    (this.cart()?.tier_progress ?? []).map((tier) => ({
-      promotion_id: tier.promotion_id,
-      name: tier.name,
-      remaining_quantity: tier.remaining_quantity,
-      benefitLabel:
-        tier.benefit_type === 'percentage'
-          ? `-${tier.benefit_value}%`
-          : `-${this.currencyFormat.format(tier.benefit_value)}`,
-      target_product_name: this.resolveProductName(tier.target_product_id),
-    })),
-  );
+  readonly tierProgressItems = computed<PromotionStackItem[]>(() => {
+    const cart = this.cart();
+    if (!cart) return [];
+    return (cart.tier_progress ?? [])
+      .map((tier) => {
+        const currentQty = this.resolveProductQuantity(tier.target_product_id);
+        // CP-ECOM-PROMO-UX-001 R3-M5: skip tiers where the customer has no
+        // current quantity (line is being set up, freshly added before
+        // `cart.items` resolves, etc.). "Desde 0 und: -10%" is meaningless
+        // and would otherwise surface in the cart dropdown.
+        if (currentQty == null || currentQty <= 0) return null;
+        const label =
+          tier.benefit_type === 'percentage'
+            ? `-${tier.benefit_value}%`
+            : `-${this.currencyFormat.format(tier.benefit_value)}`;
+        const targetName = this.resolveProductName(tier.target_product_id);
+        const item: PromotionStackItem = {
+          id: tier.promotion_id,
+          label,
+          type: tier.benefit_type,
+          value: tier.benefit_value,
+          // Sentinel: anchor at the customer's actual line count so the pill
+          // reads "Desde {currentQty} und: <benefit>".
+          min_quantity: currentQty,
+          // Span = current + remaining = next-tier threshold.
+          max_quantity: currentQty + tier.remaining_quantity,
+          target_product_name: targetName,
+        };
+        return item;
+      })
+      .filter((it): it is PromotionStackItem => it !== null);
+  });
+
+  /**
+   * Applied promotions → `PromotionStackItem[]` for `mode="expanded-cards"`.
+   *
+   * `min_quantity` is set to `1` (NOT `undefined`) as a sentinel so the
+   * `<app-promotion-stack>` expanded-cards filter — which requires
+   * `tier_index !== undefined || min_quantity !== undefined` to render any
+   * item — actually surfaces the applied promo as a tier card. Without this
+   * sentinel the cart would silently render ZERO applied-promo cards because
+   * applied promos carry no tier ladder of their own.
+   *
+   * The resulting card header shows "Desde 1 und: <name>"; that wording is
+   * the known limitation of routing order-level promos through a tier-aware
+   * component, accepted deliberately while Phase F (cart summary polish)
+   * lands the bespoke applied-promo card. See E.1 acceptance item 3.
+   */
+  readonly appliedPromotionItems = computed<PromotionStackItem[]>(() => {
+    // CP-ECOM-PROMO-UX-001 R2-B (Minor #8): whitelist `promo.type` and
+    // `promo.scope` before casting — never silently coerce unknown values
+    // into the union. CP-ECOM-PROMO-UX-001 R2-B (Minor #2): when type is
+    // missing/invalid, drop the promo and warn (don't project a
+    // misleading default).
+    const validTypes: Array<'percentage' | 'fixed_amount'> = [
+      'percentage',
+      'fixed_amount',
+    ];
+    const validScopes: Array<'order' | 'product' | 'category'> = [
+      'order',
+      'product',
+      'category',
+    ];
+
+    const items: PromotionStackItem[] = [];
+    for (const promo of this.cart()?.applied_promotions ?? []) {
+      const safeType: 'percentage' | 'fixed_amount' | undefined =
+        promo.type && validTypes.includes(promo.type as 'percentage' | 'fixed_amount')
+          ? (promo.type as 'percentage' | 'fixed_amount')
+          : undefined;
+
+      if (!safeType) {
+        // CP-ECOM-PROMO-UX-001 R3-M6: increment the contract-drift breadcrumb
+        // BEFORE logging so an operator reading `cartPromoDriftCount()` sees
+        // the same count the browser console will. Keep the warn as a
+        // last-resort visibility path — production swallows the browser
+        // console but the persistent counter survives.
+        this.driftCount.set(this.driftCount() + 1);
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[cart-promotions] Skipping applied promo ${promo.promotion_id} with invalid/missing type:`,
+          promo.type,
+        );
+        continue;
+      }
+
+      const safeScope:
+        | 'order'
+        | 'product'
+        | 'category'
+        | undefined =
+        promo.scope &&
+        validScopes.includes(
+          promo.scope as 'order' | 'product' | 'category',
+        )
+          ? (promo.scope as 'order' | 'product' | 'category')
+          : undefined;
+
+      items.push({
+        id: promo.promotion_id,
+        label: promo.name,
+        type: safeType,
+        value: promo.discount_amount,
+        scope: safeScope,
+        // Sentinel so the expanded-cards filter renders this row. See JSDoc above.
+        min_quantity: 1,
+      });
+    }
+    return items;
+  });
+
+  // ── Private helpers ───────────────────────────────────────────────────
 
   /**
    * Look up a single `product_id` against the cart's items and return the
    * product's display name (or null if absent / backend didn't supply an id).
-   * Kept as an instance method so the two computed signals above can share it
-   * without rebuilding the lookup Map on every recompute.
+   * Shared by `tierProgressItems` so the projection cannot drift apart.
    */
   private resolveProductName(productId: number | null | undefined): string | null {
     if (productId == null) return null;
@@ -347,43 +337,28 @@ export class CartPromotionsComponent {
   }
 
   /**
-   * Bulk variant of `resolveProductName` for the applied-promotions list.
-   * Preserves the input order and drops ids that aren't in the cart (e.g.
-   * stale product_ids from a removed line) so the UI never renders "en: "
-   * followed by an empty string.
+   * Sum the customer's CURRENT quantity across every cart line matching
+   * `product_id`. Used by `tierProgressItems` to anchor `min_quantity` /
+   * `max_quantity` at the customer's actual line count (NOT the tier
+   * threshold), so the pill labels encode "current state → target state"
+   * instead of "tier 1 → tier 2".
+   *
+   * Returns `null` when the line is missing — `<app-promotion-stack>` then
+   * falls back to its bare-label pill without the "Desde N und:" prefix.
    */
-  private resolveProductNames(productIds: number[] | undefined): string[] {
-    if (!productIds || productIds.length === 0) return [];
+  private resolveProductQuantity(
+    productId: number | null | undefined,
+  ): number | null {
+    if (productId == null) return null;
     const items = this.cart()?.items ?? [];
-    const names: string[] = [];
-    for (const id of productIds) {
-      const item = items.find((i) => i.product_id === id);
-      if (item?.product?.name) names.push(item.product.name);
+    let total = 0;
+    let matched = false;
+    for (const item of items) {
+      if (item.product_id === productId) {
+        total += item.quantity;
+        matched = true;
+      }
     }
-    return names;
-  }
-
-  /**
-   * Format the list of product names that unlocked an applied promotion
-   * under `quantity_grouping='per_product'`. Receives 1..N names already
-   * resolved against `cart.items[]` and must return a single string the
-   * template inserts between `en: <strong>...</strong>`.
-   *
-   * Contract:
-   *   - Never return an empty string (caller already guards with
-   *     `@if (promo.target_product_names.length > 0)`).
-   *   - Preserve the order the backend returned (it reflects which products
-   *     actually received the discount, not arbitrary cart order).
-   *
-   * Current policy (conservative for QA): comma-join without truncation. The
-   * cart summary already lives inside a narrow column and Tailwind's
-   * `text-text-secondary/80` line breaks naturally when the string is long.
-   * Product owner / David can refine this (e.g. truncate to "+N más") in a
-   * follow-up UX pass once we see real cart shapes in production.
-   *
-   * @see cart-promotions.component.html (the `@if` block that calls this).
-   */
-  protected formatTargetProductNames(names: string[]): string {
-    return names.join(', ');
+    return matched ? total : null;
   }
 }

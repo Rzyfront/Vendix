@@ -1,7 +1,7 @@
-<div class="pb-6">
+<div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
   <!-- Stats Cards -->
   @if (loading()) {
-    <div class="stats-container">
+    <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
       @for (i of [1, 2, 3, 4]; track i) {
         <div
           class="bg-surface border border-border rounded-xl p-4 animate-pulse"
@@ -53,38 +53,40 @@
     </div>
   }
 
-  <!-- Filter Bar -->
-  <div class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-surface px-4 py-3 border-b border-border rounded-lg mx-1 mb-4">
-    <div class="flex items-center gap-2.5 min-w-0">
-      <div class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0">
-        <app-icon name="shopping-cart" class="text-[var(--color-primary)]"></app-icon>
+    <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
+    <div slot="header" class="results-header flex items-center justify-between gap-3 flex-wrap">
+      <div class="flex items-center gap-2 min-w-0">
+        <app-icon name="trending-up" [size]="20" class="shrink-0 text-[var(--color-primary)]"></app-icon>
+        <span class="results-header__title text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight whitespace-nowrap">Carritos Abandonados</span>
       </div>
-      <div class="min-w-0">
-        <h1 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">
-          Carritos Abandonados
-        </h1>
-        <p class="hidden sm:block text-xs text-[var(--color-text-secondary)] font-medium truncate">
-          Análisis de abandono y recuperación de carritos
-        </p>
+      <div class="flex items-end gap-2 flex-wrap shrink-0">
+      <app-options-dropdown
+                class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                [filters]="[]"
+                [actions]="dropdownActions()"
+                [showActions]="true"
+                triggerLabel="Acciones"
+                triggerIcon="plus"
+                [isLoading]="exporting()"
+                (actionClick)="onActionsDropdownClick($event)"
+              ></app-options-dropdown>
+
+              <app-options-dropdown
+                class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                [filters]="filterConfigs"
+                [filterValues]="filterValues"
+                title="Filtros"
+                triggerLabel="Filtros"
+                (filterChange)="onFilterChange($event)"
+                (clearAllFilters)="onClearAllFilters()"
+              ></app-options-dropdown>
       </div>
     </div>
+    <div class="p-4 space-y-6">
 
-    <div class="flex items-end gap-2 md:gap-3 shrink-0">
-      <vendix-date-range-filter
-        [value]="dateRange()"
-        (valueChange)="onDateRangeChange($event)"
-      ></vendix-date-range-filter>
-      <vendix-export-button
-          class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-          [loading]="exporting()"
-          (export)="exportReport()"
-        ></vendix-export-button>
-    </div>
-  </div>
 
-  <!-- Content Grid -->
-  <div class="grid grid-cols-1 gap-6">
-    <!-- Charts -->
+  <!-- Charts -->
+  <div class="grid grid-cols-1 gap-6 md:mt-4">
     <!-- Abandoned vs Recovered Carts Trend -->
     <app-card
       shadow="none"
@@ -92,7 +94,7 @@
       overflow="hidden"
       [showHeader]="true"
     >
-      <div slot="header" class="flex flex-col">
+      <div slot="header" class="results-header flex flex-col">
         <span class="text-sm font-bold text-[var(--color-text-primary)]"
           >Tendencia de Carritos</span
         >
@@ -107,17 +109,18 @@
               class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
             ></div>
           </div>
-        } @else if (!trendsChartOptions()) {
-          <div class="h-64 flex flex-col items-center justify-center text-text-secondary">
-            <app-icon name="shopping-cart" [size]="48" class="mb-2 opacity-50"></app-icon>
-            <p>No hay datos para el período seleccionado</p>
-          </div>
         } @else {
-          <app-chart
-            [options]="trendsChartOptions()"
-            size="large"
-            [showLegend]="true"
-          ></app-chart>
+          @defer (on viewport) {
+            <app-chart
+              [options]="trendsChartOptions"
+              size="large"
+              [showLegend]="true"
+            ></app-chart>
+          } @placeholder {
+            <div
+              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
+            ></div>
+          }
         }
       </div>
     </app-card>
@@ -129,7 +132,7 @@
       overflow="hidden"
       [showHeader]="true"
     >
-      <div slot="header" class="flex flex-col">
+      <div slot="header" class="results-header flex flex-col">
         <span class="text-sm font-bold text-[var(--color-text-primary)]"
           >Tasa de Recuperación</span
         >
@@ -144,17 +147,56 @@
               class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
             ></div>
           </div>
-        } @else if (!recoveryRateChartOptions()) {
-          <div class="h-64 flex flex-col items-center justify-center text-text-secondary">
-            <app-icon name="refresh-cw" [size]="48" class="mb-2 opacity-50"></app-icon>
-            <p>No hay datos para el período seleccionado</p>
+        } @else {
+          @defer (on viewport) {
+            <app-chart
+              [options]="recoveryRateChartOptions"
+              size="large"
+              [showLegend]="false"
+            ></app-chart>
+          } @placeholder {
+            <div
+              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
+            ></div>
+          }
+        }
+      </div>
+    </app-card>
+
+    <!-- Abandoned Carts by Reason -->
+    <app-card
+      shadow="none"
+      [padding]="false"
+      overflow="hidden"
+      [showHeader]="true"
+    >
+      <div slot="header" class="results-header flex flex-col">
+        <span class="text-sm font-bold text-[var(--color-text-primary)]"
+          >Razones de Abandono</span
+        >
+        <span class="text-xs text-[var(--color-text-secondary)]"
+          >Distribución por motivo de abandono</span
+        >
+      </div>
+      <div class="p-4">
+        @if (loadingTrends()) {
+          <div class="h-64 flex items-center justify-center">
+            <div
+              class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
           </div>
         } @else {
-          <app-chart
-            [options]="recoveryRateChartOptions()"
-            size="large"
-            [showLegend]="true"
-          ></app-chart>
+          @defer (on viewport) {
+            <app-chart
+              [options]="byReasonChartOptions"
+              size="large"
+              [showLegend]="false"
+            ></app-chart>
+          } @placeholder {
+            <div
+              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
+            ></div>
+          }
         }
       </div>
     </app-card>
@@ -169,6 +211,8 @@
       @for (view of customersViews; track view.key) {
         <app-analytics-card [view]="view"></app-analytics-card>
       }
+    </div>
+  </app-card>
     </div>
   </app-card>
 </div>

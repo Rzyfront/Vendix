@@ -1,0 +1,190 @@
+<div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
+  <!-- KPI cards (sticky on mobile). Exactly 4 cards — the cost coverage
+       alert is rendered as a sibling banner below, never inside. -->
+  <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+    <app-stats
+      title="Productos Bajo Stock"
+      [value]="getTotalLowStock()"
+      smallText="Bajo stock + sin stock"
+      iconName="alert-triangle"
+      iconBgColor="bg-amber-100"
+      iconColor="text-amber-600"
+      [loading]="loadingKpis()"
+    ></app-stats>
+
+    <app-stats
+      title="Valor en Riesgo"
+      [value]="getTotalValueAtRisk() | currency"
+      smallText="Costo de reponer"
+      iconName="dollar-sign"
+      iconBgColor="bg-purple-100"
+      iconColor="text-purple-600"
+      [loading]="loadingKpis()"
+    ></app-stats>
+
+    <app-stats
+      title="Sin Proveedor"
+      [value]="getProductsWithoutSupplier()"
+      smallText="Sin proveedor asignado"
+      iconName="package-x"
+      iconBgColor="bg-red-100"
+      iconColor="text-red-600"
+      [loading]="loadingKpis()"
+    ></app-stats>
+
+    <app-stats
+      title="Días Prom. Sin Venta"
+      [value]="getAvgDaysWithoutSale()"
+      smallText="Rotación del inventario"
+      iconName="clock"
+      iconBgColor="bg-blue-100"
+      iconColor="text-blue-600"
+      [loading]="loadingKpis()"
+    ></app-stats>
+  </div>
+
+  <!-- Cost coverage banner — sibling of stats-container, NOT inside it.
+       Surfaces "X / Y con costo conocido" when the cost coverage is below
+       100 % so the buyer can see why Valor en Riesgo may be underestimated.
+       Annotation 2: NO padding / margin of its own — the parent
+       <div class="space-y-6 w-full"> handles spacing. Inner children carry
+       the breathing room so the icon / text don't touch the border. -->
+  @if (costCoverageWarning(); as warn) {
+    <div
+      class="rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-800 flex items-start gap-2"
+      role="alert"
+      data-testid="cost-coverage-warning"
+    >
+      <app-icon name="alert-circle" class="shrink-0 mt-0.5 p-1"></app-icon>
+      <span class="flex-1 py-2 pr-3">{{ warn }}</span>
+    </div>
+  }
+
+  <!-- Data table -->
+  <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
+    <div slot="header" class="results-header flex items-center justify-between gap-3 flex-wrap">
+      <!-- Left: icon + heading -->
+      <div class="flex items-center gap-2 min-w-0">
+        <app-icon name="package" [size]="20" class="shrink-0 text-[var(--color-primary)]"></app-icon>
+        <span class="results-header__title text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight whitespace-nowrap">
+          Resultados
+          <span class="results-header__count text-xs md:text-sm text-text-secondary font-normal ml-2">
+            ({{ totalItems() }} productos)
+          </span>
+        </span>
+      </div>
+
+      <!-- Right: two <app-options-dropdown> instances — annotations 3 + 4.
+           Filters (left of pair) + Actions (right of pair). Both reuse the
+           shared component from /admin/products; the trigger order matches
+           the products-list pattern (filters first, then actions). -->
+      <div class="flex items-end gap-2 flex-wrap shrink-0">
+        <app-options-dropdown
+          [filters]="filterConfigs()"
+          [filterValues]="dropdownFilterValues()"
+          [actions]="[]"
+          [showActions]="false"
+          triggerLabel="Filtros"
+          triggerIcon="filter"
+          [debounceMs]="250"
+          [isLoading]="loadingKpis()"
+          (filterChange)="onFiltersDropdownChange($event)"
+          (clearAllFilters)="onFiltersDropdownClearAll()"
+        ></app-options-dropdown>
+
+        <app-options-dropdown
+          [filters]="[]"
+          [actions]="dropdownActions()"
+          [showActions]="true"
+          triggerLabel="Acciones"
+          triggerIcon="plus"
+          (actionClick)="onActionsDropdownClick($event)"
+        ></app-options-dropdown>
+      </div>
+    </div>
+
+    @if (suppliersLoadError() || withoutSupplier()) {
+      <div class="px-4 pt-3 space-y-2">
+        @if (suppliersLoadError()) {
+          <div
+            class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 flex items-start gap-2"
+            role="alert"
+          >
+            <app-icon name="alert-circle" class="shrink-0 mt-0.5"></app-icon>
+            <div class="flex-1">
+              <strong class="font-semibold">No pudimos cargar los proveedores.</strong>
+              <span class="block text-xs text-red-600/80">
+                El filtro por proveedor no está disponible en este momento. Intenta recargar la página.
+              </span>
+            </div>
+            <button
+              type="button"
+              class="text-xs font-medium text-red-700 hover:underline"
+              (click)="loadSuppliers()"
+            >
+              Reintentar
+            </button>
+          </div>
+        }
+        @if (withoutSupplier()) {
+          <div
+            class="inline-flex items-center gap-2 text-xs text-[var(--color-text-secondary)]"
+            data-testid="without-supplier-chip"
+          >
+            <app-icon name="filter" [size]="12"></app-icon>
+            <span>Filtro activo: solo productos sin proveedor asignado</span>
+            <button
+              type="button"
+              class="ml-2 text-xs text-[var(--color-primary)] hover:underline"
+              (click)="clearSupplier()"
+            >
+              Limpiar
+            </button>
+          </div>
+        }
+      </div>
+    }
+
+    <div class="p-4 space-y-3">
+      @if (showTruncationBanner()) {
+        <div
+          class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 flex items-start gap-2"
+          role="alert"
+          data-testid="truncation-banner"
+        >
+          <app-icon name="alert-triangle" class="shrink-0 mt-0.5"></app-icon>
+          <div class="flex-1">
+            <strong class="font-semibold">Mostrando los primeros {{ totalItems() }} productos.</strong>
+            <span class="block text-xs text-amber-700/80">
+              Refina los filtros o exporta el XLSX para ver el resto del universo.
+            </span>
+          </div>
+        </div>
+      }
+      <app-responsive-data-view
+        [data]="rows()"
+        [columns]="columns"
+        [cardConfig]="cardConfig"
+        [actions]="actions"
+        [loading]="loadingRows()"
+        [sortable]="true"
+        (sort)="onSortChange($event)"
+        emptyMessage="No hay productos con bajo stock para los filtros seleccionados"
+        emptyTitle="Sin resultados"
+        emptyIcon="inbox"
+      ></app-responsive-data-view>
+    </div>
+
+    <!-- Pagination — inside the table card, immediately after the data view. -->
+    <div class="mt-4 flex justify-center">
+      <app-pagination
+        [currentPage]="page()"
+        [totalPages]="totalPages()"
+        [total]="totalItems()"
+        [limit]="limit()"
+        [infoStyle]="'range'"
+        (pageChange)="onPageChange($event)"
+      ></app-pagination>
+    </div>
+  </app-card>
+</div>

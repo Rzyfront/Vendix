@@ -76,6 +76,10 @@ import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities
 import { SerialNumberEnforcementService } from '../inventory/serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../inventory/serial-numbers/inventory-serial-numbers.service';
 import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-threshold.service';
+import {
+  AuditService,
+  AuditResource,
+} from '@common/audit/audit.service';
 
 /**
  * Multi-tarifa (Fase 5.5): snapshot por línea POS. Lleva tanto el dato
@@ -131,6 +135,11 @@ export class PaymentsService {
     // Art. 616-1 ET / Res. 000165/2023 — frontera 5 UVT entre documento
     // equivalente POS y factura electrónica nominativa.
     private readonly fiscalInvoiceThreshold: FiscalInvoiceThresholdService,
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · audit emission for `order.draft_saved`.
+    // Only used in the draft short-circuit (no other behavior change). Wired
+    // here because `@Global()` AuditModule already exports it, so DI resolves
+    // without touching the module wiring.
+    private readonly auditService: AuditService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -705,6 +714,99 @@ export class PaymentsService {
         }
       }
 
+      // ----------------------------------------------------------------
+      // CP-POS-CREAR-EDITAR-COBRAR-001 — B.2 draft/payment invariant.
+      //
+      // `is_draft=true` significa "guardar la orden pendiente de cobro". Combinarlo
+      // con `requires_payment=true` es contradictorio: si la intención es cobrar,
+      // NO debe ser draft; si la intención es guardar, NO debe procesar pago.
+      // Se valida ANTES de la `$transaction` para no tomar numeración ni abrir
+      // un cupón/COGS/inventario/pago que luego haya que revertir.
+      // ----------------------------------------------------------------
+      if (
+        createPosPaymentDto.is_draft === true &&
+        createPosPaymentDto.requires_payment === true
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.POS_DRAFT_REQUIRES_PAYMENT_001,
+          'A draft (is_draft=true) cannot be combined with requires_payment=true; save the order first, then charge it via flow/pay',
+        );
+      }
+
+      // ----------------------------------------------------------------
+      // CP-POS-CREAR-EDITAR-COBRAR-001 — B.1 customer gate.
+      //
+      // Política canónica: `settings.checkout.require_customer_data=true` (default).
+      // Una orden POS sin cliente queda huérfana y no se puede cobrar, facturar ni
+      // atender soporte. La validación corre en backend, ANTES de abrir la
+      // `$transaction`, para no escribir pagos / cupones / eventos / COGS / inventario
+      // / invoice sobre una orden sin identificar.
+      //
+      // El default seguro es TRUE: si la rama `checkout` no existe en settings
+      // (settings legacy, JSON parcial), se trata como `require_customer_data=true`
+      // y se exige cliente. Sólo se omite el gate cuando el flag es EXPLÍCITAMENTE
+      // `false`, política opt-in del comerciante.
+      //
+      // Escape hatch POS-side: cuando `settings.pos.allow_anonymous_sales=true`
+      // (flag operativo del cajero, distinto de `checkout.require_customer_data`
+      // que gobierna la facturación electrónica), el operador puede hacer ventas
+      // sin cliente desde el POS. El cashier decide desde el modal de selección
+      // de cliente (Venta Anónima vs. Con Cliente); el frontend clona el cart
+      // sin `customer_id` cuando selecciona anónimo. Sólo aplica a POS; el
+      // ecommerce mantiene `checkout.require_customer_data` como autoridad.
+      //
+      // Cuando hay `customer_id`, se valida que el cliente pertenezca a la tienda
+      // del contexto vía `store_users` (manual scope — el getter `users` del
+      // `StorePrismaService` devuelve el `baseClient` sin scope; el join se hace
+      // por la tabla de membresía).
+      // ----------------------------------------------------------------
+      const checkoutSettings = (settings as any)?.checkout as
+        | { require_customer_data?: boolean }
+        | undefined;
+      const requireCustomerData =
+        checkoutSettings?.require_customer_data !== false;
+
+      const posSettings = (settings as any)?.pos as
+        | { allow_anonymous_sales?: boolean }
+        | undefined;
+      const allowAnonymousSales = posSettings?.allow_anonymous_sales === true;
+
+      if (requireCustomerData && !allowAnonymousSales) {
+        const customerId = createPosPaymentDto.customer_id;
+        const customerIdInvalid =
+          customerId === undefined ||
+          customerId === null ||
+          (typeof customerId === 'number' &&
+            (!Number.isInteger(customerId) || customerId < 1));
+
+        if (customerIdInvalid) {
+          throw new VendixHttpException(
+            ErrorCodes.POS_CUSTOMER_REQUIRED_001,
+            'POS order requires a valid customer_id when checkout.require_customer_data is enabled',
+            { reason: 'missing_or_invalid_customer_id' },
+          );
+        }
+
+        // Scope-safe lookup: `users` no está scopeado por `StorePrismaService`
+        // (su getter devuelve el `baseClient`); validamos la membresía con
+        // `store_users.findFirst({ where: { store_id, user_id } })` antes de
+        // aceptar el cliente en esta tienda.
+        const membership = await this.prisma.store_users.findFirst({
+          where: {
+            store_id: createPosPaymentDto.store_id,
+            user_id: customerId as number,
+          },
+          select: { user_id: true },
+        });
+        if (!membership) {
+          throw new VendixHttpException(
+            ErrorCodes.POS_CUSTOMER_REQUIRED_001,
+            'POS customer does not belong to the current store',
+            { reason: 'customer_store_mismatch' },
+          );
+        }
+      }
+
       const result = await this.prisma.$transaction(async (tx) => {
         // 1. Create or update order. Backend recalculates promotions/coupon
         // server-side and returns the persistence-ready snapshots so this
@@ -1195,7 +1297,16 @@ export class PaymentsService {
           !hasSerialized;
 
 
-        if (createPosPaymentDto.update_inventory && isDirectDeliveryFinished) {
+        if (isDirectDeliveryFinished) {
+          // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 MAJOR F19.
+          // The `update_inventory` flag was a client-side bypass: a
+          // tampered / stale client could send `false` and the server
+          // would silently skip the stock move for a direct-delivery
+          // finished sale, leaving the books out of sync with reality.
+          // The branch is now driven ONLY by `isDirectDeliveryFinished`
+          // (a server-owned predicate: requires_payment + non-home +
+          // non-serialized), so the inventory move is invariant.
+          //
           // QUI-431 — POS serial selection. Pass the DTO lines so
           // `updateInventoryFromOrder` can consume the operator-chosen serials
           // for serialized products. Ecommerce/credit/other channels reach the
@@ -1388,19 +1499,74 @@ export class PaymentsService {
         // ignored — only the value returned by `CouponsService.validate`
         // (computed server-side) is persisted in `coupon_uses`, kept
         // separate from the promotional discount stored in `order_promotions`.
-        if (couponInfo.coupon_id && couponInfo.discount_amount > 0) {
-          await tx.coupon_uses.create({
-            data: {
-              coupon_id: couponInfo.coupon_id,
+        //
+        // CP-POS-CREAR-EDITAR-COBRAR-001 — B.2 coupon lifecycle: a DRAFT is a
+        // saved business order, NOT a charged sale. We must NOT persist
+        // `coupon_uses` and must NOT increment `coupons.current_uses` here; the
+        // coupon validation/commit belongs to `flow/pay`. Otherwise an
+        // abandoned draft would burn the coupon quota, and a successful draft →
+        // pay → cancel loop would leave a phantom row in `coupon_uses`.
+        if (
+          !createPosPaymentDto.is_draft &&
+          couponInfo.coupon_id &&
+          couponInfo.discount_amount > 0
+        ) {
+          // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 MAJOR F18.
+          // Idempotency guard: a retry of the same payment attempt would
+          // create a duplicate `coupon_uses` row and double-burn the
+          // coupon quota. `coupon_uses` lacks a (order_id, coupon_id)
+          // unique constraint, so we probe with `findFirst` and skip the
+          // create when a row already exists.
+          const existingUse = await tx.coupon_uses.findFirst({
+            where: {
               order_id: order.id,
-              customer_id: createPosPaymentDto.customer_id || null,
-              discount_applied: couponInfo.discount_amount,
+              coupon_id: couponInfo.coupon_id,
             },
+            select: { id: true },
           });
-          await tx.coupons.update({
-            where: { id: couponInfo.coupon_id },
+          if (!existingUse) {
+            await tx.coupon_uses.create({
+              data: {
+                coupon_id: couponInfo.coupon_id,
+                order_id: order.id,
+                customer_id: createPosPaymentDto.customer_id || null,
+                discount_applied: couponInfo.discount_amount,
+              },
+            });
+          }
+          // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 BLOCKER F17
+          // + MAJOR F22. Two fixes in one updateMany:
+          //   F17: idempotent counter — use `updateMany` with the
+          //   `state='active'` guard so a stale / inactive coupon
+          //   doesn't increment blindly. count===0 throws
+          //   `ORD_EDIT_COUPON_COMMIT_001`, the same way the editor
+          //   surfaces this race.
+          //   F22: pin the coupon to the current store via
+          //   `stores: { some: { id: storeId } }` so a coupon from a
+          //   DIFFERENT tenant can never sneak through the `id` match.
+          // We omit the `max_uses > current_uses` clause from the WHERE
+          // because Prisma's updateMany lacks row-self-referencing
+          // operators; the editor handles that quota guard with a
+          // pre-flight `validate()` call that we already trust above.
+          const inc = await tx.coupons.updateMany({
+            where: {
+              id: couponInfo.coupon_id,
+              stores: { some: { id: createPosPaymentDto.store_id } },
+              state: 'active',
+            },
             data: { current_uses: { increment: 1 } },
           });
+          if (inc.count === 0) {
+            throw new VendixHttpException(
+              ErrorCodes.ORD_EDIT_COUPON_COMMIT_001,
+              undefined,
+              {
+                stage: 'pos_increment',
+                coupon_id: couponInfo.coupon_id,
+                store_id: createPosPaymentDto.store_id,
+              },
+            );
+          }
         }
 
         // 6. Send confirmation if required
@@ -1630,6 +1796,42 @@ export class PaymentsService {
       // No cash movement, no installments, no invoice data request, no
       // success message tied to a sale.
       if (result.success && createPosPaymentDto.is_draft) {
+        // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · `order.draft_saved`.
+        //
+        // Emit AFTER the $transaction commits (we are outside it here) so an
+        // audit row never claims a save that the DB rolled back. Correlate by
+        // `request_id` so support can pivot from a frontend error / X-Request-Id
+        // straight to the timeline row. Wrapped in try/catch: a missing audit
+        // row is observability debt, never a blocker for an already-persisted
+        // draft.
+        const draftCtx = RequestContextService.getContext();
+        try {
+          await this.auditService.logCustom(
+            user?.id,
+            'order.draft_saved',
+            AuditResource.ORDERS,
+            {
+              order_id: result.order.id,
+              order_number: result.order.order_number,
+              store_id: createPosPaymentDto.store_id,
+              user_id: user?.id,
+              request_id: draftCtx?.request_id,
+              customer_id: createPosPaymentDto.customer_id ?? null,
+              // Carry enough snapshot to reconstruct the save intent without
+              // touching the order row again: no payment, no coupon use, no
+              // accounting entries — that is exactly the point of a draft.
+              has_customer: !!createPosPaymentDto.customer_id,
+              requires_payment: false,
+              grand_total: result.order.total_amount,
+            },
+            Number(result.order.id),
+          );
+        } catch (err) {
+          this.logger.warn(
+            `[POS] draft_saved audit failed for order #${result.order.id}: ${(err as Error).message}`,
+          );
+        }
+
         return {
           success: true,
           order: result.order,
@@ -1962,6 +2164,14 @@ export class PaymentsService {
         cart_subtotal: remainingSubtotal,
         customer_id: dto.customer_id,
         items: cartItems,
+        // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 MAJOR M6.
+        // Pin `store_id` so the coupon validation knows WHICH tenant's
+        // coupon pool to look in. The DTO's `validate` shape doesn't
+        // declare this field yet, hence the `as any` carry-over from
+        // the previous line; the service-side method reads from the
+        // object directly and ignores unknown keys via `forbidNonWhitelisted`
+        // being off in the inner ValidationPipe-less call path.
+        store_id: dto.store_id,
       } as any);
 
       const discount = this.roundMoney(

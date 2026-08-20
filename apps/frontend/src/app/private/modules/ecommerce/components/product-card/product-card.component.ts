@@ -21,6 +21,10 @@ import { CurrencyPipe, CurrencyFormatService } from '../../../../../shared/pipes
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
+import {
+  PromotionStackComponent,
+  PromotionStackItem,
+} from '../../../../../shared/components/promotion-stack/promotion-stack.component';
 
 @Component({
   selector: 'app-product-card',
@@ -33,6 +37,7 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
     BadgeComponent,
     QuantityControlComponent,
     NextAvailableNoticeComponent,
+    PromotionStackComponent,
   ],
   template: `
     <article class="product-card" [class.product-card--off]="product().is_available_now === false" [attr.data-currency]="currencyCode()" (click)="onCardClick($event)">
@@ -185,8 +190,21 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
             @if (hasActiveDiscount()) {
               <span class="original-price">{{ product().base_price | currency }}</span>
             }
-            @if (showPromotionBadge()) {
-              <span class="discount-badge">{{ promotionBadgeLabel() }}</span>
+            @if (promotionStackItems().length > 0) {
+              <app-promotion-stack
+                mode="compact-pills"
+                [items]="promotionStackItems()"
+                ariaLabel="Descuentos de este producto"
+                [attr.data-testid]="'tier-pills-' + product().id"
+              />
+            }
+            <!-- " +N más " lleva al detalle para ver todos los tiers. Se pinta
+                 como ancla aparte para que la card NO invente más pills de los
+                 que el stack ya muestra y el click navegue, no abra un modal. -->
+            @if (extraTiersCount() > 0) {
+              <a [routerLink]="['/products', product().slug]" class="tier-more-link">
+                +{{ extraTiersCount() }} más
+              </a>
             }
           </div>
           <!-- Inline "next opening" block — surfaces WHEN the off-schedule
@@ -478,18 +496,20 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
         text-decoration: line-through;
       }
 
-      .discount-badge {
-        display: inline-flex;
-        align-items: center;
-        min-height: 20px;
-        padding: 0.12rem 0.36rem;
-        border-radius: 999px;
-        background: var(--color-success-light);
-        color: var(--color-success);
-        font-size: 10px;
-        font-weight: var(--fw-bold);
+      // "+N más" — anclado al detalle cuando el stack de tiers compactos
+      // necesita recortar más de 3 niveles. Inline + primario para que el
+      // ojo lo lea como continuación de las pills, no como chrome aparte.
+      .tier-more-link {
+        font-size: var(--fs-xs);
+        font-weight: var(--fw-semibold);
+        color: var(--color-primary);
+        text-decoration: none;
         line-height: 1;
-        white-space: nowrap;
+
+        &:hover,
+        &:focus-visible {
+          text-decoration: underline;
+        }
       }
 
       .weight-unit {
@@ -655,6 +675,77 @@ export class ProductCardComponent {
     const tz =
       this.tenantFacade.domainConfig()?.customConfig?.ecommerce?.general?.timezone ?? null;
     return formatNextAvailableDetailed(na, tz, new Date());
+  });
+
+  /**
+   * Proyecta la `active_promotion` del producto al shape que espera
+   * `<app-promotion-stack mode="compact-pills">` (CP-ECOM-PROMO-UX-001 C.2).
+   *
+   * Tres caminos:
+   *  1. `quantity_tiers` poblado → hasta 3 pills, una por tier (con
+   *     `min_quantity` y `value`); el remanente se cuenta en
+   *     `extraTiersCount()` para el link "+N más".
+   *  2. Promoción plana (sin tiers) → 1 pill con el `badge_label`.
+   *  3. Sin promoción → `[]` y el banner de la card no renderiza nada.
+   *
+   * NOTA: Phase B declara `quantity_tiers?` en la interfaz `ActiveProductPromotion`
+   * pero el catálogo actual todavía no la emite para todos los productos;
+   * por eso el acceso es tolerante (`(promotion as any)?.quantity_tiers`). El
+   * path tier-aware se activa sólo cuando el backend empieza a mandar tiers,
+   * sin necesidad de migración frontend.
+   */
+  readonly promotionStackItems = computed<PromotionStackItem[]>(() => {
+    const promo = this.product().active_promotion;
+    if (!promo) return [];
+
+    // Acceso tolerante a `quantity_tiers` — el campo puede no existir aún
+    // en builds anteriores del backend. Cuando llegue, pintamos hasta 3.
+    const tiers = (promo as unknown as { quantity_tiers?: Array<{
+      min_quantity?: number;
+      max_quantity?: number | null;
+      discount_percentage?: number;
+      discount_amount?: number;
+      badge_label?: string;
+    }> }).quantity_tiers;
+
+    if (Array.isArray(tiers) && tiers.length > 0) {
+      const visible = tiers.slice(0, 3);
+      return visible.map((tier, index) => ({
+        id: `${promo.id}-tier-${index}`,
+        label: tier.badge_label ?? promo.badge_label,
+        type: promo.type,
+        value:
+          tier.discount_percentage ?? tier.discount_amount ?? promo.discount_percentage ?? promo.discount_amount,
+        scope: promo.scope,
+        min_quantity: tier.min_quantity,
+        max_quantity: tier.max_quantity ?? null,
+        tier_index: index,
+      }));
+    }
+
+    // Promoción plana: una sola pill.
+    return [
+      {
+        id: promo.id,
+        label: promo.badge_label,
+        type: promo.type,
+        value: promo.discount_percentage ?? promo.discount_amount,
+        scope: promo.scope,
+      },
+    ];
+  });
+
+  /**
+   * Tiers adicionales más allá de los 3 que muestra el stack compacto.
+   * Solo se renderiza cuando hay tiers Y su número supera el cap visible.
+   * Devuelve 0 cuando no hay tiers (promoción plana) → el "+N más" no aparece.
+   */
+  readonly extraTiersCount = computed<number>(() => {
+    const promo = this.product().active_promotion;
+    if (!promo) return 0;
+    const tiers = (promo as unknown as { quantity_tiers?: unknown[] }).quantity_tiers;
+    if (!Array.isArray(tiers)) return 0;
+    return Math.max(0, tiers.length - 3);
   });
 
   /**

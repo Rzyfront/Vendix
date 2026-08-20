@@ -1,5 +1,5 @@
-import {Component, OnInit, inject, signal,
-  DestroyRef} from '@angular/core';
+import { Component, OnInit, inject, computed, signal,
+  DestroyRef } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterModule, ActivatedRoute } from '@angular/router';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
@@ -15,6 +15,10 @@ import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 import { truncateLabel } from '../../../../../../shared/utils/chart-labels.util';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
+import {
+  OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
+import {
+  DropdownAction } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   SalesByProduct,
   SalesAnalyticsQueryDto} from '../../interfaces/sales-analytics.interface';
@@ -34,9 +38,21 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
     DateRangeFilterComponent,
     ExportButtonComponent,
     AnalyticsCardComponent,
+  
+    OptionsDropdownComponent,],
+  styles: [
+    `
+      :host {
+        display: block;
+        margin: -16px;
+        @media (min-width: 768px) { margin: -24px; }
+      }
+      :host ::ng-deep .stats-container { padding: 0; margin: 0; margin-bottom: 0; }
+      :host ::ng-deep .results-header { padding: 0.75rem 1rem; }
+    `,
   ],
   template: `
-    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
+    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
       <!-- Stats Cards -->
       <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
@@ -74,36 +90,30 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
         ></app-stats>
       </div>
 
-      <!-- Header -->
-      <div
-        class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-surface px-4 py-3 border-b border-border rounded-lg mx-1 mb-4"
-      >
-        <div class="flex items-center gap-2.5 min-w-0">
-          <div
-            class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0"
-          >
-            <app-icon name="package" class="text-[var(--color-primary)]"></app-icon>
-          </div>
-          <div class="min-w-0">
-            <h1 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">
-              Ventas por Producto
-            </h1>
-            <p class="hidden sm:block text-xs text-[var(--color-text-secondary)] font-medium truncate">
-              Análisis detallado de ventas por producto
-            </p>
-          </div>
+          <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
+      <div slot="header" class="results-header flex items-center justify-between gap-3 flex-wrap">
+        <div class="flex items-center gap-2 min-w-0">
+          <app-icon name="package" [size]="20" class="shrink-0 text-[var(--color-primary)]"></app-icon>
+          <span class="results-header__title text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight whitespace-nowrap">Ventas por Producto</span>
         </div>
-        <div class="flex items-end gap-2 md:gap-3 shrink-0">
-          <vendix-date-range-filter
-            [value]="dateRange()"
-            (valueChange)="onDateRangeChange($event)"
-          ></vendix-date-range-filter>
-          <vendix-export-button
-            [loading]="exporting()"
-            (export)="exportReport()"
-          ></vendix-export-button>
+        <div class="flex items-end gap-2 flex-wrap shrink-0">
+        <vendix-date-range-filter
+                    [value]="dateRange()"
+                    (valueChange)="onDateRangeChange($event)"
+                  ></vendix-date-range-filter>
+                  <app-options-dropdown
+                    [filters]="[]"
+                    [actions]="dropdownActions()"
+                    [showActions]="true"
+                    triggerLabel="Acciones"
+                    triggerIcon="plus"
+                    [isLoading]="exporting()"
+                    (actionClick)="onActionsDropdownClick($event)"
+                  ></app-options-dropdown>
         </div>
       </div>
+      <div class="p-4 space-y-6">
+
 
       <!-- Content Grid -->
       <div class="grid grid-cols-1 gap-6">
@@ -113,7 +123,7 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
         overflow="hidden"
         [showHeader]="true"
       >
-        <div slot="header" class="flex flex-col">
+        <div slot="header" class="results-header flex flex-col">
           <span class="text-sm font-bold text-[var(--color-text-primary)]">
             Productos Vendidos
             <span class="text-xs text-[var(--color-text-secondary)] font-normal ml-2">
@@ -142,8 +152,11 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
           }
         </div>
       </app-card>
-    </div>
-  `})
+          </div>
+    </app-card>
+</div>
+
+`})
 export class SalesByProductComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
@@ -307,6 +320,20 @@ onDateRangeChange(range: DateRangeFilter): void {
           this.exporting.set(false);
         }});
   }
+  readonly dropdownActions = computed<DropdownAction[]>(() => [
+    {
+      action: 'export-xlsx',
+      label: 'Exportar XLSX',
+      icon: 'download',
+    },
+  ]);
+
+  onActionsDropdownClick(action: string): void {
+    if (action === 'export-xlsx') {
+      this.exportReport();
+    }
+  }
+
 
   formatCurrency(value: number): string {
     return this.currencyService.format(value, 0);

@@ -1,10 +1,15 @@
 import { Component, input, output, computed } from '@angular/core';
-import { ReportColumn, ReportDefinition, ReportStatField } from '../../interfaces/report.interface';
+import { ReportColumn, ReportDefinition } from '../../interfaces/report.interface';
 import { NestedReportComponent } from '../nested-report/nested-report.component';
 import { DateRangeFilterComponent } from '../../../analytics/components/date-range-filter/date-range-filter.component';
-import { ExportButtonComponent } from '../../../analytics/components/export-button/export-button.component';
 import { PaginationComponent } from '../../../../../../shared/components/pagination/pagination.component';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
+import {
+  OptionsDropdownComponent,
+} from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
+import {
+  DropdownAction,
+} from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   ResponsiveDataViewComponent,
   IconComponent,
@@ -97,6 +102,23 @@ function formatStatValue(value: any, type: string): string | number {
   return String(value);
 }
 
+/**
+ * Visor genérico de reportes (LIST / SUMMARY / NESTED).
+ *
+ * Layout canónico (alineado con `inventory-low-stock-by-supplier`):
+ *   1. `<div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">` — wrapper.
+ *   2. `<div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">`
+ *      — strip de stats pegajoso en móvil, transparente en desktop.
+ *   3. Banner de warning (cobertura de costo) — sibling del stats-container,
+ *      nunca dentro de él, sin padding propio.
+ *   4. `<app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">`
+ *      con slot="header" (icono + título a la izquierda, controles a la derecha)
+ *      y la paginación DENTRO de la card.
+ *
+ * El shell `<main class="shell-content">` ya impone 16/24px de padding; el
+ * `:host` lo cancela para que el contenido se extienda al borde del sidebar.
+ * Ver `report-viewer.component.scss`.
+ */
 @Component({
   selector: 'app-report-viewer',
   standalone: true,
@@ -104,17 +126,17 @@ function formatStatValue(value: any, type: string): string | number {
     StatsComponent,
     NestedReportComponent,
     DateRangeFilterComponent,
-    ExportButtonComponent,
     PaginationComponent,
     CardComponent,
     ResponsiveDataViewComponent,
     IconComponent,
+    OptionsDropdownComponent,
   ],
   template: `
-    <div class="flex flex-col gap-6">
-      <!-- Stats Cards -->
+    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
+      <!-- 1. Stats strip (sticky on mobile) -->
       @if (statsCards().length > 0) {
-        <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
+        <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
           @for (stat of statsCards(); track stat.title) {
             <app-stats
               [title]="stat.title"
@@ -129,57 +151,68 @@ function formatStatValue(value: any, type: string): string | number {
       }
 
       <!--
-        Aviso de dato parcial. El total de un informe valuado sólo es
-        autoritativo si TODAS las unidades tienen costo conocido; cuando no, el
-        número sale subestimado y sin este aviso se lee como definitivo. Quien
-        mira la pantalla no puede distinguir "vale poco" de "no sabemos cuánto
-        vale": los dos se ven igual.
+        2. Aviso de dato parcial — sibling del stats-container, NUNCA dentro de él.
+        Sin padding propio: el wrapper space-y-6 ya separa bloques; los hijos
+        cargan el "respiro" para que el icono y el texto no toquen los bordes.
       -->
       @if (coverageWarning(); as warning) {
         <div
-          class="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-200"
-          role="status"
+          class="rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-800 flex items-start gap-2"
+          role="alert"
+          data-testid="coverage-warning"
         >
-          <app-icon name="alert-triangle" [size]="16" class="mt-0.5 shrink-0" />
-          <span>{{ warning }}</span>
+          <app-icon name="alert-circle" class="shrink-0 mt-0.5 p-1"></app-icon>
+          <span class="flex-1 py-2 pr-3">{{ warning }}</span>
         </div>
       }
 
-      <app-card [padding]="false" overflow="hidden">
-        <!-- Header -->
-        <div class="p-2 md:px-6 md:py-4 border-b border-border flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-          <div class="flex-1 min-w-0">
-            <h2 class="text-lg font-semibold text-text-primary">
+      <!-- 3. Data card — header con icono + título a la izquierda,
+              controles (date-range + export) a la derecha. -->
+      <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
+        <div slot="header" class="results-header flex items-center justify-between gap-3 flex-wrap">
+          <!-- Left: icon + heading -->
+          <div class="flex items-center gap-2 min-w-0">
+            <app-icon
+              [name]="reportIcon()"
+              [size]="20"
+              class="shrink-0 text-[var(--color-primary)]"
+            ></app-icon>
+            <span class="results-header__title text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight whitespace-nowrap">
               {{ report()?.title || 'Reporte' }}
-            </h2>
-            <p class="hidden sm:block text-xs text-text-secondary mt-0.5">
-              {{ report()?.description || '' }}
-              @if (computedTotalItems() > 0) {
-                &middot; {{ computedTotalItems() }} registros
-              }
-            </p>
+              <span class="results-header__count text-xs md:text-sm text-text-secondary font-normal ml-2">
+                @if (computedTotalItems() > 0) {
+                  ({{ computedTotalItems() }} registros)
+                }
+              </span>
+            </span>
           </div>
-          <div class="flex flex-col sm:flex-row items-stretch sm:items-end gap-3 w-full sm:w-auto">
+
+          <!-- Right: date-range (inline — OptionsDropdown no soporta date)
+               + <app-options-dropdown> Acciones para el export. Mismo
+               patrón canónico que el overview y el reporte low-stock-by-supplier. -->
+          <div class="flex items-end gap-2 flex-wrap shrink-0">
             @if (report()?.requiresDateRange) {
-              <vendix-date-range-filter [value]="dateRange()" (valueChange)="dateRangeChange.emit($event)" />
+              <vendix-date-range-filter
+                [value]="dateRange()"
+                (valueChange)="dateRangeChange.emit($event)"
+              />
             }
             @if (report()?.exportEndpoint) {
-              <vendix-export-button
-                [loading]="exportLoading()"
-                (export)="exportClick.emit()"
-              />
+              <app-options-dropdown
+                [filters]="[]"
+                [actions]="exportActions()"
+                [showActions]="true"
+                triggerLabel="Acciones"
+                triggerIcon="plus"
+                [isLoading]="exportLoading()"
+                (actionClick)="onActionsDropdownClick($event)"
+              ></app-options-dropdown>
             }
           </div>
         </div>
 
-        <!-- Table -->
-        <div class="relative min-h-[400px] p-2 md:p-4">
-          @if (loading()) {
-            <div class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center">
-              <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-            </div>
-          }
-
+        <!-- Body: data view (list / summary / nested). -->
+        <div class="p-4 space-y-3">
           @if (isForbidden()) {
             <div class="flex flex-col items-center justify-center py-20 text-text-secondary">
               <app-icon name="shield-off" [size]="48" />
@@ -203,24 +236,25 @@ function formatStatValue(value: any, type: string): string | number {
               emptyIcon="file-bar-chart"
             />
           }
-
-          @if (!loading() && computedTotalItems() > 0) {
-            <div class="mt-4 border-t border-border pt-4 flex justify-center">
-              <app-pagination
-                [currentPage]="currentPage()"
-                [totalPages]="computedTotalPages()"
-                [total]="computedTotalItems()"
-                [limit]="itemsPerPage()"
-                infoStyle="range"
-                (pageChange)="pageChange.emit($event)"
-              />
-            </div>
-          }
         </div>
+
+        <!-- Pagination — inside the table card, after the data view. -->
+        @if (!loading() && !isForbidden() && computedTotalItems() > 0) {
+          <div class="mt-4 flex justify-center">
+            <app-pagination
+              [currentPage]="currentPage()"
+              [totalPages]="computedTotalPages()"
+              [total]="computedTotalItems()"
+              [limit]="itemsPerPage()"
+              infoStyle="range"
+              (pageChange)="pageChange.emit($event)"
+            />
+          </div>
+        }
       </app-card>
     </div>
   `,
-  styles: [],
+  styleUrls: ['./report-viewer.component.scss'],
 })
 export class ReportViewerComponent {
   readonly report = input<ReportDefinition | null>(null);
@@ -239,6 +273,35 @@ export class ReportViewerComponent {
 
   readonly exportLoading = input<boolean>(false);
   readonly dateRange = input<any>(undefined);
+
+  /**
+   * Ícono del header de la data card. Toma `report().icon` (Lucide) y cae al
+   * default `file-text` si el reporte no declara uno. Se pasa por
+   * `<app-icon [name]>` que resuelve al `ICON_REGISTRY` y cae a default si
+   * el nombre no existe — sin lanzar excepciones.
+   */
+  readonly reportIcon = computed<string>(() => {
+    return this.report()?.icon || 'file-text';
+  });
+
+  /**
+   * Acción expuesta en el `<app-options-dropdown>` "Acciones" del header.
+   * Hoy solo `Exportar XLSX`; la estructura queda abierta para añadir más
+   * (ej. imprimir, refrescar) sin tocar la plantilla.
+   */
+  readonly exportActions = computed<DropdownAction[]>(() => [
+    {
+      action: 'export-xlsx',
+      label: 'ExportAR XLSX',
+      icon: 'download',
+    },
+  ]);
+
+  onActionsDropdownClick(action: string): void {
+    if (action === 'export-xlsx') {
+      this.exportClick.emit();
+    }
+  }
 
   /**
    * Texto del aviso de valuación parcial, o `null` si el informe no trae

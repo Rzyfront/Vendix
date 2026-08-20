@@ -17,6 +17,7 @@ import {
   resolveStoreTimezone,
   localPeriodSql,
 } from '@common/utils/store-timezone.util';
+import { COMPLETED_SALE_STATES } from '../analytics-metrics.contract';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
   formatAggregateQuantity,
@@ -147,11 +148,22 @@ export class ProductsAnalyticsService {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
 
+    // QUI-622: two independent rankings. The previous behaviour hard-coded
+    // quantity-desc, so the revenue ranking didn't exist. We now apply the
+    // sort_by enum in DB so each LIMIT caps the right ranking. The two
+    // rankings are NOT sub-sets of each other — a high-volume low-price
+    // product leads units; a high-price low-volume product leads revenue.
+    const sortBy = query.top_sellers_sort_by ?? 'units_sold';
+    const orderByClause =
+      sortBy === 'revenue'
+        ? { _sum: { total_price: 'desc' } }
+        : { _sum: { quantity: 'desc' } };
+
     const results = await this.prisma.order_items.groupBy({
       by: ['product_id'],
       where: {
         orders: {
-          state: { in: this.COMPLETED_STATES },
+          state: { in: [...COMPLETED_SALE_STATES] },
           created_at: { gte: startDate, lte: endDate },
         },
         ...(query.category_id && {
@@ -166,18 +178,77 @@ export class ProductsAnalyticsService {
         quantity: true,
         total_price: true,
       },
-      orderBy: {
-        _sum: { quantity: 'desc' },
-      },
+      orderBy: orderByClause,
       take: query.limit || 10,
     });
 
+    // QUI-622 review: units_without_cost via SUM(quantity) filtrado por
+    // cost_price IS NULL — mismo patron que products/profitability (QUI-623).
+    // El calculo anterior usaba COUNT(*) (filas) que no es units.
+    const coverageMap = new Map<number, { units_without_cost: number }>();
     const productIds = results
       .map((r) => r.product_id)
       .filter(Boolean) as number[];
+    if (productIds.length > 0) {
+      const context = RequestContextService.getContext();
+      if (!context?.store_id) {
+        throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+      }
+      const contextStoreId = context.store_id;
+      // QUI-622 review: StorePrismaService no expone $queryRaw — el `as any`
+      // silencia al compilador pero en runtime es undefined. Mismo patrón que
+      // aggregateCogs (~L554): usar withoutScope() y filtrar explícito por
+      // store_id en el WHERE.
+      const coverageRows = await (this.prisma.withoutScope() as any).$queryRaw<
+        Array<{ product_id: number; units_without_cost: bigint }>
+      >`
+        SELECT oi.product_id AS product_id,
+               COALESCE(SUM(CASE WHEN oi.cost_price IS NULL THEN oi.quantity ELSE 0 END), 0) AS units_without_cost
+        FROM order_items oi
+        INNER JOIN orders o ON o.id = oi.order_id
+        WHERE o.store_id = ${contextStoreId}
+          AND o.state IN (${Prisma.join(this.COMPLETED_STATES.map((s) => Prisma.raw(`'${s}'`)))})
+          AND o.created_at >= ${startDate}
+          AND o.created_at <= ${endDate}
+          AND oi.product_id IN (${Prisma.join(productIds.map((id) => Prisma.raw(`${id}`)))})
+        GROUP BY oi.product_id
+      `;
+      for (const row of coverageRows) {
+        coverageMap.set(Number(row.product_id), {
+          units_without_cost: Number(row.units_without_cost),
+        });
+      }
+    }
 
-    if (productIds.length === 0) {
-      return [];
+    // Cost from the per-line snapshot (`order_items.cost_price` at sale time).
+    // We aggregate via raw SQL so the cost honours the snapshot for every
+    // line — using `products.cost_price` would rewrite closed periods on the
+    // next cost edit. See `analytics-metrics.contract` (`CostCoverage`).
+    const rawClient = (this.prisma as any).withoutScope() as {
+      $queryRaw: <T>(query: any) => Promise<T>;
+    };
+    const costRows = await rawClient.$queryRaw<
+      Array<{ product_id: number; cogs: string | number; units_total: bigint }>
+    >(Prisma.sql`
+      SELECT
+        oi.product_id AS product_id,
+        COALESCE(SUM(oi.quantity * oi.cost_price), 0)::decimal AS cogs,
+        COUNT(*) AS units_total
+      FROM order_items oi
+      JOIN orders o ON o.id = oi.order_id
+      WHERE o.store_id = ${RequestContextService.getContext()?.store_id ?? 0}
+        AND o.state IN ('delivered', 'finished')
+        AND o.created_at >= ${startDate}
+        AND o.created_at <= ${endDate}
+        AND oi.product_id IN (${Prisma.join(productIds)})
+      GROUP BY oi.product_id
+    `);
+    const costByProduct = new Map<number, { cogs: number; units_total: number }>();
+    for (const r of costRows) {
+      costByProduct.set(Number(r.product_id), {
+        cogs: Number(r.cogs),
+        units_total: Number(r.units_total),
+      });
     }
 
     const products = (await this.prisma.products.findMany({
@@ -187,7 +258,6 @@ export class ProductsAnalyticsService {
         name: true,
         sku: true,
         base_price: true,
-        cost_price: true,
         product_images: {
           select: { image_url: true },
           take: 1,
@@ -198,7 +268,6 @@ export class ProductsAnalyticsService {
       name: string;
       sku: string | null;
       base_price: any;
-      cost_price: any;
       product_images: { image_url: string }[];
     }[];
 
@@ -210,20 +279,27 @@ export class ProductsAnalyticsService {
         const revenue = Number(r._sum.total_price || 0);
         const units = Number(r._sum.quantity || 0);
 
-        if (units === 0 || revenue === 0) {
+        // QUI-622: do NOT filter out products with revenue = 0. A product
+        // given as a gift, promotion, or courtesy has units_sold > 0 but
+        // revenue = 0 — it MUST still appear in the units ranking.
+        if (units === 0) {
           return null;
         }
 
-        // Acá NO se reescala el costo, y es a propósito: `avgPrice` es
-        // `revenue / units` con `units` en unidades de STOCK, o sea dinero por
-        // unidad mínima —la misma vara con la que `cost_price` está guardado—.
-        // Multiplicar el costo por `price_unit_quantity` como en las columnas
-        // de catálogo rompería este margen, que hoy es correcto.
-        const costPrice = product ? Number(product.cost_price || 0) : 0;
+        // PR #545 (QUI-622): use cost snapshot per units_sold (not current
+        // product.cost_price), per vendix-inventory-valuation rule 6.
+        const costSnap = costByProduct.get(r.product_id as number);
+        const cogs = costSnap?.cogs ?? 0;
+        // QUI-622 review: las unidades sin costo vienen del SUM(quantity)
+        // filtrado por cost_price IS NULL, no de restar un COUNT(*) de filas.
+        const unitsWithoutCost =
+          coverageMap.get(r.product_id as number)?.units_without_cost ?? 0;
         const avgPrice = units > 0 ? revenue / units : 0;
+        // Margin over OPERATING revenue (subtotal − discount + shipping),
+        // mirroring the contract — not over grand_total (which folds VAT in).
         const profitMargin =
-          costPrice > 0 && avgPrice > 0
-            ? ((avgPrice - costPrice) / avgPrice) * 100
+          avgPrice > 0 && cogs > 0
+            ? ((avgPrice - cogs / units) / avgPrice) * 100
             : null;
 
         return {
@@ -233,8 +309,15 @@ export class ProductsAnalyticsService {
           image_url: product?.product_images?.[0]?.image_url || null,
           units_sold: units,
           revenue,
-          average_price: avgPrice,
-          profit_margin: profitMargin,
+          average_price: Math.round(avgPrice * 100) / 100,
+          // QUI-622: cost is the historical snapshot (order_items.cost_price),
+          // not products.cost_price, so the next cost edit doesn't rewrite
+          // closed periods. units_without_cost travels with the figure so
+          // the UI can warn about gaps.
+          cost_of_goods_sold: Math.round(cogs * 100) / 100,
+          units_without_cost: unitsWithoutCost,
+          profit_margin:
+            profitMargin === null ? null : Math.round(profitMargin * 10) / 10,
         };
       })
       .filter((r): r is NonNullable<typeof r> => r !== null);
@@ -576,7 +659,7 @@ export class ProductsAnalyticsService {
           state: { in: this.COMPLETED_STATES },
           created_at: { gte: startDate, lte: endDate },
         },
-        product_id: { not: null },
+        product_id: undefined,
       },
       _sum: {
         quantity: true,
@@ -717,7 +800,7 @@ export class ProductsAnalyticsService {
           state: { in: this.COMPLETED_STATES },
           created_at: { gte: startDate, lte: endDate },
         },
-        product_id: { not: null },
+        product_id: undefined,
       },
       _sum: {
         quantity: true,

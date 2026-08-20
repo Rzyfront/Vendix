@@ -80,6 +80,18 @@ import { PosMobileFooterComponent } from './components/pos-mobile-footer.compone
 import { PosCartModalComponent } from './components/pos-cart-modal.component';
 import { PosOrderCreateResult } from './models/order.model';
 import { StoreSettingsService } from '../settings/general/services/store-settings.service';
+import { StoreSettingsFacade } from '../../../../core/store/store-settings/store-settings.facade';
+import { PaymentMethodsCatalogService } from '../../../../shared/services/payment-methods-catalog.service';
+import { OrderPaymentModalComponent } from '../orders/components/order-payment-modal/order-payment-modal.component';
+import type { Order } from '../orders/interfaces/order.interface';
+import type { PayOrderDto } from '../orders/interfaces/order.interface';
+import {
+  PaymentMethodState,
+  type StorePaymentMethod,
+} from '../settings/payments/interfaces/payment-methods.interface';
+import type { PaymentMethod as CanonicalPaymentMethod } from '../../../../shared/models/payment-method.model';
+import { EMPTY_CART_MESSAGE } from '../../../../core/utils/error-messages';
+import type { PaymentSubmit } from '../../../../shared/components';
 import type { BusinessHours } from '../../../../core/models/store-settings.interface';
 import { QuotationsService } from '../quotations/services/quotations.service';
 import { LayawayApiService } from '../layaway/services/layaway.service';
@@ -147,6 +159,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
     LayawayConfigModalComponent,
     ReservationFormModalComponent,
     PosAISummaryModalComponent,
+    OrderPaymentModalComponent,
   ],
   template: `
     <div class="flex flex-col overflow-hidden pos-container">
@@ -415,9 +428,13 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
                 [isEditMode]="isEditMode()"
                 [isQuotationMode]="isQuotationMode()"
                 [isLayawayMode]="isLayawayMode()"
+                [readyToPayOrder]="readyToPayOrder()"
+                [isCharging]="isCharging()"
                 (create)="onOpenCreateModal()"
+                (saveDraft)="onSaveDraft()"
                 (shipping)="onShipping()"
                 (checkout)="onCheckout()"
+                (charge)="onCharge()"
                 (quote)="onQuote()"
                 (layaway)="onLayaway()"
                 ></app-pos-cart>
@@ -447,12 +464,17 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           [isTablet]="isTablet()"
           [isQuotationMode]="isQuotationMode()"
           [isLayawayMode]="isLayawayMode()"
+          [isEditMode]="isEditMode()"
+          [readyToPayOrder]="readyToPayOrder()"
+          [isCharging]="isCharging()"
           [canCreateCustomItems]="canCreateCustomItems()"
           (viewCart)="onOpenCartModal()"
           (customItem)="openCustomItemModal()"
           (create)="onOpenCreateModal()"
-                (shipping)="onShipping()"
+          (saveDraft)="onSaveDraft()"
+          (shipping)="onShipping()"
           (checkout)="onCheckout()"
+          (charge)="onCharge()"
           (quote)="onQuote()"
           (layaway)="onLayaway()"
         ></app-pos-mobile-footer>
@@ -464,6 +486,9 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         [cartState]="cartState()"
         [canCreateCustomItems]="canCreateCustomItems()"
         [canOverridePrices]="canOverridePrices()"
+        [isEditMode]="isEditMode()"
+        [readyToPayOrder]="readyToPayOrder()"
+        [isCharging]="isCharging()"
         (closed)="onCloseCartModal()"
         (customItemRequested)="openCustomItemModal()"
         (itemPriceEditRequested)="editItemPriceFromMobile($event)"
@@ -471,8 +496,10 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         (itemRemoved)="onCartItemRemoved($event)"
         (clearCart)="onClearCart()"
         (create)="onOpenCreateModal()"
+        (saveDraft)="onSaveDraft()"
         (shipping)="onShippingFromModal()"
         (checkout)="onCheckoutFromModal()"
+        (charge)="onCharge()"
       ></app-pos-cart-modal>
 
       <!--
@@ -524,6 +551,8 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         [checkoutIntent]="checkoutIntent()"
         [isRestaurantWithPrepared]="isRestaurantWithPrepared()"
         [tableId]="restaurantIntegration.currentTableSession()?.table_id ?? null"
+        [mode]="checkoutMode()"
+        [editingOrderId]="editingOrderIdAsNumber()"
         (isOpenChange)="showCheckoutModal.set($event)"
         (closed)="showCheckoutModal.set(false)"
         (checkoutCompleted)="onPaymentCompleted($event)"
@@ -532,6 +561,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         (customerSelected)="onPaymentCustomerSelected($event)"
         (tableSessionOpened)="onPaymentTableSessionOpened($event)"
         (draftSaved)="onCreateOrderConfirmed($event)"
+        (editorUpdated)="onEditorUpdated($event)"
       ></app-pos-checkout-shell>
 
       <app-pos-order-confirmation
@@ -633,6 +663,28 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
       (confirmed)="onKitchenConfirmed($event)"
       (cancelled)="onKitchenCancelled()"
     />
+
+    <!--
+      Phase D.3 — Cobrar sobre la orden recién actualizada.
+      El POS NO abre el payment collector del checkout-shell aquí: reutiliza el
+      componente de pago OrderPaymentModalComponent que ya existe para
+      order-details, alimentado con la orden fresca (readyToPayOrder), los
+      métodos habilitados del catálogo y los datos de solo-lectura (cuotas,
+      balance, crédito). El submit va al endpoint canónico flow/pay. NO navega
+      a detalle.
+    -->
+    <app-order-payment-modal
+      [isOpen]="chargeModalOpen()"
+      [order]="readyToPayOrder()"
+      [paymentMethods]="storePaymentMethodsForModal()"
+      [isCreditOrder]="false"
+      [remainingBalance]="0"
+      [installments]="[]"
+      [isProcessing]="isCharging()"
+      (isOpenChange)="chargeModalOpen.set($event)"
+      (closed)="onChargeModalClosed()"
+      (paymentSubmitted)="onPaymentSubmitted($event)"
+    ></app-order-payment-modal>
   `,
   styles: [
     `
@@ -805,6 +857,55 @@ export class PosComponent {
   isEditMode = signal(false);
   editingOrderId = signal<string | null>(null);
   editingOrderNumber = signal<string | null>(null);
+  /**
+   * Phase D.1 — order-level metadata (shipping method/rate/cost/address,
+   * payment/installments/credit read-only, KDS read-only). Lives outside the
+   * cart because the cart only owns lines + customer + discounts. The backend
+   * response from `GET /store/orders/:id` is the source of truth for these
+   * fields; the cart uses them for the editor preview only.
+   */
+  editingOrder = signal<Order | null>(null);
+  /**
+   * Phase D.2 / D.3 — explicit mode for create-vs-edit. `create-draft` saves
+   * a draft without opening payment; `edit` updates the order in place and
+   * keeps the cashier in POS; `create-payment` would be reserved for future
+   * direct-charge flows. Today only the first two are wired.
+   */
+  mode = signal<'create-draft' | 'edit' | 'create-payment'>('create-draft');
+
+  // CP-POS-MODAL-SCOPE-001 / Phase A.4 — `checkoutMode` projects the internal
+  // `mode` signal onto the value the shell expects, defaulting to
+  // 'create-draft' for any caller that does not bind it explicitly.
+  readonly checkoutMode = computed<'create-draft' | 'edit' | 'create-payment'>(
+    () => this.mode(),
+  );
+
+  // CP-POS-MODAL-SCOPE-001 / Phase A.4 — `editingOrderId` is stored as a
+  // string (matches the route param convention); the shell expects a number.
+  readonly editingOrderIdAsNumber = computed<number | null>(() => {
+    const id = this.editingOrderId();
+    if (!id) return null;
+    const n = Number(id);
+    return Number.isFinite(n) ? n : null;
+  });
+  /**
+   * Phase D.3 — fresh order returned by `PUT /store/orders/:id/editor`. The
+   * `Cobrar` CTA in the cart footer and mobile footer renders ONLY when this
+   * is non-null; clicking it mounts the reused `OrderPaymentModalComponent`
+   * with the canonical `flow/pay` submit. Cleared on success or exit.
+   */
+  readyToPayOrder = signal<Order | null>(null);
+  chargeModalOpen = signal(false);
+  isCharging = signal(false);
+  /**
+   * Enabled payment methods for the active store, fetched once via the shared
+   * catalog. Stored in the canonical `PaymentMethod` shape from
+   * `payment-method.model`. The OrderPaymentModal needs the richer
+   * `StorePaymentMethod[]` shape, so we expose a converter (see
+   * `storePaymentMethodsForModal()`) rather than mutate the signal type —
+   * keeps the catalog consumer-readable and avoids a parallel cache.
+   */
+  paymentMethodsCatalog = signal<CanonicalPaymentMethod[]>([]);
 
   // Cash Register
   cashRegisterEnabled = signal(false);
@@ -940,6 +1041,11 @@ export class PosComponent {
   // protected: el template referencia isRestaurantMode()/hasOpenTableSession()
   // directamente (bindings del footer móvil + @defer de los modales de Fase H).
   protected restaurantIntegration = inject(PosRestaurantIntegrationService);
+  // Phase D.3 — settings facade + payment catalog are read-only inputs here.
+  private readonly settingsFacade = inject(StoreSettingsFacade);
+  private readonly paymentMethodsCatalogService = inject(
+    PaymentMethodsCatalogService,
+  );
 
   readonly canCreateCustomItems = computed(() =>
     this.hasPermission('store:pos:custom_items:create'),
@@ -1321,12 +1427,34 @@ export class PosComponent {
   }
 
   /**
-   * Legacy entrypoint kept for any call site that still binds to it.
-   * The "Crear" UX is now folded into the checkout shell ("Guardar
-   * borrador" in the footer), so it delegates to `onOpenCreateModal`.
+   * CP-POS-CREAR-EDITAR-COBRAR-001 — Guardar must open the customer-selection
+   * modal (Venta Anónima / Con Cliente) before persisting the order, like
+   * Cobrar does. The operator chooses the sale type first; the shell's
+   * "Guardar borrador" footer button then calls `paymentService.saveDraft`
+   * with `is_draft=true, requires_payment=false` and NEVER opens the payment
+   * step — the Cobrar button is the only one that drives `flow/pay`.
+   *
+   * Reusing the unified checkout shell (vs. a dedicated customer modal) keeps
+   * the two-button contract on a single component: same Venta Anónima
+   * default from `pos.anonymous_sales_as_default`, same POS-side customer
+   * gate from `pos.allow_anonymous_sales`, same `canBeAnonymous()` guard.
+   * The shell's internal `onSaveDraft` already validates `state.customer` and
+   * surfaces `POS_CUSTOMER_REQUIRED_001` if the backend rejects the request.
    */
   onSaveDraft(): void {
-    this.onOpenCreateModal();
+    if (!this.cartState() || this.isEmpty) {
+      this.toastService.warning(EMPTY_CART_MESSAGE);
+      return;
+    }
+    // Close the mobile cart modal so the checkout shell is the only
+    // full-screen dialog open at a time.
+    this.showCartModal.set(false);
+    // Phase D.2 — explicit draft-create mode. The shell owns the customer
+    // gate + saveDraft call; the parent just opens it. The (checkoutCompleted)
+    // output stays reserved for the flow-pay path that Cobrar drives.
+    this.mode.set('create-draft');
+    this.checkoutIntent.set('pickup');
+    this.showCheckoutModal.set(true);
   }
 
   /**
@@ -1341,17 +1469,30 @@ export class PosComponent {
     // Close the mobile cart modal so the checkout shell is the only
     // full-screen dialog open at a time.
     this.showCartModal.set(false);
+    // Phase D.2 — explicit mode: this branch is a draft-create, never a
+    // payment. The checkout-shell's `(checkoutCompleted)` is reserved for
+    // the flow-pay path; the draft path emits `(draftSaved)` and never opens
+    // a payment collector.
+    this.mode.set('create-draft');
     this.checkoutIntent.set('pickup');
     this.showCheckoutModal.set(true);
   }
 
   /**
-   * Post-create handler invoked by the checkout shell `(draftSaved)`
-   * output. Persists the new order id so the operator can re-print /
-   * track it, and surfaces the order-confirmation screen.
+   * Phase D.2 — draft-only post-create handler invoked by the checkout
+   * shell `(draftSaved)` output.
+   *
+   * - Persists the new order id so the operator can re-print / track it.
+   * - Surfaces the order-confirmation screen.
+   * - DOES NOT open a payment collector.
+   * - DOES NOT navigate to the order detail page.
+   *
+   * The previous flow conflated create-with-payment and create-with-draft,
+   * so this handler is the explicit "draft saved, pending payment" path.
    */
   onCreateOrderConfirmed(result: PosOrderCreateResult): void {
     if (!result?.order) return;
+    this.mode.set('create-draft');
     this.currentOrderId.set(result.order.id ? String(result.order.id) : null);
     this.currentOrderNumber.set(result.order.order_number ?? null);
     this.completedOrder.set({
@@ -1382,7 +1523,7 @@ export class PosComponent {
     }
 
     if (!this.cartState() || this.isEmpty) {
-      this.toastService.warning('El carrito está vacío');
+      this.toastService.warning(EMPTY_CART_MESSAGE);
       return;
     }
 
@@ -1448,7 +1589,7 @@ export class PosComponent {
     }
 
     if (!this.cartState() || this.isEmpty) {
-      this.toastService.warning('El carrito está vacío');
+      this.toastService.warning(EMPTY_CART_MESSAGE);
       return;
     }
 
@@ -1703,15 +1844,287 @@ export class PosComponent {
   onCheckout(): void {
     if (!this.cartState() || this.isEmpty) return;
 
+    // CP-POS-MODAL-SCOPE-001 / Phase A.4 — edit mode now opens the shell
+    // with `mode='edit'` (full wizard: Cliente + Cobro). The shell emits
+    // `editorUpdated` after PUT /editor so the cashier can immediately
+    // Cobrar from the same modal without leaving the POS. The legacy
+    // `updateExistingOrder()` direct path (which produced "error al
+    // validar") is removed in favour of the shell handler.
     if (this.isEditMode()) {
-      this.updateExistingOrder();
+      this.mode.set('edit');
+      this.checkoutIntent.set('pickup');
+      this.showCheckoutModal.set(true);
       return;
     }
 
     // Fase 5·B3: el checkout sin envío ('pickup') pasa por el SHELL con
-    // stepper — único checkout del POS.
+    // stepper — único checkout del POS. mode='create-payment' so the shell
+    // skips Actualizar and shows only the Cobro CTA.
+    this.mode.set('create-payment');
     this.checkoutIntent.set('pickup');
     this.showCheckoutModal.set(true);
+  }
+
+  /**
+   * CP-POS-MODAL-SCOPE-001 / Phase A.4 — handler for the shell's
+   * `(editorUpdated)` output. Refreshes `readyToPayOrder`, `editingOrder`,
+   * and `cartState` so the cashier can immediately `Cobrar` the updated
+   * order from the same shell without leaving the POS. We also surface a
+   * confirmation screen so the cashier sees what changed.
+   */
+  onEditorUpdated(updatedOrder: Order): void {
+    if (!updatedOrder?.id) return;
+    this.readyToPayOrder.set(updatedOrder);
+    this.editingOrder.set(updatedOrder);
+    this.currentOrderId.set(String(updatedOrder.id));
+    this.currentOrderNumber.set(updatedOrder.order_number ?? null);
+    // Keep the cart in sync with the persisted order — items/prices/
+    // totals now match what the backend returned. We do NOT clear the
+    // cart (the cashier should be able to continue editing).
+    const state = this.cartState();
+    if (state) {
+      this.cartState.set({ ...state, summary: state.summary });
+    }
+  }
+
+  /**
+   * Phase D.3 — open the reused `OrderPaymentModalComponent` over the fresh
+   * `readyToPayOrder`. ALWAYS re-fetches the catalog: the operator may have
+   * enabled a new method between the last editor save and the Cobrar click,
+   * and the previous "skip when non-empty" guard silently kept the modal on
+   * a stale method set. No navigation. No new modal definition.
+   */
+  onCharge(): void {
+    // CP-POS-MODAL-SCOPE-001 / Phase A.4 — when editing, route the Cobrar
+    // CTA through the shell (mode='edit') so the cashier re-validates
+    // cliente + payment before POST flow/pay. The shell still falls back to
+    // the legacy OrderPaymentModalComponent for non-edit flows.
+    if (this.isEditMode()) {
+      this.mode.set('edit');
+      this.checkoutIntent.set('pickup');
+      this.showCheckoutModal.set(true);
+      return;
+    }
+    const order = this.readyToPayOrder();
+    if (!order) {
+      this.toastService.warning(
+        'Primero actualiza la orden antes de cobrar.',
+      );
+      return;
+    }
+    this.fetchPaymentMethodsCatalog();
+    this.chargeModalOpen.set(true);
+  }
+
+  /**
+   * Adapt the canonical catalog (`PaymentMethod[]`) to the `StorePaymentMethod[]`
+   * shape that `OrderPaymentModalComponent` expects. We re-hydrate the fields the
+   * modal's `fromStorePaymentMethod` mapper reads:
+   *  - `id`            → numeric when possible (the modal forwards it to
+   *                       `flow/pay` as `store_payment_method_id`).
+   *  - `display_name`  → catalog's `displayName` || `name`.
+   *  - `state`         → 'enabled' for every catalog row (the catalog only
+   *                       returns enabled methods).
+   *  - `system_payment_method.{ type, name, provider, dian_code }` →
+   *                       mirrored from the catalog `type` / `provider`.
+   *  - `min_amount` / `max_amount` → forwarded as-is.
+   *
+   * Anything the catalog does not know about (e.g. the original `custom_config`,
+   * `display_order`) is left undefined; the modal does not require those for
+   * charging.
+   */
+  storePaymentMethodsForModal(): StorePaymentMethod[] {
+    const nowIso = new Date().toISOString();
+    return (this.paymentMethodsCatalog() ?? []).map((m) => ({
+      id: String(m.id),
+      store_id: 'catalog',
+      system_payment_method_id: String(m.id),
+      display_name: m.displayName ?? m.name ?? '',
+      custom_config: {},
+      state: m.enabled ? PaymentMethodState.ENABLED : PaymentMethodState.DISABLED,
+      display_order: 0,
+      min_amount: m.minAmount ?? undefined,
+      max_amount: m.maxAmount ?? undefined,
+      created_at: nowIso,
+      updated_at: nowIso,
+      system_payment_method: {
+        id: String(m.id),
+        name: m.name ?? '',
+        display_name: m.displayName ?? m.name ?? '',
+        description: '',
+        type: m.type as any,
+        provider: m.provider ?? '',
+        is_active: m.enabled,
+        requires_config: false,
+        config_schema: {},
+        default_config: {},
+        supported_currencies: [],
+        processing_fee_type: 'FIXED' as any,
+        processing_fee_value: 0,
+        dian_code: m.dianCode,
+        created_at: nowIso,
+        updated_at: nowIso,
+      },
+    }));
+  }
+
+  /**
+   * Phase D.3 — modal close (Cancel / Escape / backdrop). Clearing
+   * `readyToPayOrder` here would lose the next-step context; we keep it so the
+   * cashier can reopen the modal until they leave the POS or pick a fresh
+   * order. Only an explicit success clears it.
+   */
+  onChargeModalClosed(): void {
+    this.chargeModalOpen.set(false);
+  }
+
+  /**
+   * Phase D.3 — submit from `OrderPaymentModalComponent` maps to the canonical
+   * `flow/pay` endpoint via `StoreOrdersService.flowPayOrder`. The modal emits
+   * the collector's normalized `PaymentSubmit` (camelCase superset); we map it
+   * to the `PayOrderDto` snake_case shape the backend expects, mirroring the
+   * `order-details-page.component.ts` translation so the two call sites stay
+   * in lock-step. `submit as any` is gone — the DTO is typed end-to-end.
+   */
+  onPaymentSubmitted(submit: PaymentSubmit): void {
+    const order = this.readyToPayOrder();
+    if (!order || !order.id) {
+      this.toastService.error('No hay una orden lista para cobrar.');
+      return;
+    }
+    if (submit.storePaymentMethodId == null) {
+      this.toastService.error('Selecciona un método de pago válido');
+      return;
+    }
+    // Round 3 MAJOR #6 — `payment_type` was decided by a binary check on
+    // `methodType === 'wompi'`. That hardcoded 'wompi' as the only online
+    // method, while `epayco`, `mercadopago` (and any future provider) would
+    // silently map to 'direct' — a wrong classification that drives the
+    // backend down the direct-payment code path with an async gateway payload.
+    // The canonical, future-proof rule: a method is online iff its
+    // `PaymentMethod.type` is one of the known online gateways.
+    const ONLINE_PAYMENT_TYPES = new Set(['wompi', 'epayco', 'mercadopago']);
+    const dto: PayOrderDto = {
+      store_payment_method_id: Number(submit.storePaymentMethodId),
+      payment_type: ONLINE_PAYMENT_TYPES.has(String(submit.methodType))
+        ? 'online'
+        : 'direct',
+      ...(submit.amountReceived != null
+        ? { amount_received: Number(submit.amountReceived) }
+        : {}),
+      ...(submit.amount != null ? { amount: Number(submit.amount) } : {}),
+      ...(submit.reference ? { payment_reference: submit.reference } : {}),
+      ...(submit.tip != null ? { tip_amount: Number(submit.tip) } : {}),
+      ...(submit.installmentId != null
+        ? { installment_id: Number(submit.installmentId) }
+        : {}),
+      ...(submit.wompi
+        ? { wompi_payment_method: submit.wompi as unknown as never }
+        : {}),
+      ...(submit.walletId != null ? { wallet_id: Number(submit.walletId) } : {}),
+    };
+    this.isCharging.set(true);
+    this.ordersService
+      .flowPayOrder(String(order.id), dto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          this.isCharging.set(false);
+          this.chargeModalOpen.set(false);
+          // QUI-audit-round-1: el toast de éxito se ataba al response del
+          // POST, pero el refresh sub-siguiente silenciosamente dejaba
+          // `readyToPayOrder` en null si la red fallaba — el cajero perdía
+          // el rastro de la orden sin saber por qué. Ahora el toast sólo
+          // se dispara si el refresh confirma el estado final. Si el refresh
+          // falla, conservamos `readyToPayOrder` para que pueda re-abrir el
+          // modal y le decimos qué pasó.
+          this.refreshReadyToPayOrder({
+            onRefreshOk: () => {
+              this.toastService.success('Pago registrado correctamente');
+            },
+            onRefreshFail: () => {
+              this.toastService.warning(
+                'Pago aplicado, no se pudo refrescar el detalle. Reabre el cobro para ver el estado.',
+              );
+            },
+          });
+        },
+        error: (err) => {
+          this.isCharging.set(false);
+          const parsed = this.ordersService.extractApiError(err);
+          this.toastService.error(
+            parsed.message || 'No se pudo registrar el cobro',
+          );
+        },
+      });
+  }
+
+  /**
+   * Re-fetch the current order so `readyToPayOrder` reflects the post-payment
+   * state. If the backend dropped the order to a terminal state we clear the
+   * signal so the `Cobrar` CTA hides.
+   *
+   * `onRefreshOk` / `onRefreshFail` decouple the post-payment toast from the
+   * refresh outcome: when the GET fails, the cashier still sees a hint AND the
+   * signal is preserved so they can re-open the modal and recover.
+   */
+  private refreshReadyToPayOrder(callbacks?: {
+    onRefreshOk?: () => void;
+    onRefreshFail?: () => void;
+  }): void {
+    const order = this.readyToPayOrder();
+    if (!order || !order.id) {
+      this.readyToPayOrder.set(null);
+      callbacks?.onRefreshFail?.();
+      return;
+    }
+    this.ordersService
+      .getOrderById(String(order.id))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          const fresh: Order | null = response?.data || response || null;
+          this.readyToPayOrder.set(fresh);
+          // If the order is past a payable state, hide the CTA.
+          if (
+            fresh &&
+            (fresh.state === 'delivered' ||
+              fresh.state === 'cancelled' ||
+              fresh.state === 'refunded' ||
+              fresh.state === 'finished' ||
+              fresh.state === 'shipped')
+          ) {
+            this.readyToPayOrder.set(null);
+          }
+          callbacks?.onRefreshOk?.();
+        },
+        error: () => {
+          // QUI-audit-round-1: antes esto era `readyToPayOrder.set(null)`
+          // ciego. Si el GET de refresh falla después de un cobro exitoso, el
+          // cajero pierde la orden sin entender por qué. Conservamos la señal
+          // para que pueda re-abrir el modal y le avisamos vía callback.
+          callbacks?.onRefreshFail?.();
+        },
+      });
+  }
+
+  /**
+   * Fetch the enabled payment methods from the shared catalog. The catalog
+   * already maps the response through `fromPosBackendMethod` and falls back
+   * to a sensible local default on error.
+   */
+  private fetchPaymentMethodsCatalog(): void {
+    this.paymentMethodsCatalogService
+      .getEnabledMethods()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (methods) => this.paymentMethodsCatalog.set(methods ?? []),
+        // QUI-audit-round-1: si la red se cae o el backend no responde, antes
+        // el catálogo quedaba en [] y el cajero veía el modal sin métodos.
+        // Ahora registramos el intento fallido; `onCharge` reintenta al abrir
+        // el modal y el usuario puede reabrirlo para que el re-fetch dispare.
+        error: () => this.paymentMethodsCatalog.set([]),
+      });
   }
 
   /**
@@ -2594,7 +3007,7 @@ export class PosComponent {
   // Shipping Modal Methods
   onShipping(): void {
     if (!this.cartState() || this.isEmpty) {
-      this.toastService.warning('El carrito está vacío');
+      this.toastService.warning(EMPTY_CART_MESSAGE);
       return;
     }
     // Fase 5·B3: el flujo DELIVERY vive en el shell con stepper (único checkout).
@@ -2811,18 +3224,31 @@ export class PosComponent {
 
   private loadOrderForEditing(orderId: string): void {
     this.loading.set(true);
+    // QUI-audit-round-1: marcar el modo ANTES de pedir los productos. Si la
+    // carga falla (producto embebido ausente, sin conexión, etc.), el handler
+    // de error resetea todas las señales de edición y limpia el queryParam
+    // `editOrder`. Antes, si la respuesta llegaba pero el load fallaba, el
+    // shell quedaba colgado con `isEditMode` parcialmente verdadero.
+    this.isEditMode.set(true);
     this.ordersService
       .getOrderById(orderId)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
-          const order = response.data || response;
+          const order: Order = response.data || response;
 
           if (order.state !== 'created' && order.state !== 'draft') {
             this.loading.set(false);
+            // QUI-audit-round-2: el handler no reseteaba `editingOrder` ni
+            // `readyToPayOrder` antes del toast, dejando residuos de un intento
+            // previo en pantalla. Forzamos la limpieza aquí también.
+            this.readyToPayOrder.set(null);
+            this.editingOrder.set(null);
+            this.resetEditState();
             this.toastService.error(
               'Solo se pueden editar ordenes en estado "Creada" o "Borrador"',
             );
+            this.clearEditOrderQueryParam();
             this.router.navigate(['/admin/orders', orderId]);
             return;
           }
@@ -2832,53 +3258,258 @@ export class PosComponent {
             .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: () => {
-                this.isEditMode.set(true);
                 this.editingOrderId.set(orderId);
                 this.editingOrderNumber.set(order.order_number);
+                this.editingOrder.set(order);
+                this.mode.set('edit');
+                // Clear stale charge state from a previous edit attempt.
+                this.readyToPayOrder.set(null);
+                this.chargeModalOpen.set(false);
                 this.loading.set(false);
                 this.toastService.info(`Editando Orden #${order.order_number}`);
               },
               error: (err) => {
                 this.loading.set(false);
-                this.toastService.error(
-                  'Error al cargar los productos de la orden',
-                );
+                this.readyToPayOrder.set(null);
+                this.editingOrder.set(null);
+                this.resetEditState();
+                const msg =
+                  (err && (err.message || (err as any).userMessage)) ||
+                  'Error al cargar los productos de la orden';
+                this.toastService.error(msg);
+                this.clearEditOrderQueryParam();
               },
             });
         },
         error: (err) => {
           this.loading.set(false);
+          this.readyToPayOrder.set(null);
+          this.editingOrder.set(null);
+          this.resetEditState();
           this.toastService.error('Error al cargar la orden para edición');
+          this.clearEditOrderQueryParam();
           this.router.navigate(['/admin/orders']);
         },
       });
   }
 
+  /**
+   * Helper invoked from every error path of `loadOrderForEditing`: keeps the
+   * state machine clean and prevents the "back to POS keeps re-entering edit"
+   * bug by clearing the `editOrder` query param whenever the entry to edit
+   * mode aborted.
+   */
+  private resetEditState(): void {
+    this.isEditMode.set(false);
+    this.editingOrder.set(null);
+    this.editingOrderId.set(null);
+    this.editingOrderNumber.set(null);
+    this.readyToPayOrder.set(null);
+    this.chargeModalOpen.set(false);
+    if (this.mode() === 'edit') {
+      this.mode.set('create-draft');
+    }
+  }
+
+  private clearEditOrderQueryParam(): void {
+    this.router.navigate(
+      ['/admin/pos'],
+      { queryParams: { editOrder: null }, queryParamsHandling: 'merge' },
+    );
+  }
+
+  /**
+   * Phase D.2 — update an existing order via `PUT /store/orders/:id/editor`.
+   *
+   * On success:
+   *  - DO NOT clear the cart (cashier keeps editing context).
+   *  - DO NOT navigate to detail (the only logical next step is "Cobrar").
+   *  - Set `readyToPayOrder` to the FRESH order returned by the backend so the
+   *    `Cobrar` CTA renders. `flow/pay` will charge THAT order, never a stale
+   *    snapshot.
+   *
+   * Empty-cart guard: a save with zero items would push `items: []` and the
+   * editor endpoint would either no-op (silently losing the cashier's work)
+   * or reject the request. We block here with the same `EMPTY_CART_MESSAGE`
+   * used by the create flow so the operator sees a consistent reason.
+   *
+   * On error: surface the typed message via `parseApiError` (no raw Prisma /
+   * container strings reach the cashier).
+   */
   private updateExistingOrder(): void {
-    if (!this.cartState() || !this.editingOrderId()) return;
+    const orderId = this.editingOrderId();
+    const state = this.cartState();
+    if (!state || !orderId) return;
+    if (!state.items || state.items.length === 0) {
+      this.toastService.warning(EMPTY_CART_MESSAGE);
+      return;
+    }
 
     this.loading.set(true);
-    this.posOrderService
-      .updateOrderItems(this.editingOrderId()!, this.cartState()!)
+    let dto: Record<string, any>;
+    try {
+      dto = this.buildEditorRequest(state);
+    } catch (err: any) {
+      // Local `POS_CUSTOMER_REQUIRED_001` thrown by the mapper (defensive).
+      this.loading.set(false);
+      const code = err?.errorCode as string | undefined;
+      if (code) {
+        this.toastService.error(
+          err?.message || 'No se pudo preparar la orden para guardar.',
+        );
+        return;
+      }
+      throw err;
+    }
+    this.ordersService
+      .updateOrderFromEditor(orderId, dto)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
+        next: (updatedOrder: Order) => {
           this.loading.set(false);
-          this.toastService.success('Orden actualizada exitosamente');
-          this.cartService
-            .clearCart()
-            .pipe(takeUntilDestroyed(this.destroyRef))
-            .subscribe();
-          this.isEditMode.set(false);
-          this.router.navigate(['/admin/orders', this.editingOrderId()]);
+          // Refresh editor metadata so shipping/address/payment state reflect
+          // the server's authoritative snapshot.
+          this.editingOrder.set(updatedOrder);
+          this.readyToPayOrder.set(updatedOrder);
+          // Stay in POS: DO NOT navigate. DO NOT clear the cart. DO NOT close
+          // any modal — the cashier must see "Cobrar" now.
+          this.toastService.success(
+            `Orden #${updatedOrder.order_number} actualizada — lista para cobrar`,
+          );
+          this.fetchPaymentMethodsCatalog();
         },
         error: (err) => {
           this.loading.set(false);
+          const parsed = this.ordersService.extractApiError(err);
           this.toastService.error(
-            err.message || 'Error al actualizar la orden',
+            parsed.message || 'Error al actualizar la orden',
           );
         },
       });
+  }
+
+  /**
+   * Mapper: CartState → UpdateOrderEditorRequest.
+   *
+   * The editor contract on `PUT /store/orders/:id/editor` is a small subset
+   * of the cart: items (snake_case), customer_id, coupon_code, promotion_ids,
+   * public + internal notes, and the shipping fields. The previous code
+   * shipped the entire `CartState` shape — which leaked `payment_*`,
+   * `credit_*`, KDS flags, `serial_*` and `inventory_committed_at_fire` and
+   * made Prisma 7 reject the request. The backend never received a clean
+   * payload and the cashier never saw Cobrar.
+   *
+   * Customer fallback: when the cart has no customer attached (the cashier
+   * didn't pick one during edit) we fall back to the order's existing
+   * `customer_id`. Sending `null` would let Prisma 7 drop the FK and break
+   * the next `flow/pay`. If both are missing we surface
+   * `POS_CUSTOMER_REQUIRED_001` locally — saves a round-trip and matches
+   * the backend's authoritative rejection.
+   *
+   * Shipping fields: forwarded from `state.shippingContext` (populated by
+   * `loadFromOrder`). Undefined keys are omitted, not nulled — the editor
+   * endpoint treats absent keys as "no change" and any explicit `null`
+   * could clear a value the cashier did not intend to clear.
+   *
+   * `saveDraft` keeps using the cart-shaped builder in `PosPaymentService` —
+   * drafts are a different endpoint with a different contract.
+   */
+  private buildEditorRequest(state: CartState): Record<string, any> {
+    const cartCustomerId = state.customer?.id
+      ? Number(state.customer.id)
+      : null;
+    const orderCustomerId = this.editingOrder()?.customer_id
+      ? Number(this.editingOrder()!.customer_id)
+      : null;
+    const customerId = cartCustomerId ?? orderCustomerId;
+    if (customerId == null || !Number.isFinite(customerId) || customerId < 1) {
+      // Defensive mirror of `POS_CUSTOMER_REQUIRED_001`. Backend would reject
+      // with that code; we throw the same shape so the cashier sees a real
+      // reason instead of a silent 422.
+      const err = new Error(
+        'Selecciona o crea un cliente antes de guardar la orden. (POS_CUSTOMER_REQUIRED_001)',
+      ) as Error & { errorCode: string };
+      err.errorCode = 'POS_CUSTOMER_REQUIRED_001';
+      throw err;
+    }
+    const appliedCoupon = state.appliedCoupon;
+    const promotionIds = (state.appliedDiscounts ?? [])
+      .map((d: any) => Number(d.promotion_id))
+      .filter((id: number) => Number.isFinite(id));
+
+    const items = (state.items ?? []).map((item: any) => {
+      const productId = item?.product?.id;
+      const variantId = item?.variant_id ?? item?.product_variant_id ?? null;
+      const isCustomItem =
+        item?.itemType === 'custom' ||
+        (typeof productId === 'string' && productId.startsWith('custom-'));
+      const productIdNumeric = isCustomItem
+        ? null
+        : typeof productId === 'string'
+          ? parseInt(productId, 10)
+          : Number(productId ?? 0) || null;
+      const variantIdNumeric =
+        variantId == null ? null : Number(variantId) || null;
+      const productName = item?.product?.name ?? '';
+
+      return {
+        product_id: productIdNumeric,
+        product_variant_id: variantIdNumeric,
+        product_name: productName,
+        product_sku: item?.product?.sku ?? null,
+        variant_sku: item?.variant_sku ?? null,
+        variant_attributes: item?.variant_attributes ?? null,
+        description: item?.description ?? item?.notes ?? null,
+        quantity: Number(item?.quantity ?? 0),
+        unit_price: Number(item?.unitPrice ?? 0),
+        total_price: Number(item?.totalPrice ?? item?.finalPrice ?? 0),
+        final_unit_price: Number(item?.finalPrice ?? item?.unitPrice ?? 0),
+        tax_amount_item: Number(item?.taxAmount ?? 0),
+        tax_rate: item?.taxRate ?? null,
+        tax_category_id: item?.taxCategoryId ?? null,
+        applied_price_tier_id: item?.applied_price_tier_id ?? null,
+        notes: item?.notes ?? null,
+      };
+    });
+
+    const shipping = state.shippingContext;
+    const shippingKeys: Record<string, unknown> = {};
+    if (shipping) {
+      if (shipping.deliveryType != null) {
+        shippingKeys['delivery_type'] = shipping.deliveryType;
+      }
+      if (shipping.shippingAddressId != null) {
+        shippingKeys['shipping_address_id'] = shipping.shippingAddressId;
+      }
+      if (shipping.billingAddressId != null) {
+        shippingKeys['billing_address_id'] = shipping.billingAddressId;
+      }
+      if (shipping.shippingMethodId != null) {
+        shippingKeys['shipping_method_id'] = shipping.shippingMethodId;
+      }
+      if (shipping.shippingRateId != null) {
+        shippingKeys['shipping_rate_id'] = shipping.shippingRateId;
+      }
+      if (shipping.shippingCost != null) {
+        shippingKeys['shipping_cost'] = shipping.shippingCost;
+      }
+    }
+
+    return {
+      customer_id: customerId,
+      coupon_code: appliedCoupon?.code ?? null,
+      promotion_ids: promotionIds,
+      items,
+      // Round 3 MAJOR #3 — never send empty strings for `notes` /
+      // `internal_notes`. The backend's `?? ''` default kicks in when the key
+      // is omitted (and `forbidNonWhitelisted` deletes the field on
+      // unexpected keys). Empty string would survive a a round-trip and pin the
+      // order's notes to "" — exactly the silent data loss Round 1 audited
+      // for the cart path.
+      ...(state.notes ? { notes: state.notes } : {}),
+      ...(state.internalNotes ? { internal_notes: state.internalNotes } : {}),
+      ...shippingKeys,
+    };
   }
 
   private loadStoreSettings(): void {

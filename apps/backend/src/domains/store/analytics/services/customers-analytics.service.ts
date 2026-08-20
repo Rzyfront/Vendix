@@ -68,7 +68,7 @@ export class CustomersAnalyticsService {
       by: ['customer_id'],
       where: {
         state: { in: this.COMPLETED_STATES },
-        customer_id: { not: null },
+        customer_id: undefined,
         created_at: { gte: startDate, lte: endDate },
       },
     });
@@ -93,7 +93,7 @@ export class CustomersAnalyticsService {
     const revenueAgg = await this.prisma.orders.aggregate({
       where: {
         state: { in: this.COMPLETED_STATES },
-        customer_id: { not: null },
+        customer_id: undefined,
         created_at: { gte: startDate, lte: endDate },
       },
       _sum: { grand_total: true },
@@ -103,7 +103,7 @@ export class CustomersAnalyticsService {
     const previousRevenueAgg = await this.prisma.orders.aggregate({
       where: {
         state: { in: this.COMPLETED_STATES },
-        customer_id: { not: null },
+        customer_id: undefined,
         created_at: { gte: previousStartDate, lte: previousEndDate },
       },
       _sum: { grand_total: true },
@@ -114,7 +114,7 @@ export class CustomersAnalyticsService {
       by: ['customer_id'],
       where: {
         state: { in: this.COMPLETED_STATES },
-        customer_id: { not: null },
+        customer_id: undefined,
         created_at: { gte: previousStartDate, lte: previousEndDate },
       },
     });
@@ -253,7 +253,7 @@ export class CustomersAnalyticsService {
 
     const where = {
       state: { in: this.COMPLETED_STATES },
-      customer_id: { not: null },
+      customer_id: undefined,
       created_at: { gte: startDate, lte: endDate },
     };
 
@@ -376,7 +376,11 @@ export class CustomersAnalyticsService {
       by: ['customer_id'],
       where: {
         state: { in: this.COMPLETED_STATES },
-        customer_id: { not: null },
+        // Prisma 7 rechaza `{ not: null }`. Se usa `NOT` para conservar la
+        // intención: excluir las ventas sin cliente del ranking. Poner
+        // `customer_id: undefined` quitaría el filtro y metería las ventas
+        // anónimas como un cliente más.
+        NOT: { customer_id: null },
         created_at: { gte: startDate, lte: endDate },
       },
       _sum: { grand_total: true },
@@ -414,103 +418,6 @@ export class CustomersAnalyticsService {
         // RAW Date — el emitter la formatea con TZ. NULL si nunca ha
         // comprado (no debería pasar porque la query filtra customer_id NOT NULL).
         last_order_date: r._max.created_at ?? null,
-      };
-    });
-  }
-
-  /**
-   * QUI-540: cuentas por cobrar de clientes con bucketing de antigüedad.
-   *
-   * Una fila por `accounts_receivable` con status='open' o 'partial',
-   * enriquecida con datos del cliente y bucketed en:
-   *   - '0-30 días' (current)
-   *   - '31-60 días'
-   *   - '61-90 días'
-   *   - '90+ días' (riesgo de incobrabilidad)
-   *
-   * El campo `days_overdue` que ya existe en la tabla lo respetamos si
-   * está poblado; si no, lo calculamos desde `due_date` vs `now()`.
-   *
-   * `issue_date` y `due_date` son DATE (sin hora), pero Prisma los devuelve
-   * como Date instants. El emitter los formatea con TZ.
-   */
-  async getAccountsReceivableForExport(query: AnalyticsQueryDto) {
-    const context = RequestContextService.getContext();
-    if (!context?.store_id || !context.organization_id) {
-      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
-    }
-    const storeId = context.store_id;
-
-    const receivables = await this.prisma.accounts_receivable.findMany({
-      where: {
-        store_id: storeId,
-        status: { in: ['open', 'partial'] },
-        balance: { gt: 0 },
-      },
-      select: {
-        id: true,
-        customer_id: true,
-        source_type: true,
-        source_id: true,
-        document_number: true,
-        original_amount: true,
-        paid_amount: true,
-        balance: true,
-        currency: true,
-        issue_date: true,
-        due_date: true,
-        days_overdue: true,
-        last_payment_date: true,
-        status: true,
-        customer: {
-          select: {
-            first_name: true,
-            last_name: true,
-            email: true,
-            document_number: true,
-          },
-        },
-      },
-      orderBy: { due_date: 'asc' },
-      take: 10000,
-    });
-
-    const now = new Date();
-
-    return receivables.map((r) => {
-      const days = r.days_overdue > 0
-        ? r.days_overdue
-        : Math.max(0, Math.floor((now.getTime() - r.due_date.getTime()) / 86400000));
-      const bucket =
-        days <= 30
-          ? '0-30'
-          : days <= 60
-            ? '31-60'
-            : days <= 90
-              ? '61-90'
-              : '90+';
-      const customerName = r.customer
-        ? `${r.customer.first_name || ''} ${r.customer.last_name || ''}`.trim()
-        : '';
-      return {
-        id: r.id,
-        customer_id: r.customer_id,
-        customer_name: customerName,
-        customer_email: r.customer?.email ?? '',
-        customer_document: r.customer?.document_number ?? '',
-        document_number: r.document_number ?? '',
-        source_type: r.source_type,
-        source_id: r.source_id,
-        issue_date: r.issue_date,
-        due_date: r.due_date,
-        days_overdue: days,
-        aging_bucket: bucket,
-        original_amount: Math.round(Number(r.original_amount) * 100) / 100,
-        paid_amount: Math.round(Number(r.paid_amount) * 100) / 100,
-        balance: Math.round(Number(r.balance) * 100) / 100,
-        currency: r.currency,
-        status: r.status,
-        last_payment_date: r.last_payment_date,
       };
     });
   }
@@ -945,102 +852,99 @@ export class CustomersAnalyticsService {
   }
 
   /**
-   * QUI-539: cartera de clientes por días SIN comprar. Para cada
-   * cliente con al menos una orden completada, calcula los días
-   * desde su última orden hasta ahora, y bucket:
-   *   - '0-30' (activo reciente)
-   *   - '31-60' (enfriándose)
-   *   - '61-90' (dormido)
-   *   - '90+' (riesgo de churn)
+   * QUI-540: cuentas por cobrar de clientes con bucketing de antigüedad.
    *
-   * Sirve para campañas de reactivación: target los 90+ con
-   * descuento, los 31-60 con email, etc.
+   * Una fila por `accounts_receivable` con status='open' o 'partial',
+   * enriquecida con datos del cliente y bucketed en:
+   *   - '0-30 días' (current)
+   *   - '31-60 días'
+   *   - '61-90 días'
+   *   - '90+ días' (riesgo de incobrabilidad)
    *
-   * NO filtra por el rango de fechas de `query`: la métrica es «cuánto
-   * lleva sin comprar», que sólo tiene sentido contra el histórico
-   * completo. Acotarla al período convertiría a todo cliente anterior
-   * al rango en un falso «sin-orden».
+   * El campo `days_overdue` que ya existe en la tabla lo respetamos si
+   * está poblado; si no, lo calculamos desde `due_date` vs `now()`.
+   *
+   * `issue_date` y `due_date` son DATE (sin hora), pero Prisma los devuelve
+   * como Date instants. El emitter los formatea con TZ.
    */
-  async getCustomersAgingForExport(_query: AnalyticsQueryDto) {
+  async getAccountsReceivableForExport(query: AnalyticsQueryDto) {
     const context = RequestContextService.getContext();
     if (!context?.store_id || !context.organization_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
     const storeId = context.store_id;
 
-    // Última orden completada por cliente
-    const orders = await this.prisma.orders.groupBy({
-      by: ['customer_id'],
+    const receivables = await this.prisma.accounts_receivable.findMany({
       where: {
-        state: { in: this.COMPLETED_STATES },
-        customer_id: { not: null },
-        stores: { id: storeId }, // filtro de scope del store
+        store_id: storeId,
+        status: { in: ['open', 'partial'] },
+        balance: { gt: 0 },
       },
-      _max: { created_at: true },
-      _sum: { grand_total: true },
-      _count: { id: true },
-    });
-
-    const customerIds = orders
-      .map((o) => o.customer_id)
-      .filter(Boolean) as number[];
-
-    const customers = await this.prisma.users.findMany({
-      where: { id: { in: customerIds } },
       select: {
         id: true,
-        first_name: true,
-        last_name: true,
-        email: true,
+        customer_id: true,
+        source_type: true,
+        source_id: true,
         document_number: true,
-        created_at: true,
+        original_amount: true,
+        paid_amount: true,
+        balance: true,
+        currency: true,
+        issue_date: true,
+        due_date: true,
+        days_overdue: true,
+        last_payment_date: true,
+        status: true,
+        customer: {
+          select: {
+            first_name: true,
+            last_name: true,
+            email: true,
+            document_number: true,
+          },
+        },
       },
+      orderBy: { due_date: 'asc' },
+      take: 10000,
     });
-    const customerMap = new Map(customers.map((c) => [c.id, c]));
 
     const now = new Date();
 
-    return orders
-      .map((o) => {
-        const customerId = o.customer_id as number;
-        const customer = customerMap.get(customerId);
-        const customerName = customer
-          ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim()
-          : '';
-        const lastOrder = o._max.created_at;
-        const days = lastOrder
-          ? Math.floor((now.getTime() - lastOrder.getTime()) / 86400000)
-          : null;
-        const bucket =
-          days === null
-            ? 'sin-orden'
-            : days <= 30
-              ? '0-30'
-              : days <= 60
-                ? '31-60'
-                : days <= 90
-                  ? '61-90'
-                  : '90+';
-        return {
-          customer_id: customerId,
-          customer_name: customerName,
-          customer_email: customer?.email ?? '',
-          customer_document: customer?.document_number ?? '',
-          // RAW Date — el emitter la formatea con la TZ de la tienda.
-          customer_since: customer?.created_at ?? null,
-          last_order_date: lastOrder,
-          days_since_last_order: days,
-          aging_bucket: bucket,
-          total_orders: o._count.id ?? 0,
-          lifetime_value:
-            o._sum.grand_total != null
-              ? Math.round(Number(o._sum.grand_total) * 100) / 100
-              : 0,
-        };
-      })
-      .sort(
-        (a, b) =>
-          (b.days_since_last_order ?? 0) - (a.days_since_last_order ?? 0),
-      );
+    return receivables.map((r) => {
+      const days = r.days_overdue > 0
+        ? r.days_overdue
+        : Math.max(0, Math.floor((now.getTime() - r.due_date.getTime()) / 86400000));
+      const bucket =
+        days <= 30
+          ? '0-30'
+          : days <= 60
+            ? '31-60'
+            : days <= 90
+              ? '61-90'
+              : '90+';
+      const customerName = r.customer
+        ? `${r.customer.first_name || ''} ${r.customer.last_name || ''}`.trim()
+        : '';
+      return {
+        id: r.id,
+        customer_id: r.customer_id,
+        customer_name: customerName,
+        customer_email: r.customer?.email ?? '',
+        customer_document: r.customer?.document_number ?? '',
+        document_number: r.document_number ?? '',
+        source_type: r.source_type,
+        source_id: r.source_id,
+        issue_date: r.issue_date,
+        due_date: r.due_date,
+        days_overdue: days,
+        aging_bucket: bucket,
+        original_amount: Math.round(Number(r.original_amount) * 100) / 100,
+        paid_amount: Math.round(Number(r.paid_amount) * 100) / 100,
+        balance: Math.round(Number(r.balance) * 100) / 100,
+        currency: r.currency,
+        status: r.status,
+        last_payment_date: r.last_payment_date,
+      };
+    });
   }
 }

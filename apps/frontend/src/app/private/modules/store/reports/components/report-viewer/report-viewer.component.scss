@@ -1,0 +1,18 @@
+:host {
+  display: block;
+  // Cancel the parent <main class="shell-content"> padding (16px mobile /
+  // 24px desktop) so the page content extends to the sidebar edge.
+  margin: -16px;
+  @media (min-width: 768px) {
+    margin: -24px;
+  }
+}
+
+// stats-container must have ZERO padding and ZERO margin — the wrapping
+// <div class="space-y-6 w-full"> already owns inter-block spacing via
+// the `space-y-6` utility; the stats strip must not double it.
+:host ::ng-deep .stats-container {
+  padding: 0;
+  margin: 0;
+  margin-bottom: 0;
+}

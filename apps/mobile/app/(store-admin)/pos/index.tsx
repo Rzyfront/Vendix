@@ -1924,12 +1924,24 @@ const PaymentSheet = ({
 
   const mutation = useMutation({
     mutationFn: async (): Promise<PosSaleResult> => {
+      // CP-POS-CREAR-EDITAR-COBRAR-001 — el cliente es obligatorio.
+      // `customer_id` debe ser un número > 0 o el backend rechaza el payload
+      // (`POS_CUSTOMER_REQUIRED_001`). `handleConfirm` ya bloquea esta
+      // entrada cuando el cliente falta, pero añadimos un guard defensivo.
+      if (!customer || !Number.isFinite(Number(customer.id)) || Number(customer.id) <= 0) {
+        throw new PosCheckoutError(
+          'Selecciona o crea un cliente antes de cobrar. (POS_CUSTOMER_REQUIRED_001)',
+          ['customer_id faltante o inválido en mobile'],
+          false,
+        );
+      }
+
       const buildPayload = (
         requiresPayment: boolean,
         method: PaymentMethod | null,
         updateInventory: boolean,
       ): CreatePosPaymentDto => ({
-        customer_id: customer?.id ? Number(customer.id) : undefined,
+        customer_id: Number(customer.id),
         customer_name: customer ? `${customer.first_name} ${customer.last_name}` : undefined,
         customer_email: customer?.email,
         customer_phone: sanitizePhoneForDto(customer?.phone),
@@ -1958,6 +1970,10 @@ const PaymentSheet = ({
         tax_amount: Number(summary.taxAmount.toFixed(2)),
         discount_amount: Number(summary.discountAmount.toFixed(2)),
         total_amount: Number(summary.total.toFixed(2)),
+        // CP-POS-CREAR-EDITAR-COBRAR-001 — el cobro es SIEMPRE
+        // `is_draft=false, requires_payment=true`. El fallback "venta sin
+        // pago" se eliminó: ya no aceptamos órdenes anónimas.
+        is_draft: false,
         requires_payment: requiresPayment,
         store_payment_method_id: method?.id,
         amount_received: requiresPayment
@@ -1989,38 +2005,11 @@ const PaymentSheet = ({
       };
 
       const requiresPayment = Boolean(selectedMethod);
-      try {
-        const response = await processSale(buildPayload(requiresPayment, selectedMethod, true));
-        return {
-          response,
-          paymentMethodLabel: selectedMethod ? getPaymentMethodLabel(selectedMethod) : 'Venta sin pago',
-        };
-      } catch (primaryError) {
-        const parsedPrimary = parsePosCheckoutError(primaryError);
-        if (!requiresPayment || !parsedPrimary.canFallback) {
-          throw parsedPrimary;
-        }
-
-        try {
-          const response = await processSale(buildPayload(false, null, false));
-          return {
-            response,
-            paymentMethodLabel: 'Venta sin pago',
-            fallbackReason: parsedPrimary.message,
-          };
-        } catch (fallbackError) {
-          const parsedFallback = parsePosCheckoutError(fallbackError);
-          throw new PosCheckoutError(
-            parsedFallback.message,
-            [
-              `Intento con pago: ${parsedPrimary.message}`,
-              `Intento sin pago: ${parsedFallback.message}`,
-              ...parsedFallback.details,
-            ],
-            false,
-          );
-        }
-      }
+      const response = await processSale(buildPayload(requiresPayment, selectedMethod, true));
+      return {
+        response,
+        paymentMethodLabel: selectedMethod ? getPaymentMethodLabel(selectedMethod) : 'Venta sin pago',
+      };
     },
     onMutate: () => {
       setSaleError(null);
@@ -2040,15 +2029,17 @@ const PaymentSheet = ({
           : {}),
       };
       clearCart();
+      // Round 3 MAJOR #12 — the `editAfterSave` flag lives in the
+      // `PosScreen` component; the `PaymentSheet` doesn't have access to
+      // its setter. Reset happens at the next cart mount / sale start.
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['pos-products'] });
       queryClient.invalidateQueries({ queryKey: ['products'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-stats'] });
-      if (result.fallbackReason) {
-        toastWarning(`Venta cerrada sin pago: ${result.fallbackReason}`, 3500);
-      } else {
-        toastSuccess(`Venta registrada: ${formatCurrency(summary.total)}`);
-      }
+      // CP-POS-CREAR-EDITAR-COBRAR-001 — sin fallback anónimo: el cliente es
+      // obligatorio y el cobro se hace siempre con método de pago o vía
+      // "Guardar orden" (draft).
+      toastSuccess(`Venta registrada: ${formatCurrency(summary.total)}`);
       onSuccess(orderNumber, receiptData);
     },
     onError: (error) => {
@@ -2059,6 +2050,14 @@ const PaymentSheet = ({
   });
 
   const handleConfirm = () => {
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — el cliente es obligatorio. Bloqueamos
+    // el cobro si falta o no pertenece al store (`POS_CUSTOMER_REQUIRED_001`).
+    if (!customer || !Number.isFinite(Number(customer.id)) || Number(customer.id) <= 0) {
+      toastError(
+        'Selecciona o crea un cliente antes de cobrar. (POS_CUSTOMER_REQUIRED_001)',
+      );
+      return;
+    }
     if (selectedMethod && isCash && received < summary.total) {
       toastError('El monto recibido es insuficiente');
       return;
@@ -2318,6 +2317,21 @@ const PosScreen = () => {
   const [showCustomItemModal, setShowCustomItemModal] = useState(false);
   const [showShippingModal, setShowShippingModal] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
+  // Round 3 MAJOR #12 — flipped to true after a successful editor save. The
+  // footer CTA changes from "Guardar cambios" to "Cobrar" so the cashier can
+  // take payment without leaving the POS. Cleared when the cart is cleared or
+  // when the operator starts a fresh sale.
+  const [editAfterSave, setEditAfterSave] = useState(false);
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — ID del draft en edición al que el
+  // modal de cobro debe enrutar (`flowPayOrder`). Se setea cuando el
+  // operador está editando una orden persistida y va a cobrar; el modal
+  // lo lee del prop para armar el payload de `flow/pay`. En venta nueva
+  // queda `null` y el modal cae al path `processPosPayment`.
+  const [editingDraftId, setEditingDraftId] = useState<number | null>(null);
+  // Local mirror for the footer's "Ítem" action button. The mobile POS does
+  // not gate custom-line creation by mode today; the prop simply needs a
+  // boolean. Default `true` keeps parity with the prior behaviour.
+  const canCreateCustomItems = true;
   // Cash register modals (paridad web `pos-header-dropdown.component`).
   const [showCashOpenModal, setShowCashOpenModal] = useState(false);
   const [showCashCloseModal, setShowCashCloseModal] = useState(false);
@@ -2360,6 +2374,9 @@ const PosScreen = () => {
   // Cierra TODOS los modales del checkout flow. Útil cuando el usuario
   // presiona X en cualquier paso del flujo y quiere volver limpio a la
   // pantalla de selección de productos sin quedar atrapado en un modal.
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — además limpiamos `editingDraftId`
+  // para que la próxima apertura del modal de cobro no quede pre-armada
+  // con el ID de un draft que ya se cerró / pagó / canceló.
   const closeCheckoutModals = useCallback(() => {
     setShowCartModal(false);
     setShowPaymentModal(false);
@@ -2368,6 +2385,7 @@ const PosScreen = () => {
     setShowCustomerModal(false);
     setShowOrderCreateModal(false);
     setShowLayawayConfigModal(false);
+    setEditingDraftId(null);
   }, []);
   const [activeFilters, setActiveFilters] = useState<{
     category_id: string;
@@ -2411,6 +2429,12 @@ const PosScreen = () => {
   const cartItems = useCartStore((s) => s.items);
   const setMode = useCartStore((s) => s.setMode);
   const setCustomer = useCartStore((s) => s.setCustomer);
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — cuando hay un draft cargado en el cart
+  // store (`draftId != null`), el footer del POS está editando una orden
+  // existente: el botón "Crear" debe persistir los cambios sobre el draft
+  // vía `handleSaveDraft`, NO abrir `pos-order-create-modal` (que es para
+  // nuevos borradores).
+  const draftId = useCartStore((s) => (s as any).draftId ?? null);
 
   const { data: products, isLoading } = useQuery({
     queryKey: ['pos-products', search, activeFilters],
@@ -2709,11 +2733,28 @@ const PosScreen = () => {
       toastWarning('El carrito está vacío');
       return;
     }
-    if (!customer) {
-      toastWarning('Debe seleccionar un cliente antes de guardar');
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — el backend rechaza borradores sin
+    // cliente (`POS_CUSTOMER_REQUIRED_001`). Bloqueamos el guardado si
+    // falta y abrimos el selector para que el operador pueda asignarlo.
+    if (
+      !customer ||
+      !Number.isFinite(Number(customer.id)) ||
+      Number(customer.id) <= 0
+    ) {
+      toastError(
+        'Selecciona o crea un cliente antes de guardar la orden. (POS_CUSTOMER_REQUIRED_001)',
+      );
       setShowCustomerModal(true);
       return;
     }
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — cuando hay un `draftId` cargado en el
+    // cart store, el guardado NO crea un nuevo draft: edita la orden
+    // existente vía `PUT /store/orders/:id/editor`. Esto evita:
+    //   1. doble cobro (un PUT no muta state ni dispara cobros).
+    //   2. órdenes huérfanas al "Guardar" sobre un draft persistido.
+    // `updateOrderEditor` re-resuelve totales server-side (es la fuente de
+    // verdad) y devuelve la `Order` canónica.
+    const editingDraftId = (state as any).draftId ? Number((state as any).draftId) : null;
     setSavingDraft(true);
     try {
       const tenantStoreId = useTenantStore.getState().storeId;
@@ -2721,9 +2762,76 @@ const PosScreen = () => {
       const storeId = resolvePositiveId(tenantStoreId, authStoreId);
       if (!storeId) {
         toastError('La sesión no tiene una tienda activa');
+        setSavingDraft(false);
         return;
       }
 
+      if (editingDraftId != null && Number.isFinite(editingDraftId) && editingDraftId > 0) {
+        // === MODO EDICIÓN ===
+        // El editor atómico backend solo acepta campos de negocio (items,
+        // cliente, notas, envío, cupón). NO acepta state/payment/is_draft.
+        const editorItems = items.map((i) => ({
+          product_id: i.product.id === 0 ? undefined : Number(i.product.id),
+          product_variant_id: i.variant?.id ? Number(i.variant.id) : undefined,
+          product_name: i.product.name,
+          product_sku: i.product.sku || undefined,
+          variant_sku: i.variant?.sku || undefined,
+          quantity: i.quantity,
+          unit_price: Number(i.unitPrice.toFixed(2)),
+          total_price: Number(getLineSubtotal(i).toFixed(2)),
+          tax_amount_item: Number(i.taxAmount.toFixed(2)),
+          // Round 3 MINOR #14 — `tax_rate` was being stripped from the
+          // mobile editor payload, so the backend recomputed `tax_amount_item`
+          // from a fresh `tax_rate` lookup. The cashier then saw a different
+          // number on the tiquete than the one they typed. The mobile cart
+          // doesn't carry an explicit `taxRate` per line — derive from
+          // `taxAmount / (finalPrice * quantity)` so the value the editor
+          // sends matches what the cart already computed (mirror web parity
+          // where `taxRate` is the source of truth).
+          tax_rate:
+              Number(i.taxAmount) > 0 && Number(i.finalPrice) > 0 && Number(i.quantity) > 0
+                ? Number(
+                    (
+                      (Number(i.taxAmount) /
+                        (Number(i.finalPrice) * Number(i.quantity))) *
+                      100
+                    ).toFixed(4),
+                  )
+                : 0,
+          cost: i.variant?.cost_price ?? i.product.cost_price ?? undefined,
+          applied_price_tier_id: i.appliedPriceTierId ?? undefined,
+        }));
+        const editorPayload = {
+          items: editorItems,
+          customer_id: Number(customer.id),
+          internal_notes: state.notes || undefined,
+          delivery_type: 'direct_delivery' as const,
+        };
+        const updatedOrder = await OrderService.updateOrderEditor(editingDraftId, editorPayload);
+        // Round 3 MAJOR #12 — after a successful editor save, open the
+        // payment modal directly so the cashier can "Cobrar" without a
+        // second navigation. We keep the cart hydrated with the fresh totals
+        // (server returns the canonical order) and flip into the payment
+        // modal — the footer CTA "Cobrar" stays in lock-step because the
+        // cart now has the latest server-validated totals.
+        toastSuccess(
+          updatedOrder?.order_number
+            ? `Cambios guardados en ${updatedOrder.order_number}`
+            : 'Cambios guardados',
+        );
+        // Leave the cart populated so the footer + payment modal keep working
+        // until the cashier either collects payment or cancels. The footer's
+        // primary CTA now reads "Cobrar" (driven by `editAfterSave`).
+        // CP-POS-CREAR-EDITAR-COBRAR-001 — pasamos por el helper
+        // centralizado para que el modal quede pre-armado con
+        // `editingDraftId` y enrute por `flowPayOrder` (Round 5 fix).
+        setEditAfterSave(true);
+        setEditingDraftId(editingDraftId);
+        setShowPaymentModal(true);
+        return;
+      }
+
+      // === MODO NUEVO BORRADOR ===
       const payload: CreatePosPaymentDto = {
         customer_id: Number(customer.id),
         customer_name: `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim(),
@@ -2753,11 +2861,28 @@ const PosScreen = () => {
         tax_amount: Number(summary.taxAmount.toFixed(2)),
         discount_amount: Number(summary.discountAmount.toFixed(2)),
         total_amount: Number(summary.total.toFixed(2)),
+        // CP-POS-CREAR-EDITAR-COBRAR-001 fase B.2 — Guardar es SIEMPRE un
+        // draft sin pago. Backend valida `is_draft=true ∧ requires_payment=false`
+        // y rechaza combinaciones inválidas con `POS_DRAFT_REQUIRES_PAYMENT_001`.
+        is_draft: true,
         requires_payment: false,
         delivery_type: 'direct_delivery',
         internal_notes: state.notes || undefined,
         update_inventory: false,
-        allow_oversell: true,
+        // NOTA: `allow_oversell` ya NO se manda. El backend lo ignora para
+        // borradores y para cobros sin stock el rechazo viene por
+        // `POS_STOCK_INSUFFICIENT_001`. Enviar `true` aquí era solo
+        // client-intent misleading — el server es la fuente de verdad.
+        // El DTO sigue aceptándolo (`forbidNonWhitelisted: true`) pero el
+        // mobile ya no declara la intención.
+        // Coupon attachment — el cart store mobile todavía NO trackea cupones
+        // (ver `cart.store.ts`), así que ambos campos quedan fuera del
+        // payload. Round 3 MAJOR #13 — NO incluimos `coupon_id` /
+        // `coupon_code`: serializar `undefined` en JSON lo omite, pero
+        // algunos validadores del backend y clientes HTTP convierten la
+        // ausencia a `null`, y los validadores Prisma/Class-Validator
+        // distinguen entre ambas formas. La ausencia explícita (clave
+        // omitida) es la opción segura.
         print_receipt: false,
       };
 
@@ -2768,13 +2893,33 @@ const PosScreen = () => {
       }
 
       state.clearCart();
+      // Round 3 MAJOR #12 — once the new draft is created we are no longer
+      // in "edit-then-charge" mode; the next sale starts fresh.
+      setEditAfterSave(false);
       toastSuccess('Guardado correctamente');
     } catch (error: any) {
       const data = error?.response?.data;
+      const errorCode = data?.error_code || data?.code;
+      const requestId = data?.request_id || error?.response?.headers?.['x-request-id'];
       const baseMsg = data?.message || error?.message || 'Error al guardar';
       const details = data?.details?.validationErrors;
       const fullMsg = details ? `${baseMsg}: ${details.join(', ')}` : baseMsg;
-      toastError(fullMsg);
+      const codeSuffix = errorCode ? ` (${errorCode})` : '';
+      const requestSuffix = requestId ? ` [req=${requestId}]` : '';
+      // Log estructurado para correlacionar el toast del operador con el log
+      // del backend (AllExceptionsFilter guarda el mismo `request_id`).
+      // No leak de PII: solo IDs y códigos de error.
+      // Re-leemos los stores aquí porque `storeId`/`customer` están en scope
+      // del `try` y TypeScript no los ve en `catch`.
+      // eslint-disable-next-line no-console
+      console.error('[pos][saveDraft] failed', {
+        store_id: useTenantStore.getState().storeId ?? useAuthStore.getState().user?.store?.id ?? useAuthStore.getState().user?.main_store_id,
+        customer_id: customer ? Number(customer.id) : undefined,
+        request_id: requestId,
+        error_code: errorCode,
+        status: error?.response?.status,
+      });
+      toastError(`${fullMsg}${codeSuffix}${requestSuffix}`);
     } finally {
       setSavingDraft(false);
     }
@@ -2808,8 +2953,38 @@ const PosScreen = () => {
     setShowOrderCreateModal(true);
   }, [summary.totalItems]);
 
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — helper centralizado del camino
+  // "después de editar el draft, cobra". Lee `draftId` del cart store y,
+  // si está presente, abre el modal de cobro pre-armado para enrutar el
+  // cobro por `OrderService.flowPayOrder(draftId, ...)`. Si NO hay draft,
+  // abre el modal en modo venta nueva (cae a `processPosPayment`).
+  //
+  // Es la MISMA función invocada por:
+  //   1. El CTA primario del footer ("Cobrar" tras `editAfterSave=true`).
+  //   2. El botón "Cobrar" interno del modal (`PosPaymentModal`) que ya
+  //      enruta por `flowPayOrder` cuando `editingDraftIdProp != null`.
+  //
+  // Antes del Round 5 fix, el modal creaba una orden nueva con
+  // `processPosPayment` en vez de cargar al draft — este helper garantiza
+  // que el prop `editingDraftId` quede seteado ANTES de abrir el modal.
+  const openPaymentModalForCharge = useCallback(() => {
+    const stateDraftId = useCartStore.getState().draftId;
+    const nextDraftId =
+      stateDraftId && Number.isFinite(Number(stateDraftId)) && Number(stateDraftId) > 0
+        ? Number(stateDraftId)
+        : null;
+    setEditingDraftId(nextDraftId);
+    setShowPaymentModal(true);
+  }, []);
+
   // CTA primario del footer — despacha según el modo activo.
-  // - `sale`     → abre modal de pago
+  // - `sale` + draft cargado (edit-mode, sin `editAfterSave`) → persiste los
+  //   cambios sobre el draft existente (`handleSaveDraft` → editor atómico
+  //   backend). El cobro va en la siguiente pulsación del CTA una vez
+  //   `editAfterSave=true` dispara `openPaymentModalForCharge`.
+  // - `sale` (sin draft o post-save) → abre el modal de cobro vía
+  //   `openPaymentModalForCharge` (que setea `editingDraftId` para enrutar
+  //   a `flowPayOrder` si hay draft, o `processPosPayment` si no).
   // - `quotation`→ crea cotización (Fase 4 — sólo placeholder)
   // - `layaway`  → abre `PosLayawayConfigModal` (paridad con desktop
   //   `LayawayConfigModalComponent`, ver QUI-499). El modal POSTea
@@ -2820,9 +2995,18 @@ const PosScreen = () => {
       toastWarning('El carrito está vacío');
       return;
     }
+    // QUI-audit-round-2: en modo edición del draft, "Cobrar" debe persistir
+    // sobre el draft, NO abrir el flujo de venta nueva. Mientras el editor
+    // no haya guardado, el CTA es "Guardar cambios" (lo decide el footer
+    // vía `isEditMode && !editAfterSave`); tras el guardado, el CTA pasa a
+    // "Cobrar" y entra a `sale` normal usando el helper centralizado.
+    if (mode === 'sale' && draftId != null && !editAfterSave) {
+      void handleSaveDraft();
+      return;
+    }
     switch (mode) {
       case 'sale':
-        setShowPaymentModal(true);
+        openPaymentModalForCharge();
         return;
       case 'quotation':
         toastWarning('Próximamente: Crear cotización');
@@ -2836,7 +3020,7 @@ const PosScreen = () => {
         setShowLayawayConfigModal(true);
         return;
     }
-  }, [mode, customer, summary.totalItems]);
+  }, [mode, customer, summary.totalItems, draftId, editAfterSave, handleSaveDraft, openPaymentModalForCharge]);
 
   // Cambia el modo del POS (POS / Cotizar / Separé). En paridad con el web
   // `pos.component.ts` (`setQuotationMode` / `setLayawayMode`), los handlers
@@ -2950,9 +3134,12 @@ const PosScreen = () => {
         onViewCart={() => setShowCartModal(true)}
         onCustomItem={handleCustomItem}
         onCreate={handleCreate}
+        onEdit={handleSaveDraft}
         onShipping={handleShipping}
         onPrimaryCta={handlePrimaryCta}
-        canCreateCustomItems
+        isEditMode={draftId != null}
+        canCreateCustomItems={canCreateCustomItems}
+        editAfterSave={editAfterSave}
       />
 
       {/* Cart Modal — bottom sheet con slide-up (paridad web). */}
@@ -3020,7 +3207,11 @@ const PosScreen = () => {
             setShowLayawayConfigModal(true);
             return;
           }
-          setShowPaymentModal(true);
+          // CP-POS-CREAR-EDITAR-COBRAR-001 — checkout desde el cart modal
+          // debe pasar por el helper centralizado para preservar el camino
+          // de edición de draft (si hay `draftId`, el modal cobra con
+          // `flowPayOrder`; si no, con `processPosPayment`).
+          openPaymentModalForCharge();
         }}
         canCreateCustomItems
       />
@@ -3064,14 +3255,19 @@ const PosScreen = () => {
         onClose={() => setShowCart(false)}
         onCharge={() => {
           setShowCart(false);
-          setShowPaymentModal(true);
+          openPaymentModalForCharge();
         }}
       />
 
-      {/* Payment Modal — cierre seguro: limpia TODO el checkout flow. */}
+      {/* Payment Modal — cierre seguro: limpia TODO el checkout flow.
+          CP-POS-CREAR-EDITAR-COBRAR-001 — pasamos `editingDraftId` para que
+          el modal enrute por `flowPayOrder` cuando hay draft en edición
+          (seteado por `openPaymentModalForCharge`). El modal también hace
+          fallback al `draftId` del cart store por si el padre lo omite. */}
       <PosPaymentModal
         visible={showPaymentModal}
         onClose={() => closeCheckoutModals()}
+        editingDraftId={editingDraftId}
         onSuccess={(orderNumber) => {
           closeCheckoutModals();
           setOrderNumber(orderNumber);

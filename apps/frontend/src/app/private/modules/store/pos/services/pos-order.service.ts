@@ -26,6 +26,32 @@ import { resolveLineUnits } from '../utils/line-units.util';
 import { PosCustomer } from '../models/customer.model';
 import { PosCashRegisterService } from './pos-cash-register.service';
 
+/**
+ * Frontend guard for CP-POS-CREAR-EDITAR-COBRAR-001 / ERR-01.
+ *
+ * Mirrors the backend `POS_CUSTOMER_REQUIRED_001` so the POS UI rejects
+ * `customer_id=null` calls BEFORE the request leaves the browser. The backend
+ * is still authoritative and re-checks the same policy via `require_customer_data`,
+ * but failing locally saves a network round-trip and surfaces a typed message
+ * (via `parseApiError` → `ERROR_MESSAGES[POS_CUSTOMER_REQUIRED_001]`) instead
+ * of a generic Prisma/container string.
+ *
+ * Why a typed class (not a plain `Error`): downstream code can branch on
+ * `error.name === 'PosCustomerRequiredError'` (or the `errorCode` field) to
+ * focus the customer control, open the customer modal, etc., without parsing
+ * free-form message strings.
+ */
+export class PosCustomerRequiredError extends Error {
+  override readonly name = 'PosCustomerRequiredError';
+  readonly errorCode = 'POS_CUSTOMER_REQUIRED_001';
+  constructor(message?: string) {
+    super(
+      message ??
+        'Selecciona o crea un cliente antes de guardar la orden.',
+    );
+  }
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -74,14 +100,26 @@ export class PosOrderService {
       );
     }
 
+    // CP-POS-CREAR-EDITAR-COBRAR-001 / B.3 — never fabricate a customer.
+    // The policy source is `settings.checkout.require_customer_data`; the
+    // backend is authoritative, but failing here saves a round-trip and
+    // surfaces the typed `POS_CUSTOMER_REQUIRED_001` code to the cashier.
+    if (!cartState.customer || cartState.customer.id == null) {
+      this.loading.set(false);
+      return throwError(() => new PosCustomerRequiredError());
+    }
+
     const activeSession = this.posCashRegisterService.getActiveSessionSnapshot();
 
-    // Build POS payment request for credit sale (no payment)
+    // Build POS payment request for credit sale (no payment). Customer is
+    // guaranteed to be present by the guard above — no `|| 1` / synthetic
+    // email fallbacks.
+    const customer = cartState.customer;
     const posPaymentRequest = {
-      customer_id: cartState.customer?.id || 1,
-      customer_name: cartState.customer?.name || 'Cliente General',
-      customer_email: cartState.customer?.email || 'cliente@general.com',
-      customer_phone: cartState.customer?.phone || '',
+      customer_id: customer.id,
+      customer_name: this.composeCustomerName(customer),
+      customer_email: customer.email,
+      customer_phone: customer.phone ?? '',
       store_id: this.getStoreId(),
       items: this.mapCartItemsForPos(cartState),
       subtotal: Number(cartState.summary.subtotal.toFixed(2)),
@@ -208,14 +246,25 @@ export class PosOrderService {
   ): Observable<ProcessPaymentResponse> {
     this.loading.set(true);
 
+    // CP-POS-CREAR-EDITAR-COBRAR-001 / B.3 — never fabricate a customer.
+    // `ProcessPaymentRequest` may carry an optional `customer` for the
+    // "pay an existing draft" flow; if it does, the backend requires a real
+    // `customer_id`. Anonymous `|| 1` fallbacks are not allowed.
+    if (!request.customer || request.customer.id == null) {
+      this.loading.set(false);
+      return throwError(() => new PosCustomerRequiredError());
+    }
+
     const activeSession = this.posCashRegisterService.getActiveSessionSnapshot();
 
-    // Build POS payment request for cash sale
+    // Build POS payment request for cash sale. Customer is guaranteed
+    // non-null by the guard above.
+    const customer = request.customer;
     const posPaymentRequest = {
-      customer_id: request.customer?.id || 1,
-      customer_name: request.customer?.name || 'Cliente General',
-      customer_email: request.customer?.email || 'cliente@general.com',
-      customer_phone: request.customer?.phone || '',
+      customer_id: customer.id,
+      customer_name: this.composeCustomerName(customer),
+      customer_email: customer.email,
+      customer_phone: customer.phone ?? '',
       store_id: this.getStoreId(),
       items: (request.items || []).map((item) => ({
         product_id: parseInt(item.productId),
@@ -316,6 +365,11 @@ export class PosOrderService {
 
   /**
    * Map backend order to POS order format
+   *
+   * CP-POS-CREAR-EDITAR-COBRAR-001 / B.3 — backend never returns an order
+   * without a customer (the customer gate runs at create time). If the wire
+   * shape is malformed (defensive only) we keep the customer placeholder
+   * fields empty rather than fabricate a name.
    */
   private mapBackendOrderToPosOrder(backendOrder: any): PosOrder {
     return {
@@ -323,9 +377,9 @@ export class PosOrderService {
       orderNumber: backendOrder.order_number,
       customer: {
         id: backendOrder.customer_id?.toString() || '0',
-        first_name: backendOrder.customer_name || 'Cliente General',
+        first_name: backendOrder.customer_name || '',
         last_name: backendOrder.customer_name?.split(' ')[1] || '',
-        name: backendOrder.customer_name || 'Cliente General',
+        name: backendOrder.customer_name || '',
         email: backendOrder.customer_email || '',
         phone: backendOrder.customer_phone || '',
         created_at: new Date(),
@@ -992,6 +1046,21 @@ export class PosOrderService {
 
   private getStoreId(): number {
     return this.storeContextService.getStoreIdOrThrow();
+  }
+
+  /**
+   * Compose a customer full name without inventing one when parts are missing.
+   * `PosCustomer.name` is the legacy single-string alias; prefer it when set,
+   * otherwise join `first_name` + `last_name` with a single space and trim.
+   */
+  private composeCustomerName(customer: PosCustomer): string {
+    if (customer.name && customer.name.trim()) {
+      return customer.name.trim();
+    }
+    const first = customer.first_name?.trim() ?? '';
+    const last = customer.last_name?.trim() ?? '';
+    const joined = `${first} ${last}`.trim();
+    return joined;
   }
 
   private mapCartItemsForPos(cartState: CartState): any[] {

@@ -163,10 +163,34 @@ export interface PendingBooking {
   provider_name?: string;
 }
 
+/**
+ * Fulfillment context carried by the cart. Mirrors the editor payload shape
+ * (`UpdateOrderEditorDto` accepts `delivery_type`, `shipping_address_id`,
+ * `billing_address_id`, `shipping_method_id`, `shipping_rate_id`,
+ * `shipping_cost`). Read from `editingOrder` on load, forwarded verbatim by
+ * `buildEditorRequest`. Nulls are intentional: an order with no shipping
+ * (pickup) keeps every key null and the editor endpoint treats them as
+ * "no change".
+ */
+export interface ShippingContext {
+  deliveryType: string | null;
+  shippingAddressId: number | null;
+  billingAddressId: number | null;
+  shippingMethodId: number | null;
+  shippingRateId: number | null;
+  shippingCost: number | null;
+}
+
 export interface CartState {
   items: CartItem[];
   customer: PosCustomer | null;
   notes: string;
+  /**
+   * Staff-only notes restored from the order on edit (e.g. "Cliente pidió
+   * factura con Nit X"). Persisted into `orders.internal_notes` by the
+   * editor endpoint. Empty string = no notes.
+   */
+  internalNotes: string;
   appliedDiscounts: CartDiscount[];
   appliedCoupon?: { id: number; code: string; discount_type: string; discount_value: number };
   pendingBookings: PendingBooking[];
@@ -178,6 +202,11 @@ export interface CartState {
   // carrito es un espejo del servidor; null = carrito local clásico.
   linkedOrderId: number | null;
   linkedOrderNumber: string | null;
+  /**
+   * Fulfillment snapshot — populated by `loadFromOrder`, forwarded by
+   * `buildEditorRequest`. Undefined = no shipping / unknown.
+   */
+  shippingContext?: ShippingContext;
 }
 
 export interface AddToCartRequest {

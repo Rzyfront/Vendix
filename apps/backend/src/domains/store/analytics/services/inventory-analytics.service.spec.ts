@@ -53,7 +53,7 @@ describe('InventoryAnalyticsService', () => {
       is_owner: false,
     } as any);
 
-    service = new InventoryAnalyticsService(prisma as any);
+    service = new InventoryAnalyticsService(prisma as any, {} as any);
   });
 
   afterEach(() => {
@@ -108,6 +108,117 @@ describe('InventoryAnalyticsService', () => {
       expect(Array.isArray(paged)).toBe(false);
       expect((paged as any).data).toHaveLength(50);
       expect((paged as any).meta.pagination.total).toBe(150);
+    });
+  });
+
+  // ==================== QUI-545: STOCK BAJO / PUNTOS DE REORDEN ====================
+
+  describe('getLowStockForExport (QUI-545)', () => {
+    it('returns ONLY products where stock_quantity <= reorder_point, with stock_value_at_risk = qty * cost_price rounded to 2 decimals', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        {
+          id: 1,
+          name: 'Coca-Cola 350ml',
+          sku: 'CC350',
+          product_images: [],
+          stock_quantity: 2,
+          cost_price: 1500,
+          min_stock_level: 5,
+          reorder_point: 10,
+        },
+        {
+          id: 2,
+          name: 'Galletas Festival',
+          sku: 'GAL-FES',
+          product_images: [{ image_url: 'https://cdn/festival.jpg' }],
+          stock_quantity: 50, // > reorder_point, debe excluirse
+          cost_price: 800,
+          min_stock_level: 5,
+          reorder_point: 10,
+        },
+        {
+          id: 3,
+          name: 'Chocorramo',
+          sku: 'CHOCO',
+          product_images: [],
+          stock_quantity: 0, // out_of_stock
+          cost_price: 2000,
+          min_stock_level: 3,
+          reorder_point: 5,
+        },
+      ] as any);
+
+      const rows = await service.getLowStockForExport({} as any);
+
+      // 2 de 3 productos (el segundo está sobre el reorder_point).
+      expect(rows).toHaveLength(2);
+      // Coca-Cola: stock 2 * cost 1500 = 3000.00
+      const coca = rows.find((r) => r.product_id === 1);
+      expect(coca).toBeDefined();
+      expect(coca!.stock_quantity).toBe(2);
+      expect(coca!.reorder_point).toBe(10);
+      expect(coca!.min_stock_level).toBe(5);
+      expect(coca!.status).toBe('low_stock');
+      expect(coca!.stock_value_at_risk).toBe(3000);
+      // Chocorramo: stock 0 → out_of_stock, value 0.
+      const choco = rows.find((r) => r.product_id === 3);
+      expect(choco).toBeDefined();
+      expect(choco!.stock_quantity).toBe(0);
+      expect(choco!.status).toBe('out_of_stock');
+      expect(choco!.stock_value_at_risk).toBe(0);
+      // Galletas Festival NO debe estar en el resultado.
+      expect(rows.find((r) => r.product_id === 2)).toBeUndefined();
+    });
+
+    it('returns a flat array (not the {data,meta} envelope that getLowStockAlerts produces with page+limit)', async () => {
+      prisma.products.findMany.mockResolvedValue([]);
+      const rows = await service.getLowStockForExport({} as any);
+      expect(Array.isArray(rows)).toBe(true);
+      expect((rows as any).data).toBeUndefined();
+      expect((rows as any).meta).toBeUndefined();
+    });
+
+    it('handles cost_price = 0 (free product) and null cost_price without throwing, returning stock_value_at_risk = 0', async () => {
+      // Edge case: productos con costo 0 o sin costo registrado (por ejemplo,
+      // muestras gratis o ítems sin precio de compra todavía). El cálculo
+      // `qty * cost` debe tolerarlo sin NaN ni excepciones, y reportar
+      // `stock_value_at_risk = 0` para que el reporte no muestre $NaN o rompa
+      // la suma del footer.
+      prisma.products.findMany.mockResolvedValue([
+        {
+          id: 4,
+          name: 'Muestra Gratis',
+          sku: 'SAMPLE-1',
+          product_images: [],
+          stock_quantity: 3,
+          cost_price: 0, // costo cero explícito
+          min_stock_level: 1,
+          reorder_point: 2,
+        },
+        {
+          id: 5,
+          name: 'Sin Costo Registrado',
+          sku: 'NULL-COST',
+          product_images: [],
+          stock_quantity: 1,
+          cost_price: null, // sin costo
+          min_stock_level: 1,
+          reorder_point: 2,
+        },
+      ] as any);
+
+      const rows = await service.getLowStockForExport({} as any);
+
+      expect(rows).toHaveLength(2);
+      const free = rows.find((r) => r.product_id === 4);
+      expect(free).toBeDefined();
+      expect(free!.stock_value_at_risk).toBe(0);
+      expect(Number.isNaN(free!.stock_value_at_risk)).toBe(false);
+      expect(free!.status).toBe('low_stock');
+      const noCost = rows.find((r) => r.product_id === 5);
+      expect(noCost).toBeDefined();
+      expect(noCost!.stock_value_at_risk).toBe(0);
+      expect(Number.isNaN(noCost!.stock_value_at_risk)).toBe(false);
     });
   });
 
@@ -376,6 +487,64 @@ describe('InventoryAnalyticsService', () => {
         service.getInventoryValuation({} as any),
       ).rejects.toBeInstanceOf(VendixHttpException);
       expect(prisma.withoutScope).not.toHaveBeenCalled();
+    });
+  });
+
+  // ==================== QUI-550: GET-INVENTORY-BY-SUPPLIER-FOR-EXPORT ====================
+
+  describe('getInventoryBySupplierForExport (QUI-550)', () => {
+    // Cobertura mínima del nuevo método flat-array introducido por QUI-550.
+    // Verifica la forma del retorno y que tolere tiendas sin productos.
+    it('returns a flat array grouped by supplier with product_count, total_stock, total_value', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        {
+          id: 1,
+          name: 'Coca-Cola 350ml',
+          sku: 'CC350',
+          stock_quantity: 100,
+          cost_price: 1500,
+          primary_supplier_id: 10,
+          primary_supplier: { id: 10, name: 'Distribuidora Andina' },
+        },
+        {
+          id: 2,
+          name: 'Galletas Festival',
+          sku: 'GAL-FES',
+          stock_quantity: 50,
+          cost_price: 800,
+          primary_supplier_id: 10,
+          primary_supplier: { id: 10, name: 'Distribuidora Andina' },
+        },
+        {
+          id: 3,
+          name: 'Chocorramo',
+          sku: 'CHOCO',
+          stock_quantity: 200,
+          cost_price: 2000,
+          primary_supplier_id: 20,
+          primary_supplier: { id: 20, name: 'Post Colombiano SA' },
+        },
+      ] as any);
+
+      const rows = await service.getInventoryBySupplierForExport({
+        storeId: 1,
+      } as any);
+
+      expect(Array.isArray(rows)).toBe(true);
+      const andina = rows.find((r) => r.supplier_id === 10);
+      expect(andina).toBeDefined();
+      expect(andina!.product_count).toBe(2);
+      expect(andina!.total_stock_quantity).toBe(150);
+      // total_stock_value = 100*1500 + 50*800 = 190000
+      expect(andina!.total_stock_value).toBe(190000);
+    });
+
+    it('returns an empty array when there are no products, without throwing', async () => {
+      prisma.products.findMany.mockResolvedValue([] as any);
+      const rows = await service.getInventoryBySupplierForExport({
+        storeId: 1,
+      } as any);
+      expect(rows).toEqual([]);
     });
   });
 });

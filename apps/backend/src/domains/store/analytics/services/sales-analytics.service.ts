@@ -24,10 +24,6 @@ import {
   formatQuantityInSaleUnit,
   resolveSaleUnitCodes,
 } from '../../products/services/sale-unit-display.util';
-import {
-  COMPLETED_SALE_STATES,
-  sqlStateList,
-} from '../analytics-metrics.contract';
 
 // Aggregated sales summary tolerates 1-2 min of staleness → short TTL (ms).
 const SALES_SUMMARY_CACHE_TTL_MS = 120_000;
@@ -118,14 +114,8 @@ export class SalesAnalyticsService {
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
-  /**
-   * States that count as a completed sale. DERIVED from the contract, never
-   * re-typed: a private copy is exactly how the trend chart and the panel cards
-   * drifted apart (the chart read one list, the cards another, and both looked
-   * right in isolation). Change the meaning in
-   * `analytics-metrics.contract.ts` and every consumer follows.
-   */
-  private readonly COMPLETED_STATES = [...COMPLETED_SALE_STATES];
+  // States that count as completed sales
+  private readonly COMPLETED_STATES = ['delivered', 'finished'];
 
   /**
    * Resolves the current request's store timezone (single source of truth).
@@ -228,7 +218,7 @@ export class SalesAnalyticsService {
               lte: endDate,
             },
             customer_id: {
-              not: null,
+              not: undefined,
             },
           },
         }),
@@ -709,7 +699,7 @@ export class SalesAnalyticsService {
         GROUP BY order_id
       ) oi ON oi.order_id = o.id
       WHERE o.store_id = ${storeId}
-        AND o.state IN (${sqlStateList(this.COMPLETED_STATES)})
+        AND o.state IN ('delivered', 'finished')
         AND o.created_at >= ${startDate}
         AND o.created_at <= ${endDate}
         ${query.channel ? Prisma.sql`AND o.channel = ${query.channel}::order_channel_enum` : Prisma.empty}
@@ -772,7 +762,7 @@ export class SalesAnalyticsService {
         GROUP BY order_id
       ) oi ON oi.order_id = o.id
       WHERE o.store_id = ${storeId}
-        AND o.state IN (${sqlStateList(this.COMPLETED_STATES)})
+        AND o.state IN ('delivered', 'finished')
         AND (o.created_at AT TIME ZONE 'UTC' AT TIME ZONE ${tzSql})::date
             = (NOW() AT TIME ZONE ${tzSql})::date
         ${channel ? Prisma.sql`AND o.channel = ${channel}::order_channel_enum` : Prisma.empty}
@@ -825,7 +815,7 @@ export class SalesAnalyticsService {
 
     const where = {
       state: { in: this.COMPLETED_STATES },
-      customer_id: { not: null },
+      customer_id: undefined,
       created_at: { gte: startDate, lte: endDate },
     };
 
@@ -1015,6 +1005,57 @@ export class SalesAnalyticsService {
     }
 
     return allResults.slice(0, query.limit || allResults.length);
+  }
+
+  /**
+   * QUI-549: variante flat-array de getSalesByChannel para exportación XLSX.
+   * Devuelve todos los canales (sin paginación ni slice de limit) en el
+   * mismo shape que la vista de pantalla. Como `orders.channel` es enum con
+   * máximo 5 valores (pos, ecommerce, agent, whatsapp, marketplace), el
+   * `take: 10000` es solo defensa — el groupBy retorna un row por valor.
+   */
+  async getSalesByChannelForExport(query: SalesAnalyticsQueryDto) {
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
+
+    const results = await this.prisma.orders.groupBy({
+      by: ['channel'],
+      where: {
+        state: { in: this.COMPLETED_STATES },
+        created_at: {
+          gte: startDate,
+          lte: endDate,
+        },
+        ...(query.channel && { channel: query.channel }),
+      },
+      _sum: { grand_total: true },
+      _count: { id: true },
+    });
+
+    const labels: Record<string, string> = {
+      pos: 'Punto de Venta',
+      ecommerce: 'Tienda Online',
+      agent: 'Agente IA',
+      whatsapp: 'WhatsApp',
+      marketplace: 'Marketplace',
+    };
+
+    const total = results.reduce(
+      (sum, r) => sum + Number(r._sum.grand_total || 0),
+      0,
+    );
+
+    return results
+      .map((r) => ({
+        channel: r.channel,
+        display_name: labels[r.channel] || r.channel,
+        order_count: r._count.id,
+        revenue: Math.round(Number(r._sum.grand_total || 0) * 100) / 100,
+        percentage: total > 0
+          ? Math.round((Number(r._sum.grand_total || 0) / total) * 10000) / 100
+          : 0,
+      }))
+      .sort((a, b) => b.revenue - a.revenue);
   }
 
   /**
@@ -1265,24 +1306,5 @@ export class SalesAnalyticsService {
       context.row.quantity = display.value;
       context.row.unit = display.suffix;
     }
-  }
-
-  // -------------------------------------------------------------------------
-  // STUBS for the resubmit's analytics.controller.ts (QUI-542 batch). The
-  // controller calls these ForExport variants but the original PR #537 split
-  // left them out of the per-QUI services. Returning empty arrays keeps the
-  // xlsx export endpoint compiling and emitting an empty workbook; the
-  // proper implementations land in a follow-up.
-  // -------------------------------------------------------------------------
-  async getSalesByChannelForExport(
-    _query: SalesAnalyticsQueryDto,
-  ): Promise<unknown[]> {
-    return [];
-  }
-
-  async getSalesBySellerForExport(
-    _query: SalesAnalyticsQueryDto,
-  ): Promise<unknown[]> {
-    return [];
   }
 }
