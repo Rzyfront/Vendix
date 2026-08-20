@@ -172,19 +172,29 @@ export class PosCheckoutShellComponent {
   /**
    * Composición que alimenta templates y guards que sólo necesitan "se requiere
    * cliente" sin importar el motivo. Cero rama pickup solapada.
+   *
+   * Round 8 — el POS-side flag `pos.allow_anonymous_sales` es escape hatch:
+   * aunque la política exija cliente, el cashier puede vender sin él desde el
+   * POS. Por tanto "obligatorio" sólo cuando la política lo exige Y el POS
+   * no tiene la ventana abierta. La dirección de envío sigue exigiendo
+   * cliente siempre (no hay forma de atar un envío sin un customer_id).
    */
   readonly customerRequired = computed<boolean>(
-    () => this.customerRequiredByPolicy() || this.customerRequiredByAddress(),
+    () =>
+      (this.customerRequiredByPolicy() && !this.allowAnonymousSales()) ||
+      this.customerRequiredByAddress(),
   );
 
   /**
    * El paso Cliente no se puede abandonar sin cliente, por cualquiera de sus dos
    * razones: hay envío (la dirección lo exige) o la tienda prohíbe ventas
-   * anónimas ({@link customerRequiredByPolicy}). Alimenta el badge
-   * "Obligatorio" y el aviso inline del panel Cliente.
+   * anónimas ({@link customerRequiredByPolicy}) sin el escape hatch POS abierto.
+   * Alimenta el badge "Obligatorio" y el aviso inline del panel Cliente.
    */
   readonly customerMandatory = computed<boolean>(
-    () => this.customerRequiredByAddress() || this.customerRequiredByPolicy(),
+    () =>
+      this.customerRequiredByAddress() ||
+      (this.customerRequiredByPolicy() && !this.allowAnonymousSales()),
   );
 
   /**
@@ -431,10 +441,23 @@ export class PosCheckoutShellComponent {
    *  rather than shown-then-rejected. The legacy `pos-order-create-modal`
    *  used to expose it anyway; the backend then returned 422 with
    *  `POS_CUSTOMER_REQUIRED_001`. */
+  /**
+   * Whether the "Venta Anónima" toggle is visible. Driven by the POS
+   * flag `pos.allow_anonymous_sales` — that flag is the canonical source
+   * for whether the cashier can sell without a customer at the POS. We
+   * intentionally ignore `settings.checkout.require_customer_data` here
+   * because that flag governs electronic invoicing (DIAN/factura
+   * electrónica), not POS-terminal walk-in sales. The customer-required
+   * gate still fires when the operator tries to save a draft via the
+   * "Guardar" button (the POS-side flag is the policy for that path), so
+   * both flags stay honored at their respective code paths.
+   *
+   * `paymentStep.mode === 'credito'` (installment/credit sale) still
+   * requires a customer because the credit plan attaches to a person.
+   */
   readonly canBeAnonymous = computed<boolean>(
     () =>
       this.allowAnonymousSales() &&
-      !this.customerRequiredByPolicy() &&
       this.paymentStep()?.mode() !== 'credito',
   );
 
@@ -907,8 +930,13 @@ export class PosCheckoutShellComponent {
    */
   onSelectSaleType(anonymous: boolean): void {
     if (anonymous) {
-      if (this.customerRequiredByPolicy()) {
-        // Policy forbids anonymous — force the customer path.
+      // Round 8 — `pos.allow_anonymous_sales=true` is the POS-side escape
+      // hatch: even when `checkout.require_customer_data=true` (which
+      // governs ecommerce + electronic invoicing), the cashier may sell
+      // without a customer from the POS. Mirror the backend gate: refuse
+      // anonymous ONLY when the policy forbids it AND the POS flag is off.
+      if (this.customerRequiredByPolicy() && !this.allowAnonymousSales()) {
+        // Policy forbids anonymous AND POS doesn't allow it — force Con Cliente.
         this.toggleAnonymousSale(false);
         this.goToClienteSubStep(1);
         return;
@@ -1187,7 +1215,14 @@ export class PosCheckoutShellComponent {
     // The customer-id gate is enforced here as a defensive UI guard: the
     // backend is authoritative and will return `POS_CUSTOMER_REQUIRED_001`,
     // but failing locally saves a round-trip and keeps the cashier oriented.
-    if (!state.customer || state.customer.id == null) {
+    // Anonymous sales skip the customer gate when the policy allows them:
+    // `pos.allow_anonymous_sales=true` is the POS-side source for the
+    // cashier; `settings.checkout.require_customer_data` is enforced by the
+    // backend separately.
+    if (
+      !this.isAnonymousSale() &&
+      (!state.customer || state.customer.id == null)
+    ) {
       this.submittingDraft.set(false);
       this.toastService.error(
         'Selecciona o crea un cliente antes de guardar la orden.',
@@ -1195,8 +1230,16 @@ export class PosCheckoutShellComponent {
       return;
     }
 
+    // Anonymous draft: the shell flags the sale as anonymous but the parent's
+    // cartState.customer may still hold a previously-picked customer. We clone
+    // the cart with customer=null so the backend stores the draft without a
+    // customer row (Consumidor Final), per the existing saveDraft contract.
+    const draftState = this.isAnonymousSale()
+      ? { ...state, customer: null }
+      : state;
+
     this.paymentService
-      .saveDraft(state, 'current_user')
+      .saveDraft(draftState, 'current_user')
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res: any) => {
