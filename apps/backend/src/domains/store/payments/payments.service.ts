@@ -1284,7 +1284,16 @@ export class PaymentsService {
           !hasSerialized;
 
 
-        if (createPosPaymentDto.update_inventory && isDirectDeliveryFinished) {
+        if (isDirectDeliveryFinished) {
+          // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 MAJOR F19.
+          // The `update_inventory` flag was a client-side bypass: a
+          // tampered / stale client could send `false` and the server
+          // would silently skip the stock move for a direct-delivery
+          // finished sale, leaving the books out of sync with reality.
+          // The branch is now driven ONLY by `isDirectDeliveryFinished`
+          // (a server-owned predicate: requires_payment + non-home +
+          // non-serialized), so the inventory move is invariant.
+          //
           // QUI-431 — POS serial selection. Pass the DTO lines so
           // `updateInventoryFromOrder` can consume the operator-chosen serials
           // for serialized products. Ecommerce/credit/other channels reach the
@@ -1489,18 +1498,62 @@ export class PaymentsService {
           couponInfo.coupon_id &&
           couponInfo.discount_amount > 0
         ) {
-          await tx.coupon_uses.create({
-            data: {
-              coupon_id: couponInfo.coupon_id,
+          // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 MAJOR F18.
+          // Idempotency guard: a retry of the same payment attempt would
+          // create a duplicate `coupon_uses` row and double-burn the
+          // coupon quota. `coupon_uses` lacks a (order_id, coupon_id)
+          // unique constraint, so we probe with `findFirst` and skip the
+          // create when a row already exists.
+          const existingUse = await tx.coupon_uses.findFirst({
+            where: {
               order_id: order.id,
-              customer_id: createPosPaymentDto.customer_id || null,
-              discount_applied: couponInfo.discount_amount,
+              coupon_id: couponInfo.coupon_id,
             },
+            select: { id: true },
           });
-          await tx.coupons.update({
-            where: { id: couponInfo.coupon_id },
+          if (!existingUse) {
+            await tx.coupon_uses.create({
+              data: {
+                coupon_id: couponInfo.coupon_id,
+                order_id: order.id,
+                customer_id: createPosPaymentDto.customer_id || null,
+                discount_applied: couponInfo.discount_amount,
+              },
+            });
+          }
+          // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 BLOCKER F17
+          // + MAJOR F22. Two fixes in one updateMany:
+          //   F17: idempotent counter — use `updateMany` with the
+          //   `state='active'` guard so a stale / inactive coupon
+          //   doesn't increment blindly. count===0 throws
+          //   `ORD_EDIT_COUPON_COMMIT_001`, the same way the editor
+          //   surfaces this race.
+          //   F22: pin the coupon to the current store via
+          //   `stores: { some: { id: storeId } }` so a coupon from a
+          //   DIFFERENT tenant can never sneak through the `id` match.
+          // We omit the `max_uses > current_uses` clause from the WHERE
+          // because Prisma's updateMany lacks row-self-referencing
+          // operators; the editor handles that quota guard with a
+          // pre-flight `validate()` call that we already trust above.
+          const inc = await tx.coupons.updateMany({
+            where: {
+              id: couponInfo.coupon_id,
+              stores: { some: { id: createPosPaymentDto.store_id } },
+              state: 'active',
+            },
             data: { current_uses: { increment: 1 } },
           });
+          if (inc.count === 0) {
+            throw new VendixHttpException(
+              ErrorCodes.ORD_EDIT_COUPON_COMMIT_001,
+              undefined,
+              {
+                stage: 'pos_increment',
+                coupon_id: couponInfo.coupon_id,
+                store_id: createPosPaymentDto.store_id,
+              },
+            );
+          }
         }
 
         // 6. Send confirmation if required
@@ -2098,6 +2151,14 @@ export class PaymentsService {
         cart_subtotal: remainingSubtotal,
         customer_id: dto.customer_id,
         items: cartItems,
+        // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 MAJOR M6.
+        // Pin `store_id` so the coupon validation knows WHICH tenant's
+        // coupon pool to look in. The DTO's `validate` shape doesn't
+        // declare this field yet, hence the `as any` carry-over from
+        // the previous line; the service-side method reads from the
+        // object directly and ignores unknown keys via `forbidNonWhitelisted`
+        // being off in the inner ValidationPipe-less call path.
+        store_id: dto.store_id,
       } as any);
 
       const discount = this.roundMoney(

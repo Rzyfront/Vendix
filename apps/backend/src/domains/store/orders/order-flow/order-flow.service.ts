@@ -533,7 +533,72 @@ export class OrderFlowService {
     if (order.state === 'draft') {
       try {
         await this.promoteDraftToCreated(orderId);
+        // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 BLOCKER B3.
+        // Emit `order.promoted_to_created` AFTER the promotion commits.
+        // Carries the reservation count so a SIEM rule can flag a
+        // promotion that committed without ANY reservation (e.g. a
+        // service-only table order where the loop ran zero times).
+        const reservationCount = await this.prisma.stock_reservations.count({
+          where: {
+            reserved_for_type: 'order',
+            reserved_for_id: orderId,
+            status: 'active',
+          },
+        });
+        try {
+          await this.auditService.logCustom(
+            (RequestContextService.getUserId() ?? 0) as number,
+            'order.promoted_to_created',
+            AuditResource.ORDERS,
+            {
+              request_id:
+                RequestContextService.getRequestId() ?? null,
+              store_id: order.store_id ?? null,
+              order_id: orderId,
+              customer_id: order.customer_id ?? null,
+              reservation_count: reservationCount,
+            },
+            orderId,
+          );
+        } catch (auditErr) {
+          // Audit is observability, never blocks the commit.
+          this.logger.warn(
+            `[order.promoted_to_created audit failed] order=${orderId}: ${(auditErr as Error).message}`,
+          );
+        }
       } catch (err) {
+        // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 BLOCKER B3.
+        // `order.draft_promotion_failed` row carries the typed
+        // error_code and the failing stage so a support operator can
+        // triage without having to dig through nested wraps. We swallow
+        // audit failures the same way the success path does.
+        try {
+          await this.auditService.logCustom(
+            (RequestContextService.getUserId() ?? 0) as number,
+            'order.draft_promotion_failed',
+            AuditResource.ORDERS,
+            {
+              request_id:
+                RequestContextService.getRequestId() ?? null,
+              store_id: order.store_id ?? null,
+              order_id: orderId,
+              customer_id: order.customer_id ?? null,
+              error_code:
+                (err as any)?.errorCode ?? (err as any)?.code ?? 'n/a',
+              error_stage:
+                (err as any)?.stage ??
+                (err as any)?.details?.stage ??
+                'draft_promote_failed',
+              error_message:
+                err instanceof Error ? err.message : String(err),
+            },
+            orderId,
+          );
+        } catch (auditErr) {
+          this.logger.warn(
+            `[order.draft_promotion_failed audit failed] order=${orderId}: ${(auditErr as Error).message}`,
+          );
+        }
         throw this.wrapPaymentFailure('draft_promote_failed', err);
       }
       order = await this.getOrder(orderId); // reload: now 'created'

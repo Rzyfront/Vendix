@@ -526,9 +526,18 @@ export class OrdersService {
 
   async findOne(id: number) {
     // Auto-scoped by StorePrismaService
+    //
+    // Round 2 MAJOR · defense-in-depth: pin the WHERE with `store_id` from
+    // the request context so a missing/bypassed scope filter on
+    // `orders.findFirst` never crosses a tenant boundary. The scoped
+    // Prisma service already filters by `store_id` for STORE-scoped
+    // callers, but this anchor makes the isolation explicit at the read
+    // site — and survives a future refactor that drops the auto-scope.
+    const context = RequestContextService.getContext();
     const order = await this.prisma.orders.findFirst({
       where: {
         id,
+        ...(context?.store_id ? { store_id: context.store_id } : {}),
       },
       include: {
         stores: { select: { id: true, name: true, store_code: true } },
@@ -1577,8 +1586,17 @@ export class OrdersService {
         priceUnits.priceUnitByIndex[i] ?? quantity;
       const lineTotal = roundMoney(unitBase * priceUnitsQty);
       recalculatedSubtotal = roundMoney(recalculatedSubtotal + lineTotal);
+      // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 BLOCKER F16.
+      // `tax_amount_item` is a PER-UNIT snapshot. The previous version
+      // summed it directly into `recalculatedTax`, which silently
+      // under-counted the tax for any line with `quantity > 1` — an
+      // editor that just bumped quantities would persist a tax_amount
+      // that didn't match the order_item rows the same editor just
+      // wrote. Match the POS pattern (`pos-payment.service.ts:148-151`)
+      // and multiply by `quantity` so the totals reconcile.
       recalculatedTax = roundMoney(
-        recalculatedTax + Number(item.tax_amount_item || 0),
+        recalculatedTax +
+          Number(item.tax_amount_item || 0) * quantity,
       );
     }
     if (priceUnits.adjusted > 0) {
@@ -1658,6 +1676,12 @@ export class OrdersService {
       grand_total: Number(existingOrder.grand_total),
       coupon_id: existingOrder.coupon_id,
       coupon_code: existingOrder.coupon_code,
+      // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 MAJOR #15.
+      // Customer swaps were invisible in the audit timeline because
+      // before/after totals only carried the money fields. Persist
+      // `customer_id` on both sides so a re-enactment query can pin
+      // the moment the order changed hands (legal & tax-relevant).
+      customer_id: existingOrder.customer_id ?? null,
     };
 
     // 13) Transacción atómica: claim + replace items + order_promotions +
@@ -2254,7 +2278,13 @@ export class OrdersService {
           order_id: orderId,
           store_id: storeId,
           request_id: requestId,
+          // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 MAJOR #14.
+          // Surface `customer_id_before` so SIEM rules that grep for
+          // "customer switched" can match without diffing the totals
+          // block. The same id is also persisted in `before_totals` /
+          // `after_totals` for re-enactment queries.
           customer_id: dto.customer_id,
+          customer_id_before: existingOrder.customer_id ?? null,
           item_count: dto.items.length,
           before_totals: beforeTotals,
           after_totals: {
@@ -2265,6 +2295,11 @@ export class OrdersService {
             grand_total: grandTotal,
             coupon_id: couponId,
             coupon_code: requestedCode || null,
+            // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 MAJOR #15.
+            // Mirror `customer_id` on the after side so the row is
+            // self-contained: a reader that only looks at `after_totals`
+            // gets the new owner without having to JOIN against `orders`.
+            customer_id: dto.customer_id ?? null,
           },
           is_draft: isDraft,
           coupon_changed: couponChanged,

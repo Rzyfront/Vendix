@@ -265,7 +265,14 @@ export class StoreOrdersService {
   getOrderById(orderId: string): Observable<Order> {
     const url = `${this.apiUrl}/store/orders/${orderId}`;
 
-    return this.http.get<Order>(url).pipe(
+    // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 MAJOR.
+    // Backend wraps successful responses in `{ success, data, message }`
+    // via `ResponseService.success`, so a raw `this.http.get<Order>` left
+    // every consumer reading `result.id` and getting `undefined`. The
+    // `map` unwraps `data` while preserving the raw envelope for any
+    // caller that still wants it (`(r as any).data ?? r`).
+    return this.http.get<any>(url).pipe(
+      map((r) => (r?.data ?? r) as Order),
       catchError((error) => {
         console.error('Error fetching order:', error);
         return throwError(() => this.buildApiError(error));
