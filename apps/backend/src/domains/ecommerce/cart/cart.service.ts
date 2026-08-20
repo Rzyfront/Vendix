@@ -102,11 +102,26 @@ export class CartService {
       scope: 'order' | 'product' | 'category';
       discount_amount: number;
     }> = [];
+    let per_product_tier_ladder:
+      | Array<{
+          promotion_id: number;
+          target_product_id: number;
+          tiers: Array<{
+            min_quantity: number;
+            max_quantity: number | null;
+            type: 'percentage' | 'fixed_amount';
+            value: number;
+            sort_order: number;
+          }>;
+          current_tier_index: number | null;
+        }>
+      | undefined;
     try {
       const summary = await this.getCartSummary();
       promotion_discount = summary.promotion_discount;
       promotional_subtotal = summary.promotional_subtotal;
       applied_promotions = summary.applied_promotions;
+      per_product_tier_ladder = summary.per_product_tier_ladder;
     } catch (error) {
       this.logger.warn(
         `Failed to resolve cart promotions summary: ${error?.message ?? error}`,
@@ -118,6 +133,12 @@ export class CartService {
       promotion_discount,
       promotional_subtotal,
       applied_promotions,
+      // Conditional spread: omit the field when no tiered promos survived
+      // the filter in `getCartSummary`. Cart UI gets the SAME shape across
+      // auth and guest paths because both delegates to `getCartSummary`.
+      ...(per_product_tier_ladder
+        ? { per_product_tier_ladder }
+        : {}),
     };
   }
 
@@ -945,6 +966,28 @@ export class CartService {
       benefit_type: 'percentage' | 'fixed_amount';
       benefit_value: number;
     }>;
+    /**
+     * Per-product tier ladder for the promotions that already touched the
+     * cart. Surfaced so the cart UI can render the full ladder next to each
+     * line ("Lleva 3 → -10% · Lleva 6 → -15% …") without re-querying the
+     * backend. Same shape as `ActiveProductPromotion.quantity_tiers`
+     * (`QuantityTierSummary[]`), plus the index of the tier the current
+     * quantity is sitting on (`null` when the cart has fewer units than
+     * the first threshold). Omitted from the response when the cart has
+     * no quantity_tiered promotions in scope.
+     */
+    per_product_tier_ladder?: Array<{
+      promotion_id: number;
+      target_product_id: number;
+      tiers: Array<{
+        min_quantity: number;
+        max_quantity: number | null;
+        type: 'percentage' | 'fixed_amount';
+        value: number;
+        sort_order: number;
+      }>;
+      current_tier_index: number | null;
+    }>;
   }> {
     // Auth users: prefer the backend cart so quantities are server-side
     // canonical. Guests: use the DTO items array as the source of truth.
@@ -1147,6 +1190,77 @@ export class CartService {
       customer_id: RequestContextService.getUserId() ?? null,
     });
 
+    // Per-product tier ladder for promotions that touched this cart. Fed by
+    // `getTierLaddersForQuote`, which fans out one batched read of
+    // `promotion_quantity_tiers` plus `promotion_products` and returns one
+    // entry per (promotion_id, target_product_id). We narrow the result to
+    // promos that already have items in scope — the SAME
+    // `(promotion_id, target_product_id)` pairs that `tier_progress` named,
+    // which keeps the ladder consistent with the "next tier" nudge the
+    // customer is already seeing. Without this filter the engine would emit
+    // ladders for EVERY tiered promo with `promotion_products`, even when
+    // the cart has no relevant line — and the UI would render orphan
+    // ladders. Wrapped in try/catch so a failed tier read NEVER breaks the
+    // cart: log WARN and continue with the field omitted.
+    let per_product_tier_ladder:
+      | Array<{
+          promotion_id: number;
+          target_product_id: number;
+          tiers: Array<{
+            min_quantity: number;
+            max_quantity: number | null;
+            type: 'percentage' | 'fixed_amount';
+            value: number;
+            sort_order: number;
+          }>;
+          current_tier_index: number | null;
+        }>
+      | undefined;
+    try {
+      const promotionIds = Array.from(
+        new Set<number>([
+          ...quote.applied_promotions.map((p) => Number(p.promotion_id)),
+          ...quote.tier_progress.map((t) => Number(t.promotion_id)),
+        ]),
+      );
+      if (promotionIds.length > 0) {
+        const ladders =
+          await this.promotionEngine.getTierLaddersForQuote(
+            promotionIds,
+            resolvedItems.map((i) => ({
+              product_id: i.product_id,
+              quantity: i.quantity,
+            })),
+          );
+        // Keep only ladders whose (promotion_id, target_product_id) is also
+        // named by `tier_progress`. This matches the engine's "items in
+        // scope" gate and prevents rendering orphan ladders when the cart
+        // has no qualifying line.
+        const scopedPairs = new Set<string>(
+          quote.tier_progress
+            .map((t) =>
+              t.target_product_id != null
+                ? `${Number(t.promotion_id)}:${Number(t.target_product_id)}`
+                : null,
+            )
+            .filter((k): k is string => k !== null),
+        );
+        const filtered = ladders.filter((l) =>
+          scopedPairs.has(
+            `${Number(l.promotion_id)}:${Number(l.target_product_id)}`,
+          ),
+        );
+        if (filtered.length > 0) {
+          per_product_tier_ladder = filtered;
+        }
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to resolve cart per_product_tier_ladder: ${error?.message ?? error}`,
+      );
+      // Leave the field undefined: cart must keep serving 200.
+    }
+
     // Pre-fetch category names only if any applied promotion has scope
     // 'category'. Avoids the join when not needed.
     const appliedCategories = quote.applied_promotions.filter(
@@ -1257,6 +1371,13 @@ export class CartService {
       // Each entry may include `target_product_id` (populated by the engine
       // for `per_product` promos) which the banner uses to name the SKU.
       tier_progress: quote.tier_progress,
+      // Conditional spread: omit the field when no ladders survive the
+      // (promotion_id, target_product_id) filter above. Empty array and
+      // absent field are distinguishable in the JSON response (the latter
+      // is what the cart UI sees when the cart has no tiered promos).
+      ...(per_product_tier_ladder
+        ? { per_product_tier_ladder }
+        : {}),
     };
   }
 }
