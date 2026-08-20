@@ -21,7 +21,7 @@ import {
   type BadgeSize,
 } from '../badge/badge.component';
 import { IconComponent } from '../icon/icon.component';
-import { CurrencyPipe } from '../../pipes/currency';
+import { CurrencyPipe, CurrencyFormatService } from '../../pipes/currency';
 
 /**
  * Modo de presentación del stack de promos.
@@ -57,7 +57,6 @@ export interface PromotionStackItem {
   scope?: PromotionScope;
   min_quantity?: number;
   max_quantity?: number | null;
-  discount_preview?: number;
   tier_index?: number;
   target_product_name?: string | null;
   /** Solo usado en `scroll-batch`. */
@@ -96,6 +95,7 @@ export interface PromotionStackItem {
 })
 export class PromotionStackComponent {
   private readonly destroyRef = inject(DestroyRef);
+  private readonly currencyFormat = inject(CurrencyFormatService);
 
   // ── Inputs (signal-input API) ─────────────────────────────────────────
   readonly items = input<PromotionStackItem[]>([]);
@@ -108,11 +108,16 @@ export class PromotionStackComponent {
 
   // ── Outputs (signal-output API) ──────────────────────────────────────
   /**
-   * Emite cuando un item entra al viewport del carrusel (`scroll-batch`)
-   * o cuando se monta un tier activo (`expanded-cards`). Útil para
-   * analíticas de exposición de promociones.
+   * Emitted when a stack becomes visible (scroll-batch) or a tier
+   * boundary is crossed (expanded-cards). Útil para analíticas de
+   * exposición de promociones.
    *
    * En `compact-pills` no emite (todos los items son visibles a la vez).
+   *
+   * REQUIRES an external sink (analytics service, telemetry) — see
+   * consumers in catalog.component.ts, product-detail.component.ts,
+   * cart-promotions.component.ts. If no sink is wired, events are
+   * emitted and discarded.
    */
   readonly promotionViewed = output<{
     promotion_id: string | number;
@@ -125,6 +130,11 @@ export class PromotionStackComponent {
    * nivel y la `quantity` que disparó el cruce.
    *
    * Solo aplica en `expanded-cards`.
+   *
+   * REQUIRES an external sink (analytics service, telemetry) — see
+   * consumers in catalog.component.ts, product-detail.component.ts,
+   * cart-promotions.component.ts. If no sink is wired, events are
+   * emitted and discarded.
    */
   readonly promotionIntent = output<{
     promotion_id: string | number;
@@ -308,7 +318,7 @@ export class PromotionStackComponent {
       return `${item.value}% de descuento`;
     }
     if (item.type === 'fixed_amount' && item.value !== undefined) {
-      return `${item.value} de descuento`;
+      return `${this.currencyFormat.format(item.value)} de descuento`;
     }
     if (item.type === 'coupon') return 'Cupón especial';
     if (item.type === 'order') return 'Promoción sobre el pedido';
