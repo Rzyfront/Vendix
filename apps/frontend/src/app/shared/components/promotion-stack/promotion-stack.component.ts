@@ -12,7 +12,7 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
-import { NgClass } from '@angular/common';
+import { NgClass, NgSwitch, NgSwitchCase, NgSwitchDefault } from '@angular/common';
 
 import {
   BadgeComponent,
@@ -90,7 +90,7 @@ export interface PromotionStackItem {
   selector: 'app-promotion-stack',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgClass, BadgeComponent, IconComponent, CurrencyPipe],
+  imports: [NgClass, NgSwitch, NgSwitchCase, NgSwitchDefault, BadgeComponent, IconComponent, CurrencyPipe],
   templateUrl: './promotion-stack.component.html',
   styleUrl: './promotion-stack.component.scss',
 })
