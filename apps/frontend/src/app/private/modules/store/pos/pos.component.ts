@@ -1421,7 +1421,7 @@ export class PosComponent {
   onSaveDraft(): void {
     const cart = this.cartState();
     if (!cart || this.isEmpty) {
-      this.toastService.warning(this.emptyCartMessage);
+      this.toastService.warning(EMPTY_CART_MESSAGE);
       return;
     }
     this.loading.set(true);
