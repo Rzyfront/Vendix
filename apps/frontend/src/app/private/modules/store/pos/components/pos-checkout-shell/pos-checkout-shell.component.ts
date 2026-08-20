@@ -1200,7 +1200,14 @@ export class PosCheckoutShellComponent {
     // The customer-id gate is enforced here as a defensive UI guard: the
     // backend is authoritative and will return `POS_CUSTOMER_REQUIRED_001`,
     // but failing locally saves a round-trip and keeps the cashier oriented.
-    if (!state.customer || state.customer.id == null) {
+    // Anonymous sales skip the customer gate when the policy allows them:
+    // `pos.allow_anonymous_sales=true` is the POS-side source for the
+    // cashier; `settings.checkout.require_customer_data` is enforced by the
+    // backend separately.
+    if (
+      !this.isAnonymousSale() &&
+      (!state.customer || state.customer.id == null)
+    ) {
       this.submittingDraft.set(false);
       this.toastService.error(
         'Selecciona o crea un cliente antes de guardar la orden.',
@@ -1208,8 +1215,16 @@ export class PosCheckoutShellComponent {
       return;
     }
 
+    // Anonymous draft: the shell flags the sale as anonymous but the parent's
+    // cartState.customer may still hold a previously-picked customer. We clone
+    // the cart with customer=null so the backend stores the draft without a
+    // customer row (Consumidor Final), per the existing saveDraft contract.
+    const draftState = this.isAnonymousSale()
+      ? { ...state, customer: null }
+      : state;
+
     this.paymentService
-      .saveDraft(state, 'current_user')
+      .saveDraft(draftState, 'current_user')
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res: any) => {

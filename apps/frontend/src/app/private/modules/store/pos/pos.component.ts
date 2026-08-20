@@ -1408,61 +1408,34 @@ export class PosComponent {
   }
 
   /**
-   * CP-POS-CREAR-EDITAR-COBRAR-001 — direct save-draft (skip the checkout
-   * shell stepper). The Guardar button persists the order with
-   * `is_draft=true, requires_payment=false` and NEVER opens the payment
-   * step. The Cobrar button uses the full shell wizard.
+   * CP-POS-CREAR-EDITAR-COBRAR-001 — Guardar must open the customer-selection
+   * modal (Venta Anónima / Con Cliente) before persisting the order, like
+   * Cobrar does. The operator chooses the sale type first; the shell's
+   * "Guardar borrador" footer button then calls `paymentService.saveDraft`
+   * with `is_draft=true, requires_payment=false` and NEVER opens the payment
+   * step — the Cobrar button is the only one that drives `flow/pay`.
    *
-   * Honors `settings.checkout.require_customer_data` — if the policy
-   * forbids guest checkout the backend returns POS_CUSTOMER_REQUIRED_001
-   * and we surface that toast. The `pos.allow_anonymous_sales` flag lets
-   * the cashier skip the customer step entirely when set.
+   * Reusing the unified checkout shell (vs. a dedicated customer modal) keeps
+   * the two-button contract on a single component: same Venta Anónima
+   * default from `pos.anonymous_sales_as_default`, same POS-side customer
+   * gate from `pos.allow_anonymous_sales`, same `canBeAnonymous()` guard.
+   * The shell's internal `onSaveDraft` already validates `state.customer` and
+   * surfaces `POS_CUSTOMER_REQUIRED_001` if the backend rejects the request.
    */
   onSaveDraft(): void {
-    const cart = this.cartState();
-    if (!cart || this.isEmpty) {
+    if (!this.cartState() || this.isEmpty) {
       this.toastService.warning(EMPTY_CART_MESSAGE);
       return;
     }
-    this.loading.set(true);
-    this.paymentService
-      .saveDraft(cart, 'current_user')
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (result) => {
-          this.loading.set(false);
-          if (result?.order) {
-            this.currentOrderId.set(
-              result.order.id ? String(result.order.id) : null,
-            );
-            this.currentOrderNumber.set(
-              result.order.order_number ?? null,
-            );
-          }
-          this.cartService
-            .clearCart()
-            .pipe(takeUntilDestroyed(this.destroyRef))
-            .subscribe({
-              next: () => {
-                this.toastService.success(
-                  result?.message || 'Orden guardada (pendiente de cobro)',
-                );
-                this.showOrderConfirmation.set(true);
-              },
-              error: () => {
-                this.toastService.success(
-                  result?.message || 'Orden guardada (pendiente de cobro)',
-                );
-              },
-            });
-        },
-        error: (error: any) => {
-          this.loading.set(false);
-          this.toastService.error(
-            error?.message || 'Error al guardar la orden',
-          );
-        },
-      });
+    // Close the mobile cart modal so the checkout shell is the only
+    // full-screen dialog open at a time.
+    this.showCartModal.set(false);
+    // Phase D.2 — explicit draft-create mode. The shell owns the customer
+    // gate + saveDraft call; the parent just opens it. The (checkoutCompleted)
+    // output stays reserved for the flow-pay path that Cobrar drives.
+    this.mode.set('create-draft');
+    this.checkoutIntent.set('pickup');
+    this.showCheckoutModal.set(true);
   }
 
   /**
