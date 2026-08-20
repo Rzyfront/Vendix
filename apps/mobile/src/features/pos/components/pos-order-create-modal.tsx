@@ -159,7 +159,16 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
         delivery_type: 'direct_delivery',
         internal_notes: notes || undefined,
         update_inventory: false,
-        allow_oversell: true,
+        // NOTA: `allow_oversell` ya NO se manda. El backend lo ignora para
+        // borradores y el rechazo por stock insuficiente viene por
+        // `POS_STOCK_INSUFFICIENT_001`. Enviar `true` aquí era solo
+        // client-intent misleading — el server es la fuente de verdad.
+        // Coupon attachment — el cart store mobile todavía NO trackea cupones
+        // (ver `cart.store.ts`), así que ambos campos quedan undefined. Se
+        // incluyen en el payload para mantener paridad con el DTO y permitir
+        // adopción futura sin tocar el call site.
+        coupon_id: undefined,
+        coupon_code: undefined,
         print_receipt: false,
       };
 
@@ -182,11 +191,26 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
     } catch (err: any) {
       const data = err?.response?.data;
       const errorCode = data?.error_code || data?.code;
+      const requestId = data?.request_id || err?.response?.headers?.['x-request-id'];
       const baseMsg = data?.message || err?.message || 'Error al crear la orden';
       const details = data?.details?.validationErrors;
       const fullMsg = details ? `${baseMsg}: ${details.join(', ')}` : baseMsg;
       const codeSuffix = errorCode ? ` (${errorCode})` : '';
-      toastError(`${fullMsg}${codeSuffix}`);
+      const requestSuffix = requestId ? ` [req=${requestId}]` : '';
+      // Log estructurado para correlacionar el toast del operador con el log
+      // del backend (AllExceptionsFilter guarda el mismo `request_id`).
+      // No leak de PII: solo IDs y códigos de error.
+      // Re-leemos los stores aquí porque `storeId`/`c` están en scope del
+      // `try` y TypeScript no los ve en `catch`.
+      // eslint-disable-next-line no-console
+      console.error('[pos][order-create-modal] failed', {
+        store_id: useTenantStore.getState().storeId ?? useAuthStore.getState().user?.store?.id ?? useAuthStore.getState().user?.main_store_id,
+        customer_id: customer ? Number(customer.id) : undefined,
+        request_id: requestId,
+        error_code: errorCode,
+        status: err?.response?.status,
+      });
+      toastError(`${fullMsg}${codeSuffix}${requestSuffix}`);
       setIsSubmitting(false);
     }
   }, [items, hasCustomer, customer, summary, notes, clearCart, onClose, onCreated, queryClient]);
@@ -217,7 +241,6 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
           style={[styles.container, { paddingBottom: 0 }]}
           accessibilityViewIsModal
           accessibilityLiveRegion="polite"
-          accessibilityRole="alert"
         >
             {/* Header */}
             <View style={styles.header}>

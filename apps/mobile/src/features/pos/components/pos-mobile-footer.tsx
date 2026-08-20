@@ -15,10 +15,24 @@ interface PosMobileFooterProps {
   onCustomItem: () => void;
   /** "Crear" — abre `pos-order-create-modal` (fulfillment + KDS guard). */
   onCreate: () => void;
+  /**
+   * Handler alternativo al "Crear" cuando el footer está en modo edición de
+   * una orden existente (paridad web `updateExistingOrder`). Solo se usa
+   * cuando `isEditMode=true`; el padre lo conecta a `PUT /orders/:id/editor`
+   * para que el botón "Crear" persista los cambios sobre la orden original
+   * en lugar de abrir el modal resumen de un nuevo borrador.
+   */
+  onEdit?: () => void;
   onShipping: () => void;
   /** Handler del CTA primario. Varía por modo: Cobrar / Crear cotización / Crear plan separé. */
   onPrimaryCta: () => void;
   canCreateCustomItems?: boolean;
+  /**
+   * `true` cuando hay una orden existente cargada en el carrito (edición de
+   * draft o de orden pendiente). Cambia la etiqueta del botón "Crear" a
+   * "Guardar cambios" y dispara `onEdit` en lugar de `onCreate`.
+   */
+  isEditMode?: boolean;
 }
 
 // ── Mode-aware primary CTA metadata (paridad con `pos.component.ts` web) ──
@@ -59,14 +73,22 @@ export function PosMobileFooter({
   onViewCart,
   onCustomItem,
   onCreate,
+  onEdit,
   onShipping,
   onPrimaryCta,
   canCreateCustomItems = false,
+  isEditMode = false,
 }: PosMobileFooterProps) {
   const insets = useSafeAreaInsets();
   if (itemCount === 0) return null;
 
   const cta = PRIMARY_CTA_META[mode];
+  const isEditing = isEditMode && typeof onEdit === 'function';
+  const createLabel = isEditing ? 'Guardar cambios' : 'Crear';
+  const handleCreatePress = isEditing ? onEdit : onCreate;
+  const createA11yLabel = isEditing
+    ? 'Guardar cambios sobre la orden existente'
+    : 'Crear nueva orden borrador';
 
   return (
     <View style={[styles.footer, { paddingBottom: insets.bottom + 10 }]}>
@@ -93,6 +115,8 @@ export function PosMobileFooter({
         <Pressable
           style={styles.viewDetailBtn}
           onPress={onViewCart}
+          accessibilityRole="button"
+          accessibilityLabel="Ver detalle del carrito"
         >
           <Text style={styles.viewDetailText}>Ver detalle</Text>
           <Icon name="chevron-up" size={16} color={colorScales.gray[500]} />
@@ -105,6 +129,9 @@ export function PosMobileFooter({
           style={[styles.actionBtn, styles.customItemBtn]}
           onPress={onCustomItem}
           disabled={!canCreateCustomItems}
+          accessibilityRole="button"
+          accessibilityLabel="Agregar ítem personalizado"
+          accessibilityState={{ disabled: !canCreateCustomItems }}
         >
           <Icon name="file-plus" size={16} color={colors.primary} />
           <Text style={[styles.actionText, styles.customItemText]}>Ítem</Text>
@@ -112,15 +139,19 @@ export function PosMobileFooter({
 
         <Pressable
           style={[styles.actionBtn, styles.createBtn]}
-          onPress={onCreate}
+          onPress={handleCreatePress}
+          accessibilityRole="button"
+          accessibilityLabel={createA11yLabel}
         >
           <Icon name="plus-circle" size={16} color={colorScales.gray[700]} />
-          <Text style={styles.actionText}>Crear</Text>
+          <Text style={styles.actionText}>{createLabel}</Text>
         </Pressable>
 
         <Pressable
           style={[styles.actionBtn, styles.shippingBtn]}
           onPress={onShipping}
+          accessibilityRole="button"
+          accessibilityLabel="Crear pedido con envío a domicilio"
         >
           <Icon name="truck" size={16} color={colors.primary} />
           <Text style={[styles.actionText, styles.shippingText]}>Envío</Text>
@@ -131,6 +162,15 @@ export function PosMobileFooter({
       <Pressable
         style={[styles.checkoutBtn, { backgroundColor: cta.bg, shadowColor: cta.shadow }]}
         onPress={onPrimaryCta}
+        accessibilityRole="button"
+        accessibilityLabel={cta.label}
+        accessibilityHint={
+          mode === 'sale'
+            ? 'Procesa el cobro de la venta actual'
+            : mode === 'quotation'
+              ? 'Genera una cotización con los productos del carrito'
+              : 'Inicia la configuración de un plan separé'
+        }
       >
         <Icon name={cta.icon} size={18} color="#FFFFFF" />
         <Text style={styles.checkoutText}>{cta.label}</Text>

@@ -243,7 +243,16 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
         delivery_type: 'direct_delivery',
         internal_notes: state.notes || undefined,
         update_inventory: false,
-        allow_oversell: true,
+        // NOTA: `allow_oversell` ya NO se manda. El backend lo ignora para
+        // borradores y para cobros sin stock el rechazo viene por
+        // `POS_STOCK_INSUFFICIENT_001`. Enviar `true` aquí era solo
+        // client-intent misleading — el server es la fuente de verdad.
+        // Coupon attachment — el cart store mobile todavía NO trackea cupones
+        // (ver `cart.store.ts`), así que ambos campos quedan undefined. Se
+        // incluyen en el payload para mantener paridad con el DTO y permitir
+        // adopción futura sin tocar el call site.
+        coupon_id: undefined,
+        coupon_code: undefined,
         print_receipt: false,
       };
 
@@ -259,10 +268,27 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
       toastSuccess('Guardado correctamente');
     } catch (err: any) {
       const data = err?.response?.data;
+      const errorCode = data?.error_code || data?.code;
+      const requestId = data?.request_id || err?.response?.headers?.['x-request-id'];
       const baseMsg = data?.message || err?.message || 'Error al guardar';
       const details = data?.details?.validationErrors;
       const fullMsg = details ? `${baseMsg}: ${details.join(', ')}` : baseMsg;
-      toastError(fullMsg);
+      const codeSuffix = errorCode ? ` (${errorCode})` : '';
+      const requestSuffix = requestId ? ` [req=${requestId}]` : '';
+      // Log estructurado para correlacionar el toast del operador con el log
+      // del backend (AllExceptionsFilter guarda el mismo `request_id`).
+      // No leak de PII: solo IDs y códigos de error.
+      // Re-leemos los stores aquí porque `storeId`/`customer` están en scope
+      // del `try` y TypeScript no los ve en `catch`.
+      // eslint-disable-next-line no-console
+      console.error('[pos][payment-modal][saveDraft] failed', {
+        store_id: useTenantStore.getState().storeId ?? useAuthStore.getState().user?.store?.id ?? useAuthStore.getState().user?.main_store_id,
+        customer_id: state.customer ? Number(state.customer.id) : undefined,
+        request_id: requestId,
+        error_code: errorCode,
+        status: err?.response?.status,
+      });
+      toastError(`${fullMsg}${codeSuffix}${requestSuffix}`);
     } finally {
       setIsProcessing(false);
     }
@@ -343,7 +369,9 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
         requires_payment: true,
         delivery_type: 'direct_delivery',
         update_inventory: true,
-        allow_oversell: true,
+        // NOTA: `allow_oversell` ya NO se manda. El backend lo ignora y el
+        // rechazo de stock insuficiente viene por `POS_STOCK_INSUFFICIENT_001`.
+        // Enviar `true` aquí era solo client-intent misleading.
         payment_form: paymentForm === 'contado' ? '1' : '2',
         internal_notes: state.notes || undefined,
         print_receipt: false,
@@ -367,9 +395,25 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
       // verbatim para que el operador sepa qué falló y el soporte tenga
       // // referencia directa en logs.
       const errorCode = data?.error_code || data?.code;
+      const requestId = data?.request_id || err?.response?.headers?.['x-request-id'];
       const baseMsg = data?.message || err?.message || 'Error al procesar el pago';
       const codeSuffix = errorCode ? ` (${errorCode})` : '';
-      toastError(`${baseMsg}${codeSuffix}`);
+      const requestSuffix = requestId ? ` [req=${requestId}]` : '';
+      // Log estructurado para correlacionar el toast del operador con el log
+      // del backend (AllExceptionsFilter guarda el mismo `request_id`).
+      // No leak de PII: solo IDs y códigos de error.
+      // Re-leemos los stores aquí porque `storeId`/`customer` están en scope
+      // del `try` y TypeScript no los ve en `catch`.
+      // eslint-disable-next-line no-console
+      console.error('[pos][payment-modal][processPayment] failed', {
+        store_id: useTenantStore.getState().storeId ?? useAuthStore.getState().user?.store?.id ?? useAuthStore.getState().user?.main_store_id,
+        customer_id: state.customer ? Number(state.customer.id) : undefined,
+        payment_method_id: selectedMethod?.id,
+        request_id: requestId,
+        error_code: errorCode,
+        status: err?.response?.status,
+      });
+      toastError(`${baseMsg}${codeSuffix}${requestSuffix}`);
     } finally {
       setIsProcessing(false);
     }
@@ -386,7 +430,6 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
       style={[styles.overlay, { paddingTop: insets.top }]}
       accessibilityViewIsModal
       accessibilityLiveRegion="polite"
-      accessibilityRole="alert"
     >
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -490,10 +533,16 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
               {/* Forma de Pago */}
               <View style={styles.subSection}>
                 <Text style={styles.subSectionLabel}>Forma de Pago</Text>
-                <View style={styles.tabHeaders}>
+                <View
+                  style={styles.tabHeaders}
+                  accessibilityRole="tablist"
+                >
                   <Pressable
                     style={[styles.tabBtn, paymentForm === 'contado' && styles.tabBtnActive]}
                     onPress={() => setPaymentForm('contado')}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: paymentForm === 'contado' }}
+                    accessibilityLabel="Pago de contado"
                   >
                     <Icon name="zap" size={16} color={paymentForm === 'contado' ? '#FFFFFF' : colorScales.gray[600]} />
                     <Text style={[styles.tabBtnText, paymentForm === 'contado' && styles.tabBtnTextActive]}>
@@ -503,6 +552,9 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
                   <Pressable
                     style={[styles.tabBtn, paymentForm === 'credito' && styles.tabBtnActive]}
                     onPress={() => setPaymentForm('credito')}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: paymentForm === 'credito' }}
+                    accessibilityLabel="Pago a crédito"
                   >
                     <Icon name="clock" size={16} color={paymentForm === 'credito' ? '#FFFFFF' : colorScales.gray[600]} />
                     <Text style={[styles.tabBtnText, paymentForm === 'credito' && styles.tabBtnTextActive]}>
@@ -688,6 +740,9 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
                               key={c.id}
                               style={styles.customerResult}
                               onPress={() => handleSelectCustomer(c)}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Seleccionar cliente ${c.first_name} ${c.last_name ?? ''}`.trim()}
+                              accessibilityHint="Asigna este cliente a la venta actual"
                             >
                               <Icon name="user" size={16} color={colorScales.gray[500]} />
                               <View style={styles.customerResultInfo}>

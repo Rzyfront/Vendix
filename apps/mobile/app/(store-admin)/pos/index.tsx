@@ -2407,6 +2407,12 @@ const PosScreen = () => {
   const cartItems = useCartStore((s) => s.items);
   const setMode = useCartStore((s) => s.setMode);
   const setCustomer = useCartStore((s) => s.setCustomer);
+  // CP-POS-CREAR-EDITAR-COBRAR-001 — cuando hay un draft cargado en el cart
+  // store (`draftId != null`), el footer del POS está editando una orden
+  // existente: el botón "Crear" debe persistir los cambios sobre el draft
+  // vía `handleSaveDraft`, NO abrir `pos-order-create-modal` (que es para
+  // nuevos borradores).
+  const draftId = useCartStore((s) => (s as any).draftId ?? null);
 
   const { data: products, isLoading } = useQuery({
     queryKey: ['pos-products', search, activeFilters],
@@ -2767,7 +2773,18 @@ const PosScreen = () => {
         delivery_type: 'direct_delivery',
         internal_notes: state.notes || undefined,
         update_inventory: false,
-        allow_oversell: true,
+        // NOTA: `allow_oversell` ya NO se manda. El backend lo ignora para
+        // borradores y para cobros sin stock el rechazo viene por
+        // `POS_STOCK_INSUFFICIENT_001`. Enviar `true` aquí era solo
+        // client-intent misleading — el server es la fuente de verdad.
+        // El DTO sigue aceptándolo (`forbidNonWhitelisted: true`) pero el
+        // mobile ya no declara la intención.
+        // Coupon attachment — el cart store mobile todavía NO trackea cupones
+        // (ver `cart.store.ts`), así que ambos campos quedan undefined. Se
+        // incluyen en el payload para mantener paridad con el DTO y permitir
+        // adopción futura sin tocar el call site.
+        coupon_id: undefined,
+        coupon_code: undefined,
         print_receipt: false,
       };
 
@@ -2782,11 +2799,26 @@ const PosScreen = () => {
     } catch (error: any) {
       const data = error?.response?.data;
       const errorCode = data?.error_code || data?.code;
+      const requestId = data?.request_id || error?.response?.headers?.['x-request-id'];
       const baseMsg = data?.message || error?.message || 'Error al guardar';
       const details = data?.details?.validationErrors;
       const fullMsg = details ? `${baseMsg}: ${details.join(', ')}` : baseMsg;
       const codeSuffix = errorCode ? ` (${errorCode})` : '';
-      toastError(`${fullMsg}${codeSuffix}`);
+      const requestSuffix = requestId ? ` [req=${requestId}]` : '';
+      // Log estructurado para correlacionar el toast del operador con el log
+      // del backend (AllExceptionsFilter guarda el mismo `request_id`).
+      // No leak de PII: solo IDs y códigos de error.
+      // Re-leemos los stores aquí porque `storeId`/`customer` están en scope
+      // del `try` y TypeScript no los ve en `catch`.
+      // eslint-disable-next-line no-console
+      console.error('[pos][saveDraft] failed', {
+        store_id: useTenantStore.getState().storeId ?? useAuthStore.getState().user?.store?.id ?? useAuthStore.getState().user?.main_store_id,
+        customer_id: customer ? Number(customer.id) : undefined,
+        request_id: requestId,
+        error_code: errorCode,
+        status: error?.response?.status,
+      });
+      toastError(`${fullMsg}${codeSuffix}${requestSuffix}`);
     } finally {
       setSavingDraft(false);
     }
@@ -2962,8 +2994,10 @@ const PosScreen = () => {
         onViewCart={() => setShowCartModal(true)}
         onCustomItem={handleCustomItem}
         onCreate={handleCreate}
+        onEdit={handleSaveDraft}
         onShipping={handleShipping}
         onPrimaryCta={handlePrimaryCta}
+        isEditMode={draftId != null}
         canCreateCustomItems
       />
 

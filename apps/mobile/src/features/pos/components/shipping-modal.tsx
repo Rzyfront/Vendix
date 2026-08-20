@@ -169,7 +169,15 @@ export function ShippingModal({ visible, onClose, onSuccess, onSelectCustomer }:
           .filter(Boolean)
           .join(' | ') || undefined,
         update_inventory: paymentMode === 'pay_now',
-        allow_oversell: true,
+        // NOTA: `allow_oversell` ya NO se manda. El backend lo ignora y el
+        // rechazo por stock insuficiente viene por `POS_STOCK_INSUFFICIENT_001`.
+        // Enviar `true` aquí era solo client-intent misleading.
+        // Coupon attachment — el cart store mobile todavía NO trackea cupones
+        // (ver `cart.store.ts`), así que ambos campos quedan undefined. Se
+        // incluyen en el payload para mantener paridad con el DTO y permitir
+        // adopción futura sin tocar el call site.
+        coupon_id: undefined,
+        coupon_code: undefined,
         print_receipt: false,
         payment_form: paymentForm === 'credito' ? '2' : '1',
         credit_type: paymentForm === 'credito' ? 'installments' : undefined,
@@ -190,10 +198,26 @@ export function ShippingModal({ visible, onClose, onSuccess, onSelectCustomer }:
     } catch (err: any) {
       const data = err?.response?.data;
       const errorCode = data?.error_code || data?.code;
+      const requestId = data?.request_id || err?.response?.headers?.['x-request-id'];
       const apiMsg = data?.message || err?.response?.data?.errors?.[0];
       const detailMsg = err?.message || 'Error al procesar el pedido';
       const codeSuffix = errorCode ? ` (${errorCode})` : '';
-      toastError(`${apiMsg || detailMsg}${codeSuffix}`);
+      const requestSuffix = requestId ? ` [req=${requestId}]` : '';
+      // Log estructurado para correlacionar el toast del operador con el log
+      // del backend (AllExceptionsFilter guarda el mismo `request_id`).
+      // No leak de PII: solo IDs y códigos de error.
+      // eslint-disable-next-line no-console
+      console.error('[pos][shipping-modal] failed', {
+        store_id: storeId,
+        customer_id: customer ? Number(customer.id) : undefined,
+        payment_mode: paymentMode,
+        payment_form: paymentForm,
+        delivery_type: deliveryType,
+        request_id: requestId,
+        error_code: errorCode,
+        status: err?.response?.status,
+      });
+      toastError(`${apiMsg || detailMsg}${codeSuffix}${requestSuffix}`);
     } finally {
       setSaving(false);
     }
@@ -217,7 +241,6 @@ export function ShippingModal({ visible, onClose, onSuccess, onSelectCustomer }:
             onPress={(e) => e.stopPropagation()}
             accessibilityViewIsModal
             accessibilityLiveRegion="polite"
-            accessibilityRole="alert"
           >
         <View style={styles.header}>
           <Text style={styles.title}>Pedido con envío</Text>
@@ -275,10 +298,16 @@ export function ShippingModal({ visible, onClose, onSuccess, onSelectCustomer }:
               <Icon name="dollar-sign" size={16} color={colors.primary} />
               <Text style={styles.sectionTitle}>Forma de pago</Text>
             </View>
-            <View style={styles.tabGroup}>
+            <View
+              style={styles.tabGroup}
+              accessibilityRole="tablist"
+            >
               <Pressable
                 style={[styles.tabBtn, paymentForm === 'contado' && styles.tabBtnActive]}
                 onPress={() => setPaymentForm('contado')}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: paymentForm === 'contado' }}
+                accessibilityLabel="Pago de contado"
               >
                 <Icon name="dollar-sign" size={16} color={paymentForm === 'contado' ? colors.primary : colorScales.gray[500]} />
                 <Text style={[styles.tabBtnText, paymentForm === 'contado' && styles.tabBtnTextActive]}>Contado</Text>
@@ -286,6 +315,9 @@ export function ShippingModal({ visible, onClose, onSuccess, onSelectCustomer }:
               <Pressable
                 style={[styles.tabBtn, paymentForm === 'credito' && styles.tabBtnActive]}
                 onPress={() => setPaymentForm('credito')}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: paymentForm === 'credito' }}
+                accessibilityLabel="Pago a crédito"
               >
                 <Icon name="calendar" size={16} color={paymentForm === 'credito' ? colors.primary : colorScales.gray[500]} />
                 <Text style={[styles.tabBtnText, paymentForm === 'credito' && styles.tabBtnTextActive]}>Crédito</Text>
@@ -300,10 +332,18 @@ export function ShippingModal({ visible, onClose, onSuccess, onSelectCustomer }:
               <Icon name="credit-card" size={16} color={colors.primary} />
               <Text style={styles.sectionTitle}>Modalidad de pago</Text>
             </View>
-            <View style={styles.paymentModeOptions}>
+            <View
+              style={styles.paymentModeOptions}
+              accessibilityRole="radiogroup"
+              accessibilityLabel="Modalidad de pago"
+            >
               <Pressable
                 style={[styles.saleTypeBtn, paymentMode === 'on_delivery' && styles.saleTypeBtnSelected]}
                 onPress={() => { setPaymentMode('on_delivery'); setSelectedPaymentMethodId(null); }}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: paymentMode === 'on_delivery' }}
+                accessibilityLabel="Pago contra entrega"
+                accessibilityHint="Paga cuando recibas el pedido"
               >
                 <View style={styles.radioOuter}>
                   {paymentMode === 'on_delivery' && <View style={styles.radioInner} />}
@@ -320,6 +360,10 @@ export function ShippingModal({ visible, onClose, onSuccess, onSelectCustomer }:
               <Pressable
                 style={[styles.saleTypeBtn, paymentMode === 'pay_now' && styles.saleTypeBtnSelected]}
                 onPress={() => setPaymentMode('pay_now')}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: paymentMode === 'pay_now' }}
+                accessibilityLabel="Pagar ahora"
+                accessibilityHint="Paga en línea con tu método de pago"
               >
                 <View style={styles.radioOuter}>
                   {paymentMode === 'pay_now' && <View style={styles.radioInner} />}
