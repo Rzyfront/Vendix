@@ -933,18 +933,18 @@ describe('OrdersService', () => {
         }
 
         // El editor rechaza en validación de shipping ANTES de cualquier
-        // escritura, pero el código que se dispara aquí depende del
-        // orden de las ramas (método inactivo, sin rate, etc.). En
-        // este escenario, sin `shipping_method_id` el `shipping_cost`
-        // no se contrasta contra server-calculated (porque `shippingCost`
-        // queda en 0), así que un negativo es válido para el cálculo.
+        // escritura. Con `shipping_method_id` ausente, la validación de
+        // shipping dispara ORD_EDIT_INVALID_SHIPPING_001 por la rama
+        // "delivery sin método configurado" (no por el negativo — el
+        // costo negativo sólo es rechazado cuando hay método+rate).
         // El test verifica que el editor NO corrompe la fila: el claim
         // atómico nunca corre.
+        expect(caught).toBeInstanceOf(VendixHttpException);
+        expect(caught!.errorCode).toBe(
+          ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001.code,
+        );
         expect(mockPrismaService.orders.updateMany).not.toHaveBeenCalled();
         expect(mockPrismaService.order_items.deleteMany).not.toHaveBeenCalled();
-        if (caught) {
-          expect(caught).toBeInstanceOf(VendixHttpException);
-        }
       } finally {
         contextSpy.mockRestore();
       }
