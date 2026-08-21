@@ -16,6 +16,10 @@ function normalize(raw: unknown, currency: StoreCurrencyInfo = COP) {
     null as any,
     null as any,
     null as any,
+    // P0.1 — constructor ahora recibe VatResponsibilityService; el path
+    // probado (normalizeOcrResponse) no toca responsabilidades fiscales, así
+    // que null es seguro y mantiene el arnés en seco.
+    null as any,
   );
   return (service as any).normalizeOcrResponse(raw, currency);
 }

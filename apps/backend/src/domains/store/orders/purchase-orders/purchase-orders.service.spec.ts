@@ -13,6 +13,7 @@ import { SettingsService } from '../../settings/settings.service';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { AccountsPayableService } from '../../accounts-payable/accounts-payable.service';
+import { VatResponsibilityService } from '@common/helpers/vat-responsibility.helper';
 
 /**
  * Step 5 — PurchaseOrdersService.receive() unit tests.
@@ -238,6 +239,14 @@ describe('PurchaseOrdersService.receive()', () => {
             createFromEvent: jest.fn(),
             upsertPayableForReception: jest.fn(),
           },
+        },
+        // P0.1 — VatResponsibilityService ahora se inyecta por constructor.
+        // En este arnés `mockSettingsService = {} as any` rompe getFiscalData()
+        // antes de llegar al resolve, así que la rama VAT no se ejerce y un
+        // stub trivial basta para que DI compile.
+        {
+          provide: VatResponsibilityService,
+          useValue: { resolve: () => true },
         },
       ],
     }).compile();
@@ -884,6 +893,13 @@ describe('PurchaseOrdersService.receive()', () => {
               upsertPayableForReception: jest.fn(),
             },
           },
+          // P0.1 — VatResponsibilityService inyectado por constructor; el D2
+          // no ejerce la rama VAT (SettingsService está vacío, getFiscalData
+          // revienta antes del resolve), stub trivial.
+          {
+            provide: VatResponsibilityService,
+            useValue: { resolve: () => true },
+          },
         ],
       }).compile();
 
@@ -1221,6 +1237,23 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
       }),
     };
 
+    // P0.1 — replica local del predicado pre-F4 (`responsibilities.length === 0
+    // ⇒ true`; en otro caso `includes('O-48')`). El helper canónico nuevo
+    // devuelve `true` para `['O-13']` (rama indeterminada) mientras que los
+    // tests F3 aquí asumían `false` para no-responsable; replicamos la lógica
+    // anterior para no romper F3 hasta que Paso 0.1 cambie el default.
+    const mockVatResponsibilityService = {
+      resolve: (fiscalData: any) => {
+        const responsibilities = Array.isArray(
+          fiscalData?.tax_responsibilities,
+        )
+          ? fiscalData.tax_responsibilities
+          : [];
+        if (responsibilities.length === 0) return true;
+        return responsibilities.includes('O-48');
+      },
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PurchaseOrdersService,
@@ -1256,6 +1289,10 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
             createFromEvent: jest.fn(),
             upsertPayableForReception: jest.fn(),
           },
+        },
+        {
+          provide: VatResponsibilityService,
+          useValue: mockVatResponsibilityService,
         },
       ],
     }).compile();
@@ -1442,6 +1479,14 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
             useValue: {
               findPayableForPurchaseOrder: jest.fn().mockResolvedValue(null),
             },
+          },
+          // P0.1 — VatResponsibilityService inyectado por constructor. Este
+          // arnés usa tax_responsibilities=['O-48'] (responsable), por lo que
+          // el stub trivial `{ resolve: () => true }` coincide con la rama
+          // esperada (pre y post F4).
+          {
+            provide: VatResponsibilityService,
+            useValue: { resolve: () => true },
           },
         ],
       }).compile();
