@@ -13,12 +13,13 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 import {
   OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import {
+  FilterConfig,
+  FilterValues,
   DropdownAction } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   CurrencyPipe,
   CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
-import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import {
   CustomersSummary,
   CustomerTrend,
@@ -46,7 +47,6 @@ import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/
     ChartComponent,
     IconComponent,
     ExportButtonComponent,
-    DateRangeFilterComponent,
     CurrencyPipe,
     AnalyticsCardComponent,
     OptionsDropdownComponent,
@@ -145,15 +145,57 @@ this.store.dispatch(CustomersActions.clearCustomersAnalyticsState());
     },
   ]);
 
+  readonly filterConfigs: FilterConfig[] = [
+    {
+      key: 'date_range',
+      label: 'Período',
+      type: 'date-range',
+    },
+  ];
+
+  /**
+   * Proyecta el `dateRange` signal a las 3 keys que consume el dropdown
+   * (`start`, `end`, `preset`). Computed para que el panel refleje los
+   * cambios de NgRx sin tener que reasignar manualmente.
+   */
+  readonly filterValues = computed<FilterValues>(() => {
+    const range = this.dateRange();
+    return {
+      date_range_start: range.start_date || null,
+      date_range_end: range.end_date || null,
+      date_range_preset: range.preset || null,
+    };
+  });
+
   onActionsDropdownClick(action: string): void {
     if (action === 'export-xlsx') {
       this.exportReport();
     }
   }
 
-  onDateRangeChange(range: DateRangeFilter): void {
-    this.dateRange.set(range);
-    this.store.dispatch(CustomersActions.setDateRange({ dateRange: range }));
+  onFilterChange(values: FilterValues): void {
+    const start = values['date_range_start'] as string;
+    const end = values['date_range_end'] as string;
+    const preset = values['date_range_preset'] as string;
+    if (start && end) {
+      const nextRange: DateRangeFilter = {
+        start_date: start,
+        end_date: end,
+        preset: (preset || 'custom') as DateRangeFilter['preset'],
+      };
+      this.dateRange.set(nextRange);
+      this.store.dispatch(CustomersActions.setDateRange({ dateRange: nextRange }));
+    }
+  }
+
+  onClearAllFilters(): void {
+    const defaultRange: DateRangeFilter = {
+      start_date: getDefaultStartDate(),
+      end_date: getDefaultEndDate(),
+      preset: 'thisMonth',
+    };
+    this.dateRange.set(defaultRange);
+    this.store.dispatch(CustomersActions.setDateRange({ dateRange: defaultRange }));
   }
 
   getGrowthText(growth?: number): string {
