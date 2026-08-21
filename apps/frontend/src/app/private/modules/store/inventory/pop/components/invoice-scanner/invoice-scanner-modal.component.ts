@@ -438,9 +438,13 @@ import {
                         unit_price_net = (unit_price × qty - descuento línea
                         - prorrateo cabecera) / qty, con base gravable
                         corregida si los precios incluyen IVA. Solo se pinta
-                        si hay descuento efectivo (> 0); si no, ruido.
+                        cuando hay descuento efectivo (neto < bruto); sin ruido
+                        en líneas limpias, donde repetiría P. Unit.
                       -->
-                      @if ((lineTaxRows()[i]?.unit_price_net ?? 0) > 0) {
+                      @if (
+                        lineTaxRows()[i]?.unit_price_net != null &&
+                        lineTaxRows()[i]!.unit_price_net < item.unit_price
+                      ) {
                         <td class="py-2 px-3 text-text-primary">
                           {{ lineTaxRows()[i]!.unit_price_net | currency: 0 }}
                         </td>
@@ -599,6 +603,26 @@ import {
                         {{ lineTaxRows()[i]?.net_line || 0 | currency: 0 }}
                       </span>
                     </div>
+                    <!--
+                      Espejo del backend, a paridad con la columna P. Neto
+                      Unit. del desktop: precio unitario TRAS descuento de
+                      línea y prorrateo de cabecera. Misma condición que
+                      desktop (neto < bruto) para no repetir P. Unit. en
+                      líneas limpias, más qty > 0: con cantidad 0 el neto
+                      no es divisible y solo pintaría un cero engañoso.
+                    -->
+                    @if (
+                      (item.quantity || 0) > 0 &&
+                      lineTaxRows()[i]?.unit_price_net != null &&
+                      lineTaxRows()[i]!.unit_price_net < item.unit_price
+                    ) {
+                      <div class="flex justify-between">
+                        <span class="text-text-secondary">P. Neto Unit.</span>
+                        <span class="text-text-primary">
+                          {{ lineTaxRows()[i]!.unit_price_net | currency: 0 }}
+                        </span>
+                      </div>
+                    }
                     <!--
                       Espejo del backend: descuento por unidad derivado por
                       deriveLineTax = discount_total / quantity. Solo se pinta
