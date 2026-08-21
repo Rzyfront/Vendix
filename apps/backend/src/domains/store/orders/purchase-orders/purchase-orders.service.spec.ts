@@ -1844,4 +1844,41 @@ describe('PurchaseOrdersService.update() — descuento: 0-100 % y precedencia mo
     const headerData = tx.purchase_orders.update.mock.calls[0][0].data;
     expect(headerData.subtotal_amount).toBe(996);
   });
+
+  it('discount_percentage: 20 (entero) ⇒ gross*qty*0.20 = 200 con gross=1000, qty=1 (audit 4a)', async () => {
+    // El nuevo contrato entero: 20 ⇒ 20 POR CIENTO, no 0.20 %. El test
+    // anterior clavaba el caso de la fracción 0.20 para fijar la lectura
+    // como porcentaje (gross*qty*0.002); este clava el camino del entero
+    // 20 que el POP modal ya envía tras el fix de CP-ORC-POP-MODAL-DISCOUNT-001.
+    //   ownDiscount = 1000 * 1 * (20 / 100) = 200
+    //   discountPerUnit = 200 / 1 = 200
+    //   discount_total = 200 * 1 = 200
+    //   unit_cost = 1000 - 200 = 800
+    const tx = mockDraftOrderTx();
+
+    await service.update(PO_ID_LOCAL, {
+      items: [
+        {
+          product_id: PRODUCT_ID_LOCAL,
+          quantity: 1,
+          unit_price: 1000,
+          discount_percentage: 20,
+        },
+      ],
+    } as any);
+
+    expect(tx.purchase_order_items.create).toHaveBeenCalledTimes(1);
+    const createData = tx.purchase_order_items.create.mock.calls[0][0].data;
+
+    // El porcentaje original se persiste como provenance; NO se re-deriva.
+    expect(createData.discount_percentage).toBe(20);
+    // ownDiscount = gross * qty * (pct / 100) = 200.
+    expect(createData.discount_amount).toBe(200);
+    // unit_price_net = gross - discountPerUnit = 1000 - 200 = 800.
+    expect(createData.unit_cost).toBe(800);
+    expect(createData.unit_price_net).toBe(800);
+
+    const headerData = tx.purchase_orders.update.mock.calls[0][0].data;
+    expect(headerData.subtotal_amount).toBe(800);
+  });
 });

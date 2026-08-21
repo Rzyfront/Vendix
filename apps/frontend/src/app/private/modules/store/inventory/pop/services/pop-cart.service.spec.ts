@@ -137,6 +137,31 @@ describe('PopCartService — discount normalization (CP-ORC-POP-MODAL-DISCOUNT-0
       service.setItemDiscount(item.id, 50.5);
       expect(service.currentState.items[0].discount).toBe(51);
     });
+
+    it('101 → 100 (upper-clamp boundary, audit 7b)', () => {
+      // Por encima del 100 se clampea: un typo "1000" no puede descontar
+      // más que el precio entero de la línea y envenenar el FIFO layer.
+      const item = addItem();
+      service.setItemDiscount(item.id, 101);
+      expect(service.currentState.items[0].discount).toBe(100);
+    });
+
+    it('0 → 0 (lower boundary, explicit)', () => {
+      // 0 explícito sí atraviesa el normalizador y se persiste como 0
+      // (no es lo mismo que `null`/`undefined`, que se descartan en seco).
+      const item = addItem();
+      service.setItemDiscount(item.id, 0);
+      expect(service.currentState.items[0].discount).toBe(0);
+    });
+
+    it('null → state unchanged (audit 7a: normalizeDiscount null branch)', () => {
+      // `null` activa la guarda de `setItemDiscount` que retorna sin
+      // tocar el state. La línea conserva el descuento previo intacto:
+      // no se sobrescribe a 0 ni a NaN.
+      const item = addItem(50);
+      service.setItemDiscount(item.id, null);
+      expect(service.currentState.items[0].discount).toBe(50);
+    });
   });
 
   describe('addToCart — discount passes through normalizer', () => {
@@ -153,6 +178,21 @@ describe('PopCartService — discount normalization (CP-ORC-POP-MODAL-DISCOUNT-0
     it('discount: 20.6 → item.discount === 21', () => {
       addItem(20.6);
       expect(service.currentState.items[0].discount).toBe(21);
+    });
+
+    it('discount: NaN → item.discount === 0 (audit 7c: addToCart seam)', () => {
+      // El escáner de facturas puede llegar con un payload corrupto. El
+      // normalizador aplicado en `processAddToCart` rechaza NaN ⇒ 0, así
+      // que el alta de la línea sigue siendo válida (descuento cero).
+      addItem(NaN);
+      expect(service.currentState.items[0].discount).toBe(0);
+    });
+
+    it('discount: 101 → item.discount === 100 (audit 7c: addToCart upper clamp)', () => {
+      // Mismo clamp que en `setItemDiscount`: una factura con 101 % no
+      // envenena la línea. El alta nace ya clampeada.
+      addItem(101);
+      expect(service.currentState.items[0].discount).toBe(100);
     });
   });
 });
