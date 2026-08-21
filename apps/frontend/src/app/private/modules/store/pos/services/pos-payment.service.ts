@@ -124,8 +124,16 @@ export class PosPaymentService {
   }
 
   private mapCartItemForPos(item: CartItem): any {
+    // CP-POS-SVC-PERF-001 / Bugfix — `item.product.id` can be a number
+    // (DB ids) or a string (synthetic ids for custom lines like
+    // `custom-<uuid>`). Calling `.startsWith` on a number throws
+    // `startsWith is not a function` and breaks Guardar / Cobrar.
+    // Coerce to string before the prefix check.
+    const productId = item.product.id;
+    const productIdStr =
+      productId == null ? '' : String(productId);
     const isCustomItem =
-      item.itemType === 'custom' || item.product.id.startsWith('custom-');
+      item.itemType === 'custom' || productIdStr.startsWith('custom-');
     // QUI-648 — un solo multiplicador para peso legado, presentación y precio
     // por N unidades. Con escala 1 devuelve la cantidad, como siempre.
     const lineUnits = resolveLineUnits(item);
@@ -134,7 +142,7 @@ export class PosPaymentService {
 
     return {
       item_type: isCustomItem ? 'custom' : 'product',
-      product_id: isCustomItem ? null : parseInt(item.product.id, 10),
+      product_id: isCustomItem ? null : parseInt(productIdStr, 10),
       category_id: isCustomItem ? undefined : categoryIds[0],
       category_ids: isCustomItem ? undefined : categoryIds,
       product_name: item.product.name,
