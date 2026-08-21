@@ -50,13 +50,7 @@ import {
   resolveTierPricingCostAnchor,
 } from '../../products/services/tier-margin.util';
 import { assertTiersAllowed } from '../../products/services/tiers-variants-exclusive.util';
-
-/**
- * F1 IVA lifecycle — RUT casilla 53 code for "Responsable de IVA" (O-48).
- * Mirrors FiscalObligationService.VAT_RESPONSIBLE_CODE so the cost treatment
- * (exclude vs capitalize IVA) uses the same canonical fiscal source.
- */
-const VAT_RESPONSIBLE_CODE = 'O-48';
+import { VatResponsibilityService } from '@common/helpers/vat-responsibility.helper';
 
 /**
  * QUI-647 — marcador del pago real de un abono registrado al crear la OC.
@@ -110,6 +104,10 @@ export class PurchaseOrdersService {
     // FASE 3 — accountsPayableService provee el espejo PO→AP (mirrorPoPaymentToAp)
     // y el backfill de anticipos. Inyectado vía módulo AccountsPayableModule.
     private accountsPayableService: AccountsPayableService,
+    // P0.1 — VatResponsibilityService consolida el predicado `isVatResponsible`
+    // (antes replicado localmente aquí y en InvoiceScannerService). Cambia el
+    // default pre-F4 es Paso 0.1 — fuera de P0.1.
+    private vatService: VatResponsibilityService,
   ) {}
 
   /**
@@ -265,37 +263,30 @@ export class PurchaseOrdersService {
    *   - O-48 (responsible)     → IVA is descontable, EXCLUDED from cost.
    *   - O-49 (non-responsible) → IVA is CAPITALIZED into inventory cost.
    *
-   * Canonical source: `SettingsService.getFiscalData().tax_responsibilities`
-   * (RUT casilla 53). Mirrors FiscalObligationService's O-48 evaluation.
+   * Canonical source: `VatResponsibilityService.resolve(fiscalData)`
+   * (RUT casilla 53 + fallback por régimen tributario). Antes era una
+   * réplica local; P0.1 centraliza el predicado en el helper canónico.
    *
    * Anti-regression rule: NO declared responsibilities / indeterminate ⇒ treat
    * as RESPONSIBLE (O-48). This preserves the pre-F1 behaviour where entered
-   * cost was net and IVA was never capitalized.
+   * cost was net and IVA was never capitalized. Cambiar el default es Paso 0.1.
    *
    * `organizationId`/`storeId` are the resolved tenant identifiers (used for
    * logging); the fiscal data itself is read from the request context inside
    * `getFiscalData()`.
    */
-  private async isVatResponsible(
+  private async resolveVatResponsibility(
     organizationId?: number,
     storeId?: number,
   ): Promise<boolean> {
     try {
       const fiscalData = await this.settingsService.getFiscalData();
-      const responsibilities = Array.isArray(
-        (fiscalData as any)?.tax_responsibilities,
-      )
-        ? ((fiscalData as any).tax_responsibilities as unknown[]).filter(
-            (code): code is string => typeof code === 'string',
-          )
-        : [];
-
-      // No declared responsibilities / indeterminate ⇒ RESPONSIBLE (O-48).
-      if (responsibilities.length === 0) return true;
-      return responsibilities.includes(VAT_RESPONSIBLE_CODE);
+      return this.vatService.resolve(
+        fiscalData as Parameters<VatResponsibilityService['resolve']>[0],
+      );
     } catch (error: any) {
       this.logger.warn(
-        `isVatResponsible: could not resolve fiscal data for org ${organizationId} / store ${storeId} (${error?.message}); defaulting to VAT responsible (O-48).`,
+        `resolveVatResponsibility: could not resolve fiscal data for org ${organizationId} / store ${storeId} (${error?.message}); defaulting to VAT responsible (O-48).`,
       );
       return true;
     }
@@ -2701,7 +2692,7 @@ export class PurchaseOrdersService {
       // F1 IVA lifecycle: resolve the commerce's VAT responsibility ONCE for
       // this receipt. O-48 (responsible) excludes IVA from inventory cost;
       // O-49 (non-responsible) capitalizes it. Indeterminate ⇒ responsible.
-      const vatResponsible = await this.isVatResponsible(
+      const vatResponsible = await this.resolveVatResponsibility(
         organizationId ?? undefined,
         storeId ?? undefined,
       );
@@ -4197,7 +4188,7 @@ export class PurchaseOrdersService {
     // this, the preview shows a NET cost while receive() persists a GROSS one,
     // so the modal's new_cost_per_unit diverges from the recorded cost_per_unit
     // by exactly the IVA factor (the observed 1.19 for a 19% line).
-    const vatResponsible = await this.isVatResponsible(
+    const vatResponsible = await this.resolveVatResponsibility(
       organizationId,
       storeId ?? undefined,
     );

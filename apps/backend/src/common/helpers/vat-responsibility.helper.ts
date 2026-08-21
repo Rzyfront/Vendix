@@ -1,3 +1,4 @@
+import { Injectable } from '@nestjs/common';
 import { VendixHttpException } from '../errors/vendix-http.exception';
 import { ErrorCodes } from '../errors/error-codes';
 
@@ -96,4 +97,28 @@ export function assertCanChargeVat(
       cta: '/admin/fiscal/wizard',
     },
   );
+}
+
+/**
+ * Servicio DI que delega al helper puro `isVatResponsible`.
+ *
+ * P0.1 — permite convergir las tres réplicas internas de backend
+ * (PurchaseOrdersService, InvoiceScannerService, FiscalObligationService)
+ * en una sola implementación. Las réplicas pre-existían como métodos
+ * privados o constantes locales; este servicio expone la misma respuesta
+ * canónica que el helper, conservando el default pre-F4 (`true` si no hay
+ * datos fiscales). Cambiar ese default es Paso 0.1 y queda fuera de P0.1.
+ */
+@Injectable()
+export class VatResponsibilityService {
+  /**
+   * Resuelve si el comercio es responsable de IVA. Equivalente 1:1 a
+   * `isVatResponsible(fiscalData)`; la inyección DI reemplaza a las
+   * réplicas internas de PO / Scanner / fiscal-obligation. Pura, síncrona.
+   */
+  resolve(
+    fiscalData: VatFiscalDataInput | null | undefined,
+  ): boolean {
+    return isVatResponsible(fiscalData);
+  }
 }

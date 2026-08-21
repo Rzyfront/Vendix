@@ -7,6 +7,7 @@ import { SettingsService } from '../../settings/settings.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
+import { VatResponsibilityService } from '@common/helpers/vat-responsibility.helper';
 import {
   InvoiceScanResult,
   InvoiceMatchResult,
@@ -33,19 +34,16 @@ import sharp = require('sharp');
 export class InvoiceScannerService {
   private readonly logger = new Logger(InvoiceScannerService.name);
 
-  /**
-   * F3 IVA lifecycle — RUT casilla 53 code for "Responsable de IVA" (O-48).
-   * Mirrors PurchaseOrdersService.VAT_RESPONSIBLE_CODE so the tax-category
-   * suggestion uses the same canonical fiscal source.
-   */
-  private static readonly VAT_RESPONSIBLE_CODE = 'O-48';
-
   constructor(
     private readonly aiEngine: AIEngineService,
     private readonly prisma: StorePrismaService,
     private readonly purchaseOrdersService: PurchaseOrdersService,
     private readonly settingsService: SettingsService,
     private readonly responseService: ResponseService,
+    // P0.1 — consolidación del predicado `isVatResponsible`. Antes era una
+    // constante local + un método privado que replicaban la lógica del
+    // helper canónico. Mismo razonamiento que en PurchaseOrdersService.
+    private readonly vatService: VatResponsibilityService,
   ) {}
 
   /**
@@ -170,7 +168,7 @@ export class InvoiceScannerService {
     // non-responsible tenant (O-49) capitalizes IVA into cost and must not be
     // handed a deductible tax_category, so we skip loading rates entirely and
     // every `suggested_tax_category_id` stays null.
-    const vatResponsible = await this.isVatResponsible();
+    const vatResponsible = await this.resolveVatResponsibility();
     const taxCategoryRates = vatResponsible
       ? await this.loadTaxCategoryRates()
       : [];
@@ -992,29 +990,22 @@ export class InvoiceScannerService {
 
   /**
    * F3 IVA lifecycle — read-only check of the commerce's VAT responsibility.
-   * Replicated (not shared) from PurchaseOrdersService.isVatResponsible to
-   * avoid modifying that service: same canonical source
-   * (SettingsService.getFiscalData().tax_responsibilities, RUT casilla 53),
-   * same anti-regression default (no declared responsibilities /
-   * indeterminate ⇒ RESPONSIBLE O-48). Never throws.
+   * Delegada a `VatResponsibilityService.resolve` (helper canónico). Antes
+   * era una réplica local de PurchaseOrdersService.isVatResponsible;
+   * P0.1 centraliza el predicado. Misma fuente
+   * (SettingsService.getFiscalData().tax_responsibilities, RUT casilla 53)
+   * y mismo default anti-regresión (sin datos ⇒ RESPONSIBLE O-48). Never
+   * throws (devuelve `true` si la lectura de fiscal data falla).
    */
-  private async isVatResponsible(): Promise<boolean> {
+  private async resolveVatResponsibility(): Promise<boolean> {
     try {
       const fiscalData = await this.settingsService.getFiscalData();
-      const responsibilities = Array.isArray(
-        (fiscalData as any)?.tax_responsibilities,
-      )
-        ? ((fiscalData as any).tax_responsibilities as unknown[]).filter(
-            (code): code is string => typeof code === 'string',
-          )
-        : [];
-      if (responsibilities.length === 0) return true;
-      return responsibilities.includes(
-        InvoiceScannerService.VAT_RESPONSIBLE_CODE,
+      return this.vatService.resolve(
+        fiscalData as Parameters<VatResponsibilityService['resolve']>[0],
       );
     } catch (error: any) {
       this.logger.warn(
-        `isVatResponsible: could not resolve fiscal data (${error?.message}); defaulting to VAT responsible (O-48).`,
+        `resolveVatResponsibility: could not resolve fiscal data (${error?.message}); defaulting to VAT responsible (O-48).`,
       );
       return true;
     }
