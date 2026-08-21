@@ -94,15 +94,9 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
 
   filterConfigs: FilterConfig[] = [
     {
-      key: 'date_from',
-      label: 'Desde',
-      type: 'date',
-      defaultValue: getDefaultStartDate() },
-    {
-      key: 'date_to',
-      label: 'Hasta',
-      type: 'date',
-      defaultValue: getDefaultEndDate() },
+      key: 'date_range',
+      label: 'Período',
+      type: 'date-range' },
     {
       key: 'granularity',
       label: 'Granularidad',
@@ -131,8 +125,9 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(([dateRange, granularity]) => {
         this.filterValues = {
-          date_from: dateRange.start_date || null,
-          date_to: dateRange.end_date || null,
+          date_range_start: dateRange.start_date || null,
+          date_range_end: dateRange.end_date || null,
+          date_range_preset: dateRange.preset || null,
           granularity: granularity || 'day' };
       });
 
@@ -154,21 +149,24 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
   }
 
   onFilterChange(values: FilterValues): void {
-    const dateFrom = values['date_from'] as string;
-    const dateTo = values['date_to'] as string;
+    const dateFrom = values['date_range_start'] as string;
+    const dateTo = values['date_range_end'] as string;
+    const preset = values['date_range_preset'] as string;
     const granularity = values['granularity'] as string;
 
     const currentRange = this.filterValues;
     if (
-      dateFrom !== currentRange['date_from'] ||
-      dateTo !== currentRange['date_to']
+      dateFrom &&
+      dateTo &&
+      (dateFrom !== currentRange['date_range_start'] ||
+        dateTo !== currentRange['date_range_end'])
     ) {
       this.store.dispatch(
         AcquisitionActions.setDateRange({
           dateRange: {
-            start_date: dateFrom || '',
-            end_date: dateTo || '',
-            preset: 'custom' } }),
+            start_date: dateFrom,
+            end_date: dateTo,
+            preset: (preset || 'custom') as DateRangeFilter['preset'] } }),
       );
     }
 
