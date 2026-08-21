@@ -1091,6 +1091,11 @@ export class PosCheckoutShellComponent {
           );
           this.editorUpdated.emit(null);
         },
+        // CP-POS-MODAL-SCOPE-001 / Phase F.12 — guarantee the loading guard
+        // is released even if neither `next` nor `error` fires (empty 200
+        // body, observable complete without next, request cancelled). Without
+        // this the cashier sees an infinite spinner after the second edit.
+        complete: () => this.submittingDraft.set(false),
       });
   }
 

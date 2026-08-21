@@ -49,8 +49,8 @@ import { PosFiscalStatus } from '../services/pos-fiscal.service';
       [isOpen]="isOpen()"
       [size]="'md'"
       [showCloseButton]="true"
-      title="¡Venta Completada!"
-      [subtitle]="'Orden #' + derivedOrderNumber() + ' procesada exitosamente'"
+      [title]="derivedIsPaid() ? '¡Venta Completada!' : '¡Orden Guardada!'"
+      [subtitle]="(derivedIsPaid() ? 'Orden #' : 'Borrador #') + derivedOrderNumber() + (derivedIsPaid() ? ' procesada exitosamente' : ' guardado. Puedes volver a modificarla antes de cobrar.')"
       (closed)="onModalClosed()"
       >
       <div slot="header"
@@ -411,6 +411,18 @@ export class PosOrderConfirmationComponent {
   readonly derivedOrderNumber = computed(() => {
     const d = this.orderData();
     return d?.order_number || d?.number || 'N/A';
+  });
+  // CP-POS-MODAL-SCOPE-001 / Phase F.12 — distinguish draft vs sale in
+  // the confirmation modal copy so the cashier doesn't read a draft save
+  // as a fiscal sale. Draft = state in ['draft', 'created'] with no
+  // payment row; anything else with a payment row is a sale.
+  readonly derivedIsPaid = computed(() => {
+    const d = this.orderData();
+    if (!d) return false;
+    const state = (d.state || '').toString();
+    const hasPayments =
+      Array.isArray(d.payments) && d.payments.length > 0;
+    return state === 'finished' || state === 'processing' || hasPayments;
   });
   readonly derivedCurrentDate = computed(() => {
     const d = this.orderData();

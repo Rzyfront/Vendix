@@ -2284,6 +2284,16 @@ export class OrdersService {
           grand_total: grandTotal,
           coupon_id: couponId,
           coupon_code: requestedCode || null,
+          // CP-POS-MODAL-SCOPE-001 / Phase F.14 — the editor MUST persist
+          // the user-editable fields the cashier expects to round-trip
+          // (customer, public notes, internal notes). Before this fix the
+          // editor only updated monetary totals, so changing the customer
+          // or writing a note appeared to silently no-op — the cashier saw
+          // the order "saved" but the detail page still showed the old
+          // values, which made the entire edit flow look broken.
+          customer_id: dto.customer_id ?? null,
+          notes: dto.notes ?? null,
+          internal_notes: dto.internal_notes ?? null,
           updated_at: new Date(),
         },
       });

@@ -446,7 +446,7 @@ import {
                 Separate button so the label matches the action: the primary
                 CTA never silently opens payment.
               -->
-              @if (readyToPayOrder() !== null) {
+              @if (readyToPayOrder() !== null && !isEditMode()) {
                 <button
                   type="button"
                   class="cart-btn cobrar-btn"

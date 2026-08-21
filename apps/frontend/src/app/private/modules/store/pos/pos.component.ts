@@ -3305,16 +3305,17 @@ export class PosComponent {
                 this.editingOrderNumber.set(order.order_number);
                 this.editingOrder.set(order);
                 this.mode.set('edit');
-                this.checkoutIntent.set('pickup');
-                // CP-POS-MODAL-SCOPE-001 / Phase F.9 — `loadOrderForEditing`
-                // set the edit-mode signals but never opened the checkout
-                // shell, so the cashier would see the cart populated yet
-                // nothing in the modal. Open the shell here so the
-                // (Cliente → Cobro) wizard is visible immediately on entry.
-                this.showCheckoutModal.set(true);
+                // CP-POS-MODAL-SCOPE-001 / Phase F.12 — Modificar must NOT
+                // auto-open the checkout shell. The cashier expects to
+                // see ONLY the cart with the order's items rehydrated
+                // so they can edit quantities, add/remove products,
+                // change customer, and click Guardar / Actualizar /
+                // Cobrar at their own pace. The shell opens only when
+                // they click Cobrar explicitly.
                 // Clear stale charge state from a previous edit attempt.
                 this.readyToPayOrder.set(null);
                 this.chargeModalOpen.set(false);
+                this.showCheckoutModal.set(false);
                 this.loading.set(false);
                 this.toastService.info(`Editando Orden #${order.order_number}`);
               },
