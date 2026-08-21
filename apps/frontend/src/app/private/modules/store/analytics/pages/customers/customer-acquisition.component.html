@@ -63,9 +63,10 @@
       <app-options-dropdown
                 class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
                 [filters]="filterConfigs"
-                [filterValues]="filterValues"
+                [filterValues]="filterValues()"
                 title="Filtros"
                 triggerLabel="Filtros"
+                [debounceMs]="350"
                 (filterChange)="onFilterChange($event)"
                 (clearAllFilters)="onClearAllFilters()"
               ></app-options-dropdown>
