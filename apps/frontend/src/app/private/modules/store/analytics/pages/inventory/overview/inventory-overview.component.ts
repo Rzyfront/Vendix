@@ -167,7 +167,7 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
       date_range_start: dr.start_date ?? null,
       date_range_end: dr.end_date ?? null,
       date_range_preset: (dr.preset ?? null) as string | null,
-    };
+    } as FilterValues;
   });
 
   /**
