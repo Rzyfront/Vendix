@@ -62,6 +62,7 @@ import {
 import { POP_USE_UNIFIED_MODAL } from './pop.config';
 import { toLocalDateString } from '../../../../../shared/utils/date.util';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
+import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import {
   VexiUiHost,
   VexiUiHostRegistry,
@@ -2123,9 +2124,11 @@ export class PopComponent implements OnInit, OnDestroy {
           this.isProcessingOrder.set(false);
           return;
         }
+        // El sobre de éxito viene tipado sin `error` (el backend lo agrega solo
+        // al rechazar), así que se lee con el extractor que ya conoce ambas
+        // formas en vez de forzar el tipo aquí.
         const envelopeMessage =
-          response?.error?.message ||
-          response?.message ||
+          extractApiErrorMessage(response) ||
           'El servidor rechazó la creación de la orden.';
         this.orderError.set(envelopeMessage);
         this.toastService.error(envelopeMessage);

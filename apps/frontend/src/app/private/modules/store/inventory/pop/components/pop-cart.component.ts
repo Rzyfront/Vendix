@@ -370,7 +370,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                       QUI-661 Fase 4 — visual del descuento comercial de la
                       línea. Se muestra SOLO cuando hay descuento > 0 para no
                       añadir ruido cuando la línea no tiene rebaje. El neto
-                      sale del mismo `deriveLineTax` que usa el servicio: una
+                      sale del mismo deriveLineTax que usa el servicio: una
                       sola fuente, dos consumidores (servicio y template).
                       Mobile-first: flex-wrap para que el tachado + neto + (-%)
                       quepan en pantallas estrechas sin romper la fila.

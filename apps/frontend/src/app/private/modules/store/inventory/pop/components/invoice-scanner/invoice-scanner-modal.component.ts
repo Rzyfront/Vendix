@@ -462,7 +462,7 @@ import {
                       <td class="py-2 px-3 text-text-primary">
                         {{ lineTaxRows()[i]?.net_line || 0 | currency: 0 }}
                       </td>
-                      <!-- Total = base gravable + IVA. Sustituye al `qty × unit_price`
+                      <!-- Total = base gravable + IVA. Sustituye al qty × unit_price
                            que ignoraba descuento, IVA y prorrateo. -->
                       <td class="py-2 px-3 text-text-primary font-medium">
                         {{ lineTaxRows()[i]?.total_line || 0 | currency: 0 }}
@@ -567,7 +567,7 @@ import {
                     </div>
                   </div>
                   <!-- Desglose: subtotal / IVA / total, derivado igual que
-                       desktop. Reemplaza al `qty × unit_price` que ignoraba
+                       desktop. Reemplaza al qty × unit_price que ignoraba
                        descuento e IVA en móvil. -->
                   <div class="border-t border-border/50 pt-2 space-y-1 text-xs">
                     <div class="flex justify-between">
@@ -602,10 +602,10 @@ import {
           </div>
 
           <!--
-            Pie de totales derivado por `derivePurchaseTotals` sobre las
+            Pie de totales derivado por derivePurchaseTotals sobre las
             líneas que sobrevivan al descarte — MISMO algoritmo que el backend
-            va a persistir. Antes era `qty × unit_price` sumado a mano + el
-            `tax_amount` crudo del scan; eso contradecía a las filas y dejaba
+            va a persistir. Antes era qty × unit_price sumado a mano + el
+            tax_amount crudo del scan; eso contradecía a las filas y dejaba
             el IVA rancio cuando el operador tocaba cantidad/precio/descuento.
             Las filas de descuento solo se pintan si hay valor (>0): sin ruido
             cuando no hay descuento.
