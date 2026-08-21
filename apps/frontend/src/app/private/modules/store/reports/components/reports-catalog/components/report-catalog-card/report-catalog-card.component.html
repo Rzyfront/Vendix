@@ -1,0 +1,45 @@
+<div
+  class="report-catalog-card"
+  role="button"
+  tabindex="0"
+  [attr.aria-label]="report().title + ' - ' + report().description"
+  (click)="onClick()"
+  (keydown.enter)="onClick()"
+  (keydown.space)="onClick(); $event.preventDefault()"
+  (mouseenter)="showTooltip.set(true)"
+  (mouseleave)="showTooltip.set(false)"
+  [style.--card-color]="categoryColor()"
+>
+  <div class="card-icon">
+    <app-icon [name]="report().icon" [size]="20" />
+  </div>
+
+  <div class="card-content">
+    <h4 class="card-title">{{ report().title }}</h4>
+    <p class="card-description">{{ report().description }}</p>
+  </div>
+
+  <div class="card-badges">
+    <span class="card-badge">{{ report().category }}</span>
+    @if (hasTypeBadge(report().type)) {
+      <span
+        class="card-badge card-badge--type"
+        [style.--badge-color]="typeBadgeColor(report().type)"
+      >
+        {{ typeBadgeLabel(report().type) }}
+      </span>
+    }
+  </div>
+
+  @if (showTooltip()) {
+    <div class="card-tooltip">
+      <div class="tooltip-header">
+        <app-icon [name]="report().icon" [size]="16" />
+        <span>{{ report().title }}</span>
+      </div>
+      <p class="tooltip-body">
+        {{ report().detailedDescription || report().description }}
+      </p>
+    </div>
+  }
+</div>

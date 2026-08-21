@@ -1,0 +1,29 @@
+<div class="chips-container" role="group" aria-label="Filtrar reportes por categoria">
+  <app-button
+    size="sm"
+    [variant]="getChipVariant(selectedCategory() === null)"
+    customClasses="!rounded-full"
+    (clicked)="onChipClick(null)"
+  >
+    <app-icon slot="icon" name="layout-grid" [size]="14"></app-icon>
+    <span class="chip-text">Todas</span>
+    @if (totalCount() !== undefined) {
+      <span class="chip-count">{{ totalCount() }}</span>
+    }
+  </app-button>
+
+  @for (chip of chips(); track trackByCategoryId($index, chip)) {
+    <app-button
+      size="sm"
+      [variant]="getChipVariant(chip.isSelected)"
+      customClasses="!rounded-full"
+      (clicked)="onChipClick(chip.id)"
+    >
+      <app-icon slot="icon" [name]="chip.icon" [size]="14"></app-icon>
+      <span class="chip-text">{{ chip.label }}</span>
+      @if (chip.count !== undefined) {
+        <span class="chip-count">{{ chip.count }}</span>
+      }
+    </app-button>
+  }
+</div>

@@ -1,0 +1,96 @@
+// ============================================================================
+// Host — outer page wrapper. Mirrors the analytics overview page: capped
+// width so the stats grid never stretches past the readability horizon
+// on ultrawide monitors.
+// ============================================================================
+
+:host {
+  display: block;
+}
+
+// ============================================================================
+// Page-level layout — vertical rhythm between the sticky header, the date
+// filter toolbar, the stats grid, and the catalog.
+// ============================================================================
+
+.overview-summary-page {
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 1rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.overview-summary-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+// ============================================================================
+// Toolbar — aligns the date filter to the right edge above the stats grid.
+// ============================================================================
+
+.overview-summary-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+// ============================================================================
+// Stats grid — 4×2 on desktop, 2×4 on tablet, horizontal scroll on mobile.
+// Replicates the responsive pattern from the shared `.stats-container`
+// (see apps/frontend/src/styles.scss) without depending on the global class
+// because the stat cards live in their own component scope.
+// ============================================================================
+
+.overview-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+
+  // Tablet: 2 columns (the cards keep their 4-state color treatment).
+  @media (max-width: 1023px) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  // Mobile: horizontal scroll strip, hidden scrollbar. The
+  // `<app-overview-stat-card>` host has its own width:180px so cards
+  // keep a usable tap target.
+  @media (max-width: 640px) {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 0.75rem;
+    padding: 0 1rem;
+    margin: 0 -1rem;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+}
+
+// ============================================================================
+// Error banner — surfaces failures from the overview summary fetch without
+// disrupting the rest of the page. Sits below the catalog so the user can
+// still browse reports even when the summary endpoint is down.
+// ============================================================================
+
+.overview-error-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem 1.25rem;
+  border-radius: 0.75rem;
+  background-color: rgba(var(--color-error-rgb), 0.1);
+  color: var(--color-error);
+  border: 1px solid rgba(var(--color-error-rgb), 0.3);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
