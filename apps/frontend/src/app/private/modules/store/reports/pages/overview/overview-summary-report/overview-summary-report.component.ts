@@ -12,7 +12,7 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { OptionsDropdownComponent } from '../../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import { StickyHeaderComponent } from '../../../../../../../shared/components/sticky-header/sticky-header.component';
-import type {
+import {
   DropdownAction,
   FilterConfig,
   FilterValues,
