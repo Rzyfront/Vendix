@@ -863,7 +863,7 @@ export class PosComponent {
    * retry; the order is already saved, so a failed booking never
    * orphans the draft.
    */
-  private firePendingBookingsAfterDraft(orderId: number): void {
+  private firePendingBookingsAfterDraft(orderId: number, opts?: { force?: boolean }): void {
     const map = this.cartBookingsFromChild();
     if (!map || map.size === 0) return;
     // CP-POS-SVC-PERF-001 / Annotation-4 — respect the store-level
@@ -874,7 +874,14 @@ export class PosComponent {
     // the booking once payment clears. No error toast — the cashier
     // is explicitly following the store policy, not doing anything
     // wrong.
-    if (!this.allowBookingsWithoutPayment()) return;
+    //
+    // `force` is used by the Cobrar → flow/pay path, where the toggle
+    // governs ONLY the Guardar-alone behaviour. Once the cashier is
+    // collecting payment, the booking has to land — otherwise the
+    // paid order survives with no scheduled staff and the user sees
+    // a service line with no calendar entry. Pass force=true to
+    // bypass the toggle.
+    if (!opts?.force && !this.allowBookingsWithoutPayment()) return;
     const customerId = this.cartState()?.customer?.id ?? null;
 
     for (const [, block] of map.entries()) {
@@ -2135,6 +2142,12 @@ export class PosComponent {
         next: (response: any) => {
           this.isCharging.set(false);
           this.chargeModalOpen.set(false);
+          // CP-POS-SVC-PERF-001 / Annotation-4 — once payment clears,
+          // any booking blocks the cashier attached during the
+          // wizard have to land on the order, regardless of the
+          // `allow_bookings_without_payment` toggle (the toggle only
+          // governs Guardar-alone). `force` bypasses that gate.
+          this.firePendingBookingsAfterDraft(Number(order.id), { force: true });
           // QUI-audit-round-1: el toast de éxito se ataba al response del
           // POST, pero el refresh sub-siguiente silenciosamente dejaba
           // `readyToPayOrder` en null si la red fallaba — el cajero perdía
