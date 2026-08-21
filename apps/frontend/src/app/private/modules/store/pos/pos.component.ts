@@ -3305,6 +3305,13 @@ export class PosComponent {
                 this.editingOrderNumber.set(order.order_number);
                 this.editingOrder.set(order);
                 this.mode.set('edit');
+                this.checkoutIntent.set('pickup');
+                // CP-POS-MODAL-SCOPE-001 / Phase F.9 — `loadOrderForEditing`
+                // set the edit-mode signals but never opened the checkout
+                // shell, so the cashier would see the cart populated yet
+                // nothing in the modal. Open the shell here so the
+                // (Cliente → Cobro) wizard is visible immediately on entry.
+                this.showCheckoutModal.set(true);
                 // Clear stale charge state from a previous edit attempt.
                 this.readyToPayOrder.set(null);
                 this.chargeModalOpen.set(false);
