@@ -235,7 +235,15 @@ function readSession(): SessionSnapshot {
  * `true` when the merchant is VAT-responsible. Exact mirror of the web
  * `resolveIsVatResponsible` (itself a mirror of the backend
  * `vat-responsibility.helper`): O-48 wins, O-49 without O-48 denies, then the
- * regime, and an indeterminate state resolves to responsible.
+ * regime, and an indeterminate state resolves to NOT responsible
+ * (fail-closed, 2026-08-21).
+ *
+ * Cambio de default (2026-08-21): la rama indeterminada pasó de `true` a
+ * `false`. Razón: el 100% de los tenants arrancan con el módulo fiscal
+ * apagado y sin responsabilidad declarada; tratarlos como responsables
+ * equivalía a permitir cobro de IVA sin estar facultados para facturar
+ * electrónicamente. Fail-closed. Para vender con IVA, el tenant debe
+ * declarar `tax_responsibilities: ['O-48']` o pasar por el wizard fiscal.
  */
 function isVatResponsible(fiscal: Record<string, any>): boolean {
   const responsibilities: string[] = Array.isArray(fiscal?.tax_responsibilities)
@@ -252,7 +260,7 @@ function isVatResponsible(fiscal: Record<string, any>): boolean {
   if (regime === 'COMUN' || regime === 'GRAN_CONTRIBUYENTE') return true;
   if (regime === 'SIMPLIFICADO') return false;
 
-  return true;
+  return false;
 }
 
 /**
