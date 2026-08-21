@@ -895,7 +895,11 @@ export class PosCartService {
       variant_sku: it.variant_sku ?? null,
       variant_attributes: it.variant_attributes ?? null,
       description: it.description ?? it.notes ?? null,
-      skip_kds: it.skipKds === true,
+      // CP-POS-MODAL-SCOPE-001 / Phase F.4 — `skip_kds` belongs to the
+      // flow/pay pipeline (POS-vs-KDS modal on charge), NOT to the items-edit
+      // endpoint. Backend's `UpdateOrderItemsDto` does not declare it and
+      // `forbidNonWhitelisted` rejects with 400 SYS_VALIDATION_001. The flag
+      // continues to flow on `cartState.customer` and `processSaleWithPayment`.
     }));
 
     return this.posApi.updateOrderItems(orderId, payloadItems).pipe(

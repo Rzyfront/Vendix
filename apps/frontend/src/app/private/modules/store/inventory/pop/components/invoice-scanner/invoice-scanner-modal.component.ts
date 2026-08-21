@@ -34,6 +34,12 @@ import {
   MatchedLineItem,
   ProductCandidate,
 } from '../../interfaces/invoice-scanner.interface';
+import {
+  deriveLineTax,
+  derivePurchaseTotals,
+  prorateHeaderDiscount,
+  PurchaseLineTaxInput,
+} from '../../utils/purchase-line-tax.util';
 
 @Component({
   selector: 'app-invoice-scanner-modal',
@@ -365,11 +371,20 @@ import {
                 <thead>
                   <tr class="border-b border-border text-left">
                     <th class="pb-2 pr-3 text-text-secondary font-medium">Descripcion</th>
-                    <th class="pb-2 px-3 text-text-secondary font-medium w-20">Cant.</th>
-                    <th class="pb-2 px-3 text-text-secondary font-medium w-28">P. Unit.</th>
-                    <th class="pb-2 px-3 text-text-secondary font-medium w-24">Dcto</th>
+                    <th class="pb-2 px-3 text-text-secondary font-medium w-16">Cant.</th>
+                    <th class="pb-2 px-3 text-text-secondary font-medium w-24">P. Unit.</th>
+                    <th class="pb-2 px-3 text-text-secondary font-medium w-20">Dcto</th>
+                    <!--
+                      F3 IVA lifecycle: la tasa de IVA que asignó la IA baja
+                      base gravable, IVA descontable y costo capitalizado; el
+                      operador tiene que poder verla y corregirla ANTES de
+                      confirmar, o se queda arrastrando el error hasta anular
+                      la orden.
+                    -->
+                    <th class="pb-2 px-3 text-text-secondary font-medium w-16">% IVA</th>
+                    <th class="pb-2 px-3 text-text-secondary font-medium w-24">Subtotal</th>
                     <th class="pb-2 px-3 text-text-secondary font-medium w-24">Total</th>
-                    <th class="pb-2 px-3 text-text-secondary font-medium w-24">Estado</th>
+                    <th class="pb-2 px-3 text-text-secondary font-medium w-20">Estado</th>
                     <th class="pb-2 pl-3 text-text-secondary font-medium">Producto</th>
                     <th class="pb-2 pl-3 text-text-secondary font-medium w-10"></th>
                   </tr>
@@ -426,8 +441,31 @@ import {
                           step="0.01"
                         />
                       </td>
+                      <!--
+                        Tasa de IVA: el scanner la emite como fracción (0.19);
+                        el input la muestra en PORCENTAJE (19) que es como la
+                        piensa el operador. El handler convierte al guardar.
+                      -->
+                      <td class="py-2 px-3">
+                        <input
+                          type="number"
+                          [value]="(item.tax_rate ?? 0) * 100"
+                          (change)="updateItemTaxRate(i, $event)"
+                          class="w-14 px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
+                          min="0"
+                          step="0.01"
+                          aria-label="Porcentaje de IVA"
+                        />
+                      </td>
+                      <!-- Subtotal = base gravable de la línea (neto tras descuento,
+                           prorrateo de cabecera aplicado). Espejo del backend. -->
+                      <td class="py-2 px-3 text-text-primary">
+                        {{ lineTaxRows()[i]?.net_line || 0 | currency: 0 }}
+                      </td>
+                      <!-- Total = base gravable + IVA. Sustituye al qty × unit_price
+                           que ignoraba descuento, IVA y prorrateo. -->
                       <td class="py-2 px-3 text-text-primary font-medium">
-                        {{ lineTotal(item) | currency: 0 }}
+                        {{ lineTaxRows()[i]?.total_line || 0 | currency: 0 }}
                       </td>
                       <td class="py-2 px-3">
                         <app-badge
@@ -479,7 +517,7 @@ import {
                       (toggled)="toggleDiscard(i)"
                     ></app-ai-discard-toggle>
                   </div>
-                  <div class="grid grid-cols-3 gap-2">
+                  <div class="grid grid-cols-2 gap-2">
                     <div>
                       <label class="text-[10px] text-text-secondary">Cant.</label>
                       <input
@@ -501,11 +539,54 @@ import {
                         step="0.01"
                       />
                     </div>
+                    <!-- Móvil a paridad con desktop: descuento y tasa de IVA
+                         editables. Sin ellos el operador móvil no puede
+                         corregir lo que la IA asignó antes de confirmar. -->
                     <div>
-                      <label class="text-[10px] text-text-secondary">Total</label>
-                      <p class="px-2 py-1 text-sm font-medium text-text-primary">
-                        {{ item.quantity * item.unit_price | currency: 0 }}
-                      </p>
+                      <label class="text-[10px] text-text-secondary">Dcto</label>
+                      <input
+                        type="number"
+                        [value]="item.discount_amount || 0"
+                        (change)="updateItemDiscount(i, $event)"
+                        class="w-full px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary"
+                        min="0"
+                        step="0.01"
+                      />
+                    </div>
+                    <div>
+                      <label class="text-[10px] text-text-secondary">% IVA</label>
+                      <input
+                        type="number"
+                        [value]="(item.tax_rate ?? 0) * 100"
+                        (change)="updateItemTaxRate(i, $event)"
+                        class="w-full px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary"
+                        min="0"
+                        step="0.01"
+                        aria-label="Porcentaje de IVA"
+                      />
+                    </div>
+                  </div>
+                  <!-- Desglose: subtotal / IVA / total, derivado igual que
+                       desktop. Reemplaza al qty × unit_price que ignoraba
+                       descuento e IVA en móvil. -->
+                  <div class="border-t border-border/50 pt-2 space-y-1 text-xs">
+                    <div class="flex justify-between">
+                      <span class="text-text-secondary">Subtotal</span>
+                      <span class="text-text-primary">
+                        {{ lineTaxRows()[i]?.net_line || 0 | currency: 0 }}
+                      </span>
+                    </div>
+                    <div class="flex justify-between">
+                      <span class="text-text-secondary">IVA</span>
+                      <span class="text-text-primary">
+                        {{ lineTaxRows()[i]?.tax_amount || 0 | currency: 0 }}
+                      </span>
+                    </div>
+                    <div class="flex justify-between font-semibold">
+                      <span class="text-text-primary">Total</span>
+                      <span class="text-text-primary">
+                        {{ lineTaxRows()[i]?.total_line || 0 | currency: 0 }}
+                      </span>
                     </div>
                   </div>
                   <div>
@@ -520,25 +601,93 @@ import {
             </div>
           </div>
 
-          <!-- Totals -->
+          <!--
+            Pie de totales derivado por derivePurchaseTotals sobre las
+            líneas que sobrevivan al descarte — MISMO algoritmo que el backend
+            va a persistir. Antes era qty × unit_price sumado a mano + el
+            tax_amount crudo del scan; eso contradecía a las filas y dejaba
+            el IVA rancio cuando el operador tocaba cantidad/precio/descuento.
+            Las filas de descuento solo se pintan si hay valor (>0): sin ruido
+            cuando no hay descuento.
+          -->
           <div class="bg-muted/30 rounded-lg p-4 border border-border">
             <div class="space-y-2 text-sm">
               <div class="flex justify-between">
-                <span class="text-text-secondary">Subtotal</span>
-                <span class="text-text-primary font-medium">{{ calculatedSubtotal() | currency: 0 }}</span>
+                <span class="text-text-secondary">Subtotal bruto</span>
+                <span class="text-text-primary">{{ purchaseTotals().gross_subtotal | currency: 0 }}</span>
+              </div>
+              @if (purchaseTotals().line_discount > 0) {
+                <div class="flex justify-between">
+                  <span class="text-text-secondary">(-) Descuento línea</span>
+                  <span class="text-text-primary">-{{ purchaseTotals().line_discount | currency: 0 }}</span>
+                </div>
+              }
+              @if (purchaseTotals().header_discount > 0) {
+                <div class="flex justify-between">
+                  <span class="text-text-secondary">(-) Descuento general</span>
+                  <span class="text-text-primary">-{{ purchaseTotals().header_discount | currency: 0 }}</span>
+                </div>
+              }
+              <div class="flex justify-between">
+                <span class="text-text-secondary">Base gravable</span>
+                <span class="text-text-primary font-medium">
+                  {{ purchaseTotals().subtotal | currency: 0 }}
+                </span>
               </div>
               <div class="flex justify-between">
-                <span class="text-text-secondary">Impuestos</span>
-                <span class="text-text-primary">{{ scanResult()?.tax_amount || 0 | currency: 0 }}</span>
+                <span class="text-text-secondary">(+) IVA</span>
+                <span class="text-text-primary">
+                  {{ purchaseTotals().tax_amount | currency: 0 }}
+                </span>
               </div>
               <div class="flex justify-between border-t border-border pt-2">
                 <span class="text-text-primary font-semibold">Total</span>
                 <span class="text-text-primary font-bold text-base">
-                  {{ calculatedSubtotal() + (scanResult()?.tax_amount || 0) | currency: 0 }}
+                  {{ purchaseTotals().total | currency: 0 }}
                 </span>
+              </div>
+
+              <!--
+                Bloque informativo, separado del costo: el pronto pago es
+                financiero, NO entra al costo del inventario. Se pinta solo
+                si la factura lo traía. El total de la IA va siempre como
+                contraste para detectar drift de OCR.
+              -->
+              <div class="border-t border-border pt-2 mt-2 space-y-1 text-xs text-text-secondary">
+                @if (earlyPaymentDiscount() > 0) {
+                  <div class="flex justify-between">
+                    <span>Descuento pronto pago (informativo)</span>
+                    <span>-{{ earlyPaymentDiscount() | currency: 0 }}</span>
+                  </div>
+                }
+                <div class="flex justify-between">
+                  <span>Total factura (IA)</span>
+                  <span>{{ scanResult()?.total || 0 | currency: 0 }}</span>
+                </div>
               </div>
             </div>
           </div>
+
+          <!--
+            Aviso NO bloqueante: si el total derivado se aparta más del 2%
+            del total impreso por la IA (misma tolerancia que TOTALS_TOLERANCE
+            en el backend) se enciende este banner. Avisa, NO bloquea — el
+            operador decide si corrige o confirma de todas formas.
+          -->
+          @if (totalsDriftWarning() !== null) {
+            <div class="bg-amber-50 border border-amber-200 rounded-lg p-3">
+              <p class="text-xs font-semibold text-amber-800">
+                Diferencia con el total de la factura
+              </p>
+              <p class="text-xs text-amber-700 mt-1">
+                El total derivado ({{ purchaseTotals().total | currency: 0 }})
+                se aparta un {{ driftPercent() }}% del total impreso por la IA
+                ({{ scanResult()?.total || 0 | currency: 0 }}). Verifica
+                cantidades, precios, descuentos y tasas de IVA antes de
+                confirmar.
+              </p>
+            </div>
+          }
 
           <!-- Punto 3+4: picker de producto por línea, SIEMPRE editable.
                Une candidatos sugeridos + búsqueda de catálogo server-side +
@@ -838,12 +987,120 @@ export class InvoiceScannerModalComponent {
     { label: 'Revisar' },
   ];
 
-  // Computed subtotal from editable items
-  calculatedSubtotal = computed(() => {
-    return this.editableItems().reduce(
-      (sum, item) => sum + item.quantity * item.unit_price,
-      0,
-    );
+  // ============================================================
+  // Derivación fiscal espejo del backend (F3 IVA lifecycle)
+  // ============================================================
+  //
+  // Toda esta sección consume el util compartido `purchase-line-tax.util.ts`
+  // —el mismo que ejecuta `purchase-orders.service.ts` al persistir—. Si el
+  // modal muestra una cifra y el backend muestra otra, el operador aprueba
+  // un cálculo que la base de datos va a contradecir, y corregirlo después
+  // implica anular la orden. Por eso la conversión fracción→porcentaje de
+  // `tax_rate` ocurre UNA vez, al construir el input que se le pasa al util.
+
+  /** Cabecera mínima que el util necesita: ¿los precios ya traen IVA dentro? */
+  private readonly invoiceHeader = computed(() => ({
+    prices_include_tax: this.scanResult()?.prices_include_tax ?? false,
+  }));
+
+  /** Descuento COMERCIAL de pie de factura, ya normalizado por el backend. */
+  private readonly headerDiscount = computed(
+    () => Number(this.scanResult()?.discount_amount ?? 0) || 0,
+  );
+
+  /**
+   * Descuento por PRONTO PAGO — sólo se muestra, NO se aplica. Es financiero:
+   * va a cuenta de resultado y se decide al registrar el pago (QUI-647).
+   * Nunca entra al costo del inventario ni al prorrateo.
+   */
+  readonly earlyPaymentDiscount = computed(
+    () => Number(this.scanResult()?.early_payment_discount ?? 0) || 0,
+  );
+
+  /**
+   * Prorrateo del descuento de cabecera sobre las líneas que SÍ van a la
+   * orden. El util exige el cálculo conjunto: si lo moviéramos dentro de
+   * cada `deriveLineTax`, no podríamos garantizar `Σ prorrateado ===
+   * headerDiscount` exacto y el total derivaría un centavo contra lo que
+   * facturó el proveedor.
+   */
+  private readonly keptHeaderShares = computed(() =>
+    prorateHeaderDiscount(this.keptItems(), this.headerDiscount()),
+  );
+
+  /**
+   * Adaptador al shape que el util espera. La única conversión real es
+   * `tax_rate` de fracción (0.19) a porcentaje (19); el resto son campos
+   * que ya viven en `MatchedLineItem` con nombres coincidentes.
+   *
+   * `discount_percentage` y `prices_include_tax` se omiten a propósito:
+   * ninguno vive en `MatchedLineItem` (el primero lo emite el scanner sólo
+   * en dinero; el segundo vive en `InvoiceScanResult`). El util hace
+   * fallback al header de la factura para `prices_include_tax`, y a 0 para
+   * `discount_percentage` — que es el comportamiento correcto para los
+   * datos que recibimos hoy.
+   */
+  private toTaxUtilItem = (item: MatchedLineItem): PurchaseLineTaxInput => ({
+    unit_price: item.unit_price,
+    quantity: item.quantity,
+    tax_rate: (Number(item.tax_rate ?? 0) || 0) * 100,
+    discount_amount: item.discount_amount,
+  });
+
+  /**
+   * Deriva por línea, en una sola pasada, todo lo que la tabla desktop, las
+   * tarjetas móviles y el footer necesitan. Reemplaza a `lineTotal()` y a
+   * la multiplicación cruda `qty × unit_price` que la tarjeta móvil usaba.
+   *
+   * Para líneas descartadas el `share` de cabecera es 0 (no entran al cálculo
+   * fiscal) pero la línea SIGUE derivándose: el operador ve "cuánto valdría"
+   * esa fila si la devolviera, y los números no le saltan al togglear.
+   */
+  readonly lineTaxRows = computed(() => {
+    const header = this.invoiceHeader();
+    const shares = this.keptHeaderShares();
+    const discarded = this.discardedIndexes();
+    let keptCursor = 0;
+    return this.editableItems().map((item, i) => {
+      const isKept = !discarded.has(i);
+      const share = isKept ? shares[keptCursor++] ?? 0 : 0;
+      return deriveLineTax(this.toTaxUtilItem(item), header, share);
+    });
+  });
+
+  /**
+   * Totales de la compra, calculados con el MISMO algoritmo que el backend
+   * va a persistir. El footer consume esto: lo que ve el operador al
+   * confirmar es exactamente lo que va a quedar registrado — sin sorpresas
+   * en el costo capitalizado, el IVA descontable ni la base gravable.
+   */
+  readonly purchaseTotals = computed(() =>
+    derivePurchaseTotals(
+      this.keptItems().map((i) => this.toTaxUtilItem(i)),
+      this.invoiceHeader(),
+      this.headerDiscount(),
+      0, // el escáner no modela envío
+    ),
+  );
+
+  /**
+   * Aviso NO bloqueante: el total derivado se aparta más del 2% del total
+   * impreso por la IA. Misma tolerancia que `TOTALS_TOLERANCE` en
+   * `apps/backend/src/ai-engine/utils/ocr-money.util.ts`. Devuelve el GAP
+   * (0.0–1.0) si supera el umbral, null si cuadra.
+   */
+  readonly totalsDriftWarning = computed(() => {
+    const scanTotal = Number(this.scanResult()?.total ?? 0);
+    const derived = this.purchaseTotals().total;
+    if (scanTotal <= 0) return null;
+    const gap = Math.abs(derived - scanTotal) / scanTotal;
+    return gap > 0.02 ? gap : null;
+  });
+
+  /** GAP formateado como porcentaje con un decimal — listo para el banner. */
+  readonly driftPercent = computed(() => {
+    const gap = this.totalsDriftWarning();
+    return gap == null ? '0' : (gap * 100).toFixed(1);
   });
 
   private readonly MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -1209,10 +1466,19 @@ export class InvoiceScannerModalComponent {
     this.editableItems.set(items);
   }
 
-  /** Importe de la línea ya neto del descuento, para el preview. */
-  lineTotal(item: { quantity: number; unit_price: number; discount_amount?: number | null }): number {
-    const gross = (Number(item.quantity) || 0) * (Number(item.unit_price) || 0);
-    return Math.max(0, gross - (Number(item.discount_amount) || 0));
+  /**
+   * F3 IVA lifecycle — tasa de IVA por línea. El scanner la emite como
+   * FRACCIÓN decimal (0.19); el input la muestra en PORCENTAJE (19) que es
+   * como la piensa el operador. El util compartido vuelve a dividir por 100
+   * al derivar, así que guardar en fracción mantiene paridad 1:1 con el
+   * payload que el backend recibió del OCR.
+   */
+  updateItemTaxRate(index: number, event: Event): void {
+    const raw = Number((event.target as HTMLInputElement).value);
+    const fraction = (Number.isFinite(raw) ? raw : 0) / 100;
+    const items = [...this.editableItems()];
+    items[index] = { ...items[index], tax_rate: fraction };
+    this.editableItems.set(items);
   }
 
   updateItemPrice(index: number, event: Event): void {

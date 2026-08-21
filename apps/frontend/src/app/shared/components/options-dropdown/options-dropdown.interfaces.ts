@@ -2,8 +2,14 @@ import { SelectorOption } from '../selector/selector.component';
 
 /**
  * Filter type determines how the filter is rendered and behaves
+ *
+ * `'date-range'` proyecta `<vendix-date-range-filter>` (preset + rango) dentro
+ * del dropdown. A diferencia del resto, NO ocupa una sola key en
+ * `FilterValues`: se descompone en tres (`start`, `end`, `preset`) para que el
+ * contrato `Record<string, string | string[] | null>` siga siendo plano y el
+ * padre no tenga que decodificar JSON embebido en un string.
  */
-export type FilterType = 'select' | 'multi-select' | 'date';
+export type FilterType = 'select' | 'multi-select' | 'date' | 'date-range';
 
 /**
  * Configuration for a single filter in the dropdown
@@ -25,6 +31,17 @@ export interface FilterConfig {
   helpText?: string;
   /** Default value to restore when filters are cleared (instead of null) */
   defaultValue?: string | string[];
+
+  // --- Sólo para `type: 'date-range'` ---------------------------------------
+
+  /** Key de `FilterValues` para la fecha inicial. Default: `${key}_start`. */
+  startKey?: string;
+  /** Key de `FilterValues` para la fecha final. Default: `${key}_end`. */
+  endKey?: string;
+  /** Key de `FilterValues` para el preset elegido. Default: `${key}_preset`. */
+  presetKey?: string;
+  /** Muestra el selector de presets (Hoy, Este Mes...). Default: `true`. */
+  showPresets?: boolean;
 }
 
 /**

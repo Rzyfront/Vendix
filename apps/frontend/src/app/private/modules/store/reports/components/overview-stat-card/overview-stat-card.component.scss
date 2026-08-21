@@ -1,0 +1,262 @@
+// ============================================================================
+// Host — occupies the grid cell; mini-card width on mobile scroll containers.
+// ============================================================================
+
+:host {
+  display: block;
+  min-width: 0;
+  width: 100%;
+
+  @media (max-width: 640px) {
+    width: 180px;
+    flex-shrink: 0;
+  }
+}
+
+// ============================================================================
+// Card shell — base look + per-state border/background tint.
+// `transition-property` is restricted to transform/box-shadow so we never
+// restart animations on color/opacity changes (zoneless + perf rule).
+// ============================================================================
+
+.overview-stat-card {
+  position: relative;
+  overflow: hidden;
+  min-height: 132px;
+  padding: 1rem 1.25rem;
+  border-radius: 1rem;
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  transition-property: transform, box-shadow;
+  transition-duration: 200ms;
+  transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.06);
+  }
+
+  // State-driven border + bg tint. The Tailwind tokens resolve to the
+  // CSS variables defined in `styles.scss` (color-{name}-rgb).
+  &.state-critical {
+    border-color: rgba(var(--color-error-rgb), 0.3);
+    background-color: rgba(var(--color-error-rgb), 0.05);
+  }
+
+  &.state-warning {
+    border-color: rgba(var(--color-warning-rgb), 0.3);
+    background-color: rgba(var(--color-warning-rgb), 0.05);
+  }
+
+  &.state-positive {
+    border-color: rgba(var(--color-primary-rgb), 0.3);
+    background-color: rgba(var(--color-primary-rgb), 0.05);
+  }
+
+  &.state-neutral {
+    border-color: var(--color-border);
+    background-color: var(--color-surface);
+  }
+}
+
+// ============================================================================
+// Left border strip — 4px colored stripe based on state.
+// ============================================================================
+
+.stat-border-strip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background-color: var(--color-text-secondary);
+
+  .state-critical & {
+    background-color: var(--color-error);
+  }
+
+  .state-warning & {
+    background-color: var(--color-warning);
+  }
+
+  .state-positive & {
+    background-color: var(--color-primary);
+  }
+
+  .state-neutral & {
+    background-color: var(--color-border);
+  }
+}
+
+// ============================================================================
+// Content wrapper — holds header + icon + value with flex layout.
+// ============================================================================
+
+.stat-content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.stat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.stat-title {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+// ============================================================================
+// Icon wrapper — top-right absolute, rounded square, color per state.
+// ============================================================================
+
+.stat-icon-wrapper {
+  position: absolute;
+  right: 1rem;
+  top: 1rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 0.75rem;
+  display: grid;
+  place-items: center;
+  background-color: rgba(var(--color-text-secondary-rgb), 0.1);
+  color: var(--color-text-secondary);
+
+  .state-critical & {
+    background-color: rgba(var(--color-error-rgb), 0.1);
+    color: var(--color-error);
+  }
+
+  .state-warning & {
+    background-color: rgba(var(--color-warning-rgb), 0.1);
+    color: var(--color-warning);
+  }
+
+  .state-positive & {
+    background-color: rgba(var(--color-primary-rgb), 0.1);
+    color: var(--color-primary);
+  }
+
+  .state-neutral & {
+    background-color: rgba(var(--color-text-secondary-rgb), 0.1);
+    color: var(--color-text-secondary);
+  }
+}
+
+// ============================================================================
+// Value — 2xl bold, large margin to clear the icon wrapper.
+// ============================================================================
+
+.stat-value {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-top: 1.75rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+// ============================================================================
+// Trend chip — small pill next to the title; color per trend direction.
+// ============================================================================
+
+.stat-trend {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  background-color: rgba(var(--color-text-secondary-rgb), 0.15);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+
+  &.trend-up {
+    background-color: rgba(var(--color-success-rgb), 0.15);
+    color: var(--color-success);
+  }
+
+  &.trend-down {
+    background-color: rgba(var(--color-error-rgb), 0.15);
+    color: var(--color-error);
+  }
+
+  &.trend-flat {
+    background-color: rgba(var(--color-text-secondary-rgb), 0.15);
+    color: var(--color-text-secondary);
+  }
+}
+
+.stat-growth {
+  font-variant-numeric: tabular-nums;
+}
+
+// ============================================================================
+// Skeleton — shimmer placeholders matching the card geometry.
+// ============================================================================
+
+@keyframes skeleton-loading {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@mixin shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-background) 25%,
+    var(--color-border) 50%,
+    var(--color-background) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s infinite;
+  border-radius: 0.5rem;
+}
+
+.stat-skeleton {
+  .skeleton-pill {
+    height: 0.75rem;
+    width: 60%;
+    border-radius: 9999px;
+    @include shimmer;
+  }
+
+  .skeleton-icon {
+    position: absolute;
+    right: 1rem;
+    top: 1rem;
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 0.75rem;
+    @include shimmer;
+  }
+
+  .skeleton-value {
+    margin-top: 1.75rem;
+    height: 1.75rem;
+    width: 80%;
+    border-radius: 0.5rem;
+    @include shimmer;
+  }
+}

@@ -100,8 +100,23 @@ export class PopCheckoutShellComponent {
    * `app-success` con id + total + botones "Ver detalle" / "Nueva compra".
    * `orderError` aparece cuando el POST falló — pinta `app-error` con
    * mensaje y opción de reintentar.
+   *
+   * 5.3/5.5 — La forma se extiende con `stages[]` (rastro de etapas) y
+   * `failedStage` para que el shell distinga éxito pleno de éxito parcial
+   * y ofrezca acciones por etapa (reintentar pago, reintentar recepción).
    */
-  readonly orderResult = input<{ id: number; total: number; orderNumber: string } | null>(null);
+  readonly orderResult = input<{
+    id: number;
+    total: number;
+    orderNumber: string;
+    stages?: Array<{
+      name: 'create' | 'receive' | 'pay';
+      label: string;
+      status: 'success' | 'failed' | 'skipped';
+      errorMessage?: string;
+    }>;
+    failedStage?: 'create' | 'receive' | 'pay';
+  } | null>(null);
   readonly orderError = input<string | null>(null);
 
   // ── Paso Configuración (solo cuando el POP no tiene proveedor/bodega) ────
@@ -122,17 +137,19 @@ export class PopCheckoutShellComponent {
   readonly closed = output<void>();
   /** El padre ejecuta la creación/recepción/pago con el plan ya sincronizado. */
   readonly confirmed = output<void>();
+  /** El wizard cierra SIN éxito: el padre baja `showOrderConfirmModal`. */
   readonly cancelled = output<void>();
   readonly navigateToSettings = output<void>();
 
   /**
-   * CP-ID-VNDX-2026-08-18-PO-PROD — F2.S6: emits desde el panel `app-success`.
-   * `viewCreatedOrder` → el padre navega a /admin/orders/purchase-orders/:id.
-   * `createAnotherOrder` → el padre limpia y abre el wizard de nuevo.
-   * `retryOrder` → el padre re-dispara el POST con el mismo payload.
+   * CP-ID-VNDX-2026-08-21-POP-MODAL — El panel post-creación (`app-success`)
+   * se extrajo a un modal standalone fuera del shell. Los emits
+   * `viewCreatedOrder` / `createAnotherOrder` ya no viven aquí: la X, el
+   * overlay y ESC del modal `app-pop-order-confirmation-modal` llegan al
+   * padre como `(closed)`, que limpia `orderResult` y redirige a la lista
+   * de OC. `retryOrder` se conserva para el botón "Reintentar" del panel
+   * de error del wizard (no del modal).
    */
-  readonly viewCreatedOrder = output<void>();
-  readonly createAnotherOrder = output<void>();
   readonly retryOrder = output<void>();
   readonly pricingOverridesChange = output<PopPricingOverridesMap>();
   readonly ackReceiveChange = output<boolean>();

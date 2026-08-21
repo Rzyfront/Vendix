@@ -13,12 +13,12 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
 import {
   OptionsDropdownComponent } from '../../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import {
-  DropdownAction } from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+  DropdownAction,
+  FilterConfig,
+  FilterValues} from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   CurrencyPipe,
   CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
-import { ExportButtonComponent } from '../../../components/export-button/export-button.component';
-import { DateRangeFilterComponent } from '../../../components/date-range-filter/date-range-filter.component';
 import { DateRangeFilter } from '../../../interfaces/analytics.interface';
 import {
   InventorySummary,
@@ -45,8 +45,6 @@ import { getViewsByCategory, AnalyticsView } from '../../../config/analytics-reg
     ChartComponent,
     IconComponent,
     OptionsDropdownComponent,
-    ExportButtonComponent,
-    DateRangeFilterComponent,
     CurrencyPipe,
     AnalyticsCardComponent,
   ],
@@ -146,6 +144,33 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
   }
 
   /**
+   * Filter configs for the `<app-options-dropdown>` in the card header.
+   * El primer (y único) item es el rango de fechas; el componente
+   * descompone automáticamente la key en tres (`_start`/`_end`/`_preset`).
+   */
+  readonly filterConfigs = computed<FilterConfig[]>(() => [
+    {
+      key: 'date_range',
+      type: 'date-range',
+      label: 'Período',
+    },
+  ]);
+
+  /**
+   * Snapshot del estado del dropdown derivado del store NgRx: el padre
+   * mantiene la verdad, el dropdown sólo la refleja.
+   */
+  readonly dropdownFilterValues = computed<FilterValues>(() => {
+    const dr = this.dateRange();
+    if (!dr) return {} as FilterValues;
+    return {
+      date_range_start: dr.start_date ?? null,
+      date_range_end: dr.end_date ?? null,
+      date_range_preset: (dr.preset ?? null) as string | null,
+    } as FilterValues;
+  });
+
+  /**
    * Actions exposed via the `<app-options-dropdown>` in the card header.
    * Single action today (Export XLSX); kept as a `DropdownAction[]` computed
    * so future actions slot in without changing the template.
@@ -164,8 +189,43 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
     }
   }
 
-  onDateRangeChange(range: DateRangeFilter): void {
-    this.store.dispatch(InventoryActions.setDateRange({ dateRange: range }));
+  /**
+   * Handler unificado del dropdown: el `app-options-dropdown` emite las
+   * tres keys (`date_range_start/_end/_preset`); las recomponemos al
+   * `DateRangeFilter` que consume el store NgRx.
+   */
+  onFiltersDropdownChange(values: FilterValues): void {
+    const start = values['date_range_start'] as string | null;
+    const end = values['date_range_end'] as string | null;
+    const preset = values['date_range_preset'] as string | null;
+
+    // Si el padre no recibió start/end (clearAll antes de default) el
+    // dropdown habría emitido `clearAllFilters`; aquí sólo reconstruimos.
+    if (!start || !end) return;
+
+    this.store.dispatch(
+      InventoryActions.setDateRange({
+        dateRange: {
+          start_date: start,
+          end_date: end,
+          preset: (preset ?? undefined) as DateRangeFilter['preset'],
+        },
+      }),
+    );
+  }
+
+  onClearAllFilters(): void {
+    // El default (Este Mes) lo restablece el padre via `setDateRange`
+    // para que NgRx mantenga una única fuente de verdad.
+    this.store.dispatch(
+      InventoryActions.setDateRange({
+        dateRange: {
+          start_date: getDefaultStartDate(),
+          end_date: getDefaultEndDate(),
+          preset: 'thisMonth',
+        },
+      }),
+    );
   }
 
   private getThemeColors() {

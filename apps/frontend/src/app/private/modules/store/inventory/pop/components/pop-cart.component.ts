@@ -9,6 +9,7 @@ import {
   PopCartItem,
   PopCartSummary,
 } from '../services/pop-cart.service';
+import { deriveLineTax } from '../utils/purchase-line-tax.util';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -365,6 +366,36 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                         </span>
                       </div>
                     </div>
+                    <!--
+                      QUI-661 Fase 4 — visual del descuento comercial de la
+                      línea. Se muestra SOLO cuando hay descuento > 0 para no
+                      añadir ruido cuando la línea no tiene rebaje. El neto
+                      sale del mismo deriveLineTax que usa el servicio: una
+                      sola fuente, dos consumidores (servicio y template).
+                      Mobile-first: flex-wrap para que el tachado + neto + (-%)
+                      quepan en pantallas estrechas sin romper la fila.
+                    -->
+                    @if (item.discount > 0) {
+                      <div
+                        class="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 mt-1 text-[10px]"
+                      >
+                        <span class="text-text-secondary">Precio neto:</span>
+                        <span class="line-through text-text-muted">
+                          {{ formatCurrency(item.unit_cost) }}
+                        </span>
+                        <app-icon
+                          name="arrow-right"
+                          [size]="10"
+                          class="text-text-muted"
+                        ></app-icon>
+                        <span class="font-semibold text-text-primary">
+                          {{ formatCurrency(lineNetUnit(item)) }}
+                        </span>
+                        <span class="text-text-secondary">
+                          (-{{ item.discount | number: '1.0-0' }}%)
+                        </span>
+                      </div>
+                    }
                     <!-- Cost comparison -->
                     @if (getCostDelta(item); as delta) {
                       <div class="flex items-center gap-1.5 mt-1 text-[10px]">
@@ -813,6 +844,37 @@ export class PopCartComponent {
     if (item.unit_cost === currentCost) return null;
     const percentage = ((item.unit_cost - currentCost) / currentCost) * 100;
     return { currentCost, percentage };
+  }
+
+  /**
+   * Precio unitario NETO de la línea (post-descuento, pre-impuesto).
+   *
+   * Alimenta la visualización "Precio neto" del carrito cuando la línea trae
+   * descuento comercial > 0: lo que el operador ve tachado es el `unit_cost`
+   * capturado, y al lado aparece el neto que la fórmula ya aplicó. Sale del
+   * mismo `deriveLineTax` que usa el servicio para `recalculateItemTotals`, de
+   * modo que el template y el resumen se mueven juntos — nunca hay un neto
+   * distinto en la fila y en el pie.
+   *
+   * El parámetro `proratedHeaderDiscount` se deja en 0: el descuento general
+   * se prorratea por línea en el summary (ver `calculateSummary`), no aquí;
+   * esta vista muestra solo el efecto del descuento PROPIO de la línea sobre
+   * el precio unitario.
+   */
+  lineNetUnit(item: PopCartItem): number {
+    const safeTaxRate = this.hasVat() ? Number(item.tax_rate) || 0 : 0;
+    const result = deriveLineTax(
+      {
+        unit_cost: item.unit_cost,
+        quantity: item.quantity,
+        discount_percentage: item.discount,
+        tax_rate: safeTaxRate,
+        prices_include_tax: item.prices_include_tax ?? undefined,
+      },
+      { prices_include_tax: this.headerIncludeTax() },
+      0,
+    );
+    return result.unit_price_net;
   }
 
   formatCurrency(amount: number): string {

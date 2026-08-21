@@ -361,12 +361,26 @@ export const selectFiscalStatus = createSelector(
 //   - tax_responsibilities incluye 'O-48'          ⇒ responsable (true)
 //   - incluye 'O-49' SIN 'O-48'                     ⇒ NO responsable (false)
 //   - fallback tax_regime COMUN/GRAN_CONTRIBUYENTE  ⇒ true; SIMPLIFICADO ⇒ false
-//   - indeterminado                                 ⇒ true (anti-regresión)
+//   - indeterminado                                 ⇒ false (fail-closed, 2026-08-21)
+//
+// Cambio de default (2026-08-21): la rama indeterminada pasó de `true` a
+// `false`. Razón: el 100% de los tenants arrancan con el módulo fiscal
+// apagado y sin responsabilidad declarada; tratarlos como responsables
+// equivalía a permitir cobro de IVA sin estar facultados para facturar
+// electrónicamente. Fail-closed. Para vender con IVA, el tenant debe
+// declarar `tax_responsibilities: ['O-48']` o pasar por el wizard fiscal.
 // ────────────────────────────────────────────────────────────────────────
 const VAT_RESPONSIBLE_CODE = 'O-48';
 const VAT_NOT_RESPONSIBLE_CODE = 'O-49';
 
-function resolveIsVatResponsible(fiscalData: any): boolean {
+/**
+ * Resuelve si el comercio es responsable de IVA. Fuente ÚNICA de verdad en
+ * frontend para el predicado. Espejo del helper backend
+ * `apps/backend/src/common/helpers/vat-responsibility.helper.ts` (mismo
+ * algoritmo rama por rama). Exportada para especar — no la invoques fuera
+ * de los selectores de este módulo.
+ */
+export function resolveIsVatResponsible(fiscalData: any): boolean {
   const responsibilities: string[] = Array.isArray(
     fiscalData?.tax_responsibilities,
   )
@@ -383,7 +397,7 @@ function resolveIsVatResponsible(fiscalData: any): boolean {
   if (regime === 'COMUN' || regime === 'GRAN_CONTRIBUYENTE') return true;
   if (regime === 'SIMPLIFICADO') return false;
 
-  return true; // indeterminado ⇒ responsable
+  return false; // indeterminado ⇒ NO responsable (fail-closed, 2026-08-21)
 }
 
 /**
@@ -411,8 +425,11 @@ export const selectIsVatResponsible = createSelector(
 );
 
 /**
- * Predicado de bloqueo POSITIVO: `true` SOLO cuando el comercio es
- * explícitamente NO responsable de IVA. Indeterminado ⇒ `false` (no bloquea).
+ * Predicado de bloqueo POSITIVO: `true` cuando el comercio es
+ * explícitamente NO responsable de IVA o su estado fiscal es
+ * indeterminado (fail-closed desde 2026-08-21). Sólo devuelve `false`
+ * cuando hay una declaración de responsabilidad POSITIVA (O-48) o un
+ * régimen que la implica (COMUN / GRAN_CONTRIBUYENTE).
  */
 export const selectIsExplicitlyNotVatResponsible = createSelector(
   selectFiscalData,

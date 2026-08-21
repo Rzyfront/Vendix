@@ -1,0 +1,59 @@
+<app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
+  <div class="catalog-section">
+    <div class="catalog-header">
+      <div class="catalog-header-text">
+        <h2 class="catalog-title">Catálogo de Reportes</h2>
+        <p class="catalog-description">Busca y filtra todos los reportes disponibles para descarga</p>
+      </div>
+      <div class="catalog-stats">
+        <span class="catalog-count">{{ filteredReports().length }} de {{ reports().length }}</span>
+      </div>
+    </div>
+
+    <div class="catalog-controls">
+      <app-report-category-chips
+        [categories]="categories()"
+        [selectedCategory]="selectedCategory()"
+        [categoryCounts]="categoryCounts()"
+        (categoryChange)="onCategoryChange($event)"
+      />
+      <app-inputsearch
+        placeholder="Buscar reporte..."
+        (searchChange)="onSearchChange($event)"
+        class="catalog-search"
+      />
+    </div>
+
+    @if (filteredReports().length === 0) {
+      <div class="catalog-empty">
+        <app-icon name="search-x" [size]="48" />
+        <p class="empty-title">No se encontraron reportes</p>
+        <p class="empty-hint">Prueba con otro término o categoría</p>
+      </div>
+    } @else {
+      @for (group of reportsByCategory() | keyvalue; track group.key) {
+        @if (group.value.length > 0) {
+          <section class="category-group" [style.--cat-color]="getCategoryColor($any(group.key))">
+            <header class="category-header">
+              <div class="category-line"></div>
+              <div class="category-label">
+                <app-icon [name]="getCategoryIcon($any(group.key))" [size]="16" />
+                <span>{{ getCategoryLabel($any(group.key)) }}</span>
+                <span class="category-count">{{ group.value.length }}</span>
+              </div>
+              <div class="category-line"></div>
+            </header>
+            <div class="cards-grid">
+              @for (report of group.value; track report.id) {
+                <app-report-catalog-card
+                  [report]="report"
+                  [categoryColor]="getCategoryColor(report.category)"
+                />
+              }
+            </div>
+          </section>
+        }
+      }
+    }
+  </div>
+</app-card>

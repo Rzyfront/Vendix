@@ -1,7 +1,6 @@
-import { Component, input, output, computed } from '@angular/core';
+import { Component, input, output, computed, signal, effect } from '@angular/core';
 import { ReportColumn, ReportDefinition } from '../../interfaces/report.interface';
 import { NestedReportComponent } from '../nested-report/nested-report.component';
-import { DateRangeFilterComponent } from '../../../analytics/components/date-range-filter/date-range-filter.component';
 import { PaginationComponent } from '../../../../../../shared/components/pagination/pagination.component';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import {
@@ -9,7 +8,10 @@ import {
 } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import {
   DropdownAction,
+  FilterConfig,
+  FilterValues,
 } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import { DateRangeFilter } from '../../../../../../shared/interfaces/date-range-filter.interface';
 import {
   ResponsiveDataViewComponent,
   IconComponent,
@@ -125,7 +127,6 @@ function formatStatValue(value: any, type: string): string | number {
   imports: [
     StatsComponent,
     NestedReportComponent,
-    DateRangeFilterComponent,
     PaginationComponent,
     CardComponent,
     ResponsiveDataViewComponent,
@@ -187,27 +188,23 @@ function formatStatValue(value: any, type: string): string | number {
             </span>
           </div>
 
-          <!-- Right: date-range (inline — OptionsDropdown no soporta date)
-               + <app-options-dropdown> Acciones para el export. Mismo
-               patrón canónico que el overview y el reporte low-stock-by-supplier. -->
+          <!-- Right: UN solo <app-options-dropdown>. El período dejó de ser un
+               control suelto del header: viaja como filtro date-range dentro
+               del panel de Filtros, y el export sigue en el de Acciones. -->
           <div class="flex items-end gap-2 flex-wrap shrink-0">
-            @if (report()?.requiresDateRange) {
-              <vendix-date-range-filter
-                [value]="dateRange()"
-                (valueChange)="dateRangeChange.emit($event)"
-              />
-            }
-            @if (report()?.exportEndpoint) {
-              <app-options-dropdown
-                [filters]="[]"
-                [actions]="exportActions()"
-                [showActions]="true"
-                triggerLabel="Acciones"
-                triggerIcon="plus"
-                [isLoading]="exportLoading()"
-                (actionClick)="onActionsDropdownClick($event)"
-              ></app-options-dropdown>
-            }
+            <app-options-dropdown
+              [filters]="filterConfigs()"
+              [filterValues]="dropdownFilterValues()"
+              [actions]="report()?.exportEndpoint ? exportActions() : []"
+              [showActions]="!!report()?.exportEndpoint"
+              title="Filtros"
+              triggerLabel="Acciones"
+              triggerIcon="plus"
+              [isLoading]="exportLoading()"
+              (filterChange)="onFiltersDropdownChange($event)"
+              (clearAllFilters)="onFiltersDropdownClearAll()"
+              (actionClick)="onActionsDropdownClick($event)"
+            ></app-options-dropdown>
           </div>
         </div>
 
@@ -273,6 +270,92 @@ export class ReportViewerComponent {
 
   readonly exportLoading = input<boolean>(false);
   readonly dateRange = input<any>(undefined);
+
+  /**
+   * Filtros del dropdown. Hoy sólo el período, y sólo si el reporte lo pide:
+   * un reporte sin `requiresDateRange` no muestra el trigger "Filtros".
+   */
+  readonly filterConfigs = computed<FilterConfig[]>(() => {
+    if (!this.report()?.requiresDateRange) return [];
+    return [
+      {
+        key: 'date_range',
+        label: 'Período',
+        type: 'date-range',
+      },
+    ];
+  });
+
+  /**
+   * Espejo local del `dateRange` de entrada, aplanado a las tres keys que el
+   * dropdown entiende. Un `effect` lo resincroniza porque el rango lo puede
+   * mover el padre (NgRx) además del propio dropdown.
+   */
+  private readonly localFilterValues = signal<FilterValues>({});
+
+  readonly dropdownFilterValues = computed<FilterValues>(() =>
+    this.localFilterValues(),
+  );
+
+  constructor() {
+    effect(() => {
+      const range = this.dateRange() as DateRangeFilter | undefined;
+      const next: FilterValues = {
+        date_range_start: range?.start_date || null,
+        date_range_end: range?.end_date || null,
+        date_range_preset: range?.preset || null,
+      };
+      const current = this.localFilterValues();
+      if (
+        current['date_range_start'] === next['date_range_start'] &&
+        current['date_range_end'] === next['date_range_end'] &&
+        current['date_range_preset'] === next['date_range_preset']
+      ) {
+        return;
+      }
+      this.localFilterValues.set(next);
+    });
+  }
+
+  onFiltersDropdownChange(values: FilterValues): void {
+    const start = values['date_range_start'];
+    const end = values['date_range_end'];
+    const preset = values['date_range_preset'];
+
+    // Sin ambos extremos no hay rango que emitir — un rango a medias
+    // dispararía una consulta con una fecha vacía.
+    if (typeof start !== 'string' || typeof end !== 'string' || !start || !end) {
+      return;
+    }
+
+    const current = this.dateRange() as DateRangeFilter | undefined;
+    if (current?.start_date === start && current?.end_date === end) {
+      return;
+    }
+
+    this.localFilterValues.set({
+      date_range_start: start,
+      date_range_end: end,
+      date_range_preset: typeof preset === 'string' ? preset : null,
+    });
+
+    this.dateRangeChange.emit({
+      start_date: start,
+      end_date: end,
+      preset: (typeof preset === 'string' && preset
+        ? preset
+        : 'custom') as DateRangeFilter['preset'],
+    });
+  }
+
+  onFiltersDropdownClearAll(): void {
+    // El padre es el dueño del período por defecto; se le devuelve el control
+    // re-emitiendo el rango vigente sin preset personalizado.
+    const current = this.dateRange() as DateRangeFilter | undefined;
+    if (current?.start_date && current?.end_date) {
+      this.dateRangeChange.emit({ ...current, preset: 'thisMonth' });
+    }
+  }
 
   /**
    * Ícono del header de la data card. Toma `report().icon` (Lucide) y cae al

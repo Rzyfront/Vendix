@@ -136,6 +136,16 @@
                 [disabled]="filter.disabled || false"
                 />
             }
+            <!-- Date Range Filter — preset + rango, proyectado desde shared.
+                 Escribe TRES keys en filterValues (start / end / preset). -->
+            @if (filter.type === 'date-range') {
+              <vendix-date-range-filter
+                [value]="getDateRangeValue(filter)"
+                [showPresets]="filter.showPresets !== false"
+                [stacked]="true"
+                (valueChange)="onDateRangeChange(filter, $event)"
+              ></vendix-date-range-filter>
+            }
             @if (filter.helpText) {
               <div class="filter-help-text">
                 {{ filter.helpText }}

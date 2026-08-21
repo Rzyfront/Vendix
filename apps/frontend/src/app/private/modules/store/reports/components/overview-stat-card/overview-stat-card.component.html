@@ -1,0 +1,33 @@
+@if (loading()) {
+  <div class="overview-stat-card stat-skeleton state-neutral" aria-busy="true">
+    <div class="stat-border-strip"></div>
+    <div class="stat-content">
+      <div class="stat-header">
+        <span class="skeleton-pill"></span>
+      </div>
+      <div class="skeleton-icon"></div>
+      <div class="skeleton-value"></div>
+    </div>
+  </div>
+} @else {
+  <div class="overview-stat-card" [class]="'state-' + state()" [attr.aria-label]="title()">
+    <div class="stat-border-strip"></div>
+    <div class="stat-content">
+      <div class="stat-header">
+        <span class="stat-title">{{ title() }}</span>
+        @if (trend()) {
+          <span class="stat-trend" [class]="'trend-' + trend()">
+            <app-icon [name]="trendIcon()" [size]="14" />
+            @if (growth() !== null && growth() !== undefined) {
+              <span class="stat-growth">{{ formattedGrowth() }}</span>
+            }
+          </span>
+        }
+      </div>
+      <div class="stat-icon-wrapper">
+        <app-icon [name]="icon()" [size]="24" />
+      </div>
+      <div class="stat-value">{{ formattedValue() }}</div>
+    </div>
+  </div>
+}

@@ -15,41 +15,12 @@
   @for (epoch of [contentEpoch()]; track epoch) {
   <div class="pop-checkout-shell">
     <!--
-      CP-ID-VNDX-2026-08-18-PO-PROD — F2.S6: panel post-creación.
-      Cuando el POST termina OK, pintamos `app-success` con id + total y
-      dos acciones: "Ver detalle" (navega a /admin/orders/purchase-orders/:id)
-      y "Nueva compra" (cierra el modal y limpia estado). Si el POST
-      falló, pintamos `app-error` con el mensaje y un botón de reintento.
-      El stepper y los pasos del wizard se ocultan para no distraer.
+      CP-ID-VNDX-2026-08-21-POP-MODAL — El panel post-creación se extrajo a un
+      modal standalone (`app-pop-order-confirmation-modal`) que el padre monta
+      afuera del shell. Aquí solo queda el panel de error (red de seguridad
+      cuando el POST falla): el stepper y los pasos se ocultan para no
+      distraer.
     -->
-    @if (orderResult(); as result) {
-      <div class="px-6 py-10 flex flex-col items-center gap-4 text-center">
-        <div class="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">
-          <app-icon name="check-circle" [size]="40" />
-        </div>
-        <h3 class="text-lg font-semibold text-text-primary">¡Orden creada!</h3>
-        <p class="text-sm text-text-secondary">
-          {{ result.orderNumber || ('Orden #' + result.id) }} — Total:
-          <strong>{{ result.total | currency }}</strong>
-        </p>
-        <div class="flex gap-2 mt-2">
-          <button
-            type="button"
-            class="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary/90"
-            (click)="viewCreatedOrder.emit()"
-          >
-            Ver detalle
-          </button>
-          <button
-            type="button"
-            class="px-4 py-2 rounded-lg border border-border text-text-primary text-sm font-medium hover:bg-surface-secondary"
-            (click)="createAnotherOrder.emit()"
-          >
-            Nueva compra
-          </button>
-        </div>
-      </div>
-    }
     @if (orderResult() === null && orderError() !== null) {
       <div class="px-6 py-10 flex flex-col items-center gap-4 text-center">
         <div class="w-16 h-16 rounded-full bg-red-100 text-red-600 flex items-center justify-center">

@@ -2,7 +2,6 @@ import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, catchError, throwError, timer, map, switchMap, filter, takeWhile, take, timeout } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
-import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import {
     PurchaseOrder,
     CreatePurchaseOrderDto,
@@ -298,14 +297,13 @@ export class PurchaseOrdersService {
         return params;
     }
 
-    // Un solo traductor de errores para toda la app: `extractApiErrorMessage`
-    // resuelve el `error_code` tipado contra ERROR_MESSAGES y sólo cae a los
-    // genéricos por status si no hay código. La versión previa mostraba el
-    // `message` del backend —el mensaje de DESARROLLO, en inglés— directo al
-    // usuario, que es justo lo que parse-api-error prohíbe.
+    // NO re-lanzamos un string: aplastaba el `HttpErrorResponse` y perdíamos
+    // `status` + `error_code` + `details.blockers`. El consumidor llama
+    // `parseApiError(error)` (sabe desenvainar HttpErrorResponse) y conserva
+    // el `status` para enrutar (reintento, fallback, gate por stage, etc.).
     private handleError(error: any): Observable<never> {
         console.error('PurchaseOrdersService Error:', error);
-        return throwError(() => extractApiErrorMessage(error));
+        return throwError(() => error);
     }
 }
 

@@ -20,6 +20,7 @@ import { PoPaymentDetailModalComponent } from '../po-payment-detail-modal/po-pay
 import { PoTimelineComponent } from '../po-timeline/po-timeline.component';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
+import { extractApiErrorMessage } from '../../../../../../../core/utils/api-error-handler';
 
 /**
  * QUI-647 — fila del calendario de pagos acordado con el proveedor.
@@ -1138,9 +1139,15 @@ export class PoDetailModalComponent {
         const newAttachment = res.data || res;
         this.attachments.update(list => [...list, newAttachment]);
       },
-      error: (err: string) => {
+      // El servicio ahora propaga el `HttpErrorResponse` crudo (antes lo
+      // aplastaba a string), así que el motivo real llega con `error_code`.
+      error: (err: unknown) => {
         this.uploading.set(false);
-        this.toastService.error(err || 'Error al subir archivo');
+        this.toastService.error(
+          typeof err === 'string' && err.trim()
+            ? err
+            : extractApiErrorMessage(err) || 'Error al subir archivo',
+        );
       },
     });
   }
@@ -1163,8 +1170,12 @@ export class PoDetailModalComponent {
         this.attachments.update(list => list.filter(a => a.id !== attachmentId));
         this.toastService.success('Adjunto eliminado');
       },
-      error: (err: string) => {
-        this.toastService.error(err || 'Error al eliminar');
+      error: (err: unknown) => {
+        this.toastService.error(
+          typeof err === 'string' && err.trim()
+            ? err
+            : extractApiErrorMessage(err) || 'Error al eliminar',
+        );
       },
     });
   }

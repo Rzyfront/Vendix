@@ -30,9 +30,7 @@ import {
   VAT_PERIODICITIES,
   VatPeriodicity,
 } from '../constants/fiscal-responsibilities.catalog';
-
-/** RUT casilla 53 — 'O-48' Responsable de IVA. */
-const VAT_RESPONSIBLE_CODE = 'O-48';
+import { isVatResponsible } from '@common/helpers/vat-responsibility.helper';
 
 /** Meses en los que vence cada periodicidad de IVA (art. 600 ET). */
 const VAT_BIMONTHLY_MONTHS = [2, 4, 6, 8, 10, 12];
@@ -437,29 +435,28 @@ export class FiscalObligationService {
     ) {
       types.add('electronic_invoice_review');
       types.add('support_document_review');
-      // Condicionado por responsabilidades RUT (casilla 53). Regla
-      // conservadora: solo aplica cuando tax_responsibilities existe y es un
-      // array no vacío; sin datos se conserva el comportamiento legacy
-      // (generar vat_return + inc_return siempre).
+      // P0.1 — unificación del predicado de responsabilidad. La rama legacy
+      // decidía "responsable" sólo con base en `tax_responsibilities`; el
+      // helper canónico además considera `tax_regime` (COMUN /
+      // GRAN_CONTRIBUYENTE / SIMPLIFICADO) y mantiene la rama
+      // anti-regresión pre-F4 (indeterminado ⇒ responsable).
+      //
+      // DIVERGENCE: con `tax_responsibilities=[]` y `tax_regime=SIMPLIFICADO`
+      // este código ahora devuelve `false` (helper dice NO responsable) y NO
+      // agrega `vat_return`/`inc_return`. La versión previa los habría
+      // agregado de todas formas. Caso previsto pero no validado contra
+      // datos reales — registrar como observación post-deploy.
       const fiscalData = await this.fiscalDataForContext(context);
-      const responsibilities = Array.isArray(fiscalData?.tax_responsibilities)
-        ? fiscalData.tax_responsibilities.filter(
-            (code): code is string => typeof code === 'string',
-          )
-        : [];
-
-      if (responsibilities.length === 0) {
-        types.add('vat_return');
-        types.add('inc_return');
-      } else if (responsibilities.includes(VAT_RESPONSIBLE_CODE)) {
-        // O-48 habilita IVA (según periodicidad declarada) e INC.
+      if (isVatResponsible(fiscalData)) {
+        // O-48 (o régimen equivalente) habilita IVA — filtrado por
+        // periodicidad declarada — e INC.
         types.add('inc_return');
         if (this.vatReturnAppliesForPeriod(fiscalData, period)) {
           types.add('vat_return');
         }
       }
-      // Con responsabilidades declaradas pero sin O-48 (ej. O-49 no
-      // responsable de IVA) no se generan vat_return ni inc_return.
+      // Si NO es responsable (O-49 explícito, o SIMPLIFICADO sin O-48) no
+      // se generan vat_return ni inc_return.
     }
 
     if (

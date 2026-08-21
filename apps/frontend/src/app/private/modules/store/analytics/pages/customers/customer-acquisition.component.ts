@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject, DestroyRef } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, DestroyRef, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Observable, combineLatest } from 'rxjs';
@@ -88,21 +88,19 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
   readonly loading = toSignal(this.loading$, { initialValue: false });
   readonly loadingTrends = toSignal(this.loadingTrends$, { initialValue: false });
   readonly loadingChannels = toSignal(this.loadingChannels$, { initialValue: false });
+  readonly dateRange = toSignal(this.dateRange$, {
+    initialValue: { start_date: '', end_date: '', preset: 'thisMonth' as const },
+  });
+  readonly granularity = toSignal(this.granularity$, { initialValue: 'day' });
 
   trendsChartOptions: EChartsOption = {};
   channelsChartOptions: EChartsOption = {};
 
   filterConfigs: FilterConfig[] = [
     {
-      key: 'date_from',
-      label: 'Desde',
-      type: 'date',
-      defaultValue: getDefaultStartDate() },
-    {
-      key: 'date_to',
-      label: 'Hasta',
-      type: 'date',
-      defaultValue: getDefaultEndDate() },
+      key: 'date_range',
+      label: 'Período',
+      type: 'date-range' },
     {
       key: 'granularity',
       label: 'Granularidad',
@@ -118,7 +116,20 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
       defaultValue: 'day' },
   ];
 
-  filterValues: FilterValues = {};
+  /**
+   * Signal-derived projection of the NgRx state into the 3 date-range keys
+   * plus the `granularity` select. Computed for reactivity under zoneless.
+   */
+  readonly filterValues = computed<FilterValues>(() => {
+    const range = this.dateRange();
+    const granularity = this.granularity();
+    return {
+      date_range_start: range.start_date || null,
+      date_range_end: range.end_date || null,
+      date_range_preset: range.preset || null,
+      granularity: granularity || 'day',
+    };
+  });
 
   readonly customersViews: AnalyticsView[] = getViewsByCategory('customers');
 
@@ -126,15 +137,6 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
     this.store.dispatch(AcquisitionActions.loadAcquisitionSummary());
     this.store.dispatch(AcquisitionActions.loadAcquisitionTrends());
     this.store.dispatch(AcquisitionActions.loadAcquisitionChannels());
-
-    combineLatest([this.dateRange$, this.granularity$])
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(([dateRange, granularity]) => {
-        this.filterValues = {
-          date_from: dateRange.start_date || null,
-          date_to: dateRange.end_date || null,
-          granularity: granularity || 'day' };
-      });
 
     combineLatest([this.trends$, this.granularity$])
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -154,21 +156,24 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
   }
 
   onFilterChange(values: FilterValues): void {
-    const dateFrom = values['date_from'] as string;
-    const dateTo = values['date_to'] as string;
+    const dateFrom = values['date_range_start'] as string;
+    const dateTo = values['date_range_end'] as string;
+    const preset = values['date_range_preset'] as string;
     const granularity = values['granularity'] as string;
 
-    const currentRange = this.filterValues;
+    const currentRange = this.filterValues();
     if (
-      dateFrom !== currentRange['date_from'] ||
-      dateTo !== currentRange['date_to']
+      dateFrom &&
+      dateTo &&
+      (dateFrom !== currentRange['date_range_start'] ||
+        dateTo !== currentRange['date_range_end'])
     ) {
       this.store.dispatch(
         AcquisitionActions.setDateRange({
           dateRange: {
-            start_date: dateFrom || '',
-            end_date: dateTo || '',
-            preset: 'custom' } }),
+            start_date: dateFrom,
+            end_date: dateTo,
+            preset: (preset || 'custom') as DateRangeFilter['preset'] } }),
       );
     }
 

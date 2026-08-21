@@ -24,6 +24,10 @@ import {
   AddToPopCartRequest,
   UpdatePopCartItemRequest,
 } from '../interfaces/pop-cart.interface';
+import {
+  deriveLineTax,
+  derivePurchaseTotals,
+} from '../utils/purchase-line-tax.util';
 import { PurchaseOrder } from '../../interfaces';
 import { WithholdingTaxService } from '../../../withholding-tax/services/withholding-tax.service';
 import { WithholdingPreviewResult } from '../../../withholding-tax/interfaces/withholding.interface';
@@ -543,10 +547,30 @@ export class PopCartService {
       const existingItem = currentState.items[existingItemIndex];
       const newQuantity = existingItem.quantity + request.quantity;
 
+      // QUI-661 + escáner de facturas (Fase 4): un re-escaneo, o una factura que
+      // repite el mismo producto en dos renglones, TRAE discount / unit_cost /
+      // tax_rate / tax_type / prices_include_tax en el request. Si los ignoramos
+      // se acumulan cantidad sin reescribir el descuento ni la tasa — la línea
+      // termina sin el descuento comercial que la factura aplicó, y el IVA se
+      // calcula contra la tasa equivocada.
+      //
+      // Criterio: el ÚLTIMO escaneo gana. Es lo que el operador acaba de
+      // revisar y aprobar en el modal, y es coherente con el comportamiento del
+      // POS cuando un mismo producto pasa dos veces por la caja: el precio más
+      // reciente pisa al anterior. Si una factura trae dos renglones con
+      // precios distintos, este criterio acepta la última lectura como verdad.
       updatedItems = [...currentState.items];
       updatedItems[existingItemIndex] = {
         ...existingItem,
         quantity: newQuantity,
+        unit_cost: request.unit_cost ?? existingItem.unit_cost,
+        discount: request.discount ?? existingItem.discount,
+        tax_rate: request.tax_rate ?? existingItem.tax_rate,
+        tax_type: request.tax_type ?? existingItem.tax_type,
+        prices_include_tax:
+          request.prices_include_tax !== undefined
+            ? request.prices_include_tax
+            : existingItem.prices_include_tax,
         lot_info: request.lot_info || existingItem.lot_info,
         notes: request.notes || existingItem.notes,
         contentPerPackage:
@@ -673,52 +697,42 @@ export class PopCartService {
 
   /**
    * IVA cycle (F1): recalculate a line's NET subtotal / IVA / total using the
-   * pinned derivation formula. The backend remains the single source of truth
-   * for the persisted split; this is a client-side PREVIEW only.
+   * util espejo del backend (`deriveLineTax`). El backend es la única autoridad
+   * sobre lo que se persiste; aquí solo es preview.
    *
-   * effective_include = item.prices_include_tax ?? header.prices_include_tax
-   * r = tax_rate / 100
-   *  - included:  unit_price_net = unit_price / (1 + r);
-   *               line_tax = (unit_price - unit_price_net) * quantity
-   *  - added:     unit_price_net = unit_price;
-   *               line_tax = unit_price * r * quantity
+   * Maestro "¿Esta compra tiene IVA?" apagado ⇒ pasamos `tax_rate: 0` al util
+   * para que la línea salga sin impuesto (independiente del modo include/added)
+   * — comportamiento que antes vivía aquí y que el util respeta con sólo
+   * entregarle una tasa 0 (la rama `r > 0` cortocircuita a neto puro).
    *
-   * A per-line discount (%) is applied to the gross unit price BEFORE the
-   * include/added branch, so a discounted line stays consistent (discount is
-   * 0 for the common path where no discount UI is exposed).
+   * El prorrateo del descuento de cabecera se hace en `calculateSummary`, no
+   * aquí: por línea el util recibe `proratedHeaderDiscount = 0` porque la línea
+   * no sabe cuánto le toca del descuento general.
    */
   private recalculateItemTotals(
     item: PopCartItem,
     headerPricesIncludeTax: boolean,
     hasVat: boolean,
   ): void {
-    const quantity = Number(item.quantity) || 0;
-    const unitCost = Number(item.unit_cost) || 0;
-    const discountPct = Number(item.discount) || 0;
-    // Maestro "¿Esta compra tiene IVA?": apagado ⇒ la tasa se ignora (0), el
-    // neto = precio y el impuesto de la línea es 0 (sin importar el modo).
-    const taxRate = hasVat ? Number(item.tax_rate) || 0 : 0;
-    const r = taxRate / 100;
+    const safeTaxRate = hasVat ? Number(item.tax_rate) || 0 : 0;
+    const result = deriveLineTax(
+      {
+        unit_cost: item.unit_cost,
+        quantity: item.quantity,
+        // `discount` viaja en PORCENTAJE (10 = 10%) — el formato que el util
+        // espera. `discount_amount` queda undefined: si la línea lo necesitara
+        // se pasaría explícito y ganaría sobre el porcentaje.
+        discount_percentage: item.discount,
+        tax_rate: safeTaxRate,
+        prices_include_tax: item.prices_include_tax ?? undefined,
+      },
+      { prices_include_tax: headerPricesIncludeTax },
+      0, // prorrateo del descuento de cabecera: vive en calculateSummary
+    );
 
-    // Discount applies to the gross unit price first.
-    const grossUnit = unitCost * (1 - discountPct / 100);
-
-    // Per-line override wins over the header mode (mixed invoices).
-    const effectiveInclude = item.prices_include_tax ?? headerPricesIncludeTax;
-
-    let unitNet: number;
-    let lineTax: number;
-    if (effectiveInclude) {
-      unitNet = r > 0 ? grossUnit / (1 + r) : grossUnit;
-      lineTax = (grossUnit - unitNet) * quantity;
-    } else {
-      unitNet = grossUnit;
-      lineTax = grossUnit * r * quantity;
-    }
-
-    item.subtotal = unitNet * quantity; // NET line subtotal
-    item.tax_amount = lineTax; // IVA for the line
-    item.total = item.subtotal + item.tax_amount;
+    item.subtotal = result.net_line; // NET line subtotal
+    item.tax_amount = result.tax_amount; // IVA for the line
+    item.total = result.total_line;
   }
 
   /**
@@ -808,56 +822,63 @@ export class PopCartService {
    *   transition is still in flight: reading the service's signal there returns
    *   the PREVIOUS state, which left shipping (and now the discount) one update
    *   behind — the total showed the value before the last keystroke.
+   *
+   * El cálculo delega en `derivePurchaseTotals` (util espejo del backend): el
+   * descuento de cabecera se prorratea por línea, el IVA se deriva DESPUÉS de
+   * restar el descuento, y los redondedos se aplican por línea con residuo en
+   * la última. Esto reemplaza el factor proporcional anterior — que operaba
+   * sobre el subtotal NETO, no sobre el bruto, y por eso divergía del total
+   * que el backend persiste.
    */
   private calculateSummary(
     items: PopCartItem[],
-    state: Pick<PopCartState, 'shippingCost' | 'discountAmount' | 'summary'> = this
-      .currentState,
+    state: Pick<
+      PopCartState,
+      | 'shippingCost'
+      | 'discountAmount'
+      | 'summary'
+      | 'prices_include_tax'
+      | 'has_vat'
+    > = this.currentState,
   ): PopCartSummary {
     // Preserve the last backend-resolved withholding so the line does not flash
     // to 0 between an item change and the debounced preview recompute. The
     // reactive preview re-fires whenever subtotal/IVA/supplier change.
     const previousSummary = state.summary;
 
-    const base = items.reduce(
-      (acc, item) => {
-        acc.subtotal += item.subtotal;
-        acc.tax_amount += item.tax_amount;
-        acc.itemCount += item.quantity;
-        // Gross AFTER the per-line discount — the base the header discount is
-        // prorated against, exactly like `prorateHeaderDiscount` does server-side.
-        acc.gross += item.subtotal + item.tax_amount;
-        // Money already rebated line by line, for the visible discount figure.
-        acc.lineDiscount +=
-          Number(item.unit_cost || 0) *
-          Number(item.quantity || 0) *
-          (Number(item.discount || 0) / 100);
-        return acc;
-      },
-      { subtotal: 0, tax_amount: 0, itemCount: 0, gross: 0, lineDiscount: 0 },
+    const itemCount = items.reduce(
+      (acc, item) => acc + (Number(item.quantity) || 0),
+      0,
     );
 
-    // QUI-661 — the general discount is prorated proportionally to each line's
-    // weight in the gross subtotal. Because the split is proportional, a single
-    // scaling factor reproduces the server's per-line result exactly, without
-    // duplicating the proration loop on the client.
-    const headerDiscount = Math.min(
-      Number(state.discountAmount || 0),
-      base.gross,
+    const totals = derivePurchaseTotals(
+      items.map((item) => ({
+        unit_cost: item.unit_cost,
+        quantity: item.quantity,
+        // `discount` es porcentaje en el carrito; el util lo lee como
+        // `discount_percentage` (10 = 10%).
+        discount_percentage: item.discount,
+        // IVA efectivo por línea. El maestro `has_vat` se aplica AQUÍ, no en la
+        // línea: `recalculateItemTotals` calcula su tasa efectiva en una
+        // variable local y nunca la escribe en `item.tax_rate`, así que la línea
+        // sigue guardando su 19 aunque el maestro esté apagado. Leerla cruda
+        // hacía que el pie cobrara IVA mientras cada fila mostraba cero — y el
+        // total del carrito dejaba de ser el que el operador estaba aprobando.
+        tax_rate: state.has_vat ? item.tax_rate : 0,
+        prices_include_tax: item.prices_include_tax ?? undefined,
+      })),
+      { prices_include_tax: state.prices_include_tax },
+      Number(state.discountAmount) || 0,
+      Number(state.shippingCost) || 0,
     );
-    const factor = base.gross > 0 ? (base.gross - headerDiscount) / base.gross : 1;
-
-    const subtotal = base.subtotal * factor;
-    const taxAmount = base.tax_amount * factor;
-    const shipping = state.shippingCost;
 
     return {
-      subtotal,
-      tax_amount: taxAmount,
-      discount_amount: base.lineDiscount + headerDiscount,
-      shipping_cost: shipping,
-      total: subtotal + taxAmount + shipping,
-      itemCount: base.itemCount,
+      subtotal: totals.subtotal,
+      tax_amount: totals.tax_amount,
+      discount_amount: totals.discount_amount,
+      shipping_cost: totals.shipping_cost,
+      total: totals.total,
+      itemCount,
       totalItems: 0,
       withholding_amount: previousSummary?.withholding_amount ?? 0,
       withholding_lines: previousSummary?.withholding_lines,

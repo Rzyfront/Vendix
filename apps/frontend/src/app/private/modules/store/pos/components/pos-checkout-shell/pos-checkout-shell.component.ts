@@ -97,6 +97,18 @@ export class PosCheckoutShellComponent {
   readonly mode = input<'create-draft' | 'edit' | 'create-payment'>(
     'create-draft',
   );
+
+  /**
+   * CP-POS-MODAL-SCOPE-001 / Phase F.10 — the effective mode the shell acts
+   * on. When the post-edit transition is active (parent sent `mode='edit'`
+   * and the cashier successfully PUT /editor'd), this returns
+   * `'create-payment'` so the primary CTA relabels to "Cobrar" and
+   * onPrimaryConfirm routes through the collector (POST flow/pay). All
+   * routing logic reads this instead of `mode()` directly.
+   */
+  readonly effectiveMode = computed<'create-draft' | 'edit' | 'create-payment'>(
+    () => (this.postEditPaymentMode() ? 'create-payment' : this.mode()),
+  );
   /** Set when `mode='edit'`; identifies the order being updated. */
   readonly editingOrderId = input<number | null>(null);
 
@@ -333,7 +345,7 @@ export class PosCheckoutShellComponent {
     // only the Cliente step. There is no Cobro step in the create-draft
     // flow because the order has not been saved yet and there is nothing
     // to charge. The cashier exits via `Guardar borrador`.
-    if (this.mode() === 'create-draft') {
+    if (this.effectiveMode() === 'create-draft') {
       return [{ label: 'Cliente' }];
     }
     if (this.checkoutIntent() === 'delivery') {
@@ -355,7 +367,7 @@ export class PosCheckoutShellComponent {
    *  como índice, así que una discrepancia desalinea la UI del cuerpo activo. */
   readonly stepKeys = computed<string[]>(() => {
     // CP-POS-MODAL-SCOPE-001 / Phase A.1 — same scoping as `steps()`.
-    if (this.mode() === 'create-draft') {
+    if (this.effectiveMode() === 'create-draft') {
       return ['cliente'];
     }
     if (this.checkoutIntent() === 'delivery') {
@@ -533,6 +545,27 @@ export class PosCheckoutShellComponent {
   // ── Draft-order (Guardar borrador) submission state ──────────────────────
   readonly submittingDraft = signal(false);
 
+  /**
+   * CP-POS-MODAL-SCOPE-001 / Phase F.10 — `mode` is an `input()` (parent-driven)
+   * so we cannot `set()` it. After a successful PUT /editor in mode='edit'
+   * we want the same shell to switch into payment-collection mode (CTA
+   * "Cobrar", POST flow/pay). This internal boolean mirrors the
+   * `mode` input and overrides it for routing/label/autoExecute decisions
+   * without forcing the parent to re-bind the input.
+   */
+  readonly postEditPaymentMode = signal<boolean>(false);
+
+  /**
+   * CP-POS-MODAL-SCOPE-001 / Phase F.10 — when `mode` flips from 'edit' to
+   * 'create-payment' after a successful PUT /editor, the Cobro step mounts
+   * and `autoExecute=true` would fire the collector immediately with no
+   * payment method / amount selected (silent fail). Set this flag in the
+   * mode-flip path so autoExecute waits for the cashier to actually pick a
+   * method. Cleared the next time the shell opens in mode='create-payment'
+   * from a fresh entry (reset by the constructor-effect on `mode` change).
+   */
+  readonly suppressAutoExecute = signal(false);
+
   // ── Mobile summary accordion (Resumen colapsable, solo <767px) ───────────
   /** Collapsed by default on mobile; the header chip covers the total. Has
    *  no visual effect on desktop — the CSS collapse rule only applies inside
@@ -552,6 +585,24 @@ export class PosCheckoutShellComponent {
   );
   readonly confirmDisabled = computed<boolean>(() => {
     if (this.footerProcessing()) return true;
+
+    // CP-POS-MODAL-SCOPE-001 / Phase A.4 — `create-draft` does not mount the
+    // Cobro step (no paymentStep instance exists). The Guardar CTA must gate
+    // on the cart contents + customer gate only:
+    //   - cart must have ≥1 item
+    //   - if `pos.allow_anonymous_sales=false`, customer is required
+    //   - if true, customer is optional; the shell still needs *some* customer
+    //     OR explicit `isAnonymousSale=true` to honor the policy
+    if (this.effectiveMode() === 'create-draft') {
+      const state = this.cartState();
+      if (!state || !(state.items?.length ?? 0)) return true;
+      if (this.isAnonymousSale()) return false;
+      if (state.customer?.id != null) return false;
+      // No customer picked and not anonymous → block. The shell already
+      // surfaces a toast in `createRetailDraft`, so this just keeps the CTA
+      // disabled to avoid a round-trip rejection.
+      return !this.allowAnonymousSales();
+    }
 
     if (this.checkoutIntent() === 'delivery') {
       // Cobro es el último paso: la validez del envío ya se garantizó por el gate
@@ -577,8 +628,8 @@ export class PosCheckoutShellComponent {
     // - create-draft → "Guardar" (saves draft, no payment)
     // - edit         → "Actualizar" (PUT /editor)
     // - create-payment / delivery / pickup → existing copy
-    if (this.mode() === 'create-draft') return 'Guardar';
-    if (this.mode() === 'edit') return 'Actualizar';
+    if (this.effectiveMode() === 'create-draft') return 'Guardar';
+    if (this.effectiveMode() === 'edit') return 'Actualizar';
     if (this.checkoutIntent() === 'delivery') return 'Finalizar venta';
     const step = this.paymentStep();
     if (!step) return 'Confirmar Pago';
@@ -676,6 +727,13 @@ export class PosCheckoutShellComponent {
       untracked(() => {
         this.currentStep.set(0);
         this.clienteSubStep.set(0);
+        // CP-POS-MODAL-SCOPE-001 / Phase F.10 — clear the post-edit autoExecute
+        // suppress + the internal post-edit payment flag when the parent
+        // re-opens the shell with a (possibly different) mode, so the NEXT open
+        // in mode='create-payment' (fresh sale, not post-edit) keeps the
+        // original auto-fire behaviour.
+        this.suppressAutoExecute.set(false);
+        this.postEditPaymentMode.set(false);
       });
     });
 
@@ -746,6 +804,12 @@ export class PosCheckoutShellComponent {
     this.showAddressErrors.set(false);
     this.showCustomerError.set(false);
     this.submittingDraft.set(false);
+    // CP-POS-MODAL-SCOPE-001 / Phase F.10 — drop the post-edit payment mode
+    // override after a successful finalization so the NEXT sale starts in
+    // whatever mode the parent binds (not stuck in the implicit 'create-payment'
+    // from the previous edit-then-cobrar transition).
+    this.postEditPaymentMode.set(false);
+    this.suppressAutoExecute.set(false);
     this.syncAnonymousSaleState();
     // Remount the projected content so the child components (collector,
     // shipping-step, consumo-step) drop their internal state for the next sale.
@@ -901,7 +965,7 @@ export class PosCheckoutShellComponent {
    * migrated.
    */
   onPrimaryConfirm(): void {
-    const mode = this.mode();
+    const mode = this.effectiveMode();
     if (mode === 'create-draft') {
       this.onSaveDraft();
       return;
@@ -939,39 +1003,125 @@ export class PosCheckoutShellComponent {
     // Phase A.2 minimal payload — Phase C will expand with coupon/promotion
     // recompute. For now we send items + customer_id only; the backend
     // returns the persisted Order, which we re-emit to the parent.
-    const items = state.items.map((it) => ({
-      product_id: (it.product as any)?.id,
-      quantity: it.quantity,
-      unit_price: Number(it.unitPrice ?? 0),
-      total_price: Number(it.totalPrice ?? 0),
-      product_name: it.product?.name,
+    //
+    // CP-POS-MODAL-SCOPE-001 / Phase F.5 — full DTO coverage. The shell's
+    // minimal payload omitted fields the backend needs (variant_id,
+    // variant_sku, variant_attributes, description, tax_amount_item,
+    // promotion_ids, coupon_code, idempotency_key, …). The cashier
+    // experienced this as "Actualizar queda en carga infinita y nunca
+    // se actualiza": the parent sets `loading=true` waiting for
+    // `editorUpdated`, the PUT rejects with 400 on missing required
+    // fields, the error branch never emits `editorUpdated`, the
+    // spinner stays. We mirror the legacy `buildEditorRequest` shape
+    // so the editor endpoint accepts the payload and returns the
+    // fresh Order. The shell keeps the footer's own loading guard
+    // (`submittingDraft`) and resets it in BOTH next AND error so
+    // the cashier is never stuck.
+    const items = state.items.map((it: any) => ({
+      item_type: it.itemType ?? 'product',
+      product_id: it.product?.id ?? null,
+      product_variant_id: it.variant_id ?? null,
+      product_name: it.product?.name ?? '',
+      product_sku: it.product?.sku ?? null,
+      variant_sku: it.variant_sku ?? null,
+      variant_attributes: it.variant_attributes ?? null,
+      description: it.description ?? it.notes ?? null,
+      quantity: Number(it.quantity ?? 1),
+      unit_price: Number((it.unitPrice ?? 0).toFixed(2)),
+      final_unit_price: Number(
+        (it.finalPrice ?? it.unitPrice ?? 0).toFixed(2),
+      ),
+      total_price: Number((it.totalPrice ?? 0).toFixed(2)),
+      tax_amount_item: Number((it.taxAmount ?? 0).toFixed(2)),
+      tax_rate: typeof it.taxRate === 'number' ? it.taxRate : undefined,
+      tax_category_id: it.taxCategoryId ?? undefined,
+      applied_price_tier_id: it.appliedPriceTierId ?? undefined,
     }));
-    const customer = this.cartState()?.customer;
+    const customer = state.customer;
 
+    // Idempotency key per edit attempt (defense-in-depth vs double-clicks
+    // and network retries; first call wins, retries get the cached Order).
+    const idempotencyKey = `editor:${orderId}:${Date.now()}`;
+
+    this.submittingDraft.set(true);
     this.ordersService
       .updateOrderFromEditor(String(orderId), {
         items,
-        customer_id: customer?.id,
+        customer_id: customer?.id ?? null,
+        notes: state.notes || undefined,
+        internal_notes: state.internalNotes || undefined,
+        promotion_ids: (state.appliedDiscounts ?? [])
+          .map((d: any) => d.promotion_id)
+          .filter((id: any) => typeof id === 'number'),
+        coupon_code: state.appliedCoupon?.code ?? undefined,
+        idempotency_key: idempotencyKey,
       } as any)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res: any) => {
           const order = res?.data ?? res?.order ?? res;
+          this.submittingDraft.set(false);
           this.editorUpdated.emit(order);
           this.toastService.success('Orden actualizada correctamente');
-          this.isOpenChange.emit(false);
+          // CP-POS-MODAL-SCOPE-001 / Phase F.10 — after a successful PUT /editor
+          // the cashier must be able to Cobrar without leaving the shell. Flip
+          // the mode so the primary CTA relabels from "Actualizar" to "Cobrar"
+          // and onPrimaryConfirm routes through the payment-step collector
+          // (POST flow/pay) instead of running PUT /editor again. The shell
+          // stays open; resetState / close happens after the actual pay.
+          // Note: setting `mode` triggers an effect that resets currentStep to
+          // 0; queueing the step-jump in a microtask runs it AFTER the effect
+          // so the cashier lands on the Cobro step (not back at Cliente).
+          this.postEditPaymentMode.set(true);
+          this.suppressAutoExecute.set(true);
+          queueMicrotask(() => {
+            const idx = this.stepKeys().indexOf('cobro');
+            if (idx >= 0) this.currentStep.set(idx);
+          });
         },
         error: (err: any) => {
+          // Always reset the loading guard so the cashier is not stranded on
+          // a spinner forever. The parent also has its own `loading` flag; if
+          // the PUT fails, the parent never sees `editorUpdated`, so we emit
+          // a no-op `editorUpdated` with `null` to let the parent reset its
+          // own state in `onEditorUpdated`.
+          this.submittingDraft.set(false);
           this.toastService.error(
             err?.error?.message ?? err?.message ?? 'No se pudo actualizar la orden',
           );
+          this.editorUpdated.emit(null);
         },
+        // CP-POS-MODAL-SCOPE-001 / Phase F.12 — guarantee the loading guard
+        // is released even if neither `next` nor `error` fires (empty 200
+        // body, observable complete without next, request cancelled). Without
+        // this the cashier sees an infinite spinner after the second edit.
+        complete: () => this.submittingDraft.set(false),
       });
   }
 
   onConfirm(): void {
     // pickup (B1): the Cobro step self-executes (autoExecute=true).
     if (this.checkoutIntent() !== 'delivery') {
+      // CP-POS-MODAL-SCOPE-001 / Phase F.10 — the cashier enters the Cobro
+      // step and the collector's sub-wizard (Forma → Método → Monto) may
+      // still have pending sub-steps, OR the Monto sub-step may hold a
+      // value that the operator typed but has not yet collapsed with the
+      // in-panel confirm. `triggerSubmit()` early-returns while
+      // `canSubmit()` is false in either case, so the first CTA click is
+      // silently absorbed — the cashier clicks "Cobrar" and nothing
+      // happens. Route through `advanceSubStepOrConfirm` first so the
+      // collector collapses the amount (and advances any leftover
+      // sub-step) before `triggerSubmit` fires.
+      if (this.currentStepKey() === 'cobro') {
+        const pay = this.paymentStep();
+        if (pay && pay.advanceSubStepOrConfirm()) {
+          // Sub-wizard still had work to do (Forma→Método→Monto or
+          // amount-not-yet-collapsed). The shell will land back here on
+          // the next click with the wizard now terminal — that click
+          // will hit the triggerSubmit below.
+          return;
+        }
+      }
       this.paymentStep()?.triggerSubmit();
       return;
     }
@@ -1370,9 +1520,17 @@ export class PosCheckoutShellComponent {
     // cartState.customer may still hold a previously-picked customer. We clone
     // the cart with customer=null so the backend stores the draft without a
     // customer row (Consumidor Final), per the existing saveDraft contract.
-    const draftState = this.isAnonymousSale()
-      ? { ...state, customer: null }
-      : state;
+    //
+    // CP-POS-MODAL-SCOPE-001 / Phase F.2 — defensive guard against the
+    // `anonymousSalesAsDefault=true` re-sync race: if the cart carries a
+    // non-null customer row the cashier picked, the draft MUST save with that
+    // customer attached, regardless of the anonymous toggle state. The toggle
+    // is a defaulting convenience, not an override of an explicit pick.
+    const customerPicked = state.customer?.id != null;
+    const draftState =
+      this.isAnonymousSale() && !customerPicked
+        ? { ...state, customer: null }
+        : state;
 
     this.paymentService
       .saveDraft(draftState, 'current_user')

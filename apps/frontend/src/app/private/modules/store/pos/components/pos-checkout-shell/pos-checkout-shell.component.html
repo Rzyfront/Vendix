@@ -79,7 +79,8 @@
               [isAnonymous]="isAnonymousSale()"
               [paymentMethods]="paymentMethods()"
               [isProcessing]="isProcessing()"
-              [autoExecute]="checkoutIntent() === 'pickup'"
+              [editingOrderId]="editingOrderId()"
+              [autoExecute]="mode() !== 'create-draft' && checkoutIntent() === 'pickup'"
               [amountOverride]="deliveryAmount()"
               (paymentCompleted)="onCheckoutCompleted($event)"
               (paymentReady)="onPaymentReady($event)"
@@ -479,7 +480,7 @@
           <button
             type="button"
             class="btn-confirm"
-            (click)="onConfirm()"
+            (click)="onPrimaryConfirm()"
             [disabled]="confirmDisabled()"
             [class.loading]="footerProcessing()"
           >
@@ -520,7 +521,7 @@
         <button
           type="button"
           class="btn-cta-mobile"
-          (click)="onConfirm()"
+          (click)="onPrimaryConfirm()"
           [disabled]="confirmDisabled()"
           [class.loading]="footerProcessing()"
         >

@@ -722,7 +722,10 @@ export class LegalDataFormComponent implements OnInit {
         nonNullable: true,
         validators: [Validators.required],
       }),
-      tax_responsibilities: new FormControl<string[]>([], { nonNullable: true }),
+      tax_responsibilities: new FormControl<string[]>([], {
+        nonNullable: true,
+        validators: [Validators.minLength(1)],
+      }),
       tax_scheme: new FormControl('', { nonNullable: true }),
       municipality_code: new FormControl('', { nonNullable: true }),
       ciiu_code: new FormControl('', { nonNullable: true }),

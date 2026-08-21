@@ -7,6 +7,7 @@ import { SettingsService } from '../../settings/settings.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
+import { VatResponsibilityService } from '@common/helpers/vat-responsibility.helper';
 import {
   InvoiceScanResult,
   InvoiceMatchResult,
@@ -33,19 +34,16 @@ import sharp = require('sharp');
 export class InvoiceScannerService {
   private readonly logger = new Logger(InvoiceScannerService.name);
 
-  /**
-   * F3 IVA lifecycle — RUT casilla 53 code for "Responsable de IVA" (O-48).
-   * Mirrors PurchaseOrdersService.VAT_RESPONSIBLE_CODE so the tax-category
-   * suggestion uses the same canonical fiscal source.
-   */
-  private static readonly VAT_RESPONSIBLE_CODE = 'O-48';
-
   constructor(
     private readonly aiEngine: AIEngineService,
     private readonly prisma: StorePrismaService,
     private readonly purchaseOrdersService: PurchaseOrdersService,
     private readonly settingsService: SettingsService,
     private readonly responseService: ResponseService,
+    // P0.1 — consolidación del predicado `isVatResponsible`. Antes era una
+    // constante local + un método privado que replicaban la lógica del
+    // helper canónico. Mismo razonamiento que en PurchaseOrdersService.
+    private readonly vatService: VatResponsibilityService,
   ) {}
 
   /**
@@ -170,7 +168,7 @@ export class InvoiceScannerService {
     // non-responsible tenant (O-49) capitalizes IVA into cost and must not be
     // handed a deductible tax_category, so we skip loading rates entirely and
     // every `suggested_tax_category_id` stays null.
-    const vatResponsible = await this.isVatResponsible();
+    const vatResponsible = await this.resolveVatResponsibility();
     const taxCategoryRates = vatResponsible
       ? await this.loadTaxCategoryRates()
       : [];
@@ -803,8 +801,9 @@ export class InvoiceScannerService {
         ? repairScannedAmount(rawHeaderDiscount, currency).value
         : 0;
     // Se aplana igual que las líneas: en una factura con IVA incluido el
-    // descuento impreso también es bruto.
-    const headerDiscountNet =
+    // descuento impreso también es bruto. `let` porque la guarda de la Fase 5
+    // puede anularlo cuando coexiste con un descuento por línea.
+    let headerDiscountNet =
       pricesIncludeTax && headerDiscountPrinted > 0
         ? headerDiscountPrinted / (1 + this.dominantTaxRate(lineItems))
         : headerDiscountPrinted;
@@ -818,6 +817,41 @@ export class InvoiceScannerService {
       scanWarnings.push(
         'La factura menciona un descuento por pronto pago. No se aplica al costo: es un descuento financiero y se decide al registrar el pago.',
       );
+    }
+
+    // QUI-661 Fase 5 — anti-doble-conteo del descuento comercial. La IA
+    // puede emitir descuento POR LÍNEA y de CABECERA a la vez; el caso
+    // típico es un pie que totaliza descuentos ya desglosados en el cuerpo,
+    // pero el modelo también lo hace por confusión entre las dos clases. El
+    // de línea es el canónico — es el que llega a `deriveLineTax`
+    // (purchase-orders.service.ts L175-182) línea por línea y se capitaliza
+    // en la capa FIFO. Si dejamos pasar el de cabecera, `prorateHeaderDiscount`
+    // lo reparte entre las líneas y `deriveLineTax` lo SUMA al descuento
+    // propio: la base gravable se rebaja dos veces → IVA descontable
+    // subvaluado ante la DIAN y costo de inventario capitalizado por debajo
+    // de lo pagado. Por eso, si alguna línea trae descuento y la cabecera
+    // trae descuento, descartamos el de cabecera y avisamos al operador.
+    //
+    // El prompt (migración 20260820…invoice_ocr_discount_decision_rule) ya
+    // intenta que esto no pase, declarando el per-line como canónico cuando
+    // ambos aparecen; este guard es la última línea de defensa y debe
+    // coincidir con esa regla — si cambia el prompt, revisar este bloque.
+    const lineHasCommercialDiscount = lineItems.some(
+      (li) => Number(li.discount_amount) > 0,
+    );
+    const headerWasPrinted =
+      Number.isFinite(rawHeaderDiscount) && rawHeaderDiscount > 0;
+    if (lineHasCommercialDiscount && headerWasPrinted && headerDiscountNet > 0) {
+      scanWarnings.push(
+        'La factura muestra descuentos por línea y un descuento general en el pie. ' +
+          'Se conservaron los descuentos por línea y se descartó el del pie para ' +
+          'evitar descontar el mismo dinero dos veces sobre la base gravable. ' +
+          'Verifica que el total cuadre antes de confirmar.',
+      );
+      // Anulamos el de cabecera para que no llegue a `prorateHeaderDiscount`.
+      // El `early_payment_discount` ya está resuelto arriba y NO se ve
+      // afectado: es financiero, vive en otro campo y no entra a este cálculo.
+      headerDiscountNet = 0;
     }
 
     return {
@@ -956,29 +990,22 @@ export class InvoiceScannerService {
 
   /**
    * F3 IVA lifecycle — read-only check of the commerce's VAT responsibility.
-   * Replicated (not shared) from PurchaseOrdersService.isVatResponsible to
-   * avoid modifying that service: same canonical source
-   * (SettingsService.getFiscalData().tax_responsibilities, RUT casilla 53),
-   * same anti-regression default (no declared responsibilities /
-   * indeterminate ⇒ RESPONSIBLE O-48). Never throws.
+   * Delegada a `VatResponsibilityService.resolve` (helper canónico). Antes
+   * era una réplica local de PurchaseOrdersService.isVatResponsible;
+   * P0.1 centraliza el predicado. Misma fuente
+   * (SettingsService.getFiscalData().tax_responsibilities, RUT casilla 53)
+   * y mismo default anti-regresión (sin datos ⇒ RESPONSIBLE O-48). Never
+   * throws (devuelve `true` si la lectura de fiscal data falla).
    */
-  private async isVatResponsible(): Promise<boolean> {
+  private async resolveVatResponsibility(): Promise<boolean> {
     try {
       const fiscalData = await this.settingsService.getFiscalData();
-      const responsibilities = Array.isArray(
-        (fiscalData as any)?.tax_responsibilities,
-      )
-        ? ((fiscalData as any).tax_responsibilities as unknown[]).filter(
-            (code): code is string => typeof code === 'string',
-          )
-        : [];
-      if (responsibilities.length === 0) return true;
-      return responsibilities.includes(
-        InvoiceScannerService.VAT_RESPONSIBLE_CODE,
+      return this.vatService.resolve(
+        fiscalData as Parameters<VatResponsibilityService['resolve']>[0],
       );
     } catch (error: any) {
       this.logger.warn(
-        `isVatResponsible: could not resolve fiscal data (${error?.message}); defaulting to VAT responsible (O-48).`,
+        `resolveVatResponsibility: could not resolve fiscal data (${error?.message}); defaulting to VAT responsible (O-48).`,
       );
       return true;
     }

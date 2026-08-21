@@ -1,0 +1,71 @@
+<app-modal
+  [isOpen]="isOpen()"
+  [title]="'¡Orden creada!'"
+  [size]="'sm'"
+  [centered]="true"
+  [closeOnBackdrop]="true"
+  [closeOnEscape]="true"
+  [showCloseButton]="true"
+  (closed)="onClosed()"
+>
+  <div class="pop-order-confirmation">
+    <div
+      class="pop-order-confirmation__icon"
+      aria-hidden="true"
+    >
+      <app-icon name="check-circle" [size]="32" />
+    </div>
+
+    <div class="pop-order-confirmation__body">
+      <div class="pop-order-confirmation__row">
+        <span class="pop-order-confirmation__label">Número</span>
+        <span class="pop-order-confirmation__value">{{ displayNumber() }}</span>
+      </div>
+
+      <div class="pop-order-confirmation__row">
+        <span class="pop-order-confirmation__label">Total</span>
+        <span class="pop-order-confirmation__value pop-order-confirmation__value--total">
+          {{ total() | currency }}
+        </span>
+      </div>
+
+      <div class="pop-order-confirmation__row">
+        <span class="pop-order-confirmation__label">Estado</span>
+        <span
+          class="pop-order-confirmation__badge"
+          [attr.data-variant]="stateVariant()"
+        >
+          {{ stateLabel() }}
+        </span>
+      </div>
+    </div>
+
+    <!--
+      Las dos rutas de salida del taller POP. «Nueva compra» (secondary)
+      mantiene al operador en el taller con el carrito vacío; «Ver orden»
+      (primary) navega al detalle de la OC recién creada.
+    -->
+    <div class="pop-order-confirmation__actions" role="group" aria-label="Acciones después de crear la orden">
+      <app-button
+        variant="secondary"
+        size="md"
+        type="button"
+        [fullWidth]="true"
+        (clicked)="onNewPurchase()"
+      >
+        Nueva compra
+      </app-button>
+
+      <app-button
+        variant="primary"
+        size="md"
+        type="button"
+        [fullWidth]="true"
+        [disabled]="!canViewOrder()"
+        (clicked)="onViewOrder()"
+      >
+        Ver orden
+      </app-button>
+    </div>
+  </div>
+</app-modal>

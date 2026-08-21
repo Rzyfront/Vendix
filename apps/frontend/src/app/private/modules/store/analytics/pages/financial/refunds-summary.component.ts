@@ -8,7 +8,6 @@ import { ChartComponent } from '../../../../../../shared/components/chart/chart.
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
-import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { RefundsSummary, AnalyticsService } from '../../services/analytics.service';
 import { EChartsOption } from 'echarts';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
@@ -21,6 +20,8 @@ import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/
 import {
   OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import {
+  FilterConfig,
+  FilterValues,
   DropdownAction } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 @Component({
   selector: 'vendix-refunds-summary',
@@ -33,9 +34,8 @@ import {
     IconComponent,
     CurrencyPipe,
     ExportButtonComponent,
-    DateRangeFilterComponent,
     AnalyticsCardComponent,
-  
+
     OptionsDropdownComponent,],
   styles: [
     `
@@ -107,18 +107,18 @@ import {
           <span class="results-header__title text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight whitespace-nowrap">Resumen de Reembolsos</span>
         </div>
         <div class="flex items-end gap-2 flex-wrap shrink-0">
-        <vendix-date-range-filter
-                    [value]="dateRange()"
-                    (valueChange)="onDateRangeChange($event)"
-                  ></vendix-date-range-filter>
-                  <app-options-dropdown
+        <app-options-dropdown
                       class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-                      [filters]="[]"
+                      [filters]="filterConfigs"
+                      [filterValues]="filterValues()"
                       [actions]="dropdownActions()"
                       [showActions]="true"
                       triggerLabel="Acciones"
                       triggerIcon="plus"
+                      [debounceMs]="350"
                       [isLoading]="exporting()"
+                      (filterChange)="onFilterChange($event)"
+                      (clearAllFilters)="onClearAllFilters()"
                       (actionClick)="onActionsDropdownClick($event)"
                     ></app-options-dropdown>
         </div>
@@ -268,15 +268,49 @@ export class RefundsSummaryComponent implements OnInit {
     },
   ]);
 
+  readonly filterConfigs: FilterConfig[] = [
+    {
+      key: 'date_range',
+      label: 'Período',
+      type: 'date-range',
+    },
+  ];
+
+  readonly filterValues = computed<FilterValues>(() => {
+    const range = this.dateRange();
+    return {
+      date_range_start: range.start_date || null,
+      date_range_end: range.end_date || null,
+      date_range_preset: range.preset || null,
+    };
+  });
+
   onActionsDropdownClick(action: string): void {
     if (action === 'export-xlsx') {
       this.exportReport();
     }
   }
 
+  onFilterChange(values: FilterValues): void {
+    const start = values['date_range_start'] as string;
+    const end = values['date_range_end'] as string;
+    const preset = values['date_range_preset'] as string;
+    if (start && end) {
+      this.dateRange.set({
+        start_date: start,
+        end_date: end,
+        preset: (preset || 'custom') as DateRangeFilter['preset'],
+      });
+      this.loadData();
+    }
+  }
 
-  onDateRangeChange(range: DateRangeFilter): void {
-    this.dateRange.set(range);
+  onClearAllFilters(): void {
+    this.dateRange.set({
+      start_date: getDefaultStartDate(),
+      end_date: getDefaultEndDate(),
+      preset: 'thisMonth',
+    });
     this.loadData();
   }
 

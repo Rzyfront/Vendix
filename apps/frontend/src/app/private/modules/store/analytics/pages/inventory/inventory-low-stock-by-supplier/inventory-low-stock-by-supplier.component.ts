@@ -24,6 +24,12 @@ import {
 import { CurrencyPipe } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { PaginationComponent } from '../../../../../../../shared/components/pagination/pagination.component';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
+import {
+  OptionsDropdownComponent} from '../../../../../../../shared/components/options-dropdown/options-dropdown.component';
+import {
+  DropdownAction,
+  FilterConfig,
+  FilterValues} from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 
 import { AnalyticsService } from '../../../services/analytics.service';
 import { LowStockBySupplierAnalyticsEnvelope } from '../../../interfaces/low-stock-by-supplier-analytics.interface';
@@ -65,6 +71,7 @@ type TabId = 'summary' | 'by-supplier' | 'by-category' | 'history';
     ResponsiveDataViewComponent,
     StatsComponent,
     AnalyticsCardComponent,
+    OptionsDropdownComponent,
   ],
   templateUrl: './inventory-low-stock-by-supplier.component.html',
   styleUrls: ['./inventory-low-stock-by-supplier.component.scss'],
@@ -663,5 +670,158 @@ export class InventoryLowStockBySupplierComponent {
 
   hasHistory(): boolean {
     return (this.envelope()?.history_30d?.length ?? 0) > 0;
+  }
+
+  // ─── Options-dropdown: filtros unificados + acción export ────────────────
+
+  /**
+   * Opciones del selector "Proveedor" derivadas del envelope (mismo
+   * backend pass). El primer item — "Todos" — limpia el filtro; los
+   * demás reproducen los buckets `by_supplier` que ya devuelve la query.
+   */
+  readonly supplierOptions = computed<{ value: string; label: string }[]>(() => {
+    const buckets = this.envelope()?.by_supplier ?? [];
+    return [
+      { value: '', label: 'Todos' },
+      ...buckets.map((b) => ({
+        value: b.supplier_id === null ? 'null' : String(b.supplier_id),
+        label: b.supplier_name || 'Sin proveedor',
+      })),
+    ];
+  });
+
+  /**
+   * Opciones del selector "Categoría" derivadas del envelope. El primer
+   * item — "Todas" — limpia el filtro.
+   */
+  readonly categoryOptions = computed<{ value: string; label: string }[]>(() => {
+    const buckets = this.envelope()?.by_category ?? [];
+    return [
+      { value: '', label: 'Todas' },
+      ...buckets.map((c) => ({
+        value: c.category_id === null ? 'null' : String(c.category_id),
+        label: c.category_name,
+      })),
+    ];
+  });
+
+  /**
+   * Filter configs unificado para `<app-options-dropdown>`. Rango de
+   * fechas (descompuesto en `_start/_end/_preset`) + proveedor + categoría
+   * — los tres viven dentro del mismo dropdown.
+   */
+  readonly filterConfigs = computed<FilterConfig[]>(() => [
+    {
+      key: 'date_range',
+      type: 'date-range',
+      label: 'Período',
+    },
+    {
+      key: 'supplier_id',
+      type: 'select',
+      label: 'Proveedor',
+      options: this.supplierOptions(),
+      placeholder: 'Todos',
+    },
+    {
+      key: 'category_id',
+      type: 'select',
+      label: 'Categoría',
+      options: this.categoryOptions(),
+      placeholder: 'Todas',
+    },
+  ]);
+
+  /**
+   * Snapshot del estado del dropdown: las tres keys descompuestas del
+   * rango + supplier/category como strings (serializamos `null` como
+   * `'null'` para distinguir "sin proveedor" de "sin filtro").
+   */
+  readonly dropdownFilterValues = computed<FilterValues>(() => {
+    const dr = this.dateFrom(), drTo = this.dateTo();
+    const supplierId = this.supplierId();
+    const categoryId = this.categoryId();
+
+    return {
+      date_range_start: dr ?? null,
+      date_range_end: drTo ?? null,
+      date_range_preset: null,
+      supplier_id:
+        supplierId === null
+          ? null
+          : supplierId === undefined
+          ? null
+          : String(supplierId),
+      category_id:
+        categoryId === null
+          ? null
+          : categoryId === undefined
+          ? null
+          : String(categoryId),
+    };
+  });
+
+  /**
+   * Acción del dropdown: el botón "Exportar XLSX" suelto del header
+   * original ahora vive aquí.
+   */
+  readonly dropdownActions = computed<DropdownAction[]>(() => [
+    {
+      action: 'export-xlsx',
+      label: 'Exportar XLSX',
+      icon: 'download',
+    },
+  ]);
+
+  /**
+   * Handler unificado del dropdown. Reconstruye los signals locales
+   * (`dateFrom`, `dateTo`, `supplierId`, `categoryId`) desde las keys
+   * emitidas por el componente y refresca el envelope.
+   *
+   * Para `supplier_id`/`category_id`: una cadena vacía del selector
+   * significa "sin filtro"; la cadena `'null'` codifica el bucket
+   * "Sin proveedor" / "Sin categoría" del backend.
+   */
+  onFiltersDropdownChange(values: FilterValues): void {
+    const start = values['date_range_start'] as string | null;
+    const end = values['date_range_end'] as string | null;
+    this.dateFrom.set(start);
+    this.dateTo.set(end);
+
+    const rawSupplier = values['supplier_id'];
+    if (rawSupplier === null || rawSupplier === undefined || rawSupplier === '') {
+      this.supplierId.set(null);
+    } else if (rawSupplier === 'null') {
+      this.supplierId.set(null as unknown as number);
+    } else {
+      this.supplierId.set(Number(rawSupplier));
+    }
+
+    const rawCategory = values['category_id'];
+    if (rawCategory === null || rawCategory === undefined || rawCategory === '') {
+      this.categoryId.set(null);
+    } else if (rawCategory === 'null') {
+      this.categoryId.set(null as unknown as number);
+    } else {
+      this.categoryId.set(Number(rawCategory));
+    }
+
+    this.refresh();
+  }
+
+  onClearAllFilters(): void {
+    // Restablecer todos los filtros a su estado inicial (sin
+    // supplier/category, sin rango de fechas explícito).
+    this.dateFrom.set(null);
+    this.dateTo.set(null);
+    this.supplierId.set(null);
+    this.categoryId.set(null);
+    this.refresh();
+  }
+
+  onActionsDropdownClick(action: string): void {
+    if (action === 'export-xlsx') {
+      this.exportXlsx();
+    }
   }
 }

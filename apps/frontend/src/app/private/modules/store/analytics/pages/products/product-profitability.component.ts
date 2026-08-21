@@ -12,10 +12,10 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 import {
   OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import {
+  FilterConfig,
+  FilterValues,
   DropdownAction } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
-import { ExportButtonComponent } from '../../components/export-button/export-button.component';
-import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import {
   ProductProfitability,
@@ -40,8 +40,6 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
     StatsComponent,
     ChartComponent,
     IconComponent,
-    ExportButtonComponent,
-    DateRangeFilterComponent,
     AnalyticsCardComponent,
     OptionsDropdownComponent,
   ],
@@ -103,6 +101,19 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
 
   readonly productsViews: AnalyticsView[] = getViewsByCategory('products');
 
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'date_range',
+      label: 'Período',
+      type: 'date-range' },
+  ];
+
+  filterValues: FilterValues = {
+    date_range_start: getDefaultStartDate(),
+    date_range_end: getDefaultEndDate(),
+    date_range_preset: 'thisMonth',
+  };
+
   ngOnInit(): void {
     this.currencyService.loadCurrency();
 
@@ -112,6 +123,23 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(([products, summary]) => {
         this.buildCharts(products, summary);
+      });
+
+    // Resincroniza el dropdown con el store (NgRx hidrata el rango al montar).
+    this.dateRange$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((range) => {
+        this.dateRange.set(range);
+        const start = this.filterValues['date_range_start'];
+        const end = this.filterValues['date_range_end'];
+        if (start !== range.start_date || end !== range.end_date) {
+          this.filterValues = {
+            ...this.filterValues,
+            date_range_start: range.start_date || null,
+            date_range_end: range.end_date || null,
+            date_range_preset: range.preset || null,
+          };
+        }
       });
   }
 
@@ -137,9 +165,41 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
     }
   }
 
-  onDateRangeChange(range: DateRangeFilter): void {
-    this.dateRange.set(range);
-    this.store.dispatch(ProfitabilityActions.setProfitabilityDateRange({ dateRange: range }));
+  onFiltersDropdownChange(values: FilterValues): void {
+    const dateFrom = values['date_range_start'] as string;
+    const dateTo = values['date_range_end'] as string;
+    const preset = values['date_range_preset'] as string;
+
+    if (!dateFrom || !dateTo) return;
+    const start = this.filterValues['date_range_start'];
+    const end = this.filterValues['date_range_end'];
+    if (start === dateFrom && end === dateTo) return;
+
+    this.filterValues = values;
+    this.store.dispatch(
+      ProfitabilityActions.setProfitabilityDateRange({
+        dateRange: {
+          start_date: dateFrom,
+          end_date: dateTo,
+          preset: (preset || 'custom') as DateRangeFilter['preset'] } }),
+    );
+  }
+
+  onFiltersDropdownClearAll(): void {
+    const reset = getDefaultStartDate();
+    const end = getDefaultEndDate();
+    this.filterValues = {
+      date_range_start: reset,
+      date_range_end: end,
+      date_range_preset: 'thisMonth',
+    };
+    this.store.dispatch(
+      ProfitabilityActions.setProfitabilityDateRange({
+        dateRange: {
+          start_date: reset,
+          end_date: end,
+          preset: 'thisMonth' } }),
+    );
   }
 
   getProfitableCount(): number {

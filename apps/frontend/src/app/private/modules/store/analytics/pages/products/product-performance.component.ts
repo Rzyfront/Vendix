@@ -13,12 +13,12 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 import {
   OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import {
+  FilterConfig,
+  FilterValues,
   DropdownAction } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   CurrencyPipe,
   CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
-import { ExportButtonComponent } from '../../components/export-button/export-button.component';
-import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import {
   ProductsSummary,
@@ -47,8 +47,6 @@ import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/
     ChartComponent,
     IconComponent,
     CurrencyPipe,
-    ExportButtonComponent,
-    DateRangeFilterComponent,
     AnalyticsCardComponent,
     OptionsDropdownComponent,
   ],
@@ -104,12 +102,35 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
 
   readonly productsViews: AnalyticsView[] = getViewsByCategory('products');
 
+  /**
+   * Configuración de filtros del dropdown unificado. Sólo 'date-range' — la
+   * granularidad del chart se infiere del preset, no es un parámetro que el
+   * operador cambie aquí.
+   */
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'date_range',
+      label: 'Período',
+      type: 'date-range' },
+  ];
+
+  filterValues: FilterValues = {
+    date_range_start: getDefaultStartDate(),
+    date_range_end: getDefaultEndDate(),
+    date_range_preset: 'thisMonth',
+  };
+
   ngOnInit(): void {
     this.currencyService.loadCurrency();
 
     const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
     if (urlRange) {
       this.dateRange.set(urlRange);
+      this.filterValues = {
+        date_range_start: urlRange.start_date,
+        date_range_end: urlRange.end_date,
+        date_range_preset: urlRange.preset || null,
+      };
       this.store.dispatch(ProductsActions.setDateRange({ dateRange: urlRange }));
     }
 
@@ -117,6 +138,25 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
     this.store.dispatch(ProductsActions.loadProductsSummary());
     this.store.dispatch(ProductsActions.loadTopSellers({ limit: 10 }));
     this.store.dispatch(ProductsActions.loadProductsTrends());
+
+    // Hidrata el dropdown desde el store (NgRx puede traer un rango nuevo tras
+    // una navegación o un deep-link). Sólo aplicamos cambios si las keys del
+    // rango divergen — evita un loop filter→store→filter.
+    this.dateRange$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((dateRange) => {
+        this.dateRange.set(dateRange);
+        const start = this.filterValues['date_range_start'];
+        const end = this.filterValues['date_range_end'];
+        if (start !== dateRange.start_date || end !== dateRange.end_date) {
+          this.filterValues = {
+            ...this.filterValues,
+            date_range_start: dateRange.start_date || null,
+            date_range_end: dateRange.end_date || null,
+            date_range_preset: dateRange.preset || null,
+          };
+        }
+      });
 
     // Subscribe to trends to build chart
     combineLatest([this.trends$, this.granularity$])
@@ -154,9 +194,41 @@ this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
     }
   }
 
-  onDateRangeChange(range: DateRangeFilter): void {
-    this.dateRange.set(range);
-    this.store.dispatch(ProductsActions.setDateRange({ dateRange: range }));
+  onFiltersDropdownChange(values: FilterValues): void {
+    const dateFrom = values['date_range_start'] as string;
+    const dateTo = values['date_range_end'] as string;
+    const preset = values['date_range_preset'] as string;
+
+    if (!dateFrom || !dateTo) return;
+    const start = this.filterValues['date_range_start'];
+    const end = this.filterValues['date_range_end'];
+    if (start === dateFrom && end === dateTo) return;
+
+    this.filterValues = values;
+    this.store.dispatch(
+      ProductsActions.setDateRange({
+        dateRange: {
+          start_date: dateFrom,
+          end_date: dateTo,
+          preset: (preset || 'custom') as DateRangeFilter['preset'] } }),
+    );
+  }
+
+  onFiltersDropdownClearAll(): void {
+    const reset = getDefaultStartDate();
+    const end = getDefaultEndDate();
+    this.filterValues = {
+      date_range_start: reset,
+      date_range_end: end,
+      date_range_preset: 'thisMonth',
+    };
+    this.store.dispatch(
+      ProductsActions.setDateRange({
+        dateRange: {
+          start_date: reset,
+          end_date: end,
+          preset: 'thisMonth' } }),
+    );
   }
 
   getGrowthText(growth?: number): string {

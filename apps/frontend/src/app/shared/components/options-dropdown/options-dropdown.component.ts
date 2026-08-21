@@ -13,13 +13,15 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
-import { Subject, of } from 'rxjs';
-import { debounceTime, switchMap } from 'rxjs/operators';
+import { Subject, timer } from 'rxjs';
+import { switchMap } from 'rxjs/operators';
 
 import { IconComponent } from '../icon/icon.component';
 import { IconName } from '../icon/icons.registry';
 import { SelectorComponent } from '../selector/selector.component';
 import { MultiSelectorComponent } from '../multi-selector/multi-selector.component';
+import { DateRangeFilterComponent } from '../date-range-filter/date-range-filter.component';
+import { DateRangeFilter } from '../../interfaces/date-range-filter.interface';
 
 import {
   FilterConfig,
@@ -34,7 +36,8 @@ import {
     FormsModule,
     IconComponent,
     SelectorComponent,
-    MultiSelectorComponent
+    MultiSelectorComponent,
+    DateRangeFilterComponent,
 ],
   templateUrl: './options-dropdown.component.html',
   styleUrls: ['./options-dropdown.component.scss'],
@@ -102,34 +105,126 @@ export class OptionsDropdownComponent {
   private readonly debounceTrigger$ = new Subject<number>(); // LEGÍTIMO — debounce pipeline para filterChange
 
   constructor() {
-    // Sync filterValues input → local state
+    // Sync filterValues input → local state.
+    //
+    // La guarda de igualdad superficial importa: varios padres reconstruyen el
+    // objeto `filterValues` en cada emisión (`this.filterValues = {...}`), así
+    // que sin ella el effect corría en cada ciclo y podía pisar una edición
+    // local todavía en debounce. Con `'date-range'` esto se agrava, porque un
+    // solo filtro escribe TRES keys y el padre las devuelve reconstruidas.
     effect(() => {
-      this.localFilterValues.set({ ...this.filterValues() });
+      const incoming = this.filterValues();
+      if (this.shallowEqual(incoming, this.localFilterValues())) {
+        return;
+      }
+      this.localFilterValues.set({ ...incoming });
       this.calculateActiveFiltersCount();
     });
 
-    // Single pipeline: switchMap re-creates debounce when a new ms value arrives
+    // Single pipeline: switchMap re-crea la espera cuando llega un nuevo cambio,
+    // así que sólo el último sobrevive.
+    //
+    // Antes esto era `of(null).pipe(debounceTime(ms))`, que NO esperaba nada:
+    // `debounceTime` descarga su valor pendiente en cuanto la fuente completa, y
+    // `of(null)` completa de inmediato. El resultado era una emisión síncrona
+    // por cada tecla/selección — cuatro cambios de preset en 32 ms disparaban
+    // cuatro peticiones. `timer(ms)` sí emite recién cumplido el plazo.
     this.debounceTrigger$
       .pipe(
-        switchMap((ms) => of(null).pipe(debounceTime(ms))),
+        switchMap((ms) => timer(ms)),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe(() => this.emitFilterChange());
+  }
+
+  private shallowEqual(a: FilterValues, b: FilterValues): boolean {
+    const aKeys = Object.keys(a);
+    const bKeys = Object.keys(b);
+    if (aKeys.length !== bKeys.length) return false;
+    return aKeys.every((key) => {
+      const av = a[key];
+      const bv = b[key];
+      if (Array.isArray(av) || Array.isArray(bv)) {
+        if (!Array.isArray(av) || !Array.isArray(bv)) return false;
+        return av.length === bv.length && av.every((v, i) => v === bv[i]);
+      }
+      return av === bv;
+    });
+  }
+
+  // --- date-range: resolución de las 3 keys --------------------------------
+
+  /**
+   * Un filtro `'date-range'` no ocupa `filter.key` sino tres derivadas. Se
+   * resuelven aquí en un solo lugar para que la plantilla, el conteo de activos
+   * y el "limpiar" hablen exactamente de las mismas keys.
+   */
+  dateRangeKeys(filter: FilterConfig): {
+    startKey: string;
+    endKey: string;
+    presetKey: string;
+  } {
+    return {
+      startKey: filter.startKey ?? `${filter.key}_start`,
+      endKey: filter.endKey ?? `${filter.key}_end`,
+      presetKey: filter.presetKey ?? `${filter.key}_preset`,
+    };
+  }
+
+  /** Reconstruye el `DateRangeFilter` que consume `<vendix-date-range-filter>`. */
+  getDateRangeValue(filter: FilterConfig): DateRangeFilter | undefined {
+    const { startKey, endKey, presetKey } = this.dateRangeKeys(filter);
+    const values = this.localFilterValues();
+    const start = values[startKey];
+    const end = values[endKey];
+    const preset = values[presetKey];
+
+    if (typeof start !== 'string' || typeof end !== 'string' || !start || !end) {
+      return undefined;
+    }
+    return {
+      start_date: start,
+      end_date: end,
+      preset: (typeof preset === 'string' && preset
+        ? preset
+        : undefined) as DateRangeFilter['preset'],
+    };
+  }
+
+  onDateRangeChange(filter: FilterConfig, range: DateRangeFilter): void {
+    const { startKey, endKey, presetKey } = this.dateRangeKeys(filter);
+    this.localFilterValues.update((prev) => ({
+      ...prev,
+      [startKey]: range.start_date || null,
+      [endKey]: range.end_date || null,
+      [presetKey]: range.preset || null,
+    }));
+    this.calculateActiveFiltersCount();
+    this.debounceTrigger$.next(this.debounceMs());
   }
 
   private calculateActiveFiltersCount(): void {
     let count = 0;
     const values = this.localFilterValues();
     for (const filter of this.filters()) {
-      const value = values[filter.key];
       if (filter.type === 'multi-select') {
+        const value = values[filter.key];
         if (Array.isArray(value) && value.length > 0) {
           count++;
         }
-      } else {
-        if (value && value !== '') {
+        continue;
+      }
+      if (filter.type === 'date-range') {
+        // El rango cuenta como UN filtro activo aunque ocupe tres keys.
+        const { startKey, endKey } = this.dateRangeKeys(filter);
+        if (values[startKey] || values[endKey]) {
           count++;
         }
+        continue;
+      }
+      const value = values[filter.key];
+      if (value && value !== '') {
+        count++;
       }
     }
     this.activeFiltersCount.set(count);
@@ -204,6 +299,14 @@ export class OptionsDropdownComponent {
     if (filter) {
       if (filter.type === 'multi-select') {
         this.localFilterValues.update((prev) => ({ ...prev, [key]: [] }));
+      } else if (filter.type === 'date-range') {
+        const { startKey, endKey, presetKey } = this.dateRangeKeys(filter);
+        this.localFilterValues.update((prev) => ({
+          ...prev,
+          [startKey]: null,
+          [endKey]: null,
+          [presetKey]: null,
+        }));
       } else {
         this.localFilterValues.update((prev) => ({ ...prev, [key]: null }));
       }
@@ -214,6 +317,12 @@ export class OptionsDropdownComponent {
   }
 
   hasActiveFilter(key: string): boolean {
+    const filter = this.filters().find((f) => f.key === key);
+    if (filter?.type === 'date-range') {
+      const { startKey, endKey } = this.dateRangeKeys(filter);
+      const values = this.localFilterValues();
+      return !!values[startKey] || !!values[endKey];
+    }
     const value = this.localFilterValues()[key];
     if (Array.isArray(value)) {
       return value.length > 0;

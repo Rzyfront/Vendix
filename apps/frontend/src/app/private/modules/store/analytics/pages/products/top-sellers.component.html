@@ -43,19 +43,20 @@
         <span class="results-header__title text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight whitespace-nowrap">Productos Más Vendidos</span>
       </div>
       <div class="flex items-end gap-2 flex-wrap shrink-0">
-      <vendix-date-range-filter
-                [value]="dateRange()"
-                (valueChange)="onDateRangeChange($event)"
-              ></vendix-date-range-filter>
-            <app-options-dropdown
-              [filters]="[]"
-              [actions]="dropdownActions()"
-              [showActions]="true"
-              triggerLabel="Acciones"
-              triggerIcon="plus"
-              [isLoading]="exporting()"
-              (actionClick)="onActionsDropdownClick($event)"
-            ></app-options-dropdown>
+      <app-options-dropdown
+                class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                [filters]="filterConfigs"
+                [filterValues]="filterValues"
+                [actions]="dropdownActions()"
+                [showActions]="true"
+                triggerLabel="Acciones"
+                triggerIcon="plus"
+                [debounceMs]="350"
+                [isLoading]="exporting()"
+                (filterChange)="onFiltersDropdownChange($event)"
+                (clearAllFilters)="onFiltersDropdownClearAll()"
+                (actionClick)="onActionsDropdownClick($event)"
+              ></app-options-dropdown>
       </div>
     </div>
     <div class="p-4 space-y-6">

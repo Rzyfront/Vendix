@@ -7,8 +7,6 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { ExportButtonComponent } from '../../components/export-button/export-button.component';
-import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 
 import { AnalyticsService } from '../../services/analytics.service';
@@ -23,7 +21,9 @@ import { truncateLabel } from '../../../../../../shared/utils/chart-labels.util'
 import {
   OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import {
-  DropdownAction } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+  DropdownAction,
+  FilterConfig,
+  FilterValues} from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 
@@ -36,10 +36,8 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
     ChartComponent,
     StatsComponent,
     IconComponent,
-    ExportButtonComponent,
-    DateRangeFilterComponent,
     AnalyticsCardComponent,
-  
+
     OptionsDropdownComponent,],
   styles: [
     `
@@ -97,17 +95,17 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
           <span class="results-header__title text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight whitespace-nowrap">Valoración de Inventario</span>
         </div>
         <div class="flex items-end gap-2 flex-wrap shrink-0">
-        <vendix-date-range-filter
-                    [value]="dateRange()"
-                    (valueChange)="onDateRangeChange($event)"
-                  ></vendix-date-range-filter>
-                  <app-options-dropdown
-                    [filters]="[]"
+        <app-options-dropdown
+                    [filters]="filterConfigs()"
+                    [filterValues]="dropdownFilterValues()"
                     [actions]="dropdownActions()"
                     [showActions]="true"
                     triggerLabel="Acciones"
                     triggerIcon="plus"
+                    [debounceMs]="350"
                     [isLoading]="exporting()"
+                    (filterChange)="onFiltersDropdownChange($event)"
+                    (clearAllFilters)="onClearAllFilters()"
                     (actionClick)="onActionsDropdownClick($event)"
                   ></app-options-dropdown>
         </div>
@@ -322,17 +320,57 @@ legend: {
     },
   ]);
 
+  /**
+   * Filter configs unificado para `<app-options-dropdown>`. Único filtro:
+   * rango de fechas (descompuesto por el componente en `_start/_end/_preset`).
+   */
+  readonly filterConfigs = computed<FilterConfig[]>(() => [
+    {
+      key: 'date_range',
+      type: 'date-range',
+      label: 'Período',
+    },
+  ]);
+
+  readonly dropdownFilterValues = computed<FilterValues>(() => {
+    const dr = this.dateRange();
+    return {
+      date_range_start: dr?.start_date ?? null,
+      date_range_end: dr?.end_date ?? null,
+      date_range_preset: (dr?.preset ?? null) as string | null,
+    };
+  });
+
+  onFiltersDropdownChange(values: FilterValues): void {
+    const start = values['date_range_start'] as string | null;
+    const end = values['date_range_end'] as string | null;
+    const preset = values['date_range_preset'] as string | null;
+
+    if (!start || !end) return;
+
+    this.dateRange.set({
+      start_date: start,
+      end_date: end,
+      preset: (preset ?? undefined) as DateRangeFilter['preset'],
+    });
+    this.invalidateModeData();
+    this.loadChartData();
+  }
+
+  onClearAllFilters(): void {
+    this.dateRange.set({
+      start_date: getDefaultStartDate(),
+      end_date: getDefaultEndDate(),
+      preset: 'thisMonth',
+    });
+    this.invalidateModeData();
+    this.loadChartData();
+  }
+
   onActionsDropdownClick(action: string): void {
     if (action === 'export-xlsx') {
       this.exportReport();
     }
-  }
-
-
-  onDateRangeChange(range: DateRangeFilter): void {
-    this.dateRange.set(range);
-    this.invalidateModeData();
-    this.loadChartData();
   }
 
   formatCurrency(value: number): string {

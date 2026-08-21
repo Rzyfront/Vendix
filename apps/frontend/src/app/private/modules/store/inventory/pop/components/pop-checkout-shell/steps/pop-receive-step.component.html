@@ -100,6 +100,23 @@
                   <span class="editor-label">Costo nuevo</span>
                   <span class="editor-value">{{ item.new_cost_per_unit | currency }}</span>
                 </div>
+                @if (hasTax(item) && disbursementPerUnit(item); as disbursement) {
+                  <div class="editor-field">
+                    <span class="editor-label">
+                      {{ vatResponsible() ? 'Desembolso c/IVA' : 'IVA capitalizado' }}
+                    </span>
+                    <span class="editor-value editor-value--muted">
+                      {{ disbursement | currency }}
+                      <small class="disbursement-note">
+                        {{
+                          vatResponsible()
+                            ? 'el IVA no es costo: va a IVA descontable'
+                            : 'el IVA ya está dentro del costo'
+                        }}
+                      </small>
+                    </span>
+                  </div>
+                }
                 <div class="editor-field">
                   <span class="editor-label">Margen resultante</span>
                   <span class="editor-value">

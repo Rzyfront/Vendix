@@ -1872,8 +1872,15 @@ export class PosComponent {
    * order from the same shell without leaving the POS. We also surface a
    * confirmation screen so the cashier sees what changed.
    */
-  onEditorUpdated(updatedOrder: Order): void {
-    if (!updatedOrder?.id) return;
+  onEditorUpdated(updatedOrder: Order | null): void {
+    // CP-POS-MODAL-SCOPE-001 / Phase F.5 — the shell emits a no-op
+    // `editorUpdated` with `null` when the PUT /editor request fails,
+    // so the parent can release its own `loading` flag without waiting
+    // for a fresh Order. On success the Order is non-null.
+    if (!updatedOrder?.id) {
+      this.loading.set(false);
+      return;
+    }
     this.readyToPayOrder.set(updatedOrder);
     this.editingOrder.set(updatedOrder);
     this.currentOrderId.set(String(updatedOrder.id));
@@ -2272,6 +2279,17 @@ export class PosComponent {
       // sesión cacheada evita que la venta siguiente arranque con la mesa de la
       // anterior preseleccionada (y con needsTable() en false).
       this.restaurantIntegration.clearTableSession();
+
+      // CP-POS-MODAL-SCOPE-001 / Phase F.8 — clear residual edit state after a
+      // successful charge so the cart rail no longer renders "Actualizar"
+      // (the edit-mode label) on the next sale. Without this, after paying an
+      // edited order the cashier sees the shell in `mode='edit'` (button still
+      // reads Actualizar) until Nueva compra runs the F.7 reset.
+      this.editingOrderId.set(null);
+      this.editingOrder.set(null);
+      this.readyToPayOrder.set(null);
+      this.mode.set('create-draft');
+      this.checkoutIntent.set('pickup');
     }
   }
 
@@ -2283,6 +2301,31 @@ export class PosComponent {
   onStartNewSale(): void {
     this.showOrderConfirmation.set(false);
     this.completedOrder.set(null);
+
+    // CP-POS-MODAL-SCOPE-001 / Phase F.7 — Nueva compra must hand the cashier
+    // a fresh POS regardless of how they got into the previous sale. If the
+    // cashier was editing an order (the URL had `?editOrder=`), every signal
+    // that was pinned to that order is still in memory: `editingOrderId`,
+    // `editingOrder`, `currentOrderId`, `currentOrderNumber`, `linkedOrderId`,
+    // `linkedOrderNumber`, the shell `mode`, the parent's `readyToPayOrder`.
+    // Without a reset, the next sale hits `PUT /store/orders/:id/items` on
+    // the previous order's id and silently edits the previous order again.
+    this.editingOrderId.set(null);
+    this.editingOrder.set(null);
+    this.currentOrderId.set(null);
+    this.currentOrderNumber.set(null);
+    this.readyToPayOrder.set(null);
+    this.mode.set('create-draft');
+    this.checkoutIntent.set('pickup');
+    this.showCheckoutModal.set(false);
+
+    // Drop the `editOrder` query param too so a browser refresh on the same
+    // URL does not re-enter the edit flow.
+    this.router.navigate(
+      ['/admin/pos'],
+      { queryParams: { editOrder: null }, queryParamsHandling: 'merge' },
+    );
+
     this.onClearCart();
   }
 
@@ -3012,6 +3055,12 @@ export class PosComponent {
     }
     // Fase 5·B3: el flujo DELIVERY vive en el shell con stepper (único checkout).
     this.checkoutIntent.set('delivery');
+    // CP-POS-ENVIO-REGRESSION-001: el shell default a 'create-draft' y su steps()
+    // short-circuita a [Cliente] cuando mode==='create-draft'. Sin esto, Envío y
+    // Cobro desaparecen. mode='create-payment' desbloquea la rama delivery de
+    // steps() que retorna [Cliente, Envío, Cobro]. Espejo del patrón pickup
+    // (onCheckout línea ~1863).
+    this.mode.set('create-payment');
     this.showCheckoutModal.set(true);
   }
 
@@ -3262,9 +3311,17 @@ export class PosComponent {
                 this.editingOrderNumber.set(order.order_number);
                 this.editingOrder.set(order);
                 this.mode.set('edit');
+                // CP-POS-MODAL-SCOPE-001 / Phase F.12 — Modificar must NOT
+                // auto-open the checkout shell. The cashier expects to
+                // see ONLY the cart with the order's items rehydrated
+                // so they can edit quantities, add/remove products,
+                // change customer, and click Guardar / Actualizar /
+                // Cobrar at their own pace. The shell opens only when
+                // they click Cobrar explicitly.
                 // Clear stale charge state from a previous edit attempt.
                 this.readyToPayOrder.set(null);
                 this.chargeModalOpen.set(false);
+                this.showCheckoutModal.set(false);
                 this.loading.set(false);
                 this.toastService.info(`Editando Orden #${order.order_number}`);
               },

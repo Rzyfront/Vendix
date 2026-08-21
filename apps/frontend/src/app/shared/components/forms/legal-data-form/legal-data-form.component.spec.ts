@@ -192,4 +192,23 @@ describe('LegalDataFormComponent — DIAN strict resolver contract', () => {
     component.onResponsibilityToggle('O-49', false);
     expect(component.vatConflict()).toBe(false);
   });
+
+  describe('tax_responsibilities required post-F4', () => {
+    it('el form es inválido cuando tax_responsibilities está vacío', () => {
+      fixture.detectChanges();
+      expect(component.form.controls.tax_responsibilities.valid).toBe(false);
+    });
+
+    it('el form es válido cuando tax_responsibilities tiene al menos un código', () => {
+      fixture.detectChanges();
+      component.form.controls.tax_responsibilities.setValue(['O-48']);
+      expect(component.form.controls.tax_responsibilities.valid).toBe(true);
+    });
+
+    it('el form acepta un código O-49 sin O-48 para tenants no responsables', () => {
+      fixture.detectChanges();
+      component.form.controls.tax_responsibilities.setValue(['O-49']);
+      expect(component.form.controls.tax_responsibilities.valid).toBe(true);
+    });
+  });
 });

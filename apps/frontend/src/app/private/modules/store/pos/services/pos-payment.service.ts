@@ -959,8 +959,12 @@ export class PosPaymentService {
       // Hotfix post-PR-576: la firma del helper ignoraba tableSessionId
       // y tableId, así que los pagos sobre órdenes adoptadas con mesa
       // abierta nunca cerraban la mesa en backend. Propagamos ambos.
-      tableSessionId: tableSessionId ?? null,
-      tableId: tableId ?? null,
+      //
+      // CP-POS-MODAL-SCOPE-001 / Phase F.3 — `POST /store/payments` usa
+      // `forbidNonWhitelisted`, así que no se puede mandar `tableSessionId` /
+      // `tableId` como keys de primer nivel (rechaza 400 SYS_VALIDATION_001).
+      // Los anidamos en `metadata` para que el backend los consuma como
+      // snake_case en el evento de cierre de mesa, no como body-level fields.
       metadata: {
         is_pos_payment: true,
         is_adopted_order: true,
@@ -973,6 +977,8 @@ export class PosPaymentService {
             : undefined,
         wallet_id: paymentRequest.metadata?.walletId,
         cash_received: paymentRequest.cashReceived,
+        ...(tableSessionId != null ? { table_session_id: tableSessionId } : {}),
+        ...(tableId != null ? { table_id: tableId } : {}),
       },
       returnUrl: window.location.origin + '/pos/payment-callback',
     };

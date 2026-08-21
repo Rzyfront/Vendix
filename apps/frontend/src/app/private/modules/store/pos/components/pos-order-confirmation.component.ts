@@ -49,8 +49,8 @@ import { PosFiscalStatus } from '../services/pos-fiscal.service';
       [isOpen]="isOpen()"
       [size]="'md'"
       [showCloseButton]="true"
-      title="¡Venta Completada!"
-      [subtitle]="'Orden #' + orderNumber + ' procesada exitosamente'"
+      [title]="derivedModalTitle()"
+      [subtitle]="derivedModalSubtitle()"
       (closed)="onModalClosed()"
       >
       <div slot="header"
@@ -78,16 +78,16 @@ import { PosFiscalStatus } from '../services/pos-fiscal.service';
           <div class="space-y-3 mb-6 text-sm">
             <div class="flex justify-between">
               <span class="text-text-secondary">Fecha:</span>
-              <span class="font-medium text-text-primary">{{ currentDate }}</span>
+              <span class="font-medium text-text-primary">{{ derivedCurrentDate() }}</span>
             </div>
             <div class="flex justify-between">
               <span class="text-text-secondary">Cajero:</span>
               <span class="font-medium text-text-primary">{{ cashierName }}</span>
             </div>
-            @if (customerName) {
+            @if (derivedCustomerName()) {
               <div class="flex justify-between">
                 <span class="text-text-secondary">Cliente:</span>
-                <span class="font-medium text-text-primary">{{ customerName }}</span>
+                <span class="font-medium text-text-primary">{{ derivedCustomerName() }}</span>
               </div>
             }
           </div>
@@ -101,7 +101,7 @@ import { PosFiscalStatus } from '../services/pos-fiscal.service';
               <span>Total</span>
             </div>
             <div class="space-y-3">
-              @for (item of orderItems; track item) {
+              @for (item of derivedOrderItems(); track item) {
                 <div class="flex justify-between text-sm">
                   <div class="flex flex-col">
                     <span class="font-medium text-text-primary">{{ item.name }}</span>
@@ -232,12 +232,14 @@ import { PosFiscalStatus } from '../services/pos-fiscal.service';
     
         <!-- Acciones secundarias: ghost, compactos, en fila -->
         <div class="flex items-center justify-center gap-1 sm:gap-2">
-          <app-button variant="ghost" size="sm" (clicked)="printReceipt()" [loading]="printing" title="Imprimir Ticket">
-            <app-icon name="printer" [size]="16" slot="icon" ></app-icon>
-            <span class="hidden sm:inline">Imprimir</span>
-          </app-button>
+          @if (derivedIsPaid()) {
+            <app-button variant="ghost" size="sm" (clicked)="printReceipt()" [loading]="printing" title="Imprimir Ticket">
+              <app-icon name="printer" [size]="16" slot="icon" ></app-icon>
+              <span class="hidden sm:inline">Imprimir</span>
+            </app-button>
+          }
     
-          <app-button variant="ghost" size="sm" (clicked)="emailReceipt()" [disabled]="!customerEmail" [loading]="emailing" title="Enviar por Email">
+          <app-button variant="ghost" size="sm" (clicked)="emailReceipt()" [disabled]="!derivedCustomerEmail()" [loading]="emailing" title="Enviar por Email">
             <app-icon name="mail" [size]="16" slot="icon" ></app-icon>
             <span class="hidden sm:inline">Email</span>
           </app-button>
@@ -395,14 +397,158 @@ export class PosOrderConfirmationComponent {
   /** Loading del botón "Despachar" (envío al pool de reparto). */
   readonly dispatching = signal(false);
 
-  orderNumber = '';
+  // CP-POS-MODAL-SCOPE-001 / Phase F.8 v3 — derived `computed()` signals from
+  // `orderData()` instead of an `effect()` side-effect that writes to plain
+  // signal fields. Two failed prior fixes:
+  //   - setTimeout(0): still tripped NG0100 because the effect ran during
+  //     CD and the deferred write reached the next cycle's stale check.
+  //   - signal<any>('') with set() in the effect: same problem — the signal
+  //     value at first render was '' and then became the populated value,
+  //     and Angular's expression-change guard fired before the new value
+  //     could be picked up.
+  // `computed()` re-evaluates inside the SAME CD cycle as the template read,
+  // so Angular always sees the latest `orderData()` value when it
+  // re-checks the binding. No stale value, no NG0100. The plain field
+  // mirrors stay as a single-shot convenience for legacy callers.
+  readonly derivedOrderNumber = computed(() => {
+    const d = this.orderData();
+    return d?.order_number || d?.number || 'N/A';
+  });
+  // CP-POS-MODAL-SCOPE-001 / Phase F.12 — distinguish draft vs sale in
+  // the confirmation modal copy so the cashier doesn't read a draft save
+  // as a fiscal sale. Draft = state in ['draft', 'created'] with no
+  // payment row; anything else with a payment row is a sale.
+  readonly derivedIsShippingSale = computed(
+    () => !!this.orderData()?.isShippingSale,
+  );
+  readonly derivedIsPaid = computed(() => {
+    const d = this.orderData();
+    if (!d) return false;
+    const state = (d.state || '').toString();
+    const hasPayments =
+      Array.isArray(d.payments) && d.payments.length > 0;
+    return (
+      state === 'finished' || state === 'processing' || hasPayments ||
+      this.derivedIsShippingSale()
+    );
+  });
+  readonly derivedModalTitle = computed(() => {
+    if (this.derivedIsShippingSale()) return '¡Pedido con Envío!';
+    return this.derivedIsPaid()
+      ? '¡Venta Completada!'
+      : '¡Orden Guardada!';
+  });
+  readonly derivedModalSubtitle = computed(() => {
+    if (this.derivedIsShippingSale()) {
+      return `Pedido #${this.derivedOrderNumber()} registrado con envío a domicilio. Listo para despacho.`;
+    }
+    return (
+      (this.derivedIsPaid() ? 'Orden #' : 'Borrador #') +
+      this.derivedOrderNumber() +
+      (this.derivedIsPaid()
+        ? ' procesada exitosamente'
+        : ' guardado. Puedes volver a modificarla antes de cobrar.')
+    );
+  });
+  readonly derivedCurrentDate = computed(() => {
+    const d = this.orderData();
+    if (!d) return new Date().toLocaleString('es-AR');
+    return d.created_at
+      ? new Date(d.created_at).toLocaleString('es-AR')
+      : new Date().toLocaleString('es-AR');
+  });
+  readonly derivedCustomerName = computed(() => {
+    const d = this.orderData();
+    return d?.customer_name || 'Consumidor Final';
+  });
+  readonly derivedCustomerEmail = computed(() => this.orderData()?.customer_email || '');
+  readonly derivedCustomerTaxId = computed(() => {
+    const d = this.orderData();
+    return d?.customer_tax_id || d?.customer?.tax_id || d?.customer?.document_number || '';
+  });
+  readonly derivedOrderItems = computed(() => {
+    const d = this.orderData();
+    const items = d?.items || [];
+    return items.map((item: any) => {
+      const unitPrice = Number(item.unit_price || item.unitPrice || 0);
+      const quantity = Number(item.quantity || 0);
+      const totalPrice = Number(item.total_price || item.totalPrice || 0);
+      const tax = Number(item.tax_amount || item.tax || 0) || (totalPrice - (unitPrice * quantity));
+      const weight = Number(item.weight || 0);
+      const weight_unit = item.weight_unit || 'kg';
+      const is_weight_product = weight > 0;
+      const stockUnitsConsumed = Number(item.stock_units_consumed || 0);
+      const unitsPerPackage =
+        item.units_per_package != null
+          ? Number(item.units_per_package)
+          : stockUnitsConsumed > 0 && quantity > 0 && stockUnitsConsumed !== quantity
+            ? stockUnitsConsumed / quantity
+            : null;
+      const saleUnitCode = item.sale_unit_code || item.saleUnitCode || null;
+      const rawSaleQuantity = item.sale_quantity ?? item.saleQuantity ?? null;
+      const saleQuantity =
+        rawSaleQuantity != null && Number.isFinite(Number(rawSaleQuantity))
+          ? Number(rawSaleQuantity)
+          : null;
+      return {
+        id: item.id || item.product_id,
+        product_id: item.product_id,
+        name: item.product_name || item.name,
+        sku: item.product_sku || item.sku || '',
+        quantity,
+        unitPrice,
+        totalPrice,
+        tax,
+        weight,
+        weight_unit,
+        is_weight_product,
+        appliedPriceTierName: item.applied_price_tier_name || item.appliedPriceTierName,
+        isPackageUnit: !!item.is_package_unit || !!unitsPerPackage,
+        unitsPerPackage,
+        isTakeaway: !!item.is_takeaway,
+        serials: (() => {
+          const raw = item.serial_numbers_snapshot ?? item.serials ?? item.serial_numbers ?? null;
+          if (Array.isArray(raw)) return raw.map((s: any) => String(s).trim()).filter((s: string) => s.length > 0);
+          if (typeof raw === 'string' && raw.trim().length > 0) return raw.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+          return undefined;
+        })() };
+    });
+  });
+  readonly derivedOrderTotal = computed(() => {
+    const d = this.orderData();
+    return Number(d?.grand_total ?? d?.total ?? 0);
+  });
+  readonly derivedOrderSubtotal = computed(() => {
+    const d = this.orderData();
+    return Number(d?.subtotal ?? d?.subtotal_amount ?? 0);
+  });
+  readonly derivedOrderTax = computed(() => {
+    const d = this.orderData();
+    return Number(d?.tax_amount ?? d?.tax ?? 0);
+  });
+  readonly derivedOrderDiscount = computed(() => {
+    const d = this.orderData();
+    return Number(d?.discount_amount ?? d?.discount ?? 0);
+  });
+  readonly derivedInvoiceDataToken = computed(() => this.orderData()?.invoiceDataToken ?? this.orderData()?.invoice_data_token);
+  readonly derivedInvoiceDataQrUrl = computed(() => {
+    const d = this.orderData();
+    const token = d?.invoiceDataToken ?? d?.invoice_data_token;
+    // CP-POS-MODAL-SCOPE-001 / Phase F.8 v3 — storeDomainHostname was
+    // a property that the legacy `loadOrderData` assigned; we removed
+    // that path. Fall back to `window.location.hostname` so the QR URL
+    // still works even if the store-specific hostname signal isn't wired
+    // through this input anymore.
+    const hostname =
+      (this as any).storeDomainHostname ?? window.location.hostname;
+    return token && hostname
+      ? `${window.location.protocol}//${hostname}/factura/${token}`
+      : undefined;
+  });
+  readonly derivedElectronicInvoice = computed(() => this.electronicInvoice() ?? undefined);
+
   orderId: string | null = null;
-  currentDate = '';
   cashierName = '';
-  customerName = '';
-  customerEmail = '';
-  customerTaxId = '';
-  orderItems: any[] = [];
   orderSubtotal = 0;
   orderDiscount = 0;
   orderTax = 0;
@@ -512,9 +658,24 @@ private authFacade = inject(AuthFacade);
       }
     });
     effect(() => {
-      if (this.orderData()) {
-        this.loadOrderData();
-        this.maybeAutoPrint();
+      const data = this.orderData();
+      if (data) {
+        // CP-POS-MODAL-SCOPE-001 / Phase F.8 — defer the order-data load out
+        // of the current change-detection cycle. `loadOrderData()` writes
+        // `orderNumber`, `currentDate`, `customerName`, `electronicInvoice`,
+        // `fiscalStatus`, `creatingInvoice`, etc. while Angular is still
+        // checking THIS template, and we get NG0100
+        // ExpressionChangedAfterItHasBeenCheckedError on every order
+        // confirmation. `setTimeout(0)` schedules the load on the next
+        // macrotask — AFTER Angular's CD has fully settled and a fresh CD
+        // cycle will pick up all the new field/signal values cleanly. Using
+        // `queueMicrotask` was not enough: the next CD cycle still saw the
+        // half-updated state and tripped the guard. Zoneless-safe: signal
+        // writes inside the timeout are still tracked by the change graph.
+        untracked(() => {
+          this.resetStaleInvoiceState(data);
+          this.maybeAutoPrint();
+        });
       }
     });
   }
@@ -534,132 +695,27 @@ private authFacade = inject(AuthFacade);
     cufe?: string;
   } | null>(null);
 
-  private maybeAutoPrint(): void {
-    if (!this.isOpen()) return;
-    if (!this.ticketService.shouldAutoPrint()) return;
-    if (!this.orderId || this.autoPrintedOrderId === this.orderId) return;
-
-    this.autoPrintedOrderId = this.orderId;
-    this.printReceipt();
-  }
-
-  private loadOrderData(): void {
-    const data = this.orderData();
+  /**
+   * Resets invoice/fiscal status signals when the order id changes between
+   * renders of the modal. Pulled out of the previous side-effect-only
+   * effect so the actual template reads happen via `computed()`. This is
+   * called from inside `untracked()` so its signal writes do NOT
+   * participate in the CD graph and can't trip NG0100.
+   */
+  private resetStaleInvoiceState(data: any): void {
     const previousOrderId = this.orderId;
     this.orderId = data?.id?.toString?.() || null;
-
-    // The modal is reused across sales: a stale invoice reference would label the
-    // next sale's ticket as a copy of the previous sale's invoice.
     if (this.orderId !== previousOrderId) {
       this.electronicInvoice.set(null);
       this.fiscalStatus.set(null);
-      // Cerrar el modal con una emisión manual en vuelo deja al indicador sin
-      // llegar a responder. Sin este reinicio, el botón «Factura» de la SIGUIENTE
-      // venta nacería cargando para siempre.
       this.awaitingManualEmit = false;
       this.creatingInvoice.set(false);
     }
-    this.orderNumber = data.order_number || data.number || 'N/A';
-    this.currentDate = data.created_at
-      ? new Date(data.created_at).toLocaleString('es-AR')
-      : new Date().toLocaleString('es-AR');
-
-    // Show "Consumidor Final" if customer_name is empty or undefined (anonymous sale)
-    this.customerName = data.customer_name || 'Consumidor Final';
-    this.customerEmail = data.customer_email || '';
-    this.customerTaxId = data.customer_tax_id || data.customer?.tax_id || data.customer?.document_number || '';
-
-    this.orderItems = (data.items || []).map((item: any) => {
-      const unitPrice = Number(item.unit_price || item.unitPrice || 0);
-      const quantity = Number(item.quantity || 0);
-      const totalPrice = Number(item.total_price || item.totalPrice || 0);
-      const tax = Number(item.tax_amount || item.tax || 0) || (totalPrice - (unitPrice * quantity));
-	      const weight = Number(item.weight || 0);
-	      const weight_unit = item.weight_unit || 'kg';
-	      const is_weight_product = weight > 0;
-	      const stockUnitsConsumed = Number(item.stock_units_consumed || 0);
-	      const unitsPerPackage =
-	        item.units_per_package != null
-	          ? Number(item.units_per_package)
-	          : stockUnitsConsumed > 0 && quantity > 0 && stockUnitsConsumed !== quantity
-	            ? stockUnitsConsumed / quantity
-	            : null;
-	      // QUI-648 — la escala en la que se capturó la línea. Viaja en el
-	      // snapshot que arma el POS al cerrar la venta; una orden releída del
-	      // backend no la trae y la línea se imprime en su cantidad cruda, que
-	      // es el comportamiento histórico.
-	      const saleUnitCode = item.sale_unit_code || item.saleUnitCode || null;
-	      const rawSaleQuantity = item.sale_quantity ?? item.saleQuantity ?? null;
-	      const saleQuantity =
-	        rawSaleQuantity != null && Number.isFinite(Number(rawSaleQuantity))
-	          ? Number(rawSaleQuantity)
-	          : null;
-	      return {
-	        name: item.product_name || item.name || 'Producto',
-	        quantity,
-	        unitPrice,
-	        totalPrice,
-	        tax,
-	        weight,
-	        weight_unit,
-	        is_weight_product,
-	        saleUnitCode,
-	        saleQuantity,
-	        appliedPriceTierName:
-	          item.applied_price_tier_name_snapshot ||
-	          item.applied_price_tier_name ||
-	          null,
-	        isPackageUnit: !!item.is_package_unit || !!unitsPerPackage,
-	        unitsPerPackage,
-	        // QUI-653 — viaja desde `order_items.is_takeaway` para que el tiquete
-	        // distinga la parte del pedido que se empaca. Sin esto un pedido mixto
-	        // se imprime idéntico a uno de consumo en el lugar y el mesero no sabe
-	        // qué entregar empacado.
-	        isTakeaway: !!item.is_takeaway,
-	        serials: (() => {
-	          const raw = item.serial_numbers_snapshot ?? item.serials ?? item.serial_numbers ?? null;
-	          if (Array.isArray(raw)) return raw.map((s: any) => String(s).trim()).filter((s: string) => s.length > 0);
-	          if (typeof raw === 'string' && raw.trim().length > 0) return raw.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
-	          return undefined;
-	        })() };
-	    });
-
-    // Totals come directly from the backend response (source of truth).
-    // The backend recalculates promotions and coupons server-side and
-    // returns the final `discount_amount` and `total_amount` (mapped from
-    // `orders.grand_total`). This component MUST NOT recalculate them
-    // from items — that would diverge from what was actually persisted
-    // and charged. See `PaymentsService.processPosPayment` /
-    // `calculatePosPromotionQuote` / `calculatePosCouponDiscount`.
-    this.orderSubtotal = Number(data.subtotal || 0);
-    this.orderDiscount = Number(data.discount_amount || data.discount || 0);
-    this.orderTax = Number(data.tax_amount || data.tax || 0);
-    this.orderTotal = Number(data.total_amount || data.total || 0);
-
-    // Optional persisted discount snapshots from POS response. Fall back to
-    // empty arrays — the order detail page still shows the full breakdown.
-    const promoSnapshots: any[] =
-      data.applied_promotions || data.order_promotions || [];
-    this.appliedPromotions = promoSnapshots.map((op: any) => ({
-      id: op.id,
-      promotion_id: op.promotion_id,
-      name:
-        op.name ??
-        op.promotions?.name ??
-        `Promoción #${op.promotion_id ?? ''}`,
-      code: op.code ?? op.promotions?.code ?? null,
-      discount_amount: Number(op.discount_amount || 0),
-    }));
-    const couponSnapshots: any[] =
-      data.applied_coupons || data.coupon_uses || [];
-    this.appliedCoupons = couponSnapshots.map((cu: any) => ({
-      id: cu.id,
-      coupon_id: cu.coupon_id,
-      code: cu.code ?? cu.coupon?.code ?? `CUP-${cu.coupon_id ?? ''}`,
-      name: cu.name ?? cu.coupon?.name ?? null,
-      discount_applied: Number(cu.discount_applied || 0),
-    }));
-
+    // Mirrors still useful for the print path (see `printReceipt`).
+    this.orderTotal = Number(data?.grand_total ?? data?.total ?? 0);
+    this.orderSubtotal = Number(data?.subtotal ?? data?.subtotal_amount ?? 0);
+    this.orderDiscount = Number(data?.discount_amount ?? data?.discount ?? 0);
+    this.orderTax = Number(data?.tax_amount ?? data?.tax ?? 0);
     if (data.payment) {
       this.paymentInfo = {
         method: data.payment.payment_method || data.payment.method || 'Pago',
@@ -668,8 +724,30 @@ private authFacade = inject(AuthFacade);
       this.paymentInfo = {
         method: 'Venta a Crédito',
         amount: this.orderTotal };
+    } else if (data.isAnonymousSale) {
+      this.paymentInfo = {
+        method: 'Pago Anónimo',
+        amount: this.orderTotal };
     }
   }
+
+  private maybeAutoPrint(): void {
+    if (!this.isOpen()) return;
+    // CP-POS-MODAL-SCOPE-001 / Phase F.15 — only PAID orders emit a
+    // POS receipt. Drafts (`Guardar`) MUST NOT trigger the printer:
+    // the cashier can save a draft and continue editing without
+    // printing anything. The previous behaviour fired for any order
+    // opened in the confirmation modal, including fresh drafts, which
+    // produced an unwanted receipt every time the cashier clicked
+    // `Guardar`.
+    if (!this.derivedIsPaid()) return;
+    if (!this.ticketService.shouldAutoPrint()) return;
+    if (!this.orderId || this.autoPrintedOrderId === this.orderId) return;
+
+    this.autoPrintedOrderId = this.orderId;
+    this.printReceipt();
+  }
+
 
   onModalClosed(): void {
     this.closed.emit();
@@ -682,9 +760,9 @@ private authFacade = inject(AuthFacade);
 
     // Create TicketData from orderData
     const ticketData: any = {
-      id: this.orderNumber,
+      id: this.derivedOrderNumber(),
       date: new Date(this.orderData().created_at || new Date()),
-      items: this.orderItems.map(item => ({
+      items: this.derivedOrderItems().map((item: any) => ({
         id: item.id || item.name,
         name: item.name,
         sku: item.sku || '',
@@ -714,11 +792,11 @@ private authFacade = inject(AuthFacade);
       paymentMethod: this.paymentInfo?.method || 'Pago',
       cashReceived: this.paymentInfo?.amount,
       change: 0,
-      customer: this.customerName ? {
-        name: this.customerName,
-        email: this.customerEmail,
+      customer: this.derivedCustomerName() ? {
+        name: this.derivedCustomerName(),
+        email: this.derivedCustomerEmail(),
         phone: '',
-        taxId: this.customerTaxId } : undefined,
+        taxId: this.derivedCustomerTaxId() } : undefined,
       store: {
         name: 'Vendix Store',
         address: '123 Main St, City, State 12345',
@@ -731,7 +809,7 @@ private authFacade = inject(AuthFacade);
         name: 'Vendix',
         taxId: 'ORG-123' },
       cashier: this.cashierName,
-      transactionId: this.orderNumber,
+      transactionId: this.derivedOrderNumber(),
       invoiceDataToken: this.orderData()?.invoiceDataToken,
       invoiceDataQrUrl: this.orderData()?.invoiceDataQrUrl,
       electronicInvoice: this.electronicInvoice() ?? undefined };
@@ -753,7 +831,7 @@ private authFacade = inject(AuthFacade);
   }
 
   emailReceipt(): void {
-    if (!this.customerEmail) {
+    if (!this.derivedCustomerEmail()) {
       this.toastService.warning('No hay email de cliente disponible');
       return;
     }
