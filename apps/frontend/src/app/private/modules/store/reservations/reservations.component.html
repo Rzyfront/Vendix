@@ -298,7 +298,7 @@
          transport-agnostic and emits the same payload shape. -->
     <app-booking-scheduler-modal
       [existingBooking]="bookingToReschedule()"
-      [modalTitleOverride]="'Re-agendar ' + (bookingToReschedule()?.product?.name ?? bookingToReschedule()?.product_name ?? 'servicio')"
+      [modalTitleOverride]="'Re-agendar ' + (bookingToReschedule()?.product?.name ?? 'servicio')"
       (scheduled)="onAdminRescheduleScheduled($event)"
       (cancelled)="isRescheduleModalOpen.set(false)"
     />

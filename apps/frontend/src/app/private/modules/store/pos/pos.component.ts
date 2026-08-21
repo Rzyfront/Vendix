@@ -831,6 +831,17 @@ export class PosComponent {
   loading = signal(false);
 
   /**
+   * CP-POS-SVC-PERF-001 / Annotation-4 — read-once from
+   * `settings.reservations.allow_bookings_without_payment`. Defaults to
+   * `true` while settings are loading so an empty cache can't lock the
+   * cashier out of scheduling. Refreshed via `loadReservationsPolicy()`
+   * whenever the user opens the POS so a config change in
+   * /admin/settings/general/reservas takes effect without a full
+   * reload.
+   */
+  readonly allowBookingsWithoutPayment = signal<boolean>(true);
+
+  /**
    * CP-POS-SVC-PERF-001 / D.2 — booking blocks emitted by the cart
    * scheduler, keyed by `cartItemId`. The editor attaches the matching
    * block to each item when building the `UpdateOrderEditorDto`.
@@ -855,6 +866,15 @@ export class PosComponent {
   private firePendingBookingsAfterDraft(orderId: number): void {
     const map = this.cartBookingsFromChild();
     if (!map || map.size === 0) return;
+    // CP-POS-SVC-PERF-001 / Annotation-4 — respect the store-level
+    // `allow_bookings_without_payment` flag. When the policy is off,
+    // we silently skip the per-item POST /reservations call: the draft
+    // order survives without a booking, and the editor atomic block
+    // (or the actual Cobrar → flow/pay path) takes care of creating
+    // the booking once payment clears. No error toast — the cashier
+    // is explicitly following the store policy, not doing anything
+    // wrong.
+    if (!this.allowBookingsWithoutPayment()) return;
     const customerId = this.cartState()?.customer?.id ?? null;
 
     for (const [, block] of map.entries()) {
@@ -3687,6 +3707,17 @@ export class PosComponent {
         }
 
         this.applyPosSettings(storeSettings);
+        // CP-POS-SVC-PERF-001 / Annotation-4 — pick up the
+        // reservations policy from the same store-settings payload so
+        // a config change in /admin/settings/general/reservas takes
+        // effect the next time the POS opens. Falls back to the
+        // signal default (true) when the key is absent — older
+        // settings payloads don't carry the field.
+        const policy = (storeSettings as any)?.reservations
+          ?.allow_bookings_without_payment;
+        if (typeof policy === 'boolean') {
+          this.allowBookingsWithoutPayment.set(policy);
+        }
       });
   }
 

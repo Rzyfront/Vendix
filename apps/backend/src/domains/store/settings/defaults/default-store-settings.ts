@@ -383,6 +383,14 @@ export function getDefaultStoreSettings(): StoreSettings {
       // request through `booking_reschedule_requests` instead of mutating
       // `bookings` immediately).
       allow_direct_reschedule: true,
+      // CP-POS-SVC-PERF-001 / Annotation-4: whether the POS cashier
+      // can persist a `bookings` row for a service line on a draft
+      // order (Guardar) or whether scheduling only becomes legal
+      // after payment clears (Cobrar). Default true preserves the
+      // pre-toggle UX where Guardar also schedules. Stores that want
+      // payment guaranteed before any technician's calendar is locked
+      // flip it to false.
+      allow_bookings_without_payment: true,
     },
 
     // Availability - Generic-slot fallback. Mon-Fri matches the historic
