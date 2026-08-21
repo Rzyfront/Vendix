@@ -13,8 +13,8 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
-import { Subject, of } from 'rxjs';
-import { debounceTime, switchMap } from 'rxjs/operators';
+import { Subject, timer } from 'rxjs';
+import { switchMap } from 'rxjs/operators';
 
 import { IconComponent } from '../icon/icon.component';
 import { IconName } from '../icon/icons.registry';
@@ -121,10 +121,17 @@ export class OptionsDropdownComponent {
       this.calculateActiveFiltersCount();
     });
 
-    // Single pipeline: switchMap re-creates debounce when a new ms value arrives
+    // Single pipeline: switchMap re-crea la espera cuando llega un nuevo cambio,
+    // así que sólo el último sobrevive.
+    //
+    // Antes esto era `of(null).pipe(debounceTime(ms))`, que NO esperaba nada:
+    // `debounceTime` descarga su valor pendiente en cuanto la fuente completa, y
+    // `of(null)` completa de inmediato. El resultado era una emisión síncrona
+    // por cada tecla/selección — cuatro cambios de preset en 32 ms disparaban
+    // cuatro peticiones. `timer(ms)` sí emite recién cumplido el plazo.
     this.debounceTrigger$
       .pipe(
-        switchMap((ms) => of(null).pipe(debounceTime(ms))),
+        switchMap((ms) => timer(ms)),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe(() => this.emitFilterChange());
