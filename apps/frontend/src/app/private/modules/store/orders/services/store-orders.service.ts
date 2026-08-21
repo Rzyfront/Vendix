@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
-import { throwError } from 'rxjs';
+import { throwError, of } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
@@ -283,10 +283,14 @@ export class StoreOrdersService {
   getOrderTimeline(orderId: string): Observable<any[]> {
     const url = `${this.apiUrl}/store/orders/${orderId}/timeline`;
 
-    return this.http.get<any[]>(url).pipe(
+    return this.http.get<any>(url).pipe(
+      map((r) => (Array.isArray(r?.data) ? r.data : Array.isArray(r) ? r : [])),
       catchError((error) => {
         console.error('Error fetching order timeline:', error);
-        return throwError(() => this.buildApiError(error));
+        // CP-POS-SVC-PERF-001 — never propagate as fatal: order detail
+        // must render even when the timeline endpoint fails. The page
+        // shows an empty history instead of a full crash.
+        return of([] as any[]);
       }),
     );
   }
