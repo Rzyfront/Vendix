@@ -1011,11 +1011,16 @@ export class PopCartService {
         unit_cost: item.unit_cost || item.unit_price,
         // Toda lectura de `discount_percentage` desde DB pasa por
         // `normalizeDiscount` para garantizar el contrato entero 0-100
-        // (regression: loadOrder bypass). Una PO pre-fix con
-        // `discount_percentage = 0.20` debe llegar al carrito como 20, no
-        // como 0.2 — si se cuela la fracción, `cartToPurchaseOrderRequest`
-        // envía `discount_percentage: 0.2` al backend, que lo interpreta
-        // como 0.2% en lugar de 20%. Mismo bug que el usuario reportó.
+        // (regression: loadOrder bypass — antes leía `item.discount_percentage
+        // || 0` directo, propagando la fracción al backend que la interpretaba
+        // como 0.X% en vez del 20% que el operador creía haber tipeado).
+        //
+        // Nota de fidelidad: una PO pre-fix con `discount_percentage = 0.20`
+        // se trunca a 0 (el helper redondea, no detecta sesgo histórico).
+        // Esto es aceptable porque la persistencia pre-fix era incorrecta:
+        // 0.20 != 20%, así que NO estamos perdiendo valor real, sólo
+        // bloqueando que el bug se propague. Si el operador quiere mantener
+        // el descuento, lo retipea explícito en el modal y se persiste como 20.
         discount: this.normalizeDiscount(Number(item.discount_percentage)),
         tax_rate: item.tax_rate || 0,
         // IVA cycle (F1): restore tax classification and per-line override.
