@@ -803,8 +803,9 @@ export class InvoiceScannerService {
         ? repairScannedAmount(rawHeaderDiscount, currency).value
         : 0;
     // Se aplana igual que las líneas: en una factura con IVA incluido el
-    // descuento impreso también es bruto.
-    const headerDiscountNet =
+    // descuento impreso también es bruto. `let` porque la guarda de la Fase 5
+    // puede anularlo cuando coexiste con un descuento por línea.
+    let headerDiscountNet =
       pricesIncludeTax && headerDiscountPrinted > 0
         ? headerDiscountPrinted / (1 + this.dominantTaxRate(lineItems))
         : headerDiscountPrinted;
@@ -818,6 +819,41 @@ export class InvoiceScannerService {
       scanWarnings.push(
         'La factura menciona un descuento por pronto pago. No se aplica al costo: es un descuento financiero y se decide al registrar el pago.',
       );
+    }
+
+    // QUI-661 Fase 5 — anti-doble-conteo del descuento comercial. La IA
+    // puede emitir descuento POR LÍNEA y de CABECERA a la vez; el caso
+    // típico es un pie que totaliza descuentos ya desglosados en el cuerpo,
+    // pero el modelo también lo hace por confusión entre las dos clases. El
+    // de línea es el canónico — es el que llega a `deriveLineTax`
+    // (purchase-orders.service.ts L175-182) línea por línea y se capitaliza
+    // en la capa FIFO. Si dejamos pasar el de cabecera, `prorateHeaderDiscount`
+    // lo reparte entre las líneas y `deriveLineTax` lo SUMA al descuento
+    // propio: la base gravable se rebaja dos veces → IVA descontable
+    // subvaluado ante la DIAN y costo de inventario capitalizado por debajo
+    // de lo pagado. Por eso, si alguna línea trae descuento y la cabecera
+    // trae descuento, descartamos el de cabecera y avisamos al operador.
+    //
+    // El prompt (migración 20260820…invoice_ocr_discount_decision_rule) ya
+    // intenta que esto no pase, declarando el per-line como canónico cuando
+    // ambos aparecen; este guard es la última línea de defensa y debe
+    // coincidir con esa regla — si cambia el prompt, revisar este bloque.
+    const lineHasCommercialDiscount = lineItems.some(
+      (li) => Number(li.discount_amount) > 0,
+    );
+    const headerWasPrinted =
+      Number.isFinite(rawHeaderDiscount) && rawHeaderDiscount > 0;
+    if (lineHasCommercialDiscount && headerWasPrinted && headerDiscountNet > 0) {
+      scanWarnings.push(
+        'La factura muestra descuentos por línea y un descuento general en el pie. ' +
+          'Se conservaron los descuentos por línea y se descartó el del pie para ' +
+          'evitar descontar el mismo dinero dos veces sobre la base gravable. ' +
+          'Verifica que el total cuadre antes de confirmar.',
+      );
+      // Anulamos el de cabecera para que no llegue a `prorateHeaderDiscount`.
+      // El `early_payment_discount` ya está resuelto arriba y NO se ve
+      // afectado: es financiero, vive en otro campo y no entra a este cálculo.
+      headerDiscountNet = 0;
     }
 
     return {
