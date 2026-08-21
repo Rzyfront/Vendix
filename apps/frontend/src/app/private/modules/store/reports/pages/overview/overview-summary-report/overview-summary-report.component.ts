@@ -107,20 +107,6 @@ const PLACEHOLDER_VALUE = '—';
   template: `
     <div class="overview-summary-page">
       <div class="overview-summary-content">
-        <div class="overview-summary-toolbar">
-          <app-options-dropdown
-            [filters]="filterConfigs()"
-            [filterValues]="dropdownFilterValues()"
-            [actions]="[]"
-            [showActions]="false"
-            triggerLabel="Filtros"
-            triggerIcon="filter"
-            [debounceMs]="350"
-            (filterChange)="onFiltersDropdownChange($event)"
-            (clearAllFilters)="onFiltersDropdownClearAll()"
-          ></app-options-dropdown>
-        </div>
-
         @if (statCards().length > 0) {
           <div class="overview-stats-grid">
             @for (card of statCards(); track card.key) {
@@ -138,7 +124,20 @@ const PLACEHOLDER_VALUE = '—';
           </div>
         }
 
-        <app-reports-catalog />
+        <app-reports-catalog>
+          <app-options-dropdown
+            slot="filters"
+            [filters]="filterConfigs()"
+            [filterValues]="dropdownFilterValues()"
+            [actions]="[]"
+            [showActions]="false"
+            triggerLabel="Filtros"
+            triggerIcon="filter"
+            [debounceMs]="350"
+            (filterChange)="onFiltersDropdownChange($event)"
+            (clearAllFilters)="onFiltersDropdownClearAll()"
+          />
+        </app-reports-catalog>
 
         @if (error(); as err) {
           <div class="overview-error-banner" role="alert">

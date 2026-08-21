@@ -2,6 +2,25 @@
   display: block;
 }
 
+// ============================================================================
+// Filters slot — opt-in content projection area at the top-right of the
+// catalog card. The parent renders an `<app-options-dropdown>` (or any
+// other trigger) with `slot="filters"` so the host state stays in the
+// parent while the visual anchor lives inside the card. When nothing is
+// projected, the slot collapses (`:empty`) so reuses of this component
+// without filters do not pay a vertical-space penalty.
+// ============================================================================
+
+.catalog-filters-slot {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 1rem;
+
+  &:empty {
+    display: none;
+  }
+}
+
 .catalog-section {
   display: flex;
   flex-direction: column;

@@ -1,4 +1,7 @@
 <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
+  <div class="catalog-filters-slot">
+    <ng-content select="[slot='filters']"></ng-content>
+  </div>
   <div class="catalog-section">
     <div class="catalog-header">
       <div class="catalog-header-text">
