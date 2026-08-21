@@ -50,7 +50,7 @@ import { PosFiscalStatus } from '../services/pos-fiscal.service';
       [size]="'md'"
       [showCloseButton]="true"
       title="¡Venta Completada!"
-      [subtitle]="'Orden #' + orderNumber + ' procesada exitosamente'"
+      [subtitle]="'Orden #' + orderNumber() + ' procesada exitosamente'"
       (closed)="onModalClosed()"
       >
       <div slot="header"
@@ -78,16 +78,16 @@ import { PosFiscalStatus } from '../services/pos-fiscal.service';
           <div class="space-y-3 mb-6 text-sm">
             <div class="flex justify-between">
               <span class="text-text-secondary">Fecha:</span>
-              <span class="font-medium text-text-primary">{{ currentDate }}</span>
+              <span class="font-medium text-text-primary">{{ currentDate() }}</span>
             </div>
             <div class="flex justify-between">
               <span class="text-text-secondary">Cajero:</span>
               <span class="font-medium text-text-primary">{{ cashierName }}</span>
             </div>
-            @if (customerName) {
+            @if (customerName()) {
               <div class="flex justify-between">
                 <span class="text-text-secondary">Cliente:</span>
-                <span class="font-medium text-text-primary">{{ customerName }}</span>
+                <span class="font-medium text-text-primary">{{ customerName() }}</span>
               </div>
             }
           </div>
@@ -101,7 +101,7 @@ import { PosFiscalStatus } from '../services/pos-fiscal.service';
               <span>Total</span>
             </div>
             <div class="space-y-3">
-              @for (item of orderItems; track item) {
+              @for (item of orderItems(); track item) {
                 <div class="flex justify-between text-sm">
                   <div class="flex flex-col">
                     <span class="font-medium text-text-primary">{{ item.name }}</span>
@@ -237,7 +237,7 @@ import { PosFiscalStatus } from '../services/pos-fiscal.service';
             <span class="hidden sm:inline">Imprimir</span>
           </app-button>
     
-          <app-button variant="ghost" size="sm" (clicked)="emailReceipt()" [disabled]="!customerEmail" [loading]="emailing" title="Enviar por Email">
+          <app-button variant="ghost" size="sm" (clicked)="emailReceipt()" [disabled]="!customerEmail()" [loading]="emailing" title="Enviar por Email">
             <app-icon name="mail" [size]="16" slot="icon" ></app-icon>
             <span class="hidden sm:inline">Email</span>
           </app-button>
@@ -395,14 +395,23 @@ export class PosOrderConfirmationComponent {
   /** Loading del botón "Despachar" (envío al pool de reparto). */
   readonly dispatching = signal(false);
 
-  orderNumber = '';
+  // CP-POS-MODAL-SCOPE-001 / Phase F.8 — orderNumber/currentDate/customerName/
+  // /customerEmail/customerTaxId/orderItems were plain fields; setting them
+  // inside the orderData effect wrote new values AFTER Angular had already
+  // bound the template, which produced NG0100
+  // ExpressionChangedAfterItHasBeenCheckedError on every confirmation render.
+  // Plain fields aren't tracked by the change-detection graph, so the
+  // template's stale value persists until the next CD cycle, which is
+  // exactly when Angular aborts. Signals are tracked; reassigning them
+  // schedules a follow-up CD that re-evaluates the bindings cleanly.
+  orderNumber = signal('');
+  currentDate = signal('');
+  customerName = signal('');
+  customerEmail = signal('');
+  customerTaxId = signal('');
+  orderItems = signal<any[]>([]);
   orderId: string | null = null;
-  currentDate = '';
   cashierName = '';
-  customerName = '';
-  customerEmail = '';
-  customerTaxId = '';
-  orderItems: any[] = [];
   orderSubtotal = 0;
   orderDiscount = 0;
   orderTax = 0;
@@ -576,17 +585,19 @@ private authFacade = inject(AuthFacade);
       this.awaitingManualEmit = false;
       this.creatingInvoice.set(false);
     }
-    this.orderNumber = data.order_number || data.number || 'N/A';
-    this.currentDate = data.created_at
-      ? new Date(data.created_at).toLocaleString('es-AR')
-      : new Date().toLocaleString('es-AR');
+    this.orderNumber.set(data.order_number || data.number || 'N/A');
+    this.currentDate.set(
+      data.created_at
+        ? new Date(data.created_at).toLocaleString('es-AR')
+        : new Date().toLocaleString('es-AR'),
+    );
 
     // Show "Consumidor Final" if customer_name is empty or undefined (anonymous sale)
-    this.customerName = data.customer_name || 'Consumidor Final';
-    this.customerEmail = data.customer_email || '';
-    this.customerTaxId = data.customer_tax_id || data.customer?.tax_id || data.customer?.document_number || '';
+    this.customerName.set(data.customer_name || 'Consumidor Final');
+    this.customerEmail.set(data.customer_email || '');
+    this.customerTaxId.set(data.customer_tax_id || data.customer?.tax_id || data.customer?.document_number || '');
 
-    this.orderItems = (data.items || []).map((item: any) => {
+    this.orderItems.set((data.items || []).map((item: any) => {
       const unitPrice = Number(item.unit_price || item.unitPrice || 0);
       const quantity = Number(item.quantity || 0);
       const totalPrice = Number(item.total_price || item.totalPrice || 0);
@@ -639,7 +650,7 @@ private authFacade = inject(AuthFacade);
 	          if (typeof raw === 'string' && raw.trim().length > 0) return raw.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
 	          return undefined;
 	        })() };
-	    });
+	    }));
 
     // Totals come directly from the backend response (source of truth).
     // The backend recalculates promotions and coupons server-side and
@@ -699,9 +710,9 @@ private authFacade = inject(AuthFacade);
 
     // Create TicketData from orderData
     const ticketData: any = {
-      id: this.orderNumber,
+      id: this.orderNumber(),
       date: new Date(this.orderData().created_at || new Date()),
-      items: this.orderItems.map(item => ({
+      items: this.orderItems().map(item => ({
         id: item.id || item.name,
         name: item.name,
         sku: item.sku || '',
@@ -731,11 +742,11 @@ private authFacade = inject(AuthFacade);
       paymentMethod: this.paymentInfo?.method || 'Pago',
       cashReceived: this.paymentInfo?.amount,
       change: 0,
-      customer: this.customerName ? {
-        name: this.customerName,
-        email: this.customerEmail,
+      customer: this.customerName() ? {
+        name: this.customerName(),
+        email: this.customerEmail(),
         phone: '',
-        taxId: this.customerTaxId } : undefined,
+        taxId: this.customerTaxId() } : undefined,
       store: {
         name: 'Vendix Store',
         address: '123 Main St, City, State 12345',
@@ -748,7 +759,7 @@ private authFacade = inject(AuthFacade);
         name: 'Vendix',
         taxId: 'ORG-123' },
       cashier: this.cashierName,
-      transactionId: this.orderNumber,
+      transactionId: this.orderNumber(),
       invoiceDataToken: this.orderData()?.invoiceDataToken,
       invoiceDataQrUrl: this.orderData()?.invoiceDataQrUrl,
       electronicInvoice: this.electronicInvoice() ?? undefined };
@@ -770,7 +781,7 @@ private authFacade = inject(AuthFacade);
   }
 
   emailReceipt(): void {
-    if (!this.customerEmail) {
+    if (!this.customerEmail()) {
       this.toastService.warning('No hay email de cliente disponible');
       return;
     }
