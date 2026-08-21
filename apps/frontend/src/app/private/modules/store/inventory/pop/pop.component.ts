@@ -61,6 +61,7 @@ import {
 } from './interfaces/pop-cart.interface';
 import { POP_USE_UNIFIED_MODAL } from './pop.config';
 import { toLocalDateString } from '../../../../../shared/utils/date.util';
+import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import {
   VexiUiHost,
   VexiUiHostRegistry,
@@ -403,8 +404,24 @@ export class PopComponent implements OnInit, OnDestroy {
    * renderiza un panel `app-success` con el id y un botón "Ver detalle"
    * que navega a /admin/orders/purchase-orders/:id (en lugar de
    * /admin/products como antes).
+   *
+   * 5.3 — La forma se extiende con `stages[]` para que el shell pueda
+   * pintar el estado por etapa (creada / recibida / pagada con su icono)
+   * cuando la cadena `create → receive → pay` falla a MITAD. Sin esto el
+   * panel aparecía verde aunque el pago no se hubiera registrado.
    */
-  readonly orderResult = signal<{ id: number; total: number; orderNumber: string } | null>(null);
+  readonly orderResult = signal<{
+    id: number;
+    total: number;
+    orderNumber: string;
+    stages?: Array<{
+      name: 'create' | 'receive' | 'pay';
+      label: string;
+      status: 'success' | 'failed' | 'skipped';
+      errorMessage?: string;
+    }>;
+    failedStage?: 'create' | 'receive' | 'pay';
+  } | null>(null);
   readonly orderError = signal<string | null>(null);
 
   /**
@@ -934,6 +951,17 @@ export class PopComponent implements OnInit, OnDestroy {
     // agreguen con el maestro ya activo. El neto ya viene aplastado y el modo es
     // adicional (prices_include_tax=false) ⇒ no hay doble resta. No se apaga si
     // el usuario ya lo tenía encendido.
+    //
+    // 3.4 — F3 IVA lifecycle: con factura exenta (todas las líneas en rate=0) el
+    // modo "precios con IVA incluido" DECLARADO POR LA IA (`scanResult.
+    // prices_include_tax=true`) se perdía del payload porque NINGUNA línea
+    // encendía el gate. Propagamos el modo declarado al header del carrito para
+    // que las líneas exentas hereden el flag vía `setPricesIncludeTax` (que
+    // también lo aplica per-línea, así que el operador lo ve en cada fila).
+    const scanIncludesVat = data.scanResult?.prices_include_tax === true;
+    if (scanIncludesVat) {
+      this.popCartService.setPricesIncludeTax(true);
+    }
     const scanHasVat = data.editedItems.some(
       (it) => it.tax_rate != null && Number(it.tax_rate) > 0,
     );
@@ -955,6 +983,14 @@ export class PopComponent implements OnInit, OnDestroy {
     }
 
     let addedCount = 0;
+    // 3.1 — Acumulador de descuentos que NUNCA pueden vivir como % de línea
+    // (líneas bonificadas con unit_price=0 o quantity=0 → `lineGross=0` →
+    // porcentaje indefinido). El `pop-cart.service` los aplastaba a 0 con
+    // `?? 0` y el descuento de la factura desaparecía sin aviso. Los juntamos
+    // al descuento de cabecera (ya prorrateado por el backend) y avisamos al
+    // operador UNA vez al final.
+    let bonificacionAccumulated = 0;
+    let bonificacionLineCount = 0;
     for (const item of data.editedItems) {
       const candidate = item.selected_product_id
         ? item.candidates.find((c) => c.id === item.selected_product_id)
@@ -973,7 +1009,15 @@ export class PopComponent implements OnInit, OnDestroy {
       // (el carrito hereda header + default). Tasa 0 (exento) se respeta.
       const scannedRate =
         item.tax_rate != null ? Number(item.tax_rate) * 100 : undefined;
-      const scannedIncludeMode = scannedRate != null ? false : undefined;
+      // 3.4 — Para líneas con rate > 0 seguimos forzando `false` (el backend
+      // ya aplastó unit_price a neto y el modo es adicional). Para líneas con
+      // rate=0 (exentas), preservamos el modo declarado por la factura: si la
+      // IA imprimió "precios con IVA incluido" en una factura exenta, ese flag
+      // se respeta y se propaga al carrito.
+      const scannedIncludeMode =
+        scannedRate != null && scannedRate > 0
+          ? false
+          : data.scanResult?.prices_include_tax;
 
       // QUI-661 Fase 4: la factura imprime el descuento en PESOS y el carrito
       // trabaja en PORCENTAJE, así que se convierte acá contra el importe neto
@@ -984,10 +1028,19 @@ export class PopComponent implements OnInit, OnDestroy {
       const lineGross =
         (Number(item.quantity) || 0) * (Number(item.unit_price) || 0);
       const scannedDiscountAmount = Number(item.discount_amount) || 0;
-      const scannedDiscountPct =
-        lineGross > 0 && scannedDiscountAmount > 0
-          ? Math.min(100, (scannedDiscountAmount / lineGross) * 100)
-          : undefined;
+      let scannedDiscountPct: number | undefined;
+      if (lineGross > 0 && scannedDiscountAmount > 0) {
+        scannedDiscountPct = Math.min(
+          100,
+          (scannedDiscountAmount / lineGross) * 100,
+        );
+      } else if (scannedDiscountAmount > 0) {
+        // 3.1 — Línea bonificada (unit_price=0) o cantidad 0: el descuento NO
+        // puede vivir como % (división por cero). Lo acumulamos al header para
+        // que el backend lo prorratee sobre las líneas con importe.
+        bonificacionAccumulated += scannedDiscountAmount;
+        bonificacionLineCount += 1;
+      }
 
       if (candidate) {
         this.popCartService
@@ -1051,6 +1104,22 @@ export class PopComponent implements OnInit, OnDestroy {
           .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
       }
       addedCount++;
+    }
+
+    // 3.1 — Acumular descuentos de líneas bonificadas al header (prorrateo
+    // del backend) y avisar al operador. Sin esto el monto se perdía porque
+    // `pop-cart.service` convertía el `undefined` per-línea a 0 silencioso.
+    if (bonificacionAccumulated > 0) {
+      const current = this.popCartService.currentState;
+      const headerDiscount = Number(current.discountAmount) || 0;
+      this.popCartService.setDiscountAmount(
+        headerDiscount + bonificacionAccumulated,
+      );
+      this.toastService.warning(
+        bonificacionLineCount === 1
+          ? '1 línea bonificada traía descuento: se sumó al descuento general de la factura.'
+          : `${bonificacionLineCount} líneas bonificadas traían descuento: se sumó al descuento general de la factura.`,
+      );
     }
 
     if (data.invoiceNumber) {
@@ -2040,14 +2109,29 @@ export class PopComponent implements OnInit, OnDestroy {
 
     this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
-        if (response.success && response.data) {
+        // 5.4 — El backend puede responder 200/201 con `success:false` (ver
+        // `responseService.error` que RETORNA el sobre en vez de lanzar). Antes
+        // el `if` solo atendía éxito, así que `isProcessingOrder` quedaba
+        // atascado y el operador no podía reintentar. Ahora: pintar el panel
+        // de error con el mensaje del sobre y conservar el carrito.
+        if (response?.success && response.data) {
           // CP-ID-VNDX-2026-08-18-PO-PROD — F2.S6: en lugar de navegar a
           // /admin/products, pintar panel `app-success` con id + total.
           this.toastService.success('Orden creada exitosamente');
           this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
           this._setOrderResultFromCreated(response.data);
           this.isProcessingOrder.set(false);
+          return;
         }
+        const envelopeMessage =
+          response?.error?.message ||
+          response?.message ||
+          'El servidor rechazó la creación de la orden.';
+        this.orderError.set(envelopeMessage);
+        this.toastService.error(envelopeMessage);
+        // Carrito preservado: el operador puede tocar "Reintentar" desde el
+        // shell o corregir el formulario.
+        this.isProcessingOrder.set(false);
       },
       error: (error) => {
         console.error('Error submitting order:', error);
@@ -2148,7 +2232,13 @@ export class PopComponent implements OnInit, OnDestroy {
           // `_executeSubmitOrder` (action='create') populaba `orderResult`,
           // así que al confirmar "Crear y Recibir" el modal se quedaba
           // abierto con el wizard visible aunque la OC ya existía en DB.
-          this._setOrderResultFromCreated(createdOrder);
+          this._setOrderResultFromCreated(createdOrder, {
+            stages: this._buildStageTrail(doReceive, doPay, {
+              create: 'success',
+              receive: doReceive ? 'success' : 'skipped',
+              pay: doPay ? 'success' : 'skipped',
+            }),
+          });
           this.toastService.success(this._buildSuccessMessage(doReceive, doPay));
           this._finalizeAfterOrder();
         },
@@ -2163,39 +2253,116 @@ export class PopComponent implements OnInit, OnDestroy {
             );
             return;
           }
+          // 5.3 — A partir de acá la OC SÍ existe, así que el panel pasa a
+          // estado PARCIAL: pintamos la OC creada con su rastro de etapas
+          // y nombramos la que falló para que el operador decida reintentar.
+          let failedDetail = '';
           if (stage === 'receive') {
+            failedDetail = this._errorMessage(
+              err?.err,
+              'Orden creada pero hubo error al recibir por remisión',
+            );
+            this.toastService.error(failedDetail);
             // La OC existe pero la mercancía NO entró. Conservamos carrito y
             // ruta (nada de `_finalizeAfterOrder`): una recepción fallida no
             // puede parecer una operación completada. Recordamos la OC para
             // que el reintento no cree una segunda.
             this.pendingReceptionOrder.set(createdOrder);
-            this.toastService.error(
-              this._errorMessage(
-                err?.err,
-                'Orden creada pero hubo error al recibir por remisión',
-              ),
-            );
+            this._setOrderResultFromCreated(createdOrder, {
+              stages: this._buildStageTrail(doReceive, doPay, {
+                create: 'success',
+                receive: 'failed',
+                pay: 'skipped',
+                receiveError: failedDetail,
+              }),
+              failedStage: 'receive',
+            });
             return;
           }
           if (stage === 'pay') {
-            this.toastService.error(
-              this._errorMessage(
-                err?.err,
-                'Orden creada pero hubo error al registrar el pago',
-              ),
+            failedDetail = this._errorMessage(
+              err?.err,
+              'Orden creada pero hubo error al registrar el pago',
             );
-          } else {
-            this.toastService.error(
-              'Orden creada pero una etapa posterior falló',
-            );
+            this.toastService.error(failedDetail);
+            this._setOrderResultFromCreated(createdOrder, {
+              stages: this._buildStageTrail(doReceive, doPay, {
+                create: 'success',
+                receive: doReceive ? 'success' : 'skipped',
+                pay: 'failed',
+                payError: failedDetail,
+              }),
+              failedStage: 'pay',
+            });
+            this._finalizeAfterOrder();
+            return;
           }
-          // La OC existe y la mercancía ya entró (o el pago falló): pintamos
-          // el panel `app-success` igual que en el happy path — el operador
-          // DEBE ver la orden creada y decidir si reintenta el pago o sale.
-          this._setOrderResultFromCreated(createdOrder);
+          // Etapa desconocida (no debería ocurrir): pintamos parcial genérico
+          // para que el operador vea la OC y no la crea perdida.
+          failedDetail = 'Orden creada pero una etapa posterior falló';
+          this.toastService.error(failedDetail);
+          this._setOrderResultFromCreated(createdOrder, {
+            stages: this._buildStageTrail(doReceive, doPay, {
+              create: 'success',
+              receive: doReceive ? 'success' : 'skipped',
+              pay: doPay ? 'success' : 'skipped',
+            }),
+          });
           this._finalizeAfterOrder();
         },
       });
+  }
+
+  /**
+   * 5.3 — Construye el rastro de etapas para que el shell pueda pintarlo
+   * con sus iconos. Las claves `<stage>Error` opcionales adjuntan el motivo
+   * de fallo a la entrada correspondiente del rastro.
+   */
+  private _buildStageTrail(
+    doReceive: boolean,
+    doPay: boolean,
+    statuses: {
+      create: 'success' | 'failed' | 'skipped';
+      receive: 'success' | 'failed' | 'skipped';
+      pay: 'success' | 'failed' | 'skipped';
+      receiveError?: string;
+      payError?: string;
+    },
+  ): Array<{
+    name: 'create' | 'receive' | 'pay';
+    label: string;
+    status: 'success' | 'failed' | 'skipped';
+    errorMessage?: string;
+  }> {
+    const trail: Array<{
+      name: 'create' | 'receive' | 'pay';
+      label: string;
+      status: 'success' | 'failed' | 'skipped';
+      errorMessage?: string;
+    }> = [
+      { name: 'create', label: 'Orden creada', status: statuses.create },
+    ];
+    if (doReceive) {
+      trail.push({
+        name: 'receive',
+        label: 'Mercancía recibida',
+        status: statuses.receive,
+        errorMessage: statuses.receiveError,
+      });
+    } else {
+      trail.push({ name: 'receive', label: 'Mercancía recibida', status: 'skipped' });
+    }
+    if (doPay) {
+      trail.push({
+        name: 'pay',
+        label: 'Pago registrado',
+        status: statuses.pay,
+        errorMessage: statuses.payError,
+      });
+    } else {
+      trail.push({ name: 'pay', label: 'Pago registrado', status: 'skipped' });
+    }
+    return trail;
   }
 
   /**
@@ -2204,13 +2371,29 @@ export class PopComponent implements OnInit, OnDestroy {
    * y en ambos caminos de `_executeCreateReceivePay`) para que el modal deje
    * de mostrar el wizard y muestre el resultado. Sin esto, el modal se quedaba
    * abierto con el formulario aunque la OC ya existía en DB.
+   *
+   * 5.3 — Acepta `stages` y `failedStage` para que el shell pueda distinguir
+   * éxito pleno de éxito parcial (OC creada pero pago o recepción caídos).
    */
-  private _setOrderResultFromCreated(order: any): void {
+  private _setOrderResultFromCreated(
+    order: any,
+    extras: {
+      stages?: Array<{
+        name: 'create' | 'receive' | 'pay';
+        label: string;
+        status: 'success' | 'failed' | 'skipped';
+        errorMessage?: string;
+      }>;
+      failedStage?: 'create' | 'receive' | 'pay';
+    } = {},
+  ): void {
     if (!order) return;
     this.orderResult.set({
       id: order.id,
       total: Number(order.total_amount ?? 0),
       orderNumber: order.order_number ?? '',
+      ...(extras.stages ? { stages: extras.stages } : {}),
+      ...(extras.failedStage ? { failedStage: extras.failedStage } : {}),
     });
   }
 
@@ -2245,20 +2428,30 @@ export class PopComponent implements OnInit, OnDestroy {
   /**
    * QUI-486 — Normaliza el error de `PurchaseOrdersService` a un mensaje legible.
    *
-   * `PurchaseOrdersService.handleError` ya extrae `error.error.message` y
-   * re-lanza un **string plano**, no el `HttpErrorResponse`. Sobre un string,
-   * `err.error?.message` y `err.message` son `undefined`, así que la cadena
-   * `err?.error?.message || err?.message || fallback` caía SIEMPRE al fallback
-   * genérico y sepultaba el motivo real del backend (p. ej. `PO_VARIANT_001`:
-   * "el producto tiene variantes y debes seleccionar cuál estás comprando").
+   * El servicio YA NO aplasta el `HttpErrorResponse` a un string: lo propaga
+   * crudo para que el consumidor pueda enrutar por `status` y conservar
+   * `error_code`. Acá resolvemos el mensaje UX con `parseApiError` (que
+   * desenvaina `HttpErrorResponse` → `error.error` y mapea por código), pero
+   * **el encabezado sigue siendo la etapa** (es lo que el operador NECESITA
+   * ver primero). El motivo del backend va como detalle debajo.
    *
-   * Se contemplan ambas formas porque no todos los errores del flujo pasan por
-   * el servicio: los de etapa (`{ stage: 'receive' }`) se lanzan dentro del pipe.
+   * Se contemplan tres formas porque el error puede llegar como:
+   *  - `HttpErrorResponse` (vía `PurchaseOrdersService`).
+   *  - un marcador `{ stage, err }` lanzado en el pipe de la cadena.
+   *  - cualquier `Error` genérico.
    */
   private _errorMessage(err: unknown, fallback: string): string {
     if (typeof err === 'string' && err.trim()) return err;
-    const e = err as { error?: { message?: string }; message?: string } | null;
-    return e?.error?.message || e?.message || fallback;
+    const apiMessage = parseApiError(err as any).userMessage;
+    // parseApiError SIEMPRE devuelve un mensaje; si es el genérico de fallback
+    // y nosotros tenemos stage info, preferimos el nuestro. Si la API nos dio
+    // algo específico, lo honramos como detalle.
+    if (apiMessage && apiMessage !== 'Error desconocido') {
+      // Si el `fallback` ya menciona la etapa, conservamos sufijo con el
+      // motivo del backend entre paréntesis (no se rompe el copy existente).
+      return `${fallback} (${apiMessage})`;
+    }
+    return fallback;
   }
 
   /** Mensaje de progreso (toast info) según los efectos elegidos. */

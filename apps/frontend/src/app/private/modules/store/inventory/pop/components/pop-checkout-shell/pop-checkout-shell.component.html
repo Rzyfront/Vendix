@@ -23,16 +23,85 @@
       El stepper y los pasos del wizard se ocultan para no distraer.
     -->
     @if (orderResult(); as result) {
-      <div class="px-6 py-10 flex flex-col items-center gap-4 text-center">
-        <div class="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">
-          <app-icon name="check-circle" [size]="40" />
+      <div class="px-6 py-8 flex flex-col gap-5 text-center max-w-lg mx-auto">
+        <!--
+          5.3/5.5 — Header según estado: éxito pleno (check verde) o parcial
+          (triángulo ámbar) cuando al menos una etapa cayó. La etiqueta del
+          título nombra la etapa que falló para que el operador decida sin
+          tener que leer el toast.
+        -->
+        @if (result.failedStage) {
+          <div class="w-16 h-16 mx-auto rounded-full bg-amber-100 text-amber-600 flex items-center justify-center">
+            <app-icon name="alert-triangle" [size]="40" />
+          </div>
+          <h3 class="text-lg font-semibold text-text-primary">
+            Orden creada con avisos
+          </h3>
+        } @else {
+          <div class="w-16 h-16 mx-auto rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">
+            <app-icon name="check-circle" [size]="40" />
+          </div>
+          <h3 class="text-lg font-semibold text-text-primary">¡Orden creada!</h3>
+        }
+
+        <div class="rounded-lg border border-border bg-surface-secondary p-4 text-left">
+          <p class="text-sm text-text-secondary">
+            {{ result.orderNumber || ('Orden #' + result.id) }} — Total:
+            <strong class="text-text-primary">{{ result.total | currency }}</strong>
+          </p>
+          @if (result.stages?.length) {
+            <ul class="mt-3 space-y-1.5 text-sm">
+              @for (stage of result.stages; track stage.name) {
+                <li class="flex items-start gap-2">
+                  @switch (stage.status) {
+                    @case ('success') {
+                      <app-icon
+                        name="check-circle-2"
+                        [size]="16"
+                        class="text-emerald-600 mt-0.5 flex-none"
+                      />
+                    }
+                    @case ('failed') {
+                      <app-icon
+                        name="x-circle"
+                        [size]="16"
+                        class="text-red-600 mt-0.5 flex-none"
+                      />
+                    }
+                    @default {
+                      <app-icon
+                        name="minus"
+                        [size]="16"
+                        class="text-text-secondary mt-0.5 flex-none"
+                      />
+                    }
+                  }
+                  <div class="flex-1 min-w-0">
+                    <div
+                      [class.text-text-primary]="stage.status === 'success'"
+                      [class.text-text-secondary]="stage.status !== 'success'"
+                    >
+                      {{ stage.label }}
+                    </div>
+                    @if (stage.status === 'failed' && stage.errorMessage) {
+                      <p class="text-xs text-text-secondary mt-0.5 break-words">
+                        {{ stage.errorMessage }}
+                      </p>
+                    }
+                  </div>
+                </li>
+              }
+            </ul>
+          }
         </div>
-        <h3 class="text-lg font-semibold text-text-primary">¡Orden creada!</h3>
-        <p class="text-sm text-text-secondary">
-          {{ result.orderNumber || ('Orden #' + result.id) }} — Total:
-          <strong>{{ result.total | currency }}</strong>
-        </p>
-        <div class="flex gap-2 mt-2">
+
+        <!--
+          5.5 — Acciones: "Ver detalle" siempre visible; "Reintentar" SOLO
+          cuando hay una etapa que falló y se puede re-disparar; "Nueva
+          compra" para empezar de cero; "Cerrar" para salir SIN limpiar
+          (caso del operador que vino a ver el id y vuelve al carrito).
+        -->
+        <div class="flex flex-wrap gap-2 justify-center">
           <button
             type="button"
             class="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary/90"
@@ -40,12 +109,38 @@
           >
             Ver detalle
           </button>
+          @if (result.failedStage === 'pay') {
+            <button
+              type="button"
+              class="px-4 py-2 rounded-lg border border-border text-text-primary text-sm font-medium hover:bg-surface-secondary"
+              (click)="retryOrder.emit()"
+            >
+              Reintentar pago
+            </button>
+          }
+          @if (result.failedStage === 'receive') {
+            <button
+              type="button"
+              class="px-4 py-2 rounded-lg border border-border text-text-primary text-sm font-medium hover:bg-surface-secondary"
+              (click)="retryOrder.emit()"
+            >
+              Reintentar recepción
+            </button>
+          }
           <button
             type="button"
             class="px-4 py-2 rounded-lg border border-border text-text-primary text-sm font-medium hover:bg-surface-secondary"
             (click)="createAnotherOrder.emit()"
           >
             Nueva compra
+          </button>
+          <button
+            type="button"
+            class="px-4 py-2 rounded-lg border border-border text-text-secondary text-sm font-medium hover:bg-surface-secondary"
+            (click)="cancelled.emit()"
+            aria-label="Cerrar panel de confirmación"
+          >
+            Cerrar
           </button>
         </div>
       </div>

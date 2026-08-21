@@ -100,8 +100,23 @@ export class PopCheckoutShellComponent {
    * `app-success` con id + total + botones "Ver detalle" / "Nueva compra".
    * `orderError` aparece cuando el POST falló — pinta `app-error` con
    * mensaje y opción de reintentar.
+   *
+   * 5.3/5.5 — La forma se extiende con `stages[]` (rastro de etapas) y
+   * `failedStage` para que el shell distinga éxito pleno de éxito parcial
+   * y ofrezca acciones por etapa (reintentar pago, reintentar recepción).
    */
-  readonly orderResult = input<{ id: number; total: number; orderNumber: string } | null>(null);
+  readonly orderResult = input<{
+    id: number;
+    total: number;
+    orderNumber: string;
+    stages?: Array<{
+      name: 'create' | 'receive' | 'pay';
+      label: string;
+      status: 'success' | 'failed' | 'skipped';
+      errorMessage?: string;
+    }>;
+    failedStage?: 'create' | 'receive' | 'pay';
+  } | null>(null);
   readonly orderError = input<string | null>(null);
 
   // ── Paso Configuración (solo cuando el POP no tiene proveedor/bodega) ────
