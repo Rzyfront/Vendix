@@ -183,9 +183,16 @@ export class PosCartServiceSchedulerModalComponent {
   providers = signal<any[]>([]);
   providerIdText = signal<string>(''); // ngModel binding (string)
   date = signal<string>(toLocalDateString(new Date()));
-  startTime = signal<string>('09:00');
-  endTime = signal<string>('10:00');
-  submitting = signal(false);
+  // CP-POS-SVC-PERF-001 / Annotation-1 — preset start/end to current time
+  // rounded up to the next 15-min boundary + 30 min. The previous
+  // hardcoded "09:00"/"10:00" left the cashier staring at static
+  // defaults if the bootstrap() microtask didn't fire in time.
+  // Initialising at declaration means the inputs are correct the
+  // instant the modal mounts, before any async work.
+  startTime = signal<string>(roundUpToNextQuarter(currentHHmm()));
+  endTime = signal<string>(
+    addMinutes(roundUpToNextQuarter(currentHHmm()), 30),
+  );
 
   /** Parse providerId from the string-signal (avoid number casts in template). */
   providerId = computed<number | null>(() => {
@@ -229,16 +236,16 @@ export class PosCartServiceSchedulerModalComponent {
     } else {
       // CP-POS-SVC-PERF-001 — user feedback: default = current time +
       // service duration. Compute duration from variant/product.
+      // The signals already carry current+30 defaults from declaration,
+      // so this branch only refines the end time when the product
+      // declares a longer duration.
       const duration =
         item.product?.service_duration_minutes ??
         item.product?.duration_minutes ??
         30;
-      const nowHHmm = `${String(new Date().getHours()).padStart(2, '0')}:${String(
-        new Date().getMinutes(),
-      ).padStart(2, '0')}`;
-      const start = roundUpToNextQuarter(nowHHmm);
-      this.startTime.set(start);
-      this.endTime.set(addMinutes(start, duration));
+      if (duration !== 30) {
+        this.endTime.set(addMinutes(this.startTime(), duration));
+      }
     }
   }
 
@@ -335,6 +342,14 @@ export class PosCartServiceSchedulerModalComponent {
     // and persist on Actualizar / Cobrar.
     this.scheduled.emit(payload);
   }
+}
+
+/** Current local time as HH:mm (zero-padded). */
+function currentHHmm(): string {
+  const now = new Date();
+  const h = String(now.getHours()).padStart(2, '0');
+  const m = String(now.getMinutes()).padStart(2, '0');
+  return `${h}:${m}`;
 }
 
 /** Round an HH:mm string up to the next 15-min boundary (HH:mm). */

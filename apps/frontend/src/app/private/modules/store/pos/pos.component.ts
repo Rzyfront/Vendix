@@ -14,7 +14,8 @@ import type {
   FireItemExclusion,
 } from '../restaurant-ops/kds/interfaces';
 import { KitchenConfirmModalComponent } from '../restaurant-ops/kds/components/kitchen-confirm-modal/kitchen-confirm-modal.component';
-import { take, switchMap } from 'rxjs/operators';
+import { take, switchMap, catchError } from 'rxjs/operators';
+import { of as rxjsOf } from 'rxjs';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { firstValueFrom, Observable, Subject } from 'rxjs';
 import {
@@ -80,6 +81,7 @@ import { PosMobileFooterComponent } from './components/pos-mobile-footer.compone
 import { PosCartModalComponent } from './components/pos-cart-modal.component';
 import { PosOrderCreateResult } from './models/order.model';
 import { StoreSettingsService } from '../settings/general/services/store-settings.service';
+import { HttpClient } from '@angular/common/http';
 import { StoreSettingsFacade } from '../../../../core/store/store-settings/store-settings.facade';
 import { PaymentMethodsCatalogService } from '../../../../shared/services/payment-methods-catalog.service';
 import { OrderPaymentModalComponent } from '../orders/components/order-payment-modal/order-payment-modal.component';
@@ -840,6 +842,57 @@ export class PosComponent {
     this.cartBookingsFromChild.set(new Map(map ?? []));
   }
 
+  /**
+   * CP-POS-SVC-PERF-001 / Annotation-3 — fire any pending booking blocks
+   * collected by the cart scheduler once the order is persisted. New
+   * bookings hit POST /api/store/reservations with order_id so the
+   * booking row is born attached to the order. Re-agendar hits PUT
+   * /api/store/reservations/:id to update the existing row in place.
+   * Failures are surfaced via toast and logged so the cashier can
+   * retry; the order is already saved, so a failed booking never
+   * orphans the draft.
+   */
+  private firePendingBookingsAfterDraft(orderId: number): void {
+    const map = this.cartBookingsFromChild();
+    if (!map || map.size === 0) return;
+    const customerId = this.cartState()?.customer?.id ?? null;
+
+    for (const [, block] of map.entries()) {
+      const payload: any = {
+        product_id: block.product_id,
+        product_variant_id: block.product_variant_id ?? null,
+        customer_id: customerId,
+        provider_id: block.provider_id ?? null,
+        date: block.date,
+        start_time: block.start_time,
+        end_time: block.end_time,
+        notes: block.notes ?? '',
+        service_location_type: block.service_location_type ?? 'shop',
+        channel: 'pos',
+        cart_item_id: block.cart_item_id,
+        order_id: orderId,
+      };
+      const request$ = block.booking_id
+        ? this.http.put(
+            `/api/store/reservations/${block.booking_id}`,
+            payload,
+          )
+        : this.http.post('/api/store/reservations', payload);
+      request$
+        .pipe(
+          catchError((err) => {
+            this.toastService.error(
+              err?.error?.message ??
+                'No se pudo agendar la cita. Intenta desde el detalle.',
+            );
+            return rxjsOf(null);
+          }),
+          takeUntilDestroyed(this.destroyRef),
+        )
+        .subscribe();
+    }
+  }
+
   showCustomerModal = signal(false);
   editingCustomer = signal<PosCustomer | null>(null);
 
@@ -1044,6 +1097,11 @@ export class PosComponent {
   private posOrderService = inject(PosOrderService);
   private ordersService = inject(StoreOrdersService);
   private settingsService = inject(StoreSettingsService);
+  // CP-POS-SVC-PERF-001 / Annotation-3 — fire orphan bookings on Guardar
+  // so a draft order with a service line carries its `bookings` row even
+  // when the cashier never opens Actualizar / Cobrar. The editor atomic
+  // path already handles bookings on the Actualizar / Cobrar side.
+  private http = inject(HttpClient);
   private quotationsService = inject(QuotationsService);
   private layawayService = inject(LayawayApiService);
   private cashRegisterService = inject(PosCashRegisterService);
@@ -1508,6 +1566,12 @@ export class PosComponent {
     this.mode.set('create-draft');
     this.currentOrderId.set(result.order.id ? String(result.order.id) : null);
     this.currentOrderNumber.set(result.order.order_number ?? null);
+    // CP-POS-SVC-PERF-001 / Annotation-3 — fire any pending booking blocks
+    // collected by the cart scheduler. The editor atomic block already
+    // handles Actualizar / Cobrar; this side-effect covers the
+    // Guardar-alone case so a draft order with a service line keeps its
+    // booking tied to it from the moment of creation.
+    this.firePendingBookingsAfterDraft(Number(result.order.id));
     this.completedOrder.set({
       ...(result.order || {}),
       isCreateOrder: true,
