@@ -12,9 +12,17 @@ import { Type } from 'class-transformer';
 import { order_channel_enum } from '@prisma/client';
 
 export class CreateBookingDto {
+  /**
+   * Optional customer FK. CP-POS-SVC-PERF-001 / HU-B + HU-C: a
+   * "Venta Anónima" (anonymous sale) can still carry a booking
+   * alongside the order — the cashier picks staff + day + time even
+   * when there's no linked customer. Application-level guards still
+   * validate provider / date / start / end before persisting.
+   */
+  @IsOptional()
   @IsInt()
   @Type(() => Number)
-  customer_id: number;
+  customer_id?: number;
 
   @IsInt()
   @Type(() => Number)

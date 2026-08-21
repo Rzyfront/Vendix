@@ -452,7 +452,12 @@ export class ReservationsService {
       store_id,
       booking_id: booking.id,
       booking_number: booking.booking_number,
-      customer_name: `${booking.customer.first_name} ${booking.customer.last_name}`,
+      // CP-POS-SVC-PERF-001 / HU-B + HU-C — anonymous sales carry
+      // bookings without a linked customer; the event listener
+      // doesn't need a name string when the booking is unattached.
+      customer_name: booking.customer
+        ? `${booking.customer.first_name} ${booking.customer.last_name}`
+        : 'Consumidor Final',
       service_name: booking.product.name,
       date: dto.date,
       start_time: dto.start_time,

@@ -8039,7 +8039,12 @@ model invoice_retry_queue {
 model bookings {
   id                        Int                           @id @default(autoincrement())
   store_id                  Int
-  customer_id               Int
+  /// CP-POS-SVC-PERF-001 / HU-B + HU-C — anonymous sales ("Venta
+  /// Anónima" / Consumidor Final) must be able to carry a booking
+  /// alongside the order. The cashier picks the staff + day + time,
+  /// and the booking is tied to the order alone. Optional now; legacy
+  /// rows stay required by application-level guards.
+  customer_id               Int?
   product_id                Int
   product_variant_id        Int?
   booking_number            String                        @db.VarChar(50)
@@ -8081,7 +8086,7 @@ model bookings {
   updated_at                DateTime?                     @default(now()) @db.Timestamp(6)
 
   store            stores             @relation(fields: [store_id], references: [id])
-  customer         users              @relation("bookings_customer", fields: [customer_id], references: [id])
+  customer         users?             @relation("bookings_customer", fields: [customer_id], references: [id])
   product          products           @relation(fields: [product_id], references: [id])
   product_variants product_variants?  @relation(fields: [product_variant_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   order            orders?            @relation(fields: [order_id], references: [id])
