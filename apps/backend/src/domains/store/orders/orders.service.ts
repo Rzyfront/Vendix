@@ -681,6 +681,12 @@ export class OrdersService {
         // service staff + booking date/time for orders that contain a
         // scheduled service. We expose `bookings` with provider →
         // employee → user so the cashier can see who is assigned.
+        //
+        // CP-POS-SVC-PERF-001 / Bugfix — `employees` has no
+        // `avatar_url` column (avatar lives on `users` via the
+        // `user_id` FK). Selecting avatar_url here crashes findOne
+        // for EVERY order that has bookings, leaving the order detail
+        // page with "Orden #undefined" and $0 totals. Removed.
         bookings: {
           include: {
             provider: {
@@ -690,7 +696,6 @@ export class OrdersService {
                     id: true,
                     first_name: true,
                     last_name: true,
-                    avatar_url: true,
                   },
                 },
               },
