@@ -232,10 +232,12 @@ import { PosFiscalStatus } from '../services/pos-fiscal.service';
     
         <!-- Acciones secundarias: ghost, compactos, en fila -->
         <div class="flex items-center justify-center gap-1 sm:gap-2">
-          <app-button variant="ghost" size="sm" (clicked)="printReceipt()" [loading]="printing" title="Imprimir Ticket">
-            <app-icon name="printer" [size]="16" slot="icon" ></app-icon>
-            <span class="hidden sm:inline">Imprimir</span>
-          </app-button>
+          @if (derivedIsPaid()) {
+            <app-button variant="ghost" size="sm" (clicked)="printReceipt()" [loading]="printing" title="Imprimir Ticket">
+              <app-icon name="printer" [size]="16" slot="icon" ></app-icon>
+              <span class="hidden sm:inline">Imprimir</span>
+            </app-button>
+          }
     
           <app-button variant="ghost" size="sm" (clicked)="emailReceipt()" [disabled]="!derivedCustomerEmail()" [loading]="emailing" title="Enviar por Email">
             <app-icon name="mail" [size]="16" slot="icon" ></app-icon>
@@ -707,6 +709,14 @@ private authFacade = inject(AuthFacade);
 
   private maybeAutoPrint(): void {
     if (!this.isOpen()) return;
+    // CP-POS-MODAL-SCOPE-001 / Phase F.15 — only PAID orders emit a
+    // POS receipt. Drafts (`Guardar`) MUST NOT trigger the printer:
+    // the cashier can save a draft and continue editing without
+    // printing anything. The previous behaviour fired for any order
+    // opened in the confirmation modal, including fresh drafts, which
+    // produced an unwanted receipt every time the cashier clicked
+    // `Guardar`.
+    if (!this.derivedIsPaid()) return;
     if (!this.ticketService.shouldAutoPrint()) return;
     if (!this.orderId || this.autoPrintedOrderId === this.orderId) return;
 
