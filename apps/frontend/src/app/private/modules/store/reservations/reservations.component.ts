@@ -10,14 +10,20 @@ import { ReservationListComponent } from './components/reservation-list/reservat
 import { ReservationFormModalComponent } from './components/reservation-form-modal/reservation-form-modal.component';
 import { CalendarContainerComponent } from './components/calendar/calendar-container/calendar-container.component';
 import { QuickBookFromSlotModalComponent } from './components/calendar/quick-book-from-slot-modal/quick-book-from-slot-modal.component';
+// CP-POS-SVC-PERF-001 — admin re-agendar now uses the unified
+// `booking-scheduler-modal` (same as POS cart). The previous
+// `reschedule-modal` is being deprecated; kept as a parallel import
+// for now so other callers (e.g. my-reservations in ecommerce) keep
+// working until that page is migrated too.
 import { RescheduleModalComponent } from './components/reschedule-modal/reschedule-modal.component';
+import { BookingSchedulerModalComponent } from '../../../../shared/components/booking-scheduler-modal/booking-scheduler-modal.component';
+import { ReservationsService } from './services/reservations.service';
 import { BookingDetailModalComponent } from './components/booking-detail-modal/booking-detail-modal.component';
 import { TodayReservationsPanelComponent } from './components/today-reservations-panel/today-reservations-panel.component';
 import { QuickActionsPanelComponent } from './components/quick-actions-panel/quick-actions-panel.component';
 import { RescheduleRequestsPanelComponent } from './components/reschedule-requests-panel/reschedule-requests-panel.component';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 import { CardComponent } from '../../../../shared/components/card/card.component';
-import { ReservationsService } from './services/reservations.service';
 import {
   Booking,
   BookingStats,
@@ -45,6 +51,7 @@ type ReservationView = 'calendar' | 'list';
     CalendarContainerComponent,
     QuickBookFromSlotModalComponent,
     RescheduleModalComponent,
+    BookingSchedulerModalComponent,
     BookingDetailModalComponent,
     TodayReservationsPanelComponent,
     QuickActionsPanelComponent,
@@ -504,6 +511,50 @@ export class ReservationsComponent {
     this.loadStats();
     this.loadTodayBookings();
     this.calendarRefreshTrigger.update(v => v + 1);
+  }
+
+  /**
+   * CP-POS-SVC-PERF-001 / Modal unification — handler for the
+   * bifunctional `booking-scheduler-modal` used in admin re-agendar.
+   * Persists via PUT /api/store/reservations/:id (booking_id is
+   * guaranteed by the modal because we bound `[existingBooking]`),
+   * then refreshes the calendar / list. Errors are surfaced via toast;
+   * the modal stays open so the cashier can retry.
+   */
+  onAdminRescheduleScheduled(payload: any): void {
+    if (!payload?.booking_id) {
+      // Defensive — the modal should always set booking_id in edit
+      // mode, but if a parent somehow bound it incorrectly we surface
+      // a clear error rather than silently dropping the update.
+      this.toastService.error(
+        'No se puede re-agendar sin una reserva existente.',
+      );
+      return;
+    }
+    const body = {
+      date: payload.date,
+      start_time: payload.start_time,
+      end_time: payload.end_time,
+      provider_id: payload.provider_id ?? null,
+      notes: payload.notes ?? '',
+      service_location_type: payload.service_location_type ?? 'shop',
+    };
+    this.reservationsService
+      .rescheduleReservation(payload.booking_id, body as any)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Reserva re-agendada');
+          this.isRescheduleModalOpen.set(false);
+          this.onRescheduleCompleted();
+        },
+        error: (err) => {
+          this.toastService.error(
+            err?.error?.message ??
+              'No se pudo re-agendar la cita. Intenta de nuevo.',
+          );
+        },
+      });
   }
 
   onWalkIn(): void {

@@ -10,38 +10,46 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
-import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
-import { ModalComponent as AppModalComponent } from '../../../../../../shared/components/modal/modal.component';
-import { ToastService } from '../../../../../../shared/components/toast/toast.service';
-import { toLocalDateString } from '../../../../../../shared/utils/date.util';
+import { IconComponent } from '../icon/icon.component';
+import { ButtonComponent } from '../button/button.component';
+import { ModalComponent as AppModalComponent } from '../modal/modal.component';
+import { ToastService } from '../toast/toast.service';
+import { toLocalDateString } from '../../utils/date.util';
 
 /**
- * * CP-POS-SVC-PERF-001 / C.2 + C.3 — POS cart row scheduler modal.
+ * CP-POS-SVC-PERF-001 — single bifunctional booking scheduler modal.
  *
- * Triggered by the calendar icon next to a service/prepared item in
- * the POS cart. Picks (or skips) staff, picks day + start time, and
- * emits a `booking` payload to the parent so the cart can accumulate
- * it. The booking is NOT posted to /api/store/reservations from this
- * component — instead, the cart forwards it to the order editor's
- * atomic booking block (`UpdateOrderEditorItemDto.booking`) and the
- * backend creates or updates the `bookings` row inside the same
- * $transaction that persists the order_items on Actualizar / Cobrar.
+ * Replaces the previous pair of modals (POS cart's
+ * `pos-cart-service-scheduler-modal` and the reservations module's
+ * `reschedule-modal`) with one component that handles BOTH creating a
+ * new booking and editing an existing one. Callers pick the mode via
+ * which input they bind:
  *
- * Why: re-agendar was throwing `POST /api/store/reservations 404`
- * because that endpoint is not the canonical path for the POS flow —
- * it doesn't know about cart lines and can't update an existing
- * booking tied to an order. The editor path is.
+ *  - **POS cart (create / re-agendar inside the cart):** bind
+ *    `[cartItem]` only. The modal emits `(scheduled)` with the booking
+ *    block; the parent (cart) attaches it to the matching line and
+ *    forwards it to the order editor's atomic booking on Actualizar /
+ *    Cobrar.
+ *
+ *  - **Reservations module (admin re-agendar):** bind
+ *    `[existingBooking]` (the row being rescheduled). The modal still
+ *    emits `(scheduled)` with the same payload shape; the parent
+ *    (reservations page) fires PUT /api/store/reservations/:id
+ *    directly because it has the booking id and doesn't go through
+ *    the order editor.
+ *
+ *  - **Standalone create** (any other consumer): bind nothing. The
+ *    modal still works; the emitted payload has no booking_id so the
+ *    parent can decide how to persist it.
  *
  * Per user feedback: when the cashier chooses "Sin personal" the
  * modal MUST still offer slots (default = current round-up to next
  * quarter + service_duration_minutes). It focuses on the hour input
  * automatically and submits client-side slots when the provider is
- * absent. This is also true for re-agendamiento (re-opening with an
- * existingBooking input).
+ * absent. This is also true for re-agendamiento.
  */
 @Component({
-  selector: 'app-pos-cart-service-scheduler-modal',
+  selector: 'app-booking-scheduler-modal',
   standalone: true,
   imports: [
     FormsModule,
@@ -52,16 +60,15 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
   template: `
     <app-modal
       [isOpen]="true"
-      [title]="
-        existingBooking() ? 'Re-agendar ' + cartItem()?.product?.name : 'Agendar ' + cartItem()?.product?.name
-      "
+      [title]="modalTitle()"
       [showCloseButton]="true"
       (closed)="onCancel()"
     >
       <div class="flex flex-col gap-4 p-2 min-w-[420px]">
         <!-- Paso 1: Personal (opcional) -->
         <section class="space-y-2">
-          <label class="text-xs font-semibold text-text-secondary uppercase tracking-wider"
+          <label
+            class="text-xs font-semibold text-text-secondary uppercase tracking-wider"
             >Personal (opcional)</label
           >
           <div class="flex gap-2">
@@ -89,7 +96,8 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 
         <!-- Paso 2: Fecha y hora -->
         <section class="space-y-2">
-          <label class="text-xs font-semibold text-text-secondary uppercase tracking-wider"
+          <label
+            class="text-xs font-semibold text-text-secondary uppercase tracking-wider"
             >Fecha</label
           >
           <input
@@ -101,11 +109,10 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
             aria-label="Fecha de la cita"
           />
 
-          <label class="text-xs font-semibold text-text-secondary uppercase tracking-wider"
+          <label
+            class="text-xs font-semibold text-text-secondary uppercase tracking-wider"
             >Hora de inicio</label
           >
-          <!-- focused via autofocus; no-validate keeps the cashier in
-               control when the slot they want isn't in the preset list. -->
           <input
             #hourInput
             type="time"
@@ -117,7 +124,8 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
             autofocus
           />
 
-          <label class="text-xs font-semibold text-text-secondary uppercase tracking-wider"
+          <label
+            class="text-xs font-semibold text-text-secondary uppercase tracking-wider"
             >Hora de fin</label
           >
           <input
@@ -165,36 +173,49 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
     </app-modal>
   `,
 })
-export class PosCartServiceSchedulerModalComponent {
+export class BookingSchedulerModalComponent {
   private destroyRef = inject(DestroyRef);
   private http = inject(HttpClient);
   private toast = inject(ToastService);
 
-  /** CP-POS-SVC-PERF-001 / C.3 — the cart line being scheduled. */
+  /**
+   * POS cart use: bind the cart line so we can stamp
+   * `cart_item_id="cart-<id>"` on the emitted block. Optional — when
+   * omitted the modal still works for the reservations / standalone
+   * use cases.
+   */
   cartItem = input<any>(null);
-  /** Pre-fill when re-agendamiento. */
+  /**
+   * Bind an existing booking row to switch the modal into
+   * re-agendamiento mode (title, defaults, button label, and the
+   * emitted block carries `booking_id` so the parent can PUT
+   * /api/store/reservations/:id instead of POST).
+   */
   existingBooking = input<any>(null);
-  /** Output: emits the booking payload to attach to the cart line. */
+  /**
+   * Optional override of the modal title. When omitted, the modal
+   * falls back to the cart item's product name (POS) or the existing
+   * booking's product name (admin).
+   */
+  modalTitleOverride = input<string | null>(null);
+
+  /** Emits the booking payload. The parent decides where to persist. */
   scheduled = output<any>();
-  /** Output: closes the modal without scheduling. */
+  /** Modal closed without scheduling. */
   cancelled = output<void>();
 
   // -- state --
   providers = signal<any[]>([]);
-  providerIdText = signal<string>(''); // ngModel binding (string)
+  providerIdText = signal<string>('');
   date = signal<string>(toLocalDateString(new Date()));
-  // CP-POS-SVC-PERF-001 / Annotation-1 — preset start/end to current time
-  // rounded up to the next 15-min boundary + 30 min. The previous
-  // hardcoded "09:00"/"10:00" left the cashier staring at static
-  // defaults if the bootstrap() microtask didn't fire in time.
-  // Initialising at declaration means the inputs are correct the
-  // instant the modal mounts, before any async work.
   startTime = signal<string>(roundUpToNextQuarter(currentHHmm()));
   endTime = signal<string>(
     addMinutes(roundUpToNextQuarter(currentHHmm()), 30),
   );
 
-  /** Parse providerId from the string-signal (avoid number casts in template). */
+  /** CP-POS-SVC-PERF-001 / Annotation-1 — preset to current time so the
+   *  inputs are correct the instant the modal mounts, before bootstrap. */
+
   providerId = computed<number | null>(() => {
     const v = this.providerIdText();
     if (!v) return null;
@@ -207,6 +228,20 @@ export class PosCartServiceSchedulerModalComponent {
       '',
   );
 
+  /** Resolves the modal title from the override or the bound context. */
+  modalTitle = computed<string>(() => {
+    if (this.modalTitleOverride()) return this.modalTitleOverride()!;
+    const productName =
+      this.cartItem()?.product?.name ??
+      this.existingBooking()?.product?.name ??
+      this.existingBooking()?.product_name ??
+      'servicio';
+    const isEdit = !!this.existingBooking();
+    return isEdit
+      ? `Re-agendar ${productName}`
+      : `Agendar ${productName}`;
+  });
+
   canSubmit = computed(() => {
     return (
       !!this.date() &&
@@ -217,40 +252,34 @@ export class PosCartServiceSchedulerModalComponent {
   });
 
   constructor() {
-    // When the cartItem changes (modal mount), load providers + default
-    // duration.
     queueMicrotask(() => this.bootstrap());
   }
 
   private bootstrap(): void {
-    const item = this.cartItem();
-    if (!item) return;
-    this.loadProviders(item.product?.id);
-    this.applyDefaultsForItem(item);
+    const productId =
+      this.cartItem()?.product?.id ?? this.existingBooking()?.product_id;
+    if (productId) this.loadProviders(productId);
+
     if (this.existingBooking()) {
       const b = this.existingBooking();
       this.date.set((b.date ?? '').slice(0, 10) || this.date());
       this.startTime.set(b.start_time || this.startTime());
       this.endTime.set(b.end_time || this.endTime());
       this.providerIdText.set(b.provider_id ? String(b.provider_id) : '');
-    } else {
-      // CP-POS-SVC-PERF-001 — user feedback: default = current time +
-      // service duration. Compute duration from variant/product.
-      // The signals already carry current+30 defaults from declaration,
-      // so this branch only refines the end time when the product
-      // declares a longer duration.
-      const duration =
-        item.product?.service_duration_minutes ??
-        item.product?.duration_minutes ??
-        30;
-      if (duration !== 30) {
-        this.endTime.set(addMinutes(this.startTime(), duration));
-      }
+      return;
     }
-  }
 
-  private applyDefaultsForItem(_item: any): void {
-    // Date defaults to today (already set). No further work.
+    // New booking — refine end time when the product declares a longer
+    // duration. The signals already carry current+30 defaults from
+    // declaration, so we only override when the duration differs.
+    const item = this.cartItem();
+    const duration =
+      item?.product?.service_duration_minutes ??
+      item?.product?.duration_minutes ??
+      30;
+    if (duration !== 30) {
+      this.endTime.set(addMinutes(this.startTime(), duration));
+    }
   }
 
   private loadProviders(productId: number | undefined): void {
@@ -259,9 +288,7 @@ export class PosCartServiceSchedulerModalComponent {
       return;
     }
     this.http
-      .get<any>(
-        `/api/store/reservations/providers/for-service/${productId}`,
-      )
+      .get<any>(`/api/store/reservations/providers/for-service/${productId}`)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (resp) => this.providers.set(resp?.data ?? resp ?? []),
@@ -278,7 +305,6 @@ export class PosCartServiceSchedulerModalComponent {
   }
 
   onTimeChange(): void {
-    // If the cashier cleared end_time, default to start + 30 min.
     if (!this.endTime() || this.endTime() <= this.startTime()) {
       this.endTime.set(addMinutes(this.startTime(), 30));
     }
@@ -297,19 +323,17 @@ export class PosCartServiceSchedulerModalComponent {
       this.toast.warning('Completa fecha, hora inicio y hora fin.');
       return;
     }
-    const item = this.cartItem();
-    if (!item) return;
 
-    // CP-POS-SVC-PERF-001 / D.2 — emit the booking block to the parent.
-    // The cart attaches this to the matching cart line; the order editor
-    // (`UpdateOrderEditorItemDto.booking`) consumes it on Actualizar /
-    // Cobrar. NO direct HTTP call here — `/api/store/reservations` is
-    // not the canonical POS path and was 404'ing on edit-mode re-agendar.
     const existing = this.existingBooking();
+    const item = this.cartItem();
+    // CP-POS-SVC-PERF-001 / D.2 — emit a single payload shape regardless of
+    // caller. The parent decides how to persist:
+    //  - POS cart → attach to cart line + forward to editor atomic on
+    //    Actualizar / Cobrar, or fire POST /reservations on Guardar
+    //    with the freshly-created order_id.
+    //  - Reservations page → PUT /api/store/reservations/:id when
+    //    `booking_id` is set.
     const payload: any = {
-      // If the booking already exists, we send booking_id so the editor
-      // UPDATEs the row in place; otherwise the editor creates a new
-      // `bookings` row inside the order's $transaction.
       booking_id: existing?.id ?? undefined,
       provider_id: this.providerId(),
       date: this.date(),
@@ -317,19 +341,17 @@ export class PosCartServiceSchedulerModalComponent {
       end_time: this.endTime(),
       notes: existing?.notes ?? '',
       service_location_type: existing?.service_location_type ?? 'shop',
-      // Stamp the booking's cart_item_id so the editor can match it
-      // back to the cart line during Actualizar / Cobrar.
-      cart_item_id: `cart-${item.id}`,
-      // Echo the product context for the parent to associate the block
-      // with the right order_item when the editor persists.
-      product_id: item.product?.id,
+      cart_item_id: item?.id ? `cart-${item.id}` : undefined,
+      product_id:
+        item?.product?.id ?? existing?.product_id ?? undefined,
       product_variant_id:
-        item.product?.product_variants?.find?.(
-          (v: any) => v.id === item.product_variant_id,
-        )?.id ?? item.product_variant_id,
+        item?.product_variant_id ??
+        existing?.product_variant_id ??
+        undefined,
       customer_id:
-        item.customer_id ??
+        item?.customer_id ??
         (item as any)?.customer?.id ??
+        existing?.customer_id ??
         null,
       is_update: !!existing,
       is_create: !existing,
@@ -338,8 +360,6 @@ export class PosCartServiceSchedulerModalComponent {
     this.toast.success(
       existing ? 'Reserva re-agendada' : 'Reserva agendada',
     );
-    // Emit so the cart can collect the block; the editor will validate
-    // and persist on Actualizar / Cobrar.
     this.scheduled.emit(payload);
   }
 }

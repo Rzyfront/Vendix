@@ -10,7 +10,7 @@ import {
   PromotionTierProgress } from '../services/pos-cart.service';
 import { AddCustomItemRequest, CartDiscount } from '../models/cart.model';
 import { PosCustomItemModalComponent } from '../components/pos-custom-item-modal/pos-custom-item-modal.component';
-import { PosCartServiceSchedulerModalComponent } from '../components/pos-cart-service-scheduler-modal/pos-cart-service-scheduler-modal.component';
+import { BookingSchedulerModalComponent } from '../../../../../shared/components/booking-scheduler-modal/booking-scheduler-modal.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
@@ -60,7 +60,7 @@ import {
     QuantityControlComponent,
     PriceTierSelectorComponent,
     PosCustomItemModalComponent,
-    PosCartServiceSchedulerModalComponent,
+    BookingSchedulerModalComponent,
   ],
   template: `
     <div
@@ -845,12 +845,12 @@ import {
       optional existing booking for re-agendamiento.
     -->
     @if (schedulerOpen()) {
-      <app-pos-cart-service-scheduler-modal
+      <app-booking-scheduler-modal
         [cartItem]="schedulerTarget()"
         [existingBooking]="schedulerExisting()"
         (scheduled)="onScheduled($event)"
         (cancelled)="closeScheduler()"
-      ></app-pos-cart-service-scheduler-modal>
+      ></app-booking-scheduler-modal>
     }
   `,
   styles: [
@@ -1651,7 +1651,7 @@ private cartService = inject(PosCartService);
   /**
    * CP-POS-SVC-PERF-001 / C.3 — service scheduler state. The cart row's
    * calendar icon calls `openScheduler(item)`, which sets these signals
-   * to mount `<app-pos-cart-service-scheduler-modal>`. The modal
+   * to mount `<app-booking-scheduler-modal>`. The modal
    * emits `(scheduled)` so we can stash the booking back on the cart
    * line — used by the editor to attach `booking?` on Actualizar.
    */
