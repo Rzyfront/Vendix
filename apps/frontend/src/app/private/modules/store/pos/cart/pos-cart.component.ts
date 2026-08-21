@@ -1155,6 +1155,15 @@ private cartService = inject(PosCartService);
   readonly charge = output<void>();
   readonly quote = output<void>();
   readonly layaway = output<void>();
+  /**
+   * CP-POS-SVC-PERF-001 / D.2 — emits the latest `cartBookingsByItemId`
+   * map so the parent POS shell can attach the matching booking block
+   * to each cart line in the editor DTO on Actualizar / Cobrar. The
+   * map is keyed by `item.id` (cart-local id) and contains the booking
+   * payload (booking_id?, provider_id, date, start_time, end_time,
+   * notes, service_location_type, cart_item_id).
+   */
+  readonly bookingsChanged = output<Map<string, any>>();
 
   /**
    * QUI-audit-round-1 — accessible label for the `Cobrar` CTA. The CTA only
@@ -1673,6 +1682,9 @@ private cartService = inject(PosCartService);
     const next = new Map(this.cartBookingsByItemId());
     next.set(target.id, booking);
     this.cartBookingsByItemId.set(next);
+    // CP-POS-SVC-PERF-001 / D.2 — bubble up so the parent POS shell can
+    // attach the booking block to the cart line in the editor DTO.
+    this.bookingsChanged.emit(next);
     this.closeScheduler();
   }
 

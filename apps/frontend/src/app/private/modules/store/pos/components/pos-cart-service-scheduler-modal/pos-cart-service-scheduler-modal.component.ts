@@ -12,7 +12,6 @@ import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
-import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
 import { ModalComponent as AppModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
@@ -22,8 +21,17 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
  *
  * Triggered by the calendar icon next to a service/prepared item in
  * the POS cart. Picks (or skips) staff, picks day + start time, and
- * confirms a booking against `POST /api/store/reservations` so the
- * order has its reservation ready before Actualizar / Cobrar.
+ * emits a `booking` payload to the parent so the cart can accumulate
+ * it. The booking is NOT posted to /api/store/reservations from this
+ * component — instead, the cart forwards it to the order editor's
+ * atomic booking block (`UpdateOrderEditorItemDto.booking`) and the
+ * backend creates or updates the `bookings` row inside the same
+ * $transaction that persists the order_items on Actualizar / Cobrar.
+ *
+ * Why: re-agendar was throwing `POST /api/store/reservations 404`
+ * because that endpoint is not the canonical path for the POS flow —
+ * it doesn't know about cart lines and can't update an existing
+ * booking tied to an order. The editor path is.
  *
  * Per user feedback: when the cashier chooses "Sin personal" the
  * modal MUST still offer slots (default = current round-up to next
@@ -39,7 +47,6 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
     FormsModule,
     IconComponent,
     ButtonComponent,
-    SpinnerComponent,
     AppModalComponent,
   ],
   template: `
@@ -150,7 +157,6 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
           <app-button
             variant="primary"
             (clicked)="onConfirm()"
-            [loading]="submitting()"
             [disabled]="!canSubmit()"
             >{{ existingBooking() ? 'Re-agendar' : 'Agendar' }}</app-button
           >
@@ -287,51 +293,47 @@ export class PosCartServiceSchedulerModalComponent {
     const item = this.cartItem();
     if (!item) return;
 
-    // Build payload. Provider is OPTIONAL — backend accepts null.
+    // CP-POS-SVC-PERF-001 / D.2 — emit the booking block to the parent.
+    // The cart attaches this to the matching cart line; the order editor
+    // (`UpdateOrderEditorItemDto.booking`) consumes it on Actualizar /
+    // Cobrar. NO direct HTTP call here — `/api/store/reservations` is
+    // not the canonical POS path and was 404'ing on edit-mode re-agendar.
+    const existing = this.existingBooking();
     const payload: any = {
-      product_id: item.product?.id,
-      product_variant_id: item.product?.product_variants?.find?.(
-        (v: any) => v.id === item.product_variant_id,
-      )?.id ?? item.product_variant_id,
-      customer_id:
-        item.customer_id ??
-        (this.cartItem as any)?.customer?.id ??
-        null,
+      // If the booking already exists, we send booking_id so the editor
+      // UPDATEs the row in place; otherwise the editor creates a new
+      // `bookings` row inside the order's $transaction.
+      booking_id: existing?.id ?? undefined,
       provider_id: this.providerId(),
       date: this.date(),
       start_time: this.startTime(),
       end_time: this.endTime(),
-      notes: '',
-      service_location_type: 'shop',
-      channel: 'pos',
+      notes: existing?.notes ?? '',
+      service_location_type: existing?.service_location_type ?? 'shop',
+      // Stamp the booking's cart_item_id so the editor can match it
+      // back to the cart line during Actualizar / Cobrar.
       cart_item_id: `cart-${item.id}`,
-      // link this booking back to the cart line via a stable id.
-      // Backend stores it on bookings.cart_item_id (CP-POS-SVC-PERF-001).
+      // Echo the product context for the parent to associate the block
+      // with the right order_item when the editor persists.
+      product_id: item.product?.id,
+      product_variant_id:
+        item.product?.product_variants?.find?.(
+          (v: any) => v.id === item.product_variant_id,
+        )?.id ?? item.product_variant_id,
+      customer_id:
+        item.customer_id ??
+        (item as any)?.customer?.id ??
+        null,
+      is_update: !!existing,
+      is_create: !existing,
     };
 
-    this.submitting.set(true);
-    this.http
-      .post<any>('/api/store/reservations', payload)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (resp) => {
-          this.submitting.set(false);
-          const booking = resp?.data ?? resp;
-          this.toast.success(
-            this.existingBooking()
-              ? 'Reserva re-agendada'
-              : 'Reserva creada',
-          );
-          this.scheduled.emit(booking);
-        },
-        error: (err) => {
-          this.submitting.set(false);
-          this.toast.error(
-            err?.error?.message ??
-              'No se pudo agendar la cita. Intenta de nuevo.',
-          );
-        },
-      });
+    this.toast.success(
+      existing ? 'Reserva re-agendada' : 'Reserva agendada',
+    );
+    // Emit so the cart can collect the block; the editor will validate
+    // and persist on Actualizar / Cobrar.
+    this.scheduled.emit(payload);
   }
 }
 

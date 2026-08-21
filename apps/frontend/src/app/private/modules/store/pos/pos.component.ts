@@ -437,6 +437,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
                 (charge)="onCharge()"
                 (quote)="onQuote()"
                 (layaway)="onLayaway()"
+                (bookingsChanged)="onBookingsChanged($event)"
                 ></app-pos-cart>
             </div>
           </div>
@@ -826,6 +827,18 @@ export class PosComponent {
   }
   selectedCustomer = signal<PosCustomer | null>(null);
   loading = signal(false);
+
+  /**
+   * CP-POS-SVC-PERF-001 / D.2 — booking blocks emitted by the cart
+   * scheduler, keyed by `cartItemId`. The editor attaches the matching
+   * block to each item when building the `UpdateOrderEditorDto`.
+   * Re-agendamiento sends `booking_id` so the existing row is updated.
+   */
+  cartBookingsFromChild = signal<Map<string, any>>(new Map());
+
+  onBookingsChanged(map: Map<string, any>): void {
+    this.cartBookingsFromChild.set(new Map(map ?? []));
+  }
 
   showCustomerModal = signal(false);
   editingCustomer = signal<PosCustomer | null>(null);
@@ -3509,6 +3522,15 @@ export class PosComponent {
         variantId == null ? null : Number(variantId) || null;
       const productName = item?.product?.name ?? '';
 
+      // CP-POS-SVC-PERF-001 / D.2 — atomic booking block per item.
+      // The cart scheduler emits `bookingsChanged`; we stash it in
+      // `cartBookingsFromChild` and attach the matching booking here so
+      // the backend editor creates/updates the `bookings` row in the
+      // same $transaction that persists the order_items. Re-agendar
+      // sends `booking_id` so the existing row is updated in place.
+      const bookingBlock =
+        this.cartBookingsFromChild?.()?.get?.(item?.id) ?? null;
+
       return {
         product_id: productIdNumeric,
         product_variant_id: variantIdNumeric,
@@ -3526,6 +3548,23 @@ export class PosComponent {
         tax_category_id: item?.taxCategoryId ?? null,
         applied_price_tier_id: item?.applied_price_tier_id ?? null,
         notes: item?.notes ?? null,
+        // Strip the echo fields that are only used by the cart-to-modal
+        // pipeline; the editor DTO only accepts the canonical booking
+        // shape (booking_id?, provider_id?, date, start_time, end_time,
+        // notes?, service_location_type?).
+        ...(bookingBlock
+          ? {
+              booking: {
+                booking_id: bookingBlock.booking_id,
+                provider_id: bookingBlock.provider_id,
+                date: bookingBlock.date,
+                start_time: bookingBlock.start_time,
+                end_time: bookingBlock.end_time,
+                notes: bookingBlock.notes ?? '',
+                service_location_type: bookingBlock.service_location_type ?? 'shop',
+              },
+            }
+          : {}),
       };
     });
 
