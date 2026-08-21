@@ -162,7 +162,7 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
    */
   readonly dropdownFilterValues = computed<FilterValues>(() => {
     const dr = this.dateRange();
-    if (!dr) return {};
+    if (!dr) return {} as FilterValues;
     return {
       date_range_start: dr.start_date ?? null,
       date_range_end: dr.end_date ?? null,
