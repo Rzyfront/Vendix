@@ -269,7 +269,7 @@ loading = signal(true);
     this.dropdownFilterValues.set({
       date_range_start: initial.start_date,
       date_range_end: initial.end_date,
-      date_range_preset: initial.preset,
+      date_range_preset: initial.preset ?? null,
       granularity: this.granularity(),
     });
 
@@ -333,7 +333,7 @@ loading = signal(true);
         ...prev,
         date_range_start: next.start_date,
         date_range_end: next.end_date,
-        date_range_preset: next.preset,
+        date_range_preset: next.preset ?? null,
       }));
     }
 
@@ -359,7 +359,7 @@ loading = signal(true);
     this.dropdownFilterValues.set({
       date_range_start: defaults.start_date,
       date_range_end: defaults.end_date,
-      date_range_preset: defaults.preset,
+      date_range_preset: defaults.preset ?? null,
       granularity: 'day',
     });
     this.loadData();

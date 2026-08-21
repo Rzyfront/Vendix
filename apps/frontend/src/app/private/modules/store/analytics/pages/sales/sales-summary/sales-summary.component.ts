@@ -114,7 +114,7 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
   readonly dropdownFilterValues = signal<FilterValues>({
     date_range_start: this.dateRange().start_date,
     date_range_end: this.dateRange().end_date,
-    date_range_preset: this.dateRange().preset,
+    date_range_preset: this.dateRange().preset ?? null,
   });
 
   ngOnInit(): void {
@@ -128,7 +128,7 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
       this.dropdownFilterValues.set({
         date_range_start: urlRange.start_date,
         date_range_end: urlRange.end_date,
-        date_range_preset: urlRange.preset,
+        date_range_preset: urlRange.preset ?? null,
       });
     }
 
@@ -199,7 +199,7 @@ this.store.dispatch(SalesActions.clearSalesSummaryState());
     this.dropdownFilterValues.set({
       date_range_start: next.start_date,
       date_range_end: next.end_date,
-      date_range_preset: next.preset,
+      date_range_preset: next.preset ?? null,
     });
     this.store.dispatch(SalesActions.setDateRange({ dateRange: next }));
   }
@@ -214,7 +214,7 @@ this.store.dispatch(SalesActions.clearSalesSummaryState());
     this.dropdownFilterValues.set({
       date_range_start: defaults.start_date,
       date_range_end: defaults.end_date,
-      date_range_preset: defaults.preset,
+      date_range_preset: defaults.preset ?? null,
     });
     this.store.dispatch(SalesActions.setDateRange({ dateRange: defaults }));
   }
