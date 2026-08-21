@@ -3732,6 +3732,27 @@ export class PosComponent {
           this.allowBookingsWithoutPayment.set(policy);
         }
       });
+    // CP-POS-SVC-PERF-001 / Annotation-4 — refresh the reservation
+    // policy directly via /api/store/settings on every POS open. The
+    // NgRx `selectStoreSettings` snapshot carries the value captured
+    // at login time, which can drift out of sync if the operator
+    // toggled the policy from another tab/session. This HTTP call
+    // always sees the latest server-side value.
+    this.http
+      .get<any>('/api/store/settings')
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (resp: any) => {
+          const settings = resp?.data ?? resp;
+          const policy = settings?.reservations?.allow_bookings_without_payment;
+          if (typeof policy === 'boolean') {
+            this.allowBookingsWithoutPayment.set(policy);
+          }
+        },
+        error: () => {
+          /* best-effort: signal keeps its prior value */
+        },
+      });
   }
 
   private applyPosSettings(settings: any): void {
