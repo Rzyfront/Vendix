@@ -2279,6 +2279,17 @@ export class PosComponent {
       // sesión cacheada evita que la venta siguiente arranque con la mesa de la
       // anterior preseleccionada (y con needsTable() en false).
       this.restaurantIntegration.clearTableSession();
+
+      // CP-POS-MODAL-SCOPE-001 / Phase F.8 — clear residual edit state after a
+      // successful charge so the cart rail no longer renders "Actualizar"
+      // (the edit-mode label) on the next sale. Without this, after paying an
+      // edited order the cashier sees the shell in `mode='edit'` (button still
+      // reads Actualizar) until Nueva compra runs the F.7 reset.
+      this.editingOrderId.set(null);
+      this.editingOrder.set(null);
+      this.readyToPayOrder.set(null);
+      this.mode.set('create-draft');
+      this.checkoutIntent.set('pickup');
     }
   }
 

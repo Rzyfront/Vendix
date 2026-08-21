@@ -512,9 +512,26 @@ private authFacade = inject(AuthFacade);
       }
     });
     effect(() => {
-      if (this.orderData()) {
-        this.loadOrderData();
-        this.maybeAutoPrint();
+      const data = this.orderData();
+      if (data) {
+        // CP-POS-MODAL-SCOPE-001 / Phase F.8 — defer the order-data load out
+        // of the current change-detection cycle. `loadOrderData()` writes
+        // `orderNumber`, `currentDate`, `customerName`, `electronicInvoice`,
+        // `fiscalStatus`, `creatingInvoice`, etc. while Angular is still
+        // checking THIS template, and we get NG0100
+        // ExpressionChangedAfterItHasBeenCheckedError on every order
+        // confirmation. `setTimeout(0)` schedules the load on the next
+        // macrotask — AFTER Angular's CD has fully settled and a fresh CD
+        // cycle will pick up all the new field/signal values cleanly. Using
+        // `queueMicrotask` was not enough: the next CD cycle still saw the
+        // half-updated state and tripped the guard. Zoneless-safe: signal
+        // writes inside the timeout are still tracked by the change graph.
+        setTimeout(() => {
+          if (this.orderData() === data) {
+            this.loadOrderData();
+            this.maybeAutoPrint();
+          }
+        }, 0);
       }
     });
   }
