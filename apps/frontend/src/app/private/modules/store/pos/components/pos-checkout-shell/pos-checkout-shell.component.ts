@@ -1097,6 +1097,26 @@ export class PosCheckoutShellComponent {
   onConfirm(): void {
     // pickup (B1): the Cobro step self-executes (autoExecute=true).
     if (this.checkoutIntent() !== 'delivery') {
+      // CP-POS-MODAL-SCOPE-001 / Phase F.10 — the cashier enters the Cobro
+      // step and the collector's sub-wizard (Forma → Método → Monto) may
+      // still have pending sub-steps, OR the Monto sub-step may hold a
+      // value that the operator typed but has not yet collapsed with the
+      // in-panel confirm. `triggerSubmit()` early-returns while
+      // `canSubmit()` is false in either case, so the first CTA click is
+      // silently absorbed — the cashier clicks "Cobrar" and nothing
+      // happens. Route through `advanceSubStepOrConfirm` first so the
+      // collector collapses the amount (and advances any leftover
+      // sub-step) before `triggerSubmit` fires.
+      if (this.currentStepKey() === 'cobro') {
+        const pay = this.paymentStep();
+        if (pay && pay.advanceSubStepOrConfirm()) {
+          // Sub-wizard still had work to do (Forma→Método→Monto or
+          // amount-not-yet-collapsed). The shell will land back here on
+          // the next click with the wizard now terminal — that click
+          // will hit the triggerSubmit below.
+          return;
+        }
+      }
       this.paymentStep()?.triggerSubmit();
       return;
     }
