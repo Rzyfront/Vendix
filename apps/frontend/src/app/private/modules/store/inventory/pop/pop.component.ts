@@ -47,6 +47,7 @@ import {
   PopProductConfigModalComponent,
 } from './components/pop-product-config-modal.component';
 import { PopCheckoutShellComponent } from './components/pop-checkout-shell/pop-checkout-shell.component';
+import { PopOrderConfirmationModalComponent } from './components/pop-checkout-shell/pop-order-confirmation-modal/pop-order-confirmation-modal.component';
 import { PopPricingOverridesMap } from './components/pop-checkout-shell/steps/pop-receive-step.component';
 import { InvoiceScannerModalComponent } from './components/invoice-scanner/invoice-scanner-modal.component';
 import {
@@ -96,6 +97,7 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
     PopCartModalComponent,
     PopProductConfigModalComponent,
     PopCheckoutShellComponent,
+    PopOrderConfirmationModalComponent,
     InvoiceScannerModalComponent,
   ],
   template: `
@@ -224,8 +226,6 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
       (confirmed)="onOrderConfirmed()"
       (cancelled)="showOrderConfirmModal.set(false)"
       (navigateToSettings)="onNavigateToSettings()"
-      (viewCreatedOrder)="onViewCreatedOrder()"
-      (createAnotherOrder)="onCreateAnotherOrder()"
       (retryOrder)="onOrderConfirmed()"
       (pricingOverridesChange)="onPricingOverridesChange($event)"
       (ackReceiveChange)="ackReceive.set($event)"
@@ -239,6 +239,22 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
       (configOpenSupplierModal)="supplierModalOpen.set(true)"
       (configOpenWarehouseModal)="warehouseModalOpen.set(true)"
     ></app-pop-checkout-shell>
+
+    <!--
+      CP-ID-VNDX-2026-08-21-POP-MODAL — Modal standalone post-creación.
+      Aparece SOLO en éxito pleno (sin failedStage). El wizard se queda
+      detrás (su contenido ya pintaba el panel app-success que ahora vive
+      en el modal). Al cerrar el modal, onConfirmationClosed baja el wizard
+      y redirige a la lista de OC. El wizard se queda cerrado hasta que el
+      operador decida crear otra (botón Crear Orden del carrito).
+    -->
+    <app-pop-order-confirmation-modal
+      [isOpen]="!!orderResult() && !orderResult()?.failedStage"
+      [orderNumber]="orderResult()?.orderNumber ?? ''"
+      [total]="orderResult()?.total ?? 0"
+      [state]="orderResult()?.state ?? 'created'"
+      (closed)="onConfirmationClosed()"
+    ></app-pop-order-confirmation-modal>
 
     <!-- Quick-create de proveedor/bodega: AFTER el shell para que el orden
          del DOM los deje ARRIBA del wizard (z-index 9999 compartido, gana
@@ -415,6 +431,13 @@ export class PopComponent implements OnInit, OnDestroy {
     id: number;
     total: number;
     orderNumber: string;
+    /**
+     * CP-ID-VNDX-2026-08-21-POP-MODAL — Estado backend de la OC (`created`,
+     * `received`, `paid`, etc.). Lo usa el modal post-creación para mapear
+     * a una etiqueta legible + variante de badge. Si el backend no lo
+     * expone, el modal cae al genérico `Creada`.
+     */
+    state?: string;
     stages?: Array<{
       name: 'create' | 'receive' | 'pay';
       label: string;
@@ -1883,25 +1906,18 @@ export class PopComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * CP-ID-VNDX-2026-08-18-PO-PROD — F2.S6: navega al detalle de la PO creada
-   * en lugar de /admin/products. Antes el operador perdía de vista la OC.
+   * CP-ID-VNDX-2026-08-21-POP-MODAL — cierre del modal de confirmación
+   * post-creación. Limpia `orderResult` (mismo orden que el flujo viejo de
+   * éxito, que apagaba `orderResult` justo antes de seguir), baja el wizard
+   * y redirige a la lista de OC. La ruta `/admin/inventory/pop` es la del
+   * store-module-catalog (POP raíz del submódulo Inventario) y es la que usa
+   * el sidebar para volver al inicio del taller de OC.
    */
-  onViewCreatedOrder(): void {
-    const result = this.orderResult();
-    if (result?.id) {
-      this.showOrderConfirmModal.set(false);
-      this.router.navigate(['/admin/orders/purchase-orders', result.id]);
-    }
-  }
-
-  /**
-   * CP-ID-VNDX-2026-08-18-PO-PROD — F2.S6: cierra el panel de éxito y vuelve
-   * al estado limpio para crear otra OC.
-   */
-  onCreateAnotherOrder(): void {
+  onConfirmationClosed(): void {
     this.orderResult.set(null);
     this.orderError.set(null);
     this.showOrderConfirmModal.set(false);
+    this.router.navigate(['/admin/inventory/pop']);
   }
 
   onNavigateToSettings(): void {
@@ -2395,6 +2411,10 @@ export class PopComponent implements OnInit, OnDestroy {
       id: order.id,
       total: Number(order.total_amount ?? 0),
       orderNumber: order.order_number ?? '',
+      // CP-ID-VNDX-2026-08-21-POP-MODAL — el modal pinta este campo en el
+      // badge. Si el backend no lo manda, el modal cae a 'created' via el
+      // `?? 'created'` del padre.
+      state: order.state ?? order.status ?? 'created',
       ...(extras.stages ? { stages: extras.stages } : {}),
       ...(extras.failedStage ? { failedStage: extras.failedStage } : {}),
     });
