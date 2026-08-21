@@ -13,12 +13,13 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
 import {
   OptionsDropdownComponent } from '../../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import {
-  DropdownAction } from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+  DropdownAction,
+  FilterConfig,
+  FilterValues } from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   CurrencyPipe,
   CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { ExportButtonComponent } from '../../../components/export-button/export-button.component';
-import { DateRangeFilterComponent } from '../../../components/date-range-filter/date-range-filter.component';
 
 import { DateRangeFilter } from '../../../interfaces/analytics.interface';
 import {
@@ -47,7 +48,6 @@ import { getViewsByCategory, AnalyticsView } from '../../../config/analytics-reg
     IconComponent,
     OptionsDropdownComponent,
     ExportButtonComponent,
-    DateRangeFilterComponent,
     CurrencyPipe,
     AnalyticsCardComponent,
   ],
@@ -98,6 +98,25 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
 
   readonly salesViews: AnalyticsView[] = getViewsByCategory('sales');
 
+  /**
+   * Filters surfaced via the unified `<app-options-dropdown>`.
+   * Always starts with `date-range` (Período) and grows from there.
+   */
+  readonly filterConfigs = computed<FilterConfig[]>(() => [
+    { key: 'date_range', type: 'date-range', label: 'Período' },
+  ]);
+
+  /**
+   * Mirror state exposed back to the dropdown so its internal `localFilterValues`
+   * stays in sync with the canonical dateRange — including resets via "Limpiar".
+   * The `thisMonth` defaults match what `dateRange` is initialised with.
+   */
+  readonly dropdownFilterValues = signal<FilterValues>({
+    date_range_start: this.dateRange().start_date,
+    date_range_end: this.dateRange().end_date,
+    date_range_preset: this.dateRange().preset,
+  });
+
   ngOnInit(): void {
     this.currencyService.loadCurrency();
 
@@ -105,6 +124,12 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
     const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
     if (urlRange) {
       this.store.dispatch(SalesActions.setDateRange({ dateRange: urlRange }));
+      this.dateRange.set(urlRange);
+      this.dropdownFilterValues.set({
+        date_range_start: urlRange.start_date,
+        date_range_end: urlRange.end_date,
+        date_range_preset: urlRange.preset,
+      });
     }
 
     // Dispatch initial loads
@@ -147,9 +172,51 @@ this.store.dispatch(SalesActions.clearSalesSummaryState());
     }
   }
 
-  onDateRangeChange(range: DateRangeFilter): void {
-    this.dateRange.set(range);
-    this.store.dispatch(SalesActions.setDateRange({ dateRange: range }));
+  onFiltersDropdownChange(values: FilterValues): void {
+    const start = values['date_range_start'] as string | null;
+    const end = values['date_range_end'] as string | null;
+    const preset = values['date_range_preset'] as string | null;
+    if (!start || !end) {
+      return;
+    }
+
+    const next: DateRangeFilter = {
+      start_date: start,
+      end_date: end,
+      preset: (preset || 'custom') as DateRangeFilter['preset'],
+    };
+
+    const current = this.dateRange();
+    if (
+      next.start_date === current.start_date &&
+      next.end_date === current.end_date &&
+      next.preset === current.preset
+    ) {
+      return;
+    }
+
+    this.dateRange.set(next);
+    this.dropdownFilterValues.set({
+      date_range_start: next.start_date,
+      date_range_end: next.end_date,
+      date_range_preset: next.preset,
+    });
+    this.store.dispatch(SalesActions.setDateRange({ dateRange: next }));
+  }
+
+  onClearAllFilters(): void {
+    const defaults: DateRangeFilter = {
+      start_date: getDefaultStartDate(),
+      end_date: getDefaultEndDate(),
+      preset: 'thisMonth',
+    };
+    this.dateRange.set(defaults);
+    this.dropdownFilterValues.set({
+      date_range_start: defaults.start_date,
+      date_range_end: defaults.end_date,
+      date_range_preset: defaults.preset,
+    });
+    this.store.dispatch(SalesActions.setDateRange({ dateRange: defaults }));
   }
 
   getGrowthText(growth?: number): string {
