@@ -1220,7 +1220,16 @@ export class OrderDetailsPageComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: ({ order, timeline }) => {
-          const orderData = (order as any).data || order;
+          // CP-POS-SVC-PERF-001 / F.14-Round2 — defensive envelope
+          // detection. If a service upgrade accidentally regresses and
+          // returns `{success, data}` again, this catches the leak and
+          // unwraps locally instead of spreading the envelope across the
+          // Order signal (which would render every field as undefined
+          // and "$0" totals).
+          const orderData =
+            order && typeof order === 'object' && 'success' in order
+              ? (order as any).data ?? order
+              : order;
           this.order.set({
             ...orderData,
             grand_total: Number(orderData.grand_total),
