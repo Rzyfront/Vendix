@@ -17,11 +17,14 @@ import { ErrorCodes } from '../errors/error-codes';
  *   - fallback por `tax_regime`:
  *       · COMUN / GRAN_CONTRIBUYENTE                          ⇒ responsable (true)
  *       · SIMPLIFICADO                                        ⇒ NO responsable (false)
- *   - indeterminado (sin señales)                             ⇒ responsable (true)
+ *   - indeterminado (sin señales)                             ⇒ NO responsable (false)
  *
- * La rama indeterminada devuelve `true` de forma DELIBERADA (anti-regresión):
- * preserva el comportamiento pre-F4 donde un comercio sin datos fiscales
- * cargados podía asignar/cobrar IVA con normalidad.
+ * Cambio de default (2026-08-21): la rama indeterminada pasó de `true` a
+ * `false`. Razón: el 100% de los tenants arrancan con el módulo fiscal
+ * apagado y sin responsabilidad declarada; tratarlos como responsables
+ * equivalía a permitir cobro de IVA sin estar facultados para facturar
+ * electrónicamente. Fail-closed. Para vender con IVA, el tenant debe
+ * declarar `tax_responsibilities: ['O-48']` o pasar por el wizard fiscal.
  */
 
 /** RUT casilla 53 — 'O-48' Responsable de IVA. */
@@ -63,14 +66,16 @@ export function isVatResponsible(
   if (regime === 'COMUN' || regime === 'GRAN_CONTRIBUYENTE') return true;
   if (regime === 'SIMPLIFICADO') return false;
 
-  // 3) Indeterminado ⇒ responsable (anti-regresión).
-  return true;
+  // 3) Indeterminado ⇒ NO responsable (fail-closed, 2026-08-21).
+  return false;
 }
 
 /**
- * Predicado de bloqueo POSITIVO: `true` SOLO cuando el comercio es
- * explícitamente NO responsable de IVA. El caso indeterminado devuelve
- * `false` (no bloquea), consistente con la rama anti-regresión.
+ * Predicado de bloqueo POSITIVO: `true` cuando el comercio es
+ * explícitamente NO responsable de IVA o su estado fiscal es
+ * indeterminado (fail-closed desde 2026-08-21). Sólo devuelve `false`
+ * cuando hay una declaración de responsabilidad POSITIVA (O-48) o un
+ * régimen que la implica (COMUN / GRAN_CONTRIBUYENTE).
  */
 export function isExplicitlyNotVatResponsible(
   fiscalData: VatFiscalDataInput | null | undefined,
@@ -80,9 +85,11 @@ export function isExplicitlyNotVatResponsible(
 
 /**
  * Enforcement de escritura: lanza `FISCAL_VAT_NOT_RESPONSIBLE_001` (HTTP 412)
- * cuando el comercio NO es responsable de IVA. No-op si es responsable o si
- * el estado es indeterminado (no bloquea). El `context` indica el origen
- * ('product' | 'sale') y el CTA apunta al wizard de activación fiscal.
+ * cuando el comercio NO es responsable de IVA, incluyendo el estado
+ * indeterminado (fail-closed desde 2026-08-21). No-op sólo cuando hay
+ * una declaración de responsabilidad POSITIVA (O-48 o régimen que la
+ * implica). El `context` indica el origen ('product' | 'sale') y el CTA
+ * apunta al wizard de activación fiscal.
  */
 export function assertCanChargeVat(
   fiscalData: VatFiscalDataInput | null | undefined,
@@ -106,8 +113,10 @@ export function assertCanChargeVat(
  * (PurchaseOrdersService, InvoiceScannerService, FiscalObligationService)
  * en una sola implementación. Las réplicas pre-existían como métodos
  * privados o constantes locales; este servicio expone la misma respuesta
- * canónica que el helper, conservando el default pre-F4 (`true` si no hay
- * datos fiscales). Cambiar ese default es Paso 0.1 y queda fuera de P0.1.
+ * canónica que el helper. Default fail-closed (2026-08-21): devuelve
+ * `false` cuando no hay datos fiscales — para vender con IVA el tenant
+ * debe declarar `tax_responsibilities: ['O-48']` o pasar por el wizard
+ * fiscal.
  */
 @Injectable()
 export class VatResponsibilityService {

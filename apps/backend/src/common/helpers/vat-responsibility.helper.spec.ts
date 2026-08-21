@@ -16,15 +16,14 @@ import {
  * Estos specs fijan:
  *  - las seis ramas del predicado puro (responsabilidad explícita +
  *    fallback por régimen + indeterminado),
- *  - la rama anti-regresión pre-F4 (`true` cuando no hay datos fiscales),
- *  - el enforcement `assertCanChargeVat` (no-op cuando responsable o
- *    indeterminado, lanza `FISCAL_VAT_NOT_RESPONSIBLE_001` cuando NO
- *    responsable explícito),
+ *  - la rama fail-closed (`false` cuando no hay datos fiscales —
+ *    cambio de default del 2026-08-21),
+ *  - el enforcement `assertCanChargeVat` (no-op sólo cuando hay
+ *    declaración POSITIVA de responsabilidad; lanza
+ *    `FISCAL_VAT_NOT_RESPONSIBLE_001` en cualquier otro caso,
+ *    incluido el indeterminado),
  *  - el contrato del servicio DI (`VatResponsibilityService.resolve`)
  *    como delegación 1:1 al helper puro.
- *
- * Cambiar el default pre-F4 (`return true` en la rama indeterminada) es
- * Paso 0.1, fuera de P0.1. Estos tests lo fijan a propósito.
  */
 describe('isVatResponsible', () => {
   describe('responsabilidad explícita (RUT casilla 53)', () => {
@@ -87,13 +86,13 @@ describe('isVatResponsible', () => {
       ).toBe(false);
     });
 
-    it('tax_regime desconocido con responsabilidades vacías ⇒ cae al default pre-F4 (true)', () => {
-      // Único caso donde el helper devuelve `true` para un régimen no
+    it('tax_regime desconocido con responsabilidades vacías ⇒ cae al default fail-closed (false)', () => {
+      // Único caso donde el helper devuelve `false` para un régimen no
       // listado pero con responsabilidades vacías: la rama "indeterminado".
-      // El cambio de default es Paso 0.1 — fuera de P0.1.
+      // Default fail-closed desde 2026-08-21.
       expect(
         isVatResponsible({ tax_responsibilities: [], tax_regime: 'OTRO' }),
-      ).toBe(true);
+      ).toBe(false);
     });
 
     it('responsabilidades explícitas ganan al régimen', () => {
@@ -114,30 +113,30 @@ describe('isVatResponsible', () => {
     });
   });
 
-  describe('rama indeterminada (anti-regresión pre-F4)', () => {
-    it('responsabilidades vacías + sin tax_regime ⇒ true (default pre-F4)', () => {
-      expect(isVatResponsible({})).toBe(true);
+  describe('rama indeterminada (fail-closed)', () => {
+    it('responsabilidades vacías + sin tax_regime ⇒ false (default fail-closed)', () => {
+      expect(isVatResponsible({})).toBe(false);
     });
 
-    it('responsabilidades vacías + tax_regime no-string ⇒ true', () => {
+    it('responsabilidades vacías + tax_regime no-string ⇒ false', () => {
       expect(
         isVatResponsible({ tax_responsibilities: [], tax_regime: 42 }),
-      ).toBe(true);
+      ).toBe(false);
     });
 
-    it('fiscalData null ⇒ true (no lanza, default pre-F4)', () => {
-      expect(isVatResponsible(null)).toBe(true);
+    it('fiscalData null ⇒ false (no lanza, default fail-closed)', () => {
+      expect(isVatResponsible(null)).toBe(false);
     });
 
-    it('fiscalData undefined ⇒ true (no lanza, default pre-F4)', () => {
-      expect(isVatResponsible(undefined)).toBe(true);
+    it('fiscalData undefined ⇒ false (no lanza, default fail-closed)', () => {
+      expect(isVatResponsible(undefined)).toBe(false);
     });
 
-    it('tax_responsibilities que no es array ⇒ true (indeterminado)', () => {
-      // Malformed data no debe tirar al servicio a un false por accidente.
+    it('tax_responsibilities que no es array ⇒ false (indeterminado)', () => {
+      // Malformed data cae a indeterminado ⇒ fail-closed (no responsable).
       expect(
         isVatResponsible({ tax_responsibilities: 'O-48' as unknown as string[] }),
-      ).toBe(true);
+      ).toBe(false);
     });
   });
 });
@@ -157,12 +156,13 @@ describe('isExplicitlyNotVatResponsible', () => {
     ).toBe(true);
   });
 
-  it('indeterminado NO bloquea (devuelve false)', () => {
-    // Consistente con la rama anti-regresión: el helper no castiga a un
-    // comercio sin datos fiscales.
-    expect(isExplicitlyNotVatResponsible({})).toBe(false);
-    expect(isExplicitlyNotVatResponsible(null)).toBe(false);
-    expect(isExplicitlyNotVatResponsible(undefined)).toBe(false);
+  it('indeterminado BLOQUEA (devuelve true — fail-closed)', () => {
+    // Desde 2026-08-21 el default es fail-closed: sin declaración de
+    // responsabilidad, el helper castiga al comercio considerándolo NO
+    // responsable y, por tanto, bloquea la operación.
+    expect(isExplicitlyNotVatResponsible({})).toBe(true);
+    expect(isExplicitlyNotVatResponsible(null)).toBe(true);
+    expect(isExplicitlyNotVatResponsible(undefined)).toBe(true);
   });
 });
 
@@ -176,10 +176,20 @@ describe('assertCanChargeVat', () => {
     ).not.toThrow();
   });
 
-  it('no lanza cuando el estado es indeterminado (no bloquea)', () => {
-    expect(() => assertCanChargeVat({}, 'product')).not.toThrow();
-    expect(() => assertCanChargeVat(null, 'sale')).not.toThrow();
-    expect(() => assertCanChargeVat(undefined, 'sale')).not.toThrow();
+  it('LANZA cuando el estado es indeterminado (fail-closed)', () => {
+    // Desde 2026-08-21 el default es fail-closed: sin declaración de
+    // responsabilidad POSITIVA, assertCanChargeVat lanza
+    // FISCAL_VAT_NOT_RESPONSIBLE_001 para empujar al tenant al wizard.
+    let caught: unknown;
+    try {
+      assertCanChargeVat(null, 'sale');
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(VendixHttpException);
+    expect((caught as VendixHttpException).errorCode).toBe(
+      ErrorCodes.FISCAL_VAT_NOT_RESPONSIBLE_001.code,
+    );
   });
 
   it('lanza VendixHttpException con FISCAL_VAT_NOT_RESPONSIBLE_001 cuando NO responsable', () => {
@@ -282,9 +292,9 @@ describe('VatResponsibilityService (DI)', () => {
         expected: true,
       },
       { fiscalData: { tax_responsibilities: [], tax_regime: 'SIMPLIFICADO' }, expected: false },
-      { fiscalData: {}, expected: true },
-      { fiscalData: null, expected: true },
-      { fiscalData: undefined, expected: true },
+      { fiscalData: {}, expected: false },
+      { fiscalData: null, expected: false },
+      { fiscalData: undefined, expected: false },
     ];
 
     for (const { fiscalData, expected } of cases) {
