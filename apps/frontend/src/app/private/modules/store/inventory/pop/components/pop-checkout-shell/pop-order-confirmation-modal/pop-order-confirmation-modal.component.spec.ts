@@ -13,13 +13,15 @@ const buildCurrencyStub = () =>
 /**
  * CP-ID-VNDX-2026-08-21-POP-MODAL — Contrato del modal standalone post-creación.
  *
- * Cubre los tres puntos del contrato:
+ * Contrato:
  *  - Pinta número + total + estado cuando `isOpen=true`.
- *  - Click en la X del header emite `(closed)`.
+ *  - El header X, el overlay y el ESC cuentan como «Nueva compra»
+ *    (no obligan al operador a elegir un botón).
+ *  - El botón «Nueva compra» emite `(newPurchase)`.
+ *  - El botón «Ver orden» emite `(viewOrder)` y queda deshabilitado si
+ *    no hay `orderId` válido.
  *  - `isOpen=false` no renderiza el modal (verificable por ausencia del
  *    título y del cuerpo).
- *
- * Sin botones: el modal es info-only.
  */
 describe('PopOrderConfirmationModalComponent', () => {
   let fixture: ComponentFixture<PopOrderConfirmationModalComponent>;
@@ -38,6 +40,7 @@ describe('PopOrderConfirmationModalComponent', () => {
     fixture.componentRef.setInput('orderNumber', 'ORC-1234');
     fixture.componentRef.setInput('total', 250000);
     fixture.componentRef.setInput('state', 'created');
+    fixture.componentRef.setInput('orderId', 42);
     fixture.detectChanges();
   });
 
@@ -99,12 +102,14 @@ describe('PopOrderConfirmationModalComponent', () => {
     expect(component.displayNumber()).toBe('OC');
   });
 
-  it('(g) click en la X emite (closed)', () => {
+  it('(g) click en la X emite (newPurchase) — cierre neutro', () => {
     fixture.componentRef.setInput('isOpen', true);
     fixture.detectChanges();
 
-    let emitted = false;
-    component.closed.subscribe(() => (emitted = true));
+    let newPurchaseEmitted = false;
+    let viewOrderEmitted = false;
+    component.newPurchase.subscribe(() => (newPurchaseEmitted = true));
+    component.viewOrder.subscribe(() => (viewOrderEmitted = true));
 
     const closeBtn = (fixture.nativeElement as HTMLElement).querySelector(
       'button[aria-label="Cerrar modal"]',
@@ -112,6 +117,61 @@ describe('PopOrderConfirmationModalComponent', () => {
     expect(closeBtn).not.toBeNull();
     closeBtn.click();
 
-    expect(emitted).toBe(true);
+    expect(newPurchaseEmitted).toBe(true);
+    expect(viewOrderEmitted).toBe(false);
+  });
+
+  it('(h) click en "Nueva compra" emite (newPurchase)', () => {
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.detectChanges();
+
+    let newPurchaseEmitted = false;
+    let viewOrderEmitted = false;
+    component.newPurchase.subscribe(() => (newPurchaseEmitted = true));
+    component.viewOrder.subscribe(() => (viewOrderEmitted = true));
+
+    // El botón «Nueva compra» es el primero del grupo de acciones.
+    const buttons = (fixture.nativeElement as HTMLElement).querySelectorAll(
+      '.pop-order-confirmation__actions app-button button',
+    );
+    expect(buttons.length).toBe(2);
+    (buttons[0] as HTMLButtonElement).click();
+
+    expect(newPurchaseEmitted).toBe(true);
+    expect(viewOrderEmitted).toBe(false);
+  });
+
+  it('(i) click en "Ver orden" emite (viewOrder)', () => {
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.componentRef.setInput('orderId', 42);
+    fixture.detectChanges();
+
+    let newPurchaseEmitted = false;
+    let viewOrderEmitted = false;
+    component.newPurchase.subscribe(() => (newPurchaseEmitted = true));
+    component.viewOrder.subscribe(() => (viewOrderEmitted = true));
+
+    const buttons = (fixture.nativeElement as HTMLElement).querySelectorAll(
+      '.pop-order-confirmation__actions app-button button',
+    );
+    expect(buttons.length).toBe(2);
+    (buttons[1] as HTMLButtonElement).click();
+
+    expect(viewOrderEmitted).toBe(true);
+    expect(newPurchaseEmitted).toBe(false);
+  });
+
+  it('(j) "Ver orden" queda deshabilitado cuando no hay orderId válido', () => {
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.componentRef.setInput('orderId', null);
+    fixture.detectChanges();
+
+    expect(component.canViewOrder()).toBe(false);
+
+    const buttons = (fixture.nativeElement as HTMLElement).querySelectorAll(
+      '.pop-order-confirmation__actions app-button button',
+    );
+    expect(buttons.length).toBe(2);
+    expect((buttons[1] as HTMLButtonElement).disabled).toBe(true);
   });
 });

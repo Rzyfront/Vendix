@@ -39,5 +39,33 @@
         </span>
       </div>
     </div>
+
+    <!--
+      Las dos rutas de salida del taller POP. «Nueva compra» (secondary)
+      mantiene al operador en el taller con el carrito vacío; «Ver orden»
+      (primary) navega al detalle de la OC recién creada.
+    -->
+    <div class="pop-order-confirmation__actions" role="group" aria-label="Acciones después de crear la orden">
+      <app-button
+        variant="secondary"
+        size="md"
+        type="button"
+        [fullWidth]="true"
+        (clicked)="onNewPurchase()"
+      >
+        Nueva compra
+      </app-button>
+
+      <app-button
+        variant="primary"
+        size="md"
+        type="button"
+        [fullWidth]="true"
+        [disabled]="!canViewOrder()"
+        (clicked)="onViewOrder()"
+      >
+        Ver orden
+      </app-button>
+    </div>
   </div>
 </app-modal>

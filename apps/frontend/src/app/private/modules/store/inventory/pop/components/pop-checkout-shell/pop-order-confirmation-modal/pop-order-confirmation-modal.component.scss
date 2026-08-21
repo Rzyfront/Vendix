@@ -87,4 +87,12 @@
       color: #4b5563;
     }
   }
+
+  &__actions {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+  }
 }

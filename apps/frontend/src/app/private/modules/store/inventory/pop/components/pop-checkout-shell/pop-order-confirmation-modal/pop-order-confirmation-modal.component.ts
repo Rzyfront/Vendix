@@ -6,7 +6,11 @@ import {
   output,
 } from '@angular/core';
 
-import { ModalComponent, IconComponent } from '../../../../../../../../shared/components';
+import {
+  ButtonComponent,
+  IconComponent,
+  ModalComponent,
+} from '../../../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../../../shared/pipes/currency';
 
 /**
@@ -44,9 +48,16 @@ const STATE_BADGE_VARIANT: Record<string, 'success' | 'primary' | 'warning' | 'n
  * CP-ID-VNDX-2026-08-21-POP-MODAL — Modal standalone post-creación de OC.
  *
  * Reemplaza el panel `app-success` que vivía dentro de `pop-checkout-shell`.
- * El modal SOLO pinta info (número + total + estado). Sin botones: el operador
- * lo cierra con la X del header, click en overlay o ESC, y al cerrarse el
- * padre lo redirige a la lista de OC.
+ * Pinta info (número + total + estado) y ofrece al operador dos caminos:
+ *
+ *  - «Nueva compra» (variante secondary/borde): cierra el modal y limpia el
+ *    carrito para empezar otra OC desde el taller POP.
+ *  - «Ver orden» (variante primary/relleno): navega al detalle de la OC
+ *    recién creada en `/admin/orders/purchase-orders/:id`.
+ *
+ * El header X, el clic en overlay y el ESC se tratan como atajos de
+ * «Nueva compra» para no obligar al operador a elegir ruta cuando solo
+ * quiere seguir trabajando.
  *
  * El padre controla la visibilidad con `[isOpen]`. El modal no conoce el
  * wizard — sólo recibe los datos ya resueltos.
@@ -55,7 +66,7 @@ const STATE_BADGE_VARIANT: Record<string, 'success' | 'primary' | 'warning' | 'n
   selector: 'app-pop-order-confirmation-modal',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ModalComponent, IconComponent, CurrencyPipe],
+  imports: [ButtonComponent, IconComponent, ModalComponent, CurrencyPipe],
   templateUrl: './pop-order-confirmation-modal.component.html',
   styleUrl: './pop-order-confirmation-modal.component.scss',
 })
@@ -64,8 +75,18 @@ export class PopOrderConfirmationModalComponent {
   readonly orderNumber = input<string>('');
   readonly total = input<number>(0);
   readonly state = input<string>('created');
+  /**
+   * ID numérico de la OC recién creada. Se proyecta al output `viewOrder`
+   * para que el padre navegue al detalle. Es opcional: si el padre no lo
+   * pasa, el botón «Ver orden» simplemente queda deshabilitado para no
+   * navegar a una ruta con id falsamente válido.
+   */
+  readonly orderId = input<number | null>(null);
 
-  readonly closed = output<void>();
+  /** El operador eligió empezar otra OC. El padre limpia el carrito. */
+  readonly newPurchase = output<void>();
+  /** El operador eligió ir al detalle de la OC recién creada. */
+  readonly viewOrder = output<void>();
 
   /** Etiqueta legible del estado para el badge. */
   readonly stateLabel = computed<string>(() => {
@@ -94,7 +115,27 @@ export class PopOrderConfirmationModalComponent {
     return 'OC';
   });
 
+  /** Habilita «Ver orden» solo cuando hay id real para navegar. */
+  readonly canViewOrder = computed<boolean>(() => {
+    const id = this.orderId();
+    return typeof id === 'number' && Number.isFinite(id) && id > 0;
+  });
+
+  /**
+   * Cierre "neutro" (X del header, click en overlay, ESC). Lo tratamos como
+   * «Nueva compra» para no obligar al operador a elegir un botón. El padre
+   * limpia el carrito igual que en el camino explícito.
+   */
   onClosed(): void {
-    this.closed.emit();
+    this.newPurchase.emit();
+  }
+
+  onNewPurchase(): void {
+    this.newPurchase.emit();
+  }
+
+  onViewOrder(): void {
+    if (!this.canViewOrder()) return;
+    this.viewOrder.emit();
   }
 }

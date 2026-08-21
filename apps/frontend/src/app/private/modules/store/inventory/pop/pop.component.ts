@@ -1,4 +1,4 @@
-import {Component, OnInit, OnDestroy, ViewChild, signal, computed, HostListener, DestroyRef, inject, viewChild} from '@angular/core';
+import {Component, OnInit, OnDestroy, ViewChild, signal, computed, HostListener, DestroyRef, inject, viewChild, effect} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
@@ -242,18 +242,21 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
 
     <!--
       CP-ID-VNDX-2026-08-21-POP-MODAL — Modal standalone post-creación.
-      Aparece SOLO en éxito pleno (sin failedStage). El wizard se queda
-      detrás (su contenido ya pintaba el panel app-success que ahora vive
-      en el modal). Al cerrar el modal, onConfirmationClosed baja el wizard
-      y redirige a la lista de OC. El wizard se queda cerrado hasta que el
-      operador decida crear otra (botón Crear Orden del carrito).
+      Aparece SOLO en éxito pleno (sin failedStage). El wizard se baja
+      automáticamente vía el effect del constructor (en cuanto orderResult
+      es no-null y sin failedStage), así que NO hay stack: el modal
+      reemplaza al wizard, no se monta encima. El cierre del modal (X,
+      overlay, ESC) re-emplea «Nueva compra» para no obligar al operador
+      a elegir ruta.
     -->
     <app-pop-order-confirmation-modal
       [isOpen]="!!orderResult() && !orderResult()?.failedStage"
       [orderNumber]="orderResult()?.orderNumber ?? ''"
       [total]="orderResult()?.total ?? 0"
       [state]="orderResult()?.state ?? 'created'"
-      (closed)="onConfirmationClosed()"
+      [orderId]="orderResult()?.id ?? null"
+      (newPurchase)="onNewPurchase()"
+      (viewOrder)="onViewOrder()"
     ></app-pop-order-confirmation-modal>
 
     <!-- Quick-create de proveedor/bodega: AFTER el shell para que el orden
@@ -642,7 +645,23 @@ export class PopComponent implements OnInit, OnDestroy {
     private toastService: ToastService,
     private dialogService: DialogService,
     private authFacade: AuthFacade,
-  ) {}
+  ) {
+    // CP-ID-VNDX-2026-08-21-POP-MODAL — Bajar el wizard cuando llega un
+    // resultado pleno (no failedStage). El modal deriva su `isOpen` de
+    // `orderResult()`, así que aparece en cuanto el POST termina OK; el
+    // wizard, en cambio, sigue abierto hasta que cerremos
+    // `showOrderConfirmModal` explícitamente. Sin este effect, el modal
+    // queda apilado encima del wizard (doble-modal). El effect es
+    // idempotente: set(false) cuando ya está false no hace nada, y en
+    // transiciones a null tampoco (cerrar el wizard de un éxito previo
+    // sería regresión).
+    effect(() => {
+      const result = this.orderResult();
+      if (result && !result.failedStage) {
+        this.showOrderConfirmModal.set(false);
+      }
+    });
+  }
 
   async ngOnInit(): Promise<void> {
     this.vexiHosts.register(this.vexiHostAdapter);
@@ -1906,18 +1925,38 @@ export class PopComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * CP-ID-VNDX-2026-08-21-POP-MODAL — cierre del modal de confirmación
-   * post-creación. Limpia `orderResult` (mismo orden que el flujo viejo de
-   * éxito, que apagaba `orderResult` justo antes de seguir), baja el wizard
-   * y redirige a la lista de OC. La ruta `/admin/inventory/pop` es la del
-   * store-module-catalog (POP raíz del submódulo Inventario) y es la que usa
-   * el sidebar para volver al inicio del taller de OC.
+   * CP-ID-VNDX-2026-08-21-POP-MODAL — El operador eligió «Nueva compra»
+   * en el modal de confirmación post-creación. Limpiamos el resultado y
+   * vaciamos el carrito para volver a empezar en el taller. La ruta
+   * `/admin/inventory/pop` ya está activa (no navegamos): el wizard
+   * lo cerró el `effect()` del constructor al poblar `orderResult` con
+   * un éxito pleno.
    */
-  onConfirmationClosed(): void {
+  onNewPurchase(): void {
     this.orderResult.set(null);
     this.orderError.set(null);
-    this.showOrderConfirmModal.set(false);
-    this.router.navigate(['/admin/inventory/pop']);
+    this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: () => {
+        /* Ya estamos en /admin/inventory/pop; nada más que hacer. */
+      },
+      error: (err) => {
+        console.error('Error clearing cart after new purchase:', err);
+      },
+    });
+  }
+
+  /**
+   * CP-ID-VNDX-2026-08-21-POP-MODAL — El operador eligió «Ver orden».
+   * Limpiamos el resultado y el error, y navegamos al detalle de la OC
+   * recién creada. Si el id no llegó (caso defensivo), no navegamos.
+   */
+  onViewOrder(): void {
+    const id = this.orderResult()?.id;
+    this.orderResult.set(null);
+    this.orderError.set(null);
+    if (typeof id === 'number' && id > 0) {
+      this.router.navigate(['/admin/orders/purchase-orders', id]);
+    }
   }
 
   onNavigateToSettings(): void {
