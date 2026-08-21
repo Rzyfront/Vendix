@@ -44,6 +44,7 @@ import { PoTimelineComponent } from '../../../../inventory/pop/components/po-tim
 // QUI-431: reusable bulk serial-load modal in `collect` mode (no API call).
 import { SerialBulkLoadModalComponent } from '../../../../serial-numbers/components/serial-bulk-load-modal/serial-bulk-load-modal.component';
 import { BulkBackfillItem } from '../../../../serial-numbers/services/serial-numbers.service';
+import { extractApiErrorMessage } from '../../../../../../../core/utils/api-error-handler';
 
 const STATUS_LABELS: Record<PurchaseOrderStatus, string> = {
   draft: 'Borrador',
@@ -1109,7 +1110,7 @@ export class StorePurchaseOrderDetailComponent {
     this.actionLoading.set(true);
     this.service.approvePurchaseOrder(p.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => { this.toast.success('Orden aprobada'); this.actionLoading.set(false); this.reload(); },
-      error: (err) => { this.actionLoading.set(false); this.toast.error(typeof err === 'string' ? err : 'No se pudo aprobar la orden.'); },
+      error: (err) => { this.actionLoading.set(false); this.toast.error(this._errorText(err, 'No se pudo aprobar la orden.')); },
     });
   }
 
@@ -1127,7 +1128,7 @@ export class StorePurchaseOrderDetailComponent {
     this.actionLoading.set(true);
     this.service.cancelPurchaseOrder(p.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => { this.toast.success('Orden cancelada'); this.actionLoading.set(false); this.reload(); },
-      error: (err) => { this.actionLoading.set(false); this.toast.error(typeof err === 'string' ? err : 'No se pudo cancelar la orden.'); },
+      error: (err) => { this.actionLoading.set(false); this.toast.error(this._errorText(err, 'No se pudo cancelar la orden.')); },
     });
   }
 
@@ -1331,7 +1332,7 @@ export class StorePurchaseOrderDetailComponent {
         this.toast.success('Archivo subido');
         this.attachments.update((list) => [...list, res?.data ?? res]);
       },
-      error: (err) => { this.uploading.set(false); this.toast.error(typeof err === 'string' ? err : 'Error al subir archivo'); },
+      error: (err) => { this.uploading.set(false); this.toast.error(this._errorText(err, 'Error al subir archivo')); },
     });
   }
 
@@ -1348,8 +1349,21 @@ export class StorePurchaseOrderDetailComponent {
     if (!ok) return;
     this.service.removePurchaseOrderAttachment(p.id, attachmentId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => { this.attachments.update((list) => list.filter((a) => a.id !== attachmentId)); this.toast.success('Adjunto eliminado'); },
-      error: (err) => this.toast.error(typeof err === 'string' ? err : 'Error al eliminar'),
+      error: (err) => this.toast.error(this._errorText(err, 'Error al eliminar')),
     });
+  }
+
+  /**
+   * `PurchaseOrdersService` dejó de aplastar el error a string: ahora propaga
+   * el `HttpErrorResponse` crudo, con `error_code` y status. El guard
+   * `typeof err === 'string'` que había aquí pasó a ser siempre falso, así que
+   * cada fallo mostraba el texto de reserva y el motivo real del backend
+   * quedaba únicamente en consola. Se conserva la rama de string por si algún
+   * consumidor legado todavía rechaza con uno.
+   */
+  private _errorText(err: unknown, fallback: string): string {
+    if (typeof err === 'string' && err.trim()) return err;
+    return extractApiErrorMessage(err) || fallback;
   }
 
   // ============ Item helpers ============

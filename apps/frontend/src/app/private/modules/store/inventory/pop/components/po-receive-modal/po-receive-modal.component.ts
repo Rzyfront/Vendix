@@ -11,6 +11,7 @@ import { PurchaseOrder, PurchaseOrderItem, ReceivePurchaseOrderItemDto } from '.
 // QUI-431: reusable bulk serial-load modal in `collect` mode (no API call).
 import { SerialBulkLoadModalComponent } from '../../../../serial-numbers/components/serial-bulk-load-modal/serial-bulk-load-modal.component';
 import { BulkBackfillItem } from '../../../../serial-numbers/services/serial-numbers.service';
+import { extractApiErrorMessage } from '../../../../../../../core/utils/api-error-handler';
 
 interface ReceiveLineItem {
   id: number;
@@ -376,9 +377,16 @@ export class PoReceiveModalComponent {
         this.received.emit();
         this.close.emit();
       },
-      error: (err: string) => {
+      // `PurchaseOrdersService` dejó de aplastar el error a string: ahora llega
+      // el `HttpErrorResponse` crudo, con `error_code` y status. Tiparlo como
+      // string dejaba el motivo real del backend sólo en consola.
+      error: (err: unknown) => {
         this.saving.set(false);
-        this.toastService.error(err || 'Error al recibir mercancia');
+        this.toastService.error(
+          typeof err === 'string' && err.trim()
+            ? err
+            : extractApiErrorMessage(err) || 'Error al recibir mercancia',
+        );
       },
     });
   }
