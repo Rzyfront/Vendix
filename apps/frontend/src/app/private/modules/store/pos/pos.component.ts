@@ -899,9 +899,16 @@ export class PosComponent {
         cart_item_id: block.cart_item_id,
         order_id: orderId,
       };
-      const request$ = block.booking_id
+      // CP-POS-SVC-PERF-001 / D.2 — guard against bogus `booking_id === 0`
+      // that some legacy cart paths emit when an earlier attempt left
+      // a stale entry behind. Treat falsy / non-positive integers as
+      // "new booking" (POST) and only route to PUT when the id is a
+      // real, positive reference to an existing booking row.
+      const existingId = Number(block.booking_id);
+      const isUpdate = Number.isFinite(existingId) && existingId > 0;
+      const request$ = isUpdate
         ? this.http.put(
-            `/api/store/reservations/${block.booking_id}`,
+            `/api/store/reservations/${existingId}`,
             payload,
           )
         : this.http.post('/api/store/reservations', payload);
