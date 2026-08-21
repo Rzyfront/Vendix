@@ -57,12 +57,16 @@
       <div class="flex items-end gap-2 flex-wrap shrink-0">
       <app-options-dropdown
                 class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-                [filters]="[]"
+                [filters]="filterConfigs"
+                [filterValues]="filterValues"
                 [actions]="dropdownActions()"
                 [showActions]="true"
                 triggerLabel="Acciones"
                 triggerIcon="plus"
+                [debounceMs]="350"
                 [isLoading]="exporting()"
+                (filterChange)="onFiltersDropdownChange($event)"
+                (clearAllFilters)="onFiltersDropdownClearAll()"
                 (actionClick)="onActionsDropdownClick($event)"
               ></app-options-dropdown>
       </div>
