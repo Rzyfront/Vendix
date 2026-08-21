@@ -1072,11 +1072,15 @@ export class PopComponent implements OnInit, OnDestroy {
         (Number(item.quantity) || 0) * (Number(item.unit_price) || 0);
       const scannedDiscountAmount = Number(item.discount_amount) || 0;
       let scannedDiscountPct: number | undefined;
-      if (lineGross > 0 && scannedDiscountAmount > 0) {
-        scannedDiscountPct = Math.min(
-          100,
-          (scannedDiscountAmount / lineGross) * 100,
-        );
+      if (lineGross > 0 && Number.isFinite(lineGross) && scannedDiscountAmount > 0) {
+        const pct = (scannedDiscountAmount / lineGross) * 100;
+        // Invariante: el carrito trabaja en PORCENTAJE ENTERO 0-100. `deriveLineTax`
+        // divide por 100, por lo que un valor como 0.20 termina aplicando 0.2%.
+        // Redondeo explícito aquí + clamp de UX a 1 si hay descuento real pero
+        // redondeo a 0 (escaneos con descuentos pequeños tipo 0.4%).
+        let rounded = Math.round(pct);
+        if (rounded === 0 && pct > 0) rounded = 1;
+        scannedDiscountPct = Math.min(100, Math.max(0, rounded));
       } else if (scannedDiscountAmount > 0) {
         // 3.1 — Línea bonificada (unit_price=0) o cantidad 0: el descuento NO
         // puede vivir como % (división por cero). Lo acumulamos al header para
