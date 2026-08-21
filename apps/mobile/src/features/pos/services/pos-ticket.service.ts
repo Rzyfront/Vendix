@@ -244,8 +244,11 @@ function readSession(): SessionSnapshot {
  * equivalía a permitir cobro de IVA sin estar facultados para facturar
  * electrónicamente. Fail-closed. Para vender con IVA, el tenant debe
  * declarar `tax_responsibilities: ['O-48']` o pasar por el wizard fiscal.
+ *
+ * Exportada para especar — Espejo del helper backend
+ * `apps/backend/src/common/helpers/vat-responsibility.helper.ts`.
  */
-function isVatResponsible(fiscal: Record<string, any>): boolean {
+export function isVatResponsible(fiscal: Record<string, any>): boolean {
   const responsibilities: string[] = Array.isArray(fiscal?.tax_responsibilities)
     ? (fiscal.tax_responsibilities as unknown[]).filter(
         (c): c is string => typeof c === 'string',
