@@ -1009,7 +1009,14 @@ export class PopCartService {
         variant,
         quantity: item.quantity_ordered || item.quantity,
         unit_cost: item.unit_cost || item.unit_price,
-        discount: item.discount_percentage || 0,
+        // Toda lectura de `discount_percentage` desde DB pasa por
+        // `normalizeDiscount` para garantizar el contrato entero 0-100
+        // (regression: loadOrder bypass). Una PO pre-fix con
+        // `discount_percentage = 0.20` debe llegar al carrito como 20, no
+        // como 0.2 — si se cuela la fracción, `cartToPurchaseOrderRequest`
+        // envía `discount_percentage: 0.2` al backend, que lo interpreta
+        // como 0.2% en lugar de 20%. Mismo bug que el usuario reportó.
+        discount: this.normalizeDiscount(Number(item.discount_percentage)),
         tax_rate: item.tax_rate || 0,
         // IVA cycle (F1): restore tax classification and per-line override.
         tax_type: (item as any).tax_type ?? 'iva',
