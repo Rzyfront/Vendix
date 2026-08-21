@@ -924,6 +924,14 @@ export class PaymentsService {
           discount_amount: 0,
         };
 
+        // CP-POS-SVC-PERF-001 / A.4 — pure drafts (Guardar borrador) must NOT
+        // touch stock_levels or stock_reservations. The cashier reserves at
+        // flow/pay when actually charging. Forcing drafts through the
+        // reservation path was the dominant cost of the slow-Guardar bug.
+        if (createPosPaymentDto.is_draft) {
+          // §1.5 + §1.6 of stock validation/reservation are skipped entirely.
+        } else {
+
         // 1.5. BLOCKING stock validation using stock_levels (source of truth)
         // Validate ALL items before any reservation occurs
         // Oversell is intentionally not controlled by the public POS payload.
@@ -1118,6 +1126,8 @@ export class PaymentsService {
             );
           }
         }
+
+        } // end A.4 is_draft skip
 
         // 1.6. Persist promotions from the server-recalculated snapshot.
         // Backend already validated each promotion via `quoteDiscounts` and

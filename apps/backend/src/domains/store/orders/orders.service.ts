@@ -677,6 +677,33 @@ export class OrdersService {
           },
           orderBy: { used_at: 'asc' },
         },
+        // CP-POS-SVC-PERF-001 / C.5 — order detail page renders the
+        // service staff + booking date/time for orders that contain a
+        // scheduled service. We expose `bookings` with provider →
+        // employee → user so the cashier can see who is assigned.
+        bookings: {
+          include: {
+            provider: {
+              include: {
+                employee: {
+                  select: {
+                    id: true,
+                    first_name: true,
+                    last_name: true,
+                    avatar_url: true,
+                  },
+                },
+              },
+            },
+            product: {
+              select: { id: true, name: true },
+            },
+            product_variants: {
+              select: { id: true, name: true },
+            },
+          },
+          orderBy: { date: 'asc' },
+        },
       },
     });
 
@@ -2025,6 +2052,77 @@ export class OrdersService {
           };
         }),
       });
+
+      // CP-POS-SVC-PERF-001 / C.4 — atomic booking creation. For every
+      // submitted item that carries a `booking` block, create (or update)
+      // a `bookings` row inside the SAME $transaction that persists the
+      // order_item. If the editor fails for any reason afterwards, the
+      // rollback discards the booking too — no orphan reservations.
+      const itemsWithBooking = dto.items
+        .map((item, idx) => ({ item, idx }))
+        .filter(({ item }) => item.booking);
+      if (itemsWithBooking.length > 0) {
+        // Re-read order_items to obtain the freshly minted IDs.
+        const newItemsForBooking = await tx.order_items.findMany({
+          where: { order_id: orderId },
+          select: { id: true, product_id: true, product_variant_id: true },
+        });
+        const orderItemIdByKey = new Map<string, number>();
+        for (const it of newItemsForBooking) {
+          const k = `${it.product_id ?? 'null'}:${it.product_variant_id ?? 'null'}`;
+          orderItemIdByKey.set(k, it.id);
+        }
+        for (const { item } of itemsWithBooking) {
+          if (!item.booking) continue;
+          const k = `${item.product_id ?? 'null'}:${item.product_variant_id ?? 'null'}`;
+          const orderItemId = orderItemIdByKey.get(k);
+          if (!orderItemId) {
+            this.logger.warn(
+              `[editor] booking block present but order_item not found for key=${k}`,
+            );
+            continue;
+          }
+          const b = item.booking;
+          if (b.booking_id) {
+            // Re-agendamiento: update existing row.
+            await tx.bookings.update({
+              where: { id: b.booking_id },
+              data: {
+                provider_id: b.provider_id ?? null,
+                date: b.date ?? undefined,
+                start_time: b.start_time ?? undefined,
+                end_time: b.end_time ?? undefined,
+                notes: b.notes ?? undefined,
+                service_location_type:
+                  b.service_location_type ?? undefined,
+                updated_at: new Date(),
+              },
+            });
+          } else if (b.date && b.start_time && b.end_time) {
+            // Fresh booking. We use cart_item_id to track the link back
+            // to the cart line for re-agendamiento on a future edit.
+            await tx.bookings.create({
+              data: {
+                store_id: storeId,
+                customer_id: dto.customer_id ?? null,
+                product_id: item.product_id!,
+                product_variant_id:
+                  item.product_id ? item.product_variant_id ?? null : null,
+                order_id: orderId,
+                cart_item_id: `oi-${orderItemId}`,
+                provider_id: b.provider_id ?? null,
+                date: new Date(b.date),
+                start_time: b.start_time,
+                end_time: b.end_time,
+                notes: b.notes ?? null,
+                service_location_type: b.service_location_type ?? 'shop',
+                channel: 'pos',
+                status: 'confirmed',
+              },
+            });
+          }
+        }
+      }
 
       // 13d) Reservas para los nuevos items (sólo si NO es draft).
       //
