@@ -1,5 +1,7 @@
 import { Component, DestroyRef, OnInit, inject, computed, signal  } from '@angular/core';
 import {
+  FilterConfig,
+  FilterValues,
   DropdownAction } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -16,8 +18,6 @@ import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 import { truncateLabel } from '../../../../../../shared/utils/chart-labels.util';
 import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
-import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
-import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 import { ResponsiveDataViewComponent } from '../../../../../../shared/components';
 import type { TableColumn, ItemListCardConfig } from '../../../../../../shared/components';
 
@@ -27,7 +27,7 @@ import {
 @Component({
   selector: 'vendix-purchases-by-supplier',
   standalone: true,
-  imports: [CommonModule, RouterModule, CardComponent, ChartComponent, StatsComponent, IconComponent, DateRangeFilterComponent, ExportButtonComponent, CurrencyPipe, ResponsiveDataViewComponent,
+  imports: [CommonModule, RouterModule, CardComponent, ChartComponent, StatsComponent, IconComponent, CurrencyPipe, ResponsiveDataViewComponent,
     OptionsDropdownComponent,],
   styles: [
     `
@@ -86,19 +86,20 @@ import {
           <span class="results-header__title text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight whitespace-nowrap">Compras por Proveedor</span>
         </div>
         <div class="flex items-end gap-2 flex-wrap shrink-0">
-        <vendix-date-range-filter
-                    [value]="dateRange()"
-                    (valueChange)="onDateRangeChange($event)"
-                  ></vendix-date-range-filter>
-                  <app-options-dropdown
-                    [filters]="[]"
-                    [actions]="dropdownActions()"
-                    [showActions]="true"
-                    triggerLabel="Acciones"
-                    triggerIcon="plus"
-                    [isLoading]="exporting()"
-                    (actionClick)="onActionsDropdownClick($event)"
-                  ></app-options-dropdown>
+          <app-options-dropdown
+            class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+            [filters]="filterConfigs"
+            [filterValues]="filterValues"
+            [actions]="dropdownActions()"
+            [showActions]="true"
+            triggerLabel="Acciones"
+            triggerIcon="plus"
+            [debounceMs]="350"
+            [isLoading]="exporting()"
+            (filterChange)="onFiltersDropdownChange($event)"
+            (clearAllFilters)="onFiltersDropdownClearAll()"
+            (actionClick)="onActionsDropdownClick($event)"
+          ></app-options-dropdown>
         </div>
       </div>
       <div class="p-4 space-y-6">
@@ -187,10 +188,28 @@ export class PurchasesBySupplierComponent implements OnInit {
     preset: 'thisMonth'
   });
 
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'date_range',
+      label: 'Período',
+      type: 'date-range' },
+  ];
+
+  filterValues: FilterValues = {
+    date_range_start: getDefaultStartDate(),
+    date_range_end: getDefaultEndDate(),
+    date_range_preset: 'thisMonth',
+  };
+
   ngOnInit(): void {
     const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
     if (urlRange) {
       this.dateRange.set(urlRange);
+      this.filterValues = {
+        date_range_start: urlRange.start_date,
+        date_range_end: urlRange.end_date,
+        date_range_preset: urlRange.preset || null,
+      };
       this.chartQueryKey.set(null);
     }
     this.loadChartData();
@@ -479,8 +498,37 @@ legend: {
     }
   }
 
-  onDateRangeChange(range: DateRangeFilter): void {
-    this.dateRange.set(range);
+  onFiltersDropdownChange(values: FilterValues): void {
+    const dateFrom = values['date_range_start'] as string;
+    const dateTo = values['date_range_end'] as string;
+    const preset = values['date_range_preset'] as string;
+
+    if (!dateFrom || !dateTo) return;
+    const start = this.filterValues['date_range_start'];
+    const end = this.filterValues['date_range_end'];
+    if (start === dateFrom && end === dateTo) return;
+
+    this.filterValues = values;
+    this.dateRange.set({
+      start_date: dateFrom,
+      end_date: dateTo,
+      preset: (preset || 'custom') as DateRangeFilter['preset'] });
+    this.chartQueryKey.set(null);
+    this.loadChartData();
+  }
+
+  onFiltersDropdownClearAll(): void {
+    const reset = getDefaultStartDate();
+    const end = getDefaultEndDate();
+    this.filterValues = {
+      date_range_start: reset,
+      date_range_end: end,
+      date_range_preset: 'thisMonth',
+    };
+    this.dateRange.set({
+      start_date: reset,
+      end_date: end,
+      preset: 'thisMonth' });
     this.chartQueryKey.set(null);
     this.loadChartData();
   }
