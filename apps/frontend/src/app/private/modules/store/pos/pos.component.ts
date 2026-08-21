@@ -3055,6 +3055,12 @@ export class PosComponent {
     }
     // Fase 5·B3: el flujo DELIVERY vive en el shell con stepper (único checkout).
     this.checkoutIntent.set('delivery');
+    // CP-POS-ENVIO-REGRESSION-001: el shell default a 'create-draft' y su steps()
+    // short-circuita a [Cliente] cuando mode==='create-draft'. Sin esto, Envío y
+    // Cobro desaparecen. mode='create-payment' desbloquea la rama delivery de
+    // steps() que retorna [Cliente, Envío, Cobro]. Espejo del patrón pickup
+    // (onCheckout línea ~1863).
+    this.mode.set('create-payment');
     this.showCheckoutModal.set(true);
   }
 
