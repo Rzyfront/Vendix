@@ -11,7 +11,6 @@ import {
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { OptionsDropdownComponent } from '../../../../../../../shared/components/options-dropdown/options-dropdown.component';
-import { StickyHeaderComponent } from '../../../../../../../shared/components/sticky-header/sticky-header.component';
 import {
   DropdownAction,
   FilterConfig,
@@ -74,12 +73,15 @@ const PLACEHOLDER_VALUE = '—';
  * Replaces the previous `<app-report-viewer>` shell with a custom layout
  * composed of:
  *
- *   1. A sticky header.
- *   2. A date-range filter exposed via `<app-options-dropdown>` (Fase B1
+ *   1. A date-range filter exposed via `<app-options-dropdown>` (Fase B1
  *      migration — period used to live in a standalone `<vendix-date-range-filter>`
  *      and now travels inside the unified Filtros trigger).
- *   3. A 4×2 grid of color-coded stat cards driven by `OverviewSummary`.
- *   4. The full reports catalog (chips + search + grouped grid).
+ *   2. A 4×2 grid of color-coded stat cards driven by `OverviewSummary`.
+ *   3. The full reports catalog (chips + search + grouped grid).
+ *
+ * The page-level header is provided by the parent `ReportsShellComponent`,
+ * which already renders a category-scoped `<app-sticky-header>`. Rendering a
+ * second one here would duplicate the title and waste vertical space.
  *
  * Loads data directly via `ReportsDataService.fetchReportData` (no NgRx)
  * and reacts to `dateRange` changes through an `effect()` that triggers
@@ -89,7 +91,6 @@ const PLACEHOLDER_VALUE = '—';
  *   - `vendix-zoneless-signals` (signal inputs/outputs, OnPush, no legacy)
  *   - `vendix-currency-formatting` (CurrencyFormatService for ad-hoc formats)
  *   - `vendix-frontend-stats-cards` (responsive 4×2 → 2×4 → horizontal scroll)
- *   - `vendix-frontend-sticky-header` (page-level header)
  *   - `vendix-analytics-metrics` (threshold definitions)
  */
 @Component({
@@ -100,18 +101,11 @@ const PLACEHOLDER_VALUE = '—';
     OverviewStatCardComponent,
     ReportsCatalogComponent,
     OptionsDropdownComponent,
-    StickyHeaderComponent,
     IconComponent,
   ],
   styleUrls: ['./overview-summary-report.component.scss'],
   template: `
     <div class="overview-summary-page">
-      <app-sticky-header
-        title="Resumen General"
-        subtitle="Vista ejecutiva del estado del negocio"
-        icon="bar-chart-3"
-      />
-
       <div class="overview-summary-content">
         <div class="overview-summary-toolbar">
           <app-options-dropdown

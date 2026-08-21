@@ -134,20 +134,20 @@ export class OverviewStatCardComponent {
   });
 
   /**
-   * Tailwind utility classes mapped to the state. The state modifier
-   * class (`state-critical`, etc.) drives SCSS color rules; the Tailwind
-   * utilities provide the border + background tint.
+   * Human-readable state label rendered in the cyberpunk footer dot row.
+   * Localized so the card reads as a complete unit without the caller
+   * having to pass the label separately.
    */
-  readonly stateClasses = computed<string>(() => {
+  readonly stateLabel = computed<string>(() => {
     switch (this.state()) {
       case 'critical':
-        return 'border-error/30 bg-error/5';
+        return 'Crítico';
       case 'warning':
-        return 'border-warning/30 bg-warning/5';
+        return 'Advertencia';
       case 'positive':
-        return 'border-primary/30 bg-primary/5';
+        return 'Positivo';
       default:
-        return 'border-border bg-surface';
+        return 'Neutral';
     }
   });
 }

@@ -11,16 +11,17 @@
     </div>
 
     <div class="catalog-controls">
+      <app-inputsearch
+        placeholder="Buscar reporte..."
+        size="md"
+        (searchChange)="onSearchChange($event)"
+        class="catalog-search"
+      />
       <app-report-category-chips
         [categories]="categories()"
         [selectedCategory]="selectedCategory()"
         [categoryCounts]="categoryCounts()"
         (categoryChange)="onCategoryChange($event)"
-      />
-      <app-inputsearch
-        placeholder="Buscar reporte..."
-        (searchChange)="onSearchChange($event)"
-        class="catalog-search"
       />
     </div>
 

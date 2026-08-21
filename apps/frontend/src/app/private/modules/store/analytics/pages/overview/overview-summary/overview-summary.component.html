@@ -186,19 +186,22 @@
         </div>
       </div>
 
-      <app-analytics-category-chips
-        [categories]="categories"
-        [selectedCategory]="selectedCategory()"
-        (categoryChange)="onCategoryChange($event)"
-      ></app-analytics-category-chips>
+      <div class="catalog-controls">
+        <app-inputsearch
+          type="search"
+          placeholder="Buscar analiticas..."
+          size="md"
+          [ngModel]="searchTerm()"
+          (ngModelChange)="onSearchChange($event)"
+          class="catalog-search"
+        ></app-inputsearch>
 
-      <app-inputsearch
-        type="search"
-        placeholder="Buscar analiticas..."
-        size="md"
-        [ngModel]="searchTerm()"
-        (ngModelChange)="onSearchChange($event)"
-      ></app-inputsearch>
+        <app-analytics-category-chips
+          [categories]="categories"
+          [selectedCategory]="selectedCategory()"
+          (categoryChange)="onCategoryChange($event)"
+        ></app-analytics-category-chips>
+      </div>
 
       @if (filteredViews().length === 0) {
         <div class="empty-state">

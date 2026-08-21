@@ -1,7 +1,8 @@
 // ============================================================================
 // Host — outer page wrapper. Mirrors the analytics overview page: capped
 // width so the stats grid never stretches past the readability horizon
-// on ultrawide monitors.
+// on ultrawide monitors. The page-level header is rendered by the parent
+// `ReportsShellComponent`, so this view starts at the toolbar.
 // ============================================================================
 
 :host {
@@ -9,15 +10,14 @@
 }
 
 // ============================================================================
-// Page-level layout — vertical rhythm between the sticky header, the date
-// filter toolbar, the stats grid, and the catalog.
+// Page-level layout — vertical rhythm between the date filter toolbar,
+// the stats grid, and the catalog.
 // ============================================================================
 
 .overview-summary-page {
   width: 100%;
   max-width: 1600px;
   margin: 0 auto;
-  padding: 1rem 0;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;

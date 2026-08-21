@@ -1,17 +1,26 @@
 @if (loading()) {
   <div class="overview-stat-card stat-skeleton state-neutral" aria-busy="true">
-    <div class="stat-border-strip"></div>
+    <div class="stat-glow"></div>
+    <div class="stat-corner stat-corner-tl"></div>
+    <div class="stat-corner stat-corner-br"></div>
     <div class="stat-content">
       <div class="stat-header">
         <span class="skeleton-pill"></span>
       </div>
       <div class="skeleton-icon"></div>
       <div class="skeleton-value"></div>
+      <div class="skeleton-footer">
+        <span class="skeleton-dot"></span>
+        <span class="skeleton-pill-sm"></span>
+      </div>
     </div>
   </div>
 } @else {
   <div class="overview-stat-card" [class]="'state-' + state()" [attr.aria-label]="title()">
-    <div class="stat-border-strip"></div>
+    <div class="stat-glow"></div>
+    <div class="stat-corner stat-corner-tl"></div>
+    <div class="stat-corner stat-corner-br"></div>
+
     <div class="stat-content">
       <div class="stat-header">
         <span class="stat-title">{{ title() }}</span>
@@ -24,10 +33,17 @@
           </span>
         }
       </div>
+
       <div class="stat-icon-wrapper">
-        <app-icon [name]="icon()" [size]="24" />
+        <app-icon [name]="icon()" [size]="20" />
       </div>
+
       <div class="stat-value">{{ formattedValue() }}</div>
+
+      <div class="stat-footer">
+        <span class="stat-indicator" aria-hidden="true"></span>
+        <span class="stat-state-label">{{ stateLabel() }}</span>
+      </div>
     </div>
   </div>
 }

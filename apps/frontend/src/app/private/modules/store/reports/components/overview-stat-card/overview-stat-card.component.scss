@@ -14,82 +14,113 @@
 }
 
 // ============================================================================
-// Card shell — base look + per-state border/background tint.
-// `transition-property` is restricted to transform/box-shadow so we never
-// restart animations on color/opacity changes (zoneless + perf rule).
+// State palette — exposed as local CSS custom properties so the cyberpunk
+// visuals (gradient, border, glow, pulse, icon-bg) reuse a single mapping.
+// rgb variants come from the global theme so transparency composes cleanly.
+// ============================================================================
+
+.state-critical {
+  --state-color: var(--color-error);
+  --state-color-rgb: var(--color-error-rgb);
+  --state-label: 'Crítico';
+}
+
+.state-warning {
+  --state-color: var(--color-warning);
+  --state-color-rgb: var(--color-warning-rgb);
+  --state-label: 'Advertencia';
+}
+
+.state-positive {
+  --state-color: var(--color-primary);
+  --state-color-rgb: var(--color-primary-rgb);
+  --state-label: 'Positivo';
+}
+
+.state-neutral {
+  --state-color: var(--color-text-secondary);
+  --state-color-rgb: var(--color-text-secondary-rgb);
+  --state-label: 'Neutral';
+}
+
+// ============================================================================
+// Card shell — cyberpunk / futurist look:
+//   - dark gradient background tinted by the state color
+//   - 1.5px colored border + soft outer glow
+//   - L-shaped corner accents (top-left + bottom-right) for the HUD feel
+//   - explicit transition properties (no `transition: all`)
 // ============================================================================
 
 .overview-stat-card {
   position: relative;
   overflow: hidden;
-  min-height: 132px;
-  padding: 1rem 1.25rem;
-  border-radius: 1rem;
-  border: 1px solid var(--color-border);
-  background-color: var(--color-surface);
-  transition-property: transform, box-shadow;
-  transition-duration: 200ms;
+  min-height: 140px;
+  padding: 1.125rem 1.25rem 1rem;
+  border-radius: 0.75rem;
+  border: 1.5px solid rgba(var(--state-color-rgb), 0.4);
+  background:
+    linear-gradient(
+      135deg,
+      var(--color-surface) 0%,
+      rgba(var(--state-color-rgb), 0.08) 100%
+    );
+  box-shadow:
+    0 0 24px rgba(var(--state-color-rgb), 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition-property: transform, box-shadow, border-color;
+  transition-duration: 220ms;
   transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
 
   &:hover {
     transform: translateY(-2px);
-    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.06);
-  }
-
-  // State-driven border + bg tint. The Tailwind tokens resolve to the
-  // CSS variables defined in `styles.scss` (color-{name}-rgb).
-  &.state-critical {
-    border-color: rgba(var(--color-error-rgb), 0.3);
-    background-color: rgba(var(--color-error-rgb), 0.05);
-  }
-
-  &.state-warning {
-    border-color: rgba(var(--color-warning-rgb), 0.3);
-    background-color: rgba(var(--color-warning-rgb), 0.05);
-  }
-
-  &.state-positive {
-    border-color: rgba(var(--color-primary-rgb), 0.3);
-    background-color: rgba(var(--color-primary-rgb), 0.05);
-  }
-
-  &.state-neutral {
-    border-color: var(--color-border);
-    background-color: var(--color-surface);
+    border-color: rgba(var(--state-color-rgb), 0.6);
+    box-shadow:
+      0 0 32px rgba(var(--state-color-rgb), 0.32),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06);
   }
 }
 
-// ============================================================================
-// Left border strip — 4px colored stripe based on state.
-// ============================================================================
-
-.stat-border-strip {
+// Radial glow tucked in the top-right corner — adds the "screen light" feel
+// without competing with the icon for attention.
+.stat-glow {
   position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-  background-color: var(--color-text-secondary);
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at top right,
+    rgba(var(--state-color-rgb), 0.18),
+    transparent 55%
+  );
+}
 
-  .state-critical & {
-    background-color: var(--color-error);
+// L-shaped corner accents — the signature cyberpunk HUD mark.
+.stat-corner {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-style: solid;
+  border-color: var(--state-color);
+  border-width: 0;
+  opacity: 0.85;
+  pointer-events: none;
+
+  &.stat-corner-tl {
+    top: 6px;
+    left: 6px;
+    border-top-width: 1.5px;
+    border-left-width: 1.5px;
   }
 
-  .state-warning & {
-    background-color: var(--color-warning);
-  }
-
-  .state-positive & {
-    background-color: var(--color-primary);
-  }
-
-  .state-neutral & {
-    background-color: var(--color-border);
+  &.stat-corner-br {
+    bottom: 6px;
+    right: 6px;
+    border-bottom-width: 1.5px;
+    border-right-width: 1.5px;
   }
 }
 
 // ============================================================================
-// Content wrapper — holds header + icon + value with flex layout.
+// Content wrapper — keeps header / icon / value / footer stacked.
 // ============================================================================
 
 .stat-content {
@@ -107,12 +138,18 @@
   min-width: 0;
 }
 
+// ============================================================================
+// Title — uppercase, wide tracking, muted. Gives the metric a label that
+// reads as a HUD tag rather than a paragraph.
+// ============================================================================
+
 .stat-title {
-  font-size: 0.75rem;
-  font-weight: 500;
+  font-size: 0.7rem;
+  font-weight: 600;
   color: var(--color-text-secondary);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
+  opacity: 0.85;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -120,52 +157,35 @@
 }
 
 // ============================================================================
-// Icon wrapper — top-right absolute, rounded square, color per state.
+// Icon wrapper — top-right absolute, squared, tinted with state color + glow.
 // ============================================================================
 
 .stat-icon-wrapper {
   position: absolute;
   right: 1rem;
   top: 1rem;
-  width: 2.75rem;
-  height: 2.75rem;
-  border-radius: 0.75rem;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.5rem;
   display: grid;
   place-items: center;
-  background-color: rgba(var(--color-text-secondary-rgb), 0.1);
-  color: var(--color-text-secondary);
-
-  .state-critical & {
-    background-color: rgba(var(--color-error-rgb), 0.1);
-    color: var(--color-error);
-  }
-
-  .state-warning & {
-    background-color: rgba(var(--color-warning-rgb), 0.1);
-    color: var(--color-warning);
-  }
-
-  .state-positive & {
-    background-color: rgba(var(--color-primary-rgb), 0.1);
-    color: var(--color-primary);
-  }
-
-  .state-neutral & {
-    background-color: rgba(var(--color-text-secondary-rgb), 0.1);
-    color: var(--color-text-secondary);
-  }
+  background-color: rgba(var(--state-color-rgb), 0.12);
+  color: var(--state-color);
+  border: 1px solid rgba(var(--state-color-rgb), 0.3);
+  box-shadow: 0 0 12px rgba(var(--state-color-rgb), 0.2);
 }
 
 // ============================================================================
-// Value — 2xl bold, large margin to clear the icon wrapper.
+// Value — XL bold, tight tracking, tabular numerals for clean alignment.
 // ============================================================================
 
 .stat-value {
-  font-size: 1.75rem;
-  font-weight: 700;
+  font-size: 2.25rem;
+  font-weight: 800;
   color: var(--color-text-primary);
-  margin-top: 1.75rem;
+  margin-top: 1.5rem;
   line-height: 1;
+  letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
@@ -173,7 +193,54 @@
 }
 
 // ============================================================================
-// Trend chip — small pill next to the title; color per trend direction.
+// Footer — pulsing state indicator dot + state label.
+// ============================================================================
+
+.stat-footer {
+  margin-top: 0.875rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.stat-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background-color: var(--state-color);
+  box-shadow: 0 0 8px var(--state-color);
+  animation: stat-pulse 2.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.stat-state-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--state-color);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes stat-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 8px var(--state-color);
+  }
+  50% {
+    opacity: 0.55;
+    box-shadow: 0 0 16px var(--state-color);
+  }
+}
+
+// ============================================================================
+// Trend chip — small pill next to the title; squared corners + 1px outline
+// for the cyberpunk look. Direction drives the color, NOT the state, so an
+// upward trend on a critical metric still reads as success.
 // ============================================================================
 
 .stat-trend {
@@ -181,27 +248,31 @@
   align-items: center;
   gap: 0.25rem;
   padding: 0.125rem 0.5rem;
-  border-radius: 9999px;
+  border-radius: 0.375rem;
   font-size: 0.6875rem;
   font-weight: 600;
-  background-color: rgba(var(--color-text-secondary-rgb), 0.15);
+  background-color: rgba(var(--color-text-secondary-rgb), 0.12);
   color: var(--color-text-secondary);
+  border: 1px solid rgba(var(--color-text-secondary-rgb), 0.3);
   white-space: nowrap;
   flex-shrink: 0;
 
   &.trend-up {
-    background-color: rgba(var(--color-success-rgb), 0.15);
+    background-color: rgba(var(--color-success-rgb), 0.12);
     color: var(--color-success);
+    border-color: rgba(var(--color-success-rgb), 0.3);
   }
 
   &.trend-down {
-    background-color: rgba(var(--color-error-rgb), 0.15);
+    background-color: rgba(var(--color-error-rgb), 0.12);
     color: var(--color-error);
+    border-color: rgba(var(--color-error-rgb), 0.3);
   }
 
   &.trend-flat {
-    background-color: rgba(var(--color-text-secondary-rgb), 0.15);
+    background-color: rgba(var(--color-text-secondary-rgb), 0.12);
     color: var(--color-text-secondary);
+    border-color: rgba(var(--color-text-secondary-rgb), 0.3);
   }
 }
 
@@ -210,10 +281,12 @@
 }
 
 // ============================================================================
-// Skeleton — shimmer placeholders matching the card geometry.
+// Skeleton — neon shimmer placeholders matching the new geometry.
+// Shimmer gradient bleeds through the primary (neón green) tone to keep the
+// loading state on-brand with the cyberpunk aesthetic.
 // ============================================================================
 
-@keyframes skeleton-loading {
+@keyframes skeleton-shimmer {
   0% {
     background-position: 200% 0;
   }
@@ -222,15 +295,15 @@
   }
 }
 
-@mixin shimmer {
+@mixin neon-shimmer {
   background: linear-gradient(
     90deg,
-    var(--color-background) 25%,
-    var(--color-border) 50%,
-    var(--color-background) 75%
+    rgba(var(--color-text-secondary-rgb), 0.05) 25%,
+    rgba(var(--color-primary-rgb), 0.22) 50%,
+    rgba(var(--color-text-secondary-rgb), 0.05) 75%
   );
   background-size: 200% 100%;
-  animation: skeleton-loading 1.5s infinite;
+  animation: skeleton-shimmer 1.6s infinite;
   border-radius: 0.5rem;
 }
 
@@ -239,24 +312,46 @@
     height: 0.75rem;
     width: 60%;
     border-radius: 9999px;
-    @include shimmer;
+    @include neon-shimmer;
+  }
+
+  .skeleton-pill-sm {
+    height: 0.625rem;
+    width: 4rem;
+    border-radius: 0.375rem;
+    @include neon-shimmer;
   }
 
   .skeleton-icon {
     position: absolute;
     right: 1rem;
     top: 1rem;
-    width: 2.75rem;
-    height: 2.75rem;
-    border-radius: 0.75rem;
-    @include shimmer;
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 0.5rem;
+    @include neon-shimmer;
   }
 
   .skeleton-value {
-    margin-top: 1.75rem;
-    height: 1.75rem;
+    margin-top: 1.5rem;
+    height: 2.25rem;
     width: 80%;
     border-radius: 0.5rem;
-    @include shimmer;
+    @include neon-shimmer;
+  }
+
+  .skeleton-footer {
+    margin-top: 0.875rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .skeleton-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 9999px;
+    flex-shrink: 0;
+    @include neon-shimmer;
   }
 }
