@@ -1034,6 +1034,12 @@ export class PopComponent implements OnInit, OnDestroy {
     // operador UNA vez al final.
     let bonificacionAccumulated = 0;
     let bonificacionLineCount = 0;
+    // CP-ORC-POP-MODAL-DISCOUNT-001: el carrito trabaja en % ENTERO 0-100.
+    // Cuando el escáner emite un descuento chico (p.ej. 0.4% sobre $1.000 =
+    // $4) y lo redondeamos a 1%, la línea pasa de $4 a $10 — un overcharge
+    // invisible al operador. Acumulamos la diferencia en PESOS al header para
+    // que el backend lo compense y el total cuadre contra la factura original.
+    let roundingBumpMoney = 0;
     for (const item of data.editedItems) {
       const candidate = item.selected_product_id
         ? item.candidates.find((c) => c.id === item.selected_product_id)
@@ -1079,7 +1085,14 @@ export class PopComponent implements OnInit, OnDestroy {
         // Redondeo explícito aquí + clamp de UX a 1 si hay descuento real pero
         // redondeo a 0 (escaneos con descuentos pequeños tipo 0.4%).
         let rounded = Math.round(pct);
-        if (rounded === 0 && pct > 0) rounded = 1;
+        // El guard de arriba (lineGross>0, Number.isFinite, scannedDiscountAmount>0)
+        // garantiza `pct>0` aquí, así que el `&& pct > 0` previo era dead.
+        if (rounded === 0) rounded = 1;
+        // Si el redondeo a entero SOBRE-aplica el descuento (0.4%→1%, 0.49%→1%),
+        // acumulamos la diferencia en dinero para que el header la compense.
+        if (rounded > pct) {
+          roundingBumpMoney += ((rounded - pct) / 100) * lineGross;
+        }
         scannedDiscountPct = Math.min(100, Math.max(0, rounded));
       } else if (scannedDiscountAmount > 0) {
         // 3.1 — Línea bonificada (unit_price=0) o cantidad 0: el descuento NO
@@ -1151,6 +1164,20 @@ export class PopComponent implements OnInit, OnDestroy {
           .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
       }
       addedCount++;
+    }
+
+    // CP-ORC-POP-MODAL-DISCOUNT-001: sumar el sobre-aplicado por redondeo 0.4%→1%
+    // al descuento de cabecera. Sin esto el cart termina aplicando más descuento
+    // del que la factura original mostraba (drift acumulado en PO chicas).
+    if (roundingBumpMoney > 0) {
+      const current = this.popCartService.currentState;
+      const headerDiscount = Number(current.discountAmount) || 0;
+      this.popCartService.setDiscountAmount(
+        headerDiscount + roundingBumpMoney,
+      );
+      this.toastService.warning(
+        `Redondeo de descuento: ${Math.round(roundingBumpMoney).toLocaleString('es-CO')} pesos se ajustaron al encabezado para no sobre-aplicar el descuento por-linea.`,
+      );
     }
 
     // 3.1 — Acumular descuentos de líneas bonificadas al header (prorrateo
