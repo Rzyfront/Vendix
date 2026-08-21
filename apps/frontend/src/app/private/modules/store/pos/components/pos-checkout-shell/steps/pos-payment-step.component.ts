@@ -31,6 +31,7 @@ import {
 import { PaymentMethodType } from '../../../../../../../shared/models/payment-method.model';
 import { FulfillmentType } from '../../pos-fulfillment-selector.component';
 import type { CheckoutIntent } from '../pos-checkout-shell.component';
+import { StoreOrdersService } from '../../../../orders/services/store-orders.service';
 import { PosWalletService, WalletInfo } from '../../../services/pos-wallet.service';
 import {
   WompiService,
@@ -97,6 +98,16 @@ export class PosPaymentStepComponent implements OnInit {
    */
   readonly fulfillment = input<FulfillmentType>('entrega');
   /**
+   * CP-POS-MODAL-SCOPE-001 / Phase F.11 — when the shell is paying an
+   * EXISTING draft order (edit → Actualizar → Cobrar path), the charge
+   * must hit POST `/store/orders/:id/flow/pay` (ordersService.flowPayOrder),
+   * NOT the create-payment endpoint (processSaleWithPayment). The latter
+   * would create a SECOND order instead of charging the one the cashier
+   * is editing. Defaults to null so non-edit flows (create-draft and
+   * create-payment fresh) keep their existing behavior.
+   */
+  readonly editingOrderId = input<number | null>(null);
+  /**
    * Sesión de mesa PREEXISTENTE (módulo de mesas o QR del comensal) resuelta por
    * el shell. Cuando viene, se cobra contra ESA cuenta y {@link tableId} no se
    * envía — nunca se crea una segunda cuenta para la misma mesa.
@@ -148,6 +159,11 @@ export class PosPaymentStepComponent implements OnInit {
   protected readonly collector = viewChild(PaymentCollectorComponent);
 
   private readonly paymentService = inject(PosPaymentService);
+  // CP-POS-MODAL-SCOPE-001 / Phase F.11 — ordersService owns the flow/pay
+  // endpoint that charges an EXISTING draft order. The payment-step is
+  // shared between create-payment (processSaleWithPayment) and edit-then-
+  // cobrar (flowPayOrder) flows, so we inject both and branch in onSubmit.
+  private readonly ordersService = inject(StoreOrdersService);
   private readonly toastService = inject(ToastService);
   private readonly walletService = inject(PosWalletService);
   private readonly wompiService = inject(WompiService);
@@ -583,18 +599,35 @@ export class PosPaymentStepComponent implements OnInit {
       };
     }
 
-    this.paymentService
-      .processSaleWithPayment(
-        this.cartState()!,
-        payment_request,
-        'current_user',
-        this.sessionId() ?? null,
-        this.tableId() ?? null,
-      )
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
+    // CP-POS-MODAL-SCOPE-001 / Phase F.11 — branch on editingOrderId.
+    // When set, we are charging an EXISTING draft order that the cashier
+    // edited via PUT /editor; the backend expects POST /flow/pay (which
+    // atomically promotes the draft and charges it), NOT processSaleWithPayment
+    // (which would create a SECOND order).
+    const editingId = this.editingOrderId();
+    const obs = editingId
+      ? this.ordersService.flowPayOrder(String(editingId), {
+          store_payment_method_id: method.id,
+          payment_type: 'direct',
+          amount: this.cartState()!.summary.total,
+          amount_received: submit.amountReceived,
+        } as any)
+      : this.paymentService.processSaleWithPayment(
+          this.cartState()!,
+          payment_request,
+          'current_user',
+          this.sessionId() ?? null,
+          this.tableId() ?? null,
+        );
+
+    obs.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
-          if (response.success) {
+          // CP-POS-MODAL-SCOPE-001 / Phase F.11 — flowPayOrder's response
+          // shape (PayOrderResponse) does NOT carry a top-level `success`
+          // flag; treat any non-thrown response as success. processSaleWithPayment
+          // returns `{success: true/false, ...}` so we honor its flag.
+          const isSuccess = editingId ? !!response?.order : response.success;
+          if (isSuccess) {
             if (
               isWompi &&
               response.nextAction &&
@@ -625,7 +658,7 @@ export class PosPaymentStepComponent implements OnInit {
             });
           }
         },
-        error: (error) => {
+        error: (error: any) => {
           this.processing.set(false);
           console.error('Payment error:', error);
           this.toastService.show({
