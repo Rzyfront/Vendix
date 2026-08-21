@@ -834,7 +834,11 @@ export class PopCartService {
     items: PopCartItem[],
     state: Pick<
       PopCartState,
-      'shippingCost' | 'discountAmount' | 'summary' | 'prices_include_tax'
+      | 'shippingCost'
+      | 'discountAmount'
+      | 'summary'
+      | 'prices_include_tax'
+      | 'has_vat'
     > = this.currentState,
   ): PopCartSummary {
     // Preserve the last backend-resolved withholding so the line does not flash
@@ -854,10 +858,13 @@ export class PopCartService {
         // `discount` es porcentaje en el carrito; el util lo lee como
         // `discount_percentage` (10 = 10%).
         discount_percentage: item.discount,
-        // IVA efectivo por línea: el maestro `has_vat` se aplica dentro de
-        // `recalculateItemTotals` (pasando `tax_rate: 0`), por lo que el valor
-        // guardado aquí ya refleja el toggle de cabecera.
-        tax_rate: item.tax_rate,
+        // IVA efectivo por línea. El maestro `has_vat` se aplica AQUÍ, no en la
+        // línea: `recalculateItemTotals` calcula su tasa efectiva en una
+        // variable local y nunca la escribe en `item.tax_rate`, así que la línea
+        // sigue guardando su 19 aunque el maestro esté apagado. Leerla cruda
+        // hacía que el pie cobrara IVA mientras cada fila mostraba cero — y el
+        // total del carrito dejaba de ser el que el operador estaba aprobando.
+        tax_rate: state.has_vat ? item.tax_rate : 0,
         prices_include_tax: item.prices_include_tax ?? undefined,
       })),
       { prices_include_tax: state.prices_include_tax },
