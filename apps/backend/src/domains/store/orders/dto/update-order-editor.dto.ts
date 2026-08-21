@@ -12,6 +12,7 @@ import {
   ValidateNested,
   Max,
   Matches,
+  IsDateString,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 import { order_delivery_type_enum } from '@prisma/client';
@@ -174,6 +175,9 @@ export class UpdateOrderEditorItemDto {
   // create a `bookings` row inside the SAME $transaction that persists
   // the order_item, so a failed edit does not leave an orphan
   // reservation. Optional — physical products leave it null.
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => UpdateOrderEditorItemBookingDto)
   booking?: UpdateOrderEditorItemBookingDto;
 }
 

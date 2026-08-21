@@ -10,6 +10,7 @@ import {
   PromotionTierProgress } from '../services/pos-cart.service';
 import { AddCustomItemRequest, CartDiscount } from '../models/cart.model';
 import { PosCustomItemModalComponent } from '../components/pos-custom-item-modal/pos-custom-item-modal.component';
+import { PosCartServiceSchedulerModalComponent } from '../components/pos-cart-service-scheduler-modal/pos-cart-service-scheduler-modal.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
@@ -59,6 +60,7 @@ import {
     QuantityControlComponent,
     PriceTierSelectorComponent,
     PosCustomItemModalComponent,
+    PosCartServiceSchedulerModalComponent,
   ],
   template: `
     <div
@@ -544,11 +546,38 @@ import {
                 </div>
                 <!-- Item Info -->
                 <div class="min-w-0 flex flex-col justify-center">
-                  <h4
-                    class="text-sm font-semibold text-text-primary truncate leading-tight"
-                  >
-                    {{ item.product.name }}
-                  </h4>
+                  <div class="flex items-center gap-1.5">
+                    <h4
+                      class="text-sm font-semibold text-text-primary truncate leading-tight"
+                    >
+                      {{ item.product.name }}
+                    </h4>
+                    <!-- CP-POS-SVC-PERF-001 / C.3 — calendar icon on
+                         service/prepared items opens the scheduler modal
+                         so the cashier can pick staff + day + time before
+                         Actualizar / Cobrar. Replaces the absent
+                         scheduling UI of the prior release. -->
+                    @if (
+                      item.product.product_type === 'service' ||
+                      item.product.product_type === 'prepared'
+                    ) {
+                      <button
+                        type="button"
+                        class="shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-violet-600 hover:bg-violet-50 border border-violet-200 transition-colors"
+                        [attr.aria-label]="
+                          (schedulerFor(item.id) ? 'Re-agendar ' : 'Agendar ') +
+                          item.product.name
+                        "
+                        [title]="
+                          (schedulerFor(item.id) ? 'Re-agendar ' : 'Agendar ') +
+                          item.product.name
+                        "
+                        (click)="openScheduler(item)"
+                      >
+                        <app-icon name="calendar" [size]="12"></app-icon>
+                      </button>
+                    }
+                  </div>
                   @if (item.variant_display_name) {
                     <p
                       class="text-[10px] text-primary font-medium truncate leading-tight"
@@ -808,6 +837,21 @@ import {
         </app-button>
       </div>
     </app-modal>
+
+    <!--
+      CP-POS-SVC-PERF-001 / C.2 + C.3 — service scheduler modal. Mounted
+      at the cart root so the calendar icon on a service/prepared item
+      can toggle the schedulerOpen signal with the target cartItem and
+      optional existing booking for re-agendamiento.
+    -->
+    @if (schedulerOpen()) {
+      <app-pos-cart-service-scheduler-modal
+        [cartItem]="schedulerTarget()"
+        [existingBooking]="schedulerExisting()"
+        (scheduled)="onScheduled($event)"
+        (cancelled)="closeScheduler()"
+      ></app-pos-cart-service-scheduler-modal>
+    }
   `,
   styles: [
     `
@@ -1594,6 +1638,52 @@ private cartService = inject(PosCartService);
    * exists); independent of cart state so typing never closes it.
    */
   readonly orderNoteModalOpen = signal(false);
+
+  /**
+   * CP-POS-SVC-PERF-001 / C.3 — service scheduler state. The cart row's
+   * calendar icon calls `openScheduler(item)`, which sets these signals
+   * to mount `<app-pos-cart-service-scheduler-modal>`. The modal
+   * emits `(scheduled)` so we can stash the booking back on the cart
+   * line — used by the editor to attach `booking?` on Actualizar.
+   */
+  readonly schedulerOpen = signal(false);
+  readonly schedulerTarget = signal<any>(null);
+  readonly schedulerExisting = signal<any>(null);
+  readonly cartBookingsByItemId = signal<Map<string, any>>(new Map());
+
+  openScheduler(item: any): void {
+    this.schedulerTarget.set(item);
+    const existing = this.cartBookingsByItemId().get(item.id);
+    this.schedulerExisting.set(existing ?? null);
+    this.schedulerOpen.set(true);
+  }
+
+  closeScheduler(): void {
+    this.schedulerOpen.set(false);
+    this.schedulerTarget.set(null);
+    this.schedulerExisting.set(null);
+  }
+
+  onScheduled(booking: any): void {
+    const target = this.schedulerTarget();
+    if (!target || !booking) {
+      this.closeScheduler();
+      return;
+    }
+    const next = new Map(this.cartBookingsByItemId());
+    next.set(target.id, booking);
+    this.cartBookingsByItemId.set(next);
+    this.closeScheduler();
+  }
+
+  /**
+   * Read accessor for the template — returns true if a booking is
+   * attached to this cart line (drives the calendar icon's "re-agendar"
+   * copy vs "Agendar").
+   */
+  schedulerFor(itemId: string): any {
+    return this.cartBookingsByItemId().get(itemId);
+  }
 
   /** True when the current cart already carries a staff note (drives the header icon color). */
   readonly hasStaffNote = computed(() => (this.cartState().notes ?? '').length > 0);

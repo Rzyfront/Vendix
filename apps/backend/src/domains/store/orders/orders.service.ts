@@ -2058,9 +2058,21 @@ export class OrdersService {
       // a `bookings` row inside the SAME $transaction that persists the
       // order_item. If the editor fails for any reason afterwards, the
       // rollback discards the booking too — no orphan reservations.
+      //
+      // Hardening (post-C.4 audit): `bookings.customer_id` is NOT NULL in
+      // the schema; an anonymous draft + booking would violate FK.
+      // We reject up-front with 400 POS_BOOKING_REQUIRES_CUSTOMER so the
+      // cashier sees an actionable error, not a 500 from Prisma.
       const itemsWithBooking = dto.items
         .map((item, idx) => ({ item, idx }))
         .filter(({ item }) => item.booking);
+      if (itemsWithBooking.length > 0 && !dto.customer_id) {
+        throw new VendixHttpException(
+          ErrorCodes.POS_BOOKING_REQUIRES_CUSTOMER,
+          'Para agendar un servicio la orden requiere un cliente asignado.',
+          { stage: 'booking_validation' },
+        );
+      }
       if (itemsWithBooking.length > 0) {
         // Re-read order_items to obtain the freshly minted IDs.
         const newItemsForBooking = await tx.order_items.findMany({
@@ -2084,12 +2096,28 @@ export class OrdersService {
           }
           const b = item.booking;
           if (b.booking_id) {
-            // Re-agendamiento: update existing row.
+            // Re-agendamiento: verify ownership (same order, same store)
+            // so a cashier can't edit another tenant's booking by accident.
+            const existing = await tx.bookings.findFirst({
+              where: {
+                id: b.booking_id,
+                order_id: orderId,
+                store_id: storeId,
+              },
+              select: { id: true },
+            });
+            if (!existing) {
+              throw new VendixHttpException(
+                ErrorCodes.POS_BOOKING_NOT_FOUND,
+                `La reserva #${b.booking_id} no pertenece a esta orden.`,
+                { stage: 'booking_update' },
+              );
+            }
             await tx.bookings.update({
               where: { id: b.booking_id },
               data: {
                 provider_id: b.provider_id ?? null,
-                date: b.date ?? undefined,
+                date: b.date ? new Date(b.date) : undefined,
                 start_time: b.start_time ?? undefined,
                 end_time: b.end_time ?? undefined,
                 notes: b.notes ?? undefined,
@@ -2099,12 +2127,18 @@ export class OrdersService {
               },
             });
           } else if (b.date && b.start_time && b.end_time) {
-            // Fresh booking. We use cart_item_id to track the link back
-            // to the cart line for re-agendamiento on a future edit.
+            // Fresh booking. Generate a stable per-day booking_number
+            // so the cashier has a human-readable handle. Mirrors
+            // reservations.service.ts:1559.
+            const booking_number = await this.generateBookingNumberForEditor(
+              tx,
+              storeId,
+              b.date,
+            );
             await tx.bookings.create({
               data: {
                 store_id: storeId,
-                customer_id: dto.customer_id ?? null,
+                customer_id: dto.customer_id!,
                 product_id: item.product_id!,
                 product_variant_id:
                   item.product_id ? item.product_variant_id ?? null : null,
@@ -2118,8 +2152,19 @@ export class OrdersService {
                 service_location_type: b.service_location_type ?? 'shop',
                 channel: 'pos',
                 status: 'confirmed',
+                booking_number,
               },
             });
+          } else {
+            // Booking block present but missing required fields. Reject
+            // explicitly — silent skip would leave a service line
+            // without a reservation, breaking the order detail
+            // "Citas agendadas" section.
+            throw new VendixHttpException(
+              ErrorCodes.POS_BOOKING_INVALID,
+              'El servicio requiere fecha, hora de inicio y hora de fin.',
+              { stage: 'booking_create', product_id: item.product_id },
+            );
           }
         }
       }
@@ -2957,5 +3002,43 @@ export class OrdersService {
       return 'pending_delivery' as order_state_enum;
     }
     return order_state_enum.created;
+  }
+
+  /**
+   * CP-POS-SVC-PERF-001 / C.4 — mirror of
+   * `ReservationsService.generateBookingNumber` (same prefix scheme
+   * `BKG-YYYYMMDD-NNNN`). Implemented locally so OrdersService does not
+   * gain a circular dep on ReservationsService. Accepts a `tx` so the
+   * findFirst runs inside the same transaction the booking is created
+   * in, avoiding a race where two concurrent editor PUTs of the same
+   * date see the same last sequence and produce duplicate numbers.
+   */
+  private async generateBookingNumberForEditor(
+    tx: Prisma.TransactionClient,
+    store_id: number,
+    date: string,
+  ): Promise<string> {
+    const targetDate = new Date(date);
+    const year = targetDate.getUTCFullYear().toString();
+    const month = (targetDate.getUTCMonth() + 1)
+      .toString()
+      .padStart(2, '0');
+    const day = targetDate.getUTCDate().toString().padStart(2, '0');
+    const prefix = `BKG-${year}${month}${day}-`;
+
+    const lastBooking = await tx.bookings.findFirst({
+      where: {
+        store_id,
+        booking_number: { startsWith: prefix },
+      },
+      orderBy: { booking_number: 'desc' },
+    });
+
+    let sequence = 1;
+    if (lastBooking) {
+      const lastSequence = parseInt(lastBooking.booking_number.slice(-4));
+      sequence = lastSequence + 1;
+    }
+    return `${prefix}${sequence.toString().padStart(4, '0')}`;
   }
 }
