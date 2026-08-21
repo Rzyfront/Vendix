@@ -373,7 +373,14 @@ export const selectFiscalStatus = createSelector(
 const VAT_RESPONSIBLE_CODE = 'O-48';
 const VAT_NOT_RESPONSIBLE_CODE = 'O-49';
 
-function resolveIsVatResponsible(fiscalData: any): boolean {
+/**
+ * Resuelve si el comercio es responsable de IVA. Fuente ÚNICA de verdad en
+ * frontend para el predicado. Espejo del helper backend
+ * `apps/backend/src/common/helpers/vat-responsibility.helper.ts` (mismo
+ * algoritmo rama por rama). Exportada para especar — no la invoques fuera
+ * de los selectores de este módulo.
+ */
+export function resolveIsVatResponsible(fiscalData: any): boolean {
   const responsibilities: string[] = Array.isArray(
     fiscalData?.tax_responsibilities,
   )
