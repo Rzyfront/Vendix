@@ -37,6 +37,16 @@ import {
 import { PurchaseOrderStats } from './purchase-order-stats.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { PurchaseOrderPrintService } from '../services/purchase-order-print.service';
+import {
+  PURCHASE_ORDER_SORT_DEFAULT,
+  PURCHASE_ORDER_SORT_OPTIONS,
+  PurchaseOrderSortDir,
+  PurchaseOrderSortKey,
+  buildSortValue,
+  loadSortPreference,
+  parseSortValue,
+  saveSortPreference,
+} from '../utils/purchase-order-sort.util';
 
 @Component({
   selector: 'app-purchase-order-list',
@@ -75,19 +85,15 @@ export class PurchaseOrderListComponent {
 
   /**
    * CP-ID-VNDX-2026-08-18-PO-PROD — F2.S5: ordenamiento con enum cerrado.
-   * Backend ahora rechaza cualquier sort_by fuera del enum. Default = 'next_payment_date'.
+   * Backend rechaza cualquier sort_by fuera del enum.
+   *
+   * El sort ya no es un `<select>` suelto: vive dentro de
+   * `app-options-dropdown` como una FilterConfig más (key `sortBy`, value
+   * compuesto `campo:dirección`) y la elección se cachea en localStorage.
+   * Default = "Más recientes primero" (`order_date:desc`).
    */
-  readonly sortBy = signal<
-    'order_date' | 'next_payment_date' | 'supplier_name' | 'total' | 'status'
-  >('next_payment_date');
-  readonly sortDir = signal<'asc' | 'desc'>('asc');
-  readonly sortOptions = [
-    { value: 'next_payment_date', label: 'Próximo pago (asc)' },
-    { value: 'order_date', label: 'Fecha de orden' },
-    { value: 'supplier_name', label: 'Proveedor' },
-    { value: 'total', label: 'Total' },
-    { value: 'status', label: 'Estado' },
-  ] as const;
+  readonly sortBy = signal<PurchaseOrderSortKey>('order_date');
+  readonly sortDir = signal<PurchaseOrderSortDir>('desc');
 
   // Filter state
   searchTerm = '';
@@ -107,6 +113,17 @@ export class PurchaseOrderListComponent {
         { value: 'received', label: 'Recibida' },
         { value: 'cancelled', label: 'Cancelada' },
       ],
+    },
+    // El orden es un filtro más del dropdown. `defaultValue` es lo que el
+    // padre restaura cuando el usuario pulsa "Limpiar" — nunca queda en null,
+    // porque el listado siempre necesita un criterio de orden válido.
+    {
+      key: 'sortBy',
+      label: 'Ordenar por',
+      type: 'select',
+      options: [...PURCHASE_ORDER_SORT_OPTIONS],
+      placeholder: 'Más recientes primero',
+      defaultValue: PURCHASE_ORDER_SORT_DEFAULT,
     },
   ];
 
@@ -283,8 +300,28 @@ export class PurchaseOrderListComponent {
     private dialogService: DialogService,
     private toastService: ToastService,
   ) {
+    // Hidratar el orden desde el caché del cliente ANTES del primer load, para
+    // no disparar dos peticiones (una con el default y otra con la preferencia).
+    this.applySortValue(loadSortPreference() ?? PURCHASE_ORDER_SORT_DEFAULT);
     this.loadOrders();
     this.loadSuppliers();
+  }
+
+  /**
+   * Sincroniza signals + `filterValues` a partir del value compuesto del
+   * dropdown. Un value inválido cae al default dentro de `parseSortValue`,
+   * así que el query param que sale de aquí siempre respeta el enum cerrado.
+   */
+  private applySortValue(value: string | null | undefined): void {
+    const { sortBy, sortDir } = parseSortValue(value);
+    this.sortBy.set(sortBy);
+    this.sortDir.set(sortDir);
+    // Reasignar el objeto (no mutarlo) para que el input signal del
+    // options-dropdown vea el cambio y repinte el selector.
+    this.filterValues = {
+      ...this.filterValues,
+      sortBy: buildSortValue(sortBy, sortDir),
+    };
   }
 
   // Load orders with current filters
@@ -419,6 +456,17 @@ export class PurchaseOrderListComponent {
   onFilterChange(values: FilterValues): void {
     this.filterValues = values;
     this.selectedStatus = (values['status'] as string) || '';
+
+    // El sort viaja como un filtro más. "Limpiar" individual lo deja en null,
+    // por eso se cae al default en vez de mandar un sort_by vacío al backend.
+    const nextSort = (values['sortBy'] as string) || PURCHASE_ORDER_SORT_DEFAULT;
+    const previousSort = buildSortValue(this.sortBy(), this.sortDir());
+    this.applySortValue(nextSort);
+    const appliedSort = buildSortValue(this.sortBy(), this.sortDir());
+    if (appliedSort !== previousSort) {
+      saveSortPreference(appliedSort);
+    }
+
     this.filters.page = 1;
     this.loadOrders();
   }
@@ -427,6 +475,10 @@ export class PurchaseOrderListComponent {
     this.searchTerm = '';
     this.selectedStatus = '';
     this.filterValues = {};
+    // El listado no puede quedarse sin criterio de orden: "Limpiar" restaura
+    // el default declarado en la FilterConfig y lo persiste como preferencia.
+    this.applySortValue(PURCHASE_ORDER_SORT_DEFAULT);
+    saveSortPreference(PURCHASE_ORDER_SORT_DEFAULT);
     this.filters.page = 1;
     this.loadOrders();
   }
@@ -439,23 +491,14 @@ export class PurchaseOrderListComponent {
     }
   }
 
-  // Check if there are active filters
+  /**
+   * `hasFilters` gobierna el empty-state y el botón "Limpiar filtros". El sort
+   * queda deliberadamente FUERA: siempre tiene valor, y contarlo haría que la
+   * lista vacía dijera siempre "ajusta tus filtros" aunque no hubiera ninguno.
+   */
   get hasFilters(): boolean {
     return !!(this.searchTerm || this.selectedStatus);
   }
-
-  /**
-   * CP-ID-VNDX-2026-08-18-PO-PROD — F2.S5: handler del sort select.
-   * Resets page=1 al cambiar el criterio.
-   */
-  onSortChange(value: string): void {
-    if (this.sortOptions.some((o) => o.value === value)) {
-      this.sortBy.set(value as any);
-      this.filters.page = 1;
-      this.refresh.emit();
-    }
-  }
-
 
   // Get empty state title based on filters
   getEmptyStateTitle(): string {
