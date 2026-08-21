@@ -49,8 +49,8 @@ import { PosFiscalStatus } from '../services/pos-fiscal.service';
       [isOpen]="isOpen()"
       [size]="'md'"
       [showCloseButton]="true"
-      [title]="derivedIsPaid() ? '¡Venta Completada!' : '¡Orden Guardada!'"
-      [subtitle]="(derivedIsPaid() ? 'Orden #' : 'Borrador #') + derivedOrderNumber() + (derivedIsPaid() ? ' procesada exitosamente' : ' guardado. Puedes volver a modificarla antes de cobrar.')"
+      [title]="derivedModalTitle()"
+      [subtitle]="derivedModalSubtitle()"
       (closed)="onModalClosed()"
       >
       <div slot="header"
@@ -418,13 +418,37 @@ export class PosOrderConfirmationComponent {
   // the confirmation modal copy so the cashier doesn't read a draft save
   // as a fiscal sale. Draft = state in ['draft', 'created'] with no
   // payment row; anything else with a payment row is a sale.
+  readonly derivedIsShippingSale = computed(
+    () => !!this.orderData()?.isShippingSale,
+  );
   readonly derivedIsPaid = computed(() => {
     const d = this.orderData();
     if (!d) return false;
     const state = (d.state || '').toString();
     const hasPayments =
       Array.isArray(d.payments) && d.payments.length > 0;
-    return state === 'finished' || state === 'processing' || hasPayments;
+    return (
+      state === 'finished' || state === 'processing' || hasPayments ||
+      this.derivedIsShippingSale()
+    );
+  });
+  readonly derivedModalTitle = computed(() => {
+    if (this.derivedIsShippingSale()) return '¡Pedido con Envío!';
+    return this.derivedIsPaid()
+      ? '¡Venta Completada!'
+      : '¡Orden Guardada!';
+  });
+  readonly derivedModalSubtitle = computed(() => {
+    if (this.derivedIsShippingSale()) {
+      return `Pedido #${this.derivedOrderNumber()} registrado con envío a domicilio. Listo para despacho.`;
+    }
+    return (
+      (this.derivedIsPaid() ? 'Orden #' : 'Borrador #') +
+      this.derivedOrderNumber() +
+      (this.derivedIsPaid()
+        ? ' procesada exitosamente'
+        : ' guardado. Puedes volver a modificarla antes de cobrar.')
+    );
   });
   readonly derivedCurrentDate = computed(() => {
     const d = this.orderData();
