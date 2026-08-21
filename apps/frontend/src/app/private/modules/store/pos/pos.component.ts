@@ -2301,6 +2301,16 @@ export class PosComponent {
     if (paymentData.success) {
       this.currentOrderId.set(paymentData.order?.id);
       this.currentOrderNumber.set(paymentData.order?.order_number);
+      // CP-POS-SVC-PERF-001 / Annotation-4 + HU-B second half — the unified
+      // shell route (Cobrar in mode='cobrar' or the post-Actualizar flip in
+      // mode='edit') reaches this branch after flow/pay. Pending booking
+      // blocks attached during the wizard still sit in cartBookingsFromChild
+      // and need to land on the paid order — `force` ignores the toggle so
+      // toggle-OFF stores still get the booking on the Cobrar path.
+      this.firePendingBookingsAfterDraft(
+        Number(paymentData.order?.id ?? this.currentOrderId()),
+        { force: true },
+      );
       // Plan KDS fire-flows (F2): the backend auto-fires `prepared`
       // items inside the payment $transaction for restaurant stores,
       // so the fire from the frontend is no longer needed (and was a
