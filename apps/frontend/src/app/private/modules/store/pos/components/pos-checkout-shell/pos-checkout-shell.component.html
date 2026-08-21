@@ -79,7 +79,7 @@
               [isAnonymous]="isAnonymousSale()"
               [paymentMethods]="paymentMethods()"
               [isProcessing]="isProcessing()"
-              [autoExecute]="checkoutIntent() === 'pickup'"
+              [autoExecute]="mode() !== 'create-draft' && !suppressAutoExecute() && checkoutIntent() === 'pickup'"
               [amountOverride]="deliveryAmount()"
               (paymentCompleted)="onCheckoutCompleted($event)"
               (paymentReady)="onPaymentReady($event)"

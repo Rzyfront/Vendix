@@ -97,6 +97,18 @@ export class PosCheckoutShellComponent {
   readonly mode = input<'create-draft' | 'edit' | 'create-payment'>(
     'create-draft',
   );
+
+  /**
+   * CP-POS-MODAL-SCOPE-001 / Phase F.10 — the effective mode the shell acts
+   * on. When the post-edit transition is active (parent sent `mode='edit'`
+   * and the cashier successfully PUT /editor'd), this returns
+   * `'create-payment'` so the primary CTA relabels to "Cobrar" and
+   * onPrimaryConfirm routes through the collector (POST flow/pay). All
+   * routing logic reads this instead of `mode()` directly.
+   */
+  readonly effectiveMode = computed<'create-draft' | 'edit' | 'create-payment'>(
+    () => (this.postEditPaymentMode() ? 'create-payment' : this.mode()),
+  );
   /** Set when `mode='edit'`; identifies the order being updated. */
   readonly editingOrderId = input<number | null>(null);
 
@@ -333,7 +345,7 @@ export class PosCheckoutShellComponent {
     // only the Cliente step. There is no Cobro step in the create-draft
     // flow because the order has not been saved yet and there is nothing
     // to charge. The cashier exits via `Guardar borrador`.
-    if (this.mode() === 'create-draft') {
+    if (this.effectiveMode() === 'create-draft') {
       return [{ label: 'Cliente' }];
     }
     if (this.checkoutIntent() === 'delivery') {
@@ -355,7 +367,7 @@ export class PosCheckoutShellComponent {
    *  como índice, así que una discrepancia desalinea la UI del cuerpo activo. */
   readonly stepKeys = computed<string[]>(() => {
     // CP-POS-MODAL-SCOPE-001 / Phase A.1 — same scoping as `steps()`.
-    if (this.mode() === 'create-draft') {
+    if (this.effectiveMode() === 'create-draft') {
       return ['cliente'];
     }
     if (this.checkoutIntent() === 'delivery') {
@@ -533,6 +545,27 @@ export class PosCheckoutShellComponent {
   // ── Draft-order (Guardar borrador) submission state ──────────────────────
   readonly submittingDraft = signal(false);
 
+  /**
+   * CP-POS-MODAL-SCOPE-001 / Phase F.10 — `mode` is an `input()` (parent-driven)
+   * so we cannot `set()` it. After a successful PUT /editor in mode='edit'
+   * we want the same shell to switch into payment-collection mode (CTA
+   * "Cobrar", POST flow/pay). This internal boolean mirrors the
+   * `mode` input and overrides it for routing/label/autoExecute decisions
+   * without forcing the parent to re-bind the input.
+   */
+  readonly postEditPaymentMode = signal<boolean>(false);
+
+  /**
+   * CP-POS-MODAL-SCOPE-001 / Phase F.10 — when `mode` flips from 'edit' to
+   * 'create-payment' after a successful PUT /editor, the Cobro step mounts
+   * and `autoExecute=true` would fire the collector immediately with no
+   * payment method / amount selected (silent fail). Set this flag in the
+   * mode-flip path so autoExecute waits for the cashier to actually pick a
+   * method. Cleared the next time the shell opens in mode='create-payment'
+   * from a fresh entry (reset by the constructor-effect on `mode` change).
+   */
+  readonly suppressAutoExecute = signal(false);
+
   // ── Mobile summary accordion (Resumen colapsable, solo <767px) ───────────
   /** Collapsed by default on mobile; the header chip covers the total. Has
    *  no visual effect on desktop — the CSS collapse rule only applies inside
@@ -560,7 +593,7 @@ export class PosCheckoutShellComponent {
     //   - if `pos.allow_anonymous_sales=false`, customer is required
     //   - if true, customer is optional; the shell still needs *some* customer
     //     OR explicit `isAnonymousSale=true` to honor the policy
-    if (this.mode() === 'create-draft') {
+    if (this.effectiveMode() === 'create-draft') {
       const state = this.cartState();
       if (!state || !(state.items?.length ?? 0)) return true;
       if (this.isAnonymousSale()) return false;
@@ -595,8 +628,8 @@ export class PosCheckoutShellComponent {
     // - create-draft → "Guardar" (saves draft, no payment)
     // - edit         → "Actualizar" (PUT /editor)
     // - create-payment / delivery / pickup → existing copy
-    if (this.mode() === 'create-draft') return 'Guardar';
-    if (this.mode() === 'edit') return 'Actualizar';
+    if (this.effectiveMode() === 'create-draft') return 'Guardar';
+    if (this.effectiveMode() === 'edit') return 'Actualizar';
     if (this.checkoutIntent() === 'delivery') return 'Finalizar venta';
     const step = this.paymentStep();
     if (!step) return 'Confirmar Pago';
@@ -694,6 +727,13 @@ export class PosCheckoutShellComponent {
       untracked(() => {
         this.currentStep.set(0);
         this.clienteSubStep.set(0);
+        // CP-POS-MODAL-SCOPE-001 / Phase F.10 — clear the post-edit autoExecute
+        // suppress + the internal post-edit payment flag when the parent
+        // re-opens the shell with a (possibly different) mode, so the NEXT open
+        // in mode='create-payment' (fresh sale, not post-edit) keeps the
+        // original auto-fire behaviour.
+        this.suppressAutoExecute.set(false);
+        this.postEditPaymentMode.set(false);
       });
     });
 
@@ -764,6 +804,12 @@ export class PosCheckoutShellComponent {
     this.showAddressErrors.set(false);
     this.showCustomerError.set(false);
     this.submittingDraft.set(false);
+    // CP-POS-MODAL-SCOPE-001 / Phase F.10 — drop the post-edit payment mode
+    // override after a successful finalization so the NEXT sale starts in
+    // whatever mode the parent binds (not stuck in the implicit 'create-payment'
+    // from the previous edit-then-cobrar transition).
+    this.postEditPaymentMode.set(false);
+    this.suppressAutoExecute.set(false);
     this.syncAnonymousSaleState();
     // Remount the projected content so the child components (collector,
     // shipping-step, consumo-step) drop their internal state for the next sale.
@@ -919,7 +965,7 @@ export class PosCheckoutShellComponent {
    * migrated.
    */
   onPrimaryConfirm(): void {
-    const mode = this.mode();
+    const mode = this.effectiveMode();
     if (mode === 'create-draft') {
       this.onSaveDraft();
       return;
@@ -1017,7 +1063,21 @@ export class PosCheckoutShellComponent {
           this.submittingDraft.set(false);
           this.editorUpdated.emit(order);
           this.toastService.success('Orden actualizada correctamente');
-          this.isOpenChange.emit(false);
+          // CP-POS-MODAL-SCOPE-001 / Phase F.10 — after a successful PUT /editor
+          // the cashier must be able to Cobrar without leaving the shell. Flip
+          // the mode so the primary CTA relabels from "Actualizar" to "Cobrar"
+          // and onPrimaryConfirm routes through the payment-step collector
+          // (POST flow/pay) instead of running PUT /editor again. The shell
+          // stays open; resetState / close happens after the actual pay.
+          // Note: setting `mode` triggers an effect that resets currentStep to
+          // 0; queueing the step-jump in a microtask runs it AFTER the effect
+          // so the cashier lands on the Cobro step (not back at Cliente).
+          this.postEditPaymentMode.set(true);
+          this.suppressAutoExecute.set(true);
+          queueMicrotask(() => {
+            const idx = this.stepKeys().indexOf('cobro');
+            if (idx >= 0) this.currentStep.set(idx);
+          });
         },
         error: (err: any) => {
           // Always reset the loading guard so the cashier is not stranded on
