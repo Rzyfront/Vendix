@@ -6,7 +6,6 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { AnalyticsService } from '../../services/analytics.service';
@@ -18,7 +17,9 @@ import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.
 import {
   OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import {
-  DropdownAction } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+  DropdownAction,
+  FilterConfig,
+  FilterValues } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   SalesByCustomer,
   SalesAnalyticsQueryDto} from '../../interfaces/sales-analytics.interface';
@@ -35,10 +36,9 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
     ChartComponent,
     StatsComponent,
     IconComponent,
-    DateRangeFilterComponent,
     ExportButtonComponent,
     AnalyticsCardComponent,
-  
+
     OptionsDropdownComponent,],
   styles: [
     `
@@ -97,17 +97,18 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
           <span class="results-header__title text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight whitespace-nowrap">Ventas por Cliente</span>
         </div>
         <div class="flex items-end gap-2 flex-wrap shrink-0">
-        <vendix-date-range-filter
-                    [value]="dateRange()"
-                    (valueChange)="onDateRangeChange($event)"
-                  ></vendix-date-range-filter>
-                  <app-options-dropdown
-                    [filters]="[]"
+        <app-options-dropdown
+                    class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                    [filters]="filterConfigs()"
+                    [filterValues]="dropdownFilterValues()"
                     [actions]="dropdownActions()"
                     [showActions]="true"
                     triggerLabel="Acciones"
                     triggerIcon="plus"
+                    [debounceMs]="350"
                     [isLoading]="exporting()"
+                    (filterChange)="onFiltersDropdownChange($event)"
+                    (clearAllFilters)="onClearAllFilters()"
                     (actionClick)="onActionsDropdownClick($event)"
                   ></app-options-dropdown>
         </div>
@@ -186,14 +187,79 @@ export class SalesByCustomerComponent implements OnInit {
     this.currencyService.loadCurrency();
 
     const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
-    if (urlRange) {
-      this.dateRange.set(urlRange);
-    }
+    const initial: DateRangeFilter = urlRange ?? {
+      start_date: getDefaultStartDate(),
+      end_date: getDefaultEndDate(),
+      preset: 'thisMonth',
+    };
+    this.dateRange.set(initial);
+    this.dropdownFilterValues.set({
+      date_range_start: initial.start_date,
+      date_range_end: initial.end_date,
+      date_range_preset: initial.preset,
+    });
 
     this.loadChartData();
   }
-onDateRangeChange(range: DateRangeFilter): void {
-    this.dateRange.set(range);
+
+  /**
+   * Filters surfaced via the unified `<app-options-dropdown>`.
+   * Always starts with `date-range` (Período) and grows from there.
+   */
+  readonly filterConfigs = computed<FilterConfig[]>(() => [
+    { key: 'date_range', type: 'date-range', label: 'Período' },
+  ]);
+
+  /**
+   * Mirror state exposed back to the dropdown so its internal `localFilterValues`
+   * stays in sync with the canonical `dateRange` signal — including resets.
+   */
+  readonly dropdownFilterValues = signal<FilterValues>({});
+
+  onFiltersDropdownChange(values: FilterValues): void {
+    const start = values['date_range_start'] as string | null;
+    const end = values['date_range_end'] as string | null;
+    const preset = values['date_range_preset'] as string | null;
+    if (!start || !end) {
+      return;
+    }
+
+    const next: DateRangeFilter = {
+      start_date: start,
+      end_date: end,
+      preset: (preset || 'custom') as DateRangeFilter['preset'],
+    };
+
+    const current = this.dateRange();
+    if (
+      next.start_date === current.start_date &&
+      next.end_date === current.end_date &&
+      next.preset === current.preset
+    ) {
+      return;
+    }
+
+    this.dateRange.set(next);
+    this.dropdownFilterValues.set({
+      date_range_start: next.start_date,
+      date_range_end: next.end_date,
+      date_range_preset: next.preset,
+    });
+    this.loadChartData();
+  }
+
+  onClearAllFilters(): void {
+    const defaults: DateRangeFilter = {
+      start_date: getDefaultStartDate(),
+      end_date: getDefaultEndDate(),
+      preset: 'thisMonth',
+    };
+    this.dateRange.set(defaults);
+    this.dropdownFilterValues.set({
+      date_range_start: defaults.start_date,
+      date_range_end: defaults.end_date,
+      date_range_preset: defaults.preset,
+    });
     this.loadChartData();
   }
 
