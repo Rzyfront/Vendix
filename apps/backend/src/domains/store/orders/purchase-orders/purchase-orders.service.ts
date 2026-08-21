@@ -4452,7 +4452,17 @@ export class PurchaseOrdersService {
       });
     }
 
-    return { costing_method: toPublicCostingMethod(costingMethod), items };
+    // `vat_responsible` viaja al frontend porque sin él la vista previa no
+    // puede explicar su propio número: con responsabilidad de IVA el costo que
+    // entra a inventario es el NETO y el IVA es descontable (240804), mientras
+    // que sin ella el IVA ya está capitalizado DENTRO de `new_cost_per_unit`.
+    // Es la misma cifra en pantalla con dos significados opuestos, y el operador
+    // calcula su margen sobre ella.
+    return {
+      costing_method: toPublicCostingMethod(costingMethod),
+      vat_responsible: vatResponsible,
+      items,
+    };
   }
 
   /**

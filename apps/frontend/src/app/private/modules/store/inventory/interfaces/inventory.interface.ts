@@ -752,10 +752,44 @@ export interface CostPreviewItem {
    * colliding with a real product.
    */
   is_new_product?: boolean;
+  /**
+   * Desglose de IVA de la línea entrante, emitido por el backend con la misma
+   * derivación que persiste la recepción (`deriveLineTax`).
+   *
+   * Sirve para contrastar el costo que entra a inventario contra lo que
+   * realmente se desembolsa. Cuidado al usarlos: si la organización NO es
+   * responsable de IVA, el impuesto YA está sumado dentro de
+   * `new_cost_per_unit`, y volver a sumarlo lo contaría dos veces. La bandera
+   * que resuelve cuál de los dos casos aplica es `vat_responsible`, en la
+   * respuesta.
+   */
+  incoming_tax_per_unit?: number;
+  incoming_tax_amount?: number;
+  /** Bruto de la línea tal como se tecleó, antes del split de IVA. */
+  incoming_gross_cost?: number;
+  /** Neto unitario tras descuento — la base sobre la que se derivó el IVA. */
+  unit_price_net?: number;
+  /** Modo resuelto de la línea: si el precio tecleado ya traía el IVA dentro. */
+  effective_include?: boolean;
 }
 
 export interface CostPreviewResponse {
   costing_method: 'cpp' | 'fifo';
+  /**
+   * Si la organización es responsable de IVA. Cambia el SIGNIFICADO de
+   * `new_cost_per_unit`, no solo su valor:
+   *
+   * - `true`  → el costo es el NETO; el IVA es descontable (240804) y vuelve
+   *             vía la declaración, así que no es costo y el margen se calcula
+   *             sobre esta cifra.
+   * - `false` → el IVA ya está CAPITALIZADO dentro del costo, porque sin
+   *             responsabilidad no hay a quién descontárselo.
+   *
+   * Sin este dato la vista no puede explicar su propio número, y el operador
+   * calcula su margen sobre él. Opcional porque las filas de producto nuevo se
+   * sintetizan en el cliente.
+   */
+  vat_responsible?: boolean;
   items: CostPreviewItem[];
 }
 

@@ -99,6 +99,55 @@ export class PopReceiveStepComponent {
     return group;
   }
 
+  /**
+   * IVA por unidad de la línea, o 0 si la compra no lleva impuesto.
+   *
+   * Se lee del preview, que lo derivó con la misma fórmula que persiste el
+   * backend — no se recalcula aquí para que la pantalla no pueda discrepar de
+   * lo que se sella.
+   */
+  taxPerUnit(item: CostPreviewItem): number {
+    return Number(item.incoming_tax_per_unit ?? 0) || 0;
+  }
+
+  /**
+   * Lo que realmente sale del bolsillo por unidad, o `null` si no se puede
+   * afirmar.
+   *
+   * Con responsabilidad de IVA el costo de inventario es el neto y el impuesto
+   * se recupera vía IVA descontable, así que desembolso y costo son cifras
+   * distintas y conviene ver las dos: el margen se calcula sobre el costo, pero
+   * la caja se mueve por el desembolso. Sin responsabilidad el IVA ya está
+   * dentro del costo y ambas coinciden — sumarlo ahí lo contaría dos veces.
+   *
+   * Cuando el backend no informa la responsabilidad (filas de producto nuevo,
+   * sintetizadas en el cliente) devuelve `null` y la fila no se pinta: mostrar
+   * una cifra adivinada sobre la que el operador calcula su margen es peor que
+   * no mostrar ninguna.
+   */
+  disbursementPerUnit(item: CostPreviewItem): number | null {
+    const responsible = this.costPreview()?.vat_responsible;
+    if (responsible === undefined) return null;
+    const cost = Number(item.new_cost_per_unit) || 0;
+    return responsible ? cost + this.taxPerUnit(item) : cost;
+  }
+
+  /** True cuando la línea trae IVA y se sabe cómo tratarlo. */
+  hasTax(item: CostPreviewItem): boolean {
+    return (
+      this.taxPerUnit(item) > 0 &&
+      this.costPreview()?.vat_responsible !== undefined
+    );
+  }
+
+  /**
+   * Responsabilidad de IVA resuelta por el backend. `undefined` significa
+   * "no informado", no "no responsable" — ver `disbursementPerUnit`.
+   */
+  vatResponsible(): boolean | undefined {
+    return this.costPreview()?.vat_responsible;
+  }
+
   /** Accesores tipados para el template (strictTemplates: `controls[...]` es AbstractControl). */
   marginControl(item: CostPreviewItem): FormControl<string> {
     return this.rowForm(item).controls['margin'] as FormControl<string>;
