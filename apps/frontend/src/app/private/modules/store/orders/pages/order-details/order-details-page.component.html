@@ -469,7 +469,7 @@
                         <span class="font-medium text-sm truncate">
                           {{ booking.product?.name || 'Servicio' }}
                           @if (booking.product_variants?.name) {
-                            <span class="text-gray-500">· {{ booking.product_variants.name }}</span>
+                            <span class="text-gray-500">· {{ booking.product_variants?.name }}</span>
                           }
                         </span>
                       </div>
@@ -499,7 +499,7 @@
                           <app-icon name="user" [size]="12"></app-icon>
                           {{
                             booking.provider?.employee?.first_name
-                              ? booking.provider.employee.first_name + ' ' + (booking.provider.employee.last_name || '')
+                              ? ((booking.provider?.employee?.first_name || '') + ' ' + (booking.provider?.employee?.last_name || ''))
                               : booking.provider?.display_name
                           }}
                         </span>

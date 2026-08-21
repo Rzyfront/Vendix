@@ -61,7 +61,7 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
             <select
               class="flex-1 px-3 py-2 rounded-md border border-border bg-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary"
               [(ngModel)]="providerIdText"
-              (change)="onProviderChange($event.target.value)"
+              (change)="onProviderChange($any($event.target).value)"
               aria-label="Seleccionar personal"
             >
               <option value="">Sin personal (default ahora)</option>
@@ -121,7 +121,7 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
             step="300"
           />
 
-          @if (providerId() === null && date === today()) {
+          @if (providerId() === null && date() === today()) {
             <p class="text-[11px] text-violet-700">
               Sin personal y día = hoy → el default es la hora actual
               redondeada al próximo cuarto + duración del servicio.

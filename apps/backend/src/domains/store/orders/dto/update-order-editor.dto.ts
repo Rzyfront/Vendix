@@ -18,6 +18,69 @@ import { Type, Transform } from 'class-transformer';
 import { order_delivery_type_enum } from '@prisma/client';
 
 /**
+ * CP-POS-SVC-PERF-001 / C.4 — atomic booking sub-DTO. Attached to a
+ * `UpdateOrderEditorItemDto` when the item is a service and the cashier
+ * is scheduling it in the same atomic edit that persists the line.
+ *
+ * If `booking_id` is provided and matches an existing row, the row is
+ * UPDATED (re-agendamiento). Otherwise a fresh `bookings` row is created
+ * and linked to the just-persisted `order_items.id`.
+ *
+ * Either `provider_id` is set (specific staff) or omitted (cashier chose
+ * "Sin personal"). The backend never blocks on the absence.
+ *
+ * Must be declared BEFORE `UpdateOrderEditorItemDto` because swc evaluates
+ * the file top-to-bottom at runtime and the `@Type(() => ...)` decorator
+ * on `UpdateOrderEditorItemDto.booking` needs the class to be initialized.
+ * TypeScript allows forward references in type position, but swc at runtime
+ * does not — moving it here fixes the `Cannot access
+ * 'UpdateOrderEditorItemBookingDto' before initialization` boot crash.
+ */
+export class UpdateOrderEditorItemBookingDto {
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  booking_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  provider_id?: number | null;
+
+  /** ISO date YYYY-MM-DD. Required for new bookings. */
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'date debe tener formato YYYY-MM-DD',
+  })
+  date?: string;
+
+  /** "HH:mm". Required for new bookings. */
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{2}:\d{2}$/, {
+    message: 'start_time debe tener formato HH:mm',
+  })
+  start_time?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{2}:\d{2}$/, {
+    message: 'end_time debe tener formato HH:mm',
+  })
+  end_time?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
+
+  @IsOptional()
+  @IsIn(['shop', 'home'])
+  service_location_type?: 'shop' | 'home';
+}
+
+/**
  * CP-POS-CREAR-EDITAR-COBRAR-001 — C.1 · UpdateOrderEditorItemDto
  *
  * Subset estricto del editor. El backend rechaza CUALQUIER campo que no esté
@@ -341,60 +404,4 @@ export class UpdateOrderEditorDto {
   @IsString()
   @MaxLength(64)
   idempotency_key?: string;
-}
-
-/**
- * CP-POS-SVC-PERF-001 / C.4 — atomic booking sub-DTO. Attached to a
- * `UpdateOrderEditorItemDto` when the item is a service and the cashier
- * is scheduling it in the same atomic edit that persists the line.
- *
- * If `booking_id` is provided and matches an existing row, the row is
- * UPDATED (re-agendamiento). Otherwise a fresh `bookings` row is created
- * and linked to the just-persisted `order_items.id`.
- *
- * Either `provider_id` is set (specific staff) or omitted (cashier chose
- * "Sin personal"). The backend never blocks on the absence.
- */
-export class UpdateOrderEditorItemBookingDto {
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  booking_id?: number;
-
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  provider_id?: number | null;
-
-  /** ISO date YYYY-MM-DD. Required for new bookings. */
-  @IsOptional()
-  @IsString()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
-    message: 'date debe tener formato YYYY-MM-DD',
-  })
-  date?: string;
-
-  /** "HH:mm". Required for new bookings. */
-  @IsOptional()
-  @IsString()
-  @Matches(/^\d{2}:\d{2}$/, {
-    message: 'start_time debe tener formato HH:mm',
-  })
-  start_time?: string;
-
-  @IsOptional()
-  @IsString()
-  @Matches(/^\d{2}:\d{2}$/, {
-    message: 'end_time debe tener formato HH:mm',
-  })
-  end_time?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(500)
-  notes?: string;
-
-  @IsOptional()
-  @IsIn(['shop', 'home'])
-  service_location_type?: 'shop' | 'home';
 }

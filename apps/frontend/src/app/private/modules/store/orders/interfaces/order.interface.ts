@@ -658,6 +658,13 @@ export interface OrderFlowMetadata {
   cancellation_reason?: string;
   refund_reason?: string;
   refund_amount?: number;
+  /**
+   * Optional structured representation of the staff-only internal note.
+   * When present, the order-details page suppresses the plain-text
+   * `internal_notes` block to avoid duplication. Stored as JSON
+   * (e.g. an array of `{ key, value }` pairs).
+   */
+  internal_notes_as_json?: unknown;
 }
 
 // ── Order Detail UI Types ──────────────────────────────────────
