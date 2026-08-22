@@ -3955,8 +3955,55 @@ export class ProductsService {
         (p) => p.state === ProductState.ARCHIVED,
       ).length;
 
+      /**
+       * CP-PURCHASE-TRANSPARENCY D.3 — el universo de las cifras AGREGADAS.
+       *
+       * `total_products` ya sumaba sólo activos + inactivos, pero las cuatro
+       * cifras de abajo barrían `products` entero: un producto archivado con
+       * 20.000 unidades fantasma seguía aportando su valor al panel y contando
+       * como «sin stock» o «bajo mínimo». D.2 ya lo sacó del motor de costeo;
+       * esto cierra la otra mitad, la que el operador LEE.
+       *
+       * El criterio es de AGREGADO, no de visibilidad. Las lecturas de
+       * DETALLE quedan intactas: `findAll({ state: 'archived' })` sigue
+       * devolviendo el archivado con su existencia, y `previewArchiveWriteOff`
+       * sigue detallando lo que el castigo destruye. `archived_products` los
+       * sigue contando. Lo único que desaparece es su aporte a un total que
+       * afirma cuánto inventario tiene el negocio.
+       */
+      const aggregate_universe = products.filter(
+        (p) => p.state !== ProductState.ARCHIVED,
+      );
+
+      /**
+       * D.3 — lo que sale del total, con nombre propio.
+       *
+       * Restar sin decir cuánto se restó es la otra forma de mentir: en
+       * producción hay organizaciones donde lo archivado es el 95 % del valor
+       * mostrado, y tres donde es el 100 %. Que el panel pase a cero de un día
+       * para otro SIN una cifra que explique a dónde se fue se lee como
+       * pérdida de inventario.
+       *
+       * Estos dos campos no los pinta nadie todavía; existen para que el
+       * frontend pueda sacar la línea «Valor en productos archivados» en un
+       * commit posterior sin volver a tocar el backend. Son ADITIVOS: ningún
+       * consumidor actual los lee, así que no rompen nada.
+       */
+      const archived_universe = products.filter(
+        (p) => p.state === ProductState.ARCHIVED,
+      );
+      const archived_stock_units = archived_universe.reduce(
+        (sum, product) => sum + Number(product.stock_quantity ?? 0),
+        0,
+      );
+      const archived_stock_value = archived_universe.reduce(
+        (sum, product) =>
+          sum + product.base_price * Number(product.stock_quantity ?? 0),
+        0,
+      );
+
       // Stock calculations (simplified - using stock_quantity field)
-      const low_stock_products = products.filter((p) => {
+      const low_stock_products = aggregate_universe.filter((p) => {
         const stockQuantity = Number(p.stock_quantity ?? 0);
         return (
           p.stock_quantity !== null &&
@@ -3966,7 +4013,7 @@ export class ProductsService {
         );
       }).length;
 
-      const out_of_stock_products = products.filter(
+      const out_of_stock_products = aggregate_universe.filter(
         (p) =>
           p.stock_quantity !== null &&
           p.stock_quantity !== undefined &&
@@ -3974,12 +4021,12 @@ export class ProductsService {
       ).length;
 
       // Products without images
-      const products_without_images = products.filter(
+      const products_without_images = aggregate_universe.filter(
         (p) => !p.product_images || p.product_images.length === 0,
       ).length;
 
       // Total value (sum of base_price * stock_quantity)
-      const total_value = products.reduce((sum, product) => {
+      const total_value = aggregate_universe.reduce((sum, product) => {
         const stock = product.stock_quantity || 0;
         return sum + product.base_price * stock;
       }, 0);
@@ -4013,6 +4060,9 @@ export class ProductsService {
         total_value,
         categories_count,
         brands_count,
+        /** D.3 — el valor que `total_value` ya NO incluye, para poder mostrarlo aparte. */
+        archived_stock_value,
+        archived_stock_units,
       };
     } catch (error) {
       throw new BadRequestException(

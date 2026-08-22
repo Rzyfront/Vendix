@@ -13,6 +13,24 @@ import {
   CostCoverage,
   buildCostCoverage,
 } from '../../../store/analytics/analytics-metrics.contract';
+import {
+  ACTIVE_PRODUCT_RELATION_FILTER,
+  ARCHIVED_PRODUCT_STATE,
+} from '../../../store/inventory/shared/services/costing.service';
+
+/**
+ * El COMPLEMENTO EXACTO de {@link ACTIVE_PRODUCT_RELATION_FILTER}: lo que el
+ * filtro del universo deja fuera. `products.state` no es nullable, así que la
+ * negación de `{ not: archived }` es exactamente `archived` — las dos mitades
+ * cubren todas las filas y no se solapan, que es lo que permite afirmar
+ * «activo + archivado = el total de antes».
+ *
+ * Nombre de la relación verificado en `schema.prisma`: `stock_levels` e
+ * `inventory_cost_layers` la declaran `products` (plural).
+ */
+const ARCHIVED_PRODUCT_RELATION_FILTER = {
+  products: { state: ARCHIVED_PRODUCT_STATE },
+} as const;
 
 /**
  * Reportes de inventario consolidados para ORG_ADMIN.
@@ -24,6 +42,32 @@ import {
  * NOTA importante: `stock_levels` no tiene `organization_id`/`store_id`
  * directamente — la tenancy se hereda vía `inventory_locations`. Por eso
  * todas las queries filtran por `location.organization_id`/`location.store_id`.
+ *
+ * CP-PURCHASE-TRANSPARENCY D.3 — EL UNIVERSO EXCLUYE ARCHIVADOS
+ * -------------------------------------------------------------
+ * Las SEIS lecturas agregadas de este servicio (resumen, por tienda, bajo
+ * stock, cobertura, valuación CPP y valuación FIFO) llevan
+ * {@link ACTIVE_PRODUCT_RELATION_FILTER}. Archivar un producto nunca borró sus
+ * filas de `stock_levels`, así que esas unidades seguían sumando aquí como si
+ * fueran existencia real: medido en desarrollo, 2.333.553 de valor en 50 filas
+ * sobre 25 productos archivados de la organización 6.
+ *
+ * Es el MISMO predicado que D.2 aplicó al motor de costeo, importado del mismo
+ * sitio a propósito: si el estado excluido cambia, cambia en un solo lugar y no
+ * se abre una grieta entre lo que el sistema COSTEA y lo que REPORTA.
+ *
+ * Las variantes cuelgan del estado de su producto PADRE: `product_variants` no
+ * tiene columna `state`, y toda fila de `stock_levels` —de base o de variante—
+ * lleva `product_id`, así que el filtro por la relación `products` las alcanza.
+ *
+ * El criterio es de AGREGADO. Ninguna lectura de DETALLE de un producto
+ * concreto se filtra: quien abra un producto archivado debe seguir viendo sus
+ * datos, porque existió.
+ *
+ * OJO con el nombre de la relación: en `stock_levels` e
+ * `inventory_cost_layers` es `products` (plural). En
+ * `inventory_valuation_snapshots` —que este servicio NO lee— es `product`
+ * (singular). No copiar el filtro por analogía sin mirar el esquema.
  */
 @Injectable()
 export class OrgInventoryReportsService {
@@ -100,23 +144,43 @@ export class OrgInventoryReportsService {
       params.store_id ?? null,
     );
 
-    const [aggregate, locationCount, distinctProducts] = await Promise.all([
-      this.prisma.stock_levels.aggregate({
-        where: { inventory_locations: location_where },
-        _sum: {
-          quantity_on_hand: true,
-          quantity_reserved: true,
-          quantity_available: true,
-        },
-        _count: { _all: true },
-      }),
-      this.prisma.inventory_locations.count({ where: location_where }),
-      this.prisma.stock_levels.findMany({
-        where: { inventory_locations: location_where },
-        distinct: ['product_id'],
-        select: { product_id: true },
-      }),
-    ]);
+    // PUNTO 1/6 (D.3) — `stock_levels.products` (plural, verificado en
+    // schema.prisma). `total_locations` NO se filtra: una ubicación existe con
+    // independencia de lo que guarde, y esconderla no la vacía.
+    const [aggregate, locationCount, distinctProducts, archived] =
+      await Promise.all([
+        this.prisma.stock_levels.aggregate({
+          where: {
+            inventory_locations: location_where,
+            ...ACTIVE_PRODUCT_RELATION_FILTER,
+          },
+          _sum: {
+            quantity_on_hand: true,
+            quantity_reserved: true,
+            quantity_available: true,
+          },
+          _count: { _all: true },
+        }),
+        this.prisma.inventory_locations.count({ where: location_where }),
+        this.prisma.stock_levels.findMany({
+          where: {
+            inventory_locations: location_where,
+            ...ACTIVE_PRODUCT_RELATION_FILTER,
+          },
+          distinct: ['product_id'],
+          select: { product_id: true },
+        }),
+        // Lo que las tres consultas de arriba dejaron fuera, para poder
+        // mostrarlo etiquetado en vez de hacerlo desaparecer.
+        this.prisma.stock_levels.aggregate({
+          where: {
+            inventory_locations: location_where,
+            ...ARCHIVED_PRODUCT_RELATION_FILTER,
+          },
+          _sum: { quantity_on_hand: true },
+          _count: { _all: true },
+        }),
+      ]);
 
     return {
       total_skus: aggregate._count._all,
@@ -125,6 +189,9 @@ export class OrgInventoryReportsService {
       total_quantity_on_hand: aggregate._sum.quantity_on_hand ?? 0,
       total_quantity_reserved: aggregate._sum.quantity_reserved ?? 0,
       total_quantity_available: aggregate._sum.quantity_available ?? 0,
+      /** D.3 — unidades excluidas del total por pertenecer a un archivado. */
+      archived_stock_units: archived._sum.quantity_on_hand ?? 0,
+      archived_skus: archived._count._all,
     };
   }
 
@@ -138,9 +205,14 @@ export class OrgInventoryReportsService {
       params.store_id ?? null,
     );
 
+    // PUNTO 2/6 (D.3) — `stock_levels.products` (plural, verificado en
+    // schema.prisma).
     const grouped = await this.prisma.stock_levels.groupBy({
       by: ['location_id'],
-      where: { inventory_locations: location_where },
+      where: {
+        inventory_locations: location_where,
+        ...ACTIVE_PRODUCT_RELATION_FILTER,
+      },
       _sum: {
         quantity_on_hand: true,
         quantity_reserved: true,
@@ -221,10 +293,14 @@ export class OrgInventoryReportsService {
     );
     const limit = Math.min(Math.max(params.limit ?? 50, 1), 100);
 
+    // PUNTO 3/6 (D.3) — `stock_levels.products` (plural, verificado en
+    // schema.prisma). Un archivado no se «repone»: listarlo como faltante
+    // manda a comprar algo que el operador ya dio de baja.
     const items = await this.prisma.stock_levels.findMany({
       where: {
         inventory_locations: location_where,
         reorder_point: { not: null },
+        ...ACTIVE_PRODUCT_RELATION_FILTER,
       },
       include: {
         products: { select: { id: true, name: true, sku: true } },
@@ -298,6 +374,11 @@ export class OrgInventoryReportsService {
       });
 
       if (fifoResult.has_layers) {
+        const archived = await this.computeArchivedFootprint({
+          location_where,
+          store_id_filter: params.store_id ?? null,
+          from_layers: true,
+        });
         // Tolerancia de 1 unidad para no marcar parcial por un redondeo suelto.
         const fullyCovered = fifoResult.coverage.units_without_cost <= 1;
         return {
@@ -310,6 +391,7 @@ export class OrgInventoryReportsService {
           by_store: fifoResult.by_store,
           items_count: fifoResult.items_count,
           cost_coverage: fifoResult.coverage,
+          ...archived,
           note: fullyCovered
             ? 'Valuación FIFO autoritativa sobre inventory_cost_layers (quantity_remaining * unit_cost).'
             : `Valuación FIFO PARCIAL: las capas de costo vivas cubren ${Math.round(fifoResult.coverage.coverage_ratio * 100)}% del stock físico (${fifoResult.coverage.units_without_cost} de ${fifoResult.coverage.units_total} unidades sin capa). El valor está SUBESTIMADO.`,
@@ -322,6 +404,11 @@ export class OrgInventoryReportsService {
       const waResult = await this.computeWeightedAverageValuation(
         location_where,
       );
+      const archivedFallback = await this.computeArchivedFootprint({
+        location_where,
+        store_id_filter: params.store_id ?? null,
+        from_layers: false,
+      });
       return {
         method: 'weighted_average' as ResolvedCostingMethod,
         requested_method: 'fifo' as ResolvedCostingMethod,
@@ -334,6 +421,7 @@ export class OrgInventoryReportsService {
         // Sin capas vivas la cobertura FIFO es 0; el contrato la lleva siempre
         // para que el frontend no tenga que inferirla del `source`.
         cost_coverage: buildCostCoverage(0, 0),
+        ...archivedFallback,
         note: 'FIFO solicitado pero no hay cost layers con stock — usando weighted_average como aproximación (no autoritativa).',
       };
     }
@@ -347,6 +435,11 @@ export class OrgInventoryReportsService {
       location_where,
       waResult.covered_units,
     );
+    const waArchived = await this.computeArchivedFootprint({
+      location_where,
+      store_id_filter: params.store_id ?? null,
+      from_layers: false,
+    });
     const waFullyCovered = waCoverage.units_without_cost <= 1;
     return {
       method: 'weighted_average' as ResolvedCostingMethod,
@@ -358,9 +451,81 @@ export class OrgInventoryReportsService {
       by_store: waResult.by_store,
       items_count: waResult.items_count,
       cost_coverage: waCoverage,
+      ...waArchived,
       note: waFullyCovered
         ? 'Valuación CPP autoritativa sobre stock_levels.cost_per_unit * quantity_on_hand.'
         : `Valuación CPP PARCIAL: ${waCoverage.units_without_cost} de ${waCoverage.units_total} unidades no tienen costo unitario registrado y aportan $0. El valor está SUBESTIMADO.`,
+    };
+  }
+
+  /**
+   * D.3 — LA HUELLA DE LO ARCHIVADO: cuánto valor y cuántas unidades acaba de
+   * quedar FUERA de `total_value`, medidos con la misma fuente que el total.
+   *
+   * POR QUÉ EXISTE
+   * --------------
+   * Excluir archivados corrige la cifra, pero hacerlo en silencio la vuelve
+   * inexplicable. Medido en producción: hay una organización donde lo
+   * archivado es el 95,3 % del valor que el panel muestra hoy, y tres que
+   * pasan a CERO absoluto. Un operador que abre su panel y ve cero sin ninguna
+   * línea que diga a dónde se fue el dinero no lee «corrección», lee «me
+   * borraron el inventario».
+   *
+   * Estos dos campos son ADITIVOS y hoy no los pinta nadie: existen para que
+   * el frontend pueda sacar la línea «Valor en productos archivados» sin
+   * volver a tocar backend.
+   *
+   * `from_layers` sigue a la fuente del total que acompañan: si el total salió
+   * de `inventory_cost_layers`, la huella también, o serían dos cifras
+   * calculadas con reglas distintas presentadas como una resta.
+   */
+  private async computeArchivedFootprint(args: {
+    location_where: Prisma.inventory_locationsWhereInput;
+    store_id_filter: number | null;
+    from_layers: boolean;
+  }): Promise<{ archived_stock_value: number; archived_stock_units: number }> {
+    if (args.from_layers) {
+      const where: Prisma.inventory_cost_layersWhereInput = {
+        quantity_remaining: { gt: 0 },
+        ...ARCHIVED_PRODUCT_RELATION_FILTER,
+      };
+      if (args.store_id_filter != null) {
+        where.inventory_locations = { is: { store_id: args.store_id_filter } };
+      }
+      const layers = await this.orgPrisma.inventory_cost_layers.findMany({
+        where,
+        select: { quantity_remaining: true, unit_cost: true },
+      });
+      let total = new Prisma.Decimal(0);
+      let units = 0;
+      for (const layer of layers) {
+        total = total.add(layer.unit_cost.mul(layer.quantity_remaining));
+        units += Number(layer.quantity_remaining ?? 0);
+      }
+      return {
+        archived_stock_value: Number(total.toFixed(2)),
+        archived_stock_units: units,
+      };
+    }
+
+    const rows = await this.prisma.stock_levels.findMany({
+      where: {
+        inventory_locations: args.location_where,
+        cost_per_unit: { not: null },
+        ...ARCHIVED_PRODUCT_RELATION_FILTER,
+      },
+      select: { quantity_on_hand: true, cost_per_unit: true },
+    });
+    let total = new Prisma.Decimal(0);
+    let units = 0;
+    for (const row of rows) {
+      const cost = row.cost_per_unit ?? new Prisma.Decimal(0);
+      total = total.add(cost.mul(row.quantity_on_hand));
+      units += Number(row.quantity_on_hand ?? 0);
+    }
+    return {
+      archived_stock_value: Number(total.toFixed(2)),
+      archived_stock_units: units,
     };
   }
 
@@ -373,8 +538,16 @@ export class OrgInventoryReportsService {
     location_where: Prisma.inventory_locationsWhereInput,
     coveredUnits: number,
   ): Promise<CostCoverage> {
+    // PUNTO 4/6 (D.3) — `stock_levels.products` (plural, verificado en
+    // schema.prisma). ESTE es el punto que NO se puede olvidar: el numerador
+    // (`coveredUnits`) ya no incluye archivados. Si el denominador siguiera
+    // contándolos, la cobertura caería sola y el informe se declararía PARCIAL
+    // por un inventario que decidimos que no existe.
     const aggregate = await this.prisma.stock_levels.aggregate({
-      where: { inventory_locations: location_where },
+      where: {
+        inventory_locations: location_where,
+        ...ACTIVE_PRODUCT_RELATION_FILTER,
+      },
       _sum: { quantity_on_hand: true },
     });
     const onHandUnits = Number(aggregate._sum.quantity_on_hand ?? 0);
@@ -392,10 +565,13 @@ export class OrgInventoryReportsService {
   private async computeWeightedAverageValuation(
     location_where: Prisma.inventory_locationsWhereInput,
   ) {
+    // PUNTO 5/6 (D.3) — `stock_levels.products` (plural, verificado en
+    // schema.prisma).
     const rows = await this.prisma.stock_levels.findMany({
       where: {
         inventory_locations: location_where,
         cost_per_unit: { not: null },
+        ...ACTIVE_PRODUCT_RELATION_FILTER,
       },
       select: {
         quantity_on_hand: true,
@@ -459,8 +635,14 @@ export class OrgInventoryReportsService {
     const { store_id_filter } = args;
     void args.organization_id; // documentación: filtro implícito por auto-scope
 
+    // PUNTO 6/6 (D.3) — `inventory_cost_layers.products` (plural, verificado
+    // en schema.prisma: la tabla declara `products products @relation(...)`,
+    // igual que `stock_levels`). Una capa viva de un producto archivado es
+    // costo de existencia fantasma; si entrara, el total FIFO diría más de lo
+    // que el CPP del mismo alcance.
     const where: Prisma.inventory_cost_layersWhereInput = {
       quantity_remaining: { gt: 0 },
+      ...ACTIVE_PRODUCT_RELATION_FILTER,
     };
 
     if (store_id_filter != null) {

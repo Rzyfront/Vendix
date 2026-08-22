@@ -1256,17 +1256,24 @@ describe('ProductsService', () => {
 
   describe('getProductStats', () => {
     it('should return product statistics for store', async () => {
+      // CP-PURCHASE-TRANSPARENCY D.3 — el archivado (10 × 20 = 200) SALE de
+      // las cuatro cifras agregadas y viaja etiquetado aparte. Antes de D.3
+      // este bloque afirmaba `total_value: 500`, `low_stock_products: 3` y
+      // `products_without_images: 3`, es decir el arnés daba fe de que el
+      // panel sumara existencia fantasma.
       const expectedStats = {
         total_products: 3,
         active_products: 2,
         inactive_products: 1,
         archived_products: 1,
-        low_stock_products: 3,
+        low_stock_products: 2,
         out_of_stock_products: 1,
-        products_without_images: 3,
-        total_value: 500,
+        products_without_images: 2,
+        total_value: 300,
         categories_count: 2,
         brands_count: 1,
+        archived_stock_value: 200,
+        archived_stock_units: 10,
       };
 
       mockPrismaService.products.findMany.mockResolvedValue([
@@ -1331,6 +1338,178 @@ describe('ProductsService', () => {
       const result = await service.getProductStats(1);
 
       expect(result.low_stock_products).toBe(1);
+    });
+  });
+
+  /**
+   * CP-PURCHASE-TRANSPARENCY D.3 — las cifras AGREGADAS excluyen archivados.
+   *
+   * EL DEFECTO QUE CIERRA
+   * ---------------------
+   * Archivar un producto nunca borró su `stock_quantity`. D.2 sacó esas
+   * unidades del motor de COSTEO, pero el panel las seguía LEYENDO como
+   * existencia real. Medido en la base local (tienda 10): `total_value`
+   * 16.362.306.320 con 5.040.064.000 aportados por 25 productos archivados.
+   *
+   * LA LÍNEA QUE NO SE CRUZA
+   * ------------------------
+   * El criterio es de AGREGADO, no de visibilidad. `archived_products` sigue
+   * contando, `archived_stock_value` publica lo que se restó, y las lecturas
+   * de DETALLE (listado con `state=archived`, vista previa del castigo) siguen
+   * devolviendo los datos del archivado. Un archivado existió: esconderlo
+   * rompería la trazabilidad tanto como sumarlo rompía el total.
+   */
+  describe('getProductStats — el archivado sale del agregado (D.3)', () => {
+    const producto = (over: Partial<any> = {}) => ({
+      state: ProductState.ACTIVE,
+      stock_quantity: 0,
+      base_price: 0,
+      product_images: [{ id: 1 }],
+      ...over,
+    });
+
+    beforeEach(() => {
+      mockPrismaService.categories.count.mockResolvedValue(0);
+      mockPrismaService.brands.count.mockResolvedValue(0);
+      mockPrismaService.store_settings.findFirst.mockResolvedValue({
+        settings: { inventory: { low_stock_threshold: 5 } },
+      });
+    });
+
+    it('EL DEFECTO: un archivado con existencia ya no infla total_value', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        producto({ stock_quantity: 3, base_price: 1000 }),
+        producto({
+          state: ProductState.ARCHIVED,
+          stock_quantity: 20000,
+          base_price: 3,
+        }),
+      ]);
+
+      const result = await service.getProductStats(1);
+
+      // 3 × 1.000. Las 20.000 unidades fantasma a 3,00 ya no entran.
+      expect(result.total_value).toBe(3000);
+      // Y no desaparecen sin rastro: viajan etiquetadas.
+      expect(result.archived_stock_value).toBe(60000);
+      expect(result.archived_stock_units).toBe(20000);
+    });
+
+    it('un producto activo con existencia da exactamente la misma cifra que antes', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        producto({ stock_quantity: 14, base_price: 1620000 }),
+      ]);
+
+      const result = await service.getProductStats(1);
+
+      expect(result.total_value).toBe(22680000);
+      expect(result.archived_stock_value).toBe(0);
+      expect(result.archived_stock_units).toBe(0);
+    });
+
+    it('el archivado tampoco cuenta como «sin stock», «bajo mínimo» ni «sin imagen»', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        producto({
+          state: ProductState.ARCHIVED,
+          stock_quantity: 0,
+          product_images: [],
+        }),
+        producto({
+          state: ProductState.ARCHIVED,
+          stock_quantity: 2,
+          base_price: 10,
+          product_images: [],
+        }),
+      ]);
+
+      const result = await service.getProductStats(1);
+
+      expect(result.out_of_stock_products).toBe(0);
+      expect(result.low_stock_products).toBe(0);
+      expect(result.products_without_images).toBe(0);
+      // Pero siguen existiendo, y el panel puede decirlo.
+      expect(result.archived_products).toBe(2);
+    });
+
+    it('una tienda cuyo valor es TODO archivado cae a cero limpio, sin NaN', async () => {
+      // Caso límite real: en producción hay organizaciones donde lo archivado
+      // es el 100 % del valor mostrado. Pasan de una cifra a cero exacto — no
+      // a NaN, no a null, no a una división por cero.
+      mockPrismaService.products.findMany.mockResolvedValue([
+        producto({
+          state: ProductState.ARCHIVED,
+          stock_quantity: 500,
+          base_price: 8453,
+        }),
+      ]);
+
+      const result = await service.getProductStats(1);
+
+      expect(result.total_value).toBe(0);
+      expect(Number.isNaN(result.total_value)).toBe(false);
+      expect(result.total_products).toBe(0);
+      expect(result.archived_stock_value).toBe(4226500);
+      expect(result.archived_stock_units).toBe(500);
+    });
+
+    it('un stock_quantity nulo no envenena la huella archivada con NaN', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        producto({
+          state: ProductState.ARCHIVED,
+          stock_quantity: null,
+          base_price: 900,
+        }),
+      ]);
+
+      const result = await service.getProductStats(1);
+
+      expect(result.archived_stock_units).toBe(0);
+      expect(result.archived_stock_value).toBe(0);
+      expect(Number.isNaN(result.archived_stock_value)).toBe(false);
+    });
+
+    it('EL DETALLE NO CAMBIA: pedir el listado de archivados sigue devolviéndolos con su stock', async () => {
+      // Esta es la prueba que impide «arreglar de más». D.3 sólo toca
+      // agregados; la consulta de detalle por estado sigue intacta.
+      const archivado = {
+        id: 378,
+        name: 'Producto archivado',
+        state: ProductState.ARCHIVED,
+        base_price: 3,
+        track_inventory: true,
+        product_images: [],
+        product_variants: [],
+        product_categories: [],
+        stock_levels: [
+          {
+            product_variant_id: null,
+            quantity_available: 20000,
+            quantity_reserved: 0,
+            inventory_locations: { id: 1, name: 'Bodega', type: 'warehouse' },
+          },
+        ],
+      };
+      mockPrismaService.products.findMany.mockResolvedValue([archivado]);
+      mockPrismaService.products.count.mockResolvedValue(1);
+
+      const result: any = await service.findAll({
+        page: 1,
+        limit: 10,
+        state: ProductState.ARCHIVED,
+        include_inactive: true,
+      } as any);
+
+      expect(result.data).toHaveLength(1);
+      // Sigue llegando con identidad Y con su existencia: 20.000 unidades que
+      // el agregado ya no suma pero que el detalle sigue mostrando.
+      expect(result.data[0]).toEqual(
+        expect.objectContaining({
+          id: 378,
+          state: ProductState.ARCHIVED,
+          stock_quantity: 20000,
+          total_stock_available: 20000,
+        }),
+      );
     });
   });
 
