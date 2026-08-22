@@ -1030,14 +1030,6 @@ export class PopComponent implements OnInit, OnDestroy {
     }
 
     let addedCount = 0;
-    // 3.1 — Acumulador de descuentos que NUNCA pueden vivir como % de línea
-    // (líneas bonificadas con unit_price=0 o quantity=0 → `lineGross=0` →
-    // porcentaje indefinido). El `pop-cart.service` los aplastaba a 0 con
-    // `?? 0` y el descuento de la factura desaparecía sin aviso. Los juntamos
-    // al descuento de cabecera (ya prorrateado por el backend) y avisamos al
-    // operador UNA vez al final.
-    let bonificacionAccumulated = 0;
-    let bonificacionLineCount = 0;
     for (const item of data.editedItems) {
       const candidate = item.selected_product_id
         ? item.candidates.find((c) => c.id === item.selected_product_id)
@@ -1064,39 +1056,22 @@ export class PopComponent implements OnInit, OnDestroy {
       // línea para que el IVA se extraiga de un precio que no lo contiene.
       const scannedIncludeMode = false;
 
-      // Paridad de descuento: la factura imprime PESOS y esos pesos entran al
-      // carrito SIN convertirse. La conversión a porcentaje entero que vivía
-      // acá (`Math.round`, con clamp a 1% cuando redondeaba a 0, y el
-      // sobre-aplicado acumulado al descuento de CABECERA) degradaba la cifra
-      // dos veces: primero perdía centavos en el redondeo, y después el backend
-      // prorrateaba ese resto de cabecera entre TODAS las líneas por peso
-      // bruto — moviendo dinero de una línea a otra. Como las capas de costo
-      // FIFO se escriben por línea, ese movimiento deja el costeo mal.
+      // El descuento viaja como PORCENTAJE y nada más. En este punto no se
+      // convierte, no se prorratea y no se resta: se copia el mismo número que
+      // el operador acaba de ver y aprobar en la precarga al campo de descuento
+      // de la línea del carrito. Si la factura dice 5%, el carrito dice 5.
       //
-      // El backend ya prefiere el monto (`deriveLineTax`: `discount_amount > 0`
-      // gana sobre `discount_percentage`), el DTO ya lo acepta y la columna ya
-      // existe: sólo hacía falta dejar de degradar el dato en el frontend.
-      const lineGross =
-        (Number(item.quantity) || 0) * (Number(item.unit_price) || 0);
-      const scannedDiscountAmount = Number(item.discount_amount) || 0;
-      if (
-        scannedDiscountAmount > 0 &&
-        !(lineGross > 0 && Number.isFinite(lineGross))
-      ) {
-        // 3.1 — Línea bonificada (unit_price=0) o cantidad 0: el descuento no
-        // tiene línea de la que agarrarse. `deriveLineTax` clampa
-        // `discountPerUnit` a `min(discount/qty, gross)`, que con gross 0 da 0,
-        // así que el monto se evaporaría en silencio. Lo acumulamos al header
-        // para que el backend lo prorratee sobre las líneas con importe.
-        bonificacionAccumulated += scannedDiscountAmount;
-        bonificacionLineCount += 1;
-      }
-      // El monto sólo viaja a la línea cuando esa línea puede sostenerlo; si no,
-      // ya quedó sumado a la cabecera y mandarlo también sería contarlo dos veces.
-      const scannedDiscountMoney =
-        scannedDiscountAmount > 0 && lineGross > 0 && Number.isFinite(lineGross)
-          ? scannedDiscountAmount
-          : undefined;
+      // Todo lo que vivía aquí antes —convertir pesos a porcentaje con
+      // `Math.round`, clampar a 1% cuando el redondeo daba 0, y empujar el
+      // residuo al descuento de CABECERA— movía dinero entre líneas al
+      // prorratearse, y las capas de costo FIFO se escriben por línea. El
+      // porcentaje no tiene ese problema: es invariante a la base y a la
+      // cantidad, así que copiarlo tal cual es exacto y además es lo que el
+      // operador puede cotejar de un vistazo contra el papel.
+      const scannedDiscountPct = Math.min(
+        100,
+        Math.max(0, Math.round(Number(item.discount_percentage) || 0)),
+      );
 
       if (candidate) {
         this.popCartService
@@ -1117,12 +1092,10 @@ export class PopComponent implements OnInit, OnDestroy {
             tax_rate: scannedRate,
             tax_type: 'iva',
             prices_include_tax: scannedIncludeMode,
-            // El descuento entra en DINERO, base neta. `discount` (%) queda
-            // undefined a propósito: es la vía de la captura manual, y dejar
-            // las dos con valor pondría dos cifras a competir por el mismo
-            // dinero (el monto gana por precedencia y el % mentiría en la UI).
-            discount_amount: scannedDiscountMoney,
-            discount: undefined,
+            // Solo el porcentaje. `discount_amount` se deja fuera a propósito:
+            // si viajara con valor ganaría por precedencia en `deriveLineTax` y
+            // el % que muestra el carrito dejaría de ser el que se aplica.
+            discount: scannedDiscountPct,
           })
           .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
       } else {
@@ -1145,11 +1118,10 @@ export class PopComponent implements OnInit, OnDestroy {
             tax_rate: scannedRate,
             tax_type: 'iva',
             prices_include_tax: scannedIncludeMode,
-            // QUI-661 Fase 4: también en el producto NUEVO. El descuento no
-            // depende de que el producto exista en el catálogo — depende de lo
-            // que imprimió la factura, y viaja en pesos igual que allá.
-            discount_amount: scannedDiscountMoney,
-            discount: undefined,
+            // También en el producto NUEVO: el descuento no depende de que el
+            // producto exista en el catálogo, depende de lo que imprimió la
+            // factura. Mismo porcentaje, misma vía.
+            discount: scannedDiscountPct,
             prebulk_data: {
               name: item.description,
               code: item.sku_if_visible || '',
@@ -1166,22 +1138,6 @@ export class PopComponent implements OnInit, OnDestroy {
           .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
       }
       addedCount++;
-    }
-
-    // 3.1 — Acumular descuentos de líneas bonificadas al header (prorrateo
-    // del backend) y avisar al operador. Sin esto el monto se perdía porque
-    // `pop-cart.service` convertía el `undefined` per-línea a 0 silencioso.
-    if (bonificacionAccumulated > 0) {
-      const current = this.popCartService.currentState;
-      const headerDiscount = Number(current.discountAmount) || 0;
-      this.popCartService.setDiscountAmount(
-        headerDiscount + bonificacionAccumulated,
-      );
-      this.toastService.warning(
-        bonificacionLineCount === 1
-          ? '1 línea bonificada traía descuento: se sumó al descuento general de la factura.'
-          : `${bonificacionLineCount} líneas bonificadas traían descuento: se sumó al descuento general de la factura.`,
-      );
     }
 
     // El número de factura y —cuando la IA lo declaró— el modo de precios de
