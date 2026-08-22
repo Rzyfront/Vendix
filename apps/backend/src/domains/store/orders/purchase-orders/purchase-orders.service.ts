@@ -3954,86 +3954,105 @@ export class PurchaseOrdersService {
         batch_amount = 0;
       }
 
-      // C.3 — el flete-gasto también obliga a emitir aunque el lote no aporte
-      // monto: es dinero que se le debe al proveedor y que hoy nunca llegaba ni
-      // al asiento ni a la cartera.
-      if (batch_amount > 0 || freight_expense_amount > 0) {
-        // O-48 subledger gross-up (decisión de negocio jul-2026, confirmada por
-        // el usuario): la CxP (accounts_payable) DEBE reflejar el BRUTO que se le
-        // debe al proveedor (= neto + IVA descontable), no el neto. El GL 2205 ya
-        // llega a bruto vía DOS asientos: `purchase_order.received` (neto) + el
-        // complemento `purchase.vat_recognized` (IVA, solo en la recepción final,
-        // ver :2154). El subledger se alimenta ÚNICAMENTE de `gross_reception_share`,
-        // así que espejamos ese complemento aquí: en la recepción final de una
-        // compra O-48 sumamos el IVA descontable total del pedido a la porción del
-        // subledger — SIN tocar `total_amount`, que consume el asiento GL de
-        // recepción y debe seguir neto para no doble-contar el CR 2205.
-        // (O-49 nunca entra: su IVA ya viene capitalizado en batch_amount.)
-        let subledger_gross_share = batch_amount;
-        if (result.vat_responsible && result.all_items_received) {
-          const deductible_iva =
-            Math.round(
-              result.updated_po.purchase_order_items.reduce(
-                (sum, i) => sum + Number(i.deductible_tax_amount ?? 0),
-                0,
-              ) * 100,
-            ) / 100;
-          subledger_gross_share =
-            Math.round((batch_amount + deductible_iva) * 100) / 100;
-        }
-        // C.3 — con `expense` el flete no está dentro de `batch_amount` (no fue
-        // al inventario) pero SÍ se le debe al proveedor. Sumarlo aquí es lo que
-        // hace que `accounts_payable.original_amount` cuadre con
-        // `purchase_orders.total_amount` y que una orden con flete deje de poder
-        // llegar a `paid` con cartera abierta. Con `prorate` ya viene dentro.
-        if (freight_expense_amount > 0) {
-          subledger_gross_share =
-            Math.round((subledger_gross_share + freight_expense_amount) * 100) /
-            100;
-        }
-        this.eventEmitter.emit('purchase_order.received', {
-          purchase_order_id: result.updated_po.id,
-          reception_id: result.reception_id,
-          organization_id: result.updated_po.organization_id,
-          store_id,
-          accounting_entity_id,
-          // BRUTO real de la CxP: para O-49 = batch_amount (IVA ya capitalizado);
-          // para O-48 en recepción final = batch_amount + IVA descontable total.
-          // ApEventsListener.create→upsertPayableForReception lo usa como
-          // gross_amount y crea 1 sola CxP por OC (incrementa original/balance en
-          // cada recepción, idempotente por ap_reception_links.reception_id @unique).
-          gross_reception_share: subledger_gross_share,
-          // GL de recepción (DR 1435 / CR 2205): SIEMPRE neto del batch para O-48
-          // (el IVA va por el complemento vat_recognized) y bruto para O-49.
-          // Alias legacy para listeners que aún lean `total_amount`.
-          total_amount: batch_amount,
-          user_id: RequestContextService.getUserId(),
-          // ApEventsListener maps the scalar `supplier_id` into the required
-          // accounts_payable relation; without it createFromEvent receives
-          // `undefined` and the AP row is never created (no CxP on reception).
-          supplier_id: result.updated_po.supplier_id,
-          // C4-followup: result.updated_po.suppliers ya viene completo del
-          // include de la transacción — sin lookup adicional.
-          supplier,
-          // ===== C.3 — contrato de flete del evento =====
-          // `shipping_cost_allocation` dice qué se hizo con el flete y
-          // `freight_expense_amount` es el monto que el listener contable debe
-          // debitar a 513550 «Transporte, Fletes y Acarreos» como línea PROPIA
-          // del asiento (clave de mapeo de C.6, dueño: dominio contable).
-          //
-          // Es > 0 SOLO en modo `expense` y SOLO en la recepción que cierra la
-          // orden. Con `prorate` vale 0 porque el flete ya viajó dentro de
-          // `total_amount` hacia 1435 (está en el costo del inventario).
-          //
-          // Mientras el listener no consuma este campo, el GL 2205 queda por
-          // debajo del auxiliar por el monto del flete-gasto: es un dato
-          // AÑADIDO, ningún listener existente lo lee y nada se rompe por
-          // ignorarlo, pero el asiento de gasto no se posteará.
-          shipping_cost_allocation: result.freight_allocation,
-          freight_total,
-          freight_expense_amount,
-        });
+      // ===== C.3/C.9 — el evento se emite SIEMPRE =====
+      //
+      // Antes esto era `if (batch_amount > 0 || freight_expense_amount > 0)`.
+      // Una recepción de monto cero y sin flete —el último lote de una orden ya
+      // posteada por completo, o una orden de valor cero— no emitía nada, así que
+      // el dominio contable no llegaba a enterarse de que existió: sin evento no
+      // hay fila de instrumentación, y el camino quedaba MUDO justo donde había
+      // que poder explicar por qué no hay asiento. Es la misma forma del defecto
+      // que este plan entero cierra —el sistema decide algo y no lo dice— sólo
+      // que en el registro contable en vez de en la pantalla.
+      //
+      // Se eligió emitir siempre y dejar que el listener clasifique el caso
+      // (`SKIPPED_ZERO_AMOUNT`, que ya existe y ya escribe fila) en vez de
+      // registrar el salto acá. La razón es que la clasificación de por qué una
+      // recepción no genera asiento queda en UN solo sitio: repartirla entre el
+      // emisor y el consumidor es exactamente cómo dos lados del mismo flujo
+      // terminan contando historias distintas sobre la misma recepción.
+      //
+      // El auxiliar de cartera no se ve afectado: `upsertPayableForReception`
+      // clampea la contribución a >= 0 y es idempotente por
+      // `ap_reception_links.reception_id`, así que un lote de cero sólo deja el
+      // vínculo de la recepción sin mover el saldo.
+      // O-48 subledger gross-up (decisión de negocio jul-2026, confirmada por
+      // el usuario): la CxP (accounts_payable) DEBE reflejar el BRUTO que se le
+      // debe al proveedor (= neto + IVA descontable), no el neto. El GL 2205 ya
+      // llega a bruto vía DOS asientos: `purchase_order.received` (neto) + el
+      // complemento `purchase.vat_recognized` (IVA, solo en la recepción final,
+      // ver :2154). El subledger se alimenta ÚNICAMENTE de `gross_reception_share`,
+      // así que espejamos ese complemento aquí: en la recepción final de una
+      // compra O-48 sumamos el IVA descontable total del pedido a la porción del
+      // subledger — SIN tocar `total_amount`, que consume el asiento GL de
+      // recepción y debe seguir neto para no doble-contar el CR 2205.
+      // (O-49 nunca entra: su IVA ya viene capitalizado en batch_amount.)
+      let subledger_gross_share = batch_amount;
+      if (result.vat_responsible && result.all_items_received) {
+        const deductible_iva =
+          Math.round(
+            result.updated_po.purchase_order_items.reduce(
+              (sum, i) => sum + Number(i.deductible_tax_amount ?? 0),
+              0,
+            ) * 100,
+          ) / 100;
+        subledger_gross_share =
+          Math.round((batch_amount + deductible_iva) * 100) / 100;
       }
+      // C.3 — con `expense` el flete no está dentro de `batch_amount` (no fue
+      // al inventario) pero SÍ se le debe al proveedor. Sumarlo aquí es lo que
+      // hace que `accounts_payable.original_amount` cuadre con
+      // `purchase_orders.total_amount` y que una orden con flete deje de poder
+      // llegar a `paid` con cartera abierta. Con `prorate` ya viene dentro.
+      if (freight_expense_amount > 0) {
+        subledger_gross_share =
+          Math.round((subledger_gross_share + freight_expense_amount) * 100) /
+          100;
+      }
+      this.eventEmitter.emit('purchase_order.received', {
+        purchase_order_id: result.updated_po.id,
+        reception_id: result.reception_id,
+        organization_id: result.updated_po.organization_id,
+        store_id,
+        accounting_entity_id,
+        // BRUTO real de la CxP: para O-49 = batch_amount (IVA ya capitalizado);
+        // para O-48 en recepción final = batch_amount + IVA descontable total.
+        // ApEventsListener.create→upsertPayableForReception lo usa como
+        // gross_amount y crea 1 sola CxP por OC (incrementa original/balance en
+        // cada recepción, idempotente por ap_reception_links.reception_id @unique).
+        gross_reception_share: subledger_gross_share,
+        // GL de recepción (DR 1435 / CR 2205): SIEMPRE neto del batch para O-48
+        // (el IVA va por el complemento vat_recognized) y bruto para O-49.
+        // Alias legacy para listeners que aún lean `total_amount`.
+        total_amount: batch_amount,
+        user_id: RequestContextService.getUserId(),
+        // ApEventsListener maps the scalar `supplier_id` into the required
+        // accounts_payable relation; without it createFromEvent receives
+        // `undefined` and the AP row is never created (no CxP on reception).
+        supplier_id: result.updated_po.supplier_id,
+        // C4-followup: result.updated_po.suppliers ya viene completo del
+        // include de la transacción — sin lookup adicional.
+        supplier,
+        // ===== C.3 — contrato de flete del evento =====
+        // `shipping_expense_amount` es el monto que el listener contable
+        // debita a 513550 «Transporte, Fletes y Acarreos» como línea PROPIA
+        // del asiento (clave de mapeo `purchase_order.received.shipping_expense`,
+        // dueño: dominio contable, C.6). El NOMBRE es el contrato: el
+        // consumidor lo lee por esa clave exacta y un campo bautizado de otra
+        // forma no rompe nada visiblemente — simplemente no se postea nunca la
+        // línea de gasto, y el GL 2205 queda por debajo del auxiliar sin que
+        // nadie reciba un error.
+        //
+        // Es > 0 SOLO en modo `expense` y SOLO en la recepción que cierra la
+        // orden. Con `prorate` vale 0 porque el flete ya viajó dentro de
+        // `total_amount` hacia 1435 (está en el costo del inventario).
+        shipping_expense_amount: freight_expense_amount,
+        // Contexto para lectores no contables (auditoría, depuración): el modo
+        // aplicado y el flete TOTAL de la orden, que no es lo mismo que la
+        // porción reconocida como gasto en esta recepción.
+        shipping_cost_allocation: result.freight_allocation,
+        freight_total,
+      });
     } catch (error) {
       this.logger.error(
         `Failed to emit purchase_order.received for PO #${id} (reception #${result.reception_id}): ${error.message}`,
