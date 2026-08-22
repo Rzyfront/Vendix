@@ -600,8 +600,32 @@ export const InventoryService = {
     await apiClient.delete(endpoint);
   },
 
+  /**
+   * CP-PURCHASE-TRANSPARENCY A.10 — la orden nace SIEMPRE en `draft`.
+   *
+   * El backend destructura y descarta cualquier `status` del cuerpo
+   * (`status: _clientStatusIgnored`) y escribe `draft` de oficio, así que
+   * mandarlo devolvía 201 con un borrador que la pantalla creía aprobado.
+   * Por eso `CreatePurchaseOrderDto` ya no lo declara: para llegar a
+   * `approved` hay que llamar a `approvePurchaseOrder`.
+   */
   async createPurchaseOrder(dto: CreatePurchaseOrderDto): Promise<PurchaseOrder> {
     const res = await apiClient.post(Endpoints.STORE.PURCHASE_ORDERS.CREATE, dto);
+    return unwrap<PurchaseOrder>(res);
+  },
+
+  /**
+   * A.10 — lleva la orden de `draft` a `approved`.
+   *
+   * Es un acto con permiso propio (`store:orders:purchase_orders:approve`),
+   * no una clave del cuerpo de creación: el backend estampa
+   * `approved_by_user_id` y deja la auditoría. Es OBLIGATORIO antes de
+   * recibir, porque `receive()` afirma la transición a `partial` y un
+   * `draft` sólo transita a `approved` o `cancelled`.
+   */
+  async approvePurchaseOrder(id: number): Promise<PurchaseOrder> {
+    const endpoint = Endpoints.STORE.PURCHASE_ORDERS.APPROVE.replace(':id', String(id));
+    const res = await apiClient.patch(endpoint);
     return unwrap<PurchaseOrder>(res);
   },
 

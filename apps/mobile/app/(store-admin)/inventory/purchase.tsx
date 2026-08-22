@@ -145,24 +145,54 @@ export default function PurchaseInventoryScreen() {
     toastSuccess(msg);
   };
 
+  /*
+   * CP-PURCHASE-TRANSPARENCY A.10 — la orden nace SIEMPRE en `draft` y la
+   * aprobación es una ETAPA aparte de la cadena, no una clave del cuerpo.
+   *
+   * Las tres mutaciones mandaban `status` en la creación ('draft' aquí,
+   * 'approved' en las otras dos). El backend lo destructura fuera
+   * (`status: _clientStatusIgnored`) y escribe `draft` de oficio, así que
+   * «Crear Orden» devolvía 201 con un borrador sin `approved_by_user_id` que
+   * la pantalla anunciaba como creado, y «Crear + Recibir» ni siquiera podía
+   * funcionar: `receive()` afirma la transición a `partial` y un `draft` sólo
+   * transita a `approved` o `cancelled`. El fallo era silencioso.
+   *
+   * Cuando la aprobación falla el error NOMBRA la orden que SÍ se creó: sin
+   * eso el operador no puede distinguir «no se creó» de «se creó y no se
+   * aprobó», reintentaría, y abriría una segunda compra por la misma factura.
+   */
+  const createAndApproveOrder = async () => {
+    const order = await InventoryService.createPurchaseOrder(buildOrderPayload());
+
+    try {
+      await InventoryService.approvePurchaseOrder(order.id);
+    } catch (approveError) {
+      const detail =
+        approveError instanceof Error && approveError.message
+          ? approveError.message
+          : 'Reintenta la aprobacion desde el listado de ordenes de compra.';
+      throw new Error(
+        `La orden #${order.id} se creo como borrador pero no se pudo aprobar. ${detail}`,
+      );
+    }
+
+    return order;
+  };
+
   const draftMutation = useMutation({
-    mutationFn: () =>
-      InventoryService.createPurchaseOrder({
-        ...buildOrderPayload(),
-        status: 'draft',
-      }),
+    mutationFn: () => InventoryService.createPurchaseOrder(buildOrderPayload()),
     onSuccess: () => onOrderSuccess('Borrador guardado'),
-    onError: () => toastError('Error al guardar borrador'),
+    onError: (error) => {
+      toastError(error instanceof Error && error.message ? error.message : 'Error al guardar borrador');
+    },
   });
 
   const createMutation = useMutation({
-    mutationFn: () =>
-      InventoryService.createPurchaseOrder({
-        ...buildOrderPayload(),
-        status: 'approved',
-      }),
-    onSuccess: () => onOrderSuccess('Orden creada correctamente'),
-    onError: () => toastError('Error al crear la orden'),
+    mutationFn: createAndApproveOrder,
+    onSuccess: () => onOrderSuccess('Orden creada y aprobada'),
+    onError: (error) => {
+      toastError(error instanceof Error && error.message ? error.message : 'Error al crear la orden');
+    },
   });
 
   const createAndReceiveMutation = useMutation({
@@ -171,18 +201,24 @@ export default function PurchaseInventoryScreen() {
         throw new Error('Selecciona proveedor, bodega y al menos un producto');
       }
 
-      const order = await InventoryService.createPurchaseOrder({
-        ...buildOrderPayload(),
-        status: 'approved',
-      });
+      const order = await createAndApproveOrder();
 
+      /*
+       * `ReceivePurchaseOrderItemDto.id` es el id de la LINEA de la orden, no
+       * un indice: el backend rechaza con 400 («La linea N no pertenece a esta
+       * orden de compra») cualquier id que no le pertenezca. Los ids reales
+       * solo existen despues de crear la orden.
+       */
       const receiveItems = (order.purchase_order_items || []).map((item) => ({
         id: item.id,
         quantity_received: item.quantity_ordered,
       }));
 
       if (receiveItems.length === 0) {
-        throw new Error('La orden fue creada, pero no retorno items para recibir stock');
+        throw new Error(
+          `La orden #${order.id} se creo y se aprobo, pero no devolvio lineas que recibir:` +
+            ` la mercancia NO entro a bodega. Recibela desde el listado de ordenes de compra.`,
+        );
       }
 
       return InventoryService.receivePurchaseOrder(order.id, receiveItems, 'Stock recibido desde Vendix Mobile');
