@@ -1076,7 +1076,7 @@ export function normalizeInvoiceProfileConfig(
   const root = pickKnownKeys(input, ROOT_KEYS, '', issues);
 
   const general = pickKnownKeys(
-    expectObject(root.general, 'general', issues),
+    expectObject(root['general'], 'general', issues),
     GENERAL_KEYS,
     'general',
     issues,
@@ -1086,15 +1086,15 @@ export function normalizeInvoiceProfileConfig(
   // también se normaliza a null, y es el validador quien decide si el tipo de
   // operación la exigía (`AIU_SECTION_REQUIRED`).
   let aiu: ProfileAiuConfig | null = null;
-  if (root.aiu !== undefined && root.aiu !== null) {
+  if (root['aiu'] !== undefined && root['aiu'] !== null) {
     const raw = pickKnownKeys(
-      expectObject(root.aiu, 'aiu', issues),
+      expectObject(root['aiu'], 'aiu', issues),
       AIU_KEYS,
       'aiu',
       issues,
     );
-    raw.components = pickKnownKeys(
-      expectObject(raw.components, 'aiu.components', issues),
+    raw['components'] = pickKnownKeys(
+      expectObject(raw['components'], 'aiu.components', issues),
       AIU_COMPONENTS,
       'aiu.components',
       issues,
@@ -1103,18 +1103,18 @@ export function normalizeInvoiceProfileConfig(
   }
 
   const accountingRaw = pickKnownKeys(
-    expectObject(root.accounting, 'accounting', issues),
+    expectObject(root['accounting'], 'accounting', issues),
     ACCOUNTING_KEYS,
     'accounting',
     issues,
   );
   if (
-    accountingRaw.revenue_account_by_bucket !== undefined &&
-    accountingRaw.revenue_account_by_bucket !== null
+    accountingRaw['revenue_account_by_bucket'] !== undefined &&
+    accountingRaw['revenue_account_by_bucket'] !== null
   ) {
-    accountingRaw.revenue_account_by_bucket = pickKnownKeys(
+    accountingRaw['revenue_account_by_bucket'] = pickKnownKeys(
       expectObject(
-        accountingRaw.revenue_account_by_bucket,
+        accountingRaw['revenue_account_by_bucket'],
         'accounting.revenue_account_by_bucket',
         issues,
       ),
@@ -1129,11 +1129,11 @@ export function normalizeInvoiceProfileConfig(
   // se acota es la forma (ver `validateBounds`), porque un mapa libre sin cota
   // es un `jsonb` sin cota.
   if (
-    accountingRaw.mapping_key_overrides !== undefined &&
-    accountingRaw.mapping_key_overrides !== null
+    accountingRaw['mapping_key_overrides'] !== undefined &&
+    accountingRaw['mapping_key_overrides'] !== null
   ) {
-    accountingRaw.mapping_key_overrides = expectObject(
-      accountingRaw.mapping_key_overrides,
+    accountingRaw['mapping_key_overrides'] = expectObject(
+      accountingRaw['mapping_key_overrides'],
       'accounting.mapping_key_overrides',
       issues,
     );
@@ -1141,12 +1141,12 @@ export function normalizeInvoiceProfileConfig(
   const accounting = accountingRaw as unknown as ProfileAccountingConfig;
 
   const taxesRaw = pickKnownKeys(
-    expectObject(root.taxes, 'taxes', issues),
+    expectObject(root['taxes'], 'taxes', issues),
     TAXES_KEYS,
     'taxes',
     issues,
   );
-  const rules = expectArray(taxesRaw.rules, 'taxes.rules', issues).map(
+  const rules = expectArray(taxesRaw['rules'], 'taxes.rules', issues).map(
     (entry, index) =>
       pickKnownKeys(
         expectObject(entry, `taxes.rules[${index}]`, issues),
@@ -1157,7 +1157,7 @@ export function normalizeInvoiceProfileConfig(
   );
 
   const model_lines = expectArray(
-    root.model_lines,
+    root['model_lines'],
     'model_lines',
     issues,
   ).map(
@@ -1171,21 +1171,21 @@ export function normalizeInvoiceProfileConfig(
   );
 
   const format = pickKnownKeys(
-    expectObject(root.format, 'format', issues),
+    expectObject(root['format'], 'format', issues),
     FORMAT_KEYS,
     'format',
     issues,
   ) as unknown as ProfileFormatConfig;
 
   const dianRaw = pickKnownKeys(
-    expectObject(root.dian, 'dian', issues),
+    expectObject(root['dian'], 'dian', issues),
     DIAN_KEYS,
     'dian',
     issues,
   );
-  if (dianRaw.header_notes !== undefined && dianRaw.header_notes !== null) {
-    dianRaw.header_notes = expectArray(
-      dianRaw.header_notes,
+  if (dianRaw['header_notes'] !== undefined && dianRaw['header_notes'] !== null) {
+    dianRaw['header_notes'] = expectArray(
+      dianRaw['header_notes'],
       'dian.header_notes',
       issues,
     );
@@ -1194,7 +1194,7 @@ export function normalizeInvoiceProfileConfig(
 
   return {
     config: {
-      config_version: root.config_version as number,
+      config_version: root['config_version'] as number,
       general,
       aiu,
       accounting,

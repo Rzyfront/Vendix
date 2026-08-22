@@ -3,6 +3,7 @@ import { provideState } from '@ngrx/store';
 import { provideEffects } from '@ngrx/effects';
 import { invoicingReducer } from './state/reducers/invoicing.reducer';
 import { InvoicingEffects } from './state/effects/invoicing.effects';
+import { InvoiceProfileEffects } from './state/effects/invoice-profile.effects';
 import { ModuleTabsShellComponent } from '../../../../shared/components/module-tabs-shell/module-tabs-shell.component';
 
 export const invoicingRoutes: Routes = [
@@ -23,7 +24,7 @@ export const invoicingRoutes: Routes = [
         path: 'invoices/new',
         providers: [
             provideState({ name: 'invoicing', reducer: invoicingReducer }),
-            provideEffects(InvoicingEffects),
+            provideEffects(InvoicingEffects, InvoiceProfileEffects),
         ],
         loadComponent: () =>
             import('./pages/invoice-create-page/invoice-create-page.component').then(
@@ -79,6 +80,20 @@ export const invoicingRoutes: Routes = [
                     route: '/admin/invoicing/resolutions',
                 },
                 {
+                    // Con qué reglas se timbra: régimen AIU, matriz de
+                    // impuestos por componente, cuentas y formato. Va DESPUÉS
+                    // de Resoluciones y ANTES de Configuración DIAN porque ese
+                    // es el orden en que se configuran: primero la numeración
+                    // autorizada, luego las reglas del documento, y al final el
+                    // certificado con que se firma.
+                    id: 'profiles',
+                    label: 'Perfiles',
+                    description:
+                        'Configuraciones de facturación reutilizables: régimen AIU, impuestos por componente, cuentas contables y formato. Cada edición crea una versión, y cada factura queda apuntando a la que la emitió.',
+                    icon: 'layout-template',
+                    route: '/admin/invoicing/profiles',
+                },
+                {
                     id: 'dian-config',
                     label: 'Configuración DIAN',
                     shortLabel: 'DIAN',
@@ -91,7 +106,7 @@ export const invoicingRoutes: Routes = [
         },
         providers: [
             provideState({ name: 'invoicing', reducer: invoicingReducer }),
-            provideEffects(InvoicingEffects),
+            provideEffects(InvoicingEffects, InvoiceProfileEffects),
         ],
         children: [
             {
@@ -127,6 +142,18 @@ export const invoicingRoutes: Routes = [
                 path: 'resolutions',
                 loadComponent: () =>
                     import('./components/resolutions/resolutions-page.component').then((c) => c.ResolutionsPageComponent),
+            },
+            {
+                // Segmento `profiles` y NO `invoice-profiles`: el shell marca
+                // la pestaña activa por prefijo de ruta, así que cualquier
+                // segmento que empiece por `invoices` encendería la pestaña de
+                // Facturas — el mismo defecto que ya obligó a sacar
+                // `invoices/new` fuera del shell.
+                path: 'profiles',
+                loadComponent: () =>
+                    import('./pages/invoice-profiles-page/invoice-profiles-page.component').then(
+                        (m) => m.InvoiceProfilesPageComponent,
+                    ),
             },
             {
                 // Las cuatro habilitaciones DIAN y, colgando de cada una, su

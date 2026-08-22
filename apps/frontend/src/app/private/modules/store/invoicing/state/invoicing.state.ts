@@ -6,6 +6,14 @@ import {
   DianDocumentEvent,
 } from '../interfaces/invoice.interface';
 import { DianRejection } from '../utils/invoicing-errors.util';
+import type {
+  InvoiceProfile,
+  InvoiceProfileDetail,
+  InvoiceProfilePageMeta,
+  InvoiceProfileState as InvoiceProfileStateLiteral,
+  InvoiceProfileVersionSummary,
+  ProfilePreviewResult,
+} from '../interfaces/invoice-profile.interface';
 
 export interface InvoicingState {
   invoices: Invoice[];
@@ -63,6 +71,64 @@ export interface InvoicingState {
    */
   pdfRegenerating: boolean;
 
+  // ── Perfiles de facturación ───────────────────────────────────────────────
+  // Campos planos con prefijo `profile*`, siguiendo el patrón del resto del
+  // slice. No se anidan en un sub-objeto: un `profiles: {...}` obligaría a cada
+  // reducer a hacer spread de dos niveles, y ese es el sitio donde se pierden
+  // banderas sin que nada avise.
+  profiles: InvoiceProfile[];
+  profilesLoading: boolean;
+  profilesMeta: InvoiceProfilePageMeta | null;
+  profilesError: string | null;
+
+  currentProfile: InvoiceProfileDetail | null;
+  currentProfileLoading: boolean;
+
+  /**
+   * Mutación de un perfil en curso. Bandera propia y NO `profilesLoading`:
+   * reusar la de la lista cambiaría la tabla por un esqueleto mientras se
+   * guarda, y el usuario perdería de vista la fila que está editando.
+   */
+  profileSaving: boolean;
+
+  profileVersions: InvoiceProfileVersionSummary[];
+  /**
+   * A qué perfil pertenece el historial cargado.
+   *
+   * No es redundante — es el mismo defecto que `dianEventsInvoiceId` ya
+   * resuelve: sin él, las versiones del perfil A siguen en el store al abrir el
+   * B y el historial las pinta como suyas. En un perfil de facturación eso es
+   * peor que un dato feo: el diff compararía snapshots de perfiles distintos y
+   * mostraría cambios fiscales que nunca ocurrieron.
+   */
+  profileVersionsProfileId: number | null;
+  profileVersionsLoading: boolean;
+
+  /**
+   * Última previsualización. Vive en el state y no en el componente porque el
+   * editor la consulta desde varias secciones y volver a pedirla en cada cambio
+   * de pestaña reconstruiría el XML sin necesidad.
+   */
+  profilePreview: ProfilePreviewResult | null;
+  profilePreviewProfileId: number | null;
+  profilePreviewLoading: boolean;
+  /**
+   * Fallo de la previsualización con su código. Se guarda el CÓDIGO y no sólo
+   * el mensaje: `INVOICING_PREVIEW_002` (muestra inutilizable) se corrige en el
+   * formulario, mientras `INVOICING_PROFILE_VERSION_001` (historial roto) es un
+   * error que el usuario no puede arreglar. Un solo string no distingue eso.
+   */
+  profilePreviewError: { code: string | null; message: string } | null;
+
+  // Filter-as-state de perfiles, separado del de facturas: comparten slice
+  // pero no vista, y un `search` común haría que buscar en una tabla filtrara
+  // la otra.
+  profilesSearch: string;
+  profilesStateFilter: InvoiceProfileStateLiteral | '';
+  profilesOperationFilter: string;
+  profilesPage: number;
+  profilesLimit: number;
+
   // Filter-as-state
   search: string;
   page: number;
@@ -98,6 +164,30 @@ export const initialInvoicingState: InvoicingState = {
   dianEventsLoading: false,
   dianEventRegistering: false,
   pdfRegenerating: false,
+
+  profiles: [],
+  profilesLoading: false,
+  profilesMeta: null,
+  profilesError: null,
+
+  currentProfile: null,
+  currentProfileLoading: false,
+  profileSaving: false,
+
+  profileVersions: [],
+  profileVersionsProfileId: null,
+  profileVersionsLoading: false,
+
+  profilePreview: null,
+  profilePreviewProfileId: null,
+  profilePreviewLoading: false,
+  profilePreviewError: null,
+
+  profilesSearch: '',
+  profilesStateFilter: '',
+  profilesOperationFilter: '',
+  profilesPage: 1,
+  profilesLimit: 20,
 
   search: '',
   page: 1,
