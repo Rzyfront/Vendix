@@ -2289,7 +2289,9 @@ export class PopComponent implements OnInit, OnDestroy {
     // productos nuevos, antes de armar el payload.
     this.applyNewProductPricing();
     const request = cartToPurchaseOrderRequest(state, userId, undefined);
-    request.status = 'approved';
+    // A.10 — el `status` ya no viaja en el payload (nacía aprobada a petición
+    // del navegador). La orden se crea en borrador y se aprueba con la ACCIÓN
+    // de aprobar, que pasa por su permiso y deja `approved_by_user_id`.
     // QUI-647: adjunta la configuración de pago elegida en el modal.
     this.attachPaymentPlan(request);
     // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
@@ -2297,7 +2299,27 @@ export class PopComponent implements OnInit, OnDestroy {
     // QUI-648: unidad de venta configurada en el modal.
     this.attachSaleUnitConfig(request, state);
 
-    this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    this.purchaseOrdersService.createPurchaseOrder(request).pipe(
+      switchMap((response) => {
+        if (!response?.success || !response.data) return of(response);
+        // La aprobación NO puede tumbar una orden que ya existe: si falla, la
+        // orden queda en borrador y se dice con nombre y motivo. Reintentar
+        // crearía una segunda compra por la misma factura.
+        return this._approveCreatedOrder$(response.data).pipe(
+          map((approved) => ({ ...response, data: approved })),
+          catchError((err: any) => {
+            this.toastService.warning(
+              this._errorMessage(
+                err?.err,
+                'La orden se creó como BORRADOR: no se pudo aprobar',
+              ),
+            );
+            return of(response);
+          }),
+        );
+      }),
+      takeUntilDestroyed(this.destroyRef),
+    ).subscribe({
       next: (response) => {
         // 5.4 — El backend puede responder 200/201 con `success:false` (ver
         // `responseService.error` que RETORNA el sobre en vez de lanzar). Antes
@@ -2438,6 +2460,32 @@ export class PopComponent implements OnInit, OnDestroy {
           console.error('Error in create/receive/pay flow:', err);
           this.isProcessingOrder.set(false);
           const stage = err?.stage;
+          // La aprobación falló DESPUÉS de crear: la orden existe (en
+          // borrador). Se rescata del marcador porque `createdOrder` todavía
+          // no se había asignado — sin esto el flujo la daría por no creada y
+          // el reintento duplicaría la compra.
+          if (stage === 'approve' && err?.order) {
+            createdOrder = err.order;
+            const approveDetail = this._errorMessage(
+              err?.err,
+              'La orden se creó como BORRADOR: no se pudo aprobar, así que la mercancía no se recibió',
+            );
+            this.toastService.error(approveDetail);
+            // Se recuerda la OC para que «Reintentar» no cree una segunda: la
+            // reanudación intentará recibir y el backend dirá con todas sus
+            // letras que un borrador no puede recibirse.
+            this.pendingReceptionOrder.set(createdOrder);
+            this._setOrderResultFromCreated(createdOrder, {
+              stages: this._buildStageTrail(doReceive, doPay, {
+                create: 'success',
+                receive: 'failed',
+                pay: 'skipped',
+                receiveError: approveDetail,
+              }),
+              failedStage: 'receive',
+            });
+            return;
+          }
           if (stage === 'create' || !createdOrder) {
             // La OC no se creó → no limpiamos el carrito (permite reintentar).
             this.toastService.error(
@@ -2594,6 +2642,42 @@ export class PopComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * A.10 — aprueba la OC recién creada por la VÍA CORRECTA.
+   *
+   * El payload de creación mandaba `status: 'approved'` y el backend lo
+   * escribía tal cual: la orden nacía aprobada a petición del navegador y el
+   * permiso `store:orders:purchase_orders:approve` no se consultaba nunca.
+   * Ahora la orden nace en borrador y esta etapa la aprueba con
+   * `PATCH /:id/approve`, que sí exige el permiso, registra
+   * `approved_by_user_id` y deja rastro de auditoría.
+   *
+   * Lanza `{ stage: 'approve', err, order }` LLEVÁNDOSE la orden creada: sin
+   * ella el manejador de error no distinguiría «no se creó» de «se creó y no
+   * se aprobó», conservaría el carrito y el reintento crearía una SEGUNDA
+   * compra por la misma factura.
+   */
+  private _approveCreatedOrder$(order: any): Observable<any> {
+    const id = Number(order?.id);
+    if (!id) return of(order);
+    return this.purchaseOrdersService.approvePurchaseOrder(id).pipe(
+      switchMap((response) =>
+        response?.success && response.data
+          ? of(response.data)
+          : throwError(() => ({
+              stage: 'approve' as const,
+              err: response,
+              order,
+            })),
+      ),
+      catchError((err: any) =>
+        err?.stage === 'approve'
+          ? throwError(() => err)
+          : throwError(() => ({ stage: 'approve' as const, err, order })),
+      ),
+    );
+  }
+
+  /**
    * Crea la OC aprobada a partir del carrito. Lanza `{ stage: 'create' }`
    * cuando el backend responde sin `data`, para que el manejador de error
    * conserve el carrito y permita reintentar.
@@ -2604,7 +2688,8 @@ export class PopComponent implements OnInit, OnDestroy {
     // modal para los productos nuevos, antes de armar el payload.
     this.applyNewProductPricing();
     const request = cartToPurchaseOrderRequest(state, userId, undefined);
-    request.status = 'approved';
+    // A.10 — sin `status` en el payload: se crea en borrador y se aprueba por
+    // la vía que exige el permiso de aprobación (ver `_approveCreatedOrder$`).
     // QUI-647: adjunta la configuración de pago elegida en el modal.
     this.attachPaymentPlan(request);
     // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
@@ -2618,6 +2703,9 @@ export class PopComponent implements OnInit, OnDestroy {
           ? of(response.data)
           : throwError(() => ({ stage: 'create' as const })),
       ),
+      // Recibir exige una orden APROBADA (`draft` sólo transita a `approved` o
+      // `cancelled`), así que la aprobación es una etapa propia de la cadena.
+      switchMap((order) => this._approveCreatedOrder$(order)),
     );
   }
 

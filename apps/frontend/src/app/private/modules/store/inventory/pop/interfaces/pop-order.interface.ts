@@ -4,9 +4,8 @@
  */
 
 import { PopCartState, PopCartItem, LotInfo, PreBulkData } from './pop-cart.interface';
-import { ApiResponse, PurchaseOrderStatus } from '../../interfaces';
+import { ApiResponse } from '../../interfaces';
 
-// PurchaseOrderStatus imported from interfaces
 
 import { PurchaseOrder, PurchaseOrderItem } from '../../interfaces';
 
@@ -91,7 +90,11 @@ export interface CreatePurchaseOrderRequest {
   organization_id?: number;
   supplier_id: number;
   location_id: number;
-  status?: PurchaseOrderStatus;
+  // A.10 — `status` NO forma parte del payload de creación. El cliente no
+  // elige con qué estado nace una orden: el backend la crea en borrador y la
+  // aprobación es una acción aparte, con su permiso y su rastro. Declararlo
+  // aquí invitaba a volver a mandarlo (y con `forbidNonWhitelisted` en el DTO,
+  // eso es un 400 en cada creación).
   /**
    * IVA cycle (F1): dominant invoice mode. `true` when captured prices
    * already INCLUDE tax; `false` when tax is ADDED on top. Per-item
@@ -272,7 +275,12 @@ export function cartToPurchaseOrderRequest(
     organization_id: organizationId,
     supplier_id: cartState.supplierId!,
     location_id: cartState.locationId!,
-    status: cartState.status === 'draft' ? 'draft' : 'approved',
+    // A.10 — el estado NO viaja en el payload. El backend escribía tal cual el
+    // `status` que llegara, así que una orden podía NACER APROBADA a petición
+    // del navegador y saltarse el permiso de aprobación
+    // (`store:orders:purchase_orders:approve`). La orden nace en `draft` por
+    // defecto de la columna y quien la aprueba es la ACCIÓN de aprobar, que sí
+    // pasa por el permiso y deja rastro (`approved_by_user_id` + auditoría).
     // IVA cycle (F1): dominant invoice mode captured in the POP header, GATED
     // by the master switch `cartState.has_vat`. When the purchase has no VAT,
     // force `false` so the header cannot reintroduce tax-inclusive semantics
