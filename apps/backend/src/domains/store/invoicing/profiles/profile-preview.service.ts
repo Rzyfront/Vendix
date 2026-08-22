@@ -116,6 +116,19 @@ const PREVIEW_CUSTOMER: DianCustomerData = {
   country_code: 'CO',
   email: 'preview@vendix.invalid',
   tax_responsibilities: ['R-99-PN'],
+  /**
+   * `'JURIDICA'` explícito, no `null`.
+   *
+   * `null` le pide al builder DERIVAR el tipo de persona desde
+   * `document_type`, y esa derivación es ESTRUCTURAL: para una persona natural
+   * el documento no lleva `cac:PartyLegalEntity`, y emitirlo donde no
+   * corresponde es un defecto de rechazo del Anexo 19. Una previsualización que
+   * dejara al builder derivar mostraría una estructura que depende de un dato de
+   * relleno, así que se fija la rama y se declara cuál se está enseñando.
+   */
+  person_type: 'JURIDICA',
+  /** Sin CIIU: el grupo es opcional y no hay uno de muestra que no sea inventado. */
+  ciiu_code: null,
 };
 
 /**
