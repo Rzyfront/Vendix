@@ -5443,6 +5443,32 @@ model invoices {
   /// 4900 y no 5000: el prefijo obligatorio ya ocupa parte de la cota de CAV03.
   /// Misma longitud que `contract_object` en `settings-schemas.dto.ts`.
   aiu_contract_object              String?                         @db.VarChar(4900)
+  /// Régimen de base gravable AIU con el que se calculó ESTE documento, y el
+  /// piso legal y la matriz de gravabilidad que aplicaron. Tres columnas, un
+  /// solo propósito: hacer del régimen un SNAPSHOT, por la misma razón que
+  /// `aiu_contract_object` lo es.
+  ///
+  /// El régimen decide qué parte del contrato es base gravable, y los dos son
+  /// incompatibles: E.T. art. 462-1 grava A+I+U completo con piso del 10 % del
+  /// valor del contrato; Decreto 1372/1992 art. 3 grava sólo la Utilidad.
+  /// Vivía SÓLO en `store_settings.invoicing.aiu.regime`, y `invoice-flow`
+  /// volvía a leerlo VIVO en la emisión (`resolveAiuEmissionContext`). Cambiar
+  /// ese ajuste entre que se captura la factura y se transmite hacía que una
+  /// línea calculada sin impuesto se emitiera con el `Percent` heredado de la
+  /// cabecera por la ruta histórica del constructor UBL — un XML que declara
+  /// 19 % sobre una base sin impuesto, que es justo lo que prohíben FAX01 y
+  /// FAU04 del Anexo Técnico 1.9.
+  ///
+  /// NULL ⇒ se cae al ajuste vivo de la tienda, con traza explícita. Es el caso
+  /// de las facturas anteriores a esta columna: rellenarlas sería inventar la
+  /// configuración con la que se emitieron.
+  ///
+  /// `aiu_taxable_matrix` guarda la gravabilidad EFECTIVA por componente y la
+  /// tarifa que la sostiene, que es el dato que el calculador no tenía y por el
+  /// cual no podía imponer el impuesto de una línea gravable sin declarar.
+  aiu_regime                       String?                         @db.VarChar(30)
+  aiu_minimum_percent              Decimal?                        @db.Decimal(5, 2)
+  aiu_taxable_matrix               Json?
   customer_id                      Int?
   supplier_id                      Int?
   customer_name                    String?                         @db.VarChar(255)
