@@ -210,6 +210,78 @@ export const ErrorCodes = {
       'Uploaded file type is not allowed (expected one of: image/jpeg, image/png, image/webp, application/pdf)',
   },
 
+  // Print Formats Hub & Gateway (QUI-780)
+  PRINT_FORMAT_NOT_FOUND_001: {
+    code: 'PRINT_FORMAT_NOT_FOUND_001',
+    httpStatus: 404,
+    devMessage: 'Print format type not found in catalog',
+  },
+  PRINT_TEMPLATE_NOT_FOUND_001: {
+    code: 'PRINT_TEMPLATE_NOT_FOUND_001',
+    httpStatus: 404,
+    devMessage: 'Print template not found or inaccessible for organization',
+  },
+  PRINT_TEMPLATE_SYSTEM_PROTECTED_001: {
+    code: 'PRINT_TEMPLATE_SYSTEM_PROTECTED_001',
+    httpStatus: 403,
+    devMessage: 'System master print templates cannot be modified or deleted',
+  },
+  PRINT_TEMPLATE_ACCESS_DENIED_001: {
+    code: 'PRINT_TEMPLATE_ACCESS_DENIED_001',
+    httpStatus: 403,
+    devMessage: 'Access denied to organization print template',
+  },
+  PRINT_CONFIG_VALIDATION_001: {
+    code: 'PRINT_CONFIG_VALIDATION_001',
+    httpStatus: 422,
+    devMessage: 'Print format definition or overrides schema validation failed',
+  },
+  PRINT_TOKEN_SYNTAX_001: {
+    code: 'PRINT_TOKEN_SYNTAX_001',
+    httpStatus: 422,
+    devMessage: 'Custom template syntax error or unclosed token tag',
+  },
+  PRINT_DOCUMENT_NOT_FOUND_001: {
+    code: 'PRINT_DOCUMENT_NOT_FOUND_001',
+    httpStatus: 404,
+    devMessage: 'Source document to render was not found in domain',
+  },
+  PRINT_DATA_PROVIDER_MISSING_001: {
+    code: 'PRINT_DATA_PROVIDER_MISSING_001',
+    httpStatus: 500,
+    devMessage: 'No document data provider registered for the requested format type',
+  },
+  PRINT_FISCAL_STRUCTURE_VIOLATION_001: {
+    code: 'PRINT_FISCAL_STRUCTURE_VIOLATION_001',
+    httpStatus: 422,
+    devMessage: 'Fiscal electronic invoice template violates DIAN mandatory graphic representation requirements',
+  },
+  PRINT_GATEWAY_RENDER_FAILED_001: {
+    code: 'PRINT_GATEWAY_RENDER_FAILED_001',
+    httpStatus: 500,
+    devMessage: 'Print gateway document render failed',
+  },
+  PRINT_PERM_MANAGE_REQUIRED_001: {
+    code: 'PRINT_PERM_MANAGE_REQUIRED_001',
+    httpStatus: 403,
+    devMessage: 'Permission store:settings:manage or store:print_formats:manage required',
+  },
+  PRINT_LIBRARY_SHARE_FORBIDDEN_001: {
+    code: 'PRINT_LIBRARY_SHARE_FORBIDDEN_001',
+    httpStatus: 403,
+    devMessage: 'Only organization administrators can share templates with other stores',
+  },
+  PRINT_CLONE_FAILED_001: {
+    code: 'PRINT_CLONE_FAILED_001',
+    httpStatus: 409,
+    devMessage: 'Cannot clone template due to existing configuration conflict',
+  },
+  PRINT_PREVIEW_TIMEOUT_001: {
+    code: 'PRINT_PREVIEW_TIMEOUT_001',
+    httpStatus: 504,
+    devMessage: 'Print preview compilation timed out',
+  },
+
   // Payments
   PAY_INVALID_ORDER_001: {
     code: 'PAY_INVALID_ORDER_001',

@@ -115,6 +115,7 @@ export class StorePrismaService extends BasePrismaService {
     'membership_access_credentials',
     'membership_access_logs',
     'membership_access_occupancy',
+    'store_print_format_configs',
   ];
 
   private readonly fiscal_entity_scoped_models = [
@@ -1736,6 +1737,15 @@ export class StorePrismaService extends BasePrismaService {
 
   get membership_access_occupancy() {
     return this.scoped_client.membership_access_occupancy;
+  }
+
+  // Print Formats Hub
+  get store_print_format_configs() {
+    return this.scoped_client.store_print_format_configs;
+  }
+
+  get print_templates() {
+    return this.baseClient.print_templates;
   }
 
   /**

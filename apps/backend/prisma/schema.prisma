@@ -234,6 +234,7 @@ model users {
   // un certificado de firma. `onDelete: SetNull`: el documento sobrevive al
   // usuario que lo cargó (retención indefinida, ver el modelo).
   dian_configuration_documents_uploaded dian_configuration_documents[]
+  print_templates_created               print_templates[]             @relation("print_templates_created_by")
 
   @@index([email_verified])
   @@index([state])
@@ -638,6 +639,10 @@ model organizations {
   // Org-scoped tax catalogue
   tax_categories tax_categories[]
 
+  // Print Formats Hub
+  print_templates            print_templates[]
+  store_print_format_configs store_print_format_configs[]
+
   @@index([onboarding])
   @@index([account_type])
   @@index([operating_scope])
@@ -949,6 +954,9 @@ model stores {
   // Dispatch Routes & Vehicles
   dispatch_routes dispatch_routes[]
   vehicles        vehicles[]
+
+  // Print Formats Hub
+  store_print_format_configs store_print_format_configs[]
 
   @@unique([organization_id, slug])
   @@index([onboarding])
@@ -9150,6 +9158,66 @@ model email_templates {
 
   @@unique([store_id, event_type])
   @@index([event_type, is_active])
+}
+
+// ============================================
+// PRINT FORMATS HUB & TEMPLATES
+// ============================================
+
+enum print_format_type_enum {
+  pos_sale_ticket
+  sales_order_invoice
+  dispatch_note
+  quotation
+  credit_note
+  purchase_order
+  transfer_note
+  fiscal_electronic_invoice
+  fiscal_credit_note
+  kitchen_ticket
+}
+
+model print_templates {
+  id              Int                    @id @default(autoincrement())
+  organization_id Int?
+  format_type     print_format_type_enum
+  name            String                 @db.VarChar(120)
+  description     String?                @db.VarChar(255)
+  definition      Json                   // { paper, sections, fields, columns, styles, tokens, custom_template }
+  is_system       Boolean                @default(false)
+  is_shared       Boolean                @default(false)
+  created_by      Int?
+  created_at      DateTime               @default(now()) @db.Timestamp(6)
+  updated_at      DateTime               @default(now()) @db.Timestamp(6)
+
+  organization    organizations?         @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  author          users?                 @relation("print_templates_created_by", fields: [created_by], references: [id], onUpdate: NoAction, onDelete: SetNull)
+  store_configs   store_print_format_configs[]
+
+  @@index([organization_id, format_type])
+  @@index([is_system, format_type])
+  @@index([is_shared, organization_id])
+}
+
+model store_print_format_configs {
+  id              Int                    @id @default(autoincrement())
+  store_id        Int
+  organization_id Int
+  format_type     print_format_type_enum
+  is_active       Boolean                @default(true)
+  gateway_enabled Boolean                @default(false)
+  template_id     Int?
+  overrides       Json?                  // { paper, sections, fields, columns, styles, custom_template }
+  created_at      DateTime               @default(now()) @db.Timestamp(6)
+  updated_at      DateTime               @default(now()) @db.Timestamp(6)
+
+  store           stores                 @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  organization    organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  template        print_templates?       @relation(fields: [template_id], references: [id], onUpdate: NoAction, onDelete: SetNull)
+
+  @@unique([store_id, format_type])
+  @@index([store_id, is_active])
+  @@index([organization_id, format_type])
 }
 
 // ============================================

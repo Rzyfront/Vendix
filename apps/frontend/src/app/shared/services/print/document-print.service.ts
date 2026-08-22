@@ -1,4 +1,5 @@
 import { Injectable, inject } from '@angular/core';
+import { firstValueFrom } from 'rxjs';
 
 import {
   PRINT_DEFAULTS,
@@ -7,7 +8,9 @@ import {
   PrintFormat,
   ReceiptsSettings,
 } from '../../../core/models/store-settings.interface';
+import { PrintFormatType } from '../../../core/models/print-formats.model';
 import { StoreSettingsFacade } from '../../../core/store/store-settings/store-settings.facade';
+import { PrintGatewayClientService } from './print-gateway-client.service';
 
 /**
  * Upper bound for the print iframe's `load` event. `document.write` + `close()`
@@ -178,6 +181,7 @@ function legacyMirror(
 @Injectable({ providedIn: 'root' })
 export class DocumentPrintService {
   private readonly storeSettings = inject(StoreSettingsFacade);
+  private readonly gatewayClient = inject(PrintGatewayClientService);
 
   /**
    * Resolves the paper for a document without printing it.
@@ -297,6 +301,54 @@ export class DocumentPrintService {
       copies,
       format: config.format,
     };
+  }
+
+  /**
+   * Imprime un documento mediante el Print Gateway Centralizado del backend.
+   * Si ocurre algún error o el gateway no está disponible, hace fallback
+   * transparente al emisor local (legacy).
+   */
+  async printViaGateway(params: {
+    formatType: PrintFormatType;
+    documentId: number | string;
+    title?: string;
+    trigger?: PrintTrigger;
+    fallbackRequest?: PrintRequest;
+  }): Promise<PrintResult | null> {
+    try {
+      const response = await firstValueFrom(
+        this.gatewayClient.renderDocument(params.formatType, params.documentId, 'html'),
+      );
+
+      if (response && response.html) {
+        await this.sendToPrinter(response.html);
+        return {
+          documents: 1,
+          pages: response.copies || 1,
+          copies: response.copies || 1,
+          format: response.is_roll ? (response.width_mm <= 58 ? 'thermal_58' : 'thermal_80') : 'letter',
+        };
+      }
+    } catch (err) {
+      console.warn(
+        `[DocumentPrintService] Error en Print Gateway para ${params.formatType}, aplicando fallback local:`,
+        err,
+      );
+    }
+
+    // Fallback a renderizado local en el navegador
+    if (params.fallbackRequest) {
+      return this.print(params.fallbackRequest);
+    }
+
+    return null;
+  }
+
+  /**
+   * Imprime directamente un HTML completo compilado por el Print Gateway (ej: preview o render directo)
+   */
+  async printGatewayHtml(documentHtml: string): Promise<void> {
+    await this.sendToPrinter(documentHtml);
   }
 
   /**

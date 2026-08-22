@@ -1438,6 +1438,12 @@ export class BreadcrumbService {
       icon: 'credit-card',
     },
     {
+      path: '/admin/settings/print-formats',
+      title: 'Formatos de Impresión',
+      parent: 'Configuración',
+      icon: 'printer',
+    },
+    {
       path: '/admin/settings/appearance',
       title: 'Apariencia',
       parent: 'Configuración',

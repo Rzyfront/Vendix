@@ -556,6 +556,14 @@ export const storeAdminRoutes: Routes = [
               ),
           },
           {
+            path: 'print-formats',
+            title: 'Formatos de Impresión - Vendix',
+            loadComponent: () =>
+              import('../../private/modules/store/settings/print-formats/print-formats-hub.component').then(
+                (c) => c.PrintFormatsHubComponent,
+              ),
+          },
+          {
             path: 'payments',
             loadComponent: () =>
               import('../../private/modules/store/settings/payments/payments-settings.component').then(

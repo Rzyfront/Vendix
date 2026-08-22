@@ -1,0 +1,215 @@
+import { Injectable } from '@nestjs/common';
+import { print_format_type_enum } from '@prisma/client';
+import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
+import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
+import { PrintTokenDefinition } from '../interfaces/print-format.interface';
+
+@Injectable()
+export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
+  readonly formatType: print_format_type_enum = 'sales_order_invoice';
+
+  constructor(private readonly prisma: StorePrismaService) {}
+
+  async fetchDocumentData(
+    storeId: number,
+    documentId: number | string,
+  ): Promise<StandardPrintDataModel> {
+    const orderId = Number(documentId);
+    if (isNaN(orderId)) {
+      throw new VendixHttpException(ErrorCodes.PRINT_DOCUMENT_NOT_FOUND_001);
+    }
+
+    const order = await this.prisma.orders.findFirst({
+      where: { id: orderId, store_id: storeId },
+      include: {
+        order_items: true,
+        order_taxes: true,
+        users: true,
+        addresses_orders_shipping_address_idToaddresses: true,
+        stores: {
+          include: {
+            addresses: { take: 1 },
+            organizations: true,
+          },
+        },
+      },
+    });
+
+    if (!order) {
+      throw new VendixHttpException(ErrorCodes.PRINT_DOCUMENT_NOT_FOUND_001);
+    }
+
+    const store = order.stores || {};
+    const org = store.organizations || {};
+    const storeAddr = store.addresses?.[0] || {};
+    const user = order.users || {};
+    const shippingAddr = order.addresses_orders_shipping_address_idToaddresses;
+
+    const customerAddress = shippingAddr
+      ? [shippingAddr.address_line1, shippingAddr.address_line2, shippingAddr.city, shippingAddr.state_province]
+          .filter(Boolean)
+          .join(', ')
+      : undefined;
+
+    const items = (order.order_items || []).map((it: any, idx: number) => ({
+      index: idx + 1,
+      product_name: it.product_name,
+      variant_sku: it.variant_sku || undefined,
+      quantity: Number(it.quantity || 1),
+      unit_price: Number(it.unit_price || 0),
+      unit_price_formatted: `$${Number(it.unit_price || 0).toLocaleString('es-CO')}`,
+      discount_amount: Number(it.discount_amount || 0),
+      discount_formatted: it.discount_amount ? `-$${Number(it.discount_amount).toLocaleString('es-CO')}` : undefined,
+      total_price: Number(it.total_price || 0),
+      total_price_formatted: `$${Number(it.total_price || 0).toLocaleString('es-CO')}`,
+    }));
+
+    const taxes = (order.order_taxes || []).map((t: any) => ({
+      name: t.tax_name || 'IVA',
+      rate: Number(t.tax_rate || 0),
+      base_amount: Number(t.taxable_amount || 0),
+      tax_amount: Number(t.tax_amount || 0),
+      base_formatted: `$${Number(t.taxable_amount || 0).toLocaleString('es-CO')}`,
+      tax_formatted: `$${Number(t.tax_amount || 0).toLocaleString('es-CO')}`,
+    }));
+
+    const subtotal = Number(order.subtotal_amount || 0);
+    const discount = Number(order.discount_amount || 0);
+    const tax = Number(order.tax_amount || 0);
+    const shipping = Number(order.shipping_cost || 0);
+    const grandTotal = Number(order.grand_total || subtotal - discount + tax + shipping);
+
+    return {
+      store: {
+        name: store.name || 'Vendix',
+        legal_name: store.legal_name || org.legal_name,
+        tax_id: org.tax_id,
+        phone: store.phone,
+        email: store.email,
+        address: storeAddr.address_line1 ? `${storeAddr.address_line1} ${storeAddr.address_line2 || ''}`.trim() : undefined,
+        city: storeAddr.city,
+        logo_url: store.logo_url,
+      },
+      customer: user.id
+        ? {
+            name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Cliente Final',
+            tax_id: user.document_number,
+            phone: user.phone,
+            email: user.email,
+            address: customerAddress,
+          }
+        : undefined,
+      document: {
+        id: order.id,
+        number: String(order.order_number),
+        date: order.created_at ? new Date(order.created_at).toISOString() : new Date().toISOString(),
+        date_formatted: order.created_at ? new Date(order.created_at).toLocaleDateString('es-CO') : new Date().toLocaleDateString('es-CO'),
+        state: order.state,
+        state_label: order.state,
+        channel: order.channel,
+        notes: order.notes,
+        internal_notes: order.internal_notes,
+      },
+      items,
+      taxes,
+      totals: {
+        subtotal,
+        subtotal_formatted: `$${subtotal.toLocaleString('es-CO')}`,
+        discount_total: discount,
+        discount_total_formatted: `$${discount.toLocaleString('es-CO')}`,
+        shipping_total: shipping,
+        shipping_total_formatted: `$${shipping.toLocaleString('es-CO')}`,
+        tax_total: tax,
+        tax_total_formatted: `$${tax.toLocaleString('es-CO')}`,
+        grand_total: grandTotal,
+        grand_total_formatted: `$${grandTotal.toLocaleString('es-CO')}`,
+      },
+    };
+  }
+
+  async getSampleData(storeId?: number): Promise<StandardPrintDataModel> {
+    return {
+      store: {
+        name: 'Vendix Enterprise Store',
+        legal_name: 'Soluciones Comerciales Vendix S.A.S.',
+        tax_id: '900.876.543-2',
+        phone: '+57 601 555 0199',
+        email: 'facturacion@vendix.com',
+        address: 'Carrera 7 # 71-21, Torre B Piso 8',
+        city: 'Bogotá D.C.',
+      },
+      customer: {
+        name: 'Inversiones y Distribuciones Andinas S.A.',
+        tax_id: '901.444.888-1',
+        phone: '+57 310 444 5566',
+        email: 'compras@andinas.com.co',
+        address: 'Zona Industrial Montevideo, Calle 19 # 68-50',
+      },
+      document: {
+        id: 501,
+        number: 'ORD-2026-0089',
+        date: new Date().toISOString(),
+        date_formatted: new Date().toLocaleDateString('es-CO'),
+        state: 'processing',
+        state_label: 'En Proceso',
+        channel: 'ecommerce',
+      },
+      items: [
+        {
+          index: 1,
+          product_name: 'Impresora Térmica de Recibos 80mm USB/Ethernet',
+          variant_sku: 'IMP-TERM-80-ETH',
+          quantity: 2,
+          unit_price: 350000,
+          unit_price_formatted: '$350.000',
+          total_price: 700000,
+          total_price_formatted: '$700.000',
+        },
+        {
+          index: 2,
+          product_name: 'Rollo Papel Térmico 80mm x 60m (Caja x 50 unid)',
+          variant_sku: 'PAP-ROLL-80X60-CJ',
+          quantity: 1,
+          unit_price: 120000,
+          unit_price_formatted: '$120.000',
+          total_price: 120000,
+          total_price_formatted: '$120.000',
+        },
+      ],
+      taxes: [
+        {
+          name: 'IVA 19%',
+          rate: 19,
+          base_amount: 689076,
+          tax_amount: 130924,
+          base_formatted: '$689.076',
+          tax_formatted: '$130.924',
+        },
+      ],
+      totals: {
+        subtotal: 820000,
+        subtotal_formatted: '$820.000',
+        discount_total: 0,
+        discount_total_formatted: '$0',
+        shipping_total: 15000,
+        shipping_total_formatted: '$15.000',
+        tax_total: 130924,
+        tax_total_formatted: '$130.924',
+        grand_total: 835000,
+        grand_total_formatted: '$835.000',
+      },
+    };
+  }
+
+  getAvailableTokens(): PrintTokenDefinition[] {
+    return [
+      { token: '{{store.name}}', path: 'store.name', description: 'Nombre comercial de la tienda', example: 'Mi Tienda' },
+      { token: '{{customer.name}}', path: 'customer.name', description: 'Nombre o razón social del cliente', example: 'Empresa ABC' },
+      { token: '{{customer.address}}', path: 'customer.address', description: 'Dirección de entrega del cliente', example: 'Calle 100 # 15-20' },
+      { token: '{{order.order_number}}', path: 'document.number', description: 'Número de orden de venta', example: 'ORD-1002' },
+      { token: '{{totals.grand_total}}', path: 'totals.grand_total_formatted', description: 'Monto total de la orden', example: '$835.000' },
+    ];
+  }
+}
