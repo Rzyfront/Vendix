@@ -5,6 +5,7 @@ import { profileNotFound } from './profile-errors';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 
+import { ProfileCatalogCacheService } from './profile-catalog-cache.service';
 import { CloneInvoiceProfileDto } from './dto/clone-invoice-profile.dto';
 import { CreateInvoiceProfileDto } from './dto/create-invoice-profile.dto';
 import { QueryInvoiceProfilesDto } from './dto/query-invoice-profiles.dto';
@@ -46,7 +47,10 @@ const PROFILE_SELECT = {
 export class ProfilesService {
   private readonly logger = new Logger(ProfilesService.name);
 
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly catalog_cache: ProfileCatalogCacheService,
+  ) {}
 
   // ─── Contexto ───────────────────────────────────────────────────────────
 
@@ -89,13 +93,33 @@ export class ProfilesService {
    * IVA de un documento con las tarifas de otra empresa, bajo nuestro NIT y
    * nuestro consecutivo.
    */
-  private runScopedTransaction<T>(
+  private async runScopedTransaction<T>(
     work: (tx: any, scope: ProfileScope) => Promise<T>,
   ): Promise<T> {
     const scope = this.getScope();
-    return this.prisma
+    const result = (await this.prisma
       .withoutScope()
-      .$transaction((tx: any) => work(tx, scope)) as Promise<T>;
+      .$transaction((tx: any) => work(tx, scope))) as T;
+
+    // INVALIDACIÓN DE LA CACHÉ DEL CATÁLOGO, en un solo sitio.
+    //
+    // Toda escritura de este servicio pasa por acá —crear, editar, clonar,
+    // borrar, predeterminar, activar y desactivar—, así que invalidar en este
+    // punto cubre las siete sin depender de que nadie lo olvide en la octava.
+    // Siete llamadas dispersas serían siete oportunidades de omitirla, y la
+    // omisión no se nota: el catálogo simplemente sirve un perfil retirado
+    // durante lo que dure el TTL, y el wizard lo ofrece para facturar.
+    //
+    // Después del commit y no antes: invalidar primero deja una ventana en la
+    // que un lector repuebla la caché con el estado viejo y la deja rancia
+    // durante todo el TTL. Si la transacción falla, no se invalida nada, que es
+    // correcto: nada cambió.
+    //
+    // Coste de invalidar de más, si algún día se usa esta envoltura para algo
+    // que no toque perfiles: un fallo de caché. Coste de invalidar de menos:
+    // emitir con una configuración retirada.
+    await this.catalog_cache.invalidate(scope.store_id);
+    return result;
   }
 
   // ─── Lectura ────────────────────────────────────────────────────────────
@@ -174,8 +198,24 @@ export class ProfilesService {
    * La caché Redis se monta encima de ESTE método (paso C.5), no dentro de los
    * llamadores: así hay un solo sitio donde invalidar.
    */
+  /**
+   * Catálogo de perfiles activos para el selector del wizard.
+   *
+   * Sin paginar (ADR-9): el selector muestra siempre TODO el catálogo activo, y
+   * un catálogo paginado obligaría al wizard a decidir qué media lista mostrar.
+   * Lo que acota el tamaño es que son perfiles de configuración fiscal de una
+   * tienda, no datos transaccionales.
+   *
+   * Va por caché porque se lee en cada apertura del wizard. Nunca guarda el
+   * `config`: ver el docblock de `ProfileCatalogCacheService`.
+   */
   async catalog() {
-    return this.prisma.invoice_profiles.findMany({
+    const scope = this.getScope();
+
+    const cached = await this.catalog_cache.read(scope.store_id);
+    if (cached) return cached;
+
+    const entries = await this.prisma.invoice_profiles.findMany({
       where: { state: 'active' },
       select: {
         id: true,
@@ -186,7 +226,11 @@ export class ProfilesService {
       },
       orderBy: [{ is_default: 'desc' }, { name: 'asc' }],
     });
+
+    await this.catalog_cache.write(scope.store_id, entries);
+    return entries;
   }
+
 
   // ─── Escritura ──────────────────────────────────────────────────────────
 

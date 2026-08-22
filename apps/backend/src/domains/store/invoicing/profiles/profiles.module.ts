@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../../../prisma/prisma.module';
 import { ResponseModule } from '../../../../common/responses/response.module';
 
+import { ProfileCatalogCacheService } from './profile-catalog-cache.service';
 import { ProfileVersionsService } from './profile-versions.service';
 import { ProfilesService } from './profiles.service';
 
@@ -28,7 +29,8 @@ import { ProfilesService } from './profiles.service';
  */
 @Module({
   imports: [PrismaModule, ResponseModule],
-  providers: [ProfilesService, ProfileVersionsService],
-  exports: [ProfilesService, ProfileVersionsService],
+  // `REDIS_CLIENT` no se importa: `RedisModule` es `@Global()`.
+  providers: [ProfilesService, ProfileVersionsService, ProfileCatalogCacheService],
+  exports: [ProfilesService, ProfileVersionsService, ProfileCatalogCacheService],
 })
 export class ProfilesModule {}
