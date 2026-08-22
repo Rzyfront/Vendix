@@ -375,7 +375,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                       Mobile-first: flex-wrap para que el tachado + neto + (-%)
                       quepan en pantallas estrechas sin romper la fila.
                     -->
-                    @if (item.discount > 0) {
+                    @if (item.discount > 0 || (item.discount_amount ?? 0) > 0) {
                       <div
                         class="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 mt-1 text-[10px]"
                       >
@@ -391,9 +391,24 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                         <span class="font-semibold text-text-primary">
                           {{ formatCurrency(lineNetUnit(item)) }}
                         </span>
-                        <span class="text-text-secondary">
-                          (-{{ item.discount | number: '1.0-0' }}%)
-                        </span>
+                        <!--
+                          El descuento que llega del escáner de facturas vive en
+                          DINERO (discount_amount) y deja el porcentaje en 0, así
+                          que pintar sólo el porcentaje mostraba "(-0%)" sobre
+                          una línea que sí estaba rebajada. Se muestra la cifra
+                          que MANDA por precedencia: monto si lo hay, si no el %.
+                          Sin backticks: este comentario vive DENTRO del template
+                          literal del componente y una comilla invertida lo corta.
+                        -->
+                        @if ((item.discount_amount ?? 0) > 0) {
+                          <span class="text-text-secondary">
+                            (-{{ formatCurrency(item.discount_amount ?? 0) }})
+                          </span>
+                        } @else {
+                          <span class="text-text-secondary">
+                            (-{{ item.discount | number: '1.0-0' }}%)
+                          </span>
+                        }
                       </div>
                     }
                     <!-- Cost comparison -->
@@ -860,6 +875,11 @@ export class PopCartComponent {
    * se prorratea por línea en el summary (ver `calculateSummary`), no aquí;
    * esta vista muestra solo el efecto del descuento PROPIO de la línea sobre
    * el precio unitario.
+   *
+   * Recibe las DOS cifras del descuento (porcentaje y monto) para que el util
+   * resuelva la misma precedencia que el servicio: sin el monto, una línea
+   * venida del escáner mostraba el neto sin rebajar mientras el pie ya la
+   * había descontado.
    */
   lineNetUnit(item: PopCartItem): number {
     const safeTaxRate = this.hasVat() ? Number(item.tax_rate) || 0 : 0;
@@ -868,6 +888,7 @@ export class PopCartComponent {
         unit_cost: item.unit_cost,
         quantity: item.quantity,
         discount_percentage: item.discount,
+        discount_amount: item.discount_amount,
         tax_rate: safeTaxRate,
         prices_include_tax: item.prices_include_tax ?? undefined,
       },

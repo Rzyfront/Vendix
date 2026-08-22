@@ -173,7 +173,29 @@ export interface PopCartItem {
   variant?: PopProductVariant | null;
   quantity: number;
   unit_cost: number;
+  /**
+   * QUI-661 — descuento comercial de la línea en PORCENTAJE ENTERO (0-100).
+   * Es lo que el operador TECLEA a mano en el carrito, y la procedencia que se
+   * conserva cuando el descuento nació de un porcentaje. NO es la fuente de
+   * verdad cuando `discount_amount > 0`: ahí pierde por precedencia.
+   */
   discount: number;
+  /**
+   * QUI-661 / paridad escáner de facturas — descuento comercial de la línea en
+   * DINERO, sobre base NETA (el mismo neto que `unit_cost` ya expresa).
+   *
+   * Es la FUENTE DE VERDAD del descuento de la línea y GANA sobre `discount`
+   * (%). Espejo exacto de la precedencia del backend: en
+   * `PurchaseOrdersService.deriveLineTax` un `discount_amount > 0` gana sobre
+   * `discount_percentage`, y `utils/purchase-line-tax.util.ts` la replica.
+   *
+   * Existe porque la factura del proveedor imprime PESOS, no porcentajes.
+   * Convertir esos pesos a un porcentaje entero (`Math.round`) degradaba la
+   * cifra y movía dinero de una línea a otra al prorratearse por cabecera —
+   * y las capas de costo FIFO se escriben POR LÍNEA, así que ese movimiento
+   * corrompe el costeo. Undefined ⇒ la línea usa `discount` (%).
+   */
+  discount_amount?: number;
   /**
    * IVA cycle (F1): tax rate captured MANUALLY for this line, as a
    * percentage (e.g. 19 for standard Colombian IVA, 0 for exempt).
@@ -325,11 +347,23 @@ export interface AddToPopCartRequest {
    * de `prebulk_data`; este campo top-level queda listo para propagación futura.
    */
   /**
-   * QUI-661 Fase 4 — descuento comercial de la línea, en PORCENTAJE (10 = 10%).
-   * El carrito trabaja en porcentaje; el escáner de facturas extrae un MONTO y
-   * lo convierte al agregar, porque la factura imprime pesos, no porcentajes.
+   * QUI-661 Fase 4 — descuento comercial de la línea, en PORCENTAJE ENTERO
+   * (10 = 10%). Es la vía de la captura MANUAL. El escáner de facturas ya NO
+   * pasa por acá: emite pesos y los envía en `discount_amount`, porque
+   * convertirlos a porcentaje entero degradaba la cifra.
    */
   discount?: number;
+  /**
+   * Paridad escáner de facturas — descuento comercial de la línea en DINERO,
+   * base NETA. GANA sobre `discount` (%), igual que en el backend
+   * (`deriveLineTax`: `discount_amount > 0` gana sobre `discount_percentage`).
+   *
+   * Se preserva en las TRES ramas de `processAddToCart` (ítem nuevo, ítem
+   * existente, prebulk): un re-escaneo que sólo sumaba cantidad perdía el
+   * descuento porque la rama del ítem existente hacía `...existingItem` y
+   * pisaba únicamente la cantidad.
+   */
+  discount_amount?: number;
   contentPerPackage?: number;
   /**
    * IVA cycle (F3 wiring): override de IVA por línea proveniente del escáner
