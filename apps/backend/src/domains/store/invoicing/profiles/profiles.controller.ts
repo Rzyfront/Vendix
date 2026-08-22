@@ -23,9 +23,11 @@ import {
   QueryInvoiceProfilesDto,
   QueryProfileVersionsDto,
 } from './dto/query-invoice-profiles.dto';
+import { PreviewProfileDto } from './dto/preview-profile.dto';
 import { UpdateInvoiceProfileDto } from './dto/update-invoice-profile.dto';
 import { DIAN_PROFILE_TEMPLATES } from './dian-profile-templates';
 import { ProfileVersionsService } from './profile-versions.service';
+import { ProfilePreviewService } from './profile-preview.service';
 import { ProfilesService } from './profiles.service';
 
 /**
@@ -57,6 +59,7 @@ export class ProfilesController {
   constructor(
     private readonly profiles_service: ProfilesService,
     private readonly versions_service: ProfileVersionsService,
+    private readonly preview_service: ProfilePreviewService,
     private readonly response_service: ResponseService,
   ) {}
 
@@ -224,6 +227,54 @@ export class ProfilesController {
   async deactivate(@Param('id', ParseIntPipe) id: number) {
     const result = await this.profiles_service.deactivate(id);
     return this.response_service.success(result, 'Perfil desactivado');
+  }
+
+  /**
+   * PREVISUALIZACIÓN DEL XML QUE EMITIRÍA ESTE PERFIL.
+   *
+   * ## Es un POST y es una LECTURA. Las dos cosas a la vez
+   *
+   * `POST` porque la muestra es un objeto anidado —líneas, importes, cliente— y
+   * no cabe en una query string sin codificarla a mano, que es exactamente la
+   * clase de serialización artesanal donde se pierde un decimal.
+   *
+   * Lectura porque no escribe **nada**: ni numeración, ni firma, ni transmisión,
+   * ni persistencia (ADR-5). De ahí las dos consecuencias visibles acá:
+   *
+   * · `@Permissions('invoicing:profiles:read')`. Exigir `write` para ver qué
+   *   emitiría un perfil dejaría a quien audita sin la única herramienta que
+   *   permite auditar sin emitir — y quien audita, por diseño, no debe poder
+   *   escribir.
+   * · `@HttpCode(HttpStatus.OK)`. El default de Nest para `POST` es **201
+   *   Created**, y acá no se creó nada. Un 201 sobre una respuesta que no creó
+   *   recurso es una mentira que el cliente puede creer: es la clase de señal con
+   *   la que un frontend decide refrescar una lista o mostrar «guardado».
+   *
+   * El cinturón que sostiene «no numera» no es esta documentación: es el
+   * proveedor `InvoiceNumberGenerator → PreviewNumberingGuard` de
+   * `ProfilesModule`, y la respuesta lo declara en `not_performed` para que se
+   * pueda afirmar por `curl` sin leer el código.
+   *
+   * ## Sobre el ensanchamiento del guard
+   *
+   * `PermissionsGuard` franquicia por prefijo de ruta, así que quien tenga la
+   * fila `(store/invoicing/profiles, POST)` de la creación alcanza también este
+   * handler. Se acepta a conciencia: ensancha de `read` hacia quien ya tiene
+   * `write`, que es la dirección inocua. La inversa —que `read` alcanzara una
+   * escritura— sería un hallazgo.
+   */
+  @Post(':id/preview')
+  @Permissions('invoicing:profiles:read')
+  @HttpCode(HttpStatus.OK)
+  async preview(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() preview_dto: PreviewProfileDto,
+  ) {
+    const result = await this.preview_service.preview(id, preview_dto);
+    return this.response_service.success(
+      result,
+      'Previsualización generada (no se reservó numeración ni se transmitió)',
+    );
   }
 
   /**

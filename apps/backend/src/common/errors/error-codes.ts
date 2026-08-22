@@ -2489,6 +2489,78 @@ export const ErrorCodes = {
     devMessage:
       'Requested version of an existing billing profile does not exist. Kept apart from INVOICING_PROFILE_001 because the frontend reacts differently: a missing profile sends the user back to the list, a missing version only raises a toast inside the history view',
   },
+  /**
+   * La PREVISUALIZACIÓN alcanzó un camino que reserva numeración.
+   *
+   * ## Qué protege
+   *
+   * `POST /profiles/:id/preview` proyecta el XML que produciría un perfil sin
+   * transmitirlo (ADR-5). No numera, no firma, no persiste: por eso se puede
+   * llamar N veces mientras el operador ajusta las tarifas, y por eso funciona
+   * en una tienda que todavía no está habilitada ante la DIAN.
+   *
+   * `InvoiceNumberGenerator.generateNextNumber` mueve
+   * `invoice_resolutions.current_number` DENTRO de un `pg_advisory_xact_lock`, y
+   * un consecutivo autorizado que se toma y no se usa **no se recupera**: deja un
+   * hueco en la numeración que la DIAN no perdona y que nadie nota hasta la
+   * auditoría. Una previsualización que llegara a ese camino quemaría un
+   * consecutivo por cada clic en «ver factura de muestra».
+   *
+   * ## Por qué es un error y no una guarda silenciosa
+   *
+   * `ProfilesModule` sustituye el token `InvoiceNumberGenerator` por
+   * `PreviewNumberingGuard`, cuyo `generateNextNumber` lanza ESTE código. Así,
+   * si mañana alguien añade al camino de previsualización una llamada que reserve
+   * —directamente o a través de un servicio nuevo— el resultado es un 409
+   * ruidoso, no un hueco en la numeración. Devolver un número inventado en vez de
+   * fallar sería peor: el XML proyectado afirmaría un consecutivo que la
+   * resolución no otorgó y quien lo compare contra la base creería que hay
+   * corrupción.
+   *
+   * 409 y no 500: el servidor no falló. El estado del sistema —un camino de
+   * lectura conectado a un camino de escritura fiscal— es lo que hace imposible
+   * completar la operación, y eso es un conflicto, no un error interno.
+   */
+  INVOICING_PREVIEW_001: {
+    code: 'INVOICING_PREVIEW_001',
+    httpStatus: 409,
+    devMessage:
+      'The profile preview path reached numbering reservation. Preview must never move invoice_resolutions.current_number: an authorized consecutive taken and not used is unrecoverable. ProfilesModule swaps the InvoiceNumberGenerator token for PreviewNumberingGuard so this fails loudly instead of burning a consecutive per preview',
+  },
+
+  /**
+   * La muestra de la previsualización no es utilizable.
+   *
+   * Cubre exactamente dos formas de muestra imposible, y las dos son ambigüedad
+   * sobre el VALOR DEL CONTRATO —el número del que dependen la base gravable y
+   * el piso legal del art. 462-1—, así que ninguna se puede resolver adivinando:
+   *
+   * · `lines` y `contract_value` a la vez. Los dos definen el contrato y no hay
+   *   forma de saber cuál manda. Elegir uno por precedencia produciría un
+   *   desglose que cuadra consigo mismo mientras contradice lo que el operador
+   *   escribió — que es justo la confianza falsa que la previsualización existe
+   *   para no dar.
+   * · Ninguno de los dos. No hay nada que proyectar.
+   * · La porción AIU declarada excede el valor del contrato. No es ambigüedad
+   *   sino imposibilidad aritmética —el AIU es una PARTE del contrato, no un
+   *   recargo—, y el resultado sería una línea de costo reembolsable negativa.
+   *
+   * Es 422 y no 400 porque la petición está bien FORMADA: el DTO valida cada
+   * campo por separado sin problema. Lo que falla es la relación entre ellos,
+   * que es semántica. La distinción importa en el frontend: un 400 se muestra
+   * como «revisa el formulario» y un 422 puede señalar la contradicción concreta.
+   *
+   * No confundir con `INVOICING_PREVIEW_001`, que es el caso en que la
+   * previsualización intentó CONSUMIR numeración fiscal: ése es un defecto del
+   * servidor, no de la muestra.
+   */
+  INVOICING_PREVIEW_002: {
+    code: 'INVOICING_PREVIEW_002',
+    httpStatus: 422,
+    devMessage:
+      'The preview sample is unusable: it declares both `lines` and `contract_value` (which both define the contract value, leaving the taxable base and the art. 462-1 floor ambiguous), neither of them, or an aiu_value larger than the contract (which would make the reimbursable-cost line negative). Do not pick one by precedence — the resulting breakdown would be self-consistent and still contradict what the operator typed',
+  },
+
   INVOICING_AIU_006: {
     code: 'INVOICING_AIU_006',
     httpStatus: 422,
