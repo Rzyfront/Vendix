@@ -63,9 +63,55 @@ export interface AuditLogData {
   userAgent?: string;
 }
 
+/**
+ * Ancho de `audit_logs.request_id` (`VARCHAR(100)`, ver `schema.prisma`).
+ *
+ * No es cosmético: `RequestContextInterceptor` acepta el header entrante
+ * `X-Request-Id` VERBATIM, así que un tercero puede mandar uno de 4 KB. Si ese
+ * valor viajara al INSERT, Postgres rechazaría la fila entera y el `catch` de
+ * `log()` se lo tragaría — se perdería TODA la entrada de auditoría, no solo el
+ * identificador.
+ */
+const AUDIT_REQUEST_ID_MAX_LENGTH = 100;
+
 @Injectable()
 export class AuditService {
   constructor(private readonly prismaService: GlobalPrismaService) {}
+
+  /**
+   * Token de correlación de la petición que produjo esta entrada.
+   *
+   * Se lee DIRECTO del store de AsyncLocalStorage y no vía
+   * `RequestContextService.getRequestId()`, y ahí está todo el punto:
+   * `getContext()` cae de vuelta al estático `currentContext` que deja
+   * `RequestContextService.run()`. Los processors de BullMQ y los cron forjan
+   * contexto con ese `run()` — `accounting-entry-retry.processor.ts:54` incluso
+   * fabrica un `request_id` sintético (`accounting-retry-<id>`) — de modo que,
+   * una vez que uno de ellos corrió, cualquier auditoría escrita FUERA de un
+   * scope ALS heredaría ese identificador rancio y correlacionaría esta fila con
+   * una petición que jamás la tocó. Un token de correlación equivocado es peor
+   * que ninguno: hace que un investigador lea dos eventos ajenos como una sola
+   * cadena causal. Con el ALS vacío la columna se queda en NULL.
+   *
+   * Dentro de un job que SÍ restauró contexto con `run(ctx)`, el store está
+   * poblado y su `request_id` es legítimo: ese sí se persiste.
+   *
+   * Los valores que no caben en la columna se DESCARTAN, nunca se truncan: un
+   * token truncado es un token inventado, y dos peticiones distintas con el
+   * mismo prefijo colisionarían en una correlación falsa.
+   */
+  private resolveRequestId(): string | undefined {
+    const requestId =
+      RequestContextService.asyncLocalStorage.getStore()?.request_id;
+
+    if (typeof requestId !== 'string' || requestId.length === 0) {
+      return undefined;
+    }
+
+    return requestId.length <= AUDIT_REQUEST_ID_MAX_LENGTH
+      ? requestId
+      : undefined;
+  }
 
   /**
    * Registra un evento de auditoría
@@ -102,6 +148,12 @@ export class AuditService {
           metadata: auditData.metadata
             ? JSON.parse(JSON.stringify(auditData.metadata))
             : null,
+          // CP-PURCHASE-TRANSPARENCY H.1.
+          // La columna existe desde `20260822180000_purchase_transparency_
+          // additive_schema`, pero nadie la escribía: 0 de 33.590 filas la
+          // tenían. Ver `resolveRequestId()` para por qué no se usa
+          // `getRequestId()` y por qué el valor puede quedar nulo.
+          request_id: this.resolveRequestId() ?? null,
           ip_address: auditData.ipAddress,
           user_agent: auditData.userAgent,
         } as any,

@@ -1,7 +1,7 @@
 import { ProductsBulkEditController } from './products-bulk-edit.controller';
 import { ProductsBulkEditService } from './products-bulk-edit.service';
 import { ResponseService } from '@common/responses/response.service';
-import { VendixHttpException } from '@common/errors';
+import { VendixHttpException, ErrorCodes } from '@common/errors';
 
 /**
  * Refuerzo de permisos del controller de edición/archivado masivo (QUI-567).
@@ -132,6 +132,73 @@ describe('ProductsBulkEditController — refuerzo de permisos', () => {
         controller.archive({ ids: [1] } as any, {} as any),
       ).rejects.toThrow(VendixHttpException);
       expect(bulkEditService.archive).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * CP-PURCHASE-TRANSPARENCY H.2 — un rechazo que salía como éxito.
+   *
+   * `responseService.error()` RETORNA el sobre en vez de lanzarlo, y
+   * `AllExceptionsFilter` solo corre cuando la excepción SALE del handler. El
+   * `catch` que devolvía ese sobre hacía que un fallo genérico —un `P2028`, un
+   * timeout de transacción— viajara como HTTP 200 con `success:false`, y el
+   * frontend, que mira la línea de estado, lo leyera como éxito: el operador
+   * creía que el archivado masivo (IRREVERSIBLE) había funcionado.
+   *
+   * Estos casos fijan el contrato: el handler PROPAGA, y jamás llama a
+   * `responseService.error()`. Se prueban las cuatro rutas porque las cuatro
+   * tenían el mismo `catch`.
+   */
+  describe('propagación de errores (nunca 200 con success:false)', () => {
+    const authorized = {
+      preview: () => requestWith([activePerm('store:products:bulk_update')]),
+      apply: () => requestWith([activePerm('store:products:bulk_update')]),
+      previewArchive: () =>
+        requestWith([activePerm('store:products:admin_delete')]),
+      archive: () => requestWith([activePerm('store:products:admin_delete')]),
+    };
+
+    /**
+     * El caso que motivó el arreglo: un error genérico de infraestructura, NO
+     * una `VendixHttpException`. La rama tipada ya re-lanzaba; ésta era la que
+     * se convertía en 200.
+     */
+    const genericInfraFailure = () => {
+      const error: any = new Error(
+        'Transaction already closed: A query cannot be executed on an expired transaction',
+      );
+      error.code = 'P2028';
+      return error;
+    };
+
+    it.each([
+      ['archive', { ids: [1] }],
+      ['apply', { ids: [1], changes: {} }],
+      ['previewArchive', { ids: [1] }],
+      ['preview', { ids: [1], changes: {} }],
+    ] as const)(
+      '%s propaga un fallo genérico (P2028) en vez de devolver el sobre de error',
+      async (method, dto) => {
+        const failure = genericInfraFailure();
+        (bulkEditService[method] as jest.Mock).mockRejectedValueOnce(failure);
+
+        await expect(
+          (controller[method] as any)(dto, authorized[method]()),
+        ).rejects.toThrow(failure);
+
+        // La regresión concreta: si esto se llama, Nest responde HTTP 200.
+        expect(responseService.error).not.toHaveBeenCalled();
+      },
+    );
+
+    it('archive sigue conservando status y error_code de las excepciones tipadas', async () => {
+      const typed = new VendixHttpException(ErrorCodes.PROD_SVC_001);
+      (bulkEditService.archive as jest.Mock).mockRejectedValueOnce(typed);
+
+      await expect(
+        controller.archive({ ids: [1] } as any, authorized.archive()),
+      ).rejects.toBe(typed);
+      expect(responseService.error).not.toHaveBeenCalled();
     });
   });
 });

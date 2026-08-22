@@ -3,6 +3,7 @@ import {
   NestInterceptor,
   ExecutionContext,
   CallHandler,
+  Logger,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
@@ -10,6 +11,8 @@ import { AuditService, AuditAction, AuditResource } from './audit.service';
 
 @Injectable()
 export class AuditInterceptor implements NestInterceptor {
+  private readonly logger = new Logger(AuditInterceptor.name);
+
   constructor(private readonly auditService: AuditService) {}
 
   // Rutas que NO deben ser auditadas para evitar bucles infinito
@@ -127,7 +130,23 @@ export class AuditInterceptor implements NestInterceptor {
             );
           }
         } catch (error) {
-          // Error logging audit
+          // CP-PURCHASE-TRANSPARENCY H.3 — este `catch` estaba VACÍO, con solo
+          // el comentario «Error logging audit». Tragarse el error sin dejar
+          // rastro convierte una auditoría que dejó de escribirse en un evento
+          // invisible: la tabla simplemente deja de tener filas y nadie se
+          // entera hasta que alguien va a investigar un incidente y no
+          // encuentra nada.
+          //
+          // Se sigue sin re-lanzar A PROPÓSITO: esto corre en el `tap` de la
+          // respuesta, ya con el handler resuelto, y una auditoría rota no debe
+          // tumbar una operación de negocio que ya se completó. Pero deja
+          // evidencia.
+          this.logger.error(
+            `Fallo al auditar ${method} ${url} (user=${userId}): ${
+              error?.message || error
+            }`,
+            error?.stack,
+          );
         }
       }),
     );

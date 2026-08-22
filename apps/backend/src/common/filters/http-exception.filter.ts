@@ -155,10 +155,20 @@ export class AllExceptionsFilter implements ExceptionFilter {
       ...(details && { details }),
       // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 MAJOR.
       // Surface the per-request id from AsyncLocalStorage so the frontend
-      // can quote it in the same toast it shows when something fails.
-      // The audit log on the server side already carries it, but the
-      // client never saw it — operators were stuck copy-pasting the
-      // timestamp and the order id to get support to find their request.
+      // can quote it in the same toast it shows when something fails —
+      // operators were stuck copy-pasting the timestamp and the order id to
+      // get support to find their request.
+      //
+      // CP-PURCHASE-TRANSPARENCY H.1 — corrección de un comentario falso.
+      // Aquí decía que «the audit log on the server side already carries it».
+      // NO era cierto: `audit_logs` no tenía siquiera columna donde guardarlo,
+      // y cuando la columna llegó nadie la escribía (0 de 33.590 filas). Ese
+      // comentario era peor que no tener nada, porque afirmaba una garantía
+      // inexistente sobre la que alguien podía diseñar. Desde H.1
+      // `AuditService.log()` sí persiste `audit_logs.request_id`, PERO solo
+      // cuando el ALS está poblado: el id que va en esta respuesta puede no
+      // tener fila de auditoría gemela, y el que va en la auditoría puede
+      // faltar. Correlacionar por este campo es best-effort, no una garantía.
       ...(RequestContextService.getRequestId()
         ? { request_id: RequestContextService.getRequestId() }
         : {}),
