@@ -282,6 +282,18 @@ export const Endpoints = {
       GET: '/store/orders/purchase-orders/:id',
       CREATE: '/store/orders/purchase-orders',
       UPDATE: '/store/orders/purchase-orders/:id',
+      /**
+       * CP-PURCHASE-TRANSPARENCY A.10 — la orden nace SIEMPRE en `draft`
+       * (el servidor ignora cualquier `status` del cuerpo) y llega a
+       * `approved` únicamente por acá, detrás del permiso
+       * `store:orders:purchase_orders:approve`, que estampa al aprobador y
+       * escribe la entrada de auditoría.
+       *
+       * Sin esta constante el POP móvil creaba borradores que nadie aprobaba
+       * y la recepción posterior fallaba: `receive` exige la transición a
+       * `partial`, y un `draft` sólo transita a `approved` o `cancelled`.
+       */
+      APPROVE: '/store/orders/purchase-orders/:id/approve',
       RECEIVE: '/store/orders/purchase-orders/:id/receive',
       COST_PREVIEW: '/store/orders/purchase-orders/cost-preview',
     },

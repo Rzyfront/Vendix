@@ -6,6 +6,7 @@ import type {
   UpdatePopCartItemRequest,
   ShippingMethod,
   PopOrderStatus,
+  PopShippingAllocation,
 } from './types';
 import type { PurchaseOrder } from '../store/types/inventory.types';
 import { INITIAL_CART_SUMMARY, recalcItem, calcSummary, itemKey, defaultUnitCost } from './constants';
@@ -24,12 +25,29 @@ function todayLocal(): string {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * C.5 — modo de imputación del flete de una orden ya persistida.
+ *
+ * `PurchaseOrder` (tipo compartido de inventario) todavía no declara la
+ * columna, así que se lee por índice sobre un `Record<string, unknown>` en vez
+ * de por `as any`: el acceso queda tipado y el valor se valida contra la unión
+ * antes de entrar al estado.
+ */
+function shippingAllocationOf(order: PurchaseOrder): PopShippingAllocation | undefined {
+  if (!(Number(order.shipping_cost) > 0)) return undefined;
+  const raw = (order as unknown as Record<string, unknown>)['shipping_cost_allocation'];
+  return raw === 'expense' ? 'expense' : 'prorate';
+}
+
 function emptyState(): PopCartState {
   return {
     items: [],
     summary: { ...INITIAL_CART_SUMMARY },
     orderDate: todayLocal(),
     shippingCost: 0,
+    // C.5 — sin flete no hay modo que declarar. El backend rechaza `prorate`
+    // sin flete tanto como un flete sin modo, así que el default es "ausente".
+    shippingCostAllocation: undefined,
     status: 'draft',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -125,12 +143,53 @@ export function usePopCart() {
     setCart((prev) => ({ ...prev, expectedDate: date }));
   }, []);
 
+  /**
+   * C.5 — cambiar a un método que NO es flete limpia el costo y su modo. Sin
+   * esto queda un "flete fantasma" en el estado: el campo desaparece de la
+   * pantalla y el monto sigue viajando a la vista previa, al cuerpo de la
+   * creación y al costo sellado. La pantalla y el carrito tienen que contar la
+   * misma historia en todo momento.
+   */
   const setShippingMethod = useCallback((method?: ShippingMethod) => {
-    setCart((prev) => ({ ...prev, shippingMethod: method }));
+    setCart((prev) =>
+      method === 'freight'
+        ? { ...prev, shippingMethod: method }
+        : { ...prev, shippingMethod: method, shippingCost: 0, shippingCostAllocation: undefined }
+    );
   }, []);
 
+  /**
+   * C.5 — el monto se recorta a un no-negativo finito con 2 decimales: la
+   * columna es `Decimal(12,2)` y el DTO rechaza el tercer decimal con 400.
+   *
+   * Con monto > 0 se SIEMBRA el modo en `prorate` (la imputación contable
+   * correcta por defecto: el flete es parte de lo que costó poner el producto
+   * en bodega) porque el backend devuelve 400 ante un flete sin modo. Al volver
+   * a cero se LIMPIA el modo, porque el mismo validador rechaza `prorate` sin
+   * monto — y sin limpiarlo quedaría un modo colgando sin flete.
+   */
   const setShippingCost = useCallback((cost: number) => {
-    setCart((prev) => ({ ...prev, shippingCost: cost }));
+    const raw = Number(cost);
+    const safe = Number.isFinite(raw) && raw > 0 ? Math.round(raw * 100) / 100 : 0;
+    setCart((prev) =>
+      safe === 0
+        ? { ...prev, shippingCost: 0, shippingCostAllocation: undefined }
+        : {
+            ...prev,
+            shippingCost: safe,
+            shippingCostAllocation: prev.shippingCostAllocation ?? 'prorate',
+          }
+    );
+  }, []);
+
+  /**
+   * C.5 — el conmutador prorratear/asumir. Sólo tiene sentido con flete > 0;
+   * con flete en cero se ignora, porque el backend rechaza un modo sin monto.
+   */
+  const setShippingCostAllocation = useCallback((mode: PopShippingAllocation) => {
+    setCart((prev) =>
+      Number(prev.shippingCost) > 0 ? { ...prev, shippingCostAllocation: mode } : prev
+    );
   }, []);
 
   const setPaymentTerms = useCallback((terms?: string) => {
@@ -170,6 +229,10 @@ export function usePopCart() {
       locationName: order.inventory_locations?.name,
       orderDate: order.created_at?.slice(0, 10) || todayLocal(),
       shippingCost: Number(order.shipping_cost) || 0,
+      // C.5 — una orden con flete SIEMPRE tiene modo (el backend lo exige al
+      // crearla). Las órdenes anteriores a C.1 no lo tienen persistido: se
+      // asume `prorate`, que es lo que su costeo hizo de hecho.
+      shippingCostAllocation: shippingAllocationOf(order),
       paymentTerms: order.payment_terms || undefined,
       notes: order.notes || undefined,
       internalNotes: order.internal_notes || undefined,
@@ -195,6 +258,7 @@ export function usePopCart() {
     setExpectedDate,
     setShippingMethod,
     setShippingCost,
+    setShippingCostAllocation,
     setPaymentTerms,
     setNotes,
     setInternalNotes,

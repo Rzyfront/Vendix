@@ -31,8 +31,17 @@ import type {
   PreBulkData,
   PopSupplier,
   PopLocation,
+  PopFiscalExplanation,
+  PurchaseOrderItemRequest,
+  CreatePurchaseOrderRequest,
 } from '../../../src/features/pop/types';
 import { generateTempProductId } from '../../../src/features/pop/types';
+import {
+  approvePurchaseOrder,
+  createPurchaseOrder,
+  getCostPreview,
+} from '../../../src/features/pop/pop-purchase-orders.service';
+import { buildCostPreviewRequest } from '../../../src/features/pop/pop-cost-preview';
 import type { ScanResult } from '../../../src/features/pop/components/pop-invoice-scanner';
 import { InventoryService } from '../../../src/features/store/services/inventory.service';
 import { ProductService } from '../../../src/features/store/services/product.service';
@@ -131,6 +140,16 @@ export default function PopScreen() {
   const [targetAction, setTargetAction] = useState<'draft' | 'create' | 'create-receive'>('create');
   const [configModalOpen, setConfigModalOpen] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+
+  /*
+   * B.5 — explicación fiscal de la vista previa de costeo. Vive en la pantalla
+   * (y no dentro del modal) porque la petición se dispara al ABRIR la
+   * confirmación: el modal se monta ya con el dato en vuelo en vez de pedirlo
+   * en su primer render.
+   */
+  const [fiscalExplanation, setFiscalExplanation] = useState<PopFiscalExplanation | null>(null);
+  const [fiscalLoading, setFiscalLoading] = useState(false);
+  const [fiscalError, setFiscalError] = useState<string | null>(null);
 
   const [showSupplierCreate, setShowSupplierCreate] = useState(false);
   const [showLocationCreate, setShowLocationCreate] = useState(false);
@@ -301,7 +320,7 @@ export default function PopScreen() {
     }
     setIsCreating(true);
     try {
-      const items = cart.cart.items.map((i) => {
+      const items: PurchaseOrderItemRequest[] = cart.cart.items.map((i) => {
         // Prebulk products (Fase 5 — UoM parity con web): el backend acepta
         // is_ingredient + purchase_uom_id + stock_uom_id por línea. Solo se
         // propagan cuando el item fue creado vía PreBulkModal en modo insumo
@@ -337,15 +356,38 @@ export default function PopScreen() {
         };
       });
 
-      const payload = {
+      /*
+       * C.5 — el flete y su imputación viajan juntos o no viajan. El validador
+       * cruzado del backend devuelve 400 ante un flete sin modo y ante un
+       * `prorate` sin flete, así que el modo sólo se manda con monto > 0.
+       */
+      const rawShipping = Number(cart.cart.shippingCost);
+      const shippingCost =
+        Number.isFinite(rawShipping) && rawShipping > 0
+          ? Math.round(rawShipping * 100) / 100
+          : 0;
+
+      /*
+       * A.10 — el cuerpo NO lleva `status`. La orden nace en `draft` (default de
+       * columna) y la aprobación es un acto aparte, con su propio permiso, que
+       * estampa al aprobador y escribe la auditoría. Mandarlo no la hacía nacer
+       * aprobada: el servidor lo ignora, la orden quedaba en borrador y la
+       * recepción posterior fallaba sin que la pantalla supiera por qué.
+       */
+      const payload: CreatePurchaseOrderRequest = {
         supplier_id: cart.cart.supplierId,
         location_id: cart.cart.locationId || 1,
-        status: action === 'draft' ? 'draft' as const : 'approved' as const,
         order_date: cart.cart.orderDate,
         expected_date: cart.cart.expectedDate || undefined,
         payment_terms: cart.cart.paymentTerms,
         shipping_method: cart.cart.shippingMethod,
-        shipping_cost: cart.cart.shippingCost,
+        shipping_cost: shippingCost,
+        ...(shippingCost > 0
+          ? {
+              shipping_cost_allocation:
+                cart.cart.shippingCostAllocation ?? 'prorate',
+            }
+          : {}),
         subtotal_amount: cart.summary.subtotal,
         tax_amount: cart.summary.tax_amount,
         total_amount: cart.summary.total,
@@ -354,13 +396,49 @@ export default function PopScreen() {
         items,
       };
 
-      const order = await InventoryService.createPurchaseOrder(payload as any);
+      const order = await createPurchaseOrder(payload);
+
+      /*
+       * A.10 — la aprobación es una ETAPA de la cadena porque tiene que serlo:
+       * `receive` afirma la transición a `partial`, y un `draft` sólo transita a
+       * `approved` o `cancelled`. Sin este paso, «Crear Orden» dejaba un
+       * borrador que nadie aprobaba y «Crear y Recibir» fallaba en la recepción.
+       *
+       * Cuando la aprobación falla, el error NOMBRA la orden que SÍ se creó: sin
+       * eso el operador no puede distinguir «no se creó» de «se creó y no se
+       * aprobó», reintentaría, y crearía una segunda compra por la misma
+       * factura.
+       */
+      if (action !== 'draft' && order?.id) {
+        try {
+          await approvePurchaseOrder(order.id);
+        } catch (approveErr: any) {
+          throw new Error(
+            `La orden #${order.id} se creó como borrador pero no se pudo aprobar` +
+              ` y la mercancía NO entró a bodega. ` +
+              `${approveErr?.message || 'Reintenta la aprobación desde el listado de órdenes de compra.'}`,
+          );
+        }
+      }
 
       if (action === 'create-receive' && order?.id) {
-        const receiveItems = items.map((i) => ({
-          id: 0,
-          quantity_received: i.quantity,
+        /*
+         * `ReceiveItemDto.id` es el id de la LÍNEA de la orden, no un índice:
+         * el backend rechaza con 400 cualquier id que no le pertenezca. Antes se
+         * mandaba `id: 0` para todas las líneas, así que la recepción nunca pudo
+         * funcionar. Los ids reales sólo existen después de crear la orden.
+         */
+        const receiveItems = (order.purchase_order_items || []).map((line) => ({
+          id: line.id,
+          quantity_received: Number(line.quantity_ordered) || 0,
         }));
+        if (receiveItems.length === 0) {
+          throw new Error(
+            `La orden #${order.id} se creó y se aprobó, pero no devolvió líneas` +
+              ` que recibir: la mercancía NO entró a bodega. Recíbela desde el` +
+              ` listado de órdenes de compra.`,
+          );
+        }
         await InventoryService.receivePurchaseOrder(order.id, receiveItems);
       }
 
@@ -372,6 +450,62 @@ export default function PopScreen() {
       setIsCreating(false);
     }
   }, [cart]);
+
+  /*
+   * B.5 — al abrir la confirmación se pide la vista previa de costeo, cuya
+   * respuesta trae `fiscal_explanation`. La pantalla no deriva nada: pinta lo
+   * que llega y, si no llega, no pinta.
+   */
+  useEffect(() => {
+    if (!showConfirm) return;
+    const request = buildCostPreviewRequest(cart.cart);
+    if (!request) {
+      // Sin bodega o con un carrito de puros productos nuevos no hay nada que
+      // simular: no hay stock ni costo previo que consultar.
+      setFiscalExplanation(null);
+      setFiscalError(null);
+      setFiscalLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setFiscalLoading(true);
+    setFiscalError(null);
+    setFiscalExplanation(null);
+    getCostPreview(request)
+      .then((response) => {
+        if (cancelled) return;
+        setFiscalExplanation(response?.fiscal_explanation ?? null);
+      })
+      .catch((err: any) => {
+        if (cancelled) return;
+        setFiscalExplanation(null);
+        setFiscalError(
+          err?.message ||
+            'No pudimos calcular el tratamiento fiscal de esta compra.',
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setFiscalLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showConfirm, cart.cart]);
+
+  /**
+   * B.5 — el destino lo manda el backend en `cta.route`; la pantalla no lo
+   * inventa. Hoy esa ruta (`/admin/fiscal/wizard`) es del panel WEB y no tiene
+   * pantalla equivalente en expo-router, así que empujarla aterrizaría en
+   * «Unmatched Route». Se le dice al operador dónde está en vez de inventar un
+   * destino móvil que no existe; cuando el asistente fiscal llegue a la app,
+   * esto pasa a ser un `router.push(route)`.
+   */
+  const handleFiscalCtaPress = useCallback((route: string) => {
+    Alert.alert(
+      'Configura tu área fiscal',
+      `Esta configuración se hace desde el panel web de Vendix, en ${route}.`,
+    );
+  }, []);
 
   const handleSaveDraft = useCallback(() => {
     setTargetAction('draft');
@@ -515,6 +649,8 @@ export default function PopScreen() {
           orderDate={cart.cart.orderDate}
           expectedDate={cart.cart.expectedDate}
           shippingMethod={cart.cart.shippingMethod}
+          shippingCost={cart.cart.shippingCost}
+          shippingCostAllocation={cart.cart.shippingCostAllocation}
           selectedSupplierId={cart.cart.supplierId}
           selectedLocationId={cart.cart.locationId}
           suppliers={suppliers}
@@ -526,6 +662,8 @@ export default function PopScreen() {
           onOrderDateChange={cart.setOrderDate}
           onExpectedDateChange={cart.setExpectedDate}
           onShippingMethodChange={cart.setShippingMethod}
+          onShippingCostChange={cart.setShippingCost}
+          onShippingCostAllocationChange={cart.setShippingCostAllocation}
           onQuickAddSupplier={() => setShowSupplierCreate(true)}
           onQuickAddLocation={() => setShowLocationCreate(true)}
         />
@@ -608,6 +746,11 @@ export default function PopScreen() {
         supplierName={cart.cart.supplierName}
         locationName={cart.cart.locationName}
         orderMode={targetAction}
+        shippingCostAllocation={cart.cart.shippingCostAllocation}
+        fiscalExplanation={fiscalExplanation}
+        fiscalLoading={fiscalLoading}
+        fiscalError={fiscalError}
+        onFiscalCtaPress={handleFiscalCtaPress}
         onConfirm={() => executeOrder(targetAction)}
         onCancel={() => setShowConfirm(false)}
         isLoading={isCreating}
