@@ -358,8 +358,178 @@ export function validateInvoiceProfileConfig(
   validateTaxSection(config, issues);
   validateModelLines(config, issues);
   validateFormat(config, issues);
+  validateBounds(config, issues);
 
   return issues;
+}
+
+/**
+ * Cotas de tamaño y tipo de las cadenas libres del snapshot.
+ *
+ * Corre SIEMPRE, no sólo en el camino AIU: el snapshot de un perfil estándar es
+ * el mismo `jsonb` de un registro fiscal. Comprueba `typeof` antes de medir
+ * porque el DTO no valida nada dentro de `config` (ver `CONFIG_LIMITS`), así que
+ * un campo declarado `string` puede llegar como número y `.length` sería
+ * `undefined` — una comparación que se evalúa a `false` y deja pasar el valor.
+ */
+function validateBounds(
+  config: InvoiceProfileConfig,
+  issues: ProfileConfigIssue[],
+): void {
+  const text = (
+    value: unknown,
+    field: string,
+    max: number,
+    { required = false } = {},
+  ): void => {
+    if (value === undefined || value === null) {
+      if (required) {
+        issues.push({
+          field,
+          code: 'TEXT_REQUIRED',
+          message: `«${field}» es obligatorio.`,
+        });
+      }
+      return;
+    }
+    if (typeof value !== 'string') {
+      issues.push({
+        field,
+        code: 'EXPECTED_STRING',
+        message: `«${field}» tiene que ser texto.`,
+      });
+      return;
+    }
+    if (value.length > max) {
+      issues.push({
+        field,
+        code: 'TEXT_TOO_LONG',
+        message: `«${field}» admite hasta ${max} caracteres (llegaron ${value.length}).`,
+      });
+    }
+  };
+
+  text(config.general?.description, 'general.description', CONFIG_LIMITS.description);
+  text(
+    config.general?.internal_note,
+    'general.internal_note',
+    CONFIG_LIMITS.internal_note,
+  );
+
+  if (config.aiu) {
+    // Obligatorio y acotado: viaja al `cbc:Note` de la linea de Administracion
+    // (CAV03), asi que su ausencia ya la reporta `AIU_CONTRACT_OBJECT_EMPTY` y
+    // su exceso rechazaria el documento tras quemar el consecutivo.
+    text(
+      config.aiu.contract_object,
+      'aiu.contract_object',
+      CONFIG_LIMITS.contract_object,
+    );
+  }
+
+  text(
+    config.accounting?.vat_payable_account,
+    'accounting.vat_payable_account',
+    CONFIG_LIMITS.account_code,
+  );
+  const byBucket = config.accounting?.revenue_account_by_bucket;
+  if (byBucket) {
+    for (const bucket of AIU_BUCKETS) {
+      text(
+        byBucket[bucket],
+        `accounting.revenue_account_by_bucket.${bucket}`,
+        CONFIG_LIMITS.account_code,
+      );
+    }
+  }
+
+  const overrides = config.accounting?.mapping_key_overrides;
+  if (overrides) {
+    const keys = Object.keys(overrides);
+    if (keys.length > CONFIG_LIMITS.mapping_overrides_count) {
+      issues.push({
+        field: 'accounting.mapping_key_overrides',
+        code: 'TOO_MANY_ITEMS',
+        message: `Se admiten hasta ${CONFIG_LIMITS.mapping_overrides_count} sobrescrituras de cuenta (llegaron ${keys.length}).`,
+      });
+    }
+    for (const key of keys.slice(0, CONFIG_LIMITS.mapping_overrides_count)) {
+      if (key.length > CONFIG_LIMITS.mapping_key) {
+        issues.push({
+          field: `accounting.mapping_key_overrides.${key.slice(0, 20)}…`,
+          code: 'TEXT_TOO_LONG',
+          message: `Las claves de mapeo admiten hasta ${CONFIG_LIMITS.mapping_key} caracteres.`,
+        });
+        continue;
+      }
+      text(
+        overrides[key],
+        `accounting.mapping_key_overrides.${key}`,
+        CONFIG_LIMITS.account_code,
+      );
+    }
+  }
+
+  // Codigo de tributo: forma, no pertenencia. La tabla 13.2.2 del anexo vive en
+  // `dian-tax-codes.ts`, que este archivo NO puede importar —es agnostico del
+  // runtime y se copia al frontend—. Duplicar la tabla acá la dejaria rancia
+  // ante el primer tributo nuevo, asi que la pertenencia se comprueba en la
+  // emision, que si importa el catalogo, y acá sólo se descarta lo que no puede
+  // ser un codigo en ningun caso.
+  (config.taxes?.rules ?? []).forEach((rule, index) => {
+    if (typeof rule?.tax_code !== 'string' || !/^\d{2}$/.test(rule.tax_code)) {
+      issues.push({
+        field: `taxes.rules[${index}].tax_code`,
+        code: 'TAX_CODE_MALFORMED',
+        message: `El codigo de tributo tiene que ser dos digitos (por ejemplo «01» para IVA). Llego «${String(rule?.tax_code)}».`,
+      });
+    }
+  });
+
+  const lines = config.model_lines ?? [];
+  if (lines.length > CONFIG_LIMITS.model_lines_count) {
+    issues.push({
+      field: 'model_lines',
+      code: 'TOO_MANY_ITEMS',
+      message: `Se admiten hasta ${CONFIG_LIMITS.model_lines_count} lineas modelo (llegaron ${lines.length}).`,
+    });
+  }
+  lines.slice(0, CONFIG_LIMITS.model_lines_count).forEach((line, index) => {
+    text(
+      line?.description,
+      `model_lines[${index}].description`,
+      CONFIG_LIMITS.line_description,
+    );
+    text(line?.unit_code, `model_lines[${index}].unit_code`, CONFIG_LIMITS.unit_code);
+  });
+
+  text(config.format?.template_key, 'format.template_key', CONFIG_LIMITS.template_key);
+  text(
+    config.dian?.payment_means_code,
+    'dian.payment_means_code',
+    CONFIG_LIMITS.payment_code,
+  );
+  text(
+    config.dian?.payment_method_code,
+    'dian.payment_method_code',
+    CONFIG_LIMITS.payment_code,
+  );
+
+  const notes = config.dian?.header_notes;
+  if (notes) {
+    if (notes.length > CONFIG_LIMITS.header_notes_count) {
+      issues.push({
+        field: 'dian.header_notes',
+        code: 'TOO_MANY_ITEMS',
+        message: `Se admiten hasta ${CONFIG_LIMITS.header_notes_count} notas de cabecera (llegaron ${notes.length}).`,
+      });
+    }
+    notes
+      .slice(0, CONFIG_LIMITS.header_notes_count)
+      .forEach((note, index) =>
+        text(note, `dian.header_notes[${index}]`, CONFIG_LIMITS.header_note),
+      );
+  }
 }
 
 function validateAiuSection(
@@ -656,5 +826,358 @@ export function buildDefaultAiuProfileConfig(
       payment_method_code: null,
       header_notes: null,
     },
+  };
+}
+
+// ─── Límites de tamaño ────────────────────────────────────────────────────
+
+/**
+ * Cotas de longitud y cardinalidad del snapshot.
+ *
+ * ## Por qué existen acá y no en el DTO
+ *
+ * El DTO declara `config` como objeto validado **sin** `@ValidateNested`, porque
+ * `forbidNonWhitelisted` recorre el árbol anidado y rechazaría cualquier clave
+ * que un `@ValidateNested` no declare — y las siete secciones tienen decenas de
+ * campos opcionales. Consecuencia: `class-validator` no mira NADA dentro de
+ * `config`. Sin estas cotas, el snapshot —que es un `jsonb` de un registro
+ * fiscal referenciado por facturas timbradas— aceptaría cadenas de megabytes y
+ * arreglos sin fin.
+ *
+ * Las que van al XML llevan además la cota del anexo: `contract_object` se
+ * concatena al `cbc:Note` de la línea de Administración (regla CAV03), y un
+ * `Note` desmedido es un documento rechazado tras quemar el consecutivo.
+ */
+export const CONFIG_LIMITS = {
+  description: 500,
+  internal_note: 1000,
+  contract_object: 300,
+  account_code: 20,
+  mapping_key: 100,
+  mapping_overrides_count: 200,
+  line_description: 300,
+  unit_code: 4,
+  model_lines_count: 50,
+  template_key: 100,
+  payment_code: 4,
+  header_note: 500,
+  header_notes_count: 10,
+} as const;
+
+// ─── Normalización estructural ────────────────────────────────────────────
+
+/**
+ * Resultado de normalizar una configuración recibida del cliente.
+ *
+ * Trae la configuración **proyectada** sobre la forma conocida y los problemas
+ * ESTRUCTURALES encontrados. La división con `validateInvoiceProfileConfig` es
+ * deliberada y no cosmética:
+ *
+ * - el normalizador decide **qué claves existen** (estructura),
+ * - el validador decide **si los valores son legales** (semántica).
+ *
+ * Por eso el normalizador **no convierte ni un solo valor**. Si coercionara,
+ * una tarifa inválida se volvería una tarifa de aspecto válido y el validador
+ * la dejaría pasar: el dato fiscal habría cambiado en silencio, que es
+ * exactamente el fallo que este plan existe para impedir.
+ */
+export interface ConfigNormalizationResult {
+  config: InvoiceProfileConfig;
+  issues: ProfileConfigIssue[];
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function joinPath(base: string, key: string): string {
+  return base ? `${base}.${key}` : key;
+}
+
+/**
+ * Copia sólo las claves conocidas y **reporta** las demás.
+ *
+ * No las descarta en silencio a propósito: un descarte callado le dice al
+ * cliente que su campo se guardó cuando no se guardó, y la divergencia se
+ * descubre al emitir. Reportarlas convierte el mismo hecho en un 422 que nombra
+ * la clave — el mismo criterio que `forbidNonWhitelisted` aplica en la raíz.
+ */
+function pickKnownKeys(
+  source: Record<string, unknown>,
+  allowed: readonly string[],
+  path: string,
+  issues: ProfileConfigIssue[],
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(source)) {
+    if (!allowed.includes(key)) {
+      issues.push({
+        field: joinPath(path, key),
+        code: 'UNKNOWN_KEY',
+        message: `El campo «${key}» no forma parte de la configuración del perfil y no se guardaría. Quítalo.`,
+      });
+      continue;
+    }
+    out[key] = source[key];
+  }
+  return out;
+}
+
+function expectObject(
+  value: unknown,
+  path: string,
+  issues: ProfileConfigIssue[],
+): Record<string, unknown> {
+  if (value === undefined || value === null) return {};
+  if (!isPlainObject(value)) {
+    issues.push({
+      field: path,
+      code: 'EXPECTED_OBJECT',
+      message: `La sección «${path}» tiene que ser un objeto.`,
+    });
+    return {};
+  }
+  return value;
+}
+
+function expectArray(
+  value: unknown,
+  path: string,
+  issues: ProfileConfigIssue[],
+): unknown[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    issues.push({
+      field: path,
+      code: 'EXPECTED_ARRAY',
+      message: `«${path}» tiene que ser una lista.`,
+    });
+    return [];
+  }
+  return value;
+}
+
+const GENERAL_KEYS = ['description', 'internal_note'] as const;
+const AIU_KEYS = [
+  'regime',
+  'contract_object',
+  'enforce_minimum_base',
+  'minimum_base_percent',
+  'components',
+] as const;
+const ACCOUNTING_KEYS = [
+  'revenue_account_by_bucket',
+  'vat_payable_account',
+  'mapping_key_overrides',
+] as const;
+const TAXES_KEYS = ['rules'] as const;
+const TAX_RULE_KEYS = ['bucket', 'taxable', 'tax_code', 'rate'] as const;
+const MODEL_LINE_KEYS = [
+  'bucket',
+  'description',
+  'unit_code',
+  'quantity',
+] as const;
+const FORMAT_KEYS = [
+  'template_key',
+  'show_aiu_breakdown',
+  'display_decimals',
+] as const;
+const DIAN_KEYS = [
+  'payment_means_code',
+  'payment_method_code',
+  'header_notes',
+] as const;
+const ROOT_KEYS = [
+  'config_version',
+  'general',
+  'aiu',
+  'accounting',
+  'taxes',
+  'model_lines',
+  'format',
+  'dian',
+] as const;
+
+/**
+ * Proyecta una entrada arbitraria sobre `InvoiceProfileConfig`.
+ *
+ * **Nunca lanza.** Un mismo problema tiene que producir una sola forma de
+ * error: si el normalizador lanzara, una configuración inválida saldría a veces
+ * como excepción del normalizador y a veces como lista de `issues` del
+ * validador, y el editor del frontend —que marca campos por
+ * `details.issues[].field`— no podría pintar la primera.
+ *
+ * `config_version` se copia **tal cual viene**, incluso si no es un número: es
+ * el cliente quien declara con qué forma escribió el snapshot, y el validador
+ * es quien la acepta o la rechaza. Fijarla aquí al valor del servidor
+ * convertiría un frontend desactualizado en un snapshot mal etiquetado.
+ */
+export function normalizeInvoiceProfileConfig(
+  input: unknown,
+): ConfigNormalizationResult {
+  const issues: ProfileConfigIssue[] = [];
+
+  if (!isPlainObject(input)) {
+    issues.push({
+      field: 'config',
+      code: 'CONFIG_NOT_OBJECT',
+      message: 'La configuración del perfil tiene que ser un objeto.',
+    });
+    return { config: emptyConfigShell(), issues };
+  }
+
+  const root = pickKnownKeys(input, ROOT_KEYS, '', issues);
+
+  const general = pickKnownKeys(
+    expectObject(root.general, 'general', issues),
+    GENERAL_KEYS,
+    'general',
+    issues,
+  ) as unknown as ProfileGeneralConfig;
+
+  // `aiu: null` es legítimo (perfil no-AIU) y distinto de ausente: la ausencia
+  // también se normaliza a null, y es el validador quien decide si el tipo de
+  // operación la exigía (`AIU_SECTION_REQUIRED`).
+  let aiu: ProfileAiuConfig | null = null;
+  if (root.aiu !== undefined && root.aiu !== null) {
+    const raw = pickKnownKeys(
+      expectObject(root.aiu, 'aiu', issues),
+      AIU_KEYS,
+      'aiu',
+      issues,
+    );
+    raw.components = pickKnownKeys(
+      expectObject(raw.components, 'aiu.components', issues),
+      AIU_COMPONENTS,
+      'aiu.components',
+      issues,
+    );
+    aiu = raw as unknown as ProfileAiuConfig;
+  }
+
+  const accountingRaw = pickKnownKeys(
+    expectObject(root.accounting, 'accounting', issues),
+    ACCOUNTING_KEYS,
+    'accounting',
+    issues,
+  );
+  if (
+    accountingRaw.revenue_account_by_bucket !== undefined &&
+    accountingRaw.revenue_account_by_bucket !== null
+  ) {
+    accountingRaw.revenue_account_by_bucket = pickKnownKeys(
+      expectObject(
+        accountingRaw.revenue_account_by_bucket,
+        'accounting.revenue_account_by_bucket',
+        issues,
+      ),
+      AIU_BUCKETS,
+      'accounting.revenue_account_by_bucket',
+      issues,
+    );
+  }
+  // `mapping_key_overrides` es el ÚNICO mapa de claves libres del snapshot: sus
+  // claves son `mapping_key` del módulo contable, que cada tenant extiende. No
+  // se pueden enumerar acá sin duplicar ese catálogo y quedar rancio. Lo que sí
+  // se acota es la forma (ver `validateBounds`), porque un mapa libre sin cota
+  // es un `jsonb` sin cota.
+  if (
+    accountingRaw.mapping_key_overrides !== undefined &&
+    accountingRaw.mapping_key_overrides !== null
+  ) {
+    accountingRaw.mapping_key_overrides = expectObject(
+      accountingRaw.mapping_key_overrides,
+      'accounting.mapping_key_overrides',
+      issues,
+    );
+  }
+  const accounting = accountingRaw as unknown as ProfileAccountingConfig;
+
+  const taxesRaw = pickKnownKeys(
+    expectObject(root.taxes, 'taxes', issues),
+    TAXES_KEYS,
+    'taxes',
+    issues,
+  );
+  const rules = expectArray(taxesRaw.rules, 'taxes.rules', issues).map(
+    (entry, index) =>
+      pickKnownKeys(
+        expectObject(entry, `taxes.rules[${index}]`, issues),
+        TAX_RULE_KEYS,
+        `taxes.rules[${index}]`,
+        issues,
+      ) as unknown as ProfileTaxRule,
+  );
+
+  const model_lines = expectArray(
+    root.model_lines,
+    'model_lines',
+    issues,
+  ).map(
+    (entry, index) =>
+      pickKnownKeys(
+        expectObject(entry, `model_lines[${index}]`, issues),
+        MODEL_LINE_KEYS,
+        `model_lines[${index}]`,
+        issues,
+      ) as unknown as ProfileModelLine,
+  );
+
+  const format = pickKnownKeys(
+    expectObject(root.format, 'format', issues),
+    FORMAT_KEYS,
+    'format',
+    issues,
+  ) as unknown as ProfileFormatConfig;
+
+  const dianRaw = pickKnownKeys(
+    expectObject(root.dian, 'dian', issues),
+    DIAN_KEYS,
+    'dian',
+    issues,
+  );
+  if (dianRaw.header_notes !== undefined && dianRaw.header_notes !== null) {
+    dianRaw.header_notes = expectArray(
+      dianRaw.header_notes,
+      'dian.header_notes',
+      issues,
+    );
+  }
+  const dian = dianRaw as unknown as ProfileDianConfig;
+
+  return {
+    config: {
+      config_version: root.config_version as number,
+      general,
+      aiu,
+      accounting,
+      taxes: { rules },
+      model_lines,
+      format,
+      dian,
+    },
+    issues,
+  };
+}
+
+/**
+ * Cascarón con las siete secciones presentes y vacías.
+ *
+ * Se devuelve cuando la entrada no era ni un objeto. Devolver `null` obligaría a
+ * cada llamador a distinguir dos caminos de fallo para el mismo 422; con el
+ * cascarón, el validador corre igual y suma sus propios problemas a los del
+ * normalizador, y el editor recibe una sola lista.
+ */
+function emptyConfigShell(): InvoiceProfileConfig {
+  return {
+    config_version: undefined as unknown as number,
+    general: {},
+    aiu: null,
+    accounting: {},
+    taxes: { rules: [] },
+    model_lines: [],
+    format: undefined as unknown as ProfileFormatConfig,
+    dian: {},
   };
 }

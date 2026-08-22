@@ -3,6 +3,7 @@ import { ErrorCodes, VendixHttpException } from 'src/common/errors';
 import {
   InvoiceProfileConfig,
   ProfileConfigIssue,
+  normalizeInvoiceProfileConfig,
   validateInvoiceProfileConfig,
 } from './invoice-profile-config.contract';
 
@@ -21,13 +22,48 @@ export function assertValidInvoiceProfileConfig(
 ): void {
   const issues = validateInvoiceProfileConfig(config, options);
   if (issues.length === 0) return;
+  // El primer problema va al mensaje porque es lo que se ve en un toast; la
+  // lista completa viaja en `details` para que el editor marque cada campo. Si
+  // sólo se enviara el primero, el usuario tendría que guardar una vez por error
+  // para descubrir los siete que tiene.
+  throw buildProfileConfigException(issues, options);
+}
 
-  throw new VendixHttpException(
+/**
+ * Normaliza y valida en un solo paso, y devuelve el snapshot LISTO PARA
+ * PERSISTIR. Es la única puerta por la que una configuración recibida del
+ * cliente puede entrar a `invoice_profile_versions.config`.
+ *
+ * ## Por qué las dos mitades van juntas
+ *
+ * El DTO declara `config` como objeto sin `@ValidateNested` —si lo declarara,
+ * `forbidNonWhitelisted` rechazaría el árbol entero de siete secciones—, así que
+ * `class-validator` no mira NADA dentro. Persistir `dto.config` tal cual metería
+ * claves arbitrarias en el `jsonb` de un registro fiscal que las facturas
+ * timbradas referencian. Y normalizar sin validar guardaría una forma correcta
+ * con valores ilegales.
+ *
+ * Los problemas de las dos mitades salen en UNA sola lista, en orden: primero
+ * los estructurales (claves desconocidas, contenedores del tipo equivocado) y
+ * luego los semánticos. El editor los pinta por `details.issues[].field` sin
+ * saber de qué mitad vinieron.
+ */
+export function normalizeAndAssertProfileConfig(
+  input: unknown,
+  options: { operation_type: string; profile_id?: number | null },
+): InvoiceProfileConfig {
+  const { config, issues: structural } = normalizeInvoiceProfileConfig(input);
+  const issues = [...structural, ...validateInvoiceProfileConfig(config, options)];
+  if (issues.length > 0) throw buildProfileConfigException(issues, options);
+  return config;
+}
+
+function buildProfileConfigException(
+  issues: ProfileConfigIssue[],
+  options: { operation_type: string; profile_id?: number | null },
+): VendixHttpException {
+  return new VendixHttpException(
     ErrorCodes.INVOICING_PROFILE_005,
-    // El primer problema va al mensaje porque es lo que se ve en un toast; la
-    // lista completa viaja en `details` para que el editor marque cada campo.
-    // Si sólo se enviara el primero, el usuario tendría que guardar una vez por
-    // error para descubrir los siete que tiene.
     buildSummary(issues),
     {
       ...(options.profile_id != null && { profile_id: options.profile_id }),
