@@ -396,7 +396,7 @@ import {
                       factura imprime. Editar cualquiera de los dos reescribe el
                       otro, así que no pueden contradecirse en pantalla.
                     -->
-                    <th class="pb-2 px-3 text-text-secondary font-medium w-28">Dcto ($ / %)</th>
+                    <th class="pb-2 px-3 text-text-secondary font-medium w-28">Dcto %</th>
                     <!--
                       F3 IVA lifecycle: la tasa de IVA que asignó la IA baja
                       base gravable, IVA descontable y costo capitalizado; el
@@ -484,29 +484,18 @@ import {
                         corregirlo después implica anular la orden.
                       -->
                       <td class="py-2 px-3">
-                        <div class="flex flex-col gap-1">
+                        <div class="flex items-center gap-1">
                           <input
                             type="number"
-                            [value]="item.discount_amount || 0"
-                            (change)="updateItemDiscount(i, $event)"
-                            class="w-24 px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
+                            [value]="linePercentDiscount(item)"
+                            (change)="updateItemDiscountPercent(i, $event)"
+                            class="w-16 px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
                             min="0"
-                            step="0.01"
-                            aria-label="Descuento en dinero"
+                            max="100"
+                            step="1"
+                            aria-label="Descuento en porcentaje"
                           />
-                          <div class="flex items-center gap-1">
-                            <input
-                              type="number"
-                              [value]="linePercentDiscount(item)"
-                              (change)="updateItemDiscountPercent(i, $event)"
-                              class="w-16 px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
-                              min="0"
-                              max="100"
-                              step="1"
-                              aria-label="Descuento en porcentaje"
-                            />
-                            <span class="text-[10px] text-text-secondary">%</span>
-                          </div>
+                          <span class="text-[10px] text-text-secondary">%</span>
                         </div>
                       </td>
                       <!--
@@ -613,22 +602,9 @@ import {
                         </span>
                       }
                     </div>
-                    <!-- Móvil a paridad con desktop: descuento en dinero Y en
-                         porcentaje, más la tasa de IVA, todos editables. Sin
-                         ellos el operador móvil no puede corregir lo que la IA
-                         asignó antes de confirmar. -->
-                    <div>
-                      <label class="text-[10px] text-text-secondary">Dcto $</label>
-                      <input
-                        type="number"
-                        [value]="item.discount_amount || 0"
-                        (change)="updateItemDiscount(i, $event)"
-                        class="w-full px-2 py-1 text-sm border border-border rounded-md bg-surface text-text-primary"
-                        min="0"
-                        step="0.01"
-                        aria-label="Descuento en dinero"
-                      />
-                    </div>
+                    <!-- Móvil a paridad con desktop: descuento en PORCENTAJE y
+                         tasa de IVA, editables. Sin ellos el operador móvil no
+                         puede corregir lo que la IA asignó antes de confirmar. -->
                     <div>
                       <label class="text-[10px] text-text-secondary">Dcto %</label>
                       <input
@@ -683,20 +659,6 @@ import {
                         <span class="text-text-secondary">P. Neto Unit.</span>
                         <span class="text-text-primary">
                           {{ lineTaxRows()[i]!.unit_price_net | currency: 0 }}
-                        </span>
-                      </div>
-                    }
-                    <!--
-                      Espejo del backend: descuento por unidad derivado por
-                      deriveLineTax = discount_total / quantity. Solo se pinta
-                      si hay descuento efectivo (> 0) para no agregar ruido
-                      en líneas limpias. Mismo dato que el backend persistirá.
-                    -->
-                    @if ((lineTaxRows()[i]?.discount_total ?? 0) > 0 && (item.quantity || 0) > 0) {
-                      <div class="flex justify-between">
-                        <span class="text-text-secondary">Dto aplicado</span>
-                        <span class="text-text-primary">
-                          {{ (lineTaxRows()[i]!.discount_total / item.quantity) | currency: 0 }}
                         </span>
                       </div>
                     }
@@ -1253,22 +1215,19 @@ export class InvoiceScannerModalComponent {
    * `tax_rate` de fracción (0.19) a porcentaje (19); el resto son campos
    * que ya viven en `MatchedLineItem` con nombres coincidentes.
    *
-   * `discount_percentage` y `prices_include_tax` se omiten a propósito:
-   * ninguno vive en `MatchedLineItem` (el primero lo emite el scanner sólo
-   * en dinero; el segundo vive en `InvoiceScanResult`). El util hace
-   * fallback al header de la factura para `prices_include_tax`, y a 0 para
-   * `discount_percentage` — que es el comportamiento correcto para los
-   * datos que recibimos hoy.
+   * `prices_include_tax` se omite a propósito: vive en `InvoiceScanResult`,
+   * no en la línea, y el util cae al header de la factura.
+   *
+   * `discount_amount` se omite DELIBERADAMENTE aunque la línea lo traiga. El
+   * descuento de esta pantalla se expresa en PORCENTAJE y nada más, y el monto
+   * gana por precedencia en `deriveLineTax`: si viajara, el número que se
+   * aplica dejaría de ser el que el operador ve y edita en el input. El monto
+   * de la IA ya se convirtió a porcentaje una sola vez, al recibir el escaneo.
    */
   private toTaxUtilItem = (item: MatchedLineItem): PurchaseLineTaxInput => ({
     unit_price: item.unit_price,
     quantity: item.quantity,
     tax_rate: (Number(item.tax_rate ?? 0) || 0) * 100,
-    discount_amount: item.discount_amount,
-    // Respaldo de procedencia: el util aplica el porcentaje SOLO cuando no hay
-    // monto (`discount_amount > 0` gana, igual que en el backend). Un
-    // porcentaje es invariante a la base, así que aplicarlo sobre el neto da el
-    // mismo descuento que sobre el bruto.
     discount_percentage: item.discount_percentage,
   });
 
@@ -1285,11 +1244,33 @@ export class InvoiceScannerModalComponent {
     return Math.abs(n - rounded) < 0.01 ? rounded : Math.round(n * 100) / 100;
   }
 
-  /** Descuento de la línea expresado en % sobre su bruto, para el input. */
-  linePercentDiscount(item: MatchedLineItem): number {
-    const gross = (Number(item.quantity) || 0) * (Number(item.unit_price) || 0);
+  /**
+   * Porcentaje de descuento con el que arranca una línea recién escaneada.
+   *
+   * Prefiere el porcentaje que la IA leyó del papel: es la cifra impresa y es
+   * invariante a la base (un 20% es 20% con IVA o sin él). Sólo cuando no hay
+   * porcentaje se deriva del monto, contra el bruto de la línea. Con bruto 0
+   * (línea bonificada) no hay porcentaje posible y queda en 0 — dividir por
+   * cero pintaría NaN en el input.
+   */
+  private resolveLineDiscountPercent(item: MatchedLineItem): number {
+    const printedPct = Number(item.discount_percentage);
+    if (Number.isFinite(printedPct) && printedPct > 0) {
+      return Math.min(100, printedPct);
+    }
     const money = Number(item.discount_amount) || 0;
-    if (money > 0 && gross > 0) return this.displayPercent((money / gross) * 100);
+    const gross = (Number(item.quantity) || 0) * (Number(item.unit_price) || 0);
+    if (money > 0 && gross > 0) return Math.min(100, (money / gross) * 100);
+    return 0;
+  }
+
+  /**
+   * Descuento de la línea, en %. Lee UNA sola fuente: `discount_percentage`.
+   * La normalización desde el monto que emitió la IA ocurre una vez, al
+   * recibir el escaneo, no en cada repintado — así el número del input es
+   * estable aunque el operador cambie la cantidad o el precio.
+   */
+  linePercentDiscount(item: MatchedLineItem): number {
     return this.displayPercent(item.discount_percentage);
   }
 
@@ -1708,7 +1689,24 @@ export class InvoiceScannerModalComponent {
               const { purchase_uom_id, stock_uom_id } = this.resolveUomForHint(
                 item.uom_hint,
               );
-              return { ...item, purchase_uom_id, stock_uom_id };
+              return {
+                ...item,
+                purchase_uom_id,
+                stock_uom_id,
+                // Única conversión monto → porcentaje de todo el flujo, y ocurre
+                // acá: al recibir el escaneo, una sola vez. De aquí en adelante
+                // el descuento es un porcentaje y nada más — se pinta así, se
+                // edita así y así entra al carrito.
+                //
+                // Hay facturas que sólo imprimen la rebaja en pesos, sin el "%"
+                // al lado. Si no se normalizara, esa rebaja no tendría cómo
+                // expresarse y desaparecería de la orden sin aviso.
+                discount_percentage: this.resolveLineDiscountPercent(item),
+                // El monto se descarta a propósito: gana por precedencia en
+                // `deriveLineTax`, así que dejarlo vivo haría que el porcentaje
+                // que el operador ve y edita no fuera el que se aplica.
+                discount_amount: null,
+              };
             }),
           );
           // Pre-fill invoice header
@@ -1743,48 +1741,27 @@ export class InvoiceScannerModalComponent {
   }
 
   /**
-   * QUI-661 Fase 4 — descuento comercial de la línea. Se acota a [0, importe]:
-   * un descuento mayor que la línea dejaría el costo negativo y envenenaría la
-   * capa FIFO que la recepción va a crear.
-   */
-  updateItemDiscount(index: number, event: Event): void {
-    const raw = Number((event.target as HTMLInputElement).value);
-    const items = [...this.editableItems()];
-    const line = items[index];
-    const gross = (Number(line.quantity) || 0) * (Number(line.unit_price) || 0);
-    const value = Math.min(Math.max(0, raw || 0), gross);
-    // El monto es la fuente de verdad; el porcentaje se re-deriva para que los
-    // dos campos nunca se contradigan en pantalla. Con bruto 0 (línea
-    // bonificada) no hay porcentaje posible: se deja en 0 en vez de dividir por
-    // cero y emitir NaN al input.
-    items[index] = {
-      ...line,
-      discount_amount: value,
-      discount_percentage: gross > 0 ? (value / gross) * 100 : 0,
-    };
-    this.editableItems.set(items);
-  }
-
-  /**
    * Descuento de la línea tecleado en PORCENTAJE (0-100) — el caso que motivó
    * el hotfix: la factura dice "-20%", la IA lo dejó en 0 y el operador tiene
    * que poder escribir `20` y ver el total recalcularse antes de confirmar.
    *
-   * El porcentaje se acota a 0-100 (un descuento negativo es un recargo y un
-   * descuento mayor que la línea dejaría el costo negativo, envenenando la
-   * capa FIFO que la recepción va a crear) y se resuelve inmediatamente a
-   * dinero, que es la cifra que persiste el backend y que lee la contabilidad.
+   * El porcentaje se acota a 0-100: un descuento negativo es un recargo, y uno
+   * mayor que la línea dejaría el costo negativo y envenenaría la capa FIFO
+   * que crea la recepción.
+   *
+   * NO se deriva un monto. El monto se limpia en la misma escritura porque
+   * gana por precedencia en `deriveLineTax`: dejarlo con el valor del escaneo
+   * haría que teclear un porcentaje no moviera ninguna cifra — el input
+   * cambia, el total no, y el operador no tiene forma de saber por qué.
    */
   updateItemDiscountPercent(index: number, event: Event): void {
     const raw = Number((event.target as HTMLInputElement).value);
     const pct = Math.min(100, Math.max(0, Number.isFinite(raw) ? raw : 0));
     const items = [...this.editableItems()];
-    const line = items[index];
-    const gross = (Number(line.quantity) || 0) * (Number(line.unit_price) || 0);
     items[index] = {
-      ...line,
+      ...items[index],
       discount_percentage: pct,
-      discount_amount: gross > 0 ? (gross * pct) / 100 : 0,
+      discount_amount: null,
     };
     this.editableItems.set(items);
   }
