@@ -1159,15 +1159,11 @@ export class PosProductSelectionComponent {
       return;
     }
 
-    // CP-POS-SVC-PERF-001 — services go straight to the cart and the cashier
-    // opens the unified `booking-scheduler-modal` via the calendar icon on the
-    // cart row. The legacy `bookingRequired` flow (which routed to the OLD
-    // `reservation-form-modal` wizard from the reservations module) is left
-    // intact for callers that still want it, but on POS the cart flow is the
-    // single source of truth — it is the path that honours
-    // `allow_bookings_without_payment` (Guardar vs Cobrar).
-    if (product.requires_booking === true) {
-      await this.addToCartNormal(product);
+    // CP-POS-SVC-BOOKING-001 — When selecting a service or booking-required product,
+    // intercept and emit bookingRequired so the scheduler modal opens to configure
+    // date, time, provider, and location before adding to cart.
+    if (product.product_type === 'service' || product.requires_booking === true) {
+      this.bookingRequired.emit({ product, variant: null });
       return;
     }
 
@@ -1181,10 +1177,8 @@ export class PosProductSelectionComponent {
 
     if (!product) return;
 
-    if (product.requires_booking === true) {
-      // TODO: route through cart with variant context (low priority — services
-      // with variants are rare). For now, plain addToCart drops the variant.
-      await this.addToCartNormal(product);
+    if (product.product_type === 'service' || product.requires_booking === true) {
+      this.bookingRequired.emit({ product, variant });
       return;
     }
 

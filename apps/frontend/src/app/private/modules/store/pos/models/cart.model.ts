@@ -96,6 +96,19 @@ export interface CartItem {
   // checkout. Ignored for non-serialized products.
   serial_ids?: number[];
   serial_numbers?: string[];
+  // CP-POS-SVC-BOOKING-001 — Scheduled appointment details for service lines.
+  booking?: CartItemBooking;
+}
+
+export interface CartItemBooking {
+  booking_id?: number;
+  provider_id?: number | null;
+  provider_name?: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  notes?: string;
+  service_location_type?: 'shop' | 'home';
 }
 
 export interface CartDiscount {
@@ -249,6 +262,8 @@ export interface AddToCartRequest {
   // here. `serial_ids` are pool rows; `serial_numbers` are free-text entries.
   serial_ids?: number[];
   serial_numbers?: string[];
+  // CP-POS-SVC-BOOKING-001 — Booking parameters when adding a service line.
+  booking?: CartItemBooking;
 }
 
 export interface AddCustomItemRequest {

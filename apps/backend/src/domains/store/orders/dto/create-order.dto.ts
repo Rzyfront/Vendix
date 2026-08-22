@@ -146,6 +146,11 @@ export class CreateOrderItemDto {
    * Si ausente, se trata como no-prepared (orden normal).
    */
   @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  notes?: string;
+
+  @IsOptional()
   @IsIn(['physical', 'prepared', 'service', 'custom', 'combo', 'ingredient'])
   product_type?: 'physical' | 'prepared' | 'service' | 'custom' | 'combo' | 'ingredient';
 }

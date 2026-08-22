@@ -674,12 +674,15 @@ export class PosCheckoutShellComponent {
     this.currencyService.loadCurrency();
 
     // Reactive sync: derive the anonymous flag from settings unless the user
-    // explicitly overrode it. Writes wrapped in untracked() (zoneless-safe).
+    // explicitly overrode it or a customer is already attached to the cart.
     effect(() => {
       const allow = this.allowAnonymousSales();
       const asDefault = this.anonymousSalesAsDefault();
       const override = this.userOverrideAnonymous();
-      const effective = !allow ? false : (override ?? asDefault);
+      const hasCartCustomer = !!this.cartState()?.customer;
+      const effective = !allow
+        ? false
+        : (override ?? (hasCartCustomer ? false : asDefault));
       untracked(() => {
         if (this.isAnonymousSale() !== effective) {
           this.isAnonymousSale.set(effective);
@@ -783,7 +786,8 @@ export class PosCheckoutShellComponent {
       return;
     }
     const override = this.userOverrideAnonymous();
-    this.isAnonymousSale.set(override ?? this.anonymousSalesAsDefault());
+    const hasCartCustomer = !!this.cartState()?.customer;
+    this.isAnonymousSale.set(override ?? (hasCartCustomer ? false : this.anonymousSalesAsDefault()));
   }
 
   /**
@@ -1017,26 +1021,68 @@ export class PosCheckoutShellComponent {
     // fresh Order. The shell keeps the footer's own loading guard
     // (`submittingDraft`) and resets it in BOTH next AND error so
     // the cashier is never stuck.
-    const items = state.items.map((it: any) => ({
-      item_type: it.itemType ?? 'product',
-      product_id: it.product?.id ?? null,
-      product_variant_id: it.variant_id ?? null,
-      product_name: it.product?.name ?? '',
-      product_sku: it.product?.sku ?? null,
-      variant_sku: it.variant_sku ?? null,
-      variant_attributes: it.variant_attributes ?? null,
-      description: it.description ?? it.notes ?? null,
-      quantity: Number(it.quantity ?? 1),
-      unit_price: Number((it.unitPrice ?? 0).toFixed(2)),
-      final_unit_price: Number(
-        (it.finalPrice ?? it.unitPrice ?? 0).toFixed(2),
-      ),
-      total_price: Number((it.totalPrice ?? 0).toFixed(2)),
-      tax_amount_item: Number((it.taxAmount ?? 0).toFixed(2)),
-      tax_rate: typeof it.taxRate === 'number' ? it.taxRate : undefined,
-      tax_category_id: it.taxCategoryId ?? undefined,
-      applied_price_tier_id: it.appliedPriceTierId ?? undefined,
-    }));
+    const stateAny = state as any;
+    const pendingBookings = (stateAny?.pendingBookings ?? []) as Array<any>;
+    const findBooking = (item: any) => {
+      if (item.booking) return item.booking;
+      const productId =
+        typeof item.product?.id === 'number'
+          ? item.product.id
+          : Number(item.product?.id);
+      const variantId = item.variant_id ?? null;
+      return pendingBookings.find(
+        (b: any) =>
+          b.product_id === productId &&
+          (variantId == null || b.product_variant_id == null || b.product_variant_id === variantId),
+      );
+    };
+    /** CP-POS-SVC-BOOKING-001 — build the atomic booking
+     *  block for a cart line. Returns undefined when the line has no
+     *  pending booking, so the editor payload omits the field and the
+     *  backend doesn't try to insert a row.
+     *
+     *  The backend's `UpdateOrderEditorItemBookingDto` whitelists only:
+     *  booking_id, provider_id, date, start_time, end_time, notes,
+     *  service_location_type.
+     */
+    const buildBooking = (it: any): any => {
+      const b = findBooking(it);
+      if (!b) return undefined;
+      const parsedBookingId = Number(b.booking_id ?? b.id);
+      return {
+        booking_id: Number.isFinite(parsedBookingId) && parsedBookingId > 0 ? parsedBookingId : undefined,
+        provider_id: b.provider_id ? Number(b.provider_id) : null,
+        date: b.date,
+        start_time: b.start_time,
+        end_time: b.end_time,
+        notes: b.notes ?? '',
+        service_location_type: b.service_location_type === 'home' ? 'home' : 'shop',
+      };
+    };
+    const items = state.items.map((it: any) => {
+      const booking = buildBooking(it);
+      return {
+        item_type: it.itemType ?? 'product',
+        product_id: it.product?.id ?? null,
+        product_variant_id: it.variant_id ?? null,
+        product_name: it.product?.name ?? '',
+        product_sku: it.product?.sku ?? null,
+        variant_sku: it.variant_sku ?? null,
+        variant_attributes: it.variant_attributes ?? null,
+        description: it.description ?? it.notes ?? null,
+        quantity: Number(it.quantity ?? 1),
+        unit_price: Number((it.unitPrice ?? 0).toFixed(2)),
+        final_unit_price: Number(
+          (it.finalPrice ?? it.unitPrice ?? 0).toFixed(2),
+        ),
+        total_price: Number((it.totalPrice ?? 0).toFixed(2)),
+        tax_amount_item: Number((it.taxAmount ?? 0).toFixed(2)),
+        tax_rate: typeof it.taxRate === 'number' ? it.taxRate : undefined,
+        tax_category_id: it.taxCategoryId ?? undefined,
+        applied_price_tier_id: it.appliedPriceTierId ?? undefined,
+        ...(booking ? { booking } : {}),
+      };
+    });
     const customer = state.customer;
 
     // Idempotency key per edit attempt (defense-in-depth vs double-clicks

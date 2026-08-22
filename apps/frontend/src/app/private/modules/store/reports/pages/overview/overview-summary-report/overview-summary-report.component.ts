@@ -353,7 +353,7 @@ export class OverviewSummaryReportComponent {
         neutral({
           key: 'total_expenses',
           title: 'Gastos Totales',
-          icon: 'trending-down',
+          icon: 'trending-up',
           formatType: 'currency',
         }),
         neutral({
@@ -365,7 +365,7 @@ export class OverviewSummaryReportComponent {
         neutral({
           key: 'net_profit',
           title: 'Ganancia Neta',
-          icon: 'circle-dollar-sign',
+          icon: 'dollar-sign',
           formatType: 'currency',
         }),
         neutral({
@@ -383,14 +383,14 @@ export class OverviewSummaryReportComponent {
         neutral({
           key: 'breakeven_ratio',
           title: 'Punto de Equilibrio %',
-          icon: 'gauge',
+          icon: 'clock',
           formatType: 'percentage',
         }),
         // Growth has a specific null-treatment (trend = flat, growth = null).
         neutral({
           key: 'income_growth',
           title: 'Crecimiento Ingresos',
-          icon: 'minus',
+          icon: '',
           formatType: 'percentage',
           trend: 'flat',
           growth: null,
@@ -432,7 +432,7 @@ export class OverviewSummaryReportComponent {
       {
         key: 'total_expenses',
         title: 'Gastos Totales',
-        icon: 'trending-down',
+        icon: 'trending-up',
         state: this.expenseState(expenseRatio),
         trend: undefined,
         growth: undefined,
@@ -454,7 +454,7 @@ export class OverviewSummaryReportComponent {
       {
         key: 'net_profit',
         title: 'Ganancia Neta',
-        icon: 'circle-dollar-sign',
+        icon: 'dollar-sign',
         state: this.netProfitState(computedNetMargin, hasIncome),
         trend: undefined,
         growth: undefined,
@@ -487,7 +487,7 @@ export class OverviewSummaryReportComponent {
       {
         key: 'breakeven_ratio',
         title: 'Punto de Equilibrio %',
-        icon: 'gauge',
+        icon: 'clock',
         state: this.breakevenState(breakeven),
         trend: undefined,
         growth: undefined,
@@ -550,7 +550,7 @@ export class OverviewSummaryReportComponent {
       return {
         key: 'income_growth',
         title: 'Crecimiento Ingresos',
-        icon: 'minus',
+        icon: '',
         state: 'neutral',
         trend: 'flat',
         growth: null,
@@ -560,17 +560,19 @@ export class OverviewSummaryReportComponent {
       };
     }
 
+    const formattedGrowthValue = this.formatPercentage(value);
+
     if (value > 0) {
       return {
         key: 'income_growth',
         title: 'Crecimiento Ingresos',
-        icon: 'trending-up',
+        icon: '',
         state: 'positive',
         trend: 'up',
         growth: value,
         formatType: 'percentage',
         value,
-        formattedValue: this.formatPercentage(value),
+        formattedValue: formattedGrowthValue,
       };
     }
 
@@ -578,26 +580,26 @@ export class OverviewSummaryReportComponent {
       return {
         key: 'income_growth',
         title: 'Crecimiento Ingresos',
-        icon: 'trending-down',
+        icon: '',
         state: 'critical',
         trend: 'down',
         growth: value,
         formatType: 'percentage',
         value,
-        formattedValue: this.formatPercentage(value),
+        formattedValue: formattedGrowthValue,
       };
     }
 
     return {
       key: 'income_growth',
       title: 'Crecimiento Ingresos',
-      icon: 'minus',
+      icon: '',
       state: 'neutral',
       trend: 'flat',
       growth: 0,
       formatType: 'percentage',
       value: 0,
-      formattedValue: this.formatPercentage(0),
+      formattedValue: '0%',
     };
   }
 
@@ -613,7 +615,10 @@ export class OverviewSummaryReportComponent {
 
   private formatPercentage(value: number | null): string {
     if (value === null) return PLACEHOLDER_VALUE;
-    return `${value}%`;
+    const num = Number(value);
+    if (Number.isNaN(num)) return PLACEHOLDER_VALUE;
+    const formatted = num % 1 === 0 ? num.toString() : num.toFixed(2);
+    return `${formatted}%`;
   }
 
   private numberOrNull(value: unknown): number | null {
