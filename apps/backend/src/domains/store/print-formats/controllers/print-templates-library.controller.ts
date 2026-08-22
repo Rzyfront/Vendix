@@ -32,7 +32,7 @@ export class PrintTemplatesLibraryController {
   ) {}
 
   @Get()
-  @Permissions('store:settings:manage')
+  @Permissions('organization:settings:read', 'store:settings:read')
   @ApiOperation({ summary: 'List shared print templates available for organization' })
   async listTemplates(@Query('formatType') formatType?: print_format_type_enum) {
     const context = RequestContextService.getContext();
@@ -47,7 +47,7 @@ export class PrintTemplatesLibraryController {
   }
 
   @Post()
-  @Permissions('store:settings:manage')
+  @Permissions('organization:settings:update', 'store:settings:update')
   @ApiOperation({ summary: 'Create new organization print template' })
   async createTemplate(@Body() dto: CreatePrintTemplateDto) {
     const context = RequestContextService.getContext();
@@ -67,7 +67,7 @@ export class PrintTemplatesLibraryController {
   }
 
   @Post(':id/clone')
-  @Permissions('store:settings:manage')
+  @Permissions('store:settings:update')
   @ApiOperation({ summary: 'Clone a library template to current store configuration' })
   async cloneTemplate(@Param('id', ParseIntPipe) templateId: number) {
     const context = RequestContextService.getContext();
@@ -87,7 +87,7 @@ export class PrintTemplatesLibraryController {
   }
 
   @Put(':id/share')
-  @Permissions('store:settings:manage')
+  @Permissions('organization:settings:update', 'store:settings:update')
   @ApiOperation({ summary: 'Update template sharing status across organization stores' })
   async updateShare(
     @Param('id', ParseIntPipe) templateId: number,

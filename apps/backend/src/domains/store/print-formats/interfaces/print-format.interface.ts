@@ -1,6 +1,7 @@
-import { print_format_type_enum } from '@prisma/client';
+import { PrintFormatTypeEnum } from '../enums/print-format.enum';
+export * from '../enums/print-format.enum';
 
-export type PrintFormatType = print_format_type_enum;
+export type PrintFormatType = keyof typeof PrintFormatTypeEnum;
 
 export type PrintPaperFormat =
   | 'thermal_80'

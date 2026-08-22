@@ -1,9 +1,9 @@
 import { IsBoolean, IsEnum, IsNotEmpty, IsOptional, IsString, IsObject } from 'class-validator';
-import { print_format_type_enum } from '@prisma/client';
+import { PrintFormatTypeEnum } from '../enums/print-format.enum';
 
 export class CreatePrintTemplateDto {
-  @IsEnum(print_format_type_enum)
-  format_type: print_format_type_enum;
+  @IsEnum(PrintFormatTypeEnum)
+  format_type: PrintFormatTypeEnum;
 
   @IsString()
   @IsNotEmpty()

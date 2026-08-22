@@ -34,7 +34,7 @@ export class PrintFormatsController {
   ) {}
 
   @Get()
-  @Permissions('store:settings:manage')
+  @Permissions('store:settings:read')
   @ApiOperation({ summary: 'List all print format types and their status for the store' })
   async listFormats() {
     const context = RequestContextService.getContext();
@@ -50,7 +50,7 @@ export class PrintFormatsController {
   }
 
   @Get(':formatType')
-  @Permissions('store:settings:manage')
+  @Permissions('store:settings:read')
   @ApiOperation({ summary: 'Get print format configuration and template detail' })
   async getFormatDetail(@Param('formatType') formatType: print_format_type_enum) {
     const context = RequestContextService.getContext();
@@ -65,7 +65,7 @@ export class PrintFormatsController {
   }
 
   @Put(':formatType')
-  @Permissions('store:settings:manage')
+  @Permissions('store:settings:update')
   @ApiOperation({ summary: 'Update print format configuration and overrides for store' })
   async updateFormat(
     @Param('formatType') formatType: print_format_type_enum,
@@ -89,7 +89,7 @@ export class PrintFormatsController {
   }
 
   @Delete(':formatType')
-  @Permissions('store:settings:manage')
+  @Permissions('store:settings:update')
   @ApiOperation({ summary: 'Reset print format to system defaults' })
   async resetFormat(@Param('formatType') formatType: print_format_type_enum) {
     const context = RequestContextService.getContext();
@@ -104,7 +104,7 @@ export class PrintFormatsController {
   }
 
   @Post(':formatType/preview')
-  @Permissions('store:settings:manage')
+  @Permissions('store:settings:read')
   @ApiOperation({ summary: 'Generate live preview of print format with draft overrides' })
   async previewFormat(
     @Param('formatType') formatType: print_format_type_enum,
@@ -127,7 +127,7 @@ export class PrintFormatsController {
   }
 
   @Post(':formatType/activate')
-  @Permissions('store:settings:manage')
+  @Permissions('store:settings:update')
   @ApiOperation({ summary: 'Activate print gateway for format type' })
   async activateGateway(@Param('formatType') formatType: print_format_type_enum) {
     const context = RequestContextService.getContext();
@@ -143,7 +143,7 @@ export class PrintFormatsController {
   }
 
   @Post(':formatType/deactivate')
-  @Permissions('store:settings:manage')
+  @Permissions('store:settings:update')
   @ApiOperation({ summary: 'Deactivate print gateway for format type (fallback to legacy)' })
   async deactivateGateway(@Param('formatType') formatType: print_format_type_enum) {
     const context = RequestContextService.getContext();
@@ -159,7 +159,7 @@ export class PrintFormatsController {
   }
 
   @Post('render')
-  @Permissions('store:pos:access', 'store:orders:read', 'store:settings:manage')
+  @Permissions('store:pos:access', 'store:orders:read', 'store:settings:read')
   @ApiOperation({ summary: 'Render a document via Print Gateway' })
   async renderDocument(@Body() dto: RenderPrintDocumentDto) {
     const context = RequestContextService.getContext();

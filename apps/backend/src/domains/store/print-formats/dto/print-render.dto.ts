@@ -1,9 +1,9 @@
 import { IsEnum, IsNotEmpty, IsOptional, IsString, IsIn } from 'class-validator';
-import { print_format_type_enum } from '@prisma/client';
+import { PrintFormatTypeEnum } from '../enums/print-format.enum';
 
 export class RenderPrintDocumentDto {
-  @IsEnum(print_format_type_enum)
-  format_type: print_format_type_enum;
+  @IsEnum(PrintFormatTypeEnum)
+  format_type: PrintFormatTypeEnum;
 
   @IsNotEmpty()
   document_id: number | string;
