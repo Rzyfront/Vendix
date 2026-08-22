@@ -845,4 +845,167 @@ describe('CostingService', () => {
     });
   });
 
+  /**
+   * CP-PURCHASE-TRANSPARENCY D.2 — el agregado de costo deja de contar unidades
+   * de productos archivados.
+   *
+   * El filtro vive DENTRO del SQL crudo (la agregación ES la consulta), así que
+   * lo que estas pruebas verifican es (a) que el predicado viaja en la consulta
+   * emitida por LOS DOS caminos, (b) que no corre los parámetros posicionales
+   * —el aislamiento por organización sigue en `$2`— y (c) que el resultado del
+   * agregado es el que corresponde al conjunto que el motor devolvería.
+   */
+  describe('D.2 — el universo del costo excluye productos archivados', () => {
+    const makeTx = (
+      rows: any[],
+      location = { organization_id: 1, store_id: 42 },
+    ) => ({
+      $queryRaw: jest.fn().mockResolvedValue(rows),
+      inventory_locations: {
+        findUnique: jest.fn().mockResolvedValue(location),
+      },
+    });
+
+    beforeEach(() => {
+      operatingScopeService.getOperatingScope.mockResolvedValue('STORE');
+      (prismaService as any).inventory_locations.findUnique.mockResolvedValue({
+        organization_id: 1,
+        store_id: 42,
+      });
+    });
+
+    it('el predicado de estado viaja en la consulta por los dos caminos', async () => {
+      const tx = makeTx([]);
+
+      await service.getScopedStockAggregate({
+        product_id: 378,
+        location_id: 100,
+      });
+      await service.getScopedStockAggregate(
+        { product_id: 378, location_id: 100 },
+        tx,
+      );
+
+      const sentPreview = rawQuery.mock.calls[0][0];
+      const sentReception = tx.$queryRaw.mock.calls[0][0];
+      for (const sent of [sentPreview, sentReception]) {
+        expect(normalize(sent.text)).toContain(
+          "p.state IS DISTINCT FROM 'archived'",
+        );
+      }
+      // Y el contrato A.0 sigue en pie: misma cadena, mismos valores.
+      expect(normalize(sentReception.text)).toBe(normalize(sentPreview.text));
+      expect(sentReception.values).toEqual(sentPreview.values);
+    });
+
+    it('el estado va LITERAL: no corre los parámetros del aislamiento por organización', async () => {
+      await service.getScopedStockAggregate({
+        product_id: 378,
+        location_id: 100,
+      });
+
+      const sent = rawQuery.mock.calls[0][0];
+      const text = normalize(sent.text);
+      // Si el estado se hubiera parametrizado, la organización sería $3.
+      expect(text).toContain('il.organization_id = $2');
+      expect(text).toContain('il.store_id = $3');
+      expect(sent.values).toEqual([378, 1, 42]);
+      // 'archived' NO es un valor enlazado.
+      expect(sent.values).not.toContain('archived');
+    });
+
+    it('producto ARCHIVADO: el motor no devuelve filas → cantidad 0 y costo 0 (reactivación)', async () => {
+      // Con el filtro dentro del SQL, un producto archivado con 20.000 unidades
+      // a 3,00 (el caso medido del producto 378) no aporta ninguna fila.
+      rawQuery.mockResolvedValue([]);
+
+      const aggregate = await service.getScopedStockAggregate({
+        product_id: 378,
+        location_id: 100,
+      });
+
+      expect(aggregate).toEqual({ quantity: 0, cost_per_unit: 0 });
+    });
+
+    it('producto ARCHIVADO: una compra a 100 se costea a 100, no a 2,03', async () => {
+      // Antes de D.2 el agregado traía 20.000@3 y el promedio ponderado con una
+      // recepción de 10@100 daba 2,03. Sin universo previo, el costo nuevo es
+      // exactamente el de la compra.
+      (prismaService as any).stock_levels.findFirst.mockResolvedValue(null);
+      rawQuery.mockResolvedValue([]);
+
+      const result = await service.calculateCostOnReceipt({
+        product_id: 378,
+        location_id: 100,
+        quantity_received: 10,
+        unit_cost: 100,
+        costing_method: 'weighted_average',
+      });
+
+      expect(result.new_scoped_cost_per_unit).toBe(100);
+      expect(result.new_cost_per_unit).toBe(100);
+    });
+
+    it('producto ACTIVO con stock: el costo es EXACTAMENTE el de antes de D.2', async () => {
+      const activeUniverse = [
+        {
+          quantity_on_hand: 94,
+          cost_per_unit: 1_620_000,
+          variant_cost_price: null,
+          product_cost_price: 1_620_000,
+        },
+        {
+          quantity_on_hand: 25,
+          cost_per_unit: 1_620_000,
+          variant_cost_price: null,
+          product_cost_price: 1_620_000,
+        },
+      ];
+      rawQuery.mockResolvedValue(activeUniverse);
+
+      const aggregate = await service.getScopedStockAggregate({
+        product_id: 268,
+        location_id: 100,
+      });
+
+      expect(aggregate.quantity).toBe(119);
+      expect(aggregate.cost_per_unit).toBe(1_620_000);
+    });
+
+    it('MEZCLA: sólo las filas activas entran; el promedio no lo arrastra el archivado', async () => {
+      // El motor entrega ya filtrado: 10@1.000 del producto vivo. La fila
+      // archivada de 20.000@3 que antes venía en el mismo conjunto ya no llega,
+      // y por eso el promedio se queda en 1.000 en vez de desplomarse a ~3,5.
+      rawQuery.mockResolvedValue([
+        {
+          quantity_on_hand: 10,
+          cost_per_unit: 1_000,
+          variant_cost_price: null,
+          product_cost_price: 1_000,
+        },
+      ]);
+
+      const aggregate = await service.getScopedStockAggregate({
+        product_id: 268,
+        location_id: 100,
+      });
+
+      expect(aggregate.quantity).toBe(10);
+      expect(aggregate.cost_per_unit).toBe(1_000);
+    });
+
+    it('initializeCostLayers usa el MISMO criterio por la relación con products', async () => {
+      (prismaService as any).stock_levels.findMany.mockResolvedValue([]);
+
+      await service.initializeCostLayers(1);
+
+      const where = (prismaService as any).stock_levels.findMany.mock
+        .calls[0][0].where;
+      expect(where.quantity_on_hand).toEqual({ gt: 0 });
+      // `product_variants` no tiene columna `state`: el criterio SIEMPRE cuelga
+      // del producto padre.
+      expect(where.products).toEqual({ state: { not: 'archived' } });
+    });
+  });
+
 });

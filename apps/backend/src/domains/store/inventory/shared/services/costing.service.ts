@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, product_state_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { GlobalPrismaService } from '../../../../../prisma/services/global-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -19,6 +19,63 @@ export interface ScopedLocationFilter {
   organization_id: number;
   store_id?: number;
 }
+
+/**
+ * CP-PURCHASE-TRANSPARENCY D.2 — el estado que saca a un producto del universo
+ * de costo.
+ *
+ * EL DEFECTO QUE CIERRA
+ * ---------------------
+ * Archivar un producto era un cambio de bandera invisible: `remove()` escribía
+ * `state='archived'` y NO tocaba `stock_levels`. Esas unidades seguían dentro
+ * del promedio ponderado. Medido en desarrollo: el producto 378, archivado, con
+ * 20.000 unidades a 3,00, hacía que una compra real a 100,00 cotizara un costo
+ * nuevo de 2,03 — el operador cree que borró el producto y el sistema le sigue
+ * promediando contra existencias fantasma.
+ *
+ * DÓNDE SE APLICA, Y DÓNDE NO
+ * ---------------------------
+ * El criterio es de UNIVERSO: un archivado no participa en un agregado que
+ * BARRE varias filas de un alcance (`getScopedStockAggregate`,
+ * `initializeCostLayers`). NO se aplica en `consumeCostLayers`, y no es un
+ * olvido: allí el producto viene FIJADO por el llamador, así que el filtro no
+ * podría cambiar QUÉ se consume — sólo negarse a costear. Y el primer llamador
+ * que consume stock de un producto archivado es justamente el castigo de
+ * inventario de D.4 (`adjustment_type='loss'`, `quantity_after=0`), cuyo COGS
+ * es la cifra que alimenta el asiento a 529505 «Faltantes de Inventario».
+ * Filtrar ahí dejaría todos los castigos valorados en CERO — exactamente la
+ * mudez contable que D.8 existe para evitar. Ver el comentario en
+ * `consumeCostLayers`.
+ */
+export const ARCHIVED_PRODUCT_STATE = product_state_enum.archived;
+
+/**
+ * Predicado SQL del universo activo, para la consulta cruda del agregado.
+ *
+ * SIN PARÁMETRO, A PROPÓSITO. `'archived'` es una constante de compilación, no
+ * entrada de usuario, así que va literal en la plantilla. Parametrizarla
+ * (`${ARCHIVED_PRODUCT_STATE}`) correría los índices `$n` de todos los
+ * parámetros que vienen después —organización y tienda incluidas— y el bloque
+ * A.0 del spec compara la CADENA SQL y los VALORES emitidos con `tx` y sin
+ * `tx`: un corrimiento silencioso ahí es el aviso de que el aislamiento entre
+ * organizaciones dejó de estar donde el spec cree.
+ *
+ * `IS DISTINCT FROM` y no `<>`: el `LEFT JOIN products` puede, en teoría,
+ * devolver `p.state` NULL; con `<>` la fila caería fuera por comparación NULL.
+ * Una fila de stock sin producto no es un archivado, es un huérfano, y su sitio
+ * es dentro del agregado (visible) y no fuera (silenciado).
+ */
+const ACTIVE_PRODUCT_STATE_SQL = Prisma.sql`p.state IS DISTINCT FROM 'archived'`;
+
+/**
+ * El MISMO criterio en forma de fragmento `where` de Prisma, para las lecturas
+ * del universo que no son crudas. Único punto de verdad junto a
+ * {@link ACTIVE_PRODUCT_STATE_SQL}: si un día el estado excluido cambia, cambia
+ * aquí y en la constante de arriba, no en cada `where` del dominio.
+ */
+export const ACTIVE_PRODUCT_RELATION_FILTER = {
+  products: { state: { not: ARCHIVED_PRODUCT_STATE } },
+} as const;
 
 /**
  * Fila cruda del universo de stock. Los tres costos viajan juntos para que la
@@ -145,6 +202,14 @@ export class CostingService {
    *   `BasePrismaService` sólo expone `$queryRawUnsafe`, no `$queryRaw`, así
    *   que hay que bajar al cliente base para usar plantillas parametrizadas.
    *
+   * QUÉ QUEDA FUERA DEL UNIVERSO (D.2)
+   * ----------------------------------
+   * El stock de un producto `state='archived'`. Ver
+   * {@link ARCHIVED_PRODUCT_STATE}. Las variantes se filtran por el estado de
+   * su producto PADRE: `product_variants` no tiene columna `state`, y el `JOIN
+   * products p ON p.id = sl.product_id` ya cuelga toda fila de stock —base o de
+   * variante— del producto que la posee.
+   *
    * Devuelve la cantidad en alcance y su costo unitario promedio ponderado.
    */
   async getScopedStockAggregate(
@@ -178,6 +243,7 @@ export class CostingService {
        WHERE sl.product_id = ${params.product_id}
          AND (${variantPredicate})
          AND sl.quantity_on_hand > 0
+         AND (${ACTIVE_PRODUCT_STATE_SQL})
          AND (${membership})
     `);
     const quantity = (rows as any[]).reduce(
@@ -412,6 +478,15 @@ export class CostingService {
   /**
    * Consume cost layers when selling/removing stock.
    * Returns the total COGS (Cost of Goods Sold) for the consumed quantity.
+   *
+   * D.2 — AQUÍ NO SE FILTRA POR `state`, y es una decisión, no un olvido.
+   * El producto viene fijado por el llamador (`params.product_id`), así que el
+   * filtro no podría cambiar QUÉ capas se consumen: sólo podría negarse a
+   * costearlas y devolver 0. El primer llamador que consume stock de un
+   * producto archivado es el castigo de inventario de D.4, y ese 0 sería
+   * justamente el COGS del asiento de faltantes. El universo activo se impone
+   * en los agregados que barren varias filas —`getScopedStockAggregate` e
+   * `initializeCostLayers`—, que es donde el archivado contamina.
    */
   async consumeCostLayers(
     params: ConsumeCostParams,
@@ -580,6 +655,11 @@ export class CostingService {
     const stockLevels = await prisma.stock_levels.findMany({
       where: {
         quantity_on_hand: { gt: 0 },
+        // D.2 — mismo universo que `getScopedStockAggregate`: sembrar capas de
+        // costo para un producto archivado reintroduciría por la puerta de
+        // atrás las existencias que el agregado acaba de dejar fuera, y un
+        // futuro cambio a FIFO las costearía como si estuvieran vivas.
+        ...ACTIVE_PRODUCT_RELATION_FILTER,
       },
       include: {
         products: {
