@@ -6,9 +6,31 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { OperatingScopeService } from '@common/services/operating-scope.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 
+/**
+ * Universo de ubicaciones que un agregado de costo puede mirar.
+ *
+ * OJO: NO es un fragmento `where` de Prisma. `store_id` aquí significa
+ * `(inventory_locations.store_id = <valor> OR inventory_locations.store_id IS
+ * NULL)` — la tienda MÁS la bodega central de la organización, que no cuelga de
+ * ninguna tienda. Ausente ⇒ toda la organización. La traducción a SQL vive en
+ * `buildLocationMembershipSql`, que es el ÚNICO consumidor.
+ */
 export interface ScopedLocationFilter {
   organization_id: number;
   store_id?: number;
+}
+
+/**
+ * Fila cruda del universo de stock. Los tres costos viajan juntos para que la
+ * cadena canónica de fallback (`cost_per_unit` → variante → producto → 0) se
+ * resuelva en TypeScript con la misma semántica `||` que el resto del servicio,
+ * en vez de reimplementarla en SQL con `NULLIF`/`COALESCE`.
+ */
+interface ScopedStockRow {
+  quantity_on_hand: number | string | null;
+  cost_per_unit: unknown;
+  variant_cost_price: unknown;
+  product_cost_price: unknown;
 }
 
 export interface CalculateCostParams {
@@ -59,27 +81,71 @@ export class CostingService {
   ) {}
 
   /**
-   * QUI-425 — Weighted-average cost aggregate across the in-scope location set.
+   * Traduce el universo de ubicaciones a un predicado SQL EXPLÍCITO.
    *
-   * Reads via the UNSCOPED base client (`GlobalPrismaService`) on purpose:
-   * `buildScopedLocationFilter` already encodes the EXACT operating-scope
-   * predicate (STORE → same store, ORGANIZATION → whole org). Going through
-   * the store-scoped client would AND an extra
-   * `inventory_locations.store_id = <ctx store>` clause that silently DROPS
-   * org-level central warehouses (`store_id = null`) and sibling stores from
-   * the aggregate — which corrupted `cost_price`/`profit_margin` on receipt
-   * for ORGANIZATION-scope orgs (the general-inventory cost was ignored).
+   * Es el único punto donde se escribe la pertenencia, y se escribe entera:
+   * la organización SIEMPRE, y bajo alcance STORE también la tienda MÁS la
+   * bodega central (`store_id IS NULL`), que no cuelga de ninguna tienda pero
+   * sí alimenta el CPP de todas las de su organización.
    *
-   * Returns the scoped on-hand quantity and its weighted-average unit cost.
+   * El aislamiento entre organizaciones sale de AQUÍ, no del cliente que
+   * ejecute la consulta: `il.organization_id` no es opcional en ninguna rama.
+   */
+  private buildLocationMembershipSql(
+    filter: ScopedLocationFilter,
+  ): Prisma.Sql {
+    if (filter.store_id == null) {
+      return Prisma.sql`il.organization_id = ${filter.organization_id}`;
+    }
+    return Prisma.sql`il.organization_id = ${filter.organization_id} AND (il.store_id = ${filter.store_id} OR il.store_id IS NULL)`;
+  }
+
+  /**
+   * QUI-425 — Universo de stock del CPP: promedio ponderado sobre TODAS las
+   * ubicaciones en alcance. Con `tx` y sin `tx` agrega EXACTAMENTE el mismo
+   * conjunto; esa igualdad es el contrato de esta función.
    *
-   * Cuando llega `tx`, la lectura va POR el cliente transaccional: no por
-   * scoping —`$transaction` delega en el `baseClient` y por eso ya viene sin
-   * extensiones, que es justo lo que este agregado necesita— sino porque
-   * `globalPrisma` es otro `PrismaClient` con otro pool y NO ve lo escrito
-   * dentro de la transacción abierta. Con dos líneas del mismo producto en una
-   * recepción, el CPP por ubicación (que sí lee por `tx`) daba 150 y este
-   * agregado 200: `products.cost_price` quedaba en 200 y de ahí salía el precio
-   * publicado.
+   * POR QUÉ ES UNA CONSULTA CRUDA Y NO `client.stock_levels.findMany`
+   * ----------------------------------------------------------------
+   * `StorePrismaService` SOBRESCRIBE `$transaction` para delegar en el cliente
+   * CON alcance (`store-prisma.service.ts` → `override $transaction(...)
+   * { return this.scoped_client.$transaction(...) }`), y su tabla de alcances
+   * relacionales incluye `stock_levels: { inventory_locations: { store_id } }`.
+   * Encima, `mergeScopedWhere` NO reemplaza ante colisión de clave: empuja el
+   * filtro de seguridad a un `AND`. Con el patrón anterior
+   * (`const client = tx ?? globalPrisma` + `findMany`) los dos caminos leían
+   * universos distintos:
+   *
+   *   · vista previa (SIN `tx`) → cliente sin alcance → valía SOLO el filtro
+   *     explícito, que incluye A PROPÓSITO la bodega central de la
+   *     organización (`inventory_locations.store_id IS NULL`);
+   *   · recepción (CON `tx`)   → cliente con alcance → se le ANDeaba
+   *     `store_id = <tienda del contexto>` y esa bodega quedaba FUERA.
+   *
+   * Medido sobre datos de desarrollo (producto 268, organización 6, tienda 10,
+   * comprando 10 unidades a 2.000.000): la vista previa agregaba 119 unidades y
+   * cotizaba 1.649.457,36; la recepción agregaba 25 y sellaba 1.728.571,43. Un
+   * 4,8 % entre la cifra que el operador aprueba y la que el sistema persiste.
+   *
+   * `$queryRaw` NO atraviesa las extensiones de Prisma: la extensión de alcance
+   * se registra por modelo y por operación (`findMany`, `update`, …), nunca
+   * sobre las operaciones crudas. Por eso la consulta cruda es inmune al
+   * alcance del cliente que la ejecute, y la pertenencia se escribe explícita
+   * en el `WHERE` vía `buildLocationMembershipSql`.
+   *
+   * QUÉ CLIENTE LA EJECUTA, Y POR QUÉ
+   * ---------------------------------
+   * · CON `tx` → el propio handle transaccional. No por el alcance (ya no
+   *   importa: la consulta es cruda) sino por VISIBILIDAD: `globalPrisma` es
+   *   otro `PrismaClient` con otro pool y NO ve lo escrito dentro de la
+   *   transacción abierta. Con dos líneas del mismo producto en una recepción,
+   *   el CPP por ubicación (que sí lee por `tx`) daba 150 y este agregado 200:
+   *   `products.cost_price` quedaba en 200 y de ahí salía el precio publicado.
+   * · SIN `tx` → `globalPrisma.withoutScope()`, el `PrismaClient` desnudo.
+   *   `BasePrismaService` sólo expone `$queryRawUnsafe`, no `$queryRaw`, así
+   *   que hay que bajar al cliente base para usar plantillas parametrizadas.
+   *
+   * Devuelve la cantidad en alcance y su costo unitario promedio ponderado.
    */
   async getScopedStockAggregate(
     params: { product_id: number; variant_id?: number; location_id: number },
@@ -91,21 +157,31 @@ export class CostingService {
       params.location_id,
       tx,
     );
-    const client = tx ?? this.globalPrisma;
-    const rows = await client.stock_levels.findMany({
-      where: {
-        product_id: params.product_id,
-        product_variant_id: params.variant_id || null,
-        quantity_on_hand: { gt: 0 },
-        inventory_locations: { is: locationFilter },
-      },
-      include: {
-        products: { select: { cost_price: true } },
-        product_variants: { select: { cost_price: true } },
-      },
-    });
+    const membership = this.buildLocationMembershipSql(locationFilter);
+    const variantPredicate = params.variant_id
+      ? Prisma.sql`sl.product_variant_id = ${params.variant_id}`
+      : Prisma.sql`sl.product_variant_id IS NULL`;
+
+    // `tx` es `any` (el handle transaccional viaja sin tipar por todo el
+    // dominio), así que el argumento de tipo se aplica al resultado, no a la
+    // llamada: TS prohíbe pasar type arguments a una invocación `any`.
+    const client = tx ?? this.globalPrisma.withoutScope();
+    const rows: ScopedStockRow[] = await client.$queryRaw(Prisma.sql`
+      SELECT sl.quantity_on_hand AS quantity_on_hand,
+             sl.cost_per_unit    AS cost_per_unit,
+             pv.cost_price       AS variant_cost_price,
+             p.cost_price        AS product_cost_price
+        FROM stock_levels sl
+        JOIN inventory_locations il ON il.id = sl.location_id
+        LEFT JOIN products p ON p.id = sl.product_id
+        LEFT JOIN product_variants pv ON pv.id = sl.product_variant_id
+       WHERE sl.product_id = ${params.product_id}
+         AND (${variantPredicate})
+         AND sl.quantity_on_hand > 0
+         AND (${membership})
+    `);
     const quantity = (rows as any[]).reduce(
-      (sum: number, sl: any) => sum + (sl.quantity_on_hand ?? 0),
+      (sum: number, sl: any) => sum + Number(sl.quantity_on_hand ?? 0),
       0,
     );
     const value = (rows as any[]).reduce((sum: number, sl: any) => {
@@ -119,26 +195,33 @@ export class CostingService {
       // eslabón.
       const effectiveCost =
         Number(sl.cost_per_unit) ||
-        Number(sl.product_variants?.cost_price) ||
-        Number(sl.products?.cost_price) ||
+        Number(sl.variant_cost_price) ||
+        Number(sl.product_cost_price) ||
         0;
-      return sum + (sl.quantity_on_hand ?? 0) * effectiveCost;
+      return sum + Number(sl.quantity_on_hand ?? 0) * effectiveCost;
     }, 0);
     return { quantity, cost_per_unit: quantity > 0 ? value / quantity : 0 };
   }
 
   /**
-   * Build a scoped `inventory_locations` filter for cost aggregates based on
-   * the organization's operating scope:
+   * Resuelve el universo de ubicaciones del agregado de costo según el alcance
+   * operativo de la organización:
    *
-   * - STORE → constrains to the same `store_id` as the receiving location
-   *   (org-level central warehouses without a `store_id` fall back to org-level).
-   * - ORGANIZATION → constrains to the entire organization.
+   * - STORE, ubicación receptora atada a una tienda → esa tienda MÁS la bodega
+   *   central de la organización (`store_id IS NULL`). La bodega central entra
+   *   A PROPÓSITO: es inventario de la organización que surte a sus tiendas, y
+   *   dejarla fuera hacía que el CPP de la tienda ignorara el costo del grueso
+   *   de las existencias.
+   * - STORE, ubicación receptora SIN tienda (la propia bodega central) → toda
+   *   la organización. No hay tienda desde la cual estrechar.
+   * - ORGANIZATION → toda la organización.
    *
-   * Validates that the location belongs to the given organization. Used by
-   * `calculateCostOnReceipt` and by `getCostPreview` (purchase orders) so the
-   * weighted-average cost never aggregates stock across organizations or, in
-   * STORE scope, across sibling stores.
+   * Valida que la ubicación pertenezca a la organización dada: cruzar
+   * organizaciones lanza `INV_LOCATION_NOT_IN_ORG` antes de tocar stock.
+   *
+   * Lo consume `getScopedStockAggregate` (recepción y vista previa por igual)
+   * a través de `buildLocationMembershipSql`. El resultado NO es un `where` de
+   * Prisma — ver {@link ScopedLocationFilter}.
    */
   async buildScopedLocationFilter(
     organizationId: number,
@@ -168,7 +251,11 @@ export class CostingService {
 
     if (scope === 'STORE') {
       if (location.store_id == null) {
-        this.logger.warn(
+        // `debug`, no `warn`: recibir en la bodega central de la organización
+        // es el comportamiento DISEÑADO, no una anomalía. Se emitía una vez por
+        // ítem en cada vista previa de costo, así que como `warn` era ~el 90 %
+        // del volumen del log y tapaba los avisos que sí exigen mirar.
+        this.logger.debug(
           `Location ${locationId} has scope STORE but store_id is null; ` +
             `falling back to ORGANIZATION-level cost aggregate.`,
         );
@@ -220,11 +307,12 @@ export class CostingService {
       Number(stockLevel?.products?.cost_price) ||
       0;
 
-    // Scoped stock aggregate (multi-tenant safe): aggregate across the same
-    // store (STORE scope) or organization (ORGANIZATION scope) — never cross
-    // organizations or, in STORE scope, sibling stores. Reads via the UNSCOPED
-    // base client so org-level central warehouses (store_id = null) and sibling
-    // stores are included for ORGANIZATION scope — see getScopedStockAggregate.
+    // Agregado de stock en alcance (multi-tenant seguro): misma tienda más la
+    // bodega central bajo alcance STORE, o toda la organización bajo alcance
+    // ORGANIZATION — nunca a través de organizaciones. Lee por consulta cruda
+    // para que el conjunto agregado sea IDÉNTICO aquí (dentro de `tx`, con
+    // cliente scopeado) y en la vista previa (sin `tx`, cliente sin alcance):
+    // ver getScopedStockAggregate.
     const { quantity: scopedQty, cost_per_unit: scopedCost } =
       await this.getScopedStockAggregate(
         {

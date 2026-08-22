@@ -23,11 +23,25 @@ import { OperatingScopeService } from '@common/services/operating-scope.service'
  *   5. Scope ORGANIZATION → filter only { organization_id }.
  *   6. Cross-org location → throw.
  */
+/**
+ * `Prisma.Sql.text` conserva los saltos de línea y la sangría de la plantilla.
+ * Las aserciones comparan la CONSULTA, no su formato.
+ */
+const normalize = (sql: string): string => sql.replace(/\s+/g, ' ').trim();
+
 describe('CostingService', () => {
   let service: CostingService;
   let prismaService: jest.Mocked<StorePrismaService>;
   let globalPrismaService: jest.Mocked<GlobalPrismaService>;
   let operatingScopeService: jest.Mocked<OperatingScopeService>;
+  /**
+   * El agregado de costo lee por CONSULTA CRUDA (`$queryRaw`), no por
+   * `stock_levels.findMany`. Es deliberado: `$queryRaw` no atraviesa las
+   * extensiones de Prisma, así que el conjunto agregado no depende de si el
+   * cliente que ejecuta trae alcance de tienda o no. El mock apunta al
+   * `PrismaClient` desnudo que devuelve `globalPrisma.withoutScope()`.
+   */
+  let rawQuery: jest.Mock;
 
   const mockContext = {
     organization_id: 1,
@@ -59,13 +73,12 @@ describe('CostingService', () => {
       },
     };
 
-    // QUI-425: the scoped cost aggregate is read through the UNSCOPED base
-    // client (GlobalPrismaService), so it must be mocked separately from the
-    // store-scoped client used for the single-location read and writes.
+    // QUI-425: el agregado en alcance se lee por el cliente SIN alcance
+    // (`GlobalPrismaService.withoutScope()`), separado del cliente de tienda
+    // que hace la lectura por ubicación y las escrituras.
+    rawQuery = jest.fn().mockResolvedValue([]);
     const mockGlobalPrismaService = {
-      stock_levels: {
-        findMany: jest.fn(),
-      },
+      withoutScope: jest.fn().mockReturnValue({ $queryRaw: rawQuery }),
     };
 
     const mockOperatingScopeService = {
@@ -100,7 +113,7 @@ describe('CostingService', () => {
     });
     (prismaService as any).stock_levels.findMany.mockResolvedValue([]);
     // Scoped aggregate default: no in-scope stock anywhere.
-    (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([]);
+    rawQuery.mockResolvedValue([]);
     (prismaService as any).inventory_cost_layers.create.mockResolvedValue({});
     (prismaService as any).products.update.mockResolvedValue({});
     (prismaService as any).product_variants.update.mockResolvedValue({});
@@ -116,7 +129,7 @@ describe('CostingService', () => {
       // No existing stock_level — first ever receipt.
       (prismaService as any).stock_levels.findFirst.mockResolvedValue(null);
       // No locations with stock_on_hand > 0 anywhere yet (scoped aggregate).
-      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([]);
+      rawQuery.mockResolvedValue([]);
 
       const result = await service.calculateCostOnReceipt({
         product_id: 1,
@@ -172,9 +185,7 @@ describe('CostingService', () => {
         existingStockLevel,
       );
       // Scoped aggregate (UNSCOPED base client) finds the same single stock level.
-      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([
-        existingStockLevel,
-      ]);
+      rawQuery.mockResolvedValue([existingStockLevel]);
 
       const result = await service.calculateCostOnReceipt({
         product_id: 1,
@@ -232,9 +243,7 @@ describe('CostingService', () => {
       (prismaService as any).stock_levels.findFirst.mockResolvedValue(
         existingStockLevel,
       );
-      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([
-        existingStockLevel,
-      ]);
+      rawQuery.mockResolvedValue([existingStockLevel]);
 
       const result = await service.calculateCostOnReceipt({
         product_id: 1,
@@ -259,14 +268,14 @@ describe('CostingService', () => {
   });
 
   describe('scoped aggregation by operating_scope', () => {
-    it('case 4: STORE scope filters by { organization_id, store_id }', async () => {
+    it('case 4: STORE scope → org + esa tienda + la bodega central (store_id IS NULL)', async () => {
       operatingScopeService.getOperatingScope.mockResolvedValue('STORE');
       (prismaService as any).inventory_locations.findUnique.mockResolvedValue({
         organization_id: 1,
         store_id: 42,
       });
       (prismaService as any).stock_levels.findFirst.mockResolvedValue(null);
-      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([]);
+      rawQuery.mockResolvedValue([]);
 
       await service.calculateCostOnReceipt({
         product_id: 1,
@@ -276,17 +285,13 @@ describe('CostingService', () => {
         costing_method: 'weighted_average',
       });
 
-      // Aggregate runs on the UNSCOPED client with the scope filter as the
-      // ONLY predicate (STORE → org + store).
-      expect(globalPrismaService.stock_levels.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            inventory_locations: {
-              is: { organization_id: 1, store_id: 42 },
-            },
-          }),
-        }),
+      // La pertenencia va ESCRITA en el WHERE, no heredada del cliente.
+      const sent = rawQuery.mock.calls[0][0];
+      expect(normalize(sent.text)).toContain(
+        'il.organization_id = $2 AND (il.store_id = $3 OR il.store_id IS NULL)',
       );
+      // [product_id, organization_id, store_id] — sin variante en esta llamada.
+      expect(sent.values).toEqual([1, 1, 42]);
     });
 
     it('case 5: ORGANIZATION scope filters by { organization_id } only', async () => {
@@ -296,7 +301,7 @@ describe('CostingService', () => {
         store_id: 42,
       });
       (prismaService as any).stock_levels.findFirst.mockResolvedValue(null);
-      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([]);
+      rawQuery.mockResolvedValue([]);
 
       await service.calculateCostOnReceipt({
         product_id: 1,
@@ -306,17 +311,12 @@ describe('CostingService', () => {
         costing_method: 'weighted_average',
       });
 
-      // ORGANIZATION scope → filter is { organization_id } only, so org-level
-      // central warehouses (store_id = null) and sibling stores are included.
-      expect(globalPrismaService.stock_levels.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            inventory_locations: {
-              is: { organization_id: 1 },
-            },
-          }),
-        }),
-      );
+      // ORGANIZATION scope → sólo { organization_id }: entran la bodega central
+      // (store_id = null) y las tiendas hermanas.
+      const sent = rawQuery.mock.calls[0][0];
+      expect(normalize(sent.text)).toContain('il.organization_id = $2');
+      expect(normalize(sent.text)).not.toContain('il.store_id =');
+      expect(sent.values).toEqual([1, 1]);
     });
 
     it('case 5b (QUI-425): ORGANIZATION scope blends the org-level central warehouse into cost_price/margin basis', async () => {
@@ -332,7 +332,7 @@ describe('CostingService', () => {
       // Receiving location itself is empty pre-receipt.
       (prismaService as any).stock_levels.findFirst.mockResolvedValue(null);
       // Scoped aggregate (unscoped read) sees the org-level central warehouse.
-      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([
+      rawQuery.mockResolvedValue([
         {
           location_id: 49, // Bodega Central, store_id = null
           quantity_on_hand: 10,
@@ -586,12 +586,12 @@ describe('CostingService', () => {
   describe('cost_per_unit collapse fallback (F1)', () => {
     it('case a: stock row with cost_per_unit=NULL falls back to products.cost_price (3.5M, not 0)', async () => {
       // Aggregate reads through the UNSCOPED base client (globalPrisma).
-      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([
+      rawQuery.mockResolvedValue([
         {
           quantity_on_hand: 10,
           cost_per_unit: null, // born NULL (non-receipt write path)
-          products: { cost_price: 3_500_000 },
-          product_variants: null,
+          product_cost_price: 3_500_000,
+          variant_cost_price: null,
         },
       ]);
 
@@ -618,13 +618,15 @@ describe('CostingService', () => {
         location_id: 100,
         quantity_on_hand: 24,
         cost_per_unit: null,
+        // Forma Prisma (la lee `stock_levels.findFirst`, por ubicación)…
         products: { cost_price: 3_500_000 },
         product_variants: null,
+        // …y forma cruda (la lee el agregado en alcance, por `$queryRaw`).
+        product_cost_price: 3_500_000,
+        variant_cost_price: null,
       };
       (prismaService as any).stock_levels.findFirst.mockResolvedValue(existing);
-      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([
-        existing,
-      ]);
+      rawQuery.mockResolvedValue([existing]);
 
       const result = await service.calculateCostOnReceipt({
         product_id: 1,
@@ -646,12 +648,12 @@ describe('CostingService', () => {
     });
 
     it('case c: legitimate zero cost (cost_per_unit=0 AND cost_price=0) stays 0 (no false fallback)', async () => {
-      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([
+      rawQuery.mockResolvedValue([
         {
           quantity_on_hand: 10,
           cost_per_unit: 0,
-          products: { cost_price: 0 },
-          product_variants: null,
+          product_cost_price: 0,
+          variant_cost_price: null,
         },
       ]);
 
@@ -665,4 +667,182 @@ describe('CostingService', () => {
       expect(agg.cost_per_unit).toBe(0);
     });
   });
+
+  /**
+   * A.0 — Un único universo de stock.
+   *
+   * El defecto que este bloque clava: `getScopedStockAggregate` elegía cliente
+   * con `tx ?? globalPrisma`, y como `StorePrismaService` SOBRESCRIBE
+   * `$transaction` hacia el cliente CON alcance, el camino de recepción recibía
+   * un `AND inventory_locations.store_id = <tienda>` encima del filtro
+   * explícito — y ese filtro incluye A PROPÓSITO la bodega central de la
+   * organización (`store_id IS NULL`). Medido en dev (producto 268,
+   * organización 6, tienda 10, 10 u. a 2.000.000): vista previa 119 unidades y
+   * 1.649.457,36; recepción 25 unidades y 1.728.571,43. 4,8 % de divergencia
+   * entre lo que el operador aprueba y lo que el sistema sella.
+   *
+   * El contrato que queda escrito aquí: MISMO conjunto agregado con `tx` y sin
+   * `tx`, y el aislamiento entre organizaciones sale del `WHERE`, no del
+   * cliente que ejecute.
+   */
+  describe('A.0 — universo de stock idéntico con tx y sin tx', () => {
+    // 94 unidades en la bodega central (store_id = null) + 25 en la tienda.
+    // Bajo el defecto, la recepción veía sólo las 25.
+    const universe = [
+      {
+        quantity_on_hand: 94,
+        cost_per_unit: 1_620_000,
+        product_cost_price: 1_620_000,
+        variant_cost_price: null,
+      },
+      {
+        quantity_on_hand: 25,
+        cost_per_unit: 1_620_000,
+        product_cost_price: 1_620_000,
+        variant_cost_price: null,
+      },
+    ];
+
+    const makeTx = (rows: any[], location = { organization_id: 1, store_id: 42 }) => ({
+      $queryRaw: jest.fn().mockResolvedValue(rows),
+      inventory_locations: {
+        findUnique: jest.fn().mockResolvedValue(location),
+      },
+    });
+
+    beforeEach(() => {
+      operatingScopeService.getOperatingScope.mockResolvedValue('STORE');
+      (prismaService as any).inventory_locations.findUnique.mockResolvedValue({
+        organization_id: 1,
+        store_id: 42,
+      });
+    });
+
+    it('los dos caminos emiten la MISMA consulta y agregan el MISMO conjunto', async () => {
+      rawQuery.mockResolvedValue(universe);
+      const tx = makeTx(universe);
+
+      const preview = await service.getScopedStockAggregate({
+        product_id: 268,
+        location_id: 100,
+      });
+      const reception = await service.getScopedStockAggregate(
+        { product_id: 268, location_id: 100 },
+        tx,
+      );
+
+      // Igualdad exacta del agregado — el contrato.
+      expect(reception).toEqual(preview);
+      // 94 (bodega central) + 25 (tienda). El defecto daba 25 en recepción.
+      expect(reception.quantity).toBe(119);
+      expect(reception.cost_per_unit).toBe(1_620_000);
+
+      // Misma consulta, mismos parámetros: un solo resolvedor.
+      const sentPreview = rawQuery.mock.calls[0][0];
+      const sentReception = tx.$queryRaw.mock.calls[0][0];
+      expect(normalize(sentReception.text)).toBe(normalize(sentPreview.text));
+      expect(sentReception.values).toEqual(sentPreview.values);
+      // Y la bodega central sigue dentro del universo en AMBOS.
+      expect(normalize(sentReception.text)).toContain('il.store_id IS NULL');
+    });
+
+    it('con `tx` la lectura va por el handle transaccional (ve lo escrito en la transacción)', async () => {
+      const tx = makeTx(universe);
+
+      await service.getScopedStockAggregate(
+        { product_id: 268, location_id: 100 },
+        tx,
+      );
+
+      // `globalPrisma` es OTRO PrismaClient con OTRO pool: dentro de la
+      // transacción no vería la línea anterior de la misma recepción.
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(rawQuery).not.toHaveBeenCalled();
+      expect(globalPrismaService.withoutScope).not.toHaveBeenCalled();
+    });
+
+    it('sin `tx` la lectura va por el cliente SIN alcance', async () => {
+      rawQuery.mockResolvedValue(universe);
+
+      await service.getScopedStockAggregate({
+        product_id: 268,
+        location_id: 100,
+      });
+
+      expect(globalPrismaService.withoutScope).toHaveBeenCalled();
+      expect(rawQuery).toHaveBeenCalledTimes(1);
+    });
+
+    it('el WHERE fija la organización del contexto en los dos caminos', async () => {
+      operatingScopeService.getOperatingScope.mockResolvedValue('ORGANIZATION');
+      rawQuery.mockResolvedValue([]);
+      const tx = makeTx([]);
+
+      await service.getScopedStockAggregate({
+        product_id: 268,
+        location_id: 100,
+      });
+      await service.getScopedStockAggregate(
+        { product_id: 268, location_id: 100 },
+        tx,
+      );
+
+      for (const sent of [rawQuery.mock.calls[0][0], tx.$queryRaw.mock.calls[0][0]]) {
+        const text = normalize(sent.text);
+        // El JOIN es lo que ancla cada fila de stock a una organización…
+        expect(text).toContain(
+          'JOIN inventory_locations il ON il.id = sl.location_id',
+        );
+        // …y el predicado la fija. Nunca es opcional, en ninguna rama.
+        expect(text).toContain('il.organization_id = $2');
+        // [product_id, organization_id] — la organización es la del contexto.
+        expect(sent.values).toEqual([268, 1]);
+      }
+    });
+
+    it('una ubicación de OTRA organización es inalcanzable por los dos caminos', async () => {
+      const foreign = { organization_id: 99, store_id: 7 };
+      (prismaService as any).inventory_locations.findUnique.mockResolvedValue(
+        foreign,
+      );
+      const tx = makeTx(universe, foreign);
+
+      await expect(
+        service.getScopedStockAggregate({ product_id: 268, location_id: 100 }),
+      ).rejects.toThrow('Location 100 does not belong to organization 1');
+
+      await expect(
+        service.getScopedStockAggregate(
+          { product_id: 268, location_id: 100 },
+          tx,
+        ),
+      ).rejects.toThrow('Location 100 does not belong to organization 1');
+
+      // Ninguno de los dos llegó siquiera a consultar stock.
+      expect(rawQuery).not.toHaveBeenCalled();
+      expect(tx.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('la variante viaja parametrizada y estrecha el universo igual en ambos caminos', async () => {
+      rawQuery.mockResolvedValue([]);
+      const tx = makeTx([]);
+
+      await service.getScopedStockAggregate({
+        product_id: 268,
+        variant_id: 413,
+        location_id: 100,
+      });
+      await service.getScopedStockAggregate(
+        { product_id: 268, variant_id: 413, location_id: 100 },
+        tx,
+      );
+
+      for (const sent of [rawQuery.mock.calls[0][0], tx.$queryRaw.mock.calls[0][0]]) {
+        expect(normalize(sent.text)).toContain('sl.product_variant_id = $2');
+        // [product_id, variant_id, organization_id, store_id]
+        expect(sent.values).toEqual([268, 413, 1, 42]);
+      }
+    });
+  });
+
 });
