@@ -1194,8 +1194,16 @@ export class SettingsService {
           where: { organization_id },
           select: { settings: true },
         });
-      return ((orgSettings?.settings as any)?.fiscal_data ??
-        {}) as StoreSettings['fiscal_data'];
+      const orgFiscalData = ((orgSettings?.settings as any)?.fiscal_data ??
+        {}) as Record<string, unknown>;
+      // CP-PURCHASE-TRANSPARENCY B.2 — bajo alcance fiscal ORGANIZATION la
+      // tienda NO tiene identidad propia: todo el bloque es de la organización,
+      // así que el origen es 'organization' sin ambigüedad.
+      return {
+        ...orgFiscalData,
+        tax_responsibilities_source: 'organization',
+        tax_regime_source: 'organization',
+      } as StoreSettings['fiscal_data'];
     }
 
     await this.ensureDefaults(store_id);
@@ -1238,6 +1246,60 @@ export class SettingsService {
     // are distinct legal entities simply edits the default before saving.
     const blank = (value: unknown): boolean =>
       value === null || value === undefined || String(value).trim() === '';
+
+    // ── CP-PURCHASE-TRANSPARENCY B.2 ─────────────────────────────────────────
+    // Herencia de `tax_responsibilities` y `tax_regime` desde la organización.
+    //
+    // Decisión de negocio: una tienda que no declaró responsabilidades propias
+    // es la misma entidad ante la DIAN que su organización. La herencia que ya
+    // existía cubría la IDENTIDAD (NIT, razón social) pero no estos dos campos,
+    // así que una tienda dentro de una organización que declaró O-48 resolvía
+    // «no responsable» y capitalizaba el IVA al costo sin que nadie lo hubiera
+    // decidido. En el entorno de referencia, 12 de 15 organizaciones no tienen
+    // datos fiscales y caen justo en esa rama.
+    //
+    // La herencia es POR CAMPO y sólo hacia el vacío: un valor propio de la
+    // tienda NUNCA se pisa. Aplicarla al revés convertiría a una tienda que
+    // declaró O-49 en O-48 y le haría descontar un IVA que no puede descontar.
+    //
+    // Se aplica sobre `storeLevel` (antes de las dos ramas de retorno) para que
+    // la tienda con identidad propia y la que la hereda cuenten la misma
+    // historia sobre su responsabilidad fiscal.
+    const ownResponsibilities = Array.isArray(storeLevel.tax_responsibilities)
+      ? (storeLevel.tax_responsibilities as unknown[])
+      : [];
+    const needsResponsibilities = ownResponsibilities.length === 0;
+    const needsRegime = blank(storeLevel.tax_regime);
+
+    storeLevel.tax_responsibilities_source = 'store';
+    storeLevel.tax_regime_source = 'store';
+
+    if (needsResponsibilities || needsRegime) {
+      const inheritedSettings = await this.organizationPrisma
+        .withoutScope()
+        .organization_settings.findFirst({
+          where: { organization_id },
+          select: { settings: true },
+        });
+      const orgFiscal = ((inheritedSettings?.settings as any)?.fiscal_data ??
+        {}) as Record<string, unknown>;
+
+      const orgResponsibilities = Array.isArray(orgFiscal.tax_responsibilities)
+        ? (orgFiscal.tax_responsibilities as unknown[]).filter(
+            (code): code is string => typeof code === 'string',
+          )
+        : [];
+      if (needsResponsibilities && orgResponsibilities.length > 0) {
+        storeLevel.tax_responsibilities = orgResponsibilities;
+        storeLevel.tax_responsibilities_source = 'organization';
+      }
+
+      if (needsRegime && !blank(orgFiscal.tax_regime)) {
+        storeLevel.tax_regime = orgFiscal.tax_regime;
+        storeLevel.tax_regime_source = 'organization';
+      }
+    }
+
     const hasOwnIdentity =
       !blank(storeLevel.tax_id) ||
       !blank(storeLevel.nit) ||
@@ -1357,9 +1419,18 @@ export class SettingsService {
     // Fusión superficial centralizada en `mergeFiscalData` (ver §"Approach
     // Chosen" del plan de identidad fiscal SSOT). Antes este spread se hacía
     // inline — mismo resultado, pero el nombre no declaraba la intención.
+    // B.2 — `getFiscalData` devuelve dos marcadores DERIVADOS del origen del
+    // dato (`*_source`). Un formulario que lea y devuelva el objeto entero los
+    // reenviaría, y `mergeFiscalData` los persistiría: la tienda acabaría con
+    // un campo que dice de dónde vino un valor que ahora es suyo, y la próxima
+    // lectura lo contradiría. Se descartan aquí, en el único punto de escritura.
+    const writableDto = { ...dto };
+    delete writableDto.tax_responsibilities_source;
+    delete writableDto.tax_regime_source;
+
     const nextFiscalData = mergeFiscalData(
       previousFiscalData as Record<string, unknown>,
-      dto,
+      writableDto,
     );
 
     // Proyección única de columnas del alcance tienda vía
@@ -1368,7 +1439,7 @@ export class SettingsService {
     // podía producir columnas distintas si el orden o el saneado cambiaban.
     const storeColumns = buildTenantFiscalColumns(
       'store',
-      dto,
+      writableDto,
       nextFiscalData,
     );
 
