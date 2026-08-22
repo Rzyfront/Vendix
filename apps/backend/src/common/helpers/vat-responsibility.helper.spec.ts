@@ -5,6 +5,8 @@ import {
   isVatResponsible,
   isExplicitlyNotVatResponsible,
   assertCanChargeVat,
+  resolveVatResponsibility,
+  vatResponsibilityReadFailure,
   VatResponsibilityService,
   VAT_RESPONSIBLE_CODE,
   VAT_NOT_RESPONSIBLE_CODE,
@@ -300,5 +302,169 @@ describe('VatResponsibilityService (DI)', () => {
     for (const { fiscalData, expected } of cases) {
       expect(service.resolve(fiscalData)).toBe(expected);
     }
+  });
+});
+
+/**
+ * CP-PURCHASE-TRANSPARENCY B.0 — el resultado de TRES estados.
+ *
+ * `boolean` no distingue «declaró que NO es responsable» de «no sabemos si lo
+ * es», y el flujo de compras necesita esa diferencia para explicarle al
+ * usuario por qué el IVA se capitaliza. Estos specs fijan:
+ *  - que `indeterminate` sólo es `true` cuando NO hubo señal fiscal;
+ *  - que un fallo de LECTURA (`read_error`) es indeterminado pero distinto de
+ *    la ausencia de datos (`absent`), porque una se reintenta y la otra se
+ *    resuelve en el wizard fiscal;
+ *  - que `isVatResponsible` es exactamente la proyección de `responsible`, de
+ *    modo que las dos respuestas no puedan divergir.
+ */
+describe('resolveVatResponsibility (tres estados)', () => {
+  it('O-48 declarado ⇒ responsable, concluyente, fuente tax_responsibilities', () => {
+    const result = resolveVatResponsibility({
+      tax_responsibilities: [VAT_RESPONSIBLE_CODE],
+    });
+    expect(result.responsible).toBe(true);
+    expect(result.indeterminate).toBe(false);
+    expect(result.reason).toBe('declared_responsible');
+    expect(result.source).toBe('tax_responsibilities');
+  });
+
+  it('O-49 sin O-48 ⇒ NO responsable pero CONCLUYENTE (no es indeterminado)', () => {
+    const result = resolveVatResponsibility({
+      tax_responsibilities: [VAT_NOT_RESPONSIBLE_CODE],
+    });
+    expect(result.responsible).toBe(false);
+    expect(result.indeterminate).toBe(false);
+    expect(result.reason).toBe('declared_not_responsible');
+  });
+
+  it('fallback por régimen COMUN ⇒ responsable, fuente tax_regime', () => {
+    const result = resolveVatResponsibility({
+      tax_responsibilities: [],
+      tax_regime: 'COMUN',
+    });
+    expect(result.responsible).toBe(true);
+    expect(result.indeterminate).toBe(false);
+    expect(result.source).toBe('tax_regime');
+    expect(result.reason).toBe('regime_responsible');
+  });
+
+  it('fallback por régimen SIMPLIFICADO ⇒ NO responsable y concluyente', () => {
+    const result = resolveVatResponsibility({
+      tax_responsibilities: [],
+      tax_regime: 'SIMPLIFICADO',
+    });
+    expect(result.responsible).toBe(false);
+    expect(result.indeterminate).toBe(false);
+    expect(result.reason).toBe('regime_not_responsible');
+  });
+
+  it.each([
+    ['objeto vacío', {}],
+    ['null', null],
+    ['undefined', undefined],
+    ['régimen desconocido', { tax_responsibilities: [], tax_regime: 'OTRO' }],
+  ])('sin señal fiscal (%s) ⇒ indeterminado y fail-closed', (_label, input) => {
+    const result = resolveVatResponsibility(input as any);
+    expect(result.responsible).toBe(false);
+    expect(result.indeterminate).toBe(true);
+    expect(result.reason).toBe('no_fiscal_signal');
+    expect(result.source).toBe('absent');
+  });
+
+  it('siempre trae un message no vacío para explicarle la decisión al usuario', () => {
+    const inputs = [
+      { tax_responsibilities: [VAT_RESPONSIBLE_CODE] },
+      { tax_responsibilities: [VAT_NOT_RESPONSIBLE_CODE] },
+      { tax_responsibilities: [], tax_regime: 'COMUN' },
+      { tax_responsibilities: [], tax_regime: 'SIMPLIFICADO' },
+      {},
+    ];
+    for (const input of inputs) {
+      expect(resolveVatResponsibility(input).message.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('isVatResponsible es exactamente la proyección de `responsible`', () => {
+    // Blinda contra «mismo predicado, dos implementaciones»: si alguien
+    // reescribe una de las dos funciones, esta tabla lo delata.
+    const inputs = [
+      { tax_responsibilities: [VAT_RESPONSIBLE_CODE] },
+      { tax_responsibilities: [VAT_NOT_RESPONSIBLE_CODE] },
+      { tax_responsibilities: [VAT_RESPONSIBLE_CODE, VAT_NOT_RESPONSIBLE_CODE] },
+      { tax_responsibilities: [], tax_regime: 'COMUN' },
+      { tax_responsibilities: [], tax_regime: 'GRAN_CONTRIBUYENTE' },
+      { tax_responsibilities: [], tax_regime: 'SIMPLIFICADO' },
+      { tax_responsibilities: [], tax_regime: 'OTRO' },
+      {},
+      null,
+      undefined,
+    ];
+    for (const input of inputs) {
+      expect(isVatResponsible(input as any)).toBe(
+        resolveVatResponsibility(input as any).responsible,
+      );
+    }
+  });
+});
+
+describe('vatResponsibilityReadFailure', () => {
+  it('es indeterminado y fail-closed: nunca declara responsabilidad', () => {
+    const result = vatResponsibilityReadFailure();
+    expect(result.responsible).toBe(false);
+    expect(result.indeterminate).toBe(true);
+  });
+
+  it('se distingue de la ausencia de datos por su `source`', () => {
+    // La distinción no es cosmética: `absent` manda al wizard fiscal,
+    // `read_error` invita a reintentar.
+    expect(vatResponsibilityReadFailure().source).toBe('read_error');
+    expect(resolveVatResponsibility({}).source).toBe('absent');
+    expect(vatResponsibilityReadFailure().reason).toBe('fiscal_read_failed');
+  });
+});
+
+describe('VatResponsibilityService — variante de tres estados', () => {
+  let service: VatResponsibilityService;
+
+  beforeEach(async () => {
+    const mod: TestingModule = await Test.createTestingModule({
+      providers: [VatResponsibilityService],
+    }).compile();
+    service = mod.get(VatResponsibilityService);
+  });
+
+  it('resolveDetailed delega 1:1 en el helper puro', () => {
+    const inputs = [
+      { tax_responsibilities: [VAT_RESPONSIBLE_CODE] },
+      { tax_responsibilities: [VAT_NOT_RESPONSIBLE_CODE] },
+      { tax_responsibilities: [], tax_regime: 'SIMPLIFICADO' },
+      {},
+      null,
+      undefined,
+    ];
+    for (const input of inputs) {
+      expect(service.resolveDetailed(input as any)).toEqual(
+        resolveVatResponsibility(input as any),
+      );
+    }
+  });
+
+  it('resolve sigue siendo la proyección booleana de resolveDetailed', () => {
+    const inputs = [
+      { tax_responsibilities: [VAT_RESPONSIBLE_CODE] },
+      { tax_responsibilities: [], tax_regime: 'COMUN' },
+      {},
+      null,
+    ];
+    for (const input of inputs) {
+      expect(service.resolve(input as any)).toBe(
+        service.resolveDetailed(input as any).responsible,
+      );
+    }
+  });
+
+  it('readFailure expone el resultado canónico de fallo de lectura', () => {
+    expect(service.readFailure()).toEqual(vatResponsibilityReadFailure());
   });
 });

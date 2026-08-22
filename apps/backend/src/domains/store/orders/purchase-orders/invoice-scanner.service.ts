@@ -7,7 +7,10 @@ import { SettingsService } from '../../settings/settings.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
-import { VatResponsibilityService } from '@common/helpers/vat-responsibility.helper';
+import {
+  VatResponsibilityService,
+  VatResponsibilityResult,
+} from '@common/helpers/vat-responsibility.helper';
 import {
   InvoiceScanResult,
   InvoiceMatchResult,
@@ -168,8 +171,8 @@ export class InvoiceScannerService {
     // non-responsible tenant (O-49) capitalizes IVA into cost and must not be
     // handed a deductible tax_category, so we skip loading rates entirely and
     // every `suggested_tax_category_id` stays null.
-    const vatResponsible = await this.resolveVatResponsibility();
-    const taxCategoryRates = vatResponsible
+    const vatResponsibility = await this.resolveVatResponsibility();
+    const taxCategoryRates = vatResponsibility.responsible
       ? await this.loadTaxCategoryRates()
       : [];
 
@@ -1021,24 +1024,51 @@ export class InvoiceScannerService {
 
   /**
    * F3 IVA lifecycle — read-only check of the commerce's VAT responsibility.
-   * Delegada a `VatResponsibilityService.resolve` (helper canónico). Antes
-   * era una réplica local de PurchaseOrdersService.isVatResponsible;
-   * P0.1 centraliza el predicado. Misma fuente
-   * (SettingsService.getFiscalData().tax_responsibilities, RUT casilla 53)
-   * y mismo default anti-regresión (sin datos ⇒ RESPONSIBLE O-48). Never
-   * throws (devuelve `true` si la lectura de fiscal data falla).
+   * Delegada a `VatResponsibilityService.resolveDetailed` (helper canónico).
+   * Antes era una réplica local de PurchaseOrdersService.isVatResponsible;
+   * P0.1 centralizó el predicado. Misma fuente
+   * (SettingsService.getFiscalData().tax_responsibilities, RUT casilla 53).
+   *
+   * Devuelve TRES estados, no dos: `responsible`, `indeterminate`, y el
+   * `reason` / `message` que explican la decisión. El escáner los necesita
+   * porque este predicado gobierna el `suggested_tax_category_id` de TODA la
+   * factura escaneada, y «no eres responsable» y «no sabemos si lo eres» son
+   * dos cosas distintas que contarle al usuario.
+   *
+   * Never throws. Ante un fallo de LECTURA devuelve `readFailure()`:
+   * indeterminado y NO responsable (fail-closed) — el IVA se capitaliza al
+   * costo, que es la lectura conservadora.
+   *
+   * CP-PURCHASE-TRANSPARENCY B.0 — este `catch` devolvía `true`. Fallar
+   * abierto contradecía al helper canónico (que falla cerrado desde
+   * 2026-08-21) y hacía que un fallo transitorio de settings declarara «eres
+   * responsable de IVA» sin saberlo: el escáner sugería un impuesto
+   * descontable y la pantalla siguiente explicaba que el impuesto se
+   * capitaliza — dos afirmaciones fiscales opuestas sobre la misma factura,
+   * con minutos de diferencia.
    */
-  private async resolveVatResponsibility(): Promise<boolean> {
+  private async resolveVatResponsibility(): Promise<VatResponsibilityResult> {
     try {
       const fiscalData = await this.settingsService.getFiscalData();
-      return this.vatService.resolve(
-        fiscalData as Parameters<VatResponsibilityService['resolve']>[0],
+      return this.vatService.resolveDetailed(
+        fiscalData as Parameters<
+          VatResponsibilityService['resolveDetailed']
+        >[0],
       );
     } catch (error: any) {
+      // El contexto del Logger distingue este warn de su homólogo en
+      // PurchaseOrdersService, pero se pierde apenas alguien copia la línea a
+      // un ticket. Por eso la línea nombra tenant y petición por sí sola.
+      const organizationId = RequestContextService.getOrganizationId();
+      const storeId = RequestContextService.getStoreId();
+      const requestId = RequestContextService.getRequestId();
       this.logger.warn(
-        `resolveVatResponsibility: could not resolve fiscal data (${error?.message}); defaulting to VAT responsible (O-48).`,
+        `[InvoiceScan] resolveVatResponsibility: could not resolve fiscal data ` +
+          `for org ${organizationId ?? 'unknown'} / store ${storeId ?? 'unknown'} ` +
+          `(request ${requestId ?? 'unknown'}): ${error?.message}. ` +
+          `Falling back to NOT VAT responsible (fail-closed); the tax is capitalized into cost.`,
       );
-      return true;
+      return this.vatService.readFailure();
     }
   }
 
