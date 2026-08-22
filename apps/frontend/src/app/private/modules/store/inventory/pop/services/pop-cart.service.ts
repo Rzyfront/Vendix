@@ -325,13 +325,47 @@ export class PopCartService {
   }
 
   /**
+   * CP-ORC-POP-MODAL-DISCOUNT-001 — normalize a discount percentage to a safe
+   * integer in 0..100. Rejects `null`/`undefined`/`NaN`/`±Infinity` by
+   * returning 0; otherwise rounds and clamps the value.
+   *
+   * Used both at the cart-write seam (`setItemDiscount`) and at the entry
+   * seam (`processAddToCart`) so a single helper owns the contract — no
+   * divergence between the modal that edits an existing line and the
+   * scanner that adds a new one with a discount already in the payload.
+   */
+  private normalizeDiscount(value: number | null | undefined): number {
+    if (
+      value === null ||
+      value === undefined ||
+      !Number.isFinite(Number(value))
+    ) {
+      return 0;
+    }
+    return Math.min(100, Math.max(0, Math.round(Number(value))));
+  }
+
+  /**
    * QUI-661 — set the per-line commercial discount, as a percentage.
    *
    * Clamped to 0..100 so a typo can never drive a line's cost negative and
-   * poison the FIFO layer it will later create.
+   * poison the FIFO layer it will later create. Non-finite inputs
+   * (`NaN`/`±Infinity`) and `null`/`undefined` are rejected outright so
+   * the line's stored discount is never silently wiped to 0 by an
+   * upstream typo — the state stays exactly as it was.
    */
-  setItemDiscount(itemId: string, discountPercentage: number) {
-    const pct = Math.min(100, Math.max(0, Number(discountPercentage) || 0));
+  setItemDiscount(
+    itemId: string,
+    discountPercentage: number | null | undefined,
+  ) {
+    if (
+      discountPercentage === null ||
+      discountPercentage === undefined ||
+      !Number.isFinite(Number(discountPercentage))
+    ) {
+      return;
+    }
+    const pct = this.normalizeDiscount(discountPercentage);
     const items = this.currentState.items.map((item) =>
       item.id === itemId ? { ...item, discount: pct } : item,
     );
@@ -498,9 +532,10 @@ export class PopCartService {
         product: request.product,
         quantity: request.quantity,
         unit_cost: request.unit_cost,
-        // QUI-661 Fase 4: el escáner de facturas llega con descuento; el alta
-        // manual sigue en 0.
-        discount: request.discount ?? 0,
+        // CP-ORC-POP-MODAL-DISCOUNT-001: el escáner de facturas llega con
+        // descuento; el alta manual sigue en 0. La normalización
+        // (entero 0..100, NaN/Infinity ⇒ 0) vive en `normalizeDiscount`.
+        discount: this.normalizeDiscount(request.discount),
         // IVA cycle (F1/F3): defaults sembrados salvo override del request
         // (escáner de facturas). `prices_include_tax` undefined ⇒ hereda header.
         tax_rate: request.tax_rate ?? DEFAULT_PURCHASE_TAX_RATE,
@@ -564,7 +599,13 @@ export class PopCartService {
         ...existingItem,
         quantity: newQuantity,
         unit_cost: request.unit_cost ?? existingItem.unit_cost,
-        discount: request.discount ?? existingItem.discount,
+        // CP-ORC-POP-MODAL-DISCOUNT-001: el ÚLTIMO escaneo gana, pero pasa
+        // por el normalizador para que un payload con NaN/Infinity no
+        // pise el descuento de la línea con un 0 silencioso.
+        discount:
+          request.discount !== undefined
+            ? this.normalizeDiscount(request.discount)
+            : existingItem.discount,
         tax_rate: request.tax_rate ?? existingItem.tax_rate,
         tax_type: request.tax_type ?? existingItem.tax_type,
         prices_include_tax:
@@ -589,9 +630,10 @@ export class PopCartService {
         variant: request.variant,
         quantity: request.quantity,
         unit_cost: request.unit_cost,
-        // QUI-661 Fase 4: el escáner de facturas llega con descuento; el alta
-        // manual sigue en 0.
-        discount: request.discount ?? 0,
+        // CP-ORC-POP-MODAL-DISCOUNT-001: el escáner de facturas llega con
+        // descuento; el alta manual sigue en 0. La normalización
+        // (entero 0..100, NaN/Infinity ⇒ 0) vive en `normalizeDiscount`.
+        discount: this.normalizeDiscount(request.discount),
         // IVA cycle (F1/F3): defaults salvo override del request (escáner).
         tax_rate: request.tax_rate ?? DEFAULT_PURCHASE_TAX_RATE,
         tax_type: request.tax_type ?? 'iva',
@@ -967,7 +1009,19 @@ export class PopCartService {
         variant,
         quantity: item.quantity_ordered || item.quantity,
         unit_cost: item.unit_cost || item.unit_price,
-        discount: item.discount_percentage || 0,
+        // Toda lectura de `discount_percentage` desde DB pasa por
+        // `normalizeDiscount` para garantizar el contrato entero 0-100
+        // (regression: loadOrder bypass — antes leía `item.discount_percentage
+        // || 0` directo, propagando la fracción al backend que la interpretaba
+        // como 0.X% en vez del 20% que el operador creía haber tipeado).
+        //
+        // Nota de fidelidad: una PO pre-fix con `discount_percentage = 0.20`
+        // se trunca a 0 (el helper redondea, no detecta sesgo histórico).
+        // Esto es aceptable porque la persistencia pre-fix era incorrecta:
+        // 0.20 != 20%, así que NO estamos perdiendo valor real, sólo
+        // bloqueando que el bug se propague. Si el operador quiere mantener
+        // el descuento, lo retipea explícito en el modal y se persiste como 20.
+        discount: this.normalizeDiscount(Number(item.discount_percentage)),
         tax_rate: item.tax_rate || 0,
         // IVA cycle (F1): restore tax classification and per-line override.
         tax_type: (item as any).tax_type ?? 'iva',

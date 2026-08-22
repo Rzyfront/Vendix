@@ -14,7 +14,8 @@ import type {
   FireItemExclusion,
 } from '../restaurant-ops/kds/interfaces';
 import { KitchenConfirmModalComponent } from '../restaurant-ops/kds/components/kitchen-confirm-modal/kitchen-confirm-modal.component';
-import { take, switchMap } from 'rxjs/operators';
+import { take, switchMap, catchError } from 'rxjs/operators';
+import { of as rxjsOf } from 'rxjs';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { firstValueFrom, Observable, Subject } from 'rxjs';
 import {
@@ -57,6 +58,7 @@ import {
 import { AddCustomItemRequest, CartSummary } from './models/cart.model';
 import { PosCustomItemModalComponent } from './components/pos-custom-item-modal/pos-custom-item-modal.component';
 import { resolveSaleQuantity } from './utils/line-units.util';
+import { environment } from '../../../../../environments/environment';
 import {
   PosCustomerService,
   PosCustomer,
@@ -80,6 +82,7 @@ import { PosMobileFooterComponent } from './components/pos-mobile-footer.compone
 import { PosCartModalComponent } from './components/pos-cart-modal.component';
 import { PosOrderCreateResult } from './models/order.model';
 import { StoreSettingsService } from '../settings/general/services/store-settings.service';
+import { HttpClient } from '@angular/common/http';
 import { StoreSettingsFacade } from '../../../../core/store/store-settings/store-settings.facade';
 import { PaymentMethodsCatalogService } from '../../../../shared/services/payment-methods-catalog.service';
 import { OrderPaymentModalComponent } from '../orders/components/order-payment-modal/order-payment-modal.component';
@@ -111,6 +114,7 @@ import { PosScheduleIndicatorComponent } from './components/pos-schedule-indicat
 import { PosScheduleModalComponent } from './components/pos-schedule-modal.component';
 import { PosHeaderDropdownComponent } from './components/pos-header-dropdown.component';
 import { ReservationFormModalComponent } from '../reservations/components/reservation-form-modal/reservation-form-modal.component';
+import { BookingSchedulerModalComponent } from '../../../../shared/components/booking-scheduler-modal/booking-scheduler-modal.component';
 import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.component';
 import {
   PosRestaurantIntegrationService,
@@ -158,6 +162,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
     PosHeaderDropdownComponent,
     LayawayConfigModalComponent,
     ReservationFormModalComponent,
+    BookingSchedulerModalComponent,
     PosAISummaryModalComponent,
     OrderPaymentModalComponent,
   ],
@@ -437,6 +442,8 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
                 (charge)="onCharge()"
                 (quote)="onQuote()"
                 (layaway)="onLayaway()"
+                (customerSelected)="onCustomerSelected($event)"
+                (bookingsChanged)="onBookingsChanged($event)"
                 ></app-pos-cart>
             </div>
           </div>
@@ -628,15 +635,14 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         ></app-pos-schedule-modal>
       }
 
-      @defer (when showReservationModal()) {
-        <app-reservation-form-modal
-          [isOpen]="showReservationModal()"
-          [initialProduct]="pendingBookingProduct()"
-          [initialCustomer]="selectedCustomer()"
-          [posMode]="true"
-          (closed)="onBookingModalClosed()"
-          (created)="onBookingCreated($event)"
-        ></app-reservation-form-modal>
+      @if (showReservationModal()) {
+        <app-booking-scheduler-modal
+          [product]="pendingBookingProduct()"
+          [posCustomer]="selectedCustomer()"
+          (customerSelected)="onCustomerSelected($event)"
+          (scheduled)="onPosServiceScheduled($event)"
+          (cancelled)="showReservationModal.set(false)"
+        ></app-booking-scheduler-modal>
       }
 
       @defer (when showLayawayConfigModal()) {
@@ -826,6 +832,167 @@ export class PosComponent {
   }
   selectedCustomer = signal<PosCustomer | null>(null);
   loading = signal(false);
+
+  /**
+   * CP-POS-SVC-PERF-001 / Annotation-4 — read-once from
+   * `settings.reservations.allow_bookings_without_payment`. Defaults to
+   * `true` while settings are loading so an empty cache can't lock the
+   * cashier out of scheduling. Refreshed via `loadReservationsPolicy()`
+   * whenever the user opens the POS so a config change in
+   * /admin/settings/general/reservas takes effect without a full
+   * reload.
+   */
+  readonly allowBookingsWithoutPayment = signal<boolean>(true);
+
+  /**
+   * CP-POS-SVC-PERF-001 / D.2 — booking blocks emitted by the cart
+   * scheduler, keyed by `cartItemId`. The editor attaches the matching
+   * block to each item when building the `UpdateOrderEditorDto`.
+   * Re-agendamiento sends `booking_id` so the existing row is updated.
+   */
+  cartBookingsFromChild = signal<Map<string, any>>(new Map());
+
+  onBookingsChanged(map: Map<string, any>): void {
+    const sz = map ? map.size : -1;
+    console.log('POS-DBG onBookingsChanged size=', sz);
+    this.cartBookingsFromChild.set(new Map(map ?? []));
+  }
+
+  /**
+   * CP-POS-SVC-PERF-001 / Annotation-3 — fire any pending booking blocks
+   * collected by the cart scheduler once the order is persisted. New
+   * bookings hit POST /api/store/reservations with order_id so the
+   * booking row is born attached to the order. Re-agendar hits PUT
+   * /api/store/reservations/:id to update the existing row in place.
+   * Failures are surfaced via toast and logged so the cashier can
+   * retry; the order is already saved, so a failed booking never
+   * orphans the draft.
+   */
+  private firePendingBookingsAfterDraft(orderId: number, opts?: { force?: boolean }): void {
+    // CP-POS-SVC-PERF-001 / Annotation-4 — respect the store-level
+    // `allow_bookings_without_payment` flag unless forced (e.g. on direct Cobrar/payment).
+    if (!opts?.force && !this.allowBookingsWithoutPayment()) return;
+
+    const map = this.cartBookingsFromChild();
+    const customerId = this.cartState()?.customer?.id ?? null;
+    const blocksToFire: any[] = [];
+    const seenKeys = new Set<string>();
+
+    // 1. Check cartBookingsFromChild map
+    if (map && map.size > 0) {
+      for (const [key, block] of map.entries()) {
+        if (block && (block.date || block.start_time)) {
+          blocksToFire.push({ ...block, _cartKey: key });
+          seenKeys.add(String(key));
+          if (block.cart_item_id) seenKeys.add(String(block.cart_item_id));
+        }
+      }
+    }
+
+    // 2. Check cartState().items for attached .booking
+    const items = this.cartState()?.items ?? [];
+    for (const item of items) {
+      if (item.booking && (item.booking.date || item.booking.start_time)) {
+        const itemId = String(item.id);
+        if (!seenKeys.has(itemId) && !seenKeys.has(`cart-${itemId}`)) {
+          blocksToFire.push({
+            ...item.booking,
+            product_id: Number(item.product?.id),
+            product_variant_id: item.variant_id ?? null,
+            cart_item_id: item.id,
+            _cartKey: itemId,
+          });
+          seenKeys.add(itemId);
+          seenKeys.add(`cart-${itemId}`);
+        }
+      }
+    }
+
+    // 3. Check cartState().pendingBookings
+    const pending = this.cartState()?.pendingBookings ?? [];
+    for (const pb of pending) {
+      if (pb && (pb.date || pb.start_time)) {
+        const alreadyIncluded = blocksToFire.some(
+          (b) =>
+            Number(b.product_id) === Number(pb.product_id) &&
+            b.date === pb.date &&
+            b.start_time === pb.start_time,
+        );
+        if (!alreadyIncluded) {
+          blocksToFire.push({
+            ...pb,
+            product_id: Number(pb.product_id),
+            product_variant_id: pb.product_variant_id ?? null,
+            cart_item_id: `cart-${pb.product_id}`,
+          });
+        }
+      }
+    }
+
+    console.log('[POS-DBG] firePendingBookingsAfterDraft orderId=', orderId, 'force=', opts?.force, 'totalBlocks=', blocksToFire.length, blocksToFire);
+    if (blocksToFire.length === 0) return;
+
+    for (const block of blocksToFire) {
+      let resolvedProductId = block.product_id;
+      let resolvedVariantId = block.product_variant_id ?? null;
+      if (!resolvedProductId) {
+        const cartItem = items.find(
+          (it) =>
+            it.id === block.cart_item_id ||
+            `cart-${it.id}` === block.cart_item_id ||
+            String(it.id) === String(block._cartKey),
+        );
+        if (cartItem) {
+          resolvedProductId = Number(cartItem.product?.id) || null;
+          resolvedVariantId = resolvedVariantId ?? cartItem.variant_id ?? null;
+        }
+      }
+      if (!resolvedProductId) {
+        console.warn('[POS-DBG] Skipping booking with no resolved product_id:', block);
+        continue;
+      }
+
+      const payload: any = {
+        product_id: Number(resolvedProductId),
+        product_variant_id: resolvedVariantId ? Number(resolvedVariantId) : null,
+        customer_id: customerId ? Number(customerId) : (block.customer_id ? Number(block.customer_id) : null),
+        provider_id: block.provider_id ? Number(block.provider_id) : null,
+        date: block.date,
+        start_time: block.start_time,
+        end_time: block.end_time,
+        notes: block.notes ?? '',
+        service_location_type: block.service_location_type ?? 'shop',
+        channel: 'pos',
+        cart_item_id: block.cart_item_id ?? null,
+        order_id: Number(orderId),
+      };
+
+      const existingId = Number(block.booking_id || block.id);
+      const isUpdate = Number.isFinite(existingId) && existingId > 0;
+      const request$ = isUpdate
+        ? this.http.put(
+            `${environment.apiUrl}/store/reservations/${existingId}`,
+            payload,
+          )
+        : this.http.post(`${environment.apiUrl}/store/reservations`, payload);
+
+      request$
+        .pipe(
+          catchError((err) => {
+            console.error('[POS-DBG] Failed to persist booking for order', orderId, err);
+            this.toastService.error(
+              err?.error?.message ??
+                'No se pudo agendar la cita. Intenta desde el detalle.',
+            );
+            return rxjsOf(null);
+          }),
+          takeUntilDestroyed(this.destroyRef),
+        )
+        .subscribe((res) => {
+          console.log('[POS-DBG] Successfully persisted booking for order', orderId, res);
+        });
+    }
+  }
 
   showCustomerModal = signal(false);
   editingCustomer = signal<PosCustomer | null>(null);
@@ -1031,6 +1198,11 @@ export class PosComponent {
   private posOrderService = inject(PosOrderService);
   private ordersService = inject(StoreOrdersService);
   private settingsService = inject(StoreSettingsService);
+  // CP-POS-SVC-PERF-001 / Annotation-3 — fire orphan bookings on Guardar
+  // so a draft order with a service line carries its `bookings` row even
+  // when the cashier never opens Actualizar / Cobrar. The editor atomic
+  // path already handles bookings on the Actualizar / Cobrar side.
+  private http = inject(HttpClient);
   private quotationsService = inject(QuotationsService);
   private layawayService = inject(LayawayApiService);
   private cashRegisterService = inject(PosCashRegisterService);
@@ -1495,8 +1667,35 @@ export class PosComponent {
     this.mode.set('create-draft');
     this.currentOrderId.set(result.order.id ? String(result.order.id) : null);
     this.currentOrderNumber.set(result.order.order_number ?? null);
+    // CP-POS-SVC-PERF-001 / Annotation-3 — fire any pending booking blocks
+    // collected by the cart scheduler if store policy allows bookings without payment.
+    if (result.order?.id) {
+      this.firePendingBookingsAfterDraft(Number(result.order.id));
+    }
+    const sc = this.selectedCustomer();
+    const customerName =
+      result.order?.customer_name ||
+      (result.order?.customer?.first_name
+        ? `${result.order.customer.first_name} ${result.order.customer.last_name || ''}`.trim()
+        : null) ||
+      (sc?.first_name ? `${sc.first_name} ${sc.last_name || ''}`.trim() : null) ||
+      result.order?.customer?.name ||
+      null;
+
     this.completedOrder.set({
       ...(result.order || {}),
+      customer: result.order?.customer || sc || undefined,
+      customer_name: customerName,
+      customer_email:
+        result.order?.customer_email ||
+        result.order?.customer?.email ||
+        sc?.email ||
+        null,
+      customer_tax_id:
+        result.order?.customer_tax_id ||
+        result.order?.customer?.document_number ||
+        sc?.document_number ||
+        null,
       isCreateOrder: true,
       fulfillment: result.fulfillment,
       tableId: result.tableId,
@@ -2038,6 +2237,12 @@ export class PosComponent {
         next: (response: any) => {
           this.isCharging.set(false);
           this.chargeModalOpen.set(false);
+          // CP-POS-SVC-PERF-001 / Annotation-4 — once payment clears,
+          // any booking blocks the cashier attached during the
+          // wizard have to land on the order, regardless of the
+          // `allow_bookings_without_payment` toggle (the toggle only
+          // governs Guardar-alone). `force` bypasses that gate.
+          this.firePendingBookingsAfterDraft(Number(order.id), { force: true });
           // QUI-audit-round-1: el toast de éxito se ataba al response del
           // POST, pero el refresh sub-siguiente silenciosamente dejaba
           // `readyToPayOrder` en null si la red fallaba — el cajero perdía
@@ -2184,6 +2389,17 @@ export class PosComponent {
     if (paymentData.success) {
       this.currentOrderId.set(paymentData.order?.id);
       this.currentOrderNumber.set(paymentData.order?.order_number);
+      // CP-POS-SVC-PERF-001 / Annotation-4 + HU-B second half — the unified
+      // shell route (Cobrar in mode='cobrar' or the post-Actualizar flip in
+      // mode='edit') reaches this branch after flow/pay. Pending booking
+      // blocks attached during the wizard still sit in cartBookingsFromChild
+      // and need to land on the paid order — `force` ignores the toggle so
+      // toggle-OFF stores still get the booking on the Cobrar path.
+      console.log('[POS-DBG] onPaymentCompleted fire pre', this.cartBookingsFromChild?.()?.size, paymentData?.order?.id);
+      this.firePendingBookingsAfterDraft(
+        Number(paymentData.order?.id ?? this.currentOrderId()),
+        { force: true },
+      );
       // Plan KDS fire-flows (F2): the backend auto-fires `prepared`
       // items inside the payment $transaction for restaurant stores,
       // so the fire from the frontend is no longer needed (and was a
@@ -2337,6 +2553,73 @@ export class PosComponent {
     );
     this.pendingBookingVariant.set(variant);
     this.showReservationModal.set(true);
+  }
+
+  onPosServiceScheduled(booking: any): void {
+    this.showReservationModal.set(false);
+    const prod = this.pendingBookingProduct();
+    const variant = this.pendingBookingVariant();
+    if (!prod) return;
+
+    if (booking.customer && (!this.selectedCustomer() || this.selectedCustomer()?.id !== booking.customer.id)) {
+      this.onCustomerSelected(booking.customer);
+    }
+
+    this.cartService
+      .addToCart({
+        product: prod,
+        quantity: 1,
+        variant: variant || undefined,
+        booking: {
+          booking_id: booking.booking_id,
+          provider_id: booking.provider_id,
+          provider_name: booking.provider_name,
+          date: booking.date,
+          start_time: booking.start_time,
+          end_time: booking.end_time,
+          notes: booking.notes,
+          service_location_type: booking.service_location_type,
+        },
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (cartState) => {
+          const addedItem = cartState.items[cartState.items.length - 1] ?? cartState.items[0];
+          if (addedItem) {
+            const next = new Map(this.cartBookingsFromChild());
+            next.set(addedItem.id, {
+              ...booking,
+              product_id: Number(prod.id),
+              product_variant_id: variant?.id ?? booking.product_variant_id ?? null,
+              cart_item_id: `cart-${addedItem.id}`,
+            });
+            this.cartBookingsFromChild.set(next);
+          }
+          this.cartService
+            .addPendingBooking({
+              id: booking.booking_id ?? 0,
+              booking_number: '',
+              product_id: booking.product_id ?? Number(prod.id),
+              product_name: prod.name ?? '',
+              product_variant_id: booking.product_variant_id ?? variant?.id ?? null,
+              variant_name: variant?.name ?? undefined,
+              customer_id: booking.customer_id ?? this.selectedCustomer()?.id ?? 0,
+              date: booking.date,
+              start_time: booking.start_time,
+              end_time: booking.end_time,
+              provider_name: booking.provider_name ?? undefined,
+            })
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe();
+
+          this.pendingBookingProduct.set(null);
+          this.pendingBookingVariant.set(null);
+          this.toastService.success('Servicio agregado al carrito con su horario');
+        },
+        error: (err) => {
+          this.toastService.error(err?.message || 'Error al agregar servicio al carrito');
+        },
+      });
   }
 
   onBookingCreated(event?: any): void {
@@ -3080,6 +3363,10 @@ export class PosComponent {
       this.currentOrderId.set(shippingData.order?.id);
       this.currentOrderNumber.set(shippingData.order?.order_number);
 
+      if (shippingData.order?.id) {
+        this.firePendingBookingsAfterDraft(Number(shippingData.order.id), { force: true });
+      }
+
       // Plan KDS fire-flows (F2): the backend auto-fires `prepared`
       // items inside the payment $transaction for restaurant stores.
       // Surface the server's `kitchen_fire.fired_count` as a toast.
@@ -3509,6 +3796,15 @@ export class PosComponent {
         variantId == null ? null : Number(variantId) || null;
       const productName = item?.product?.name ?? '';
 
+      // CP-POS-SVC-PERF-001 / D.2 — atomic booking block per item.
+      // The cart scheduler emits `bookingsChanged`; we stash it in
+      // `cartBookingsFromChild` and attach the matching booking here so
+      // the backend editor creates/updates the `bookings` row in the
+      // same $transaction that persists the order_items. Re-agendar
+      // sends `booking_id` so the existing row is updated in place.
+      const bookingBlock =
+        this.cartBookingsFromChild?.()?.get?.(item?.id) ?? null;
+
       return {
         product_id: productIdNumeric,
         product_variant_id: variantIdNumeric,
@@ -3526,6 +3822,23 @@ export class PosComponent {
         tax_category_id: item?.taxCategoryId ?? null,
         applied_price_tier_id: item?.applied_price_tier_id ?? null,
         notes: item?.notes ?? null,
+        // Strip the echo fields that are only used by the cart-to-modal
+        // pipeline; the editor DTO only accepts the canonical booking
+        // shape (booking_id?, provider_id?, date, start_time, end_time,
+        // notes?, service_location_type?).
+        ...(bookingBlock
+          ? {
+              booking: {
+                booking_id: bookingBlock.booking_id,
+                provider_id: bookingBlock.provider_id,
+                date: bookingBlock.date,
+                start_time: bookingBlock.start_time,
+                end_time: bookingBlock.end_time,
+                notes: bookingBlock.notes ?? '',
+                service_location_type: bookingBlock.service_location_type ?? 'shop',
+              },
+            }
+          : {}),
       };
     });
 
@@ -3584,6 +3897,38 @@ export class PosComponent {
         }
 
         this.applyPosSettings(storeSettings);
+        // CP-POS-SVC-PERF-001 / Annotation-4 — pick up the
+        // reservations policy from the same store-settings payload so
+        // a config change in /admin/settings/general/reservas takes
+        // effect the next time the POS opens. Falls back to the
+        // signal default (true) when the key is absent — older
+        // settings payloads don't carry the field.
+        const policy = (storeSettings as any)?.reservations
+          ?.allow_bookings_without_payment;
+        if (typeof policy === 'boolean') {
+          this.allowBookingsWithoutPayment.set(policy);
+        }
+      });
+    // CP-POS-SVC-PERF-001 / Annotation-4 — refresh the reservation
+    // policy directly via /api/store/settings on every POS open. The
+    // NgRx `selectStoreSettings` snapshot carries the value captured
+    // at login time, which can drift out of sync if the operator
+    // toggled the policy from another tab/session. This HTTP call
+    // always sees the latest server-side value.
+    this.http
+      .get<any>(`${environment.apiUrl}/store/settings`)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (resp: any) => {
+          const settings = resp?.data ?? resp;
+          const policy = settings?.reservations?.allow_bookings_without_payment;
+          if (typeof policy === 'boolean') {
+            this.allowBookingsWithoutPayment.set(policy);
+          }
+        },
+        error: () => {
+          /* best-effort: signal keeps its prior value */
+        },
       });
   }
 

@@ -905,6 +905,27 @@ export interface ReservationsSettings {
    * was applied directly). Stores that want tighter control flip this off.
    */
   allow_direct_reschedule: boolean;
+  /**
+   * CP-POS-SVC-PERF-001 — store-level policy that controls whether a
+   * POS cashier can persist a `bookings` row for a service line on a
+   * draft order (Guardar) or whether scheduling only becomes legal
+   * after payment clears (Cobrar / flow/pay).
+   *
+   *  - true (default): a cashier can attach a booking to a draft
+   *    order. POS POSTs /api/store/reservations with the freshly-created
+   *    order_id as soon as the draft is saved. Useful for service-
+   *    heavy stores (salons, clinics, repair shops) where the cashier
+   *    books the slot first and collects payment later.
+   *  - false: bookings are only persisted on the Cobrar path. The
+   *    draft order survives without a booking until the cashier
+   *    charges it; the editor atomic block then attaches the booking.
+   *    Useful for stores that want payment guaranteed before any
+   *    technician's calendar is locked.
+   *
+   * Mirrors `ReservationsSettings.allow_bookings_without_payment` in
+   * `settings-schemas.dto.ts`.
+   */
+  allow_bookings_without_payment: boolean;
 }
 
 /**

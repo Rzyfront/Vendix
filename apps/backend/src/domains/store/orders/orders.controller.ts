@@ -13,6 +13,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import {
   CreateOrderDto,
@@ -54,6 +55,11 @@ export class OrdersController {
     private readonly prisma: StorePrismaService,
     private readonly ecommercePrisma: EcommercePrismaService,
   ) {}
+
+  // CP-POS-SVC-PERF-001 / Bugfix — Nest can't reflect Logger as a
+  // constructor parameter without `@Inject`. Initialize in the
+  // class body so DI doesn't try to resolve it as the 9th dep.
+  private readonly logger = new Logger(OrdersController.name);
 
   @Get()
   @Permissions('store:orders:read')
@@ -223,10 +229,29 @@ export class OrdersController {
         'Orden obtenida exitosamente',
       );
     } catch (error) {
+      // CP-POS-SVC-PERF-001 / Bugfix — never leak Prisma stack traces or
+      // raw `Unknown field …` errors into the response body. VendixHttpException
+      // errors carry a curated devMessage; everything else is an internal
+      // server error and must surface as a generic 500 with a stable
+      // error_code the frontend can switch on.
+      if (error instanceof VendixHttpException) {
+        return this.responseService.error(
+          (error as any).devMessage || error.message,
+          (error as any).userMessage || error.message,
+          error.getStatus ? error.getStatus() : 400,
+          (error as any).errorCode,
+        );
+      }
+      // Unexpected — log the full trace server-side, return generic.
+      this.logger.error(
+        `[findOne:${id}] Unexpected error`,
+        error?.stack || String(error),
+      );
       return this.responseService.error(
-        error.message || 'Error al obtener la orden',
-        error.response?.message || error.message,
-        error.status || 400,
+        'No se pudo cargar la orden. Intenta de nuevo.',
+        'INTERNAL_ORDER_LOAD_001',
+        500,
+        'INTERNAL_ORDER_LOAD_001',
       );
     }
   }
@@ -241,10 +266,27 @@ export class OrdersController {
         'Línea de tiempo de la orden obtenida exitosamente',
       );
     } catch (error) {
+      // CP-POS-SVC-PERF-001 / Bugfix — same anti-leak guard as findOne.
+      // VendixHttpException carries curated devMessage; anything else
+      // logs the full trace and returns a generic 500 with a stable
+      // error_code the frontend can switch on.
+      if (error instanceof VendixHttpException) {
+        return this.responseService.error(
+          (error as any).devMessage || error.message,
+          (error as any).userMessage || error.message,
+          error.getStatus ? error.getStatus() : 400,
+          (error as any).errorCode,
+        );
+      }
+      this.logger.error(
+        `[getTimeline:${id}] Unexpected error`,
+        error?.stack || String(error),
+      );
       return this.responseService.error(
-        error.message || 'Error al obtener la línea de tiempo de la orden',
-        error.response?.message || error.message,
-        error.status || 400,
+        'No se pudo cargar la línea de tiempo.',
+        'INTERNAL_TIMELINE_LOAD_001',
+        500,
+        'INTERNAL_TIMELINE_LOAD_001',
       );
     }
   }

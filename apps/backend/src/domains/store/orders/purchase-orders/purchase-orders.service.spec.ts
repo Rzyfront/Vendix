@@ -1675,3 +1675,210 @@ describe('PurchaseOrdersService.resolvePricingAfterReceipt()', () => {
     });
   });
 });
+
+/**
+ * CP-ORC-POP-MODAL-DISCOUNT-001 — regresión contra QUI-661.
+ *
+ * `purchase-orders.service.ts` :132-210 (`deriveLineTax`) fija el contrato:
+ *
+ *   ownDiscount =
+ *     item.discount_amount != null && Number(item.discount_amount) > 0
+ *       ? Number(item.discount_amount)
+ *       : gross * quantity * (Number(item.discount_percentage ?? 0) / 100);
+ *
+ * De aquí se derivan DOS invariantes que el POP modal respeta:
+ *   1. `discount_percentage: 0.20` se interpreta como 0.20 POR CIENTO
+ *      (gross × qty × 0.002). NO es 20% ni la fracción 0.20 de la línea.
+ *   2. Cuando vienen TANTO `discount_percentage` COMO `discount_amount`, el
+ *      MONTO gana. Re-derivar desde el porcentaje cuando la línea se persiste
+ *      daría un número distinto al día siguiente si cambia el precio.
+ *
+ * `deriveLineTax` es privado: lo ejercitamos vía `update()` (sobre un borrador
+ * para que `assertMutable` no corte y `update()` sí pase por la derivación),
+ * capturando lo que se pasa a `tx.purchase_order_items.create` — esa es la
+ * fila que llega al FIFO cost layer en la recepción.
+ */
+describe('PurchaseOrdersService.update() — descuento: 0-100 % y precedencia monto gana', () => {
+  let service: PurchaseOrdersService;
+  let prismaService: jest.Mocked<StorePrismaService>;
+
+  const ORG_ID = 1;
+  const STORE_ID = 10;
+  const USER_ID = 7;
+  const PO_ID_LOCAL = 42;
+  const PRODUCT_ID_LOCAL = 555;
+
+  beforeEach(async () => {
+    // Solo necesitamos que el DI compile y que `$transaction` esté bajo
+    // nuestro control. `update()` con items corre dentro del callback de la
+    // tx; los demás providers no se ejercitan en este camino.
+    const mockPrismaService = {
+      $transaction: jest.fn(),
+    } as any;
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PurchaseOrdersService,
+        { provide: StorePrismaService, useValue: mockPrismaService },
+        { provide: StockLevelManager, useValue: {} as any },
+        { provide: CostingService, useValue: {} as any },
+        { provide: CostingMethodResolverService, useValue: {} as any },
+        { provide: InventorySerialNumbersService, useValue: {} as any },
+        { provide: SerialNumberEnforcementService, useValue: {} as any },
+        { provide: AuditService, useValue: {} as any },
+        { provide: S3Service, useValue: {} as any },
+        { provide: SettingsService, useValue: {} as any },
+        { provide: FiscalScopeService, useValue: {} as any },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: AccountsPayableService, useValue: {} as any },
+        { provide: VatResponsibilityService, useValue: { resolve: () => true } },
+      ],
+    }).compile();
+
+    service = module.get(PurchaseOrdersService);
+    prismaService = mockPrismaService;
+
+    jest
+      .spyOn(RequestContextService, 'getOrganizationId')
+      .mockReturnValue(ORG_ID);
+    jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(STORE_ID);
+    jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(USER_ID);
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+    jest.restoreAllMocks();
+  });
+
+  /**
+   * Mockea la transacción de update() con una orden en estado `draft`. Los
+   * métodos que `update()` toca son: `purchase_orders.findUnique`
+   * (loadOrderOrFail), `product_variants.findMany`
+   * (assertNoBaseLineOnVariantProduct), `purchase_order_items.deleteMany`,
+   * `purchase_order_items.create` y `purchase_orders.update`.
+   */
+  function mockDraftOrderTx() {
+    const tx = {
+      purchase_orders: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: PO_ID_LOCAL,
+          status: 'draft',
+          order_number: 'PO-DISC-TEST',
+        }),
+        update: jest.fn().mockResolvedValue({
+          id: PO_ID_LOCAL,
+          status: 'draft',
+        }),
+      },
+      purchase_order_items: {
+        findMany: jest.fn().mockResolvedValue([]),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+        create: jest.fn().mockResolvedValue({}),
+      },
+      product_variants: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    (prismaService.$transaction as jest.Mock).mockImplementation(
+      async (callback: any) => callback(tx),
+    );
+    return tx;
+  }
+
+  it('discount_percentage: 0.20 ⇒ 0.20 POR CIENTO (gross*qty*0.002 = 2 con gross=1000, qty=1)', async () => {
+    const tx = mockDraftOrderTx();
+
+    await service.update(PO_ID_LOCAL, {
+      items: [
+        {
+          product_id: PRODUCT_ID_LOCAL,
+          quantity: 1,
+          unit_price: 1000,
+          discount_percentage: 0.20,
+        },
+      ],
+    } as any);
+
+    expect(tx.purchase_order_items.create).toHaveBeenCalledTimes(1);
+    const createData = tx.purchase_order_items.create.mock.calls[0][0].data;
+
+    // ownDiscount = 1000 * 1 * (0.20 / 100) = 2
+    // discount_total = 2 (discountPerUnit * quantity = 2 * 1)
+    expect(createData.discount_amount).toBe(2);
+    // unit_price_net = gross - discountPerUnit = 1000 - 2 = 998
+    expect(createData.unit_cost).toBe(998);
+    expect(createData.unit_price_net).toBe(998);
+    // El porcentaje original se persiste como provenance; NO se re-deriva.
+    expect(createData.discount_percentage).toBe(0.20);
+
+    // Y el subtotal del header debe coincidir con el neto por línea.
+    const headerData = tx.purchase_orders.update.mock.calls[0][0].data;
+    expect(headerData.subtotal_amount).toBe(998);
+  });
+
+  it('cuando vienen discount_percentage: 0.20 Y discount_amount: 4, el monto gana (4, no 2)', async () => {
+    const tx = mockDraftOrderTx();
+
+    await service.update(PO_ID_LOCAL, {
+      items: [
+        {
+          product_id: PRODUCT_ID_LOCAL,
+          quantity: 1,
+          unit_price: 1000,
+          discount_percentage: 0.20,
+          discount_amount: 4,
+        },
+      ],
+    } as any);
+
+    expect(tx.purchase_order_items.create).toHaveBeenCalledTimes(1);
+    const createData = tx.purchase_order_items.create.mock.calls[0][0].data;
+
+    // El porcentaje solo produciría 2; el monto es 4 → discount_amount gana.
+    expect(createData.discount_amount).toBe(4);
+    // unit_price_net = 1000 - 4 = 996
+    expect(createData.unit_cost).toBe(996);
+    expect(createData.unit_price_net).toBe(996);
+    // El porcentaje original se persiste como provenance, pero NO entra al
+    // cálculo: la fila persistida lleva el monto resuelto.
+    expect(createData.discount_percentage).toBe(0.20);
+
+    const headerData = tx.purchase_orders.update.mock.calls[0][0].data;
+    expect(headerData.subtotal_amount).toBe(996);
+  });
+
+  it('discount_percentage: 20 (entero) ⇒ gross*qty*0.20 = 200 con gross=1000, qty=1 (audit 4a)', async () => {
+    // El nuevo contrato entero: 20 ⇒ 20 POR CIENTO, no 0.20 %. El test
+    // anterior clavaba el caso de la fracción 0.20 para fijar la lectura
+    // como porcentaje (gross*qty*0.002); este clava el camino del entero
+    // 20 que el POP modal ya envía tras el fix de CP-ORC-POP-MODAL-DISCOUNT-001.
+    //   ownDiscount = 1000 * 1 * (20 / 100) = 200
+    //   discountPerUnit = 200 / 1 = 200
+    //   discount_total = 200 * 1 = 200
+    //   unit_cost = 1000 - 200 = 800
+    const tx = mockDraftOrderTx();
+
+    await service.update(PO_ID_LOCAL, {
+      items: [
+        {
+          product_id: PRODUCT_ID_LOCAL,
+          quantity: 1,
+          unit_price: 1000,
+          discount_percentage: 20,
+        },
+      ],
+    } as any);
+
+    expect(tx.purchase_order_items.create).toHaveBeenCalledTimes(1);
+    const createData = tx.purchase_order_items.create.mock.calls[0][0].data;
+
+    // El porcentaje original se persiste como provenance; NO se re-deriva.
+    expect(createData.discount_percentage).toBe(20);
+    // ownDiscount = gross * qty * (pct / 100) = 200.
+    expect(createData.discount_amount).toBe(200);
+    // unit_price_net = gross - discountPerUnit = 1000 - 200 = 800.
+    expect(createData.unit_cost).toBe(800);
+    expect(createData.unit_price_net).toBe(800);
+
+    const headerData = tx.purchase_orders.update.mock.calls[0][0].data;
+    expect(headerData.subtotal_amount).toBe(800);
+  });
+});

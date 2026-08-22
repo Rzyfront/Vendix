@@ -10,6 +10,7 @@ import {
   PromotionTierProgress } from '../services/pos-cart.service';
 import { AddCustomItemRequest, CartDiscount } from '../models/cart.model';
 import { PosCustomItemModalComponent } from '../components/pos-custom-item-modal/pos-custom-item-modal.component';
+import { BookingSchedulerModalComponent } from '../../../../../shared/components/booking-scheduler-modal/booking-scheduler-modal.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
@@ -59,6 +60,7 @@ import {
     QuantityControlComponent,
     PriceTierSelectorComponent,
     PosCustomItemModalComponent,
+    BookingSchedulerModalComponent,
   ],
   template: `
     <div
@@ -89,16 +91,16 @@ import {
           <button
             type="button"
             (click)="orderNoteModalOpen.set(true)"
-            class="staff-note-btn relative w-8 h-8 rounded-md flex items-center justify-center transition-colors"
+            class="staff-note-btn relative px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-colors border text-xs font-semibold shadow-2xs"
             [class]="
               hasStaffNote()
-                ? 'text-green-600 bg-green-50 hover:bg-green-100'
-                : 'text-text-secondary hover:text-text-primary hover:bg-muted/40'
+                ? 'text-green-700 bg-green-50 border-green-200 hover:bg-green-100'
+                : 'text-text-secondary border-border/80 hover:text-text-primary hover:bg-muted/40'
             "
             aria-label="Nota de la orden"
           >
-            <span class="ai-tooltip">Nota de la orden</span>
-            <app-icon name="notebook-pen" [size]="16"></app-icon>
+            <app-icon name="notebook-pen" [size]="14"></app-icon>
+            <span>Nota</span>
           </button>
         </div>
 
@@ -544,11 +546,38 @@ import {
                 </div>
                 <!-- Item Info -->
                 <div class="min-w-0 flex flex-col justify-center">
-                  <h4
-                    class="text-sm font-semibold text-text-primary truncate leading-tight"
-                  >
-                    {{ item.product.name }}
-                  </h4>
+                  <div class="flex items-center gap-1.5">
+                    <h4
+                      class="text-sm font-semibold text-text-primary truncate leading-tight"
+                    >
+                      {{ item.product.name }}
+                    </h4>
+                    <!-- CP-POS-SVC-PERF-001 / C.3 — calendar icon on
+                         service/prepared items opens the scheduler modal
+                         so the cashier can pick staff + day + time before
+                         Actualizar / Cobrar. Replaces the absent
+                         scheduling UI of the prior release. -->
+                    @if (
+                      item.product.product_type === 'service' ||
+                      item.product.product_type === 'prepared'
+                    ) {
+                      <button
+                        type="button"
+                        class="shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-violet-600 hover:bg-violet-50 border border-violet-200 transition-colors"
+                        [attr.aria-label]="
+                          (schedulerFor(item.id) ? 'Re-agendar ' : 'Agendar ') +
+                          item.product.name
+                        "
+                        [title]="
+                          (schedulerFor(item.id) ? 'Re-agendar ' : 'Agendar ') +
+                          item.product.name
+                        "
+                        (click)="openScheduler(item)"
+                      >
+                        <app-icon name="calendar" [size]="12"></app-icon>
+                      </button>
+                    }
+                  </div>
                   @if (item.variant_display_name) {
                     <p
                       class="text-[10px] text-primary font-medium truncate leading-tight"
@@ -634,21 +663,66 @@ import {
                     <button
                       type="button"
                       (click)="editItemPrice(item)"
-                      class="p-1 rounded-sm text-text-secondary hover:text-primary hover:bg-primary/10 transition-colors"
+                      class="p-1 rounded text-primary hover:bg-primary/15 border border-primary/30 bg-primary/5 transition-colors shadow-2xs"
                       title="Editar ítem personalizado"
                     >
-                      <app-icon name="pencil" [size]="14"></app-icon>
+                      <app-icon name="pencil" [size]="13"></app-icon>
                     </button>
                   }
                   <button
                     type="button"
                     (click)="removeFromCart(item.id)"
-                    class="p-1 rounded-sm text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors"
+                    class="p-1 rounded text-red-600 hover:bg-red-100 border border-red-200 bg-red-50/80 transition-colors shadow-2xs"
                     title="Eliminar"
                   >
-                    <app-icon name="trash-2" [size]="14"></app-icon>
+                    <app-icon name="trash-2" [size]="13"></app-icon>
                   </button>
                 </div>
+
+                <!-- CP-POS-SVC-BOOKING-001: Booking summary badge for service line items -->
+                @if (schedulerFor(item.id) || item.booking; as b) {
+                  <div class="col-span-3 mt-1.5 flex items-center justify-between gap-1.5 p-2 rounded-md bg-violet-50 border border-violet-200 text-[11px] text-violet-900">
+                    <div class="flex items-center gap-1.5 min-w-0">
+                      <app-icon name="calendar-check" [size]="14" class="text-violet-600 shrink-0"></app-icon>
+                      <div class="truncate">
+                        <span class="font-bold">{{ b.date }}</span>
+                        <span class="mx-1 opacity-70">|</span>
+                        <span>{{ b.start_time }} – {{ b.end_time }}</span>
+                        @if (b.provider_name) {
+                          <span class="ml-1 text-violet-700 font-semibold truncate">({{ b.provider_name }})</span>
+                        }
+                        <span
+                          class="ml-1.5 px-1 py-0.5 rounded text-[9px] font-bold inline-block"
+                          [class]="b.service_location_type === 'home' ? 'bg-amber-100 text-amber-800' : 'bg-violet-200/70 text-violet-800'"
+                        >
+                          {{ b.service_location_type === 'home' ? 'A domicilio' : 'En tienda' }}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      (click)="openScheduler(item)"
+                      class="px-2 py-0.5 rounded text-[10px] font-bold text-violet-700 hover:bg-violet-200/50 border border-violet-300 transition-colors shrink-0"
+                    >
+                      Re-agendar
+                    </button>
+                  </div>
+                } @else if (item.product.product_type === 'service' || item.product.requires_booking) {
+                  <div class="col-span-3 mt-1.5 flex items-center justify-between gap-1.5 p-2 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-900">
+                    <div class="flex items-center gap-1.5 min-w-0">
+                      <app-icon name="alert-circle" [size]="14" class="text-amber-600 shrink-0"></app-icon>
+                      <span class="font-medium truncate">Servicio sin horario asignado</span>
+                    </div>
+                    <button
+                      type="button"
+                      (click)="openScheduler(item)"
+                      class="px-2 py-0.5 rounded bg-amber-200 hover:bg-amber-300 text-amber-900 text-[10px] font-bold shrink-0 transition-colors"
+                    >
+                      Agendar
+                    </button>
+                  </div>
+                }
+
                 <!-- Actions Row: Quantity + Total -->
                 <div
                   class="col-span-3 flex items-center justify-between pt-2 mt-1 border-t border-border/50"
@@ -808,6 +882,23 @@ import {
         </app-button>
       </div>
     </app-modal>
+
+    <!--
+      CP-POS-SVC-PERF-001 / C.2 + C.3 — service scheduler modal. Mounted
+      at the cart root so the calendar icon on a service/prepared item
+      can toggle the schedulerOpen signal with the target cartItem and
+      optional existing booking for re-agendamiento.
+    -->
+    @if (schedulerOpen()) {
+      <app-booking-scheduler-modal
+        [cartItem]="schedulerTarget()"
+        [existingBooking]="schedulerExisting()"
+        [posCustomer]="cartState()?.customer"
+        (customerSelected)="onCustomerSelected($event)"
+        (scheduled)="onScheduled($event)"
+        (cancelled)="closeScheduler()"
+      ></app-booking-scheduler-modal>
+    }
   `,
   styles: [
     `
@@ -1111,6 +1202,16 @@ private cartService = inject(PosCartService);
   readonly charge = output<void>();
   readonly quote = output<void>();
   readonly layaway = output<void>();
+  readonly customerSelected = output<any>();
+  /**
+   * CP-POS-SVC-PERF-001 / D.2 — emits the latest `cartBookingsByItemId`
+   * map so the parent POS shell can attach the matching booking block
+   * to each cart line in the editor DTO on Actualizar / Cobrar. The
+   * map is keyed by `item.id` (cart-local id) and contains the booking
+   * payload (booking_id?, provider_id, date, start_time, end_time,
+   * notes, service_location_type, cart_item_id).
+   */
+  readonly bookingsChanged = output<Map<string, any>>();
 
   /**
    * QUI-audit-round-1 — accessible label for the `Cobrar` CTA. The CTA only
@@ -1550,6 +1651,12 @@ private cartService = inject(PosCartService);
   }
 
   removeFromCart(itemId: string): void {
+    if (this.cartBookingsByItemId().has(itemId)) {
+      const next = new Map(this.cartBookingsByItemId());
+      next.delete(itemId);
+      this.cartBookingsByItemId.set(next);
+      this.bookingsChanged.emit(next);
+    }
     this.cartService
       .removeFromCart(itemId)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -1561,7 +1668,8 @@ private cartService = inject(PosCartService);
           this.toastService.error(
             error.message || 'Error al eliminar producto',
           );
-        } });
+        },
+      });
   }
 
   async clearCart(): Promise<void> {
@@ -1571,9 +1679,13 @@ private cartService = inject(PosCartService);
         '¿Estás seguro de que quieres vaciar todos los productos del carrito?',
       confirmText: 'Vaciar',
       cancelText: 'Cancelar',
-      confirmVariant: 'danger' });
+      confirmVariant: 'danger',
+    });
 
     if (confirm) {
+      const next = new Map<string, any>();
+      this.cartBookingsByItemId.set(next);
+      this.bookingsChanged.emit(next);
       this.cartService
         .clearCart()
         .pipe(takeUntilDestroyed(this.destroyRef))
@@ -1583,10 +1695,10 @@ private cartService = inject(PosCartService);
           },
           error: (error) => {
             this.toastService.error(error.message || 'Error al vaciar carrito');
-          } });
+          },
+        });
     }
   }
-
 
   /**
    * Whether the staff-note modal is open. Opened from the small state
@@ -1594,6 +1706,89 @@ private cartService = inject(PosCartService);
    * exists); independent of cart state so typing never closes it.
    */
   readonly orderNoteModalOpen = signal(false);
+
+  /**
+   * CP-POS-SVC-BOOKING-001 — Service scheduler state.
+   */
+  readonly schedulerOpen = signal(false);
+  readonly schedulerTarget = signal<any>(null);
+  readonly schedulerExisting = signal<any>(null);
+  readonly cartBookingsByItemId = signal<Map<string, any>>(new Map());
+
+  openScheduler(item: any): void {
+    this.schedulerTarget.set(item);
+    const existing = this.cartBookingsByItemId().get(item.id) || item.booking;
+    this.schedulerExisting.set(existing ?? null);
+    this.schedulerOpen.set(true);
+  }
+
+  closeScheduler(): void {
+    this.schedulerOpen.set(false);
+    this.schedulerTarget.set(null);
+    this.schedulerExisting.set(null);
+  }
+
+  onCustomerSelected(c: any): void {
+    if (c) {
+      this.cartService.setCustomer(c).pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
+      this.customerSelected.emit(c);
+    }
+  }
+
+  onScheduled(booking: any): void {
+    const target = this.schedulerTarget();
+    if (!target || !booking) {
+      this.closeScheduler();
+      return;
+    }
+    if (booking.customer) {
+      this.cartService.setCustomer(booking.customer).pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
+      this.customerSelected.emit(booking.customer);
+    }
+    const resolvedProductId =
+      typeof target.productId === 'number'
+        ? target.productId
+        : Number(target.productId) || Number(target.product?.id) || Number(booking.product_id) || 0;
+    const enrichedBooking = {
+      ...booking,
+      product_id: resolvedProductId,
+      product_variant_id: target.variant_id ?? booking.product_variant_id ?? null,
+      cart_item_id: target.id,
+    };
+    const next = new Map(this.cartBookingsByItemId());
+    next.set(target.id, enrichedBooking);
+    this.cartBookingsByItemId.set(next);
+    target.booking = enrichedBooking;
+    // CP-POS-SVC-BOOKING-001 — bubble up so parent POS shell attaches booking block to cart line
+    this.bookingsChanged.emit(next);
+    this.cartService
+      .addPendingBooking({
+        id: booking.booking_id ?? 0,
+        booking_number: '',
+        product_id: resolvedProductId,
+        product_name: target.product?.name ?? '',
+        product_variant_id: target.variant_id ?? booking.product_variant_id ?? null,
+        variant_name: target.variant_display_name ?? undefined,
+        customer_id: booking.customer_id ?? 0,
+        date: booking.date,
+        start_time: booking.start_time,
+        end_time: booking.end_time,
+        provider_name: booking.provider_name ?? undefined,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe();
+    this.closeScheduler();
+  }
+
+  /**
+   * Read accessor for the template — returns booking attached to this cart line.
+   */
+  schedulerFor(itemId: string): any {
+    const fromMap = this.cartBookingsByItemId().get(itemId);
+    if (fromMap) return fromMap;
+    const item = this.cartState().items.find((i) => i.id === itemId);
+    return item?.booking ?? null;
+  }
 
   /** True when the current cart already carries a staff note (drives the header icon color). */
   readonly hasStaffNote = computed(() => (this.cartState().notes ?? '').length > 0);

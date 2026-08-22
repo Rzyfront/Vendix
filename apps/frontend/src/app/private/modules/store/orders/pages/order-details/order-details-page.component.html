@@ -399,18 +399,18 @@
             </div>
           </app-card>
 
-          <!-- 1.5. NOTA DEL STAFF (solo visible al equipo interno) -->
+          <!-- 1.5. NOTA DE LA ORDEN (pública — escrita por el cashier desde el POS) -->
           @if (orderData.notes) {
             <app-card shadow="sm" [responsivePadding]="true">
               <div slot="header" class="flex items-center gap-2">
                 <app-icon name="sticky-note" [size]="18" class="text-amber-500"></app-icon>
                 <h3 class="text-base sm:text-lg font-semibold text-[var(--color-text-primary)]">
-                  Nota del staff
+                  Nota de la orden
                 </h3>
                 <span
                   class="text-[10px] sm:text-[11px] font-medium uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded"
                 >
-                  Solo interno
+                  Pública
                 </span>
               </div>
               <p
@@ -418,6 +418,101 @@
               >
                 {{ orderData.notes }}
               </p>
+            </app-card>
+          }
+
+          <!-- 1.6. NOTA INTERNA DEL STAFF (solo visible al equipo interno) -->
+          @if (orderData.internal_notes && !flowMetadata().internal_notes_as_json) {
+            <app-card shadow="sm" [responsivePadding]="true">
+              <div slot="header" class="flex items-center gap-2">
+                <app-icon name="message-square" [size]="18" class="text-rose-500"></app-icon>
+                <h3 class="text-base sm:text-lg font-semibold text-[var(--color-text-primary)]">
+                  Nota del staff
+                </h3>
+                <span
+                  class="text-[10px] sm:text-[11px] font-medium uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded"
+                >
+                  Solo interno
+                </span>
+              </div>
+              <p
+                class="text-sm text-[var(--color-text-primary)] whitespace-pre-line leading-relaxed"
+              >
+                {{ orderData.internal_notes }}
+              </p>
+            </app-card>
+          }
+
+          <!-- 1.7. CITAS AGENDADAS — CP-POS-SVC-PERF-001 / C.5 -->
+          @if (orderData.bookings && orderData.bookings.length > 0) {
+            <app-card shadow="sm" [responsivePadding]="true">
+              <div slot="header" class="flex items-center gap-2">
+                <app-icon name="calendar" [size]="18" class="text-violet-500"></app-icon>
+                <h3 class="text-base sm:text-lg font-semibold text-[var(--color-text-primary)]">
+                  Citas agendadas
+                </h3>
+                <span
+                  class="text-[10px] sm:text-[11px] font-medium uppercase tracking-wide text-violet-700 bg-violet-50 border border-violet-200 px-2 py-0.5 rounded"
+                >
+                  {{ orderData.bookings.length }}
+                </span>
+              </div>
+
+              <div class="space-y-2">
+                @for (booking of orderData.bookings; track booking.id) {
+                  <div
+                    class="p-3 sm:p-4 bg-[var(--color-surface)] rounded-xl border border-border flex flex-col gap-2"
+                  >
+                    <div class="flex items-center justify-between flex-wrap gap-2">
+                      <div class="flex items-center gap-2 min-w-0">
+                        <app-icon name="calendar-check" [size]="16" class="text-violet-500 flex-shrink-0"></app-icon>
+                        <span class="font-medium text-sm truncate">
+                          {{ booking.product?.name || 'Servicio' }}
+                          @if (booking.product_variants?.name) {
+                            <span class="text-gray-500">· {{ booking.product_variants?.name }}</span>
+                          }
+                        </span>
+                      </div>
+                      <span
+                        class="text-[10px] sm:text-xs font-medium uppercase tracking-wide px-2 py-0.5 rounded"
+                        [class.text-emerald-700]="booking.status === 'confirmed' || booking.status === 'completed'"
+                        [class.bg-emerald-50]="booking.status === 'confirmed' || booking.status === 'completed'"
+                        [class.text-amber-700]="booking.status === 'pending' || booking.status === 'in_progress'"
+                        [class.bg-amber-50]="booking.status === 'pending' || booking.status === 'in_progress'"
+                        [class.text-rose-700]="booking.status === 'cancelled' || booking.status === 'no_show'"
+                        [class.bg-rose-50]="booking.status === 'cancelled' || booking.status === 'no_show'"
+                      >
+                        {{ booking.status }}
+                      </span>
+                    </div>
+                    <div class="flex items-center flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
+                      <span class="flex items-center gap-1">
+                        <app-icon name="calendar" [size]="12"></app-icon>
+                        {{ booking.date }}
+                      </span>
+                      <span class="flex items-center gap-1">
+                        <app-icon name="clock" [size]="12"></app-icon>
+                        {{ booking.start_time }} – {{ booking.end_time }}
+                      </span>
+                      @if (booking.provider?.employee?.first_name || booking.provider?.display_name) {
+                        <span class="flex items-center gap-1">
+                          <app-icon name="user" [size]="12"></app-icon>
+                          {{
+                            booking.provider?.employee?.first_name
+                              ? ((booking.provider?.employee?.first_name || '') + ' ' + (booking.provider?.employee?.last_name || ''))
+                              : booking.provider?.display_name
+                          }}
+                        </span>
+                      } @else {
+                        <span class="flex items-center gap-1 text-gray-400">
+                          <app-icon name="user-x" [size]="12"></app-icon>
+                          Sin personal asignado
+                        </span>
+                      }
+                    </div>
+                  </div>
+                }
+              </div>
             </app-card>
           }
 

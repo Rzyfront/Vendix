@@ -72,3 +72,4 @@ apps/mobile/.captures/
 
 # buildcheck logs (compile gate, scripts/buildcheck.sh)
 .buildcheck/
+test-results/

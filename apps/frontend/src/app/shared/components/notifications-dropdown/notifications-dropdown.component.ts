@@ -48,7 +48,7 @@ import {
         </div>
 
         <div class="notif-list">
-          @for (n of notifications(); track n) {
+          @for (n of notifications(); track n.id) {
             <div
               class="notif-item"
               [class.unread]="!n.is_read"

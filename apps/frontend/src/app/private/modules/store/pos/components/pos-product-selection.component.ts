@@ -1159,8 +1159,11 @@ export class PosProductSelectionComponent {
       return;
     }
 
-    if (product.requires_booking === true) {
-      this.bookingRequired.emit(product);
+    // CP-POS-SVC-BOOKING-001 — When selecting a service or booking-required product,
+    // intercept and emit bookingRequired so the scheduler modal opens to configure
+    // date, time, provider, and location before adding to cart.
+    if (product.product_type === 'service' || product.requires_booking === true) {
+      this.bookingRequired.emit({ product, variant: null });
       return;
     }
 
@@ -1174,7 +1177,7 @@ export class PosProductSelectionComponent {
 
     if (!product) return;
 
-    if (product.requires_booking === true) {
+    if (product.product_type === 'service' || product.requires_booking === true) {
       this.bookingRequired.emit({ product, variant });
       return;
     }

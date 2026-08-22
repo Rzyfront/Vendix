@@ -1471,6 +1471,28 @@ export class ReservationsSettingsDto {
   @IsOptional()
   @IsBoolean()
   allow_direct_reschedule?: boolean;
+
+  /**
+   * CP-POS-SVC-PERF-001 — store-level policy that gates whether the
+   * POS can persist a `bookings` row on a draft order (Guardar) or
+   * whether scheduling only becomes legal after payment (Cobrar).
+   *
+   *  - true (default): the POS POSTs /api/store/reservations right
+   *    after Guardar so the cashier can book a slot before charging.
+   *  - false: bookings are only persisted on the Cobrar path; the
+   *    draft order survives without a booking until the cashier
+   *    charges it. The editor atomic block attaches the booking then.
+   */
+  @ApiProperty({
+    example: true,
+    required: false,
+    description:
+      'Si true, el POS puede agendar un servicio al Guardar la orden. ' +
+      'Si false, el agendamiento solo se persiste al Cobrar (pago confirmado).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  allow_bookings_without_payment?: boolean;
 }
 
 /**

@@ -8039,7 +8039,12 @@ model invoice_retry_queue {
 model bookings {
   id                        Int                           @id @default(autoincrement())
   store_id                  Int
-  customer_id               Int
+  /// CP-POS-SVC-PERF-001 / HU-B + HU-C — anonymous sales ("Venta
+  /// Anónima" / Consumidor Final) must be able to carry a booking
+  /// alongside the order. The cashier picks the staff + day + time,
+  /// and the booking is tied to the order alone. Optional now; legacy
+  /// rows stay required by application-level guards.
+  customer_id               Int?
   product_id                Int
   product_variant_id        Int?
   booking_number            String                        @db.VarChar(50)
@@ -8072,11 +8077,16 @@ model bookings {
   /// `home`. NULL for `shop` bookings.
   service_address_id        Int?
   service_address           addresses?                    @relation("booking_service_address", fields: [service_address_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  /// CP-POS-SVC-PERF-001 / C.1 — optional link from booking back to the
+  /// cart line that produced it. Allows the order editor to round-trip
+  /// the same booking atomically. NULL when the booking was created
+  /// outside the POS (ecommerce, reservations module, etc.).
+  cart_item_id              String?                       @db.VarChar(80)
   created_at                DateTime?                     @default(now()) @db.Timestamp(6)
   updated_at                DateTime?                     @default(now()) @db.Timestamp(6)
 
   store            stores             @relation(fields: [store_id], references: [id])
-  customer         users              @relation("bookings_customer", fields: [customer_id], references: [id])
+  customer         users?             @relation("bookings_customer", fields: [customer_id], references: [id])
   product          products           @relation(fields: [product_id], references: [id])
   product_variants product_variants?  @relation(fields: [product_variant_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   order            orders?            @relation(fields: [order_id], references: [id])

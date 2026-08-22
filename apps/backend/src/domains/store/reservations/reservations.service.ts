@@ -271,12 +271,14 @@ export class ReservationsService {
     }
 
     // 4. Validar que el cliente no tenga reservas superpuestas
-    await this.availabilityService.validateNoOverlapForCustomer(
-      dto.customer_id,
-      dto.date,
-      dto.start_time,
-      dto.end_time,
-    );
+    if (dto.customer_id) {
+      await this.availabilityService.validateNoOverlapForCustomer(
+        dto.customer_id,
+        dto.date,
+        dto.start_time,
+        dto.end_time,
+      );
+    }
 
     // 5. Generar numero de reserva
     const booking_number = await this.generateBookingNumber(store_id, dto.date);
@@ -387,6 +389,11 @@ export class ReservationsService {
               end_time: dto.end_time,
               status: booking_status_enum.pending,
               channel: dto.channel || 'pos',
+              // CP-POS-SVC-PERF-001 — cart-line anchor surfaced by the
+              // POS scheduler so future re-orders can reattach the same
+              // booking to its original cart row. Optional and persisted
+              // verbatim.
+              cart_item_id: dto.cart_item_id ?? null,
               notes: dto.notes,
               order_id: orderIdForBooking,
               table_id: dto.table_id ?? null,
@@ -452,7 +459,12 @@ export class ReservationsService {
       store_id,
       booking_id: booking.id,
       booking_number: booking.booking_number,
-      customer_name: `${booking.customer.first_name} ${booking.customer.last_name}`,
+      // CP-POS-SVC-PERF-001 / HU-B + HU-C — anonymous sales carry
+      // bookings without a linked customer; the event listener
+      // doesn't need a name string when the booking is unattached.
+      customer_name: booking.customer
+        ? `${booking.customer.first_name} ${booking.customer.last_name}`
+        : 'Consumidor Final',
       service_name: booking.product.name,
       date: dto.date,
       start_time: dto.start_time,
@@ -470,6 +482,8 @@ export class ReservationsService {
     start_time: string;
     end_time: string;
     notes?: string;
+    cart_item_id?: string;
+    order_id?: number;
   }) {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
@@ -540,6 +554,11 @@ export class ReservationsService {
         end_time: dto.end_time,
         status: booking_status_enum.pending,
         channel: 'ecommerce',
+        // CP-POS-SVC-PERF-001 — cart-line anchor surfaced by the POS
+        // scheduler so future re-orders can reattach the same booking
+        // to its original cart row. Optional and persisted verbatim.
+        cart_item_id: dto.cart_item_id ?? null,
+        order_id: dto.order_id ?? null,
         notes: dto.notes,
         expires_at: expiresAt,
         created_by_user_id: context?.user_id,

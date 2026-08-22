@@ -35,12 +35,13 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
         iconTone="teal"
         title="Reservas"
         hint="Al apagar el reagendamiento directo, cada cambio de cita queda pendiente de tu aprobación.">
-        <!-- Fallback a { allow_direct_reschedule: true } cuando la tienda nunca
-             persistió esta sección — preserva la UX heredada de un clic hasta
-             que el operador opte explícitamente por el flujo de aprobación. -->
+        <!-- Fallback a { allow_direct_reschedule: true, allow_bookings_without_payment: true }
+             cuando la tienda nunca persistió esta sección — preserva la UX
+             heredada (reagenda directa + agenda sin pago) hasta que el
+             operador opte explícitamente por algo distinto. -->
         <app-reservations-settings-form
           [settings]="
-            store.settings().reservations || { allow_direct_reschedule: true }
+            store.settings().reservations || { allow_direct_reschedule: true, allow_bookings_without_payment: true }
           "
           (settingsChange)="store.onSectionChange('reservations', $event)" />
       </app-settings-section>

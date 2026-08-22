@@ -568,7 +568,12 @@ export class OrderDetailsPageComponent {
 
   readonly sortedTimeline = computed(() => {
     const logs = this.rawTimeline();
-    if (!logs || logs.length === 0) return [];
+    // CP-POS-SVC-PERF-001 / Bugfix — guard against non-iterable signal
+    // values. The timeline API response can land as `{success: true, data}`
+    // when the envelope unwrap fails (interceptor, mock, error shape).
+    // Spread/Array.from throw "logs is not iterable" → kills the entire
+    // order detail page. We coerce defensively.
+    if (!Array.isArray(logs) || logs.length === 0) return [];
 
     // Sort ascending by created_at (oldest first)
     const sorted = [...logs].sort(
@@ -934,7 +939,12 @@ export class OrderDetailsPageComponent {
 
   readonly history_timeline_steps = computed<TimelineStep[]>(() => {
     const logs = this.sortedTimeline();
-    if (logs.length === 0) {
+    // CP-POS-SVC-PERF-001 / Bugfix — defensive: sortedTimeline already
+    // returns [] when rawTimeline is non-iterable, but the parent
+    // `TimelineComponent.current_step` throws NG0950 because the
+    // `input.required<TimelineStep[]>()` saw `undefined`. Belt and braces:
+    // if sortedTimeline ever returns a non-array, coerce.
+    if (!Array.isArray(logs) || logs.length === 0) {
       const order = this.order();
       return [{
         key: 'created',
@@ -1210,7 +1220,16 @@ export class OrderDetailsPageComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: ({ order, timeline }) => {
-          const orderData = (order as any).data || order;
+          // CP-POS-SVC-PERF-001 / F.14-Round2 — defensive envelope
+          // detection. If a service upgrade accidentally regresses and
+          // returns `{success, data}` again, this catches the leak and
+          // unwraps locally instead of spreading the envelope across the
+          // Order signal (which would render every field as undefined
+          // and "$0" totals).
+          const orderData =
+            order && typeof order === 'object' && 'success' in order
+              ? (order as any).data ?? order
+              : order;
           this.order.set({
             ...orderData,
             grand_total: Number(orderData.grand_total),
@@ -1254,7 +1273,13 @@ export class OrderDetailsPageComponent {
             })),
           });
 
-          this.rawTimeline.set((timeline as any).data || timeline || []);
+          this.rawTimeline.set(
+            Array.isArray(timeline)
+              ? timeline
+              : Array.isArray((timeline as any)?.data)
+                ? (timeline as any).data
+                : [],
+          );
           this.isLoading.set(false);
 
           // Load payment methods if order can accept payment

@@ -64,6 +64,8 @@ export interface Order {
    * Never exposed to the customer.
    */
   notes?: string;
+  // CP-POS-SVC-PERF-001 / C.5 — service bookings attached to this order.
+  bookings?: OrderBooking[];
   created_at: string;
   updated_at: string;
   completed_at?: string;
@@ -656,6 +658,13 @@ export interface OrderFlowMetadata {
   cancellation_reason?: string;
   refund_reason?: string;
   refund_amount?: number;
+  /**
+   * Optional structured representation of the staff-only internal note.
+   * When present, the order-details page suppresses the plain-text
+   * `internal_notes` block to avoid duplication. Stored as JSON
+   * (e.g. an array of `{ key, value }` pairs).
+   */
+  internal_notes_as_json?: unknown;
 }
 
 // ── Order Detail UI Types ──────────────────────────────────────
@@ -790,4 +799,39 @@ export interface RefundItemRecord {
 export interface ResolveRefundPayload {
   target_state: 'completed' | 'failed';
   resolution_notes: string;
+}
+
+/**
+ * * CP-POS-SVC-PERF-001 / C.5 — booking row surfaced via `findOne`. The
+ * `provider.employee` chain is the canonical way Vendix resolves the
+ * assigned staff member (vendix-restaurant-ops equivalent is `staff`).
+ */
+export interface OrderBooking {
+  id: number;
+  booking_number?: string;
+  product_id: number;
+  product_variant_id?: number;
+  customer_id: number;
+  /** Calendar date (YYYY-MM-DD) of the appointment. */
+  date: string;
+  /** "HH:mm" wall-clock time, store-local. */
+  start_time: string;
+  end_time: string;
+  status: string;
+  provider_id?: number | null;
+  channel?: string;
+  notes?: string;
+  product?: { id: number; name: string };
+  product_variants?: { id: number; name: string };
+  provider?: {
+    id: number;
+    display_name?: string;
+    avatar_url?: string;
+    employee?: {
+      id: number;
+      first_name: string;
+      last_name: string;
+      avatar_url?: string;
+    } | null;
+  } | null;
 }

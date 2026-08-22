@@ -1,4 +1,7 @@
 <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
+  <div class="catalog-filters-slot">
+    <ng-content select="[slot='filters']"></ng-content>
+  </div>
   <div class="catalog-section">
     <div class="catalog-header">
       <div class="catalog-header-text">
@@ -11,16 +14,17 @@
     </div>
 
     <div class="catalog-controls">
+      <app-inputsearch
+        placeholder="Buscar reporte..."
+        size="md"
+        (searchChange)="onSearchChange($event)"
+        class="catalog-search"
+      />
       <app-report-category-chips
         [categories]="categories()"
         [selectedCategory]="selectedCategory()"
         [categoryCounts]="categoryCounts()"
         (categoryChange)="onCategoryChange($event)"
-      />
-      <app-inputsearch
-        placeholder="Buscar reporte..."
-        (searchChange)="onSearchChange($event)"
-        class="catalog-search"
       />
     </div>
 

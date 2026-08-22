@@ -37,6 +37,34 @@
       />
     </div>
 
+    <!-- CP-POS-SVC-PERF-001 — toggle de agendamiento sin pago. Cuando
+         está ACTIVO el POS guarda el booking junto con el borrador
+         (POST /api/store/reservations con order_id). Cuando está
+         INACTIVO el POS sólo persiste el agendamiento al Cobrar
+         (vía el bloque atómico del editor PUT /orders/:id/editor). -->
+    <div class="policy-toggle">
+      <div class="policy-toggle__label">
+        <span>Agendar servicios sin pago</span>
+        <app-tooltip
+          content="Ejemplo: una peluquería con varios sillones. El cajero reserva la silla 3 a las 10:00 mientras el cliente sigue eligiendo peinado — la cita queda bloqueada antes del cobro. Si esta opción está apagada, la reserva se crea únicamente cuando el cliente paga (Cobrar)."
+          position="top"
+        >
+          <span class="help-icon">
+            <app-icon name="help-circle" [size]="13"></app-icon>
+          </span>
+        </app-tooltip>
+        <app-badge variant="info" size="xs" badgeStyle="outline">
+          Activo por defecto
+        </app-badge>
+      </div>
+      <app-setting-toggle
+        [formControl]="allowBookingsWithoutPaymentControl"
+        label="¿Permitir agendar antes del cobro?"
+        description="Activo: el cajero puede asignar personal + día + hora a un servicio al Guardar la orden, sin esperar al pago. Inactivo: el agendamiento se persiste únicamente al Cobrar — un Guardar sólo guarda el servicio sin cita."
+        (changed)="onFieldChange()"
+      />
+    </div>
+
     <!-- Comparativa de las dos caras. La vigente queda resaltada para que el
          operador vea de inmediato bajo qué política está operando hoy. -->
     <div class="policy-grid">

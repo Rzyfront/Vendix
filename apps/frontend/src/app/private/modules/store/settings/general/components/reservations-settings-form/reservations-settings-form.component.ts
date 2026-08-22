@@ -23,6 +23,27 @@ export interface ReservationsSettings {
    * slot until an admin approves or rejects it.
    */
   allow_direct_reschedule: boolean;
+  /**
+   * CP-POS-SVC-PERF-001 — store-level policy that controls whether a
+   * POS cashier can persist a `bookings` row on a draft order
+   * (Guardar) or whether scheduling only becomes legal after payment
+   * clears (Cobrar).
+   *
+   *  - true (default): the POS POSTs /api/store/reservations right
+   *    after Guardar so the cashier can book a slot before charging.
+   *    Useful for service-heavy stores (salons, clinics, repair
+   *    shops) where the cashier books the slot first and collects
+   *    payment later.
+   *  - false: bookings are only persisted on the Cobrar path. The
+   *    draft order survives without a booking until the cashier
+   *    charges it; the editor atomic block then attaches the
+   *    booking. Useful for stores that want payment guaranteed
+   *    before any technician's calendar is locked.
+   *
+   * Mirrors `ReservationsSettings.allow_bookings_without_payment` in
+   * the backend `store-settings.interface.ts`.
+   */
+  allow_bookings_without_payment: boolean;
 }
 
 /**
@@ -123,11 +144,17 @@ export class ReservationsSettingsForm {
     allow_direct_reschedule: new FormControl<boolean>(true, {
       nonNullable: true,
     }),
+    allow_bookings_without_payment: new FormControl<boolean>(true, {
+      nonNullable: true,
+    }),
   });
 
   /** Typed accessor for the FormControl. */
   get allowDirectRescheduleControl(): FormControl<boolean> {
     return this.form.get('allow_direct_reschedule') as FormControl<boolean>;
+  }
+  get allowBookingsWithoutPaymentControl(): FormControl<boolean> {
+    return this.form.get('allow_bookings_without_payment') as FormControl<boolean>;
   }
 
   constructor() {

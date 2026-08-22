@@ -5,6 +5,7 @@ import { AnalyticsShellComponent } from './analytics-shell.component';
 import {
   AnalyticsCategoryId,
   getCategoryById,
+  getViewsByCategory,
 } from '../../config/analytics-registry';
 import { DateRangeSyncService } from '../../../shared/services/date-range-sync.service';
 
@@ -47,9 +48,17 @@ describe('AnalyticsShellComponent', () => {
 // The previous `tabs()` API has been retired; analytics exposes its tabs
 // declaratively in the template, not as a public signal on the component.
 // The header now owns the primary 'Ver Reportes' action, asserted below.
-it('exposes the category id from the route data', () => {
-  expect(component.category()?.id).toBe('sales');
-});
+  it('exposes the category id from the route data', () => {
+    expect(component.category()?.id).toBe('sales');
+  });
+
+  it('derives sticky-header tabs from the sales registry views', () => {
+    const tabs = component.headerTabs();
+    expect(tabs.length).toBe(getViewsByCategory('sales').length);
+    expect(tabs[0].route).toBe('/admin/analytics/sales/summary');
+    expect(tabs.every((tab) => !!tab.route)).toBe(true);
+  });
+
   it('renders the Ver Reportes header action', () => {
     const actions = component.headerActions();
     expect(actions.length).toBe(1);

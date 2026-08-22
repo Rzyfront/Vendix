@@ -638,9 +638,96 @@ export class PosCartService {
     resolved: Array<{ item: any; product: Product | null }>,
   ): CartState {
     const discounts = this.mapOrderPromotionsToDiscounts(order);
-    const cartItems: CartItem[] = resolved.map(({ item, product }) =>
-      this.mapOrderItemToCartItem(item, product),
-    );
+    const bookingRows = Array.isArray(order?.bookings) ? order.bookings : [];
+    const pendingBookings = bookingRows.map((b: any) => ({
+      id: Number(b.id || 0),
+      booking_number: b.booking_number || '',
+      product_id: Number(b.product_id || 0),
+      product_name: b.product?.name || b.product_name || '',
+      product_variant_id: b.product_variant_id ? Number(b.product_variant_id) : undefined,
+      customer_id: Number(b.customer_id || 0),
+      date: (b.date ? String(b.date) : '').slice(0, 10),
+      start_time: b.start_time || '',
+      end_time: b.end_time || '',
+      provider_name:
+        b.provider?.display_name ||
+        b.provider?.employee?.first_name ||
+        undefined,
+      service_location_type: b.service_location_type || 'shop',
+      notes: b.notes || '',
+      cart_item_id: b.cart_item_id || undefined,
+    }));
+
+    const cartItems: CartItem[] = resolved.map(({ item, product }) => {
+      const cartItem = this.mapOrderItemToCartItem(item, product);
+      let matchedBooking = bookingRows.find(
+        (b: any) =>
+          (b.cart_item_id && b.cart_item_id === `cart-${item.id}`) ||
+          (item.product_id && b.product_id === Number(item.product_id)),
+      );
+
+      if (!matchedBooking && (item.notes || item.description)) {
+        const text = String(item.notes || item.description || '');
+        const match = text.match(/\[BOOKING:(\{.*?\})\]/);
+        if (match && match[1]) {
+          try {
+            const parsed = JSON.parse(match[1]);
+            matchedBooking = {
+              ...parsed,
+              product_id: Number(item.product_id ?? parsed.product_id),
+              product_variant_id: item.product_variant_id ?? parsed.product_variant_id ?? null,
+            };
+          } catch (e) {
+            // ignore malformed JSON
+          }
+        }
+      }
+
+      if (matchedBooking) {
+        cartItem.booking = {
+          booking_id: matchedBooking.id ?? matchedBooking.booking_id ?? 0,
+          provider_id: matchedBooking.provider_id,
+          provider_name:
+            matchedBooking.provider?.display_name ||
+            matchedBooking.provider?.employee?.first_name ||
+            matchedBooking.provider_name ||
+            undefined,
+          date: (matchedBooking.date ? String(matchedBooking.date) : '').slice(0, 10),
+          start_time: matchedBooking.start_time || '',
+          end_time: matchedBooking.end_time || '',
+          notes: matchedBooking.notes || '',
+          service_location_type: matchedBooking.service_location_type || 'shop',
+        };
+
+        if (
+          !pendingBookings.some(
+            (pb: any) =>
+              pb.product_id === Number(item.product_id) &&
+              pb.date === cartItem.booking?.date &&
+              pb.start_time === cartItem.booking?.start_time,
+          )
+        ) {
+          pendingBookings.push({
+            id: Number(cartItem.booking.booking_id || 0),
+            booking_number: matchedBooking.booking_number || '',
+            product_id: Number(item.product_id || 0),
+            product_name: product?.name || item.product_name || '',
+            product_variant_id: item.product_variant_id
+              ? Number(item.product_variant_id)
+              : undefined,
+            customer_id: Number(order.customer_id || 0),
+            date: cartItem.booking.date,
+            start_time: cartItem.booking.start_time,
+            end_time: cartItem.booking.end_time,
+            provider_name: cartItem.booking.provider_name,
+            service_location_type: cartItem.booking.service_location_type,
+            notes: cartItem.booking.notes,
+            cart_item_id: `cart-${item.id}`,
+          });
+        }
+      }
+      return cartItem;
+    });
 
     return {
       items: cartItems,
@@ -649,7 +736,7 @@ export class PosCartService {
       internalNotes: order?.internal_notes ?? '',
       appliedDiscounts: discounts,
       appliedCoupon: this.mapOrderCouponsToAppliedCoupon(order),
-      pendingBookings: [],
+      pendingBookings,
       summary: this.calculateSummary(cartItems, discounts),
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -1973,16 +2060,21 @@ export class PosCartService {
     const hasSerials =
       (request.serial_ids?.length ?? 0) > 0 ||
       (request.serial_numbers?.length ?? 0) > 0;
+    const isServiceOrBooking =
+      request.product.product_type === 'service' ||
+      request.product.requires_booking === true ||
+      !!request.booking;
     const existingItemIndex =
-      isWeightProduct || hasSerials || request.capturedByScale === true
-        ? -1 // Don't combine weight items / serialized lines
+      isWeightProduct || hasSerials || isServiceOrBooking || request.capturedByScale === true
+        ? -1 // Don't combine weight items / serialized lines / booked services
         : currentState.items.findIndex(
             (item) =>
               item.product.id === request.product.id &&
               (item.variant_id || null) === (request.variant?.id || null) &&
               (item.skipKds ?? false) === (request.skipKds === true) &&
               (item.isTakeaway ?? false) === (request.isTakeaway === true) &&
-              !(item.serial_ids?.length || item.serial_numbers?.length),
+              !(item.serial_ids?.length || item.serial_numbers?.length) &&
+              !item.booking,
           );
 
     // Variant-aware pricing
@@ -2097,6 +2189,8 @@ export class PosCartService {
         serial_numbers: request.serial_numbers?.length
           ? request.serial_numbers
           : undefined,
+        // CP-POS-SVC-BOOKING-001 — Scheduled appointment details for service lines.
+        booking: request.booking,
       };
       updatedItems = [newItem, ...currentState.items];
     }

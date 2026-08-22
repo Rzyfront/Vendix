@@ -11,7 +11,6 @@ import {
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { OptionsDropdownComponent } from '../../../../../../../shared/components/options-dropdown/options-dropdown.component';
-import { StickyHeaderComponent } from '../../../../../../../shared/components/sticky-header/sticky-header.component';
 import {
   DropdownAction,
   FilterConfig,
@@ -74,12 +73,15 @@ const PLACEHOLDER_VALUE = '—';
  * Replaces the previous `<app-report-viewer>` shell with a custom layout
  * composed of:
  *
- *   1. A sticky header.
- *   2. A date-range filter exposed via `<app-options-dropdown>` (Fase B1
+ *   1. A date-range filter exposed via `<app-options-dropdown>` (Fase B1
  *      migration — period used to live in a standalone `<vendix-date-range-filter>`
  *      and now travels inside the unified Filtros trigger).
- *   3. A 4×2 grid of color-coded stat cards driven by `OverviewSummary`.
- *   4. The full reports catalog (chips + search + grouped grid).
+ *   2. A 4×2 grid of color-coded stat cards driven by `OverviewSummary`.
+ *   3. The full reports catalog (chips + search + grouped grid).
+ *
+ * The page-level header is provided by the parent `ReportsShellComponent`,
+ * which already renders a category-scoped `<app-sticky-header>`. Rendering a
+ * second one here would duplicate the title and waste vertical space.
  *
  * Loads data directly via `ReportsDataService.fetchReportData` (no NgRx)
  * and reacts to `dateRange` changes through an `effect()` that triggers
@@ -89,7 +91,6 @@ const PLACEHOLDER_VALUE = '—';
  *   - `vendix-zoneless-signals` (signal inputs/outputs, OnPush, no legacy)
  *   - `vendix-currency-formatting` (CurrencyFormatService for ad-hoc formats)
  *   - `vendix-frontend-stats-cards` (responsive 4×2 → 2×4 → horizontal scroll)
- *   - `vendix-frontend-sticky-header` (page-level header)
  *   - `vendix-analytics-metrics` (threshold definitions)
  */
 @Component({
@@ -100,33 +101,12 @@ const PLACEHOLDER_VALUE = '—';
     OverviewStatCardComponent,
     ReportsCatalogComponent,
     OptionsDropdownComponent,
-    StickyHeaderComponent,
     IconComponent,
   ],
   styleUrls: ['./overview-summary-report.component.scss'],
   template: `
     <div class="overview-summary-page">
-      <app-sticky-header
-        title="Resumen General"
-        subtitle="Vista ejecutiva del estado del negocio"
-        icon="bar-chart-3"
-      />
-
       <div class="overview-summary-content">
-        <div class="overview-summary-toolbar">
-          <app-options-dropdown
-            [filters]="filterConfigs()"
-            [filterValues]="dropdownFilterValues()"
-            [actions]="[]"
-            [showActions]="false"
-            triggerLabel="Filtros"
-            triggerIcon="filter"
-            [debounceMs]="350"
-            (filterChange)="onFiltersDropdownChange($event)"
-            (clearAllFilters)="onFiltersDropdownClearAll()"
-          ></app-options-dropdown>
-        </div>
-
         @if (statCards().length > 0) {
           <div class="overview-stats-grid">
             @for (card of statCards(); track card.key) {
@@ -144,7 +124,20 @@ const PLACEHOLDER_VALUE = '—';
           </div>
         }
 
-        <app-reports-catalog />
+        <app-reports-catalog>
+          <app-options-dropdown
+            slot="filters"
+            [filters]="filterConfigs()"
+            [filterValues]="dropdownFilterValues()"
+            [actions]="[]"
+            [showActions]="false"
+            triggerLabel="Filtros"
+            triggerIcon="filter"
+            [debounceMs]="350"
+            (filterChange)="onFiltersDropdownChange($event)"
+            (clearAllFilters)="onFiltersDropdownClearAll()"
+          />
+        </app-reports-catalog>
 
         @if (error(); as err) {
           <div class="overview-error-banner" role="alert">
@@ -360,7 +353,7 @@ export class OverviewSummaryReportComponent {
         neutral({
           key: 'total_expenses',
           title: 'Gastos Totales',
-          icon: 'trending-down',
+          icon: 'trending-up',
           formatType: 'currency',
         }),
         neutral({
@@ -372,7 +365,7 @@ export class OverviewSummaryReportComponent {
         neutral({
           key: 'net_profit',
           title: 'Ganancia Neta',
-          icon: 'circle-dollar-sign',
+          icon: 'dollar-sign',
           formatType: 'currency',
         }),
         neutral({
@@ -390,14 +383,14 @@ export class OverviewSummaryReportComponent {
         neutral({
           key: 'breakeven_ratio',
           title: 'Punto de Equilibrio %',
-          icon: 'gauge',
+          icon: 'clock',
           formatType: 'percentage',
         }),
         // Growth has a specific null-treatment (trend = flat, growth = null).
         neutral({
           key: 'income_growth',
           title: 'Crecimiento Ingresos',
-          icon: 'minus',
+          icon: '',
           formatType: 'percentage',
           trend: 'flat',
           growth: null,
@@ -439,7 +432,7 @@ export class OverviewSummaryReportComponent {
       {
         key: 'total_expenses',
         title: 'Gastos Totales',
-        icon: 'trending-down',
+        icon: 'trending-up',
         state: this.expenseState(expenseRatio),
         trend: undefined,
         growth: undefined,
@@ -461,7 +454,7 @@ export class OverviewSummaryReportComponent {
       {
         key: 'net_profit',
         title: 'Ganancia Neta',
-        icon: 'circle-dollar-sign',
+        icon: 'dollar-sign',
         state: this.netProfitState(computedNetMargin, hasIncome),
         trend: undefined,
         growth: undefined,
@@ -494,7 +487,7 @@ export class OverviewSummaryReportComponent {
       {
         key: 'breakeven_ratio',
         title: 'Punto de Equilibrio %',
-        icon: 'gauge',
+        icon: 'clock',
         state: this.breakevenState(breakeven),
         trend: undefined,
         growth: undefined,
@@ -557,7 +550,7 @@ export class OverviewSummaryReportComponent {
       return {
         key: 'income_growth',
         title: 'Crecimiento Ingresos',
-        icon: 'minus',
+        icon: '',
         state: 'neutral',
         trend: 'flat',
         growth: null,
@@ -567,17 +560,19 @@ export class OverviewSummaryReportComponent {
       };
     }
 
+    const formattedGrowthValue = this.formatPercentage(value);
+
     if (value > 0) {
       return {
         key: 'income_growth',
         title: 'Crecimiento Ingresos',
-        icon: 'trending-up',
+        icon: '',
         state: 'positive',
         trend: 'up',
         growth: value,
         formatType: 'percentage',
         value,
-        formattedValue: this.formatPercentage(value),
+        formattedValue: formattedGrowthValue,
       };
     }
 
@@ -585,26 +580,26 @@ export class OverviewSummaryReportComponent {
       return {
         key: 'income_growth',
         title: 'Crecimiento Ingresos',
-        icon: 'trending-down',
+        icon: '',
         state: 'critical',
         trend: 'down',
         growth: value,
         formatType: 'percentage',
         value,
-        formattedValue: this.formatPercentage(value),
+        formattedValue: formattedGrowthValue,
       };
     }
 
     return {
       key: 'income_growth',
       title: 'Crecimiento Ingresos',
-      icon: 'minus',
+      icon: '',
       state: 'neutral',
       trend: 'flat',
       growth: 0,
       formatType: 'percentage',
       value: 0,
-      formattedValue: this.formatPercentage(0),
+      formattedValue: '0%',
     };
   }
 
@@ -620,7 +615,10 @@ export class OverviewSummaryReportComponent {
 
   private formatPercentage(value: number | null): string {
     if (value === null) return PLACEHOLDER_VALUE;
-    return `${value}%`;
+    const num = Number(value);
+    if (Number.isNaN(num)) return PLACEHOLDER_VALUE;
+    const formatted = num % 1 === 0 ? num.toString() : num.toFixed(2);
+    return `${formatted}%`;
   }
 
   private numberOrNull(value: unknown): number | null {

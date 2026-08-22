@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
-import { throwError } from 'rxjs';
+import { throwError, of } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
@@ -268,11 +268,39 @@ export class StoreOrdersService {
     // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 MAJOR.
     // Backend wraps successful responses in `{ success, data, message }`
     // via `ResponseService.success`, so a raw `this.http.get<Order>` left
-    // every consumer reading `result.id` and getting `undefined`. The
-    // `map` unwraps `data` while preserving the raw envelope for any
-    // caller that still wants it (`(r as any).data ?? r`).
+    // every consumer reading `result.id` and getting `undefined`.
+    //
+    // Round 3 — F.14 / F.15 follow-up. `r?.data ?? r` is ambiguous: if the
+    // backend returns `{ success: true, data: undefined, message: ... }`
+    // (interceptor stripped `data`, mock backend, partial response), the
+    // fallback returned the envelope itself, which then was cast as
+    // `Order` and spread across `this.order.set(...)`, leaving every
+    // order field undefined and the page rendering as "Orden #undefined
+    // • Tienda: undefined • Subtotal $0". We now detect the envelope
+    // shape explicitly: when `success === true` we demand `data` to be
+    // an object; otherwise we surface a hard error rather than return a
+    // shape-cast envelope as a fake Order.
     return this.http.get<any>(url).pipe(
-      map((r) => (r?.data ?? r) as Order),
+      map((r) => {
+        if (r && typeof r === 'object' && 'success' in r) {
+          // Envelope shape — must contain `data` for a 200 OK.
+          if (r.success === true) {
+            if (r.data && typeof r.data === 'object') return r.data as Order;
+            // success:true but data missing — backend bug or partial
+            // response. Fail loud so the page shows the error UI rather
+            // than silently rendering "Orden #undefined".
+            throw new Error(
+              'orders.getOrderById: envelope {success:true} returned without data',
+            );
+          }
+          // success:false — let the catchError branch format the message.
+          throw new Error(
+            (r as any).message || 'orders.getOrderById: envelope reported failure',
+          );
+        }
+        // No envelope — backend returned the Order directly.
+        return r as Order;
+      }),
       catchError((error) => {
         console.error('Error fetching order:', error);
         return throwError(() => this.buildApiError(error));
@@ -283,10 +311,14 @@ export class StoreOrdersService {
   getOrderTimeline(orderId: string): Observable<any[]> {
     const url = `${this.apiUrl}/store/orders/${orderId}/timeline`;
 
-    return this.http.get<any[]>(url).pipe(
+    return this.http.get<any>(url).pipe(
+      map((r) => (Array.isArray(r?.data) ? r.data : Array.isArray(r) ? r : [])),
       catchError((error) => {
         console.error('Error fetching order timeline:', error);
-        return throwError(() => this.buildApiError(error));
+        // CP-POS-SVC-PERF-001 — never propagate as fatal: order detail
+        // must render even when the timeline endpoint fails. The page
+        // shows an empty history instead of a full crash.
+        return of([] as any[]);
       }),
     );
   }

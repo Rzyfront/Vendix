@@ -14,105 +14,121 @@
 }
 
 // ============================================================================
-// Card shell — base look + per-state border/background tint.
-// `transition-property` is restricted to transform/box-shadow so we never
-// restart animations on color/opacity changes (zoneless + perf rule).
+// State palette — CSS custom properties per state (positive, critical, warning, neutral).
+// ============================================================================
+
+.state-positive {
+  --state-color: #10b981;
+  --state-color-rgb: 16, 185, 129;
+}
+
+.state-critical {
+  --state-color: #ef4444;
+  --state-color-rgb: 239, 68, 68;
+}
+
+.state-warning {
+  --state-color: #f59e0b;
+  --state-color-rgb: 245, 158, 11;
+}
+
+.state-neutral {
+  --state-color: #6b7280;
+  --state-color-rgb: 107, 114, 128;
+}
+
+// ============================================================================
+// Card container — Clean Stitch design with soft shadow, rounded corners,
+// corner gradient blur, and bottom accent line.
 // ============================================================================
 
 .overview-stat-card {
   position: relative;
   overflow: hidden;
-  min-height: 132px;
-  padding: 1rem 1.25rem;
-  border-radius: 1rem;
-  border: 1px solid var(--color-border);
-  background-color: var(--color-surface);
+  min-height: 135px;
+  height: 100%;
+  padding: 1.25rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-border, #e5e7eb);
+  background-color: var(--color-surface, #ffffff);
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   transition-property: transform, box-shadow;
   transition-duration: 200ms;
   transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
 
   &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.06);
-  }
-
-  // State-driven border + bg tint. The Tailwind tokens resolve to the
-  // CSS variables defined in `styles.scss` (color-{name}-rgb).
-  &.state-critical {
-    border-color: rgba(var(--color-error-rgb), 0.3);
-    background-color: rgba(var(--color-error-rgb), 0.05);
-  }
-
-  &.state-warning {
-    border-color: rgba(var(--color-warning-rgb), 0.3);
-    background-color: rgba(var(--color-warning-rgb), 0.05);
-  }
-
-  &.state-positive {
-    border-color: rgba(var(--color-primary-rgb), 0.3);
-    background-color: rgba(var(--color-primary-rgb), 0.05);
-  }
-
-  &.state-neutral {
-    border-color: var(--color-border);
-    background-color: var(--color-surface);
+    transform: translateY(-1px);
+    box-shadow:
+      0 4px 6px -1px rgba(0, 0, 0, 0.08),
+      0 2px 4px -1px rgba(0, 0, 0, 0.04);
   }
 }
 
-// ============================================================================
-// Left border strip — 4px colored stripe based on state.
-// ============================================================================
-
-.stat-border-strip {
+// Decorative top-right corner gradient
+.stat-corner-bg {
   position: absolute;
-  left: 0;
   top: 0;
+  right: 0;
+  width: 6rem;
+  height: 6rem;
+  border-bottom-left-radius: 9999px;
+  background: radial-gradient(
+    circle at top right,
+    rgba(var(--state-color-rgb), 0.12),
+    transparent 70%
+  );
+  opacity: 0.7;
+  pointer-events: none;
+  z-index: 0;
+}
+
+// Bottom accent line
+.stat-bottom-line {
+  position: absolute;
   bottom: 0;
-  width: 4px;
-  background-color: var(--color-text-secondary);
-
-  .state-critical & {
-    background-color: var(--color-error);
-  }
-
-  .state-warning & {
-    background-color: var(--color-warning);
-  }
-
-  .state-positive & {
-    background-color: var(--color-primary);
-  }
-
-  .state-neutral & {
-    background-color: var(--color-border);
-  }
+  left: 0;
+  width: 100%;
+  height: 4px;
+  background-color: rgba(var(--state-color-rgb), 0.2);
+  pointer-events: none;
+  z-index: 2;
 }
 
 // ============================================================================
-// Content wrapper — holds header + icon + value with flex layout.
+// Content layout
 // ============================================================================
 
 .stat-content {
   position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
-  min-height: 100%;
+  justify-content: space-between;
+  height: 100%;
+  min-width: 0;
 }
 
 .stat-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.5rem;
+  margin-bottom: 0.75rem;
   min-width: 0;
 }
+
+// ============================================================================
+// Title
+// ============================================================================
 
 .stat-title {
   font-size: 0.75rem;
-  font-weight: 500;
-  color: var(--color-text-secondary);
+  font-weight: 600;
+  color: var(--color-text-secondary, #6b7280);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
+  line-height: 1.2;
+  margin: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -120,100 +136,117 @@
 }
 
 // ============================================================================
-// Icon wrapper — top-right absolute, rounded square, color per state.
+// Icon wrapper / Percent glyph
 // ============================================================================
 
 .stat-icon-wrapper {
-  position: absolute;
-  right: 1rem;
-  top: 1rem;
-  width: 2.75rem;
-  height: 2.75rem;
-  border-radius: 0.75rem;
-  display: grid;
-  place-items: center;
-  background-color: rgba(var(--color-text-secondary-rgb), 0.1);
-  color: var(--color-text-secondary);
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(var(--state-color-rgb), 0.1);
+  color: var(--state-color);
+  flex-shrink: 0;
+}
 
-  .state-critical & {
-    background-color: rgba(var(--color-error-rgb), 0.1);
-    color: var(--color-error);
+.stat-percent-glyph {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--state-color);
+  line-height: 1;
+}
+
+// ============================================================================
+// Trend badge
+// ============================================================================
+
+.stat-trend-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.625rem;
+  font-weight: 700;
+  padding: 0.125rem 0.5rem;
+  border-radius: 9999px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+
+  &.trend-up {
+    background-color: rgba(16, 185, 129, 0.12);
+    color: #16a34a;
   }
 
-  .state-warning & {
-    background-color: rgba(var(--color-warning-rgb), 0.1);
-    color: var(--color-warning);
+  &.trend-down {
+    background-color: rgba(239, 68, 68, 0.12);
+    color: #dc2626;
   }
 
-  .state-positive & {
-    background-color: rgba(var(--color-primary-rgb), 0.1);
-    color: var(--color-primary);
-  }
-
-  .state-neutral & {
-    background-color: rgba(var(--color-text-secondary-rgb), 0.1);
-    color: var(--color-text-secondary);
+  &.trend-flat {
+    background-color: rgba(107, 114, 128, 0.1);
+    color: #4b5563;
   }
 }
 
 // ============================================================================
-// Value — 2xl bold, large margin to clear the icon wrapper.
+// Value
 // ============================================================================
 
 .stat-value {
-  font-size: 1.75rem;
+  font-size: 1.875rem;
   font-weight: 700;
-  color: var(--color-text-primary);
-  margin-top: 1.75rem;
-  line-height: 1;
+  color: var(--color-text-primary, #111827);
+  line-height: 1.2;
+  margin-bottom: 0.5rem;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  @media (max-width: 640px) {
+    font-size: 1.5rem;
+  }
+}
+
+// ============================================================================
+// Footer: indicator dot + state label
+// ============================================================================
+
+.stat-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: auto;
+  padding-top: 0.25rem;
+  min-width: 0;
+}
+
+.stat-indicator {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background-color: var(--state-color);
+  flex-shrink: 0;
+}
+
+.stat-state-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--state-color);
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 // ============================================================================
-// Trend chip — small pill next to the title; color per trend direction.
+// Skeleton Loader
 // ============================================================================
 
-.stat-trend {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.125rem 0.5rem;
-  border-radius: 9999px;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  background-color: rgba(var(--color-text-secondary-rgb), 0.15);
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-  flex-shrink: 0;
-
-  &.trend-up {
-    background-color: rgba(var(--color-success-rgb), 0.15);
-    color: var(--color-success);
-  }
-
-  &.trend-down {
-    background-color: rgba(var(--color-error-rgb), 0.15);
-    color: var(--color-error);
-  }
-
-  &.trend-flat {
-    background-color: rgba(var(--color-text-secondary-rgb), 0.15);
-    color: var(--color-text-secondary);
-  }
-}
-
-.stat-growth {
-  font-variant-numeric: tabular-nums;
-}
-
-// ============================================================================
-// Skeleton — shimmer placeholders matching the card geometry.
-// ============================================================================
-
-@keyframes skeleton-loading {
+@keyframes skeleton-shimmer {
   0% {
     background-position: 200% 0;
   }
@@ -222,41 +255,50 @@
   }
 }
 
-@mixin shimmer {
+@mixin shimmer-effect {
   background: linear-gradient(
     90deg,
-    var(--color-background) 25%,
-    var(--color-border) 50%,
-    var(--color-background) 75%
+    rgba(var(--color-neutral-200-rgb, 226, 232, 240), 0.6) 25%,
+    rgba(var(--color-neutral-100-rgb, 241, 245, 249), 0.9) 50%,
+    rgba(var(--color-neutral-200-rgb, 226, 232, 240), 0.6) 75%
   );
   background-size: 200% 100%;
-  animation: skeleton-loading 1.5s infinite;
-  border-radius: 0.5rem;
+  animation: skeleton-shimmer 1.5s infinite;
+  border-radius: 0.375rem;
 }
 
 .stat-skeleton {
   .skeleton-pill {
     height: 0.75rem;
-    width: 60%;
-    border-radius: 9999px;
-    @include shimmer;
+    width: 55%;
+    @include shimmer-effect;
+  }
+
+  .skeleton-pill-sm {
+    height: 0.625rem;
+    width: 3.5rem;
+    @include shimmer-effect;
   }
 
   .skeleton-icon {
-    position: absolute;
-    right: 1rem;
-    top: 1rem;
-    width: 2.75rem;
-    height: 2.75rem;
-    border-radius: 0.75rem;
-    @include shimmer;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.5rem;
+    @include shimmer-effect;
   }
 
   .skeleton-value {
-    margin-top: 1.75rem;
-    height: 1.75rem;
-    width: 80%;
-    border-radius: 0.5rem;
-    @include shimmer;
+    height: 1.875rem;
+    width: 75%;
+    margin-bottom: 0.5rem;
+    @include shimmer-effect;
+  }
+
+  .skeleton-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 9999px;
+    flex-shrink: 0;
+    @include shimmer-effect;
   }
 }

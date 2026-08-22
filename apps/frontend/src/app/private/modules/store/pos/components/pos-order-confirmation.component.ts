@@ -459,9 +459,16 @@ export class PosOrderConfirmationComponent {
   });
   readonly derivedCustomerName = computed(() => {
     const d = this.orderData();
-    return d?.customer_name || 'Consumidor Final';
+    if (!d) return 'Consumidor Final';
+    if (d.customer_name) return d.customer_name;
+    if (d.customer?.first_name) {
+      return `${d.customer.first_name} ${d.customer.last_name || ''}`.trim();
+    }
+    if (d.customer?.name) return d.customer.name;
+    if (d.customer?.business_name) return d.customer.business_name;
+    return 'Consumidor Final';
   });
-  readonly derivedCustomerEmail = computed(() => this.orderData()?.customer_email || '');
+  readonly derivedCustomerEmail = computed(() => this.orderData()?.customer_email || this.orderData()?.customer?.email || '');
   readonly derivedCustomerTaxId = computed(() => {
     const d = this.orderData();
     return d?.customer_tax_id || d?.customer?.tax_id || d?.customer?.document_number || '';

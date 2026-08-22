@@ -291,11 +291,16 @@
   }
 
   @defer (when isRescheduleModalOpen()) {
-    <app-reschedule-modal
-      [isOpen]="isRescheduleModalOpen()"
-      [booking]="bookingToReschedule()"
-      (closed)="isRescheduleModalOpen.set(false)"
-      (rescheduled)="onRescheduleCompleted()"
+    <!-- CP-POS-SVC-PERF-001 / Modal unification — admin re-agendar
+         now uses the same bifunctional `booking-scheduler-modal` as
+         the POS cart. The parent captures `(scheduled)` and persists
+         via PUT /api/store/reservations/:id; the modal itself is
+         transport-agnostic and emits the same payload shape. -->
+    <app-booking-scheduler-modal
+      [existingBooking]="bookingToReschedule()"
+      [modalTitleOverride]="'Re-agendar ' + (bookingToReschedule()?.product?.name ?? 'servicio')"
+      (scheduled)="onAdminRescheduleScheduled($event)"
+      (cancelled)="isRescheduleModalOpen.set(false)"
     />
   }
 

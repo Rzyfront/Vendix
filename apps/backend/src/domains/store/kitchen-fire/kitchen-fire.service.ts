@@ -323,6 +323,9 @@ export class KitchenFireService {
     };
     const preparedItems: PreparedItemContext[] = [];
     const recipeLessItems: Array<(typeof order.order_items)[number]> = [];
+    // CP-POS-SVC-PERF-001 / A.2 — cache explodeBom per recipeId locally so
+    // multiple cart lines sharing the same recipe cost 1 explosion (not N).
+    const bomCache = new Map<number, BomExplosionLine[]>();
     for (const itemId of firedItemIds) {
       const item = order.order_items.find((oi) => oi.id === itemId)!;
       const recipe = await this.prisma.recipes.findFirst({
@@ -339,9 +342,13 @@ export class KitchenFireService {
         recipeLessItems.push(item);
         continue;
       }
-      const bomLines = await this.recipesService.explodeBom(recipe.id, {
-        [recipe.id]: 1,
-      });
+      let bomLines = bomCache.get(recipe.id);
+      if (!bomLines) {
+        bomLines = await this.recipesService.explodeBom(recipe.id, {
+          [recipe.id]: 1,
+        });
+        bomCache.set(recipe.id, bomLines);
+      }
       preparedItems.push({ orderItem: item, recipeId: recipe.id, bomLines });
     }
 
@@ -356,11 +363,21 @@ export class KitchenFireService {
         allLeafProductIds.add(line.component_product_id);
       }
     }
-    for (const pid of allLeafProductIds) {
-      const loc = await this.stockLevelManager.getDefaultLocationForProduct(
-        pid,
-      );
-      locationByProduct.set(pid, loc);
+    // CP-POS-SVC-PERF-001 / A.1 — batch the N+1 location lookups into a
+    // single Promise.all pass. Stock-location resolution is independent
+    // per product, so parallelising is safe and reduces 30+ sequential
+    // RTT to 1 round-trip burst.
+    const distinctLeafIds = Array.from(allLeafProductIds);
+    const locationResults = await Promise.all(
+      distinctLeafIds.map((pid) =>
+        this.stockLevelManager
+          .getDefaultLocationForProduct(pid)
+          .then((loc) => [pid, loc] as const)
+          .catch(() => [pid, null] as const),
+      ),
+    );
+    for (const [pid, loc] of locationResults) {
+      if (loc !== null) locationByProduct.set(pid, loc);
     }
 
     // 3c. Resolve the store business date (tz + cutoff-aware) BEFORE the
@@ -641,47 +658,55 @@ export class KitchenFireService {
         : bomLines;
 
       // Per-leaf consumption: stock × orderQty × bomMultiplier.
+      // CP-POS-SVC-PERF-001 / A.3 — per-leaf updateStock calls are
+      // independent (each touches its own stock_levels row), so we
+      // collect them and run in parallel via Promise.all. Cuts N
+      // sequential round-trips to a single burst per order_item while
+      // preserving the kds_session_id mapping (per item, not per leaf).
+      const itemKdsSessionId =
+        openSessionByKds.get(
+          kdsByProduct.get(orderItem.product_id!) ?? defaultKds.id,
+        ) ?? null;
+      const updateStockPromises: Promise<any>[] = [];
+      const validLines: Array<{
+        line: (typeof effectiveBomLines)[number];
+        consumedQty: number;
+        locationId: number;
+      }> = [];
       for (const line of effectiveBomLines) {
         const consumedQty = Math.round(line.quantity * orderQty);
         if (!Number.isFinite(consumedQty) || consumedQty <= 0) {
-          // Defensive: this should never happen if the recipe items have
-          // valid quantities. Warn loudly so the data-integrity issue is
-          // visible in ops rather than silently dropping the line.
           this.logger.warn(
             `Skipping zero/invalid BOM line in recipe for order item ${orderItem.id}: component=${line.component_product_id} qty=${line.quantity}`,
           );
           continue;
         }
-
-        const locationId = locationByProduct.get(
-          line.component_product_id,
-        );
+        const locationId = locationByProduct.get(line.component_product_id);
         if (!locationId) continue;
-
-        const result = await this.stockLevelManager.updateStock(
-          {
-            product_id: line.component_product_id,
-            location_id: locationId,
-            quantity_change: -Math.abs(consumedQty),
-            movement_type: 'consumption',
-            reason: `Fire-to-kitchen (order #${order.id} – item #${orderItem.id})`,
-            source_module: 'kitchen_fire',
-            user_id,
-            order_item_id: orderItem.id,
-            create_movement: true,
-            validate_availability: false,
-            // QUI-651 — dueño del consumo por estación. Se firma con la sesión
-            // abierta del KDS destino de ESTE plato, no con una sesión global:
-            // en un fire de dos estaciones cada movimiento pertenece al turno
-            // de la suya.
-            kds_session_id:
-              openSessionByKds.get(
-                kdsByProduct.get(orderItem.product_id!) ?? defaultKds.id,
-              ) ?? null,
-          },
-          tx,
+        validLines.push({ line, consumedQty, locationId });
+      }
+      for (const { line, consumedQty, locationId } of validLines) {
+        updateStockPromises.push(
+          this.stockLevelManager.updateStock(
+            {
+              product_id: line.component_product_id,
+              location_id: locationId,
+              quantity_change: -Math.abs(consumedQty),
+              movement_type: 'consumption',
+              reason: `Fire-to-kitchen (order #${order.id} – item #${orderItem.id})`,
+              source_module: 'kitchen_fire',
+              user_id,
+              order_item_id: orderItem.id,
+              create_movement: true,
+              validate_availability: false,
+              kds_session_id: itemKdsSessionId,
+            },
+            tx,
+          ),
         );
-
+      }
+      const results = await Promise.all(updateStockPromises);
+      for (const result of results) {
         if (result?.cost_snapshot) {
           cogsTotal += Number(result.cost_snapshot.total_cost || 0);
           consumedLineCount += 1;
@@ -1220,6 +1245,9 @@ export class KitchenFireService {
     };
     const preparedItems: PreparedItemContext[] = [];
     const recipeLessItems: Array<(typeof order.order_items)[number]> = [];
+    // CP-POS-SVC-PERF-001 / A.2 — cache explodeBom per recipeId locally so
+    // multiple cart lines sharing the same recipe cost 1 explosion (not N).
+    const bomCache = new Map<number, BomExplosionLine[]>();
     for (const itemId of firedItemIds) {
       const item = order.order_items.find((oi) => oi.id === itemId)!;
       const recipe = await this.prisma.recipes.findFirst({
@@ -1230,9 +1258,13 @@ export class KitchenFireService {
         recipeLessItems.push(item);
         continue;
       }
-      const bomLines = await this.recipesService.explodeBom(recipe.id, {
-        [recipe.id]: 1,
-      });
+      let bomLines = bomCache.get(recipe.id);
+      if (!bomLines) {
+        bomLines = await this.recipesService.explodeBom(recipe.id, {
+          [recipe.id]: 1,
+        });
+        bomCache.set(recipe.id, bomLines);
+      }
       preparedItems.push({ orderItem: item, recipeId: recipe.id, bomLines });
     }
 
@@ -1244,11 +1276,21 @@ export class KitchenFireService {
         allLeafProductIds.add(line.component_product_id);
       }
     }
-    for (const pid of allLeafProductIds) {
-      const loc = await this.stockLevelManager.getDefaultLocationForProduct(
-        pid,
-      );
-      locationByProduct.set(pid, loc);
+    // CP-POS-SVC-PERF-001 / A.1 — batch the N+1 location lookups into a
+    // single Promise.all pass. Stock-location resolution is independent
+    // per product, so parallelising is safe and reduces 30+ sequential
+    // RTT to 1 round-trip burst.
+    const distinctLeafIds = Array.from(allLeafProductIds);
+    const locationResults = await Promise.all(
+      distinctLeafIds.map((pid) =>
+        this.stockLevelManager
+          .getDefaultLocationForProduct(pid)
+          .then((loc) => [pid, loc] as const)
+          .catch(() => [pid, null] as const),
+      ),
+    );
+    for (const [pid, loc] of locationResults) {
+      if (loc !== null) locationByProduct.set(pid, loc);
     }
 
     const businessDate = await this.getBusinessDate(store_id);

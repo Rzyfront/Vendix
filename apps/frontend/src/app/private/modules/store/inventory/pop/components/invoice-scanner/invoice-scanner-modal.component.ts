@@ -373,6 +373,15 @@ import {
                     <th class="pb-2 pr-3 text-text-secondary font-medium">Descripcion</th>
                     <th class="pb-2 px-3 text-text-secondary font-medium w-16">Cant.</th>
                     <th class="pb-2 px-3 text-text-secondary font-medium w-24">P. Unit.</th>
+                    <!--
+                      Espejo del backend: P. Neto Unit. = unit_price_net
+                      que deriva deriveLineTax (util compartido). Es el precio
+                      unitario TRAS el descuento de línea y el prorrateo del
+                      descuento de cabecera. Misma cifra que el backend va a
+                      persistir. Solo se pinta si hay descuento (unit_price_net
+                      < unit_price); sin ruido en líneas limpias.
+                    -->
+                    <th class="pb-2 px-3 text-text-secondary font-medium w-24">P. Neto Unit.</th>
                     <th class="pb-2 px-3 text-text-secondary font-medium w-20">Dcto</th>
                     <!--
                       F3 IVA lifecycle: la tasa de IVA que asignó la IA baja
@@ -424,6 +433,24 @@ import {
                           step="0.01"
                         />
                       </td>
+                      <!--
+                        P. Neto Unit. del deriveLineTax util compartido:
+                        unit_price_net = (unit_price × qty - descuento línea
+                        - prorrateo cabecera) / qty, con base gravable
+                        corregida si los precios incluyen IVA. Solo se pinta
+                        cuando hay descuento efectivo (neto < bruto); sin ruido
+                        en líneas limpias, donde repetiría P. Unit.
+                      -->
+                      @if (
+                        lineTaxRows()[i]?.unit_price_net != null &&
+                        lineTaxRows()[i]!.unit_price_net < item.unit_price
+                      ) {
+                        <td class="py-2 px-3 text-text-primary">
+                          {{ lineTaxRows()[i]!.unit_price_net | currency: 0 }}
+                        </td>
+                      } @else {
+                        <td class="py-2 px-3 text-text-secondary">—</td>
+                      }
                       <!--
                         QUI-661 Fase 4: el descuento que extrajo la IA es
                         editable ANTES de confirmar. Es el punto donde el
@@ -576,6 +603,40 @@ import {
                         {{ lineTaxRows()[i]?.net_line || 0 | currency: 0 }}
                       </span>
                     </div>
+                    <!--
+                      Espejo del backend, a paridad con la columna P. Neto
+                      Unit. del desktop: precio unitario TRAS descuento de
+                      línea y prorrateo de cabecera. Misma condición que
+                      desktop (neto < bruto) para no repetir P. Unit. en
+                      líneas limpias, más qty > 0: con cantidad 0 el neto
+                      no es divisible y solo pintaría un cero engañoso.
+                    -->
+                    @if (
+                      (item.quantity || 0) > 0 &&
+                      lineTaxRows()[i]?.unit_price_net != null &&
+                      lineTaxRows()[i]!.unit_price_net < item.unit_price
+                    ) {
+                      <div class="flex justify-between">
+                        <span class="text-text-secondary">P. Neto Unit.</span>
+                        <span class="text-text-primary">
+                          {{ lineTaxRows()[i]!.unit_price_net | currency: 0 }}
+                        </span>
+                      </div>
+                    }
+                    <!--
+                      Espejo del backend: descuento por unidad derivado por
+                      deriveLineTax = discount_total / quantity. Solo se pinta
+                      si hay descuento efectivo (> 0) para no agregar ruido
+                      en líneas limpias. Mismo dato que el backend persistirá.
+                    -->
+                    @if ((lineTaxRows()[i]?.discount_total ?? 0) > 0 && (item.quantity || 0) > 0) {
+                      <div class="flex justify-between">
+                        <span class="text-text-secondary">Dto aplicado</span>
+                        <span class="text-text-primary">
+                          {{ (lineTaxRows()[i]!.discount_total / item.quantity) | currency: 0 }}
+                        </span>
+                      </div>
+                    }
                     <div class="flex justify-between">
                       <span class="text-text-secondary">IVA</span>
                       <span class="text-text-primary">

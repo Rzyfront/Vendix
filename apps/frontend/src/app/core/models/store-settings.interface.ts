@@ -175,6 +175,15 @@ export interface ReservationsSettings {
    *  the reschedule becomes a pending request routed through the
    *  `booking_reschedule_requests` admin queue. */
   allow_direct_reschedule: boolean;
+  /** When true (default), the POS cashier can persist a `bookings`
+   *  row for a service line on a draft order (Guardar) — the cart
+   *  fires POST /api/store/reservations right after the order is
+   *  created so the slot is locked before payment. When false, the
+   *  POS does NOT create the booking on Guardar; the booking is
+   *  attached later on the Cobrar path via the editor atomic block.
+   *  This lets stores decide whether scheduling is gated by payment
+   *  (false) or independent (true). */
+  allow_bookings_without_payment: boolean;
 }
 
 /**

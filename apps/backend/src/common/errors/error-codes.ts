@@ -1062,6 +1062,35 @@ export const ErrorCodes = {
     devMessage:
       'A draft (is_draft=true) cannot be combined with requires_payment=true; save the order first, then charge it via flow/pay',
   },
+  // CP-POS-SVC-PERF-001 / C.4 hardening — atomic booking requires a
+  // customer. `bookings.customer_id` is NOT NULL in the schema; an
+  // anonymous order carrying a `booking` block would violate FK and
+  // surface as a raw 500. We reject explicitly with 422.
+  POS_BOOKING_REQUIRES_CUSTOMER: {
+    code: 'POS_BOOKING_REQUIRES_CUSTOMER',
+    httpStatus: 422,
+    devMessage:
+      'Booking a service in the editor requires a customer to be assigned to the order; `bookings.customer_id` is NOT NULL.',
+  },
+  // CP-POS-SVC-PERF-001 / C.4 hardening — booking payload missing
+  // required fields (date, start_time, end_time). Silent skip would
+  // leave a service line without a reservation, breaking the order
+  // detail "Citas agendadas" section.
+  POS_BOOKING_INVALID: {
+    code: 'POS_BOOKING_INVALID',
+    httpStatus: 422,
+    devMessage:
+      'Service booking block must include `date` (YYYY-MM-DD), `start_time` and `end_time` (HH:mm).',
+  },
+  // CP-POS-SVC-PERF-001 / C.4 hardening — booking_id from the cashier
+  // doesn't belong to this order (or another tenant). Refuse cross-tenant
+  // updates at the service boundary.
+  POS_BOOKING_NOT_FOUND: {
+    code: 'POS_BOOKING_NOT_FOUND',
+    httpStatus: 404,
+    devMessage:
+      'The booking_id provided does not belong to this order / store.',
+  },
   // CP-POS-CREAR-EDITAR-COBRAR-001 — race en editor. Otro operador cambió la
   // orden de `created`/`draft` mientras editábamos. 409 porque la petición está
   // bien formada; lo que cambió es el estado del recurso.

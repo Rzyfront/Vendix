@@ -331,6 +331,7 @@ export class OrdersService {
                     // producto cambie de "por metro" a "por rollo".
                     price_unit_quantity:
                       priceUnits.priceUnitByIndex[index] ?? null,
+                    notes: item.notes ?? null,
                     updated_at: new Date(),
                   };
                 }),
@@ -676,6 +677,38 @@ export class OrdersService {
             },
           },
           orderBy: { used_at: 'asc' },
+        },
+        // CP-POS-SVC-PERF-001 / C.5 — order detail page renders the
+        // service staff + booking date/time for orders that contain a
+        // scheduled service. We expose `bookings` with provider →
+        // employee → user so the cashier can see who is assigned.
+        //
+        // CP-POS-SVC-PERF-001 / Bugfix — `employees` has no
+        // `avatar_url` column (avatar lives on `users` via the
+        // `user_id` FK). Selecting avatar_url here crashes findOne
+        // for EVERY order that has bookings, leaving the order detail
+        // page with "Orden #undefined" and $0 totals. Removed.
+        bookings: {
+          include: {
+            provider: {
+              include: {
+                employee: {
+                  select: {
+                    id: true,
+                    first_name: true,
+                    last_name: true,
+                  },
+                },
+              },
+            },
+            product: {
+              select: { id: true, name: true },
+            },
+            product_variants: {
+              select: { id: true, name: true },
+            },
+          },
+          orderBy: { date: 'asc' },
         },
       },
     });
@@ -2026,6 +2059,122 @@ export class OrdersService {
         }),
       });
 
+      // CP-POS-SVC-PERF-001 / C.4 — atomic booking creation. For every
+      // submitted item that carries a `booking` block, create (or update)
+      // a `bookings` row inside the SAME $transaction that persists the
+      // order_item. If the editor fails for any reason afterwards, the
+      // rollback discards the booking too — no orphan reservations.
+      //
+      // Hardening (post-C.4 audit): `bookings.customer_id` is NOT NULL in
+      // the schema; an anonymous draft + booking would violate FK.
+      // We reject up-front with 400 POS_BOOKING_REQUIRES_CUSTOMER so the
+      // cashier sees an actionable error, not a 500 from Prisma.
+      const itemsWithBooking = dto.items
+        .map((item, idx) => ({ item, idx }))
+        .filter(({ item }) => item.booking);
+      if (itemsWithBooking.length > 0 && !dto.customer_id) {
+        throw new VendixHttpException(
+          ErrorCodes.POS_BOOKING_REQUIRES_CUSTOMER,
+          'Para agendar un servicio la orden requiere un cliente asignado.',
+          { stage: 'booking_validation' },
+        );
+      }
+      if (itemsWithBooking.length > 0) {
+        // Re-read order_items to obtain the freshly minted IDs.
+        const newItemsForBooking = await tx.order_items.findMany({
+          where: { order_id: orderId },
+          select: { id: true, product_id: true, product_variant_id: true },
+        });
+        const orderItemIdByKey = new Map<string, number>();
+        for (const it of newItemsForBooking) {
+          const k = `${it.product_id ?? 'null'}:${it.product_variant_id ?? 'null'}`;
+          orderItemIdByKey.set(k, it.id);
+        }
+        for (const { item } of itemsWithBooking) {
+          if (!item.booking) continue;
+          const k = `${item.product_id ?? 'null'}:${item.product_variant_id ?? 'null'}`;
+          const orderItemId = orderItemIdByKey.get(k);
+          if (!orderItemId) {
+            this.logger.warn(
+              `[editor] booking block present but order_item not found for key=${k}`,
+            );
+            continue;
+          }
+          const b = item.booking;
+          if (b.booking_id) {
+            // Re-agendamiento: verify ownership (same order, same store)
+            // so a cashier can't edit another tenant's booking by accident.
+            const existing = await tx.bookings.findFirst({
+              where: {
+                id: b.booking_id,
+                order_id: orderId,
+                store_id: storeId,
+              },
+              select: { id: true },
+            });
+            if (!existing) {
+              throw new VendixHttpException(
+                ErrorCodes.POS_BOOKING_NOT_FOUND,
+                `La reserva #${b.booking_id} no pertenece a esta orden.`,
+                { stage: 'booking_update' },
+              );
+            }
+            await tx.bookings.update({
+              where: { id: b.booking_id },
+              data: {
+                provider_id: b.provider_id ?? null,
+                date: b.date ? new Date(b.date) : undefined,
+                start_time: b.start_time ?? undefined,
+                end_time: b.end_time ?? undefined,
+                notes: b.notes ?? undefined,
+                service_location_type:
+                  b.service_location_type ?? undefined,
+                updated_at: new Date(),
+              },
+            });
+          } else if (b.date && b.start_time && b.end_time) {
+            // Fresh booking. Generate a stable per-day booking_number
+            // so the cashier has a human-readable handle. Mirrors
+            // reservations.service.ts:1559.
+            const booking_number = await this.generateBookingNumberForEditor(
+              tx,
+              storeId,
+              b.date,
+            );
+            await tx.bookings.create({
+              data: {
+                store_id: storeId,
+                customer_id: dto.customer_id!,
+                product_id: item.product_id!,
+                product_variant_id:
+                  item.product_id ? item.product_variant_id ?? null : null,
+                order_id: orderId,
+                cart_item_id: `oi-${orderItemId}`,
+                provider_id: b.provider_id ?? null,
+                date: new Date(b.date),
+                start_time: b.start_time,
+                end_time: b.end_time,
+                notes: b.notes ?? null,
+                service_location_type: b.service_location_type ?? 'shop',
+                channel: 'pos',
+                status: 'confirmed',
+                booking_number,
+              },
+            });
+          } else {
+            // Booking block present but missing required fields. Reject
+            // explicitly — silent skip would leave a service line
+            // without a reservation, breaking the order detail
+            // "Citas agendadas" section.
+            throw new VendixHttpException(
+              ErrorCodes.POS_BOOKING_INVALID,
+              'El servicio requiere fecha, hora de inicio y hora de fin.',
+              { stage: 'booking_create', product_id: item.product_id },
+            );
+          }
+        }
+      }
+
       // 13d) Reservas para los nuevos items (sólo si NO es draft).
       //
       //      Round 1 BLOCKER #2: el bloque anterior hacía `reserveStock` con
@@ -2859,5 +3008,43 @@ export class OrdersService {
       return 'pending_delivery' as order_state_enum;
     }
     return order_state_enum.created;
+  }
+
+  /**
+   * CP-POS-SVC-PERF-001 / C.4 — mirror of
+   * `ReservationsService.generateBookingNumber` (same prefix scheme
+   * `BKG-YYYYMMDD-NNNN`). Implemented locally so OrdersService does not
+   * gain a circular dep on ReservationsService. Accepts a `tx` so the
+   * findFirst runs inside the same transaction the booking is created
+   * in, avoiding a race where two concurrent editor PUTs of the same
+   * date see the same last sequence and produce duplicate numbers.
+   */
+  private async generateBookingNumberForEditor(
+    tx: Prisma.TransactionClient,
+    store_id: number,
+    date: string,
+  ): Promise<string> {
+    const targetDate = new Date(date);
+    const year = targetDate.getUTCFullYear().toString();
+    const month = (targetDate.getUTCMonth() + 1)
+      .toString()
+      .padStart(2, '0');
+    const day = targetDate.getUTCDate().toString().padStart(2, '0');
+    const prefix = `BKG-${year}${month}${day}-`;
+
+    const lastBooking = await tx.bookings.findFirst({
+      where: {
+        store_id,
+        booking_number: { startsWith: prefix },
+      },
+      orderBy: { booking_number: 'desc' },
+    });
+
+    let sequence = 1;
+    if (lastBooking) {
+      const lastSequence = parseInt(lastBooking.booking_number.slice(-4));
+      sequence = lastSequence + 1;
+    }
+    return `${prefix}${sequence.toString().padStart(4, '0')}`;
   }
 }
