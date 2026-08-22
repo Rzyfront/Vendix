@@ -2375,6 +2375,47 @@ export const ErrorCodes = {
   },
 
   /**
+   * Carrera perdida al marcar predeterminado.
+   *
+   * El invariante «un solo predeterminado por (`store_id`, `operation_type`)» lo
+   * sostiene un índice único PARCIAL, no el código. Dos `set-default`
+   * simultáneos sobre perfiles del mismo tipo entran los dos, desmarcan los dos
+   * y marcan los dos: una de las dos transacciones choca con el índice y
+   * Postgres la aborta con `23505` (`P2002` en Prisma).
+   *
+   * 409 y no 500: el estado final es correcto —hay exactamente un
+   * predeterminado— y lo único que ocurrió es que este cliente perdió la
+   * carrera. Reintentar en el servidor sería peor: el usuario pidió que ganara
+   * SU perfil, y un reintento automático decidiría por él en función de quién
+   * llegó último. El frontend refresca y muestra cuál quedó.
+   */
+  INVOICING_PROFILE_002: {
+    code: 'INVOICING_PROFILE_002',
+    httpStatus: 409,
+    devMessage:
+      'Another profile of the same operation type was set as default concurrently: the partial unique index rejected this write',
+  },
+
+  /**
+   * Marcar predeterminado un perfil INACTIVO.
+   *
+   * Es un 409 de estado y no un 422 de validación: el `:id` es válido, el
+   * permiso es correcto y el cuerpo está vacío — lo que impide la operación es
+   * en qué estado está el recurso.
+   *
+   * Por qué se prohíbe en vez de activar y marcar de una: el predeterminado es
+   * lo que el wizard elige SOLO. Activar de rebote convertiría un clic en
+   * «Predeterminar» en dos efectos —uno pedido y otro no— y el perfil recién
+   * activado entraría al catálogo de facturación sin que nadie lo revisara.
+   * Activar es un paso aparte y visible.
+   */
+  INVOICING_PROFILE_007: {
+    code: 'INVOICING_PROFILE_007',
+    httpStatus: 409,
+    devMessage: 'An inactive billing profile cannot be made the default one',
+  },
+
+  /**
    * Borrado de un perfil que facturas ya timbradas referencian.
    *
    * 409 y no 400: la petición está bien formada y el permiso es correcto; lo que

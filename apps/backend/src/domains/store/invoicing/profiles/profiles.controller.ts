@@ -186,6 +186,47 @@ export class ProfilesController {
   }
 
   /**
+   * `POST` y no `PATCH`: es el método con el que está sembrado el permiso
+   * `invoicing:profiles:set_default`
+   * (`POST /api/store/invoicing/profiles/:id/set-default`), y `PermissionsGuard`
+   * casa las filas del usuario por `(path, method)` con igualdad exacta. Cambiar
+   * el verbo acá dejaría el permiso sembrado sin ninguna ruta que lo use.
+   *
+   * Permiso propio, distinto de `write`: editar un perfil y decidir con cuál se
+   * factura por omisión son decisiones de distinto peso, y esta segunda es la
+   * que tiene consecuencia fiscal.
+   */
+  @Post(':id/set-default')
+  @Permissions('invoicing:profiles:set_default')
+  async setDefault(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.profiles_service.setDefault(id);
+    return this.response_service.success(
+      result,
+      'Perfil marcado como predeterminado',
+    );
+  }
+
+  /**
+   * Activar y desactivar son rutas separadas —no un único `toggle`— porque el
+   * cliente debe declarar el estado al que quiere llegar. Un `toggle` depende de
+   * lo que el servidor crea que es el estado actual, así que dos clics rápidos
+   * pueden dejar el perfil en el estado contrario al que el usuario ve.
+   */
+  @Post(':id/activate')
+  @Permissions('invoicing:profiles:write')
+  async activate(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.profiles_service.activate(id);
+    return this.response_service.success(result, 'Perfil activado');
+  }
+
+  @Post(':id/deactivate')
+  @Permissions('invoicing:profiles:write')
+  async deactivate(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.profiles_service.deactivate(id);
+    return this.response_service.success(result, 'Perfil desactivado');
+  }
+
+  /**
    * Devuelve 200 con `{ deleted: true, id }`, no 204.
    *
    * El 204 de `ResolutionsController` obliga al frontend a recordar qué borró

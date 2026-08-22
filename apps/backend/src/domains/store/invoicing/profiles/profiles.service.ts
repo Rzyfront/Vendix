@@ -203,6 +203,24 @@ export class ProfilesService {
       operation_type: dto.operation_type,
     });
 
+    try {
+      return await this.createInTransaction(dto, config);
+    } catch (error) {
+      // Dos `create` simultáneos con `is_default: true` sobre el mismo tipo
+      // chocan en el índice único parcial. Sin traducir, el usuario recibiría un
+      // 500 por haber pulsado «crear» al mismo tiempo que un compañero.
+      if (this.isUniqueViolation(error)) {
+        // `profile_id: null` — la fila no llegó a existir.
+        throw this.defaultRaceLost(null, dto.operation_type);
+      }
+      throw error;
+    }
+  }
+
+  private createInTransaction(
+    dto: CreateInvoiceProfileDto,
+    config: InvoiceProfileConfig,
+  ) {
     return this.runScopedTransaction(async (tx, scope) => {
       if (dto.is_default) {
         await this.clearDefault(tx, scope, dto.operation_type);
@@ -270,7 +288,11 @@ export class ProfilesService {
           ...(dto.operation_type !== undefined && {
             operation_type: dto.operation_type,
           }),
-          ...(dto.state !== undefined && { state: dto.state }),
+          // `state` NO se toca acá: tiene sus propias rutas (`activate` /
+          // `deactivate`). Aceptarlo también aquí crearía dos caminos para el
+          // mismo hecho, y sólo uno de los dos invalidaría la caché del
+          // catálogo (C.5) y escribiría la auditoría (C.7). Es el patrón de
+          // «dos implementaciones paralelas» que este plan existe para evitar.
           updated_at: new Date(),
         },
         select: PROFILE_SELECT,
@@ -337,6 +359,184 @@ export class ProfilesService {
 
       return this.commitVersion(tx, scope, profile.id, validated, 1);
     });
+  }
+
+  // ─── Predeterminado y estado ────────────────────────────────────────────
+
+  /**
+   * Marca el perfil como predeterminado de su tipo de operación (ADR-9).
+   *
+   * ## Por qué es una ruta propia y no un campo del `PATCH`
+   *
+   * `PermissionsGuard` autoriza por `(path, method)` además de por nombre, así
+   * que dos operaciones que deban autorizarse distinto **no pueden compartir
+   * ruta y verbo**. El permiso `invoicing:profiles:set_default` está sembrado
+   * con `POST /api/store/invoicing/profiles/:id/set-default` justamente para
+   * que un rol pueda editar perfiles sin poder decidir cuál factura por
+   * omisión — que es la decisión con consecuencia fiscal, no la edición.
+   *
+   * ## Por qué se exige que esté activo
+   *
+   * Un predeterminado inactivo es un puntero a algo que el catálogo no muestra:
+   * el wizard pediría el predeterminado, lo encontraría fuera de la lista de
+   * elegibles y tendría que decidir sin criterio. Se rechaza con 409 en vez de
+   * activar de rebote, porque activar mete el perfil al catálogo de facturación
+   * y eso no es un efecto colateral aceptable de un clic en «Predeterminar».
+   *
+   * ## La carrera
+   *
+   * Una transacción no basta, y el índice único tampoco. Dos peticiones
+   * simultáneas sobre perfiles distintos del mismo tipo pueden **serializarse
+   * sin colisionar**: la segunda desmarca lo que la primera acaba de marcar y
+   * marca lo suyo. El invariante de base queda intacto —un solo
+   * predeterminado— y las dos peticiones responden 200. Medido en vivo: 1 de 3
+   * rondas concurrentes devolvió `200` a un cliente cuyo perfil no quedó
+   * predeterminado.
+   *
+   * Lo que cierra el hueco es concurrencia optimista sobre el predeterminado
+   * vigente: se lee antes de la transacción y se vuelve a leer dentro; si no
+   * coinciden, otro ganó y esta petición recibe 409. La rama simétrica —el rival
+   * commitea después de esa comprobación— la ataja el índice único parcial, cuyo
+   * `P2002` se traduce al MISMO 409.
+   *
+   * Reintentar en el servidor sería peor que fallar: el usuario pidió que
+   * ganara SU perfil, y un reintento decidiría por él según quién llegó último.
+   */
+  async setDefault(id: number) {
+    const profile = await this.prisma.invoice_profiles.findFirst({
+      where: { id },
+      select: { id: true, operation_type: true, state: true, is_default: true },
+    });
+    if (!profile) throw profileNotFound(id);
+
+    if (profile.state !== 'active') {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_PROFILE_007,
+        'Un perfil inactivo no puede ser el predeterminado. Actívalo primero.',
+        { profile_id: id, state: profile.state },
+      );
+    }
+
+    // Ya lo es: no se abre transacción ni se reescribe `updated_at`. La
+    // operación es idempotente y repetirla no es un error del cliente.
+    if (profile.is_default) return this.findOne(id);
+
+    // El predeterminado VIGENTE hace de número de versión de esta operación.
+    // Se lee fuera de la transacción y se vuelve a leer dentro: si cambió
+    // entremedio, alguien más ganó la carrera y esta petición se rechaza.
+    const previous = await this.prisma.invoice_profiles.findFirst({
+      where: { operation_type: profile.operation_type, is_default: true },
+      select: { id: true },
+    });
+    const expected = previous?.id ?? null;
+
+    try {
+      return await this.runScopedTransaction(async (tx, scope) => {
+        await this.assertOwned(tx, scope, id);
+
+        const inside = await tx.invoice_profiles.findFirst({
+          where: {
+            store_id: scope.store_id,
+            operation_type: profile.operation_type,
+            is_default: true,
+          },
+          select: { id: true },
+        });
+
+        // ESTA comparación es lo que hace detectable la carrera. La versión
+        // anterior desmarcaba «el predeterminado que hubiera» y marcaba el suyo;
+        // con eso, dos peticiones simultáneas se aplicaban en secuencia, la
+        // segunda desmarcaba a la primera, y **las dos respondían 200**. El
+        // cliente que perdió recibía éxito sobre un estado que ya no existía
+        // (medido: 1 de 3 rondas concurrentes). Comparar contra lo leído antes
+        // convierte ese caso en el 409 que el plan exige.
+        if ((inside?.id ?? null) !== expected) {
+          throw this.defaultRaceLost(id, profile.operation_type);
+        }
+
+        if (inside) {
+          await tx.invoice_profiles.update({
+            where: { id: inside.id },
+            data: { is_default: false, updated_at: new Date() },
+          });
+        }
+
+        const updated = await tx.invoice_profiles.update({
+          where: { id },
+          data: { is_default: true, updated_at: new Date() },
+          select: PROFILE_SELECT,
+        });
+
+        // Se devuelve lo que ESTA transacción escribió, no un `findOne`
+        // posterior: entre el commit y una relectura cabe otro traspaso, y la
+        // respuesta afirmaría un estado que el servidor ya no sostiene.
+        return this.attachCurrentConfig(tx, updated);
+      });
+    } catch (error) {
+      // La otra rama de la misma carrera: si el rival commitea después de la
+      // comprobación de arriba, quien choca es el índice único parcial.
+      if (this.isUniqueViolation(error)) {
+        throw this.defaultRaceLost(id, profile.operation_type);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Activa el perfil. **No lo predetermina**: activar y predeterminar son dos
+   * decisiones, y encadenarlas metería al wizard un perfil que nadie eligió.
+   *
+   * Idempotente: activar uno ya activo devuelve el perfil sin escribir.
+   */
+  async activate(id: number) {
+    return this.setState(id, 'active');
+  }
+
+  /**
+   * Desactiva el perfil y, si era el predeterminado, **le quita también la
+   * marca**.
+   *
+   * Las dos cosas van juntas por necesidad, no por comodidad: `/catalog` sólo
+   * sirve activos, así que un predeterminado inactivo sería un puntero a algo
+   * que el wizard no puede ofrecer. El tipo de operación queda sin
+   * predeterminado —estado legítimo, ADR-9— y el wizard lo tolera pidiendo al
+   * usuario que elija.
+   */
+  async deactivate(id: number) {
+    return this.setState(id, 'inactive');
+  }
+
+  /**
+   * Cambia el estado dentro de una transacción con el ancla comprobada.
+   *
+   * Se lee primero por el cliente scopeado para que un id ajeno no llegue nunca
+   * al cliente base, y se vuelve a comprobar dentro con `assertOwned`.
+   */
+  private async setState(id: number, state: 'active' | 'inactive') {
+    const profile = await this.prisma.invoice_profiles.findFirst({
+      where: { id },
+      select: { id: true, state: true, is_default: true },
+    });
+    if (!profile) throw profileNotFound(id);
+
+    if (profile.state === state) return this.findOne(id);
+
+    await this.runScopedTransaction(async (tx, scope) => {
+      await this.assertOwned(tx, scope, id);
+      await tx.invoice_profiles.update({
+        where: { id },
+        data: {
+          state,
+          // Desactivar arrastra la marca de predeterminado; activar nunca la
+          // pone. La asimetría es deliberada: quitarla evita un puntero a un
+          // perfil invisible, ponerla decidiría por el usuario.
+          ...(state === 'inactive' && profile.is_default && { is_default: false }),
+          updated_at: new Date(),
+        },
+      });
+    });
+
+    return this.findOne(id);
   }
 
   /**
@@ -490,6 +690,20 @@ export class ProfilesService {
     return row.config;
   }
 
+  /**
+   * 409 de carrera perdida. Un solo constructor porque las dos ramas —la
+   * comprobación optimista y el choque del índice único— son el MISMO hecho
+   * para el usuario, y responder distinto según cuál se disparó primero
+   * expondría el mecanismo sin decirle nada útil.
+   */
+  private defaultRaceLost(profile_id: number | null, operation_type: string) {
+    return new VendixHttpException(
+      ErrorCodes.INVOICING_PROFILE_002,
+      `Otro perfil quedó como predeterminado para operaciones ${operation_type} al mismo tiempo. Refresca y vuelve a intentarlo.`,
+      { profile_id, operation_type },
+    );
+  }
+
   private deleteBlocked(profile_id: number, invoice_count: number) {
     return new VendixHttpException(
       ErrorCodes.INVOICING_PROFILE_003,
@@ -508,5 +722,14 @@ export class ProfilesService {
   private isForeignKeyViolation(error: unknown): boolean {
     const code = (error as { code?: string })?.code;
     return code === 'P2003' || code === 'P2014';
+  }
+
+  /**
+   * `P2002` es la violación de restricción única de Prisma. Acá sólo puede
+   * venir del índice único PARCIAL de predeterminados: es el único único que
+   * una escritura de este servicio puede violar, porque `name` no lo es.
+   */
+  private isUniqueViolation(error: unknown): boolean {
+    return (error as { code?: string })?.code === 'P2002';
   }
 }

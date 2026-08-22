@@ -11,7 +11,6 @@ import {
 import {
   INVOICE_PROFILE_NAME_MAX_LENGTH,
   INVOICE_PROFILE_OPERATION_TYPES,
-  INVOICE_PROFILE_STATES,
 } from './invoice-profile.constants';
 
 const trimmed = ({ value }: TransformFnParams): unknown =>
@@ -53,17 +52,21 @@ export class UpdateInvoiceProfileDto {
   operation_type?: string;
 
   /**
-   * `state` se acepta acá y además tiene rutas propias (`activate` /
-   * `deactivate`) porque el listado necesita un interruptor de una sola llamada
-   * y el editor necesita guardar el estado junto con lo demás. Las dos vías
-   * pasan por la misma comprobación de permiso `invoicing:profiles:write`, así
-   * que no abren un camino que la otra cierre.
+   * `state` NO está en este DTO — igual que `is_default`, y por la misma razón
+   * de fondo: cada uno tiene su ruta.
+   *
+   * La primera versión sí lo aceptaba, con el argumento de que las dos vías
+   * comparten el permiso `write` y por tanto ninguna abre lo que la otra cierra.
+   * Eso es cierto para la autorización y falso para todo lo demás. Dos caminos
+   * hacia el mismo hecho se separan en cuanto uno de los dos crece: la
+   * invalidación de la caché del catálogo (C.5) y la fila de auditoría (C.7)
+   * cuelgan de `activate`/`deactivate`, y un `PATCH` que cambiara el estado por
+   * su cuenta dejaría el catálogo sirviendo un perfil retirado y la acción sin
+   * registrar. Que hoy funcione no es una defensa: la próxima línea que se
+   * añada a una de las dos vías es la que produce la divergencia.
+   *
+   * Cambiar el estado: `POST :id/activate` o `POST :id/deactivate`.
    */
-  @IsOptional()
-  @IsIn(INVOICE_PROFILE_STATES, {
-    message: `state debe ser ${INVOICE_PROFILE_STATES.join(' o ')}.`,
-  })
-  state?: string;
 
   /**
    * Reemplazo COMPLETO del snapshot, nunca un parche.
