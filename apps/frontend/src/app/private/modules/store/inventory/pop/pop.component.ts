@@ -2321,11 +2321,13 @@ export class PopComponent implements OnInit, OnDestroy {
       takeUntilDestroyed(this.destroyRef),
     ).subscribe({
       next: (response) => {
-        // 5.4 — El backend puede responder 200/201 con `success:false` (ver
-        // `responseService.error` que RETORNA el sobre en vez de lanzar). Antes
-        // el `if` solo atendía éxito, así que `isProcessingOrder` quedaba
-        // atascado y el operador no podía reintentar. Ahora: pintar el panel
-        // de error con el mensaje del sobre y conservar el carrito.
+        // 5.4 — HISTÓRICO: el backend respondía 200/201 con `success:false`
+        // porque `responseService.error` RETORNA el sobre en vez de lanzar, y
+        // el `if` solo atendía éxito, dejando `isProcessingOrder` atascado.
+        // CP-PURCHASE-TRANSPARENCY quitó ese envoltorio de los 24 handlers de
+        // compras: un fallo llega ahora por `error:` con su estado HTTP real.
+        // La rama `else` de abajo queda como red de seguridad, no como
+        // contrato. NO diseñes encima de `success:false`: ya no llega.
         if (response?.success && response.data) {
           // CP-ID-VNDX-2026-08-18-PO-PROD — F2.S6: en lugar de navegar a
           // /admin/products, pintar panel `app-success` con id + total.

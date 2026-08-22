@@ -11,6 +11,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { formatDate } from '@angular/common';
+import { extractApiErrorMessage } from '../../../../../../../core/utils/api-error-handler';
 import { DestroyRef } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { merge } from 'rxjs';
@@ -1212,10 +1213,15 @@ export class PoPaymentModalComponent {
             .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: () => this.afterSaveOk(),
-              error: (attErr: string) => {
+              error: (attErr: unknown) => {
                 // Pago ya registrado pero adjunto falló: warning no destructivo.
+                // `attErr` es un HttpErrorResponse desde que el controller dejó
+                // de envolver el fallo en un 200: interpolarlo crudo imprimía
+                // «[object Object]» al operador.
                 this.afterSaveOk();
-                this.toastService.error(`Pago guardado, pero el adjunto falló: ${attErr}`);
+                const detail =
+                  extractApiErrorMessage(attErr) || 'no se pudo adjuntar el comprobante';
+                this.toastService.error(`Pago guardado, pero el adjunto falló: ${detail}`);
               },
             });
         } else {
@@ -1224,7 +1230,10 @@ export class PoPaymentModalComponent {
       },
       error: (err: any) => {
         this.saving.set(false);
-        const msg = err?.message ?? 'Error al registrar pago';
+        // `err.message` de un HttpErrorResponse es «Http failure response for
+        // …: 400 Bad Request», no el mensaje de negocio. El extractor lee el
+        // cuerpo del error, que es donde viaja.
+        const msg = extractApiErrorMessage(err) || 'Error al registrar pago';
         this.toastService.error(msg);
       },
     });
