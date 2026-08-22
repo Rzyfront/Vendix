@@ -353,6 +353,12 @@ export class PopCartService {
    * (`NaN`/`±Infinity`) and `null`/`undefined` are rejected outright so
    * the line's stored discount is never silently wiped to 0 by an
    * upstream typo — the state stays exactly as it was.
+   *
+   * Teclear un porcentaje LIMPIA `discount_amount`. Sin eso, el monto heredado
+   * del escaneo gana por precedencia (`deriveLineTax`: monto > 0 vence al
+   * porcentaje) y la edición manual no tiene ningún efecto visible: el
+   * operador teclea, el número cambia en el input y la cifra no se mueve — un
+   * CTA mudo. Los dos campos nunca coexisten con valor.
    */
   setItemDiscount(
     itemId: string,
@@ -367,7 +373,9 @@ export class PopCartService {
     }
     const pct = this.normalizeDiscount(discountPercentage);
     const items = this.currentState.items.map((item) =>
-      item.id === itemId ? { ...item, discount: pct } : item,
+      item.id === itemId
+        ? { ...item, discount: pct, discount_amount: undefined }
+        : item,
     );
     for (const item of items) {
       this.recalculateItemTotals(
@@ -377,6 +385,38 @@ export class PopCartService {
       );
     }
     this.updateState({ items, summary: this.calculateSummary(items) });
+  }
+
+  /**
+   * Paridad escáner de facturas — fija el descuento comercial de la línea en
+   * DINERO (base neta). Es la contraparte de `setItemDiscount`: la factura del
+   * proveedor imprime pesos, y esa cifra es la que el backend persiste y la que
+   * la contabilidad lee, así que se guarda tal cual en vez de derivarla de un
+   * porcentaje que el redondeo degradaría.
+   *
+   * Mismo criterio defensivo que `setItemDiscount`: `null`/`undefined`/no
+   * finito se rechazan SIN tocar el estado, para que un payload corrupto no
+   * borre en silencio el descuento que la línea ya tenía. Se clampa a `>= 0`
+   * porque un "descuento" negativo es un recargo y tendría que viajar como
+   * flete, no como rebaja que baja la base gravable.
+   *
+   * Fija `discount = 0` en la misma línea: dos cifras compitiendo por el mismo
+   * dinero dejan al operador sin saber cuál se aplicó, y el porcentaje ya no
+   * describe nada porque el monto gana por precedencia.
+   */
+  setItemDiscountAmount(itemId: string, amount: number | null | undefined) {
+    if (
+      amount === null ||
+      amount === undefined ||
+      !Number.isFinite(Number(amount))
+    ) {
+      return;
+    }
+    const money = Math.max(0, Number(amount));
+    this.mutateItem(itemId, (item) => {
+      item.discount_amount = money;
+      item.discount = 0;
+    });
   }
 
   /**
@@ -536,6 +576,10 @@ export class PopCartService {
         // descuento; el alta manual sigue en 0. La normalización
         // (entero 0..100, NaN/Infinity ⇒ 0) vive en `normalizeDiscount`.
         discount: this.normalizeDiscount(request.discount),
+        // Paridad escáner: el MONTO viaja crudo. No pasa por
+        // `normalizeDiscount` porque ese helper es el contrato del PORCENTAJE
+        // entero 0-100; aplicarlo a pesos truncaría la cifra de la factura.
+        discount_amount: request.discount_amount,
         // IVA cycle (F1/F3): defaults sembrados salvo override del request
         // (escáner de facturas). `prices_include_tax` undefined ⇒ hereda header.
         tax_rate: request.tax_rate ?? DEFAULT_PURCHASE_TAX_RATE,
@@ -606,6 +650,15 @@ export class PopCartService {
           request.discount !== undefined
             ? this.normalizeDiscount(request.discount)
             : existingItem.discount,
+        // Paridad escáner: el descuento en DINERO sigue exactamente el mismo
+        // patrón que `discount` / `unit_cost` / `tax_rate`. Sin esta línea el
+        // `...existingItem` de arriba conservaba el monto del escaneo ANTERIOR
+        // mientras la cantidad sí se actualizaba — la línea quedaba con el
+        // descuento de un renglón y la cantidad de dos.
+        discount_amount:
+          request.discount_amount !== undefined
+            ? request.discount_amount
+            : existingItem.discount_amount,
         tax_rate: request.tax_rate ?? existingItem.tax_rate,
         tax_type: request.tax_type ?? existingItem.tax_type,
         prices_include_tax:
@@ -634,6 +687,8 @@ export class PopCartService {
         // descuento; el alta manual sigue en 0. La normalización
         // (entero 0..100, NaN/Infinity ⇒ 0) vive en `normalizeDiscount`.
         discount: this.normalizeDiscount(request.discount),
+        // Paridad escáner: el MONTO en pesos viaja crudo (ver rama prebulk).
+        discount_amount: request.discount_amount,
         // IVA cycle (F1/F3): defaults salvo override del request (escáner).
         tax_rate: request.tax_rate ?? DEFAULT_PURCHASE_TAX_RATE,
         tax_type: request.tax_type ?? 'iva',
@@ -761,10 +816,12 @@ export class PopCartService {
       {
         unit_cost: item.unit_cost,
         quantity: item.quantity,
-        // `discount` viaja en PORCENTAJE (10 = 10%) — el formato que el util
-        // espera. `discount_amount` queda undefined: si la línea lo necesitara
-        // se pasaría explícito y ganaría sobre el porcentaje.
+        // Se entregan LOS DOS y el util resuelve la precedencia (monto > 0
+        // gana), exactamente como lo hace `deriveLineTax` en el backend. Pasar
+        // sólo el porcentaje era lo que degradaba el descuento del escáner: la
+        // cifra en pesos de la factura no tenía por dónde entrar al preview.
         discount_percentage: item.discount,
+        discount_amount: item.discount_amount,
         tax_rate: safeTaxRate,
         prices_include_tax: item.prices_include_tax ?? undefined,
       },
@@ -898,8 +955,11 @@ export class PopCartService {
         unit_cost: item.unit_cost,
         quantity: item.quantity,
         // `discount` es porcentaje en el carrito; el util lo lee como
-        // `discount_percentage` (10 = 10%).
+        // `discount_percentage` (10 = 10%). `discount_amount` (pesos) viaja al
+        // lado y GANA cuando es > 0 — misma precedencia que el backend, para
+        // que el pie del carrito no contradiga a sus propias filas.
         discount_percentage: item.discount,
+        discount_amount: item.discount_amount,
         // IVA efectivo por línea. El maestro `has_vat` se aplica AQUÍ, no en la
         // línea: `recalculateItemTotals` calcula su tasa efectiva en una
         // variable local y nunca la escribe en `item.tax_rate`, así que la línea
@@ -1022,6 +1082,16 @@ export class PopCartService {
         // bloqueando que el bug se propague. Si el operador quiere mantener
         // el descuento, lo retipea explícito en el modal y se persiste como 20.
         discount: this.normalizeDiscount(Number(item.discount_percentage)),
+        // Paridad escáner: la OC persistida guarda el descuento de línea en
+        // DINERO (`purchase_order_items.discount_amount`) y es la cifra que el
+        // backend prefiere al recalcular. Hidratarla es lo que hace que una OC
+        // recargada reproduzca EXACTAMENTE las mismas cifras que produjo; sin
+        // esto el carrito la recomponía desde el porcentaje redondeado y el
+        // total al reabrir no era el que se aprobó.
+        discount_amount:
+          Number((item as any).discount_amount) > 0
+            ? Number((item as any).discount_amount)
+            : undefined,
         tax_rate: item.tax_rate || 0,
         // IVA cycle (F1): restore tax classification and per-line override.
         tax_type: (item as any).tax_type ?? 'iva',

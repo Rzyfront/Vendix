@@ -47,6 +47,15 @@ export interface ExtractedLineItem {
    */
   discount_amount?: number | null;
   /**
+   * QUI-661 hotfix — descuento comercial de la línea en PORCENTAJE (0-100), tal
+   * como lo imprime la factura ("-20%", "Dcto 20%"). Es PROCEDENCIA: el monto en
+   * `discount_amount` es la fuente de verdad y gana en `deriveLineTax`. Un
+   * porcentaje es invariante a la base (bruto o neto), así que es la cifra que el
+   * operador coteja de un vistazo contra el papel y la que puede teclear sin
+   * preguntarse si el número que ve incluye IVA.
+   */
+  discount_percentage?: number | null;
+  /**
    * Fase 4: pistas de unidad de medida emitidas por el perfil
    * `invoice_ocr_ingredient`. El perfil retail (`invoice_ocr`) no las
    * emite, por eso son opcionales. `uom_hint` es un código de unidad

@@ -950,16 +950,43 @@ export class InvoiceScannerService {
     const unitNet =
       pricesIncludeTax && r > 0 ? grossUnit / (1 + r) : grossUnit;
 
+    // Izada a const (antes se calculaba en línea dentro del return) porque el
+    // descuento derivado de un porcentaje necesita la MISMA cantidad que se
+    // emite: dos lecturas independientes de `item.quantity` podrían divergir.
+    const quantity = Number(item.quantity) || 0;
+
     // QUI-661 Fase 4 — el descuento se aplana a NETO con la MISMA regla que el
     // precio. Si la factura imprime precios con IVA incluido, el descuento
     // impreso también es bruto; restarlo tal cual de un `unit_price` ya neto
     // sobre-descontaría exactamente el IVA del descuento (19% de más sobre esa
     // rebaja) y arrastraría ese error hasta la capa de costo.
     const rawDiscount = Number(item.discount_amount);
-    const printedDiscount =
+    const printedAmountDiscount =
       Number.isFinite(rawDiscount) && rawDiscount > 0
         ? repairScannedAmount(rawDiscount, currency).value
         : 0;
+
+    // QUI-661 hotfix — el PORCENTAJE de descuento de la línea. NUNCA pasa por
+    // `repairScannedAmount`: es adimensional, igual que `tax_rate`. 20 es 20,
+    // no 20.000; repararlo lo convertiría en un porcentaje absurdo.
+    const rawPct = Number(item.discount_percentage);
+    const discountPct =
+      Number.isFinite(rawPct) && rawPct > 0 ? Math.min(100, rawPct) : undefined;
+
+    // Cuando la IA imprime "-20%" pero deja el monto en 0 —el defecto que
+    // motivó este hotfix— el descuento NO puede perderse: se deriva del
+    // porcentaje sobre el valor BRUTO de la línea (mismo `quantity` ya
+    // calculado arriba), que es la base sobre la que la factura imprime el
+    // porcentaje. Si la IA emitió AMBOS, el MONTO manda y el porcentaje queda
+    // como procedencia: no se reconcilian ni se avisa, porque el monto impreso
+    // es la cifra que el proveedor cobró.
+    const printedDiscount =
+      printedAmountDiscount > 0
+        ? printedAmountDiscount
+        : discountPct !== undefined
+          ? grossUnit * quantity * (discountPct / 100)
+          : 0;
+
     const discountNet =
       pricesIncludeTax && r > 0 ? printedDiscount / (1 + r) : printedDiscount;
 
@@ -967,7 +994,7 @@ export class InvoiceScannerService {
 
     return {
       description: String(item.description || ''),
-      quantity: Number(item.quantity) || 0,
+      quantity,
       // unit_price SIEMPRE queda en neto (aplastado si la factura era inclusiva).
       unit_price: unitNet,
       unit_price_gross: grossUnit,
@@ -985,6 +1012,10 @@ export class InvoiceScannerService {
       // Neto, coherente con `unit_price`. Cero se emite como undefined para no
       // ensuciar las líneas sin descuento.
       discount_amount: discountNet > 0 ? discountNet : undefined,
+      // QUI-661 hotfix — el porcentaje NO se aplana: es adimensional, no vive
+      // en ninguna base. Viaja como procedencia para que el modal muestre la
+      // misma cifra que imprime el papel.
+      discount_percentage: discountPct,
     };
   }
 

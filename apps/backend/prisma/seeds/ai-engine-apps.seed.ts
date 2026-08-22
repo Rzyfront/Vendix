@@ -30,8 +30,14 @@ export async function seedAIEngineApps(
       // Vision OCR returns text/JSON from an image input; the underlying model
       // is a text-output (vision-capable) model.
       model_type: 'text' as ai_model_type_enum,
-      temperature: 0.1,
-      max_tokens: 4000,
+      // QUI-661 hotfix — extraer cifras de una factura es DETERMINISTA: no hay
+      // nada que muestrear. Cualquier temperatura > 0 es variabilidad regalada
+      // sobre una tarea sin grados de libertad.
+      temperature: 0,
+      // Alineado con lo que corre en producción. Una factura multipágina no
+      // cabe en 4000 tokens de salida: el JSON se trunca a mitad de las líneas
+      // y el escaneo entero muere al parsear.
+      max_tokens: 50000,
       is_active: true,
       system_prompt: `You are a purchase invoice data extraction system. You analyze invoice images and return structured JSON.
 
@@ -57,6 +63,7 @@ You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no e
       "total": number,
       "tax_rate": number,
       "discount_amount": number,
+      "discount_percentage": number,
       "sku_if_visible": "string or null — product code/reference if visible"
     }
   ],
@@ -103,7 +110,15 @@ RULES:
 12. "tax_rate" (per line): the IVA/consumption rate for THAT line, as a DECIMAL FRACTION — NOT a percentage.
    - 0.19 = standard IVA (19%). 0.05 = reduced rate (5%, some foods / INC). 0 = exempt, excluded, or 0% (excluido / exento / no grava).
    - Read the per-line tax column when the invoice shows one. Otherwise infer from the invoice's global IVA: if a single IVA rate applies to the taxed items, use that fraction on the taxed lines and 0 on the exempt ones.
-   - ALWAYS return the fraction (0.19), never 19 and never "19%". tax_amount stays the IVA total only (rule 5); do NOT fold tax_rate into it.`,
+   - ALWAYS return the fraction (0.19), never 19 and never "19%". tax_amount stays the IVA total only (rule 5); do NOT fold tax_rate into it.
+9bis. DISCOUNT PERCENTAGE — when the line prints a percentage ("-20%", "Dcto 20%"), report it VERBATIM in "discount_percentage" (0-100, never a fraction) AND the money in "discount_amount". Reporting one and omitting the other loses the figure the operator reads off the paper. A visible discount column or percentage on the line means discount_amount MUST be non-zero — 0 is correct ONLY when nothing is printed.
+9ter. DISCOUNT BASIS — every discount money figure is in the SAME basis as "unit_price". If prices_include_tax = true the printed discount is tax-inclusive; report it as printed and do NOT strip the tax yourself.
+13. "subtotal" = the sum of line taxable bases AFTER commercial discounts and BEFORE IVA. Not the sum of printed line totals when those already carry tax.
+14. WITHHOLDINGS — never subtract retefuente / reteica / reteiva from "total". "total" is the invoice's "Total a pagar" BEFORE withholdings; they are settled at payment.
+15. SELF-CHECK before answering. For every line verify:
+   prices_include_tax = true  -> quantity x unit_price - discount_amount ~= total
+   prices_include_tax = false -> (quantity x unit_price - discount_amount) x (1 + tax_rate) ~= total
+   And verify the sum of line totals ~= grand total. If a line does not reconcile, re-read its columns before answering — a mismatch means you misread a column, not that the invoice is wrong.`,
       // prompt_template is null — for vision apps, text instructions must be
       // in the same message as the image (handled by scanInvoice()).
       prompt_template: null,
@@ -115,7 +130,8 @@ RULES:
         'Variante de invoice_ocr para órdenes de insumo. Devuelve los mismos campos de retail + presentation / pack_size / uom_hint para sugerir la unidad de compra y de stock al usuario en el modal POP.',
       output_format: 'json',
       model_type: 'text' as ai_model_type_enum,
-      temperature: 0.1,
+      // QUI-661 hotfix — misma razón que invoice_ocr: extracción determinista.
+      temperature: 0,
       max_tokens: 4500,
       is_active: true,
       system_prompt: `You are a purchase invoice data extraction system specialized in INGREDIENT orders. You analyze invoice images for kitchen / restaurant supply and return structured JSON.
@@ -147,6 +163,7 @@ You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no e
       "total": number,
       "tax_rate": number,
       "discount_amount": number,
+      "discount_percentage": number,
       "sku_if_visible": "string or null",
       "presentation": "string or null",
       "pack_size": number or null,
@@ -196,7 +213,15 @@ RULES:
 14. "tax_rate" (per line): the IVA/consumption rate for THAT line, as a DECIMAL FRACTION — NOT a percentage.
     - 0.19 = standard IVA (19%). 0.05 = reduced rate (5%, some foods / INC). 0 = exempt, excluded, or 0% (excluido / exento / no grava).
     - Read the per-line tax column when the invoice shows one. Otherwise infer from the invoice's global IVA: if a single IVA rate applies to the taxed items, use that fraction on the taxed lines and 0 on the exempt ones.
-    - ALWAYS return the fraction (0.19), never 19 and never "19%". tax_amount stays the IVA total only (rule 5); do NOT fold tax_rate into it.`,
+    - ALWAYS return the fraction (0.19), never 19 and never "19%". tax_amount stays the IVA total only (rule 5); do NOT fold tax_rate into it.
+11bis. DISCOUNT PERCENTAGE — when the line prints a percentage ("-20%", "Dcto 20%"), report it VERBATIM in "discount_percentage" (0-100, never a fraction) AND the money in "discount_amount". Reporting one and omitting the other loses the figure the operator reads off the paper. A visible discount column or percentage on the line means discount_amount MUST be non-zero — 0 is correct ONLY when nothing is printed.
+11ter. DISCOUNT BASIS — every discount money figure is in the SAME basis as "unit_price". If prices_include_tax = true the printed discount is tax-inclusive; report it as printed and do NOT strip the tax yourself.
+15. "subtotal" = the sum of line taxable bases AFTER commercial discounts and BEFORE IVA. Not the sum of printed line totals when those already carry tax.
+16. WITHHOLDINGS — never subtract retefuente / reteica / reteiva from "total". "total" is the invoice's "Total a pagar" BEFORE withholdings; they are settled at payment.
+17. SELF-CHECK before answering. For every line verify:
+   prices_include_tax = true  -> quantity x unit_price - discount_amount ~= total
+   prices_include_tax = false -> (quantity x unit_price - discount_amount) x (1 + tax_rate) ~= total
+   And verify the sum of line totals ~= grand total. If a line does not reconcile, re-read its columns before answering — a mismatch means you misread a column, not that the invoice is wrong.`,
       prompt_template: null,
     },
     {

@@ -22,6 +22,14 @@ export interface PurchaseOrderItemRequest {
   quantity: number;
   unit_price: number;
   discount_percentage?: number;
+  /**
+   * Descuento comercial de la línea en DINERO (base neta). GANA sobre
+   * `discount_percentage` en el backend: `PurchaseOrdersService.deriveLineTax`
+   * usa `discount_amount` cuando es > 0 y sólo entonces cae al porcentaje.
+   * La columna `purchase_order_items.discount_amount` ya existe, así que la
+   * cifra que imprimió la factura se persiste sin degradarse.
+   */
+  discount_amount?: number;
   /** IVA cycle (F1): tax rate (%) captured manually for this line. */
   tax_rate?: number;
   /** IVA cycle (F1): tax classification for this line. Defaults to 'iva'. */
@@ -139,13 +147,22 @@ export function cartToPurchaseOrderRequest(
         // meaningful when VAT is on (mixed invoices).
         tax_rate: cartState.has_vat ? item.tax_rate : 0,
         tax_type: item.tax_type ?? 'iva',
-        // QUI-661: descuento comercial de la línea. Se manda el porcentaje
-        // tecleado; el backend resuelve el monto, lo persiste y lo resta de la
-        // base ANTES de derivar el IVA — por eso no se manda un precio ya
+        // QUI-661: descuento comercial de la línea. No se manda un precio ya
         // rebajado: el descuento tiene que ser visible como tal para que llegue
         // a la capa de costo y no se confunda con un precio negociado.
+        //
+        // Se envían AMBAS cifras a propósito y el backend resuelve la
+        // precedencia (`deriveLineTax`: `discount_amount > 0` gana sobre
+        // `discount_percentage`). El MONTO es la fuente de verdad —lo que
+        // imprimió la factura— y el PORCENTAJE viaja como procedencia de la
+        // captura manual. Sólo una de las dos tiene valor a la vez: el carrito
+        // limpia el monto al teclear un porcentaje y pone el porcentaje en 0 al
+        // fijar un monto.
         ...(Number(item.discount) > 0
           ? { discount_percentage: Number(item.discount) }
+          : {}),
+        ...(Number(item.discount_amount) > 0
+          ? { discount_amount: Number(item.discount_amount) }
           : {}),
         ...(cartState.has_vat && item.prices_include_tax !== undefined
           ? { prices_include_tax: item.prices_include_tax }
