@@ -3,7 +3,10 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
-import { CostingService } from '../../inventory/shared/services/costing.service';
+import {
+  CostingService,
+  scopedStockKey,
+} from '../../inventory/shared/services/costing.service';
 import { CostingMethodResolverService } from '../../inventory/shared/services/costing-method-resolver.service';
 import { InventorySerialNumbersService } from '../../inventory/serial-numbers/inventory-serial-numbers.service';
 import { SerialNumberEnforcementService } from '../../inventory/serial-numbers/serial-number-enforcement.service';
@@ -1241,8 +1244,29 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
       product_variants: { findMany: jest.fn().mockResolvedValue([]) },
     };
 
+    // J.1 — el universo de stock también se lee POR LOTE: una llamada para
+    // todos los renglones, no una por línea. El doble responde con el MISMO
+    // `Map` que el servicio real (una entrada por par pedido), porque un doble
+    // que devolviera un objeto plano dejaría pasar un llamador que preguntara
+    // por la llave equivocada y recibiera `undefined` — es decir, un cero
+    // indistinguible de «no hay stock», que la vista previa interpreta como
+    // reactivación.
     const mockCostingService = {
-      getScopedStockAggregate: jest.fn().mockResolvedValue(scopedAggregate),
+      getScopedStockAggregates: jest.fn(async (params: any) => {
+        const aggregates = new Map<
+          string,
+          { quantity: number; cost_per_unit: number }
+        >();
+        for (const key of params.keys as Array<{
+          product_id: number;
+          variant_id?: number | null;
+        }>) {
+          aggregates.set(scopedStockKey(key.product_id, key.variant_id ?? null), {
+            ...scopedAggregate,
+          });
+        }
+        return aggregates;
+      }),
     };
     const mockCostingMethodResolver = {
       resolveCostingMethod: jest.fn().mockResolvedValue(costingMethod),
@@ -1558,6 +1582,78 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
   });
 
   /**
+   * CP-PURCHASE-TRANSPARENCY J.1 — la última consulta sale del bucle.
+   *
+   * `global_stock` / `global_cost_per_unit` gobiernan la vista previa: el
+   * primero decide si la compra es una reactivación y el segundo es la base del
+   * CPP que el modal muestra. Se leían una vez POR RENGLÓN, y cada lectura
+   * arrastraba además su propia resolución de ubicación. En un endpoint que se
+   * redispara con cada tecla del encabezado, el costo crecía con el carrito.
+   */
+  it('J.1: el universo de stock se lee UNA vez para todo el lote, no una por línea', async () => {
+    const service = await buildPreviewService({
+      taxResponsibilities: ['O-48'],
+      isIngredient: false,
+      purchaseToStockFactor: null,
+      scopedAggregate: { quantity: 40, cost_per_unit: 500 },
+    });
+
+    const result: any = await service.getCostPreview({
+      location_id: LOCATION_ID,
+      prices_include_tax: false,
+      items: [
+        { product_id: PRODUCT_ID, quantity: 1, unit_cost: 1000 },
+        { product_id: PRODUCT_ID, quantity: 2, unit_cost: 1000 },
+        { product_id: PRODUCT_ID, quantity: 3, unit_cost: 1000 },
+      ],
+    } as any);
+
+    const aggregates = (service as any).costingService
+      .getScopedStockAggregates as jest.Mock;
+    expect(aggregates).toHaveBeenCalledTimes(1);
+    expect(aggregates.mock.calls[0][0].location_id).toBe(LOCATION_ID);
+    expect(aggregates.mock.calls[0][0].keys).toHaveLength(3);
+    // Y las tres líneas siguen viendo el mismo universo que veían antes.
+    expect(result.items.map((i: any) => i.global_stock)).toEqual([40, 40, 40]);
+    expect(result.items.map((i: any) => i.global_cost_per_unit)).toEqual([
+      500, 500, 500,
+    ]);
+  });
+
+  it('J.1: una línea base y una de variante piden universos DISTINTOS', async () => {
+    const service = await buildPreviewService({
+      taxResponsibilities: ['O-48'],
+      isIngredient: false,
+      purchaseToStockFactor: null,
+      scopedAggregate: { quantity: 10, cost_per_unit: 100 },
+    });
+
+    await service.getCostPreview({
+      location_id: LOCATION_ID,
+      prices_include_tax: false,
+      items: [
+        { product_id: PRODUCT_ID, quantity: 1, unit_cost: 1000 },
+        {
+          product_id: PRODUCT_ID,
+          product_variant_id: 77,
+          quantity: 1,
+          unit_cost: 1000,
+        },
+      ],
+    } as any);
+
+    const aggregates = (service as any).costingService
+      .getScopedStockAggregates as jest.Mock;
+    // La variante forma parte de la LLAVE. Si el lote se pidiera por
+    // `product_id IN (…)`, la línea base heredaría el stock de todas las
+    // variantes del producto y su CPP saldría de un universo que no es el suyo.
+    expect(aggregates.mock.calls[0][0].keys).toEqual([
+      { product_id: PRODUCT_ID, variant_id: null },
+      { product_id: PRODUCT_ID, variant_id: 77 },
+    ]);
+  });
+
+  /**
    * CP-PURCHASE-TRANSPARENCY C.2 — el flete se reparte y se capitaliza.
    *
    * `shipping_cost` viajaba en la cabecera, sumaba al total y no tocaba ni el
@@ -1702,9 +1798,22 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
             useValue: {
               // Stock en cero ⇒ reactivación ⇒ el CPP es el costo entrante
               // directo, lo que aísla la aritmética del margen.
-              getScopedStockAggregate: jest
-                .fn()
-                .mockResolvedValue({ quantity: 0, cost_per_unit: 0 }),
+              getScopedStockAggregates: jest.fn(async (params: any) => {
+                const aggregates = new Map<
+                  string,
+                  { quantity: number; cost_per_unit: number }
+                >();
+                for (const key of params.keys as Array<{
+                  product_id: number;
+                  variant_id?: number | null;
+                }>) {
+                  aggregates.set(
+                    scopedStockKey(key.product_id, key.variant_id ?? null),
+                    { quantity: 0, cost_per_unit: 0 },
+                  );
+                }
+                return aggregates;
+              }),
             },
           },
           {

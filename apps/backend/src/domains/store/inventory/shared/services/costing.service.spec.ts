@@ -40,6 +40,12 @@ describe('CostingService', () => {
    * extensiones de Prisma, así que el conjunto agregado no depende de si el
    * cliente que ejecuta trae alcance de tienda o no. El mock apunta al
    * `PrismaClient` desnudo que devuelve `globalPrisma.withoutScope()`.
+   *
+   * J.1 — las filas del doble llevan `product_id` / `product_variant_id`
+   * porque el motor SIEMPRE los devuelve y la lectura es por LOTE: cada fila
+   * se atribuye a su propio par. Un fixture sin ellos describiría un motor que
+   * no existe, y el día que alguien pida dos pares el arnés seguiría verde
+   * mientras el servicio sumara los dos universos en uno.
    */
   let rawQuery: jest.Mock;
 
@@ -237,6 +243,8 @@ describe('CostingService', () => {
     it('case 3: FIFO returns new_cost_per_unit = unit_cost (no average) and still creates layer', async () => {
       const existingStockLevel = {
         id: 9,
+        product_id: 1,
+        product_variant_id: null,
         quantity_on_hand: 10,
         cost_per_unit: 1000,
       };
@@ -334,6 +342,8 @@ describe('CostingService', () => {
       // Scoped aggregate (unscoped read) sees the org-level central warehouse.
       rawQuery.mockResolvedValue([
         {
+          product_id: 1,
+          product_variant_id: null,
           location_id: 49, // Bodega Central, store_id = null
           quantity_on_hand: 10,
           cost_per_unit: 1000000,
@@ -588,6 +598,8 @@ describe('CostingService', () => {
       // Aggregate reads through the UNSCOPED base client (globalPrisma).
       rawQuery.mockResolvedValue([
         {
+          product_id: 1,
+          product_variant_id: null,
           quantity_on_hand: 10,
           cost_per_unit: null, // born NULL (non-receipt write path)
           product_cost_price: 3_500_000,
@@ -650,6 +662,8 @@ describe('CostingService', () => {
     it('case c: legitimate zero cost (cost_per_unit=0 AND cost_price=0) stays 0 (no false fallback)', async () => {
       rawQuery.mockResolvedValue([
         {
+          product_id: 1,
+          product_variant_id: null,
           quantity_on_hand: 10,
           cost_per_unit: 0,
           product_cost_price: 0,
@@ -690,12 +704,16 @@ describe('CostingService', () => {
     // Bajo el defecto, la recepción veía sólo las 25.
     const universe = [
       {
+        product_id: 268,
+        product_variant_id: null,
         quantity_on_hand: 94,
         cost_per_unit: 1_620_000,
         product_cost_price: 1_620_000,
         variant_cost_price: null,
       },
       {
+        product_id: 268,
+        product_variant_id: null,
         quantity_on_hand: 25,
         cost_per_unit: 1_620_000,
         product_cost_price: 1_620_000,
@@ -949,12 +967,16 @@ describe('CostingService', () => {
     it('producto ACTIVO con stock: el costo es EXACTAMENTE el de antes de D.2', async () => {
       const activeUniverse = [
         {
+          product_id: 268,
+          product_variant_id: null,
           quantity_on_hand: 94,
           cost_per_unit: 1_620_000,
           variant_cost_price: null,
           product_cost_price: 1_620_000,
         },
         {
+          product_id: 268,
+          product_variant_id: null,
           quantity_on_hand: 25,
           cost_per_unit: 1_620_000,
           variant_cost_price: null,
@@ -978,6 +1000,8 @@ describe('CostingService', () => {
       // y por eso el promedio se queda en 1.000 en vez de desplomarse a ~3,5.
       rawQuery.mockResolvedValue([
         {
+          product_id: 268,
+          product_variant_id: null,
           quantity_on_hand: 10,
           cost_per_unit: 1_000,
           variant_cost_price: null,
@@ -1005,6 +1029,289 @@ describe('CostingService', () => {
       // `product_variants` no tiene columna `state`: el criterio SIEMPRE cuelga
       // del producto padre.
       expect(where.products).toEqual({ state: { not: 'archived' } });
+    });
+  });
+
+  /**
+   * CP-PURCHASE-TRANSPARENCY J.1 — el universo se lee POR LOTE.
+   *
+   * El defecto que cierra: la vista previa de compra llamaba al agregado una
+   * vez POR RENGLÓN, y cada llamada arrastraba además su propia resolución de
+   * ubicación (`inventory_locations.findUnique` + alcance operativo). En un
+   * endpoint que se redispara con cada tecla del encabezado, el costo crecía
+   * con el tamaño del carrito.
+   *
+   * Lo que estas pruebas fijan es que izar la lectura NO relaja nada de lo
+   * anterior: el aislamiento por organización sigue en el `WHERE`, `'archived'`
+   * sigue sin parametrizar (así que los índices `$n` no se corren), la
+   * consulta sigue siendo la misma con `tx` y sin `tx`, y cada par recibe SU
+   * universo y no el promedio de los demás.
+   */
+  describe('J.1 — agregado por lote', () => {
+    const makeTx = (
+      rows: any[],
+      location = { organization_id: 1, store_id: 42 },
+    ) => ({
+      $queryRaw: jest.fn().mockResolvedValue(rows),
+      inventory_locations: {
+        findUnique: jest.fn().mockResolvedValue(location),
+      },
+    });
+
+    beforeEach(() => {
+      operatingScopeService.getOperatingScope.mockResolvedValue('STORE');
+      (prismaService as any).inventory_locations.findUnique.mockResolvedValue({
+        organization_id: 1,
+        store_id: 42,
+      });
+    });
+
+    it('N pares → UNA consulta y UNA resolución de ubicación', async () => {
+      rawQuery.mockResolvedValue([]);
+
+      await service.getScopedStockAggregates({
+        keys: [
+          { product_id: 268 },
+          { product_id: 268, variant_id: 413 },
+          { product_id: 378 },
+        ],
+        location_id: 100,
+      });
+
+      expect(rawQuery).toHaveBeenCalledTimes(1);
+      // La ubicación receptora es de la CABECERA de la compra: se resuelve una
+      // sola vez para todo el lote, no una por renglón.
+      expect(
+        (prismaService as any).inventory_locations.findUnique,
+      ).toHaveBeenCalledTimes(1);
+      expect(
+        operatingScopeService.getOperatingScope,
+      ).toHaveBeenCalledTimes(1);
+    });
+
+    it('cada par recibe SU universo: los promedios no se mezclan', async () => {
+      // Dos productos con costos deliberadamente distintos. Si el servicio
+      // sumara los dos universos, ambos saldrían a 1.500.
+      rawQuery.mockResolvedValue([
+        {
+          product_id: 268,
+          product_variant_id: null,
+          quantity_on_hand: 10,
+          cost_per_unit: 1_000,
+          variant_cost_price: null,
+          product_cost_price: 1_000,
+        },
+        {
+          product_id: 268,
+          product_variant_id: null,
+          quantity_on_hand: 10,
+          cost_per_unit: 3_000,
+          variant_cost_price: null,
+          product_cost_price: 3_000,
+        },
+        {
+          product_id: 500,
+          product_variant_id: null,
+          quantity_on_hand: 5,
+          cost_per_unit: 7_000,
+          variant_cost_price: null,
+          product_cost_price: 7_000,
+        },
+      ]);
+
+      const aggregates = await service.getScopedStockAggregates({
+        keys: [{ product_id: 268 }, { product_id: 500 }],
+        location_id: 100,
+      });
+
+      expect(aggregates.get('268:base')).toEqual({
+        quantity: 20,
+        cost_per_unit: 2_000,
+      });
+      expect(aggregates.get('500:base')).toEqual({
+        quantity: 5,
+        cost_per_unit: 7_000,
+      });
+    });
+
+    it('la variante y la base del MISMO producto son universos distintos', async () => {
+      rawQuery.mockResolvedValue([
+        {
+          product_id: 268,
+          product_variant_id: null,
+          quantity_on_hand: 14,
+          cost_per_unit: 1_620_000,
+          variant_cost_price: null,
+          product_cost_price: 1_620_000,
+        },
+        {
+          product_id: 268,
+          product_variant_id: 413,
+          quantity_on_hand: 44,
+          cost_per_unit: 900_000,
+          variant_cost_price: 900_000,
+          product_cost_price: 1_620_000,
+        },
+      ]);
+
+      const aggregates = await service.getScopedStockAggregates({
+        keys: [{ product_id: 268 }, { product_id: 268, variant_id: 413 }],
+        location_id: 100,
+      });
+
+      expect(aggregates.get('268:base')?.quantity).toBe(14);
+      expect(aggregates.get('268:413')?.quantity).toBe(44);
+      expect(aggregates.get('268:413')?.cost_per_unit).toBe(900_000);
+    });
+
+    it('un par SIN stock viene en el mapa con ceros, no ausente', async () => {
+      rawQuery.mockResolvedValue([]);
+
+      const aggregates = await service.getScopedStockAggregates({
+        keys: [{ product_id: 268 }, { product_id: 378 }],
+        location_id: 100,
+      });
+
+      // El llamador nunca tiene que distinguir «no vino» de «vino en cero»:
+      // ese es justo el hueco por el que se cuela una reactivación falsa.
+      expect(aggregates.has('378:base')).toBe(true);
+      expect(aggregates.get('378:base')).toEqual({
+        quantity: 0,
+        cost_per_unit: 0,
+      });
+    });
+
+    it('llaves duplicadas se colapsan: un solo par viaja al motor', async () => {
+      rawQuery.mockResolvedValue([]);
+
+      await service.getScopedStockAggregates({
+        keys: [{ product_id: 268 }, { product_id: 268, variant_id: null }],
+        location_id: 100,
+      });
+
+      const sent = rawQuery.mock.calls[0][0];
+      // [product_id, organization_id, store_id] — el par aparece UNA vez.
+      expect(sent.values).toEqual([268, 1, 42]);
+    });
+
+    it('sin llaves no toca la base de datos', async () => {
+      const aggregates = await service.getScopedStockAggregates({
+        keys: [],
+        location_id: 100,
+      });
+
+      expect(aggregates.size).toBe(0);
+      expect(rawQuery).not.toHaveBeenCalled();
+      expect(
+        (prismaService as any).inventory_locations.findUnique,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('el lote de UNA llave emite exactamente la consulta de `getScopedStockAggregate`', async () => {
+      rawQuery.mockResolvedValue([]);
+
+      await service.getScopedStockAggregate({
+        product_id: 268,
+        location_id: 100,
+      });
+      await service.getScopedStockAggregates({
+        keys: [{ product_id: 268 }],
+        location_id: 100,
+      });
+
+      const single = rawQuery.mock.calls[0][0];
+      const batched = rawQuery.mock.calls[1][0];
+      // Una sola implementación del universo: la firma de una llave delega.
+      expect(normalize(batched.text)).toBe(normalize(single.text));
+      expect(batched.values).toEqual(single.values);
+    });
+
+    it('A.0 sigue en pie por lote: misma consulta con `tx` y sin `tx`', async () => {
+      rawQuery.mockResolvedValue([]);
+      const tx = makeTx([]);
+      const keys = [
+        { product_id: 268 },
+        { product_id: 268, variant_id: 413 },
+      ];
+
+      await service.getScopedStockAggregates({ keys, location_id: 100 });
+      await service.getScopedStockAggregates({ keys, location_id: 100 }, tx);
+
+      const preview = rawQuery.mock.calls[0][0];
+      const reception = tx.$queryRaw.mock.calls[0][0];
+      expect(normalize(reception.text)).toBe(normalize(preview.text));
+      expect(reception.values).toEqual(preview.values);
+      // Y la bodega central sigue dentro del universo en los dos caminos.
+      expect(normalize(reception.text)).toContain('il.store_id IS NULL');
+    });
+
+    it('el aislamiento por organización va en el WHERE, después de TODOS los pares', async () => {
+      rawQuery.mockResolvedValue([]);
+
+      await service.getScopedStockAggregates({
+        keys: [
+          { product_id: 268 },
+          { product_id: 268, variant_id: 413 },
+          { product_id: 378 },
+        ],
+        location_id: 100,
+      });
+
+      const sent = rawQuery.mock.calls[0][0];
+      const text = normalize(sent.text);
+      // 4 parámetros de pares (268, 268, 413, 378) ⇒ organización en $5.
+      expect(text).toContain('il.organization_id = $5');
+      expect(text).toContain('il.store_id = $6');
+      expect(sent.values).toEqual([268, 268, 413, 378, 1, 42]);
+      // El estado NO se parametriza ni siquiera con N pares: si lo hiciera,
+      // correría los índices y el aislamiento dejaría de estar donde se cree.
+      expect(text).toContain("p.state IS DISTINCT FROM 'archived'");
+      expect(sent.values).not.toContain('archived');
+    });
+
+    it('una ubicación de OTRA organización es inalcanzable también por lote', async () => {
+      (prismaService as any).inventory_locations.findUnique.mockResolvedValue({
+        organization_id: 99,
+        store_id: 7,
+      });
+
+      await expect(
+        service.getScopedStockAggregates({
+          keys: [{ product_id: 268 }, { product_id: 378 }],
+          location_id: 100,
+        }),
+      ).rejects.toThrow('Location 100 does not belong to organization 1');
+
+      expect(rawQuery).not.toHaveBeenCalled();
+    });
+
+    it('un par ARCHIVADO no trae filas: cero y cero, sin arrastrar a los vivos', async () => {
+      // El motor entrega ya filtrado por `p.state IS DISTINCT FROM 'archived'`:
+      // del producto 378 (archivado, 20.000@3) no llega nada.
+      rawQuery.mockResolvedValue([
+        {
+          product_id: 268,
+          product_variant_id: null,
+          quantity_on_hand: 14,
+          cost_per_unit: 1_620_000,
+          variant_cost_price: null,
+          product_cost_price: 1_620_000,
+        },
+      ]);
+
+      const aggregates = await service.getScopedStockAggregates({
+        keys: [{ product_id: 268 }, { product_id: 378 }],
+        location_id: 100,
+      });
+
+      expect(aggregates.get('378:base')).toEqual({
+        quantity: 0,
+        cost_per_unit: 0,
+      });
+      expect(aggregates.get('268:base')).toEqual({
+        quantity: 14,
+        cost_per_unit: 1_620_000,
+      });
     });
   });
 

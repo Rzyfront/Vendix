@@ -38,6 +38,7 @@ import { StockLevelManager } from '../../inventory/shared/services/stock-level-m
 import {
   CostingService,
   CostCalculationResult,
+  scopedStockKey,
 } from '../../inventory/shared/services/costing.service';
 import { CostingMethodResolverService } from '../../inventory/shared/services/costing-method-resolver.service';
 import { toPublicCostingMethod } from '../../inventory/shared/helpers/costing-method.mapper';
@@ -4910,12 +4911,15 @@ export class PurchaseOrdersService {
    *    helpers que usa `create()` (`prorateHeaderDiscount`,
    *    `resolveFreightAllocation`), así que la paridad se garantiza por
    *    contrato compartido y no por réplica aritmética.
-   *  - **A.12 — las consultas de conjunto salen del bucle.** El producto, la
-   *    variante, el nivel de stock y la configuración de unidad de medida se
-   *    leían línea por línea. La vista previa se redispara con cada cambio de
-   *    cabecera, así que su costo por línea tiene que ser constante. Queda
-   *    dentro del bucle una sola lectura: el agregado de stock con alcance, que
-   *    depende del producto y hoy no admite lectura por lote.
+   *  - **A.12 — las consultas salen del bucle, TODAS.** El producto, la
+   *    variante, el nivel de stock, la configuración de unidad de medida y el
+   *    agregado de stock con alcance se leían línea por línea. La vista previa
+   *    se redispara con cada cambio de cabecera, así que su costo tiene que ser
+   *    constante y no crecer con el tamaño del carrito. Hoy el bucle NO emite
+   *    ninguna consulta: es aritmética sobre mapas ya resueltos. El agregado
+   *    con alcance fue el último en izarse, vía
+   *    `CostingService.getScopedStockAggregates` (una consulta para los N
+   *    pares, más una sola resolución de la ubicación de cabecera).
    *  - **B.4 — devuelve `fiscal_explanation`.** El frontend deja de re-derivar
    *    el predicado de IVA para explicar el costo. Había cuatro réplicas del
    *    predicado en el repositorio con valores por omisión divergentes: si el
@@ -5074,6 +5078,32 @@ export class PurchaseOrdersService {
       ]),
     );
 
+    // A.12 (cierre) — el agregado de stock con alcance, que era la ÚLTIMA
+    // lectura que quedaba dentro del bucle, también sale de él.
+    //
+    // Es el número que gobierna la vista previa: `global_stock` decide si la
+    // compra es una reactivación y `global_cost_per_unit` es la base del CPP
+    // que el modal muestra. Se leía una vez por renglón, y cada lectura traía
+    // además su propia resolución de ubicación (`inventory_locations` +
+    // alcance operativo): una orden de 30 líneas pagaba ~60-90 consultas en un
+    // endpoint que se redispara con cada tecla del encabezado. Ahora es UNA
+    // consulta para todo el lote, más la resolución de ubicación una sola vez
+    // —la ubicación receptora es de la CABECERA, no de la línea.
+    //
+    // La aritmética no cambia: `getScopedStockAggregates` es la implementación
+    // canónica y `getScopedStockAggregate` (el que usa `receive()` dentro de su
+    // transacción) delega en ella, así que vista previa y recepción siguen
+    // emitiendo la MISMA consulta sobre el MISMO universo — el contrato A.0.
+    const scopedAggregates = await this.costingService.getScopedStockAggregates(
+      {
+        keys: dto.items.map((i) => ({
+          product_id: i.product_id,
+          variant_id: i.product_variant_id ?? null,
+        })),
+        location_id: dto.location_id,
+      },
+    );
+
     // ===== A.2: el prorrateo se resuelve sobre el LOTE, antes del bucle =====
 
     // QUI-661 — el descuento de cabecera se reparte con el MISMO helper que
@@ -5175,23 +5205,30 @@ export class PurchaseOrdersService {
       const currentStock = Number(stockLevel?.quantity_on_hand ?? 0);
       const currentCost = Number(stockLevel?.cost_per_unit ?? 0);
 
-      // Aggregate stock across the scoped location set (org or store) via the
-      // shared helper. A.0 unificó el universo: el helper emite una consulta
-      // cruda con la pertenencia de ubicación escrita en el `WHERE`, contra el
-      // cliente SIN alcance cuando no hay transacción y contra el handle
-      // transaccional cuando la hay. Los dos caminos —vista previa y
-      // recepción— agregan EL MISMO conjunto, así que la brecha del 4,8 %
-      // entre lo que se aprobaba y lo que se sellaba está cerrada.
+      // Universo de stock en alcance (organización o tienda + bodega central)
+      // ya resuelto para TODO el lote antes del bucle. Acá sólo se lee la
+      // entrada del par.
       //
-      // Se queda dentro del bucle porque el helper resuelve por producto y no
-      // admite lectura por lote; izarla exige cambiar `CostingService`
-      // (fuera del alcance de este paso).
-      const { quantity: globalStock, cost_per_unit: globalCostPerUnit } =
-        await this.costingService.getScopedStockAggregate({
-          product_id: item.product_id,
-          variant_id: item.product_variant_id || undefined,
-          location_id: dto.location_id,
-        });
+      // Por qué ese universo es el que es: A.0 lo unificó. El agregado emite
+      // una consulta CRUDA con la pertenencia de ubicación escrita en el
+      // `WHERE` (`il.organization_id` siempre; bajo alcance STORE también la
+      // tienda MÁS `il.store_id IS NULL`), y por eso es inmune al alcance del
+      // cliente que la ejecute: la vista previa la corre por el cliente sin
+      // alcance y `receive()` por su handle transaccional, y agregan EL MISMO
+      // conjunto. Antes no: `StorePrismaService` sobrescribe `$transaction`
+      // hacia el cliente CON alcance y `mergeScopedWhere` ANDea el filtro, así
+      // que la recepción perdía la bodega central de la organización. La
+      // brecha medida era del 4,8 % entre lo que el operador aprobaba y lo que
+      // el sistema sellaba (producto 268: 119 unidades y 1.649.457,36 en la
+      // vista previa contra 25 y 1.728.571,43 en la recepción).
+      //
+      // El aislamiento entre organizaciones lo da ese `WHERE`, no el cliente
+      // Prisma. Ver `CostingService.getScopedStockAggregates`.
+      const scoped = scopedAggregates.get(
+        scopedStockKey(item.product_id, item.product_variant_id ?? null),
+      ) ?? { quantity: 0, cost_per_unit: 0 };
+      const globalStock = scoped.quantity;
+      const globalCostPerUnit = scoped.cost_per_unit;
 
       const derivedTax = derivedByLine[index];
       const netUnitCost = derivedTax.unit_price_net;
@@ -5232,12 +5269,15 @@ export class PurchaseOrdersService {
       } = PurchaseOrdersService.applyUoMConversion(product, quantity, costUnit);
 
       const newStock = globalStock + incomingStockQty;
-      // NOTA (dependencia de D.2): `globalStock` todavía incluye el stock de
-      // productos ARCHIVADOS, porque el filtro por estado del agregado vive en
-      // `CostingService` y lo enciende D.2. Mientras tanto, una reactivación
-      // puede no detectarse si el único stock vivo pertenece a un producto
-      // archivado. No se corrige desde acá: hacerlo sería una segunda
-      // implementación del mismo filtro.
+      // D.2 (ya aterrizado) — `globalStock` NO cuenta stock de productos
+      // archivados. El filtro (`p.state IS DISTINCT FROM 'archived'`) vive
+      // dentro del SQL del agregado, y este `globalStock` sale precisamente de
+      // ahí, así que la detección de reactivación ya no lo ve: volver a
+      // comprar un producto que el operador archivó se trata como stock en
+      // cero y se cotiza al costo ENTRANTE, en vez de promediarse contra las
+      // existencias fantasma que el archivado dejó en `stock_levels`. Medido
+      // en desarrollo: el producto 378, archivado con 20.000 unidades a 3,00,
+      // hacía que una compra a 100,00 cotizara 2,03; hoy cotiza 100,00.
       const isReactivation = globalStock <= 0;
 
       let newCostPerUnit: number;
