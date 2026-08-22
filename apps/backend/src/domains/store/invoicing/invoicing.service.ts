@@ -3613,6 +3613,59 @@ export class InvoicingService {
       );
     }
 
+    // Componente AIU que el régimen GRAVA y que llegó sin ningún impuesto
+    // declarado ⇒ **bloquea**.
+    //
+    // Es el caso simétrico del piso legal y hace exactamente el mismo daño, por
+    // la misma vía: la DIAN ACEPTA el documento. Un XML que declara menos IVA
+    // del debido pero es internamente consistente pasa la validación, y el
+    // faltante sólo se corrige después con nota crédito, o aparece en una
+    // fiscalización con sanción e intereses. Nada de eso es recuperable
+    // cambiando el borrador: la numeración ya se gastó.
+    //
+    // Y a diferencia de `line_tax`, acá el servidor NO puede ganar: la tarifa
+    // depende del bien o servicio y `InvoiceCalculatorService` no tiene el
+    // catálogo, así que lo único que podía hacer era reportar el hecho con los
+    // tres importes en cero —no puede afirmar CUÁNTO faltaba—. Entre emitir
+    // sub-declarando y no emitir, no emitir es la única opción defendible.
+    //
+    // Esto NO rompe el formulario del panel, que es lo que hacía inviable
+    // bloquear el caso simétrico: el panel pone IVA en TODAS las líneas por
+    // defecto, así que el motor le quita el impuesto a las que el régimen no
+    // grava (`aiu_untaxable_line_declares_tax`, que sigue sin bloquear) y
+    // ninguna línea gravable se queda sin tarifa. Lo que este bloqueo corta es
+    // el cliente que declara IVA sólo en Administración y deja Imprevistos y
+    // Utilidad limpios: la factura 83 en producción, corta por 95.000 COP.
+    //
+    // Un servicio realmente exento o excluido se declara con tarifa 0, no
+    // omitiendo el impuesto. La DIAN distingue las dos cosas —exento emite
+    // `cac:TaxTotal` con `cbc:Percent` en 0,00, excluido no lo emite— y
+    // colapsarlas borraría la diferencia justo donde cambia el resultado.
+    const aiu_untaxed = result.divergences.find(
+      (divergence) => divergence.scope === 'aiu_taxable_line_without_tax',
+    );
+    if (aiu_untaxed) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_AIU_004,
+        `La línea ${aiu_untaxed.line_index + 1}${
+          aiu_untaxed.line_description
+            ? ` («${aiu_untaxed.line_description}»)`
+            : ''
+        } es el componente «${aiu_untaxed.tax_type ?? 'AIU'}» del contrato, que bajo el régimen de ` +
+          `base gravable configurado SÍ hace parte de la base del IVA, y no declara ningún impuesto. ` +
+          `No se emite el documento: la DIAN lo aceptaría declarando menos IVA del debido y el ` +
+          `faltante sólo se corregiría después con nota crédito. Declara el impuesto de esta línea ` +
+          `con su tarifa (por ejemplo IVA 19%); si el servicio es exento o excluido, declárala con ` +
+          `tarifa 0 —no la dejes sin impuesto—. Si lo que no corresponde es que este componente ` +
+          `grave, cambia el régimen de AIU en la configuración de facturación de la tienda: bajo el ` +
+          `Decreto 1372/1992 sólo la Utilidad hace parte de la base.`,
+        {
+          line_index: aiu_untaxed.line_index,
+          aiu_component: aiu_untaxed.tax_type ?? null,
+        },
+      );
+    }
+
     for (const divergence of result.divergences) {
       this.logger.warn(
         `[${label}] Divergencia ${divergence.scope} en línea ${divergence.line_index + 1}: ` +
