@@ -576,45 +576,55 @@ interface FreightAndTaxHeader {
  *      conjunto de líneas, no cada una, para no romper la factura mixta con
  *      renglones exentos legítimos.
  */
+/**
+ * CP-PURCHASE-TRANSPARENCY C.7 — la regla vive en una función PURA y exportada,
+ * no dentro del `ValidatorConstraint`, porque hay una puerta que NUNCA pasa por
+ * el `ValidationPipe`: `OrgPurchaseOrdersService.create()` arma el DTO de tienda
+ * campo por campo y llama al servicio directamente. Un decorador solo protege la
+ * puerta HTTP de tienda; esta función la puede invocar también el servicio, que
+ * es el único punto por el que pasan las DOS puertas.
+ *
+ * Devuelve el mensaje del primer incumplimiento, o `null` si la cabecera es
+ * válida.
+ */
+export function validateFreightAndTaxHeader(
+  header: FreightAndTaxHeader,
+): string | null {
+  const shipping = Number(header.shipping_cost ?? 0);
+  const allocation = header.shipping_cost_allocation;
+  const allocationMissing =
+    allocation === null || allocation === undefined || allocation === '';
+
+  if (shipping > 0 && allocationMissing) {
+    return 'Falta indicar cómo se imputa el flete: «prorate» lo reparte entre las líneas y lo capitaliza al costo, «expense» lo lleva a gasto.';
+  }
+  if (allocation === 'prorate' && !(shipping > 0)) {
+    return 'El prorrateo del flete exige un costo de flete mayor que cero.';
+  }
+  if (header.prices_include_tax === true) {
+    const items = Array.isArray(header.items) ? header.items : [];
+    const anyTaxed = items.some((i) => Number(i?.tax_rate ?? 0) > 0);
+    if (!anyTaxed) {
+      return 'La factura declara precios con impuesto incluido pero ninguna línea trae tasa de impuesto: falta el «tax_rate» de las líneas gravadas.';
+    }
+  }
+  return null;
+}
+
 @ValidatorConstraint({ name: 'IsValidFreightAndTax', async: false })
 export class IsValidFreightAndTaxConstraint
   implements ValidatorConstraintInterface
 {
-  private static failure(header: FreightAndTaxHeader): string | null {
-    const shipping = Number(header.shipping_cost ?? 0);
-    const allocation = header.shipping_cost_allocation;
-    const allocationMissing =
-      allocation === null || allocation === undefined || allocation === '';
-
-    if (shipping > 0 && allocationMissing) {
-      return 'Falta indicar cómo se imputa el flete: «prorate» lo reparte entre las líneas y lo capitaliza al costo, «expense» lo lleva a gasto.';
-    }
-    if (allocation === 'prorate' && !(shipping > 0)) {
-      return 'El prorrateo del flete exige un costo de flete mayor que cero.';
-    }
-    if (header.prices_include_tax === true) {
-      const items = Array.isArray(header.items) ? header.items : [];
-      const anyTaxed = items.some((i) => Number(i?.tax_rate ?? 0) > 0);
-      if (!anyTaxed) {
-        return 'La factura declara precios con impuesto incluido pero ninguna línea trae tasa de impuesto: falta el «tax_rate» de las líneas gravadas.';
-      }
-    }
-    return null;
-  }
-
   validate(_value: unknown, args: ValidationArguments): boolean {
     return (
-      IsValidFreightAndTaxConstraint.failure(
-        args.object as FreightAndTaxHeader,
-      ) === null
+      validateFreightAndTaxHeader(args.object as FreightAndTaxHeader) === null
     );
   }
 
   defaultMessage(args: ValidationArguments): string {
     return (
-      IsValidFreightAndTaxConstraint.failure(
-        args.object as FreightAndTaxHeader,
-      ) ?? 'La configuración de flete e impuesto de la cabecera es inválida.'
+      validateFreightAndTaxHeader(args.object as FreightAndTaxHeader) ??
+      'La configuración de flete e impuesto de la cabecera es inválida.'
     );
   }
 }
@@ -655,9 +665,23 @@ export class CreatePurchaseOrderDto {
   @IsValidFreightAndTax()
   location_id: number;
 
+  /**
+   * A.10 — DECLARADO PERO IGNORADO. `create()` fija `draft` de oficio y jamás
+   * lee este campo: una orden nace en borrador y la aprobación es un acto con
+   * permiso propio (`approve()`), no una clave del cuerpo. Antes el spread lo
+   * derramaba a Prisma y un cliente podía hacer nacer una orden `approved`
+   * saltándose ese permiso.
+   *
+   * Sigue declarado —y no borrado— porque el POP web lo envía en CADA creación
+   * (`pop-order.interface.ts:251`) y con `forbidNonWhitelisted` quitarlo ahora
+   * devolvería 400 a la pantalla principal de compras. Se elimina del contrato
+   * cuando el frontend deje de enviarlo (oleada 3).
+   */
   @ApiProperty({
-    description: 'Purchase order status',
+    description:
+      'IGNORADO por el servidor: la orden nace siempre en `draft`. Se conserva por compatibilidad con el POP web.',
     enum: purchase_order_status_enum,
+    deprecated: true,
   })
   @IsEnum(purchase_order_status_enum)
   @IsOptional()

@@ -5,7 +5,11 @@ import {
   Logger,
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
-import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
+import {
+  CreatePurchaseOrderDto,
+  ShippingCostAllocation,
+  validateFreightAndTaxHeader,
+} from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { PurchaseOrderQueryDto } from './dto/purchase-order-query.dto';
 import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
@@ -50,7 +54,10 @@ import {
   resolveTierPricingCostAnchor,
 } from '../../products/services/tier-margin.util';
 import { assertTiersAllowed } from '../../products/services/tiers-variants-exclusive.util';
-import { VatResponsibilityService } from '@common/helpers/vat-responsibility.helper';
+import {
+  VatResponsibilityService,
+  VatResponsibilityResult,
+} from '@common/helpers/vat-responsibility.helper';
 
 /**
  * QUI-647 — marcador del pago real de un abono registrado al crear la OC.
@@ -258,38 +265,259 @@ export class PurchaseOrdersService {
   }
 
   /**
+   * CP-PURCHASE-TRANSPARENCY C.2 — reparte el flete de la cabecera entre las
+   * líneas, para que pueda CAPITALIZARSE al costo (modo `prorate`).
+   *
+   * Base del reparto: el NETO por línea DESPUÉS de descuentos
+   * (`unit_price_net × quantity`). Repartir sobre el bruto haría que una línea
+   * con 100 % de descuento absorbiera flete: el proveedor la regaló y el sistema
+   * le cargaría transporte, inflando el costo de un producto que no costó nada.
+   *
+   * Degradaciones, en orden:
+   *   - neto total 0 (toda la orden regalada) → se reparte por CANTIDAD; el
+   *     transporte se pagó igual y las unidades lo consumieron igual.
+   *   - también cantidad 0 → no hay a qué adherir el flete: `basis: 'none'` y el
+   *     llamador degrada la orden a `expense` y lo registra. Es preferible a
+   *     dividir por cero y sembrar `NaN` en una capa FIFO.
+   *
+   * El residuo del redondeo aterriza ÍNTEGRO en la última línea del lote —la
+   * misma regla que `prorateHeaderDiscount` ya aplica en producción— para que
+   * `Σ shares === shippingCost` EXACTAMENTE. `allocated_shipping_amount` es
+   * `Decimal(12,2)`: si la suma de las líneas no diera el flete de la cabecera
+   * al céntimo, el invariante que C.4 verifica en los tres momentos (crear,
+   * editar, recibir) sería inverificable.
+   *
+   * @param netPerLine  neto de cada línea después de descuentos (misma longitud
+   *                    y mismo orden que las líneas del lote).
+   * @param quantities  cantidades de cada línea (fallback de reparto).
+   */
+  private prorateShipping(
+    netPerLine: number[],
+    quantities: number[],
+    shippingCost: number,
+  ): { shares: number[]; basis: 'net' | 'quantity' | 'none' } {
+    const shares = new Array(netPerLine.length).fill(0);
+    const freight = Number(shippingCost || 0);
+    if (!(freight > 0) || netPerLine.length === 0) {
+      return { shares, basis: 'none' };
+    }
+
+    const netTotal = netPerLine.reduce((s, v) => s + Number(v || 0), 0);
+    const qtyTotal = quantities.reduce((s, v) => s + Number(v || 0), 0);
+
+    let weights: number[];
+    let basis: 'net' | 'quantity' | 'none';
+    if (netTotal > 0) {
+      weights = netPerLine.map((v) => Number(v || 0));
+      basis = 'net';
+    } else if (qtyTotal > 0) {
+      weights = quantities.map((v) => Number(v || 0));
+      basis = 'quantity';
+    } else {
+      return { shares, basis: 'none' };
+    }
+
+    const weightTotal = weights.reduce((s, v) => s + v, 0);
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+
+    let assigned = 0;
+    for (let i = 0; i < weights.length - 1; i++) {
+      shares[i] = round2((weights[i] / weightTotal) * freight);
+      assigned += shares[i];
+    }
+    shares[weights.length - 1] = round2(freight - assigned);
+    return { shares, basis };
+  }
+
+  /**
+   * CP-PURCHASE-TRANSPARENCY C.2/C.4 — resuelve el modo de flete APLICADO y el
+   * reparto por línea a partir de lo que el operador SOLICITÓ.
+   *
+   * Solicitado y aplicado pueden diferir: cuando `prorate` no tiene sobre qué
+   * repartir (neto y cantidad en cero) la orden degrada a `expense`. Los dos
+   * valores quedan sellados en la auditoría (C.11) porque re-derivarlos mañana
+   * leería los datos de mañana, y entonces nada distinguiría un cambio de
+   * configuración de un defecto.
+   */
+  private resolveFreightAllocation(params: {
+    shippingCost: number;
+    requested?: ShippingCostAllocation | string | null;
+    netPerLine: number[];
+    quantities: number[];
+    /** Solo para el log cuando hay degradación. */
+    context: string;
+  }): {
+    requested: ShippingCostAllocation | null;
+    applied: ShippingCostAllocation | null;
+    shares: number[];
+    total: number;
+  } {
+    const requested =
+      params.requested === 'prorate' || params.requested === 'expense'
+        ? (params.requested as ShippingCostAllocation)
+        : null;
+    const freight = Math.round(Number(params.shippingCost || 0) * 100) / 100;
+    const zeroShares = new Array(params.netPerLine.length).fill(0);
+
+    if (!(freight > 0) || requested !== 'prorate') {
+      return { requested, applied: requested, shares: zeroShares, total: freight };
+    }
+
+    const { shares, basis } = this.prorateShipping(
+      params.netPerLine,
+      params.quantities,
+      freight,
+    );
+    if (basis === 'none') {
+      this.logger.warn(
+        `[Freight] ${params.context}: se pidió prorratear ${freight} de flete pero ` +
+          `la orden no tiene ni neto ni cantidad sobre la que repartirlo; ` +
+          `se degrada a 'expense' y el flete NO entra al costo del inventario.`,
+      );
+      return { requested, applied: 'expense', shares: zeroShares, total: freight };
+    }
+    return { requested, applied: 'prorate', shares, total: freight };
+  }
+
+  /**
    * F1 IVA lifecycle — read-only check of the commerce's VAT responsibility,
    * driving the inventory cost treatment at receipt:
    *   - O-48 (responsible)     → IVA is descontable, EXCLUDED from cost.
    *   - O-49 (non-responsible) → IVA is CAPITALIZED into inventory cost.
    *
-   * Canonical source: `VatResponsibilityService.resolve(fiscalData)`
-   * (RUT casilla 53 + fallback por régimen tributario). Antes era una
-   * réplica local; P0.1 centraliza el predicado en el helper canónico.
+   * Canonical source: `VatResponsibilityService.resolveDetailed(fiscalData)`
+   * (RUT casilla 53 + fallback por régimen tributario).
    *
-   * Anti-regression rule: NO declared responsibilities / indeterminate ⇒ treat
-   * as RESPONSIBLE (O-48). This preserves the pre-F1 behaviour where entered
-   * cost was net and IVA was never capitalized. Cambiar el default es Paso 0.1.
+   * CP-PURCHASE-TRANSPARENCY B.1 — este método devolvía `boolean` y su `catch`
+   * devolvía `true`. Dos defectos encadenados:
    *
-   * `organizationId`/`storeId` are the resolved tenant identifiers (used for
-   * logging); the fiscal data itself is read from the request context inside
-   * `getFiscalData()`.
+   *   1. **Fallaba ABIERTO contra un helper que falla CERRADO.** Desde el
+   *      2026-08-21 el helper canónico devuelve `false` ante indeterminación;
+   *      este `catch` afirmaba «eres responsable de IVA» a partir de un timeout
+   *      de settings. Un fallo técnico no es una afirmación fiscal, y la
+   *      consecuencia era material: el IVA se declaraba descontable en una
+   *      compra de un comercio que quizá no puede descontarlo.
+   *   2. **Dos estados no alcanzan.** Un `boolean` no distingue «el comercio
+   *      declaró O-49» de «no pudimos leer su configuración», y esa diferencia
+   *      es exactamente la que la vista previa tiene que explicarle al operador
+   *      antes de capitalizarle el 19 % al costo (ver B.4 y
+   *      `buildFiscalExplanation`). Por eso devuelve el resultado de TRES
+   *      estados y no su proyección booleana.
+   *
+   * El docblock anterior afirmaba «NO declared responsibilities / indeterminate
+   * ⇒ treat as RESPONSIBLE (O-48)» y remitía a un «Paso 0.1» ya ejecutado: era
+   * falso desde el 2026-08-21 y era la premisa sobre la que el próximo lector
+   * habría diseñado mal.
+   *
+   * Nunca lanza. `organizationId`/`storeId` son los identificadores de tenant ya
+   * resueltos (solo para el log); los datos fiscales se leen del contexto de
+   * petición dentro de `getFiscalData()`.
    */
   private async resolveVatResponsibility(
     organizationId?: number,
     storeId?: number,
-  ): Promise<boolean> {
+  ): Promise<VatResponsibilityResult> {
     try {
       const fiscalData = await this.settingsService.getFiscalData();
-      return this.vatService.resolve(
-        fiscalData as Parameters<VatResponsibilityService['resolve']>[0],
+      return this.vatService.resolveDetailed(
+        fiscalData as Parameters<
+          VatResponsibilityService['resolveDetailed']
+        >[0],
       );
     } catch (error: any) {
+      // El `request_id` empareja esta línea con la del escáner de facturas
+      // (`InvoiceScannerService.resolveVatResponsibility`): las dos réplicas
+      // hablan de la MISMA factura y sin el identificador de petición no hay
+      // forma de cruzarlas en el log cuando las dos fallan a la vez.
+      const requestId = RequestContextService.getRequestId();
       this.logger.warn(
-        `resolveVatResponsibility: could not resolve fiscal data for org ${organizationId} / store ${storeId} (${error?.message}); defaulting to VAT responsible (O-48).`,
+        `[PO] resolveVatResponsibility: could not resolve fiscal data ` +
+          `for org ${organizationId ?? 'unknown'} / store ${storeId ?? 'unknown'} ` +
+          `(request ${requestId ?? 'unknown'}): ${error?.message}. ` +
+          `Falling back to NOT VAT responsible (fail-closed); the tax is capitalized into cost.`,
       );
-      return true;
+      return this.vatService.readFailure();
     }
+  }
+
+  /**
+   * CP-PURCHASE-TRANSPARENCY B.4 — traduce la decisión fiscal a algo que un
+   * operador pueda leer, y que el frontend NO tenga que volver a derivar.
+   *
+   * Hay cuatro réplicas del predicado de responsabilidad de IVA en el
+   * repositorio, con valores por omisión que llegaron a ser opuestos. Mientras
+   * el paso de recepción se explique con el dato del backend y el de
+   * confirmación con el selector del frontend, dos pantallas del MISMO asistente
+   * pueden contradecirse sobre la misma factura. Por eso la explicación viaja
+   * como dato estructurado y no como un booleano que cada pantalla interpreta.
+   *
+   * `treatment` es lo que de verdad se hizo con el impuesto:
+   *   - `deductible`  → el IVA queda fuera del costo (240804, descontable).
+   *   - `capitalized` → el IVA entra al costo del inventario.
+   *
+   * Las citas legales son un contrato cerrado: el operador las repite ante su
+   * contador, así que una cita equivocada en pantalla es peor que ninguna.
+   * - IVA descontable: art. 485 ET y art. 488 ET.
+   * - IVA como mayor valor del costo: art. 493 ET.
+   * - No responsables: art. 437 ET parágrafo 3.
+   * - Capitalización al inventario: NIC 2 ¶11 / NIIF PYMES §13.6.
+   * - Régimen simple: art. 18 Ley 1943/2018.
+   * PROHIBIDO citar el art. 491 ET (es de activos fijos, no de inventario) y el
+   * Decreto 2650/1993 (es el PUC, no el fundamento del IVA).
+   */
+  private buildFiscalExplanation(outcome: VatResponsibilityResult): {
+    vat_responsible: boolean;
+    indeterminate: boolean;
+    reason: string;
+    source: string;
+    treatment: 'deductible' | 'capitalized';
+    message: string;
+    legal_basis: string[];
+    cta?: { label: string; route: string };
+  } {
+    const treatment: 'deductible' | 'capitalized' = outcome.responsible
+      ? 'deductible'
+      : 'capitalized';
+
+    const legal_basis = outcome.responsible
+      ? ['Art. 485 ET', 'Art. 488 ET']
+      : outcome.reason === 'regime_not_responsible'
+        ? [
+            'Art. 437 ET parágrafo 3',
+            'Art. 18 Ley 1943/2018',
+            'Art. 493 ET',
+            'NIC 2 ¶11',
+          ]
+        : ['Art. 437 ET parágrafo 3', 'Art. 493 ET', 'NIC 2 ¶11'];
+
+    const message = outcome.responsible
+      ? 'El comercio es responsable de IVA, así que el IVA de esta compra es descontable y NO entra al costo del inventario. El costo que ves es el valor neto.'
+      : outcome.indeterminate
+        ? outcome.source === 'read_error'
+          ? 'No pudimos leer la configuración fiscal del comercio en este momento. Por precaución el IVA se suma al costo del inventario. Revisa la configuración del área fiscal y vuelve a intentarlo antes de aprobar la compra.'
+          : 'El comercio todavía no declaró su responsabilidad de IVA, así que por precaución el IVA se suma al costo del inventario. Configura el área fiscal para que el sistema sepa si puedes descontarlo.'
+        : 'El comercio no es responsable de IVA, así que el IVA de esta compra se suma al costo del inventario (mayor valor del costo).';
+
+    return {
+      vat_responsible: outcome.responsible,
+      indeterminate: outcome.indeterminate,
+      reason: outcome.reason,
+      source: outcome.source,
+      treatment,
+      message,
+      legal_basis,
+      // El CTA solo aparece cuando el estado es INDETERMINADO: mandar al
+      // asistente fiscal a un comercio que ya declaró O-49 sería pedirle que
+      // "arregle" una configuración correcta.
+      ...(outcome.indeterminate
+        ? {
+            cta: {
+              label: 'Configurar el área fiscal',
+              route: '/admin/fiscal/wizard',
+            },
+          }
+        : {}),
+    };
   }
 
   /**
@@ -339,6 +567,41 @@ export class PurchaseOrdersService {
       },
     });
 
+    return PurchaseOrdersService.applyUoMConversion(
+      product,
+      purchaseQuantity,
+      purchaseUnitCost,
+    );
+  }
+
+  /**
+   * A.12 — la ARITMÉTICA de `resolveUoMConversion`, sin su lectura.
+   *
+   * `getCostPreview` resolvía la conversión línea por línea, y cada resolución
+   * abría su propia `products.findFirst`: el costo del preview crecía con el
+   * número de líneas cuando la configuración de unidad de medida se puede leer
+   * de una sola vez para todo el lote. Separar la lectura del cálculo permite
+   * que la vista previa lea el conjunto una vez y aplique la MISMA aritmética
+   * que la recepción, en lugar de una copia.
+   *
+   * Estática y pura a propósito: si tuviera acceso a `this` alguien acabaría
+   * volviendo a meterle una consulta dentro.
+   */
+  private static applyUoMConversion(
+    product: {
+      is_ingredient?: boolean | null;
+      purchase_to_stock_factor?: unknown;
+      stock_uom_id?: number | null;
+      purchase_uom_id?: number | null;
+    } | null
+      | undefined,
+    purchaseQuantity: number,
+    purchaseUnitCost: number,
+  ): {
+    stockQuantity: number;
+    stockUnitCost: number;
+    purchaseFactor: number;
+  } {
     const factor = Number(product?.purchase_to_stock_factor ?? 1);
     // QUI-648 — la conversión al recibir deja de ser exclusiva del insumo:
     // comprar 5 rollos y almacenar 100.000 mm es el mismo mecanismo que
@@ -537,6 +800,25 @@ export class PurchaseOrdersService {
   }
 
   async create(createPurchaseOrderDto: CreatePurchaseOrderDto) {
+    // ===== C.7 — la regla de flete e impuesto se valida en el SERVICIO =====
+    //
+    // `IsValidFreightAndTax` protege la puerta HTTP de tienda, pero hay una
+    // segunda puerta al mismo flujo: `OrgPurchaseOrdersService.create()` arma el
+    // DTO campo por campo y llama a este método directamente, sin volver a pasar
+    // por el `ValidationPipe`. Ningún decorador nuevo se aplica por esa puerta.
+    // Validar acá es lo único que hace que las dos acepten y rechacen igual.
+    const freightContractError = validateFreightAndTaxHeader(
+      createPurchaseOrderDto as {
+        shipping_cost?: number;
+        shipping_cost_allocation?: string;
+        prices_include_tax?: boolean;
+        items?: Array<{ tax_rate?: number } | null | undefined>;
+      },
+    );
+    if (freightContractError) {
+      throw new BadRequestException(freightContractError);
+    }
+
     // QUI-647 — timezone de la tienda para comparar las fechas del plan de
     // pago contra "hoy" en el CALENDARIO local (fecha-sólo, sin convertir a
     // instante: pasar a UTC correría la fecha un día en tiendas con offset
@@ -564,6 +846,15 @@ export class PurchaseOrdersService {
       async (tx): Promise<{
         order: any;
         advance: { paymentId: number; amount: number } | null;
+        // C.11 — el modo de flete SOLICITADO y el APLICADO salen de la
+        // transacción para sellarse en la auditoría: la degradación
+        // `prorate → expense` ocurre acá dentro y después no es observable.
+        freight: {
+          requested: ShippingCostAllocation | null;
+          applied: ShippingCostAllocation | null;
+          shares: number[];
+          total: number;
+        };
       }> => {
         let advanceToRegister: {
           paymentId: number;
@@ -1058,7 +1349,45 @@ export class PurchaseOrdersService {
                   has_multiple_price_tiers: hasMultiplePriceTiers,
                 };
 
-            const newProduct = await tx.products.create({
+            // ===== A.7 — la colisión de SKU no puede terminar en un 500 =====
+            //
+            // `products` tiene `@@unique([store_id, sku])` y el índice NO
+            // distingue estado: el SKU de un producto ARCHIVADO lo sigue
+            // ocupando. El flujo que originó el reporte del dueño —«borro el
+            // producto y lo vuelvo a cargar»— cae justo ahí, y hasta A.4 el
+            // `try/catch` del controlador convertía el P2002 en un HTTP 200
+            // mentiroso; sin él sale un 500 crudo que no dice qué producto
+            // estorba ni ofrece salida.
+            //
+            // Se comprueba ANTES de crear, no en un `catch`: un error de Postgres
+            // ABORTA la transacción, así que dentro del `catch` ya no se puede
+            // consultar quién ocupa el SKU, que es precisamente el dato que el
+            // frontend necesita para ofrecer «reactivar» (D.1). El costo es una
+            // consulta indexada por línea, y solo por línea con producto NUEVO.
+            const desiredSku = item.sku || `GEN-${Date.now()}`;
+            const skuOwner = await tx.products.findFirst({
+              where: { store_id: storeId, sku: desiredSku },
+              select: { id: true, name: true, state: true },
+            });
+            if (skuOwner) {
+              throw new VendixHttpException(
+                ErrorCodes.PROD_SKU_COLLISION_001,
+                `El SKU «${desiredSku}» ya está ocupado por el producto «${skuOwner.name}» (id ${skuOwner.id}, estado ${skuOwner.state}) en esta tienda.`,
+                {
+                  sku: desiredSku,
+                  product_id: skuOwner.id,
+                  product_name: skuOwner.name,
+                  product_state: skuOwner.state,
+                  // El archivado es el caso que el operador no entiende: el
+                  // producto «no está» en su catálogo pero su SKU sigue ahí.
+                  is_archived: skuOwner.state === 'archived',
+                },
+              );
+            }
+
+            let newProduct: { id: number };
+            try {
+              newProduct = await tx.products.create({
               data: {
                 name: item.product_name,
                 slug:
@@ -1067,7 +1396,7 @@ export class PurchaseOrdersService {
                     .replace(/[^a-z0-9]+/g, '-')
                     .replace(/(^-|-$)+/g, '') + `-${Date.now()}`,
                 description: item.product_description || '',
-                sku: item.sku || `GEN-${Date.now()}`,
+                sku: desiredSku,
                 cost_price: cost,
                 profit_margin: margin,
                 stock_quantity: 0,
@@ -1091,7 +1420,31 @@ export class PurchaseOrdersService {
                       }
                     : undefined,
               },
-            });
+              });
+            } catch (error: any) {
+              // Carrera: entre la comprobación de arriba y este INSERT otra
+              // petición pudo tomar el SKU. Se mapea igual, pero SIN volver a
+              // consultar: el P2002 ya abortó la transacción de Postgres y
+              // cualquier lectura posterior fallaría con "current transaction is
+              // aborted". El código y el SKU bastan para que el frontend
+              // reintente o mande al catálogo.
+              //
+              // El filtro por `target` es deliberadamente estrecho: mapear todo
+              // P2002 escondería colisiones de `slug` o `barcode`, que exigen
+              // otra explicación y otro remedio.
+              const target = error?.meta?.target;
+              const hitsSku = Array.isArray(target)
+                ? target.includes('sku')
+                : typeof target === 'string' && target.includes('sku');
+              if (error?.code === 'P2002' && hitsSku) {
+                throw new VendixHttpException(
+                  ErrorCodes.PROD_SKU_COLLISION_001,
+                  `El SKU «${desiredSku}» quedó ocupado por otra operación mientras se creaba el producto.`,
+                  { sku: desiredSku, concurrent: true },
+                );
+              }
+              throw error;
+            }
             finalProductId = newProduct.id;
           }
         }
@@ -1155,19 +1508,39 @@ export class PurchaseOrdersService {
       );
       let netSubtotal = 0;
       let lineTax = 0;
+      // C.2 — el prorrateo del flete necesita el NETO por línea DESPUÉS de
+      // descuentos, que es justo lo que este bucle ya deriva. Se guarda en vez
+      // de recalcularse: una segunda aritmética sería una segunda verdad.
+      const netPerLine: number[] = [];
+      const quantitiesPerLine: number[] = [];
       for (let i = 0; i < processedItems.length; i++) {
         const d = this.deriveLineTax(
           processedItems[i],
           createPurchaseOrderDto,
           headerShares[i],
         );
-        netSubtotal += d.unit_price_net * Number(processedItems[i].quantity ?? 0);
+        const qty = Number(processedItems[i].quantity ?? 0);
+        netPerLine.push(d.unit_price_net * qty);
+        quantitiesPerLine.push(qty);
+        netSubtotal += d.unit_price_net * qty;
         lineTax += d.tax_amount;
       }
       const subtotal = round2(netSubtotal);
       const totalAmount = round2(
         subtotal + round2(lineTax) + (createPurchaseOrderDto.shipping_cost || 0),
       );
+
+      // C.2/C.4 — reparto del flete resuelto sobre el lote COMPLETO, antes de
+      // escribir nada. La orden sella el modo APLICADO (que puede diferir del
+      // solicitado si hubo degradación) y cada línea su porción; recibir no
+      // vuelve a repartir.
+      const freight = this.resolveFreightAllocation({
+        shippingCost: Number(createPurchaseOrderDto.shipping_cost || 0),
+        requested: createPurchaseOrderDto.shipping_cost_allocation,
+        netPerLine,
+        quantities: quantitiesPerLine,
+        context: `create() para la ubicación ${createPurchaseOrderDto.location_id}`,
+      });
 
       // ===== QUI-647: validación del plan de pago =====
       //
@@ -1346,11 +1719,22 @@ export class PurchaseOrdersService {
       // convierte `downPayment` en 0, y si el valor crudo del DTO quedara en
       // el spread, el conditional `...(downPayment > 0 ? ...)` vacío no lo
       // sobreescribiría y la orden immediate quedaría con un abono fantasma.
+      //
+      // A.10 — `status` sale del spread. El DTO lo sigue aceptando (el POP web
+      // lo envía en cada creación y quitarlo devolvería 400 a la pantalla
+      // principal de compras) pero el servicio lo IGNORA: una orden nace en
+      // borrador y la aprobación es un acto con permiso propio. Antes el spread
+      // lo derramaba a Prisma tal cual, así que un `POST` con
+      // `"status":"approved"` hacía nacer la orden aprobada saltándose ese
+      // permiso — y `approved_by_user_id`, que también estaba en el DTO,
+      // permitía además nombrar al aprobador de una orden que nadie aprobó.
       const {
         expected_date: rawExpectedDate,
         payment_due_date: rawPaymentDueDate,
         payment_installments: _installmentsInput,
         down_payment_amount: _downPaymentInput,
+        status: _clientStatusIgnored,
+        shipping_cost_allocation: _requestedAllocationIgnored,
         ...orderDataRest
       } = orderData;
 
@@ -1364,6 +1748,12 @@ export class PurchaseOrdersService {
       const purchaseOrder = await tx.purchase_orders.create({
         data: {
           ...orderDataRest,
+          // A.10 — de oficio, no del cliente. Ver el comentario del destructuring.
+          status: purchase_order_status_enum.draft,
+          approved_by_user_id: null,
+          // C.4 — el modo APLICADO (el solicitado pudo degradar). Se sella acá
+          // y `receive()` lo obedece sin volver a decidir.
+          shipping_cost_allocation: freight.applied,
           order_type: orderType,
           expected_date: toDate(rawExpectedDate),
           // Bug 1: `payment_due_date` viene como `YYYY-MM-DD` (string) del
@@ -1437,6 +1827,11 @@ export class PurchaseOrdersService {
                 // source of truth; the percentage is provenance only.
                 discount_amount: derived.discount_total,
                 discount_percentage: item.discount_percentage ?? 0,
+                // C.2 — porción del flete que aterriza en esta línea. Cero en
+                // modo `expense`. La suma de las líneas es EXACTAMENTE
+                // `purchase_orders.shipping_cost` (el residuo va a la última),
+                // y `receive()` lo lee de acá en vez de repartir otra vez.
+                allocated_shipping_amount: freight.shares[index] ?? 0,
                 notes: item.notes,
                 batch_number: item.batch_number,
                 manufacturing_date: toDate(item.manufacturing_date),
@@ -1500,8 +1895,17 @@ export class PurchaseOrdersService {
         });
       }
 
-      return { order: purchaseOrder, advance: advanceToRegister };
-    });
+      return { order: purchaseOrder, advance: advanceToRegister, freight };
+    },
+      // A.11 — techo EXPLÍCITO de transacción. Prisma impone 5.000 ms por
+      // omisión y nadie lo había declarado: una orden de 80 líneas emite del
+      // orden de miles de consultas (creación de productos, config de UoM,
+      // líneas, calendario de pagos) y aborta con P2028 en RDS mientras pasa en
+      // local, donde la latencia por consulta es un orden de magnitud menor. El
+      // resto del repositorio ya sube el techo a 20-30 s; aquí hace falta más
+      // porque este camino puede crear catálogo.
+      { timeout: 120_000, maxWait: 10_000 },
+    );
 
     const result = txResult.order;
     const advanceRegistered = txResult.advance;
@@ -1519,16 +1923,63 @@ export class PurchaseOrdersService {
       });
     }
 
-    // Audit log after transaction
+    // ===== C.11 — sellar la decisión fiscal y el modo de flete al CREAR =====
+    //
+    // La decisión que mueve el 19 % del costo queda escrita junto a la orden que
+    // la sufrió. Re-derivarla mañana leería los datos fiscales de mañana: tras
+    // B.2, configurar el RUT la semana que viene haría que la re-derivación
+    // contradijera la orden y nada distinguiría un cambio de configuración de un
+    // defecto.
+    //
+    // Se resuelve DESPUÉS del commit a propósito: son dos lecturas de solo
+    // lectura y meterlas dentro alargaría la transacción sin ninguna ganancia.
     try {
       const user_id = RequestContextService.getUserId();
-      await this.auditService.logCustom(
-        user_id ?? 0,
-        'PO_CREATED',
-        'purchase_orders',
-        { purchase_order_id: result.id, order_number: result.order_number },
-        result.id,
+      const auditStoreId =
+        result.location?.store_id ?? RequestContextService.getStoreId() ?? undefined;
+      const vatOutcome = await this.resolveVatResponsibility(
+        result.organization_id ?? undefined,
+        auditStoreId,
       );
+      let costingMethodLabel: string | undefined;
+      try {
+        costingMethodLabel = toPublicCostingMethod(
+          await this.costingMethodResolver.resolveCostingMethod(
+            result.organization_id,
+            auditStoreId,
+          ),
+        );
+      } catch {
+        // El método de costeo es contexto de la auditoría, no su razón de ser:
+        // no poder resolverlo no puede impedir que la fila se escriba.
+        costingMethodLabel = undefined;
+      }
+
+      await this.auditService.log({
+        userId: user_id ?? 0,
+        // `logCustom` no acepta `store_id` y lo dejaba nulo en las 256 filas de
+        // compras, así que la auditoría de compras no se podía filtrar por
+        // tienda. `log()` sí lo acepta y vive en el mismo servicio.
+        storeId: auditStoreId,
+        organizationId: result.organization_id ?? undefined,
+        action: 'PO_CREATED',
+        resource: 'purchase_orders',
+        resourceId: result.id,
+        metadata: {
+          purchase_order_id: result.id,
+          order_number: result.order_number,
+          items_count: createPurchaseOrderDto.items?.length ?? 0,
+          costing_method: costingMethodLabel,
+          fiscal_explanation: this.buildFiscalExplanation(vatOutcome),
+          shipping_cost: txResult.freight.total,
+          // Los DOS modos: `prorate` degrada a `expense` cuando no hay neto ni
+          // cantidad sobre la que repartir, y sin las dos cifras esa degradación
+          // es indistinguible de una elección del operador.
+          shipping_cost_allocation_requested: txResult.freight.requested,
+          shipping_cost_allocation_applied: txResult.freight.applied,
+          request_id: RequestContextService.getRequestId(),
+        },
+      });
     } catch (error) {
       this.logger.error(
         `Failed to log audit for PO create #${result.id}: ${error.message}`,
@@ -1847,6 +2298,12 @@ export class PurchaseOrdersService {
     'internal_notes',
     'discount_amount',
     'shipping_cost',
+    // C.4 — sin esta clave la edición de un borrador PERDÍA el modo de flete en
+    // silencio: el operador elegía prorratear, la allowlist descartaba el campo
+    // y la recepción usaba el valor viejo. El modo es editable mientras la orden
+    // sea borrador y queda sellado al recibir; cambiarlo después exigiría
+    // reprocesar capas de costo, y eso no se hace.
+    'shipping_cost_allocation',
     'shipping_method',
     'payment_terms',
     'payment_due_date',
@@ -1867,12 +2324,53 @@ export class PurchaseOrdersService {
         items?: any[];
       };
 
+      // C.7 — misma regla de flete e impuesto que en la creación. `PartialType`
+      // vuelve opcional a `location_id`, y `@IsOptional()` desactiva TODOS los
+      // validadores colgados de esa propiedad cuando llega ausente: el
+      // validador cruzado NO corre en una edición parcial. Acá sí.
+      const freightContractError = validateFreightAndTaxHeader({
+        shipping_cost: updatePurchaseOrderDto.shipping_cost,
+        shipping_cost_allocation:
+          updatePurchaseOrderDto.shipping_cost_allocation,
+        prices_include_tax: updatePurchaseOrderDto.prices_include_tax,
+        items,
+      });
+      if (freightContractError) {
+        throw new BadRequestException(freightContractError);
+      }
+
       const data: Record<string, unknown> = {};
       for (const field of PurchaseOrdersService.UPDATABLE_ORDER_FIELDS) {
         if (rest[field as keyof typeof rest] !== undefined) {
           data[field] = rest[field as keyof typeof rest];
         }
       }
+
+      // C.4 — la cabecera vigente. El flete y su modo pueden venir a medias en
+      // un PATCH (sólo el monto, sólo el modo, ninguno), así que el reparto se
+      // resuelve sobre la combinación de lo enviado y lo ya persistido, nunca
+      // sobre el DTO a secas.
+      const currentHeader = (await tx.purchase_orders.findUnique({
+        where: { id },
+        select: {
+          shipping_cost: true,
+          shipping_cost_allocation: true,
+          subtotal_amount: true,
+          tax_amount: true,
+        },
+      })) as {
+        shipping_cost: unknown;
+        shipping_cost_allocation: string | null;
+        subtotal_amount: unknown;
+        tax_amount: unknown;
+      } | null;
+
+      let freightForItems: {
+        requested: ShippingCostAllocation | null;
+        applied: ShippingCostAllocation | null;
+        shares: number[];
+        total: number;
+      } | null = null;
 
       // If items are being updated, recalculate totals.
       // FASE 4 — misma derivación bruta consistente que create(): neto por línea
@@ -1896,23 +2394,52 @@ export class PurchaseOrdersService {
         );
         let netSubtotal = 0;
         let lineTax = 0;
+        const netPerLine: number[] = [];
+        const quantitiesPerLine: number[] = [];
         for (let i = 0; i < items.length; i++) {
           const d = this.deriveLineTax(
             items[i],
             updatePurchaseOrderDto,
             headerShares[i],
           );
-          netSubtotal += d.unit_price_net * Number(items[i].quantity ?? 0);
+          const qty = Number(items[i].quantity ?? 0);
+          netPerLine.push(d.unit_price_net * qty);
+          quantitiesPerLine.push(qty);
+          netSubtotal += d.unit_price_net * qty;
           lineTax += d.tax_amount;
         }
         const subtotal = round2(netSubtotal);
-        const totalAmount = round2(
-          subtotal + round2(lineTax) + (updatePurchaseOrderDto.shipping_cost || 0),
+        const shippingCost = Number(
+          updatePurchaseOrderDto.shipping_cost ??
+            currentHeader?.shipping_cost ??
+            0,
         );
+        const totalAmount = round2(subtotal + round2(lineTax) + shippingCost);
 
         data.subtotal_amount = subtotal;
         data.tax_amount = round2(lineTax);
         data.total_amount = totalAmount;
+
+        // C.4 — al reescribir las líneas hay que REPARTIR otra vez: las
+        // porciones viejas pertenecían a un lote que ya no existe. Si el reparto
+        // se recalculara al editar pero no al recibir (o al contrario), la suma
+        // de porciones dejaría de cuadrar con la cabecera y el invariante de C.2
+        // se rompería sin que nada lo advirtiera.
+        freightForItems = this.resolveFreightAllocation({
+          shippingCost,
+          requested:
+            (updatePurchaseOrderDto.shipping_cost_allocation as
+              | ShippingCostAllocation
+              | undefined) ??
+            (currentHeader?.shipping_cost_allocation as
+              | ShippingCostAllocation
+              | null
+              | undefined),
+          netPerLine,
+          quantities: quantitiesPerLine,
+          context: `update() orden ${id}`,
+        });
+        data.shipping_cost_allocation = freightForItems.applied;
 
         // Reemplazo completo de las líneas. Es seguro porque assertMutable ya
         // garantizó `draft`: sin recepciones, `quantity_received` es 0 en todas
@@ -1937,6 +2464,7 @@ export class PurchaseOrdersService {
               unit_price_net: derived.unit_price_net,
               discount_amount: derived.discount_total,
               discount_percentage: item.discount_percentage ?? 0,
+              allocated_shipping_amount: freightForItems?.shares[i] ?? 0,
               tax_rate: item.tax_rate ?? null,
               tax_type:
                 (item.tax_type as tax_type_enum | undefined) ??
@@ -1952,6 +2480,85 @@ export class PurchaseOrdersService {
             },
           });
         }
+      } else if (
+        updatePurchaseOrderDto.shipping_cost !== undefined ||
+        updatePurchaseOrderDto.shipping_cost_allocation !== undefined ||
+        updatePurchaseOrderDto.discount_amount !== undefined
+      ) {
+        // ===== C.4 — editar SOLO la cabecera =====
+        //
+        // El PATCH del flete sin líneas era un agujero doble: ni se repartía de
+        // nuevo entre las líneas (la suma dejaba de cuadrar con la cabecera) ni
+        // se recalculaba `total_amount` (la rama de totales colgaba de `items`).
+        // El operador subía el flete de 0 a 100.000 y la orden seguía valiendo
+        // lo mismo, con la cartera y el pago cuadrando contra una cifra vieja.
+        const round2 = (n: number) => Math.round(n * 100) / 100;
+        const existingLines = await tx.purchase_order_items.findMany({
+          where: { purchase_order_id: id },
+          select: {
+            id: true,
+            quantity_ordered: true,
+            unit_price_net: true,
+            unit_cost: true,
+            tax_amount: true,
+          },
+          orderBy: { id: 'asc' },
+        });
+
+        const netPerLine = existingLines.map(
+          (l) =>
+            Number(l.unit_price_net ?? l.unit_cost ?? 0) *
+            Number(l.quantity_ordered ?? 0),
+        );
+        const quantitiesPerLine = existingLines.map((l) =>
+          Number(l.quantity_ordered ?? 0),
+        );
+        const shippingCost = Number(
+          updatePurchaseOrderDto.shipping_cost ??
+            currentHeader?.shipping_cost ??
+            0,
+        );
+        const freight = this.resolveFreightAllocation({
+          shippingCost,
+          requested:
+            (updatePurchaseOrderDto.shipping_cost_allocation as
+              | ShippingCostAllocation
+              | undefined) ??
+            (currentHeader?.shipping_cost_allocation as
+              | ShippingCostAllocation
+              | null
+              | undefined),
+          netPerLine,
+          quantities: quantitiesPerLine,
+          context: `update() cabecera de la orden ${id}`,
+        });
+        data.shipping_cost_allocation = freight.applied;
+
+        for (let i = 0; i < existingLines.length; i++) {
+          await tx.purchase_order_items.update({
+            where: { id: existingLines[i].id },
+            data: { allocated_shipping_amount: freight.shares[i] ?? 0 },
+          });
+        }
+
+        // El total se recompone desde lo persistido: el neto y el IVA de las
+        // líneas no cambian al mover el flete, pero el bruto sí.
+        //
+        // LÍMITE CONOCIDO: editar `discount_amount` sin reenviar las líneas NO
+        // vuelve a prorratear el descuento (eso reescribiría `unit_cost` y con
+        // él la base gravable de cada línea). El frontend siempre manda las
+        // líneas cuando toca el descuento; acá sólo se recompone el total para
+        // que la cabecera no quede mintiendo.
+        const netSubtotal = netPerLine.reduce((s, v) => s + v, 0);
+        const lineTax = existingLines.reduce(
+          (s, l) => s + Number(l.tax_amount ?? 0),
+          0,
+        );
+        data.subtotal_amount = round2(netSubtotal);
+        data.tax_amount = round2(lineTax);
+        data.total_amount = round2(
+          round2(netSubtotal) + round2(lineTax) + shippingCost,
+        );
       }
 
       return tx.purchase_orders.update({
@@ -2691,11 +3298,26 @@ export class PurchaseOrdersService {
 
       // F1 IVA lifecycle: resolve the commerce's VAT responsibility ONCE for
       // this receipt. O-48 (responsible) excludes IVA from inventory cost;
-      // O-49 (non-responsible) capitalizes it. Indeterminate ⇒ responsible.
-      const vatResponsible = await this.resolveVatResponsibility(
+      // O-49 (non-responsible) capitalizes it.
+      //
+      // B.1 — indeterminado ⇒ NO responsable (fail-closed). Antes el comentario
+      // decía «Indeterminate ⇒ responsible» y era cierto: el wrapper fallaba
+      // abierto. Ya no.
+      const vatOutcome = await this.resolveVatResponsibility(
         organizationId ?? undefined,
         storeId ?? undefined,
       );
+      const vatResponsible = vatOutcome.responsible;
+
+      // C.2 — flete capitalizado al costo. `allocated_shipping_amount` se selló
+      // por línea al crear/editar la orden (ver `resolveFreightAllocation`), así
+      // que la recepción NO vuelve a repartir: reparte quien conoce el lote
+      // completo, y recibir parcialmente no debe cambiar el reparto pactado.
+      // Solo se capitaliza cuando la cabecera dice `prorate`; con `expense` la
+      // columna vale 0 y el flete no toca el costo del inventario.
+      const freightProrated =
+        (purchaseOrder as { shipping_cost_allocation?: string | null })
+          .shipping_cost_allocation === 'prorate';
 
       // D2: accumulate the purchase-unit subtotal received in THIS specific
       // reception batch (quantity_received_now × unit_cost, in purchase-order
@@ -2732,13 +3354,32 @@ export class PurchaseOrdersService {
               ? lineTaxAmount / qtyOrdered
               : netUnitCost * (Number(orderItem?.tax_rate ?? 0) / 100);
 
+          // C.2 — porción del flete que aterrizó en ESTA línea, llevada a
+          // unidad de compra. Se divide por `quantity_ordered` (no por lo
+          // recibido en este lote) porque el reparto se pactó sobre la orden
+          // completa: si se dividiera por lo recibido, una recepción parcial
+          // cargaría a esas unidades todo el flete de la línea.
+          const freightPerUnit =
+            freightProrated && qtyOrdered > 0
+              ? Number(
+                  (orderItem as { allocated_shipping_amount?: unknown })
+                    ?.allocated_shipping_amount ?? 0,
+                ) / qtyOrdered
+              : 0;
+
           // O-48 responsible → cost EXCLUDES IVA (net). O-49 non-responsible →
           // CAPITALIZE IVA into cost. Capitalization is on the PURCHASE unit,
           // BEFORE resolveUoMConversion (so the per-stock-unit cost the FIFO
           // engine sees already carries the capitalized IVA when applicable).
-          const costUnit = vatResponsible
-            ? netUnitCost
-            : netUnitCost + ivaPerUnit;
+          //
+          // C.2 — el flete entra AQUÍ, en unidad de COMPRA, por la misma razón:
+          // sumarlo después de `resolveUoMConversion` lo desviaría exactamente
+          // por `purchase_to_stock_factor`. En una compra por cajas de 12 el
+          // error es de un orden de magnitud y queda sellado en la capa FIFO,
+          // irreversible sin un ajuste manual.
+          const costUnit =
+            (vatResponsible ? netUnitCost : netUnitCost + ivaPerUnit) +
+            freightPerUnit;
 
           // Seal the VAT attributable to the units received in THIS batch,
           // proportional to quantity_received (purchase units), accumulating
@@ -3126,22 +3767,90 @@ export class PurchaseOrdersService {
         // Surfaced here so the post-tx block can decide whether to recognize
         // the deductible VAT (only O-48).
         vat_responsible: vatResponsible,
+        // B.4/C.11 — el resultado de TRES estados y el método de costeo viajan
+        // fuera de la transacción para sellarse en la auditoría. Re-derivarlos
+        // después leería la configuración de DESPUÉS, y entonces nada
+        // distinguiría un cambio de configuración de un defecto.
+        vat_outcome: vatOutcome,
+        costing_method: costingMethod,
+        // C.3 — modo de flete de la orden (sellado al crear) y su monto.
+        freight_allocation: (updated_po as { shipping_cost_allocation?: string | null })
+          .shipping_cost_allocation ?? null,
+        freight_total:
+          Math.round(Number(updated_po.shipping_cost ?? 0) * 100) / 100,
       };
-    });
+    },
+      // A.11 — techo EXPLÍCITO de transacción, igual que en `create()`. Una
+      // recepción de 80 líneas encadena costeo FIFO, movimientos, niveles de
+      // stock, series y precios: del orden de 3.000 consultas. Con el techo
+      // heredado de 5.000 ms aborta con P2028 en RDS y es invisible en local.
+      { timeout: 120_000, maxWait: 10_000 },
+    );
 
-    // Audit log after transaction
+    // C.3 — el flete de la cabecera, resuelto UNA vez para los dos consumidores
+    // de más abajo: la auditoría (que lo sella) y la emisión contable (que lo
+    // reparte entre 1435 y 513550 según el modo).
+    const freight_total = result.freight_total;
+    const freight_prorated = result.freight_allocation === 'prorate';
+    // El flete-gasto se reconoce UNA sola vez, en la recepción que cierra la
+    // orden: es un cargo de cabecera, no de línea, así que prorratearlo entre
+    // recepciones parciales sólo fabricaría residuos de redondeo. Misma
+    // convención que el complemento de IVA descontable.
+    const freight_expense_amount =
+      !freight_prorated && result.all_items_received ? freight_total : 0;
+
+    // ===== C.11 — sellar la decisión fiscal y el modo de flete =====
+    //
+    // El `metadata` de una recepción era literalmente
+    // `{"items_count": 1, "purchase_order_id": 213}`. La única huella indirecta
+    // de la estrategia fiscal aplicada eran las dos columnas de impuesto, y en
+    // 134 de 152 líneas ambas valen cero: para esas líneas la estrategia es
+    // IRRECUPERABLE. Y re-derivarla mañana leería los datos fiscales de mañana —
+    // tras B.2, configurar el RUT la semana que viene haría que la re-derivación
+    // contradijera la orden sin que nada distinga un cambio de configuración de
+    // un defecto.
+    //
+    // Se usa `log()` y no `logCustom()` porque `logCustom` no acepta `store_id`
+    // y lo dejaba nulo en las 256 filas de compras, así que la auditoría de
+    // compras no se podía filtrar por tienda. `logCustom` vive en el dominio
+    // común y no se toca desde aquí.
     try {
       const user_id = RequestContextService.getUserId();
       const audit_action = result.all_items_received
         ? 'PO_RECEIVED'
         : 'PO_PARTIALLY_RECEIVED';
-      await this.auditService.logCustom(
-        user_id ?? 0,
-        audit_action,
-        'purchase_orders',
-        { purchase_order_id: id, items_count: dto.items.length },
-        id,
-      );
+      await this.auditService.log({
+        userId: user_id ?? 0,
+        storeId:
+          result.updated_po.location?.store_id ??
+          RequestContextService.getStoreId() ??
+          undefined,
+        organizationId: result.updated_po.organization_id ?? undefined,
+        action: audit_action,
+        resource: 'purchase_orders',
+        resourceId: id,
+        metadata: {
+          purchase_order_id: id,
+          order_number: result.updated_po.order_number,
+          reception_id: result.reception_id,
+          items_count: dto.items.length,
+          all_items_received: result.all_items_received,
+          costing_method: toPublicCostingMethod(result.costing_method),
+          fiscal_explanation: this.buildFiscalExplanation(result.vat_outcome),
+          shipping_cost: result.freight_total,
+          // El modo SELLADO en la cabecera, que es el que la recepción obedeció.
+          // El modo SOLICITADO por el operador vive en el `metadata` de
+          // `PO_CREATED`: la degradación `prorate → expense` (sin base sobre la
+          // que repartir) ocurre al crear, y aquí ya no es observable. Guardar
+          // dos veces el mismo valor con dos nombres distintos fingiría una
+          // distinción que este punto del flujo no puede hacer.
+          shipping_cost_allocation_applied: result.freight_allocation,
+          // C.3 — cuánto del flete se llevó a gasto en esta recepción (513550).
+          // Cero en modo `prorate` (fue al costo) y en recepciones parciales.
+          freight_expense_recognized: freight_expense_amount,
+          request_id: RequestContextService.getRequestId(),
+        },
+      });
     } catch (error) {
       this.logger.error(
         `Failed to log audit for PO receive #${id}: ${error.message}`,
@@ -3228,7 +3937,31 @@ export class PurchaseOrdersService {
               0,
             ) * 100,
           ) / 100;
-      const emit_total = Math.round((net_total + capitalized_iva) * 100) / 100;
+
+      // C.3 — el flete entra al asiento. Hoy `shipping_cost` sumaba en
+      // `total_amount` mientras el asiento y el auxiliar de cartera se
+      // construían sobre `orderSubtotal`, que NO lo incluye; el techo de
+      // sobrepago de `registerPayment` SÍ. Con flete > 0 una orden alcanzaba el
+      // estado `paid` con la cartera todavía abierta por el monto del flete.
+      //
+      // Los dos modos difieren en QUÉ cuenta recibe el débito, no en si el
+      // proveedor cobra:
+      //   - `prorate`: el flete ya está DENTRO del costo de los productos
+      //     (`allocated_shipping_amount` → `costUnit` → capa FIFO), así que
+      //     entra al mismo asiento de recepción (DR 1435 / CR 2205).
+      //   - `expense`: el flete NO toca el inventario; va a gasto del período
+      //     (513550 «Transporte, Fletes y Acarreos»). Ese débito es una LÍNEA
+      //     DISTINTA que el listener contable tiene que emitir — ver
+      //     `freight_expense_amount` en el evento. Mientras esa línea no exista,
+      //     el flete-gasto NO se suma al `total_amount` del asiento (hacerlo lo
+      //     mandaría a inventario, justo lo contrario de lo que el operador
+      //     eligió), pero SÍ al auxiliar de cartera, que es lo que de verdad se
+      //     le debe al proveedor.
+      const capitalized_freight = freight_prorated ? freight_total : 0;
+
+      const emit_total =
+        Math.round((net_total + capitalized_iva + capitalized_freight) * 100) /
+        100;
 
       if (result.all_items_received) {
         // Sum what accounting already posted (NET) for THIS order's earlier
@@ -3270,7 +4003,10 @@ export class PurchaseOrdersService {
         batch_amount = 0;
       }
 
-      if (batch_amount > 0) {
+      // C.3 — el flete-gasto también obliga a emitir aunque el lote no aporte
+      // monto: es dinero que se le debe al proveedor y que hoy nunca llegaba ni
+      // al asiento ni a la cartera.
+      if (batch_amount > 0 || freight_expense_amount > 0) {
         // O-48 subledger gross-up (decisión de negocio jul-2026, confirmada por
         // el usuario): la CxP (accounts_payable) DEBE reflejar el BRUTO que se le
         // debe al proveedor (= neto + IVA descontable), no el neto. El GL 2205 ya
@@ -3293,6 +4029,16 @@ export class PurchaseOrdersService {
             ) / 100;
           subledger_gross_share =
             Math.round((batch_amount + deductible_iva) * 100) / 100;
+        }
+        // C.3 — con `expense` el flete no está dentro de `batch_amount` (no fue
+        // al inventario) pero SÍ se le debe al proveedor. Sumarlo aquí es lo que
+        // hace que `accounts_payable.original_amount` cuadre con
+        // `purchase_orders.total_amount` y que una orden con flete deje de poder
+        // llegar a `paid` con cartera abierta. Con `prorate` ya viene dentro.
+        if (freight_expense_amount > 0) {
+          subledger_gross_share =
+            Math.round((subledger_gross_share + freight_expense_amount) * 100) /
+            100;
         }
         this.eventEmitter.emit('purchase_order.received', {
           purchase_order_id: result.updated_po.id,
@@ -3318,6 +4064,23 @@ export class PurchaseOrdersService {
           // C4-followup: result.updated_po.suppliers ya viene completo del
           // include de la transacción — sin lookup adicional.
           supplier,
+          // ===== C.3 — contrato de flete del evento =====
+          // `shipping_cost_allocation` dice qué se hizo con el flete y
+          // `freight_expense_amount` es el monto que el listener contable debe
+          // debitar a 513550 «Transporte, Fletes y Acarreos» como línea PROPIA
+          // del asiento (clave de mapeo de C.6, dueño: dominio contable).
+          //
+          // Es > 0 SOLO en modo `expense` y SOLO en la recepción que cierra la
+          // orden. Con `prorate` vale 0 porque el flete ya viajó dentro de
+          // `total_amount` hacia 1435 (está en el costo del inventario).
+          //
+          // Mientras el listener no consuma este campo, el GL 2205 queda por
+          // debajo del auxiliar por el monto del flete-gasto: es un dato
+          // AÑADIDO, ningún listener existente lo lee y nada se rompe por
+          // ignorarlo, pero el asiento de gasto no se posteará.
+          shipping_cost_allocation: result.freight_allocation,
+          freight_total,
+          freight_expense_amount,
         });
       }
     } catch (error) {
@@ -4163,11 +4926,55 @@ export class PurchaseOrdersService {
     });
   }
 
+  /**
+   * Vista previa del costo de una compra ANTES de crearla.
+   *
+   * CP-PURCHASE-TRANSPARENCY A.2 / A.12 / B.4 la reordenó por tres razones:
+   *
+   *  - **A.2 — el prorrateo se calcula sobre el LOTE, no por ítem.** Antes el
+   *    bucle procesaba cada línea aislada y DECLINABA repartir el descuento de
+   *    cabecera, con un comentario que reconocía que adivinar la porción
+   *    mostraría un costo que `create()` no iba a persistir. Con el flete esa
+   *    concesión deja de ser aceptable: si la vista previa no reparte, miente.
+   *    Ahora el descuento de cabecera y el flete se reparten con los MISMOS
+   *    helpers que usa `create()` (`prorateHeaderDiscount`,
+   *    `resolveFreightAllocation`), así que la paridad se garantiza por
+   *    contrato compartido y no por réplica aritmética.
+   *  - **A.12 — las consultas de conjunto salen del bucle.** El producto, la
+   *    variante, el nivel de stock y la configuración de unidad de medida se
+   *    leían línea por línea. La vista previa se redispara con cada cambio de
+   *    cabecera, así que su costo por línea tiene que ser constante. Queda
+   *    dentro del bucle una sola lectura: el agregado de stock con alcance, que
+   *    depende del producto y hoy no admite lectura por lote.
+   *  - **B.4 — devuelve `fiscal_explanation`.** El frontend deja de re-derivar
+   *    el predicado de IVA para explicar el costo. Había cuatro réplicas del
+   *    predicado en el repositorio con valores por omisión divergentes: si el
+   *    paso de recepción se explica con el dato del backend y el de
+   *    confirmación con el selector del frontend, dos pasos del MISMO asistente
+   *    pueden contradecirse sobre la misma factura.
+   */
   async getCostPreview(dto: CostPreviewDto) {
     const organizationId = RequestContextService.getOrganizationId();
     if (!organizationId) {
       throw new BadRequestException('Organization ID not found in context');
     }
+
+    // C.7 — la vista previa aplica la MISMA regla de cabecera que la creación.
+    // Un flete sin modo de imputación no se puede costear, y aceptarlo acá
+    // dejaría al operador aprobar una simulación que el `POST` rechaza.
+    const freightContractError = validateFreightAndTaxHeader(
+      dto as {
+        shipping_cost?: number;
+        shipping_cost_allocation?: string;
+        prices_include_tax?: boolean;
+        items?: Array<{ tax_rate?: number } | null | undefined>;
+      },
+    );
+    if (freightContractError) {
+      throw new BadRequestException(freightContractError);
+    }
+
+    // ===== A.12: resoluciones de CONJUNTO, una sola vez para todo el lote =====
 
     // Resolve costing method via org/store precedence (mirrors receive()).
     const location = await this.prisma.inventory_locations.findUnique({
@@ -4181,21 +4988,166 @@ export class PurchaseOrdersService {
     );
 
     // F3 preview↔persist parity: resolve the commerce's VAT responsibility ONCE
-    // for this preview, using the SAME source of truth as receive() (see the
-    // vatResponsible read at receive()'s cost-treatment block). O-48
+    // for this preview, using the SAME source of truth as receive(). O-48
     // responsible → IVA is descontable, EXCLUDED from cost (net). O-49
     // non-responsible → IVA is CAPITALIZED into the inventory cost. Without
     // this, the preview shows a NET cost while receive() persists a GROSS one,
     // so the modal's new_cost_per_unit diverges from the recorded cost_per_unit
     // by exactly the IVA factor (the observed 1.19 for a 19% line).
-    const vatResponsible = await this.resolveVatResponsibility(
+    //
+    // B.1 — el resultado trae TRES estados. `responsible` gobierna la
+    // aritmética; `indeterminate` y `reason` gobiernan lo que se le explica al
+    // operador (ver `fiscal_explanation` al final).
+    const vatOutcome = await this.resolveVatResponsibility(
       organizationId,
       storeId ?? undefined,
     );
+    const vatResponsible = vatOutcome.responsible;
 
-    // Scoped cost aggregates (STORE vs ORGANIZATION) are computed per-item via
-    // CostingService.getScopedStockAggregate, which owns the operating-scope
-    // location filter and reads UNSCOPED to include org-level warehouses.
+    const productIds = Array.from(
+      new Set(dto.items.map((i) => i.product_id).filter((id) => !!id)),
+    );
+    const variantIds = Array.from(
+      new Set(
+        dto.items
+          .map((i) => i.product_variant_id)
+          .filter((id): id is number => !!id),
+      ),
+    );
+
+    // Un solo barrido del catálogo para TODO el lote. Trae a la vez el snapshot
+    // de precio para la UX de margen y la configuración de unidad de medida que
+    // `applyUoMConversion` necesita: son la misma fila, leerla dos veces era
+    // pagar el doble por el mismo dato.
+    type PreviewProductRow = {
+      id: number;
+      name: string | null;
+      base_price: unknown;
+      profit_margin: unknown;
+      price_unit_quantity: number | null;
+      is_ingredient: boolean | null;
+      purchase_to_stock_factor: unknown;
+      stock_uom_id: number | null;
+      purchase_uom_id: number | null;
+    };
+    const productRows: PreviewProductRow[] = productIds.length
+      ? await this.prisma.products.findMany({
+          where: { id: { in: productIds } },
+          select: {
+            id: true,
+            name: true,
+            base_price: true,
+            profit_margin: true,
+            // QUI-648 — escala de publicación del precio: sin ella el margen que
+            // muestra el modal mezcla el costo del milímetro con el precio del
+            // metro (ver `resolvePricingAfterReceipt`).
+            price_unit_quantity: true,
+            is_ingredient: true,
+            purchase_to_stock_factor: true,
+            stock_uom_id: true,
+            purchase_uom_id: true,
+          },
+        })
+      : [];
+    const productById = new Map(productRows.map((p) => [p.id, p]));
+
+    // Variants carry their own price_override (NOT base_price) and
+    // profit_margin. We read both so the margin UX reflects the variant
+    // pricing when a variant is involved.
+    type PreviewVariantRow = {
+      id: number;
+      name: string | null;
+      price_override: unknown;
+      profit_margin: unknown;
+    };
+    const variantRows: PreviewVariantRow[] = variantIds.length
+      ? await this.prisma.product_variants.findMany({
+          where: { id: { in: variantIds } },
+          select: {
+            id: true,
+            name: true,
+            price_override: true,
+            profit_margin: true,
+          },
+        })
+      : [];
+    const variantById = new Map(variantRows.map((v) => [v.id, v]));
+
+    // Snapshot por ubicación (solo para mostrar). NO alimenta el CPP: eso sale
+    // de `getScopedStockAggregate`.
+    type PreviewStockRow = {
+      product_id: number;
+      product_variant_id: number | null;
+      quantity_on_hand: unknown;
+      cost_per_unit: unknown;
+    };
+    const stockRows: PreviewStockRow[] = productIds.length
+      ? await this.prisma.stock_levels.findMany({
+          where: {
+            location_id: dto.location_id,
+            product_id: { in: productIds },
+          },
+          select: {
+            product_id: true,
+            product_variant_id: true,
+            quantity_on_hand: true,
+            cost_per_unit: true,
+          },
+        })
+      : [];
+    const stockKey = (productId: number, variantId: number | null) =>
+      `${productId}:${variantId ?? 'base'}`;
+    const stockByKey = new Map(
+      stockRows.map((s) => [
+        stockKey(s.product_id, s.product_variant_id ?? null),
+        s,
+      ]),
+    );
+
+    // ===== A.2: el prorrateo se resuelve sobre el LOTE, antes del bucle =====
+
+    // QUI-661 — el descuento de cabecera se reparte con el MISMO helper que
+    // `create()`. Antes la vista previa lo ignoraba y mostraba un costo que la
+    // orden nunca iba a tener.
+    const headerShares = this.prorateHeaderDiscount(
+      dto.items,
+      Number(dto.discount_amount || 0),
+    );
+
+    // F1 IVA lifecycle: derive the NET cost from the entered (possibly gross)
+    // unit_cost + tax_rate + effective include-tax mode. The NET is the cost
+    // basis for CPP/FIFO — mirrors what create/receive persist.
+    const derivedByLine = dto.items.map((item, index) =>
+      this.deriveLineTax(
+        {
+          unit_cost: item.unit_cost,
+          quantity: item.quantity,
+          tax_rate: item.tax_rate,
+          prices_include_tax: item.prices_include_tax,
+          discount_percentage: item.discount_percentage,
+          discount_amount: item.discount_amount,
+        },
+        dto,
+        headerShares[index],
+      ),
+    );
+
+    const quantitiesPerLine = dto.items.map((i) => Number(i.quantity ?? 0));
+    const netPerLine = derivedByLine.map(
+      (d, index) => d.unit_price_net * quantitiesPerLine[index],
+    );
+
+    // C.2 — mismo reparto de flete que `create()`. La base es el neto después
+    // de descuentos y el residuo va a la última línea, así que la suma de
+    // porciones es EXACTAMENTE el flete de la cabecera.
+    const freight = this.resolveFreightAllocation({
+      shippingCost: Number(dto.shipping_cost || 0),
+      requested: dto.shipping_cost_allocation,
+      netPerLine,
+      quantities: quantitiesPerLine,
+      context: `getCostPreview() ubicación ${dto.location_id}`,
+    });
+    const freightCapitalized = freight.applied === 'prorate';
 
     const items: Array<{
       product_id: number;
@@ -4216,6 +5168,19 @@ export class PurchaseOrdersService {
       incoming_tax_per_unit: number;
       incoming_tax_amount: number;
       effective_include: boolean;
+      /**
+       * B.4 — el desglose por línea en las MISMAS dos columnas mutuamente
+       * excluyentes que `receive()` sella (`deductible_tax_amount` /
+       * `capitalized_tax_amount`). Una de las dos es siempre 0.
+       */
+      deductible_tax_amount: number;
+      capitalized_tax_amount: number;
+      /** QUI-661 — descuento total aplicado (propio + porción de cabecera). */
+      discount_amount: number;
+      header_discount_share: number;
+      /** C.2 — porción del flete de la cabecera imputada a esta línea. */
+      allocated_shipping_amount: number;
+      shipping_per_unit: number;
       is_reactivation: boolean;
       current_base_price: number;
       current_profit_margin: number;
@@ -4230,23 +5195,27 @@ export class PurchaseOrdersService {
       price_unit_quantity: number;
     }> = [];
 
-    for (const item of dto.items) {
-      const stockLevel = await this.prisma.stock_levels.findFirst({
-        where: {
-          product_id: item.product_id,
-          product_variant_id: item.product_variant_id || null,
-          location_id: dto.location_id,
-        },
-      });
+    for (let index = 0; index < dto.items.length; index++) {
+      const item = dto.items[index];
+      const product = productById.get(item.product_id);
+      const stockLevel = stockByKey.get(
+        stockKey(item.product_id, item.product_variant_id ?? null),
+      );
 
       const currentStock = Number(stockLevel?.quantity_on_hand ?? 0);
       const currentCost = Number(stockLevel?.cost_per_unit ?? 0);
 
       // Aggregate stock across the scoped location set (org or store) via the
-      // shared helper, which reads UNSCOPED so org-level central warehouses
-      // (store_id = null) and sibling stores are counted for ORGANIZATION scope
-      // — the store-scoped client would drop them and report global_stock = 0,
-      // wrongly flagging a reactivation and ignoring the general inventory.
+      // shared helper. A.0 unificó el universo: el helper emite una consulta
+      // cruda con la pertenencia de ubicación escrita en el `WHERE`, contra el
+      // cliente SIN alcance cuando no hay transacción y contra el handle
+      // transaccional cuando la hay. Los dos caminos —vista previa y
+      // recepción— agregan EL MISMO conjunto, así que la brecha del 4,8 %
+      // entre lo que se aprobaba y lo que se sellaba está cerrada.
+      //
+      // Se queda dentro del bucle porque el helper resuelve por producto y no
+      // admite lectura por lote; izarla exige cambiar `CostingService`
+      // (fuera del alcance de este paso).
       const { quantity: globalStock, cost_per_unit: globalCostPerUnit } =
         await this.costingService.getScopedStockAggregate({
           product_id: item.product_id,
@@ -4254,62 +5223,51 @@ export class PurchaseOrdersService {
           location_id: dto.location_id,
         });
 
-      // F1 IVA lifecycle: derive the NET cost from the entered (possibly
-      // gross) unit_cost + tax_rate + effective include-tax mode. The NET is
-      // the cost basis for CPP/FIFO — mirrors what create/receive persist.
-      // QUI-661 — the preview must carry the line discount too, or the margin
-      // it shows is computed against a cost the order will never have. The
-      // HEADER discount is deliberately NOT prorated here: the preview runs per
-      // item without the sibling lines in scope, and guessing a share would
-      // show a cost that does not match what create() will persist.
-      const derivedTax = this.deriveLineTax(
-        {
-          unit_cost: item.unit_cost,
-          quantity: item.quantity,
-          tax_rate: item.tax_rate,
-          prices_include_tax: item.prices_include_tax,
-          discount_percentage: (item as { discount_percentage?: number })
-            .discount_percentage,
-          discount_amount: (item as { discount_amount?: number })
-            .discount_amount,
-        },
-        dto,
-      );
+      const derivedTax = derivedByLine[index];
       const netUnitCost = derivedTax.unit_price_net;
+      const quantity = quantitiesPerLine[index];
 
       // ===== F3 preview↔persist parity: mirror receive()'s unit cost EXACTLY =====
       // receive() derives the per-stock-unit cost that FIFO/CPP consumes as:
-      //   costUnit = vatResponsible ? netUnitCost : netUnitCost + ivaPerUnit
+      //   costUnit = (vatResponsible ? net : net + iva) + freightPerUnit
       //   { stockQuantity, stockUnitCost } = resolveUoMConversion(qty, costUnit)
-      // where ivaPerUnit == orderItem.tax_amount / quantity_ordered. Because
+      // where ivaPerUnit == orderItem.tax_amount / quantity_ordered and
+      // freightPerUnit == allocated_shipping_amount / quantity_ordered. Because
       // create() persists tax_amount = deriveLineTax().tax_amount (= per-unit
-      // tax × quantity) and quantity_ordered = quantity, that ratio is exactly
-      // deriveLineTax()'s tax_amount_per_unit — which is what we have here.
+      // tax × quantity), allocated_shipping_amount = prorateShipping()[i] and
+      // quantity_ordered = quantity, ambos cocientes son exactamente los que se
+      // calculan acá.
       //
       // (1) IVA: O-48 responsible → NET; O-49 non-responsible → capitalize IVA.
       const ivaPerUnit = derivedTax.tax_amount_per_unit;
-      const costUnit = vatResponsible ? netUnitCost : netUnitCost + ivaPerUnit;
+      // (2) Flete: solo en modo `prorate`, y en unidad de COMPRA — sumarlo
+      // después de la conversión de unidad de medida lo desviaría exactamente
+      // por `purchase_to_stock_factor`.
+      const lineFreight = freightCapitalized ? (freight.shares[index] ?? 0) : 0;
+      const freightPerUnit = quantity > 0 ? lineFreight / quantity : 0;
+      const costUnit =
+        (vatResponsible ? netUnitCost : netUnitCost + ivaPerUnit) +
+        freightPerUnit;
 
-      // (2) UoM: convert the incoming purchase-unit quantity + capitalized cost
-      // to MINIMUM stock units via the SAME helper receive() uses. The CPP must
-      // be computed in stock units because globalStock/globalCostPerUnit come
-      // from stock_levels (already in stock units) — mixing a purchase-unit
+      // (3) UoM: convert the incoming purchase-unit quantity + capitalized cost
+      // to MINIMUM stock units via the SAME arithmetic receive() uses. The CPP
+      // must be computed in stock units because globalStock/globalCostPerUnit
+      // come from stock_levels (already in stock units) — mixing a purchase-unit
       // quantity into the denominator drifts the result by the conversion
-      // factor. resolveUoMConversion no-ops (factor=1) for retail products, so
-      // this is byte-for-byte identical to the old behaviour when no UoM
-      // conversion applies. `this.prisma` acts as the read client (the helper
-      // only issues a scoped products.findFirst, no writes).
+      // factor. Con factor 1 (todo el catálogo retail) el resultado es idéntico
+      // al de antes.
       const {
         stockQuantity: incomingStockQty,
         stockUnitCost: incomingStockUnitCost,
-      } = await this.resolveUoMConversion(
-        item.product_id,
-        item.quantity,
-        costUnit,
-        this.prisma,
-      );
+      } = PurchaseOrdersService.applyUoMConversion(product, quantity, costUnit);
 
       const newStock = globalStock + incomingStockQty;
+      // NOTA (dependencia de D.2): `globalStock` todavía incluye el stock de
+      // productos ARCHIVADOS, porque el filtro por estado del agregado vive en
+      // `CostingService` y lo enciende D.2. Mientras tanto, una reactivación
+      // puede no detectarse si el único stock vivo pertenece a un producto
+      // archivado. No se corrige desde acá: hacerlo sería una segunda
+      // implementación del mismo filtro.
       const isReactivation = globalStock <= 0;
 
       let newCostPerUnit: number;
@@ -4328,42 +5286,14 @@ export class PurchaseOrdersService {
       // Round to 2 decimals for display
       newCostPerUnit = Math.round(newCostPerUnit * 100) / 100;
 
-      // Fetch product name + current pricing snapshot for the margin UX.
-      // We read base_price + profit_margin so the confirmation modal can show
-      // the *resulting* margin if the operator accepts the new cost without
-      // overrides, and let them know what they're about to overwrite.
-      const product = await this.prisma.products.findUnique({
-        where: { id: item.product_id },
-        select: {
-          name: true,
-          base_price: true,
-          profit_margin: true,
-          // QUI-648 — escala de publicación del precio: sin ella el margen que
-          // muestra el modal mezcla el costo del milímetro con el precio del
-          // metro (ver `resolvePricingAfterReceipt`).
-          price_unit_quantity: true,
-        },
-      });
-
-      let variantName: string | undefined;
-      let variantBasePrice: number | null = null;
-      let variantMargin: number | null = null;
-      if (item.product_variant_id) {
-        // Variants carry their own price_override (NOT base_price) and
-        // profit_margin. We read both so the margin UX reflects the variant
-        // pricing when a variant is involved.
-        const variant = await this.prisma.product_variants.findUnique({
-          where: { id: item.product_variant_id },
-          select: { name: true, price_override: true, profit_margin: true },
-        });
-        variantName = variant?.name || undefined;
-        variantBasePrice = variant?.price_override != null
-          ? Number(variant.price_override)
-          : null;
-        variantMargin = variant?.profit_margin != null
-          ? Number(variant.profit_margin)
-          : null;
-      }
+      const variant = item.product_variant_id
+        ? variantById.get(item.product_variant_id)
+        : undefined;
+      const variantName = variant?.name || undefined;
+      const variantBasePrice =
+        variant?.price_override != null ? Number(variant.price_override) : null;
+      const variantMargin =
+        variant?.profit_margin != null ? Number(variant.profit_margin) : null;
 
       // Current selling price: variant override wins, otherwise product base.
       // current_profit_margin: variant margin wins, otherwise product margin.
@@ -4409,6 +5339,8 @@ export class PurchaseOrdersService {
           ? null
           : PurchaseOrdersService.clampProfitMargin(rawResultingMargin);
 
+      const lineTaxTotal = Math.round(derivedTax.tax_amount * 100) / 100;
+
       items.push({
         product_id: item.product_id,
         product_variant_id: item.product_variant_id || null,
@@ -4422,7 +5354,7 @@ export class PurchaseOrdersService {
         global_cost_per_unit: Math.round(globalCostPerUnit * 100) / 100,
         new_stock: newStock,
         new_cost_per_unit: newCostPerUnit,
-        incoming_quantity: item.quantity,
+        incoming_quantity: quantity,
         // incoming_cost is the NET cost basis that actually enters inventory
         // (equals the entered value when no tax applies — legacy-compatible).
         incoming_cost: Math.round(netUnitCost * 100) / 100,
@@ -4430,8 +5362,15 @@ export class PurchaseOrdersService {
         unit_price_net: Math.round(netUnitCost * 100) / 100,
         incoming_tax_per_unit:
           Math.round(derivedTax.tax_amount_per_unit * 100) / 100,
-        incoming_tax_amount: Math.round(derivedTax.tax_amount * 100) / 100,
+        incoming_tax_amount: lineTaxTotal,
         effective_include: derivedTax.effective_include,
+        // Mutuamente excluyentes, igual que las columnas que sella `receive()`.
+        deductible_tax_amount: vatResponsible ? lineTaxTotal : 0,
+        capitalized_tax_amount: vatResponsible ? 0 : lineTaxTotal,
+        discount_amount: Math.round(derivedTax.discount_total * 100) / 100,
+        header_discount_share: Math.round((headerShares[index] ?? 0) * 100) / 100,
+        allocated_shipping_amount: freight.shares[index] ?? 0,
+        shipping_per_unit: Math.round(freightPerUnit * 100) / 100,
         is_reactivation: isReactivation,
         current_base_price: currentBasePrice,
         current_profit_margin: currentProfitMargin,
@@ -4449,9 +5388,23 @@ export class PurchaseOrdersService {
     // que sin ella el IVA ya está capitalizado DENTRO de `new_cost_per_unit`.
     // Es la misma cifra en pantalla con dos significados opuestos, y el operador
     // calcula su margen sobre ella.
+    //
+    // B.4 — `fiscal_explanation` es el contrato ESTRUCTURADO de esa explicación:
+    // distingue «declaró que no es responsable» de «no pudimos saberlo», dice
+    // qué se hizo con el impuesto, lo fundamenta y —solo cuando el estado es
+    // indeterminado— ofrece la acción que lo resuelve. `vat_responsible` se
+    // conserva para los clientes que ya lo leen; un cliente antiguo ignora el
+    // campo nuevo sin romperse.
     return {
       costing_method: toPublicCostingMethod(costingMethod),
       vat_responsible: vatResponsible,
+      fiscal_explanation: this.buildFiscalExplanation(vatOutcome),
+      shipping_cost: freight.total,
+      // Solicitado y aplicado por separado: `prorate` degrada a `expense`
+      // cuando no hay neto ni cantidad sobre la que repartir, y el operador
+      // tiene que ver que su elección no se pudo honrar.
+      shipping_cost_allocation_requested: freight.requested,
+      shipping_cost_allocation_applied: freight.applied,
       items,
     };
   }
