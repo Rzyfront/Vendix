@@ -2343,6 +2343,72 @@ export const ErrorCodes = {
     devMessage:
       'Billing profile configuration is fiscally invalid: AIU component percentages must sum to exactly 100, the minimum taxable base cannot fall below the 10% legal floor under E.T. art. 462-1, and the tax matrix must agree with the profile regime (et_462_1 taxes A+I+U, decreto_1372_1992 taxes only Utilidad). All offending fields are returned in details.issues with their dotted path so the editor can mark them',
   },
+
+  /**
+   * Perfil de facturación inexistente — o de otro tenant.
+   *
+   * **Los dos casos devuelven exactamente esto, y es deliberado.** El servicio
+   * busca con el cliente scopeado, así que el perfil de otra tienda simplemente
+   * no aparece en el resultado: para el llamador es indistinguible de un id que
+   * no existe. Distinguirlos —403 para «existe pero no es tuyo»— convertiría el
+   * endpoint en un oráculo de enumeración: probando ids se podría inventariar
+   * cuántos perfiles tiene la competencia.
+   */
+  /**
+   * Perfil de facturación inexistente — o de otra tienda.
+   *
+   * Las dos situaciones responden lo mismo A PROPÓSITO. El cliente scopeado no
+   * devuelve filas de otra tienda, así que el servicio no puede distinguirlas;
+   * y aunque pudiera, responder 403 al id ajeno y 404 al inexistente convertiría
+   * el endpoint en un oráculo de enumeración: barriendo ids se aprendería
+   * cuáles existen en tiendas ajenas.
+   *
+   * El texto que ve el usuario NO sale de aquí: lo construye
+   * `profileNotFound()` en `profiles/profile-errors.ts`, en español y sin
+   * explicar el mecanismo. Este `devMessage` es la red de seguridad para un
+   * `throw` que olvide pasarlo — por eso es corto y no revela el razonamiento.
+   */
+  INVOICING_PROFILE_001: {
+    code: 'INVOICING_PROFILE_001',
+    httpStatus: 404,
+    devMessage: 'Billing profile not found',
+  },
+
+  /**
+   * Borrado de un perfil que facturas ya timbradas referencian.
+   *
+   * 409 y no 400: la petición está bien formada y el permiso es correcto; lo que
+   * la impide es el ESTADO del recurso. La FK
+   * `invoices.profile_id → invoice_profiles(id) ON DELETE RESTRICT` ya lo
+   * bloquearía a nivel de base, pero como error de Prisma sin traducir sería un
+   * 500 sin explicación. Este código es la versión legible del mismo NO, con el
+   * conteo en `details` para que el diálogo diga cuántas facturas y ofrezca
+   * desactivar en su lugar.
+   *
+   * El historial de versiones NO se puede borrar aunque el perfil sí: es lo que
+   * hace reproducible una factura de hace dos años.
+   */
+  INVOICING_PROFILE_003: {
+    code: 'INVOICING_PROFILE_003',
+    httpStatus: 409,
+    devMessage:
+      'Billing profile cannot be deleted because stamped invoices reference it. The FK is ON DELETE RESTRICT, so the database would refuse it anyway — this code is the readable version of the same refusal, with the invoice count in details and deactivation offered as the alternative',
+  },
+
+  /**
+   * Versión inexistente de un perfil que sí existe.
+   *
+   * Separado de `INVOICING_PROFILE_001` porque el frontend hace dos cosas
+   * distintas: ante el perfil ausente vuelve al listado, ante la versión ausente
+   * se queda en el historial y sólo muestra un toast. Un solo código obligaría a
+   * adivinar cuál de las dos por el texto del mensaje.
+   */
+  INVOICING_PROFILE_VERSION_001: {
+    code: 'INVOICING_PROFILE_VERSION_001',
+    httpStatus: 404,
+    devMessage:
+      'Requested version of an existing billing profile does not exist. Kept apart from INVOICING_PROFILE_001 because the frontend reacts differently: a missing profile sends the user back to the list, a missing version only raises a toast inside the history view',
+  },
   INVOICING_AIU_006: {
     code: 'INVOICING_AIU_006',
     httpStatus: 422,

@@ -304,6 +304,44 @@ export interface ProfileConfigIssue {
   message: string;
 }
 
+/**
+ * Problemas que NO impiden guardar el perfil.
+ *
+ * Sólo hay uno, y su razón es concreta. El objeto del contrato es un dato **por
+ * factura** con valor por omisión en el perfil: `CreateInvoiceDto
+ * .aiu_contract_object` lo declara opcional justo porque una empresa de
+ * servicios tiene varios contratos AIU y describe uno distinto en cada
+ * documento. Exigirlo al guardar el perfil no consigue que el dato sea correcto:
+ * consigue que el usuario escriba relleno para poder guardar, y el relleno es
+ * PEOR que el vacío — pasa la puerta de emisión y termina impreso como el objeto
+ * del contrato en el `cbc:Note` de la línea de Administración, mientras que el
+ * vacío falla ruidosamente antes de tomar consecutivo.
+ *
+ * O sea: el vacío se sigue reportando —el editor lo muestra como aviso y el
+ * estado vacío puede pedirlo— pero no bloquea el guardado. Lo que bloquea la
+ * EMISIÓN sigue siendo la puerta de la Fase A, que es donde el dato ya no puede
+ * faltar.
+ */
+export const PROFILE_CONFIG_WARNING_CODES: readonly string[] = [
+  'AIU_CONTRACT_OBJECT_EMPTY',
+];
+
+/**
+ * `true` si el problema impide guardar. Es la única forma correcta de decidir si
+ * una lista de problemas se traduce en un 422: `issues.length > 0` trataría un
+ * aviso como un error.
+ */
+export function isBlockingIssue(issue: ProfileConfigIssue): boolean {
+  return !PROFILE_CONFIG_WARNING_CODES.includes(issue.code);
+}
+
+/** Los problemas que bloquean, de una lista mixta. */
+export function blockingIssues(
+  issues: readonly ProfileConfigIssue[],
+): ProfileConfigIssue[] {
+  return issues.filter(isBlockingIssue);
+}
+
 /** Tarifas de IVA que la DIAN admite en `cbc:Percent` (tabla del anexo). */
 const IVA_RATES_SCALED = new Set([0, 500, 1600, 1900]);
 /** Tarifas de INC admitidas. */
@@ -847,11 +885,19 @@ export function buildDefaultAiuProfileConfig(
  * Las que van al XML llevan además la cota del anexo: `contract_object` se
  * concatena al `cbc:Note` de la línea de Administración (regla CAV03), y un
  * `Note` desmedido es un documento rechazado tras quemar el consecutivo.
+ *
+ * `contract_object` vale 4900 y no una cifra propia **a propósito**: es el mismo
+ * dato que `CreateInvoiceDto.aiu_contract_object`, que ya lleva
+ * `@MaxLength(4900)` porque CAV03 acota la nota COMPLETA a 5000 y el prefijo
+ * obligatorio ocupa el resto. Una cota más baja acá haría que un objeto de
+ * contrato legítimo se pudiera escribir en la factura pero no guardar como
+ * valor por omisión del perfil — la misma regla midiendo distinto según por
+ * dónde entre el dato.
  */
 export const CONFIG_LIMITS = {
   description: 500,
   internal_note: 1000,
-  contract_object: 300,
+  contract_object: 4900,
   account_code: 20,
   mapping_key: 100,
   mapping_overrides_count: 200,

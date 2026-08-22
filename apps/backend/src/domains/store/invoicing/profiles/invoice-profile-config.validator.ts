@@ -3,6 +3,7 @@ import { ErrorCodes, VendixHttpException } from 'src/common/errors';
 import {
   InvoiceProfileConfig,
   ProfileConfigIssue,
+  blockingIssues,
   normalizeInvoiceProfileConfig,
   validateInvoiceProfileConfig,
 } from './invoice-profile-config.contract';
@@ -21,7 +22,7 @@ export function assertValidInvoiceProfileConfig(
   options: { operation_type: string; profile_id?: number | null },
 ): void {
   const issues = validateInvoiceProfileConfig(config, options);
-  if (issues.length === 0) return;
+  if (blockingIssues(issues).length === 0) return;
   // El primer problema va al mensaje porque es lo que se ve en un toast; la
   // lista completa viaja en `details` para que el editor marque cada campo. Si
   // sólo se enviara el primero, el usuario tendría que guardar una vez por error
@@ -53,8 +54,15 @@ export function normalizeAndAssertProfileConfig(
   options: { operation_type: string; profile_id?: number | null },
 ): InvoiceProfileConfig {
   const { config, issues: structural } = normalizeInvoiceProfileConfig(input);
-  const issues = [...structural, ...validateInvoiceProfileConfig(config, options)];
-  if (issues.length > 0) throw buildProfileConfigException(issues, options);
+  const issues = [
+    ...structural,
+    ...validateInvoiceProfileConfig(config, options),
+  ];
+  // Se decide por los que BLOQUEAN, pero se envían TODOS: un aviso que no viaje
+  // en `details.issues` es un aviso que el editor no puede mostrar.
+  if (blockingIssues(issues).length > 0) {
+    throw buildProfileConfigException(issues, options);
+  }
   return config;
 }
 
