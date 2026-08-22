@@ -7,6 +7,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import {
   CreateProductDto,
   UpdateProductDto,
@@ -21,6 +22,10 @@ import {
 import { Prisma } from '@prisma/client';
 import { generateSlug } from '@common/utils/slug.util';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import {
+  InventoryAdjustmentsService,
+  AdjustmentTransactionResult,
+} from '../inventory/adjustments/inventory-adjustments.service';
 import { LocationsService } from '../inventory/locations/locations.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -79,6 +84,92 @@ import type {
  */
 export const MAX_PRODUCT_IDS = 1000;
 
+/**
+ * CP-PURCHASE-TRANSPARENCY D.4 — una línea del castigo de inventario que
+ * precede a un archivado: una tripleta (ubicación, variante, producto) con
+ * existencias que se van a llevar a cero.
+ */
+export interface ArchiveWriteOffLine {
+  location_id: number;
+  location_name: string;
+  product_variant_id: number | null;
+  variant_sku: string | null;
+  quantity_on_hand: number;
+  /**
+   * Costo unitario por la CADENA CANÓNICA —`stock_levels.cost_per_unit` →
+   * `product_variants.cost_price` → `products.cost_price` → 0—, la misma que
+   * `CostingService.consumeCostLayers` aplica bajo promedio ponderado. Bajo
+   * FIFO el COGS real sale de las capas y puede diferir; por eso la fila de
+   * auditoría guarda tanto lo que se le enseñó al operador como lo que el
+   * ajuste terminó costeando.
+   */
+  unit_cost: number;
+  value: number;
+  /** `false` ⇒ la cadena canónica se agotó sin encontrar costo. */
+  has_known_cost: boolean;
+}
+
+/** Una existencia que el archivado NO puede tocar, y por qué se bloquea. */
+export interface ArchiveOutOfScopeStock {
+  location_id: number;
+  location_name: string;
+  store_id: number | null;
+  quantity_on_hand: number;
+}
+
+/**
+ * Lo que el archivado va a destruir, calculado ANTES de destruirlo. Es el
+ * contrato que la interfaz necesita para enseñar «esto es lo que se va a
+ * destruir» y pedir confirmación (D.9), y el mismo objeto que viaja en
+ * `details` cuando el backend rechaza por falta de confirmación.
+ */
+export interface ArchiveWriteOffPlan {
+  product_id: number;
+  /** `true` cuando hay unidades que castigar: sin esto, archivar no confirma. */
+  requires_confirmation: boolean;
+  total_units: number;
+  total_value: number;
+  /**
+   * Unidades cuyo costo efectivo es CERO tras agotar la cadena canónica.
+   * Medido en desarrollo: el 63,9 % de las unidades fantasma (1.122.249 de
+   * 1.756.346). Se destruyen igual —son existencias que no existen— pero su
+   * baja no produce asiento contable, porque un asiento por valor cero no es
+   * un asiento. Cero aquí significa «costo desconocido», no «gratis», y por eso
+   * la cifra viaja hasta la fila de auditoría en vez de diluirse.
+   */
+  zero_cost_units: number;
+  lines: ArchiveWriteOffLine[];
+  /**
+   * Existencias del producto en ubicaciones que el alcance de la tienda NO ve
+   * —hoy, en la práctica, la bodega central de la organización
+   * (`inventory_locations.store_id IS NULL`)—. BLOQUEAN el archivado en vez de
+   * destruirse: el cliente con alcance de tienda ni siquiera puede escribirlas
+   * (el ajuste fallaría con `INV_FIND_001` a mitad de la transacción), y darlas
+   * de baja desde la pantalla de una tienda destruiría inventario de la
+   * organización que puede estar surtiendo a otras.
+   */
+  out_of_scope_units: number;
+  out_of_scope: ArchiveOutOfScopeStock[];
+}
+
+/** Opciones del archivado individual. */
+export interface RemoveProductOptions {
+  /**
+   * El operador VIO el desglose del castigo y dijo que sí. Por defecto `false`:
+   * sin esto, un producto con existencias no se archiva. La ruta masiva la
+   * propaga desde su propio DTO (D.6) para que un lote de un solo identificador
+   * no sea un atajo alrededor de esta compuerta.
+   */
+  confirm_stock_write_off?: boolean;
+  /**
+   * Identificador del lote cuando el archivado viene de la ruta masiva. Sólo
+   * viaja a la fila de auditoría, para poder reconstruir qué se destruyó bajo
+   * una misma confirmación.
+   */
+  batch_id?: string;
+}
+
+
 type OnlinePurchaseStatusReason =
   | 'ready'
   | 'ecommerce_not_configured'
@@ -117,6 +208,15 @@ export class ProductsService {
     private readonly promotionEngine: PromotionEngineService,
     private readonly settingsService: SettingsService,
     private readonly autoEntryService: AutoEntryService,
+    // D.4 — el castigo de inventario del archivado pasa SIEMPRE por el
+    // servicio de ajustes: nunca por SQL, nunca escribiendo `stock_levels` a
+    // mano. Así hereda movimiento, snapshot de valoración, espejo
+    // denormalizado y evento contable sin reimplementar ninguno.
+    private readonly inventoryAdjustments: InventoryAdjustmentsService,
+    // D.4 — SOLO LECTURA, y sólo para una cosa: contar las existencias del
+    // producto que quedan FUERA del alcance de la tienda. Ver
+    // `buildArchiveWriteOffPlan`.
+    private readonly globalPrisma: GlobalPrismaService,
   ) {}
 
   /**
@@ -2241,8 +2341,14 @@ export class ProductsService {
           },
         });
       if (hasActiveReservations) {
+        // D.7 — un mismo rechazo, un solo código y un solo estado. Este bloqueo
+        // decía `INV_STOCK_001` (400, «Stock insuficiente»), que describe otra
+        // cosa: aquí SÍ hay stock, lo que pasa es que está comprometido. El
+        // registro de errores y `product-variant.service.ts` ya usaban
+        // `PROD_HAS_RESERVATIONS_001` (409) para el mismo hecho, y el frontend
+        // no puede ramificar sobre un código que cambia según la puerta.
         throw new VendixHttpException(
-          ErrorCodes.INV_STOCK_001,
+          ErrorCodes.PROD_HAS_RESERVATIONS_001,
           'Cannot modify product with active stock reservations. Release reservations first.',
         );
       }
@@ -3188,20 +3294,380 @@ export class ProductsService {
     });
   }
 
-  // Eliminación lógica - archivar producto
-  async remove(id: number) {
-    try {
-      // Verificar que el producto existe
-      await this.findOne(id);
+  // ===========================================================================
+  // Archivado (CP-PURCHASE-TRANSPARENCY D.4 / D.8)
+  // ===========================================================================
 
-      // Eliminación lógica: cambiar estado a archived
-      return await this.prisma.products.update({
-        where: { id },
-        data: {
-          state: 'archived',
-          updated_at: new Date(),
+  /**
+   * Fila mínima del producto para decidir un archivado. `findOne()` firma URLs
+   * de S3 y carga media docena de relaciones: para esto sobra, y el archivado
+   * masivo lo llamaba una vez por producto.
+   *
+   * MISMO predicado que `findOne()` (`state != archived` + alcance de tienda),
+   * así que un id inexistente y uno ya archivado siguen siendo el mismo
+   * `PROD_FIND_001` de siempre.
+   */
+  private async loadProductForArchive(id: number) {
+    const context = RequestContextService.getContext();
+
+    const product = await this.prisma.products.findFirst({
+      where: {
+        id,
+        state: { not: ProductState.ARCHIVED },
+        ...(!context?.is_super_admin && { store_id: context?.store_id }),
+      },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        state: true,
+        store_id: true,
+        cost_price: true,
+        stock_quantity: true,
+        track_inventory: true,
+      },
+    });
+
+    if (!product) {
+      throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
+    }
+
+    return product;
+  }
+
+  /**
+   * Reservas activas del producto, variantes INCLUIDAS.
+   *
+   * Superconjunto deliberado del predicado de `update()` (que sí filtra
+   * `product_variant_id: null`): archivar retira el producto ENTERO del
+   * catálogo, así que una reserva sobre una variante quedaría apuntando a un
+   * producto archivado. Es el mismo criterio que ya usa el preview masivo.
+   *
+   * D.7 — el rechazo es `PROD_HAS_RESERVATIONS_001` (409) en las tres puertas.
+   */
+  private async assertNoActiveReservationsForArchive(
+    productId: number,
+  ): Promise<void> {
+    const reservation = await this.prisma.stock_reservations.findFirst({
+      where: { product_id: productId, status: 'active' },
+      select: { id: true },
+    });
+
+    if (reservation) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_HAS_RESERVATIONS_001,
+        'El producto tiene reservas de stock activas. Libera las reservas antes de archivarlo.',
+      );
+    }
+  }
+
+  /**
+   * Calcula, SIN ESCRIBIR NADA, qué va a destruir el archivado.
+   *
+   * Dos lecturas, y las dos importan:
+   *
+   * 1. `this.prisma.stock_levels` — cliente CON alcance de tienda. Define el
+   *    universo que el castigo PUEDE tocar, porque es exactamente el mismo
+   *    cliente con el que la transacción va a escribir: `stock_levels` está
+   *    scopeado por `inventory_locations.store_id`
+   *    (`store-prisma.service.ts:419`).
+   * 2. `this.globalPrisma.stock_levels` — cliente SIN alcance, con el filtro de
+   *    organización escrito a mano (patrón DB-22). Sirve para UNA cosa: saber
+   *    si quedan existencias del producto FUERA de ese universo. Hoy eso
+   *    significa la bodega central de la organización
+   *    (`inventory_locations.store_id IS NULL`), que en desarrollo tiene 40
+   *    filas y 1.386 unidades. No se destruyen: se reportan y bloquean.
+   *
+   * El costo unitario sale de la CADENA CANÓNICA, la misma que
+   * `CostingService.consumeCostLayers` usa bajo promedio ponderado, para que la
+   * cifra que se le enseña al operador sea la que el ajuste va a costear.
+   */
+  async buildArchiveWriteOffPlan(product: {
+    id: number;
+    store_id: number | null;
+    cost_price: any;
+  }): Promise<ArchiveWriteOffPlan> {
+    const plans = await this.buildArchiveWriteOffPlans([product]);
+    return plans.get(product.id) ?? this.emptyArchiveWriteOffPlan(product.id);
+  }
+
+  /**
+   * La misma cuenta para N productos, en DOS consultas en total en vez de dos
+   * por producto. Lo usa el preview del archivado masivo, que puede llegar con
+   * 100 identificadores.
+   */
+  async buildArchiveWriteOffPlans(
+    products: Array<{ id: number; store_id: number | null; cost_price: any }>,
+  ): Promise<Map<number, ArchiveWriteOffPlan>> {
+    const plans = new Map<number, ArchiveWriteOffPlan>();
+    if (products.length === 0) return plans;
+
+    const ids = products.map((product) => product.id);
+    const organizationId = RequestContextService.getOrganizationId();
+
+    const inScopeRows = await this.prisma.stock_levels.findMany({
+      where: { product_id: { in: ids }, quantity_on_hand: { gt: 0 } },
+      select: {
+        product_id: true,
+        location_id: true,
+        product_variant_id: true,
+        quantity_on_hand: true,
+        cost_per_unit: true,
+        inventory_locations: {
+          select: { id: true, name: true, store_id: true },
         },
+        product_variants: { select: { sku: true, cost_price: true } },
+      },
+    });
+
+    const allOrgRows = organizationId
+      ? await this.globalPrisma.stock_levels.findMany({
+          where: {
+            product_id: { in: ids },
+            quantity_on_hand: { gt: 0 },
+            // El aislamiento entre organizaciones lo da ESTE filtro, no el
+            // cliente: `globalPrisma` no scopea nada.
+            inventory_locations: { organization_id: organizationId },
+          },
+          select: {
+            product_id: true,
+            location_id: true,
+            quantity_on_hand: true,
+            inventory_locations: {
+              select: { id: true, name: true, store_id: true },
+            },
+          },
+        })
+      : [];
+
+    for (const product of products) {
+      const productCost = Number(product.cost_price) || 0;
+
+      const lines: ArchiveWriteOffLine[] = inScopeRows
+        .filter((row) => row.product_id === product.id)
+        .map((row) => {
+          // Cadena canónica: `||` y no `??` A PROPÓSITO, para que un 0 espurio
+          // caiga al siguiente eslabón en vez de fijar el costo en cero.
+          const unitCost =
+            Number(row.cost_per_unit) ||
+            Number(row.product_variants?.cost_price) ||
+            productCost ||
+            0;
+          const quantity = Number(row.quantity_on_hand) || 0;
+          return {
+            location_id: row.location_id,
+            location_name:
+              row.inventory_locations?.name ?? `#${row.location_id}`,
+            product_variant_id: row.product_variant_id ?? null,
+            variant_sku: row.product_variants?.sku ?? null,
+            quantity_on_hand: quantity,
+            unit_cost: unitCost,
+            value: quantity * unitCost,
+            has_known_cost: unitCost > 0,
+          };
+        });
+
+      const inScopeLocationIds = new Set(lines.map((line) => line.location_id));
+      const outOfScopeByLocation = new Map<number, ArchiveOutOfScopeStock>();
+
+      for (const row of allOrgRows) {
+        if (row.product_id !== product.id) continue;
+        if (inScopeLocationIds.has(row.location_id)) continue;
+        const quantity = Number(row.quantity_on_hand) || 0;
+        const existing = outOfScopeByLocation.get(row.location_id);
+        if (existing) {
+          existing.quantity_on_hand += quantity;
+          continue;
+        }
+        outOfScopeByLocation.set(row.location_id, {
+          location_id: row.location_id,
+          location_name: row.inventory_locations?.name ?? `#${row.location_id}`,
+          store_id: row.inventory_locations?.store_id ?? null,
+          quantity_on_hand: quantity,
+        });
+      }
+
+      const outOfScope = [...outOfScopeByLocation.values()];
+      const totalUnits = lines.reduce(
+        (sum, line) => sum + line.quantity_on_hand,
+        0,
+      );
+
+      plans.set(product.id, {
+        product_id: product.id,
+        requires_confirmation: totalUnits > 0,
+        total_units: totalUnits,
+        total_value: lines.reduce((sum, line) => sum + line.value, 0),
+        zero_cost_units: lines.reduce(
+          (sum, line) => sum + (line.has_known_cost ? 0 : line.quantity_on_hand),
+          0,
+        ),
+        lines,
+        out_of_scope_units: outOfScope.reduce(
+          (sum, line) => sum + line.quantity_on_hand,
+          0,
+        ),
+        out_of_scope: outOfScope,
       });
+    }
+
+    return plans;
+  }
+
+  /**
+   * Planes de castigo por identificador, cargando los productos por su cuenta.
+   * Entrada del preview del archivado masivo: los ids inexistentes o ya
+   * archivados simplemente no aparecen en el mapa.
+   */
+  async getArchiveWriteOffPlansByIds(
+    ids: number[],
+  ): Promise<Map<number, ArchiveWriteOffPlan>> {
+    if (ids.length === 0) return new Map();
+
+    const products = await this.prisma.products.findMany({
+      where: { id: { in: ids }, state: { not: ProductState.ARCHIVED } },
+      select: { id: true, store_id: true, cost_price: true },
+    });
+
+    return this.buildArchiveWriteOffPlans(products);
+  }
+
+  private emptyArchiveWriteOffPlan(productId: number): ArchiveWriteOffPlan {
+    return {
+      product_id: productId,
+      requires_confirmation: false,
+      total_units: 0,
+      total_value: 0,
+      zero_cost_units: 0,
+      lines: [],
+      out_of_scope_units: 0,
+      out_of_scope: [],
+    };
+  }
+
+  /**
+   * Vista previa pública del castigo (D.9). Estrictamente de solo lectura.
+   */
+  async previewArchiveWriteOff(id: number): Promise<ArchiveWriteOffPlan> {
+    const product = await this.loadProductForArchive(id);
+    return this.buildArchiveWriteOffPlan(product);
+  }
+
+  /**
+   * Eliminación lógica: archiva el producto.
+   *
+   * QUÉ CAMBIÓ, Y POR QUÉ
+   * ---------------------
+   * Antes esto escribía `state='archived'` y nada más: ni tocaba el stock, ni
+   * emitía evento, ni dejaba auditoría. Las existencias quedaban colgando
+   * invisibles y seguían entrando en el promedio ponderado, así que volver a
+   * comprar un producto «borrado» lo costeaba contra inventario fantasma (el
+   * defecto que abrió este plan; ver D.2 en `costing.service.ts`).
+   *
+   * Ahora, con existencias:
+   *   1. las reservas activas BLOQUEAN (`PROD_HAS_RESERVATIONS_001`, 409):
+   *      no se destruye existencia comprometida con un pedido;
+   *   2. las existencias fuera del alcance de la tienda BLOQUEAN
+   *      (`PROD_VARIANT_HAS_STOCK_001`, 409): no se destruye inventario de la
+   *      organización desde la pantalla de una tienda;
+   *   3. sin confirmación explícita se RECHAZA (`PROD_VARIANT_HAS_STOCK_001`,
+   *      409) devolviendo el plan completo en `details`, para que la interfaz
+   *      pueda enseñar qué se va a destruir y ofrecer el botón;
+   *   4. con confirmación, TODO ocurre en UNA transacción: un ajuste de tipo
+   *      `loss` con `quantity_after = 0` por cada tripleta con existencias, el
+   *      cambio de estado DESPUÉS de las bajas, y la fila de auditoría. Si la
+   *      auditoría falla, la transacción entera revierte: sin rastro, el
+   *      castigo no debe ocurrir.
+   *
+   * El evento contable se emite DESPUÉS del commit, nunca dentro: anunciar un
+   * hecho que todavía puede revertirse es peor que no anunciarlo.
+   */
+  async remove(id: number, options: RemoveProductOptions = {}) {
+    try {
+      const product = await this.loadProductForArchive(id);
+
+      await this.assertNoActiveReservationsForArchive(id);
+
+      const plan = await this.buildArchiveWriteOffPlan(product);
+
+      if (plan.out_of_scope_units > 0) {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_VARIANT_HAS_STOCK_001,
+          `El producto tiene ${plan.out_of_scope_units} unidades en ubicaciones fuera de esta tienda ` +
+            `(${plan.out_of_scope.map((l) => l.location_name).join(', ')}). ` +
+            'Transfiérelas o ajústalas desde Inventario antes de archivarlo.',
+          { archive_write_off: plan } as any,
+        );
+      }
+
+      if (plan.requires_confirmation && options.confirm_stock_write_off !== true) {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_VARIANT_HAS_STOCK_001,
+          `Archivar este producto dará de baja ${plan.total_units} unidades por un valor de ${plan.total_value}. ` +
+            'Confirma la operación para continuar.',
+          { archive_write_off: plan } as any,
+        );
+      }
+
+      const actorUserId = RequestContextService.getUserId() ?? null;
+      const organizationId = RequestContextService.getOrganizationId() ?? null;
+
+      const { archived, adjustments } = await this.prisma.$transaction(
+        async (tx) => {
+          const results: AdjustmentTransactionResult[] = [];
+
+          // Las bajas van ANTES del cambio de estado (DB-16): el costeo de la
+          // baja lee el producto vivo, y ningún producto queda archivado con
+          // existencias ni por un instante dentro de la transacción.
+          for (const line of plan.lines) {
+            const result =
+              await this.inventoryAdjustments.createAdjustmentInTransaction(
+                tx,
+                {
+                  product_id: id,
+                  product_variant_id: line.product_variant_id ?? undefined,
+                  location_id: line.location_id,
+                  type: 'loss',
+                  quantity_after: 0,
+                  reason_code: 'product_archived',
+                  description: `Baja de inventario por archivado del producto #${id} (${product.name})`,
+                },
+                { approvedByUserId: actorUserId ?? undefined },
+              );
+            results.push(result);
+          }
+
+          const updated = await tx.products.update({
+            where: { id },
+            data: { state: 'archived', updated_at: new Date() },
+          });
+
+          await this.writeArchiveAuditRow(tx, {
+            product,
+            plan,
+            adjustments: results,
+            userId: actorUserId,
+            organizationId,
+            options,
+          });
+
+          return { archived: updated, adjustments: results };
+        },
+        // El castigo puede recorrer varias ubicaciones y variantes, y cada
+        // ajuste arrastra movimiento, espejo denormalizado y snapshot de
+        // valoración. Los 5 s por defecto de Prisma no alcanzan.
+        { timeout: 120_000, maxWait: 15_000 },
+      );
+
+      for (const result of adjustments) {
+        this.inventoryAdjustments.emitInventoryAdjusted(
+          result,
+          organizationId ?? 0,
+          actorUserId,
+        );
+      }
+
+      return archived;
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2025') {
@@ -3210,6 +3676,122 @@ export class ProductsService {
       }
       throw error;
     }
+  }
+
+  /**
+   * D.8 — la fila de auditoría del archivado, escrita DENTRO de la transacción.
+   *
+   * POR QUÉ NO `AuditService.log()`
+   * -------------------------------
+   * Porque hace justo lo contrario de lo que hace falta aquí: escribe por
+   * `GlobalPrismaService` (otra conexión, así que no viaja en esta transacción)
+   * y envuelve todo en un `try/catch` que traga el error con un `console.error`.
+   * Con eso, un fallo de bitácora dejaría el castigo consumado y mudo.
+   *
+   * POR QUÉ NO EL INTERCEPTOR GLOBAL
+   * --------------------------------
+   * Porque no sirve para esto y está medido: descarta el query string donde
+   * viajaría la confirmación, escribe `oldValues:{}` sin `metadata` en los
+   * borrados, y en el archivado masivo no escribe NADA (17 productos
+   * archivados en un lote → cero filas en `audit_logs`).
+   *
+   * AQUÍ NO HAY `try/catch`, Y ES DELIBERADO: si esta escritura falla, la
+   * transacción entera revierte y el archivado no ocurre.
+   */
+  private async writeArchiveAuditRow(
+    tx: any,
+    payload: {
+      product: {
+        id: number;
+        name: string;
+        sku: string | null;
+        state: string;
+        store_id: number | null;
+        stock_quantity: number | null;
+      };
+      plan: ArchiveWriteOffPlan;
+      adjustments: AdjustmentTransactionResult[];
+      userId: number | null;
+      organizationId: number | null;
+      options: RemoveProductOptions;
+    },
+  ): Promise<void> {
+    const { product, plan, adjustments, userId, organizationId, options } =
+      payload;
+
+    if (product.store_id == null) {
+      // `store_id` no nulo es parte del contrato de la fila: sin él la
+      // auditoría no se puede leer por tienda.
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VALIDATE_001,
+        `El producto ${product.id} no tiene tienda asociada; no se puede auditar su archivado.`,
+      );
+    }
+
+    const postedCostAmount = adjustments.reduce(
+      (sum, entry) => sum + Math.abs(Number(entry.cost_amount) || 0),
+      0,
+    );
+
+    await tx.audit_logs.create({
+      data: {
+        user_id: userId,
+        store_id: product.store_id,
+        organization_id: organizationId,
+        action: 'PRODUCT_ARCHIVE',
+        resource: 'products',
+        resource_id: product.id,
+        request_id: RequestContextService.getRequestId() ?? null,
+        old_values: {
+          state: product.state,
+          stock_quantity: product.stock_quantity,
+        },
+        new_values: { state: 'archived' },
+        metadata: {
+          source: options.batch_id ? 'bulk' : 'individual',
+          batch_id: options.batch_id ?? null,
+          // A QUÉ CIFRA DIJO QUE SÍ EL OPERADOR. Es el punto de la fila: la
+          // cifra que se le enseñó en pantalla no puede desaparecer al
+          // confirmarla.
+          confirmation: {
+            confirmed: options.confirm_stock_write_off === true,
+            required: plan.requires_confirmation,
+            approved_units: plan.total_units,
+            approved_value: plan.total_value,
+          },
+          write_off: {
+            total_units: plan.total_units,
+            total_value: plan.total_value,
+            // Unidades destruidas sin costo conocido. NO producen asiento:
+            // `InventoryAdjustmentsService.emitInventoryAdjusted` sólo emite
+            // con `cost_amount > 0`, y un asiento por valor cero no es un
+            // asiento. Queda escrito aquí para que la ausencia del asiento sea
+            // un hecho documentado y no un silencio.
+            zero_cost_units: plan.zero_cost_units,
+            locations: plan.lines.length,
+            lines: plan.lines,
+          },
+          adjustments: {
+            ids: adjustments.map((entry) => entry.adjustment?.id),
+            // Lo que los ajustes costearon DE VERDAD. Bajo promedio ponderado
+            // coincide con `write_off.total_value`; bajo FIFO sale de las capas
+            // y puede diferir. Guardar los dos permite ver la divergencia sin
+            // recalcular nada.
+            posted_cost_amount: postedCostAmount,
+            /**
+             * Los identificadores de asiento NO se pueden guardar aquí: el
+             * asiento lo escribe el listener contable al recibir
+             * `inventory.adjusted`, que se emite DESPUÉS del commit. Lo que sí
+             * queda es cuántas líneas deberían haberlo producido, para poder
+             * cruzarlo contra `journal_entries` por `adjustment_id`.
+             */
+            accounting_entries_expected: adjustments.filter(
+              (entry) => Math.abs(Number(entry.cost_amount) || 0) > 0,
+            ).length,
+          },
+        },
+      },
+    });
   }
 
   // Obtener productos por tienda (solo activos)

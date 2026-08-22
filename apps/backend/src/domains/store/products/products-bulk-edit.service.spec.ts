@@ -5,6 +5,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { ErrorCodes, VendixHttpException } from 'src/common/errors';
 import { BulkArchiveProductsDto, BulkEditProductsDto } from './dto';
 import { ProductState, ProductType } from './dto/product-enums';
+import { RequestContextService } from '@common/context/request-context.service';
 
 /**
  * Métodos de escritura vigilados en el mock de Prisma. `preview()` es
@@ -34,6 +35,10 @@ const MOCKED_MODELS = [
   'order_items',
   'recipe_items',
   'promotion_products',
+  // D.8 — el archivado masivo escribe una fila resumen en `audit_logs`. Va en
+  // este array a propósito: así las aserciones de «el preview no escribe nada»
+  // también cubren la auditoría.
+  'audit_logs',
 ] as const;
 
 type MockModel = Record<string, jest.Mock>;
@@ -115,18 +120,51 @@ function makeDto(
   return { ids, changes } as BulkEditProductsDto;
 }
 
-function makeArchiveDto(ids: number[]): BulkArchiveProductsDto {
-  return { ids } as BulkArchiveProductsDto;
+function makeArchiveDto(
+  ids: number[],
+  overrides: Partial<BulkArchiveProductsDto> = {},
+): BulkArchiveProductsDto {
+  return { ids, ...overrides } as BulkArchiveProductsDto;
+}
+
+/** Plan de castigo mínimo para las pruebas de D.6. */
+function makeWriteOffPlan(
+  productId: number,
+  units: number,
+  value: number,
+  zeroCostUnits = 0,
+) {
+  return {
+    product_id: productId,
+    requires_confirmation: units > 0,
+    total_units: units,
+    total_value: value,
+    zero_cost_units: zeroCostUnits,
+    lines: [],
+    out_of_scope_units: 0,
+    out_of_scope: [],
+  };
 }
 
 describe('ProductsBulkEditService', () => {
   let service: ProductsBulkEditService;
   let prisma: MockPrisma;
-  let productsService: { update: jest.Mock; remove: jest.Mock };
+  let productsService: {
+    update: jest.Mock;
+    remove: jest.Mock;
+    getArchiveWriteOffPlansByIds: jest.Mock;
+  };
 
   beforeEach(async () => {
     prisma = buildMockPrisma();
-    productsService = { update: jest.fn(), remove: jest.fn() };
+    productsService = {
+      update: jest.fn(),
+      remove: jest.fn(),
+      // D.6 — el preview y el archivado masivo consultan a `ProductsService`
+      // qué existencias va a destruir cada fila. Por defecto: nada que
+      // castigar, para que los casos previos a D.6 sigan describiendo lo mismo.
+      getArchiveWriteOffPlansByIds: jest.fn().mockResolvedValue(new Map()),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -137,6 +175,18 @@ describe('ProductsBulkEditService', () => {
     }).compile();
 
     service = module.get<ProductsBulkEditService>(ProductsBulkEditService);
+
+    // D.8 — la fila resumen del archivado masivo exige `store_id` no nulo, y
+    // lo saca del contexto de petición.
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+      organization_id: 6,
+      store_id: 10,
+      user_id: 1,
+    } as any);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   it('should be defined', () => {
@@ -144,7 +194,7 @@ describe('ProductsBulkEditService', () => {
   });
 
   describe('preview()', () => {
-    it('marca error INV_STOCK_001 cuando el producto tiene reservas de stock activas', async () => {
+    it('marca error PROD_HAS_RESERVATIONS_001 cuando el producto tiene reservas de stock activas', async () => {
       prisma.products.findMany.mockResolvedValue([makeProduct({ id: 1 })]);
       prisma.stock_reservations.findMany.mockResolvedValue([{ product_id: 1 }]);
 
@@ -156,7 +206,7 @@ describe('ProductsBulkEditService', () => {
       expect(result.errors).toBe(1);
       expect(result.ok).toBe(0);
       expect(result.items[0].status).toBe('error');
-      expect(result.items[0].code).toBe('INV_STOCK_001');
+      expect(result.items[0].code).toBe('PROD_HAS_RESERVATIONS_001');
       expect(result.items[0].message).toContain('active stock reservations');
       // La consulta replica el bloqueo del servicio individual: reservas del
       // propio producto (product_variant_id null) en estado activo.
@@ -421,7 +471,7 @@ describe('ProductsBulkEditService', () => {
         .mockResolvedValueOnce({ id: 1, name: 'Uno', sku: 'SKU-1' })
         .mockRejectedValueOnce(
           new VendixHttpException(
-            ErrorCodes.INV_STOCK_001,
+            ErrorCodes.PROD_HAS_RESERVATIONS_001,
             'Cannot modify product with active stock reservations. Release reservations first.',
           ),
         )
@@ -445,7 +495,7 @@ describe('ProductsBulkEditService', () => {
         id: 2,
         name: 'Dos',
         status: 'error',
-        code: 'INV_STOCK_001',
+        code: 'PROD_HAS_RESERVATIONS_001',
       });
       expect(result.results[1].message).toContain('active stock reservations');
       expect(result.results[2]).toMatchObject({ id: 3, status: 'ok' });
@@ -512,7 +562,7 @@ describe('ProductsBulkEditService', () => {
   });
 
   describe('previewArchive()', () => {
-    it('marca error INV_STOCK_001 cuando el producto tiene reservas de stock activas', async () => {
+    it('marca error PROD_HAS_RESERVATIONS_001 cuando el producto tiene reservas de stock activas', async () => {
       prisma.products.findMany.mockResolvedValue([makeProduct({ id: 1 })]);
       prisma.stock_reservations.findMany.mockResolvedValue([{ product_id: 1 }]);
 
@@ -523,7 +573,7 @@ describe('ProductsBulkEditService', () => {
       expect(result.ok).toBe(0);
       expect(result.items[0].status).toBe('error');
       // Mismo código que el bloqueo del servicio individual en `update()`.
-      expect(result.items[0].code).toBe('INV_STOCK_001');
+      expect(result.items[0].code).toBe('PROD_HAS_RESERVATIONS_001');
       expect(result.items[0].message).toContain('reservas de stock activas');
       // Desviación deliberada frente a `update()`: NO se filtra
       // `product_variant_id: null`. Archivar retira también las variantes, así
@@ -621,7 +671,15 @@ describe('ProductsBulkEditService', () => {
         name: 'Producto de prueba',
         sku: 'SKU-1',
         status: 'ok',
+        // D.6 / FB-10 — el desglose del castigo viaja SIEMPRE, también en las
+        // filas sin existencias, para que la interfaz no ramifique por forma.
+        on_hand_units: 0,
+        value_to_write_off: 0,
+        zero_cost_units: 0,
+        out_of_scope_units: 0,
       });
+      expect(result.requires_confirmation).toBe(false);
+      expect(result.total_units_to_write_off).toBe(0);
     });
 
     it('acumula los dos avisos cuando el producto es insumo y está en promoción', async () => {
@@ -646,7 +704,7 @@ describe('ProductsBulkEditService', () => {
       const result = await service.previewArchive(makeArchiveDto([1]));
 
       expect(result.items[0].status).toBe('error');
-      expect(result.items[0].code).toBe('INV_STOCK_001');
+      expect(result.items[0].code).toBe('PROD_HAS_RESERVATIONS_001');
     });
 
     it('reporta error PROD_FIND_001 para ids inexistentes o ya archivados', async () => {
@@ -753,14 +811,22 @@ describe('ProductsBulkEditService', () => {
       await service.archive(makeArchiveDto([1]));
 
       // El soft-delete es la primitiva de `remove()`; el bulk no reescribe
-      // `state:'archived'` por su cuenta.
-      expect(productsService.remove).toHaveBeenCalledWith(1);
+      // `state:'archived'` por su cuenta. D.6 añade el segundo argumento: la
+      // confirmación del castigo y el identificador del lote.
+      expect(productsService.remove).toHaveBeenCalledWith(1, {
+        confirm_stock_write_off: false,
+        batch_id: expect.stringMatching(/^bulk-archive-/),
+      });
       expect(productsService.remove).toHaveBeenCalledTimes(1);
       for (const model of MOCKED_MODELS) {
         for (const write of WRITE_METHODS) {
+          // `audit_logs.create` es la ÚNICA escritura propia del lote (D.8):
+          // la fila resumen que ata los N archivados a una confirmación.
+          if (model === 'audit_logs' && write === 'create') continue;
           expect(prisma[model][write]).not.toHaveBeenCalled();
         }
       }
+      expect(prisma.audit_logs.create).toHaveBeenCalledTimes(1);
       expect(prisma.$transaction).not.toHaveBeenCalled();
       expect(productsService.update).not.toHaveBeenCalled();
     });
@@ -783,10 +849,13 @@ describe('ProductsBulkEditService', () => {
         id: 2,
         name: 'Dos',
         status: 'error',
-        code: 'INV_STOCK_001',
+        code: 'PROD_HAS_RESERVATIONS_001',
       });
       expect(productsService.remove).toHaveBeenCalledTimes(1);
-      expect(productsService.remove).toHaveBeenCalledWith(1);
+      expect(productsService.remove).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ confirm_stock_write_off: false }),
+      );
     });
 
     it('no bloquea por avisos: insumo de receta y promoción vigente sí se archivan', async () => {
@@ -803,7 +872,10 @@ describe('ProductsBulkEditService', () => {
 
       expect(result.successful).toBe(1);
       expect(result.failed).toBe(0);
-      expect(productsService.remove).toHaveBeenCalledWith(1);
+      expect(productsService.remove).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ confirm_stock_write_off: false }),
+      );
     });
 
     it('registra un fallo sin error_code con el mensaje crudo', async () => {
@@ -822,6 +894,180 @@ describe('ProductsBulkEditService', () => {
         message: 'boom',
       });
       expect(result.results[0].code).toBeUndefined();
+    });
+
+    // -------------------------------------------------------------------------
+    // CP-PURCHASE-TRANSPARENCY D.6 — la compuerta de D.4 no se burla mandando
+    // un lote.
+    // -------------------------------------------------------------------------
+
+    it('D.6: sin confirmación el lote NO castiga — propaga false a remove()', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        makeProduct({ id: 1, name: 'Uno' }),
+      ]);
+      productsService.getArchiveWriteOffPlansByIds.mockResolvedValue(
+        new Map([[1, makeWriteOffPlan(1, 14, 22_680_000)]]),
+      );
+      productsService.remove.mockRejectedValue(
+        new VendixHttpException(
+          ErrorCodes.PROD_VARIANT_HAS_STOCK_001,
+          'Archivar este producto dará de baja 14 unidades…',
+        ),
+      );
+
+      const result = await service.archive(makeArchiveDto([1]));
+
+      expect(productsService.remove).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ confirm_stock_write_off: false }),
+      );
+      expect(result.failed).toBe(1);
+      expect(result.results[0].code).toBe('PROD_VARIANT_HAS_STOCK_001');
+      expect(result.written_off_units).toBe(0);
+    });
+
+    it('D.6: un lote de UN solo identificador no es un atajo', async () => {
+      // Exactamente el mismo comportamiento que la ruta individual: la
+      // confirmación no se infiere del tamaño del lote.
+      prisma.products.findMany.mockResolvedValue([
+        makeProduct({ id: 1, name: 'Uno' }),
+      ]);
+      productsService.getArchiveWriteOffPlansByIds.mockResolvedValue(
+        new Map([[1, makeWriteOffPlan(1, 5, 500)]]),
+      );
+      productsService.remove.mockRejectedValue(
+        new VendixHttpException(ErrorCodes.PROD_VARIANT_HAS_STOCK_001),
+      );
+
+      await service.archive(makeArchiveDto([1]));
+
+      expect(productsService.remove).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ confirm_stock_write_off: false }),
+      );
+    });
+
+    it('D.6: con confirmación castiga y la respuesta detalla unidades y valor por producto', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        makeProduct({ id: 1, name: 'Uno' }),
+        makeProduct({ id: 2, name: 'Dos' }),
+      ]);
+      productsService.getArchiveWriteOffPlansByIds.mockResolvedValue(
+        new Map([
+          [1, makeWriteOffPlan(1, 14, 22_680_000)],
+          [2, makeWriteOffPlan(2, 20_000, 60_000, 20_000)],
+        ]),
+      );
+      productsService.remove
+        .mockResolvedValueOnce({ id: 1, name: 'Uno' })
+        .mockResolvedValueOnce({ id: 2, name: 'Dos' });
+
+      const result = await service.archive(
+        makeArchiveDto([1, 2], { confirm_stock_write_off: true }),
+      );
+
+      expect(productsService.remove).toHaveBeenNthCalledWith(
+        1,
+        1,
+        expect.objectContaining({ confirm_stock_write_off: true }),
+      );
+      expect(result.successful).toBe(2);
+      expect(result.results[0]).toMatchObject({
+        id: 1,
+        written_off_units: 14,
+        written_off_value: 22_680_000,
+      });
+      expect(result.results[1]).toMatchObject({
+        id: 2,
+        written_off_units: 20_000,
+        written_off_value: 60_000,
+        // Unidades sin costo conocido: se destruyen, pero no dejan asiento.
+        zero_cost_units: 20_000,
+      });
+      expect(result.written_off_units).toBe(20_014);
+      expect(result.written_off_value).toBe(22_740_000);
+    });
+
+    it('D.6/D.8: la fila resumen del lote lleva el desglose y el mismo batch_id que las filas individuales', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        makeProduct({ id: 1, name: 'Uno' }),
+      ]);
+      productsService.getArchiveWriteOffPlansByIds.mockResolvedValue(
+        new Map([[1, makeWriteOffPlan(1, 14, 22_680_000)]]),
+      );
+      productsService.remove.mockResolvedValue({ id: 1, name: 'Uno' });
+
+      await service.archive(
+        makeArchiveDto([1], { confirm_stock_write_off: true }),
+      );
+
+      expect(prisma.audit_logs.create).toHaveBeenCalledTimes(1);
+      const written = prisma.audit_logs.create.mock.calls[0][0].data;
+      expect(written.action).toBe('PRODUCT_ARCHIVE_BULK');
+      expect(written.resource).toBe('products');
+      // `store_id` no nulo: el contrato de la fila.
+      expect(written.store_id).toBe(10);
+      expect(written.metadata.confirmation).toEqual({ confirmed: true });
+      expect(written.metadata.written_off_units).toBe(14);
+      expect(written.metadata.written_off_value).toBe(22_680_000);
+      expect(written.metadata.results).toHaveLength(1);
+      // El mismo lote que viajó a cada `remove()`.
+      const propagatedBatchId =
+        productsService.remove.mock.calls[0][1].batch_id;
+      expect(written.metadata.batch_id).toBe(propagatedBatchId);
+    });
+
+    it('D.6: el preview enumera unidades y valor a castigar, y pide confirmación', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        makeProduct({ id: 1, name: 'Uno' }),
+      ]);
+      productsService.getArchiveWriteOffPlansByIds.mockResolvedValue(
+        new Map([[1, makeWriteOffPlan(1, 14, 22_680_000)]]),
+      );
+
+      const result = await service.previewArchive(makeArchiveDto([1]));
+
+      expect(result.requires_confirmation).toBe(true);
+      expect(result.total_units_to_write_off).toBe(14);
+      expect(result.total_value_to_write_off).toBe(22_680_000);
+      expect(result.items[0]).toMatchObject({
+        id: 1,
+        status: 'warning',
+        on_hand_units: 14,
+        value_to_write_off: 22_680_000,
+      });
+      expect(result.items[0].message).toContain('14 unidades');
+    });
+
+    it('D.6: existencias fuera del alcance de la tienda BLOQUEAN el preview', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        makeProduct({ id: 1, name: 'Uno' }),
+      ]);
+      productsService.getArchiveWriteOffPlansByIds.mockResolvedValue(
+        new Map([
+          [
+            1,
+            {
+              ...makeWriteOffPlan(1, 0, 0),
+              out_of_scope_units: 1_386,
+              out_of_scope: [
+                {
+                  location_id: 3,
+                  location_name: 'Bodega central',
+                  store_id: null,
+                  quantity_on_hand: 1_386,
+                },
+              ],
+            },
+          ],
+        ]),
+      );
+
+      const result = await service.previewArchive(makeArchiveDto([1]));
+
+      expect(result.items[0].status).toBe('error');
+      expect(result.items[0].code).toBe('PROD_VARIANT_HAS_STOCK_001');
+      expect(result.items[0].out_of_scope_units).toBe(1_386);
     });
 
     it('deduplica ids repetidos para no archivar dos veces el mismo producto', async () => {

@@ -168,8 +168,10 @@ export class ProductVariantService {
         },
       });
       if (hasActiveReservations) {
+        // D.7 — mismo rechazo, mismo código: reservas activas es
+        // `PROD_HAS_RESERVATIONS_001` (409), no `INV_STOCK_001` (400).
         throw new VendixHttpException(
-          ErrorCodes.INV_STOCK_001,
+          ErrorCodes.PROD_HAS_RESERVATIONS_001,
           'Cannot add variant to product with active stock reservations. Release reservations first.',
         );
       }
@@ -376,8 +378,10 @@ export class ProductVariantService {
         },
       });
       if (hasActiveReservations) {
+        // D.7 — mismo rechazo, mismo código: reservas activas es
+        // `PROD_HAS_RESERVATIONS_001` (409), no `INV_STOCK_001` (400).
         throw new VendixHttpException(
-          ErrorCodes.INV_STOCK_001,
+          ErrorCodes.PROD_HAS_RESERVATIONS_001,
           'Cannot modify variant with active stock reservations. Release reservations first.',
         );
       }

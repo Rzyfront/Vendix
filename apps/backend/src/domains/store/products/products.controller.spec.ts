@@ -15,6 +15,7 @@ import {
   StockByLocationDto,
 } from './dto';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 describe('ProductsController', () => {
   let controller: ProductsController;
@@ -318,12 +319,41 @@ describe('ProductsController', () => {
         message: 'Producto eliminado exitosamente',
       });
 
-      const result = await controller.remove(1);
+      await controller.remove(1);
 
-      expect(service.remove).toHaveBeenCalledWith(1);
+      // D.4 — sin `?confirm_stock_write_off=true` la confirmación es `false`:
+      // se declara, nunca se asume.
+      expect(service.remove).toHaveBeenCalledWith(1, {
+        confirm_stock_write_off: false,
+      });
       expect(responseService.deleted).toHaveBeenCalledWith(
         'Producto eliminado exitosamente',
       );
+    });
+
+    it('D.4: propaga la confirmación del castigo cuando llega por query string', async () => {
+      mockProductsService.remove.mockResolvedValue(undefined);
+      mockResponseService.deleted.mockReturnValue({ success: true });
+
+      await controller.remove(1, 'true');
+
+      expect(service.remove).toHaveBeenCalledWith(1, {
+        confirm_stock_write_off: true,
+      });
+    });
+
+    it('D.4/FB-09: un rechazo se PROPAGA — nunca sale como 200 con success:false', async () => {
+      // El `try/catch` que había aquí llamaba a `responseService.error()`, que
+      // RETORNA el sobre en vez de lanzarlo: un archivado rechazado se leía
+      // como éxito y el operador creía que había borrado el producto.
+      const rejection = new VendixHttpException(
+        ErrorCodes.PROD_VARIANT_HAS_STOCK_001,
+        'Archivar este producto dará de baja 14 unidades…',
+      );
+      mockProductsService.remove.mockRejectedValue(rejection);
+
+      await expect(controller.remove(1)).rejects.toThrow(rejection);
+      expect(responseService.error).not.toHaveBeenCalled();
     });
   });
 
