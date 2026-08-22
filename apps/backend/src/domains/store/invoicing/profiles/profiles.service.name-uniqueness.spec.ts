@@ -112,8 +112,12 @@ describe('ProfilesService — unicidad del nombre por tienda', () => {
       invalidate: jest.fn().mockResolvedValue(undefined),
     } as any;
 
+    // Doble de la auditoría (C.7). Acá no se afirma sobre ella; su propio spec
+    // lo hace. Lo que importa es que ninguna operación dependa de su resultado.
+    const audit = { log: jest.fn().mockResolvedValue(undefined) } as any;
+
     return {
-      service: new ProfilesService(prisma, cache),
+      service: new ProfilesService(prisma, cache, audit),
       tx,
       transaction,
       findManyCalls,

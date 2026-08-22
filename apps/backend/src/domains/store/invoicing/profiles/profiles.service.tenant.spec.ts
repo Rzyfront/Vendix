@@ -78,7 +78,10 @@ describe('ProfilesService — ancla de tenant', () => {
       write: jest.fn().mockResolvedValue(undefined),
       invalidate: jest.fn().mockResolvedValue(undefined),
     } as any;
-    const service = new ProfilesService(prisma, cache);
+    // Doble de la auditoría (C.7). Acá no se afirma sobre ella; su propio spec
+    // lo hace. Lo que importa es que ninguna operación dependa de su resultado.
+    const audit = { log: jest.fn().mockResolvedValue(undefined) } as any;
+    const service = new ProfilesService(prisma, cache, audit);
     return { service, tx, scoped, withoutScope, prisma };
   }
 

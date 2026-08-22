@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 
+import { AuditService } from '@common/audit/audit.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { profileNotFound } from './profile-errors';
 import { RequestContextService } from '../../../../common/context/request-context.service';
@@ -27,6 +28,43 @@ interface ProfileScope {
   user_id?: number;
 }
 
+/**
+ * Las siete acciones auditadas. `CREATE`/`UPDATE`/`DELETE` reusan los valores
+ * de `AuditAction`; las otras cuatro son cadenas propias porque el enum
+ * compartido no las tiene y la columna es `VarChar(100)`. Se escriben con el
+ * mismo estilo del enum (MAYÚSCULAS con guion bajo) para que una consulta por
+ * `action` no tenga que saber de qué dominio viene la fila.
+ */
+type ProfileAuditAction =
+  | 'CREATE'
+  | 'UPDATE'
+  | 'DELETE'
+  | 'CLONE'
+  | 'SET_DEFAULT'
+  | 'ACTIVATE'
+  | 'DEACTIVATE';
+
+/**
+ * El valor de `resource`. Es el nombre de la tabla, que es el criterio que
+ * siguen los valores de `AuditResource` (`products`, `orders`, `stock_levels`).
+ */
+const PROFILE_AUDIT_RESOURCE = 'invoice_profiles';
+
+/**
+ * Las columnas del perfil que la auditoría vigila. `config` no está: vive
+ * versionado en `invoice_profile_versions` y no se duplica — ver `writeAudit`.
+ * `updated_at` tampoco: cambia en toda escritura y su diff no informa de nada.
+ */
+const AUDITED_COLUMNS = [
+  'name',
+  'operation_type',
+  'state',
+  'is_default',
+  'current_version',
+  'cloned_from_profile_id',
+  'cloned_from_version',
+] as const;
+
 /** Lo que el listado y el detalle devuelven del perfil. */
 const PROFILE_SELECT = {
   id: true,
@@ -51,6 +89,7 @@ export class ProfilesService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly catalog_cache: ProfileCatalogCacheService,
+    private readonly audit: AuditService,
   ) {}
 
   // ─── Contexto ───────────────────────────────────────────────────────────
@@ -62,6 +101,108 @@ export class ProfilesService {
    * `Error` pelado, que el filtro global degradaría a 500 sobre una petición que
    * simplemente llegó sin tienda seleccionada.
    */
+  /**
+   * AUDITORÍA DE LAS SIETE ACCIONES (requerimiento 24).
+   *
+   * ## Qué se guarda y qué NO
+   *
+   * `old_values` y `new_values` llevan **sólo las columnas del perfil que
+   * cambiaron**, con las mismas claves en las dos: así el par ES el diff, sin
+   * que haya que compararlo al leer ni almacenar lo que quedó igual. Para
+   * `CREATE`, `CLONE` y `DELETE` no hay diff sino nacimiento o muerte, y se
+   * guarda el estado completo del lado que existe.
+   *
+   * **El `config` no se copia acá.** Ya está persistido íntegro e inmutable en
+   * `invoice_profile_versions`: copiarlo a `audit_logs` crearía una segunda
+   * copia de la misma verdad fiscal, con su propia posibilidad de divergir, y
+   * duplicaría kilobytes por edición. El diff configuración-contra-configuración
+   * —el que pide el requerimiento 13 para el historial— se calcula entre dos
+   * filas de `versions`, que es donde vive. Para que el lector sepa QUÉ dos
+   * filas comparar, `metadata` lleva `version_from` y `version_to`.
+   *
+   * ## Por qué es best-effort y no parte de la transacción
+   *
+   * `AuditService.log` atrapa su propio error. Es deliberado y se hereda tal
+   * cual: la auditoría de un cambio de configuración no puede ser la razón por
+   * la que ese cambio se pierda. Se llama DESPUÉS del commit por la misma razón
+   * que la invalidación de caché — auditar algo que la transacción luego
+   * revirtió sería registrar un hecho que no ocurrió.
+   *
+   * ## `storeId` explícito
+   *
+   * `AuditService.log` resuelve `organization_id` del contexto por su cuenta,
+   * pero **no** `store_id`. Una fila sin `store_id` no la encuentra el índice
+   * `(store_id, created_at)` con el que se consulta la auditoría de una tienda:
+   * quedaría escrita y sería invisible.
+   */
+  private async writeAudit(
+    action: ProfileAuditAction,
+    profile_id: number,
+    old_values: Record<string, unknown> | null,
+    new_values: Record<string, unknown> | null,
+    metadata?: Record<string, unknown>,
+  ): Promise<void> {
+    const scope = RequestContextService.getContext();
+    try {
+      await this.audit.log({
+        userId: scope?.user_id,
+        storeId: scope?.store_id,
+        organizationId: scope?.organization_id,
+        action,
+        resource: PROFILE_AUDIT_RESOURCE,
+        resourceId: profile_id,
+        oldValues: old_values ?? undefined,
+        newValues: new_values ?? undefined,
+        metadata,
+      });
+    } catch (error) {
+      // `AuditService.log` YA atrapa su propio error, así que este catch parece
+      // redundante. No lo es: esa garantía es prestada. Vive en un servicio
+      // compartido de `common/`, y el día que alguien la quite —para hacer la
+      // auditoría obligatoria en otro dominio, por ejemplo— este módulo
+      // empezaría a devolver 500 sobre operaciones YA COMMITEADAS, que es el
+      // peor error posible: el usuario reintenta algo que sí se guardó.
+      //
+      // La garantía tiene que ser local para ser verificable, y el spec la
+      // verifica acá.
+      this.logger.warn(
+        `No se pudo auditar ${action} del perfil ${profile_id}: ${(error as Error)?.message}`,
+      );
+    }
+  }
+
+  /**
+   * Reduce dos estados a las claves que difieren. Devuelve `null` si nada
+   * cambió, y quien lo llama omite la fila de auditoría: registrar un PATCH que
+   * no cambió nada llena la auditoría de ruido y esconde los cambios reales.
+   */
+  /**
+   * Proyecta un perfil sobre las columnas auditadas. Proyectar en vez de pasar
+   * la fila entera es lo que impide que un `select` más ancho meta el `config`
+   * —o cualquier columna futura— en `audit_logs` sin que nadie lo decida.
+   */
+  private auditSnapshot(profile: Record<string, unknown>): Record<string, unknown> {
+    const snapshot: Record<string, unknown> = {};
+    for (const key of AUDITED_COLUMNS) snapshot[key] = profile[key];
+    return snapshot;
+  }
+
+  private static diffColumns(
+    before: Record<string, unknown>,
+    after: Record<string, unknown>,
+  ): { old_values: Record<string, unknown>; new_values: Record<string, unknown> } | null {
+    const old_values: Record<string, unknown> = {};
+    const new_values: Record<string, unknown> = {};
+
+    for (const key of AUDITED_COLUMNS) {
+      if (before[key] === after[key]) continue;
+      old_values[key] = before[key];
+      new_values[key] = after[key];
+    }
+
+    return Object.keys(new_values).length === 0 ? null : { old_values, new_values };
+  }
+
   private getScope(): ProfileScope {
     const context = RequestContextService.getContext();
     if (!context?.organization_id || !context?.store_id) {
@@ -289,7 +430,11 @@ export class ProfilesService {
     if (taken) throw this.nameTaken(taken, dto.name);
 
     try {
-      return await this.createInTransaction(dto, config);
+      const created = await this.createInTransaction(dto, config);
+      await this.writeAudit('CREATE', created.id, null, this.auditSnapshot(created), {
+        version_to: created.current_version,
+      });
+      return created;
     } catch (error) {
       // Dos índices únicos pueden fallar acá: el de nombre por tienda y el
       // parcial de predeterminados. Cuál de los dos fue no se deduce del error
@@ -338,9 +483,12 @@ export class ProfilesService {
   async update(id: number, dto: UpdateInvoiceProfileDto) {
     // La lectura previa va por el cliente SCOPEADO: es lo que garantiza que un
     // id de otro tenant no llegue nunca a la transacción, donde ya no hay scope.
+    // El `select` trae las columnas auditadas además de las que la lógica usa:
+    // el diff de la auditoría se calcula contra ESTA lectura, y pedirlas después
+    // dejaría fuera lo que la propia escritura acaba de cambiar.
     const current = await this.prisma.invoice_profiles.findFirst({
       where: { id },
-      select: { id: true, operation_type: true, current_version: true },
+      select: PROFILE_SELECT,
     });
     if (!current) throw profileNotFound(id);
 
@@ -371,7 +519,7 @@ export class ProfilesService {
       if (taken) throw this.nameTaken(taken, dto.name);
     }
 
-    return this.runScopedTransactionTranslating(
+    const result = await this.runScopedTransactionTranslating(
       { name: dto.name, operation_type, profile_id: id, exclude_id: id },
       async (tx, scope) => {
       await this.assertOwned(tx, scope, id);
@@ -402,6 +550,22 @@ export class ProfilesService {
       );
       },
     );
+
+    const diff = ProfilesService.diffColumns(
+      this.auditSnapshot(current),
+      this.auditSnapshot(result),
+    );
+    if (diff) {
+      await this.writeAudit('UPDATE', id, diff.old_values, diff.new_values, {
+        version_from: current.current_version,
+        version_to: result.current_version,
+        // Una edición que sólo movió el puntero de versión cambió la
+        // CONFIGURACIÓN, y el diff de columnas no lo dice: esta bandera es la
+        // que le dice al lector que tiene que ir a comparar las dos versiones.
+        config_changed: result.current_version !== current.current_version,
+      });
+    }
+    return result;
   }
 
   /**
@@ -441,7 +605,7 @@ export class ProfilesService {
     const taken = await this.findByName(dto.name);
     if (taken) throw this.nameTaken(taken, dto.name);
 
-    return this.runScopedTransactionTranslating(
+    const clone = await this.runScopedTransactionTranslating(
       { name: dto.name, operation_type: source.operation_type, profile_id: null },
       async (tx, scope) => {
       const profile = await tx.invoice_profiles.create({
@@ -463,6 +627,16 @@ export class ProfilesService {
       return this.commitVersion(tx, scope, profile.id, validated, 1);
       },
     );
+
+    // `CLONE` y no `CREATE`: el clon nace con una configuración que ya existía
+    // en otro perfil, y quien audite necesita poder distinguir «alguien
+    // configuró esto» de «alguien copió una configuración vigente».
+    await this.writeAudit('CLONE', clone.id, null, this.auditSnapshot(clone), {
+      source_profile_id: source.id,
+      source_version,
+      version_to: 1,
+    });
+    return clone;
   }
 
   // ─── Predeterminado y estado ────────────────────────────────────────────
@@ -535,7 +709,7 @@ export class ProfilesService {
     const expected = previous?.id ?? null;
 
     try {
-      return await this.runScopedTransaction(async (tx, scope) => {
+      const promoted = await this.runScopedTransaction(async (tx, scope) => {
         await this.assertOwned(tx, scope, id);
 
         const inside = await tx.invoice_profiles.findFirst({
@@ -576,6 +750,18 @@ export class ProfilesService {
         // respuesta afirmaría un estado que el servidor ya no sostiene.
         return this.attachCurrentConfig(tx, updated);
       });
+
+      // Una sola fila para toda la operación, con el perfil que perdió la marca
+      // en `metadata`. Escribir dos —una por cada perfil— haría que un traspaso
+      // se leyera como dos decisiones independientes, y la decisión fue una.
+      await this.writeAudit(
+        'SET_DEFAULT',
+        id,
+        { is_default: false },
+        { is_default: true },
+        { operation_type: profile.operation_type, unset_profile_id: expected },
+      );
+      return promoted;
     } catch (error) {
       // La otra rama de la misma carrera: si el rival commitea después de la
       // comprobación de arriba, quien choca es el índice único parcial.
@@ -623,6 +809,8 @@ export class ProfilesService {
     });
     if (!profile) throw profileNotFound(id);
 
+    // Ya está en ese estado: es idempotente y NO se audita. Registrar un clic
+    // que no cambió nada llena la auditoría de ruido y esconde los cambios.
     if (profile.state === state) return this.findOne(id);
 
     await this.runScopedTransaction(async (tx, scope) => {
@@ -639,6 +827,18 @@ export class ProfilesService {
         },
       });
     });
+
+    // El arrastre del predeterminado forma parte del hecho auditado: sin él, el
+    // perfil aparecería como no predeterminado en una consulta posterior y nada
+    // diría cuándo dejó de serlo.
+    const drops_default = state === 'inactive' && profile.is_default;
+    await this.writeAudit(
+      state === 'active' ? 'ACTIVATE' : 'DEACTIVATE',
+      id,
+      { state: profile.state, ...(drops_default && { is_default: true }) },
+      { state, ...(drops_default && { is_default: false }) },
+      drops_default ? { default_dropped: true } : undefined,
+    );
 
     return this.findOne(id);
   }
@@ -661,9 +861,11 @@ export class ProfilesService {
    * MISMO 409 en vez de escapar como 500.
    */
   async remove(id: number) {
+    // El `select` completo es para la auditoría: después del DELETE no hay nada
+    // que leer, así que el estado del perfil se captura ANTES o se pierde.
     const profile = await this.prisma.invoice_profiles.findFirst({
       where: { id },
-      select: { id: true },
+      select: PROFILE_SELECT,
     });
     if (!profile) throw profileNotFound(id);
 
@@ -727,6 +929,10 @@ export class ProfilesService {
       }
       throw error;
     }
+
+    await this.writeAudit('DELETE', id, this.auditSnapshot(profile), null, {
+      versions_deleted: profile.current_version,
+    });
 
     return { deleted: true, id };
   }
