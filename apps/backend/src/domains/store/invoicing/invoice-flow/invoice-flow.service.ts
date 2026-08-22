@@ -340,6 +340,15 @@ interface AiuEmissionContext {
   regime: AiuVatRegime;
   /** Cadena YA COMPUESTA para `cbc:Note` de la línea de Administración. */
   note: string;
+  /**
+   * De dónde salió el régimen. No es adorno de log: `settings` significa que el
+   * XML se está construyendo con configuración VIVA que pudo cambiar después de
+   * que se calcularon los importes que el documento lleva dentro. Cuando la
+   * DIAN rechaza por descuadre de base gravable, esto es lo que dice si el
+   * documento se emitió con su propio régimen o con el que la tienda tenía en
+   * ese instante.
+   */
+  regime_source: 'snapshot' | 'settings' | 'default';
 }
 
 /**
@@ -2022,6 +2031,7 @@ export class InvoiceFlowService {
     store_id: number | bigint | null;
     operation_type?: string | null;
     aiu_contract_object?: string | null;
+    aiu_regime?: string | null;
   }): Promise<AiuEmissionContext | null> {
     const operation_type = (invoice.operation_type || '').trim();
     if (operation_type !== DIAN_INVOICE_OPERATION_TYPES.AIU) return null;
@@ -2064,13 +2074,83 @@ export class InvoiceFlowService {
     }
 
     return {
-      // Default explícito y conservador, el mismo que la creación: bajo
-      // `et_462_1` tributa el AIU completo, o sea se declara MÁS IVA. Una tienda
-      // que no configuró nada declara de más —recuperable— y no de menos, que es
-      // sanción.
-      regime: settings.regime ?? 'et_462_1',
+      ...this.resolveAiuRegimeForEmission(invoice, settings),
       note,
     };
+  }
+
+  /**
+   * Régimen con el que se va a construir el XML, y de dónde salió.
+   *
+   * EL SNAPSHOT DEL DOCUMENTO MANDA, por la misma razón que manda para el
+   * objeto del contrato, y con más consecuencia. El régimen no describe el
+   * documento: decide, línea por línea, cuál emite `cac:TaxTotal` y cuál no
+   * (`attachAiuLineExtras` → `omit_tax_total`). Los IMPORTES, en cambio, salen
+   * de los tributos ya persistidos. Las dos mitades tienen que venir del mismo
+   * régimen o el XML declara una gravabilidad que no corresponde a los números
+   * que lleva dentro: una línea con impuesto persistido a la que se le suprime
+   * el `cac:TaxTotal` descuadra el total contra la suma de líneas (FAU04), y
+   * una línea sin impuesto a la que se le permite emitirlo hereda el `Percent`
+   * de la cabecera (FAX01). Los dos son rechazo, y el consecutivo ya se gastó.
+   *
+   * Orden de precedencia y por qué:
+   *
+   *   1. `invoices.aiu_regime` — el régimen con el que se calcularon estos
+   *      importes. Es el único dato que no puede contradecirlos.
+   *   2. `store_settings.invoicing.aiu.regime` — respaldo para las facturas
+   *      anteriores a la columna. Se avisa en el log, porque es precisamente la
+   *      lectura viva que el snapshot vino a reemplazar.
+   *   3. `'et_462_1'` — el MISMO default que usa la creación. Que las dos
+   *      puntas caigan al mismo valor es lo que hace consistente a la tienda
+   *      que nunca configuró AIU; cambiarlo por un rechazo acá rompería un
+   *      camino que hoy funciona y funciona bien, porque `et_462_1` declara MÁS
+   *      IVA: de más es recuperable, de menos es sanción.
+   *
+   * Un valor desconocido en la columna NO cae al default: se rechaza. Es el
+   * único caso realmente irresoluble —el documento afirma un régimen y ninguno
+   * de los dos conocidos es— y adivinar entre dos bases incompatibles cambia el
+   * IVA declarado sin dejar rastro de que se adivinó.
+   */
+  private resolveAiuRegimeForEmission(
+    invoice: { id: number; aiu_regime?: string | null },
+    settings: AiuSettings,
+  ): Pick<AiuEmissionContext, 'regime' | 'regime_source'> {
+    const KNOWN: readonly AiuVatRegime[] = ['et_462_1', 'decreto_1372_1992'];
+    const frozen = (invoice.aiu_regime || '').trim();
+
+    if (frozen) {
+      if (!KNOWN.includes(frozen as AiuVatRegime)) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_AIU_006,
+          `La factura declara un régimen de base gravable AIU que el sistema no reconoce ` +
+            `(«${frozen}»). No se emite: los dos regímenes válidos gravan partes distintas del ` +
+            `contrato —E.T. art. 462-1 grava Administración + Imprevistos + Utilidad, Decreto ` +
+            `1372/1992 grava sólo la Utilidad— y elegir uno por defecto cambiaría el IVA ` +
+            `declarado. Corrige el régimen en la configuración de facturación de la tienda y ` +
+            `vuelve a guardar la factura.`,
+          { invoice_id: invoice.id, declared_regime: frozen, known: KNOWN },
+        );
+      }
+      return { regime: frozen as AiuVatRegime, regime_source: 'snapshot' };
+    }
+
+    if (settings.regime) {
+      this.logger.warn(
+        `Factura ${invoice.id}: contrato AIU sin régimen congelado. Se usa el ajuste VIVO de la ` +
+          `tienda («${settings.regime}») para decidir qué líneas emiten cac:TaxTotal. Es una ` +
+          `factura anterior a invoices.aiu_regime: si el ajuste cambió después de que se ` +
+          `calcularon sus importes, la gravabilidad del XML puede no corresponder a los tributos ` +
+          `persistidos.`,
+      );
+      return { regime: settings.regime, regime_source: 'settings' };
+    }
+
+    this.logger.warn(
+      `Factura ${invoice.id}: contrato AIU sin régimen congelado y sin configuración AIU en la ` +
+        `tienda. Se usa el default conservador «et_462_1», el mismo que aplicó la creación, que ` +
+        `grava el AIU completo y por tanto declara de más antes que de menos.`,
+    );
+    return { regime: 'et_462_1', regime_source: 'default' };
   }
 
   /**

@@ -1034,6 +1034,31 @@ export class InvoicingService {
         // haga que el XML describa un contrato distinto del que se facturó.
         // `undefined` en un documento no-AIU: la columna queda NULL.
         aiu_contract_object: aiu_context.contract_object,
+        // SNAPSHOT DEL RÉGIMEN. Misma razón que la línea de arriba, y más
+        // grave: el régimen no describe el documento, DECIDE qué parte del
+        // contrato es base gravable, y los dos son incompatibles —E.T. art.
+        // 462-1 grava A+I+U completo, Decreto 1372/1992 grava sólo la
+        // Utilidad—. En emisión el régimen es lo que decide `omit_tax_total`
+        // por línea, mientras los importes salen de los tributos persistidos:
+        // si el ajuste de la tienda cambia entre la captura y la firma, el XML
+        // declara una gravabilidad que no corresponde a los importes que lleva
+        // dentro. Eso es rechazo por FAU04 con el consecutivo ya gastado, o
+        // peor, aceptación con el IVA equivocado.
+        //
+        // `undefined` en documentos no-AIU: `resolveAiuContext` devuelve `{}` y
+        // las tres columnas quedan NULL.
+        aiu_regime: aiu_context.aiu?.regime,
+        aiu_minimum_percent:
+          aiu_context.aiu?.minimum_base_percent != null
+            ? new Prisma.Decimal(String(aiu_context.aiu.minimum_base_percent))
+            : undefined,
+        aiu_taxable_matrix: aiu_context.aiu
+          ? this.buildAiuTaxableMatrix(
+              calculated.lines,
+              aiu_context.aiu,
+              'invoice:create',
+            )
+          : undefined,
         // Divisa extranjera: SOLO declara la conversión. El documento se emite
         // siempre en COP (Res. DIAN 000042/2020 art. 73) y el importe legal
         // sigue siendo `total_amount`.
@@ -1995,6 +2020,34 @@ export class InvoicingService {
         aiu_context.aiu,
         tax_catalog,
       );
+      // EL SNAPSHOT SE REFRESCA EN CADA EDICIÓN QUE TOCA LÍNEAS.
+      //
+      // Dejarlo quieto sería peor que no tenerlo: los importes de abajo se
+      // reescriben con el régimen que acaba de resolver `resolveAiuContext`, y
+      // un snapshot viejo describiría una gravabilidad que ya no es la de los
+      // importes que quedan persistidos. El snapshot vale por coincidir con los
+      // números del documento, no por ser antiguo.
+      //
+      // El caso no-AIU no se resuelve acá sino en la puerta de más abajo, que
+      // corre aunque el PATCH no traiga líneas.
+      if (aiu_context.aiu) {
+        update_data.aiu_regime = aiu_context.aiu.regime;
+        update_data.aiu_minimum_percent =
+          aiu_context.aiu.minimum_base_percent != null
+            ? new Prisma.Decimal(String(aiu_context.aiu.minimum_base_percent))
+            : null;
+        update_data.aiu_taxable_matrix = this.buildAiuTaxableMatrix(
+          calculated.lines,
+          aiu_context.aiu,
+          `invoice:update:${id}`,
+        );
+        // Se persiste el objeto RESUELTO, no el crudo del PATCH, que es lo que
+        // ya hace `create()`. Sin esto las dos puntas divergían: crear con el
+        // objeto de la tienda lo congelaba en la columna, y editar la misma
+        // factura sin mandarlo la dejaba con el crudo —o con nada—.
+        update_data.aiu_contract_object = aiu_context.contract_object;
+      }
+
       recalculated_header_taxes = calculated.header_taxes;
       recalculated_line_taxes = this.needsPersistedLineTaxes(
         calculated.header_taxes,
@@ -2062,6 +2115,33 @@ export class InvoicingService {
           ),
         };
       }
+    }
+
+    // PUERTA: un documento que NO es AIU no puede quedarse con datos AIU.
+    //
+    // Corre fuera del bloque de líneas a propósito: un PATCH puede cambiar
+    // `operation_type` sin mandar `items`, y por ese camino el recálculo ni se
+    // ejecuta. Las cuatro columnas describen un contrato AIU —el régimen de
+    // base gravable, su piso, la matriz de gravabilidad y el objeto del
+    // contrato—; en una venta estándar ninguna aplica, y dejarlas es dejar
+    // datos fiscales que contradicen el documento que los lleva. Hoy la emisión
+    // no los lee (`resolveAiuEmissionContext` corta antes en todo documento
+    // no-AIU), pero eso es una salvaguarda del lector, no una razón para
+    // persistir basura: cualquier reporte, exportación o auditoría que lea la
+    // columna directamente vería un contrato AIU donde no hay ninguno.
+    //
+    // `Prisma.DbNull` y no `undefined`: en una columna JSON `undefined` significa
+    // "no la toques", que es exactamente el bug.
+    const resulting_operation_type =
+      dto.operation_type ?? invoice.operation_type;
+    if (
+      (resulting_operation_type || '').trim() !==
+      DIAN_INVOICE_OPERATION_TYPES.AIU
+    ) {
+      update_data.aiu_regime = null;
+      update_data.aiu_minimum_percent = null;
+      update_data.aiu_taxable_matrix = Prisma.DbNull;
+      update_data.aiu_contract_object = null;
     }
 
     const updated = await this.prisma.invoices.update({
@@ -2841,6 +2921,121 @@ export class InvoicingService {
    *   que la recompone con la misma `buildAiuNote` desde la misma
    *   configuración, así que las dos no pueden divergir.
    */
+  /**
+   * Matriz de gravabilidad AIU que se CONGELA en el documento.
+   *
+   * No es telemetría: es el dato que faltaba. `InvoiceCalculatorService` sabe
+   * qué componentes entran a la base gravable del régimen —eso lo decide
+   * `isAiuTaxable`— pero **no sabe a qué tarifa**, porque la tarifa depende del
+   * bien o servicio y ese servicio no tiene el catálogo. Por eso, ante una
+   * línea gravable que llegó SIN impuesto, lo único que podía hacer era
+   * reportar el hecho con los tres importes en cero: no podía afirmar cuánto
+   * debía. El resultado es una factura que sale sub-declarada y que la DIAN
+   * ACEPTA, porque un XML internamente consistente con menos IVA del debido es
+   * un XML válido — el error solo se corrige después con nota crédito.
+   *
+   * Esta matriz deja ese hueco por escrito y legible por máquina en
+   * `taxable_without_rate`, en vez de dejarlo en una línea de log. Es lo que
+   * consume el rechazo `INVOICING_AIU_004` y lo que la versión del perfil de
+   * facturación va a poder completar con la tarifa que hoy nadie aporta.
+   *
+   * Se congela junto al régimen por la misma razón que `aiu_contract_object`:
+   * lo que se declaró tiene que quedar legible tal como se declaró, aunque la
+   * configuración cambie entre la captura y la firma.
+   */
+  private buildAiuTaxableMatrix(
+    lines: CalculatedLine[],
+    aiu: InvoiceCalculatorAiuInput,
+    stage: string,
+  ): Prisma.InputJsonValue {
+    const by_component = new Map<
+      string,
+      {
+        component: string;
+        taxable: boolean;
+        lines: number;
+        taxable_amount: Prisma.Decimal;
+        tax_amount: Prisma.Decimal;
+        rates: Array<Record<string, string>>;
+      }
+    >();
+
+    for (const line of lines) {
+      const component = line.aiu_component;
+      // Una línea SIN componente en un documento AIU es la porción de COSTO
+      // reembolsable del contrato: no grava bajo ninguno de los dos regímenes
+      // y no pertenece a esta matriz.
+      if (!component) continue;
+
+      const entry =
+        by_component.get(component) ??
+        {
+          component,
+          // `omit_tax_total` es el flag que el calculador YA derivó del
+          // régimen. Se lee de ahí en vez de recalcularlo: dos derivaciones
+          // del mismo hecho es exactamente cómo se desincronizan.
+          taxable: !line.omit_tax_total,
+          lines: 0,
+          taxable_amount: new Prisma.Decimal(0),
+          tax_amount: new Prisma.Decimal(0),
+          rates: [],
+        };
+
+      entry.lines += 1;
+      entry.taxable_amount = entry.taxable_amount.plus(
+        new Prisma.Decimal(line.line_extension_amount),
+      );
+      entry.tax_amount = entry.tax_amount.plus(
+        new Prisma.Decimal(line.tax_amount),
+      );
+
+      for (const tax of line.taxes) {
+        const key = `${tax.tax_type}|${tax.dian_tax_code}|${tax.tax_rate}|${tax.rate_basis}`;
+        if (entry.rates.some((r) => r.key === key)) continue;
+        entry.rates.push({
+          key,
+          tax_type: tax.tax_type,
+          dian_tax_code: tax.dian_tax_code,
+          tax_rate: tax.tax_rate,
+          rate_basis: tax.rate_basis,
+        });
+      }
+
+      by_component.set(component, entry);
+    }
+
+    const components = Array.from(by_component.values()).map((entry) => ({
+      component: entry.component,
+      taxable: entry.taxable,
+      lines: entry.lines,
+      taxable_amount: entry.taxable_amount.toFixed(2),
+      tax_amount: entry.tax_amount.toFixed(2),
+      // `key` era solo para deduplicar; no viaja al documento.
+      rates: entry.rates.map(({ key: _key, ...rate }) => rate),
+    }));
+
+    return {
+      regime: aiu.regime,
+      stage,
+      minimum: {
+        enforced: aiu.enforce_minimum_base ?? false,
+        percent:
+          aiu.minimum_base_percent != null
+            ? String(aiu.minimum_base_percent)
+            : null,
+      },
+      components,
+      /**
+       * Componentes que el régimen SÍ grava y que aun así no declararon
+       * ninguna tarifa. Cada uno es IVA que el documento debía declarar y no
+       * declara. Vacío es lo correcto; no vacío es la brecha de ADR-3.
+       */
+      taxable_without_rate: components
+        .filter((c) => c.taxable && c.rates.length === 0)
+        .map((c) => c.component),
+    } as Prisma.InputJsonValue;
+  }
+
   private async resolveAiuContext(
     operation_type: string | null | undefined,
     items: Array<{ aiu_component?: string | null }>,

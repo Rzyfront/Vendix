@@ -2319,7 +2319,7 @@ export const ErrorCodes = {
     code: 'INVOICING_AIU_006',
     httpStatus: 422,
     devMessage:
-      'No AIU regime can be resolved: the invoice carries no frozen aiu_regime and the store has no invoicing.aiu configuration; the base cannot be guessed because the two regimes (E.T. 462-1 vs Decreto 1372/1992) are incompatible',
+      'The invoice declares an aiu_regime that is not one of the two known regimes: emission is refused rather than coerced to a default, because E.T. 462-1 (taxes A+I+U) and Decreto 1372/1992 (taxes only Utilidad) are incompatible bases and picking one would change the VAT declared with no trace that it was guessed. A MISSING regime is not this error: it falls back to the store setting, and then to the same conservative et_462_1 default the creation path uses, both logged',
   },
   /**
    * DIVISA — la factura electrónica colombiana se emite SIEMPRE en pesos
