@@ -1,4 +1,4 @@
-import { Component, input, model, output } from '@angular/core';
+import { Component, computed, input, model, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
 import {
@@ -9,6 +9,8 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
+import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
+import { PopShippingAllocation } from '../interfaces';
 
 /**
  * `pop-order-config-modal`
@@ -31,12 +33,13 @@ import { ModalComponent } from '../../../../../../shared/components/modal/modal.
     InputComponent,
     ButtonComponent,
     IconComponent,
+    ToggleComponent,
   ],
   template: `
     <app-modal
       [(isOpen)]="isOpen"
       title="Configurar orden de compra"
-      subtitle="Proveedor, bodega, fechas y método de envío"
+      subtitle="Proveedor, bodega, fechas, envío y flete"
       size="md"
     >
       <div class="flex flex-col gap-4">
@@ -137,6 +140,37 @@ import { ModalComponent } from '../../../../../../shared/components/modal/modal.
             placeholder="Elegir método..."
           ></app-selector>
         </div>
+
+        <!--
+          B.6 — paridad con el paso Configuración del wizard: donde se declara
+          el método de envío se declara también el flete. Si el monto sólo
+          existiera en el wizard, el operador podría elegir «Flete» aquí y
+          confirmar sin que nadie le preguntara cuánto.
+        -->
+        @if (isFreight()) {
+          <div class="flex flex-col gap-1.5 min-w-0">
+            <label class="text-xs font-semibold text-text-secondary pl-0.5">
+              Costo del flete
+            </label>
+            <app-input
+              size="sm"
+              [currency]="true"
+              [currencyDecimals]="2"
+              [ngModel]="shippingCost()"
+              (ngModelChange)="onShippingCostModel($event)"
+              customWrapperClass="!mt-0"
+            ></app-input>
+
+            <app-toggle
+              [checked]="isProrate()"
+              label="Prorratear el flete en el costo de los productos"
+              (toggled)="onAllocationToggle($event)"
+            ></app-toggle>
+            <p class="text-[11px] leading-snug text-text-secondary">
+              {{ allocationLegend() }}
+            </p>
+          </div>
+        }
       </div>
 
       <div slot="footer" class="flex justify-end">
@@ -161,6 +195,10 @@ export class PopOrderConfigModalComponent {
   readonly expectedDate = input('');
   readonly shippingMethod = input('');
   readonly minExpectedDate = input('');
+  readonly shippingCost = input(0);
+  readonly shippingCostAllocation = input<PopShippingAllocation | undefined>(
+    undefined,
+  );
 
   // Field changes bubble up to pop-header's existing handlers.
   readonly supplierChange = output<number | null | string>();
@@ -168,6 +206,46 @@ export class PopOrderConfigModalComponent {
   readonly orderDateChange = output<string>();
   readonly expectedDateChange = output<string>();
   readonly shippingMethodChange = output<string>();
+  readonly shippingCostChange = output<number>();
+  readonly shippingCostAllocationChange = output<PopShippingAllocation>();
+
+  readonly isFreight = computed<boolean>(
+    () => this.shippingMethod() === 'freight',
+  );
+  readonly isProrate = computed<boolean>(
+    () => (this.shippingCostAllocation() ?? 'prorate') === 'prorate',
+  );
+
+  /**
+   * La leyenda va en términos de negocio, no de contabilidad: la duda del
+   * operador es inmediata y es la misma en los dos modos — «¿esto me sube el
+   * costo del producto?» y «¿esto suma al total?».
+   */
+  readonly allocationLegend = computed<string>(() =>
+    this.isProrate()
+      ? 'El flete se reparte entre los productos según su participación en la compra, así que cada producto queda valorado con lo que realmente costó ponerlo en bodega: sube su costo unitario y con él el margen que calcula el sistema. El flete se suma al total de la orden.'
+      : 'El flete no toca el costo de los productos: se registra como un costo de la orden y el costo unitario no se mueve. El flete se suma igual al total de la orden.',
+  );
+
+  /**
+   * El CVA de `app-input [currency]` entrega el número crudo (o null al
+   * vaciar). Se sanea a 2 decimales porque la columna es `Decimal(12,2)` y el
+   * DTO rechaza el tercero con 400.
+   */
+  onShippingCostModel(value: number | string | null): void {
+    const n = Number(value);
+    const safe = Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : 0;
+    this.shippingCostChange.emit(safe);
+    if (safe > 0) {
+      this.shippingCostAllocationChange.emit(
+        this.shippingCostAllocation() ?? 'prorate',
+      );
+    }
+  }
+
+  onAllocationToggle(prorate: boolean): void {
+    this.shippingCostAllocationChange.emit(prorate ? 'prorate' : 'expense');
+  }
   readonly openSupplierModal = output<void>();
   readonly openWarehouseModal = output<void>();
 
