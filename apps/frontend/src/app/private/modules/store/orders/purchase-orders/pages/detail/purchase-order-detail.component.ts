@@ -337,13 +337,13 @@ interface ReceiveLine {
                   -->
                   @if (costPreviewLoading()) {
                     <div class="px-4 py-3 border-b border-border text-xs text-text-secondary flex items-center gap-2">
-                      <app-spinner [size]="14" />
+                      <app-spinner size="sm" />
                       Calculando la valoración de esta recepción...
                     </div>
                   }
                   @if (costPreviewError(); as previewError) {
                     <div class="px-4 py-3 border-b border-border">
-                      <app-alert-banner type="warning" [message]="previewError" />
+                      <app-alert-banner variant="warning" icon="alert-triangle">{{ previewError }}</app-alert-banner>
                       <button type="button" class="mt-2 text-xs font-medium text-primary hover:underline"
                         (click)="reloadCostPreview()">
                         Reintentar el cálculo
