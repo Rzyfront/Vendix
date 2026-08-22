@@ -195,4 +195,124 @@ describe('PopCartService — discount normalization (CP-ORC-POP-MODAL-DISCOUNT-0
       expect(service.currentState.items[0].discount).toBe(100);
     });
   });
+
+  /**
+   * Paridad del descuento del escáner de facturas.
+   *
+   * La factura del proveedor imprime PESOS. El frontend los convertía a un
+   * porcentaje ENTERO (`Math.round`) antes de entrar al carrito, y el resto que
+   * el redondeo no podía representar se inyectaba al descuento de CABECERA —
+   * que el backend prorratea entre TODAS las líneas por peso bruto. El dinero
+   * cambiaba de línea, y como las capas de costo FIFO se escriben por línea, el
+   * costeo quedaba mal.
+   *
+   * `discount_amount` (dinero, base neta) es ahora la fuente de verdad y GANA
+   * sobre `discount` (%), igual que en `PurchaseOrdersService.deriveLineTax`.
+   */
+  describe('discount_amount — el monto de la factura no se degrada', () => {
+    /**
+     * Línea de bruto 10 000 (1000 × 10). Un descuento de 1234 es 12,34 %: un
+     * porcentaje entero NO puede representarlo, que es exactamente el caso que
+     * el bug perdía.
+     */
+    function addLineWithMoneyDiscount(discount_amount: number): PopCartItem {
+      const req: AddToPopCartRequest = {
+        product: baseProduct,
+        quantity: 10,
+        unit_cost: 1000,
+        discount_amount,
+      };
+      service.addToCart(req).subscribe();
+      return service.currentState.items[0];
+    }
+
+    it('el monto llega intacto al resumen y baja el subtotal exactamente en esa cifra', () => {
+      // `has_vat` arranca apagado ⇒ sin IVA, el neto es bruto − descuento.
+      // bruto 10 000 − 1234 = 8766. Con la conversión a porcentaje entero el
+      // descuento habría sido 1200 y el subtotal 8800: 34 pesos desplazados.
+      addLineWithMoneyDiscount(1234);
+
+      const summary = service.currentState.summary;
+      expect(summary.discount_amount).toBe(1234);
+      expect(summary.subtotal).toBe(8766);
+      expect(summary.subtotal).toBe(10000 - 1234);
+    });
+
+    it('el monto se preserva en el item y NO se traduce a porcentaje', () => {
+      const item = addLineWithMoneyDiscount(1234);
+
+      expect(service.currentState.items[0].discount_amount).toBe(1234);
+      // `discount` (%) queda en 0: es la vía de la captura manual y no describe
+      // este descuento. Dos cifras con valor a la vez dejarían al operador sin
+      // saber cuál se aplicó.
+      expect(service.currentState.items[0].discount).toBe(0);
+      expect(item.id).toBeTruthy();
+    });
+
+    it('un re-escaneo de la misma línea reescribe el monto en vez de perderlo', () => {
+      // La rama "el ítem YA está en el carrito" hacía `...existingItem` y sólo
+      // pisaba la cantidad: el monto del escaneo anterior sobrevivía mientras la
+      // cantidad sí se actualizaba. El ÚLTIMO escaneo gana, como con `discount`,
+      // `unit_cost` y `tax_rate`.
+      addLineWithMoneyDiscount(1234);
+      addLineWithMoneyDiscount(500);
+
+      expect(service.currentState.items.length).toBe(1);
+      expect(service.currentState.items[0].quantity).toBe(20);
+      expect(service.currentState.items[0].discount_amount).toBe(500);
+    });
+
+    it('setItemDiscount(10) limpia el monto y pasa a aplicar el 10 %', () => {
+      // Sin la limpieza, el monto heredado del escaneo gana por precedencia y
+      // teclear el porcentaje no mueve ninguna cifra — un CTA mudo.
+      const item = addLineWithMoneyDiscount(1234);
+      service.setItemDiscount(item.id, 10);
+
+      const line = service.currentState.items[0];
+      expect(line.discount).toBe(10);
+      expect(line.discount_amount).toBeUndefined();
+      // 10 % de 10 000 = 1000 ⇒ subtotal 9000.
+      expect(service.currentState.summary.discount_amount).toBe(1000);
+      expect(service.currentState.summary.subtotal).toBe(9000);
+    });
+
+    it('setItemDiscountAmount fija el monto y pone el porcentaje en 0', () => {
+      const item = addItem(25); // línea con 25 % tecleado a mano
+      service.setItemDiscountAmount(item.id, 40);
+
+      const line = service.currentState.items[0];
+      expect(line.discount_amount).toBe(40);
+      expect(line.discount).toBe(0);
+      // bruto 100 (1 × 100) − 40 = 60.
+      expect(service.currentState.summary.discount_amount).toBe(40);
+      expect(service.currentState.summary.subtotal).toBe(60);
+    });
+
+    it('setItemDiscountAmount rechaza null/undefined/no-finito sin tocar el estado', () => {
+      const item = addLineWithMoneyDiscount(1234);
+
+      service.setItemDiscountAmount(item.id, null);
+      expect(service.currentState.items[0].discount_amount).toBe(1234);
+
+      service.setItemDiscountAmount(item.id, undefined);
+      expect(service.currentState.items[0].discount_amount).toBe(1234);
+
+      service.setItemDiscountAmount(item.id, NaN);
+      expect(service.currentState.items[0].discount_amount).toBe(1234);
+
+      service.setItemDiscountAmount(item.id, Infinity);
+      expect(service.currentState.items[0].discount_amount).toBe(1234);
+    });
+
+    it('setItemDiscountAmount clampa un monto negativo a 0', () => {
+      // Un "descuento" negativo es un recargo: tendría que viajar como flete,
+      // no como rebaja que baja la base gravable.
+      const item = addLineWithMoneyDiscount(1234);
+      service.setItemDiscountAmount(item.id, -50);
+
+      expect(service.currentState.items[0].discount_amount).toBe(0);
+      expect(service.currentState.summary.discount_amount).toBe(0);
+      expect(service.currentState.summary.subtotal).toBe(10000);
+    });
+  });
 });

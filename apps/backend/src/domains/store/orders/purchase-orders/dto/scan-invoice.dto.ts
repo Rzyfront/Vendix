@@ -69,6 +69,15 @@ export interface ExtractedLineItem {
    * Opcional: los escaneos anteriores a esta fase no lo emiten.
    */
   discount_amount?: number | null;
+  /**
+   * QUI-661 hotfix — descuento comercial de la línea en PORCENTAJE (0-100),
+   * tal como lo imprime la factura ("-20%", "Dcto 20%"). Es PROCEDENCIA: el
+   * monto en `discount_amount` es la fuente de verdad y gana en `deriveLineTax`.
+   * Se conserva sin recalcular desde el monto porque es la cifra que el
+   * operador coteja de un vistazo contra el papel. Un porcentaje es invariante
+   * a la base (bruto o neto), por eso es el dato más robusto que la IA emite.
+   */
+  discount_percentage?: number | null;
 }
 
 export interface InvoiceScanResult {
