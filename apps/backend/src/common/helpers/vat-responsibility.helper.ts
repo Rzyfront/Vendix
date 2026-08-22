@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { VendixHttpException } from '../errors/vendix-http.exception';
 import { ErrorCodes } from '../errors/error-codes';
+import { purchaseEffectFor } from '../../domains/fiscal-operations/constants/fiscal-responsibilities.catalog';
 
 /**
  * F4 — Ciclo de vida legal del IVA colombiano.
@@ -188,6 +189,177 @@ export function vatResponsibilityReadFailure(): VatResponsibilityResult {
 }
 
 /**
+ * CP-PURCHASE-TRANSPARENCY B.3 — qué hace el motor de costeo con el IVA que el
+ * comercio PAGA en una compra.
+ *
+ * Se deriva de `responsible`, no se decide aparte: si el predicado y el texto
+ * pudieran divergir, la pantalla explicaría al revés lo que el sistema hace.
+ */
+export type VatPurchaseTreatment = 'deductible' | 'capitalized';
+
+/**
+ * Explicación completa del tratamiento del IVA de una compra, lista para viajar
+ * como dato estructurado hasta la interfaz (ADR-2: el frontend no vuelve a
+ * derivar el predicado para explicar el costo).
+ *
+ * Es el cuerpo de `fiscal_explanation` en la respuesta de la vista previa de
+ * costo. Contrato compartido: `reason` y `source` son las uniones estables del
+ * helper — el mismo vocabulario que usan los logs y los tests, para que un
+ * defecto reportado desde la pantalla se pueda buscar en el código.
+ */
+export interface VatTreatmentExplanation {
+  /** Proyección fail-closed: `false` también cuando el estado es indeterminado. */
+  vat_responsible: boolean;
+  indeterminate: boolean;
+  reason: VatResponsibilityReason;
+  source: VatResponsibilitySource;
+  treatment: VatPurchaseTreatment;
+  /** Español llano, listo para pintar. Sin jerga de código. */
+  message: string;
+  legal_basis: string[];
+  /** Presente SOLO cuando el estado es indeterminado. */
+  cta?: { label: string; route: string };
+}
+
+/** Ruta del asistente fiscal. Único destino del CTA de estado indeterminado. */
+export const FISCAL_WIZARD_ROUTE = '/admin/fiscal/wizard';
+
+/**
+ * Base legal del caso indeterminado. NO es la de O-49: el comercio no declaró
+ * nada, así que lo que se cita es la regla por defecto que el sistema aplica
+ * (tratarlo como no responsable y capitalizar), no una declaración suya.
+ */
+const INDETERMINATE_LEGAL_BASIS = [
+  'Art. 437 ET, parágrafo 3 — no responsables del IVA',
+  'Art. 493 ET — el IVA que no es descontable constituye mayor valor del costo o del gasto',
+  'NIIF para PYMES §13.6 / NIC 2 ¶11 — los impuestos no recuperables integran el costo de los inventarios',
+];
+
+/**
+ * Copia del catálogo para las dos ramas que NO nacen de una declaración del
+ * contribuyente sino de una INFERENCIA por régimen tributario. El matiz
+ * importa: el comercio no dijo «soy O-48», el sistema lo dedujo de su régimen,
+ * y el texto tiene que decirlo así para que el operador sepa que puede
+ * corregirlo.
+ */
+const REGIME_INFERENCE_COPY: Record<
+  'regime_responsible' | 'regime_not_responsible',
+  { message: string; legal_basis: string[] }
+> = {
+  regime_responsible: {
+    message:
+      'Tu régimen tributario (común o gran contribuyente) implica que eres responsable de IVA, aunque no lo declaraste explícitamente. Por eso el IVA de esta compra no aumenta el costo de tus productos: se registra como IVA descontable. Declara la responsabilidad O-48 en tu área fiscal para dejarlo confirmado.',
+    legal_basis: [
+      'Art. 437 ET — responsables del impuesto sobre las ventas',
+      'Art. 485 ET — impuestos descontables',
+      'Art. 488 ET — solo son descontables los impuestos pagados en bienes y servicios que dan derecho a costo o deducción',
+    ],
+  },
+  regime_not_responsible: {
+    message:
+      'Tu régimen tributario declarado no es responsable de IVA, así que el IVA de esta compra se suma al costo de tus productos. Es una inferencia a partir del régimen, no una declaración tuya: si ya eres responsable de IVA, decláralo en tu área fiscal para que el costo se calcule bien.',
+    legal_basis: [
+      'Art. 18 Ley 1943 de 2018 — eliminación del régimen simplificado y creación de la categoría de no responsables de IVA',
+      'Art. 493 ET — el IVA que no es descontable constituye mayor valor del costo o del gasto',
+      'NIIF para PYMES §13.6 / NIC 2 ¶11 — los impuestos no recuperables integran el costo de los inventarios',
+    ],
+  },
+};
+
+/**
+ * Explica el tratamiento del IVA de compra a partir de un resultado YA resuelto.
+ *
+ * Existe separada de `resolveVatTreatment` porque el consumidor que atrapó un
+ * fallo de lectura tiene el resultado (`vatResponsibilityReadFailure()`) pero
+ * ya no tiene los datos fiscales: sin esta variante tendría que inventarse el
+ * texto en su `catch`, que es exactamente la duplicación que B.3 elimina.
+ *
+ * Pura, síncrona, nunca lanza.
+ */
+export function vatTreatmentFromResult(
+  outcome: VatResponsibilityResult,
+): VatTreatmentExplanation {
+  const base = {
+    vat_responsible: outcome.responsible,
+    indeterminate: outcome.indeterminate,
+    reason: outcome.reason,
+    source: outcome.source,
+  };
+
+  // 1) Declaración explícita: el texto y la base legal salen del CATÁLOGO
+  //    oficial (`fiscal-responsibilities.catalog.ts`), no de una cadena local.
+  if (
+    outcome.reason === 'declared_responsible' ||
+    outcome.reason === 'declared_not_responsible'
+  ) {
+    const code =
+      outcome.reason === 'declared_responsible'
+        ? VAT_RESPONSIBLE_CODE
+        : VAT_NOT_RESPONSIBLE_CODE;
+    const effect = purchaseEffectFor(code);
+    if (effect) {
+      return { ...base, treatment: effect.treatment, message: effect.message, legal_basis: effect.legal_basis };
+    }
+    // El catálogo perdió la entrada (nunca debería pasar): se cae al
+    // tratamiento derivado del booleano, que es el que el motor SÍ aplica.
+  }
+
+  // 2) Inferencia por régimen.
+  if (
+    outcome.reason === 'regime_responsible' ||
+    outcome.reason === 'regime_not_responsible'
+  ) {
+    const copy = REGIME_INFERENCE_COPY[outcome.reason];
+    return {
+      ...base,
+      treatment: outcome.responsible ? 'deductible' : 'capitalized',
+      message: copy.message,
+      legal_basis: copy.legal_basis,
+    };
+  }
+
+  // 3) Indeterminado — las dos formas. Fail-closed: se capitaliza. El mensaje
+  //    recomienda configurar el área fiscal y el CTA apunta al asistente.
+  const cta = { label: 'Configurar mi área fiscal', route: FISCAL_WIZARD_ROUTE };
+  if (outcome.reason === 'fiscal_read_failed') {
+    return {
+      ...base,
+      treatment: 'capitalized',
+      message:
+        'No pudimos leer la configuración fiscal de tu comercio, así que por precaución tratamos esta compra como si no fueras responsable de IVA: el IVA se suma al costo de tus productos. Vuelve a intentarlo en un momento y, si el problema sigue, revisa la configuración de tu área fiscal.',
+      legal_basis: INDETERMINATE_LEGAL_BASIS,
+      cta,
+    };
+  }
+
+  return {
+    ...base,
+    treatment: outcome.responsible ? 'deductible' : 'capitalized',
+    message:
+      'Aún no configuraste tu área fiscal. Mientras no lo hagas tratamos tu comercio como no responsable de IVA, así que el IVA de esta compra se sumará al costo de tus productos. Configura tu responsabilidad fiscal para que los costos y los impuestos se calculen según tu situación real ante la DIAN.',
+    legal_basis: INDETERMINATE_LEGAL_BASIS,
+    cta,
+  };
+}
+
+/**
+ * B.3 — resuelve el estado fiscal Y lo explica en una sola llamada.
+ *
+ * Es `resolveVatResponsibility` + el texto del catálogo. El booleano que
+ * devuelve (`vat_responsible`) es LITERALMENTE el mismo que aplica el motor de
+ * costeo, porque sale de la misma función: el texto no puede describir un
+ * tratamiento distinto del que el sistema ejecuta.
+ *
+ * Pura, síncrona, nunca lanza. Para el caso «no se pudo LEER `fiscal_data`»
+ * usa `vatTreatmentFromResult(vatResponsibilityReadFailure())`.
+ */
+export function resolveVatTreatment(
+  fiscalData: VatFiscalDataInput | null | undefined,
+): VatTreatmentExplanation {
+  return vatTreatmentFromResult(resolveVatResponsibility(fiscalData));
+}
+
+/**
  * Resuelve si el comercio es responsable de IVA a partir de su `fiscal_data`.
  * Proyección booleana de `resolveVatResponsibility`: colapsa "no responsable"
  * e "indeterminado" en `false` (fail-closed). Ver el bloque de documentación
@@ -282,5 +454,24 @@ export class VatResponsibilityService {
    */
   readFailure(): VatResponsibilityResult {
     return vatResponsibilityReadFailure();
+  }
+
+  /**
+   * B.3 — resultado de tres estados MÁS el tratamiento del IVA de compra, su
+   * texto en español y su base legal, listo para viajar como
+   * `fiscal_explanation` en la respuesta de la vista previa de costo.
+   */
+  explain(
+    fiscalData: VatFiscalDataInput | null | undefined,
+  ): VatTreatmentExplanation {
+    return resolveVatTreatment(fiscalData);
+  }
+
+  /**
+   * B.3 — explicación canónica cuando la LECTURA de `fiscal_data` falló. El
+   * `catch` del consumidor devuelve esto en vez de inventarse un texto.
+   */
+  explainReadFailure(): VatTreatmentExplanation {
+    return vatTreatmentFromResult(vatResponsibilityReadFailure());
   }
 }

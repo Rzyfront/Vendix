@@ -72,6 +72,11 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'refund.completed.store_credit': '2805',
   'purchase_order.received.inventory': '1435',
   'purchase_order.received.accounts_payable': '2205',
+  // CP-PURCHASE-TRANSPARENCY C.6 — flete de compra asumido como gasto
+  // (shipping_cost_allocation = 'expense'). Espejo de DEFAULT_ACCOUNT_MAPPINGS
+  // en src/.../account-mapping.service.ts. 513550 es cuenta de detalle
+  // («Transporte, Fletes y Acarreos»); 5135 es el grupo y no admite movimiento.
+  'purchase_order.received.shipping_expense': '513550',
   'support_document.accepted.expense': '5195',
   'support_document.accepted.vat_deductible': '240804',
   'support_document.accepted.iva_deductible': '240804',

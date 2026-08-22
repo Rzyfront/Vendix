@@ -10,7 +10,11 @@ import {
   VatResponsibilityService,
   VAT_RESPONSIBLE_CODE,
   VAT_NOT_RESPONSIBLE_CODE,
+  resolveVatTreatment,
+  vatTreatmentFromResult,
+  FISCAL_WIZARD_ROUTE,
 } from './vat-responsibility.helper';
+import { purchaseEffectFor } from '../../domains/fiscal-operations/constants/fiscal-responsibilities.catalog';
 
 /**
  * P0.1 — consolidación del helper `isVatResponsible`.
@@ -466,5 +470,153 @@ describe('VatResponsibilityService — variante de tres estados', () => {
 
   it('readFailure expone el resultado canónico de fallo de lectura', () => {
     expect(service.readFailure()).toEqual(vatResponsibilityReadFailure());
+  });
+});
+
+/**
+ * CP-PURCHASE-TRANSPARENCY B.3 — el texto que ve el operador tiene que
+ * describir EL MISMO tratamiento que aplica el motor de costeo. Si el catálogo
+ * dijera «se descuenta» mientras el motor capitaliza, la interfaz estaría
+ * explicando al revés lo que el sistema hace: peor que no explicar nada.
+ */
+describe('resolveVatTreatment — las cinco combinaciones de motivo (B.3)', () => {
+  const cases: Array<{
+    name: string;
+    input: any;
+    reason: string;
+    source: string;
+    treatment: 'deductible' | 'capitalized';
+    indeterminate: boolean;
+  }> = [
+    {
+      name: 'O-48 declarado',
+      input: { tax_responsibilities: [VAT_RESPONSIBLE_CODE] },
+      reason: 'declared_responsible',
+      source: 'tax_responsibilities',
+      treatment: 'deductible',
+      indeterminate: false,
+    },
+    {
+      name: 'O-49 declarado',
+      input: { tax_responsibilities: [VAT_NOT_RESPONSIBLE_CODE] },
+      reason: 'declared_not_responsible',
+      source: 'tax_responsibilities',
+      treatment: 'capitalized',
+      indeterminate: false,
+    },
+    {
+      name: 'inferencia por régimen COMUN',
+      input: { tax_regime: 'COMUN' },
+      reason: 'regime_responsible',
+      source: 'tax_regime',
+      treatment: 'deductible',
+      indeterminate: false,
+    },
+    {
+      name: 'inferencia por régimen SIMPLIFICADO',
+      input: { tax_regime: 'SIMPLIFICADO' },
+      reason: 'regime_not_responsible',
+      source: 'tax_regime',
+      treatment: 'capitalized',
+      indeterminate: false,
+    },
+    {
+      name: 'sin ninguna señal fiscal',
+      input: {},
+      reason: 'no_fiscal_signal',
+      source: 'absent',
+      treatment: 'capitalized',
+      indeterminate: true,
+    },
+  ];
+
+  it.each(cases)(
+    '$name → reason=$reason source=$source treatment=$treatment',
+    ({ input, reason, source, treatment, indeterminate }) => {
+      const out = resolveVatTreatment(input);
+      expect(out.reason).toBe(reason);
+      expect(out.source).toBe(source);
+      expect(out.treatment).toBe(treatment);
+      expect(out.indeterminate).toBe(indeterminate);
+      expect(out.message.length).toBeGreaterThan(0);
+      expect(out.legal_basis.length).toBeGreaterThan(0);
+    },
+  );
+
+  it('el tratamiento NUNCA contradice el booleano que aplica el motor de costeo', () => {
+    for (const { input } of cases) {
+      const out = resolveVatTreatment(input);
+      expect(out.vat_responsible).toBe(isVatResponsible(input));
+      expect(out.treatment).toBe(
+        out.vat_responsible ? 'deductible' : 'capitalized',
+      );
+    }
+  });
+
+  it('el fallo de lectura es indeterminado, capitaliza y NO se confunde con la ausencia de datos', () => {
+    const out = vatTreatmentFromResult(vatResponsibilityReadFailure());
+    expect(out.reason).toBe('fiscal_read_failed');
+    expect(out.source).toBe('read_error');
+    expect(out.indeterminate).toBe(true);
+    expect(out.treatment).toBe('capitalized');
+    expect(out.message).not.toBe(resolveVatTreatment({}).message);
+  });
+
+  it('solo los estados indeterminados traen llamada a la acción, y apunta al asistente fiscal', () => {
+    expect(resolveVatTreatment({}).cta).toEqual({
+      label: expect.any(String),
+      route: FISCAL_WIZARD_ROUTE,
+    });
+    expect(
+      vatTreatmentFromResult(vatResponsibilityReadFailure()).cta?.route,
+    ).toBe(FISCAL_WIZARD_ROUTE);
+    expect(
+      resolveVatTreatment({ tax_responsibilities: [VAT_RESPONSIBLE_CODE] }).cta,
+    ).toBeUndefined();
+    expect(
+      resolveVatTreatment({ tax_responsibilities: [VAT_NOT_RESPONSIBLE_CODE] })
+        .cta,
+    ).toBeUndefined();
+    expect(resolveVatTreatment({ tax_regime: 'COMUN' }).cta).toBeUndefined();
+  });
+
+  it('el texto y la base legal de O-48 / O-49 salen del CATÁLOGO oficial, no de una cadena local', () => {
+    expect(
+      resolveVatTreatment({ tax_responsibilities: [VAT_RESPONSIBLE_CODE] }),
+    ).toEqual(
+      expect.objectContaining({
+        message: purchaseEffectFor(VAT_RESPONSIBLE_CODE)!.message,
+        legal_basis: purchaseEffectFor(VAT_RESPONSIBLE_CODE)!.legal_basis,
+      }),
+    );
+    expect(
+      resolveVatTreatment({ tax_responsibilities: [VAT_NOT_RESPONSIBLE_CODE] }),
+    ).toEqual(
+      expect.objectContaining({
+        message: purchaseEffectFor(VAT_NOT_RESPONSIBLE_CODE)!.message,
+        legal_basis: purchaseEffectFor(VAT_NOT_RESPONSIBLE_CODE)!.legal_basis,
+      }),
+    );
+  });
+
+  it('la cascada por régimen se declara como INFERENCIA, no como declaración del contribuyente', () => {
+    expect(resolveVatTreatment({ tax_regime: 'COMUN' }).message).toMatch(
+      /no lo declaraste/i,
+    );
+    expect(resolveVatTreatment({ tax_regime: 'SIMPLIFICADO' }).message).toMatch(
+      /inferencia/i,
+    );
+  });
+
+  it('no cita artículos que no sostienen la afirmación (491 ET es de activos fijos; el 2650/1993 no funda el IVA)', () => {
+    const all = [
+      ...cases.map((c) => resolveVatTreatment(c.input)),
+      vatTreatmentFromResult(vatResponsibilityReadFailure()),
+    ].flatMap((o) => o.legal_basis);
+    for (const cite of all) {
+      expect(cite).not.toMatch(/\b491\b/);
+      expect(cite).not.toMatch(/\b86\b/);
+      expect(cite).not.toMatch(/2650/);
+    }
   });
 });

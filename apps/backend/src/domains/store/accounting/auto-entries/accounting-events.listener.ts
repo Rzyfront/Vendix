@@ -4,6 +4,7 @@ import { AutoEntryService, AutoEntryLine } from './auto-entry.service';
 import { AccountMappingService } from '../account-mappings/account-mapping.service';
 import { FiscalGateService } from '../../../../common/services/fiscal-gate.service';
 import { PlatformOrgService } from '../../../../common/services/platform-org.service';
+import { AccountingEntryFailureService } from './accounting-entry-failure.service';
 import { TaxBreakdownItem } from '@common/interfaces/tax-breakdown.interface';
 import { WithholdingLine } from '@common/interfaces/withholding-breakdown.interface';
 
@@ -16,6 +17,7 @@ export class AccountingEventsListener {
     private readonly account_mapping_service: AccountMappingService,
     private readonly fiscal_gate: FiscalGateService,
     private readonly platform_org_service: PlatformOrgService,
+    private readonly entry_failure_service: AccountingEntryFailureService,
   ) {}
 
   /**
@@ -56,6 +58,16 @@ export class AccountingEventsListener {
    *
    * `flow_key` es un subflow (payments, inventory, invoicing, payroll, …); el
    * gate lo mapea a su área fiscal gobernante vía SUBFLOW_TO_AREA.
+   *
+   * CP-PURCHASE-TRANSPARENCY C.9 — `organization_id` NO es opcional en la
+   * práctica: todos los eventos lo traen y todos los llamadores lo pasan. Se
+   * mantiene opcional solo por firma. La razón es concreta: una recepción en
+   * bodega DE ORGANIZACIÓN llega con `store_id` indefinido, así que sin el
+   * tercer argumento `org_id` caía a `0`, el gate devolvía `false` y el
+   * manejador salía con un `return` desnudo. Dos de las 21 recepciones sin
+   * asiento medidas en el entorno de referencia se explican exactamente así:
+   * no era una decisión de configuración, era el gate resolviendo la
+   * organización equivocada.
    */
   private async isFlowEnabled(
     store_id: number | undefined,
@@ -70,6 +82,51 @@ export class AccountingEventsListener {
       store_id ?? null,
       flow_key,
     );
+  }
+
+  /**
+   * CP-PURCHASE-TRANSPARENCY C.9 — variante INSTRUMENTADA de `isFlowEnabled`
+   * para los flujos donde un asiento ausente descuadra inventario o cuentas por
+   * pagar (compras, recepciones, ajustes). Cuando el gate dice «no», deja fila
+   * en `accounting_entry_failures` con la causa `SKIPPED_FLOW_DISABLED` antes
+   * de devolver `false`, de modo que un conteo «recepciones vs asientos» sea
+   * respondible sin leer el log del contenedor — que cada despliegue borra.
+   *
+   * Deliberadamente NO se aplica a los eventos de alto volumen (ventas, pagos,
+   * caja): una tienda con la contabilidad apagada a propósito llenaría la tabla
+   * de bitácora con miles de filas por día y ahogaría los defectos reales. Los
+   * flujos instrumentados tienen volumen acotado por operaciones de compra.
+   */
+  private async requireFlow(
+    flow_key: string,
+    ctx: {
+      organization_id: number;
+      store_id?: number;
+      /** `source_type` del asiento que no se va a crear. */
+      source_type: string;
+      source_id?: number | null;
+      event: unknown;
+    },
+  ): Promise<boolean> {
+    if (
+      await this.isFlowEnabled(ctx.store_id, flow_key, ctx.organization_id)
+    ) {
+      return true;
+    }
+    // C.9 — camino 2 de 4.
+    await this.entry_failure_service.recordSkip({
+      organization_id: ctx.organization_id,
+      store_id: ctx.store_id,
+      source_type: ctx.source_type,
+      source_id: ctx.source_id,
+      cause: 'SKIPPED_FLOW_DISABLED',
+      detail:
+        `El subflujo contable '${flow_key}' está apagado para la organización ` +
+        `#${ctx.organization_id}${ctx.store_id ? ` / tienda #${ctx.store_id}` : ' (bodega de organización)'}. ` +
+        `La operación de negocio se completó sin asiento.`,
+      event_payload: ctx.event,
+    });
+    return false;
   }
 
   @OnEvent('invoice.accepted')
@@ -90,7 +147,14 @@ export class AccountingEventsListener {
     customer?: { id: number; name?: string; tax_id?: string };
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'invoicing'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'invoicing',
+          event.organization_id,
+        ))
+      )
+        return;
 
       // Una nota crédito aceptada llega por el MISMO evento invoice.accepted:
       // debe reversar la venta (DR devoluciones/impuestos, CR cartera), nunca
@@ -158,7 +222,14 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'purchases'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'purchases',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onSupportDocumentAccepted({
         invoice_id: event.invoice_id,
         organization_id: event.organization_id,
@@ -205,7 +276,14 @@ export class AccountingEventsListener {
     customer?: { id: number; name?: string; tax_id?: string };
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'payments'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'payments',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onPaymentReceived({
         payment_id: event.payment_id,
         organization_id: event.organization_id,
@@ -263,7 +341,14 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'credit_sales'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'credit_sales',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onCreditSaleCreated({
         order_id: event.order_id,
         organization_id: event.organization_id,
@@ -339,7 +424,14 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'expenses'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'expenses',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onExpensePaid({
         expense_id: event.expense_id,
         organization_id: event.organization_id,
@@ -409,7 +501,14 @@ export class AccountingEventsListener {
     >;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'payroll'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'payroll',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onPayrollApproved({
         payroll_run_id: event.payroll_run_id,
         organization_id: event.organization_id,
@@ -460,7 +559,14 @@ export class AccountingEventsListener {
     }>;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'payroll'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'payroll',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onPayrollPaid({
         payroll_run_id: event.payroll_run_id,
         organization_id: event.organization_id,
@@ -489,7 +595,14 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'inventory'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'inventory',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onOrderCompleted({
         order_id: event.order_id,
         organization_id: event.organization_id,
@@ -520,7 +633,14 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'inventory'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'inventory',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onProductionCompleted({
         production_order_id: event.production_order_id,
         organization_id: event.organization_id,
@@ -553,7 +673,14 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'inventory'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'inventory',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onKitchenFired({
         kitchen_ticket_id: event.kitchen_ticket_id,
         order_id: event.order_id,
@@ -589,7 +716,14 @@ export class AccountingEventsListener {
     refund_method?: string;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'returns'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'returns',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onRefundCompleted({
         refund_id: event.refund_id,
         organization_id: event.organization_id,
@@ -628,25 +762,50 @@ export class AccountingEventsListener {
     /** F2: entidad fiscal resuelta por el emisor (propagación explícita). */
     accounting_entity_id?: number;
     total_amount: number;
+    /**
+     * CP-PURCHASE-TRANSPARENCY C.6 — flete de esta recepción que el comercio
+     * ASUME como gasto (`shipping_cost_allocation = 'expense'`). Ausente o 0
+     * en modo `prorate`, donde el flete ya viaja dentro de `total_amount`
+     * porque entró al costo unitario. Ver `onPurchaseOrderReceived`.
+     */
+    shipping_expense_amount?: number;
     user_id?: number;
     /** C4-followup: propagado desde purchase-orders.service.ts (updated_po.suppliers). */
     supplier?: { id: number; name?: string; tax_id?: string };
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'purchases'))) return;
-      await this.auto_entry_service.onPurchaseOrderReceived({
+      if (
+        !(await this.requireFlow('purchases', {
+          organization_id: event.organization_id,
+          store_id: event.store_id,
+          source_type: 'purchase_order.received',
+          source_id: event.reception_id,
+          event,
+        }))
+      )
+        return;
+      const entry = await this.auto_entry_service.onPurchaseOrderReceived({
         purchase_order_id: event.purchase_order_id,
         reception_id: event.reception_id,
         organization_id: event.organization_id,
         store_id: event.store_id,
         accounting_entity_id: event.accounting_entity_id,
         total_amount: Number(event.total_amount),
+        shipping_expense_amount:
+          event.shipping_expense_amount != null
+            ? Number(event.shipping_expense_amount)
+            : undefined,
         user_id: event.user_id,
         supplier: event.supplier,
       });
-      this.logger.log(
-        `Auto-entry created for purchase_order.received #${event.purchase_order_id} (reception #${event.reception_id})`,
-      );
+      // C.9 — este `log` afirmaba «Auto-entry created» aunque `postAutoEntry`
+      // hubiera devuelto `null`. La afirmación de éxito ahora exige asiento.
+      // El caso nulo YA dejó fila con su causa dentro de postAutoEntry.
+      if (entry) {
+        this.logger.log(
+          `Auto-entry created for purchase_order.received #${event.purchase_order_id} (reception #${event.reception_id})`,
+        );
+      }
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for purchase_order.received #${event.purchase_order_id} (reception #${event.reception_id}): ${error.message}`,
@@ -677,8 +836,17 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'purchases'))) return;
-      await this.auto_entry_service.onPurchaseVatRecognized({
+      if (
+        !(await this.requireFlow('purchases', {
+          organization_id: event.organization_id,
+          store_id: event.store_id,
+          source_type: 'purchase_vat',
+          source_id: event.invoice_id,
+          event,
+        }))
+      )
+        return;
+      const entry = await this.auto_entry_service.onPurchaseVatRecognized({
         invoice_id: event.invoice_id,
         purchase_order_id: event.purchase_order_id,
         reception_id: event.reception_id,
@@ -689,9 +857,11 @@ export class AccountingEventsListener {
         supplier: event.supplier,
         user_id: event.user_id,
       });
-      this.logger.log(
-        `Auto-entry created for purchase.vat_recognized invoice #${event.invoice_id} (PO #${event.purchase_order_id})`,
-      );
+      if (entry) {
+        this.logger.log(
+          `Auto-entry created for purchase.vat_recognized invoice #${event.invoice_id} (PO #${event.purchase_order_id})`,
+        );
+      }
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for purchase.vat_recognized invoice #${event.invoice_id} (PO #${event.purchase_order_id}): ${error.message}`,
@@ -715,8 +885,19 @@ export class AccountingEventsListener {
     supplier?: { id: number; name?: string; tax_id?: string };
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'purchases'))) return;
-      await this.auto_entry_service.onPurchaseOrderPayment({
+      if (
+        !(await this.requireFlow('purchases', {
+          organization_id: event.organization_id,
+          store_id: event.store_id,
+          source_type: event.is_advance
+            ? 'purchase_order.advance_payment'
+            : 'purchase_order.payment',
+          source_id: event.payment_id ?? event.purchase_order_id,
+          event,
+        }))
+      )
+        return;
+      const entry = await this.auto_entry_service.onPurchaseOrderPayment({
         purchase_order_id: event.purchase_order_id,
         payment_id: event.payment_id,
         organization_id: event.organization_id,
@@ -728,10 +909,12 @@ export class AccountingEventsListener {
         user_id: event.user_id,
         supplier: event.supplier,
       });
-      this.logger.log(
-        `Auto-entry created for purchase_order.payment PO #${event.purchase_order_id}` +
-          (event.is_advance ? ' (anticipo)' : ''),
-      );
+      if (entry) {
+        this.logger.log(
+          `Auto-entry created for purchase_order.payment PO #${event.purchase_order_id}` +
+            (event.is_advance ? ' (anticipo)' : ''),
+        );
+      }
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for purchase_order.payment PO #${event.purchase_order_id}: ${error.message}`,
@@ -760,8 +943,17 @@ export class AccountingEventsListener {
     supplier?: { id: number; name?: string; tax_id?: string };
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'purchases'))) return;
-      await this.auto_entry_service.onPurchaseOrderAdvanceReclass({
+      if (
+        !(await this.requireFlow('purchases', {
+          organization_id: event.organization_id,
+          store_id: event.store_id,
+          source_type: 'purchase_order.advance_reclass',
+          source_id: event.reception_id,
+          event,
+        }))
+      )
+        return;
+      const entry = await this.auto_entry_service.onPurchaseOrderAdvanceReclass({
         purchase_order_id: event.purchase_order_id,
         reception_id: event.reception_id,
         organization_id: event.organization_id,
@@ -771,9 +963,11 @@ export class AccountingEventsListener {
         user_id: event.user_id,
         supplier: event.supplier,
       });
-      this.logger.log(
-        `Auto-entry created for purchase_order.advance_reclass PO #${event.purchase_order_id} (reception #${event.reception_id})`,
-      );
+      if (entry) {
+        this.logger.log(
+          `Auto-entry created for purchase_order.advance_reclass PO #${event.purchase_order_id} (reception #${event.reception_id})`,
+        );
+      }
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for purchase_order.advance_reclass PO #${event.purchase_order_id} (reception #${event.reception_id}): ${error.message}`,
@@ -792,8 +986,17 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'inventory'))) return;
-      await this.auto_entry_service.onInventoryAdjusted({
+      if (
+        !(await this.requireFlow('inventory', {
+          organization_id: event.organization_id,
+          store_id: event.store_id,
+          source_type: 'inventory.adjusted',
+          source_id: event.adjustment_id,
+          event,
+        }))
+      )
+        return;
+      const entry = await this.auto_entry_service.onInventoryAdjusted({
         adjustment_id: event.adjustment_id,
         organization_id: event.organization_id,
         store_id: event.store_id,
@@ -801,9 +1004,11 @@ export class AccountingEventsListener {
         quantity_change: Number(event.quantity_change),
         user_id: event.user_id,
       });
-      this.logger.log(
-        `Auto-entry created for inventory.adjusted #${event.adjustment_id}`,
-      );
+      if (entry) {
+        this.logger.log(
+          `Auto-entry created for inventory.adjusted #${event.adjustment_id}`,
+        );
+      }
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for inventory.adjusted #${event.adjustment_id}: ${error.message}`,
@@ -826,7 +1031,14 @@ export class AccountingEventsListener {
     organization_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'layaway'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'layaway',
+          event.organization_id,
+        ))
+      )
+        return;
       const organization_id =
         event.organization_id || (await this.resolveOrgId(event.store_id));
       await this.auto_entry_service.onLayawayPaymentReceived({
@@ -858,7 +1070,14 @@ export class AccountingEventsListener {
     organization_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'layaway'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'layaway',
+          event.organization_id,
+        ))
+      )
+        return;
       const organization_id =
         event.organization_id || (await this.resolveOrgId(event.store_id));
       await this.auto_entry_service.onLayawayCompleted({
@@ -893,7 +1112,14 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'layaway'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'layaway',
+          event.organization_id,
+        ))
+      )
+        return;
       const organization_id =
         event.organization_id || (await this.resolveOrgId(event.store_id));
       await this.auto_entry_service.onLayawayCancelled({
@@ -935,7 +1161,14 @@ export class AccountingEventsListener {
     organization_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'installments'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'installments',
+          event.organization_id,
+        ))
+      )
+        return;
       const organization_id =
         event.organization_id || (await this.resolveOrgId(event.store_id));
       await this.auto_entry_service.onInstallmentPaymentReceived({
@@ -990,7 +1223,14 @@ export class AccountingEventsListener {
     approved_by?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'settlements'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'settlements',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onSettlementApproved({
         settlement_id: event.settlement_id,
         settlement_number: event.settlement_number ?? `#${event.settlement_id}`,
@@ -1036,7 +1276,14 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'settlements'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'settlements',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onSettlementPaid({
         settlement_id: event.settlement_id,
         settlement_number: event.settlement_number,
@@ -1078,7 +1325,14 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'fixed_assets'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'fixed_assets',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onDepreciationPosted({
         asset_id: event.asset_id,
         asset_number: event.asset_number,
@@ -1113,7 +1367,14 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'fixed_assets'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'fixed_assets',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onFixedAssetDisposed({
         asset_id: event.asset_id,
         asset_number: event.asset_number,
@@ -1153,7 +1414,14 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'withholding'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'withholding',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onWithholdingApplied({
         organization_id: event.organization_id,
         store_id: event.store_id,
@@ -1193,7 +1461,13 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'stock_transfers'))) {
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'stock_transfers',
+          event.organization_id,
+        ))
+      ) {
         this.logger.debug(
           `Skipping stock_transfer.completed auto-entry #${event.transfer_id}: stock_transfers accounting flow disabled for store=${event.store_id ?? 'n/a'}`,
         );
@@ -1241,7 +1515,14 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'inventory'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'inventory',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onDispatchNoteDelivered({
         dispatch_note_id: event.dispatch_note_id,
         dispatch_number: event.dispatch_number,
@@ -1278,7 +1559,14 @@ export class AccountingEventsListener {
     supplier?: { id: number; name?: string; tax_id?: string };
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'inventory'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'inventory',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onDispatchNoteReceived({
         dispatch_note_id: event.dispatch_note_id,
         dispatch_number: event.dispatch_number,
@@ -1319,7 +1607,14 @@ export class AccountingEventsListener {
     supplier?: { id: number; name?: string; tax_id?: string };
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'inventory'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'inventory',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onDispatchNoteVoided({
         dispatch_note_id: event.dispatch_note_id,
         dispatch_number: event.dispatch_number,
@@ -1353,7 +1648,14 @@ export class AccountingEventsListener {
     user_id: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'cash_register'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'cash_register',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onCashRegisterOpened({
         session_id: event.session_id,
         organization_id: event.organization_id,
@@ -1383,7 +1685,14 @@ export class AccountingEventsListener {
     user_id: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'cash_register'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'cash_register',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onCashRegisterClosed({
         session_id: event.session_id,
         organization_id: event.organization_id,
@@ -1417,7 +1726,14 @@ export class AccountingEventsListener {
     user_id: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'cash_register'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'cash_register',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onCashRegisterMovement({
         movement_id: event.movement_id,
         organization_id: event.organization_id,
@@ -1458,7 +1774,14 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'cash_register'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'cash_register',
+          event.organization_id,
+        ))
+      )
+        return;
       const organization_id =
         event.organization_id || (await this.resolveOrgId(event.store_id));
       await this.auto_entry_service.onDispatchRouteClosed({
@@ -1495,7 +1818,14 @@ export class AccountingEventsListener {
     user_id: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'ar_ap'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'ar_ap',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onArWrittenOff({
         ar_id: event.ar_id,
         organization_id: event.organization_id,
@@ -1530,7 +1860,14 @@ export class AccountingEventsListener {
     user_id: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'ar_ap'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'ar_ap',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onApPaymentRegistered({
         ap_id: event.ap_id,
         ap_payment_id: event.ap_payment_id ?? event.ap_id,
@@ -1563,7 +1900,14 @@ export class AccountingEventsListener {
     user_id: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'ar_ap'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'ar_ap',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onApWrittenOff({
         ap_id: event.ap_id,
         organization_id: event.organization_id,
@@ -1594,7 +1938,14 @@ export class AccountingEventsListener {
     rule_id: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'commissions'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'commissions',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onCommissionCalculated({
         payment_id: event.payment_id,
         organization_id: event.organization_id,
@@ -1625,7 +1976,14 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'wallet'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'wallet',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onWalletCredited({
         wallet_id: event.wallet_id,
         organization_id: event.organization_id,
@@ -1656,7 +2014,14 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'wallet'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'wallet',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onWalletDebited({
         wallet_id: event.wallet_id,
         organization_id: event.organization_id,
@@ -1686,7 +2051,14 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'expenses'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'expenses',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onExpenseRefunded({
         expense_id: event.expense_id,
         organization_id: event.organization_id,
@@ -1714,7 +2086,14 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'expenses'))) return;
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'expenses',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onExpenseCancelled({
         expense_id: event.expense_id,
         organization_id: event.organization_id,
@@ -1801,7 +2180,11 @@ export class AccountingEventsListener {
 
     // ── Store-cliente side: SaaS expense ────────────────────────────────
     if (
-      (await this.isFlowEnabled(event.store.store_id, 'expenses')) &&
+      (await this.isFlowEnabled(
+        event.store.store_id,
+        'expenses',
+        event.store.organization_id,
+      )) &&
       event.store.amount > 0
     ) {
       try {

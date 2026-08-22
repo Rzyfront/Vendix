@@ -398,3 +398,225 @@ describe('AutoEntryService VAT settlement lifecycle (F5 + 2a/2b)', () => {
     expect(finalLedger['240810']).toBeCloseTo(-1000, 3);
   });
 });
+
+/**
+ * CP-PURCHASE-TRANSPARENCY C.6 — el flete asumido como gasto es una TERCERA
+ * línea del asiento de recepción, y la CxP sube a inventario + flete.
+ *
+ * La asimetría es el punto: en modo `prorate` el flete ya está dentro del costo
+ * unitario, así que `total_amount` lo contiene y el asiento sigue siendo de dos
+ * líneas. En modo `expense` el flete NO entra al costo, pero el proveedor igual
+ * lo cobra: sin la tercera línea el asiento quedaría descuadrado o —lo que
+ * pasaba antes— con menos de dos líneas válidas y descartado en silencio.
+ */
+describe('AutoEntryService purchase_order.received — flete asumido (C.6)', () => {
+  const MAPPING_CODES: Record<string, string> = {
+    'purchase_order.received.inventory': '1435',
+    'purchase_order.received.accounts_payable': '2205',
+    'purchase_order.received.shipping_expense': '513550',
+  };
+
+  const build = (codes: Record<string, string> = MAPPING_CODES) => {
+    const accountMapping = {
+      getMapping: jest.fn(async (_org: number, key: string) =>
+        codes[key] ? { account_code: codes[key], source: 'default' } : null,
+      ),
+    };
+    const service = new AutoEntryService(
+      { chart_of_accounts: { findFirst: jest.fn() } } as any,
+      accountMapping as any,
+      { resolveAccountingEntityForFiscal: jest.fn() } as any,
+      {
+        isAreaEnabled: jest.fn().mockResolvedValue(true),
+        isSubflowEnabled: jest.fn().mockResolvedValue(true),
+      } as any,
+      { recordFailure: jest.fn(), recordSkip: jest.fn() } as any,
+    );
+    const createAutoEntry = jest
+      .spyOn(service, 'createAutoEntry')
+      .mockResolvedValue({ id: 1 } as any);
+    return { service, createAutoEntry };
+  };
+
+  const baseData = {
+    purchase_order_id: 500,
+    reception_id: 900,
+    organization_id: 6,
+    store_id: 10,
+    accounting_entity_id: 25,
+    total_amount: 1_000_000,
+    user_id: 9,
+  };
+
+  it("modo 'prorate' (sin flete propio): dos líneas y la CxP igual al inventario", async () => {
+    const { service, createAutoEntry } = build();
+
+    await service.onPurchaseOrderReceived(baseData);
+
+    const lines = createAutoEntry.mock.calls[0][0].lines.filter(Boolean) as any[];
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toEqual(
+      expect.objectContaining({ account_code: '1435', debit_amount: 1_000_000 }),
+    );
+    expect(lines[1]).toEqual(
+      expect.objectContaining({ account_code: '2205', credit_amount: 1_000_000 }),
+    );
+  });
+
+  it("modo 'expense': DR 1435 neto + DR 513550 flete + CR 2205 la suma, y cuadra", async () => {
+    const { service, createAutoEntry } = build();
+
+    await service.onPurchaseOrderReceived({
+      ...baseData,
+      shipping_expense_amount: 50_000,
+    });
+
+    const lines = createAutoEntry.mock.calls[0][0].lines.filter(Boolean) as any[];
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toEqual(
+      expect.objectContaining({ account_code: '1435', debit_amount: 1_000_000 }),
+    );
+    expect(lines[1]).toEqual(
+      expect.objectContaining({ account_code: '513550', debit_amount: 50_000 }),
+    );
+    expect(lines[2]).toEqual(
+      expect.objectContaining({ account_code: '2205', credit_amount: 1_050_000 }),
+    );
+
+    const debit = lines.reduce((s, l) => s + Number(l.debit_amount), 0);
+    const credit = lines.reduce((s, l) => s + Number(l.credit_amount), 0);
+    expect(debit).toBe(credit);
+  });
+
+  it('un flete en 0 no produce la tercera línea (no hay gasto que registrar)', async () => {
+    const { service, createAutoEntry } = build();
+
+    await service.onPurchaseOrderReceived({
+      ...baseData,
+      shipping_expense_amount: 0,
+    });
+
+    const lines = createAutoEntry.mock.calls[0][0].lines.filter(Boolean) as any[];
+    expect(lines).toHaveLength(2);
+  });
+
+  it('sin la clave de mapeo del flete falla EN VOZ ALTA, nombrándola, en vez de emitir un asiento torcido', async () => {
+    const { service, createAutoEntry } = build({
+      'purchase_order.received.inventory': '1435',
+      'purchase_order.received.accounts_payable': '2205',
+    });
+
+    await expect(
+      service.onPurchaseOrderReceived({
+        ...baseData,
+        shipping_expense_amount: 50_000,
+      }),
+    ).rejects.toThrow(/purchase_order\.received\.shipping_expense/);
+    expect(createAutoEntry).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * CP-PURCHASE-TRANSPARENCY C.9 — `postAutoEntry` devolvía `null` por dos
+ * caminos sin dejar rastro. Ahora cada uno escribe su fila con la causa.
+ */
+describe('AutoEntryService postAutoEntry — omisiones instrumentadas (C.9)', () => {
+  const build = (overrides: any = {}) => {
+    const recordSkip = jest.fn().mockResolvedValue(undefined);
+    const service = new AutoEntryService(
+      {
+        chart_of_accounts: { findFirst: jest.fn() },
+        withoutScope: () => ({
+          accounting_entities: {
+            findFirst: jest.fn().mockResolvedValue({
+              id: 25,
+              scope: 'STORE',
+              store_id: 10,
+              organization_id: 6,
+            }),
+          },
+        }),
+        fiscal_periods: { findFirst: jest.fn().mockResolvedValue(null) },
+        ...overrides.prisma,
+      } as any,
+      { getMapping: jest.fn().mockResolvedValue(null) } as any,
+      { resolveAccountingEntityForFiscal: jest.fn() } as any,
+      {
+        isAreaEnabled: jest.fn().mockResolvedValue(true),
+        isSubflowEnabled: jest.fn().mockResolvedValue(true),
+        ...overrides.fiscalGate,
+      } as any,
+      { recordFailure: jest.fn(), recordSkip } as any,
+    );
+    jest
+      .spyOn(service as any, 'resolveEntryDate')
+      .mockResolvedValue(new Date('2026-08-22T05:00:00.000Z'));
+    return { service, recordSkip };
+  };
+
+  const event = {
+    source_type: 'purchase_order.received',
+    source_id: 900,
+    organization_id: 6,
+    store_id: 10,
+    accounting_entity_id: 25,
+    description: 'Purchase order received #500 (reception #900)',
+    lines: [
+      { account_code: '1435', description: 'Inventory', debit_amount: 100, credit_amount: 0 },
+      { account_code: '2205', description: 'AP', debit_amount: 0, credit_amount: 100 },
+    ],
+  };
+
+  it('área contable inactiva ⇒ fila SKIPPED_AREA_INACTIVE y retorno nulo', async () => {
+    const { service, recordSkip } = build({
+      fiscalGate: { isAreaEnabled: jest.fn().mockResolvedValue(false) },
+    });
+
+    await expect(service.postAutoEntry(event as any)).resolves.toBeNull();
+    expect(recordSkip).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cause: 'SKIPPED_AREA_INACTIVE',
+        source_type: 'purchase_order.received',
+        source_id: 900,
+        organization_id: 6,
+      }),
+    );
+  });
+
+  it('menos de dos líneas válidas ⇒ fila SKIPPED_MISSING_MAPPING y retorno nulo', async () => {
+    const { service, recordSkip } = build();
+
+    await expect(
+      service.postAutoEntry({ ...event, lines: [event.lines[0], null] } as any),
+    ).resolves.toBeNull();
+    expect(recordSkip).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cause: 'SKIPPED_MISSING_MAPPING',
+        source_type: 'purchase_order.received',
+        source_id: 900,
+      }),
+    );
+  });
+
+  it('IVA no positivo en purchase.vat_recognized ⇒ fila SKIPPED_ZERO_AMOUNT', async () => {
+    const { service, recordSkip } = build();
+
+    await expect(
+      service.onPurchaseVatRecognized({
+        invoice_id: 77,
+        purchase_order_id: 500,
+        reception_id: 900,
+        organization_id: 6,
+        store_id: 10,
+        iva_amount: 0,
+      }),
+    ).resolves.toBeNull();
+    expect(recordSkip).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cause: 'SKIPPED_ZERO_AMOUNT',
+        source_type: 'purchase_vat',
+        source_id: 77,
+      }),
+    );
+  });
+});
