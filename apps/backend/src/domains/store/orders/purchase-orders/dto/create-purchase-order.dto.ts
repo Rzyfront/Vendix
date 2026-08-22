@@ -4,10 +4,13 @@ import {
   IsNumber,
   IsInt,
   Min,
+  Max,
   IsEnum,
   IsOptional,
   IsDateString,
   IsArray,
+  ArrayMinSize,
+  ArrayMaxSize,
   IsBoolean,
   MaxLength,
   ValidateNested,
@@ -18,7 +21,7 @@ import {
   ValidationOptions,
 } from 'class-validator';
 import { IsIn } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform, TransformFnParams } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 import {
   purchase_order_status_enum,
@@ -29,6 +32,85 @@ import {
 /** Allowed fiscal tax classifications for a purchase line (F1 IVA lifecycle). */
 const TAX_TYPE_VALUES = Object.values(tax_type_enum) as string[];
 
+/**
+ * Cota de tamaño de los arreglos de línea. El mismo límite que el resto de las
+ * operaciones masivas del repo (`BatchCreateAdjustmentsDto`): sin tope, una
+ * orden de 5.000 líneas abre 5.000 escrituras dentro de una sola transacción y
+ * deja el pool de Prisma en el suelo.
+ */
+export const PURCHASE_ORDER_ITEMS_MAX = 100;
+
+/**
+ * Modos de imputación del flete de la factura de compra.
+ *
+ * - `prorate`: el flete se reparte entre las líneas y se CAPITALIZA al costo.
+ * - `expense`: el flete no toca el costo del inventario; va a gasto.
+ *
+ * Vive acá y no en el DTO de la vista previa porque los dos contratos deben
+ * ofrecer exactamente el mismo juego de valores: si divergen, el operador
+ * aprueba una simulación que la orden no puede reproducir.
+ */
+export const SHIPPING_COST_ALLOCATIONS = ['prorate', 'expense'] as const;
+export type ShippingCostAllocation = (typeof SHIPPING_COST_ALLOCATIONS)[number];
+
+/**
+ * Devuelve el valor CRUDO del payload, no el que ya tocó el pipe.
+ *
+ * El `ValidationPipe` global corre con `enableImplicitConversion: true`
+ * (`main.ts`), y class-transformer aplica esa conversión ANTES de los
+ * `@Transform` del DTO. Para una propiedad declarada `boolean` eso significa
+ * `Boolean('false') === true`: el string llega ya invertido y ningún
+ * `@Transform` que mire `value` puede recuperarlo. Para una declarada `number`,
+ * `Number('') === 0`: un campo vacío se vuelve un cero silencioso en vez de
+ * quedar ausente. `obj[key]` conserva el valor tal como vino en el cuerpo de la
+ * petición, que es el único desde el que se puede decidir bien.
+ */
+const rawInput = ({ value, obj, key }: TransformFnParams): unknown =>
+  obj && typeof obj === 'object' && key in (obj as Record<string, unknown>)
+    ? (obj as Record<string, unknown>)[key]
+    : value;
+
+/**
+ * Coerción numérica para campos monetarios OPCIONALES (patrón
+ * `toOptionalNumber` de `create-dispatch-note.dto.ts`, endurecido con la
+ * lectura del crudo).
+ *
+ * Nunca devuelve `NaN`: un valor no vacío que no parsea se devuelve intacto
+ * para que `@IsNumber` lo rechace con un mensaje legible en vez del opaco
+ * "must be a number" que produce un `NaN` silencioso. Un valor ausente o vacío
+ * se devuelve como `undefined` para que `@IsOptional()` haga su trabajo y el
+ * campo NO se persista como 0.
+ */
+export const toOptionalNumber = (params: TransformFnParams): unknown => {
+  const raw = rawInput(params);
+  if (raw === null || raw === undefined || raw === '') return undefined;
+  if (typeof raw === 'number') return Number.isNaN(raw) ? params.value : raw;
+  if (typeof raw === 'string') {
+    const parsed = Number(raw.trim());
+    return Number.isNaN(parsed) ? raw : parsed;
+  }
+  return raw;
+};
+
+/**
+ * Coerción booleana para banderas OPCIONALES.
+ *
+ * Devolver `undefined` cuando el campo no viene es OBLIGATORIO y no un detalle:
+ * `deriveLineTax` resuelve el modo de la línea con
+ * `item.prices_include_tax ?? header.prices_include_tax ?? false`. Un
+ * `@Transform` que convierta la ausencia en `false` le pone a TODAS las líneas
+ * un override explícito y el modo de cabecera deja de aplicarse.
+ */
+export const toOptionalBoolean = (params: TransformFnParams): unknown => {
+  const raw = rawInput(params);
+  if (raw === null || raw === undefined || raw === '') return undefined;
+  if (typeof raw === 'boolean') return raw;
+  if (raw === 'true' || raw === 1 || raw === '1') return true;
+  if (raw === 'false' || raw === 0 || raw === '0') return false;
+  // Cualquier otra cosa se entrega intacta para que `@IsBoolean` la rechace.
+  return raw;
+};
+
 export class PurchaseOrderItemDto {
   @ApiProperty({ description: 'Product ID' })
   @IsNumber()
@@ -37,12 +119,17 @@ export class PurchaseOrderItemDto {
 
   @ApiProperty({ description: 'Product variant ID (optional)' })
   @IsNumber()
+  @Min(1)
   @IsOptional()
   product_variant_id?: number;
 
+  // Entero a propósito: `purchase_order_items.quantity_ordered` es `Int` en
+  // Prisma. La VISTA PREVIA sí admite fracción (ver `CostPreviewItemDto`)
+  // porque simula el efecto de la cantidad ANTES de convertirla a unidades de
+  // stock; la creación exige el entero que la columna puede guardar.
   @ApiProperty({ description: 'Quantity ordered' })
-  @IsNumber()
-  @IsNotEmpty()
+  @IsInt()
+  @Min(1)
   quantity: number;
 
   @ApiProperty({ description: 'Unit price' })
@@ -127,7 +214,10 @@ export class PurchaseOrderItemDto {
    * costing engine capitalizes. The percentage travels only as provenance.
    */
   @ApiProperty({ description: 'Line discount percentage (optional)' })
+  @Transform(toOptionalNumber)
   @IsNumber()
+  @Min(0)
+  @Max(100)
   @IsOptional()
   discount_percentage?: number;
 
@@ -137,12 +227,17 @@ export class PurchaseOrderItemDto {
       'QUI-661: line discount as a money amount. Wins over discount_percentage.',
     required: false,
   })
+  @Transform(toOptionalNumber)
   @IsNumber()
+  @Min(0)
   @IsOptional()
   discount_amount?: number;
 
   @ApiProperty({ description: 'Tax rate (optional)' })
+  @Transform(toOptionalNumber)
   @IsNumber()
+  @Min(0)
+  @Max(100)
   @IsOptional()
   tax_rate?: number;
 
@@ -170,6 +265,7 @@ export class PurchaseOrderItemDto {
       'F1: per-line override of header prices_include_tax (mixed invoices).',
     required: false,
   })
+  @Transform(toOptionalBoolean)
   @IsBoolean()
   @IsOptional()
   prices_include_tax?: boolean;
@@ -452,6 +548,96 @@ export function IsValidPaymentPlan(validationOptions?: ValidationOptions) {
   };
 }
 
+/**
+ * Forma mínima que el validador cruzado necesita de la cabecera. Se describe
+ * estructuralmente (y no con los dos DTO concretos) porque la MISMA regla rige
+ * la creación y la vista previa: si el validador conociera solo a uno, el otro
+ * volvería a divergir, que es justo el defecto que este contrato cierra.
+ */
+interface FreightAndTaxHeader {
+  shipping_cost?: number;
+  shipping_cost_allocation?: string;
+  prices_include_tax?: boolean;
+  items?: Array<{ tax_rate?: number } | null | undefined>;
+}
+
+/**
+ * Validador CROSS-FIELD del flete y del modo de impuesto de la cabecera
+ * (patrón `IsValidPaymentPlanConstraint`).
+ *
+ *   1. `shipping_cost > 0` exige `shipping_cost_allocation`: un flete sin modo
+ *      de imputación no se puede costear — nadie sabe si entra al inventario o
+ *      al gasto, y el número queda esperando a que alguien lo adivine.
+ *   2. `shipping_cost_allocation = 'prorate'` exige `shipping_cost > 0`: el
+ *      prorrateo reparte el flete entre las líneas y sin monto divide por cero.
+ *   3. `prices_include_tax = true` exige que ALGUNA línea traiga `tax_rate > 0`:
+ *      declarar que los precios traen impuesto incluido y no declarar ninguna
+ *      tasa deja el IVA descontable en cero y el costo inflado. Se mira el
+ *      conjunto de líneas, no cada una, para no romper la factura mixta con
+ *      renglones exentos legítimos.
+ */
+@ValidatorConstraint({ name: 'IsValidFreightAndTax', async: false })
+export class IsValidFreightAndTaxConstraint
+  implements ValidatorConstraintInterface
+{
+  private static failure(header: FreightAndTaxHeader): string | null {
+    const shipping = Number(header.shipping_cost ?? 0);
+    const allocation = header.shipping_cost_allocation;
+    const allocationMissing =
+      allocation === null || allocation === undefined || allocation === '';
+
+    if (shipping > 0 && allocationMissing) {
+      return 'Falta indicar cómo se imputa el flete: «prorate» lo reparte entre las líneas y lo capitaliza al costo, «expense» lo lleva a gasto.';
+    }
+    if (allocation === 'prorate' && !(shipping > 0)) {
+      return 'El prorrateo del flete exige un costo de flete mayor que cero.';
+    }
+    if (header.prices_include_tax === true) {
+      const items = Array.isArray(header.items) ? header.items : [];
+      const anyTaxed = items.some((i) => Number(i?.tax_rate ?? 0) > 0);
+      if (!anyTaxed) {
+        return 'La factura declara precios con impuesto incluido pero ninguna línea trae tasa de impuesto: falta el «tax_rate» de las líneas gravadas.';
+      }
+    }
+    return null;
+  }
+
+  validate(_value: unknown, args: ValidationArguments): boolean {
+    return (
+      IsValidFreightAndTaxConstraint.failure(
+        args.object as FreightAndTaxHeader,
+      ) === null
+    );
+  }
+
+  defaultMessage(args: ValidationArguments): string {
+    return (
+      IsValidFreightAndTaxConstraint.failure(
+        args.object as FreightAndTaxHeader,
+      ) ?? 'La configuración de flete e impuesto de la cabecera es inválida.'
+    );
+  }
+}
+
+/**
+ * Se cuelga de `location_id` (obligatorio en los dos DTO) y NO de
+ * `shipping_cost`: `@IsOptional()` desactiva TODOS los validadores de su
+ * propiedad cuando el valor es `undefined`, que es exactamente el caso que la
+ * regla 2 tiene que atrapar (`allocation='prorate'` sin flete). Colgado de un
+ * campo siempre presente, el validador siempre corre.
+ */
+export function IsValidFreightAndTax(validationOptions?: ValidationOptions) {
+  return function (object: object, propertyName: string) {
+    registerDecorator({
+      name: 'IsValidFreightAndTax',
+      target: object.constructor,
+      propertyName,
+      options: validationOptions,
+      validator: IsValidFreightAndTaxConstraint,
+    });
+  };
+}
+
 export class CreatePurchaseOrderDto {
   @ApiProperty({ description: 'Organization ID' })
   @IsNumber()
@@ -466,6 +652,7 @@ export class CreatePurchaseOrderDto {
   @ApiProperty({ description: 'Location ID where items will be received' })
   @IsNumber()
   @IsNotEmpty()
+  @IsValidFreightAndTax()
   location_id: number;
 
   @ApiProperty({
@@ -501,6 +688,7 @@ export class CreatePurchaseOrderDto {
       'F1: dominant invoice tax mode. true = line prices already include tax.',
     required: false,
   })
+  @Transform(toOptionalBoolean)
   @IsBoolean()
   @IsOptional()
   prices_include_tax?: boolean;
@@ -525,10 +713,31 @@ export class CreatePurchaseOrderDto {
   @IsOptional()
   shipping_method?: string;
 
+  /**
+   * Flete de la factura. Dos decimales OBLIGATORIOS: la columna es
+   * `Decimal(12,2)` y PostgreSQL y JavaScript no redondean igual el tercero, así
+   * que un valor de 3 decimales muestra una cifra en pantalla y guarda otra.
+   */
   @ApiProperty({ description: 'Shipping cost' })
-  @IsNumber()
+  @Transform(toOptionalNumber)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
   @IsOptional()
   shipping_cost?: number;
+
+  /**
+   * Cómo se imputa el flete: `prorate` lo reparte entre las líneas y lo
+   * capitaliza al costo; `expense` lo deja fuera del inventario. Obligatorio
+   * cuando `shipping_cost > 0` (ver `IsValidFreightAndTaxConstraint`).
+   */
+  @ApiProperty({
+    description: 'Shipping cost allocation mode (prorate | expense)',
+    enum: SHIPPING_COST_ALLOCATIONS,
+    required: false,
+  })
+  @IsIn(SHIPPING_COST_ALLOCATIONS as unknown as string[])
+  @IsOptional()
+  shipping_cost_allocation?: ShippingCostAllocation;
 
   @ApiProperty({ description: 'Subtotal amount' })
   @IsNumber()
@@ -546,7 +755,9 @@ export class CreatePurchaseOrderDto {
   total_amount?: number;
 
   @ApiProperty({ description: 'Discount amount' })
+  @Transform(toOptionalNumber)
   @IsNumber()
+  @Min(0)
   @IsOptional()
   discount_amount?: number;
 
@@ -623,15 +834,19 @@ export class CreatePurchaseOrderDto {
   @IsOptional()
   created_by_user_id?: number;
 
-  @ApiProperty({ description: 'Approved by user ID' })
-  @IsNumber()
-  @IsOptional()
-  approved_by_user_id?: number;
+  // A.10 — `approved_by_user_id` NO vive en el contrato de creación: se
+  // escribe únicamente en `approve()`, detrás del permiso de aprobación. Estaba
+  // declarado acá y el servicio lo derramaba a Prisma con el resto de la
+  // cabecera, así que un cliente podía nombrar al aprobador de una orden que
+  // nadie aprobó. Con `forbidNonWhitelisted` el campo ahora devuelve 400.
 
   @ApiProperty({
     description: 'Purchase order items',
     type: [PurchaseOrderItemDto],
   })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(PURCHASE_ORDER_ITEMS_MAX)
   @ValidateNested({ each: true })
   @Type(() => PurchaseOrderItemDto)
   items: PurchaseOrderItemDto[];
