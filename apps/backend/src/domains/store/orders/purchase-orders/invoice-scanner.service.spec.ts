@@ -781,3 +781,271 @@ describe('InvoiceScannerService.matchProducts — tope de líneas', () => {
     expect(hasWarning(result.warnings, 'admite máximo 100')).toBe(false);
   });
 });
+
+/**
+ * El motivo tiene que llegar PEGADO al renglón, no sólo en la lista de avisos
+ * de cabecera. Un «el producto X está archivado» flotando arriba, con veinte
+ * líneas debajo, obliga al operador a averiguar cuál de las veinte es X.
+ *
+ * Cada motivo de las dos uniones tiene su caso acá, y se verifica que los
+ * datos que la pantalla necesita viajen ESTRUCTURADOS — no dentro de una
+ * cadena que el frontend tendría que partir.
+ */
+describe('InvoiceScannerService.matchProducts — motivo por línea', () => {
+  const archivedBySku = {
+    id: 378,
+    name: 'AGUA CRISTAL 600ML',
+    sku: 'AGU-600',
+    cost_price: 3,
+    state: 'archived',
+  };
+
+  const skuLine = [
+    {
+      description: 'AGUA CRISTAL 600ML',
+      quantity: 10,
+      unit_price: 100,
+      total: 1000,
+      sku_if_visible: 'AGU-600',
+    },
+  ];
+
+  describe('match_reason', () => {
+    it('archived_candidate lleva el producto archivado estructurado', async () => {
+      const { service } = buildScanner({ skuProduct: archivedBySku });
+
+      const [item] = (await service.matchProducts(scanned(skuLine))).items;
+
+      expect(item.match_reason).toBe('archived_candidate');
+      expect(item.archived_candidate).toEqual({
+        id: 378,
+        name: 'AGUA CRISTAL 600ML',
+        sku: 'AGU-600',
+      });
+    });
+
+    it('archived_sku_reassigned cuando se propuso otro producto activo', async () => {
+      const { service } = buildScanner({
+        skuProduct: archivedBySku,
+        nameMatches: [
+          {
+            id: 900,
+            name: 'AGUA CRISTAL 600ML',
+            sku: 'AGU-600-V2',
+            cost_price: 120,
+          },
+        ],
+      });
+
+      const [item] = (await service.matchProducts(scanned(skuLine))).items;
+
+      expect(item.match_reason).toBe('archived_sku_reassigned');
+      expect(item.selected_product_id).toBe(900);
+      // El archivado sigue nombrado: la pantalla puede contrastar los dos.
+      expect(item.archived_candidate?.id).toBe(378);
+    });
+
+    it('no_catalog_match no arrastra ningún archivado', async () => {
+      const { service } = buildScanner({ skuProduct: null });
+
+      const [item] = (await service.matchProducts(scanned(skuLine))).items;
+
+      expect(item.match_reason).toBe('no_catalog_match');
+      expect(item.archived_candidate).toBeUndefined();
+    });
+
+    it('lookup_failed distingue el error transitorio de "no hay coincidencias"', async () => {
+      const { service, prisma } = buildScanner({});
+      prisma.products.findFirst.mockRejectedValueOnce(new Error('db down'));
+
+      const [item] = (await service.matchProducts(scanned(skuLine))).items;
+
+      expect(item.match_reason).toBe('lookup_failed');
+      expect(item.match_status).toBe('new');
+    });
+
+    it('un emparejamiento limpio no lleva motivo: no hay nada que explicar', async () => {
+      const { service } = buildScanner({
+        skuProduct: { ...archivedBySku, state: 'active' },
+      });
+
+      const [item] = (await service.matchProducts(scanned(skuLine))).items;
+
+      expect(item.match_status).toBe('matched');
+      expect(item.match_reason).toBeUndefined();
+      expect(item.archived_candidate).toBeUndefined();
+    });
+  });
+
+  describe('quantity_adjustment', () => {
+    const activeProduct = {
+      id: 55,
+      name: 'CERVEZA LATA 330ML',
+      sku: 'CER-330',
+      cost_price: 1000,
+      state: 'active',
+    };
+    const retailPackaging = {
+      id: 55,
+      is_ingredient: false,
+      purchase_to_stock_factor: 12,
+      stock_uom_id: null,
+      purchase_uom_id: null,
+      stock_unit: 'unidad',
+      purchase_unit: 'caja',
+    };
+    const line = (quantity: number) => [
+      {
+        description: 'CERVEZA LATA 330ML',
+        quantity,
+        unit_price: 12000,
+        total: quantity * 12000,
+        sku_if_visible: 'CER-330',
+      },
+    ];
+
+    it('converted_to_stock_units trae las cuatro cifras del antes y el después', async () => {
+      const { service } = buildScanner({
+        skuProduct: activeProduct,
+        packaging: [retailPackaging],
+      });
+
+      const [item] = (await service.matchProducts(scanned(line(2.5)))).items;
+
+      expect(item.quantity_adjustment).toEqual({
+        reason: 'converted_to_stock_units',
+        original_quantity: 2.5,
+        applied_quantity: 30,
+        original_unit_price: 12000,
+        applied_unit_price: 1000,
+        packaging_factor: 12,
+        stock_unit: 'unidad',
+        purchase_unit: 'caja',
+      });
+    });
+
+    it('rounded_factor_applied_at_receipt no toca el costo unitario', async () => {
+      const { service } = buildScanner({
+        skuProduct: activeProduct,
+        packaging: [
+          {
+            ...retailPackaging,
+            is_ingredient: true,
+            stock_uom_id: 3,
+            purchase_uom_id: 4,
+          },
+        ],
+      });
+
+      const [item] = (await service.matchProducts(scanned(line(2.5)))).items;
+
+      expect(item.quantity_adjustment?.reason).toBe(
+        'rounded_factor_applied_at_receipt',
+      );
+      expect(item.quantity_adjustment?.original_unit_price).toBe(12000);
+      expect(item.quantity_adjustment?.applied_unit_price).toBe(12000);
+      expect(item.quantity_adjustment?.packaging_factor).toBe(12);
+    });
+
+    it('rounded_conversion_not_exact expone la cifra que no era entera', async () => {
+      const { service } = buildScanner({
+        skuProduct: activeProduct,
+        packaging: [{ ...retailPackaging, purchase_to_stock_factor: 5 }],
+      });
+
+      const [item] = (await service.matchProducts(scanned(line(2.5)))).items;
+
+      expect(item.quantity_adjustment?.reason).toBe(
+        'rounded_conversion_not_exact',
+      );
+      expect(item.quantity_adjustment?.converted_quantity).toBe(12.5);
+    });
+
+    it('rounded_no_packaging_factor no inventa un factor', async () => {
+      const { service } = buildScanner({
+        skuProduct: activeProduct,
+        packaging: [{ ...retailPackaging, purchase_to_stock_factor: null }],
+      });
+
+      const [item] = (await service.matchProducts(scanned(line(2.5)))).items;
+
+      expect(item.quantity_adjustment?.reason).toBe(
+        'rounded_no_packaging_factor',
+      );
+      expect(item.quantity_adjustment?.packaging_factor).toBeUndefined();
+      expect(item.quantity_adjustment?.converted_quantity).toBeUndefined();
+    });
+
+    it('rounded_unmatched_line cuando la línea aún no tiene producto', async () => {
+      const { service } = buildScanner({ skuProduct: null });
+
+      const [item] = (
+        await service.matchProducts(
+          scanned([
+            {
+              description: 'CARNE RES KG',
+              quantity: 0.315,
+              unit_price: 40000,
+              total: 12600,
+            },
+          ]),
+        )
+      ).items;
+
+      expect(item.quantity_adjustment?.reason).toBe('rounded_unmatched_line');
+      expect(item.quantity_adjustment?.original_quantity).toBe(0.315);
+      // Nunca cero: el DTO de creación exige @Min(1).
+      expect(item.quantity_adjustment?.applied_quantity).toBe(1);
+    });
+
+    it('una cantidad entera no lleva ajuste', async () => {
+      const { service } = buildScanner({ skuProduct: activeProduct });
+
+      const [item] = (await service.matchProducts(scanned(line(3)))).items;
+
+      expect(item.quantity_adjustment).toBeUndefined();
+    });
+  });
+
+  /**
+   * Los dos ejes COEXISTEN. Con un solo campo, el segundo motivo pisaría al
+   * primero y la pantalla perdería la mitad de la explicación: por eso son dos
+   * campos y no dos valores de la misma unión.
+   */
+  it('una línea puede llevar motivo de emparejamiento Y de cantidad a la vez', async () => {
+    const { service } = buildScanner({ skuProduct: archivedBySku });
+
+    const [item] = (
+      await service.matchProducts(
+        scanned([
+          {
+            description: 'AGUA CRISTAL 600ML',
+            quantity: 2.5,
+            unit_price: 100,
+            total: 250,
+            sku_if_visible: 'AGU-600',
+          },
+        ]),
+      )
+    ).items;
+
+    expect(item.match_reason).toBe('archived_candidate');
+    expect(item.archived_candidate?.sku).toBe('AGU-600');
+    expect(item.quantity_adjustment?.reason).toBe('rounded_unmatched_line');
+    expect(item.quantity_adjustment?.applied_quantity).toBe(3);
+  });
+
+  /**
+   * El aviso de cabecera se conserva: sigue siendo el canal de lo que NO
+   * cuelga de una línea concreta (estado fiscal, proveedor, tope de líneas), y
+   * quitarlo rompería lo ya verificado.
+   */
+  it('el campo por línea NO reemplaza a warnings', async () => {
+    const { service } = buildScanner({ skuProduct: archivedBySku });
+
+    const result = await service.matchProducts(scanned(skuLine));
+
+    expect(result.items[0].match_reason).toBe('archived_candidate');
+    expect(hasWarning(result.warnings, 'ARCHIVADO')).toBe(true);
+  });
+});

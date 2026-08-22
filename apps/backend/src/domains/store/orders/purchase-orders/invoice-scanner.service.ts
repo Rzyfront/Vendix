@@ -16,7 +16,10 @@ import {
   InvoiceMatchResult,
   SupplierMatch,
   MatchedLineItem,
+  MatchedLineReason,
+  QuantityAdjustmentReason,
   ProductCandidate,
+  ArchivedProductRef,
   ConfirmScannedInvoiceDto,
 } from './dto/scan-invoice.dto';
 import {
@@ -35,30 +38,20 @@ import {
 import sharp = require('sharp');
 
 /**
- * CP-PURCHASE-TRANSPARENCY D.1 — un producto ARCHIVADO que el emparejador
- * reconoció y descartó a propósito.
+ * Resultado interno del emparejador de productos.
  *
- * Existe porque «no lo emparejé» y «lo emparejé pero está archivado» son dos
- * cosas distintas para el operador, y la segunda no puede desaparecer en
- * silencio: si el escáner reconoce el producto por SKU y simplemente omite la
- * línea, el operador ve una factura con un renglón menos y no tiene forma de
- * saber por qué. El descarte viaja hasta `warnings` para que la revisión lo
- * explique y el operador decida — reactivarlo o crear uno nuevo.
- */
-interface ArchivedProductDiscard {
-  id: number;
-  name: string;
-  sku: string | null;
-}
-
-/**
- * Resultado interno del emparejador de productos. NO es un DTO: `warnings`
- * (que sí es público) es el canal por el que el motivo llega a la interfaz,
- * así que el contrato de `scan-invoice.dto.ts` no cambia.
+ * `archivedDiscards` son los productos ARCHIVADOS que el emparejador reconoció
+ * y descartó a propósito. Existe porque «no lo emparejé» y «lo emparejé pero
+ * está archivado» son dos cosas distintas para el operador, y la segunda no
+ * puede desaparecer en silencio: si el escáner reconoce el producto por SKU y
+ * simplemente omite la línea, el operador ve una factura con un renglón menos
+ * y no tiene forma de saber por qué. El descarte sale por DOS canales —
+ * `MatchedLineItem.match_reason` + `archived_candidate` (pegado al renglón) y
+ * `InvoiceMatchResult.warnings` (la cabecera de la revisión).
  */
 interface ProductMatchLookup {
   candidates: ProductCandidate[];
-  archivedDiscards: ArchivedProductDiscard[];
+  archivedDiscards: ArchivedProductRef[];
 }
 
 /**
@@ -317,7 +310,9 @@ export class InvoiceScannerService {
         // al lado, para que el operador reactive el producto o cree uno nuevo
         // en vez de encontrarse una factura con un renglón menos.
         const archived = lookup.archivedDiscards[0];
+        let matchReason: MatchedLineReason | undefined;
         if (matchStatus === 'new') {
+          matchReason = archived ? 'archived_candidate' : 'no_catalog_match';
           warnings.push(
             archived
               ? `Producto "${item.description}": el catálogo tiene "${archived.name}"` +
@@ -328,6 +323,7 @@ export class InvoiceScannerService {
               : `Producto "${item.description}" sin coincidencias en el catálogo.`,
           );
         } else if (archived) {
+          matchReason = 'archived_sku_reassigned';
           // Se emparejó con OTRO producto activo pese a que el SKU impreso
           // pertenece a uno archivado. Es exactamente el caso en que el
           // operador debe mirar: la línea no va al producto que dice el papel.
@@ -344,6 +340,13 @@ export class InvoiceScannerService {
           match_status: matchStatus,
           selected_product_id: selectedProductId,
           candidates: candidates.slice(0, 5),
+          // El motivo va PEGADO al renglón, no sólo en la lista de avisos: un
+          // «el producto X está archivado» flotando arriba con veinte líneas
+          // debajo obliga al operador a buscar cuál es X.
+          match_reason: matchReason,
+          archived_candidate: matchReason?.startsWith('archived')
+            ? archived
+            : undefined,
           // F3: sugerencia de impuesto por tasa + neto ya aplanado.
           suggested_tax_category_id: this.suggestTaxCategoryId(
             item.tax_rate,
@@ -361,6 +364,10 @@ export class InvoiceScannerService {
           match_status: 'new',
           selected_product_id: undefined,
           candidates: [],
+          // La búsqueda falló; la línea llega vacía por un error transitorio,
+          // no porque el catálogo no tenga el producto. La pantalla debe poder
+          // decir eso mismo en vez de "sin coincidencias".
+          match_reason: 'lookup_failed',
           // F3: mantiene el contrato aun cuando el match de producto falla.
           suggested_tax_category_id: this.suggestTaxCategoryId(
             item.tax_rate,
@@ -461,6 +468,7 @@ export class InvoiceScannerService {
         const stockQuantity = Math.round(converted);
         const scale = (value: unknown): number => Number(value) / factor;
 
+        const previousUnitPrice = Number(item.unit_price) || 0;
         const newUnitPrice = scale(item.unit_price);
         item.quantity = stockQuantity;
         item.unit_price = newUnitPrice;
@@ -475,6 +483,19 @@ export class InvoiceScannerService {
         // se escalan. Dividirlos rebajaría el descuento y el total al pasar de
         // empaques a unidades, que es dinero que sí existió en la factura.
 
+        // Estructurado y pegado al renglón: la pantalla muestra el antes y el
+        // después sin volver a abrir la factura ni partir la cadena del aviso.
+        item.quantity_adjustment = {
+          reason: 'converted_to_stock_units',
+          original_quantity: original,
+          applied_quantity: stockQuantity,
+          original_unit_price: previousUnitPrice,
+          applied_unit_price: newUnitPrice,
+          packaging_factor: factor,
+          stock_unit: pack?.stockUnit ?? null,
+          purchase_unit: pack?.purchaseUnit ?? null,
+        };
+
         warnings.push(
           `«${item.description}»: la factura la trae como ${formatQuantity(original)} ` +
             `${purchaseLabel} y cada uno equivale a ${formatQuantity(factor)} ` +
@@ -487,7 +508,7 @@ export class InvoiceScannerService {
 
       const rounded = Math.max(1, Math.round(original));
       const unitPrice = Number(item.unit_price) || 0;
-      const reason = this.explainQuantityRoundReason(
+      const { reason, text } = this.explainQuantityRoundReason(
         item,
         pack,
         converted,
@@ -495,10 +516,27 @@ export class InvoiceScannerService {
       );
 
       item.quantity = rounded;
+      item.quantity_adjustment = {
+        reason,
+        original_quantity: original,
+        applied_quantity: rounded,
+        // Al redondear el costo unitario NO se toca: es lo que alimenta el
+        // CPP/FIFO y tiene que seguir siendo el que imprime la factura.
+        original_unit_price: unitPrice,
+        applied_unit_price: unitPrice,
+        packaging_factor:
+          pack != null && Number.isFinite(pack.factor) && pack.factor > 1
+            ? pack.factor
+            : undefined,
+        converted_quantity:
+          reason === 'rounded_conversion_not_exact' ? converted : undefined,
+        stock_unit: pack?.stockUnit ?? null,
+        purchase_unit: pack?.purchaseUnit ?? null,
+      };
 
       warnings.push(
         `«${item.description}»: la factura la trae como ${formatQuantity(original)} ` +
-          `y la orden solo guarda cantidades enteras (${reason}). Se cargó ` +
+          `y la orden solo guarda cantidades enteras (${text}). Se cargó ` +
           `${rounded}. El costo unitario NO se tocó ` +
           `(${formatQuantity(unitPrice)}), así que el total de la línea pasa de ` +
           `${formatQuantity(original * unitPrice)} a ` +
@@ -511,27 +549,47 @@ export class InvoiceScannerService {
    * Por qué no se pudo convertir la cantidad y hubo que redondear. El operador
    * necesita saberlo para poder arreglarlo (configurar el empaque, cambiar la
    * unidad de la línea) en vez de solo enterarse de que el número cambió.
+   *
+   * Devuelve el motivo TIPADO (para `quantity_adjustment.reason`, que la
+   * interfaz renderiza pegado al renglón) y su texto (para el aviso de
+   * cabecera). Las dos salidas nacen del mismo `if`, así que no pueden
+   * divergir.
    */
   private explainQuantityRoundReason(
     item: MatchedLineItem,
     pack: ProductPackaging | undefined,
     converted: number,
     stockLabel: string,
-  ): string {
+  ): { reason: QuantityAdjustmentReason; text: string } {
     if (item.selected_product_id == null) {
-      return 'la línea todavía no está emparejada con un producto del catálogo, ' +
-        'así que no hay factor de empaque que aplicar';
+      return {
+        reason: 'rounded_unmatched_line',
+        text:
+          'la línea todavía no está emparejada con un producto del catálogo, ' +
+          'así que no hay factor de empaque que aplicar',
+      };
     }
     if (pack == null || !Number.isFinite(pack.factor) || pack.factor <= 1) {
-      return 'el producto no tiene un factor de empaque configurado';
+      return {
+        reason: 'rounded_no_packaging_factor',
+        text: 'el producto no tiene un factor de empaque configurado',
+      };
     }
     if (pack.receiptConverts) {
-      return `el factor de empaque del producto (${formatQuantity(pack.factor)} ` +
-        `${stockLabel} por ${pack.purchaseUnit || 'empaque'}) se aplica al RECIBIR ` +
-        'la orden, así que la cantidad tiene que quedar en la unidad de compra';
+      return {
+        reason: 'rounded_factor_applied_at_receipt',
+        text:
+          `el factor de empaque del producto (${formatQuantity(pack.factor)} ` +
+          `${stockLabel} por ${pack.purchaseUnit || 'empaque'}) se aplica al RECIBIR ` +
+          'la orden, así que la cantidad tiene que quedar en la unidad de compra',
+      };
     }
-    return `convertir con el factor daría ${formatQuantity(converted)} ${stockLabel}, ` +
-      'que tampoco es un entero';
+    return {
+      reason: 'rounded_conversion_not_exact',
+      text:
+        `convertir con el factor daría ${formatQuantity(converted)} ${stockLabel}, ` +
+        'que tampoco es un entero',
+    };
   }
 
   /**
@@ -799,7 +857,7 @@ export class InvoiceScannerService {
     supplierId?: number,
   ): Promise<ProductMatchLookup> {
     const candidates: ProductCandidate[] = [];
-    const archivedDiscards: ArchivedProductDiscard[] = [];
+    const archivedDiscards: ArchivedProductRef[] = [];
     const seenIds = new Set<number>();
 
     // Tier 1: SKU exact match
