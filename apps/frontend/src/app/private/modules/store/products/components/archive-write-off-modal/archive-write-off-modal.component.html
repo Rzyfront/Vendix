@@ -1,0 +1,267 @@
+<app-modal
+  [(isOpen)]="modalOpen"
+  size="lg"
+  [title]="
+    isBlocked()
+      ? 'No se puede eliminar este producto'
+      : 'Eliminar producto y dar de baja sus existencias'
+  "
+  [subtitle]="productName()"
+  [closeOnBackdrop]="false"
+>
+  @if (plan()) {
+    <!-- ═══════════════ Estado 3 — bloqueado ════════════════════════════════ -->
+    @if (isBlocked()) {
+      <div class="flex flex-col gap-3">
+        <app-alert-banner variant="danger" icon="shield-alert">
+          Este producto tiene <strong>{{ outOfScopeUnits() }}</strong>
+          {{ unitsLabel(outOfScopeUnits()) }} en ubicaciones que esta tienda no
+          administra. Vendix no destruye inventario de otra ubicación desde la
+          pantalla de una tienda.
+        </app-alert-banner>
+
+        <div class="rounded-xl border border-border">
+          <p
+            class="border-b border-border px-3 py-2 text-[10px] font-semibold uppercase text-text-secondary"
+          >
+            Existencias fuera del alcance de esta tienda
+          </p>
+          <ul class="divide-y divide-border">
+            @for (row of outOfScopeRows(); track row.location_id) {
+              <li class="flex items-center justify-between gap-2 px-3 py-2">
+                <p class="min-w-0 truncate text-xs font-semibold text-text-primary">
+                  {{ row.location_name }}
+                </p>
+                <p class="shrink-0 text-xs font-bold text-text-primary">
+                  {{ row.quantity_on_hand }} {{ unitsLabel(row.quantity_on_hand) }}
+                </p>
+              </li>
+            }
+          </ul>
+        </div>
+
+        <div class="rounded-xl border border-border bg-surface px-3 py-2.5">
+          <p class="flex items-center gap-1.5 text-xs font-semibold text-text-primary">
+            <app-icon name="lightbulb" [size]="13" />
+            Qué hacer para poder eliminarlo
+          </p>
+          <ol
+            class="mt-1.5 ml-4 list-decimal space-y-1 text-[11px] leading-tight text-text-secondary"
+          >
+            <li>
+              Transfiere esas unidades a una ubicación de esta tienda, o ajústalas
+              a cero desde <strong>Inventario</strong>.
+            </li>
+            <li>Vuelve a esta pantalla e intenta eliminar el producto otra vez.</li>
+          </ol>
+        </div>
+
+        @if (totalUnits() > 0) {
+          <p class="text-[11px] leading-tight text-text-secondary">
+            Nada se ha eliminado ni dado de baja. Las {{ totalUnits() }}
+            {{ unitsLabel(totalUnits()) }} que sí están en esta tienda siguen
+            intactas.
+          </p>
+        }
+      </div>
+    } @else {
+      <!-- ═══════════════ Estado 2 — pide confirmación ══════════════════════ -->
+      <div class="flex flex-col gap-3">
+        <app-alert-banner variant="danger" icon="shield-alert">
+          Al eliminar este producto se
+          <strong>dan de baja sus existencias</strong>: quedan en cero y no hay
+          forma de recuperarlas ni de desarchivar el producto desde Vendix.
+        </app-alert-banner>
+
+        <!-- Las dos cifras que el operador está aprobando -->
+        <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div class="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5">
+            <p class="text-[10px] font-semibold uppercase text-red-700">
+              Unidades que se darán de baja
+            </p>
+            <p class="text-2xl font-bold leading-tight text-red-700">
+              {{ totalUnits() }}
+            </p>
+            <p class="mt-0.5 text-[10px] leading-tight text-red-700/80">
+              En {{ lines().length }}
+              {{ lines().length === 1 ? 'ubicación o variante' : 'ubicaciones y variantes' }}
+            </p>
+          </div>
+
+          <div class="rounded-xl border border-border bg-surface px-3 py-2.5">
+            <p class="text-[10px] font-semibold uppercase text-text-secondary">
+              Valor estimado a castigar
+            </p>
+            @if (allUnitsUnknownCost()) {
+              <p class="text-2xl font-bold leading-tight text-amber-700">
+                Sin determinar
+              </p>
+              <p class="mt-0.5 text-[10px] leading-tight text-amber-700">
+                Ninguna de estas unidades tiene costo registrado.
+              </p>
+            } @else {
+              <p class="text-2xl font-bold leading-tight text-text-primary">
+                {{ money()(totalValue()) }}
+              </p>
+              <p class="mt-0.5 text-[10px] leading-tight text-text-secondary">
+                Es una estimación: el costo definitivo se calcula al dar la baja
+                y puede diferir del que ves aquí.
+              </p>
+            }
+          </div>
+        </div>
+
+        <!--
+          LA ADVERTENCIA QUE JUSTIFICA ESTE PASO. `zero_cost_units` es «costo
+          desconocido», no «gratis». Sin este bloque el operador lee un valor
+          bajo (o cero) y confirma creyendo que no destruye nada de valor.
+        -->
+        @if (hasUnknownCost()) {
+          <app-alert-banner variant="warning" icon="alert-triangle">
+            @if (allUnitsUnknownCost()) {
+              Las {{ totalUnits() }} {{ unitsLabel(totalUnits()) }} no tienen
+              costo registrado, así que el valor sale en cero.
+              <strong>Cero aquí significa costo desconocido, no mercancía
+              gratis.</strong>
+              Se darán de baja igual y no generarán asiento contable.
+            } @else {
+              {{ zeroCostUnits() }} de las {{ totalUnits() }}
+              {{ unitsLabel(totalUnits()) }} no tienen costo registrado.
+              <strong>Su costo es desconocido, no cero.</strong>
+              El valor estimado de arriba solo cubre las {{ knownCostUnits() }}
+              {{ unitsLabel(knownCostUnits()) }} con costo conocido, así que se
+              queda corto.
+            }
+          </app-alert-banner>
+        }
+
+        <!-- Desglose: dónde está y qué es lo que se destruye -->
+        <div class="rounded-xl border border-border">
+          <p
+            class="border-b border-border px-3 py-2 text-[10px] font-semibold uppercase text-text-secondary"
+          >
+            Qué se da de baja, por ubicación y variante
+          </p>
+          <div class="max-h-[36vh] overflow-y-auto">
+            <ul class="divide-y divide-border">
+              @for (
+                line of lines();
+                track line.location_id + ':' + (line.product_variant_id ?? 0)
+              ) {
+                <li class="px-3 py-2">
+                  <div class="flex flex-wrap items-baseline justify-between gap-1.5">
+                    <p class="min-w-0 truncate text-xs font-semibold text-text-primary">
+                      {{ line.location_name }}
+                      <span class="font-normal text-text-secondary">
+                        · {{ describeLine(line) }}
+                      </span>
+                    </p>
+                    <p class="shrink-0 text-xs font-bold text-red-700">
+                      {{ line.quantity_on_hand }}
+                      {{ unitsLabel(line.quantity_on_hand) }}
+                    </p>
+                  </div>
+
+                  <p
+                    class="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] leading-tight text-text-secondary"
+                  >
+                    @if (line.has_known_cost) {
+                      <span>
+                        {{ money()(line.unit_cost) }} c/u ·
+                        {{ money()(line.value) }}
+                      </span>
+                    } @else {
+                      <span
+                        class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700"
+                      >
+                        <app-icon name="help-circle" [size]="11" />
+                        Costo desconocido
+                      </span>
+                      <span>
+                        No entra en el valor estimado, pero las unidades se
+                        destruyen igual.
+                      </span>
+                    }
+                  </p>
+                </li>
+              }
+            </ul>
+          </div>
+        </div>
+
+        @if (errorMessage()) {
+          <app-alert-banner variant="danger" icon="alert-triangle">
+            {{ errorMessage() }}
+          </app-alert-banner>
+        }
+
+        <!-- ═══ El gesto deliberado ═════════════════════════════════════════ -->
+        <label
+          class="flex cursor-pointer items-start gap-2.5 rounded-xl border p-3 transition-colors"
+          [class.border-border]="!acknowledged()"
+          [class.bg-surface]="!acknowledged()"
+          [class.border-red-300]="acknowledged()"
+          [class.bg-red-50]="acknowledged()"
+        >
+          <input
+            type="checkbox"
+            class="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-border accent-red-600"
+            [checked]="acknowledged()"
+            [disabled]="archiving()"
+            (change)="onAcknowledgeChange($event)"
+          />
+          <span class="min-w-0 flex-1">
+            <span class="block text-xs font-semibold text-text-primary">
+              Entiendo que se darán de baja {{ totalUnits() }}
+              {{ unitsLabel(totalUnits()) }} y que no podré recuperarlas
+            </span>
+            <span class="mt-0.5 block text-[10px] leading-tight text-text-secondary">
+              El inventario de este producto quedará en cero y el producto
+              quedará archivado.
+            </span>
+          </span>
+        </label>
+      </div>
+    }
+  }
+
+  <!-- ═══════════════ Pie ═════════════════════════════════════════════════ -->
+  <div slot="footer" class="flex w-full flex-wrap justify-end gap-2">
+    @if (isBlocked()) {
+      <!--
+        SIN BOTÓN DE CONFIRMAR, y no es un descuido: no existe confirmación que
+        el backend vaya a aceptar mientras haya existencias fuera de alcance.
+        Ofrecer un botón deshabilitado sugeriría que marcar algo lo habilita.
+      -->
+      <app-button variant="primary" size="sm" (clicked)="onClose()">
+        Entendido
+      </app-button>
+    } @else {
+      <app-button
+        variant="outline"
+        size="sm"
+        [disabled]="archiving()"
+        (clicked)="onClose()"
+      >
+        Cancelar
+      </app-button>
+      <!--
+        El icono y el rótulo NO van dentro de un `@if`: `ng-content select` no
+        casa con nodos que viven en un bloque de control de flujo, así que el
+        icono se perdería al entrar en «archivando». El estado de carga lo pone
+        `app-button` con su propio `[loading]`, y el rótulo sale de un computed.
+      -->
+      <app-button
+        variant="danger"
+        size="sm"
+        [loading]="archiving()"
+        [showTextWhileLoading]="true"
+        [disabled]="!canConfirm()"
+        (clicked)="onConfirm()"
+      >
+        <app-icon slot="icon" name="trash-2" [size]="14" />
+        {{ confirmLabel() }}
+      </app-button>
+    }
+  </div>
+</app-modal>

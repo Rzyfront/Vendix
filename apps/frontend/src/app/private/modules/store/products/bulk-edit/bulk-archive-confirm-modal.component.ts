@@ -66,6 +66,7 @@ import {
   ModalComponent,
   type SaveRequirement,
 } from '../../../../../shared/components/index';
+import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { ERROR_MESSAGES } from '../../../../../core/utils/error-messages';
 import {
   PRODUCT_SAVE_ERROR_MAP,
@@ -104,6 +105,7 @@ export type BulkArchiveStage =
 })
 export class BulkArchiveConfirmModalComponent {
   private readonly bulkEditService = inject(ProductsBulkEditService);
+  private readonly currencyFormat = inject(CurrencyFormatService);
   private readonly destroyRef = inject(DestroyRef);
 
   /** Visibilidad. Two-way con la página. */
@@ -155,6 +157,87 @@ export class BulkArchiveConfirmModalComponent {
   readonly blockedCount = computed<number>(
     () => this.previewResult()?.errors ?? 0,
   );
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // CP-PURCHASE-TRANSPARENCY D.9 — el castigo de inventario, agregado
+  // ───────────────────────────────────────────────────────────────────────────
+  //
+  // Sólo cuentan las filas ARCHIVABLES. Las `error` traen sus cifras igual (el
+  // backend las manda en todas para que la interfaz no distinga formas), pero
+  // sumar el impacto de un producto que no se va a archivar inflaría la cifra
+  // que el operador está aprobando: diría que va a destruir más de lo que
+  // realmente va a destruir, y la confirmación dejaría de significar lo que
+  // dice.
+
+  private readonly archivableItems = computed<BulkArchivePreviewItem[]>(() =>
+    (this.previewResult()?.items ?? []).filter((item) => item.status !== 'error'),
+  );
+
+  readonly unitsToWriteOff = computed<number>(() =>
+    this.archivableItems().reduce((sum, item) => sum + (item.on_hand_units ?? 0), 0),
+  );
+
+  readonly valueToWriteOff = computed<number>(() =>
+    this.archivableItems().reduce(
+      (sum, item) => sum + (item.value_to_write_off ?? 0),
+      0,
+    ),
+  );
+
+  /**
+   * Unidades sin costo conocido. NO son unidades gratis: son unidades cuyo
+   * costo el sistema no sabe. Se destruyen igual y no entran en el valor, así
+   * que sin nombrarlas la cifra de arriba se lee como «casi no vale nada».
+   */
+  readonly zeroCostUnits = computed<number>(() =>
+    this.archivableItems().reduce(
+      (sum, item) => sum + (item.zero_cost_units ?? 0),
+      0,
+    ),
+  );
+
+  readonly knownCostUnits = computed<number>(() =>
+    Math.max(0, this.unitsToWriteOff() - this.zeroCostUnits()),
+  );
+
+  readonly hasUnknownCost = computed<boolean>(() => this.zeroCostUnits() > 0);
+
+  readonly allUnitsUnknownCost = computed<boolean>(
+    () =>
+      this.unitsToWriteOff() > 0 &&
+      this.zeroCostUnits() >= this.unitsToWriteOff(),
+  );
+
+  readonly willWriteOffStock = computed<boolean>(() => this.unitsToWriteOff() > 0);
+
+  /**
+   * Filas bloqueadas por existencias fuera del alcance de la tienda. Se cuentan
+   * aparte de los bloqueos genéricos porque su remedio es distinto y ocurre en
+   * otro módulo: transferir o ajustar desde Inventario.
+   */
+  readonly outOfScopeItems = computed<BulkArchivePreviewItem[]>(() =>
+    (this.previewResult()?.items ?? []).filter(
+      (item) => (item.out_of_scope_units ?? 0) > 0,
+    ),
+  );
+
+  readonly outOfScopeUnits = computed<number>(() =>
+    this.outOfScopeItems().reduce(
+      (sum, item) => sum + (item.out_of_scope_units ?? 0),
+      0,
+    ),
+  );
+
+  /**
+   * Formateador de dinero. `computed` que devuelve una función para atar el
+   * formato a la señal de moneda: un método suelto no se re-evaluaría cuando la
+   * moneda de la tienda termina de cargar y las cifras quedarían con el formato
+   * de arranque.
+   */
+  readonly money = computed<(value: number) => string>(() => {
+    this.currencyFormat.currentCurrency();
+    return (value: number): string => this.currencyFormat.format(value || 0);
+  });
 
   /**
    * Las DOS condiciones del gesto deliberado. Si falta cualquiera, no se archiva.
@@ -226,7 +309,11 @@ export class BulkArchiveConfirmModalComponent {
     this.requestRequirements.set([]);
 
     this.bulkEditService
-      .archiveInBatches(ids, this.resolveName())
+      // CP-PURCHASE-TRANSPARENCY D.6/D.9 — la confirmación del castigo viaja
+      // SÓLO cuando el preview declaró que hay existencias que castigar. Si no
+      // las hay, mandar `true` declararía una decisión que el operador nunca
+      // tuvo que tomar y que la casilla que marcó no describía.
+      .archiveInBatches(ids, this.resolveName(), this.willWriteOffStock())
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {

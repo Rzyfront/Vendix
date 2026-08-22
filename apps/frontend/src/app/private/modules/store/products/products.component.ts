@@ -11,6 +11,7 @@ import { ToastService } from '../../../../shared/components/toast/toast.service'
 import { DialogService } from '../../../../shared/components/dialog/dialog.service';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
+import { parseApiError } from '../../../../core/utils/parse-api-error';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import {
   VexiUiHost,
@@ -27,6 +28,8 @@ import {
   ProductStats,
   ProductCategory,
   Brand,
+  ArchiveWriteOffPlan,
+  readArchiveWriteOffPlan,
 } from './interfaces';
 
 // Components
@@ -34,6 +37,7 @@ import { ProductListComponent } from './components/product-list/product-list.com
 import { ProductCreateModalComponent } from './components/product-create-modal.component';
 import { BulkUploadModalComponent } from './components/bulk-upload-modal/bulk-upload-modal.component';
 import { BulkImageUploadModalComponent } from './components/bulk-image-upload-modal/bulk-image-upload-modal.component';
+import { ArchiveWriteOffModalComponent } from './components/archive-write-off-modal/archive-write-off-modal.component';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 
 @Component({
@@ -44,6 +48,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
     ProductCreateModalComponent,
     BulkUploadModalComponent,
     BulkImageUploadModalComponent,
+    ArchiveWriteOffModalComponent,
     StatsComponent,
   ],
   providers: [ProductsService],
@@ -137,6 +142,20 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
         [(isOpen)]="isBulkImageUploadModalOpen"
         (uploadComplete)="onBulkImageUploadComplete()"
       ></app-bulk-image-upload-modal>
+
+      <!--
+        CP-PURCHASE-TRANSPARENCY D.9 — el diálogo del castigo. Sólo se abre
+        cuando el producto TIENE existencias: el producto sin nada que castigar
+        conserva el diálogo de confirmación de siempre y no pasa por aquí.
+      -->
+      <app-archive-write-off-modal
+        [(modalOpen)]="isArchiveWriteOffModalOpen"
+        [plan]="archiveWriteOffPlan()"
+        [productName]="archiveTargetName()"
+        [archiving]="isArchiving()"
+        [errorMessage]="archiveErrorMessage()"
+        (confirmed)="onConfirmArchiveWriteOff()"
+      ></app-archive-write-off-modal>
     </div>
   `,
 })
@@ -199,6 +218,24 @@ export class ProductsComponent {
 
   // Estado de descarga de plantilla
   readonly isExporting = signal(false);
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // CP-PURCHASE-TRANSPARENCY D.9 — estado del castigo por archivado
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /** Visibilidad del diálogo enriquecido. Two-way con el modal. */
+  readonly isArchiveWriteOffModalOpen = signal(false);
+  /** El plan que el operador está mirando. Del preview o del 409, indistinto. */
+  readonly archiveWriteOffPlan = signal<ArchiveWriteOffPlan | null>(null);
+  /** Producto sobre el que se está decidiendo. */
+  readonly archiveTarget = signal<Product | null>(null);
+  readonly archiveTargetName = computed(() => this.archiveTarget()?.name ?? '');
+  /** El `DELETE` confirmado está en vuelo. */
+  readonly isArchiving = signal(false);
+  /** Error del intento de confirmación, pintado DENTRO del modal. */
+  readonly archiveErrorMessage = signal<string | null>(null);
+  /** El preview está en vuelo: evita disparar dos veces desde la lista. */
+  readonly isPreparingArchive = signal(false);
 
   constructor() {
     // Asegurar que la moneda esté cargada
@@ -520,7 +557,80 @@ export class ProductsComponent {
       });
   }
 
+  /**
+   * CP-PURCHASE-TRANSPARENCY D.9 — flujo de dos tiempos.
+   *
+   * ## LO QUE HABÍA, Y POR QUÉ NO PODÍA QUEDARSE
+   *
+   * Un `dialogService.confirm` genérico y, en el error,
+   * `error: () => toastService.error('Error al eliminar producto')`: el objeto
+   * entero se DESCARTABA. Con el archivado castigando inventario (D.4), el
+   * backend responde 409 `PROD_VARIANT_HAS_STOCK_001` con el plan completo del
+   * castigo en `details.archive_write_off`, y ese manejador lo tiraba a la
+   * basura. El operador veía un toast rojo sin causa, no sabía que había
+   * existencias, no sabía que existía una confirmación posible, y no tenía
+   * botón que la ofreciera: el flujo quedaba muerto y volvía a hacer justo lo
+   * que originó el reporte —borrar el producto y recargarlo—.
+   *
+   * (El rechazo llega ahora como un 409 de verdad. Antes el controller lo
+   * envolvía en un `try/catch` que llamaba `responseService.error()`, que
+   * RETORNA el sobre en vez de lanzarlo, así que el rechazo viajaba como HTTP
+   * 200 con `success:false` y el `next` de este mismo `subscribe` lo celebraba
+   * como éxito. Ese `try/catch` ya no está.)
+   *
+   * ## LOS TRES ESTADOS
+   *
+   * 1. `requires_confirmation === false` → NADA CAMBIA: el diálogo simple de
+   *    siempre. Un producto sin existencias no gana fricción por este paso.
+   * 2. `requires_confirmation && out_of_scope_units === 0` → diálogo
+   *    enriquecido: unidades, valor, desglose y casilla.
+   * 3. `out_of_scope_units > 0` → el mismo diálogo en su forma bloqueada, sin
+   *    botón de confirmar y con las instrucciones para desbloquearlo.
+   *
+   * ## POR QUÉ SE PIDE LA VISTA PREVIA ANTES DE PREGUNTAR NADA
+   *
+   * Porque el estado 1 no debe abrir modal, y saber si estamos en el estado 1
+   * exige preguntarle al backend. Preguntar primero y decidir después es lo
+   * único que evita meter al producto sin existencias en un diálogo que no le
+   * corresponde. Si la vista previa falla —permisos, red—, se degrada al
+   * diálogo simple: el backend sigue siendo quien decide, y su 409 vuelve a
+   * traer el plan.
+   */
   deleteProduct(product: Product): void {
+    if (this.isPreparingArchive() || this.isArchiving()) {
+      return;
+    }
+    this.isPreparingArchive.set(true);
+
+    this.productsService
+      .previewArchiveWriteOff(product.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (plan) => {
+          this.isPreparingArchive.set(false);
+          if (!plan || (!plan.requires_confirmation && plan.out_of_scope_units === 0)) {
+            this.confirmPlainArchive(product);
+            return;
+          }
+          this.openArchiveWriteOffModal(product, plan);
+        },
+        error: (error: unknown) => {
+          this.isPreparingArchive.set(false);
+          // El plan también puede venir dentro del propio error (no debería en
+          // una ruta de solo lectura, pero si viene se aprovecha: es el mismo
+          // objeto y una sola fuente de verdad).
+          const plan = readArchiveWriteOffPlan(error);
+          if (plan) {
+            this.openArchiveWriteOffModal(product, plan);
+            return;
+          }
+          this.confirmPlainArchive(product);
+        },
+      });
+  }
+
+  /** Estado 1: el diálogo de toda la vida, sin cambios de comportamiento. */
+  private confirmPlainArchive(product: Product): void {
     this.dialogService
       .confirm({
         title: 'Eliminar Producto',
@@ -530,17 +640,114 @@ export class ProductsComponent {
         confirmVariant: 'danger',
       })
       .then((confirmed) => {
-        if (confirmed) {
-          this.productsService.deleteProduct(product.id).subscribe({
-            next: () => {
-              this.toastService.success('Producto eliminado exitosamente');
-              this.loadProducts();
-              this.loadStats();
-            },
-            error: () => this.toastService.error('Error al eliminar producto'),
-          });
+        if (!confirmed) {
+          return;
         }
+        this.archiveTarget.set(product);
+        this.runArchive(product, false);
       });
+  }
+
+  /** Estados 2 y 3: el diálogo que enseña qué se va a destruir. */
+  private openArchiveWriteOffModal(
+    product: Product,
+    plan: ArchiveWriteOffPlan,
+  ): void {
+    this.archiveTarget.set(product);
+    this.archiveWriteOffPlan.set(plan);
+    this.archiveErrorMessage.set(null);
+    this.isArchiveWriteOffModalOpen.set(true);
+  }
+
+  /** El operador marcó la casilla y pulsó. Sólo aquí viaja la confirmación. */
+  onConfirmArchiveWriteOff(): void {
+    const product = this.archiveTarget();
+    if (!product || this.isArchiving()) {
+      return;
+    }
+    this.runArchive(product, true);
+  }
+
+  /**
+   * El `DELETE`, con o sin confirmación del castigo.
+   *
+   * `confirmStockWriteOff` NUNCA se pone a `true` desde la ruta del diálogo
+   * simple: si el backend contesta que hay existencias cuando el preview decía
+   * que no (porque llegó una recepción entre medias), lo correcto es enseñar el
+   * plan fresco y volver a preguntar, no confirmar por el operador.
+   */
+  private runArchive(product: Product, confirmStockWriteOff: boolean): void {
+    this.isArchiving.set(true);
+    this.archiveErrorMessage.set(null);
+
+    this.productsService
+      .deleteProduct(product.id, confirmStockWriteOff)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          // El mensaje se redacta ANTES de limpiar: el plan es la única fuente
+          // de la cifra que se acaba de castigar y borrarlo primero la perdería.
+          const message = this.describeArchiveSuccess(confirmStockWriteOff);
+          this.isArchiving.set(false);
+          this.isArchiveWriteOffModalOpen.set(false);
+          this.archiveWriteOffPlan.set(null);
+          this.archiveTarget.set(null);
+          this.toastService.success(message);
+          this.loadProducts();
+          this.loadStats();
+        },
+        error: (error: unknown) => {
+          this.isArchiving.set(false);
+          this.handleArchiveRejection(product, error);
+        },
+      });
+  }
+
+  /** El toast dice lo que pasó de verdad, incluidas las bajas. */
+  private describeArchiveSuccess(confirmStockWriteOff: boolean): string {
+    const plan = this.archiveWriteOffPlan();
+    if (!confirmStockWriteOff || !plan || plan.total_units <= 0) {
+      return 'Producto eliminado exitosamente';
+    }
+    const units = plan.total_units;
+    return `Producto eliminado y ${units} ${units === 1 ? 'unidad dada' : 'unidades dadas'} de baja`;
+  }
+
+  /**
+   * El manejador que ya no descarta el error.
+   *
+   * Si el rechazo trae plan (409 `PROD_VARIANT_HAS_STOCK_001`), ese plan MANDA:
+   * es más fresco que el del preview y describe el estado real del inventario
+   * ahora mismo. Se sustituye y el modal se abre —o se queda abierto— con las
+   * cifras nuevas; el modal retira el consentimiento al cambiar el plan, así
+   * que el operador tiene que volver a mirar antes de volver a pulsar.
+   *
+   * Si no trae plan, se pinta el código: `parseApiError` da el mensaje del
+   * backend cuando es presentable y el copy curado del catálogo cuando no, y el
+   * código va en el título del toast para que un reporte de soporte lo incluya.
+   */
+  private handleArchiveRejection(product: Product, error: unknown): void {
+    const freshPlan = readArchiveWriteOffPlan(error);
+    if (freshPlan) {
+      this.openArchiveWriteOffModal(product, freshPlan);
+      return;
+    }
+
+    const { errorCode, userMessage } = parseApiError(error);
+    const message = userMessage || extractApiErrorMessage(error);
+    const title = errorCode
+      ? `No se pudo eliminar el producto (${errorCode})`
+      : 'No se pudo eliminar el producto';
+
+    // Con el modal abierto el toast queda detrás y nadie lo lee: el error se
+    // pinta dentro del propio diálogo, donde el operador está mirando.
+    if (this.isArchiveWriteOffModalOpen()) {
+      this.archiveErrorMessage.set(
+        errorCode ? `${message} (${errorCode})` : message,
+      );
+      return;
+    }
+    this.toastService.error(message, title);
   }
 
   // Bulk Upload
