@@ -1,4 +1,4 @@
-import { Transform, TransformFnParams, Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsInt,
   IsOptional,
@@ -9,9 +9,7 @@ import {
 } from 'class-validator';
 
 import { INVOICE_PROFILE_NAME_MAX_LENGTH } from './invoice-profile.constants';
-
-const trimmed = ({ value }: TransformFnParams): unknown =>
-  typeof value === 'string' ? value.trim() : value;
+import { normalizeProfileName } from './invoice-profile-name';
 
 /**
  * Clonar produce un perfil INDEPENDIENTE (ADR-1), no una versión del original.
@@ -22,7 +20,7 @@ const trimmed = ({ value }: TransformFnParams): unknown =>
  * clon emite.
  */
 export class CloneInvoiceProfileDto {
-  @Transform(trimmed)
+  @Transform(normalizeProfileName)
   @IsString({ message: 'El nombre del nuevo perfil es obligatorio.' })
   @MinLength(1, { message: 'El nombre del nuevo perfil no puede estar vacío.' })
   @MaxLength(INVOICE_PROFILE_NAME_MAX_LENGTH, {

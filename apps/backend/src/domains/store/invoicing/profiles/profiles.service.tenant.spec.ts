@@ -71,7 +71,14 @@ describe('ProfilesService — ancla de tenant', () => {
     });
 
     const prisma = { ...scoped, withoutScope } as any;
-    const service = new ProfilesService(prisma);
+    // Doble de la caché del catálogo (C.5): acá sólo importa que no estorbe.
+    // `invalidate` se llama tras cada commit y su fallo es best-effort.
+    const cache = {
+      read: jest.fn().mockResolvedValue(null),
+      write: jest.fn().mockResolvedValue(undefined),
+      invalidate: jest.fn().mockResolvedValue(undefined),
+    } as any;
+    const service = new ProfilesService(prisma, cache);
     return { service, tx, scoped, withoutScope, prisma };
   }
 

@@ -2416,6 +2416,45 @@ export const ErrorCodes = {
   },
 
   /**
+   * Nombre de perfil ya usado en la misma tienda.
+   *
+   * ## Por qué esto ES la idempotencia de la creación
+   *
+   * El requerimiento pedía que un doble submit no creara dos perfiles. La forma
+   * barata sería una cabecera `Idempotency-Key` con su tabla de claves y su TTL;
+   * la forma correcta es notar que el nombre YA identifica al perfil para la
+   * persona que lo elige en el wizard, y hacer que la base lo haga cumplir. Con
+   * `(store_id, lower(name))` único, dos POST idénticos en paralelo terminan
+   * necesariamente en una sola fila, sin estado extra que expirar.
+   *
+   * ## Por qué 409 y no 200 con el perfil existente
+   *
+   * Devolver 200 con el perfil que ya existía es la respuesta cómoda y es
+   * peligrosa: quien envía "AIU obras" con una configuración nueva recibiría un
+   * 200 y un cuerpo con la configuración VIEJA, y creería que sus tarifas se
+   * guardaron. En un módulo cuya salida es un XML con el IVA que se declara a la
+   * DIAN, un guardado que no ocurrió y se anuncia como exitoso es peor que un
+   * error visible.
+   *
+   * El 409 lleva `existing_profile_id` en `details` justamente para que el
+   * frontend pueda distinguir los dos casos que llegan por la misma puerta: el
+   * doble clic accidental —mismo nombre, nada más que informar, se navega al
+   * perfil creado— y el choque real de nombres, donde hay que pedir otro.
+   *
+   * ## Por qué también lo emiten editar y clonar
+   *
+   * Renombrar un perfil al nombre de otro, o clonar hacia un nombre tomado,
+   * violan el mismo índice. Si sólo la creación tradujera el error, las otras
+   * dos rutas devolverían 500 por el mismo hecho.
+   */
+  INVOICING_PROFILE_004: {
+    code: 'INVOICING_PROFILE_004',
+    httpStatus: 409,
+    devMessage:
+      'A billing profile with that name already exists in this store (unique index on store_id + lower(name))',
+  },
+
+  /**
    * Borrado de un perfil que facturas ya timbradas referencian.
    *
    * 409 y no 400: la petición está bien formada y el permiso es correcto; lo que

@@ -14,23 +14,29 @@ import {
   INVOICE_PROFILE_OPERATION_TYPES,
   INVOICE_PROFILE_STATES,
 } from './invoice-profile.constants';
+import { normalizeProfileName } from './invoice-profile-name';
 
 /** Mismo criterio que `CreateInvoiceDto`: un texto vacío es ausencia, no error. */
 const blankToUndefined = ({ value }: TransformFnParams): unknown =>
   typeof value === 'string' && value.trim() === '' ? undefined : value;
 
-/** Recorta el nombre antes de medirlo y de guardarlo. */
-const trimmed = ({ value }: TransformFnParams): unknown =>
-  typeof value === 'string' ? value.trim() : value;
-
 export class CreateInvoiceProfileDto {
   /**
-   * `@Transform(trimmed)` antes de `@MaxLength`: sin recortar, 150 caracteres
-   * más un espacio final pasaban la validación y Postgres rechazaba el INSERT
-   * contra `VarChar(150)` con un error de Prisma que el filtro global degrada a
-   * 500. La cota del DTO tiene que medir exactamente lo que se va a guardar.
+   * `@Transform(normalizeProfileName)` antes de `@MaxLength`, por dos razones
+   * distintas que dan la misma respuesta.
+   *
+   * La primera es la cota: sin recortar, 150 caracteres más un espacio final
+   * pasaban la validación y Postgres rechazaba el INSERT contra `VarChar(150)`
+   * con un error de Prisma que el filtro global degrada a 500. La cota del DTO
+   * tiene que medir exactamente lo que se va a guardar.
+   *
+   * La segunda es la unicidad: el nombre es único por tienda vía
+   * `invoice_profiles_unique_name_per_store` sobre `(store_id, lower(name))`,
+   * y ese índice no colapsa espacios. Sin normalizar, `"AIU  obras"` entra como
+   * un segundo perfil junto a `"AIU obras"` y el selector del wizard ofrece dos
+   * opciones que la persona lee iguales.
    */
-  @Transform(trimmed)
+  @Transform(normalizeProfileName)
   @IsString({ message: 'El nombre del perfil es obligatorio.' })
   @MinLength(1, { message: 'El nombre del perfil no puede estar vacío.' })
   @MaxLength(INVOICE_PROFILE_NAME_MAX_LENGTH, {

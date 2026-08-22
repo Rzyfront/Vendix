@@ -1,4 +1,4 @@
-import { Transform, TransformFnParams } from 'class-transformer';
+import { Transform } from 'class-transformer';
 import {
   IsIn,
   IsObject,
@@ -12,9 +12,7 @@ import {
   INVOICE_PROFILE_NAME_MAX_LENGTH,
   INVOICE_PROFILE_OPERATION_TYPES,
 } from './invoice-profile.constants';
-
-const trimmed = ({ value }: TransformFnParams): unknown =>
-  typeof value === 'string' ? value.trim() : value;
+import { normalizeProfileName } from './invoice-profile-name';
 
 /**
  * Edición de un perfil.
@@ -29,7 +27,7 @@ const trimmed = ({ value }: TransformFnParams): unknown =>
  */
 export class UpdateInvoiceProfileDto {
   @IsOptional()
-  @Transform(trimmed)
+  @Transform(normalizeProfileName)
   @IsString()
   @MinLength(1, { message: 'El nombre del perfil no puede estar vacío.' })
   @MaxLength(INVOICE_PROFILE_NAME_MAX_LENGTH, {

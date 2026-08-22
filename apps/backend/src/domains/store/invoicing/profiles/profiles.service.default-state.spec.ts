@@ -88,7 +88,14 @@ describe('ProfilesService — predeterminado y estado', () => {
       withoutScope: jest.fn().mockReturnValue({ $transaction: jest.fn((cb: any) => cb(tx)) }),
     };
 
-    const service = new ProfilesService(scoped);
+    // Doble de la caché del catálogo (C.5): acá sólo importa que no estorbe.
+    // `invalidate` se llama tras cada commit y su fallo es best-effort.
+    const cache = {
+      read: jest.fn().mockResolvedValue(null),
+      write: jest.fn().mockResolvedValue(undefined),
+      invalidate: jest.fn().mockResolvedValue(undefined),
+    } as any;
+    const service = new ProfilesService(scoped, cache);
     return { service, tx, scoped, updates, outside: () => outsideCalls, profile };
   }
 

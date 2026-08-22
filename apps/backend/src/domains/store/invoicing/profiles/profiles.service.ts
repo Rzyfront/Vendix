@@ -8,6 +8,7 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { ProfileCatalogCacheService } from './profile-catalog-cache.service';
 import { CloneInvoiceProfileDto } from './dto/clone-invoice-profile.dto';
 import { CreateInvoiceProfileDto } from './dto/create-invoice-profile.dto';
+import { normalizeName } from './dto/invoice-profile-name';
 import { QueryInvoiceProfilesDto } from './dto/query-invoice-profiles.dto';
 import { UpdateInvoiceProfileDto } from './dto/update-invoice-profile.dto';
 import { InvoiceProfileConfig } from './invoice-profile-config.contract';
@@ -93,6 +94,38 @@ export class ProfilesService {
    * IVA de un documento con las tarifas de otra empresa, bajo nuestro NIT y
    * nuestro consecutivo.
    */
+  /**
+   * `runScopedTransaction` + traducción de la violación de único.
+   *
+   * Los tres caminos que escriben un `name` —crear, editar, clonar— pueden
+   * chocar con el índice `invoice_profiles_unique_name_per_store`, y los tres
+   * deben responder el MISMO 409. Envolver el `try/catch` acá evita que el
+   * tercero que se agregue lo olvide y devuelva un 500 por el mismo hecho.
+   */
+  private async runScopedTransactionTranslating<T>(
+    conflict: {
+      name?: string;
+      operation_type: string;
+      profile_id: number | null;
+      exclude_id?: number;
+    },
+    work: (tx: any, scope: ProfileScope) => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await this.runScopedTransaction(work);
+    } catch (error) {
+      if (this.isUniqueViolation(error)) {
+        throw await this.uniqueConflict(
+          conflict.name,
+          conflict.operation_type,
+          conflict.profile_id,
+          conflict.exclude_id,
+        );
+      }
+      throw error;
+    }
+  }
+
   private async runScopedTransaction<T>(
     work: (tx: any, scope: ProfileScope) => Promise<T>,
   ): Promise<T> {
@@ -247,15 +280,22 @@ export class ProfilesService {
       operation_type: dto.operation_type,
     });
 
+    // Comprobación previa: NO es la garantía, es el mensaje. Entre esta lectura
+    // y el INSERT cabe otro `create` con el mismo nombre, y en esa carrera gana
+    // el índice único. Existe para que el caso normal —el usuario escribe un
+    // nombre que ya usó— reciba el 409 con el id del perfil existente sin tener
+    // que provocar un error de base.
+    const taken = await this.findByName(dto.name);
+    if (taken) throw this.nameTaken(taken, dto.name);
+
     try {
       return await this.createInTransaction(dto, config);
     } catch (error) {
-      // Dos `create` simultáneos con `is_default: true` sobre el mismo tipo
-      // chocan en el índice único parcial. Sin traducir, el usuario recibiría un
-      // 500 por haber pulsado «crear» al mismo tiempo que un compañero.
+      // Dos índices únicos pueden fallar acá: el de nombre por tienda y el
+      // parcial de predeterminados. Cuál de los dos fue no se deduce del error
+      // —ver `uniqueConflict`— sino preguntando a la base.
       if (this.isUniqueViolation(error)) {
-        // `profile_id: null` — la fila no llegó a existir.
-        throw this.defaultRaceLost(null, dto.operation_type);
+        throw await this.uniqueConflict(dto.name, dto.operation_type, null);
       }
       throw error;
     }
@@ -323,7 +363,17 @@ export class ProfilesService {
       normalizeAndAssertProfileConfig(existing, { operation_type, profile_id: id });
     }
 
-    return this.runScopedTransaction(async (tx, scope) => {
+    // Renombrar hacia un nombre tomado viola el mismo índice que crear. El
+    // `exclude_id` es el propio perfil: reenviar su nombre sin cambiarlo no es
+    // un conflicto consigo mismo.
+    if (dto.name !== undefined) {
+      const taken = await this.findByName(dto.name, id);
+      if (taken) throw this.nameTaken(taken, dto.name);
+    }
+
+    return this.runScopedTransactionTranslating(
+      { name: dto.name, operation_type, profile_id: id, exclude_id: id },
+      async (tx, scope) => {
       await this.assertOwned(tx, scope, id);
       const updated = await tx.invoice_profiles.update({
         where: { id },
@@ -350,7 +400,8 @@ export class ProfilesService {
         config,
         updated.current_version + 1,
       );
-    });
+      },
+    );
   }
 
   /**
@@ -384,7 +435,15 @@ export class ProfilesService {
       operation_type: source.operation_type,
     });
 
-    return this.runScopedTransaction(async (tx, scope) => {
+    // Clonar hacia un nombre tomado viola el mismo índice. Es el caso más
+    // probable de los tres: el nombre por omisión de un clon suele derivarse del
+    // original, y clonar dos veces propone el mismo.
+    const taken = await this.findByName(dto.name);
+    if (taken) throw this.nameTaken(taken, dto.name);
+
+    return this.runScopedTransactionTranslating(
+      { name: dto.name, operation_type: source.operation_type, profile_id: null },
+      async (tx, scope) => {
       const profile = await tx.invoice_profiles.create({
         data: {
           organization_id: scope.organization_id,
@@ -402,7 +461,8 @@ export class ProfilesService {
       });
 
       return this.commitVersion(tx, scope, profile.id, validated, 1);
-    });
+      },
+    );
   }
 
   // ─── Predeterminado y estado ────────────────────────────────────────────
@@ -618,6 +678,43 @@ export class ProfilesService {
         // esto, `deleteMany({ profile_id })` borraría el historial de un perfil
         // de otro tenant con sólo acertar un id.
         await this.assertOwned(tx, scope, id);
+
+        // La procedencia de los clones se anula A MANO, y como PAREJA.
+        //
+        // La FK `cloned_from_profile_id` es ON DELETE SET NULL, así que parecía
+        // resuelto: borrar el origen anularía la referencia del clon. No lo
+        // estaba. Postgres anula la columna de la FK y **sólo** esa, dejando
+        // `cloned_from_version` con su valor — y el CHECK
+        // `invoice_profiles_clone_pair_complete` exige que las dos sean NULL o
+        // ninguna. Resultado medido: borrar un perfil del que alguien había
+        // clonado devolvía 500 `SYS_INTERNAL_001` (un `DriverAdapterError` de
+        // CHECK no trae código Prisma, así que no había nada que traducir) y la
+        // operación era imposible de completar.
+        //
+        // Las dos columnas son un solo hecho —«vengo de la versión N del perfil
+        // X»— y se anulan juntas. El CHECK se queda tal cual: es correcto, y es
+        // lo que delató el problema.
+        await tx.invoice_profiles.updateMany({
+          // `store_id` explícito: dentro de la transacción no hay scope, y sin
+          // él esto anularía la procedencia de clones de otros tenants.
+          where: { store_id: scope.store_id, cloned_from_profile_id: id },
+          data: {
+            cloned_from_profile_id: null,
+            cloned_from_version: null,
+            updated_at: new Date(),
+          },
+        });
+
+        // Lo anterior sólo alcanza a los clones de ESTA tienda, que son los
+        // únicos que la API puede crear. Si quedara alguno fuera del ámbito, el
+        // DELETE volvería a chocar contra el CHECK y saldría como 500: se
+        // comprueba y se responde 409 en su lugar. No debería ocurrir nunca por
+        // la API; ocurre si alguien insertó la referencia por SQL.
+        const foreign_clones = await tx.invoice_profiles.count({
+          where: { cloned_from_profile_id: id, store_id: { not: scope.store_id } },
+        });
+        if (foreign_clones > 0) throw this.deleteBlockedByClones(id, foreign_clones);
+
         await tx.invoice_profile_versions.deleteMany({
           where: { profile_id: id },
         });
@@ -748,6 +845,22 @@ export class ProfilesService {
     );
   }
 
+  /**
+   * 409 por clones fuera del ámbito de la tienda.
+   *
+   * Comparte código con el borrado bloqueado por facturas —`INVOICING_PROFILE_003`
+   * es «este perfil no puede borrarse porque algo lo referencia»— pero el
+   * mensaje nombra la causa real, porque la salida del usuario es distinta: ante
+   * facturas timbradas se desactiva; ante esto hay que llamar a soporte.
+   */
+  private deleteBlockedByClones(profile_id: number, clone_count: number) {
+    return new VendixHttpException(
+      ErrorCodes.INVOICING_PROFILE_003,
+      `Este perfil es el origen de ${clone_count} perfil(es) de otra tienda y no puede eliminarse desde acá.`,
+      { profile_id, foreign_clone_count: clone_count },
+    );
+  }
+
   private deleteBlocked(profile_id: number, invoice_count: number) {
     return new VendixHttpException(
       ErrorCodes.INVOICING_PROFILE_003,
@@ -769,9 +882,93 @@ export class ProfilesService {
   }
 
   /**
-   * `P2002` es la violación de restricción única de Prisma. Acá sólo puede
-   * venir del índice único PARCIAL de predeterminados: es el único único que
-   * una escritura de este servicio puede violar, porque `name` no lo es.
+   * Busca un perfil de ESTA tienda cuyo nombre coincida sin distinguir
+   * mayúsculas, que es el criterio del índice.
+   *
+   * ## Por qué se comparan los nombres en memoria
+   *
+   * Lo natural sería `name: { equals, mode: 'insensitive' }`. No se usa: Prisma
+   * traduce ese modo a `ILIKE`, e `ILIKE` interpreta `%` y `_` como comodines.
+   * Un perfil llamado `"AIU%"` daría por tomado cualquier nombre que empiece por
+   * `AIU` y el usuario recibiría un 409 sobre un conflicto que no existe.
+   *
+   * Un `$queryRaw` con `lower(name) = lower($1)` sería exacto pero sale del
+   * cliente scopeado y habría que reponer el `store_id` a mano —el filtro de
+   * tenant es justo lo que no conviene escribir a mano dos veces—. Traer los
+   * perfiles de la tienda y comparar acá es exacto, mantiene el scope, y la
+   * cardinalidad lo permite: son perfiles de facturación de UNA tienda, del
+   * orden de decenas.
+   */
+  private async findByName(name: string | undefined, exclude_id?: number) {
+    if (name === undefined) return null;
+    const target = normalizeName(name).toLowerCase();
+
+    const rows = await this.prisma.invoice_profiles.findMany({
+      where: exclude_id === undefined ? {} : { id: { not: exclude_id } },
+      select: { id: true, name: true },
+    });
+
+    return rows.find((row) => row.name.toLowerCase() === target) ?? null;
+  }
+
+  /**
+   * Decide QUÉ único se violó preguntando a la base, no leyendo el error.
+   *
+   * `error.meta.target` identifica la restricción en el caso simple, pero el de
+   * nombre es un índice sobre una EXPRESIÓN (`lower(name)`) que no existe en el
+   * esquema de Prisma: qué reporta ahí no está garantizado entre versiones del
+   * cliente. Una traducción que dependa del formato del mensaje falla en
+   * silencio el día que se sube de versión, y falla hacia el lado malo: el
+   * usuario recibiría «otro perfil quedó como predeterminado» cuando lo que pasó
+   * es que el nombre estaba tomado.
+   *
+   * Preguntar por el nombre es determinista: si existe, fue el índice de nombre;
+   * si no, sólo queda el parcial de predeterminados.
+   */
+  private async uniqueConflict(
+    name: string | undefined,
+    operation_type: string,
+    profile_id: number | null,
+    exclude_id?: number,
+  ): Promise<VendixHttpException> {
+    const existing = await this.findByName(name, exclude_id);
+    if (existing && name !== undefined) return this.nameTaken(existing, name);
+    return this.defaultRaceLost(profile_id, operation_type);
+  }
+
+  /**
+   * 409 de nombre tomado — la forma que toma la idempotencia de la creación.
+   *
+   * `existing_profile_id` va en `details` a propósito: es lo que permite al
+   * frontend separar el doble clic accidental (navega al perfil que sí se creó)
+   * del choque real de nombres (pide otro). Sin ese id, las dos situaciones
+   * llegan indistinguibles y la única salida es mostrar un error rojo también a
+   * quien no hizo nada mal.
+   */
+  private nameTaken(existing: { id: number; name: string }, attempted: string) {
+    // El mensaje nombra el perfil EXISTENTE, no lo que el usuario escribió. La
+    // primera versión mostraba lo escrito y en el caso que importa —chocar por
+    // la caja— decía «Ya existe un perfil llamado "idempotencia SONDA"» cuando
+    // en la lista se lee «Idempotencia Sonda»: el usuario iba a buscar una
+    // cadena que no está en pantalla. `attempted` viaja en `details` para que
+    // quien depure vea las dos.
+    return new VendixHttpException(
+      ErrorCodes.INVOICING_PROFILE_004,
+      `Ya existe un perfil llamado «${existing.name}» en esta tienda.`,
+      {
+        name: existing.name,
+        attempted_name: normalizeName(attempted),
+        existing_profile_id: existing.id,
+      },
+    );
+  }
+
+  /**
+   * `P2002` es la violación de restricción única de Prisma. En esta tabla hay
+   * DOS únicos que una escritura del servicio puede violar —el parcial de
+   * predeterminados y el de nombre por tienda—, así que este predicado dice
+   * «chocó con un único», no cuál. Quien lo captura debe pasar por
+   * `uniqueConflict` para averiguarlo.
    */
   private isUniqueViolation(error: unknown): boolean {
     return (error as { code?: string })?.code === 'P2002';
