@@ -426,6 +426,19 @@ import {
                         <span class="text-text-primary line-clamp-1" [title]="item.description">
                           {{ item.description }}
                         </span>
+                        <!--
+                          Los dos ejes van PEGADOS al renglón y COEXISTEN: una
+                          línea puede venir de un producto archivado Y traer la
+                          cantidad convertida. En una lista suelta arriba, el
+                          operador tendría que adivinar de qué renglón habla
+                          cada aviso.
+                        -->
+                        @if (matchNote(item); as note) {
+                          <span class="block text-[11px] text-amber-600 leading-snug">{{ note }}</span>
+                        }
+                        @if (quantityNote(item); as note) {
+                          <span class="block text-[11px] text-text-secondary leading-snug">{{ note }}</span>
+                        }
                       </td>
                       <td class="py-2 px-3">
                         <input
@@ -575,6 +588,12 @@ import {
                       (toggled)="toggleDiscard(i)"
                     ></app-ai-discard-toggle>
                   </div>
+                  @if (matchNote(item); as note) {
+                    <p class="text-[11px] text-amber-600 leading-snug">{{ note }}</p>
+                  }
+                  @if (quantityNote(item); as note) {
+                    <p class="text-[11px] text-text-secondary leading-snug">{{ note }}</p>
+                  }
                   <div class="grid grid-cols-2 gap-2">
                     <div>
                       <label class="text-[10px] text-text-secondary">Cant.</label>
@@ -1058,6 +1077,63 @@ export class InvoiceScannerModalComponent {
 
   /** Clases de la fila descartada, compartidas con las otras superficies. */
   protected readonly discardedRowClasses = AI_DISCARDED_ROW_CLASSES;
+
+  /**
+   * D.1 — por qué esta línea no fue al producto que dice el papel.
+   *
+   * El backend ya manda el motivo tipado y, cuando aplica, el producto
+   * archivado. Se pinta con nombre y SKU para que el operador no tenga que
+   * cruzar la lista de avisos con veinte renglones.
+   */
+  matchNote(item: MatchedLineItem): string | null {
+    const archived = item.archived_candidate;
+    switch (item.match_reason) {
+      case 'archived_candidate':
+        return archived
+          ? `El catálogo tiene «${archived.name}»${archived.sku ? ` (SKU ${archived.sku})` : ''}, pero está ARCHIVADO y no se seleccionó: su costo y su stock no cuentan para esta compra. Reactívalo o crea un producto nuevo desde esta línea.`
+          : 'Había un producto archivado que no se seleccionó a propósito.';
+      case 'archived_sku_reassigned':
+        return archived
+          ? `El SKU impreso pertenece a «${archived.name}», que está ARCHIVADO. Se propuso otro producto en su lugar: verifica que sea el correcto antes de confirmar.`
+          : 'El SKU impreso pertenece a un producto archivado; se propuso otro en su lugar.';
+      case 'no_catalog_match':
+        return 'Sin coincidencias en el catálogo: se creará como producto nuevo.';
+      case 'lookup_failed':
+        return 'No se pudo consultar el catálogo para esta línea; revísala a mano antes de confirmar.';
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * C.8 — la cantidad que se va a cargar NO es la que imprime la factura.
+   *
+   * Se muestran las DOS cifras (la del papel y la aplicada) porque el total de
+   * la línea NO se recalcula al redondear: enseñar sólo la aplicada al lado de
+   * un total intacto haría ver 30.000 junto a 3 × 12.000.
+   */
+  quantityNote(item: MatchedLineItem): string | null {
+    const adj = item.quantity_adjustment;
+    if (!adj) return null;
+    const original = this.trimNumber(adj.original_quantity);
+    const applied = this.trimNumber(adj.applied_quantity);
+    if (adj.reason === 'converted_to_stock_units') {
+      const purchase = adj.purchase_unit ? ` ${adj.purchase_unit}` : '';
+      const stock = adj.stock_unit ? ` ${adj.stock_unit}` : '';
+      const factor = adj.packaging_factor
+        ? ` (× ${this.trimNumber(adj.packaging_factor)})`
+        : '';
+      return `La factura trae ${original}${purchase}${factor} y se cargan ${applied}${stock} a ${this.trimNumber(adj.applied_unit_price)} c/u. El total de la línea no cambia.`;
+    }
+    return `La factura trae ${original} y la orden guarda cantidades enteras: se cargan ${applied} al mismo costo unitario (${this.trimNumber(adj.applied_unit_price)}). El total impreso de la línea no se recalculó.`;
+  }
+
+  /** Número legible sin decimales de relleno (3 en vez de 3,000). */
+  private trimNumber(value: number | null | undefined): string {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '0';
+    return Number.isInteger(n) ? String(n) : String(Math.round(n * 1000) / 1000);
+  }
 
   isDiscarded(index: number): boolean {
     return this.discardedIndexes().has(index);
