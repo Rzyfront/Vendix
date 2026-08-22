@@ -41,6 +41,15 @@ import {
 import { PurchaseOrderPrintService } from '../../services/purchase-order-print.service';
 import { PoPaymentModalComponent, PoPaymentModalOrder } from '../../../../inventory/pop/components/po-payment-modal/po-payment-modal.component';
 import { PoTimelineComponent } from '../../../../inventory/pop/components/po-timeline/po-timeline.component';
+// B.7 — el mismo panel que pinta el wizard POP. La explicación fiscal no puede
+// depender de la pantalla desde la que se sella el costo.
+import { FiscalExplanationPanelComponent } from '../../../../inventory/pop/components/fiscal-explanation-panel/fiscal-explanation-panel.component';
+import {
+  PopCostPreviewRequest,
+  PopCostPreviewRequestItem,
+  PopCostPreviewResponse,
+  PopFiscalExplanation,
+} from '../../../../inventory/pop/interfaces';
 // QUI-431: reusable bulk serial-load modal in `collect` mode (no API call).
 import { SerialBulkLoadModalComponent } from '../../../../serial-numbers/components/serial-bulk-load-modal/serial-bulk-load-modal.component';
 import { BulkBackfillItem } from '../../../../serial-numbers/services/serial-numbers.service';
@@ -126,6 +135,7 @@ interface ReceiveLine {
     PoPaymentModalComponent,
     PoTimelineComponent,
     SerialBulkLoadModalComponent,
+    FiscalExplanationPanelComponent,
   ],
   template: `
     <div class="w-full min-h-screen">
@@ -319,6 +329,47 @@ interface ReceiveLine {
                     </h2>
                   </div>
 
+                  <!--
+                    B.7 — Con «Crear Orden» el costo se sella DÍAS DESPUÉS, aquí.
+                    Esta pantalla no tenía vista previa, ni explicación fiscal,
+                    ni flete por línea: para todo ese camino el operador
+                    aprobaba a ciegas la cifra que entra a inventario.
+                  -->
+                  @if (costPreviewLoading()) {
+                    <div class="px-4 py-3 border-b border-border text-xs text-text-secondary flex items-center gap-2">
+                      <app-spinner [size]="14" />
+                      Calculando la valoración de esta recepción...
+                    </div>
+                  }
+                  @if (costPreviewError(); as previewError) {
+                    <div class="px-4 py-3 border-b border-border">
+                      <app-alert-banner type="warning" [message]="previewError" />
+                      <button type="button" class="mt-2 text-xs font-medium text-primary hover:underline"
+                        (click)="reloadCostPreview()">
+                        Reintentar el cálculo
+                      </button>
+                    </div>
+                  }
+                  @if (fiscalExplanation(); as fx) {
+                    <div class="px-4 py-3 border-b border-border">
+                      <app-fiscal-explanation-panel
+                        [explanation]="fx"
+                        (navigateToFiscalWizard)="goToFiscalWizard($event)"
+                      />
+                    </div>
+                  }
+                  @if (previewShippingCost() > 0) {
+                    <p class="px-4 py-2 border-b border-border text-xs text-text-secondary">
+                      @if (previewShippingProrated()) {
+                        Flete de {{ money(previewShippingCost()) }} prorrateado entre las
+                        líneas: sube el costo unitario de cada producto.
+                      } @else {
+                        Flete de {{ money(previewShippingCost()) }} asumido como costo de
+                        la orden: no toca el costo unitario de los productos.
+                      }
+                    </p>
+                  }
+
                   <div class="overflow-x-auto">
                     <table class="w-full text-sm">
                       <thead class="bg-surface-secondary border-b border-border">
@@ -336,6 +387,17 @@ interface ReceiveLine {
                             <td class="px-4 py-2.5">
                               <div class="font-medium text-text-primary">{{ line.product_name }}</div>
                               <div class="text-xs text-text-secondary">{{ line.sku }}</div>
+                              @if (newCostFor(line); as newCost) {
+                                <div class="text-[11px] text-text-secondary">
+                                  Costo nuevo: <strong>{{ money(newCost) }}</strong>
+                                </div>
+                              }
+                              @if (allocatedShippingFor(line); as freight) {
+                                <div class="text-[11px] text-text-secondary">
+                                  Flete asignado: {{ money(freight.amount) }}
+                                  ({{ money(freight.perUnit) }} por unidad, ya dentro del costo nuevo)
+                                </div>
+                              }
                             </td>
                             <td class="px-4 py-2.5 text-center hidden sm:table-cell text-text-secondary">{{ line.quantity_ordered }}</td>
                             <td class="px-4 py-2.5 text-center hidden sm:table-cell text-text-secondary">{{ line.quantity_received }}</td>
@@ -876,6 +938,51 @@ export class StorePurchaseOrderDetailComponent {
   // draft | approved | partial | received | cancelled. Aquí se evaluaban además
   // `submitted` y `ordered`, que no existen en el enum y por tanto nunca se
   // cumplían — condiciones muertas que disfrazaban el gating real.
+  // ==========================================================
+  // B.7 — Vista previa de costeo del camino «Crear Orden»
+  // ==========================================================
+
+  /**
+   * Valoración de lo que está a punto de entrar a inventario.
+   *
+   * Se pide sobre las cantidades PENDIENTES: es lo que una recepción completa
+   * va a costear. La cifra del panel es la que queda en `inventory_cost_layers`
+   * — por eso se pinta ANTES del botón, no después.
+   */
+  readonly costPreview = signal<PopCostPreviewResponse | null>(null);
+  readonly costPreviewLoading = signal(false);
+  readonly costPreviewError = signal<string | null>(null);
+
+  /** Degrada limpio: sin explicación (respuesta vieja) no se pinta nada. */
+  readonly fiscalExplanation = computed<PopFiscalExplanation | null>(
+    () => this.costPreview()?.fiscal_explanation ?? null,
+  );
+
+  readonly previewShippingCost = computed<number>(
+    () => Number(this.costPreview()?.shipping_cost ?? 0) || 0,
+  );
+
+  /** `expense` deja el reparto en cero a propósito: el flete no capitaliza. */
+  readonly previewShippingProrated = computed<boolean>(
+    () => this.costPreview()?.shipping_cost_allocation_applied === 'prorate',
+  );
+
+  /**
+   * Índice por `producto-variante` de lo que devolvió la vista previa. La
+   * tabla de recepción se recorre por línea de la orden, no por línea del
+   * preview, así que necesita el puente.
+   */
+  private readonly previewIndex = computed(() => {
+    const map = new Map<string, any>();
+    for (const item of this.costPreview()?.items ?? []) {
+      map.set(
+        `${item.product_id}-${(item as any).product_variant_id ?? 0}`,
+        item,
+      );
+    }
+    return map;
+  });
+
   readonly canApprove = computed(() => this.po()?.status === 'draft');
 
   readonly canReceive = computed(() => {
@@ -967,6 +1074,9 @@ export class StorePurchaseOrderDetailComponent {
           this.payments.set((res.payments as any)?.data ?? []);
           this.attachments.set((res.attachments as any)?.data ?? []);
           this.buildReceiveLines(order);
+          // La valoración se pide DESPUÉS de armar las líneas: el preview se
+          // calcula sobre lo pendiente, que sale justamente de ellas.
+          this.loadCostPreview(order);
           this.loading.set(false);
         },
         error: (err) => {
@@ -1020,6 +1130,146 @@ export class StorePurchaseOrderDetailComponent {
     // Cada (re)carga de la OC abre un intento limpio: la remisión pendiente de
     // un intento anterior ya no aplica sobre estas líneas recalculadas.
     this.clearPendingReceipt();
+  }
+
+  /**
+   * B.7 — pide la valoración de la recepción pendiente.
+   *
+   * Manda las MISMAS entradas que la creación (descuentos, IVA, flete y su
+   * modo): con menos, la simulación y la orden parten de bases distintas y la
+   * cifra que el operador aprueba no se puede reproducir. `prices_include_tax`
+   * se gatea con `some(tax_rate > 0)` porque el validador cruzado del backend
+   * rechaza una cabecera que se contradice.
+   */
+  private loadCostPreview(po: PurchaseOrder | null): void {
+    this.costPreview.set(null);
+    this.costPreviewError.set(null);
+    if (!po || !this.canReceive()) return;
+
+    const locationId = Number((po as any).location_id);
+    if (!locationId) return;
+
+    const lines = this.receiveLines().filter(
+      (line) => line.pending > 0 && Number(line.unit_price) > 0,
+    );
+    if (lines.length === 0) return;
+
+    const rawItems = ((po.purchase_order_items || po.items || []) as
+      PurchaseOrderItem[]);
+    const byId = new Map<number, PurchaseOrderItem>();
+    for (const item of rawItems) if (item.id) byId.set(item.id, item);
+
+    const items: PopCostPreviewRequestItem[] = lines.map((line) => {
+      const source = byId.get(line.id) as any;
+      return {
+        product_id: line.product_id,
+        product_variant_id: line.product_variant_id ?? undefined,
+        quantity: line.pending,
+        unit_cost: line.unit_price,
+        tax_rate: Number(source?.tax_rate) || 0,
+        tax_type: source?.tax_type ?? 'iva',
+        ...(Number(source?.discount_percentage) > 0
+          ? { discount_percentage: Number(source.discount_percentage) }
+          : {}),
+        ...(Number(source?.discount_amount) > 0
+          ? { discount_amount: Number(source.discount_amount) }
+          : {}),
+        ...(typeof source?.prices_include_tax === 'boolean'
+          ? { prices_include_tax: source.prices_include_tax }
+          : {}),
+      };
+    });
+
+    const header = po as any;
+    const rawShipping = Number(header.shipping_cost);
+    const shippingCost =
+      Number.isFinite(rawShipping) && rawShipping > 0
+        ? Math.round(rawShipping * 100) / 100
+        : 0;
+
+    const request: PopCostPreviewRequest = {
+      location_id: locationId,
+      prices_include_tax:
+        !!header.prices_include_tax &&
+        items.some((it) => Number(it.tax_rate) > 0),
+      discount_amount: Number(header.discount_amount) || 0,
+      shipping_cost: shippingCost,
+      ...(shippingCost > 0
+        ? {
+            shipping_cost_allocation:
+              header.shipping_cost_allocation === 'expense'
+                ? 'expense'
+                : 'prorate',
+          }
+        : {}),
+      items,
+    };
+
+    this.costPreviewLoading.set(true);
+    this.service
+      .getCostPreview(request)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          const data = response?.success
+            ? (response.data as PopCostPreviewResponse | null)
+            : null;
+          if (!data) {
+            // Un fallo NO puede parecer «esta orden no mueve inventario»: se
+            // dice, con reintento, en vez de dejar el bloque mudo.
+            this.costPreviewError.set(
+              (response as any)?.message ||
+                'No se pudo calcular la valoración de esta recepción.',
+            );
+          }
+          this.costPreview.set(data ?? null);
+          this.costPreviewLoading.set(false);
+        },
+        error: (err: unknown) => {
+          this.costPreviewError.set(
+            this._errorText(
+              err,
+              'No se pudo calcular la valoración de esta recepción.',
+            ),
+          );
+          this.costPreviewLoading.set(false);
+        },
+      });
+  }
+
+  /** Reintento manual del cálculo desde el panel de error. */
+  reloadCostPreview(): void {
+    this.loadCostPreview(this.po());
+  }
+
+  /** Costo unitario resultante que la vista previa calculó para la línea. */
+  newCostFor(line: ReceiveLine): number | null {
+    const item = this.previewIndex().get(
+      `${line.product_id}-${line.product_variant_id ?? 0}`,
+    );
+    const cost = Number(item?.new_cost_per_unit);
+    return Number.isFinite(cost) && cost > 0 ? cost : null;
+  }
+
+  /** Flete que el backend asignó a la línea. Null cuando no capitaliza. */
+  allocatedShippingFor(
+    line: ReceiveLine,
+  ): { amount: number; perUnit: number } | null {
+    const item = this.previewIndex().get(
+      `${line.product_id}-${line.product_variant_id ?? 0}`,
+    );
+    const amount = Number(item?.allocated_shipping_amount) || 0;
+    if (amount <= 0) return null;
+    const perUnit =
+      Number(item?.shipping_per_unit) ||
+      (line.pending > 0 ? amount / line.pending : 0);
+    return { amount, perUnit };
+  }
+
+  /** La ruta la manda el backend en `fiscal_explanation.cta.route`. */
+  goToFiscalWizard(route: string): void {
+    if (!route) return;
+    this.router.navigate([route]);
   }
 
   private clearPendingReceipt(): void {
