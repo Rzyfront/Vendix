@@ -4,19 +4,20 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import {
   AnalyticsCategoryId,
   getCategoryById,
+  getViewsByCategory,
 } from '../../config/analytics-registry';
 import {
   StickyHeaderComponent,
   StickyHeaderActionButton,
+  StickyHeaderTab,
 } from '../../../../../../shared/components/sticky-header/sticky-header.component';
-import { AnalyticsTabBarComponent } from '../analytics-tab-bar/analytics-tab-bar.component';
 import { DateRangeSyncService } from '../../../shared/services/date-range-sync.service';
 import { dateRangeToQueryParams } from '../../../shared/utils/date-range-params.util';
 
 @Component({
   selector: 'app-analytics-shell',
   standalone: true,
-  imports: [RouterOutlet, StickyHeaderComponent, AnalyticsTabBarComponent],
+  imports: [RouterOutlet, StickyHeaderComponent],
   templateUrl: './analytics-shell.component.html',
   styleUrls: ['./analytics-shell.component.scss'],
 })
@@ -38,6 +39,23 @@ export class AnalyticsShellComponent {
   readonly category = computed(() => {
     const categoryId = this.categoryId();
     return categoryId ? getCategoryById(categoryId) : undefined;
+  });
+
+  /**
+   * Pestañas del módulo renderizadas dentro del sticky-header (route tabs).
+   * Sustituyen al antiguo `app-analytics-tab-bar` para ahorrar una fila de
+   * altura y dejar las stats cards pegadas al header, como en los reportes.
+   * Se derivan del mismo registry, así que el comportamiento no cambia.
+   */
+  readonly headerTabs = computed<StickyHeaderTab[]>(() => {
+    const categoryId = this.categoryId();
+    if (!categoryId) return [];
+    return getViewsByCategory(categoryId).map((view) => ({
+      id: view.key,
+      label: view.title,
+      icon: view.icon,
+      route: view.route,
+    }));
   });
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
