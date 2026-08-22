@@ -15,7 +15,7 @@ import {
   HttpCode,
   HttpStatus,
   BadRequestException,
-  HttpException,
+  Logger,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -52,9 +52,54 @@ const PAYMENT_RECEIPT_SCAN_ALLOWED_MIMETYPES = new Set([
 ]);
 const PAYMENT_RECEIPT_SCAN_MAX_FILE_BYTES = 10 * 1024 * 1024;
 
+/**
+ * CP-PURCHASE-TRANSPARENCY K — un fallo de compras dejó de responder 200.
+ *
+ * Cada handler de este controller estaba envuelto en un `try/catch` que
+ * terminaba en `return this.responseService.error(...)`. Ese método RETORNA el
+ * sobre `{success:false, statusCode}` en vez de lanzarlo, y `AllExceptionsFilter`
+ * solo corre cuando la excepción SALE del handler: la respuesta viajaba con el
+ * status del decorador —**200 en los `@Get`/`@Patch`/`@Delete`, 201 en los
+ * `@Post`**— y el status real enterrado en el cuerpo.
+ *
+ * Para el cliente eso es indistinguible de un éxito a nivel de transporte: el
+ * `HttpClient` de Angular resuelve por la rama de éxito, el interceptor de
+ * errores no se dispara, y el componente pinta un fallo como si fuera un dato.
+ * Verificado en caliente antes del cambio: `PATCH /:id/receive` con una
+ * transacción caída devolvía `HTTP/1.1 200 OK`.
+ *
+ * El `catch` re-lanzaba ya las `HttpException` (QUI-486), así que los rechazos
+ * de negocio salían bien. Lo que se colaba era el fallo GENÉRICO —un P2028, un
+ * timeout, un `PrismaClientValidationError`—, que es justo el caso en que el
+ * operador más necesita saber que no pasó nada. Y de propina el envoltorio
+ * copiaba `error.message` al cuerpo: el mensaje crudo de Prisma reproduce la
+ * invocación completa con la ruta interna del fichero, los nombres de tabla y
+ * columna y el `store_id` del tenant. El filtro global deja eso en el log del
+ * servidor y NUNCA en la respuesta (ver `http-exception.filter.ts`), así que
+ * quitar el envoltorio cierra además una fuga de información.
+ *
+ * Precondición verificada antes de tocar nada: ningún `throw new Error(...)`
+ * crudo alcanza un handler de este controller.
+ *   · `purchase-orders.service.ts` → 0 ocurrencias.
+ *   · `invoice-scanner.service.ts` → 3, ninguna alcanzable desde una ruta HTTP:
+ *     las dos de `scanPaymentFromImage()` solo las ve el processor de la cola,
+ *     y la de `normalizeOcrResponse()` la ataja `scanInvoice()`, que la traduce
+ *     a `VendixHttpException(INV_SCAN_INCOMPLETE)`.
+ *   · `s3.service.ts` → 2, en `downloadFile()` y en la generación de favicons;
+ *     de S3 aquí solo se usan `uploadFile`/`signUrl`/`deleteFile`.
+ * El resto de servicios de la cadena (stock, costeo, seriales, auditoría,
+ * settings, fiscal, cuentas por pagar, IVA, AI engine) tienen 0.
+ *
+ * Forma del arreglo: el `catch` SOLO sobrevive donde aporta contexto de
+ * diagnóstico que la excepción no lleva (el id de la orden, el tamaño del
+ * lote, el nombre del fichero). Ahí registra y **re-lanza crudo**. Donde no
+ * aportaba nada más que traducir el error, el `try/catch` se eliminó entero.
+ */
 @Controller('store/orders/purchase-orders')
 @UseGuards(PermissionsGuard)
 export class PurchaseOrdersController {
+  private readonly logger = new Logger(PurchaseOrdersController.name);
+
   constructor(
     private readonly purchaseOrdersService: PurchaseOrdersService,
     private readonly invoiceScannerService: InvoiceScannerService,
@@ -77,117 +122,77 @@ export class PurchaseOrdersController {
         'Orden de compra creada exitosamente',
       );
     } catch (error) {
-      // QUI-486 — los errores de negocio DEBEN salir como HTTP 4xx.
-      // Este catch devuelve un cuerpo de error pero deja el status en 201
-      // (default de @Post), así que el cliente lo lee como éxito: es
-      // exactamente el "falso éxito" que reporta el ticket. Se re-lanza toda
-      // HttpException (VendixHttpException tipada y las de Nest —
-      // BadRequestException, NotFoundException, ForbiddenException) para que el
-      // AllExceptionsFilter global la formatee con su status real y su
-      // `error_code`. Los errores NO-HTTP (fallo de Prisma, bug inesperado)
-      // siguen cayendo en el envoltorio de abajo, sin cambio de contrato.
-      if (error instanceof HttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al crear la orden de compra',
-        error.response?.message || error.message,
-        error.status || 400,
+      // QUI-486 — los errores de negocio DEBEN salir como HTTP 4xx. Ese
+      // ticket arregló la mitad tipada re-lanzando toda `HttpException`; los
+      // errores NO-HTTP seguían saliendo con status 201 y `success:false` en
+      // el cuerpo, que es exactamente el mismo "falso éxito" un peldaño más
+      // abajo. Ver la nota de CP-PURCHASE-TRANSPARENCY K en la cabecera de la
+      // clase: ahora se registra y se re-lanza crudo, sin distinguir tipo.
+      //
+      // El `catch` se conserva solo por el log: el proveedor y el número de
+      // líneas son el dato con el que se reconstruye qué se intentó crear, y
+      // la excepción no lo lleva.
+      this.logger.error(
+        `Purchase order create failed (supplier=${createPurchaseOrderDto?.supplier_id ?? 'n/a'}, items=${createPurchaseOrderDto?.items?.length ?? 0}): ${error?.message || error}`,
+        error?.stack,
       );
+      throw error;
     }
   }
 
   @Get()
   @Permissions('store:orders:purchase_orders:read')
   async findAll(@Query() query: PurchaseOrderQueryDto) {
-    try {
-      const result = await this.purchaseOrdersService.findAll(query);
-      if (result.data && result.meta) {
-        return this.responseService.paginated(
-          result.data,
-          result.meta.total,
-          result.meta.page,
-          result.meta.limit,
-          'Órdenes de compra obtenidas exitosamente',
-        );
-      }
-      return this.responseService.success(
-        result,
+    const result = await this.purchaseOrdersService.findAll(query);
+    if (result.data && result.meta) {
+      return this.responseService.paginated(
+        result.data,
+        result.meta.total,
+        result.meta.page,
+        result.meta.limit,
         'Órdenes de compra obtenidas exitosamente',
       );
-    } catch (error) {
-      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
-      if (error instanceof HttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al obtener las órdenes de compra',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
     }
+    return this.responseService.success(
+      result,
+      'Órdenes de compra obtenidas exitosamente',
+    );
   }
 
   @Get('draft')
   @Permissions('store:orders:purchase_orders:read')
   async findDrafts(@Query() query: PurchaseOrderQueryDto) {
-    try {
-      const result = await this.purchaseOrdersService.findByStatus(
-        'draft',
-        query,
-      );
-      return this.responseService.success(
-        result,
-        'Borradores de órdenes de compra obtenidos exitosamente',
-      );
-    } catch (error) {
-      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
-      if (error instanceof HttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al obtener los borradores de órdenes de compra',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.purchaseOrdersService.findByStatus(
+      'draft',
+      query,
+    );
+    return this.responseService.success(
+      result,
+      'Borradores de órdenes de compra obtenidos exitosamente',
+    );
   }
 
   @Get('approved')
   @Permissions('store:orders:purchase_orders:read')
   async findApproved(@Query() query: PurchaseOrderQueryDto) {
-    try {
-      const result = await this.purchaseOrdersService.findByStatus(
-        'approved',
-        query,
-      );
-      return this.responseService.success(
-        result,
-        'Órdenes de compra aprobadas obtenidas exitosamente',
-      );
-    } catch (error) {
-      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
-      if (error instanceof HttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al obtener las órdenes de compra aprobadas',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.purchaseOrdersService.findByStatus(
+      'approved',
+      query,
+    );
+    return this.responseService.success(
+      result,
+      'Órdenes de compra aprobadas obtenidas exitosamente',
+    );
   }
 
   @Get('pending')
   @Permissions('store:orders:purchase_orders:read')
   async findPending(@Query() query: PurchaseOrderQueryDto) {
-    try {
-      const result = await this.purchaseOrdersService.findPending(query);
-      return this.responseService.success(
-        result,
-        'Órdenes de compra pendientes obtenidas exitosamente',
-      );
-    } catch (error) {
-      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
-      if (error instanceof HttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al obtener las órdenes de compra pendientes',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.purchaseOrdersService.findPending(query);
+    return this.responseService.success(
+      result,
+      'Órdenes de compra pendientes obtenidas exitosamente',
+    );
   }
 
   @Get('supplier/:supplierId')
@@ -196,24 +201,14 @@ export class PurchaseOrdersController {
     @Param('supplierId') supplierId: string,
     @Query() query: PurchaseOrderQueryDto,
   ) {
-    try {
-      const result = await this.purchaseOrdersService.findBySupplier(
-        +supplierId,
-        query,
-      );
-      return this.responseService.success(
-        result,
-        'Órdenes de compra del proveedor obtenidas exitosamente',
-      );
-    } catch (error) {
-      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
-      if (error instanceof HttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al obtener las órdenes de compra del proveedor',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.purchaseOrdersService.findBySupplier(
+      +supplierId,
+      query,
+    );
+    return this.responseService.success(
+      result,
+      'Órdenes de compra del proveedor obtenidas exitosamente',
+    );
   }
 
   // ===== Invoice Scanner routes =====
@@ -249,32 +244,30 @@ export class PurchaseOrdersController {
         'Factura escaneada exitosamente',
       );
     } catch (error) {
-      if (error instanceof VendixHttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al escanear la factura',
-        error.response?.message || error.message,
-        error.status || 400,
+      // Ver la nota de CP-PURCHASE-TRANSPARENCY K en la cabecera de la clase.
+      // Este catch era además el más estrecho del fichero: filtraba por
+      // `VendixHttpException`, así que una `BadRequestException` de Nest
+      // —la que levanta el `FileInterceptor` cuando el multipart viene mal—
+      // también acababa dentro del sobre con status 200.
+      //
+      // El log se queda porque el tipo y el tamaño del fichero son lo único
+      // que explica un OCR caído, y no viajan en la excepción.
+      this.logger.error(
+        `Invoice scan failed (mimetype=${file?.mimetype ?? 'n/a'}, size=${file?.size ?? 0}, profile=${orderType ?? 'retail'}): ${error?.message || error}`,
+        error?.stack,
       );
+      throw error;
     }
   }
 
   @Post('scan/match')
   @Permissions('store:orders:purchase_orders:create')
   async matchProducts(@Body() scanResult: any) {
-    try {
-      const result = await this.invoiceScannerService.matchProducts(scanResult);
-      return this.responseService.success(
-        result,
-        'Coincidencias de productos encontradas',
-      );
-    } catch (error) {
-      if (error instanceof VendixHttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al buscar coincidencias de productos',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.invoiceScannerService.matchProducts(scanResult);
+    return this.responseService.success(
+      result,
+      'Coincidencias de productos encontradas',
+    );
   }
 
   @Post('scan/confirm')
@@ -294,30 +287,23 @@ export class PurchaseOrdersController {
         'Orden de compra creada desde factura escaneada',
       );
     } catch (error) {
-      if (error instanceof VendixHttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al confirmar la factura escaneada',
-        error.response?.message || error.message,
-        error.status || 400,
+      // Ver la nota de CP-PURCHASE-TRANSPARENCY K en la cabecera de la clase.
+      // Aquí el falso éxito era el más caro del fichero: `confirmAndCreatePO`
+      // crea la orden y sus líneas dentro de una transacción; si se cae, el
+      // modal de confirmación del escáner celebraba una OC que no existe.
+      this.logger.error(
+        `Scanned invoice confirmation failed (supplier=${confirmDto?.supplier_id ?? 'n/a'}, items=${confirmDto?.items?.length ?? 0}, hasFile=${!!file}): ${error?.message || error}`,
+        error?.stack,
       );
+      throw error;
     }
   }
 
   @Post('cost-preview')
   @Permissions('store:orders:purchase_orders:read')
   async getCostPreview(@Body() dto: CostPreviewDto) {
-    try {
-      const result = await this.purchaseOrdersService.getCostPreview(dto);
-      return this.responseService.success(result, 'Preview de costos obtenido');
-    } catch (error) {
-      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
-      if (error instanceof HttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al obtener preview de costos',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.purchaseOrdersService.getCostPreview(dto);
+    return this.responseService.success(result, 'Preview de costos obtenido');
   }
 
   // ===== Sub-resource routes (BEFORE :id to avoid route conflicts) =====
@@ -325,61 +311,31 @@ export class PurchaseOrdersController {
   @Get(':id/receptions')
   @Permissions('store:orders:purchase_orders:read')
   async getReceptions(@Param('id') id: string) {
-    try {
-      const result = await this.purchaseOrdersService.getReceptions(+id);
-      return this.responseService.success(
-        result,
-        'Recepciones obtenidas exitosamente',
-      );
-    } catch (error) {
-      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
-      if (error instanceof HttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al obtener las recepciones',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.purchaseOrdersService.getReceptions(+id);
+    return this.responseService.success(
+      result,
+      'Recepciones obtenidas exitosamente',
+    );
   }
 
   @Get(':id/cost-summary')
   @Permissions('store:orders:purchase_orders:read')
   async getCostSummary(@Param('id') id: string) {
-    try {
-      const result = await this.purchaseOrdersService.getCostSummary(+id);
-      return this.responseService.success(
-        result,
-        'Resumen de costos obtenido exitosamente',
-      );
-    } catch (error) {
-      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
-      if (error instanceof HttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al obtener el resumen de costos',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.purchaseOrdersService.getCostSummary(+id);
+    return this.responseService.success(
+      result,
+      'Resumen de costos obtenido exitosamente',
+    );
   }
 
   @Get(':id/timeline')
   @Permissions('store:orders:purchase_orders:read')
   async getTimeline(@Param('id') id: string) {
-    try {
-      const result = await this.purchaseOrdersService.getTimeline(+id);
-      return this.responseService.success(
-        result,
-        'Timeline obtenido exitosamente',
-      );
-    } catch (error) {
-      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
-      if (error instanceof HttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al obtener el timeline',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.purchaseOrdersService.getTimeline(+id);
+    return this.responseService.success(
+      result,
+      'Timeline obtenido exitosamente',
+    );
   }
 
   @Post(':id/attachments')
@@ -392,11 +348,12 @@ export class PurchaseOrdersController {
   ) {
     try {
       if (!file) {
-        return this.responseService.error(
-          'No se proporcionó un archivo',
-          'File is required',
-          400,
-        );
+        // Esta guarda ni siquiera estaba en un `catch`: devolvía el sobre
+        // directamente, así que subir el formulario sin fichero respondía
+        // **HTTP 201 Created** con `success:false`. `MEDIA_FILE_REQUIRED_001`
+        // es el código ya registrado para esto (400), el mismo que usan el
+        // resto de subidas del repo.
+        throw new VendixHttpException(ErrorCodes.MEDIA_FILE_REQUIRED_001);
       }
       const result = await this.purchaseOrdersService.addAttachment(
         +id,
@@ -408,34 +365,25 @@ export class PurchaseOrdersController {
         'Archivo adjunto agregado exitosamente',
       );
     } catch (error) {
-      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
-      if (error instanceof HttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al agregar el archivo adjunto',
-        error.response?.message || error.message,
-        error.status || 400,
+      // Ver la nota de CP-PURCHASE-TRANSPARENCY K en la cabecera de la clase.
+      // El log conserva el nombre y el tamaño del fichero: un fallo de S3 no
+      // los lleva, y sin ellos no se sabe qué adjunto quedó sin subir.
+      this.logger.error(
+        `Attachment upload failed (po=${id}, name=${file?.originalname ?? 'n/a'}, size=${file?.size ?? 0}): ${error?.message || error}`,
+        error?.stack,
       );
+      throw error;
     }
   }
 
   @Get(':id/attachments')
   @Permissions('store:orders:purchase_orders:read')
   async getAttachments(@Param('id') id: string) {
-    try {
-      const result = await this.purchaseOrdersService.getAttachments(+id);
-      return this.responseService.success(
-        result,
-        'Archivos adjuntos obtenidos exitosamente',
-      );
-    } catch (error) {
-      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
-      if (error instanceof HttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al obtener los archivos adjuntos',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.purchaseOrdersService.getAttachments(+id);
+    return this.responseService.success(
+      result,
+      'Archivos adjuntos obtenidos exitosamente',
+    );
   }
 
   @Delete(':id/attachments/:attachmentId')
@@ -444,22 +392,12 @@ export class PurchaseOrdersController {
     @Param('id') id: string,
     @Param('attachmentId') attachmentId: string,
   ) {
-    try {
-      const result =
-        await this.purchaseOrdersService.removeAttachment(+attachmentId);
-      return this.responseService.success(
-        result,
-        'Archivo adjunto eliminado exitosamente',
-      );
-    } catch (error) {
-      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
-      if (error instanceof HttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al eliminar el archivo adjunto',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result =
+      await this.purchaseOrdersService.removeAttachment(+attachmentId);
+    return this.responseService.success(
+      result,
+      'Archivo adjunto eliminado exitosamente',
+    );
   }
 
   @Post(':id/payments')
@@ -475,34 +413,23 @@ export class PurchaseOrdersController {
         'Pago registrado exitosamente',
       );
     } catch (error) {
-      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
-      if (error instanceof HttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al registrar el pago',
-        error.response?.message || error.message,
-        error.status || 400,
+      // Ver la nota de CP-PURCHASE-TRANSPARENCY K en la cabecera de la clase.
+      // Un pago que se cae y responde 201 es dinero que el operador da por
+      // registrado: el monto y el método son lo que permite reconciliarlo
+      // contra el extracto, y la excepción no los lleva.
+      this.logger.error(
+        `Purchase payment registration failed (po=${id}, amount=${dto?.amount ?? 'n/a'}, method=${dto?.payment_method ?? 'n/a'}): ${error?.message || error}`,
+        error?.stack,
       );
+      throw error;
     }
   }
 
   @Get(':id/payments')
   @Permissions('store:orders:purchase_orders:read')
   async getPayments(@Param('id') id: string) {
-    try {
-      const result = await this.purchaseOrdersService.getPayments(+id);
-      return this.responseService.success(
-        result,
-        'Pagos obtenidos exitosamente',
-      );
-    } catch (error) {
-      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
-      if (error instanceof HttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al obtener los pagos',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.purchaseOrdersService.getPayments(+id);
+    return this.responseService.success(result, 'Pagos obtenidos exitosamente');
   }
 
   // ===== Main :id route =====
@@ -510,21 +437,11 @@ export class PurchaseOrdersController {
   @Get(':id')
   @Permissions('store:orders:purchase_orders:read')
   async findOne(@Param('id') id: string) {
-    try {
-      const result = await this.purchaseOrdersService.findOne(+id);
-      return this.responseService.success(
-        result,
-        'Orden de compra obtenida exitosamente',
-      );
-    } catch (error) {
-      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
-      if (error instanceof HttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al obtener la orden de compra',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.purchaseOrdersService.findOne(+id);
+    return this.responseService.success(
+      result,
+      'Orden de compra obtenida exitosamente',
+    );
   }
 
   @Patch(':id')
@@ -533,64 +450,34 @@ export class PurchaseOrdersController {
     @Param('id') id: string,
     @Body() updatePurchaseOrderDto: UpdatePurchaseOrderDto,
   ) {
-    try {
-      const result = await this.purchaseOrdersService.update(
-        +id,
-        updatePurchaseOrderDto,
-      );
-      return this.responseService.updated(
-        result,
-        'Orden de compra actualizada exitosamente',
-      );
-    } catch (error) {
-      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
-      if (error instanceof HttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al actualizar la orden de compra',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.purchaseOrdersService.update(
+      +id,
+      updatePurchaseOrderDto,
+    );
+    return this.responseService.updated(
+      result,
+      'Orden de compra actualizada exitosamente',
+    );
   }
 
   @Patch(':id/approve')
   @Permissions('store:orders:purchase_orders:approve')
   async approve(@Param('id') id: string) {
-    try {
-      const result = await this.purchaseOrdersService.approve(+id);
-      return this.responseService.success(
-        result,
-        'Orden de compra aprobada exitosamente',
-      );
-    } catch (error) {
-      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
-      if (error instanceof HttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al aprobar la orden de compra',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.purchaseOrdersService.approve(+id);
+    return this.responseService.success(
+      result,
+      'Orden de compra aprobada exitosamente',
+    );
   }
 
   @Patch(':id/cancel')
   @Permissions('store:orders:purchase_orders:cancel')
   async cancel(@Param('id') id: string) {
-    try {
-      const result = await this.purchaseOrdersService.cancel(+id);
-      return this.responseService.success(
-        result,
-        'Orden de compra cancelada exitosamente',
-      );
-    } catch (error) {
-      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
-      if (error instanceof HttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al cancelar la orden de compra',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.purchaseOrdersService.cancel(+id);
+    return this.responseService.success(
+      result,
+      'Orden de compra cancelada exitosamente',
+    );
   }
 
   @Patch(':id/receive')
@@ -603,19 +490,23 @@ export class PurchaseOrdersController {
         'Orden de compra recibida exitosamente',
       );
     } catch (error) {
-      // QUI-486 — mismo motivo que en create(): sin este re-lanzado la
-      // recepción fallida vuelve como HTTP 200 con `success:false` y
-      // `po-receive-modal` la celebra con "Mercancia recibida correctamente"
-      // sin que haya entrado una sola unidad. Ese es el origen real de la
-      // "recepción silenciosa" del ticket, y afecta por igual al guard de
-      // sobre-recepción (BadRequestException) y al de variantes
-      // (VendixHttpException) — de ahí que se re-lance toda HttpException.
-      if (error instanceof HttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al recibir la orden de compra',
-        error.response?.message || error.message,
-        error.status || 400,
+      // QUI-486 — sin re-lanzar, la recepción fallida vuelve como HTTP 200 con
+      // `success:false` y `po-receive-modal` la celebra con "Mercancia recibida
+      // correctamente" sin que haya entrado una sola unidad. Ese es el origen
+      // real de la "recepción silenciosa" del ticket.
+      //
+      // QUI-486 solo re-lanzaba `HttpException`, y por eso curaba los guards
+      // (sobre-recepción, variantes) pero NO el caso peor: `receive()` corre
+      // dentro de una transacción que mueve stock, escribe capas de costo y
+      // emite eventos contables. Si ESA transacción se cae —un P2028, un
+      // deadlock, un timeout— el error no es una `HttpException` y salía por
+      // el envoltorio: 200, modal en verde, bodega intacta. Verificado en
+      // caliente antes del cambio. Ahora se re-lanza crudo, sin filtrar tipo.
+      this.logger.error(
+        `Purchase order reception failed (po=${id}, lines=${dto?.items?.length ?? 0}, invoice=${dto?.supplier_invoice_number ?? 'n/a'}): ${error?.message || error}`,
+        error?.stack,
       );
+      throw error;
     }
   }
 
@@ -628,13 +519,14 @@ export class PurchaseOrdersController {
         'Orden de compra eliminada exitosamente',
       );
     } catch (error) {
-      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
-      if (error instanceof HttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al eliminar la orden de compra',
-        error.response?.message || error.message,
-        error.status || 400,
+      // Ver la nota de CP-PURCHASE-TRANSPARENCY K en la cabecera de la clase.
+      // El borrado es irreversible: un 200 sobre un borrado que no ocurrió
+      // hace que el operador quite la orden de su lista mental y no vuelva.
+      this.logger.error(
+        `Purchase order delete failed (po=${id}): ${error?.message || error}`,
+        error?.stack,
       );
+      throw error;
     }
   }
 
@@ -700,7 +592,11 @@ export class PurchaseOrdersController {
     try {
       const job = await this.paymentReceiptScanQueue.add(
         'scan',
-        { dataUri, mimeType, context: { store_id, organization_id, user_id, request_id } },
+        {
+          dataUri,
+          mimeType,
+          context: { store_id, organization_id, user_id, request_id },
+        },
         {
           attempts: 3,
           backoff: { type: 'exponential', delay: 2000 },
