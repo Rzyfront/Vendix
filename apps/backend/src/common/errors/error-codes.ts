@@ -2274,6 +2274,54 @@ export const ErrorCodes = {
       'Line declares an aiu_component on a document whose operation_type is not the AIU one (09); the component would be silently ignored and the line taxed as standard',
   },
   /**
+   * Los tres códigos siguientes cierran la vía por la que una factura AIU
+   * ACEPTADA declara menos IVA del debido, que es el daño que el bloque de
+   * arriba nombra pero no impedía.
+   *
+   * El hueco no era un descuido de cálculo. Bajo `et_462_1` la base es el AIU
+   * completo, así que Imprevistos y Utilidad sin IVA sub-declaran el impuesto;
+   * el calculador lo DETECTA (divergencia `aiu_taxable_line_without_tax`) pero
+   * no podía imponer el importe porque **no conocía la tarifa**: depende del
+   * bien o servicio y ese servicio no lo sabe. Con la divergencia reducida a un
+   * `logger.warn`, quien capturaba la factura decidía la base gravable por
+   * omisión. Evidencia real: la factura 83 (`QA102`, régimen `et_462_1`)
+   * declaró 190.000 donde correspondían 285.000 — 95.000 de IVA faltantes.
+   *
+   * El perfil de facturación es lo que aporta el dato ausente: su matriz de
+   * impuestos declara la tarifa por componente AIU, y con ella el servidor sí
+   * puede imponer. De ahí la asimetría deliberada de estos códigos:
+   *
+   * - con perfil y tarifa declarada ⇒ el servidor IMPONE, no hay error;
+   * - sin perfil ⇒ `INVOICING_AIU_004`, porque emitir sub-declarando es peor
+   *   que parar: la DIAN acepta el documento y el faltante solo se corrige con
+   *   nota crédito, ya con la sanción corriendo;
+   * - con perfil pero el cliente declara otra tarifa ⇒ `INVOICING_AIU_005`,
+   *   porque contradecir la configuración congelada señala un bug de cliente o
+   *   manipulación, y eso debe ser ruidoso y no resolverse en silencio.
+   *
+   * No bloquean el flujo del panel: el formulario pone IVA en TODAS las líneas,
+   * que es el caso simétrico (`aiu_untaxable_line_declares_tax`) y ese sí se
+   * resuelve quitando el impuesto sin bloquear.
+   */
+  INVOICING_AIU_004: {
+    code: 'INVOICING_AIU_004',
+    httpStatus: 422,
+    devMessage:
+      'AIU taxable line declares no tax and no billing profile supplies the rate for its component: the server cannot infer the rate and refuses to emit an under-declared document (the DIAN would accept it and the shortfall would only be fixable by credit note)',
+  },
+  INVOICING_AIU_005: {
+    code: 'INVOICING_AIU_005',
+    httpStatus: 422,
+    devMessage:
+      'Declared per-line tax contradicts the tax matrix frozen in the billing profile version for that AIU component (different rate, or tax on a component the regime does not tax): the taxable base is determined by the regime, never by what the client declares line by line',
+  },
+  INVOICING_AIU_006: {
+    code: 'INVOICING_AIU_006',
+    httpStatus: 422,
+    devMessage:
+      'No AIU regime can be resolved: the invoice carries no frozen aiu_regime and the store has no invoicing.aiu configuration; the base cannot be guessed because the two regimes (E.T. 462-1 vs Decreto 1372/1992) are incompatible',
+  },
+  /**
    * DIVISA — la factura electrónica colombiana se emite SIEMPRE en pesos
    * (Res. DIAN 000042/2020 art. 73; Oficios 901544 y 903436 de 2020; Concepto
    * 1509 de 2024). La divisa no cambia `cbc:DocumentCurrencyCode`: se DECLARA
