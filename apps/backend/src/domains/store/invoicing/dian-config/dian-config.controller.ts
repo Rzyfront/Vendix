@@ -29,6 +29,7 @@ import { S3Service } from '../../../../common/services/s3.service';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { Roles } from '../../../auth/decorators/roles.decorator';
 import { RolesGuard } from '../../../auth/guards/roles.guard';
+import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { UserRole } from '../../../auth/enums/user-role.enum';
 import { CreateDianConfigDto } from './dto/create-dian-config.dto';
 import { UpdateDianConfigDto } from './dto/update-dian-config.dto';
@@ -39,7 +40,18 @@ import { buildDianCertificateS3Key } from './certificates/certificate-s3-key.uti
 import { DIAN_IDENTITY_DOCUMENT_MAX_BYTES } from './certificates/identity-documents.contract';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 
+/*
+ * NOTA sobre el guard: hasta este cambio la clase no declaraba `PermissionsGuard`,
+ * así que los `@Permissions` de abajo eran decoración inerte —Nest sólo los lee si
+ * hay un guard que los consulte—. Verificado empíricamente: un usuario de rol
+ * `cashier` sin un solo permiso `invoicing:*` obtenía 200 en las lecturas y
+ * alcanzaba la capa de servicio en los `DELETE` (404 con `error_code` de dominio,
+ * prueba de que la autorización no se evaluaba). No es un permiso nuevo ni una
+ * restricción nueva: es hacer efectiva la que el archivo ya declaraba. Mismo
+ * criterio que `pos/pos-fiscal.controller.ts`.
+ */
 @Controller('store/invoicing/dian-config')
+@UseGuards(PermissionsGuard)
 export class DianConfigController {
   constructor(
     private readonly dian_config_service: DianConfigService,

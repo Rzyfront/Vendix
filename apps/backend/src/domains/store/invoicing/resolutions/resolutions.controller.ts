@@ -11,6 +11,7 @@ import {
   ParseIntPipe,
   UploadedFile,
   UseInterceptors,
+  UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
@@ -18,6 +19,7 @@ import { ResolutionsService } from './resolutions.service';
 import { ResolutionScannerService } from './resolution-scanner.service';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { CreateResolutionDto } from './dto/create-resolution.dto';
 import { UpdateResolutionDto } from './dto/update-resolution.dto';
 
@@ -29,7 +31,18 @@ const SCAN_ALLOWED_MIME_TYPES = [
   'application/pdf',
 ];
 
+/*
+ * NOTA sobre el guard: hasta este cambio la clase no declaraba `PermissionsGuard`,
+ * así que los `@Permissions` de abajo eran decoración inerte —Nest sólo los lee si
+ * hay un guard que los consulte—. Verificado empíricamente: un usuario de rol
+ * `cashier` sin un solo permiso `invoicing:*` obtenía 200 en las lecturas y
+ * alcanzaba la capa de servicio en los `DELETE` (404 con `error_code` de dominio,
+ * prueba de que la autorización no se evaluaba). No es un permiso nuevo ni una
+ * restricción nueva: es hacer efectiva la que el archivo ya declaraba. Mismo
+ * criterio que `pos/pos-fiscal.controller.ts`.
+ */
 @Controller('store/invoicing/resolutions')
+@UseGuards(PermissionsGuard)
 export class ResolutionsController {
   constructor(
     private readonly resolutions_service: ResolutionsService,
