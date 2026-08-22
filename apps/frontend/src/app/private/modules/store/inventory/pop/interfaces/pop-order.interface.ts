@@ -103,6 +103,15 @@ export interface CreatePurchaseOrderRequest {
   payment_terms?: string;
   shipping_method?: string;
   shipping_cost?: number;
+  /**
+   * C.5 — cómo se imputa el flete: `prorate` lo reparte entre las líneas y lo
+   * capitaliza al costo del inventario; `expense` lo deja como costo de la
+   * orden y no mueve el costo unitario. En los dos casos suma al total.
+   *
+   * El backend RECHAZA con 400 un `shipping_cost > 0` sin este campo, y también
+   * un `prorate` sin flete. Por eso viaja SÓLO cuando hay flete.
+   */
+  shipping_cost_allocation?: 'prorate' | 'expense';
   subtotal_amount?: number;
   tax_amount?: number;
   total_amount?: number;
@@ -244,6 +253,21 @@ export function cartToPurchaseOrderRequest(
     return !!p.is_ingredient && !sellable;
   });
 
+  // Flete saneado a 2 decimales: la columna es `Decimal(12,2)` y el DTO
+  // rechaza un tercer decimal con 400.
+  const rawShipping = Number(cartState.shippingCost);
+  const shippingCost =
+    Number.isFinite(rawShipping) && rawShipping > 0
+      ? Math.round(rawShipping * 100) / 100
+      : 0;
+
+  // IVA cycle (F1): modo dominante de la factura, GATEADO por el maestro
+  // `has_vat` Y por que exista al menos una línea gravada.
+  const headerPricesIncludeTax =
+    cartState.has_vat &&
+    !!cartState.prices_include_tax &&
+    items.some((it) => Number(it.tax_rate) > 0);
+
   return {
     organization_id: organizationId,
     supplier_id: cartState.supplierId!,
@@ -253,13 +277,24 @@ export function cartToPurchaseOrderRequest(
     // by the master switch `cartState.has_vat`. When the purchase has no VAT,
     // force `false` so the header cannot reintroduce tax-inclusive semantics
     // that the $0 IVA preview never showed.
-    prices_include_tax: cartState.has_vat ? cartState.prices_include_tax : false,
+    // El validador cruzado del backend rechaza «precios con IVA incluido» sin
+    // una sola línea gravada: es una cabecera que se contradice. Se exige aquí
+    // el mismo `some(tax_rate > 0)` para no mandar una combinación que la
+    // pantalla nunca mostró y que vuelve como un 400 sin campo señalado.
+    prices_include_tax: headerPricesIncludeTax,
     order_type: isIngredientOrder ? 'ingredient' : 'retail',
     order_date: cartState.orderDate.toISOString(),
     expected_date: cartState.expectedDate?.toISOString(),
     payment_terms: cartState.paymentTerms,
     shipping_method: cartState.shippingMethod,
-    shipping_cost: cartState.shippingCost,
+    shipping_cost: shippingCost,
+    // Sólo con flete: `prorate` sin monto también es 400.
+    ...(shippingCost > 0
+      ? {
+          shipping_cost_allocation:
+            cartState.shippingCostAllocation ?? 'prorate',
+        }
+      : {}),
     // QUI-661: descuento general de la factura. El backend lo prorratea por
     // línea; acá sólo viaja el monto que el proveedor rebajó sobre el total.
     discount_amount: cartState.discountAmount || 0,

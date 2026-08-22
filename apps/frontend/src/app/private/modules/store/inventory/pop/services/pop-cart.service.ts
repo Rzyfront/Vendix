@@ -74,6 +74,9 @@ const INITIAL_STATE: PopCartState = {
   expectedDate: new Date(),
   shippingMethod: 'pickup',
   shippingCost: 0,
+  // C.5 — sin flete no hay modo que declarar. El backend rechaza `prorate`
+  // sin flete tanto como un flete sin modo, así que el default es "ausente".
+  shippingCostAllocation: undefined,
   discountAmount: 0,
   paymentTerms: undefined,
   notes: '',
@@ -301,17 +304,59 @@ export class PopCartService {
   }
 
   /**
-   * Set shipping method
+   * Set shipping method.
+   *
+   * C.5 — cambiar a un método que NO es flete limpia el costo y su modo. Sin
+   * esto quedaba un "flete fantasma" en el estado: el campo desaparecía de la
+   * pantalla y el monto seguía viajando al preview, al payload de creación y
+   * al costo sellado. La pantalla y el carrito tienen que contar la misma
+   * historia en todo momento.
    */
   setShippingMethod(method: ShippingMethod | undefined) {
-    this.updateState({ shippingMethod: method });
+    if (method === 'freight') {
+      this.updateState({ shippingMethod: method });
+      return;
+    }
+    this.updateState({
+      shippingMethod: method,
+      shippingCost: 0,
+      shippingCostAllocation: undefined,
+    });
   }
 
   /**
-   * Set shipping cost
+   * Set shipping cost.
+   *
+   * Se recorta a un no-negativo finito con 2 decimales: la columna que lo
+   * recibe es `Decimal(12,2)` y el DTO rechaza un tercer decimal con 400.
+   * Un flete en cero deja el estado sin modo, porque el validador cruzado del
+   * backend rechaza `prorate` sin flete.
    */
   setShippingCost(cost: number) {
-    this.updateState({ shippingCost: cost });
+    const raw = Number(cost);
+    const safe = Number.isFinite(raw) && raw > 0 ? Math.round(raw * 100) / 100 : 0;
+    if (safe === 0) {
+      this.updateState({ shippingCost: 0, shippingCostAllocation: undefined });
+      return;
+    }
+    const current = this.currentState;
+    this.updateState({
+      shippingCost: safe,
+      // El modo es OBLIGATORIO en cuanto hay flete (HTTP 400 sin él). Se
+      // siembra en `prorate` —la imputación contable correcta por defecto: el
+      // flete es parte de lo que costó poner el producto en bodega— y el
+      // operador puede cambiarlo en el conmutador del paso Configuración.
+      shippingCostAllocation: current.shippingCostAllocation ?? 'prorate',
+    });
+  }
+
+  /**
+   * C.5 — cómo se imputa el flete. Sólo tiene sentido con flete > 0; con flete
+   * en cero se ignora, porque el backend rechaza un modo sin monto.
+   */
+  setShippingCostAllocation(mode: 'prorate' | 'expense') {
+    if (!(Number(this.currentState.shippingCost) > 0)) return;
+    this.updateState({ shippingCostAllocation: mode });
   }
 
   /**
@@ -1121,6 +1166,15 @@ export class PopCartService {
       expectedDate: order.expected_date ? new Date(order.expected_date) : undefined,
       shippingMethod: order.shipping_method as any || undefined,
       shippingCost: order.shipping_cost || 0,
+      // C.5 — una orden con flete SIEMPRE tiene modo (el backend lo exige al
+      // crearla). Las órdenes anteriores a C.1 no lo tienen persistido: se
+      // asume `prorate`, que es lo que su costeo hizo de hecho.
+      shippingCostAllocation: Number(order.shipping_cost) > 0
+        ? (((order as any).shipping_cost_allocation as
+            | 'prorate'
+            | 'expense'
+            | undefined) ?? 'prorate')
+        : undefined,
       discountAmount: order.discount_amount || 0,
       paymentTerms: order.payment_terms,
       notes: order.notes || '',

@@ -306,3 +306,9 @@
   background: var(--color-surface);
   border: 1px solid var(--color-border);
 }
+/* C.5 — nota de la fila de flete: dice si se prorrateó o se asumió. */
+.cnf-total-note {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}

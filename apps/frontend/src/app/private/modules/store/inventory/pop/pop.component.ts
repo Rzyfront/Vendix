@@ -55,7 +55,13 @@ import {
   InvoiceMatchResult,
   MatchedLineItem,
 } from './interfaces/invoice-scanner.interface';
-import { CostPreviewResponse } from '../interfaces';
+import {
+  PopCostPreviewItem,
+  PopCostPreviewRequest,
+  PopCostPreviewRequestItem,
+  PopCostPreviewResponse,
+  PopShippingAllocation,
+} from './interfaces';
 import {
   PopProductConfigResult,
   PopProductModalResult,
@@ -214,6 +220,7 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
       [actionType]="confirmOrderAction"
       [costPreview]="costPreview()"
       [loadingCostPreview]="loadingCostPreview()"
+      [costPreviewError]="costPreviewError()"
       [isProcessing]="isProcessingOrder()"
       [retryOrderRef]="retryOrderRef()"
       [orderResult]="orderResult()"
@@ -223,6 +230,13 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
       [locationOptions]="shellLocationOptions()"
       [shippingMethodOptions]="shellShippingMethodOptions"
       [minExpectedDate]="shellMinExpectedDate()"
+      [selectedSupplierId]="cartState()?.supplierId ?? null"
+      [selectedLocationId]="cartState()?.locationId ?? null"
+      [orderDate]="shellOrderDate()"
+      [expectedDate]="shellExpectedDate()"
+      [shippingMethod]="shellShippingMethod()"
+      [shippingCost]="shellShippingCost()"
+      [shippingCostAllocation]="shellShippingCostAllocation()"
       (confirmed)="onOrderConfirmed()"
       (cancelled)="showOrderConfirmModal.set(false)"
       (navigateToSettings)="onNavigateToSettings()"
@@ -236,6 +250,10 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
       (configOrderDateChange)="onShellOrderDateChange($event)"
       (configExpectedDateChange)="onShellExpectedDateChange($event)"
       (configShippingMethodChange)="onShellShippingMethodChange($event)"
+      (configShippingCostChange)="onShellShippingCostChange($event)"
+      (configShippingCostAllocationChange)="onShellShippingCostAllocationChange($event)"
+      (retryCostPreview)="loadCostPreview()"
+      (navigateToFiscalWizard)="onNavigateToFiscalWizard($event)"
       (configOpenSupplierModal)="supplierModalOpen.set(true)"
       (configOpenWarehouseModal)="warehouseModalOpen.set(true)"
     ></app-pop-checkout-shell>
@@ -477,6 +495,24 @@ export class PopComponent implements OnInit, OnDestroy {
   });
   readonly shellShippingMethodOptions = SHIPPING_METHOD_OPTIONS;
 
+  /**
+   * A.13 — método de envío VIVO del carrito.
+   *
+   * El shell montaba sin esta entrada, así que el paso Configuración
+   * re-sembraba `'pickup'` en cada apertura y pisaba lo que el carrito ya
+   * tenía. Con flete elegido, esa re-siembra borraba silenciosamente el modo
+   * de envío antes de que el operador llegara a Confirmación.
+   */
+  readonly shellShippingMethod = computed<string>(
+    () => this.cartState()?.shippingMethod ?? 'pickup',
+  );
+  readonly shellShippingCost = computed<number>(
+    () => Number(this.cartState()?.shippingCost ?? 0) || 0,
+  );
+  readonly shellShippingCostAllocation = computed<
+    PopShippingAllocation | undefined
+  >(() => this.cartState()?.shippingCostAllocation);
+
   /** Fechas del carrito en formato YYYY-MM-DD para los inputs date del wizard. */
   readonly shellOrderDate = computed<string>(() => {
     const fromCart = this.toISODate(this.cartState()?.orderDate);
@@ -522,8 +558,18 @@ export class PopComponent implements OnInit, OnDestroy {
     return pending.order_number || `#${pending.id}`;
   });
 
-  costPreview = signal<CostPreviewResponse | null>(null);
+  costPreview = signal<PopCostPreviewResponse | null>(null);
   loadingCostPreview = signal(false);
+  /**
+   * A.5 — motivo del fallo de la vista previa, para PINTARLO.
+   *
+   * Antes el `error:` del preview caía en un catch mudo que dejaba
+   * `costPreview` en null: el paso Recepción se veía vacío, indistinguible de
+   * «esta compra no mueve inventario», y el operador confirmaba una recepción
+   * sin haber visto jamás el costo que se iba a sellar. Mientras este signal
+   * tenga valor el shell bloquea «Confirmar».
+   */
+  readonly costPreviewError = signal<string | null>(null);
   /**
    * QUI-425 (D4) — Latest pricing overrides captured by the confirmation
    * modal. Mirrored here so the parent can grab them synchronously on confirm.
@@ -1738,6 +1784,34 @@ export class PopComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * C.5 — flete tecleado en el paso Configuración.
+   *
+   * El carrito siembra `prorate` en cuanto el monto es > 0 y limpia el modo al
+   * volver a 0: el backend responde 400 a `shipping_cost > 0` sin modo, y a
+   * `prorate` sin monto. La vista previa se recarga porque el flete prorrateado
+   * cambia el costo unitario que el operador va a aprobar.
+   */
+  onShellShippingCostChange(value: number): void {
+    this.popCartService.setShippingCost(value);
+    this.loadCostPreview();
+  }
+
+  onShellShippingCostAllocationChange(value: PopShippingAllocation): void {
+    this.popCartService.setShippingCostAllocation(value);
+    this.loadCostPreview();
+  }
+
+  /**
+   * CTA del aviso fiscal. La ruta la manda el BACKEND en
+   * `fiscal_explanation.cta.route`: la pantalla no la inventa, así el destino
+   * del asistente se mueve en un solo lugar.
+   */
+  onNavigateToFiscalWizard(route: string): void {
+    if (!route) return;
+    this.router.navigate([route]);
+  }
+
+  /**
    * El paso Configuración quedó completo (proveedor+bodega): ya hay bodega
    * para costear, así que recargamos el preview de costeo que el wizard
    * necesita en el paso Recepción.
@@ -1847,6 +1921,13 @@ export class PopComponent implements OnInit, OnDestroy {
    */
   private openCheckoutShell(action: 'create' | 'create-receive'): void {
     const state = this.popCartService.currentState;
+
+    // Primera línea a propósito: una apertura NUNCA puede empezar mostrando la
+    // valoración de la compra anterior. `loadCostPreview` retorna temprano si
+    // no hay bodega o el carrito está vacío, así que sin este reset el paso
+    // Recepción pintaba el costo de otra orden como si fuera el de ésta.
+    this.costPreview.set(null);
+    this.costPreviewError.set(null);
 
     this.pendingAction.set(null);
     this.showCartModal.set(false);
@@ -1968,18 +2049,67 @@ export class PopComponent implements OnInit, OnDestroy {
     if (!state.locationId || state.items.length === 0) return;
 
     this.costPreview.set(null);
+    this.costPreviewError.set(null);
     this.loadingCostPreview.set(true);
 
-    const request = {
+    // A.5 — la vista previa recibe EXACTAMENTE las mismas entradas que la
+    // creación y la recepción. Mandaba sólo bodega + (producto, cantidad,
+    // costo): sin descuentos, sin IVA y sin flete la simulación partía de una
+    // base que la orden nunca iba a tener, y el operador aprobaba un costo
+    // irreproducible. El mapeo por línea replica `cartToPurchaseOrderRequest`
+    // a propósito — si divergen, vuelve el defecto que este paso cierra.
+    const previewItems: PopCostPreviewRequestItem[] = state.items
+      .filter((item) => !item.is_prebulk && item.product?.id)
+      .map((item) => ({
+        product_id: item.product.id,
+        product_variant_id: item.variant?.id,
+        quantity: item.quantity,
+        unit_cost: item.unit_cost,
+        // El maestro `has_vat` gatea la tasa igual que en la creación: sin él
+        // la tasa sembrada (19) se colaba y la vista previa mostraba un IVA
+        // que la orden no iba a tener.
+        tax_rate: state.has_vat ? Number(item.tax_rate) || 0 : 0,
+        tax_type: item.tax_type ?? 'iva',
+        ...(Number(item.discount) > 0
+          ? { discount_percentage: Number(item.discount) }
+          : {}),
+        ...(Number(item.discount_amount) > 0
+          ? { discount_amount: Number(item.discount_amount) }
+          : {}),
+        ...(state.has_vat && item.prices_include_tax !== undefined
+          ? { prices_include_tax: item.prices_include_tax }
+          : {}),
+      }));
+
+    // Flete a 2 decimales: la columna es `Decimal(12,2)` y el DTO rechaza el
+    // tercero con 400.
+    const rawShipping = Number(state.shippingCost);
+    const shippingCost =
+      Number.isFinite(rawShipping) && rawShipping > 0
+        ? Math.round(rawShipping * 100) / 100
+        : 0;
+
+    // El validador cruzado del backend rechaza «precios con IVA incluido» sin
+    // una sola línea gravada. Se exige aquí el mismo `some(tax_rate > 0)` para
+    // no mandar una cabecera que se contradice y volver con un 400 sin campo.
+    const headerPricesIncludeTax =
+      state.has_vat &&
+      !!state.prices_include_tax &&
+      previewItems.some((it) => Number(it.tax_rate) > 0);
+
+    const request: PopCostPreviewRequest = {
       location_id: state.locationId,
-      items: state.items
-        .filter((item) => !item.is_prebulk && item.product?.id)
-        .map((item) => ({
-          product_id: item.product.id,
-          product_variant_id: item.variant?.id,
-          quantity: item.quantity,
-          unit_cost: item.unit_cost,
-        })),
+      prices_include_tax: headerPricesIncludeTax,
+      discount_amount: Number(state.discountAmount) || 0,
+      shipping_cost: shippingCost,
+      // `prorate` sin monto también es 400: el modo sólo viaja con flete.
+      ...(shippingCost > 0
+        ? {
+            shipping_cost_allocation:
+              state.shippingCostAllocation ?? 'prorate',
+          }
+        : {}),
+      items: previewItems,
     };
 
     // QUI-645 — los productos NUEVOS (prebulk) no tienen nada que consultar en
@@ -1995,9 +2125,7 @@ export class PopComponent implements OnInit, OnDestroy {
       // Solo hay productos nuevos: no hay nada que pedirle al backend, pero el
       // modal igual debe mostrarlos para poder fijarles precio.
       this.costPreview.set(
-        newRows.length
-          ? ({ costing_method: null, items: newRows } as any)
-          : null,
+        newRows.length ? { costing_method: null, items: newRows } : null,
       );
       this.loadingCostPreview.set(false);
       return;
@@ -2005,21 +2133,39 @@ export class PopComponent implements OnInit, OnDestroy {
 
     this.purchaseOrdersService.getCostPreview(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
-        const data = response.success ? response.data : null;
-        this.costPreview.set(
-          data
-            ? ({ ...data, items: [...(data.items ?? []), ...newRows] } as any)
-            : newRows.length
-              ? ({ costing_method: null, items: newRows } as any)
-              : null,
-        );
+        const data = response.success
+          ? (response.data as PopCostPreviewResponse | null)
+          : null;
+        if (!data) {
+          // 200 con `success:false`: el backend contestó, pero no hay
+          // valoración. Es un fallo, no un «no aplica» — se dice.
+          this.costPreviewError.set(
+            (response as any)?.message ||
+              'El servidor respondió sin datos de valoración.',
+          );
+          this.costPreview.set(
+            newRows.length ? { costing_method: null, items: newRows } : null,
+          );
+          this.loadingCostPreview.set(false);
+          return;
+        }
+        this.costPreview.set({
+          ...data,
+          items: [...(data.items ?? []), ...newRows],
+        });
         this.loadingCostPreview.set(false);
       },
-      error: () => {
+      error: (err) => {
+        // A.5 — el error se PINTA. Las filas de producto nuevo se conservan
+        // (no dependen del backend) pero el paso queda marcado como fallido:
+        // el shell no deja confirmar mientras `costPreviewError` tenga valor.
+        this.costPreviewError.set(
+          err?.error?.message ||
+            err?.message ||
+            'No se pudo calcular la valoración de inventario.',
+        );
         this.costPreview.set(
-          newRows.length
-            ? ({ costing_method: null, items: newRows } as any)
-            : null,
+          newRows.length ? { costing_method: null, items: newRows } : null,
         );
         this.loadingCostPreview.set(false);
       },
@@ -2035,7 +2181,7 @@ export class PopComponent implements OnInit, OnDestroy {
    * stay stable while the cart is untouched, which is what the override map
    * needs. `applyNewProductPricing` maps them back to the cart line.
    */
-  private buildNewProductPreviewRows(): any[] {
+  private buildNewProductPreviewRows(): PopCostPreviewItem[] {
     const state = this.popCartService.currentState;
     return state.items
       .map((item, index) => ({ item, index }))

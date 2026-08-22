@@ -108,4 +108,47 @@
       ></app-selector>
     </div>
   </section>
+
+  <!--
+    C.5 — Flete. Aparece SÓLO con entrega por flete: pintarlo siempre haría que
+    el operador capturara flete en compras de mostrador e inflara el costo del
+    inventario. Al cambiar de método el monto se limpia (no queda flete
+    fantasma en el estado del carrito).
+  -->
+  @if (isFreight()) {
+    <section class="cfg-section cfg-section--freight">
+      <div class="cfg-field">
+        <label class="cfg-label" for="pop-config-shipping-cost">
+          Costo del flete
+        </label>
+        <app-input
+          id="pop-config-shipping-cost"
+          size="sm"
+          [currency]="true"
+          [currencyDecimals]="2"
+          [formControl]="form.controls.shippingCost"
+          [control]="form.controls.shippingCost"
+          [placeholder]="'0'"
+          customWrapperClass="!mt-0"
+          (inputChange)="onShippingCostChange($event)"
+        ></app-input>
+        @if (shippingCostError()) {
+          <p class="cfg-error">{{ shippingCostError() }}</p>
+        }
+      </div>
+
+      <div class="cfg-allocation">
+        <app-toggle
+          [checked]="isProrate()"
+          label="Prorratear el flete en el costo de los productos"
+          ariaLabel="Prorratear el flete en el costo de los productos"
+          (toggled)="onAllocationToggle($event)"
+        ></app-toggle>
+        <p class="cfg-allocation-mode">
+          {{ isProrate() ? 'Prorratear' : 'Asumirlo como costo de la orden' }}
+        </p>
+        <p class="cfg-allocation-legend">{{ allocationLegend() }}</p>
+      </div>
+    </section>
+  }
 </div>

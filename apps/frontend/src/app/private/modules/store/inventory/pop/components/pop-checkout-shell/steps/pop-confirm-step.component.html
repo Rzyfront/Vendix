@@ -89,6 +89,19 @@
     </div>
   </section>
 
+  <!--
+    B.5 — Explicación fiscal en el PUNTO DE NO RETORNO. Es la última pantalla
+    antes de sellar el costo: aquí el operador tiene que ver qué se hace con el
+    IVA, por qué, con qué base legal, y —si no ha configurado su área fiscal—
+    la recomendación con su acción. Antes esta pantalla sólo mostraba «IVA: $X».
+  -->
+  @if (fiscalExplanation()) {
+    <app-fiscal-explanation-panel
+      [explanation]="fiscalExplanation()"
+      (navigateToFiscalWizard)="navigateToFiscalWizard.emit($event)"
+    ></app-fiscal-explanation-panel>
+  }
+
   <!-- Totales -->
   <section class="cnf-totals">
     <div class="cnf-total-row">
@@ -99,6 +112,20 @@
       <div class="cnf-total-row">
         <span class="cnf-total-label">Descuento</span>
         <span class="cnf-total-value cnf-total-value--discount">-{{ cartState()?.summary?.discount_amount | currency }}</span>
+      </div>
+    }
+    <!--
+      C.5 — El flete YA está sumado en `total`. Si no tiene fila propia, el
+      operador ve un total que no cuadra con subtotal+IVA y no sabe por qué.
+      La etiqueta dice además si tocó o no el costo de los productos.
+    -->
+    @if (shippingCost() > 0) {
+      <div class="cnf-total-row">
+        <span class="cnf-total-label">
+          Flete
+          <small class="cnf-total-note">({{ shippingAllocationLabel() }})</small>
+        </span>
+        <span class="cnf-total-value">{{ shippingCost() | currency }}</span>
       </div>
     }
     <div class="cnf-total-row cnf-total-row--grand">

@@ -63,3 +63,38 @@
   color: var(--color-text-muted);
   padding-left: 2px;
 }
+/* C.5 — Flete: campo condicionado al método de entrega + conmutador con
+ * leyenda. La leyenda no es decoración: es el único lugar donde el operador
+ * lee qué le va a pasar al costo de sus productos antes de aprobarlo. */
+
+.cfg-section--freight {
+  gap: 12px;
+}
+
+.cfg-error {
+  font-size: 11px;
+  color: var(--color-destructive);
+  padding-left: 2px;
+}
+
+.cfg-allocation {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+}
+
+.cfg-allocation-mode {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  padding-left: 2px;
+}
+
+.cfg-allocation-legend {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+  padding-left: 2px;
+}

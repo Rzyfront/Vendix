@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  computed,
   input,
   output,
   signal,
@@ -10,7 +11,12 @@ import { DecimalPipe } from '@angular/common';
 import { CurrencyPipe } from '../../../../../../../../shared/pipes/currency/currency.pipe';
 import { InputComponent } from '../../../../../../../../shared/components/input/input.component';
 import { IconComponent } from '../../../../../../../../shared/components/icon/icon.component';
-import { CostPreviewItem, CostPreviewResponse } from '../../../../interfaces';
+import { FiscalExplanationPanelComponent } from '../../fiscal-explanation-panel/fiscal-explanation-panel.component';
+import {
+  PopCostPreviewItem,
+  PopCostPreviewResponse,
+  PopFiscalExplanation,
+} from '../../../interfaces';
 
 /**
  * Override por línea (misma forma que los campos opcionales del backend
@@ -46,17 +52,57 @@ export type PopPricingOverridesMap = Map<string, PopPricingOverride>;
     DecimalPipe,
     InputComponent,
     IconComponent,
+    FiscalExplanationPanelComponent,
   ],
   templateUrl: './pop-receive-step.component.html',
   styleUrl: './pop-receive-step.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class PopReceiveStepComponent {
-  readonly costPreview = input<CostPreviewResponse | null>(null);
+  readonly costPreview = input<PopCostPreviewResponse | null>(null);
   readonly loadingCostPreview = input(false);
+  /**
+   * A.5 — mensaje del fallo de la vista previa. Antes el error se tragaba y el
+   * paso quedaba vacío: el operador confirmaba una recepción sin haber visto el
+   * costo que iba a sellar.
+   */
+  readonly costPreviewError = input<string | null>(null);
 
   /** "Cambiar estrategia" → el shell re-emite para navegar a settings generales. */
   readonly navigateToSettings = output<void>();
+  /** El panel de error pide otra vista previa. */
+  readonly retryCostPreview = output<void>();
+  /** CTA del aviso fiscal → asistente fiscal (ruta emitida por el backend). */
+  readonly navigateToFiscalWizard = output<string>();
+
+  /** B.5 — explicación fiscal estructurada. `null` en respuestas sin ella. */
+  readonly fiscalExplanation = computed<PopFiscalExplanation | null>(
+    () => this.costPreview()?.fiscal_explanation ?? null,
+  );
+
+  /**
+   * C.5 — flete que el backend repartió entre las líneas. `expense` deja este
+   * total en cero porque el flete no toca el costo del inventario.
+   */
+  readonly allocatedShippingTotal = computed<number>(() =>
+    (this.costPreview()?.items ?? []).reduce(
+      (acc, item) => acc + (Number(item.allocated_shipping_amount) || 0),
+      0,
+    ),
+  );
+
+  /**
+   * El backend degradó `prorate` a `expense` por no haber base sobre la que
+   * repartir. Hay que decirlo: la elección del operador no se honró.
+   */
+  readonly shippingAllocationDowngraded = computed<boolean>(() => {
+    const preview = this.costPreview();
+    if (!preview?.shipping_cost_allocation_requested) return false;
+    return (
+      preview.shipping_cost_allocation_requested !==
+      preview.shipping_cost_allocation_applied
+    );
+  });
 
   /** Acuse de recepción: ON por defecto en cada apertura (solo cuando está montado). */
   readonly ackReceive = signal(true);
@@ -81,18 +127,26 @@ export class PopReceiveStepComponent {
   }
 
   /** Clave estable para el preview @for Y el mapa de overrides. */
-  previewKey(item: CostPreviewItem): string {
+  previewKey(item: PopCostPreviewItem): string {
     return `${item.product_id}-${item.product_variant_id || 0}`;
   }
 
   /** FormGroup de borrador por fila (creado una sola vez por línea). */
-  rowForm(item: CostPreviewItem): FormGroup {
+  rowForm(item: PopCostPreviewItem): FormGroup {
     const key = this.previewKey(item);
     let group = this.rowControls.get(key);
     if (!group) {
+      // Los controles se declaran `string | number`: el CVA de `app-input` en
+      // modo `[currency]` escribe el NÚMERO crudo (`onChange(rawValue)`), no la
+      // cadena que se pinta. Tiparlos como `string` era una mentira que dejaba
+      // pasar sin ruido el `NaN` que A.14 corrige.
       group = new FormGroup({
-        margin: new FormControl<string>(this.marginDraftFor(item)),
-        price: new FormControl<string>(this.priceDraftFor(item)),
+        margin: new FormControl<string | number | null>(
+          this.marginDraftFor(item),
+        ),
+        price: new FormControl<string | number | null>(
+          this.priceDraftFor(item),
+        ),
       });
       this.rowControls.set(key, group);
     }
@@ -106,7 +160,7 @@ export class PopReceiveStepComponent {
    * backend — no se recalcula aquí para que la pantalla no pueda discrepar de
    * lo que se sella.
    */
-  taxPerUnit(item: CostPreviewItem): number {
+  taxPerUnit(item: PopCostPreviewItem): number {
     return Number(item.incoming_tax_per_unit ?? 0) || 0;
   }
 
@@ -125,40 +179,63 @@ export class PopReceiveStepComponent {
    * una cifra adivinada sobre la que el operador calcula su margen es peor que
    * no mostrar ninguna.
    */
-  disbursementPerUnit(item: CostPreviewItem): number | null {
+  disbursementPerUnit(item: PopCostPreviewItem): number | null {
     const responsible = this.costPreview()?.vat_responsible;
     if (responsible === undefined) return null;
     const cost = Number(item.new_cost_per_unit) || 0;
     return responsible ? cost + this.taxPerUnit(item) : cost;
   }
 
-  /** True cuando la línea trae IVA y se sabe cómo tratarlo. */
-  hasTax(item: CostPreviewItem): boolean {
-    return (
-      this.taxPerUnit(item) > 0 &&
-      this.costPreview()?.vat_responsible !== undefined
-    );
+  /**
+   * True cuando la línea trae IVA y se sabe cómo tratarlo.
+   *
+   * B.5 — la explicación FISCAL ya no cuelga de aquí: el panel del paso se
+   * pinta con `fiscal_explanation`, aunque el IVA sea cero. Esta bandera sólo
+   * decide si tiene sentido pintar la fila de DESEMBOLSO, que con impuesto cero
+   * repetiría el costo.
+   */
+  hasTax(item: PopCostPreviewItem): boolean {
+    return this.taxPerUnit(item) > 0 && this.vatResponsible() !== undefined;
   }
 
   /**
    * Responsabilidad de IVA resuelta por el backend. `undefined` significa
    * "no informado", no "no responsable" — ver `disbursementPerUnit`.
+   *
+   * B.5 — se lee de `fiscal_explanation` cuando está (es el dato estructurado y
+   * fail-closed) y cae a `vat_responsible` para respuestas que aún no lo traen.
    */
   vatResponsible(): boolean | undefined {
+    const fx = this.fiscalExplanation();
+    if (fx) return fx.vat_responsible;
     return this.costPreview()?.vat_responsible;
   }
 
-  /** Accesores tipados para el template (strictTemplates: `controls[...]` es AbstractControl). */
-  marginControl(item: CostPreviewItem): FormControl<string> {
-    return this.rowForm(item).controls['margin'] as FormControl<string>;
+  /** Flete asignado a la línea (0 con `expense`). */
+  allocatedShipping(item: PopCostPreviewItem): number {
+    return Number(item.allocated_shipping_amount) || 0;
   }
 
-  priceControl(item: CostPreviewItem): FormControl<string> {
-    return this.rowForm(item).controls['price'] as FormControl<string>;
+  /** El mismo flete por unidad: lo que subió el costo unitario. */
+  shippingPerUnit(item: PopCostPreviewItem): number {
+    return Number(item.shipping_per_unit) || 0;
+  }
+
+  /** Accesores tipados para el template (strictTemplates: `controls[...]` es AbstractControl). */
+  marginControl(item: PopCostPreviewItem): FormControl<string | number | null> {
+    return this.rowForm(item).controls['margin'] as FormControl<
+      string | number | null
+    >;
+  }
+
+  priceControl(item: PopCostPreviewItem): FormControl<string | number | null> {
+    return this.rowForm(item).controls['price'] as FormControl<
+      string | number | null
+    >;
   }
 
   /** True cuando el operador definió al menos un override para esta línea. */
-  hasOverride(item: CostPreviewItem): boolean {
+  hasOverride(item: PopCostPreviewItem): boolean {
     const o = this.pricingOverrides().get(this.previewKey(item));
     return !!(
       o &&
@@ -171,14 +248,14 @@ export class PopReceiveStepComponent {
    * mismo cociente que el backend usa para `resulting_margin` y para lo que la
    * recepción persiste. Con escala 1 devuelve el costo intacto.
    */
-  private costInPriceScale(item: CostPreviewItem): number {
+  private costInPriceScale(item: PopCostPreviewItem): number {
     const scale = Number(item.price_unit_quantity ?? 1);
     const safeScale = Number.isFinite(scale) && scale > 1 ? scale : 1;
     return Number(item.new_cost_per_unit) * safeScale;
   }
 
   /** Margen desplegado en "Margen resultante" (override > derivado > backend). */
-  previewMargin(item: CostPreviewItem): number | null {
+  previewMargin(item: PopCostPreviewItem): number | null {
     const o = this.pricingOverrides().get(this.previewKey(item));
     if (o?.new_profit_margin !== undefined) return o.new_profit_margin;
     const cost = this.costInPriceScale(item);
@@ -189,14 +266,14 @@ export class PopReceiveStepComponent {
   }
 
   /** Valor de "Nuevo margen" (string para app-input). */
-  marginDraftFor(item: CostPreviewItem): string {
+  marginDraftFor(item: PopCostPreviewItem): string {
     const o = this.pricingOverrides().get(this.previewKey(item));
     if (o?.new_profit_margin !== undefined) return String(o.new_profit_margin);
     return item.resulting_margin !== null ? String(item.resulting_margin) : '';
   }
 
   /** Valor de "Nuevo precio base" (string para app-input). */
-  priceDraftFor(item: CostPreviewItem): string {
+  priceDraftFor(item: PopCostPreviewItem): string {
     const o = this.pricingOverrides().get(this.previewKey(item));
     if (o?.new_base_price !== undefined) return String(o.new_base_price);
     return String(item.current_base_price ?? 0);
@@ -206,7 +283,7 @@ export class PopReceiveStepComponent {
    * Input de margen: re-calcula en vivo el precio base anclado al NUEVO costo.
    * Vacío → ancla a costo (borra el override completo, como "Restablecer").
    */
-  onMarginDraftChange(item: CostPreviewItem, raw: string): void {
+  onMarginDraftChange(item: PopCostPreviewItem, raw: string | number): void {
     const value = this.parseOptionalNumber(raw);
     if (value === null) {
       this.clearOverride(item);
@@ -227,7 +304,7 @@ export class PopReceiveStepComponent {
    * Input de precio: re-calcula en vivo el margen derivado del NUEVO costo.
    * Vacío → ancla a costo (borra el override completo).
    */
-  onPriceDraftChange(item: CostPreviewItem, raw: string): void {
+  onPriceDraftChange(item: PopCostPreviewItem, raw: string | number): void {
     const value = this.parseOptionalNumber(raw);
     if (value === null) {
       this.clearOverride(item);
@@ -243,7 +320,7 @@ export class PopReceiveStepComponent {
     this.rowForm(item).patchValue({ margin: this.marginDraftFor(item) });
   }
 
-  clearOverride(item: CostPreviewItem): void {
+  clearOverride(item: PopCostPreviewItem): void {
     const key = this.previewKey(item);
     const next = new Map(this.pricingOverrides());
     next.delete(key);
@@ -254,10 +331,25 @@ export class PopReceiveStepComponent {
     });
   }
 
-  /** Tolerante a "", null y NaN (el input vacío es "sin override", no crash). */
-  private parseOptionalNumber(raw: string | null | undefined): number | null {
+  /**
+   * Tolerante a "", null y NaN (el input vacío es "sin override", no crash).
+   *
+   * A.14 — ya NO cambia comas por puntos. Esa "normalización" era la que
+   * borraba el override: con `app-input [currency]` emitiendo el texto
+   * formateado, `"1,500,000"` se convertía en `"1.500.000"`, `Number(...)`
+   * daba `NaN`, y `NaN → null` se interpretaba como "el operador vació el
+   * campo" → `clearOverride`. Teclear cualquier precio base ≥ 1000 borraba el
+   * override en silencio, en los dos estilos de formato. Ahora `app-input`
+   * entrega el número canónico (`"1500000"`) y el `<input type="number">` del
+   * margen entrega siempre decimal con punto, así que la sustitución no tenía
+   * ningún caso legítimo que atender y sí uno destructivo.
+   */
+  private parseOptionalNumber(
+    raw: string | number | null | undefined,
+  ): number | null {
     if (raw === null || raw === undefined || raw === '') return null;
-    const cleaned = String(raw).replace(/,/g, '.').trim();
+    if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+    const cleaned = raw.trim();
     if (cleaned === '') return null;
     const n = Number(cleaned);
     return Number.isFinite(n) ? n : null;

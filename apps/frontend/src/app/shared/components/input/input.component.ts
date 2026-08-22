@@ -259,6 +259,25 @@ export class InputComponent implements ControlValueAccessor {
   readonly currencyDecimals = input<number>();
   readonly allowNegative = input(false);
 
+  /**
+   * Valor tecleado.
+   *
+   * En modo NORMAL es el texto del control tal cual.
+   *
+   * En modo `currency` es el número CANÓNICO ya parseado, serializado como
+   * cadena (`"1500000"`, `"1500000.5"`, `""` cuando el campo queda vacío) —
+   * NUNCA el texto formateado con separadores de miles. Emitir `"1.500.000"`
+   * (o `"1,500,000"`, según `format_style`) convertía a este control de dinero
+   * en una trampa: todo consumidor que hiciera `Number($event)` recibía `NaN`
+   * y, si su código trataba el `NaN` como "campo vacío", el valor tecleado se
+   * borraba en silencio. Ocurría de verdad en el paso de recepción del POP:
+   * teclear cualquier precio base ≥ 1000 anulaba el override sin decir nada.
+   *
+   * El texto formateado sigue siendo lo que se PINTA (`value()`), que es su
+   * lugar: es una salida de presentación, no un valor. El tipo `string` no
+   * cambia, así que los consumidores que no usan `[currency]` —la inmensa
+   * mayoría— no se enteran de esta nota.
+   */
   readonly inputChange = output<string>();
   readonly inputFocus = output<void>();
   readonly inputBlur = output<void>();
@@ -560,7 +579,7 @@ export class InputComponent implements ControlValueAccessor {
 
       this.currencyRawValue = this.currencyParse(sanitized);
       this.onChange(this.currencyRawValue);
-      this.inputChange.emit(formatted);
+      this.inputChange.emit(this.currencyEmitPayload());
       return;
     }
 
@@ -699,7 +718,18 @@ export class InputComponent implements ControlValueAccessor {
     input.value = formatted;
     this.currencyRawValue = this.currencyParse(sanitized);
     this.onChange(this.currencyRawValue);
-    this.inputChange.emit(formatted);
+    this.inputChange.emit(this.currencyEmitPayload());
+  }
+
+  /**
+   * Carga de `inputChange` en modo `currency`: el número canónico serializado.
+   *
+   * `String(1500000)` → `"1500000"`, que `Number(...)` revierte sin pérdida en
+   * cualquier `format_style`. El campo vacío emite `''` para que el consumidor
+   * distinguir "sin valor" siga siendo trivial (`$event === ''`).
+   */
+  private currencyEmitPayload(): string {
+    return this.currencyRawValue === null ? '' : String(this.currencyRawValue);
   }
 
   private currencyGetSeparators(): { thousands: string; decimal: string } {
