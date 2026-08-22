@@ -11,6 +11,7 @@ import type {
   InvoiceProfileDetail,
   InvoiceProfilePageMeta,
   InvoiceProfileState as InvoiceProfileStateLiteral,
+  InvoiceProfileVersion,
   InvoiceProfileVersionSummary,
   ProfilePreviewResult,
 } from '../interfaces/invoice-profile.interface';
@@ -90,6 +91,34 @@ export interface InvoicingState {
    * guarda, y el usuario perdería de vista la fila que está editando.
    */
   profileSaving: boolean;
+
+  /**
+   * Último fallo de mutación de un perfil, COMPLETO.
+   *
+   * `profilesError` guarda sólo el texto, y con eso no se puede pintar el
+   * refuerzo que el requerimiento 12 pide: el 409 de borrado bloqueado trae
+   * `details.invoice_count` —cuántas facturas timbradas referencian el
+   * perfil— y `describeApiFailure` prefiere el copy curado sobre el mensaje
+   * del backend, así que el número sólo sobrevive si se guarda el `details`.
+   * Sin él la confirmación reforzada diría «tiene facturas» sin decir cuántas,
+   * que es la mitad del dato que hace tomar la decisión correcta.
+   */
+  profileMutationFailure: {
+    message: string;
+    errorCode: string | null;
+    details: unknown;
+  } | null;
+
+  /**
+   * Snapshot de la versión que el usuario abrió del historial, y de quién es.
+   *
+   * El `profileId` se guarda al lado por la misma razón que en el historial y
+   * en la previsualización: sin él, abrir el perfil B tras haber mirado una
+   * versión del perfil A mostraría el snapshot de A como si fuera de B.
+   */
+  profileVersionSnapshot: InvoiceProfileVersion | null;
+  profileVersionSnapshotProfileId: number | null;
+  profileVersionSnapshotLoading: boolean;
 
   profileVersions: InvoiceProfileVersionSummary[];
   /**
@@ -173,6 +202,11 @@ export const initialInvoicingState: InvoicingState = {
   currentProfile: null,
   currentProfileLoading: false,
   profileSaving: false,
+  profileMutationFailure: null,
+
+  profileVersionSnapshot: null,
+  profileVersionSnapshotProfileId: null,
+  profileVersionSnapshotLoading: false,
 
   profileVersions: [],
   profileVersionsProfileId: null,

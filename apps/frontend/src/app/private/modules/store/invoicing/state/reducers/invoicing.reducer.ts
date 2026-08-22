@@ -489,6 +489,8 @@ export const invoicingReducer = createReducer(
     profilePreview: null,
     profilePreviewProfileId: null,
     profilePreviewError: null,
+    profileVersionSnapshot: null,
+    profileVersionSnapshotProfileId: null,
   })),
 
   // ── Mutaciones ───────────────────────────────────────────
@@ -563,8 +565,54 @@ export const invoicingReducer = createReducer(
     ProfileActions.updateProfileFailure,
     ProfileActions.deleteProfileFailure,
     ProfileActions.profileStateChangeFailure,
-    (state, { error }) => ({ ...state, profileSaving: false, profilesError: error }),
+    // Se guarda el fallo COMPLETO, no sólo el texto: el 409 de borrado bloqueado
+    // trae `details.invoice_count`, y ese número es lo que convierte un aviso
+    // genérico en una decisión informada.
+    (state, { error, errorCode, details }) => ({
+      ...state,
+      profileSaving: false,
+      profilesError: error,
+      profileMutationFailure: {
+        message: error,
+        errorCode: errorCode ?? null,
+        details: details ?? null,
+      },
+    }),
   ),
+  // Cualquier mutación que arranca limpia el fallo anterior: dejarlo pintado
+  // mientras se reintenta hace parecer que el reintento también falló.
+  on(
+    ProfileActions.createProfile,
+    ProfileActions.cloneProfile,
+    ProfileActions.updateProfile,
+    ProfileActions.deleteProfile,
+    ProfileActions.activateProfile,
+    ProfileActions.deactivateProfile,
+    ProfileActions.setProfileDefault,
+    (state) => ({ ...state, profileMutationFailure: null }),
+  ),
+
+  // ── Snapshot de una versión ──────────────────────────────
+  on(ProfileActions.loadProfileVersion, (state) => ({
+    ...state,
+    profileVersionSnapshotLoading: true,
+  })),
+  on(ProfileActions.loadProfileVersionSuccess, (state, { profileId, snapshot }) => ({
+    ...state,
+    profileVersionSnapshotLoading: false,
+    profileVersionSnapshot: snapshot,
+    profileVersionSnapshotProfileId: profileId,
+  })),
+  on(ProfileActions.loadProfileVersionFailure, (state, { error }) => ({
+    ...state,
+    profileVersionSnapshotLoading: false,
+    profilesError: error,
+  })),
+  on(ProfileActions.clearProfileVersionSnapshot, (state) => ({
+    ...state,
+    profileVersionSnapshot: null,
+    profileVersionSnapshotProfileId: null,
+  })),
 
   // ── Historial ────────────────────────────────────────────
   on(ProfileActions.loadProfileVersions, (state) => ({

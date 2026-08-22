@@ -156,3 +156,50 @@ export const selectPreviewValidationGroups = createSelector(
         };
     },
 );
+
+/** Último fallo de mutación, completo (mensaje + código + `details`). */
+export const selectProfileMutationFailure = createSelector(
+    selectInvoicingState,
+    (state) => state.profileMutationFailure,
+);
+
+/**
+ * Borrado bloqueado por referencias, con el conteo que lo bloquea.
+ *
+ * `INVOICING_PROFILE_003` cubre dos causas distintas con salidas distintas para
+ * el usuario: facturas timbradas (`invoice_count`) ⇒ desactivar en vez de
+ * borrar; clones de otra tienda (`foreign_clone_count`) ⇒ hay que llamar a
+ * soporte porque desde acá no se alcanza el otro ámbito. Se distinguen por la
+ * clave presente en `details`, no por el mensaje, que es texto.
+ */
+export const selectProfileDeleteBlock = createSelector(
+    selectProfileMutationFailure,
+    (failure) => {
+        if (!failure || failure.errorCode !== 'INVOICING_PROFILE_003') return null;
+        const details = (failure.details ?? {}) as Record<string, unknown>;
+        const invoices = Number(details['invoice_count'] ?? 0);
+        const clones = Number(details['foreign_clone_count'] ?? 0);
+        return {
+            message: failure.message,
+            invoiceCount: Number.isFinite(invoices) ? invoices : 0,
+            foreignCloneCount: Number.isFinite(clones) ? clones : 0,
+            /** `true` cuando la salida correcta es desactivar, no borrar. */
+            suggestDeactivate: invoices > 0,
+        };
+    },
+);
+
+/** Snapshot de la versión abierta del historial, sólo si es del perfil actual. */
+export const selectProfileVersionSnapshot = createSelector(
+    selectInvoicingState,
+    (state) =>
+        state.currentProfile &&
+        state.profileVersionSnapshotProfileId === state.currentProfile.id
+            ? state.profileVersionSnapshot
+            : null,
+);
+
+export const selectProfileVersionSnapshotLoading = createSelector(
+    selectInvoicingState,
+    (state) => state.profileVersionSnapshotLoading,
+);

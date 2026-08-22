@@ -7,6 +7,7 @@ import type {
     InvoiceProfilePageMeta,
     InvoiceProfileQuery,
     InvoiceProfileState,
+    InvoiceProfileVersion,
     InvoiceProfileVersionSummary,
     PreviewProfilePayload,
     ProfilePreviewResult,
@@ -202,6 +203,30 @@ export const loadProfileVersionsSuccess = createAction(
 export const loadProfileVersionsFailure = createAction(
     '[Invoicing/Profiles] Load Versions Failure',
     props<MutationFailure>(),
+);
+
+/**
+ * Carga el snapshot de UNA versión.
+ *
+ * Separada de `loadProfileVersions` porque el listado trae sólo el resumen
+ * (quién y cuándo): el snapshot completo es un `jsonb` de varios KB por versión
+ * y traerlos todos para pintar una lista sería descargar el historial entero
+ * para mostrar cuatro fechas.
+ */
+export const loadProfileVersion = createAction(
+    '[Invoicing/Profiles] Load Version Snapshot',
+    props<{ id: number; version: number }>(),
+);
+export const loadProfileVersionSuccess = createAction(
+    '[Invoicing/Profiles] Load Version Snapshot Success',
+    props<{ profileId: number; snapshot: InvoiceProfileVersion }>(),
+);
+export const loadProfileVersionFailure = createAction(
+    '[Invoicing/Profiles] Load Version Snapshot Failure',
+    props<MutationFailure>(),
+);
+export const clearProfileVersionSnapshot = createAction(
+    '[Invoicing/Profiles] Clear Version Snapshot',
 );
 
 // ── Previsualización ─────────────────────────────────────────────────────────

@@ -26,6 +26,7 @@ import {
     selectProfilesLoading,
     selectProfilesMeta,
     selectProfileSaving,
+    selectProfileDeleteBlock,
 } from '../../state/selectors/invoice-profile.selectors';
 
 /**
@@ -188,6 +189,33 @@ import {
                         </div>
                     }
 
+                    @if (delete_block(); as block) {
+                        <div
+                            class="mb-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2 text-xs text-warning md:text-sm"
+                            role="alert"
+                        >
+                            <p class="font-semibold">
+                                Este perfil no se puede eliminar.
+                            </p>
+                            @if (block.invoiceCount > 0) {
+                                <p>
+                                    Lo referencian {{ block.invoiceCount }} factura(s) ya
+                                    timbradas. Es la única fuente que explica cómo se
+                                    calcularon: si ya no debe usarse, desactívalo — seguirá
+                                    fuera del selector del wizard y las facturas emitidas
+                                    conservarán su configuración.
+                                </p>
+                            }
+                            @if (block.foreignCloneCount > 0) {
+                                <p>
+                                    Es el origen de {{ block.foreignCloneCount }} perfil(es)
+                                    de otra tienda, que no se alcanza desde acá. Escribe a
+                                    soporte para resolverlo.
+                                </p>
+                            }
+                        </div>
+                    }
+
                     <app-responsive-data-view
                         [data]="rows()"
                         [columns]="columns"
@@ -320,6 +348,18 @@ export class InvoiceProfilesPageComponent {
     readonly meta = toSignal(this.store.select(selectProfilesMeta), {
         initialValue: null,
     });
+    /**
+     * Borrado bloqueado por referencias, con el conteo.
+     *
+     * Se pinta como refuerzo del requerimiento 12: no hay «forzar». Un perfil
+     * referenciado por facturas timbradas es la única fuente que reproduce cómo
+     * se calcularon esas facturas; borrarlo deja documentos emitidos sin forma
+     * de explicar su propio desglose ante una revisión fiscal.
+     */
+    readonly delete_block = toSignal(this.store.select(selectProfileDeleteBlock), {
+        initialValue: null,
+    });
+
     readonly filters = toSignal(this.store.select(selectProfilesFilters), {
         initialValue: {
             search: '',

@@ -304,6 +304,37 @@ export class InvoiceProfileEffects {
     );
 
     /**
+     * Snapshot de una versión concreta del historial.
+     *
+     * `switchMap`: si el usuario pincha tres versiones seguidas, la respuesta
+     * que importa es la de la última — dejar llegar una anterior pintaría el
+     * snapshot equivocado bajo la versión seleccionada, que en una revisión
+     * fiscal es peor que no mostrar nada.
+     */
+    readonly loadVersion$ = createEffect(() =>
+        this.actions$.pipe(
+            ofType(ProfileActions.loadProfileVersion),
+            switchMap(({ id, version }) =>
+                this.profiles.version(id, version).pipe(
+                    map((response) =>
+                        ProfileActions.loadProfileVersionSuccess({
+                            profileId: id,
+                            snapshot: response.data,
+                        }),
+                    ),
+                    catchError((error) =>
+                        of(
+                            ProfileActions.loadProfileVersionFailure(
+                                this.fail(error, { silent: false }),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    );
+
+    /**
      * Punto único de reporte de fallos.
      *
      * `describeApiFailure` traduce el `error_code` a la copia en español del

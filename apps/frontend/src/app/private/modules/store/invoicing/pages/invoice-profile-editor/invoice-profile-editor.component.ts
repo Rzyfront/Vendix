@@ -52,6 +52,7 @@ import type {
 } from '../../interfaces/invoice-profile.interface';
 import { INVOICE_PROFILE_OPERATION_LABELS } from '../../interfaces/invoice-profile.interface';
 import { InvoiceProfilePreviewPanelComponent } from '../../components/invoice-profile-preview-panel/invoice-profile-preview-panel.component';
+import { InvoiceProfileVersionsPanelComponent } from '../../components/invoice-profile-versions-panel/invoice-profile-versions-panel.component';
 import * as ProfileActions from '../../state/actions/invoice-profile.actions';
 import {
     selectCurrentProfile,
@@ -74,7 +75,8 @@ type EditorSection =
     | 'model_lines'
     | 'format'
     | 'dian'
-    | 'preview';
+    | 'preview'
+    | 'history';
 
 interface SectionTab {
     key: EditorSection;
@@ -123,6 +125,7 @@ interface SectionTab {
         SelectorComponent,
         ToggleComponent,
         InvoiceProfilePreviewPanelComponent,
+        InvoiceProfileVersionsPanelComponent,
     ],
     template: `
         <app-modal
@@ -517,6 +520,16 @@ interface SectionTab {
                     </div>
                 }
 
+                <!-- ── Historial de versiones (E.7) ── -->
+                @if (section() === 'history' && profileId() !== null) {
+                    <div id="section-history">
+                        <vendix-invoice-profile-versions-panel
+                            [profileId]="profileId()"
+                            [currentVersion]="currentVersionNumber()"
+                        ></vendix-invoice-profile-versions-panel>
+                    </div>
+                }
+
                 <!-- Avisos que NO bloquean. Se pintan siempre, en cualquier
                      sección: el usuario tiene que poder verlos desde donde esté
                      antes de pulsar Guardar. -->
@@ -621,6 +634,7 @@ export class InvoiceProfileEditorComponent {
         { key: 'format', label: 'Formato', icon: 'layout-template' },
         { key: 'dian', label: 'DIAN', icon: 'shield-check' },
         { key: 'preview', label: 'Previsualización', icon: 'eye' },
+        { key: 'history', label: 'Historial', icon: 'history' },
     ];
 
     readonly form: FormGroup = this.fb.group({
@@ -695,6 +709,9 @@ export class InvoiceProfileEditorComponent {
             // La previsualización necesita `:id`: en creación la pestaña no se
             // ofrece en vez de mostrar un botón que siempre falla.
             if (tab.key === 'preview') return this.isEdit();
+            // El historial tampoco existe antes de guardar: un perfil sin `:id`
+            // no tiene versiones que comparar.
+            if (tab.key === 'history') return this.isEdit();
             return true;
         }),
     );
@@ -769,6 +786,11 @@ export class InvoiceProfileEditorComponent {
     }
     get headerNotes(): FormArray {
         return this.form.get('dian.header_notes') as FormArray;
+    }
+
+    /** Versión vigente del perfil abierto; 0 mientras no hay detalle. */
+    currentVersionNumber(): number {
+        return this.current()?.current_version ?? 0;
     }
 
     /** Objeto de contrato tal como está en el formulario, para sembrar el panel. */
