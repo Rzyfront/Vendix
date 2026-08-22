@@ -87,7 +87,7 @@ export class PosApiService {
   }
 
   cancelOrder(id: string, reason?: string): Observable<any> {
-    return this.http.post(`${this.apiUrl}/store/orders/${id}/cancel`, {
+    return this.http.post(`${this.apiUrl}/store/orders/${id}/flow/cancel`, {
       reason,
     });
   }

@@ -1,49 +1,51 @@
 @if (loading()) {
   <div class="overview-stat-card stat-skeleton state-neutral" aria-busy="true">
-    <div class="stat-glow"></div>
-    <div class="stat-corner stat-corner-tl"></div>
-    <div class="stat-corner stat-corner-br"></div>
     <div class="stat-content">
       <div class="stat-header">
-        <span class="skeleton-pill"></span>
+        <div class="skeleton-pill"></div>
+        <div class="skeleton-icon"></div>
       </div>
-      <div class="skeleton-icon"></div>
       <div class="skeleton-value"></div>
-      <div class="skeleton-footer">
-        <span class="skeleton-dot"></span>
-        <span class="skeleton-pill-sm"></span>
+      <div class="stat-footer">
+        <div class="skeleton-dot"></div>
+        <div class="skeleton-pill-sm"></div>
       </div>
     </div>
   </div>
 } @else {
   <div class="overview-stat-card" [class]="'state-' + state()" [attr.aria-label]="title()">
-    <div class="stat-glow"></div>
-    <div class="stat-corner stat-corner-tl"></div>
-    <div class="stat-corner stat-corner-br"></div>
+    <!-- Decorative top-right gradient accent -->
+    <div class="stat-corner-bg" aria-hidden="true"></div>
 
     <div class="stat-content">
       <div class="stat-header">
-        <span class="stat-title">{{ title() }}</span>
-        @if (trend()) {
-          <span class="stat-trend" [class]="'trend-' + trend()">
-            <app-icon [name]="trendIcon()" [size]="14" />
-            @if (growth() !== null && growth() !== undefined) {
-              <span class="stat-growth">{{ formattedGrowth() }}</span>
+        <h3 class="stat-title">{{ title() }}</h3>
+
+        @if (trend() && growth() !== null && growth() !== undefined) {
+          <div class="stat-trend-badge" [class]="'trend-' + trend()">
+            <app-icon [name]="trendIcon()" [size]="12" />
+            <span>{{ formattedGrowth() }}</span>
+          </div>
+        } @else if (icon()) {
+          <div class="stat-icon-wrapper">
+            @if (icon() === 'percent') {
+              <span class="stat-percent-glyph">%</span>
+            } @else {
+              <app-icon [name]="icon()" [size]="18" />
             }
-          </span>
+          </div>
         }
       </div>
 
-      <div class="stat-icon-wrapper">
-        <app-icon [name]="icon()" [size]="20" />
-      </div>
-
-      <div class="stat-value">{{ formattedValue() }}</div>
+      <div class="stat-value" [title]="formattedValue()">{{ formattedValue() }}</div>
 
       <div class="stat-footer">
         <span class="stat-indicator" aria-hidden="true"></span>
         <span class="stat-state-label">{{ stateLabel() }}</span>
       </div>
     </div>
+
+    <!-- Bottom accent line -->
+    <div class="stat-bottom-line" aria-hidden="true"></div>
   </div>
 }

@@ -8,6 +8,7 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
 import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 import { PosCartService } from '../../services/pos-cart.service';
+import { environment } from '../../../../../../../environments/environment';
 
 @Component({
   selector: 'app-pos-quick-book',
@@ -56,7 +57,7 @@ export class PosQuickBookComponent {
   loadServices() {
     this.loading.set(true);
     this.http
-      .get<any>('/api/store/products', {
+      .get<any>(`${environment.apiUrl}/store/products`, {
         params: {
           requires_booking: 'true',
           product_type: 'service',
@@ -103,7 +104,7 @@ export class PosQuickBookComponent {
     this.selectedSlot.set(null);
 
     this.http
-      .get<any>(`/api/store/reservations/availability/${service.id}`, {
+      .get<any>(`${environment.apiUrl}/store/reservations/availability/${service.id}`, {
         params: {
           date_from: date,
           date_to: date,
@@ -138,7 +139,7 @@ export class PosQuickBookComponent {
       return;
     }
     this.http
-      .get<any>('/api/store/customers', {
+      .get<any>(`${environment.apiUrl}/store/customers`, {
         params: { search: query, limit: '10' },
       })
       .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
@@ -193,7 +194,7 @@ export class PosQuickBookComponent {
     }
 
     this.http
-      .post<any>('/api/store/reservations', payload)
+      .post<any>(`${environment.apiUrl}/store/reservations`, payload)
       .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
           this.submitting.set(false);

@@ -140,13 +140,34 @@ export class PosPaymentService {
     const taxRate = item.taxRate ?? this.calculateItemTaxRate(item);
     const categoryIds = this.getProductCategoryIds(item);
 
+    let notes = item.notes || '';
+    if (item.booking && (item.booking.date || item.booking.start_time)) {
+      const bookingData = {
+        booking_id: item.booking.booking_id ?? null,
+        product_id: item.product.id,
+        product_variant_id: item.variant_id ?? null,
+        provider_id: item.booking.provider_id ?? null,
+        provider_name: item.booking.provider_name ?? null,
+        date: item.booking.date,
+        start_time: item.booking.start_time,
+        end_time: item.booking.end_time,
+        service_location_type: item.booking.service_location_type ?? 'shop',
+        notes: item.booking.notes ?? '',
+      };
+      const marker = `[BOOKING:${JSON.stringify(bookingData)}]`;
+      if (!notes.includes('[BOOKING:')) {
+        notes = notes ? `${notes} ${marker}` : marker;
+      }
+    }
+
     return {
       item_type: isCustomItem ? 'custom' : 'product',
       product_id: isCustomItem ? null : parseInt(productIdStr, 10),
       category_id: isCustomItem ? undefined : categoryIds[0],
       category_ids: isCustomItem ? undefined : categoryIds,
       product_name: item.product.name,
-      description: item.description || item.notes || item.product.description || undefined,
+      description: item.description || notes || item.product.description || undefined,
+      notes: notes || undefined,
       product_sku: isCustomItem ? undefined : item.product.sku,
       quantity: item.quantity,
       unit_price: Number(item.unitPrice.toFixed(2)),

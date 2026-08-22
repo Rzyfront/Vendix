@@ -2694,6 +2694,7 @@ export class PaymentsService {
     const orderItem: any = {
       product_name: params.productName,
       description: params.description,
+      notes: params.item.notes || undefined,
       variant_sku: params.sku || undefined,
       variant_attributes: params.item.variant_attributes
         ? JSON.stringify(params.item.variant_attributes)

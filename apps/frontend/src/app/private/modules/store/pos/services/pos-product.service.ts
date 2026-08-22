@@ -80,6 +80,12 @@ export interface Product {
    * this to decide whether the "Enviar a cocina" action applies to a cart line.
    */
   product_type?: string;
+  // CP-POS-SVC-BOOKING-001 — Service scheduling fields
+  requires_booking?: boolean;
+  booking_mode?: 'free_booking' | 'provider_required' | string | null;
+  is_eligible_for_home_service?: boolean;
+  service_duration_minutes?: number | null;
+  duration_minutes?: number | null;
   // Multi-tarifa flags (Phase 5). Packaging (units-per-package) is no longer a
   // product field — it lives on the price tier / per-product tier override and
   // is resolved per cart line via PriceResolverService.resolveWithTier.
@@ -590,6 +596,7 @@ export class PosProductService {
         product_type: product.product_type || 'physical',
         requires_booking: product.requires_booking === true,
         booking_mode: product.booking_mode || null,
+        is_eligible_for_home_service: product.is_eligible_for_home_service === true,
         service_duration_minutes: product.service_duration_minutes || null,
         service_modality: product.service_modality || null,
         _rawStockLevels: product.stock_levels,

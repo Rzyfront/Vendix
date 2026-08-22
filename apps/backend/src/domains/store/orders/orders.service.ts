@@ -331,6 +331,7 @@ export class OrdersService {
                     // producto cambie de "por metro" a "por rollo".
                     price_unit_quantity:
                       priceUnits.priceUnitByIndex[index] ?? null,
+                    notes: item.notes ?? null,
                     updated_at: new Date(),
                   };
                 }),

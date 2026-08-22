@@ -7,6 +7,7 @@ import {
   IsIn,
   IsBoolean,
   Matches,
+  MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { order_channel_enum } from '@prisma/client';
@@ -101,4 +102,15 @@ export class CreateBookingDto {
   @IsInt()
   @Type(() => Number)
   service_address_id?: number;
+
+  /**
+   * CP-POS-SVC-PERF-001 — cart-line anchor used by the POS scheduler to
+   * bind this booking to a specific cart row. Optional because ecommerce
+   * and admin bookings don't carry one. Persisted on `bookings.cart_item_id`
+   * so future re-orders can reattach the same line.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  cart_item_id?: string;
 }

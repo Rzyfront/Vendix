@@ -8081,7 +8081,7 @@ model bookings {
   /// cart line that produced it. Allows the order editor to round-trip
   /// the same booking atomically. NULL when the booking was created
   /// outside the POS (ecommerce, reservations module, etc.).
-  cart_item_id              String?                       @db.VarChar(30)
+  cart_item_id              String?                       @db.VarChar(80)
   created_at                DateTime?                     @default(now()) @db.Timestamp(6)
   updated_at                DateTime?                     @default(now()) @db.Timestamp(6)
 

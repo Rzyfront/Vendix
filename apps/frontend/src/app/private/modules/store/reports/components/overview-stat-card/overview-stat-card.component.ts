@@ -89,18 +89,17 @@ export class OverviewStatCardComponent {
   });
 
   /**
-   * Formats `growth` as a signed percentage. The `percentage` format
-   * produces an integer-style value (e.g. `+12%`); the `number` format
-   * produces one decimal (e.g. `+12.3%`).
+   * Formats `growth` as a signed percentage. Rounded cleanly to at most 2
+   * decimal places (e.g. `+12%`, `-37.61%`).
    */
   readonly formattedGrowth = computed<string>(() => {
     const g = this.growth();
     if (g === null || g === undefined) return '';
-    const sign = g > 0 ? '+' : '';
-    if (this.formatType() === 'percentage') {
-      return `${sign}${g}%`;
-    }
-    return `${sign}${g.toFixed(1)}%`;
+    const num = Number(g);
+    if (Number.isNaN(num)) return '';
+    const sign = num > 0 ? '+' : '';
+    const formatted = num % 1 === 0 ? num.toString() : num.toFixed(2);
+    return `${sign}${formatted}%`;
   });
 
   /**
@@ -128,26 +127,26 @@ export class OverviewStatCardComponent {
       return this.currencyPipe.transform(num, 'COP', 'symbol-narrow', '1.0-0') ?? '';
     }
     if (formatType === 'percentage') {
-      return `${num}%`;
+      const formatted = num % 1 === 0 ? num.toString() : num.toFixed(2);
+      return `${formatted}%`;
     }
     return num.toLocaleString('es-CO');
   });
 
   /**
-   * Human-readable state label rendered in the cyberpunk footer dot row.
-   * Localized so the card reads as a complete unit without the caller
-   * having to pass the label separately.
+   * Human-readable state label rendered in the footer dot row.
+   * Localized and uppercase to match the Stitch design.
    */
   readonly stateLabel = computed<string>(() => {
     switch (this.state()) {
       case 'critical':
-        return 'Crítico';
+        return 'CRÍTICO';
       case 'warning':
-        return 'Advertencia';
+        return 'ADVERTENCIA';
       case 'positive':
-        return 'Positivo';
+        return 'POSITIVO';
       default:
-        return 'Neutral';
+        return 'NEUTRAL';
     }
   });
 }
