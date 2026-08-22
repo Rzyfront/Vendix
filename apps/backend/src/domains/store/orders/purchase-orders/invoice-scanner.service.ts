@@ -22,6 +22,7 @@ import {
 import {
   CreatePurchaseOrderDto,
   PurchaseOrderItemDto,
+  PURCHASE_ORDER_ITEMS_MAX,
 } from './dto/create-purchase-order.dto';
 import { AddAttachmentDto } from './dto/add-attachment.dto';
 import { parseAiJson } from '../../../../ai-engine/utils/ai-json.util';
@@ -32,6 +33,66 @@ import {
   StoreCurrencyInfo,
 } from '../../../../ai-engine/utils/ocr-money.util';
 import sharp = require('sharp');
+
+/**
+ * CP-PURCHASE-TRANSPARENCY D.1 — un producto ARCHIVADO que el emparejador
+ * reconoció y descartó a propósito.
+ *
+ * Existe porque «no lo emparejé» y «lo emparejé pero está archivado» son dos
+ * cosas distintas para el operador, y la segunda no puede desaparecer en
+ * silencio: si el escáner reconoce el producto por SKU y simplemente omite la
+ * línea, el operador ve una factura con un renglón menos y no tiene forma de
+ * saber por qué. El descarte viaja hasta `warnings` para que la revisión lo
+ * explique y el operador decida — reactivarlo o crear uno nuevo.
+ */
+interface ArchivedProductDiscard {
+  id: number;
+  name: string;
+  sku: string | null;
+}
+
+/**
+ * Resultado interno del emparejador de productos. NO es un DTO: `warnings`
+ * (que sí es público) es el canal por el que el motivo llega a la interfaz,
+ * así que el contrato de `scan-invoice.dto.ts` no cambia.
+ */
+interface ProductMatchLookup {
+  candidates: ProductCandidate[];
+  archivedDiscards: ArchivedProductDiscard[];
+}
+
+/**
+ * Configuración de empaque de un producto emparejado, leída una sola vez por
+ * escaneo para poder convertir una cantidad fraccionaria a unidades enteras.
+ */
+interface ProductPackaging {
+  /** `products.purchase_to_stock_factor` (unidades de stock por empaque). */
+  factor: number;
+  /**
+   * `true` cuando `PurchaseOrdersService.resolveUoMConversion` volverá a
+   * multiplicar por el factor al RECIBIR la orden. Es el espejo exacto de esa
+   * guarda (`purchase-orders.service.ts:342-356`). Si el escáner convirtiera
+   * también, el stock entraría multiplicado dos veces por el factor — la
+   * clase de bug que ese helper existe para impedir.
+   */
+  receiptConverts: boolean;
+  stockUnit: string | null;
+  purchaseUnit: string | null;
+}
+
+/**
+ * Formatea una cantidad para el operador colombiano sin depender de ICU:
+ * 2.5 → "2,5", 30 → "30", 0.315 → "0,315". Determinista en tests.
+ */
+function formatQuantity(value: number): string {
+  if (!Number.isFinite(value)) return '0';
+  return String(Number(value.toFixed(3))).replace('.', ',');
+}
+
+/** Un número es «entero» con tolerancia al ruido de coma flotante. */
+function isWholeNumber(value: number): boolean {
+  return Number.isFinite(value) && Math.abs(value - Math.round(value)) < 1e-6;
+}
 
 @Injectable()
 export class InvoiceScannerService {
@@ -176,6 +237,34 @@ export class InvoiceScannerService {
       ? await this.loadTaxCategoryRates()
       : [];
 
+    // CP-PURCHASE-TRANSPARENCY I.a — el aviso que faltaba.
+    //
+    // B.0 hizo que el predicado fiscal fallara cerrado y devolviera tres
+    // estados, pero el escáner seguía capitalizando el IVA de TODA la factura
+    // sin decírselo a nadie: el usuario veía costos con el impuesto adentro y
+    // ningún `suggested_tax_category_id`, sin saber que el sistema había
+    // tomado una decisión fiscal por él. Arreglar el cálculo sin contar la
+    // decisión no es arreglar el problema.
+    //
+    // Los dos orígenes del estado indeterminado NO se cuentan igual:
+    //   · `absent`     → el comercio nunca configuró su área fiscal. La salida
+    //                    es el asistente; se lo nombramos.
+    //   · `read_error` → puede tenerla perfectamente configurada y la lectura
+    //                    falló ahora. Mandarlo al asistente sería mentirle.
+    if (vatResponsibility.indeterminate) {
+      warnings.push(
+        vatResponsibility.source === 'read_error'
+          ? `${vatResponsibility.message} No es que falte configuración: no pudimos ` +
+              'leerla en este momento. Si tu comercio sí es responsable de IVA, vuelve ' +
+              'a escanear la factura en unos minutos antes de confirmar la compra, ' +
+              'porque el impuesto se está sumando al costo del inventario.'
+          : `${vatResponsibility.message} Configura tu área fiscal en Finanzas → ` +
+              'Fiscal → Asistente (/admin/fiscal/wizard) si eres responsable de IVA; ' +
+              'mientras tanto el impuesto de esta factura se suma al costo del ' +
+              'inventario en vez de quedar como IVA descontable.',
+      );
+    }
+
     // Supplier match — never throw
     try {
       supplierMatch = await this.matchSupplier(scanResult);
@@ -201,10 +290,11 @@ export class InvoiceScannerService {
 
     for (const item of scanResult.line_items || []) {
       try {
-        const candidates = await this.findProductCandidates(
+        const lookup = await this.findProductCandidates(
           item,
           supplierMatch.matched_id,
         );
+        const candidates = lookup.candidates;
         const topCandidate = candidates.length > 0 ? candidates[0] : null;
 
         let matchStatus: 'matched' | 'partial' | 'new' = 'new';
@@ -222,9 +312,30 @@ export class InvoiceScannerService {
           }
         }
 
+        // CP-PURCHASE-TRANSPARENCY D.1 — el descarte por archivado nunca es
+        // silencioso. La línea llega igual (marcada como `new`), con el motivo
+        // al lado, para que el operador reactive el producto o cree uno nuevo
+        // en vez de encontrarse una factura con un renglón menos.
+        const archived = lookup.archivedDiscards[0];
         if (matchStatus === 'new') {
           warnings.push(
-            `Producto "${item.description}" sin coincidencias en el catálogo.`,
+            archived
+              ? `Producto "${item.description}": el catálogo tiene "${archived.name}"` +
+                  `${archived.sku ? ` (SKU ${archived.sku})` : ''}, pero está ARCHIVADO ` +
+                  'y no se seleccionó a propósito — su costo y su stock ya no cuentan ' +
+                  'para esta compra. Reactívalo desde el catálogo si vas a seguir ' +
+                  'comprándolo, o crea un producto nuevo desde esta línea.'
+              : `Producto "${item.description}" sin coincidencias en el catálogo.`,
+          );
+        } else if (archived) {
+          // Se emparejó con OTRO producto activo pese a que el SKU impreso
+          // pertenece a uno archivado. Es exactamente el caso en que el
+          // operador debe mirar: la línea no va al producto que dice el papel.
+          warnings.push(
+            `Producto "${item.description}": el SKU impreso pertenece a ` +
+              `"${archived.name}", que está ARCHIVADO. Se propuso ` +
+              `"${topCandidate?.name ?? 'otro producto'}" en su lugar. Verifica que ` +
+              'sea el correcto antes de confirmar.',
           );
         }
 
@@ -260,11 +371,220 @@ export class InvoiceScannerService {
       }
     }
 
+    // CP-PURCHASE-TRANSPARENCY I.b — el puente entre la factura y el carrito.
+    await this.reconcileFractionalQuantities(matchedItems, warnings);
+
+    // El tope de líneas de la orden es `PURCHASE_ORDER_ITEMS_MAX` (DTO). Una
+    // factura de distribuidora lo supera sin esfuerzo, y el 400 llegaría
+    // DESPUÉS de que el operador revisó línea por línea. Se avisa acá, al
+    // principio de la revisión, en vez de al final.
+    if (matchedItems.length > PURCHASE_ORDER_ITEMS_MAX) {
+      warnings.push(
+        `La factura trae ${matchedItems.length} líneas y una orden de compra ` +
+          `admite máximo ${PURCHASE_ORDER_ITEMS_MAX}. Divídela en varias órdenes ` +
+          'antes de confirmar: si la envías completa, la creación se rechaza.',
+      );
+    }
+
     return {
       supplier_match: supplierMatch,
       items: matchedItems,
       warnings,
     };
+  }
+
+  /**
+   * CP-PURCHASE-TRANSPARENCY I.b — convierte las cantidades fraccionarias a
+   * enteros ANTES de llenar el carrito, y dice siempre qué hizo.
+   *
+   * `purchase_order_items.quantity_ordered` es `Int` y se queda `Int`
+   * (decisión de negocio). La vista previa de costo sí admite fracción
+   * (`CostPreviewItemDto`, 3 decimales) para mostrar el efecto de «2,5 cajas»
+   * ANTES de convertir; la creación exige el entero que la columna guarda. El
+   * escáner es el puente: sin él, una factura por peso (0,315 KGM) o por
+   * fracción de empaque muere en un 400 de validación que no explica nada.
+   *
+   * Dos caminos, y ninguno calla:
+   *
+   *  1. CONVERSIÓN EXACTA — el producto declara `purchase_to_stock_factor` y
+   *     la recepción NO lo va a volver a aplicar. 2,5 cajas × 12 = 30 unidades.
+   *     El costo unitario se divide por el mismo factor, así que el total de
+   *     la línea (lo que el proveedor cobró) no se mueve ni un peso.
+   *
+   *  2. REDONDEO — no hay factor utilizable, o la conversión tampoco da entero.
+   *     Se usa el entero más cercano (mínimo 1, porque el DTO exige `@Min(1)`)
+   *     y el costo unitario NO se toca: el costo unitario es lo que alimenta el
+   *     CPP/FIFO y tiene que seguir siendo el que imprime la factura. Lo que se
+   *     mueve es el total de la línea, y el aviso da las dos cifras.
+   *
+   * La guarda del caso 1 es el espejo de `resolveUoMConversion`
+   * (`purchase-orders.service.ts:342-356`): si la recepción va a multiplicar
+   * por el factor, convertir acá metería el stock multiplicado DOS veces. Esa
+   * es precisamente la clase de bug —«stock y FIFO se separan por exactamente
+   * el factor de conversión»— que ese helper documenta como la más peligrosa
+   * del flujo de recepción.
+   *
+   * Salida rápida: si ninguna línea trae fracción (el caso abrumadoramente
+   * mayoritario) no se ejecuta ni una consulta.
+   */
+  private async reconcileFractionalQuantities(
+    items: MatchedLineItem[],
+    warnings: string[],
+  ): Promise<void> {
+    const fractional = items.filter(
+      (item) => !isWholeNumber(Number(item.quantity)),
+    );
+    if (fractional.length === 0) return;
+
+    const packaging = await this.loadPackagingFactors(
+      fractional
+        .map((item) => item.selected_product_id)
+        .filter((id): id is number => typeof id === 'number'),
+    );
+
+    for (const item of fractional) {
+      const original = Number(item.quantity) || 0;
+      const pack =
+        item.selected_product_id != null
+          ? packaging.get(item.selected_product_id)
+          : undefined;
+
+      const factor = pack?.factor ?? 0;
+      const canConvert =
+        pack != null && !pack.receiptConverts && Number.isFinite(factor) && factor > 1;
+      const converted = canConvert ? original * factor : NaN;
+
+      const stockLabel = pack?.stockUnit || 'unidades';
+      const purchaseLabel = pack?.purchaseUnit || 'empaques';
+
+      if (canConvert && isWholeNumber(converted)) {
+        const stockQuantity = Math.round(converted);
+        const scale = (value: unknown): number => Number(value) / factor;
+
+        const newUnitPrice = scale(item.unit_price);
+        item.quantity = stockQuantity;
+        item.unit_price = newUnitPrice;
+        if (item.unit_price_gross != null) {
+          item.unit_price_gross = scale(item.unit_price_gross);
+        }
+        // `unit_cost_net` es, por contrato, el mismo neto que `unit_price`.
+        if (item.unit_cost_net != null) {
+          item.unit_cost_net = newUnitPrice;
+        }
+        // `discount_amount` y `total` son montos de LÍNEA, no por unidad: no
+        // se escalan. Dividirlos rebajaría el descuento y el total al pasar de
+        // empaques a unidades, que es dinero que sí existió en la factura.
+
+        warnings.push(
+          `«${item.description}»: la factura la trae como ${formatQuantity(original)} ` +
+            `${purchaseLabel} y cada uno equivale a ${formatQuantity(factor)} ` +
+            `${stockLabel}. La orden guarda cantidades enteras, así que se cargó como ` +
+            `${stockQuantity} ${stockLabel} a ${formatQuantity(newUnitPrice)} c/u. ` +
+            'El total de la línea no cambia.',
+        );
+        continue;
+      }
+
+      const rounded = Math.max(1, Math.round(original));
+      const unitPrice = Number(item.unit_price) || 0;
+      const reason = this.explainQuantityRoundReason(
+        item,
+        pack,
+        converted,
+        stockLabel,
+      );
+
+      item.quantity = rounded;
+
+      warnings.push(
+        `«${item.description}»: la factura la trae como ${formatQuantity(original)} ` +
+          `y la orden solo guarda cantidades enteras (${reason}). Se cargó ` +
+          `${rounded}. El costo unitario NO se tocó ` +
+          `(${formatQuantity(unitPrice)}), así que el total de la línea pasa de ` +
+          `${formatQuantity(original * unitPrice)} a ` +
+          `${formatQuantity(rounded * unitPrice)}. Revísalo antes de confirmar.`,
+      );
+    }
+  }
+
+  /**
+   * Por qué no se pudo convertir la cantidad y hubo que redondear. El operador
+   * necesita saberlo para poder arreglarlo (configurar el empaque, cambiar la
+   * unidad de la línea) en vez de solo enterarse de que el número cambió.
+   */
+  private explainQuantityRoundReason(
+    item: MatchedLineItem,
+    pack: ProductPackaging | undefined,
+    converted: number,
+    stockLabel: string,
+  ): string {
+    if (item.selected_product_id == null) {
+      return 'la línea todavía no está emparejada con un producto del catálogo, ' +
+        'así que no hay factor de empaque que aplicar';
+    }
+    if (pack == null || !Number.isFinite(pack.factor) || pack.factor <= 1) {
+      return 'el producto no tiene un factor de empaque configurado';
+    }
+    if (pack.receiptConverts) {
+      return `el factor de empaque del producto (${formatQuantity(pack.factor)} ` +
+        `${stockLabel} por ${pack.purchaseUnit || 'empaque'}) se aplica al RECIBIR ` +
+        'la orden, así que la cantidad tiene que quedar en la unidad de compra';
+    }
+    return `convertir con el factor daría ${formatQuantity(converted)} ${stockLabel}, ` +
+      'que tampoco es un entero';
+  }
+
+  /**
+   * Lee la configuración de empaque de los productos emparejados en UNA sola
+   * consulta (nunca dentro del bucle de líneas: una factura de 100 renglones
+   * abriría 100 lecturas y deja el pool de Prisma en el suelo).
+   *
+   * Nunca lanza: sin configuración de empaque el puente simplemente redondea y
+   * avisa, que es peor experiencia pero nunca un escaneo caído.
+   */
+  private async loadPackagingFactors(
+    productIds: number[],
+  ): Promise<Map<number, ProductPackaging>> {
+    const result = new Map<number, ProductPackaging>();
+    const unique = Array.from(new Set(productIds));
+    if (unique.length === 0) return result;
+
+    try {
+      const products = await this.prisma.products.findMany({
+        where: { id: { in: unique } },
+        select: {
+          id: true,
+          is_ingredient: true,
+          purchase_to_stock_factor: true,
+          stock_uom_id: true,
+          purchase_uom_id: true,
+          stock_unit: true,
+          purchase_unit: true,
+        },
+      });
+
+      for (const product of products) {
+        const factor = Number(product.purchase_to_stock_factor ?? 0);
+        const declaresBothUoms =
+          product.stock_uom_id != null && product.purchase_uom_id != null;
+        result.set(product.id, {
+          factor,
+          receiptConverts:
+            (!!product.is_ingredient || declaresBothUoms) &&
+            Number.isFinite(factor) &&
+            factor > 0,
+          stockUnit: product.stock_unit,
+          purchaseUnit: product.purchase_unit,
+        });
+      }
+    } catch (err: any) {
+      this.logger.warn(
+        `[InvoiceScan] Could not load packaging factors (${err?.message}); ` +
+          'fractional quantities will be rounded with a notice.',
+      );
+    }
+
+    return result;
   }
 
   /** @deprecated Use frontend cart injection instead. Kept for backward compatibility. */
@@ -453,28 +773,66 @@ export class InvoiceScannerService {
     };
   }
 
+  /**
+   * CP-PURCHASE-TRANSPARENCY D.1 — los tres niveles excluyen los productos
+   * ARCHIVADOS.
+   *
+   * Por qué era la puerta de entrada del defecto: `@@unique([store_id, sku])`
+   * impide crear un producto nuevo con el SKU de uno archivado, así que el
+   * operador que «borra y vuelve a cargar» pasa forzosamente por el nivel 1. Y
+   * ahí el emparejamiento se autoselecciona con confianza ≥ 90 sin que nadie
+   * mire: `selected_product_id` quedaba sellado contra un producto archivado y
+   * la compra volvía a promediar su costo y su stock. `matchSupplier` ya
+   * excluía los proveedores archivados, con la razón escrita — la asimetría
+   * era un descuido, no una decisión.
+   *
+   * El descarte se decide EN MEMORIA, no con un `where`, a propósito: filtrar
+   * en la consulta borraría el único hecho que el operador necesita ver
+   * («existe, pero está archivado»). El nivel 1 es una lectura de fila única
+   * por SKU, así que leer el `state` y ramificar cuesta lo mismo que filtrar.
+   * El nivel 3 conserva su filtro de base de datos: ahí un archivado no es «el
+   * producto reconocido» sino una coincidencia de palabras, y silenciarlo no
+   * le quita información a nadie.
+   */
   private async findProductCandidates(
     item: { description: string; sku_if_visible?: string },
     supplierId?: number,
-  ): Promise<ProductCandidate[]> {
+  ): Promise<ProductMatchLookup> {
     const candidates: ProductCandidate[] = [];
+    const archivedDiscards: ArchivedProductDiscard[] = [];
     const seenIds = new Set<number>();
 
     // Tier 1: SKU exact match
     if (item.sku_if_visible) {
       const bySku = await this.prisma.products.findFirst({
         where: { sku: { equals: item.sku_if_visible, mode: 'insensitive' } },
-        select: { id: true, name: true, sku: true, cost_price: true },
+        select: {
+          id: true,
+          name: true,
+          sku: true,
+          cost_price: true,
+          state: true,
+        },
       });
       if (bySku) {
+        // `seenIds` se marca en AMBAS ramas: un archivado descartado acá no
+        // puede volver a colarse como candidato por los niveles 2 o 3.
         seenIds.add(bySku.id);
-        candidates.push({
-          id: bySku.id,
-          name: bySku.name,
-          sku: bySku.sku || '',
-          cost_price: bySku.cost_price ? Number(bySku.cost_price) : undefined,
-          confidence: 95,
-        });
+        if (bySku.state === 'archived') {
+          archivedDiscards.push({
+            id: bySku.id,
+            name: bySku.name,
+            sku: bySku.sku,
+          });
+        } else {
+          candidates.push({
+            id: bySku.id,
+            name: bySku.name,
+            sku: bySku.sku || '',
+            cost_price: bySku.cost_price ? Number(bySku.cost_price) : undefined,
+            confidence: 95,
+          });
+        }
       }
     }
 
@@ -484,7 +842,13 @@ export class InvoiceScannerService {
         where: { supplier_id: supplierId },
         include: {
           products: {
-            select: { id: true, name: true, sku: true, cost_price: true },
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              cost_price: true,
+              state: true,
+            },
           },
         },
         take: 20,
@@ -503,6 +867,18 @@ export class InvoiceScannerService {
         const score = Math.max(nameScore + 10, skuScore); // +10 bonus for being in supplier catalog
         if (score >= 30) {
           seenIds.add(sp.products.id);
+          // Solo se reporta el archivado que HABRÍA sido candidato. Anunciar
+          // cada fila archivada del catálogo del proveedor —incluidas las que
+          // ni siquiera puntúan— llenaría la revisión de ruido y enterraría
+          // los avisos que sí importan.
+          if (sp.products.state === 'archived') {
+            archivedDiscards.push({
+              id: sp.products.id,
+              name: sp.products.name,
+              sku: sp.products.sku,
+            });
+            continue;
+          }
           candidates.push({
             id: sp.products.id,
             name: sp.products.name,
@@ -551,7 +927,7 @@ export class InvoiceScannerService {
     // Sort by confidence descending
     candidates.sort((a, b) => b.confidence - a.confidence);
 
-    return candidates.slice(0, 5);
+    return { candidates: candidates.slice(0, 5), archivedDiscards };
   }
 
   private fuzzyScore(query: string, target: string): number {
