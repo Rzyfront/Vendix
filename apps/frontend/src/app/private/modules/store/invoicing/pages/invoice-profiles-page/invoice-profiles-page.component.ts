@@ -17,6 +17,7 @@ import {
 
 import type { InvoiceProfile } from '../../interfaces/invoice-profile.interface';
 import { operationTypeLabel } from '../../interfaces/invoice-profile.interface';
+import { InvoiceProfileEditorComponent } from '../invoice-profile-editor/invoice-profile-editor.component';
 import * as ProfileActions from '../../state/actions/invoice-profile.actions';
 import {
     selectProfiles,
@@ -57,6 +58,7 @@ import {
         InputsearchComponent,
         ButtonComponent,
         IconComponent,
+        InvoiceProfileEditorComponent,
     ],
     template: `
         <div class="w-full">
@@ -187,7 +189,7 @@ import {
                     }
 
                     <app-responsive-data-view
-                        [data]="profiles()"
+                        [data]="rows()"
                         [columns]="columns"
                         [cardConfig]="card_config"
                         [actions]="table_actions"
@@ -197,6 +199,14 @@ import {
                     ></app-responsive-data-view>
                 </div>
             </app-card>
+
+            <!-- Editor de las 7 secciones -->
+            @if (editor(); as open) {
+                <vendix-invoice-profile-editor
+                    [profileId]="open.id"
+                    (closed)="closeEditor()"
+                ></vendix-invoice-profile-editor>
+            }
 
             <!-- Confirmación de activar / desactivar -->
             @if (pending_toggle(); as row) {
@@ -353,6 +363,34 @@ export class InvoiceProfilesPageComponent {
         return this.delete_confirmation().trim() === row.name.trim();
     });
 
+    /**
+     * Filas de la tabla: el perfil más `default_label`.
+     *
+     * El requerimiento 3 pide una columna «Predeterminado» propia, y `app-table`
+     * sólo invoca `transform` cuando `row[key]` trae algo — `is_default: false`
+     * cuenta como vacío, así que una columna clavada a ese booleano quedaría en
+     * blanco precisamente en las filas NO predeterminadas, que son la mayoría.
+     * Derivar acá un texto que SIEMPRE tiene valor (`'—'` incluido) es lo que
+     * hace que la celda se pinte en las dos ramas. El campo es de presentación:
+     * no viaja al backend ni se guarda.
+     */
+    /**
+     * Editor abierto. `{ id: null }` es crear y `{ id: n }` es editar — no se usa
+     * `number | null` a secas porque `null` ya significa «cerrado», y las dos
+     * cosas colisionarían en el mismo valor.
+     */
+    readonly editor = signal<{ id: number | null } | null>(null);
+
+    readonly rows = computed(() =>
+        this.profiles().map((profile) => ({
+            ...profile,
+            default_label: profile.is_default ? 'Predeterminado' : '—',
+            // La tarjeta móvil pinta `subtitleKey` en crudo, sin `transform`:
+            // sin esto el subtítulo diría «09» en vez de «AIU».
+            operation_label: operationTypeLabel(profile.operation_type),
+        })),
+    );
+
     readonly total = computed(() => this.meta()?.total ?? this.profiles().length);
 
     readonly stats = computed(() => {
@@ -392,18 +430,14 @@ export class InvoiceProfilesPageComponent {
                 item ? item.name : '',
         },
         {
-            // `key: 'operation_type'` y no `is_default`, aunque la celda muestre
-            // ambos: `app-table` sólo llama a `transform` cuando `row[key]` no
-            // está vacío, y `is_default: false` cuenta como vacío — la columna
-            // se quedaría en blanco justo en las filas NO predeterminadas.
+            // `operation_type` viene siempre poblado (es `NOT NULL` y de dos
+            // dígitos), así que la celda nunca se silencia por el gating de
+            // `transform`.
             key: 'operation_type',
             label: 'Operación',
             priority: 1,
-            transform: (_value: unknown, item?: InvoiceProfile) => {
-                if (!item) return '';
-                const label = operationTypeLabel(item.operation_type);
-                return item.is_default ? `${label} · predeterminado` : label;
-            },
+            transform: (_value: unknown, item?: InvoiceProfile) =>
+                item ? operationTypeLabel(item.operation_type) : '',
         },
         {
             // Misma razón: `current_version` es ≥ 1 siempre, así que la celda
@@ -414,6 +448,14 @@ export class InvoiceProfilesPageComponent {
             priority: 2,
             transform: (_value: unknown, item?: InvoiceProfile) =>
                 item ? `v${item.current_version}` : '',
+        },
+        {
+            key: 'default_label',
+            label: 'Predeterminado',
+            align: 'center',
+            priority: 2,
+            transform: (_value: unknown, item?: InvoiceProfile) =>
+                item?.is_default ? 'Sí' : '—',
         },
         {
             key: 'updated_at',
@@ -483,7 +525,7 @@ export class InvoiceProfilesPageComponent {
 
     card_config: ItemListCardConfig = {
         titleKey: 'name',
-        subtitleKey: 'operation_type',
+        subtitleKey: 'operation_label',
         badgeKey: 'state',
     };
 
@@ -522,12 +564,19 @@ export class InvoiceProfilesPageComponent {
     }
 
     createProfile(): void {
-        // El editor llega en E.4; hasta entonces la acción no se ofrece a medias.
+        // Se limpia el perfil actual ANTES de abrir: si quedara el del último
+        // editado, el editor lo hidrataría y el «nuevo» perfil nacería con la
+        // configuración de otro.
         this.store.dispatch(ProfileActions.clearCurrentProfile());
+        this.editor.set({ id: null });
     }
 
     editProfile(row: InvoiceProfile): void {
-        this.store.dispatch(ProfileActions.loadProfile({ id: row.id }));
+        this.editor.set({ id: row.id });
+    }
+
+    closeEditor(): void {
+        this.editor.set(null);
     }
 
     cloneProfile(row: InvoiceProfile): void {
