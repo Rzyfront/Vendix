@@ -465,6 +465,15 @@ model audit_logs {
   /// tener que inventar columnas por evento. Estándar bajo `metadata` para que
   /// la consulta de timeline no se acople a un catálogo volátil de columnas.
   metadata        Json?
+  /// CP-PURCHASE-TRANSPARENCY C.10 — token de correlación de la petición que
+  /// produjo esta entrada. `request-context.interceptor.ts` ya lo genera o lo
+  /// HEREDA del header `X-Request-Id` y lo sella en el ALS, pero la tabla no
+  /// tenía dónde guardarlo (y un comentario en `http-exception.filter.ts`
+  /// afirmaba falsamente que la auditoría ya lo llevaba).
+  /// TEXTO, no `uuid`: el interceptor acepta el header entrante tal cual, así
+  /// que el valor puede no ser un UUID válido y una columna `uuid` reventaría
+  /// la escritura de auditoría por culpa de un header de un tercero.
+  request_id      String?        @db.VarChar(100)
   ip_address      String?        @db.VarChar(45)
   user_agent      String?
   created_at      DateTime?      @default(now()) @db.Timestamp(6)
@@ -478,6 +487,10 @@ model audit_logs {
   @@index([organization_id, created_at])
   @@index([user_id, created_at])
   @@index([created_at])
+  /// CP-PURCHASE-TRANSPARENCY C.10 — `getTimeline` (única pantalla forense por
+  /// orden) consulta por `resource` + `resource_id` y ningún índice existente
+  /// sirve ese predicado: todos empiezan por store/org/user/created_at.
+  @@index([resource, resource_id, created_at(sort: Desc)])
 }
 
 model organizations {
@@ -1883,6 +1896,14 @@ model products {
   @@index([store_id, is_featured])
   @@index([store_id, is_consultation])
   @@index([online_purchase_domain_id])
+  /// CP-PURCHASE-TRANSPARENCY D.0 — hoy NO existe ningún índice que incluya
+  /// `state`, y las fases siguientes encienden un filtro por estado en las
+  /// agregaciones de valoración: sin índice el planificador degrada a barrido
+  /// secuencial al crecer el catálogo. `(state, id)` sirve el barrido global
+  /// paginado por id; `(store_id, state)` sirve el mismo filtro dentro de una
+  /// tienda, que es como lo consultan los reportes con scope.
+  @@index([state, id])
+  @@index([store_id, state])
 }
 
 // ===== PRICE TIERS (MULTI-TARIFA) =====
@@ -2610,6 +2631,20 @@ model purchase_orders {
   /// supplier number is absent the recognition falls back to `order_number`.
   supplier_invoice_number String?                            @db.VarChar(50)
   supplier_invoice_date   DateTime?                          @db.Date
+  /// CP-PURCHASE-TRANSPARENCY C.1 — qué se hizo con el flete de esta orden:
+  /// `prorate` lo reparte entre las líneas (y por tanto entra al costo del
+  /// inventario) o `expense` lo manda a gasto del período y NO toca el costo.
+  /// NULLABLE a propósito: las órdenes anteriores al ticket nunca tomaron esta
+  /// decisión y no se les inventa una — un default silencioso reescribiría a
+  /// posteriori la intención del operador que las creó. Guardada como VarChar
+  /// con un CHECK, calcando `payment_plan` (misma tabla, misma forma: una
+  /// decisión enumerada que no justifica un tipo enum de Postgres).
+  /// El monto sigue viviendo en `shipping_cost`, que ya existía.
+  shipping_cost_allocation String?                           @db.VarChar(20)
+  /// CP-PURCHASE-TRANSPARENCY C.10 — vista previa que el operador aprobó y de
+  /// la que salió esta orden. Hoy no existe nada que permita demostrar a
+  /// posteriori que la cifra aprobada es la que se selló.
+  preview_id              String?                            @db.Uuid
   purchase_order_items    purchase_order_items[]
   users                   users?                             @relation("purchase_orders_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   users1                  users?                             @relation("purchase_orders_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -2659,6 +2694,21 @@ model purchase_order_items {
   /// has no way to reach the product's cost.
   discount_percentage    Decimal?                         @default(0) @db.Decimal(5, 2)
   discount_amount        Decimal?                         @default(0) @db.Decimal(12, 2)
+  /// CP-PURCHASE-TRANSPARENCY C.1 — porción del flete de la cabecera que
+  /// aterrizó en ESTA línea cuando `purchase_orders.shipping_cost_allocation
+  /// = 'prorate'`. Cero cuando el flete se mandó a gasto o cuando la orden es
+  /// anterior al ticket.
+  /// NOT NULL DEFAULT 0 a propósito: un nulo obligaría a cada consumidor
+  /// (costeo, capas FIFO, reportes) a decidir qué significa, y ya sabemos que
+  /// significa cero.
+  /// Decimal(12,2) — NO (12,4): es un monto de LÍNEA, no un precio unitario.
+  /// En esta tabla los (12,4) son unitarios (`unit_cost`, `unit_price_net`) y
+  /// los montos de línea son (12,2) (`total_cost`, `discount_amount`,
+  /// `tax_amount`). Además su origen, `purchase_orders.shipping_cost`, es
+  /// (12,2): con dos decimales el prorrateo por mayor-residuo suma EXACTO al
+  /// flete de la cabecera, mientras que guardar cuatro fabricaría un total que
+  /// no cuadra al mostrarse redondeado.
+  allocated_shipping_amount Decimal                       @default(0) @db.Decimal(12, 2)
   unit_price_net         Decimal?                         @db.Decimal(12, 4)
   tax_amount             Decimal?                         @db.Decimal(12, 2)
   deductible_tax_amount  Decimal?                         @db.Decimal(12, 2)
@@ -2680,6 +2730,7 @@ model purchase_order_items {
   purchase_orders        purchase_orders                  @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
   reception_items        purchase_order_reception_items[]
   dispatch_note_items    dispatch_note_items[]
+  inventory_cost_layers  inventory_cost_layers[]
 
   @@index([purchase_order_id])
   @@index([product_id, purchase_order_id])
@@ -6962,6 +7013,16 @@ model inventory_cost_layers {
   product_variant_id Int?
   location_id        Int
   purchase_order_id  Int?
+  /// CP-PURCHASE-TRANSPARENCY C.10 — línea de compra concreta que originó esta
+  /// capa. Hasta ahora la capa solo conocía la ORDEN, así que verificar que la
+  /// cifra aprobada es la sellada devolvía N filas en cuanto había recepciones
+  /// parciales o el mismo producto en dos líneas con costos distintos, y no
+  /// había forma de saber cuál correspondía a cuál.
+  /// Nullable: las capas históricas no pueden reconstruir su línea, y las que
+  /// no nacen de una compra (ajustes, transferencias) no tienen ninguna.
+  /// ON DELETE SET NULL — nunca CASCADE: borrar una línea de compra no puede
+  /// llevarse por delante la capa de costo que sostiene la valoración.
+  purchase_order_item_id Int?
   quantity_remaining Int       @default(0)
   unit_cost          Decimal   @db.Decimal(12, 4)
   received_at        DateTime  @default(now()) @db.Timestamp(6)
@@ -6975,9 +7036,11 @@ model inventory_cost_layers {
   product_variants    product_variants?   @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)
   inventory_locations inventory_locations @relation(fields: [location_id], references: [id], onDelete: Cascade)
   purchase_orders     purchase_orders?    @relation(fields: [purchase_order_id], references: [id])
+  purchase_order_item purchase_order_items? @relation(fields: [purchase_order_item_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([product_id, product_variant_id, location_id, received_at])
   @@index([organization_id])
+  @@index([purchase_order_item_id])
 }
 
 model inventory_valuation_snapshots {
