@@ -35,6 +35,7 @@ import { InvoiceRetryQueueService } from './services/invoice-retry-queue.service
 import {
   CalculatedLine,
   CalculatedTax,
+  DEFAULT_AIU_MINIMUM_PERCENT,
   InvoiceCalculatorAiuInput,
   InvoiceCalculatorResult,
   InvoiceCalculatorService,
@@ -1048,10 +1049,13 @@ export class InvoicingService {
         // `undefined` en documentos no-AIU: `resolveAiuContext` devuelve `{}` y
         // las tres columnas quedan NULL.
         aiu_regime: aiu_context.aiu?.regime,
-        aiu_minimum_percent:
-          aiu_context.aiu?.minimum_base_percent != null
-            ? new Prisma.Decimal(String(aiu_context.aiu.minimum_base_percent))
-            : undefined,
+        // El porcentaje EFECTIVO, no el declarado: bajo `et_462_1` el piso rige
+        // aunque la tienda no lo escriba, así que NULL habría significado «no
+        // hay piso» en una factura que sí lo tiene. Ausente solo cuando de
+        // verdad no aplica: régimen del Decreto 1372, o piso apagado explícito.
+        aiu_minimum_percent: aiu_context.aiu
+          ? this.resolveAiuMinimumPercent(aiu_context.aiu)
+          : undefined,
         aiu_taxable_matrix: aiu_context.aiu
           ? this.buildAiuTaxableMatrix(
               calculated.lines,
@@ -2033,9 +2037,7 @@ export class InvoicingService {
       if (aiu_context.aiu) {
         update_data.aiu_regime = aiu_context.aiu.regime;
         update_data.aiu_minimum_percent =
-          aiu_context.aiu.minimum_base_percent != null
-            ? new Prisma.Decimal(String(aiu_context.aiu.minimum_base_percent))
-            : null;
+          this.resolveAiuMinimumPercent(aiu_context.aiu) ?? null;
         update_data.aiu_taxable_matrix = this.buildAiuTaxableMatrix(
           calculated.lines,
           aiu_context.aiu,
@@ -2943,6 +2945,26 @@ export class InvoicingService {
    * lo que se declaró tiene que quedar legible tal como se declaró, aunque la
    * configuración cambie entre la captura y la firma.
    */
+  /**
+   * Porcentaje del piso legal que rige para ESTE documento, o `undefined` cuando
+   * no rige ninguno.
+   *
+   * Un solo sitio para la regla, consumido por la creación, la edición y la
+   * matriz. Tenerla escrita tres veces es cómo `enforce_minimum_base !== false`
+   * se convierte en `?? false` en una de las tres y la factura queda declarando
+   * un piso que no es el que se le aplicó.
+   */
+  private resolveAiuMinimumPercent(
+    aiu: InvoiceCalculatorAiuInput,
+  ): Prisma.Decimal | undefined {
+    if (aiu.regime !== 'et_462_1' || aiu.enforce_minimum_base === false) {
+      return undefined;
+    }
+    return aiu.minimum_base_percent != null
+      ? new Prisma.Decimal(String(aiu.minimum_base_percent))
+      : DEFAULT_AIU_MINIMUM_PERCENT;
+  }
+
   private buildAiuTaxableMatrix(
     lines: CalculatedLine[],
     aiu: InvoiceCalculatorAiuInput,
@@ -3014,15 +3036,33 @@ export class InvoicingService {
       rates: entry.rates.map(({ key: _key, ...rate }) => rate),
     }));
 
+    // ESPEJO EXACTO de `InvoiceCalculatorService.summarizeAiu`. Las dos
+    // condiciones importan y no son las obvias:
+    //
+    // · `!== false`, no `=== true`: el piso está activo POR DEFECTO bajo
+    //   `et_462_1`. Solo se apaga declarándolo explícitamente. Escribirlo como
+    //   `?? false` registraba «piso apagado» en documentos donde el motor SÍ lo
+    //   aplicó — la matriz afirmaba lo contrario de lo que pasó.
+    // · Bajo `decreto_1372_1992` NUNCA aplica: el Decreto no fija piso sobre la
+    //   utilidad del constructor y trasplantarle el 10 % del 462-1 rechazaría
+    //   facturas de construcción legales.
+    //
+    // El porcentaje se guarda ya resuelto, con el default aplicado, para que la
+    // re-verificación antes de firmar lea el mismo número y no vuelva a
+    // derivarlo.
+    const minimum_enforced =
+      aiu.regime === 'et_462_1' && aiu.enforce_minimum_base !== false;
+    const minimum_percent =
+      aiu.minimum_base_percent != null
+        ? new Prisma.Decimal(String(aiu.minimum_base_percent))
+        : DEFAULT_AIU_MINIMUM_PERCENT;
+
     return {
       regime: aiu.regime,
       stage,
       minimum: {
-        enforced: aiu.enforce_minimum_base ?? false,
-        percent:
-          aiu.minimum_base_percent != null
-            ? String(aiu.minimum_base_percent)
-            : null,
+        enforced: minimum_enforced,
+        percent: minimum_enforced ? minimum_percent.toFixed(2) : null,
       },
       components,
       /**

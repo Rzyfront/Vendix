@@ -2313,7 +2313,7 @@ export const ErrorCodes = {
     code: 'INVOICING_AIU_005',
     httpStatus: 422,
     devMessage:
-      'Declared per-line tax contradicts the tax matrix frozen in the billing profile version for that AIU component (different rate, or tax on a component the regime does not tax): the taxable base is determined by the regime, never by what the client declares line by line',
+      'A per-line tax contradicts the AIU taxable base for that component: the base is determined by the regime, never by what the line declares. Two sites raise it. At CAPTURE, the declared tax disagrees with the tax matrix frozen in the billing profile version (different rate, or a tax on a component the regime does not tax). At EMISSION, a line whose component the regime does not tax carries a tax PERSISTED under a different regime: the XML would drop that line cac:TaxTotal while the amount stays in the header total and cbc:PayableAmount, and FAU04 contrasts one against the sum of the other',
   },
   INVOICING_AIU_006: {
     code: 'INVOICING_AIU_006',

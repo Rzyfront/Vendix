@@ -78,7 +78,14 @@ const ONE_CENT = new Prisma.Decimal('0.01');
 const PERCENT_DIVISOR = new Prisma.Decimal(100);
 const PER_MIL_DIVISOR = new Prisma.Decimal(1000);
 /** Piso legal de la base gravable AIU — E.T. art. 462-1: 10 % del contrato. */
-const DEFAULT_AIU_MINIMUM_PERCENT = new Prisma.Decimal(10);
+/**
+ * Piso legal del AIU: 10 % del valor del contrato (E.T. art. 462-1). Se exporta
+ * porque el SNAPSHOT que la factura congela tiene que guardar el porcentaje
+ * EFECTIVO, no `null` cuando la tienda no lo declaró: una re-verificación que
+ * tenga que volver a derivar el default no es una re-verificación del mismo
+ * dato, es una segunda derivación que puede divergir.
+ */
+export const DEFAULT_AIU_MINIMUM_PERCENT = new Prisma.Decimal(10);
 
 /**
  * Tipos fiscales que son RETENCIÓN, no impuesto del documento.
