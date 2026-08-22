@@ -51,6 +51,7 @@ import type {
     UpdateInvoiceProfilePayload,
 } from '../../interfaces/invoice-profile.interface';
 import { INVOICE_PROFILE_OPERATION_LABELS } from '../../interfaces/invoice-profile.interface';
+import { InvoiceProfilePreviewPanelComponent } from '../../components/invoice-profile-preview-panel/invoice-profile-preview-panel.component';
 import * as ProfileActions from '../../state/actions/invoice-profile.actions';
 import {
     selectCurrentProfile,
@@ -72,7 +73,8 @@ type EditorSection =
     | 'taxes'
     | 'model_lines'
     | 'format'
-    | 'dian';
+    | 'dian'
+    | 'preview';
 
 interface SectionTab {
     key: EditorSection;
@@ -120,6 +122,7 @@ interface SectionTab {
         TextareaComponent,
         SelectorComponent,
         ToggleComponent,
+        InvoiceProfilePreviewPanelComponent,
     ],
     template: `
         <app-modal
@@ -503,6 +506,17 @@ interface SectionTab {
                     </div>
                 }
 
+                <!-- ── Previsualización (E.5) ── -->
+                @if (section() === 'preview' && profileId() !== null) {
+                    <div id="section-preview">
+                        <vendix-invoice-profile-preview-panel
+                            [profileId]="profileId()"
+                            [isAiu]="isAiu()"
+                            [contractObject]="currentContractObject()"
+                        ></vendix-invoice-profile-preview-panel>
+                    </div>
+                }
+
                 <!-- Avisos que NO bloquean. Se pintan siempre, en cualquier
                      sección: el usuario tiene que poder verlos desde donde esté
                      antes de pulsar Guardar. -->
@@ -606,6 +620,7 @@ export class InvoiceProfileEditorComponent {
         { key: 'model_lines', label: 'Líneas modelo', icon: 'list' },
         { key: 'format', label: 'Formato', icon: 'layout-template' },
         { key: 'dian', label: 'DIAN', icon: 'shield-check' },
+        { key: 'preview', label: 'Previsualización', icon: 'eye' },
     ];
 
     readonly form: FormGroup = this.fb.group({
@@ -675,7 +690,13 @@ export class InvoiceProfileEditorComponent {
     readonly isAiu = computed(() => this.operationType() === '09');
 
     readonly visibleTabs = computed(() =>
-        this.all_tabs.filter((tab) => tab.key !== 'aiu' || this.isAiu()),
+        this.all_tabs.filter((tab) => {
+            if (tab.key === 'aiu') return this.isAiu();
+            // La previsualización necesita `:id`: en creación la pestaña no se
+            // ofrece en vez de mostrar un botón que siempre falla.
+            if (tab.key === 'preview') return this.isEdit();
+            return true;
+        }),
     );
 
     /** Problemas del snapshot actual, con la MISMA función que usa el backend. */
@@ -748,6 +769,11 @@ export class InvoiceProfileEditorComponent {
     }
     get headerNotes(): FormArray {
         return this.form.get('dian.header_notes') as FormArray;
+    }
+
+    /** Objeto de contrato tal como está en el formulario, para sembrar el panel. */
+    currentContractObject(): string {
+        return String(this.aiuGroup.get('contract_object')?.value ?? '');
     }
 
     operationType(): string {
