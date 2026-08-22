@@ -2315,6 +2315,34 @@ export const ErrorCodes = {
     devMessage:
       'A per-line tax contradicts the AIU taxable base for that component: the base is determined by the regime, never by what the line declares. Two sites raise it. At CAPTURE, the declared tax disagrees with the tax matrix frozen in the billing profile version (different rate, or a tax on a component the regime does not tax). At EMISSION, a line whose component the regime does not tax carries a tax PERSISTED under a different regime: the XML would drop that line cac:TaxTotal while the amount stays in the header total and cbc:PayableAmount, and FAU04 contrasts one against the sum of the other',
   },
+
+  /**
+   * Configuración de un perfil de facturación que no se puede guardar.
+   *
+   * 422 y no 400: la forma es válida —el DTO ya pasó— y lo que falla es una
+   * regla FISCAL. La distinción importa para el editor, que ante un 400 muestra
+   * «revisa los datos» y ante esto puede marcar el campo exacto: `details.issues`
+   * trae la ruta con puntos dentro del snapshot (`aiu.components.utilidad`).
+   *
+   * Devuelve TODOS los problemas, no el primero. El editor tiene 7 secciones y
+   * uno por vez obligaría al usuario a guardar siete veces para descubrir siete
+   * errores.
+   *
+   * La regla que justifica el código es la última de la lista, y es la que este
+   * plan entero existe para hacer cumplir: **la matriz de impuestos no puede
+   * contradecir el régimen del perfil.** El régimen decide, línea por línea,
+   * cuál emite `cac:TaxTotal`; los importes salen de los tributos persistidos.
+   * Si las dos mitades salen de regímenes distintos, el XML declara una
+   * gravabilidad que contradice sus propios números y la DIAN lo rechaza por
+   * FAU04 con el consecutivo ya gastado. Un perfil guardado con esa
+   * contradicción la reproduciría en cada factura que lo use.
+   */
+  INVOICING_PROFILE_005: {
+    code: 'INVOICING_PROFILE_005',
+    httpStatus: 422,
+    devMessage:
+      'Billing profile configuration is fiscally invalid: AIU component percentages must sum to exactly 100, the minimum taxable base cannot fall below the 10% legal floor under E.T. art. 462-1, and the tax matrix must agree with the profile regime (et_462_1 taxes A+I+U, decreto_1372_1992 taxes only Utilidad). All offending fields are returned in details.issues with their dotted path so the editor can mark them',
+  },
   INVOICING_AIU_006: {
     code: 'INVOICING_AIU_006',
     httpStatus: 422,
