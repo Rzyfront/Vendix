@@ -57,6 +57,8 @@ import { assertTiersAllowed } from '../../products/services/tiers-variants-exclu
 import {
   VatResponsibilityService,
   VatResponsibilityResult,
+  VatTreatmentExplanation,
+  vatTreatmentFromResult,
 } from '@common/helpers/vat-responsibility.helper';
 
 /**
@@ -456,68 +458,17 @@ export class PurchaseOrdersService {
    *   - `capitalized` → el IVA entra al costo del inventario.
    *
    * Las citas legales son un contrato cerrado: el operador las repite ante su
-   * contador, así que una cita equivocada en pantalla es peor que ninguna.
-   * - IVA descontable: art. 485 ET y art. 488 ET.
-   * - IVA como mayor valor del costo: art. 493 ET.
-   * - No responsables: art. 437 ET parágrafo 3.
-   * - Capitalización al inventario: NIC 2 ¶11 / NIIF PYMES §13.6.
-   * - Régimen simple: art. 18 Ley 1943/2018.
-   * PROHIBIDO citar el art. 491 ET (es de activos fijos, no de inventario) y el
-   * Decreto 2650/1993 (es el PUC, no el fundamento del IVA).
+   * contador, así que una cita equivocada en pantalla es peor que ninguna. Por
+   * eso el texto y la base legal NO se arman acá: salen de
+   * `vatTreatmentFromResult` (B.3), que a su vez los toma del catálogo oficial
+   * de responsabilidades. Este método es un alias con nombre local — escribir
+   * una segunda copia de las citas es exactamente cómo dos pantallas del mismo
+   * asistente terminan citando artículos distintos para la misma factura.
    */
-  private buildFiscalExplanation(outcome: VatResponsibilityResult): {
-    vat_responsible: boolean;
-    indeterminate: boolean;
-    reason: string;
-    source: string;
-    treatment: 'deductible' | 'capitalized';
-    message: string;
-    legal_basis: string[];
-    cta?: { label: string; route: string };
-  } {
-    const treatment: 'deductible' | 'capitalized' = outcome.responsible
-      ? 'deductible'
-      : 'capitalized';
-
-    const legal_basis = outcome.responsible
-      ? ['Art. 485 ET', 'Art. 488 ET']
-      : outcome.reason === 'regime_not_responsible'
-        ? [
-            'Art. 437 ET parágrafo 3',
-            'Art. 18 Ley 1943/2018',
-            'Art. 493 ET',
-            'NIC 2 ¶11',
-          ]
-        : ['Art. 437 ET parágrafo 3', 'Art. 493 ET', 'NIC 2 ¶11'];
-
-    const message = outcome.responsible
-      ? 'El comercio es responsable de IVA, así que el IVA de esta compra es descontable y NO entra al costo del inventario. El costo que ves es el valor neto.'
-      : outcome.indeterminate
-        ? outcome.source === 'read_error'
-          ? 'No pudimos leer la configuración fiscal del comercio en este momento. Por precaución el IVA se suma al costo del inventario. Revisa la configuración del área fiscal y vuelve a intentarlo antes de aprobar la compra.'
-          : 'El comercio todavía no declaró su responsabilidad de IVA, así que por precaución el IVA se suma al costo del inventario. Configura el área fiscal para que el sistema sepa si puedes descontarlo.'
-        : 'El comercio no es responsable de IVA, así que el IVA de esta compra se suma al costo del inventario (mayor valor del costo).';
-
-    return {
-      vat_responsible: outcome.responsible,
-      indeterminate: outcome.indeterminate,
-      reason: outcome.reason,
-      source: outcome.source,
-      treatment,
-      message,
-      legal_basis,
-      // El CTA solo aparece cuando el estado es INDETERMINADO: mandar al
-      // asistente fiscal a un comercio que ya declaró O-49 sería pedirle que
-      // "arregle" una configuración correcta.
-      ...(outcome.indeterminate
-        ? {
-            cta: {
-              label: 'Configurar el área fiscal',
-              route: '/admin/fiscal/wizard',
-            },
-          }
-        : {}),
-    };
+  private buildFiscalExplanation(
+    outcome: VatResponsibilityResult,
+  ): VatTreatmentExplanation {
+    return vatTreatmentFromResult(outcome);
   }
 
   /**
