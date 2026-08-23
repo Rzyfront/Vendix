@@ -238,6 +238,27 @@ export interface UblDocumentLine extends ProviderInvoiceItem {
 }
 
 /**
+ * Lo que el grupo de totales monetarios necesita saber del documento.
+ *
+ * `taxes` son los tributos de CABECERA, y están acá porque la base imponible de
+ * la cabecera se DERIVA de lo que van a emitir las líneas: una línea sin
+ * desglose propio hereda su tributo de `taxes[0]`, así que sin ese dato el grupo
+ * de totales no puede saber si la línea emitirá `cac:TaxTotal` o callará — y eso
+ * es exactamente lo que decide si aporta base. Ver `lineTaxableContribution`.
+ *
+ * Es un tipo con nombre y no tres literales repetidos porque los tres puntos de
+ * entrada (`buildMonetaryTotal`, `buildLegalMonetaryTotal`,
+ * `buildRequestedMonetaryTotal`) tienen que pedir lo MISMO: cuando la forma
+ * estaba escrita tres veces, agregar un campo en una sola era invisible.
+ */
+export interface UblMonetaryTotalInput {
+  discount_amount: string;
+  tax_amount: string;
+  items: ProviderInvoiceItem[];
+  taxes: ProviderInvoiceTax[];
+}
+
+/**
  * Literal EXACTO con el que debe EMPEZAR el `cbc:Note` de la línea de
  * Administración de un contrato AIU.
  *
@@ -1717,13 +1738,64 @@ export class UblCommonBuilder {
    * The arithmetic was never wrong: it is the same function that backed the 30
    * accepted invoices. Only the envelope was misnamed.
    */
+  /**
+   * Base imponible que UNA línea aporta a la cabecera — exactamente la Σ de los
+   * `cbc:TaxableAmount` que esa línea va a emitir. `null` ⇒ la línea NO emite
+   * `cac:TaxTotal`, así que no aporta nada.
+   *
+   * ## Por qué existe
+   *
+   * FAU04 compara `round(//cbc:TaxExclusiveAmount)` contra
+   * `round(sum(<línea>/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxableAmount))`, y cada
+   * lado se calculaba con un criterio propio:
+   *
+   * · la CABECERA admitía la línea con UNA condición — `!omit_tax_total`;
+   * · la LÍNEA emitía su grupo con DOS — `!omit_tax_total` **y** tener tributo
+   *   propio o de cabecera del que heredar (ver `buildLineTaxTotal`).
+   *
+   * Un documento sin NINGÚN tributo cae en la grieta: es el caso natural de una
+   * factura 100 % excluida que no marca la bandera —un tenant que sólo vende
+   * excluido no tiene por qué marcarla, porque no hay régimen AIU de por medio—.
+   * Ninguna línea emite subtotal, la suma de líneas es 0,00, y la cabecera
+   * declara el bruto entero. La DIAN rechaza por FAU04 antes de firmar, así que
+   * no se quema consecutivo, pero la emisión queda bloqueada sin diagnóstico en
+   * el emisor.
+   *
+   * Derivar los DOS lados de esta función hace ese desacuerdo irrepresentable.
+   *
+   * ## Sobre el doble conteo
+   *
+   * Cuando una línea trae dos tributos sobre la MISMA base, la Σ de subtotales
+   * cuenta esa base dos veces. Se replica TAL CUAL, a propósito: la regla suma
+   * NODOS `cbc:TaxableAmount`, no bases distintas. El objetivo de esta función es
+   * igualar lo que la DIAN calcula sobre el XML transmitido, no lo que sería
+   * contablemente más justo — si la cabecera "corrigiera" el doble conteo, el
+   * documento sería rechazado por declarar menos base de la que suman sus líneas.
+   */
+  static lineTaxableContribution(
+    item: ProviderInvoiceItem,
+    header_taxes: ProviderInvoiceTax[],
+  ): string | null {
+    const line = item as UblDocumentLine;
+    if (line.omit_tax_total) return null;
+
+    const line_taxes = line.taxes ?? [];
+
+    // MISMA guarda que `buildLineTaxTotal`: sin tributo propio NI de cabecera del
+    // que heredar, la línea calla, y una línea callada no tiene ningún
+    // `cbc:TaxableAmount` que sumar.
+    if (line_taxes.length === 0 && header_taxes.length === 0) return null;
+
+    // Sin desglose propio la línea emite UN subtotal cuya base es su importe.
+    if (line_taxes.length === 0) return dianLineExtension(line);
+
+    // Con desglose, un `cac:TaxSubtotal` por tributo, cada uno con SU base.
+    return dianSum(line_taxes.map((tax) => tax.taxable_amount));
+  }
+
   static buildMonetaryTotal(
     parent: any,
-    data: {
-      discount_amount: string;
-      tax_amount: string;
-      items: ProviderInvoiceItem[];
-    },
+    data: UblMonetaryTotalInput,
     currency: string,
     /**
      * UBL name of the group. Defaults to `LegalMonetaryTotal`, which is correct
@@ -1735,13 +1807,16 @@ export class UblCommonBuilder {
   ): void {
     const line_extension = dianLineExtensionTotal(data.items);
 
-    // FAU04: sólo las líneas que DECLARAN su grupo de tributos aportan
-    // `cbc:TaxableAmount`, así que sólo ellas pueden sumar a la base imponible
-    // de la cabecera. `omit_tax_total` vive en `UblDocumentLine`, que extiende
-    // `ProviderInvoiceItem`; los productores que no lo usan dejan la bandera
-    // ausente y el filtro conserva la línea, que es el comportamiento previo.
-    const taxable_base = dianLineExtensionTotal(
-      data.items.filter((item) => !(item as UblDocumentLine).omit_tax_total),
+    // FAU04 — la base de la cabecera es la Σ EXACTA de los `cbc:TaxableAmount`
+    // que van a emitir las líneas, derivada de la MISMA función que decide qué
+    // emite cada línea. Antes cada lado tenía su propio criterio y podían
+    // discrepar; ver `lineTaxableContribution`.
+    const taxable_base = dianSum(
+      data.items
+        .map((item) =>
+          UblCommonBuilder.lineTaxableContribution(item, data.taxes ?? []),
+        )
+        .filter((amount): amount is string => amount !== null),
     );
 
     const document_discount = UblCommonBuilder.documentDiscount(data);
@@ -1786,11 +1861,7 @@ export class UblCommonBuilder {
    */
   static buildLegalMonetaryTotal(
     parent: any,
-    data: {
-      discount_amount: string;
-      tax_amount: string;
-      items: ProviderInvoiceItem[];
-    },
+    data: UblMonetaryTotalInput,
     currency: string,
   ): void {
     UblCommonBuilder.buildMonetaryTotal(
@@ -1808,11 +1879,7 @@ export class UblCommonBuilder {
    */
   static buildRequestedMonetaryTotal(
     parent: any,
-    data: {
-      discount_amount: string;
-      tax_amount: string;
-      items: ProviderInvoiceItem[];
-    },
+    data: UblMonetaryTotalInput,
     currency: string,
   ): void {
     UblCommonBuilder.buildMonetaryTotal(
