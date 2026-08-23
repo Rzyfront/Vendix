@@ -199,8 +199,18 @@ export class ProfilesController {
    * factura por omisión son decisiones de distinto peso, y esta segunda es la
    * que tiene consecuencia fiscal.
    */
+  /**
+   * Transición de estado sobre un perfil que YA existe, así que 200, no 201.
+   *
+   * El default de Nest para `POST` es 201 Created y acá no nace ningún recurso:
+   * se mueve un campo del que ya estaba. La distinción no es cosmética — el 201
+   * es la señal con la que un cliente decide «se creó algo, agrégalo a la
+   * lista», y un frontend que la crea duplica la fila en pantalla. Mismo
+   * criterio ya documentado en `preview` más abajo.
+   */
   @Post(':id/set-default')
   @Permissions('invoicing:profiles:set_default')
+  @HttpCode(HttpStatus.OK)
   async setDefault(@Param('id', ParseIntPipe) id: number) {
     const result = await this.profiles_service.setDefault(id);
     return this.response_service.success(
@@ -217,6 +227,7 @@ export class ProfilesController {
    */
   @Post(':id/activate')
   @Permissions('invoicing:profiles:write')
+  @HttpCode(HttpStatus.OK)
   async activate(@Param('id', ParseIntPipe) id: number) {
     const result = await this.profiles_service.activate(id);
     return this.response_service.success(result, 'Perfil activado');
@@ -224,6 +235,7 @@ export class ProfilesController {
 
   @Post(':id/deactivate')
   @Permissions('invoicing:profiles:write')
+  @HttpCode(HttpStatus.OK)
   async deactivate(@Param('id', ParseIntPipe) id: number) {
     const result = await this.profiles_service.deactivate(id);
     return this.response_service.success(result, 'Perfil desactivado');

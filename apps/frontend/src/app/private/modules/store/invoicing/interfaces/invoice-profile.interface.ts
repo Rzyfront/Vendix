@@ -232,6 +232,27 @@ export interface ProfilePreviewValidation {
 }
 
 /** Una línea del desglose proyectado. */
+/**
+ * Un impuesto de una línea de la muestra.
+ *
+ * `taxable_amount` es LA cifra que la DIAN suma sobre todas las líneas para
+ * comprobar FAU04 contra el `TaxExclusiveAmount` de la cabecera. Se declara
+ * porque es lo que permite mostrar en pantalla POR QUÉ la validación pasa o
+ * falla: sin el desglose por línea, un rechazo FAU04 es un número contra otro
+ * número sin nada que explique la diferencia.
+ *
+ * Todos los montos llegan como `string`, no `number`: son decimales exactos que
+ * un `number` de JS redondearía, y el redondeo es precisamente lo que la DIAN
+ * rechaza.
+ */
+export interface ProfilePreviewLineTax {
+    dian_tax_code: string;
+    tax_name: string;
+    tax_rate: string;
+    taxable_amount: string;
+    tax_amount: string;
+}
+
 export interface ProfilePreviewLine {
     index: number;
     bucket: AiuBucket;
@@ -244,6 +265,14 @@ export interface ProfilePreviewLine {
     /** `true` si la línea NO aporta a la base gravable. */
     omit_tax_total: boolean;
     tax_amount: string;
+    /** `line_extension_amount + tax_amount`, ya calculado por el backend. */
+    total_amount: string;
+    /**
+     * Desglose por impuesto. El servidor SIEMPRE lo manda; la interfaz no lo
+     * declaraba, así que leerlo obligaba a un cast y el desglose que sustenta
+     * FAU04 quedaba fuera del alcance de la UI.
+     */
+    taxes: ProfilePreviewLineTax[];
     note: string | null;
 }
 

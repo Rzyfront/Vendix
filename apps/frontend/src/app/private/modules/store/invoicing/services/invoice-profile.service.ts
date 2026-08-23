@@ -24,11 +24,27 @@ export interface ApiPagedResponse<T> extends ApiResponse<T> {
 }
 
 /** Plantilla de perfil que ofrece `GET …/profiles/templates`. */
+/**
+ * Plantilla de arranque servida por `GET /profiles/templates`.
+ *
+ * `label`, no `name`: el backend emite `label` y la distinción es deliberada —
+ * `name` es lo que el usuario TECLEA al crear el perfil a partir de la
+ * plantilla, así que llamar igual a las dos cosas hace que un componente lea la
+ * etiqueta de la plantilla creyendo que lee el nombre del perfil. La interfaz
+ * declaraba `name` y el servidor nunca lo mandó: sin consumidor todavía, era una
+ * rotura latente que habría salido como `undefined` en pantalla en el primer
+ * `template.name` del CTA «Usar plantilla DIAN».
+ *
+ * `template_version` viaja para que el perfil creado registre DE QUÉ versión de
+ * la plantilla nació: la plantilla evoluciona y un perfil creado con la v1 no es
+ * el mismo que uno creado con la v2.
+ */
 export interface InvoiceProfileTemplate {
     key: string;
-    name: string;
+    label: string;
     description: string;
     operation_type: string;
+    template_version: number;
     config: InvoiceProfileConfig;
 }
 
@@ -215,7 +231,11 @@ export class InvoiceProfileService {
      * RESTRICT`: entre contar y borrar cabe una factura nueva, y esa carrera la
      * gana la base.
      */
-    remove(id: number): Observable<ApiResponse<{ id: number }>> {
-        return this.http.delete<ApiResponse<{ id: number }>>(this.url(`${id}`));
+    remove(id: number): Observable<
+        ApiResponse<{ id: number; deleted: boolean }>
+    > {
+        return this.http.delete<
+            ApiResponse<{ id: number; deleted: boolean }>
+        >(this.url(`${id}`));
     }
 }
