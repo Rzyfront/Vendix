@@ -440,14 +440,30 @@ describe('InvoiceProfileConfig — paridad del piso legal', () => {
 describe('InvoiceProfileConfig — paridad con el espejo del frontend', () => {
   /**
    * El espejo de Angular es una copia **byte a byte** de este archivo, no una
-   * reescritura: el archivo no importa nada, así que compila igual en los dos
-   * runtimes y la copia literal hace imposible la divergencia parcial —el modo
-   * en que estos espejos se rompen de verdad, con un campo añadido en un lado
-   * y la validación intacta en el otro.
+   * reescritura: el archivo no importa nada, así que la copia literal hace
+   * imposible la divergencia parcial —el modo en que estos espejos se rompen de
+   * verdad, con un campo añadido en un lado y la validación intacta en el otro.
    *
-   * Si este test falla, la corrección es copiar, no editar a mano:
+   * ## PERO NO COMPILA IGUAL EN LOS DOS RUNTIMES
+   *
+   * El frontend activa `noPropertyAccessFromIndexSignature` (`tsconfig.json` y
+   * `tsconfig.app.json`); el backend no. Un acceso `root.general` sobre un tipo
+   * indexado compila en el backend y NO en Angular, así que la única notación
+   * válida para las dos puntas es la de corchetes: `root['general']`.
+   *
+   * Esto ya rompió el espejo una vez: alguien arregló la copia del frontend a
+   * corchetes para que compilara, y este test quedó en rojo con 23 líneas de
+   * diferencia —todas de notación, ninguna de semántica—. La receta que estaba
+   * escrita acá, `cp` backend → frontend, habría vuelto a romper el build de
+   * Angular. Se corrigió al revés: el backend adoptó la notación de corchetes.
+   *
+   * Si este test falla, la corrección es copiar, no editar a mano — y en la
+   * dirección que preserve los corchetes:
    *   cp apps/backend/src/domains/store/invoicing/profiles/invoice-profile-config.contract.ts \
    *      apps/frontend/src/app/core/utils/invoice-profile-config.contract.ts
+   *
+   * Antes de copiar, comprobar que el origen no reintrodujo acceso por punto
+   * sobre un índice: si lo hizo, el espejo compilará acá y romperá Angular.
    */
   it('el archivo del frontend es idéntico al del backend', () => {
     const backend = readFileSync(
