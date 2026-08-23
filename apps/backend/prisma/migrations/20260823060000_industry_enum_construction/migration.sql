@@ -1,0 +1,27 @@
+-- DATA IMPACT:
+-- Tables affected: none.
+-- Enum changes: industry_enum += 'construction'
+--   (ADD VALUE idempotente; el valor NO se usa en el DDL de esta migración).
+-- Expected row changes: none. Ninguna tienda existente cambia de industria:
+--   `stores.industries` tiene DEFAULT [retail] y esta migración no toca filas.
+-- Destructive operations: none.
+-- FK/cascade risk: none. Un valor de enum nuevo no altera constraints.
+-- Idempotency: guarded con ADD VALUE IF NOT EXISTS — seguro de re-ejecutar.
+-- Approval: solicitada explícitamente por el usuario el 2026-08-23
+--   («Si la industria de construcción no está agrégala»).
+--
+-- POR QUÉ ESTA MIGRACIÓN VA SOLA
+-- Postgres no permite usar un valor de enum recién añadido en la MISMA
+-- transacción en que se añade. Cualquier DDL o backfill que quiera referenciar
+-- 'construction' necesita una migración posterior. Acá no hay ninguno, así que
+-- la separación no cuesta nada y deja la puerta abierta.
+--
+-- POR QUÉ 'construction' Y NO SE REUSA 'service'
+-- El régimen AIU del Decreto 1372/1992 es específico de construcción de bien
+-- inmueble y su base gravable se calcula distinto del 462-1 (aseo, vigilancia y
+-- servicios temporales), que es lo que cubre `service`. Sin industria propia no
+-- hay forma de recomendar la plantilla correcta, y una constructora arrancaría
+-- con el régimen equivocado — que en una factura electrónica no es un detalle de
+-- UI: es una base gravable mal declarada ante la DIAN.
+
+ALTER TYPE "industry_enum" ADD VALUE IF NOT EXISTS 'construction';

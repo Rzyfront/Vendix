@@ -1,3 +1,4 @@
+import type { $Enums } from '@prisma/client';
 import {
   IsString,
   IsEmail,
@@ -96,13 +97,54 @@ export enum StoreState {
   ARCHIVED = 'archived',
 }
 
-export enum StoreIndustry {
-  RETAIL = 'retail',
-  RESTAURANT = 'restaurant',
-  MANUFACTURING = 'manufacturing',
-  SERVICE = 'service',
-  GYM = 'gym',
-}
+/**
+ * Industrias de una tienda, DERIVADAS del enum de Prisma.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * POR QUÉ `satisfies Record<Uppercase<…>, …>` Y NO UN `enum` A MANO
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Esto era un `export enum` escrito a mano, o sea un espejo de `industry_enum`
+ * que nada obligaba a estar completo. Y no es decorativo:
+ * `setup-store-wizard.dto.ts` lo usa con `@IsEnum(StoreIndustry, { each: true })`,
+ * así que una industria que exista en Postgres y en el picker del frontend pero
+ * no acá se rechaza con **400 en el onboarding** — el fallo aparece en el sitio
+ * más lejano al cambio, y a nadie se le ocurre mirar un DTO de tiendas.
+ *
+ * El `satisfies` cierra las dos direcciones en tiempo de compilación:
+ *
+ * · `Record<Uppercase<$Enums.industry_enum>, …>` exige UNA CLAVE POR VALOR del
+ *   enum. Agregar `construction` a `schema.prisma` y no acá **no compila**, y lo
+ *   caza el job `Backend Build (prisma + nest)` de CI, que sí corre (el de jest
+ *   está en `if: false` desde 2026-08-14, así que un spec no habría guardado
+ *   nada).
+ * · El valor de cada clave está tipado como `$Enums.industry_enum`, así que una
+ *   errata (`'construcion'`) tampoco compila.
+ *
+ * Se conserva la forma `CLAVE_EN_MAYÚSCULAS → 'valor'` porque hay consumidores
+ * que la usan (`StoreIndustry.RETAIL` en los defaults de settings,
+ * `StoreIndustry.GYM` en el job de aforo). Prisma expone las claves en
+ * minúscula, así que reexportar `$Enums.industry_enum` a secas los habría roto.
+ *
+ * El `as const` va ANTES del `satisfies` a propósito: sin él los valores se
+ * ensanchan a `string` y el `Record` deja de verificar nada.
+ */
+export const StoreIndustry = {
+  RETAIL: 'retail',
+  RESTAURANT: 'restaurant',
+  MANUFACTURING: 'manufacturing',
+  SERVICE: 'service',
+  GYM: 'gym',
+  CONSTRUCTION: 'construction',
+} as const satisfies Record<
+  Uppercase<$Enums.industry_enum>,
+  $Enums.industry_enum
+>;
+
+/**
+ * El tipo homónimo, para que `industries?: StoreIndustry[]` siga funcionando
+ * igual que cuando esto era un `enum`.
+ */
+export type StoreIndustry = $Enums.industry_enum;
 
 export class CreateStoreDto {
   @IsOptional()

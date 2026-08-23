@@ -3995,6 +3995,7 @@ enum industry_enum {
   manufacturing
   service
   gym
+  construction
 }
 
 // ===================== MEMBERSHIPS (industria-genérico, Ola 1) =====================

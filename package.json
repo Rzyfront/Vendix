@@ -29,6 +29,7 @@
     "zoneless:audit": "bash apps/frontend/scripts/zoneless-audit.sh",
     "tz:audit": "bash scripts/tz-audit.sh",
     "state-refresh:audit": "bash scripts/state-refresh-audit.sh",
+    "industries:audit": "bash scripts/industry-parity-audit.sh",
     "symbols:audit": "node scripts/assert-imported-symbols.js",
     "dian:ubl-model": "node scripts/generate-dian-ubl-content-model.js",
     "dian:catalogs": "node scripts/generate-dian-catalogs.js",

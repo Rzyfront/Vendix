@@ -4,6 +4,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
+import type { StoreIndustry } from '../../shared/constants/industry-modules.constant';
 
 export interface WizardStatus {
   user_id: number;
@@ -89,7 +90,13 @@ export interface SetupStoreData {
    * the store-setup-step multi-toggle cards let the user add or remove
    * entries before submit.
    */
-  industries?: ('retail' | 'restaurant' | 'manufacturing' | 'service')[];
+  /**
+   * Derivada del constante compartido. Esta línea declaraba CUATRO industrias
+   * —sin `gym`— desde que se añadió la quinta: el picker del onboarding sí la
+   * ofrecía y este tipo no la admitía, y nada falló porque el valor viaja como
+   * string hasta el DTO del backend. Derivarla cierra el hueco.
+   */
+  industries?: StoreIndustry[];
   timezone?: string;
   currency?: string;
   address_line1?: string;

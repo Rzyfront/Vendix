@@ -4,6 +4,7 @@ export const STORE_INDUSTRIES = [
   'manufacturing',
   'service',
   'gym',
+  'construction',
 ] as const;
 
 export type StoreIndustry = (typeof STORE_INDUSTRIES)[number];
@@ -57,6 +58,12 @@ export const INDUSTRY_METADATA: Record<StoreIndustry, IndustryMeta> = {
     label: 'Gimnasio',
     description: 'Membresías, accesos y aforo',
     icon: 'dumbbell',
+  },
+  construction: {
+    value: 'construction',
+    label: 'Construcción',
+    description: 'Obras, contratos y AIU',
+    icon: 'building-2',
   },
 };
 
@@ -135,6 +142,26 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
   ],
   gym: [
     'restaurant_ops',
+    'orders_reservations',
+    'dispatch',
+    'orders_dispatch_notes',
+    'orders_dispatch_routes',
+    'dispatch_fleet',
+    'settings_shipping',
+  ],
+  // Construcción ejecuta obras por contrato: necesita inventario de materiales,
+  // compras, proveedores, facturación (AIU 1372) y contabilidad. Lo que no
+  // necesita es lo de atención al público en sitio ni la flota de reparto a
+  // clientes — de ahí la misma lista que `manufacturing`, que es la industria
+  // más cercana en forma (produce contra pedido, no vende al paso).
+  //
+  // Se arranca por lo CONSERVADOR a propósito: ocultar de más es un módulo que
+  // el usuario pide y se destapa en una línea; mostrar de más es un panel con
+  // secciones que no le sirven y que enseñan a ignorar el menú. Si una
+  // constructora pide despacho de materiales a obra, se quita 'dispatch' de acá.
+  construction: [
+    'restaurant_ops',
+    'memberships',
     'orders_reservations',
     'dispatch',
     'orders_dispatch_notes',

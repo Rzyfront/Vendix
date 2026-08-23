@@ -226,7 +226,22 @@ export class AuthFacade {
    * chain used by `isRestaurant` in product-create-page. Defaults to `false`
    * when the store has no industries loaded yet.
    */
-  readonly storeSupportsIngredients = computed<boolean>(() => {
+  /**
+   * Industrias de la tienda activa, resueltas por la cascada
+   * `store_settings.general.industries` → respuesta de login → `[]`.
+   *
+   * Existe para que la cascada se escriba UNA vez. Estaba copiada literal en
+   * `storeSupportsIngredients` y en `isRestaurant`, y una tercera copia era el
+   * camino conocido a que dos predicados que deberían decidir lo mismo dejen de
+   * hacerlo: basta que alguien arregle el orden de precedencia en una copia.
+   *
+   * El orden importa y no es intercambiable: los settings mandan porque son la
+   * fuente de verdad; el login sólo cubre el hueco entre que la sesión abre y
+   * que `storeSettings$` responde. Devolver `[]` en vez de `['retail']` es
+   * deliberado — suponer una industria hace que una capacidad se ofrezca antes
+   * de saber si aplica.
+   */
+  readonly storeIndustries = computed<string[]>(() => {
     const fromSettings = (this.storeSettings() as any)?.general?.industries as
       | string[]
       | undefined;
@@ -235,7 +250,10 @@ export class AuthFacade {
       fromSettings ||
       (Array.isArray(fromLogin) ? fromLogin : null) ||
       [];
-    return industriesSupportIngredients(industries);
+    return industries;
+  });
+  readonly storeSupportsIngredients = computed<boolean>(() => {
+    return industriesSupportIngredients(this.storeIndustries());
   });
   /**
    * Capability resolver: true if the active store is a restaurant. Reads
@@ -246,15 +264,7 @@ export class AuthFacade {
    * no industries are loaded yet.
    */
   readonly isRestaurant = computed<boolean>(() => {
-    const fromSettings = (this.storeSettings() as any)?.general?.industries as
-      | string[]
-      | undefined;
-    const fromLogin = this.userIndustries();
-    const industries =
-      fromSettings ||
-      (Array.isArray(fromLogin) ? fromLogin : null) ||
-      [];
-    return industries.includes('restaurant');
+    return this.storeIndustries().includes('restaurant');
   });
   /**
    * Capability resolver: true if the active store is a gym. Reads the SAME
