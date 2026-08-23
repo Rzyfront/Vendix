@@ -267,13 +267,27 @@ export class ProfilesController {
    * `ProfilesModule`, y la respuesta lo declara en `not_performed` para que se
    * pueda afirmar por `curl` sin leer el código.
    *
-   * ## Sobre el ensanchamiento del guard
+   * ## Sobre el guard: el prefijo NO franquicia
    *
-   * `PermissionsGuard` franquicia por prefijo de ruta, así que quien tenga la
-   * fila `(store/invoicing/profiles, POST)` de la creación alcanza también este
-   * handler. Se acepta a conciencia: ensancha de `read` hacia quien ya tiene
-   * `write`, que es la dirección inocua. La inversa —que `read` alcanzara una
-   * escritura— sería un hallazgo.
+   * Esta nota decía que `PermissionsGuard` franquiciaba por prefijo y que la
+   * fila `(store/invoicing/profiles, POST)` de la creación alcanzaba también
+   * este handler. **Ya no es cierto**, y dejarlo escrito era peor que un simple
+   * desfase: una nota que declara una fuga como aceptada enseña al siguiente
+   * lector a tolerar un ensanchamiento que no tiene por qué tolerar.
+   *
+   * `permissions.guard.ts` compara `permission.path === currentPath` —igualdad
+   * estricta contra el PATRÓN de ruta de Nest, no `startsWith`—, así que la fila
+   * de la creación casa sólo con `POST /profiles` y nada más. Las rutas
+   * secundarias (`:id/preview`, `:id/clone`, `:id/set-default`, …) no tienen
+   * fila propia y se autorizan por la rama de NOMBRE, es decir por lo que este
+   * mismo decorador declara.
+   *
+   * Lo que sí sigue siendo cierto de la disyunción: la rama de ruta concede
+   * IGNORANDO el decorador, así que quien porte la fila `(GET, /profiles)` entra
+   * al listado aunque el handler pidiera otra cosa. Ambas propiedades están
+   * afirmadas en `permissions.guard.invoice-profiles.spec.ts` — la separación
+   * `write` ⇏ `set-default` incluida—, que es donde hay que mirar antes de
+   * creerle a este comentario.
    */
   @Post(':id/preview')
   @Permissions('invoicing:profiles:read')
