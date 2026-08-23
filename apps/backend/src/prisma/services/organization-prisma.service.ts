@@ -71,6 +71,8 @@ export class OrganizationPrismaService extends BasePrismaService {
     'inventory_cost_layers',
     'inventory_valuation_snapshots',
     'stock_levels',
+    'print_templates',
+    'store_print_format_configs',
   ];
 
   /**
@@ -528,6 +530,15 @@ export class OrganizationPrismaService extends BasePrismaService {
 
   get partner_payout_batches() {
     return this.scoped_client.partner_payout_batches;
+  }
+
+  // Print Formats Hub
+  get print_templates() {
+    return this.scoped_client.print_templates;
+  }
+
+  get store_print_format_configs() {
+    return this.scoped_client.store_print_format_configs;
   }
 
   // Onboarding state (no scoping - has its own FK to organization)

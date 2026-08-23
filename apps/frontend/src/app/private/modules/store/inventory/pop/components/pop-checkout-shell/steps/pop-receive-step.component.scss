@@ -274,3 +274,63 @@
     text-decoration: underline;
   }
 }
+/* A.5 — Panel de error de la vista previa. Mismo lenguaje visual que
+ * `.retry-banner` del paso de confirmación: sin `app-alert-banner`. */
+.recv-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid var(--color-destructive);
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--color-destructive);
+}
+
+.recv-error-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.recv-error-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.recv-error-text {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.recv-error-retry {
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--color-destructive);
+  background: transparent;
+  color: var(--color-destructive);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* C.5 — Nota del flete sobre la lista de valoración. */
+.freight-note {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+}
+
+.freight-note--warn {
+  display: block;
+  margin-top: 4px;
+  font-weight: 600;
+  color: #b45309;
+}

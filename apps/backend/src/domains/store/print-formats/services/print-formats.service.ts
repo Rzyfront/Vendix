@@ -1,0 +1,299 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { print_format_type_enum } from '@prisma/client';
+import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { OrganizationPrismaService } from '../../../../prisma/services/organization-prisma.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { PrintGatewayService } from './print-gateway.service';
+import { PrintFiscalValidatorService } from './print-fiscal-validator.service';
+import { DocumentDataProviderRegistry } from '../providers/document-data-provider.registry';
+import {
+  UpdatePrintFormatConfigDto,
+} from '../dto/print-format-config.dto';
+import {
+  CreatePrintTemplateDto,
+  UpdatePrintTemplateDto,
+} from '../dto/print-template.dto';
+
+export const ALL_FORMAT_TYPES: print_format_type_enum[] = [
+  'pos_sale_ticket',
+  'sales_order_invoice',
+  'dispatch_note',
+  'quotation',
+  'credit_note',
+  'purchase_order',
+  'transfer_note',
+  'fiscal_electronic_invoice',
+  'fiscal_credit_note',
+  'kitchen_ticket',
+];
+
+export const FORMAT_TYPE_METADATA: Record<
+  print_format_type_enum,
+  { name: string; category: string; icon: string; engine: 'html' | 'pdf' }
+> = {
+  pos_sale_ticket: { name: 'Ticket de Venta POS', category: 'Ventas POS', icon: 'receipt', engine: 'html' },
+  sales_order_invoice: { name: 'Factura de Venta / Orden', category: 'Ventas', icon: 'file-text', engine: 'html' },
+  dispatch_note: { name: 'Remisión / Despacho', category: 'Logística', icon: 'truck', engine: 'html' },
+  quotation: { name: 'Cotización Comercial', category: 'Comercial', icon: 'file-spreadsheet', engine: 'html' },
+  credit_note: { name: 'Nota Crédito Comercial', category: 'Ventas', icon: 'corner-down-left', engine: 'html' },
+  purchase_order: { name: 'Orden de Compra', category: 'Compras', icon: 'shopping-cart', engine: 'html' },
+  transfer_note: { name: 'Traslado entre Tiendas', category: 'Inventario', icon: 'arrow-left-right', engine: 'html' },
+  fiscal_electronic_invoice: { name: 'Factura Electrónica (DIAN)', category: 'Facturación', icon: 'shield-check', engine: 'html' },
+  fiscal_credit_note: { name: 'Nota Crédito Electrónica', category: 'Facturación', icon: 'file-minus', engine: 'html' },
+  kitchen_ticket: { name: 'Ticket de Cocina (KDS)', category: 'Restaurante', icon: 'utensils', engine: 'html' },
+};
+
+@Injectable()
+export class PrintFormatsService {
+  private readonly logger = new Logger(PrintFormatsService.name);
+
+  constructor(
+    private readonly storePrisma: StorePrismaService,
+    private readonly orgPrisma: OrganizationPrismaService,
+    private readonly gateway: PrintGatewayService,
+    private readonly fiscalValidator: PrintFiscalValidatorService,
+    private readonly registry: DocumentDataProviderRegistry,
+  ) {}
+
+  /**
+   * Lista el catálogo de los 10 formatos con el estado actual para la tienda
+   */
+  async listStoreFormats(storeId: number, organizationId: number) {
+    const storeConfigs = await this.storePrisma.store_print_format_configs.findMany({
+      where: { store_id: storeId },
+      include: { template: true },
+    });
+
+    const configMap = new Map<print_format_type_enum, any>();
+    for (const cfg of storeConfigs) {
+      configMap.set(cfg.format_type, cfg);
+    }
+
+    return ALL_FORMAT_TYPES.map((type) => {
+      const cfg = configMap.get(type);
+      const meta = FORMAT_TYPE_METADATA[type];
+      return {
+        format_type: type,
+        name: meta.name,
+        category: meta.category,
+        icon: meta.icon,
+        engine: meta.engine,
+        is_configured: Boolean(cfg),
+        is_active: cfg?.is_active ?? true,
+        gateway_enabled: cfg?.gateway_enabled ?? false,
+        template_name: cfg?.template?.name || (cfg?.overrides ? 'Personalizado (Overrides)' : 'Por defecto del sistema'),
+        updated_at: cfg?.updated_at || null,
+      };
+    });
+  }
+
+  /**
+   * Obtiene la configuración detallada de un formato de impresión
+   */
+  async getStoreFormatDetail(storeId: number, formatType: print_format_type_enum) {
+    const effective = await this.gateway.resolveEffectiveConfig(storeId, formatType);
+    const provider = this.registry.getProvider(formatType);
+    const meta = FORMAT_TYPE_METADATA[formatType];
+
+    const storeConfig = await this.storePrisma.store_print_format_configs.findFirst({
+      where: { store_id: storeId, format_type: formatType },
+      include: { template: true },
+    });
+
+    return {
+      format_type: formatType,
+      name: meta.name,
+      category: meta.category,
+      is_active: effective.is_active,
+      gateway_enabled: effective.gateway_enabled,
+      is_customized: effective.is_customized,
+      template_id: storeConfig?.template_id || null,
+      template_name: storeConfig?.template?.name || null,
+      definition: effective.definition,
+      overrides: storeConfig?.overrides || null,
+      available_tokens: provider.getAvailableTokens(),
+    };
+  }
+
+  /**
+   * Actualiza o crea la configuración y overrides para un formato en la tienda
+   */
+  async updateStoreFormat(
+    storeId: number,
+    organizationId: number,
+    formatType: print_format_type_enum,
+    dto: UpdatePrintFormatConfigDto,
+  ) {
+    // Si se están enviando overrides con definición estructurada o custom, validar fiscalmente
+    if (dto.overrides) {
+      const current = await this.gateway.resolveEffectiveConfig(storeId, formatType);
+      const merged = { ...current.definition, ...dto.overrides };
+      this.fiscalValidator.assertFiscalCompliance(formatType, merged as any);
+    }
+
+    const existing = await this.storePrisma.store_print_format_configs.findFirst({
+      where: { store_id: storeId, format_type: formatType },
+    });
+
+    let result;
+    if (existing) {
+      result = await this.storePrisma.store_print_format_configs.update({
+        where: { id: existing.id },
+        data: {
+          is_active: dto.is_active !== undefined ? dto.is_active : existing.is_active,
+          gateway_enabled: dto.gateway_enabled !== undefined ? dto.gateway_enabled : existing.gateway_enabled,
+          template_id: dto.template_id !== undefined ? dto.template_id : existing.template_id,
+          overrides: dto.overrides !== undefined ? (dto.overrides as any) : existing.overrides,
+          updated_at: new Date(),
+        },
+        include: { template: true },
+      });
+    } else {
+      result = await this.storePrisma.store_print_format_configs.create({
+        data: {
+          store_id: storeId,
+          organization_id: organizationId,
+          format_type: formatType,
+          is_active: dto.is_active ?? true,
+          gateway_enabled: dto.gateway_enabled ?? true,
+          template_id: dto.template_id || null,
+          overrides: (dto.overrides as any) || null,
+        },
+        include: { template: true },
+      });
+    }
+
+    return this.getStoreFormatDetail(storeId, formatType);
+  }
+
+  /**
+   * Restablece la configuración de un formato a los defaults del sistema
+   */
+  async resetStoreFormatToDefault(storeId: number, formatType: print_format_type_enum) {
+    const existing = await this.storePrisma.store_print_format_configs.findFirst({
+      where: { store_id: storeId, format_type: formatType },
+    });
+
+    if (existing) {
+      await this.storePrisma.store_print_format_configs.delete({
+        where: { id: existing.id },
+      });
+    }
+
+    return { success: true, message: 'Configuración restablecida a los valores por defecto del sistema.' };
+  }
+
+  /**
+   * Activa el flag gateway_enabled para un formato
+   */
+  async activateGateway(storeId: number, organizationId: number, formatType: print_format_type_enum) {
+    await this.updateStoreFormat(storeId, organizationId, formatType, { gateway_enabled: true });
+    return { format_type: formatType, gateway_enabled: true };
+  }
+
+  /**
+   * Desactiva el flag gateway_enabled (revierte a legacy emitter)
+   */
+  async deactivateGateway(storeId: number, organizationId: number, formatType: print_format_type_enum) {
+    await this.updateStoreFormat(storeId, organizationId, formatType, { gateway_enabled: false });
+    return { format_type: formatType, gateway_enabled: false };
+  }
+
+  // ============================================
+  // BIBLIOTECA DE ORGANIZACIÓN (TEMPLATES COMPARTIDOS)
+  // ============================================
+
+  async listLibraryTemplates(organizationId: number, formatType?: print_format_type_enum) {
+    const where: any = {
+      OR: [
+        { is_system: true },
+        { organization_id: organizationId, is_shared: true },
+        { organization_id: organizationId },
+      ],
+    };
+
+    if (formatType) {
+      where.format_type = formatType;
+    }
+
+    return this.orgPrisma.print_templates.findMany({
+      where,
+      include: {
+        author: {
+          select: { id: true, first_name: true, last_name: true, email: true },
+        },
+      },
+      orderBy: [{ is_system: 'desc' }, { created_at: 'desc' }],
+    });
+  }
+
+  async createLibraryTemplate(
+    organizationId: number,
+    userId: number,
+    dto: CreatePrintTemplateDto,
+  ) {
+    this.fiscalValidator.assertFiscalCompliance(dto.format_type, dto.definition as any);
+
+    return this.orgPrisma.print_templates.create({
+      data: {
+        organization_id: organizationId,
+        created_by: userId,
+        format_type: dto.format_type,
+        name: dto.name,
+        description: dto.description || null,
+        definition: dto.definition as any,
+        is_system: false,
+        is_shared: dto.is_shared ?? true,
+      },
+    });
+  }
+
+  async cloneTemplateToStore(
+    storeId: number,
+    organizationId: number,
+    templateId: number,
+  ) {
+    const template = await this.orgPrisma.print_templates.findFirst({
+      where: {
+        id: templateId,
+        OR: [{ is_system: true }, { organization_id: organizationId }],
+      },
+    });
+
+    if (!template) {
+      throw new VendixHttpException(ErrorCodes.PRINT_TEMPLATE_NOT_FOUND_001);
+    }
+
+    await this.updateStoreFormat(storeId, organizationId, template.format_type, {
+      template_id: template.id,
+      overrides: {},
+      is_active: true,
+      gateway_enabled: true,
+    });
+
+    return this.getStoreFormatDetail(storeId, template.format_type);
+  }
+
+  async updateTemplateShareState(
+    organizationId: number,
+    templateId: number,
+    isShared: boolean,
+  ) {
+    const template = await this.orgPrisma.print_templates.findFirst({
+      where: { id: templateId, organization_id: organizationId },
+    });
+
+    if (!template) {
+      throw new VendixHttpException(ErrorCodes.PRINT_TEMPLATE_NOT_FOUND_001);
+    }
+
+    if (template.is_system) {
+      throw new VendixHttpException(ErrorCodes.PRINT_TEMPLATE_SYSTEM_PROTECTED_001);
+    }
+
+    return this.orgPrisma.print_templates.update({
+      where: { id: templateId },
+      data: { is_shared: isShared, updated_at: new Date() },
+    });
+  }
+}

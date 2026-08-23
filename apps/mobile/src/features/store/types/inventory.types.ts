@@ -147,10 +147,19 @@ export interface CreatePurchaseOrderItemDto {
   notes?: string;
 }
 
+/**
+ * CP-PURCHASE-TRANSPARENCY A.10 — NO declara `status`, y no debe volver.
+ *
+ * El backend descarta cualquier `status` del cuerpo de creación y escribe
+ * `draft` de oficio, así que declararlo aquí sólo servía para que la pantalla
+ * creyera haber creado una orden aprobada que en la base era un borrador.
+ * `approved` se alcanza únicamente con `InventoryService.approvePurchaseOrder`.
+ * Además, cuando el backend retire el campo de su DTO, `forbidNonWhitelisted`
+ * convertiría este envío en un 400 en cada creación.
+ */
 export interface CreatePurchaseOrderDto {
   supplier_id: number;
   location_id: number;
-  status?: PurchaseOrderStatus;
   order_date?: string;
   expected_date?: string;
   subtotal_amount?: number;

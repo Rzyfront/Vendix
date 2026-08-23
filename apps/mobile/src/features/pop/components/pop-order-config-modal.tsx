@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Modal as RNModal,
   View,
@@ -12,9 +12,16 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { DatePickerField } from '@/shared/components/date-picker-field/date-picker-field';
+import { MoneyInput } from '@/shared/components/money-input/money-input';
+import { Toggle } from '@/shared/components/toggle/toggle';
 import { borderRadius, colorScales, colors, shadows, spacing, typography } from '@/shared/theme';
-import type { PopSupplier, PopLocation, ShippingMethod } from '../types';
-import { SHIPPING_METHOD_LABELS } from '../constants';
+import type {
+  PopSupplier,
+  PopLocation,
+  PopShippingAllocation,
+  ShippingMethod,
+} from '../types';
+import { SHIPPING_METHOD_LABELS, SHIPPING_ALLOCATION_LEGEND } from '../constants';
 
 type DropdownKind = 'suppliers' | 'locations' | 'shipping';
 
@@ -30,6 +37,10 @@ interface PopOrderConfigModalProps {
   orderDate: string;
   expectedDate?: string;
   shippingMethod?: ShippingMethod;
+  /** C.5 — monto del flete. Sólo se pregunta cuando el método es `freight`. */
+  shippingCost?: number;
+  /** C.5 — `prorate` (capitaliza al costo) o `expense` (no toca el costo). */
+  shippingCostAllocation?: PopShippingAllocation;
   /** YYYY-MM-DD. Si se pasa, la fecha de entrega no puede ser anterior a esta. */
   minExpectedDate?: string;
   // Cambios (bubble-up — el padre gestiona el state).
@@ -38,6 +49,8 @@ interface PopOrderConfigModalProps {
   onOrderDateChange: (date: string) => void;
   onExpectedDateChange: (date?: string) => void;
   onShippingMethodChange: (method?: ShippingMethod) => void;
+  onShippingCostChange?: (cost: number) => void;
+  onShippingCostAllocationChange?: (mode: PopShippingAllocation) => void;
   // Quick-create triggers — el padre abre sus modales correspondientes.
   onOpenSupplierModal?: () => void;
   onOpenWarehouseModal?: () => void;
@@ -52,12 +65,13 @@ interface PopOrderConfigModalProps {
  * `Modal` compartido pageSheet, para coincidir con el centrado compacto de
  * la versión web responsive (no pantalla completa).
  *
- * Solo captura los 5 campos del modal web:
+ * Captura los mismos campos que el modal web:
  *   1. Proveedor *
  *   2. Bodega *
  *   3. Fecha Orden
  *   4. Fecha Entrega (≥ Fecha Orden)
  *   5. Método Envío
+ *   6. Flete: monto + conmutador de imputación (sólo si el método es `freight`)
  *
  * El componente es "tonto": todos los valores vienen del padre y cada cambio
  * se emite por callback. Sin estado interno para los valores (live-binding
@@ -79,16 +93,54 @@ export default function PopOrderConfigModal({
   orderDate,
   expectedDate,
   shippingMethod,
+  shippingCost = 0,
+  shippingCostAllocation,
   minExpectedDate,
   onSupplierChange,
   onLocationChange,
   onOrderDateChange,
   onExpectedDateChange,
   onShippingMethodChange,
+  onShippingCostChange,
+  onShippingCostAllocationChange,
   onOpenSupplierModal,
   onOpenWarehouseModal,
 }: PopOrderConfigModalProps) {
   const insets = useSafeAreaInsets();
+
+  // ── C.5 Flete ────────────────────────────────────────────────────────────
+  // El campo sólo existe cuando la orden viene por flete: preguntar el monto de
+  // un envío que el proveedor trae no significa nada, y el backend lo rechaza.
+  const isFreight = shippingMethod === 'freight';
+  // Por defecto se prorratea — es la imputación contable correcta: el flete es
+  // parte de lo que costó poner el producto en bodega.
+  const isProrate = (shippingCostAllocation ?? 'prorate') === 'prorate';
+
+  /**
+   * `MoneyInput` es un input de texto: mantiene el string que el operador está
+   * tecleando. Se guarda aparte del número del carrito porque escribir "1500."
+   * (paso intermedio hacia "1500.50") colapsaría a "1500" en cada tecla si el
+   * valor mostrado se derivara del número. El borrador se re-siembra sólo en la
+   * transición de cerrado→abierto, para no pelear con lo que se está tecleando.
+   */
+  const [freightDraft, setFreightDraft] = useState('');
+  const wasVisible = useRef(false);
+  useEffect(() => {
+    if (visible && !wasVisible.current) {
+      setFreightDraft(Number(shippingCost) > 0 ? String(shippingCost) : '');
+    }
+    wasVisible.current = visible;
+  }, [visible, shippingCost]);
+
+  const handleFreightChange = (raw: string) => {
+    setFreightDraft(raw);
+    const parsed = Number(raw);
+    // La columna es `Decimal(12,2)`: un tercer decimal se guarda distinto de lo
+    // que muestra la pantalla, así que se recorta antes de salir de aquí.
+    const safe =
+      Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed * 100) / 100 : 0;
+    onShippingCostChange?.(safe);
+  };
 
   // ── Dropdown flotante: estado único + posición medida ────────────────────
   const [openDropdown, setOpenDropdown] = useState<DropdownKind | null>(null);
@@ -151,7 +203,7 @@ export default function PopOrderConfigModal({
                   <View style={styles.headerText}>
                     <Text style={styles.title}>Configurar orden de compra</Text>
                     <Text style={styles.subtitle}>
-                      Proveedor, bodega, fechas y método de envío
+                      Proveedor, bodega, fechas, envío y flete
                     </Text>
                   </View>
                   <TouchableOpacity
@@ -267,6 +319,35 @@ export default function PopOrderConfigModal({
                       <Ionicons name="chevron-down" size={14} color="#6b7280" />
                     </TouchableOpacity>
                   </View>
+
+                  {/*
+                    5. Flete (C.5) — donde se declara el método de envío se
+                    declara también cuánto costó y qué se hace con él. Si el
+                    monto viviera en otra pantalla, el operador podría elegir
+                    «Flete» aquí y confirmar sin que nadie le preguntara cuánto.
+                  */}
+                  {isFreight && (
+                    <View style={styles.fieldGroup}>
+                      <Text style={styles.label}>Costo del flete</Text>
+                      <MoneyInput
+                        value={freightDraft}
+                        onChangeText={handleFreightChange}
+                        placeholder="0"
+                      />
+                      <Toggle
+                        value={isProrate}
+                        onChange={(next) =>
+                          onShippingCostAllocationChange?.(next ? 'prorate' : 'expense')
+                        }
+                        label="Prorratear el flete en el costo de los productos"
+                      />
+                      <Text style={styles.allocationLegend}>
+                        {isProrate
+                          ? SHIPPING_ALLOCATION_LEGEND.prorate
+                          : SHIPPING_ALLOCATION_LEGEND.expense}
+                      </Text>
+                    </View>
+                  )}
                 </ScrollView>
 
                 {/* ─── Footer (réplica web: Listo verde a la derecha) ───────────── */}
@@ -441,6 +522,11 @@ const styles = StyleSheet.create({
   },
   required: {
     color: colors.error,
+  },
+  allocationLegend: {
+    fontSize: 11,
+    lineHeight: 16,
+    color: colorScales.gray[500],
   },
   selector: {
     flex: 1,

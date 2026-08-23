@@ -348,6 +348,24 @@ export class BulkArchiveProductsDto {
   @IsInt({ each: true })
   @Type(() => Number)
   ids: number[];
+
+  /**
+   * CP-PURCHASE-TRANSPARENCY D.6 — la confirmación del castigo de inventario,
+   * propagada a `ProductsService.remove(id, opts)`.
+   *
+   * EXISTE PARA QUE LA COMPUERTA INDIVIDUAL NO SE PUEDA BURLAR MANDANDO UN
+   * LOTE. El archivado masivo llama a `remove()` producto por producto: sin
+   * este campo, en cuanto D.4 aterrizó, o bien un lote de 40 identificadores
+   * castigaba el inventario de 40 productos sin que nadie confirmara nada, o
+   * bien todos devolvían 409 dentro del bucle y el archivado masivo quedaba
+   * roto al 100 %. Con él, un lote de UN solo identificador se comporta
+   * exactamente igual que la ruta individual.
+   *
+   * Ausente ⇒ `false`. La confirmación se declara, nunca se asume.
+   */
+  @IsOptional()
+  @IsBoolean()
+  confirm_stock_write_off?: boolean;
 }
 
 /**
@@ -376,6 +394,20 @@ export class BulkArchivePreviewItemDto {
   status: BulkEditItemStatus;
   code?: string;
   message?: string;
+  /**
+   * D.6 / FB-10 — lo que este producto va a perder si el lote se confirma.
+   * Aditivo: las filas `error` los traen igual (en 0 cuando no hay existencias),
+   * para que la interfaz no tenga que distinguir formas.
+   */
+  on_hand_units: number;
+  value_to_write_off: number;
+  /** Unidades sin costo conocido: se destruyen, pero no generan asiento. */
+  zero_cost_units: number;
+  /**
+   * Unidades en ubicaciones que esta tienda no puede tocar (bodega central de
+   * la organización). Bloquean el archivado: se transfieren o ajustan primero.
+   */
+  out_of_scope_units: number;
 }
 
 export class BulkArchivePreviewResultDto {
@@ -383,6 +415,11 @@ export class BulkArchivePreviewResultDto {
   ok: number;
   warnings: number;
   errors: number;
+  /** D.6 — el total que el operador está a punto de aprobar, en una cifra. */
+  total_units_to_write_off: number;
+  total_value_to_write_off: number;
+  /** `true` si alguna fila tiene existencias: sin confirmar, el lote no castiga. */
+  requires_confirmation: boolean;
   items: BulkArchivePreviewItemDto[];
 }
 
@@ -393,11 +430,19 @@ export class BulkArchiveResultItemDto {
   status: Exclude<BulkEditItemStatus, 'warning'>;
   code?: string;
   message?: string;
+  /** D.6 — lo que ESTA fila destruyó de verdad. 0 en las filas fallidas. */
+  written_off_units?: number;
+  written_off_value?: number;
+  zero_cost_units?: number;
+  adjustment_ids?: number[];
 }
 
 export class BulkArchiveResultDto {
   total: number;
   successful: number;
   failed: number;
+  /** D.6 — el desglose agregado de lo que el lote destruyó. */
+  written_off_units: number;
+  written_off_value: number;
   results: BulkArchiveResultItemDto[];
 }

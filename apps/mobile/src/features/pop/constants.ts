@@ -1,10 +1,35 @@
-import type { ShippingMethod, PopCartItem, PopCartSummary, PopProduct, PopProductVariant } from './types';
+import type {
+  ShippingMethod,
+  PopCartItem,
+  PopCartSummary,
+  PopProduct,
+  PopProductVariant,
+  PopShippingAllocation,
+} from './types';
 
 export const SHIPPING_METHOD_LABELS: Record<ShippingMethod, string> = {
   supplier_transport: 'Transporte Proveedor',
   freight: 'Flete',
   pickup: 'Recolección',
   other: 'Otro',
+};
+
+/**
+ * CP-PURCHASE-TRANSPARENCY C.5 — qué significa cada modo de imputación del
+ * flete, en términos de NEGOCIO y no de contabilidad.
+ *
+ * La duda del operador es inmediata y es la misma en los dos modos: «¿esto me
+ * sube el costo del producto?» y «¿esto suma al total?». Los textos son
+ * literalmente los mismos que muestra la web
+ * (`pop-order-config-modal.component.ts`, `allocationLegend`): si divergieran,
+ * el mismo negocio leería dos explicaciones distintas de la misma decisión
+ * según el dispositivo desde el que compra.
+ */
+export const SHIPPING_ALLOCATION_LEGEND: Record<PopShippingAllocation, string> = {
+  prorate:
+    'El flete se reparte entre los productos según su participación en la compra, así que cada producto queda valorado con lo que realmente costó ponerlo en bodega: sube su costo unitario y con él el margen que calcula el sistema. El flete se suma al total de la orden.',
+  expense:
+    'El flete no toca el costo de los productos: se registra como un costo de la orden y el costo unitario no se mueve. El flete se suma igual al total de la orden.',
 };
 
 export const ORDER_ACTION_LABELS: Record<string, string> = {

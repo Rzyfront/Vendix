@@ -78,6 +78,9 @@ describe('SettingsService — guard de transición de caja (QUI-560)', () => {
       {} as any, // migrator
       {} as any, // fiscalScope
       sessionsService as unknown as SessionsService,
+      // La suite entera dejaba de correr por este argumento faltante
+      // (`pwaCache`): «Test suite failed to run» no es un test que pasa.
+      { invalidateStore: jest.fn() } as any, // pwaCache
     );
   });
 
@@ -372,5 +375,189 @@ describe('SettingsService — guard de transición de caja (QUI-560)', () => {
 
       expect(stored.vexi.voice_engine).toBe('realtime');
     });
+  });
+});
+
+/**
+ * CP-PURCHASE-TRANSPARENCY B.2 — herencia de `tax_responsibilities` y
+ * `tax_regime` desde la organización.
+ *
+ * La herencia que ya existía cubría la identidad (NIT, razón social) pero no
+ * estos dos campos: una tienda dentro de una organización que declaró O-48
+ * resolvía «no responsable» y capitalizaba el IVA al costo sin que nadie lo
+ * hubiera decidido. Lo que estos casos fijan es la dirección de la herencia —
+ * sólo hacia el vacío, nunca pisando un valor propio — porque aplicarla al
+ * revés haría descontar a una tienda O-49 un IVA que no puede descontar.
+ */
+describe('SettingsService.getFiscalData — herencia fiscal tienda ← organización (B.2)', () => {
+  const ORG_ID = 6;
+  const FISCAL_STORE_ID = 10;
+
+  const build = (params: {
+    storeFiscalData: Record<string, unknown>;
+    orgFiscalData: Record<string, unknown>;
+    fiscalScope?: 'STORE' | 'ORGANIZATION';
+  }) => {
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({
+        store_id: FISCAL_STORE_ID,
+        organization_id: ORG_ID,
+        user_id: USER_ID,
+      } as any);
+
+    const prisma = {
+      store_settings: {
+        findUnique: jest.fn().mockResolvedValue({
+          store_id: FISCAL_STORE_ID,
+          settings: { fiscal_data: params.storeFiscalData },
+        }),
+        upsert: jest.fn().mockResolvedValue({}),
+      },
+      default_templates: { findFirst: jest.fn() },
+      stores: { findUnique: jest.fn(), update: jest.fn() },
+      withoutScope: () => ({
+        stores: {
+          findUnique: jest.fn().mockResolvedValue({
+            organization_id: ORG_ID,
+            legal_name: null,
+            tax_id: null,
+            tax_id_dv: null,
+            nit_type: null,
+            municipality_code: null,
+            ciiu_code: null,
+            name: 'Tienda',
+          }),
+        },
+        organizations: {
+          findUnique: jest.fn().mockResolvedValue({
+            legal_name: 'Organización S.A.S.',
+            tax_id: '900123456',
+            name: 'Organización',
+          }),
+        },
+      }),
+    };
+
+    const organizationPrisma = {
+      withoutScope: () => ({
+        organization_settings: {
+          findFirst: jest
+            .fn()
+            .mockResolvedValue({ settings: { fiscal_data: params.orgFiscalData } }),
+        },
+      }),
+    };
+
+    const service = new SettingsService(
+      prisma as any,
+      organizationPrisma as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { logUpdate: jest.fn() } as any,
+      {} as any,
+      {
+        requireFiscalScope: jest
+          .fn()
+          .mockResolvedValue(params.fiscalScope ?? 'STORE'),
+      } as any,
+      {} as any,
+      { invalidateStore: jest.fn() } as any, // pwaCache
+    );
+    return service;
+  };
+
+  it('tienda SIN datos propios: hereda responsabilidades y régimen, y lo declara', async () => {
+    const service = build({
+      storeFiscalData: {},
+      orgFiscalData: {
+        tax_responsibilities: ['O-48', 'O-13'],
+        tax_regime: 'COMUN',
+      },
+    });
+
+    const out: any = await service.getFiscalData();
+
+    expect(out.tax_responsibilities).toEqual(['O-48', 'O-13']);
+    expect(out.tax_regime).toBe('COMUN');
+    expect(out.tax_responsibilities_source).toBe('organization');
+    expect(out.tax_regime_source).toBe('organization');
+  });
+
+  it('tienda CON datos propios: no se ve alterada por la organización', async () => {
+    const service = build({
+      storeFiscalData: {
+        tax_responsibilities: ['O-49'],
+        tax_regime: 'SIMPLIFICADO',
+      },
+      orgFiscalData: {
+        tax_responsibilities: ['O-48'],
+        tax_regime: 'COMUN',
+      },
+    });
+
+    const out: any = await service.getFiscalData();
+
+    // El riesgo que este caso cubre: una tienda que declaró O-49 pasando a
+    // tratarse como O-48 descontaría un IVA que no puede descontar.
+    expect(out.tax_responsibilities).toEqual(['O-49']);
+    expect(out.tax_regime).toBe('SIMPLIFICADO');
+    expect(out.tax_responsibilities_source).toBe('store');
+    expect(out.tax_regime_source).toBe('store');
+  });
+
+  it('la herencia es POR CAMPO: régimen propio + responsabilidades heredadas', async () => {
+    const service = build({
+      storeFiscalData: { tax_regime: 'SIMPLIFICADO' },
+      orgFiscalData: {
+        tax_responsibilities: ['O-48'],
+        tax_regime: 'COMUN',
+      },
+    });
+
+    const out: any = await service.getFiscalData();
+
+    expect(out.tax_responsibilities).toEqual(['O-48']);
+    expect(out.tax_responsibilities_source).toBe('organization');
+    expect(out.tax_regime).toBe('SIMPLIFICADO');
+    expect(out.tax_regime_source).toBe('store');
+  });
+
+  it('ni tienda ni organización declaran nada: no se inventa un valor', async () => {
+    const service = build({ storeFiscalData: {}, orgFiscalData: {} });
+
+    const out: any = await service.getFiscalData();
+
+    expect(out.tax_responsibilities).toBeUndefined();
+    expect(out.tax_regime).toBeUndefined();
+    expect(out.tax_responsibilities_source).toBe('store');
+    expect(out.tax_regime_source).toBe('store');
+  });
+
+  it('un arreglo vacío de responsabilidades cuenta como ausencia, no como declaración', async () => {
+    const service = build({
+      storeFiscalData: { tax_responsibilities: [] },
+      orgFiscalData: { tax_responsibilities: ['O-48'] },
+    });
+
+    const out: any = await service.getFiscalData();
+
+    expect(out.tax_responsibilities).toEqual(['O-48']);
+    expect(out.tax_responsibilities_source).toBe('organization');
+  });
+
+  it('bajo alcance fiscal ORGANIZATION todo el bloque viene de la organización', async () => {
+    const service = build({
+      storeFiscalData: { tax_responsibilities: ['O-49'] },
+      orgFiscalData: { tax_responsibilities: ['O-48'], tax_regime: 'COMUN' },
+      fiscalScope: 'ORGANIZATION',
+    });
+
+    const out: any = await service.getFiscalData();
+
+    expect(out.tax_responsibilities).toEqual(['O-48']);
+    expect(out.tax_responsibilities_source).toBe('organization');
+    expect(out.tax_regime_source).toBe('organization');
   });
 });

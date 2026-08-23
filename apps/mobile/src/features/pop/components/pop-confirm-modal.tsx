@@ -3,13 +3,21 @@ import {
   View,
   Text,
   FlatList,
+  ScrollView,
   TouchableOpacity,
   Modal,
   Image,
   StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import type { PopCartItem, PopCartSummary } from '../types';
+import type {
+  PopCartItem,
+  PopCartSummary,
+  PopFiscalExplanation,
+  PopShippingAllocation,
+} from '../types';
+import FiscalExplanationPanel from './fiscal-explanation-panel';
+import { SHIPPING_ALLOCATION_LEGEND } from '../constants';
 
 interface PopConfirmModalProps {
   visible: boolean;
@@ -18,6 +26,28 @@ interface PopConfirmModalProps {
   supplierName?: string;
   locationName?: string;
   orderMode: 'draft' | 'create' | 'create-receive';
+  /**
+   * C.5 — cómo se imputa el flete que ya está sumado en `summary.total`.
+   * `undefined` cuando no hay flete.
+   */
+  shippingCostAllocation?: PopShippingAllocation;
+  /**
+   * B.5 — la explicación fiscal tal como la emite la vista previa de costeo.
+   * La confirmación es el punto de no retorno: es donde el operador tiene que
+   * ver qué se va a hacer con el IVA de esta compra. La pantalla NO deriva el
+   * predicado; pinta lo que llega, y si no llega no pinta nada.
+   */
+  fiscalExplanation?: PopFiscalExplanation | null;
+  /** La vista previa está en vuelo. */
+  fiscalLoading?: boolean;
+  /**
+   * La vista previa falló. Se PINTA en vez de quedar en un catch mudo: un panel
+   * fiscal ausente por un fallo de red es indistinguible de «esta compra no
+   * tiene nada fiscal que explicar», y no es lo mismo.
+   */
+  fiscalError?: string | null;
+  /** Recibe la ruta que el backend puso en `cta.route`. */
+  onFiscalCtaPress?: (route: string) => void;
   onConfirm: () => void;
   onCancel: () => void;
   isLoading?: boolean;
@@ -36,6 +66,11 @@ export default function PopConfirmModal({
   supplierName,
   locationName,
   orderMode,
+  shippingCostAllocation,
+  fiscalExplanation,
+  fiscalLoading,
+  fiscalError,
+  onFiscalCtaPress,
   onConfirm,
   onCancel,
   isLoading,
@@ -109,11 +144,49 @@ export default function PopConfirmModal({
               <Text style={styles.summaryLabel}>Impuestos</Text>
               <Text style={styles.summaryValue}>{formatCurrency(summary.tax_amount)}</Text>
             </View>
+            {/*
+              C.5 — el flete se dice y se explica acá porque ya está sumado en
+              el total: si sólo apareciera dentro del total, el operador vería
+              una cifra mayor que la suma de sus líneas sin saber por qué.
+            */}
+            {summary.shipping_cost > 0 && (
+              <>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Flete</Text>
+                  <Text style={styles.summaryValue}>
+                    {formatCurrency(summary.shipping_cost)}
+                  </Text>
+                </View>
+                <Text style={styles.shippingLegend}>
+                  {SHIPPING_ALLOCATION_LEGEND[shippingCostAllocation ?? 'prorate']}
+                </Text>
+              </>
+            )}
             <View style={[styles.summaryRow, styles.totalRow]}>
               <Text style={styles.totalLabel}>Total</Text>
               <Text style={styles.totalValue}>{formatCurrency(summary.total)}</Text>
             </View>
           </View>
+
+          {/* B.5 — tratamiento del IVA en el punto de no retorno. */}
+          {(fiscalLoading || !!fiscalError || !!fiscalExplanation) && (
+            <ScrollView style={styles.fiscalScroll} contentContainerStyle={styles.fiscalContent}>
+              {fiscalLoading && (
+                <Text style={styles.fiscalNotice}>
+                  Calculando el tratamiento del IVA de esta compra...
+                </Text>
+              )}
+              {!fiscalLoading && !!fiscalError && (
+                <Text style={styles.fiscalNotice}>{fiscalError}</Text>
+              )}
+              {!fiscalLoading && (
+                <FiscalExplanationPanel
+                  explanation={fiscalExplanation}
+                  onCtaPress={onFiscalCtaPress}
+                />
+              )}
+            </ScrollView>
+          )}
 
           <View style={styles.footer}>
             <TouchableOpacity style={styles.cancelBtn} onPress={onCancel}>
@@ -152,6 +225,10 @@ const styles = StyleSheet.create({
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   summaryLabel: { fontSize: 13, color: '#6b7280' },
   summaryValue: { fontSize: 13, fontWeight: '600', color: '#374151' },
+  shippingLegend: { fontSize: 11, lineHeight: 16, color: '#6b7280', marginBottom: 6 },
+  fiscalScroll: { maxHeight: 220, borderTopWidth: 1, borderTopColor: '#e5e7eb' },
+  fiscalContent: { paddingHorizontal: 20, paddingVertical: 14, gap: 10 },
+  fiscalNotice: { fontSize: 12, lineHeight: 18, color: '#6b7280' },
   totalRow: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e5e7eb' },
   totalLabel: { fontSize: 15, fontWeight: '700', color: '#111827' },
   totalValue: { fontSize: 22, fontWeight: '800', color: '#059669' },

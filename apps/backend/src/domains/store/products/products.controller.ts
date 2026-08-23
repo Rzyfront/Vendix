@@ -364,23 +364,58 @@ export class ProductsController {
     }
   }
 
+  /**
+   * CP-PURCHASE-TRANSPARENCY D.4 / D.9 — vista previa del castigo de
+   * inventario que precede al archivado. ESTRICTAMENTE DE SOLO LECTURA.
+   *
+   * Permiso `admin_delete` y no `read`: es el ensayo de una operación
+   * irreversible, y enumera existencias y su valoración. Quien no puede
+   * archivar no necesita saber cuánto se destruiría.
+   */
   @ApiOperation({
     summary:
-      'Archivar un producto definitivamente',
+      'Ver qué existencias se darán de baja si se archiva el producto (no escribe nada)',
+  })
+  @Get(':id/archive-preview')
+  @Permissions('store:products:admin_delete')
+  async previewArchive(@Param('id', ParseIntPipe) id: number) {
+    const plan = await this.productsService.previewArchiveWriteOff(id);
+    return this.responseService.success(
+      plan,
+      'Vista previa del archivado calculada',
+    );
+  }
+
+  /**
+   * SIN try/catch, y es el arreglo (FB-09).
+   *
+   * `responseService.error()` RETORNA el sobre en vez de lanzarlo, así que el
+   * `catch` que había aquí convertía CUALQUIER rechazo en un HTTP 200 con
+   * `success:false` enterrado en el cuerpo. Con D.4 eso pasa de feo a
+   * peligroso: un archivado rechazado por reservas activas, por existencias
+   * fuera de alcance o por falta de confirmación se leería como éxito, y el
+   * operador creería que borró el producto. El filtro global de excepciones ya
+   * traduce `VendixHttpException` a su código y su estado.
+   *
+   * La confirmación viaja por query string porque `DELETE` no lleva cuerpo en
+   * este contrato. El interceptor global de auditoría descarta el query string
+   * (`audit.interceptor.ts:31`), pero eso da igual: `remove()` escribe su
+   * propia fila con el token de confirmación dentro (D.8).
+   */
+  @ApiOperation({
+    summary:
+      'Archivar un producto definitivamente (da de baja sus existencias, previa confirmación)',
   })
   @Delete(':id')
   @Permissions('store:products:admin_delete')
-  async remove(@Param('id', ParseIntPipe) id: number) {
-    try {
-      await this.productsService.remove(id);
-      return this.responseService.deleted('Producto eliminado exitosamente');
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al eliminar el producto',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+  async remove(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('confirm_stock_write_off') confirmStockWriteOff?: string,
+  ) {
+    await this.productsService.remove(id, {
+      confirm_stock_write_off: confirmStockWriteOff === 'true',
+    });
+    return this.responseService.deleted('Producto eliminado exitosamente');
   }
   // Product Variants endpoints
   @ApiOperation({

@@ -163,6 +163,7 @@ export const MODULE_ROUTES: Record<string, string> = {
   settings: '/admin/settings/general',
   settings_general: '/admin/settings/general',
   settings_payments: '/admin/settings/payments',
+  settings_print_formats: '/admin/settings/print-formats',
   settings_appearance: '/admin/settings/appearance',
   settings_security: '/admin/settings/security',
   settings_domains: '/admin/settings/domains',

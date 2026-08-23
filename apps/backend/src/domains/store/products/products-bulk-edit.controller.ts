@@ -96,13 +96,13 @@ export class ProductsBulkEditController {
         'Previsualización de edición masiva generada exitosamente',
       );
     } catch (error) {
-      // Conserva status + error_code + details de las excepciones tipadas.
-      if (error instanceof VendixHttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al previsualizar la edición masiva',
-        error.response?.message || error.message,
-        error.status || 400,
+      // Ver la nota de CP-PURCHASE-TRANSPARENCY H.2 en `archive()`: se registra
+      // y se RE-LANZA; devolver el sobre de error respondería HTTP 200.
+      this.logger.error(
+        `Bulk edit preview failed (ids=${dto?.ids?.length ?? 0}): ${error?.message || error}`,
+        error?.stack,
       );
+      throw error;
     }
   }
 
@@ -134,16 +134,12 @@ export class ProductsBulkEditController {
         'Edición masiva completada exitosamente',
       );
     } catch (error) {
+      // Ver la nota de CP-PURCHASE-TRANSPARENCY H.2 en `archive()`.
       this.logger.error(
         `Bulk edit failed (ids=${dto?.ids?.length ?? 0}): ${error?.message || error}`,
         error?.stack,
       );
-      if (error instanceof VendixHttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al aplicar la edición masiva',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
+      throw error;
     }
   }
 
@@ -193,13 +189,12 @@ export class ProductsBulkEditController {
         'Previsualización de archivado masivo generada exitosamente',
       );
     } catch (error) {
-      // Conserva status + error_code + details de las excepciones tipadas.
-      if (error instanceof VendixHttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al previsualizar el archivado masivo',
-        error.response?.message || error.message,
-        error.status || 400,
+      // Ver la nota de CP-PURCHASE-TRANSPARENCY H.2 en `archive()`.
+      this.logger.error(
+        `Bulk archive preview failed (ids=${dto?.ids?.length ?? 0}): ${error?.message || error}`,
+        error?.stack,
       );
+      throw error;
     }
   }
 
@@ -233,16 +228,30 @@ export class ProductsBulkEditController {
         'Archivado masivo completado exitosamente',
       );
     } catch (error) {
+      // CP-PURCHASE-TRANSPARENCY H.2 — un rechazo que salía como éxito.
+      //
+      // Aquí había `return this.responseService.error(...)` para todo lo que no
+      // fuera `VendixHttpException`. Ese método RETORNA el sobre en vez de
+      // lanzarlo, y `AllExceptionsFilter` solo corre cuando la excepción SALE
+      // del handler: la respuesta viajaba como **HTTP 200 con
+      // `success:false`** y el `statusCode` real enterrado en el cuerpo. El
+      // frontend mira la línea de estado, así que leía éxito.
+      //
+      // Los rechazos de negocio no se veían afectados (son
+      // `VendixHttpException` y esa rama sí re-lanzaba), pero un fallo genérico
+      // —un `P2028`, un timeout de transacción— sí: el operador creería que
+      // archivó el lote cuando la transacción se cayó, y el archivado es
+      // IRREVERSIBLE (ver la nota de arriba). Es el mismo patrón ya corregido
+      // en `DELETE /products/:id` (`products.controller.ts`, FB-09).
+      //
+      // El `catch` se conserva únicamente por el log —los ids del lote son el
+      // dato de diagnóstico que la excepción no lleva— y re-lanza crudo para
+      // que el filtro global traduzca el error a su estado y su `error_code`.
       this.logger.error(
         `Bulk archive failed (ids=${dto?.ids?.length ?? 0}): ${error?.message || error}`,
         error?.stack,
       );
-      if (error instanceof VendixHttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al aplicar el archivado masivo',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
+      throw error;
     }
   }
 }

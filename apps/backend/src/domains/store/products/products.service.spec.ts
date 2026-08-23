@@ -19,6 +19,8 @@ import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { SettingsService } from '../settings/settings.service';
 import { AutoEntryService } from '../accounting/auto-entries/auto-entry.service';
+import { InventoryAdjustmentsService } from '../inventory/adjustments/inventory-adjustments.service';
+import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import {
   CreateProductDto,
   UpdateProductDto,
@@ -86,6 +88,12 @@ describe('ProductsService', () => {
       createMany: jest.fn(),
       findMany: jest.fn(),
       updateMany: jest.fn(),
+    },
+    // D.8 — la fila de auditoría del archivado se escribe DENTRO de la misma
+    // transacción que el castigo y el cambio de estado: si falla, no hay
+    // archivado. Por eso el modelo tiene que existir en el doble.
+    audit_logs: {
+      create: jest.fn(),
     },
     inventory_locations: {
       findMany: jest.fn(),
@@ -230,6 +238,23 @@ describe('ProductsService', () => {
     validateProductAccountCodes: jest.fn().mockResolvedValue(undefined),
   };
 
+  // D.4 — el castigo de inventario del archivado. `createAdjustmentInTransaction`
+  // es la primitiva que `remove()` invoca DENTRO de su propia transacción; la
+  // emisión del evento contable queda fuera, ya commiteada.
+  const mockInventoryAdjustments = {
+    createAdjustmentInTransaction: jest.fn(),
+    emitInventoryAdjusted: jest.fn(),
+  };
+
+  // D.4 — SOLO LECTURA: el detector de existencias fuera del alcance de la
+  // tienda (bodega central de la organización u otra tienda). Por defecto no
+  // ve nada, que es el caso sano.
+  const mockGlobalPrisma = {
+    stock_levels: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -302,6 +327,14 @@ describe('ProductsService', () => {
           provide: AutoEntryService,
           useValue: mockAutoEntryService,
         },
+        {
+          provide: InventoryAdjustmentsService,
+          useValue: mockInventoryAdjustments,
+        },
+        {
+          provide: GlobalPrismaService,
+          useValue: mockGlobalPrisma,
+        },
       ],
     }).compile();
 
@@ -317,6 +350,11 @@ describe('ProductsService', () => {
     // implementation, so a row left behind by one test makes the next `create`
     // die on PROD_DUP_001 in a completely unrelated describe.
     mockPrismaService.products.findFirst.mockResolvedValue(null);
+    // D.4 — `buildArchiveWriteOffPlans` lee `stock_levels` para saber QUÉ se va
+    // a destruir. Sin default, el doble devuelve `undefined` y el plan revienta
+    // antes de llegar a la regla que el test quiere probar.
+    mockPrismaService.stock_levels.findMany.mockResolvedValue([]);
+    mockGlobalPrisma.stock_levels.findMany.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -827,6 +865,248 @@ describe('ProductsService', () => {
     });
   });
 
+  // ===========================================================================
+  // D.4 / D.7 / D.8 — archivar con existencias
+  // ===========================================================================
+  // El defecto de origen: archivar dejaba las existencias colgando invisibles y
+  // el promedio ponderado las seguía contando, así que recomprar un producto
+  // «borrado» lo costeaba contra inventario fantasma. La decisión es castigar
+  // el inventario al archivar; lo que estos tests protegen es que el castigo
+  // sea VISIBLE y CONSENTIDO antes de ocurrir, y trazable después.
+  describe('remove — castigo de inventario del archivado (D.4/D.7/D.8)', () => {
+    const productWithStock = {
+      id: 7,
+      store_id: 1,
+      name: 'Cerveza 330ml',
+      sku: 'CER-330',
+      state: 'active',
+      cost_price: 1200,
+      stock_quantity: 30,
+      track_inventory: true,
+    };
+
+    const stockRow = (overrides: any = {}) => ({
+      product_id: 7,
+      location_id: 4,
+      product_variant_id: null,
+      quantity_on_hand: 30,
+      cost_per_unit: 1000,
+      inventory_locations: { id: 4, name: 'Bodega tienda', store_id: 1 },
+      product_variants: null,
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      mockPrismaService.products.findFirst.mockResolvedValue(productWithStock);
+      mockPrismaService.stock_reservations.findFirst.mockResolvedValue(null);
+      mockPrismaService.products.update.mockResolvedValue({
+        ...productWithStock,
+        state: 'archived',
+      });
+      mockPrismaService.audit_logs.create.mockResolvedValue({ id: 1 });
+      mockPrismaService.$transaction.mockImplementation((callback: any) =>
+        callback(mockPrismaService),
+      );
+      mockInventoryAdjustments.createAdjustmentInTransaction.mockResolvedValue({
+        adjustment: { id: 55 },
+        quantity_change: -30,
+        cost_amount: -30000,
+      });
+    });
+
+    it('sin existencias archiva igual, pero AHORA deja fila de auditoría', async () => {
+      mockPrismaService.stock_levels.findMany.mockResolvedValue([]);
+
+      await service.remove(7);
+
+      expect(
+        mockInventoryAdjustments.createAdjustmentInTransaction,
+      ).not.toHaveBeenCalled();
+      expect(mockPrismaService.products.update).toHaveBeenCalledWith({
+        where: { id: 7 },
+        data: { state: 'archived', updated_at: expect.any(Date) },
+      });
+      expect(mockPrismaService.audit_logs.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('con existencias y SIN confirmación rechaza 409 y devuelve el plan completo', async () => {
+      mockPrismaService.stock_levels.findMany.mockResolvedValue([stockRow()]);
+
+      let thrown: any;
+      await service.remove(7).catch((error) => {
+        thrown = error;
+      });
+
+      expect(thrown).toBeInstanceOf(VendixHttpException);
+      expect(thrown.getStatus()).toBe(409);
+      const details = (thrown.getResponse() as any)?.details;
+      expect(details.archive_write_off).toEqual(
+        expect.objectContaining({
+          product_id: 7,
+          requires_confirmation: true,
+          total_units: 30,
+          total_value: 30000,
+          zero_cost_units: 0,
+        }),
+      );
+      expect(details.archive_write_off.lines).toEqual([
+        expect.objectContaining({
+          location_id: 4,
+          location_name: 'Bodega tienda',
+          quantity_on_hand: 30,
+          unit_cost: 1000,
+          value: 30000,
+          has_known_cost: true,
+        }),
+      ]);
+      // Nada se tocó: el rechazo es ANTES de la transacción.
+      expect(mockPrismaService.products.update).not.toHaveBeenCalled();
+      expect(
+        mockInventoryAdjustments.createAdjustmentInTransaction,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('con confirmación castiga a cero, archiva DESPUÉS y audita, todo en una transacción', async () => {
+      // `cost_price: 0` en el producto es DELIBERADO: la cadena canónica cae
+      // `stock_levels.cost_per_unit -> variante -> producto`, así que sin este
+      // cero la segunda línea heredaría el costo del producto y el caso del
+      // 63,9 % de unidades sin costo no se probaría nunca.
+      mockPrismaService.products.findFirst.mockResolvedValue({
+        ...productWithStock,
+        cost_price: 0,
+      });
+      mockPrismaService.stock_levels.findMany.mockResolvedValue([
+        stockRow(),
+        stockRow({
+          location_id: 9,
+          product_variant_id: 21,
+          quantity_on_hand: 5,
+          cost_per_unit: 0,
+          inventory_locations: { id: 9, name: 'Mostrador', store_id: 1 },
+          product_variants: { sku: 'CER-330-L', cost_price: 0 },
+        }),
+      ]);
+
+      await service.remove(7, { confirm_stock_write_off: true });
+
+      expect(mockPrismaService.$transaction).toHaveBeenCalledTimes(1);
+      expect(
+        mockInventoryAdjustments.createAdjustmentInTransaction,
+      ).toHaveBeenCalledTimes(2);
+      expect(
+        mockInventoryAdjustments.createAdjustmentInTransaction,
+      ).toHaveBeenNthCalledWith(
+        1,
+        mockPrismaService,
+        expect.objectContaining({
+          product_id: 7,
+          location_id: 4,
+          type: 'loss',
+          quantity_after: 0,
+          reason_code: 'product_archived',
+        }),
+        expect.anything(),
+      );
+      // La variante viaja: sin ella el ajuste castigaría la fila equivocada.
+      expect(
+        mockInventoryAdjustments.createAdjustmentInTransaction,
+      ).toHaveBeenNthCalledWith(
+        2,
+        mockPrismaService,
+        expect.objectContaining({
+          product_variant_id: 21,
+          location_id: 9,
+          quantity_after: 0,
+        }),
+        expect.anything(),
+      );
+
+      // DB-16: el estado se escribe DESPUÉS de las bajas.
+      const updateOrder =
+        mockPrismaService.products.update.mock.invocationCallOrder[0];
+      const lastAdjustmentOrder =
+        mockInventoryAdjustments.createAdjustmentInTransaction.mock
+          .invocationCallOrder[1];
+      expect(updateOrder).toBeGreaterThan(lastAdjustmentOrder);
+
+      const auditRow =
+        mockPrismaService.audit_logs.create.mock.calls[0][0].data;
+      expect(auditRow.action).toBe('PRODUCT_ARCHIVE');
+      expect(auditRow.resource).toBe('products');
+      expect(auditRow.resource_id).toBe(7);
+      expect(auditRow.store_id).toBe(1);
+      expect(auditRow.metadata.confirmation).toEqual(
+        expect.objectContaining({
+          confirmed: true,
+          required: true,
+          approved_units: 35,
+        }),
+      );
+      // El 63,9 % de las unidades fantasma no tiene costo: la fila lo dice en
+      // vez de dejar que el silencio del asiento contable lo esconda.
+      expect(auditRow.metadata.write_off.zero_cost_units).toBe(5);
+
+      // El evento contable se emite DESPUÉS del commit, uno por ajuste.
+      expect(mockInventoryAdjustments.emitInventoryAdjusted).toHaveBeenCalledTimes(
+        2,
+      );
+    });
+
+    it('las existencias fuera del alcance de la tienda BLOQUEAN aunque haya confirmación', async () => {
+      mockPrismaService.stock_levels.findMany.mockResolvedValue([stockRow()]);
+      mockGlobalPrisma.stock_levels.findMany.mockResolvedValue([
+        {
+          product_id: 7,
+          location_id: 99,
+          quantity_on_hand: 1386,
+          inventory_locations: {
+            id: 99,
+            name: 'Bodega central',
+            store_id: null,
+          },
+        },
+      ]);
+
+      await expect(
+        service.remove(7, { confirm_stock_write_off: true }),
+      ).rejects.toThrow(VendixHttpException);
+
+      expect(mockPrismaService.products.update).not.toHaveBeenCalled();
+    });
+
+    it('D.7: las reservas activas rechazan con PROD_HAS_RESERVATIONS_001', async () => {
+      mockPrismaService.stock_reservations.findFirst.mockResolvedValue({
+        id: 3,
+      });
+
+      let thrown: any;
+      await service.remove(7).catch((error) => {
+        thrown = error;
+      });
+
+      expect(thrown).toBeInstanceOf(VendixHttpException);
+      expect(thrown.errorCode).toBe(
+        ErrorCodes.PROD_HAS_RESERVATIONS_001.code,
+      );
+      expect(mockPrismaService.products.update).not.toHaveBeenCalled();
+    });
+
+    it('D.8: si la auditoría falla, el archivado entero revierte y no se emite evento', async () => {
+      mockPrismaService.stock_levels.findMany.mockResolvedValue([stockRow()]);
+      mockPrismaService.audit_logs.create.mockRejectedValue(
+        new Error('audit_logs down'),
+      );
+
+      await expect(
+        service.remove(7, { confirm_stock_write_off: true }),
+      ).rejects.toThrow('audit_logs down');
+
+      expect(
+        mockInventoryAdjustments.emitInventoryAdjusted,
+      ).not.toHaveBeenCalled();
+    });
+  });
+
   // Variant CRUD moved out of ProductsService: these three methods are pure
   // delegations to ProductVariantService, which owns SKU uniqueness, the
   // attribute matrix and the stock_levels rows. The contract to protect here is
@@ -976,17 +1256,24 @@ describe('ProductsService', () => {
 
   describe('getProductStats', () => {
     it('should return product statistics for store', async () => {
+      // CP-PURCHASE-TRANSPARENCY D.3 — el archivado (10 × 20 = 200) SALE de
+      // las cuatro cifras agregadas y viaja etiquetado aparte. Antes de D.3
+      // este bloque afirmaba `total_value: 500`, `low_stock_products: 3` y
+      // `products_without_images: 3`, es decir el arnés daba fe de que el
+      // panel sumara existencia fantasma.
       const expectedStats = {
         total_products: 3,
         active_products: 2,
         inactive_products: 1,
         archived_products: 1,
-        low_stock_products: 3,
+        low_stock_products: 2,
         out_of_stock_products: 1,
-        products_without_images: 3,
-        total_value: 500,
+        products_without_images: 2,
+        total_value: 300,
         categories_count: 2,
         brands_count: 1,
+        archived_stock_value: 200,
+        archived_stock_units: 10,
       };
 
       mockPrismaService.products.findMany.mockResolvedValue([
@@ -1051,6 +1338,178 @@ describe('ProductsService', () => {
       const result = await service.getProductStats(1);
 
       expect(result.low_stock_products).toBe(1);
+    });
+  });
+
+  /**
+   * CP-PURCHASE-TRANSPARENCY D.3 — las cifras AGREGADAS excluyen archivados.
+   *
+   * EL DEFECTO QUE CIERRA
+   * ---------------------
+   * Archivar un producto nunca borró su `stock_quantity`. D.2 sacó esas
+   * unidades del motor de COSTEO, pero el panel las seguía LEYENDO como
+   * existencia real. Medido en la base local (tienda 10): `total_value`
+   * 16.362.306.320 con 5.040.064.000 aportados por 25 productos archivados.
+   *
+   * LA LÍNEA QUE NO SE CRUZA
+   * ------------------------
+   * El criterio es de AGREGADO, no de visibilidad. `archived_products` sigue
+   * contando, `archived_stock_value` publica lo que se restó, y las lecturas
+   * de DETALLE (listado con `state=archived`, vista previa del castigo) siguen
+   * devolviendo los datos del archivado. Un archivado existió: esconderlo
+   * rompería la trazabilidad tanto como sumarlo rompía el total.
+   */
+  describe('getProductStats — el archivado sale del agregado (D.3)', () => {
+    const producto = (over: Partial<any> = {}) => ({
+      state: ProductState.ACTIVE,
+      stock_quantity: 0,
+      base_price: 0,
+      product_images: [{ id: 1 }],
+      ...over,
+    });
+
+    beforeEach(() => {
+      mockPrismaService.categories.count.mockResolvedValue(0);
+      mockPrismaService.brands.count.mockResolvedValue(0);
+      mockPrismaService.store_settings.findFirst.mockResolvedValue({
+        settings: { inventory: { low_stock_threshold: 5 } },
+      });
+    });
+
+    it('EL DEFECTO: un archivado con existencia ya no infla total_value', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        producto({ stock_quantity: 3, base_price: 1000 }),
+        producto({
+          state: ProductState.ARCHIVED,
+          stock_quantity: 20000,
+          base_price: 3,
+        }),
+      ]);
+
+      const result = await service.getProductStats(1);
+
+      // 3 × 1.000. Las 20.000 unidades fantasma a 3,00 ya no entran.
+      expect(result.total_value).toBe(3000);
+      // Y no desaparecen sin rastro: viajan etiquetadas.
+      expect(result.archived_stock_value).toBe(60000);
+      expect(result.archived_stock_units).toBe(20000);
+    });
+
+    it('un producto activo con existencia da exactamente la misma cifra que antes', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        producto({ stock_quantity: 14, base_price: 1620000 }),
+      ]);
+
+      const result = await service.getProductStats(1);
+
+      expect(result.total_value).toBe(22680000);
+      expect(result.archived_stock_value).toBe(0);
+      expect(result.archived_stock_units).toBe(0);
+    });
+
+    it('el archivado tampoco cuenta como «sin stock», «bajo mínimo» ni «sin imagen»', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        producto({
+          state: ProductState.ARCHIVED,
+          stock_quantity: 0,
+          product_images: [],
+        }),
+        producto({
+          state: ProductState.ARCHIVED,
+          stock_quantity: 2,
+          base_price: 10,
+          product_images: [],
+        }),
+      ]);
+
+      const result = await service.getProductStats(1);
+
+      expect(result.out_of_stock_products).toBe(0);
+      expect(result.low_stock_products).toBe(0);
+      expect(result.products_without_images).toBe(0);
+      // Pero siguen existiendo, y el panel puede decirlo.
+      expect(result.archived_products).toBe(2);
+    });
+
+    it('una tienda cuyo valor es TODO archivado cae a cero limpio, sin NaN', async () => {
+      // Caso límite real: en producción hay organizaciones donde lo archivado
+      // es el 100 % del valor mostrado. Pasan de una cifra a cero exacto — no
+      // a NaN, no a null, no a una división por cero.
+      mockPrismaService.products.findMany.mockResolvedValue([
+        producto({
+          state: ProductState.ARCHIVED,
+          stock_quantity: 500,
+          base_price: 8453,
+        }),
+      ]);
+
+      const result = await service.getProductStats(1);
+
+      expect(result.total_value).toBe(0);
+      expect(Number.isNaN(result.total_value)).toBe(false);
+      expect(result.total_products).toBe(0);
+      expect(result.archived_stock_value).toBe(4226500);
+      expect(result.archived_stock_units).toBe(500);
+    });
+
+    it('un stock_quantity nulo no envenena la huella archivada con NaN', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        producto({
+          state: ProductState.ARCHIVED,
+          stock_quantity: null,
+          base_price: 900,
+        }),
+      ]);
+
+      const result = await service.getProductStats(1);
+
+      expect(result.archived_stock_units).toBe(0);
+      expect(result.archived_stock_value).toBe(0);
+      expect(Number.isNaN(result.archived_stock_value)).toBe(false);
+    });
+
+    it('EL DETALLE NO CAMBIA: pedir el listado de archivados sigue devolviéndolos con su stock', async () => {
+      // Esta es la prueba que impide «arreglar de más». D.3 sólo toca
+      // agregados; la consulta de detalle por estado sigue intacta.
+      const archivado = {
+        id: 378,
+        name: 'Producto archivado',
+        state: ProductState.ARCHIVED,
+        base_price: 3,
+        track_inventory: true,
+        product_images: [],
+        product_variants: [],
+        product_categories: [],
+        stock_levels: [
+          {
+            product_variant_id: null,
+            quantity_available: 20000,
+            quantity_reserved: 0,
+            inventory_locations: { id: 1, name: 'Bodega', type: 'warehouse' },
+          },
+        ],
+      };
+      mockPrismaService.products.findMany.mockResolvedValue([archivado]);
+      mockPrismaService.products.count.mockResolvedValue(1);
+
+      const result: any = await service.findAll({
+        page: 1,
+        limit: 10,
+        state: ProductState.ARCHIVED,
+        include_inactive: true,
+      } as any);
+
+      expect(result.data).toHaveLength(1);
+      // Sigue llegando con identidad Y con su existencia: 20.000 unidades que
+      // el agregado ya no suma pero que el detalle sigue mostrando.
+      expect(result.data[0]).toEqual(
+        expect.objectContaining({
+          id: 378,
+          state: ProductState.ARCHIVED,
+          stock_quantity: 20000,
+          total_stock_available: 20000,
+        }),
+      );
     });
   });
 

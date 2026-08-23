@@ -68,6 +68,7 @@ import { MembershipsModule } from './memberships/memberships.module';
 import { MembershipAccessModule } from './membership-access/membership-access.module';
 import { UomModule } from './uom/uom.module';
 import { WeeklyReportModule } from './weekly-report/weekly-report.module';
+import { PrintFormatsModule } from './print-formats/print-formats.module';
 
 @Module({
   imports: [
@@ -138,8 +139,9 @@ import { WeeklyReportModule } from './weekly-report/weekly-report.module';
     MembershipAccessModule,
     UomModule,
     WeeklyReportModule,
+    PrintFormatsModule,
   ],
   providers: [StorePrismaService],
-  exports: [StorePrismaService],
+  exports: [StorePrismaService, PrintFormatsModule],
 })
 export class StoreDomainModule {}

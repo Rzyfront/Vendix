@@ -73,11 +73,15 @@
             [expectedDate]="expectedDate()"
             [shippingMethod]="shippingMethod()"
             [minExpectedDate]="minExpectedDate()"
+            [shippingCost]="shippingCost()"
+            [shippingCostAllocation]="shippingCostAllocation()"
             (supplierChange)="configSupplierChange.emit($event)"
             (locationChange)="configLocationChange.emit($event)"
             (orderDateChange)="configOrderDateChange.emit($event)"
             (expectedDateChange)="configExpectedDateChange.emit($event)"
-            (shippingMethodChange)="configShippingMethodChange.emit($event)"
+            (shippingMethodChange)="onConfigShippingMethodChange($event)"
+            (shippingCostChange)="configShippingCostChange.emit($event)"
+            (shippingCostAllocationChange)="configShippingCostAllocationChange.emit($event)"
             (openSupplierModal)="configOpenSupplierModal.emit()"
             (openWarehouseModal)="configOpenWarehouseModal.emit()"
           ></app-pop-config-step>
@@ -103,7 +107,10 @@
           <app-pop-receive-step
             [costPreview]="costPreview()"
             [loadingCostPreview]="loadingCostPreview()"
+            [costPreviewError]="costPreviewError()"
             (navigateToSettings)="onNavigateToSettings()"
+            (retryCostPreview)="retryCostPreview.emit()"
+            (navigateToFiscalWizard)="navigateToFiscalWizard.emit($event)"
           ></app-pop-receive-step>
         </div>
       }
@@ -121,6 +128,8 @@
             [plan]="paymentStep()?.plan() ?? null"
             [ackReceive]="receiveStep()?.ackReceive() ?? true"
             [retryOrderRef]="retryOrderRef()"
+            [fiscalExplanation]="costPreview()?.fiscal_explanation ?? null"
+            (navigateToFiscalWizard)="navigateToFiscalWizard.emit($event)"
           ></app-pop-confirm-step>
         </div>
       }

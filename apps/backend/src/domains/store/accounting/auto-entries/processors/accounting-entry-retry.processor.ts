@@ -44,7 +44,7 @@ export class AccountingEntryRetryProcessor extends WorkerHost {
     );
 
     try {
-      await RequestContextService.run(
+      const entry = await RequestContextService.run(
         {
           is_super_admin: false,
           is_owner: false,
@@ -55,6 +55,19 @@ export class AccountingEntryRetryProcessor extends WorkerHost {
         },
         () => this.auto_entry_service.postAutoEntry(payload),
       );
+      // CP-PURCHASE-TRANSPARENCY C.9 — `postAutoEntry` puede devolver `null`
+      // sin lanzar (área contable inactiva, menos de dos líneas válidas). Antes
+      // ese retorno nulo marcaba el fallo como RESUELTO: la bandeja se vaciaba
+      // sola sin que ningún asiento existiera. La causa del salto ya quedó
+      // escrita en la misma fila por `recordSkip`, así que aquí basta con no
+      // mentir: sin asiento, el fallo sigue abierto.
+      if (!entry) {
+        this.logger.warn(
+          `Retry of auto-entry failure #${failure_id} produced NO entry ` +
+            `(${payload.source_type}#${payload.source_id ?? '?'}); leaving it unresolved.`,
+        );
+        return;
+      }
       await this.failure_service.markResolved(failure_id);
       this.logger.log(
         `Auto-entry failure #${failure_id} resolved on retry ` +

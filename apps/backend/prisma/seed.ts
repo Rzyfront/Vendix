@@ -1,5 +1,6 @@
 import { getPrismaClient, disconnectPrisma } from './seeds/shared/client';
 import { seedDefaultTemplates } from './seeds/default-templates.seed';
+import { seedPrintTemplates } from './seeds/print-templates.seed';
 import { seedPermissionsAndRoles } from './seeds/permissions-roles.seed';
 import { seedOrganizationsAndStores } from './seeds/organizations-stores.seed';
 import { seedVendixPlatformOrg } from './seeds/vendix-platform-org.seed';
@@ -52,6 +53,11 @@ const seedModules = [
     name: 'Default Templates',
     fn: seedDefaultTemplates,
     description: 'System configuration templates',
+  },
+  {
+    name: 'Print Format Templates',
+    fn: seedPrintTemplates,
+    description: 'System master print format templates (Hub de Formatos)',
   },
   {
     name: 'Permissions & Roles',

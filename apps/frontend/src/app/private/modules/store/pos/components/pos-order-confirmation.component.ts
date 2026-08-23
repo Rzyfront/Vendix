@@ -141,7 +141,7 @@ import { PosFiscalStatus } from '../services/pos-fiscal.service';
                 <span>{{ formatCurrency(orderSubtotal) }}</span>
               </div>
             }
-            @for (promo of appliedPromotions; track promo.id) {
+            @for (promo of derivedAppliedPromotions(); track promo.promotion_id || promo.id || promo.name) {
               <div class="flex justify-between text-xs text-success">
                 <span class="truncate">
                   <app-icon name="tag" [size]="12" class="inline mr-1"></app-icon>
@@ -153,7 +153,7 @@ import { PosFiscalStatus } from '../services/pos-fiscal.service';
                 <span class="font-medium whitespace-nowrap">-{{ formatCurrency(promo.discount_amount) }}</span>
               </div>
             }
-            @for (cp of appliedCoupons; track cp.id) {
+            @for (cp of derivedAppliedCoupons(); track cp.coupon_id || cp.id || cp.code) {
               <div class="flex justify-between text-xs text-success">
                 <span class="truncate">
                   <app-icon name="ticket" [size]="12" class="inline mr-1"></app-icon>
@@ -424,12 +424,29 @@ export class PosOrderConfirmationComponent {
   readonly derivedIsPaid = computed(() => {
     const d = this.orderData();
     if (!d) return false;
-    const state = (d.state || '').toString();
-    const hasPayments =
+    // Explicit draft flag from POS draft-saved flow (onCreateOrderConfirmed)
+    if (d.isCreateOrder === true) return false;
+
+    const state = (d.state || d.status || '').toString().toLowerCase();
+    const isTerminalPaidState =
+      state === 'finished' || state === 'processing' || state === 'completed';
+    const hasPaymentStatus =
+      d.payment_status === 'succeeded' || d.payment_status === 'paid';
+    const hasPaymentObject =
+      !!d.payment && typeof d.payment === 'object';
+    const hasPaymentsArray =
       Array.isArray(d.payments) && d.payments.length > 0;
+    const isCredit = !!d.isCreditSale;
+    const isShipping =
+      !!d.isShippingSale || this.derivedIsShippingSale();
+
     return (
-      state === 'finished' || state === 'processing' || hasPayments ||
-      this.derivedIsShippingSale()
+      isTerminalPaidState ||
+      hasPaymentStatus ||
+      hasPaymentObject ||
+      hasPaymentsArray ||
+      isCredit ||
+      isShipping
     );
   });
   readonly derivedModalTitle = computed(() => {
@@ -475,7 +492,7 @@ export class PosOrderConfirmationComponent {
   });
   readonly derivedOrderItems = computed(() => {
     const d = this.orderData();
-    const items = d?.items || [];
+    const items = d?.items || d?.order_items || [];
     return items.map((item: any) => {
       const unitPrice = Number(item.unit_price || item.unitPrice || 0);
       const quantity = Number(item.quantity || 0);
@@ -523,7 +540,7 @@ export class PosOrderConfirmationComponent {
   });
   readonly derivedOrderTotal = computed(() => {
     const d = this.orderData();
-    return Number(d?.grand_total ?? d?.total ?? 0);
+    return Number(d?.grand_total ?? d?.total_amount ?? d?.total ?? 0);
   });
   readonly derivedOrderSubtotal = computed(() => {
     const d = this.orderData();
@@ -553,6 +570,14 @@ export class PosOrderConfirmationComponent {
       : undefined;
   });
   readonly derivedElectronicInvoice = computed(() => this.electronicInvoice() ?? undefined);
+  readonly derivedAppliedPromotions = computed(() => {
+    const d = this.orderData();
+    return d?.applied_promotions || d?.appliedPromotions || this.appliedPromotions || [];
+  });
+  readonly derivedAppliedCoupons = computed(() => {
+    const d = this.orderData();
+    return d?.applied_coupons || d?.appliedCoupons || this.appliedCoupons || [];
+  });
 
   orderId: string | null = null;
   cashierName = '';
@@ -665,8 +690,9 @@ private authFacade = inject(AuthFacade);
       }
     });
     effect(() => {
+      const isOpen = this.isOpen();
       const data = this.orderData();
-      if (data) {
+      if (isOpen && data) {
         // CP-POS-MODAL-SCOPE-001 / Phase F.8 — defer the order-data load out
         // of the current change-detection cycle. `loadOrderData()` writes
         // `orderNumber`, `currentDate`, `customerName`, `electronicInvoice`,
@@ -719,10 +745,12 @@ private authFacade = inject(AuthFacade);
       this.creatingInvoice.set(false);
     }
     // Mirrors still useful for the print path (see `printReceipt`).
-    this.orderTotal = Number(data?.grand_total ?? data?.total ?? 0);
+    this.orderTotal = Number(data?.grand_total ?? data?.total_amount ?? data?.total ?? 0);
     this.orderSubtotal = Number(data?.subtotal ?? data?.subtotal_amount ?? 0);
     this.orderDiscount = Number(data?.discount_amount ?? data?.discount ?? 0);
     this.orderTax = Number(data?.tax_amount ?? data?.tax ?? 0);
+    this.appliedPromotions = data?.applied_promotions || data?.appliedPromotions || [];
+    this.appliedCoupons = data?.applied_coupons || data?.appliedCoupons || [];
     if (data.payment) {
       this.paymentInfo = {
         method: data.payment.payment_method || data.payment.method || 'Pago',
@@ -735,6 +763,8 @@ private authFacade = inject(AuthFacade);
       this.paymentInfo = {
         method: 'Pago Anónimo',
         amount: this.orderTotal };
+    } else {
+      this.paymentInfo = null;
     }
   }
 
@@ -792,13 +822,13 @@ private authFacade = inject(AuthFacade);
 	        // venta imprimiéndose distinto según el momento.
 	        isTakeaway: item.isTakeaway,
 	        serials: item.serials })),
-      subtotal: this.orderSubtotal,
-      tax: this.orderTax,
-      discount: this.orderDiscount,
-      total: this.orderTotal,
+      subtotal: this.derivedOrderSubtotal() || this.orderSubtotal,
+      tax: this.derivedOrderTax() || this.orderTax,
+      discount: this.derivedOrderDiscount() || this.orderDiscount,
+      total: this.derivedOrderTotal() || this.orderTotal,
       paymentMethod: this.paymentInfo?.method || 'Pago',
-      cashReceived: this.paymentInfo?.amount,
-      change: 0,
+      cashReceived: this.paymentInfo?.amount || (this.derivedOrderTotal() || this.orderTotal),
+      change: Number(this.orderData()?.change || 0),
       customer: this.derivedCustomerName() ? {
         name: this.derivedCustomerName(),
         email: this.derivedCustomerEmail(),
@@ -817,8 +847,8 @@ private authFacade = inject(AuthFacade);
         taxId: 'ORG-123' },
       cashier: this.cashierName,
       transactionId: this.derivedOrderNumber(),
-      invoiceDataToken: this.orderData()?.invoiceDataToken,
-      invoiceDataQrUrl: this.orderData()?.invoiceDataQrUrl,
+      invoiceDataToken: this.derivedInvoiceDataToken(),
+      invoiceDataQrUrl: this.derivedInvoiceDataQrUrl(),
       electronicInvoice: this.electronicInvoice() ?? undefined };
 
     this.ticketService.printTicket(ticketData, { printReceipt: true }).subscribe({
@@ -1012,7 +1042,7 @@ private authFacade = inject(AuthFacade);
   );
 
   hasDiscount(): boolean {
-    return this.orderDiscount > 0;
+    return (this.derivedOrderDiscount() || this.orderDiscount) > 0;
   }
 
   formatCurrency(amount: number): string {

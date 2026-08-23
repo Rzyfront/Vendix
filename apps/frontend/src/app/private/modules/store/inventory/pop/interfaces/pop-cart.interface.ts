@@ -307,6 +307,22 @@ export interface PopCartState {
   shippingMethod?: string;
   shippingCost: number;
   /**
+   * CP-PURCHASE-TRANSPARENCY C.5 — qué hacer con el flete de la factura.
+   *
+   * - `prorate`: se reparte entre los productos según su participación en la
+   *   compra, así que cada producto queda valorado con lo que REALMENTE costó
+   *   ponerlo en bodega. Sube el costo unitario y con él el margen calculado.
+   * - `expense`: no toca el costo de los productos; se registra como un costo
+   *   de la orden. El costo unitario no se mueve.
+   *
+   * En los dos casos el flete se suma al total de la orden.
+   *
+   * `undefined` mientras no haya flete. El backend RECHAZA (HTTP 400) un
+   * `shipping_cost > 0` sin modo, así que sólo viaja cuando hay flete — y sólo
+   * se puede omitir mientras el flete sea cero.
+   */
+  shippingCostAllocation?: 'prorate' | 'expense';
+  /**
    * QUI-661 — descuento comercial GENERAL sobre la factura del proveedor, en
    * dinero. El backend lo prorratea por línea contra el peso de cada una en el
    * subtotal bruto y lo aplica ANTES de derivar el IVA; no se queda en la

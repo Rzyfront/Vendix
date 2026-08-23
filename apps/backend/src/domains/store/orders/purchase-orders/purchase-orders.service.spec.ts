@@ -3,7 +3,10 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
-import { CostingService } from '../../inventory/shared/services/costing.service';
+import {
+  CostingService,
+  scopedStockKey,
+} from '../../inventory/shared/services/costing.service';
 import { CostingMethodResolverService } from '../../inventory/shared/services/costing-method-resolver.service';
 import { InventorySerialNumbersService } from '../../inventory/serial-numbers/inventory-serial-numbers.service';
 import { SerialNumberEnforcementService } from '../../inventory/serial-numbers/serial-number-enforcement.service';
@@ -240,14 +243,17 @@ describe('PurchaseOrdersService.receive()', () => {
             upsertPayableForReception: jest.fn(),
           },
         },
-        // P0.1 — VatResponsibilityService ahora se inyecta por constructor.
-        // En este arnés `mockSettingsService = {} as any` rompe getFiscalData()
-        // antes de llegar al resolve, así que la rama VAT no se ejerce y un
-        // stub trivial basta para que DI compile.
-        {
-          provide: VatResponsibilityService,
-          useValue: { resolve: () => true },
-        },
+        // B.1 — el doble es el servicio REAL, no un stub.
+        //
+        // En este arnés `mockSettingsService = {} as any` rompe getFiscalData(),
+        // así que el flujo cae al `catch` de `resolveVatResponsibility`, que
+        // desde B.1 devuelve `readFailure()`: indeterminado y FAIL-CLOSED. El
+        // stub anterior (`{ resolve: () => true }`) no sólo carecía de ese
+        // método —reventaba con «readFailure is not a function»— sino que
+        // afirmaba lo contrario de lo que el sistema hace cuando no puede leer
+        // la configuración fiscal. Un doble que contradice al predicado real
+        // convierte el arnés en un testigo falso.
+        VatResponsibilityService,
       ],
     }).compile();
 
@@ -893,13 +899,9 @@ describe('PurchaseOrdersService.receive()', () => {
               upsertPayableForReception: jest.fn(),
             },
           },
-          // P0.1 — VatResponsibilityService inyectado por constructor; el D2
-          // no ejerce la rama VAT (SettingsService está vacío, getFiscalData
-          // revienta antes del resolve), stub trivial.
-          {
-            provide: VatResponsibilityService,
-            useValue: { resolve: () => true },
-          },
+          // B.1 — servicio REAL. `SettingsService` vacío ⇒ getFiscalData()
+          // revienta ⇒ `readFailure()`: indeterminado, fail-closed.
+          VatResponsibilityService,
         ],
       }).compile();
 
@@ -1184,6 +1186,12 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
     purchaseToStockFactor: number | null;
     scopedAggregate: { quantity: number; cost_per_unit: number };
     costingMethod?: string;
+    /**
+     * B.1 — simula que la LECTURA de `fiscal_data` falla (timeout de settings,
+     * tenant sin contexto). No es lo mismo que «no hay datos fiscales»: el
+     * sistema tiene que poder distinguirlo y decirlo.
+     */
+    fiscalReadFails?: boolean;
   }) {
     const {
       taxResponsibilities,
@@ -1191,8 +1199,15 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
       purchaseToStockFactor,
       scopedAggregate,
       costingMethod = 'weighted_average',
+      fiscalReadFails = false,
     } = opts;
 
+    // A.12 — la vista previa lee el catálogo por LOTE (`findMany`), no una vez
+    // por línea. Antes resolvía producto, variante, stock y unidad de medida
+    // DENTRO del bucle: cuatro consultas por renglón en un endpoint que se
+    // vuelve a disparar con cada tecla del encabezado. El doble tiene que
+    // exponer las mismas puertas o el arnés mide una implementación que ya no
+    // existe.
     const mockPrismaService = {
       inventory_locations: {
         findUnique: jest.fn().mockResolvedValue({ store_id: STORE_ID }),
@@ -1200,59 +1215,79 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
       stock_levels: {
         // Per-location display snapshot only — does NOT feed the CPP (that
         // comes from getScopedStockAggregate below).
-        findFirst: jest.fn().mockResolvedValue({
-          quantity_on_hand: scopedAggregate.quantity,
-          cost_per_unit: scopedAggregate.cost_per_unit,
-        }),
+        findMany: jest.fn().mockResolvedValue([
+          {
+            product_id: PRODUCT_ID,
+            product_variant_id: null,
+            quantity_on_hand: scopedAggregate.quantity,
+            cost_per_unit: scopedAggregate.cost_per_unit,
+          },
+        ]),
       },
       products: {
-        // resolveUoMConversion reads this (is_ingredient + factor).
-        findFirst: jest.fn().mockResolvedValue({
-          id: PRODUCT_ID,
-          is_ingredient: isIngredient,
-          purchase_to_stock_factor: purchaseToStockFactor,
-          stock_uom_id: null,
-          purchase_uom_id: null,
-        }),
-        // name + pricing snapshot for the margin UX.
-        findUnique: jest.fn().mockResolvedValue({
-          name: 'Insumo Test',
-          base_price: 3000,
-          profit_margin: 20,
-        }),
+        // Una sola fila cubre el snapshot de precio para la UX de margen Y la
+        // configuración de UoM que consume `applyUoMConversion`.
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: PRODUCT_ID,
+            name: 'Insumo Test',
+            base_price: 3000,
+            profit_margin: 20,
+            price_unit_quantity: null,
+            is_ingredient: isIngredient,
+            purchase_to_stock_factor: purchaseToStockFactor,
+            stock_uom_id: null,
+            purchase_uom_id: null,
+          },
+        ]),
       },
-      product_variants: { findUnique: jest.fn() },
+      product_variants: { findMany: jest.fn().mockResolvedValue([]) },
     };
 
+    // J.1 — el universo de stock también se lee POR LOTE: una llamada para
+    // todos los renglones, no una por línea. El doble responde con el MISMO
+    // `Map` que el servicio real (una entrada por par pedido), porque un doble
+    // que devolviera un objeto plano dejaría pasar un llamador que preguntara
+    // por la llave equivocada y recibiera `undefined` — es decir, un cero
+    // indistinguible de «no hay stock», que la vista previa interpreta como
+    // reactivación.
     const mockCostingService = {
-      getScopedStockAggregate: jest.fn().mockResolvedValue(scopedAggregate),
+      getScopedStockAggregates: jest.fn(async (params: any) => {
+        const aggregates = new Map<
+          string,
+          { quantity: number; cost_per_unit: number }
+        >();
+        for (const key of params.keys as Array<{
+          product_id: number;
+          variant_id?: number | null;
+        }>) {
+          aggregates.set(scopedStockKey(key.product_id, key.variant_id ?? null), {
+            ...scopedAggregate,
+          });
+        }
+        return aggregates;
+      }),
     };
     const mockCostingMethodResolver = {
       resolveCostingMethod: jest.fn().mockResolvedValue(costingMethod),
     };
     const mockSettingsService = {
       // isVatResponsible reads tax_responsibilities from here (RUT casilla 53).
-      getFiscalData: jest.fn().mockResolvedValue({
-        tax_responsibilities: taxResponsibilities,
-      }),
+      getFiscalData: fiscalReadFails
+        ? jest
+            .fn()
+            .mockRejectedValue(new Error('settings timeout'))
+        : jest.fn().mockResolvedValue({
+            tax_responsibilities: taxResponsibilities,
+          }),
     };
 
-    // P0.1 — replica local del predicado pre-F4 (`responsibilities.length === 0
-    // ⇒ true`; en otro caso `includes('O-48')`). El helper canónico nuevo
-    // devuelve `true` para `['O-13']` (rama indeterminada) mientras que los
-    // tests F3 aquí asumían `false` para no-responsable; replicamos la lógica
-    // anterior para no romper F3 hasta que Paso 0.1 cambie el default.
-    const mockVatResponsibilityService = {
-      resolve: (fiscalData: any) => {
-        const responsibilities = Array.isArray(
-          fiscalData?.tax_responsibilities,
-        )
-          ? fiscalData.tax_responsibilities
-          : [];
-        if (responsibilities.length === 0) return true;
-        return responsibilities.includes('O-48');
-      },
-    };
+    // B.1 — la réplica local del predicado pre-F4 se elimina. Existía porque
+    // aquel default era fail-OPEN (`responsibilities.length === 0 ⇒ true`) y
+    // divergía del helper; desde 2026-08-21 el default canónico es fail-closed
+    // y coincide exactamente con lo que estos casos esperan (`['O-13']` ⇒ no
+    // responsable ⇒ IVA capitalizado). Mantener la copia sólo garantizaba que
+    // el día que el predicado real cambiara, el arnés siguiera verde mintiendo.
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -1290,10 +1325,7 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
             upsertPayableForReception: jest.fn(),
           },
         },
-        {
-          provide: VatResponsibilityService,
-          useValue: mockVatResponsibilityService,
-        },
+        VatResponsibilityService,
       ],
     }).compile();
 
@@ -1392,6 +1424,332 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
   });
 
   /**
+   * CP-PURCHASE-TRANSPARENCY B.1/B.4 — la vista previa no sólo dice CUÁNTO
+   * cuesta: dice POR QUÉ el IVA entró (o no) a ese costo.
+   *
+   * Antes el frontend recibía un booleano y volvía a derivar la explicación por
+   * su cuenta. Con cuatro réplicas del mismo predicado en el repositorio y
+   * defaults que llegaron a ser opuestos, dos pantallas del MISMO asistente
+   * podían contradecirse sobre la misma factura. Estos casos fijan el contrato
+   * estructurado: qué se hizo, por qué, con qué fundamento, y qué acción lo
+   * corrige.
+   */
+  describe('B.4: fiscal_explanation explica el tratamiento del IVA', () => {
+    const item = {
+      product_id: PRODUCT_ID,
+      quantity: 5,
+      unit_cost: 1000,
+      tax_rate: 19,
+    };
+    const previewWith = (opts: {
+      taxResponsibilities: string[];
+      fiscalReadFails?: boolean;
+    }) =>
+      buildPreviewService({
+        taxResponsibilities: opts.taxResponsibilities,
+        fiscalReadFails: opts.fiscalReadFails,
+        isIngredient: false,
+        purchaseToStockFactor: null,
+        scopedAggregate: { quantity: 0, cost_per_unit: 0 },
+      });
+
+    /**
+     * Las citas legales son un contrato cerrado: el operador las repite ante su
+     * contador. El art. 491 ET es de ACTIVOS FIJOS, no de inventario, y el
+     * Decreto 2650/1993 es el PUC, no el fundamento del IVA. Citar cualquiera
+     * de los dos en esta pantalla es peor que no citar nada.
+     */
+    const assertNoForbiddenCitation = (legalBasis: string[]) => {
+      const joined = legalBasis.join(' | ');
+      expect(joined).not.toMatch(/491/);
+      expect(joined).not.toMatch(/2650/);
+    };
+
+    it('O-48: descontable, sin CTA al asistente fiscal', async () => {
+      const service = await previewWith({ taxResponsibilities: ['O-48'] });
+      const result: any = await service.getCostPreview({
+        location_id: LOCATION_ID,
+        prices_include_tax: false,
+        items: [item],
+      } as any);
+
+      const fx = result.fiscal_explanation;
+      expect(fx.vat_responsible).toBe(true);
+      expect(fx.indeterminate).toBe(false);
+      expect(fx.treatment).toBe('deductible');
+      expect(fx.reason).toBe('declared_responsible');
+      expect(fx.source).toBe('tax_responsibilities');
+      expect(fx.legal_basis.join(' | ')).toMatch(/485/);
+      assertNoForbiddenCitation(fx.legal_basis);
+      // El comercio YA declaró su situación: mandarlo al asistente sería
+      // pedirle que "arregle" una configuración correcta.
+      expect(fx.cta).toBeUndefined();
+      // El desglose por línea usa las dos columnas mutuamente excluyentes que
+      // `receive()` sella. Nunca las dos a la vez.
+      expect(result.items[0].deductible_tax_amount).toBe(950);
+      expect(result.items[0].capitalized_tax_amount).toBe(0);
+    });
+
+    it('sin señal fiscal: indeterminado, capitaliza y ofrece el asistente', async () => {
+      // 'O-13' es una responsabilidad real que no dice nada sobre IVA: ni O-48
+      // ni O-49, y sin régimen tributario. El sistema NO puede saberlo.
+      const service = await previewWith({ taxResponsibilities: ['O-13'] });
+      const result: any = await service.getCostPreview({
+        location_id: LOCATION_ID,
+        prices_include_tax: false,
+        items: [item],
+      } as any);
+
+      const fx = result.fiscal_explanation;
+      expect(fx.vat_responsible).toBe(false);
+      expect(fx.indeterminate).toBe(true);
+      expect(fx.treatment).toBe('capitalized');
+      expect(fx.reason).toBe('no_fiscal_signal');
+      expect(fx.source).toBe('absent');
+      expect(fx.cta?.route).toBe('/admin/fiscal/wizard');
+      assertNoForbiddenCitation(fx.legal_basis);
+      expect(result.items[0].deductible_tax_amount).toBe(0);
+      expect(result.items[0].capitalized_tax_amount).toBe(950);
+    });
+
+    /**
+     * B.1 — EL caso que motivó el paso. El `catch` de `resolveVatResponsibility`
+     * devolvía `true` («eres responsable de IVA») a partir de un timeout de
+     * settings, mientras el helper canónico falla CERRADO. Un fallo técnico no
+     * es una afirmación fiscal, y la consecuencia era material: el IVA se
+     * declaraba descontable para un comercio que quizá no puede descontarlo.
+     */
+    it('si NO se puede leer la configuración fiscal, falla CERRADO y lo dice', async () => {
+      const service = await previewWith({
+        taxResponsibilities: [],
+        fiscalReadFails: true,
+      });
+      const result: any = await service.getCostPreview({
+        location_id: LOCATION_ID,
+        prices_include_tax: false,
+        items: [item],
+      } as any);
+
+      const fx = result.fiscal_explanation;
+      expect(fx.vat_responsible).toBe(false);
+      expect(fx.indeterminate).toBe(true);
+      expect(fx.treatment).toBe('capitalized');
+      // `read_error` y `absent` NO son intercambiables: la primera se resuelve
+      // reintentando, la segunda en el asistente fiscal.
+      expect(fx.reason).toBe('fiscal_read_failed');
+      expect(fx.source).toBe('read_error');
+      expect(fx.cta?.route).toBe('/admin/fiscal/wizard');
+      // Fail-closed en el DINERO, no sólo en el texto: 1000 neto + 19 % = 1190.
+      expect(result.items[0].new_cost_per_unit).toBe(1190);
+      expect(result.vat_responsible).toBe(false);
+    });
+  });
+
+  /**
+   * CP-PURCHASE-TRANSPARENCY A.2 — la vista previa PRORRATEA el descuento de
+   * cabecera.
+   *
+   * Antes lo ignoraba a propósito y lo decía en un comentario: procesaba cada
+   * línea aislada, así que no tenía el lote para repartir. El resultado era una
+   * simulación que el operador aprobaba y que la orden no podía reproducir.
+   */
+  it('A.2: el descuento de cabecera se reparte entre las líneas del lote', async () => {
+    const service = await buildPreviewService({
+      taxResponsibilities: ['O-48'],
+      isIngredient: false,
+      purchaseToStockFactor: null,
+      scopedAggregate: { quantity: 0, cost_per_unit: 0 },
+    });
+
+    const result: any = await service.getCostPreview({
+      location_id: LOCATION_ID,
+      prices_include_tax: false,
+      discount_amount: 100,
+      items: [
+        { product_id: PRODUCT_ID, quantity: 1, unit_cost: 1000 },
+        { product_id: PRODUCT_ID, quantity: 1, unit_cost: 1000 },
+      ],
+    } as any);
+
+    const shares = result.items.map((i: any) => i.header_discount_share);
+    expect(shares).toEqual([50, 50]);
+    // La suma de porciones es EXACTAMENTE el descuento de la cabecera: si no lo
+    // fuera, el total de la orden derivaría del de la factura del proveedor.
+    expect(shares.reduce((a: number, b: number) => a + b, 0)).toBe(100);
+    // Y llega hasta el costo, que es el punto: 1000 - 50 = 950.
+    expect(result.items[0].unit_price_net).toBe(950);
+    expect(result.items[0].new_cost_per_unit).toBe(950);
+  });
+
+  /**
+   * CP-PURCHASE-TRANSPARENCY J.1 — la última consulta sale del bucle.
+   *
+   * `global_stock` / `global_cost_per_unit` gobiernan la vista previa: el
+   * primero decide si la compra es una reactivación y el segundo es la base del
+   * CPP que el modal muestra. Se leían una vez POR RENGLÓN, y cada lectura
+   * arrastraba además su propia resolución de ubicación. En un endpoint que se
+   * redispara con cada tecla del encabezado, el costo crecía con el carrito.
+   */
+  it('J.1: el universo de stock se lee UNA vez para todo el lote, no una por línea', async () => {
+    const service = await buildPreviewService({
+      taxResponsibilities: ['O-48'],
+      isIngredient: false,
+      purchaseToStockFactor: null,
+      scopedAggregate: { quantity: 40, cost_per_unit: 500 },
+    });
+
+    const result: any = await service.getCostPreview({
+      location_id: LOCATION_ID,
+      prices_include_tax: false,
+      items: [
+        { product_id: PRODUCT_ID, quantity: 1, unit_cost: 1000 },
+        { product_id: PRODUCT_ID, quantity: 2, unit_cost: 1000 },
+        { product_id: PRODUCT_ID, quantity: 3, unit_cost: 1000 },
+      ],
+    } as any);
+
+    const aggregates = (service as any).costingService
+      .getScopedStockAggregates as jest.Mock;
+    expect(aggregates).toHaveBeenCalledTimes(1);
+    expect(aggregates.mock.calls[0][0].location_id).toBe(LOCATION_ID);
+    expect(aggregates.mock.calls[0][0].keys).toHaveLength(3);
+    // Y las tres líneas siguen viendo el mismo universo que veían antes.
+    expect(result.items.map((i: any) => i.global_stock)).toEqual([40, 40, 40]);
+    expect(result.items.map((i: any) => i.global_cost_per_unit)).toEqual([
+      500, 500, 500,
+    ]);
+  });
+
+  it('J.1: una línea base y una de variante piden universos DISTINTOS', async () => {
+    const service = await buildPreviewService({
+      taxResponsibilities: ['O-48'],
+      isIngredient: false,
+      purchaseToStockFactor: null,
+      scopedAggregate: { quantity: 10, cost_per_unit: 100 },
+    });
+
+    await service.getCostPreview({
+      location_id: LOCATION_ID,
+      prices_include_tax: false,
+      items: [
+        { product_id: PRODUCT_ID, quantity: 1, unit_cost: 1000 },
+        {
+          product_id: PRODUCT_ID,
+          product_variant_id: 77,
+          quantity: 1,
+          unit_cost: 1000,
+        },
+      ],
+    } as any);
+
+    const aggregates = (service as any).costingService
+      .getScopedStockAggregates as jest.Mock;
+    // La variante forma parte de la LLAVE. Si el lote se pidiera por
+    // `product_id IN (…)`, la línea base heredaría el stock de todas las
+    // variantes del producto y su CPP saldría de un universo que no es el suyo.
+    expect(aggregates.mock.calls[0][0].keys).toEqual([
+      { product_id: PRODUCT_ID, variant_id: null },
+      { product_id: PRODUCT_ID, variant_id: 77 },
+    ]);
+  });
+
+  /**
+   * CP-PURCHASE-TRANSPARENCY C.2 — el flete se reparte y se capitaliza.
+   *
+   * `shipping_cost` viajaba en la cabecera, sumaba al total y no tocaba ni el
+   * costo, ni el asiento, ni la cuenta por pagar. El producto costaba menos de
+   * lo que costó.
+   */
+  describe('C.2: prorrateo del flete', () => {
+    const threeEqualLines = [
+      { product_id: PRODUCT_ID, quantity: 1, unit_cost: 100 },
+      { product_id: PRODUCT_ID, quantity: 1, unit_cost: 100 },
+      { product_id: PRODUCT_ID, quantity: 1, unit_cost: 100 },
+    ];
+    const buildFreightService = () =>
+      buildPreviewService({
+        taxResponsibilities: ['O-48'],
+        isIngredient: false,
+        purchaseToStockFactor: null,
+        scopedAggregate: { quantity: 0, cost_per_unit: 0 },
+      });
+
+    /**
+     * 100,00 entre tres no da un número redondo. El residuo aterriza ÍNTEGRO en
+     * la última línea para que la suma dé el flete de la cabecera AL CÉNTIMO:
+     * `allocated_shipping_amount` es `Decimal(12,2)` y el invariante
+     * `Σ líneas === cabecera` es lo que hace verificable la paridad entre
+     * crear, editar y recibir.
+     */
+    it('prorate: la suma de porciones es exactamente el flete (residuo a la última línea)', async () => {
+      const service = await buildFreightService();
+      const result: any = await service.getCostPreview({
+        location_id: LOCATION_ID,
+        prices_include_tax: false,
+        shipping_cost: 100,
+        shipping_cost_allocation: 'prorate',
+        items: threeEqualLines,
+      } as any);
+
+      const shares = result.items.map(
+        (i: any) => i.allocated_shipping_amount,
+      );
+      expect(shares).toEqual([33.33, 33.33, 33.34]);
+      expect(
+        Math.round(
+          shares.reduce((a: number, b: number) => a + b, 0) * 100,
+        ) / 100,
+      ).toBe(100);
+      expect(result.shipping_cost_allocation_requested).toBe('prorate');
+      expect(result.shipping_cost_allocation_applied).toBe('prorate');
+      // Y entra al costo: 100 de mercancía + 33,33 de transporte.
+      expect(result.items[0].new_cost_per_unit).toBe(133.33);
+      expect(result.items[2].new_cost_per_unit).toBe(133.34);
+    });
+
+    it('expense: el flete NO toca el costo del inventario', async () => {
+      const service = await buildFreightService();
+      const result: any = await service.getCostPreview({
+        location_id: LOCATION_ID,
+        prices_include_tax: false,
+        shipping_cost: 100,
+        shipping_cost_allocation: 'expense',
+        items: threeEqualLines,
+      } as any);
+
+      expect(
+        result.items.map((i: any) => i.allocated_shipping_amount),
+      ).toEqual([0, 0, 0]);
+      expect(result.shipping_cost_allocation_applied).toBe('expense');
+      expect(result.items[0].new_cost_per_unit).toBe(100);
+      // El monto sigue viajando: el flete existe aunque no se capitalice.
+      expect(result.shipping_cost).toBe(100);
+    });
+
+    /**
+     * Degradación explícita: sin neto y sin cantidad no hay a qué adherir el
+     * flete. Dividir por cero sembraría `NaN` en una capa FIFO, así que la
+     * orden degrada a `expense` — y el operador tiene que VER que su elección
+     * no se pudo honrar, por eso solicitado y aplicado viajan por separado.
+     */
+    it('prorate sin base de reparto degrada a expense y lo reporta', async () => {
+      const service = await buildFreightService();
+      const result: any = await service.getCostPreview({
+        location_id: LOCATION_ID,
+        prices_include_tax: false,
+        shipping_cost: 100,
+        shipping_cost_allocation: 'prorate',
+        items: [{ product_id: PRODUCT_ID, quantity: 0, unit_cost: 0 }],
+      } as any);
+
+      expect(result.shipping_cost_allocation_requested).toBe('prorate');
+      expect(result.shipping_cost_allocation_applied).toBe('expense');
+      expect(result.items[0].allocated_shipping_amount).toBe(0);
+      expect(Number.isNaN(result.items[0].new_cost_per_unit)).toBe(false);
+    });
+  });
+
+  /**
    * QUI-648 — el margen del preview se mide contra el costo llevado a la escala
    * del precio. `new_cost_per_unit` es el costo de la unidad MÍNIMA de stock;
    * `current_base_price` cubre `price_unit_quantity` de esas unidades.
@@ -1406,27 +1764,28 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
       profit_margin: number;
       price_unit_quantity: number | null;
     }) {
+      // A.12 — lecturas por lote (ver el comentario del arnés principal).
       const mockPrismaService = {
         inventory_locations: {
           findUnique: jest.fn().mockResolvedValue({ store_id: STORE_ID }),
         },
         stock_levels: {
-          findFirst: jest.fn().mockResolvedValue(null),
+          findMany: jest.fn().mockResolvedValue([]),
         },
         products: {
-          findFirst: jest.fn().mockResolvedValue({
-            id: PRODUCT_ID,
-            is_ingredient: false,
-            purchase_to_stock_factor: null,
-            stock_uom_id: null,
-            purchase_uom_id: null,
-          }),
-          findUnique: jest.fn().mockResolvedValue({
-            name: 'Cable de cobre',
-            ...pricing,
-          }),
+          findMany: jest.fn().mockResolvedValue([
+            {
+              id: PRODUCT_ID,
+              name: 'Cable de cobre',
+              is_ingredient: false,
+              purchase_to_stock_factor: null,
+              stock_uom_id: null,
+              purchase_uom_id: null,
+              ...pricing,
+            },
+          ]),
         },
-        product_variants: { findUnique: jest.fn() },
+        product_variants: { findMany: jest.fn().mockResolvedValue([]) },
       };
 
       const module: TestingModule = await Test.createTestingModule({
@@ -1439,9 +1798,22 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
             useValue: {
               // Stock en cero ⇒ reactivación ⇒ el CPP es el costo entrante
               // directo, lo que aísla la aritmética del margen.
-              getScopedStockAggregate: jest
-                .fn()
-                .mockResolvedValue({ quantity: 0, cost_per_unit: 0 }),
+              getScopedStockAggregates: jest.fn(async (params: any) => {
+                const aggregates = new Map<
+                  string,
+                  { quantity: number; cost_per_unit: number }
+                >();
+                for (const key of params.keys as Array<{
+                  product_id: number;
+                  variant_id?: number | null;
+                }>) {
+                  aggregates.set(
+                    scopedStockKey(key.product_id, key.variant_id ?? null),
+                    { quantity: 0, cost_per_unit: 0 },
+                  );
+                }
+                return aggregates;
+              }),
             },
           },
           {
@@ -1480,14 +1852,10 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
               findPayableForPurchaseOrder: jest.fn().mockResolvedValue(null),
             },
           },
-          // P0.1 — VatResponsibilityService inyectado por constructor. Este
-          // arnés usa tax_responsibilities=['O-48'] (responsable), por lo que
-          // el stub trivial `{ resolve: () => true }` coincide con la rama
-          // esperada (pre y post F4).
-          {
-            provide: VatResponsibilityService,
-            useValue: { resolve: () => true },
-          },
+          // B.1 — servicio REAL. Este arnés declara
+          // `tax_responsibilities=['O-48']`, así que el predicado canónico
+          // resuelve «responsable» por la vía que resuelve en producción.
+          VatResponsibilityService,
         ],
       }).compile();
 
@@ -1731,7 +2099,7 @@ describe('PurchaseOrdersService.update() — descuento: 0-100 % y precedencia mo
         { provide: FiscalScopeService, useValue: {} as any },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
         { provide: AccountsPayableService, useValue: {} as any },
-        { provide: VatResponsibilityService, useValue: { resolve: () => true } },
+        VatResponsibilityService,
       ],
     }).compile();
 
@@ -1880,5 +2248,373 @@ describe('PurchaseOrdersService.update() — descuento: 0-100 % y precedencia mo
 
     const headerData = tx.purchase_orders.update.mock.calls[0][0].data;
     expect(headerData.subtotal_amount).toBe(800);
+  });
+});
+
+/**
+ * CP-PURCHASE-TRANSPARENCY A.10 / A.11 / C.2 / C.7 / C.11 —
+ * `PurchaseOrdersService.create()`.
+ *
+ * El arnés controla `$transaction` y captura el `data` que llega a
+ * `tx.purchase_orders.create`: esa es la fila que nace, y las tres cosas que
+ * este paso arregla se leen ahí (el estado de oficio, el modo de flete aplicado
+ * y la porción de flete por línea).
+ */
+describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
+  let service: PurchaseOrdersService;
+  let prismaService: any;
+  let auditService: { log: jest.Mock };
+
+  const ORG_ID = 1;
+  const STORE_ID = 10;
+  const USER_ID = 7;
+  const LOCATION_ID = 999;
+  const SUPPLIER_ID = 77;
+  const PRODUCT_ID = 555;
+  const NEW_PO_ID = 4242;
+
+  /** Fábrica del `tx` con lo mínimo que recorre el camino de producto EXISTENTE. */
+  function mockCreateTx() {
+    return {
+      // assertNoBaseLineOnVariantProduct: sin variantes ⇒ no corta.
+      product_variants: { findMany: jest.fn().mockResolvedValue([]) },
+      products: { findMany: jest.fn().mockResolvedValue([]) },
+      inventory_locations: {
+        findFirst: jest.fn().mockResolvedValue({ id: LOCATION_ID }),
+        findUnique: jest.fn().mockResolvedValue({ store_id: STORE_ID }),
+      },
+      suppliers: { findFirst: jest.fn().mockResolvedValue({ id: SUPPLIER_ID }) },
+      purchase_orders: {
+        create: jest.fn().mockImplementation(({ data }: any) =>
+          Promise.resolve({
+            id: NEW_PO_ID,
+            order_number: data.order_number,
+            organization_id: ORG_ID,
+            location: { store_id: STORE_ID },
+            status: data.status,
+          }),
+        ),
+      },
+      purchase_order_payment_schedules: { create: jest.fn() },
+    };
+  }
+
+  const baseDto = () => ({
+    supplier_id: SUPPLIER_ID,
+    location_id: LOCATION_ID,
+    items: [{ product_id: PRODUCT_ID, quantity: 1, unit_price: 1000 }],
+  });
+
+  beforeEach(async () => {
+    prismaService = { $transaction: jest.fn() };
+    auditService = { log: jest.fn().mockResolvedValue(undefined) };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PurchaseOrdersService,
+        { provide: StorePrismaService, useValue: prismaService },
+        { provide: StockLevelManager, useValue: {} as any },
+        { provide: CostingService, useValue: {} as any },
+        {
+          provide: CostingMethodResolverService,
+          useValue: {
+            resolveCostingMethod: jest
+              .fn()
+              .mockResolvedValue('weighted_average'),
+          },
+        },
+        { provide: InventorySerialNumbersService, useValue: {} as any },
+        { provide: SerialNumberEnforcementService, useValue: {} as any },
+        { provide: AuditService, useValue: auditService },
+        { provide: S3Service, useValue: {} as any },
+        {
+          provide: SettingsService,
+          useValue: {
+            getFiscalData: jest
+              .fn()
+              .mockResolvedValue({ tax_responsibilities: ['O-48'] }),
+          },
+        },
+        { provide: FiscalScopeService, useValue: {} as any },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: AccountsPayableService, useValue: {} as any },
+        VatResponsibilityService,
+      ],
+    }).compile();
+
+    service = module.get(PurchaseOrdersService);
+
+    jest
+      .spyOn(RequestContextService, 'getOrganizationId')
+      .mockReturnValue(ORG_ID);
+    jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(STORE_ID);
+    jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(USER_ID);
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+    jest.restoreAllMocks();
+  });
+
+  const runCreate = async (dto: any) => {
+    const tx = mockCreateTx();
+    prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+    await service.create(dto);
+    return tx;
+  };
+
+  /**
+   * A.10 — el defecto: `create()` derramaba el DTO a Prisma con un spread, así
+   * que `status` viajaba tal cual. Un `POST` con `"status":"approved"` hacía
+   * nacer la orden aprobada SALTÁNDOSE el permiso de aprobación, que es un acto
+   * propio (`approve()`). El campo sigue declarado en el DTO —el POP web lo
+   * envía en cada creación y quitarlo devolvería 400 a la pantalla principal de
+   * compras— pero el servicio lo ignora.
+   */
+  it('A.10: ignora el `status` del cliente; la orden nace en draft', async () => {
+    const tx = await runCreate({ ...baseDto(), status: 'approved' });
+
+    const data = tx.purchase_orders.create.mock.calls[0][0].data;
+    expect(data.status).toBe('draft');
+    // Y nadie queda nombrado como aprobador de una orden que nadie aprobó.
+    expect(data.approved_by_user_id).toBeNull();
+  });
+
+  /**
+   * A.11 — Prisma impone 5.000 ms por omisión y nadie lo había declarado. Una
+   * orden de 80 líneas emite del orden de miles de consultas y aborta con P2028
+   * en RDS mientras pasa en local, donde la latencia por consulta es un orden
+   * de magnitud menor.
+   */
+  it('A.11: la transacción declara su techo de tiempo', async () => {
+    await runCreate(baseDto());
+
+    expect(prismaService.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      { timeout: 120_000, maxWait: 10_000 },
+    );
+  });
+
+  /**
+   * C.7 — la misma regla que protege la puerta HTTP tiene que correr en el
+   * SERVICIO, porque `OrgPurchaseOrdersService.create()` arma el DTO campo por
+   * campo y llama aquí directamente, sin pasar por el `ValidationPipe`.
+   */
+  it('C.7: flete sin modo de imputación se rechaza ANTES de abrir la transacción', async () => {
+    await expect(
+      service.create({ ...baseDto(), shipping_cost: 100 } as any),
+    ).rejects.toThrow(/flete/i);
+    expect(prismaService.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('C.7: `prorate` sin monto de flete se rechaza igual', async () => {
+    await expect(
+      service.create({
+        ...baseDto(),
+        shipping_cost_allocation: 'prorate',
+      } as any),
+    ).rejects.toThrow(/flete/i);
+    expect(prismaService.$transaction).not.toHaveBeenCalled();
+  });
+
+  /**
+   * C.2 — el flete se sella por línea al crear, y `receive()` lo lee de ahí en
+   * vez de repartir otra vez. La suma de porciones es EXACTAMENTE el flete de
+   * la cabecera: el residuo del redondeo va íntegro a la última línea.
+   */
+  it('C.2: sella la porción de flete por línea y el modo aplicado', async () => {
+    const tx = await runCreate({
+      supplier_id: SUPPLIER_ID,
+      location_id: LOCATION_ID,
+      shipping_cost: 100,
+      shipping_cost_allocation: 'prorate',
+      items: [
+        { product_id: PRODUCT_ID, quantity: 1, unit_price: 100 },
+        { product_id: PRODUCT_ID, quantity: 1, unit_price: 100 },
+        { product_id: PRODUCT_ID, quantity: 1, unit_price: 100 },
+      ],
+    });
+
+    const data = tx.purchase_orders.create.mock.calls[0][0].data;
+    expect(data.shipping_cost_allocation).toBe('prorate');
+
+    const shares = data.purchase_order_items.create.map(
+      (i: any) => i.allocated_shipping_amount,
+    );
+    expect(shares).toEqual([33.33, 33.33, 33.34]);
+    expect(
+      Math.round(shares.reduce((a: number, b: number) => a + b, 0) * 100) / 100,
+    ).toBe(100);
+  });
+
+  /**
+   * C.11 — la auditoría de compras era literalmente
+   * `{ items_count, purchase_order_id }` y `logCustom` dejaba `store_id` nulo en
+   * las filas de compras, así que no se podía filtrar por tienda. Re-derivar la
+   * decisión fiscal mañana leería los datos fiscales de mañana: nada
+   * distinguiría un cambio de configuración de un defecto.
+   */
+  it('C.11: la auditoría sella la decisión fiscal, el flete y la tienda', async () => {
+    await runCreate({
+      ...baseDto(),
+      shipping_cost: 50,
+      shipping_cost_allocation: 'expense',
+    });
+
+    expect(auditService.log).toHaveBeenCalledTimes(1);
+    const entry = auditService.log.mock.calls[0][0];
+    expect(entry.action).toBe('PO_CREATED');
+    expect(entry.storeId).toBe(STORE_ID);
+
+    const meta = entry.metadata;
+    expect(meta.fiscal_explanation.vat_responsible).toBe(true);
+    expect(meta.fiscal_explanation.treatment).toBe('deductible');
+    expect(meta.costing_method).toBeDefined();
+    expect(meta.shipping_cost).toBe(50);
+    expect(meta.shipping_cost_allocation_requested).toBe('expense');
+    expect(meta.shipping_cost_allocation_applied).toBe('expense');
+  });
+});
+
+/**
+ * CP-PURCHASE-TRANSPARENCY R2 — `GET /store/orders/purchase-orders/:id` sobre
+ * una orden que no existe.
+ *
+ * El defecto medido contra el backend local antes del arreglo:
+ *
+ *     GET /api/store/orders/purchase-orders/999999
+ *     → HTTP/1.1 200 OK
+ *       {"success":true,"message":"Orden de compra obtenida exitosamente","data":null}
+ *
+ * `findUnique` devolvía `null` y el handler lo envolvía en el sobre de ÉXITO.
+ * Con ese 200 el detalle del frontend pinta la página entera —«OC #undefined»,
+ * todos los campos en «—», «Productos (0)» y el botón Imprimir operativo—:
+ * el cliente pidió un recurso y recibió otra cosa sin que nada se lo dijera.
+ *
+ * El hermano de alcance ORGANIZACIÓN (`OrgPurchaseOrdersService.findOne`) ya
+ * lanzaba `NotFoundException`; el de alcance TIENDA era el que estaba solo.
+ */
+describe('PurchaseOrdersService.findOne() — un recurso ausente es 404, no un sobre de éxito', () => {
+  let service: PurchaseOrdersService;
+  let prismaService: any;
+
+  const ORG_ID = 1;
+  const STORE_ID = 10;
+  const PO_ID = 215;
+
+  beforeEach(async () => {
+    prismaService = {
+      purchase_orders: { findUnique: jest.fn() },
+      $transaction: jest.fn(),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PurchaseOrdersService,
+        { provide: StorePrismaService, useValue: prismaService },
+        { provide: StockLevelManager, useValue: {} as any },
+        { provide: CostingService, useValue: {} as any },
+        { provide: CostingMethodResolverService, useValue: {} as any },
+        { provide: InventorySerialNumbersService, useValue: {} as any },
+        { provide: SerialNumberEnforcementService, useValue: {} as any },
+        { provide: AuditService, useValue: { log: jest.fn() } },
+        { provide: S3Service, useValue: {} as any },
+        { provide: SettingsService, useValue: {} as any },
+        { provide: FiscalScopeService, useValue: {} as any },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: AccountsPayableService, useValue: {} as any },
+        VatResponsibilityService,
+      ],
+    }).compile();
+
+    service = module.get(PurchaseOrdersService);
+
+    jest
+      .spyOn(RequestContextService, 'getOrganizationId')
+      .mockReturnValue(ORG_ID);
+    jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(STORE_ID);
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+    jest.restoreAllMocks();
+  });
+
+  it('una orden inexistente lanza PO_FIND_001 en vez de devolver null', async () => {
+    prismaService.purchase_orders.findUnique.mockResolvedValue(null);
+
+    await expect(service.findOne(999999)).rejects.toMatchObject({
+      errorCode: 'PO_FIND_001',
+    });
+  });
+
+  /**
+   * El código, no solo el hecho de lanzar: `PO_FIND_001` ya está registrado en
+   * `error-codes.ts` con `httpStatus: 404`. Se fija aquí para que nadie lo
+   * cambie por un código nuevo ni degrade el estado.
+   */
+  it('el rechazo viaja como 404 con un código YA registrado, no como 500 sin código', async () => {
+    prismaService.purchase_orders.findUnique.mockResolvedValue(null);
+
+    const fallo = await service.findOne(999999).catch((e) => e);
+
+    // `getStatus()` y no la propiedad `status`: es la API pública de
+    // `HttpException` y la que lee el `AllExceptionsFilter` para poner el
+    // status en la línea de respuesta.
+    expect(fallo.getStatus()).toBe(404);
+    expect(fallo.errorCode).toBe('PO_FIND_001');
+  });
+
+  /**
+   * Alcance multi-tenant: una orden que SÍ existe pero es de otra tienda tiene
+   * que dar 404, nunca 403 — un 403 le confirmaría su existencia a quien no
+   * debe saber ni que existe.
+   *
+   * Quien produce ese efecto es el `StorePrismaService`: `purchase_orders` está
+   * registrado como modelo de alcance RELACIONAL
+   * (`{ location: { store_id } }`), así que la fila de otra tienda no casa y el
+   * `findUnique` responde `null` — indistinguible de «no existe». Este spec fija
+   * las dos mitades del contrato: que la lectura pasa por el cliente CON
+   * alcance (no por uno crudo, que expondría la orden ajena) y que su `null`
+   * sale por la MISMA rama 404, sin ninguna bifurcación a 403.
+   */
+  it('una orden de OTRA tienda sale por la misma puerta 404, nunca 403', async () => {
+    // Lo que el cliente con alcance devuelve cuando la fila pertenece a otro
+    // store_id: exactamente lo mismo que cuando la fila no existe.
+    prismaService.purchase_orders.findUnique.mockResolvedValue(null);
+
+    const fallo = await service.findOne(PO_ID).catch((e) => e);
+
+    expect(fallo.getStatus()).toBe(404);
+    expect(fallo.getStatus()).not.toBe(403);
+    expect(fallo.errorCode).toBe('PO_FIND_001');
+    // La lectura sale por el cliente con alcance de tienda; si alguien la
+    // moviera a un cliente sin alcance, la orden ajena se volvería legible.
+    expect(prismaService.purchase_orders.findUnique).toHaveBeenCalledTimes(1);
+  });
+
+  it('una orden propia sigue devolviéndose igual que antes', async () => {
+    const orden = {
+      id: PO_ID,
+      order_number: 'PO-20260822-668',
+      suppliers: { id: 122, name: 'Debug Test Supplier' },
+      location: { id: 50, store_id: STORE_ID },
+      purchase_order_items: [{ id: 1 }],
+      payment_schedules: [],
+    };
+    prismaService.purchase_orders.findUnique.mockResolvedValue(orden);
+
+    await expect(service.findOne(PO_ID)).resolves.toBe(orden);
+
+    // El include no cambió: proveedor, ubicación, líneas y el calendario de
+    // pagos ordenado (QUI-647) siguen viajando en el mismo read.
+    const args = prismaService.purchase_orders.findUnique.mock.calls[0][0];
+    expect(args.where).toEqual({ id: PO_ID });
+    expect(args.include.suppliers).toBe(true);
+    expect(args.include.location).toBe(true);
+    expect(args.include.purchase_order_items).toBeDefined();
+    expect(args.include.payment_schedules).toEqual({
+      orderBy: { scheduled_date: 'asc' },
+    });
   });
 });

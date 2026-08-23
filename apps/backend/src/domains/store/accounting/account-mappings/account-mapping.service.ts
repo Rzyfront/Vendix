@@ -207,6 +207,23 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '2205',
     description: 'Proveedores',
   },
+  // CP-PURCHASE-TRANSPARENCY C.6 — flete de compra ASUMIDO como gasto
+  // (`purchase_orders.shipping_cost_allocation = 'expense'`).
+  //
+  // La asimetría del negocio: con `prorate` el flete entra al costo de los
+  // productos y viaja dentro de `total_amount` del evento, así que NO necesita
+  // línea propia (ya está en el DR 1435). Con `expense` el flete NO toca el
+  // costo unitario, pero SIGUE siendo un costo de la orden y una deuda con el
+  // proveedor: sin esta clave el asiento salía con menos de dos líneas válidas
+  // y `postAutoEntry` lo descartaba devolviendo `null` — recepción sin asiento
+  // y sin fila de fallo.
+  //
+  // 513550 «Transporte, Fletes y Acarreos» (Decreto 2650/1993) es cuenta de
+  // DETALLE, no grupo: 5135 «Servicios» es el grupo y no admite movimiento.
+  'purchase_order.received.shipping_expense': {
+    code: '513550',
+    description: 'Transporte, Fletes y Acarreos (flete de compra asumido)',
+  },
   'support_document.accepted.expense': {
     code: '5195',
     description: 'Compra/Gasto soportado',

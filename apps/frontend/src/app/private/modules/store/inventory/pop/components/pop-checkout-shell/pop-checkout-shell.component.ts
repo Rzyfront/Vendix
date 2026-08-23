@@ -22,7 +22,10 @@ import type {
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../../../shared/pipes/currency';
 import { focusFirstInvalid } from '../../../../../../../core/utils/focus-first-invalid';
 import { PopCartState } from '../../interfaces/pop-cart.interface';
-import { CostPreviewResponse } from '../../../interfaces';
+import {
+  PopCostPreviewResponse,
+  PopShippingAllocation,
+} from '../../interfaces';
 import {
   PopPaymentStepComponent,
   PopPaymentPlan,
@@ -88,8 +91,14 @@ export class PopCheckoutShellComponent {
   readonly supplierName = input('');
   readonly locationName = input('');
   readonly actionType = input<PopCheckoutAction>('create');
-  readonly costPreview = input<CostPreviewResponse | null>(null);
+  readonly costPreview = input<PopCostPreviewResponse | null>(null);
   readonly loadingCostPreview = input(false);
+  /**
+   * A.5 — mensaje del fallo de la vista previa. Mientras esté presente el paso
+   * de recepción pinta un panel de error y la confirmación queda bloqueada: sin
+   * vista previa el operador estaría aprobando un costo que no vio.
+   */
+  readonly costPreviewError = input<string | null>(null);
   readonly isProcessing = input(false);
   /** Ref (`#id` / `order_number`) de la OC pendiente de recepción (reintento). */
   readonly retryOrderRef = input<string | null>(null);
@@ -131,6 +140,11 @@ export class PopCheckoutShellComponent {
   readonly expectedDate = input('');
   readonly shippingMethod = input('');
   readonly minExpectedDate = input('');
+  /** C.5 — flete vigente en el carrito y su imputación. */
+  readonly shippingCost = input(0);
+  readonly shippingCostAllocation = input<PopShippingAllocation | undefined>(
+    undefined,
+  );
 
   // ── Outputs ───────────────────────────────────────────────────────────────
   readonly isOpenChange = output<boolean>();
@@ -140,6 +154,14 @@ export class PopCheckoutShellComponent {
   /** El wizard cierra SIN éxito: el padre baja `showOrderConfirmModal`. */
   readonly cancelled = output<void>();
   readonly navigateToSettings = output<void>();
+  /** A.5 — el panel de error del paso de recepción pide otra vista previa. */
+  readonly retryCostPreview = output<void>();
+  /**
+   * B.5 — el CTA del aviso «no sabemos tu estado fiscal» lleva al asistente
+   * fiscal. La ruta la manda el backend dentro de `fiscal_explanation.cta`: la
+   * pantalla no la inventa.
+   */
+  readonly navigateToFiscalWizard = output<string>();
 
   /**
    * CP-ID-VNDX-2026-08-21-POP-MODAL — El panel post-creación (`app-success`)
@@ -162,6 +184,9 @@ export class PopCheckoutShellComponent {
   readonly configOrderDateChange = output<string>();
   readonly configExpectedDateChange = output<string>();
   readonly configShippingMethodChange = output<string>();
+  readonly configShippingCostChange = output<number>();
+  readonly configShippingCostAllocationChange =
+    output<PopShippingAllocation>();
   readonly configOpenSupplierModal = output<void>();
   readonly configOpenWarehouseModal = output<void>();
 
@@ -176,12 +201,42 @@ export class PopCheckoutShellComponent {
   // ── Stepper state ────────────────────────────────────────────────────────
   readonly currentStep = signal(0);
 
+  /**
+   * B.6 — Latch del paso Configuración.
+   *
+   * `needsConfig` es un snapshot tomado al ABRIR (`!supplierId || !locationId`).
+   * En el caso normal —proveedor y bodega ya elegidos, que es SIEMPRE el caso al
+   * reabrir tras cancelar— era `false` y el paso no entraba al stepper: el campo
+   * de flete y su conmutador no existían en el DOM y el wizard confirmaba la
+   * orden sin haber preguntado nunca. Un control que decide dinero no puede
+   * depender de un snapshot.
+   *
+   * El latch se enciende al abrir si la orden YA lleva flete, y en cuanto el
+   * operador elige «Flete» dentro del paso. Nunca se apaga a mitad de sesión:
+   * un paso que desaparece bajo los pies del operador (al volver el método a
+   * «Recolección») renumeraría el stepper mientras está parado en él.
+   */
+  private readonly configLatch = signal(false);
+
+  /** El carrito trae flete: método «Flete» o un costo ya capturado. */
+  private readonly orderCarriesFreight = computed<boolean>(() => {
+    const state = this.cartState();
+    return (
+      state?.shippingMethod === 'freight' || Number(state?.shippingCost ?? 0) > 0
+    );
+  });
+
+  /** El paso Configuración se monta por falta de config O por llevar flete. */
+  readonly showConfigStep = computed<boolean>(
+    () => this.needsConfig() || this.configLatch(),
+  );
+
   readonly steps = computed<StepsLineItem[]>(() => {
     const base =
       this.actionType() === 'create-receive'
         ? [{ label: 'Pago' }, { label: 'Recepción' }, { label: 'Confirmación' }]
         : [{ label: 'Pago' }, { label: 'Confirmación' }];
-    return this.needsConfig()
+    return this.showConfigStep()
       ? [{ label: 'Configuración' }, ...base]
       : base;
   });
@@ -192,7 +247,7 @@ export class PopCheckoutShellComponent {
       this.actionType() === 'create-receive'
         ? ['pago', 'recepcion', 'confirmacion']
         : ['pago', 'confirmacion'];
-    return this.needsConfig() ? ['configuracion', ...base] : base;
+    return this.showConfigStep() ? ['configuracion', ...base] : base;
   });
 
   readonly currentStepKey = computed<string>(
@@ -206,13 +261,15 @@ export class PopCheckoutShellComponent {
 
   readonly title = computed<string>(() => {
     if (this.actionType() === 'create-receive') return 'Crear y Recibir Inventario';
-    return this.needsConfig() ? 'Nueva Orden de Compra' : 'Confirmar Orden de Compra';
+    return this.showConfigStep()
+      ? 'Nueva Orden de Compra'
+      : 'Confirmar Orden de Compra';
   });
 
   readonly subtitle = computed<string>(() => {
     switch (this.currentStepKey()) {
       case 'configuracion':
-        return 'Configuración · Proveedor, bodega, fechas y envío';
+        return 'Configuración · Proveedor, bodega, fechas, envío y flete';
       case 'pago':
         return 'Pago · Cómo se paga esta orden';
       case 'recepcion':
@@ -269,7 +326,21 @@ export class PopCheckoutShellComponent {
   private resetState(): void {
     this.currentStep.set(0);
     this.buttonFlash.set(false);
+    // B.6 — el latch se re-evalúa por apertura: una orden que llega con flete
+    // abre con el paso Configuración presente aunque ya tenga proveedor y
+    // bodega.
+    this.configLatch.set(this.orderCarriesFreight());
     this.contentEpoch.update((n) => n + 1);
+  }
+
+  /**
+   * C.5 — el paso avisa que el método de envío cambió. Elegir «Flete» ENCIENDE
+   * el latch para que el campo no pueda desaparecer del stepper en la misma
+   * sesión, y el valor sigue viaje al padre, que lo escribe en el carrito.
+   */
+  onConfigShippingMethodChange(value: string): void {
+    if (value === 'freight') this.configLatch.set(true);
+    this.configShippingMethodChange.emit(value);
   }
 
   // ── Navegación (no bloqueante) ───────────────────────────────────────────
@@ -331,6 +402,10 @@ export class PopCheckoutShellComponent {
     if (this.isProcessing()) return true;
     const pay = this.paymentStep();
     if (pay && !pay.isValid()) return true;
+    // A.5 — sin vista previa no se confirma una recepción: el operador estaría
+    // aprobando un costo de inventario que la pantalla nunca le mostró.
+    if (this.actionType() === 'create-receive' && this.costPreviewError())
+      return true;
     return false;
   });
 

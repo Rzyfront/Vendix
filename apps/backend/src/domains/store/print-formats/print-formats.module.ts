@@ -1,0 +1,82 @@
+import { Module, OnModuleInit } from '@nestjs/common';
+import { PrismaModule } from '../../../prisma/prisma.module';
+import { ResponseService } from '@common/responses/response.service';
+import { QrService } from '../../../common/services/qr.service';
+
+// Controllers
+import { PrintFormatsController } from './controllers/print-formats.controller';
+import { PrintTemplatesLibraryController } from './controllers/print-templates-library.controller';
+
+// Services
+import { PrintFormatsService } from './services/print-formats.service';
+import { PrintGatewayService } from './services/print-gateway.service';
+import { PrintTemplateCompilerService } from './services/print-template-compiler.service';
+import { PrintLayoutComposerService } from './services/print-layout-composer.service';
+import { PrintFiscalValidatorService } from './services/print-fiscal-validator.service';
+
+// Providers & Registry
+import { DocumentDataProviderRegistry } from './providers/document-data-provider.registry';
+import { PosSaleTicketDataProvider } from './providers/pos-sale-ticket.provider';
+import { SalesOrderInvoiceDataProvider } from './providers/sales-order-invoice.provider';
+import { DispatchNoteDataProvider } from './providers/dispatch-note.provider';
+import { QuotationDataProvider } from './providers/quotation.provider';
+import { CreditNoteDataProvider } from './providers/credit-note.provider';
+import { PurchaseOrderDataProvider } from './providers/purchase-order.provider';
+import { TransferNoteDataProvider } from './providers/transfer-note.provider';
+import { FiscalInvoiceDataProvider } from './providers/fiscal-invoice.provider';
+import { FiscalCreditNoteDataProvider } from './providers/fiscal-credit-note.provider';
+import { KitchenTicketDataProvider } from './providers/kitchen-ticket.provider';
+
+@Module({
+  imports: [PrismaModule],
+  controllers: [PrintFormatsController, PrintTemplatesLibraryController],
+  providers: [
+    ResponseService,
+    QrService,
+    PrintFormatsService,
+    PrintGatewayService,
+    PrintTemplateCompilerService,
+    PrintLayoutComposerService,
+    PrintFiscalValidatorService,
+    DocumentDataProviderRegistry,
+    PosSaleTicketDataProvider,
+    SalesOrderInvoiceDataProvider,
+    DispatchNoteDataProvider,
+    QuotationDataProvider,
+    CreditNoteDataProvider,
+    PurchaseOrderDataProvider,
+    TransferNoteDataProvider,
+    FiscalInvoiceDataProvider,
+    FiscalCreditNoteDataProvider,
+    KitchenTicketDataProvider,
+  ],
+  exports: [PrintGatewayService, PrintFormatsService],
+})
+export class PrintFormatsModule implements OnModuleInit {
+  constructor(
+    private readonly registry: DocumentDataProviderRegistry,
+    private readonly posSaleTicketProvider: PosSaleTicketDataProvider,
+    private readonly salesOrderInvoiceProvider: SalesOrderInvoiceDataProvider,
+    private readonly dispatchNoteProvider: DispatchNoteDataProvider,
+    private readonly quotationProvider: QuotationDataProvider,
+    private readonly creditNoteProvider: CreditNoteDataProvider,
+    private readonly purchaseOrderProvider: PurchaseOrderDataProvider,
+    private readonly transferNoteProvider: TransferNoteDataProvider,
+    private readonly fiscalInvoiceProvider: FiscalInvoiceDataProvider,
+    private readonly fiscalCreditNoteProvider: FiscalCreditNoteDataProvider,
+    private readonly kitchenTicketProvider: KitchenTicketDataProvider,
+  ) {}
+
+  onModuleInit() {
+    this.registry.register(this.posSaleTicketProvider);
+    this.registry.register(this.salesOrderInvoiceProvider);
+    this.registry.register(this.dispatchNoteProvider);
+    this.registry.register(this.quotationProvider);
+    this.registry.register(this.creditNoteProvider);
+    this.registry.register(this.purchaseOrderProvider);
+    this.registry.register(this.transferNoteProvider);
+    this.registry.register(this.fiscalInvoiceProvider);
+    this.registry.register(this.fiscalCreditNoteProvider);
+    this.registry.register(this.kitchenTicketProvider);
+  }
+}

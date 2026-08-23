@@ -1,14 +1,138 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, product_state_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { GlobalPrismaService } from '../../../../../prisma/services/global-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { OperatingScopeService } from '@common/services/operating-scope.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 
+/**
+ * Universo de ubicaciones que un agregado de costo puede mirar.
+ *
+ * OJO: NO es un fragmento `where` de Prisma. `store_id` aquí significa
+ * `(inventory_locations.store_id = <valor> OR inventory_locations.store_id IS
+ * NULL)` — la tienda MÁS la bodega central de la organización, que no cuelga de
+ * ninguna tienda. Ausente ⇒ toda la organización. La traducción a SQL vive en
+ * `buildLocationMembershipSql`, que es el ÚNICO consumidor.
+ */
 export interface ScopedLocationFilter {
   organization_id: number;
   store_id?: number;
+}
+
+/**
+ * CP-PURCHASE-TRANSPARENCY D.2 — el estado que saca a un producto del universo
+ * de costo.
+ *
+ * EL DEFECTO QUE CIERRA
+ * ---------------------
+ * Archivar un producto era un cambio de bandera invisible: `remove()` escribía
+ * `state='archived'` y NO tocaba `stock_levels`. Esas unidades seguían dentro
+ * del promedio ponderado. Medido en desarrollo: el producto 378, archivado, con
+ * 20.000 unidades a 3,00, hacía que una compra real a 100,00 cotizara un costo
+ * nuevo de 2,03 — el operador cree que borró el producto y el sistema le sigue
+ * promediando contra existencias fantasma.
+ *
+ * DÓNDE SE APLICA, Y DÓNDE NO
+ * ---------------------------
+ * El criterio es de UNIVERSO: un archivado no participa en un agregado que
+ * BARRE varias filas de un alcance (`getScopedStockAggregates`,
+ * `initializeCostLayers`). NO se aplica en `consumeCostLayers`, y no es un
+ * olvido: allí el producto viene FIJADO por el llamador, así que el filtro no
+ * podría cambiar QUÉ se consume — sólo negarse a costear. Y el primer llamador
+ * que consume stock de un producto archivado es justamente el castigo de
+ * inventario de D.4 (`adjustment_type='loss'`, `quantity_after=0`), cuyo COGS
+ * es la cifra que alimenta el asiento a 529505 «Faltantes de Inventario».
+ * Filtrar ahí dejaría todos los castigos valorados en CERO — exactamente la
+ * mudez contable que D.8 existe para evitar. Ver el comentario en
+ * `consumeCostLayers`.
+ */
+export const ARCHIVED_PRODUCT_STATE = product_state_enum.archived;
+
+/**
+ * Predicado SQL del universo activo, para la consulta cruda del agregado.
+ *
+ * SIN PARÁMETRO, A PROPÓSITO. `'archived'` es una constante de compilación, no
+ * entrada de usuario, así que va literal en la plantilla. Parametrizarla
+ * (`${ARCHIVED_PRODUCT_STATE}`) correría los índices `$n` de todos los
+ * parámetros que vienen después —organización y tienda incluidas— y el bloque
+ * A.0 del spec compara la CADENA SQL y los VALORES emitidos con `tx` y sin
+ * `tx`: un corrimiento silencioso ahí es el aviso de que el aislamiento entre
+ * organizaciones dejó de estar donde el spec cree.
+ *
+ * `IS DISTINCT FROM` y no `<>`: el `LEFT JOIN products` puede, en teoría,
+ * devolver `p.state` NULL; con `<>` la fila caería fuera por comparación NULL.
+ * Una fila de stock sin producto no es un archivado, es un huérfano, y su sitio
+ * es dentro del agregado (visible) y no fuera (silenciado).
+ */
+const ACTIVE_PRODUCT_STATE_SQL = Prisma.sql`p.state IS DISTINCT FROM 'archived'`;
+
+/**
+ * El MISMO criterio en forma de fragmento `where` de Prisma, para las lecturas
+ * del universo que no son crudas. Único punto de verdad junto a
+ * {@link ACTIVE_PRODUCT_STATE_SQL}: si un día el estado excluido cambia, cambia
+ * aquí y en la constante de arriba, no en cada `where` del dominio.
+ */
+export const ACTIVE_PRODUCT_RELATION_FILTER = {
+  products: { state: { not: ARCHIVED_PRODUCT_STATE } },
+} as const;
+
+/**
+ * Fila cruda del universo de stock. Los tres costos viajan juntos para que la
+ * cadena canónica de fallback (`cost_per_unit` → variante → producto → 0) se
+ * resuelva en TypeScript con la misma semántica `||` que el resto del servicio,
+ * en vez de reimplementarla en SQL con `NULLIF`/`COALESCE`.
+ *
+ * `product_id` / `product_variant_id` viajan porque la lectura es POR LOTE: una
+ * sola consulta trae el universo de varios pares y cada fila tiene que saber
+ * decir a cuál pertenece. Con una sola llave el `WHERE` ya las fija todas, pero
+ * atribuirlas por su propio par —siempre, sin caso especial— es lo que impide
+ * que un futuro llamador con dos llaves reciba el promedio de las dos juntas.
+ */
+interface ScopedStockRow {
+  product_id: number | string | null;
+  product_variant_id: number | string | null;
+  quantity_on_hand: number | string | null;
+  cost_per_unit: unknown;
+  variant_cost_price: unknown;
+  product_cost_price: unknown;
+}
+
+/**
+ * Par (producto, variante) sobre el que se agrega. `variant_id` ausente o nulo
+ * significa la fila BASE del producto, NO «cualquier variante»: el predicado
+ * emitido es `sl.product_variant_id IS NULL`.
+ */
+export interface ScopedStockKey {
+  product_id: number;
+  variant_id?: number | null;
+}
+
+/** Resultado del agregado para UN par. */
+export interface ScopedStockAggregate {
+  quantity: number;
+  cost_per_unit: number;
+}
+
+/**
+ * Llave textual del par, compartida por quien pide el lote y quien lee el
+ * resultado. Es una función exportada y no una plantilla repetida en cada
+ * llamador a propósito: dos consumidores que la escriban a mano acaban
+ * preguntando uno por `268:null` y otro por `268:base`, y el que falle recibe
+ * un cero indistinguible de «no hay stock» — es decir, una reactivación falsa
+ * que cotiza el costo entrante como si el inventario estuviera vacío.
+ *
+ * Colapsa por VERACIDAD (`||`, no `??`) para casar exactamente con el
+ * predicado emitido, que también decide por veracidad: cualquier variante
+ * falsa —`null`, `undefined`, `0`— es la fila BASE. Con `??`, un `0` daría la
+ * llave `268:0` mientras la consulta pediría `product_variant_id IS NULL` y
+ * atribuiría sus filas a `268:base`: el par pedido saldría en cero.
+ */
+export function scopedStockKey(
+  product_id: number,
+  variant_id?: number | null,
+): string {
+  return `${product_id}:${variant_id || 'base'}`;
 }
 
 export interface CalculateCostParams {
@@ -59,56 +183,182 @@ export class CostingService {
   ) {}
 
   /**
-   * QUI-425 — Weighted-average cost aggregate across the in-scope location set.
+   * Traduce el universo de ubicaciones a un predicado SQL EXPLÍCITO.
    *
-   * Reads via the UNSCOPED base client (`GlobalPrismaService`) on purpose:
-   * `buildScopedLocationFilter` already encodes the EXACT operating-scope
-   * predicate (STORE → same store, ORGANIZATION → whole org). Going through
-   * the store-scoped client would AND an extra
-   * `inventory_locations.store_id = <ctx store>` clause that silently DROPS
-   * org-level central warehouses (`store_id = null`) and sibling stores from
-   * the aggregate — which corrupted `cost_price`/`profit_margin` on receipt
-   * for ORGANIZATION-scope orgs (the general-inventory cost was ignored).
+   * Es el único punto donde se escribe la pertenencia, y se escribe entera:
+   * la organización SIEMPRE, y bajo alcance STORE también la tienda MÁS la
+   * bodega central (`store_id IS NULL`), que no cuelga de ninguna tienda pero
+   * sí alimenta el CPP de todas las de su organización.
    *
-   * Returns the scoped on-hand quantity and its weighted-average unit cost.
-   *
-   * Cuando llega `tx`, la lectura va POR el cliente transaccional: no por
-   * scoping —`$transaction` delega en el `baseClient` y por eso ya viene sin
-   * extensiones, que es justo lo que este agregado necesita— sino porque
-   * `globalPrisma` es otro `PrismaClient` con otro pool y NO ve lo escrito
-   * dentro de la transacción abierta. Con dos líneas del mismo producto en una
-   * recepción, el CPP por ubicación (que sí lee por `tx`) daba 150 y este
-   * agregado 200: `products.cost_price` quedaba en 200 y de ahí salía el precio
-   * publicado.
+   * El aislamiento entre organizaciones sale de AQUÍ, no del cliente que
+   * ejecute la consulta: `il.organization_id` no es opcional en ninguna rama.
    */
-  async getScopedStockAggregate(
-    params: { product_id: number; variant_id?: number; location_id: number },
+  private buildLocationMembershipSql(
+    filter: ScopedLocationFilter,
+  ): Prisma.Sql {
+    if (filter.store_id == null) {
+      return Prisma.sql`il.organization_id = ${filter.organization_id}`;
+    }
+    return Prisma.sql`il.organization_id = ${filter.organization_id} AND (il.store_id = ${filter.store_id} OR il.store_id IS NULL)`;
+  }
+
+  /**
+   * QUI-425 / A.12 — Universo de stock del CPP para VARIOS pares
+   * (producto, variante) a la vez, en UNA sola consulta.
+   *
+   * Es la forma canónica; {@link getScopedStockAggregate} es el caso de una
+   * llave y delega aquí. Hay UNA implementación del universo, no dos: el
+   * predicado de pertenencia, el filtro de estado y la cadena de fallback de
+   * costo se escriben una vez y valen igual para la recepción (una llave,
+   * dentro de `tx`) que para la vista previa (N llaves, sin `tx`). Dos
+   * implementaciones del mismo universo es exactamente la grieta que A.0
+   * cerró, y duplicarla para «optimizar la vista previa» la reabriría.
+   *
+   * POR QUÉ POR LOTE
+   * ----------------
+   * La vista previa de compra se redispara con CADA cambio del encabezado
+   * (proveedor, descuento, flete, fecha). A.12 sacó del bucle el producto, la
+   * variante, el stock por ubicación y la unidad de medida, pero este agregado
+   * se quedaba dentro: una orden de 30 renglones emitía 30 resoluciones de
+   * ubicación + 30 consultas de agregado, y el costo del endpoint crecía con
+   * el tamaño del carrito en vez de ser constante. Ahora la ubicación se
+   * resuelve UNA vez y el universo de todos los pares se lee en UNA consulta.
+   *
+   * QUÉ DEVUELVE
+   * ------------
+   * Un `Map` con una entrada POR CADA llave pedida —incluidas las que no
+   * tienen stock, sembradas en `{ quantity: 0, cost_per_unit: 0 }`—, de modo
+   * que el llamador nunca tiene que distinguir «no vino» de «vino en cero».
+   * Las llaves duplicadas se colapsan: dos renglones del mismo par comparten
+   * universo y el motor no lo resuelve dos veces.
+   *
+   * POR QUÉ ES UNA CONSULTA CRUDA Y NO `client.stock_levels.findMany` (A.0)
+   * -----------------------------------------------------------------------
+   * `StorePrismaService` SOBRESCRIBE `$transaction` para delegar en el cliente
+   * CON alcance (`store-prisma.service.ts` → `override $transaction(...)
+   * { return this.scoped_client.$transaction(...) }`), y su tabla de alcances
+   * relacionales incluye `stock_levels: { inventory_locations: { store_id } }`.
+   * Encima, `mergeScopedWhere` NO reemplaza ante colisión de clave: empuja el
+   * filtro de seguridad a un `AND`. Con el patrón anterior
+   * (`const client = tx ?? globalPrisma` + `findMany`) los dos caminos leían
+   * universos distintos:
+   *
+   *   · vista previa (SIN `tx`) → cliente sin alcance → valía SOLO el filtro
+   *     explícito, que incluye A PROPÓSITO la bodega central de la
+   *     organización (`inventory_locations.store_id IS NULL`);
+   *   · recepción (CON `tx`)   → cliente con alcance → se le ANDeaba
+   *     `store_id = <tienda del contexto>` y esa bodega quedaba FUERA.
+   *
+   * Medido sobre datos de desarrollo (producto 268, organización 6, tienda 10,
+   * comprando 10 unidades a 2.000.000): la vista previa agregaba 119 unidades y
+   * cotizaba 1.649.457,36; la recepción agregaba 25 y sellaba 1.728.571,43. Un
+   * 4,8 % entre la cifra que el operador aprueba y la que el sistema persiste.
+   *
+   * `$queryRaw` NO atraviesa las extensiones de Prisma: la extensión de alcance
+   * se registra por modelo y por operación (`findMany`, `update`, …), nunca
+   * sobre las operaciones crudas. Por eso la consulta cruda es inmune al
+   * alcance del cliente que la ejecute, y la pertenencia se escribe explícita
+   * en el `WHERE` vía `buildLocationMembershipSql`. El aislamiento entre
+   * organizaciones lo da ESE `WHERE` —`il.organization_id` en todas las
+   * ramas—, no el cliente Prisma.
+   *
+   * QUÉ CLIENTE LA EJECUTA, Y POR QUÉ
+   * ---------------------------------
+   * · CON `tx` → el propio handle transaccional. No por el alcance (ya no
+   *   importa: la consulta es cruda) sino por VISIBILIDAD: `globalPrisma` es
+   *   otro `PrismaClient` con otro pool y NO ve lo escrito dentro de la
+   *   transacción abierta. Con dos líneas del mismo producto en una recepción,
+   *   el CPP por ubicación (que sí lee por `tx`) daba 150 y este agregado 200:
+   *   `products.cost_price` quedaba en 200 y de ahí salía el precio publicado.
+   * · SIN `tx` → `globalPrisma.withoutScope()`, el `PrismaClient` desnudo.
+   *   `BasePrismaService` sólo expone `$queryRawUnsafe`, no `$queryRaw`, así
+   *   que hay que bajar al cliente base para usar plantillas parametrizadas.
+   *
+   * QUÉ QUEDA FUERA DEL UNIVERSO (D.2)
+   * ----------------------------------
+   * El stock de un producto `state='archived'`. Ver
+   * {@link ARCHIVED_PRODUCT_STATE}. Las variantes se filtran por el estado de
+   * su producto PADRE: `product_variants` no tiene columna `state`, y el `JOIN
+   * products p ON p.id = sl.product_id` ya cuelga toda fila de stock —base o de
+   * variante— del producto que la posee.
+   */
+  async getScopedStockAggregates(
+    params: { keys: ScopedStockKey[]; location_id: number },
     tx?: any,
-  ): Promise<{ quantity: number; cost_per_unit: number }> {
+  ): Promise<Map<string, ScopedStockAggregate>> {
+    // Se siembra con ceros ANTES de consultar: el contrato es «una entrada por
+    // llave pedida», no «una entrada por llave con stock».
+    const aggregates = new Map<string, ScopedStockAggregate>();
+    const uniqueKeys = new Map<string, ScopedStockKey>();
+    for (const key of params.keys) {
+      if (!key?.product_id) continue;
+      const id = scopedStockKey(key.product_id, key.variant_id ?? null);
+      aggregates.set(id, { quantity: 0, cost_per_unit: 0 });
+      if (!uniqueKeys.has(id)) uniqueKeys.set(id, key);
+    }
+
+    // Sin llaves no hay universo que agregar. Se sale ANTES de resolver la
+    // ubicación: no es un atajo de aislamiento —no se devuelve ningún dato—
+    // sino la negativa a cobrar dos consultas por una respuesta vacía.
+    if (uniqueKeys.size === 0) return aggregates;
+
     const organizationId = this.getOrganizationId();
     const locationFilter = await this.buildScopedLocationFilter(
       organizationId,
       params.location_id,
       tx,
     );
-    const client = tx ?? this.globalPrisma;
-    const rows = await client.stock_levels.findMany({
-      where: {
-        product_id: params.product_id,
-        product_variant_id: params.variant_id || null,
-        quantity_on_hand: { gt: 0 },
-        inventory_locations: { is: locationFilter },
-      },
-      include: {
-        products: { select: { cost_price: true } },
-        product_variants: { select: { cost_price: true } },
-      },
-    });
-    const quantity = (rows as any[]).reduce(
-      (sum: number, sl: any) => sum + (sl.quantity_on_hand ?? 0),
-      0,
+    const membership = this.buildLocationMembershipSql(locationFilter);
+
+    // Un OR de pares EXACTOS, no `product_id IN (…)`: la variante forma parte
+    // de la llave, y un `IN` de productos traería las filas de TODAS las
+    // variantes de cada producto pedido. El orden de los parámetros es
+    // [pares…, organización, (tienda)] — el mismo que emitía la versión de una
+    // sola llave, que es lo que el bloque A.0 del spec fija por índice `$n`.
+    const pairPredicates = Array.from(uniqueKeys.values()).map((key) =>
+      key.variant_id
+        ? Prisma.sql`(sl.product_id = ${key.product_id} AND sl.product_variant_id = ${key.variant_id})`
+        : Prisma.sql`(sl.product_id = ${key.product_id} AND sl.product_variant_id IS NULL)`,
     );
-    const value = (rows as any[]).reduce((sum: number, sl: any) => {
+    const pairs = Prisma.join(pairPredicates, ' OR ');
+
+    // `tx` es `any` (el handle transaccional viaja sin tipar por todo el
+    // dominio), así que el argumento de tipo se aplica al resultado, no a la
+    // llamada: TS prohíbe pasar type arguments a una invocación `any`.
+    const client = tx ?? this.globalPrisma.withoutScope();
+    const rows: ScopedStockRow[] = await client.$queryRaw(Prisma.sql`
+      SELECT sl.product_id         AS product_id,
+             sl.product_variant_id AS product_variant_id,
+             sl.quantity_on_hand   AS quantity_on_hand,
+             sl.cost_per_unit      AS cost_per_unit,
+             pv.cost_price         AS variant_cost_price,
+             p.cost_price          AS product_cost_price
+        FROM stock_levels sl
+        JOIN inventory_locations il ON il.id = sl.location_id
+        LEFT JOIN products p ON p.id = sl.product_id
+        LEFT JOIN product_variants pv ON pv.id = sl.product_variant_id
+       WHERE (${pairs})
+         AND sl.quantity_on_hand > 0
+         AND (${ACTIVE_PRODUCT_STATE_SQL})
+         AND (${membership})
+    `);
+
+    // Valor acumulado aparte de la cantidad: el promedio se cierra al final,
+    // igual que hacía la versión de una llave (dos `reduce` sobre el mismo
+    // conjunto), para que la aritmética en punto flotante sea la MISMA.
+    const valueByKey = new Map<string, number>();
+    for (const row of rows as any[]) {
+      const id = scopedStockKey(
+        Number(row.product_id),
+        row.product_variant_id == null ? null : Number(row.product_variant_id),
+      );
+      const bucket = aggregates.get(id);
+      // El `WHERE` no puede producir una fila fuera de las llaves pedidas.
+      // Descartarla en silencio es preferible a inventarle un cubo: si algún
+      // día pudiera, la contaminación sería del promedio de otro par.
+      if (!bucket) continue;
+
+      const quantity = Number(row.quantity_on_hand ?? 0);
       // Fix colapso CPP: `stock_levels.cost_per_unit` nace NULL en todo camino
       // de escritura que no sea recepción de compra (crear/editar producto,
       // variantes, importación, ajustes, seeds). Sin fallback, ese stock aporta
@@ -118,27 +368,83 @@ export class CostingService {
       // `||` (no `??`) A PROPÓSITO para que un 0 espurio caiga al siguiente
       // eslabón.
       const effectiveCost =
-        Number(sl.cost_per_unit) ||
-        Number(sl.product_variants?.cost_price) ||
-        Number(sl.products?.cost_price) ||
+        Number(row.cost_per_unit) ||
+        Number(row.variant_cost_price) ||
+        Number(row.product_cost_price) ||
         0;
-      return sum + (sl.quantity_on_hand ?? 0) * effectiveCost;
-    }, 0);
-    return { quantity, cost_per_unit: quantity > 0 ? value / quantity : 0 };
+
+      bucket.quantity += quantity;
+      valueByKey.set(id, (valueByKey.get(id) ?? 0) + quantity * effectiveCost);
+    }
+
+    for (const [id, aggregate] of aggregates) {
+      aggregate.cost_per_unit =
+        aggregate.quantity > 0
+          ? (valueByKey.get(id) ?? 0) / aggregate.quantity
+          : 0;
+    }
+
+    return aggregates;
   }
 
   /**
-   * Build a scoped `inventory_locations` filter for cost aggregates based on
-   * the organization's operating scope:
+   * QUI-425 — Universo de stock del CPP para UN par (producto, variante):
+   * promedio ponderado sobre TODAS las ubicaciones en alcance. Con `tx` y sin
+   * `tx` agrega EXACTAMENTE el mismo conjunto; esa igualdad es el contrato.
    *
-   * - STORE → constrains to the same `store_id` as the receiving location
-   *   (org-level central warehouses without a `store_id` fall back to org-level).
-   * - ORGANIZATION → constrains to the entire organization.
+   * A.12 — el cuerpo vive en {@link getScopedStockAggregates}, que es la forma
+   * canónica y documenta el mecanismo entero (consulta cruda, elección de
+   * cliente, aislamiento por `WHERE`, exclusión de archivados). Esta firma se
+   * conserva porque la recepción agrega un solo par por ítem dentro de su
+   * transacción; delegar en vez de duplicar es lo que garantiza que la consulta
+   * emitida siga siendo la MISMA que la de la vista previa —misma cadena,
+   * mismos parámetros posicionales—, que es el contrato que el bloque A.0 del
+   * spec verifica.
    *
-   * Validates that the location belongs to the given organization. Used by
-   * `calculateCostOnReceipt` and by `getCostPreview` (purchase orders) so the
-   * weighted-average cost never aggregates stock across organizations or, in
-   * STORE scope, across sibling stores.
+   * Devuelve la cantidad en alcance y su costo unitario promedio ponderado.
+   */
+  async getScopedStockAggregate(
+    params: { product_id: number; variant_id?: number; location_id: number },
+    tx?: any,
+  ): Promise<ScopedStockAggregate> {
+    const aggregates = await this.getScopedStockAggregates(
+      {
+        keys: [
+          { product_id: params.product_id, variant_id: params.variant_id },
+        ],
+        location_id: params.location_id,
+      },
+      tx,
+    );
+    return (
+      aggregates.get(scopedStockKey(params.product_id, params.variant_id)) ?? {
+        quantity: 0,
+        cost_per_unit: 0,
+      }
+    );
+  }
+
+  /**
+   * Resuelve el universo de ubicaciones del agregado de costo según el alcance
+   * operativo de la organización:
+   *
+   * - STORE, ubicación receptora atada a una tienda → esa tienda MÁS la bodega
+   *   central de la organización (`store_id IS NULL`). La bodega central entra
+   *   A PROPÓSITO: es inventario de la organización que surte a sus tiendas, y
+   *   dejarla fuera hacía que el CPP de la tienda ignorara el costo del grueso
+   *   de las existencias.
+   * - STORE, ubicación receptora SIN tienda (la propia bodega central) → toda
+   *   la organización. No hay tienda desde la cual estrechar.
+   * - ORGANIZATION → toda la organización.
+   *
+   * Valida que la ubicación pertenezca a la organización dada: cruzar
+   * organizaciones lanza `INV_LOCATION_NOT_IN_ORG` antes de tocar stock.
+   *
+   * Lo consume `getScopedStockAggregates` (recepción y vista previa por igual,
+   * una llave o N) a través de `buildLocationMembershipSql`. Se resuelve UNA
+   * vez por lote: la ubicación receptora es de la cabecera de la compra, no de
+   * la línea. El resultado NO es un `where` de
+   * Prisma — ver {@link ScopedLocationFilter}.
    */
   async buildScopedLocationFilter(
     organizationId: number,
@@ -168,7 +474,11 @@ export class CostingService {
 
     if (scope === 'STORE') {
       if (location.store_id == null) {
-        this.logger.warn(
+        // `debug`, no `warn`: recibir en la bodega central de la organización
+        // es el comportamiento DISEÑADO, no una anomalía. Se emitía una vez por
+        // ítem en cada vista previa de costo, así que como `warn` era ~el 90 %
+        // del volumen del log y tapaba los avisos que sí exigen mirar.
+        this.logger.debug(
           `Location ${locationId} has scope STORE but store_id is null; ` +
             `falling back to ORGANIZATION-level cost aggregate.`,
         );
@@ -220,11 +530,12 @@ export class CostingService {
       Number(stockLevel?.products?.cost_price) ||
       0;
 
-    // Scoped stock aggregate (multi-tenant safe): aggregate across the same
-    // store (STORE scope) or organization (ORGANIZATION scope) — never cross
-    // organizations or, in STORE scope, sibling stores. Reads via the UNSCOPED
-    // base client so org-level central warehouses (store_id = null) and sibling
-    // stores are included for ORGANIZATION scope — see getScopedStockAggregate.
+    // Agregado de stock en alcance (multi-tenant seguro): misma tienda más la
+    // bodega central bajo alcance STORE, o toda la organización bajo alcance
+    // ORGANIZATION — nunca a través de organizaciones. Lee por consulta cruda
+    // para que el conjunto agregado sea IDÉNTICO aquí (dentro de `tx`, con
+    // cliente scopeado) y en la vista previa (sin `tx`, cliente sin alcance):
+    // ver getScopedStockAggregate.
     const { quantity: scopedQty, cost_per_unit: scopedCost } =
       await this.getScopedStockAggregate(
         {
@@ -324,6 +635,15 @@ export class CostingService {
   /**
    * Consume cost layers when selling/removing stock.
    * Returns the total COGS (Cost of Goods Sold) for the consumed quantity.
+   *
+   * D.2 — AQUÍ NO SE FILTRA POR `state`, y es una decisión, no un olvido.
+   * El producto viene fijado por el llamador (`params.product_id`), así que el
+   * filtro no podría cambiar QUÉ capas se consumen: sólo podría negarse a
+   * costearlas y devolver 0. El primer llamador que consume stock de un
+   * producto archivado es el castigo de inventario de D.4, y ese 0 sería
+   * justamente el COGS del asiento de faltantes. El universo activo se impone
+   * en los agregados que barren varias filas —`getScopedStockAggregates` e
+   * `initializeCostLayers`—, que es donde el archivado contamina.
    */
   async consumeCostLayers(
     params: ConsumeCostParams,
@@ -492,6 +812,11 @@ export class CostingService {
     const stockLevels = await prisma.stock_levels.findMany({
       where: {
         quantity_on_hand: { gt: 0 },
+        // D.2 — mismo universo que `getScopedStockAggregates`: sembrar capas de
+        // costo para un producto archivado reintroduciría por la puerta de
+        // atrás las existencias que el agregado acaba de dejar fuera, y un
+        // futuro cambio a FIFO las costearía como si estuvieran vivas.
+        ...ACTIVE_PRODUCT_RELATION_FILTER,
       },
       include: {
         products: {

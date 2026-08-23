@@ -34,6 +34,17 @@ export interface BatchAdjustmentInput {
  * necesita saber exactamente qué se aplicó para no reportar como fallida una
  * fila cuyo stock ya se movió.
  */
+/**
+ * Lo que devuelve un ajuste creado DENTRO de una transacción ajena. Lleva el
+ * `cost_amount` porque el evento contable se emite después del commit y el
+ * llamador lo necesita para decidir si hay algo que anunciar.
+ */
+export interface AdjustmentTransactionResult {
+  adjustment: InventoryAdjustment;
+  quantity_change: number;
+  cost_amount: number;
+}
+
 export type BatchAdjustmentOutcome =
   | { index: number; ok: true; adjustment: InventoryAdjustment }
   | { index: number; ok: false; error: any };
@@ -117,6 +128,31 @@ export class InventoryAdjustmentsService {
     data: CreateAdjustmentDto,
     options: { approvedByUserId?: number } = {},
   ): Promise<InventoryAdjustment> {
+    const { organizationId, userId } = this.resolveAdjustmentActor();
+
+    // `timeout` explícito: ahora la transacción cubre también el movimiento de
+    // stock, el espejo denormalizado y el snapshot de valoración, que antes
+    // corrían fuera. Los 5 s por defecto de Prisma se quedan cortos en un
+    // producto con muchas ubicaciones o variantes.
+    const adjustment_result = await this.prisma.$transaction(
+      (prisma) => this.createAdjustmentInTransaction(prisma, data, options),
+      { timeout: 30_000, maxWait: 10_000 },
+    );
+
+    this.emitInventoryAdjusted(adjustment_result, organizationId, userId);
+
+    return adjustment_result.adjustment;
+  }
+
+  /**
+   * Resuelve organización y usuario del contexto de petición. Extraído para que
+   * el llamador que abre SU PROPIA transacción los tenga ANTES de abrirla: el
+   * evento contable se emite después del commit y necesita los dos.
+   */
+  private resolveAdjustmentActor(): {
+    organizationId: number;
+    userId: number | null;
+  } {
     const orgIdRaw = RequestContextService.getOrganizationId();
     const userIdRaw = RequestContextService.getUserId();
 
@@ -131,113 +167,151 @@ export class InventoryAdjustmentsService {
       throw new BadRequestException('Invalid organization ID in context');
     }
 
-    const adjustment_result = await this.prisma.$transaction(async (prisma) => {
-      // Ensure IDs are numbers (handling string payload from frontend)
-      const productId = Number(data.product_id);
-      const locationId = Number(data.location_id);
-      const variantId = data.product_variant_id
-        ? Number(data.product_variant_id)
-        : null;
-      const batchId = data.batch_id ? Number(data.batch_id) : null;
-      const quantityAfter = Number(data.quantity_after);
+    return { organizationId, userId };
+  }
 
-      // 1. Validar que el adjustment_type sea válido
-      const validTypes: AdjustmentType[] = [
-        'damage',
-        'loss',
-        'theft',
-        'expiration',
-        'count_variance',
-        'manual_correction',
-      ];
-      if (!validTypes.includes(data.type)) {
-        throw new BadRequestException(`Invalid adjustment type: ${data.type}`);
-      }
+  /**
+   * EL MISMO ajuste, pero DENTRO de la transacción del llamador.
+   *
+   * Existe por CP-PURCHASE-TRANSPARENCY D.4: archivar un producto con
+   * existencias tiene que dar de baja el stock Y escribir `state='archived'` Y
+   * dejar su fila de auditoría en UN solo comprobante. Con `createAdjustment`
+   * eso era imposible: abre su propia transacción, y anidar
+   * `$transaction` dentro de otra en Prisma no anida — toma OTRA conexión del
+   * pool, que ni ve lo escrito por la transacción exterior ni revierte con ella
+   * (ver `reference_prisma_pool_starvation_this_prisma_in_tx`).
+   *
+   * NO emite el evento contable: el llamador es el dueño del commit, así que es
+   * el único que sabe cuándo emitirlo sin anunciar un hecho que puede
+   * revertirse. Usa {@link emitInventoryAdjusted} después del commit.
+   */
+  async createAdjustmentInTransaction(
+    prismaTx: any,
+    data: CreateAdjustmentDto,
+    options: { approvedByUserId?: number } = {},
+  ): Promise<AdjustmentTransactionResult> {
+    const { organizationId, userId } = this.resolveAdjustmentActor();
 
-      let quantityBefore: number;
-      let quantityChange: number;
+    // `prisma` es el handle de la transacción del llamador: todas las lecturas
+    // y escrituras de aquí abajo viajan en ESE comprobante.
+    const prisma = prismaTx;
 
-      // 2. Determinar la cantidad actual según si es ajuste de lote o de stock general
-      if (batchId) {
-        // Ajuste a nivel de LOTE
-        const batch = await prisma.inventory_batches.findUnique({
-          where: { id: batchId },
-        });
+    // Ensure IDs are numbers (handling string payload from frontend)
+    const productId = Number(data.product_id);
+    const locationId = Number(data.location_id);
+    const variantId = data.product_variant_id
+      ? Number(data.product_variant_id)
+      : null;
+    const batchId = data.batch_id ? Number(data.batch_id) : null;
+    const quantityAfter = Number(data.quantity_after);
 
-        if (!batch) {
-          throw new VendixHttpException(ErrorCodes.INV_ADJ_001);
-        }
+    // 1. Validar que el adjustment_type sea válido
+    const validTypes: AdjustmentType[] = [
+      'damage',
+      'loss',
+      'theft',
+      'expiration',
+      'count_variance',
+      'manual_correction',
+    ];
+    if (!validTypes.includes(data.type)) {
+      throw new BadRequestException(`Invalid adjustment type: ${data.type}`);
+    }
 
-        if (batch.product_id !== productId) {
-          throw new VendixHttpException(ErrorCodes.INV_VALIDATE_001);
-        }
+    let quantityBefore: number;
+    let quantityChange: number;
 
-        if (batch.location_id !== locationId) {
-          throw new VendixHttpException(ErrorCodes.INV_VALIDATE_001);
-        }
-
-        // Cantidad actual del lote (quantity - quantity_used)
-        quantityBefore = batch.quantity - batch.quantity_used;
-        quantityChange = quantityAfter - quantityBefore;
-
-        // Actualizar el lote
-        const newQuantity = batch.quantity + quantityChange;
-        if (newQuantity < batch.quantity_used) {
-          throw new BadRequestException(
-            'Cannot reduce batch quantity below used amount',
-          );
-        }
-
-        await prisma.inventory_batches.update({
-          where: { id: batchId },
-          data: {
-            quantity: newQuantity,
-            updated_at: new Date(),
-          },
-        });
-      } else {
-        // Ajuste a nivel de STOCK GENERAL (bodega)
-        // Usamos findFirst porque el índice único incluye product_variant_id que es nullable
-        const currentStockLevel = await prisma.stock_levels.findFirst({
-          where: {
-            product_id: productId,
-            product_variant_id: variantId, // null se maneja correctamente con findFirst
-            location_id: locationId,
-          },
-        });
-
-        if (!currentStockLevel) {
-          throw new VendixHttpException(ErrorCodes.INV_FIND_001);
-        }
-
-        quantityBefore = currentStockLevel.quantity_on_hand;
-        quantityChange = quantityAfter - quantityBefore;
-      }
-
-      // 3. Crear registro de ajuste
-      const adjustment = await prisma.inventory_adjustments.create({
-        data: {
-          organization_id: organizationId,
-          product_id: productId,
-          product_variant_id: variantId,
-          location_id: locationId,
-          batch_id: batchId,
-          adjustment_type: data.type as any,
-          quantity_before: quantityBefore,
-          quantity_after: quantityAfter,
-          quantity_change: quantityChange,
-          reason_code: data.reason_code || null,
-          description: data.description || null,
-          created_by_user_id: userId ?? null,
-          approved_by_user_id: options.approvedByUserId ?? null,
-          approved_at: options.approvedByUserId ? new Date() : null,
-          created_at: new Date(),
-        },
-        include: ADJUSTMENT_INCLUDE,
+    // 2. Determinar la cantidad actual según si es ajuste de lote o de stock general
+    if (batchId) {
+      // Ajuste a nivel de LOTE
+      const batch = await prisma.inventory_batches.findUnique({
+        where: { id: batchId },
       });
 
-      // 4. Actualizar stock levels (siempre, tanto para lote como para stock general)
-      const stockUpdate = await this.stockLevelManager.updateStock({
+      if (!batch) {
+        throw new VendixHttpException(ErrorCodes.INV_ADJ_001);
+      }
+
+      if (batch.product_id !== productId) {
+        throw new VendixHttpException(ErrorCodes.INV_VALIDATE_001);
+      }
+
+      if (batch.location_id !== locationId) {
+        throw new VendixHttpException(ErrorCodes.INV_VALIDATE_001);
+      }
+
+      // Cantidad actual del lote (quantity - quantity_used)
+      quantityBefore = batch.quantity - batch.quantity_used;
+      quantityChange = quantityAfter - quantityBefore;
+
+      // Actualizar el lote
+      const newQuantity = batch.quantity + quantityChange;
+      if (newQuantity < batch.quantity_used) {
+        throw new BadRequestException(
+          'Cannot reduce batch quantity below used amount',
+        );
+      }
+
+      await prisma.inventory_batches.update({
+        where: { id: batchId },
+        data: {
+          quantity: newQuantity,
+          updated_at: new Date(),
+        },
+      });
+    } else {
+      // Ajuste a nivel de STOCK GENERAL (bodega)
+      // Usamos findFirst porque el índice único incluye product_variant_id que es nullable
+      const currentStockLevel = await prisma.stock_levels.findFirst({
+        where: {
+          product_id: productId,
+          product_variant_id: variantId, // null se maneja correctamente con findFirst
+          location_id: locationId,
+        },
+      });
+
+      if (!currentStockLevel) {
+        throw new VendixHttpException(ErrorCodes.INV_FIND_001);
+      }
+
+      quantityBefore = currentStockLevel.quantity_on_hand;
+      quantityChange = quantityAfter - quantityBefore;
+    }
+
+    // 3. Crear registro de ajuste
+    const adjustment = await prisma.inventory_adjustments.create({
+      data: {
+        organization_id: organizationId,
+        product_id: productId,
+        product_variant_id: variantId,
+        location_id: locationId,
+        batch_id: batchId,
+        adjustment_type: data.type as any,
+        quantity_before: quantityBefore,
+        quantity_after: quantityAfter,
+        quantity_change: quantityChange,
+        reason_code: data.reason_code || null,
+        description: data.description || null,
+        created_by_user_id: userId ?? null,
+        approved_by_user_id: options.approvedByUserId ?? null,
+        approved_at: options.approvedByUserId ? new Date() : null,
+        created_at: new Date(),
+      },
+      include: ADJUSTMENT_INCLUDE,
+    });
+
+    // 4. Actualizar stock levels (siempre, tanto para lote como para stock general)
+    //
+    // El `prisma` del segundo argumento NO es cosmético. Esta llamada iba SIN
+    // handle: `updateStock` abría entonces `this.prisma.$transaction` por su
+    // cuenta, así que la fila de `inventory_adjustments` y el movimiento de
+    // stock que la justifica vivían en DOS transacciones distintas. Si el
+    // ajuste fallaba después, la fila revertía y el stock ya movido se quedaba
+    // movido; y cada ajuste consumía dos conexiones del pool a la vez. Pasarle
+    // el handle mete las dos escrituras en el mismo comprobante, que es lo que
+    // el código siempre pareció hacer.
+    const stockUpdate = await this.stockLevelManager.updateStock(
+      {
         product_id: productId,
         variant_id: variantId ?? undefined,
         location_id: locationId,
@@ -247,36 +321,57 @@ export class InventoryAdjustmentsService {
         user_id: userId || undefined,
         create_movement: true,
         validate_availability: false,
-      });
+      },
+      prisma,
+    );
 
-      // 5. Transformar respuesta para mapear nombres de relaciones
-      return {
-        adjustment: this.mapAdjustmentResponse(adjustment),
-        quantity_change: quantityChange,
-        cost_amount: Number(stockUpdate.cost_snapshot?.total_cost || 0),
-      };
-    });
+    // 5. Transformar respuesta para mapear nombres de relaciones
+    return {
+      adjustment: this.mapAdjustmentResponse(adjustment),
+      quantity_change: quantityChange,
+      cost_amount: Number(stockUpdate.cost_snapshot?.total_cost || 0),
+    };
+  }
 
-    // Emit inventory.adjusted for accounting after successful transaction
+  /**
+   * Anuncia el ajuste a la contabilidad. SIEMPRE después del commit.
+   *
+   * LA COMPUERTA `cost_amount > 0` NO ES UN DESCUIDO Y TAMPOCO ES INOCUA.
+   * Un asiento por valor cero no es un asiento, así que emitirlo sólo
+   * ensuciaría el libro. Pero la consecuencia hay que decirla en voz alta: el
+   * 63,9 % de las unidades fantasma medidas en desarrollo (1.122.249 de
+   * 1.756.346) tienen costo efectivo CERO tras agotar la cadena canónica
+   * completa —`stock_levels.cost_per_unit` → `product_variants.cost_price` →
+   * `products.cost_price`—, así que la mayoría de los castigos de D.4 no
+   * producirá asiento. Por eso el rastro de esas bajas NO puede depender de
+   * este evento: la fila de `audit_logs` que D.8 escribe DENTRO de la
+   * transacción lleva las unidades, el costo unitario resuelto y el valor de
+   * cada línea, y marca explícitamente cuáles se destruyeron sin valor
+   * conocido. Valor cero ahí significa «costo desconocido», no «mercancía
+   * gratis».
+   */
+  emitInventoryAdjusted(
+    result: AdjustmentTransactionResult,
+    organizationId: number,
+    userId: number | null,
+  ): void {
     try {
-      const cost_amount = Math.abs(Number(adjustment_result.cost_amount || 0));
+      const cost_amount = Math.abs(Number(result.cost_amount || 0));
       if (cost_amount > 0) {
         this.eventEmitter.emit('inventory.adjusted', {
-          adjustment_id: adjustment_result.adjustment.id,
+          adjustment_id: result.adjustment.id,
           organization_id: organizationId,
-          store_id: adjustment_result.adjustment.inventory_locations?.store_id,
-          quantity_change: adjustment_result.quantity_change,
+          store_id: result.adjustment.inventory_locations?.store_id,
+          quantity_change: result.quantity_change,
           cost_amount,
           user_id: userId,
         });
       }
     } catch (error) {
       this.logger.error(
-        `Failed to emit inventory.adjusted for adjustment #${adjustment_result.adjustment.id}: ${error.message}`,
+        `Failed to emit inventory.adjusted for adjustment #${result.adjustment.id}: ${error.message}`,
       );
     }
-
-    return adjustment_result.adjustment;
   }
 
   /**

@@ -108,4 +108,61 @@
       ></app-selector>
     </div>
   </section>
+
+  <!--
+    C.5 — Flete. Aparece SÓLO con entrega por flete: pintarlo siempre haría que
+    el operador capturara flete en compras de mostrador e inflara el costo del
+    inventario. Al cambiar de método el monto se limpia (no queda flete
+    fantasma en el estado del carrito).
+  -->
+  @if (isFreight()) {
+    <section class="cfg-section cfg-section--freight">
+      <div class="cfg-field">
+        <label class="cfg-label" for="pop-config-shipping-cost">
+          Costo del flete
+        </label>
+        <app-input
+          id="pop-config-shipping-cost"
+          size="sm"
+          [currency]="true"
+          [currencyDecimals]="2"
+          [formControl]="form.controls.shippingCost"
+          [control]="form.controls.shippingCost"
+          [placeholder]="'0'"
+          customWrapperClass="!mt-0"
+          (inputChange)="onShippingCostChange($event)"
+        ></app-input>
+        @if (shippingCostError()) {
+          <p class="cfg-error">{{ shippingCostError() }}</p>
+        }
+      </div>
+
+      <!--
+        CP-PURCHASE-TRANSPARENCY (T2/D.1) — sin flete el conmutador queda
+        INACTIVO y se dice qué falta. Antes quedaba armado: al pulsarlo
+        `app-toggle` se pintaba solo, `PopCartService` descartaba el modo en
+        silencio (rechaza la imputación sin monto) y la pantalla afirmaba una
+        imputación que el carrito no tenía.
+      -->
+      <div class="cfg-allocation">
+        <app-toggle
+          [checked]="isProrate()"
+          [disabled]="!hasShippingCost()"
+          label="Prorratear el flete en el costo de los productos"
+          ariaLabel="Prorratear el flete en el costo de los productos"
+          (toggled)="onAllocationToggle($event)"
+        ></app-toggle>
+        @if (!hasShippingCost()) {
+          <p class="cfg-allocation-blocked">
+            Escribe primero el costo del flete: sin monto no hay nada que
+            repartir, así que la imputación no se puede elegir todavía.
+          </p>
+        }
+        <p class="cfg-allocation-mode">
+          {{ isProrate() ? 'Prorratear' : 'Asumirlo como costo de la orden' }}
+        </p>
+        <p class="cfg-allocation-legend">{{ allocationLegend() }}</p>
+      </div>
+    </section>
+  }
 </div>

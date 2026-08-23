@@ -1,9 +1,11 @@
 import {
   IsOptional,
   IsNumber,
+  IsPositive,
   IsString,
   IsBoolean,
   IsArray,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -140,6 +142,94 @@ export interface ProductCandidate {
   confidence: number;
 }
 
+/**
+ * CP-PURCHASE-TRANSPARENCY — referencia a un producto ARCHIVADO que el
+ * emparejador reconoció y descartó a propósito.
+ *
+ * Viaja estructurada, no dentro de la cadena del aviso, porque la interfaz
+ * tiene que poder pintar el nombre y el SKU pegados al renglón sin partir
+ * texto: un motivo que obliga a parsear una frase no sirve.
+ */
+export interface ArchivedProductRef {
+  id: number;
+  name: string;
+  sku: string | null;
+}
+
+/**
+ * CP-PURCHASE-TRANSPARENCY — por qué esta línea quedó como quedó, en el
+ * eje del EMPAREJAMIENTO.
+ *
+ * | valor                     | qué pasó                                                        |
+ * | ------------------------- | --------------------------------------------------------------- |
+ * | `archived_candidate`      | El único producto reconocido está archivado; la línea NO se emparejó. |
+ * | `archived_sku_reassigned` | El SKU impreso es de un archivado, pero se propuso otro producto activo. |
+ * | `no_catalog_match`        | Ningún producto del catálogo coincidió.                          |
+ * | `lookup_failed`           | La búsqueda falló (error transitorio); la línea llegó sin candidatos. |
+ *
+ * Ausente cuando el emparejamiento fue limpio y no hay nada que explicar.
+ */
+export type MatchedLineReason =
+  | 'archived_candidate'
+  | 'archived_sku_reassigned'
+  | 'no_catalog_match'
+  | 'lookup_failed';
+
+/**
+ * CP-PURCHASE-TRANSPARENCY I.b — por qué la CANTIDAD de la línea no es la
+ * que imprime la factura.
+ *
+ * | valor                               | qué pasó                                                          |
+ * | ----------------------------------- | ------------------------------------------------------------------ |
+ * | `converted_to_stock_units`          | Se convirtió con el factor de envase; el total de la línea no cambió. |
+ * | `rounded_unmatched_line`            | Se redondeó: la línea aún no tiene producto, no hay factor que aplicar. |
+ * | `rounded_no_packaging_factor`       | Se redondeó: el producto no declara factor de envase.               |
+ * | `rounded_factor_applied_at_receipt` | Se redondeó: el factor se aplica al RECIBIR, convertir acá duplicaría. |
+ * | `rounded_conversion_not_exact`      | Se redondeó: convertir con el factor tampoco daba un entero.        |
+ */
+export type QuantityAdjustmentReason =
+  | 'converted_to_stock_units'
+  | 'rounded_unmatched_line'
+  | 'rounded_no_packaging_factor'
+  | 'rounded_factor_applied_at_receipt'
+  | 'rounded_conversion_not_exact';
+
+/**
+ * CP-PURCHASE-TRANSPARENCY I.b — el ajuste de cantidad, completo y tipado.
+ *
+ * `purchase_order_items.quantity_ordered` es `Int`, así que una factura que
+ * dice «2,5 cajas» no se puede guardar tal cual. El escáner decide qué entero
+ * entra al carrito y esta estructura cuenta la decisión con TODAS las cifras
+ * que la pantalla necesita — original, aplicada, factor, precios — para que el
+ * operador vea el antes y el después sin abrir la factura otra vez.
+ */
+export interface QuantityAdjustment {
+  reason: QuantityAdjustmentReason;
+  /** Cantidad tal como la imprime la factura (puede ser fraccionaria). */
+  original_quantity: number;
+  /** Entero que quedó en la línea. Nunca menor que 1 (`@Min(1)` en el DTO). */
+  applied_quantity: number;
+  /** Costo unitario antes del ajuste. */
+  original_unit_price: number;
+  /**
+   * Costo unitario después. Igual al original salvo en la conversión, donde
+   * se divide por el factor para que el total de la línea no se mueva. Al
+   * REDONDEAR nunca se toca: es lo que alimenta el CPP/FIFO.
+   */
+  applied_unit_price: number;
+  /** `products.purchase_to_stock_factor`, cuando el producto lo declara. */
+  packaging_factor?: number;
+  /**
+   * Resultado EXACTO de multiplicar por el factor, presente sólo cuando ese
+   * resultado tampoco era entero (`rounded_conversion_not_exact`). Permite
+   * que la pantalla muestre "12,5" y explique por qué no sirvió.
+   */
+  converted_quantity?: number;
+  /** Etiquetas de unidad para la copia en pantalla ("unidad", "caja"). */
+  stock_unit?: string | null;
+  purchase_unit?: string | null;
+}
+
 export interface MatchedLineItem extends ExtractedLineItem {
   match_status: 'matched' | 'partial' | 'new';
   selected_product_id?: number;
@@ -159,6 +249,32 @@ export interface MatchedLineItem extends ExtractedLineItem {
    * pre-fill the cost field with the net value without re-deriving it.
    */
   unit_cost_net?: number | null;
+  /**
+   * CP-PURCHASE-TRANSPARENCY — por qué esta línea quedó así en el eje del
+   * EMPAREJAMIENTO. Aditivo y opcional: una línea que hoy funciona no cambia.
+   *
+   * Existe además de `InvoiceMatchResult.warnings` porque un aviso de cabecera
+   * que dice «el producto X está archivado», con veinte renglones debajo,
+   * obliga al operador a buscar cuál es X. El motivo tiene que estar donde
+   * está la consecuencia. `warnings` se conserva para lo que NO cuelga de una
+   * línea concreta (estado fiscal, proveedor, tope de líneas).
+   */
+  match_reason?: MatchedLineReason;
+  /**
+   * El producto archivado detrás de `archived_candidate` /
+   * `archived_sku_reassigned`. Presente sólo con esos dos motivos.
+   */
+  archived_candidate?: ArchivedProductRef;
+  /**
+   * CP-PURCHASE-TRANSPARENCY I.b — el ajuste de cantidad, cuando lo hubo.
+   *
+   * Campo APARTE de `match_reason`, y no otro valor de esa misma unión, porque
+   * los dos ejes COEXISTEN: una línea puede quedar sin emparejar por archivado
+   * Y traer una cantidad fraccionaria que hubo que redondear. Con un solo
+   * campo, el segundo motivo pisaría al primero y la pantalla perdería
+   * justamente la mitad de la explicación.
+   */
+  quantity_adjustment?: QuantityAdjustment;
 }
 
 export interface InvoiceMatchResult {
@@ -169,9 +285,25 @@ export interface InvoiceMatchResult {
 
 // --- DTOs for confirmation (validated, these come from the user) ---
 
+/**
+ * CP-PURCHASE-TRANSPARENCY R2 — por qué las cotas de estas dos clases NO son
+ * redundantes con las de `CreatePurchaseOrderDto`.
+ *
+ * `confirmAndCreatePO()` no reenvía este body por HTTP: construye a mano un
+ * `PurchaseOrderItemDto` (`poItem.quantity = item.quantity`,
+ * `poItem.unit_price = item.unit_cost`) y llama a
+ * `purchaseOrdersService.create()` con el objeto ya instanciado. El
+ * `ValidationPipe` global solo corre en el borde HTTP, así que los
+ * `@IsInt() @Min(1)` de `PurchaseOrderItemDto` NUNCA se ejecutan en este
+ * camino. Estas clases son la única validación que ve la ruta del escáner de
+ * facturas, y hasta ahora no acotaba ninguno de sus campos numéricos.
+ */
 export class ConfirmScannedInvoiceItemDto {
   @IsOptional()
   @IsNumber()
+  // FK a `products.id` (autoincremental desde 1). Cuando la línea es de un
+  // producto NUEVO el campo llega ausente, no en 0: el 0 lo pone el servicio.
+  @IsPositive()
   product_id?: number;
 
   @IsOptional()
@@ -182,10 +314,17 @@ export class ConfirmScannedInvoiceItemDto {
   @IsString()
   sku?: string;
 
+  // `@IsPositive()` y no `@Min(1)`: comprar 0 o −3 unidades no es una línea de
+  // factura, pero acotar a entero aquí estrecharía el contrato más allá de lo
+  // que hoy acepta el escáner.
   @IsNumber()
+  @IsPositive()
   quantity: number;
 
+  // Piso 0 —no 0.01—: la bonificación del proveedor entra a costo cero. El
+  // negativo sí se rechaza: invierte la capa de costo y el total de la orden.
   @IsNumber()
+  @Min(0)
   unit_cost: number;
 
   @IsOptional()
@@ -199,15 +338,21 @@ export class ConfirmScannedInvoiceItemDto {
    */
   @IsOptional()
   @IsNumber()
+  // El servicio solo lo reenvía cuando es `> 0`, así que un negativo se
+  // descartaba en silencio en vez de decir que el body venía mal.
+  @Min(0)
   discount_amount?: number;
 }
 
 export class ConfirmScannedInvoiceDto {
   @IsOptional()
   @IsNumber()
+  @IsPositive()
   supplier_id?: number;
 
+  // FK obligatoria: es la bodega donde entrará la mercancía.
   @IsNumber()
+  @IsPositive()
   location_id: number;
 
   @IsArray()
@@ -223,12 +368,16 @@ export class ConfirmScannedInvoiceDto {
   @IsString()
   invoice_date?: string;
 
+  // Cabecera: ambos viajan tal cual a `CreatePurchaseOrderDto` sin pasar por
+  // el pipe (ver la nota de la clase de arriba).
   @IsOptional()
   @IsNumber()
+  @Min(0)
   tax_amount?: number;
 
   @IsOptional()
   @IsNumber()
+  @Min(0)
   discount_amount?: number;
 
   @IsOptional()

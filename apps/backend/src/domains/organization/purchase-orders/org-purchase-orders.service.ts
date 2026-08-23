@@ -421,15 +421,26 @@ export class OrgPurchaseOrdersService {
 
     // Mapear DTO org-native → DTO store-native (header location_id desde
     // destination_location_id). Items pasan SIN destination_location_id.
+    //
+    // CP-PURCHASE-TRANSPARENCY C.7 — este mapeo es MANUAL y campo por campo, así
+    // que todo lo que no se nombre acá se pierde en silencio: el cliente lo
+    // envía, el 201 lo confirma y la orden nace sin él. Al agregar un campo al
+    // contrato de compra hay que agregarlo TAMBIÉN en esta lista.
     const storeDto: CreatePurchaseOrderDto = {
       supplier_id: dto.supplier_id,
       location_id: dto.destination_location_id,
-      status: dto.status,
+      // A.10 — `status` NO cruza. `PurchaseOrdersService.create()` fija `draft`
+      // de oficio y la aprobación es un acto con permiso propio (`approve()`).
+      // Mientras el mapeo lo reenviaba, un POST org con `"status":"approved"`
+      // hacía nacer la orden aprobada saltándose ese permiso.
       order_date: dto.order_date,
       expected_date: dto.expected_date,
       payment_terms: dto.payment_terms,
       shipping_method: dto.shipping_method,
       shipping_cost: dto.shipping_cost,
+      // C.2/C.7 — el modo de imputación del flete tiene que cruzar o el costo
+      // por línea lo decide el valor por defecto del servicio, no la factura.
+      shipping_cost_allocation: dto.shipping_cost_allocation,
       tax_amount: dto.tax_amount,
       discount_amount: dto.discount_amount,
       // F1 IVA lifecycle: dominant invoice tax mode must cross the mapping so
@@ -446,6 +457,11 @@ export class OrgPurchaseOrdersService {
         quantity: item.quantity,
         unit_price: item.unit_price,
         discount_percentage: item.discount_percentage,
+        // QUI-661/C.7 — el descuento por línea como MONTO gana sobre el
+        // porcentaje y es el que baja la base gravable. No cruzaba: la OC
+        // creada desde la organización nacía sin el descuento que el operador
+        // había escrito.
+        discount_amount: item.discount_amount,
         tax_rate: item.tax_rate,
         // F1: line-level VAT fields cross the mapping (type + per-line override).
         tax_type: item.tax_type,

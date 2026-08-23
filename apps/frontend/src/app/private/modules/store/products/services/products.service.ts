@@ -16,6 +16,7 @@ import {
   PaginatedResponse,
   ProductStats,
   OnlinePurchaseLinkResult,
+  ArchiveWriteOffPlan,
 } from '../interfaces';
 import {
   BulkImageAnalysisResult,
@@ -193,13 +194,61 @@ export class ProductsService {
       );
   }
 
-  deleteProduct(id: number): Observable<void> {
+  /**
+   * CP-PURCHASE-TRANSPARENCY D.9 — vista previa del castigo de inventario.
+   *
+   * `GET /store/products/:id/archive-preview`. Estrictamente de solo lectura:
+   * calcula lo que el archivado destruiría SIN destruir nada. Es la primera
+   * mitad del flujo de dos tiempos; la segunda es `deleteProduct(id, true)`.
+   *
+   * Ruta de error DEDICADA (`handleArchiveError`) por la misma razón que abajo.
+   */
+  previewArchiveWriteOff(id: number): Observable<ArchiveWriteOffPlan> {
     return this.http
-      .delete<void>(`${this.apiUrl}/store/products/${id}`)
+      .get<
+        ApiResponse<ArchiveWriteOffPlan>
+      >(`${this.apiUrl}/store/products/${id}/archive-preview`)
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleArchiveError),
+      );
+  }
+
+  /**
+   * Archiva el producto. Con `confirmStockWriteOff` da de baja sus existencias.
+   *
+   * ## POR QUÉ NO USA `handleError`
+   *
+   * `handleError` APLANA el error a un `string` (`throwError(() => mensaje)`).
+   * Con D.4 desplegado eso destruye el flujo entero: el rechazo por existencias
+   * llega como 409 `PROD_VARIANT_HAS_STOCK_001` con el plan completo en
+   * `details.archive_write_off`, y ese objeto —las unidades, el valor, el
+   * desglose por ubicación y variante, las existencias fuera de alcance— es
+   * justo lo que el diálogo de confirmación necesita enseñar. Aplanado a una
+   * cadena, el operador recibe un toast rojo, no sabe que hay existencias, no
+   * sabe que hay una confirmación posible y no tiene botón que la ofrezca.
+   *
+   * `handleArchiveError` propaga un objeto que preserva `error_code`, `details`
+   * y el cuerpo crudo, igual que hace `handleSaveError` para el formulario.
+   *
+   * ## LA CONFIRMACIÓN VIAJA POR QUERY STRING
+   *
+   * `DELETE` no lleva cuerpo en este contrato
+   * (`products.controller.ts:410-419`). El parámetro solo se añade cuando es
+   * `true`: mandar `confirm_stock_write_off=false` sería declarar una decisión
+   * que nadie tomó, y el backend ya trata su ausencia como «no confirmado».
+   */
+  deleteProduct(id: number, confirmStockWriteOff = false): Observable<void> {
+    const params = confirmStockWriteOff
+      ? new HttpParams().set('confirm_stock_write_off', 'true')
+      : undefined;
+
+    return this.http
+      .delete<void>(`${this.apiUrl}/store/products/${id}`, { params })
       .pipe(
         // Invalidar cache de analytics por eliminación de producto.
         tap(() => this.analytics.requestInvalidation()),
-        catchError(this.handleError),
+        catchError(this.handleArchiveError),
       );
   }
 
@@ -760,6 +809,57 @@ export class ProductsService {
       message,
       details: error?.error?.details ?? null,
       error: error?.error ?? undefined,
+    }));
+  }
+
+  /**
+   * Ruta de error DEDICADA para el archivado (D.9): `previewArchiveWriteOff` y
+   * `deleteProduct`.
+   *
+   * PRESERVA EL OBJETO. `handleError` aplana a `string` y con eso desaparece
+   * `details.archive_write_off` —el plan del castigo que el backend devuelve
+   * junto al 409— y también el `error_code`, así que el consumidor no puede ni
+   * distinguir «hay existencias, confirma» de «no tienes permiso».
+   *
+   * Tampoco reescribe el 409 como «Ya existe un producto con este SKU o slug»,
+   * que es lo que hacía `handleError` y era falso para esta ruta: en el
+   * archivado un 409 significa existencias, reservas activas o falta de
+   * confirmación, nunca un conflicto de unicidad.
+   *
+   * No usa `this`, por lo que es seguro pasarlo por referencia a `catchError`.
+   */
+  private handleArchiveError(error: any): Observable<never> {
+    console.error('ProductsService Archive Error:', error);
+
+    const body = error?.error ?? error;
+    const backendCode: string | undefined =
+      body?.error_code ?? error?.error_code;
+
+    let message = 'No se pudo eliminar el producto';
+    if (backendCode && PRODUCT_SAVE_ERROR_MAP[backendCode]) {
+      message = PRODUCT_SAVE_ERROR_MAP[backendCode].reason;
+    } else if (typeof error === 'string') {
+      message = error;
+    } else if (typeof body?.message === 'string') {
+      message = body.message;
+    } else if (typeof error?.message === 'string') {
+      message = error.message;
+    } else if (error?.status === 401) {
+      message = 'Acceso no autorizado';
+    } else if (error?.status === 403) {
+      message = 'No tienes permiso para eliminar productos';
+    } else if (error?.status === 404) {
+      message = 'Producto no encontrado';
+    } else if (error?.status >= 500) {
+      message = 'Error del servidor. Por favor intenta más tarde';
+    }
+
+    return throwError(() => ({
+      error_code: backendCode ?? null,
+      message,
+      status: error?.status ?? null,
+      details: body?.details ?? null,
+      error: body ?? undefined,
     }));
   }
 

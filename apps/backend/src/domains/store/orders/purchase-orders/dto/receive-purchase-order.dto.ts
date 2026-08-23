@@ -1,4 +1,6 @@
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsDateString,
   IsInt,
@@ -9,6 +11,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { PURCHASE_ORDER_ITEMS_MAX } from './create-purchase-order.dto';
 
 export class ReceiveItemDto {
   @IsInt()
@@ -24,9 +27,16 @@ export class ReceiveItemDto {
    * each entry becomes a real `in_stock` pool row. When fewer serials than
    * `quantity_received` are provided, the gap is auto-filled with unique
    * placeholders to keep strict parity with stock-on-hand.
+   *
+   * Cota de tamaño: la misma que la de las líneas. Un arreglo vacío no dice
+   * nada que la ausencia del campo no diga ya, y un arreglo sin techo abre una
+   * escritura por serial dentro de la transacción de recepción. Una línea con
+   * más seriales que el tope se recibe en varias entregas parciales.
    */
   @IsOptional()
   @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(PURCHASE_ORDER_ITEMS_MAX)
   @IsString({ each: true })
   serial_numbers?: string[];
 
@@ -51,14 +61,29 @@ export class ReceiveItemDto {
    * receipt time. When omitted alongside new_base_price, the existing
    * base_price is preserved and the margin is recomputed from the new
    * cost_price.
+   *
+   * CP-PURCHASE-TRANSPARENCY R2 — piso 0 por paridad con los dos hermanos que
+   * ya lo tenían: `new_base_price` (arriba, `@Min(0)`) y
+   * `sale_unit_profit_margin` en `create-purchase-order.dto.ts`. Sin cota, un
+   * margen negativo llega a `resolvePricingAfterReceipt()` y deriva un precio
+   * de venta por DEBAJO del costo, o directamente negativo, en el catálogo.
+   *
+   * JUICIO DECLARADO: esto prohíbe el "loss leader" deliberado por esta vía.
+   * Si el negocio lo quiere, es quitar esta línea — pero entonces hay que
+   * quitarla también de los dos hermanos, no dejar el contrato a medias.
    */
   @IsOptional()
   @IsNumber()
+  @Min(0, { message: 'El margen de ganancia no puede ser negativo' })
   new_profit_margin?: number;
 }
 
 export class ReceivePurchaseOrderDto {
+  // `items: []` pasaba la validación y llegaba al servicio como una recepción
+  // que no recibe nada: abría la transacción, no movía stock y devolvía 200.
   @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(PURCHASE_ORDER_ITEMS_MAX)
   @ValidateNested({ each: true })
   @Type(() => ReceiveItemDto)
   items: ReceiveItemDto[];

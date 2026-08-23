@@ -896,9 +896,20 @@ export class AutoEntryService {
       'accounting',
     );
     if (!accounting_enabled) {
-      this.logger.warn(
-        `Skipping auto-entry for ${source_type} #${source_id}: accounting area inactive for organization #${organization_id}`,
-      );
+      // C.9 — camino 3 de 4. Devolver `null` aquí era indistinguible de un
+      // asiento creado: el listener imprimía «Auto-entry created» igual. La
+      // fila es la única evidencia que sobrevive al `docker rm` del despliegue.
+      await this.entry_failure_service.recordSkip({
+        organization_id,
+        store_id,
+        source_type,
+        source_id,
+        cause: 'SKIPPED_AREA_INACTIVE',
+        detail:
+          `El área fiscal 'accounting' está inactiva para la organización #${organization_id}` +
+          `${store_id ? ` (tienda #${store_id})` : ''}. La operación se completó sin asiento.`,
+        event_payload: event_data,
+      });
       return null;
     }
 
@@ -936,9 +947,21 @@ export class AutoEntryService {
 
     // Need at least 2 lines for a valid entry (debit + credit)
     if (valid_lines.length < 2) {
-      this.logger.warn(
-        `Skipping auto-entry for ${source_type} #${source_id}: insufficient configured mappings (${valid_lines.length} lines)`,
-      );
+      // C.9 — camino 4 de 4, y el más peligroso: NO es una decisión de
+      // configuración sino un defecto. Falta la clave de mapeo o la cuenta PUC
+      // a la que apunta, y el asiento se descartaba entero sin dejar rastro.
+      await this.entry_failure_service.recordSkip({
+        organization_id,
+        store_id,
+        source_type,
+        source_id,
+        cause: 'SKIPPED_MISSING_MAPPING',
+        detail:
+          `Solo ${valid_lines.length} de ${lines.length} líneas resolvieron su cuenta PUC ` +
+          `(se necesitan al menos 2). Falta la clave de mapeo contable o la cuenta a la que apunta. ` +
+          `Asiento omitido: ${description}`,
+        event_payload: event_data,
+      });
       return null;
     }
 
@@ -3527,6 +3550,29 @@ export class AutoEntryService {
      */
     accounting_entity_id?: number;
     total_amount: number;
+    /**
+     * CP-PURCHASE-TRANSPARENCY C.6 — porción de flete de ESTA recepción que el
+     * comercio ASUME como gasto, es decir la orden tiene
+     * `shipping_cost_allocation = 'expense'`.
+     *
+     * Contrato con el emisor (`purchase-orders.service.ts`), y la asimetría es
+     * el punto entero del paso:
+     *
+     * - `prorate`: el flete YA está dentro de `total_amount` (entró al costo
+     *   unitario de cada línea). Este campo va ausente o en 0. Una sola cuenta
+     *   toca el flete: 1435.
+     * - `expense`: el flete NO entra al costo del inventario, así que
+     *   `total_amount` NO lo contiene — pero el proveedor igual lo cobra. Este
+     *   campo trae el flete de la recepción y produce la tercera línea:
+     *
+     *       DR 1435   Inventario                    total_amount
+     *       DR 513550 Transporte, fletes y acarreos shipping_expense_amount
+     *       CR 2205   Proveedores                   total_amount + shipping_expense_amount
+     *
+     * Nunca las dos cosas a la vez: si el emisor mandara flete prorrateado
+     * también aquí, el mismo dinero quedaría contabilizado dos veces.
+     */
+    shipping_expense_amount?: number;
     user_id?: number;
     /**
      * Snapshot del proveedor. El emisor ya carga `result.updated_po.suppliers`
@@ -3543,6 +3589,14 @@ export class AutoEntryService {
         }
       : undefined;
 
+    const shipping_expense =
+      Math.round(Number(data.shipping_expense_amount || 0) * 100) / 100;
+    const has_shipping_expense = shipping_expense > 0;
+    // La CxP es lo que se le debe al proveedor: inventario + flete asumido.
+    const payable_amount = has_shipping_expense
+      ? Math.round((Number(data.total_amount) + shipping_expense) * 100) / 100
+      : Number(data.total_amount);
+
     const lines = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
@@ -3552,16 +3606,44 @@ export class AutoEntryService {
         0,
         data.store_id,
       ),
+      ...(has_shipping_expense
+        ? [
+            this.resolveAccountLine(
+              data.organization_id,
+              'purchase_order.received.shipping_expense',
+              'Freight expense (not capitalized)',
+              shipping_expense,
+              0,
+              data.store_id,
+              supplier_third_party,
+            ),
+          ]
+        : []),
       this.resolveAccountLine(
         data.organization_id,
         'purchase_order.received.accounts_payable',
         'Accounts Payable',
         0,
-        data.total_amount,
+        payable_amount,
         data.store_id,
         supplier_third_party,
       ),
     ]);
+
+    // Si la cuenta de flete no está mapeada, las otras dos líneas SÍ resuelven
+    // y el asiento pasaría el filtro de «al menos dos líneas» descuadrado
+    // (débito sin el flete, crédito con él). Fallar aquí, en voz alta, deja
+    // fila en `accounting_entry_failures` nombrando la clave que falta —
+    // mucho mejor que un descuadre genérico o, peor, un asiento torcido.
+    if (has_shipping_expense && lines[1] == null) {
+      throw new Error(
+        `Missing account mapping 'purchase_order.received.shipping_expense' ` +
+          `for organization #${data.organization_id}` +
+          `${data.store_id ? ` (store #${data.store_id})` : ''}: cannot post the ` +
+          `${shipping_expense} freight expense of purchase order #${data.purchase_order_id} ` +
+          `(reception #${data.reception_id}). Map it to a detail PUC account (default 513550).`,
+      );
+    }
 
     return this.createAutoEntry({
       source_type: 'purchase_order.received',
@@ -3569,7 +3651,9 @@ export class AutoEntryService {
       organization_id: data.organization_id,
       store_id: data.store_id,
       accounting_entity_id: data.accounting_entity_id,
-      description: `Purchase order received #${data.purchase_order_id} (reception #${data.reception_id})`,
+      description:
+        `Purchase order received #${data.purchase_order_id} (reception #${data.reception_id})` +
+        (has_shipping_expense ? ` — freight expensed ${shipping_expense}` : ''),
       lines,
       user_id: data.user_id,
     });
@@ -3611,9 +3695,20 @@ export class AutoEntryService {
   }) {
     const iva = Number(data.iva_amount || 0);
     if (!(iva > 0)) {
-      this.logger.warn(
-        `Skipping purchase_vat recognition for invoice #${data.invoice_id}: non-positive IVA (${iva})`,
-      );
+      // C.9 — camino 1 de 4. Omitir un monto cero es correcto, pero tiene que
+      // ser CONTABLE: sin fila, el conteo «recepciones == asientos» no cuadra
+      // y nadie sabe si falta el asiento o si nunca hubo qué asentar.
+      await this.entry_failure_service.recordSkip({
+        organization_id: data.organization_id,
+        store_id: data.store_id,
+        source_type: 'purchase_vat',
+        source_id: data.invoice_id,
+        cause: 'SKIPPED_ZERO_AMOUNT',
+        detail:
+          `IVA descontable no positivo (${iva}) en la factura #${data.invoice_id} ` +
+          `de la OC #${data.purchase_order_id} (recepción #${data.reception_id}). No hay IVA que reconocer.`,
+        event_payload: data,
+      });
       return null;
     }
 
@@ -3798,10 +3893,18 @@ export class AutoEntryService {
   }) {
     const amount = Number(data.amount || 0);
     if (!(amount > 0)) {
-      this.logger.warn(
-        `Skipping advance reclass for PO #${data.purchase_order_id} ` +
-          `(reception #${data.reception_id}): non-positive amount (${amount})`,
-      );
+      // C.9 — camino 1 de 4 (monto cero) en la reclasificación de anticipos.
+      await this.entry_failure_service.recordSkip({
+        organization_id: data.organization_id,
+        store_id: data.store_id,
+        source_type: 'purchase_order.advance_reclass',
+        source_id: data.reception_id,
+        cause: 'SKIPPED_ZERO_AMOUNT',
+        detail:
+          `Monto de reclasificación no positivo (${amount}) para la OC #${data.purchase_order_id} ` +
+          `(recepción #${data.reception_id}). No hay anticipo que trasladar contra la CxP.`,
+        event_payload: data,
+      });
       return null;
     }
 

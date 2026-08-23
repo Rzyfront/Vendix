@@ -4,9 +4,8 @@
  */
 
 import { PopCartState, PopCartItem, LotInfo, PreBulkData } from './pop-cart.interface';
-import { ApiResponse, PurchaseOrderStatus } from '../../interfaces';
+import { ApiResponse } from '../../interfaces';
 
-// PurchaseOrderStatus imported from interfaces
 
 import { PurchaseOrder, PurchaseOrderItem } from '../../interfaces';
 
@@ -91,7 +90,11 @@ export interface CreatePurchaseOrderRequest {
   organization_id?: number;
   supplier_id: number;
   location_id: number;
-  status?: PurchaseOrderStatus;
+  // A.10 — `status` NO forma parte del payload de creación. El cliente no
+  // elige con qué estado nace una orden: el backend la crea en borrador y la
+  // aprobación es una acción aparte, con su permiso y su rastro. Declararlo
+  // aquí invitaba a volver a mandarlo (y con `forbidNonWhitelisted` en el DTO,
+  // eso es un 400 en cada creación).
   /**
    * IVA cycle (F1): dominant invoice mode. `true` when captured prices
    * already INCLUDE tax; `false` when tax is ADDED on top. Per-item
@@ -103,6 +106,15 @@ export interface CreatePurchaseOrderRequest {
   payment_terms?: string;
   shipping_method?: string;
   shipping_cost?: number;
+  /**
+   * C.5 — cómo se imputa el flete: `prorate` lo reparte entre las líneas y lo
+   * capitaliza al costo del inventario; `expense` lo deja como costo de la
+   * orden y no mueve el costo unitario. En los dos casos suma al total.
+   *
+   * El backend RECHAZA con 400 un `shipping_cost > 0` sin este campo, y también
+   * un `prorate` sin flete. Por eso viaja SÓLO cuando hay flete.
+   */
+  shipping_cost_allocation?: 'prorate' | 'expense';
   subtotal_amount?: number;
   tax_amount?: number;
   total_amount?: number;
@@ -244,22 +256,53 @@ export function cartToPurchaseOrderRequest(
     return !!p.is_ingredient && !sellable;
   });
 
+  // Flete saneado a 2 decimales: la columna es `Decimal(12,2)` y el DTO
+  // rechaza un tercer decimal con 400.
+  const rawShipping = Number(cartState.shippingCost);
+  const shippingCost =
+    Number.isFinite(rawShipping) && rawShipping > 0
+      ? Math.round(rawShipping * 100) / 100
+      : 0;
+
+  // IVA cycle (F1): modo dominante de la factura, GATEADO por el maestro
+  // `has_vat` Y por que exista al menos una línea gravada.
+  const headerPricesIncludeTax =
+    cartState.has_vat &&
+    !!cartState.prices_include_tax &&
+    items.some((it) => Number(it.tax_rate) > 0);
+
   return {
     organization_id: organizationId,
     supplier_id: cartState.supplierId!,
     location_id: cartState.locationId!,
-    status: cartState.status === 'draft' ? 'draft' : 'approved',
+    // A.10 — el estado NO viaja en el payload. El backend escribía tal cual el
+    // `status` que llegara, así que una orden podía NACER APROBADA a petición
+    // del navegador y saltarse el permiso de aprobación
+    // (`store:orders:purchase_orders:approve`). La orden nace en `draft` por
+    // defecto de la columna y quien la aprueba es la ACCIÓN de aprobar, que sí
+    // pasa por el permiso y deja rastro (`approved_by_user_id` + auditoría).
     // IVA cycle (F1): dominant invoice mode captured in the POP header, GATED
     // by the master switch `cartState.has_vat`. When the purchase has no VAT,
     // force `false` so the header cannot reintroduce tax-inclusive semantics
     // that the $0 IVA preview never showed.
-    prices_include_tax: cartState.has_vat ? cartState.prices_include_tax : false,
+    // El validador cruzado del backend rechaza «precios con IVA incluido» sin
+    // una sola línea gravada: es una cabecera que se contradice. Se exige aquí
+    // el mismo `some(tax_rate > 0)` para no mandar una combinación que la
+    // pantalla nunca mostró y que vuelve como un 400 sin campo señalado.
+    prices_include_tax: headerPricesIncludeTax,
     order_type: isIngredientOrder ? 'ingredient' : 'retail',
     order_date: cartState.orderDate.toISOString(),
     expected_date: cartState.expectedDate?.toISOString(),
     payment_terms: cartState.paymentTerms,
     shipping_method: cartState.shippingMethod,
-    shipping_cost: cartState.shippingCost,
+    shipping_cost: shippingCost,
+    // Sólo con flete: `prorate` sin monto también es 400.
+    ...(shippingCost > 0
+      ? {
+          shipping_cost_allocation:
+            cartState.shippingCostAllocation ?? 'prorate',
+        }
+      : {}),
     // QUI-661: descuento general de la factura. El backend lo prorratea por
     // línea; acá sólo viaja el monto que el proveedor rebajó sobre el total.
     discount_amount: cartState.discountAmount || 0,

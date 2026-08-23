@@ -201,6 +201,16 @@ export interface BulkEditResult {
  */
 export interface BulkArchiveProductsRequest {
   ids: number[];
+  /**
+   * CP-PURCHASE-TRANSPARENCY D.6/D.9 — la confirmación del castigo de
+   * inventario.
+   *
+   * Ausente ⇒ el backend la trata como `false` y `remove()` rechaza CADA
+   * producto con existencias con el mismo 409 que por la ruta individual. Sin
+   * este campo el archivado masivo quedaría roto al 100 % en cuanto un producto
+   * del lote tuviera stock. La confirmación se declara, nunca se asume.
+   */
+  confirm_stock_write_off?: boolean;
 }
 
 /**
@@ -229,6 +239,27 @@ export interface BulkArchivePreviewItem {
   status: BulkEditItemStatus;
   code?: string;
   message?: string;
+  /**
+   * CP-PURCHASE-TRANSPARENCY D.6/D.9 — lo que ESTA fila va a perder.
+   *
+   * Aditivos y siempre presentes (0 cuando no hay existencias), incluso en las
+   * filas `error`: así la interfaz no tiene que distinguir formas. Opcionales en
+   * el espejo porque un lote degradado por un fallo de red los fabrica sin
+   * ellos (`archivePreviewFallback`), y ahí el 0 sería una cifra inventada.
+   */
+  on_hand_units?: number;
+  value_to_write_off?: number;
+  /**
+   * Unidades sin costo conocido. NO significa «gratis»: significa que su costo
+   * es desconocido y que su baja no produce asiento contable. No entran en
+   * `value_to_write_off`.
+   */
+  zero_cost_units?: number;
+  /**
+   * Unidades en ubicaciones fuera del alcance de esta tienda. BLOQUEAN el
+   * archivado de esta fila: el backend la devuelve como `error`.
+   */
+  out_of_scope_units?: number;
 }
 
 /** Espejo de `BulkArchivePreviewResultDto`. */
@@ -238,6 +269,11 @@ export interface BulkArchivePreviewResult {
   warnings: number;
   errors: number;
   items: BulkArchivePreviewItem[];
+  /** D.6 — la cifra agregada que el operador está a punto de aprobar. */
+  total_units_to_write_off?: number;
+  total_value_to_write_off?: number;
+  /** `true` si alguna fila tiene existencias: sin confirmar, el lote no castiga. */
+  requires_confirmation?: boolean;
 }
 
 /** Espejo de `BulkArchiveResultItemDto` — tras archivar no hay `warning`. */
@@ -247,6 +283,12 @@ export interface BulkArchiveResultItem {
   status: Exclude<BulkEditItemStatus, 'warning'>;
   code?: string;
   message?: string;
+  /** D.6 — lo que esta fila destruyó DE VERDAD. 0 en las filas fallidas. */
+  written_off_units?: number;
+  written_off_value?: number;
+  zero_cost_units?: number;
+  /** Identificadores de los ajustes de baja, para auditar sin salir de aquí. */
+  adjustment_ids?: number[];
 }
 
 /** Espejo de `BulkArchiveResultDto`. */
@@ -255,6 +297,9 @@ export interface BulkArchiveResult {
   successful: number;
   failed: number;
   results: BulkArchiveResultItem[];
+  /** D.6 — el desglose agregado de lo que el lote destruyó. */
+  written_off_units?: number;
+  written_off_value?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

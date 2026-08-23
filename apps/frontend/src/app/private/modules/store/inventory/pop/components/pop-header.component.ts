@@ -20,6 +20,7 @@ import { PopOrderConfigDropdownComponent } from "./pop-order-config-dropdown.com
 
 import { PopCartService, ShippingMethod } from "../services/pop-cart.service";
 import { PopSupplier, PopLocation } from "../interfaces/pop-cart.interface";
+import { PopShippingAllocation } from "../interfaces";
 
 // Local constants
 const SHIPPING_METHOD_LABELS = {
@@ -31,6 +32,7 @@ const SHIPPING_METHOD_LABELS = {
 
 import { SuppliersService } from "../../services/suppliers.service";
 import { InventoryService } from "../../services/inventory.service";
+import { ToastService } from "../../../../../../shared/components/toast/toast.service";
 
 /**
  * POP Header Component
@@ -129,11 +131,15 @@ import { InventoryService } from "../../services/inventory.service";
       [expectedDate]="expectedDate()"
       [shippingMethod]="shippingMethod()"
       [minExpectedDate]="minExpectedDate()"
+      [shippingCost]="shippingCost()"
+      [shippingCostAllocation]="shippingCostAllocation()"
       (supplierChange)="onSupplierChange($event)"
       (locationChange)="onLocationChange($event)"
       (orderDateChange)="onOrderDateChange($event)"
       (expectedDateChange)="onExpectedDateChange($event)"
       (shippingMethodChange)="onShippingMethodChange($event)"
+      (shippingCostChange)="onShippingCostChange($event)"
+      (shippingCostAllocationChange)="onShippingCostAllocationChange($event)"
       (openSupplierModal)="openSupplierModal.emit()"
       (openWarehouseModal)="openWarehouseModal.emit()"
       (done)="onConfigModalDone()"
@@ -151,6 +157,7 @@ export class PopHeaderComponent {
   private popCartService = inject(PopCartService);
   private suppliersService = inject(SuppliersService);
   private inventoryService = inject(InventoryService);
+  private toastService = inject(ToastService);
   private destroyRef = inject(DestroyRef);
 
   // Data
@@ -174,6 +181,15 @@ export class PopHeaderComponent {
   readonly orderDate = signal("");
   readonly expectedDate = signal("");
   readonly shippingMethod = signal("");
+  /**
+   * B.6 — flete de la orden, para que el modal de configuración muestre los
+   * mismos campos que el paso Configuración del wizard. Se sincronizan desde
+   * el carrito igual que el resto: la cabecera no es dueña del dato.
+   */
+  readonly shippingCost = signal(0);
+  readonly shippingCostAllocation = signal<PopShippingAllocation | undefined>(
+    undefined,
+  );
   readonly minExpectedDate = signal("");
 
   // Config modal visibility (button/mini-card/dropdown → modal).
@@ -243,6 +259,13 @@ export class PopHeaderComponent {
         }
         if (state.shippingMethod !== this.shippingMethod()) {
           this.shippingMethod.set(state.shippingMethod || "");
+        }
+        const cartShipping = Number(state.shippingCost) || 0;
+        if (cartShipping !== this.shippingCost()) {
+          this.shippingCost.set(cartShipping);
+        }
+        if (state.shippingCostAllocation !== this.shippingCostAllocation()) {
+          this.shippingCostAllocation.set(state.shippingCostAllocation);
         }
       });
   }
@@ -414,6 +437,33 @@ export class PopHeaderComponent {
 
   onShippingMethodChange(method: string): void {
     this.popCartService.setShippingMethod(method as ShippingMethod);
+  }
+
+  /**
+   * El carrito siembra `prorate` en cuanto el monto es > 0 y limpia el modo al
+   * volver a 0: el backend responde 400 a un flete sin modo y a un modo sin
+   * flete.
+   */
+  onShippingCostChange(amount: number): void {
+    this.popCartService.setShippingCost(amount);
+  }
+
+  /**
+   * CP-PURCHASE-TRANSPARENCY (T2/D.1) — red de seguridad del rechazo.
+   *
+   * El modal de configuracion ya deja el conmutador inactivo mientras no haya
+   * flete, asi que este rechazo no deberia llegar por la pantalla. Si llega
+   * por cualquier otra via se DICE: setShippingCostAllocation devuelve false
+   * y el operador se entera de que su eleccion no se guardo, en vez de quedarse
+   * con una pantalla que afirma una imputacion que el carrito no tiene.
+   */
+  onShippingCostAllocationChange(mode: PopShippingAllocation): void {
+    const applied = this.popCartService.setShippingCostAllocation(mode);
+    if (!applied) {
+      this.toastService.warning(
+        "Escribe primero el costo del flete: sin monto no hay nada que repartir, asi que la imputacion no se guardo.",
+      );
+    }
   }
 
   // ============================================================

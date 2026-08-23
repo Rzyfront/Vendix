@@ -2,7 +2,12 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Icon } from '@/shared/components/icon/icon';
 import { borderRadius, colorScales, colors, shadows, spacing, typography } from '@/shared/theme';
-import type { PopSupplier, PopLocation, ShippingMethod } from '../types';
+import type {
+  PopSupplier,
+  PopLocation,
+  PopShippingAllocation,
+  ShippingMethod,
+} from '../types';
 import { SHIPPING_METHOD_LABELS } from '../constants';
 import PopOrderConfigDropdown from './pop-order-config-dropdown';
 import PopOrderConfigModal from './pop-order-config-modal';
@@ -14,6 +19,9 @@ interface PopHeaderProps {
   orderDate: string;
   expectedDate?: string;
   shippingMethod?: ShippingMethod;
+  /** C.5 — monto del flete y su imputación; el modal los pregunta cuando aplica. */
+  shippingCost?: number;
+  shippingCostAllocation?: PopShippingAllocation;
   // IDs opcionales — se usan para isConfigured (réplica web: !!supplierId && !!locationId).
   selectedSupplierId?: number;
   selectedLocationId?: number;
@@ -29,6 +37,8 @@ interface PopHeaderProps {
   onOrderDateChange: (date: string) => void;
   onExpectedDateChange: (date?: string) => void;
   onShippingMethodChange: (method?: ShippingMethod) => void;
+  onShippingCostChange?: (cost: number) => void;
+  onShippingCostAllocationChange?: (mode: PopShippingAllocation) => void;
   // Quick-add de catálogo.
   onQuickAddSupplier?: () => void;
   onQuickAddLocation?: () => void;
@@ -53,6 +63,8 @@ export default function PopHeader({
   orderDate,
   expectedDate,
   shippingMethod,
+  shippingCost,
+  shippingCostAllocation,
   selectedSupplierId,
   selectedLocationId,
   suppliers,
@@ -64,6 +76,8 @@ export default function PopHeader({
   onOrderDateChange,
   onExpectedDateChange,
   onShippingMethodChange,
+  onShippingCostChange,
+  onShippingCostAllocationChange,
   onQuickAddSupplier,
   onQuickAddLocation,
   title = 'POP',
@@ -133,12 +147,16 @@ export default function PopHeader({
         orderDate={orderDate}
         expectedDate={expectedDate}
         shippingMethod={shippingMethod}
+        shippingCost={shippingCost}
+        shippingCostAllocation={shippingCostAllocation}
         minExpectedDate={orderDate}
         onSupplierChange={onSupplierChange}
         onLocationChange={onLocationChange}
         onOrderDateChange={onOrderDateChange}
         onExpectedDateChange={onExpectedDateChange}
         onShippingMethodChange={onShippingMethodChange}
+        onShippingCostChange={onShippingCostChange}
+        onShippingCostAllocationChange={onShippingCostAllocationChange}
         onOpenSupplierModal={onQuickAddSupplier}
         onOpenWarehouseModal={onQuickAddLocation}
       />

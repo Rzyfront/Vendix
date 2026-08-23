@@ -5,13 +5,32 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { PoPaymentModalComponent } from './po-payment-modal.component';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
+import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 
 const buildCurrencyStub = () =>
   ({
     format: (n: number | string | null | undefined) =>
       `$${Number(n ?? 0).toFixed(2)}`,
     loadCurrency: () => undefined,
+    // El app-input en modo moneda lee estas dos senales del servicio para
+    // decidir separadores y decimales al escribir el valor (writeValue ->
+    // currencyFormatForDisplay). Sin ellas el stub explota con
+    // "currencyFormatStyle is not a function" en cuanto un FormControl de
+    // dinero recibe setValue.
+    currencyFormatStyle: () => 'comma_dot' as const,
+    currencyDecimals: () => 2,
   }) as unknown as CurrencyFormatService;
+
+/**
+ * El modal lee storeSettings.settings()?.general?.timezone para fechar el pago.
+ * Sin este stub, TestBed construye el facade real, que inyecta el Store de NgRx
+ * y revienta con NG0201 al crear el componente: los 14 casos fallaban ahi, antes
+ * de ejercitar una sola linea de logica del modal.
+ */
+const buildStoreSettingsStub = () =>
+  ({
+    settings: () => null,
+  }) as unknown as StoreSettingsFacade;
 
 const buildToastStub = () =>
   ({
@@ -47,6 +66,7 @@ describe('PoPaymentModalComponent — payment plan unified modal', () => {
         provideHttpClientTesting(),
         { provide: CurrencyFormatService, useFactory: buildCurrencyStub },
         { provide: ToastService, useFactory: buildToastStub },
+        { provide: StoreSettingsFacade, useFactory: buildStoreSettingsStub },
       ],
     });
     fixture = TestBed.createComponent(PoPaymentModalComponent);
@@ -189,6 +209,51 @@ describe('PoPaymentModalComponent — payment plan unified modal', () => {
       http.verify();
     });
 
+    /**
+     * Camino triste legible. `isPayValid()` apaga el submit con "a > 0 &&
+     * a <= remaining", pero hasta ahora solo el techo se explicaba: un monto
+     * en cero o negativo dejaba el botón muerto sin decir por qué. El piso
+     * coincide con lo que el servidor rechaza desde RegisterPaymentDto
+     * (Min 0.01, commit 2762dd995): cero incluido, no solo los negativos.
+     */
+    const errorTexts = (): string[] =>
+      Array.from(
+        (fixture.nativeElement as HTMLElement).querySelectorAll('p.text-destructive'),
+      ).map((el) => (el.textContent ?? '').trim());
+
+    it('(k) amount negativo → explica el piso y no dispara POST', () => {
+      component.amountValue.set(-5000);
+      fixture.detectChanges();
+
+      expect(errorTexts()).toContain('El monto debe ser mayor que cero.');
+      component.submit();
+      http.expectNone((r) => r.url.includes('/payments'));
+    });
+
+    it('(l) amount en cero → mismo mensaje: cero tampoco es un pago válido', () => {
+      component.amountValue.set(0);
+      fixture.detectChanges();
+
+      expect(errorTexts()).toContain('El monto debe ser mayor que cero.');
+      component.submit();
+      http.expectNone((r) => r.url.includes('/payments'));
+    });
+
+    it('(m) amount > pendiente → sigue explicando el techo, y solo el techo', () => {
+      component.amountValue.set(5000); // > total=1000
+      fixture.detectChanges();
+
+      expect(errorTexts()).toContain('El monto no puede superar el saldo pendiente.');
+      expect(errorTexts()).not.toContain('El monto debe ser mayor que cero.');
+    });
+
+    it('(n) amount válido → ningún mensaje de monto', () => {
+      component.amountValue.set(500);
+      fixture.detectChanges();
+
+      expect(errorTexts()).not.toContain('El monto debe ser mayor que cero.');
+      expect(errorTexts()).not.toContain('El monto no puede superar el saldo pendiente.');
+    });
     it('(j) toggle interno entre vistas: setView("plan") cambia activeView()', () => {
       expect(component.activeView()).toBe('pay');
       component.setView('plan');

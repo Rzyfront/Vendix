@@ -142,6 +142,65 @@ export interface MatchedLineItem extends ExtractedLineItem {
    */
   purchase_uom_id?: number | null;
   stock_uom_id?: number | null;
+  /**
+   * D.1 — por qué la línea quedó como quedó. Va PEGADO al renglón: un aviso
+   * «el producto X está archivado» flotando arriba con veinte líneas debajo
+   * obliga al operador a buscar cuál es X.
+   */
+  match_reason?: MatchedLineReason;
+  /**
+   * El producto ARCHIVADO que el catálogo tenía. Presente sólo cuando el
+   * motivo es de archivado: o se descartó a propósito (`archived_candidate`),
+   * o el SKU impreso es suyo y la línea se propuso a otro producto activo
+   * (`archived_sku_reassigned`).
+   */
+  archived_candidate?: ArchivedCandidate;
+  /**
+   * C.8 — la cantidad que se va a cargar NO es la que imprime la factura.
+   *
+   * Coexiste con `match_reason`: una línea puede estar archivada Y venir
+   * convertida de empaques a unidades. Se pintan los dos.
+   *
+   * OJO con `total`: NO se recalcula al redondear — sigue siendo el total que
+   * imprimió el papel. Pintarlo junto a la cantidad aplicada mostraría 30.000
+   * al lado de 3 × 12.000.
+   */
+  quantity_adjustment?: QuantityAdjustment;
+}
+
+/** Motivo tipado de `MatchedLineItem.match_reason`. */
+export type MatchedLineReason =
+  | 'archived_candidate'
+  | 'archived_sku_reassigned'
+  | 'no_catalog_match'
+  | 'lookup_failed';
+
+/** Producto archivado que el escáner encontró y no seleccionó. */
+export interface ArchivedCandidate {
+  id: number;
+  name: string;
+  sku: string;
+}
+
+/** Motivo tipado del ajuste de cantidad. */
+export type QuantityAdjustmentReason =
+  | 'converted_to_stock_units'
+  | 'rounded_unmatched_line'
+  | 'rounded_no_packaging_factor'
+  | 'rounded_factor_applied_at_receipt'
+  | 'rounded_conversion_not_exact';
+
+/** El antes y el después de la cantidad y del costo unitario de la línea. */
+export interface QuantityAdjustment {
+  reason: QuantityAdjustmentReason;
+  original_quantity: number;
+  applied_quantity: number;
+  original_unit_price: number;
+  applied_unit_price: number;
+  packaging_factor?: number;
+  converted_quantity?: number;
+  stock_unit?: string | null;
+  purchase_unit?: string | null;
 }
 
 export interface InvoiceMatchResult {

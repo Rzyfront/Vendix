@@ -4,7 +4,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Observable, Subscription, firstValueFrom, of, throwError } from 'rxjs';
-import { catchError, map, switchMap } from 'rxjs/operators';
+import { catchError, map, switchMap, tap } from 'rxjs/operators';
 
 import type { SelectorOption } from '../../../../../shared/components/selector/selector.component';
 
@@ -55,7 +55,13 @@ import {
   InvoiceMatchResult,
   MatchedLineItem,
 } from './interfaces/invoice-scanner.interface';
-import { CostPreviewResponse } from '../interfaces';
+import {
+  PopCostPreviewItem,
+  PopCostPreviewRequest,
+  PopCostPreviewRequestItem,
+  PopCostPreviewResponse,
+  PopShippingAllocation,
+} from './interfaces';
 import {
   PopProductConfigResult,
   PopProductModalResult,
@@ -214,6 +220,7 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
       [actionType]="confirmOrderAction"
       [costPreview]="costPreview()"
       [loadingCostPreview]="loadingCostPreview()"
+      [costPreviewError]="costPreviewError()"
       [isProcessing]="isProcessingOrder()"
       [retryOrderRef]="retryOrderRef()"
       [orderResult]="orderResult()"
@@ -223,6 +230,13 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
       [locationOptions]="shellLocationOptions()"
       [shippingMethodOptions]="shellShippingMethodOptions"
       [minExpectedDate]="shellMinExpectedDate()"
+      [selectedSupplierId]="cartState()?.supplierId ?? null"
+      [selectedLocationId]="cartState()?.locationId ?? null"
+      [orderDate]="shellOrderDate()"
+      [expectedDate]="shellExpectedDate()"
+      [shippingMethod]="shellShippingMethod()"
+      [shippingCost]="shellShippingCost()"
+      [shippingCostAllocation]="shellShippingCostAllocation()"
       (confirmed)="onOrderConfirmed()"
       (cancelled)="showOrderConfirmModal.set(false)"
       (navigateToSettings)="onNavigateToSettings()"
@@ -236,6 +250,10 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
       (configOrderDateChange)="onShellOrderDateChange($event)"
       (configExpectedDateChange)="onShellExpectedDateChange($event)"
       (configShippingMethodChange)="onShellShippingMethodChange($event)"
+      (configShippingCostChange)="onShellShippingCostChange($event)"
+      (configShippingCostAllocationChange)="onShellShippingCostAllocationChange($event)"
+      (retryCostPreview)="loadCostPreview()"
+      (navigateToFiscalWizard)="onNavigateToFiscalWizard($event)"
       (configOpenSupplierModal)="supplierModalOpen.set(true)"
       (configOpenWarehouseModal)="warehouseModalOpen.set(true)"
     ></app-pop-checkout-shell>
@@ -253,7 +271,7 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
       [isOpen]="!!orderResult() && !orderResult()?.failedStage"
       [orderNumber]="orderResult()?.orderNumber ?? ''"
       [total]="orderResult()?.total ?? 0"
-      [state]="orderResult()?.state ?? 'created'"
+      [state]="orderResult()?.state ?? ''"
       [orderId]="orderResult()?.id ?? null"
       (newPurchase)="onNewPurchase()"
       (viewOrder)="onViewOrder()"
@@ -435,10 +453,18 @@ export class PopComponent implements OnInit, OnDestroy {
     total: number;
     orderNumber: string;
     /**
-     * CP-ID-VNDX-2026-08-21-POP-MODAL — Estado backend de la OC (`created`,
-     * `received`, `paid`, etc.). Lo usa el modal post-creación para mapear
-     * a una etiqueta legible + variante de badge. Si el backend no lo
-     * expone, el modal cae al genérico `Creada`.
+     * CP-ID-VNDX-2026-08-21-POP-MODAL — Estado backend de la OC. Lo usa el
+     * modal post-creación para mapear a una etiqueta legible + variante de
+     * badge.
+     *
+     * CP-PURCHASE-TRANSPARENCY (T2/D.2) — es SIEMPRE un valor de
+     * `purchase_order_status_enum` (`draft | approved | partial | received |
+     * cancelled`), releído del servidor DESPUÉS de recibir y pagar (ver
+     * `_readOrderStatus$`). Antes se congelaba el estado que devolvía la
+     * creación: una compra con recepción inmediata terminaba en `received` en
+     * base de datos y el modal anunciaba «Aprobada», invitando al operador a
+     * recibirla otra vez. Vacío significa «el servidor no lo informó», y el
+     * modal lo dice en esas palabras en vez de elegir un estado.
      */
     state?: string;
     stages?: Array<{
@@ -476,6 +502,24 @@ export class PopComponent implements OnInit, OnDestroy {
     return header ? header.locationOptions() : [];
   });
   readonly shellShippingMethodOptions = SHIPPING_METHOD_OPTIONS;
+
+  /**
+   * A.13 — método de envío VIVO del carrito.
+   *
+   * El shell montaba sin esta entrada, así que el paso Configuración
+   * re-sembraba `'pickup'` en cada apertura y pisaba lo que el carrito ya
+   * tenía. Con flete elegido, esa re-siembra borraba silenciosamente el modo
+   * de envío antes de que el operador llegara a Confirmación.
+   */
+  readonly shellShippingMethod = computed<string>(
+    () => this.cartState()?.shippingMethod ?? 'pickup',
+  );
+  readonly shellShippingCost = computed<number>(
+    () => Number(this.cartState()?.shippingCost ?? 0) || 0,
+  );
+  readonly shellShippingCostAllocation = computed<
+    PopShippingAllocation | undefined
+  >(() => this.cartState()?.shippingCostAllocation);
 
   /** Fechas del carrito en formato YYYY-MM-DD para los inputs date del wizard. */
   readonly shellOrderDate = computed<string>(() => {
@@ -522,8 +566,18 @@ export class PopComponent implements OnInit, OnDestroy {
     return pending.order_number || `#${pending.id}`;
   });
 
-  costPreview = signal<CostPreviewResponse | null>(null);
+  costPreview = signal<PopCostPreviewResponse | null>(null);
   loadingCostPreview = signal(false);
+  /**
+   * A.5 — motivo del fallo de la vista previa, para PINTARLO.
+   *
+   * Antes el `error:` del preview caía en un catch mudo que dejaba
+   * `costPreview` en null: el paso Recepción se veía vacío, indistinguible de
+   * «esta compra no mueve inventario», y el operador confirmaba una recepción
+   * sin haber visto jamás el costo que se iba a sellar. Mientras este signal
+   * tenga valor el shell bloquea «Confirmar».
+   */
+  readonly costPreviewError = signal<string | null>(null);
   /**
    * QUI-425 (D4) — Latest pricing overrides captured by the confirmation
    * modal. Mirrored here so the parent can grab them synchronously on confirm.
@@ -1738,6 +1792,49 @@ export class PopComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * C.5 — flete tecleado en el paso Configuración.
+   *
+   * El carrito siembra `prorate` en cuanto el monto es > 0 y limpia el modo al
+   * volver a 0: el backend responde 400 a `shipping_cost > 0` sin modo, y a
+   * `prorate` sin monto. La vista previa se recarga porque el flete prorrateado
+   * cambia el costo unitario que el operador va a aprobar.
+   */
+  onShellShippingCostChange(value: number): void {
+    this.popCartService.setShippingCost(value);
+    this.loadCostPreview();
+  }
+
+  /**
+   * CP-PURCHASE-TRANSPARENCY (T2/D.1) — red de seguridad del rechazo.
+   *
+   * El paso Configuración ya deja el conmutador inactivo sin flete, así que
+   * este rechazo no debería ocurrir por la pantalla. Si ocurre por cualquier
+   * otra vía, se DICE: `setShippingCostAllocation` devuelve `false` y el
+   * operador se entera de que su elección no se guardó, en vez de quedarse con
+   * una pantalla que afirma una imputación que el carrito no tiene.
+   */
+  onShellShippingCostAllocationChange(value: PopShippingAllocation): void {
+    const applied = this.popCartService.setShippingCostAllocation(value);
+    if (!applied) {
+      this.toastService.warning(
+        'Escribe primero el costo del flete: sin monto no hay nada que repartir, así que la imputación no se guardó.',
+      );
+      return;
+    }
+    this.loadCostPreview();
+  }
+
+  /**
+   * CTA del aviso fiscal. La ruta la manda el BACKEND en
+   * `fiscal_explanation.cta.route`: la pantalla no la inventa, así el destino
+   * del asistente se mueve en un solo lugar.
+   */
+  onNavigateToFiscalWizard(route: string): void {
+    if (!route) return;
+    this.router.navigate([route]);
+  }
+
+  /**
    * El paso Configuración quedó completo (proveedor+bodega): ya hay bodega
    * para costear, así que recargamos el preview de costeo que el wizard
    * necesita en el paso Recepción.
@@ -1847,6 +1944,13 @@ export class PopComponent implements OnInit, OnDestroy {
    */
   private openCheckoutShell(action: 'create' | 'create-receive'): void {
     const state = this.popCartService.currentState;
+
+    // Primera línea a propósito: una apertura NUNCA puede empezar mostrando la
+    // valoración de la compra anterior. `loadCostPreview` retorna temprano si
+    // no hay bodega o el carrito está vacío, así que sin este reset el paso
+    // Recepción pintaba el costo de otra orden como si fuera el de ésta.
+    this.costPreview.set(null);
+    this.costPreviewError.set(null);
 
     this.pendingAction.set(null);
     this.showCartModal.set(false);
@@ -1968,18 +2072,67 @@ export class PopComponent implements OnInit, OnDestroy {
     if (!state.locationId || state.items.length === 0) return;
 
     this.costPreview.set(null);
+    this.costPreviewError.set(null);
     this.loadingCostPreview.set(true);
 
-    const request = {
+    // A.5 — la vista previa recibe EXACTAMENTE las mismas entradas que la
+    // creación y la recepción. Mandaba sólo bodega + (producto, cantidad,
+    // costo): sin descuentos, sin IVA y sin flete la simulación partía de una
+    // base que la orden nunca iba a tener, y el operador aprobaba un costo
+    // irreproducible. El mapeo por línea replica `cartToPurchaseOrderRequest`
+    // a propósito — si divergen, vuelve el defecto que este paso cierra.
+    const previewItems: PopCostPreviewRequestItem[] = state.items
+      .filter((item) => !item.is_prebulk && item.product?.id)
+      .map((item) => ({
+        product_id: item.product.id,
+        product_variant_id: item.variant?.id,
+        quantity: item.quantity,
+        unit_cost: item.unit_cost,
+        // El maestro `has_vat` gatea la tasa igual que en la creación: sin él
+        // la tasa sembrada (19) se colaba y la vista previa mostraba un IVA
+        // que la orden no iba a tener.
+        tax_rate: state.has_vat ? Number(item.tax_rate) || 0 : 0,
+        tax_type: item.tax_type ?? 'iva',
+        ...(Number(item.discount) > 0
+          ? { discount_percentage: Number(item.discount) }
+          : {}),
+        ...(Number(item.discount_amount) > 0
+          ? { discount_amount: Number(item.discount_amount) }
+          : {}),
+        ...(state.has_vat && item.prices_include_tax !== undefined
+          ? { prices_include_tax: item.prices_include_tax }
+          : {}),
+      }));
+
+    // Flete a 2 decimales: la columna es `Decimal(12,2)` y el DTO rechaza el
+    // tercero con 400.
+    const rawShipping = Number(state.shippingCost);
+    const shippingCost =
+      Number.isFinite(rawShipping) && rawShipping > 0
+        ? Math.round(rawShipping * 100) / 100
+        : 0;
+
+    // El validador cruzado del backend rechaza «precios con IVA incluido» sin
+    // una sola línea gravada. Se exige aquí el mismo `some(tax_rate > 0)` para
+    // no mandar una cabecera que se contradice y volver con un 400 sin campo.
+    const headerPricesIncludeTax =
+      state.has_vat &&
+      !!state.prices_include_tax &&
+      previewItems.some((it) => Number(it.tax_rate) > 0);
+
+    const request: PopCostPreviewRequest = {
       location_id: state.locationId,
-      items: state.items
-        .filter((item) => !item.is_prebulk && item.product?.id)
-        .map((item) => ({
-          product_id: item.product.id,
-          product_variant_id: item.variant?.id,
-          quantity: item.quantity,
-          unit_cost: item.unit_cost,
-        })),
+      prices_include_tax: headerPricesIncludeTax,
+      discount_amount: Number(state.discountAmount) || 0,
+      shipping_cost: shippingCost,
+      // `prorate` sin monto también es 400: el modo sólo viaja con flete.
+      ...(shippingCost > 0
+        ? {
+            shipping_cost_allocation:
+              state.shippingCostAllocation ?? 'prorate',
+          }
+        : {}),
+      items: previewItems,
     };
 
     // QUI-645 — los productos NUEVOS (prebulk) no tienen nada que consultar en
@@ -1995,9 +2148,7 @@ export class PopComponent implements OnInit, OnDestroy {
       // Solo hay productos nuevos: no hay nada que pedirle al backend, pero el
       // modal igual debe mostrarlos para poder fijarles precio.
       this.costPreview.set(
-        newRows.length
-          ? ({ costing_method: null, items: newRows } as any)
-          : null,
+        newRows.length ? { costing_method: null, items: newRows } : null,
       );
       this.loadingCostPreview.set(false);
       return;
@@ -2005,21 +2156,39 @@ export class PopComponent implements OnInit, OnDestroy {
 
     this.purchaseOrdersService.getCostPreview(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
-        const data = response.success ? response.data : null;
-        this.costPreview.set(
-          data
-            ? ({ ...data, items: [...(data.items ?? []), ...newRows] } as any)
-            : newRows.length
-              ? ({ costing_method: null, items: newRows } as any)
-              : null,
-        );
+        const data = response.success
+          ? (response.data as PopCostPreviewResponse | null)
+          : null;
+        if (!data) {
+          // 200 con `success:false`: el backend contestó, pero no hay
+          // valoración. Es un fallo, no un «no aplica» — se dice.
+          this.costPreviewError.set(
+            (response as any)?.message ||
+              'El servidor respondió sin datos de valoración.',
+          );
+          this.costPreview.set(
+            newRows.length ? { costing_method: null, items: newRows } : null,
+          );
+          this.loadingCostPreview.set(false);
+          return;
+        }
+        this.costPreview.set({
+          ...data,
+          items: [...(data.items ?? []), ...newRows],
+        });
         this.loadingCostPreview.set(false);
       },
-      error: () => {
+      error: (err) => {
+        // A.5 — el error se PINTA. Las filas de producto nuevo se conservan
+        // (no dependen del backend) pero el paso queda marcado como fallido:
+        // el shell no deja confirmar mientras `costPreviewError` tenga valor.
+        this.costPreviewError.set(
+          err?.error?.message ||
+            err?.message ||
+            'No se pudo calcular la valoración de inventario.',
+        );
         this.costPreview.set(
-          newRows.length
-            ? ({ costing_method: null, items: newRows } as any)
-            : null,
+          newRows.length ? { costing_method: null, items: newRows } : null,
         );
         this.loadingCostPreview.set(false);
       },
@@ -2035,7 +2204,7 @@ export class PopComponent implements OnInit, OnDestroy {
    * stay stable while the cart is untouched, which is what the override map
    * needs. `applyNewProductPricing` maps them back to the cart line.
    */
-  private buildNewProductPreviewRows(): any[] {
+  private buildNewProductPreviewRows(): PopCostPreviewItem[] {
     const state = this.popCartService.currentState;
     return state.items
       .map((item, index) => ({ item, index }))
@@ -2143,7 +2312,9 @@ export class PopComponent implements OnInit, OnDestroy {
     // productos nuevos, antes de armar el payload.
     this.applyNewProductPricing();
     const request = cartToPurchaseOrderRequest(state, userId, undefined);
-    request.status = 'approved';
+    // A.10 — el `status` ya no viaja en el payload (nacía aprobada a petición
+    // del navegador). La orden se crea en borrador y se aprueba con la ACCIÓN
+    // de aprobar, que pasa por su permiso y deja `approved_by_user_id`.
     // QUI-647: adjunta la configuración de pago elegida en el modal.
     this.attachPaymentPlan(request);
     // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
@@ -2151,13 +2322,35 @@ export class PopComponent implements OnInit, OnDestroy {
     // QUI-648: unidad de venta configurada en el modal.
     this.attachSaleUnitConfig(request, state);
 
-    this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    this.purchaseOrdersService.createPurchaseOrder(request).pipe(
+      switchMap((response) => {
+        if (!response?.success || !response.data) return of(response);
+        // La aprobación NO puede tumbar una orden que ya existe: si falla, la
+        // orden queda en borrador y se dice con nombre y motivo. Reintentar
+        // crearía una segunda compra por la misma factura.
+        return this._approveCreatedOrder$(response.data).pipe(
+          map((approved) => ({ ...response, data: approved })),
+          catchError((err: any) => {
+            this.toastService.warning(
+              this._errorMessage(
+                err?.err,
+                'La orden se creó como BORRADOR: no se pudo aprobar',
+              ),
+            );
+            return of(response);
+          }),
+        );
+      }),
+      takeUntilDestroyed(this.destroyRef),
+    ).subscribe({
       next: (response) => {
-        // 5.4 — El backend puede responder 200/201 con `success:false` (ver
-        // `responseService.error` que RETORNA el sobre en vez de lanzar). Antes
-        // el `if` solo atendía éxito, así que `isProcessingOrder` quedaba
-        // atascado y el operador no podía reintentar. Ahora: pintar el panel
-        // de error con el mensaje del sobre y conservar el carrito.
+        // 5.4 — HISTÓRICO: el backend respondía 200/201 con `success:false`
+        // porque `responseService.error` RETORNA el sobre en vez de lanzar, y
+        // el `if` solo atendía éxito, dejando `isProcessingOrder` atascado.
+        // CP-PURCHASE-TRANSPARENCY quitó ese envoltorio de los 24 handlers de
+        // compras: un fallo llega ahora por `error:` con su estado HTTP real.
+        // La rama `else` de abajo queda como red de seguridad, no como
+        // contrato. NO diseñes encima de `success:false`: ya no llega.
         if (response?.success && response.data) {
           // CP-ID-VNDX-2026-08-18-PO-PROD — F2.S6: en lugar de navegar a
           // /admin/products, pintar panel `app-success` con id + total.
@@ -2245,7 +2438,7 @@ export class PopComponent implements OnInit, OnDestroy {
             : of(null);
 
           // Etapa pago (tras crear y, si aplica, tras recibir).
-          return reception$.pipe(
+          const payment$ = reception$.pipe(
             switchMap(() => {
               if (!doPay) return of(null);
               const amount =
@@ -2265,6 +2458,21 @@ export class PopComponent implements OnInit, OnDestroy {
                     throwError(() => ({ stage: 'pay' as const, err })),
                   ),
                 );
+            }),
+          );
+
+          // CP-PURCHASE-TRANSPARENCY (T2/D.2) — releer el estado REAL antes de
+          // pintar el modal de éxito. `createdOrder` es la foto que dejó la
+          // creación (+ aprobación): decía `approved` incluso después de que
+          // la recepción hubiera dejado la orden en `received`, y el operador
+          // leía «Aprobada» y podía intentar recibirla otra vez. No es
+          // inferencia — es el estado que responde el servidor.
+          return payment$.pipe(
+            switchMap(() => this._readOrderStatus$(createdOrder?.id)),
+            tap((status) => {
+              if (status && createdOrder) {
+                createdOrder = { ...createdOrder, status };
+              }
             }),
           );
         }),
@@ -2292,6 +2500,32 @@ export class PopComponent implements OnInit, OnDestroy {
           console.error('Error in create/receive/pay flow:', err);
           this.isProcessingOrder.set(false);
           const stage = err?.stage;
+          // La aprobación falló DESPUÉS de crear: la orden existe (en
+          // borrador). Se rescata del marcador porque `createdOrder` todavía
+          // no se había asignado — sin esto el flujo la daría por no creada y
+          // el reintento duplicaría la compra.
+          if (stage === 'approve' && err?.order) {
+            createdOrder = err.order;
+            const approveDetail = this._errorMessage(
+              err?.err,
+              'La orden se creó como BORRADOR: no se pudo aprobar, así que la mercancía no se recibió',
+            );
+            this.toastService.error(approveDetail);
+            // Se recuerda la OC para que «Reintentar» no cree una segunda: la
+            // reanudación intentará recibir y el backend dirá con todas sus
+            // letras que un borrador no puede recibirse.
+            this.pendingReceptionOrder.set(createdOrder);
+            this._setOrderResultFromCreated(createdOrder, {
+              stages: this._buildStageTrail(doReceive, doPay, {
+                create: 'success',
+                receive: 'failed',
+                pay: 'skipped',
+                receiveError: approveDetail,
+              }),
+              failedStage: 'receive',
+            });
+            return;
+          }
           if (stage === 'create' || !createdOrder) {
             // La OC no se creó → no limpiamos el carrito (permite reintentar).
             this.toastService.error(
@@ -2439,12 +2673,52 @@ export class PopComponent implements OnInit, OnDestroy {
       total: Number(order.total_amount ?? 0),
       orderNumber: order.order_number ?? '',
       // CP-ID-VNDX-2026-08-21-POP-MODAL — el modal pinta este campo en el
-      // badge. Si el backend no lo manda, el modal cae a 'created' via el
-      // `?? 'created'` del padre.
-      state: order.state ?? order.status ?? 'created',
+      // badge.
+      //
+      // CP-PURCHASE-TRANSPARENCY (T2/D.2) — `purchase_orders` NO tiene columna
+      // `state`; el estado vive en `status`. Se conserva la lectura de `state`
+      // por si alguna respuesta lo trae, pero el fallback ya no inventa
+      // 'created': un estado ausente se declara ausente.
+      state: order.state ?? order.status ?? '',
       ...(extras.stages ? { stages: extras.stages } : {}),
       ...(extras.failedStage ? { failedStage: extras.failedStage } : {}),
     });
+  }
+
+  /**
+   * A.10 — aprueba la OC recién creada por la VÍA CORRECTA.
+   *
+   * El payload de creación mandaba `status: 'approved'` y el backend lo
+   * escribía tal cual: la orden nacía aprobada a petición del navegador y el
+   * permiso `store:orders:purchase_orders:approve` no se consultaba nunca.
+   * Ahora la orden nace en borrador y esta etapa la aprueba con
+   * `PATCH /:id/approve`, que sí exige el permiso, registra
+   * `approved_by_user_id` y deja rastro de auditoría.
+   *
+   * Lanza `{ stage: 'approve', err, order }` LLEVÁNDOSE la orden creada: sin
+   * ella el manejador de error no distinguiría «no se creó» de «se creó y no
+   * se aprobó», conservaría el carrito y el reintento crearía una SEGUNDA
+   * compra por la misma factura.
+   */
+  private _approveCreatedOrder$(order: any): Observable<any> {
+    const id = Number(order?.id);
+    if (!id) return of(order);
+    return this.purchaseOrdersService.approvePurchaseOrder(id).pipe(
+      switchMap((response) =>
+        response?.success && response.data
+          ? of(response.data)
+          : throwError(() => ({
+              stage: 'approve' as const,
+              err: response,
+              order,
+            })),
+      ),
+      catchError((err: any) =>
+        err?.stage === 'approve'
+          ? throwError(() => err)
+          : throwError(() => ({ stage: 'approve' as const, err, order })),
+      ),
+    );
   }
 
   /**
@@ -2458,7 +2732,8 @@ export class PopComponent implements OnInit, OnDestroy {
     // modal para los productos nuevos, antes de armar el payload.
     this.applyNewProductPricing();
     const request = cartToPurchaseOrderRequest(state, userId, undefined);
-    request.status = 'approved';
+    // A.10 — sin `status` en el payload: se crea en borrador y se aprueba por
+    // la vía que exige el permiso de aprobación (ver `_approveCreatedOrder$`).
     // QUI-647: adjunta la configuración de pago elegida en el modal.
     this.attachPaymentPlan(request);
     // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
@@ -2472,6 +2747,9 @@ export class PopComponent implements OnInit, OnDestroy {
           ? of(response.data)
           : throwError(() => ({ stage: 'create' as const })),
       ),
+      // Recibir exige una orden APROBADA (`draft` sólo transita a `approved` o
+      // `cancelled`), así que la aprobación es una etapa propia de la cadena.
+      switchMap((order) => this._approveCreatedOrder$(order)),
     );
   }
 
@@ -2590,6 +2868,28 @@ export class PopComponent implements OnInit, OnDestroy {
         this.dispatchNotesService.confirm(dn.id).pipe(map(() => dn)),
       ),
       switchMap((dn) => this.dispatchNotesService.receive(dn.id)),
+    );
+  }
+
+  /**
+   * CP-PURCHASE-TRANSPARENCY (T2/D.2) — estado REAL de la OC leído del
+   * servidor tras la cadena `crear → recibir → pagar`.
+   *
+   * Ni la recepción por remisión ni el registro de pago devuelven la orden:
+   * la primera responde la remisión y el segundo el pago. Sin esta relectura
+   * el modal se queda con el estado de la creación. Falla en silencio a
+   * propósito (`null`): la OC ya existe y el operador tiene que ver su modal
+   * — el badge dirá «Sin confirmar» antes que un estado equivocado.
+   */
+  private _readOrderStatus$(id: unknown): Observable<string | null> {
+    const orderId = Number(id);
+    if (!orderId) return of(null);
+    return this.purchaseOrdersService.getPurchaseOrderById(orderId).pipe(
+      map((response: any) => {
+        const status = response?.success ? response?.data?.status : null;
+        return typeof status === 'string' && status ? status : null;
+      }),
+      catchError(() => of(null)),
     );
   }
 

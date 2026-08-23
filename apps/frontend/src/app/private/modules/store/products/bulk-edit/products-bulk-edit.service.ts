@@ -336,7 +336,16 @@ export class ProductsBulkEditService {
   ): Observable<BulkArchivePreviewResult> {
     const batches = this.startPhase('archive-preview', ids);
     if (batches.length === 0) {
-      return of({ total: 0, ok: 0, warnings: 0, errors: 0, items: [] });
+      return of({
+        total: 0,
+        ok: 0,
+        warnings: 0,
+        errors: 0,
+        items: [],
+        total_units_to_write_off: 0,
+        total_value_to_write_off: 0,
+        requires_confirmation: false,
+      });
     }
 
     return from(batches).pipe(
@@ -366,10 +375,18 @@ export class ProductsBulkEditService {
   archiveInBatches(
     ids: readonly number[],
     resolveName?: ProductNameResolver,
+    confirmStockWriteOff = false,
   ): Observable<BulkArchiveResult> {
     const batches = this.startPhase('archive', ids);
     if (batches.length === 0) {
-      return of({ total: 0, successful: 0, failed: 0, results: [] });
+      return of({
+        total: 0,
+        successful: 0,
+        failed: 0,
+        results: [],
+        written_off_units: 0,
+        written_off_value: 0,
+      });
     }
 
     return from(batches).pipe(
@@ -377,7 +394,15 @@ export class ProductsBulkEditService {
         this.http
           .post<
             ApiEnvelope<BulkArchiveResult>
-          >(`${this.apiUrl}/store/products/bulk-edit/archive`, { ids: batch })
+          >(`${this.apiUrl}/store/products/bulk-edit/archive`, {
+            ids: batch,
+            // CP-PURCHASE-TRANSPARENCY D.6 — la confirmación viaja POR LOTE, y
+            // tiene que viajar en TODOS: el troceado del cliente es invisible
+            // para el operador, que confirmó una vez sobre la selección entera.
+            // Mandarla sólo en el primero dejaría los lotes 2..N rechazados
+            // producto a producto con un 409 que nadie pidió.
+            confirm_stock_write_off: confirmStockWriteOff,
+          })
           .pipe(
             map((res) => res.data),
             catchError((err: unknown) =>
@@ -486,6 +511,10 @@ export class ProductsBulkEditService {
       status: 'error',
       code: errorCode ?? undefined,
       message: userMessage,
+      // Los campos del castigo se OMITEN, no se ponen en 0: un lote cuyo
+      // preview no se pudo calcular no autoriza a afirmar que esos productos no
+      // tienen existencias. `undefined` es «no se sabe»; 0 sería una cifra
+      // inventada sobre la que el operador tomaría una decisión irreversible.
     }));
     return {
       total: batch.length,
@@ -493,6 +522,9 @@ export class ProductsBulkEditService {
       warnings: 0,
       errors: batch.length,
       items,
+      total_units_to_write_off: 0,
+      total_value_to_write_off: 0,
+      requires_confirmation: false,
     };
   }
 
@@ -509,12 +541,19 @@ export class ProductsBulkEditService {
       status: 'error',
       code: errorCode ?? undefined,
       message: userMessage,
+      written_off_units: 0,
+      written_off_value: 0,
     }));
     return {
       total: batch.length,
       successful: 0,
       failed: batch.length,
       results,
+      // Un lote que no llegó no destruyó nada. Aquí el 0 SÍ es una afirmación
+      // verificable, a diferencia del preview: el `catchError` está dentro del
+      // `concatMap`, así que la petición terminó y nada de este lote se aplicó.
+      written_off_units: 0,
+      written_off_value: 0,
     };
   }
 
@@ -608,8 +647,30 @@ export function mergeArchivePreviewResults(
       warnings: acc.warnings + (part?.warnings ?? 0),
       errors: acc.errors + (part?.errors ?? 0),
       items: [...acc.items, ...(part?.items ?? [])],
+      // D.6 — las cifras del castigo también se agregan. Sin esto el modal
+      // enseñaría el total del ÚLTIMO lote como si fuera el de la selección
+      // entera, que es exactamente la clase de número equivocado que este plan
+      // existe para eliminar.
+      total_units_to_write_off:
+        (acc.total_units_to_write_off ?? 0) + (part?.total_units_to_write_off ?? 0),
+      total_value_to_write_off:
+        (acc.total_value_to_write_off ?? 0) + (part?.total_value_to_write_off ?? 0),
+      // OR entre lotes: basta que UNO tenga existencias para que la
+      // confirmación sea obligatoria en toda la operación.
+      requires_confirmation:
+        (acc.requires_confirmation ?? false) ||
+        (part?.requires_confirmation ?? false),
     }),
-    { total: 0, ok: 0, warnings: 0, errors: 0, items: [] },
+    {
+      total: 0,
+      ok: 0,
+      warnings: 0,
+      errors: 0,
+      items: [],
+      total_units_to_write_off: 0,
+      total_value_to_write_off: 0,
+      requires_confirmation: false,
+    },
   );
 }
 
@@ -623,7 +684,18 @@ export function mergeArchiveResults(
       successful: acc.successful + (part?.successful ?? 0),
       failed: acc.failed + (part?.failed ?? 0),
       results: [...acc.results, ...(part?.results ?? [])],
+      written_off_units:
+        (acc.written_off_units ?? 0) + (part?.written_off_units ?? 0),
+      written_off_value:
+        (acc.written_off_value ?? 0) + (part?.written_off_value ?? 0),
     }),
-    { total: 0, successful: 0, failed: 0, results: [] },
+    {
+      total: 0,
+      successful: 0,
+      failed: 0,
+      results: [],
+      written_off_units: 0,
+      written_off_value: 0,
+    },
   );
 }

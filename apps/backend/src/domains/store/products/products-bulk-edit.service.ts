@@ -1,5 +1,6 @@
-import { HttpException, Injectable } from '@nestjs/common';
+import { HttpException, Injectable, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { RequestContextService } from '@common/context/request-context.service';
 import { ProductsService } from './products.service';
 import { ErrorCodes, VendixHttpException } from 'src/common/errors';
 import { storeIndustriesSupportIngredients } from '@common/helpers/industry-capabilities.helper';
@@ -158,6 +159,8 @@ const BULK_EDITABLE_FIELDS: readonly string[] = [
  */
 @Injectable()
 export class ProductsBulkEditService {
+  private readonly logger = new Logger(ProductsBulkEditService.name);
+
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly productsService: ProductsService,
@@ -380,9 +383,20 @@ export class ProductsBulkEditService {
       .map((product) => product.id);
 
     const constraints = await this.loadArchiveConstraints(archivableIds);
+    // D.6 / FB-10 — lo que cada fila va a perder. Dos consultas para todo el
+    // lote, no dos por producto.
+    const writeOffs =
+      await this.productsService.getArchiveWriteOffPlansByIds(archivableIds);
 
     const items: BulkArchivePreviewItemDto[] = ids.map((id) => {
       const product = productById.get(id);
+      const writeOff = writeOffs.get(id);
+      const writeOffFields = {
+        on_hand_units: writeOff?.total_units ?? 0,
+        value_to_write_off: writeOff?.total_value ?? 0,
+        zero_cost_units: writeOff?.zero_cost_units ?? 0,
+        out_of_scope_units: writeOff?.out_of_scope_units ?? 0,
+      };
 
       // `remove()` llama `findOne()`, que filtra `state != archived`
       // (`products.service.ts:1615-1623`): ausente o ya archivado ⇒ PROD_FIND_001.
@@ -396,6 +410,7 @@ export class ProductsBulkEditService {
           message: product
             ? 'El producto ya está archivado'
             : ErrorCodes.PROD_FIND_001.devMessage,
+          ...writeOffFields,
         };
       }
 
@@ -403,6 +418,7 @@ export class ProductsBulkEditService {
         id: product.id,
         name: product.name,
         sku: product.sku ?? null,
+        ...writeOffFields,
       };
 
       const blocker = this.detectArchiveBlocker(product.id, constraints);
@@ -410,7 +426,27 @@ export class ProductsBulkEditService {
         return { ...base, status: 'error' as const, ...blocker };
       }
 
+      // D.6 — existencias fuera del alcance de la tienda (bodega central de la
+      // organización). `remove()` las rechaza, así que el preview lo dice antes
+      // en vez de dejar que el lote falle fila a fila.
+      if (writeOffFields.out_of_scope_units > 0) {
+        return {
+          ...base,
+          status: 'error' as const,
+          code: ErrorCodes.PROD_VARIANT_HAS_STOCK_001.code,
+          message: `El producto tiene ${writeOffFields.out_of_scope_units} unidades en ubicaciones fuera de esta tienda. Transfiérelas o ajústalas antes de archivarlo.`,
+        };
+      }
+
       const warnings = this.detectArchiveWarnings(product.id, constraints);
+      // D.6 — el castigo de inventario es un AVISO, no un bloqueo: se ejecuta
+      // si el operador confirma. Va primero en el texto porque es lo único
+      // irreversible de la lista.
+      if (writeOffFields.on_hand_units > 0) {
+        warnings.unshift(
+          `Se darán de baja ${writeOffFields.on_hand_units} unidades por un valor de ${writeOffFields.value_to_write_off}.`,
+        );
+      }
       if (warnings.length > 0) {
         return {
           ...base,
@@ -422,11 +458,19 @@ export class ProductsBulkEditService {
       return { ...base, status: 'ok' as const };
     });
 
+    const totalUnits = items.reduce((sum, item) => sum + item.on_hand_units, 0);
+
     return {
       total: items.length,
       ok: items.filter((item) => item.status === 'ok').length,
       warnings: items.filter((item) => item.status === 'warning').length,
       errors: items.filter((item) => item.status === 'error').length,
+      total_units_to_write_off: totalUnits,
+      total_value_to_write_off: items.reduce(
+        (sum, item) => sum + item.value_to_write_off,
+        0,
+      ),
+      requires_confirmation: totalUnits > 0,
       items,
     };
   }
@@ -457,6 +501,22 @@ export class ProductsBulkEditService {
       .map((product) => product.id);
     const constraints = await this.loadArchiveConstraints(archivableIds);
 
+    // D.6 — el castigo se declara, no se asume. Ausente ⇒ `false`, y entonces
+    // `remove()` rechaza cada producto con existencias exactamente igual que
+    // por la ruta individual: un lote de un solo identificador no es un atajo.
+    const confirmStockWriteOff = dto.confirm_stock_write_off === true;
+    // Identificador del lote: la única manera de reconstruir después qué
+    // productos se destruyeron bajo UNA misma confirmación.
+    const batchId = `bulk-archive-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 10)}`;
+
+    // Lo que el operador estaba aprobando en el momento de pulsar. Se calcula
+    // ANTES de tocar nada: después del castigo el stock ya es cero y la cifra
+    // sería irrecuperable.
+    const approvedPlans =
+      await this.productsService.getArchiveWriteOffPlansByIds(archivableIds);
+
     const results: BulkArchiveResultItemDto[] = [];
 
     for (const id of ids) {
@@ -469,16 +529,26 @@ export class ProductsBulkEditService {
           name: knownNames.get(id) ?? '',
           status: 'error',
           ...blocker,
+          written_off_units: 0,
+          written_off_value: 0,
         });
         continue;
       }
 
+      const plan = approvedPlans.get(id);
+
       try {
-        const archived = await this.productsService.remove(id);
+        const archived = await this.productsService.remove(id, {
+          confirm_stock_write_off: confirmStockWriteOff,
+          batch_id: batchId,
+        });
         results.push({
           id,
           name: archived?.name ?? knownNames.get(id) ?? '',
           status: 'ok',
+          written_off_units: plan?.total_units ?? 0,
+          written_off_value: plan?.total_value ?? 0,
+          zero_cost_units: plan?.zero_cost_units ?? 0,
         });
       } catch (error) {
         const { code, message } = this.extractErrorInfo(error);
@@ -488,16 +558,92 @@ export class ProductsBulkEditService {
           status: 'error',
           ...(code && { code }),
           message,
+          written_off_units: 0,
+          written_off_value: 0,
         });
       }
     }
 
-    return {
+    const summary: BulkArchiveResultDto = {
       total: results.length,
       successful: results.filter((result) => result.status === 'ok').length,
       failed: results.filter((result) => result.status === 'error').length,
+      written_off_units: results.reduce(
+        (sum, result) => sum + (result.written_off_units ?? 0),
+        0,
+      ),
+      written_off_value: results.reduce(
+        (sum, result) => sum + (result.written_off_value ?? 0),
+        0,
+      ),
       results,
     };
+
+    // D.8 — fila resumen del lote. Cada producto ya dejó la suya dentro de su
+    // propia transacción; ésta es la que ata las N a una sola confirmación.
+    // Medido antes de este paso: 17 productos archivados en un mismo lote
+    // dejaron CERO filas en `audit_logs`, porque el interceptor global no
+    // escribe nada en esta ruta.
+    await this.writeBulkArchiveAuditRow(batchId, confirmStockWriteOff, summary);
+
+    return summary;
+  }
+
+  /**
+   * Fila resumen del archivado masivo.
+   *
+   * A DIFERENCIA de la fila por producto (que va DENTRO de la transacción del
+   * castigo y aborta si falla), ésta se escribe después y su fallo NO revierte
+   * nada: no habría nada que revertir, porque cada producto ya se commiteó por
+   * separado y su propia fila ya quedó escrita. Perder este resumen degrada la
+   * trazabilidad, no la destruye.
+   */
+  private async writeBulkArchiveAuditRow(
+    batchId: string,
+    confirmed: boolean,
+    summary: BulkArchiveResultDto,
+  ): Promise<void> {
+    try {
+      const storeId = RequestContextService.getStoreId();
+      if (storeId == null) {
+        // `store_id` no nulo es parte del contrato de la fila (D.8). Sin
+        // contexto de tienda no hay fila que escribir, pero tampoco se calla:
+        // el archivado masivo sólo se alcanza por una ruta con contexto, así
+        // que llegar aquí es una anomalía que hay que poder ver.
+        this.logger.warn(
+          `Archivado masivo ${batchId} sin contexto de tienda: no se escribió la fila resumen de auditoría.`,
+        );
+        return;
+      }
+
+      await this.prisma.audit_logs.create({
+        data: {
+          user_id: RequestContextService.getUserId() ?? null,
+          store_id: storeId,
+          organization_id: RequestContextService.getOrganizationId() ?? null,
+          action: 'PRODUCT_ARCHIVE_BULK',
+          resource: 'products',
+          resource_id: null,
+          request_id: RequestContextService.getRequestId() ?? null,
+          old_values: null,
+          new_values: null,
+          metadata: {
+            batch_id: batchId,
+            confirmation: { confirmed },
+            total: summary.total,
+            successful: summary.successful,
+            failed: summary.failed,
+            written_off_units: summary.written_off_units,
+            written_off_value: summary.written_off_value,
+            results: summary.results,
+          },
+        } as any,
+      });
+    } catch (error) {
+      this.logger.error(
+        `No se pudo escribir la auditoría resumen del archivado masivo ${batchId}: ${error?.message || error}`,
+      );
+    }
   }
 
   /**
@@ -509,10 +655,11 @@ export class ProductsBulkEditService {
     constraints: ArchiveConstraints,
   ): { code: string; message: string } | null {
     if (constraints.reserved.has(productId)) {
-      // Mismo código que el bloqueo del servicio individual en `update()`
-      // (`products.service.ts:1933-1938`).
+      // Mismo código que el bloqueo del servicio individual en `update()` y en
+      // `remove()`. D.7 lo movió de `INV_STOCK_001` (400) a
+      // `PROD_HAS_RESERVATIONS_001` (409): un mismo rechazo, un solo código.
       return {
-        code: ErrorCodes.INV_STOCK_001.code,
+        code: ErrorCodes.PROD_HAS_RESERVATIONS_001.code,
         message:
           'El producto tiene reservas de stock activas. Libera las reservas antes de archivarlo.',
       };
@@ -851,8 +998,9 @@ export class ProductsBulkEditService {
     // 1. `products.service.ts:1917-1931` — reservas de stock activas del propio
     //    producto (`product_variant_id: null`, `status: 'active'`).
     if (reservedProductIds.has(product.id)) {
+      // D.7 — espejo exacto del bloqueo individual de `update()`.
       return {
-        code: ErrorCodes.INV_STOCK_001.code,
+        code: ErrorCodes.PROD_HAS_RESERVATIONS_001.code,
         message:
           'Cannot modify product with active stock reservations. Release reservations first.',
       };

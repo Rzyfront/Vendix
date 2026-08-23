@@ -20,6 +20,45 @@
     </label>
   </section>
 
+  <!--
+    A.5 — Fallo de la vista previa: panel VISIBLE en vez de un paso vacío.
+    Mientras esté, el shell bloquea «Confirmar»: aprobar una recepción sin haber
+    visto el costo que se va a sellar es justo lo que este plan cierra.
+  -->
+  @if (costPreviewError()) {
+    <section class="recv-error">
+      <app-icon name="shield-alert" [size]="18"></app-icon>
+      <div class="recv-error-body">
+        <p class="recv-error-title">No pudimos calcular la valoración</p>
+        <p class="recv-error-text">{{ costPreviewError() }}</p>
+        <p class="recv-error-text">
+          Sin esta vista previa no se puede confirmar la recepción: el costo que
+          entraría a inventario no se te ha mostrado.
+        </p>
+        <button
+          type="button"
+          class="recv-error-retry"
+          (click)="retryCostPreview.emit()"
+        >
+          Reintentar
+        </button>
+      </div>
+    </section>
+  }
+
+  <!--
+    B.5 — Explicación fiscal. Se pinta SIEMPRE que el backend la manda, también
+    con IVA cero: el tratamiento del impuesto es una decisión del sistema aunque
+    la factura no esté gravada. Antes colgaba de `hasTax()` y, como
+    `incoming_tax_per_unit` llegaba siempre en cero, no se pintaba nunca.
+  -->
+  @if (fiscalExplanation()) {
+    <app-fiscal-explanation-panel
+      [explanation]="fiscalExplanation()"
+      (navigateToFiscalWizard)="navigateToFiscalWizard.emit($event)"
+    ></app-fiscal-explanation-panel>
+  }
+
   <!-- Valoración de inventario: preview de costeo + márgenes/precios (QUI-425) -->
   @if (loadingCostPreview() || (costPreview()?.items?.length ?? 0) > 0) {
     <section class="recv-section">
@@ -44,6 +83,41 @@
           Cambiar estrategia →
         </button>
       </div>
+
+      <!--
+        C.5 — El flete que el backend repartió. `expense` deja el reparto en
+        cero a propósito: el flete no toca el costo del inventario. Si el
+        backend tuvo que degradar el prorrateo, se dice — la elección del
+        operador no se honró y tiene que enterarse ANTES de confirmar.
+      -->
+      @if ((costPreview()?.shipping_cost ?? 0) > 0) {
+        <p class="freight-note">
+          @if (costPreview()?.shipping_cost_allocation_applied === 'prorate') {
+            <!--
+              CP-PURCHASE-TRANSPARENCY (T2/D.3) — decía «sube el costo unitario
+              de cada producto» con las cifras «$4 → $3» justo debajo. El costo
+              se expresa por unidad de STOCK: cuando una unidad comprada rinde
+              varias (`purchase_to_stock_factor`), la conversión diluye más de
+              lo que el flete suma y el costo BAJA. Se nombra el mecanismo, no
+              una dirección que sólo se cumple a veces.
+            -->
+            Flete de {{ costPreview()!.shipping_cost | currency }} prorrateado
+            entre las líneas según su participación: entra en el costo con el
+            que cada producto queda valorado. Si una unidad comprada rinde
+            varias de stock, el costo unitario final puede quedar por debajo
+            del costo de la línea — las cifras de abajo son el resultado.
+          } @else {
+            Flete de {{ costPreview()!.shipping_cost | currency }} asumido como
+            costo de la orden: no toca el costo unitario de los productos.
+          }
+          @if (shippingAllocationDowngraded()) {
+            <span class="freight-note--warn">
+              Pediste prorratearlo, pero no hay base sobre la que repartirlo, así
+              que se registró como costo de la orden.
+            </span>
+          }
+        </p>
+      }
 
       @if (loadingCostPreview()) {
         <div class="preview-loading">
@@ -113,6 +187,18 @@
                             ? 'el IVA no es costo: va a IVA descontable'
                             : 'el IVA ya está dentro del costo'
                         }}
+                      </small>
+                    </span>
+                  </div>
+                }
+                @if (allocatedShipping(item) > 0) {
+                  <div class="editor-field">
+                    <span class="editor-label">Flete asignado</span>
+                    <span class="editor-value editor-value--muted">
+                      {{ allocatedShipping(item) | currency }}
+                      <small class="disbursement-note">
+                        {{ shippingPerUnit(item) | currency }} por unidad, ya
+                        dentro del costo nuevo
                       </small>
                     </span>
                   </div>

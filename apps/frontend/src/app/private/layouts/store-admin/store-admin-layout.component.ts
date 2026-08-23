@@ -889,6 +889,11 @@ export class StoreAdminLayoutComponent {
           route: '/admin/settings/payments',
         },
         {
+          label: 'Formatos de Impresión',
+          icon: 'circle',
+          route: '/admin/settings/print-formats',
+        },
+        {
           label: 'Apariencia',
           icon: 'circle',
           route: '/admin/settings/appearance',

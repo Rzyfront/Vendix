@@ -36,6 +36,17 @@ export interface FiscalDataSettings {
   // and with tax-declaration-draft.service.ts:calculateIca).
   municipality_code?: string;
   ciiu_code?: string;
+  /**
+   * CP-PURCHASE-TRANSPARENCY B.2 — origen DERIVADO de la responsabilidad y del
+   * régimen que devuelve la lectura: `'store'` si la tienda los declaró,
+   * `'organization'` si los heredó de su organización.
+   *
+   * Estrictamente de LECTURA. `updateFiscalData` los descarta antes de mezclar,
+   * así que un formulario que haga GET y devuelva el objeto entero no puede
+   * persistirlos ni convertir un valor heredado en uno propio por accidente.
+   */
+  tax_responsibilities_source?: 'store' | 'organization';
+  tax_regime_source?: 'store' | 'organization';
 }
 
 // ============================================================================

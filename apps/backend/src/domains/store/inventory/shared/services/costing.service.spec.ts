@@ -23,11 +23,31 @@ import { OperatingScopeService } from '@common/services/operating-scope.service'
  *   5. Scope ORGANIZATION → filter only { organization_id }.
  *   6. Cross-org location → throw.
  */
+/**
+ * `Prisma.Sql.text` conserva los saltos de línea y la sangría de la plantilla.
+ * Las aserciones comparan la CONSULTA, no su formato.
+ */
+const normalize = (sql: string): string => sql.replace(/\s+/g, ' ').trim();
+
 describe('CostingService', () => {
   let service: CostingService;
   let prismaService: jest.Mocked<StorePrismaService>;
   let globalPrismaService: jest.Mocked<GlobalPrismaService>;
   let operatingScopeService: jest.Mocked<OperatingScopeService>;
+  /**
+   * El agregado de costo lee por CONSULTA CRUDA (`$queryRaw`), no por
+   * `stock_levels.findMany`. Es deliberado: `$queryRaw` no atraviesa las
+   * extensiones de Prisma, así que el conjunto agregado no depende de si el
+   * cliente que ejecuta trae alcance de tienda o no. El mock apunta al
+   * `PrismaClient` desnudo que devuelve `globalPrisma.withoutScope()`.
+   *
+   * J.1 — las filas del doble llevan `product_id` / `product_variant_id`
+   * porque el motor SIEMPRE los devuelve y la lectura es por LOTE: cada fila
+   * se atribuye a su propio par. Un fixture sin ellos describiría un motor que
+   * no existe, y el día que alguien pida dos pares el arnés seguiría verde
+   * mientras el servicio sumara los dos universos en uno.
+   */
+  let rawQuery: jest.Mock;
 
   const mockContext = {
     organization_id: 1,
@@ -59,13 +79,12 @@ describe('CostingService', () => {
       },
     };
 
-    // QUI-425: the scoped cost aggregate is read through the UNSCOPED base
-    // client (GlobalPrismaService), so it must be mocked separately from the
-    // store-scoped client used for the single-location read and writes.
+    // QUI-425: el agregado en alcance se lee por el cliente SIN alcance
+    // (`GlobalPrismaService.withoutScope()`), separado del cliente de tienda
+    // que hace la lectura por ubicación y las escrituras.
+    rawQuery = jest.fn().mockResolvedValue([]);
     const mockGlobalPrismaService = {
-      stock_levels: {
-        findMany: jest.fn(),
-      },
+      withoutScope: jest.fn().mockReturnValue({ $queryRaw: rawQuery }),
     };
 
     const mockOperatingScopeService = {
@@ -100,7 +119,7 @@ describe('CostingService', () => {
     });
     (prismaService as any).stock_levels.findMany.mockResolvedValue([]);
     // Scoped aggregate default: no in-scope stock anywhere.
-    (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([]);
+    rawQuery.mockResolvedValue([]);
     (prismaService as any).inventory_cost_layers.create.mockResolvedValue({});
     (prismaService as any).products.update.mockResolvedValue({});
     (prismaService as any).product_variants.update.mockResolvedValue({});
@@ -116,7 +135,7 @@ describe('CostingService', () => {
       // No existing stock_level — first ever receipt.
       (prismaService as any).stock_levels.findFirst.mockResolvedValue(null);
       // No locations with stock_on_hand > 0 anywhere yet (scoped aggregate).
-      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([]);
+      rawQuery.mockResolvedValue([]);
 
       const result = await service.calculateCostOnReceipt({
         product_id: 1,
@@ -172,9 +191,7 @@ describe('CostingService', () => {
         existingStockLevel,
       );
       // Scoped aggregate (UNSCOPED base client) finds the same single stock level.
-      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([
-        existingStockLevel,
-      ]);
+      rawQuery.mockResolvedValue([existingStockLevel]);
 
       const result = await service.calculateCostOnReceipt({
         product_id: 1,
@@ -226,15 +243,15 @@ describe('CostingService', () => {
     it('case 3: FIFO returns new_cost_per_unit = unit_cost (no average) and still creates layer', async () => {
       const existingStockLevel = {
         id: 9,
+        product_id: 1,
+        product_variant_id: null,
         quantity_on_hand: 10,
         cost_per_unit: 1000,
       };
       (prismaService as any).stock_levels.findFirst.mockResolvedValue(
         existingStockLevel,
       );
-      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([
-        existingStockLevel,
-      ]);
+      rawQuery.mockResolvedValue([existingStockLevel]);
 
       const result = await service.calculateCostOnReceipt({
         product_id: 1,
@@ -259,14 +276,14 @@ describe('CostingService', () => {
   });
 
   describe('scoped aggregation by operating_scope', () => {
-    it('case 4: STORE scope filters by { organization_id, store_id }', async () => {
+    it('case 4: STORE scope → org + esa tienda + la bodega central (store_id IS NULL)', async () => {
       operatingScopeService.getOperatingScope.mockResolvedValue('STORE');
       (prismaService as any).inventory_locations.findUnique.mockResolvedValue({
         organization_id: 1,
         store_id: 42,
       });
       (prismaService as any).stock_levels.findFirst.mockResolvedValue(null);
-      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([]);
+      rawQuery.mockResolvedValue([]);
 
       await service.calculateCostOnReceipt({
         product_id: 1,
@@ -276,17 +293,13 @@ describe('CostingService', () => {
         costing_method: 'weighted_average',
       });
 
-      // Aggregate runs on the UNSCOPED client with the scope filter as the
-      // ONLY predicate (STORE → org + store).
-      expect(globalPrismaService.stock_levels.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            inventory_locations: {
-              is: { organization_id: 1, store_id: 42 },
-            },
-          }),
-        }),
+      // La pertenencia va ESCRITA en el WHERE, no heredada del cliente.
+      const sent = rawQuery.mock.calls[0][0];
+      expect(normalize(sent.text)).toContain(
+        'il.organization_id = $2 AND (il.store_id = $3 OR il.store_id IS NULL)',
       );
+      // [product_id, organization_id, store_id] — sin variante en esta llamada.
+      expect(sent.values).toEqual([1, 1, 42]);
     });
 
     it('case 5: ORGANIZATION scope filters by { organization_id } only', async () => {
@@ -296,7 +309,7 @@ describe('CostingService', () => {
         store_id: 42,
       });
       (prismaService as any).stock_levels.findFirst.mockResolvedValue(null);
-      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([]);
+      rawQuery.mockResolvedValue([]);
 
       await service.calculateCostOnReceipt({
         product_id: 1,
@@ -306,17 +319,12 @@ describe('CostingService', () => {
         costing_method: 'weighted_average',
       });
 
-      // ORGANIZATION scope → filter is { organization_id } only, so org-level
-      // central warehouses (store_id = null) and sibling stores are included.
-      expect(globalPrismaService.stock_levels.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            inventory_locations: {
-              is: { organization_id: 1 },
-            },
-          }),
-        }),
-      );
+      // ORGANIZATION scope → sólo { organization_id }: entran la bodega central
+      // (store_id = null) y las tiendas hermanas.
+      const sent = rawQuery.mock.calls[0][0];
+      expect(normalize(sent.text)).toContain('il.organization_id = $2');
+      expect(normalize(sent.text)).not.toContain('il.store_id =');
+      expect(sent.values).toEqual([1, 1]);
     });
 
     it('case 5b (QUI-425): ORGANIZATION scope blends the org-level central warehouse into cost_price/margin basis', async () => {
@@ -332,8 +340,10 @@ describe('CostingService', () => {
       // Receiving location itself is empty pre-receipt.
       (prismaService as any).stock_levels.findFirst.mockResolvedValue(null);
       // Scoped aggregate (unscoped read) sees the org-level central warehouse.
-      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([
+      rawQuery.mockResolvedValue([
         {
+          product_id: 1,
+          product_variant_id: null,
           location_id: 49, // Bodega Central, store_id = null
           quantity_on_hand: 10,
           cost_per_unit: 1000000,
@@ -586,12 +596,14 @@ describe('CostingService', () => {
   describe('cost_per_unit collapse fallback (F1)', () => {
     it('case a: stock row with cost_per_unit=NULL falls back to products.cost_price (3.5M, not 0)', async () => {
       // Aggregate reads through the UNSCOPED base client (globalPrisma).
-      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([
+      rawQuery.mockResolvedValue([
         {
+          product_id: 1,
+          product_variant_id: null,
           quantity_on_hand: 10,
           cost_per_unit: null, // born NULL (non-receipt write path)
-          products: { cost_price: 3_500_000 },
-          product_variants: null,
+          product_cost_price: 3_500_000,
+          variant_cost_price: null,
         },
       ]);
 
@@ -618,13 +630,15 @@ describe('CostingService', () => {
         location_id: 100,
         quantity_on_hand: 24,
         cost_per_unit: null,
+        // Forma Prisma (la lee `stock_levels.findFirst`, por ubicación)…
         products: { cost_price: 3_500_000 },
         product_variants: null,
+        // …y forma cruda (la lee el agregado en alcance, por `$queryRaw`).
+        product_cost_price: 3_500_000,
+        variant_cost_price: null,
       };
       (prismaService as any).stock_levels.findFirst.mockResolvedValue(existing);
-      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([
-        existing,
-      ]);
+      rawQuery.mockResolvedValue([existing]);
 
       const result = await service.calculateCostOnReceipt({
         product_id: 1,
@@ -646,12 +660,14 @@ describe('CostingService', () => {
     });
 
     it('case c: legitimate zero cost (cost_per_unit=0 AND cost_price=0) stays 0 (no false fallback)', async () => {
-      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([
+      rawQuery.mockResolvedValue([
         {
+          product_id: 1,
+          product_variant_id: null,
           quantity_on_hand: 10,
           cost_per_unit: 0,
-          products: { cost_price: 0 },
-          product_variants: null,
+          product_cost_price: 0,
+          variant_cost_price: null,
         },
       ]);
 
@@ -665,4 +681,638 @@ describe('CostingService', () => {
       expect(agg.cost_per_unit).toBe(0);
     });
   });
+
+  /**
+   * A.0 — Un único universo de stock.
+   *
+   * El defecto que este bloque clava: `getScopedStockAggregate` elegía cliente
+   * con `tx ?? globalPrisma`, y como `StorePrismaService` SOBRESCRIBE
+   * `$transaction` hacia el cliente CON alcance, el camino de recepción recibía
+   * un `AND inventory_locations.store_id = <tienda>` encima del filtro
+   * explícito — y ese filtro incluye A PROPÓSITO la bodega central de la
+   * organización (`store_id IS NULL`). Medido en dev (producto 268,
+   * organización 6, tienda 10, 10 u. a 2.000.000): vista previa 119 unidades y
+   * 1.649.457,36; recepción 25 unidades y 1.728.571,43. 4,8 % de divergencia
+   * entre lo que el operador aprueba y lo que el sistema sella.
+   *
+   * El contrato que queda escrito aquí: MISMO conjunto agregado con `tx` y sin
+   * `tx`, y el aislamiento entre organizaciones sale del `WHERE`, no del
+   * cliente que ejecute.
+   */
+  describe('A.0 — universo de stock idéntico con tx y sin tx', () => {
+    // 94 unidades en la bodega central (store_id = null) + 25 en la tienda.
+    // Bajo el defecto, la recepción veía sólo las 25.
+    const universe = [
+      {
+        product_id: 268,
+        product_variant_id: null,
+        quantity_on_hand: 94,
+        cost_per_unit: 1_620_000,
+        product_cost_price: 1_620_000,
+        variant_cost_price: null,
+      },
+      {
+        product_id: 268,
+        product_variant_id: null,
+        quantity_on_hand: 25,
+        cost_per_unit: 1_620_000,
+        product_cost_price: 1_620_000,
+        variant_cost_price: null,
+      },
+    ];
+
+    const makeTx = (rows: any[], location = { organization_id: 1, store_id: 42 }) => ({
+      $queryRaw: jest.fn().mockResolvedValue(rows),
+      inventory_locations: {
+        findUnique: jest.fn().mockResolvedValue(location),
+      },
+    });
+
+    beforeEach(() => {
+      operatingScopeService.getOperatingScope.mockResolvedValue('STORE');
+      (prismaService as any).inventory_locations.findUnique.mockResolvedValue({
+        organization_id: 1,
+        store_id: 42,
+      });
+    });
+
+    it('los dos caminos emiten la MISMA consulta y agregan el MISMO conjunto', async () => {
+      rawQuery.mockResolvedValue(universe);
+      const tx = makeTx(universe);
+
+      const preview = await service.getScopedStockAggregate({
+        product_id: 268,
+        location_id: 100,
+      });
+      const reception = await service.getScopedStockAggregate(
+        { product_id: 268, location_id: 100 },
+        tx,
+      );
+
+      // Igualdad exacta del agregado — el contrato.
+      expect(reception).toEqual(preview);
+      // 94 (bodega central) + 25 (tienda). El defecto daba 25 en recepción.
+      expect(reception.quantity).toBe(119);
+      expect(reception.cost_per_unit).toBe(1_620_000);
+
+      // Misma consulta, mismos parámetros: un solo resolvedor.
+      const sentPreview = rawQuery.mock.calls[0][0];
+      const sentReception = tx.$queryRaw.mock.calls[0][0];
+      expect(normalize(sentReception.text)).toBe(normalize(sentPreview.text));
+      expect(sentReception.values).toEqual(sentPreview.values);
+      // Y la bodega central sigue dentro del universo en AMBOS.
+      expect(normalize(sentReception.text)).toContain('il.store_id IS NULL');
+    });
+
+    it('con `tx` la lectura va por el handle transaccional (ve lo escrito en la transacción)', async () => {
+      const tx = makeTx(universe);
+
+      await service.getScopedStockAggregate(
+        { product_id: 268, location_id: 100 },
+        tx,
+      );
+
+      // `globalPrisma` es OTRO PrismaClient con OTRO pool: dentro de la
+      // transacción no vería la línea anterior de la misma recepción.
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(rawQuery).not.toHaveBeenCalled();
+      expect(globalPrismaService.withoutScope).not.toHaveBeenCalled();
+    });
+
+    it('sin `tx` la lectura va por el cliente SIN alcance', async () => {
+      rawQuery.mockResolvedValue(universe);
+
+      await service.getScopedStockAggregate({
+        product_id: 268,
+        location_id: 100,
+      });
+
+      expect(globalPrismaService.withoutScope).toHaveBeenCalled();
+      expect(rawQuery).toHaveBeenCalledTimes(1);
+    });
+
+    it('el WHERE fija la organización del contexto en los dos caminos', async () => {
+      operatingScopeService.getOperatingScope.mockResolvedValue('ORGANIZATION');
+      rawQuery.mockResolvedValue([]);
+      const tx = makeTx([]);
+
+      await service.getScopedStockAggregate({
+        product_id: 268,
+        location_id: 100,
+      });
+      await service.getScopedStockAggregate(
+        { product_id: 268, location_id: 100 },
+        tx,
+      );
+
+      for (const sent of [rawQuery.mock.calls[0][0], tx.$queryRaw.mock.calls[0][0]]) {
+        const text = normalize(sent.text);
+        // El JOIN es lo que ancla cada fila de stock a una organización…
+        expect(text).toContain(
+          'JOIN inventory_locations il ON il.id = sl.location_id',
+        );
+        // …y el predicado la fija. Nunca es opcional, en ninguna rama.
+        expect(text).toContain('il.organization_id = $2');
+        // [product_id, organization_id] — la organización es la del contexto.
+        expect(sent.values).toEqual([268, 1]);
+      }
+    });
+
+    it('una ubicación de OTRA organización es inalcanzable por los dos caminos', async () => {
+      const foreign = { organization_id: 99, store_id: 7 };
+      (prismaService as any).inventory_locations.findUnique.mockResolvedValue(
+        foreign,
+      );
+      const tx = makeTx(universe, foreign);
+
+      await expect(
+        service.getScopedStockAggregate({ product_id: 268, location_id: 100 }),
+      ).rejects.toThrow('Location 100 does not belong to organization 1');
+
+      await expect(
+        service.getScopedStockAggregate(
+          { product_id: 268, location_id: 100 },
+          tx,
+        ),
+      ).rejects.toThrow('Location 100 does not belong to organization 1');
+
+      // Ninguno de los dos llegó siquiera a consultar stock.
+      expect(rawQuery).not.toHaveBeenCalled();
+      expect(tx.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('la variante viaja parametrizada y estrecha el universo igual en ambos caminos', async () => {
+      rawQuery.mockResolvedValue([]);
+      const tx = makeTx([]);
+
+      await service.getScopedStockAggregate({
+        product_id: 268,
+        variant_id: 413,
+        location_id: 100,
+      });
+      await service.getScopedStockAggregate(
+        { product_id: 268, variant_id: 413, location_id: 100 },
+        tx,
+      );
+
+      for (const sent of [rawQuery.mock.calls[0][0], tx.$queryRaw.mock.calls[0][0]]) {
+        expect(normalize(sent.text)).toContain('sl.product_variant_id = $2');
+        // [product_id, variant_id, organization_id, store_id]
+        expect(sent.values).toEqual([268, 413, 1, 42]);
+      }
+    });
+  });
+
+  /**
+   * CP-PURCHASE-TRANSPARENCY D.2 — el agregado de costo deja de contar unidades
+   * de productos archivados.
+   *
+   * El filtro vive DENTRO del SQL crudo (la agregación ES la consulta), así que
+   * lo que estas pruebas verifican es (a) que el predicado viaja en la consulta
+   * emitida por LOS DOS caminos, (b) que no corre los parámetros posicionales
+   * —el aislamiento por organización sigue en `$2`— y (c) que el resultado del
+   * agregado es el que corresponde al conjunto que el motor devolvería.
+   */
+  describe('D.2 — el universo del costo excluye productos archivados', () => {
+    const makeTx = (
+      rows: any[],
+      location = { organization_id: 1, store_id: 42 },
+    ) => ({
+      $queryRaw: jest.fn().mockResolvedValue(rows),
+      inventory_locations: {
+        findUnique: jest.fn().mockResolvedValue(location),
+      },
+    });
+
+    beforeEach(() => {
+      operatingScopeService.getOperatingScope.mockResolvedValue('STORE');
+      (prismaService as any).inventory_locations.findUnique.mockResolvedValue({
+        organization_id: 1,
+        store_id: 42,
+      });
+    });
+
+    it('el predicado de estado viaja en la consulta por los dos caminos', async () => {
+      const tx = makeTx([]);
+
+      await service.getScopedStockAggregate({
+        product_id: 378,
+        location_id: 100,
+      });
+      await service.getScopedStockAggregate(
+        { product_id: 378, location_id: 100 },
+        tx,
+      );
+
+      const sentPreview = rawQuery.mock.calls[0][0];
+      const sentReception = tx.$queryRaw.mock.calls[0][0];
+      for (const sent of [sentPreview, sentReception]) {
+        expect(normalize(sent.text)).toContain(
+          "p.state IS DISTINCT FROM 'archived'",
+        );
+      }
+      // Y el contrato A.0 sigue en pie: misma cadena, mismos valores.
+      expect(normalize(sentReception.text)).toBe(normalize(sentPreview.text));
+      expect(sentReception.values).toEqual(sentPreview.values);
+    });
+
+    it('el estado va LITERAL: no corre los parámetros del aislamiento por organización', async () => {
+      await service.getScopedStockAggregate({
+        product_id: 378,
+        location_id: 100,
+      });
+
+      const sent = rawQuery.mock.calls[0][0];
+      const text = normalize(sent.text);
+      // Si el estado se hubiera parametrizado, la organización sería $3.
+      expect(text).toContain('il.organization_id = $2');
+      expect(text).toContain('il.store_id = $3');
+      expect(sent.values).toEqual([378, 1, 42]);
+      // 'archived' NO es un valor enlazado.
+      expect(sent.values).not.toContain('archived');
+    });
+
+    it('producto ARCHIVADO: el motor no devuelve filas → cantidad 0 y costo 0 (reactivación)', async () => {
+      // Con el filtro dentro del SQL, un producto archivado con 20.000 unidades
+      // a 3,00 (el caso medido del producto 378) no aporta ninguna fila.
+      rawQuery.mockResolvedValue([]);
+
+      const aggregate = await service.getScopedStockAggregate({
+        product_id: 378,
+        location_id: 100,
+      });
+
+      expect(aggregate).toEqual({ quantity: 0, cost_per_unit: 0 });
+    });
+
+    it('producto ARCHIVADO: una compra a 100 se costea a 100, no a 2,03', async () => {
+      // Antes de D.2 el agregado traía 20.000@3 y el promedio ponderado con una
+      // recepción de 10@100 daba 2,03. Sin universo previo, el costo nuevo es
+      // exactamente el de la compra.
+      (prismaService as any).stock_levels.findFirst.mockResolvedValue(null);
+      rawQuery.mockResolvedValue([]);
+
+      const result = await service.calculateCostOnReceipt({
+        product_id: 378,
+        location_id: 100,
+        quantity_received: 10,
+        unit_cost: 100,
+        costing_method: 'weighted_average',
+      });
+
+      expect(result.new_scoped_cost_per_unit).toBe(100);
+      expect(result.new_cost_per_unit).toBe(100);
+    });
+
+    it('producto ACTIVO con stock: el costo es EXACTAMENTE el de antes de D.2', async () => {
+      const activeUniverse = [
+        {
+          product_id: 268,
+          product_variant_id: null,
+          quantity_on_hand: 94,
+          cost_per_unit: 1_620_000,
+          variant_cost_price: null,
+          product_cost_price: 1_620_000,
+        },
+        {
+          product_id: 268,
+          product_variant_id: null,
+          quantity_on_hand: 25,
+          cost_per_unit: 1_620_000,
+          variant_cost_price: null,
+          product_cost_price: 1_620_000,
+        },
+      ];
+      rawQuery.mockResolvedValue(activeUniverse);
+
+      const aggregate = await service.getScopedStockAggregate({
+        product_id: 268,
+        location_id: 100,
+      });
+
+      expect(aggregate.quantity).toBe(119);
+      expect(aggregate.cost_per_unit).toBe(1_620_000);
+    });
+
+    it('MEZCLA: sólo las filas activas entran; el promedio no lo arrastra el archivado', async () => {
+      // El motor entrega ya filtrado: 10@1.000 del producto vivo. La fila
+      // archivada de 20.000@3 que antes venía en el mismo conjunto ya no llega,
+      // y por eso el promedio se queda en 1.000 en vez de desplomarse a ~3,5.
+      rawQuery.mockResolvedValue([
+        {
+          product_id: 268,
+          product_variant_id: null,
+          quantity_on_hand: 10,
+          cost_per_unit: 1_000,
+          variant_cost_price: null,
+          product_cost_price: 1_000,
+        },
+      ]);
+
+      const aggregate = await service.getScopedStockAggregate({
+        product_id: 268,
+        location_id: 100,
+      });
+
+      expect(aggregate.quantity).toBe(10);
+      expect(aggregate.cost_per_unit).toBe(1_000);
+    });
+
+    it('initializeCostLayers usa el MISMO criterio por la relación con products', async () => {
+      (prismaService as any).stock_levels.findMany.mockResolvedValue([]);
+
+      await service.initializeCostLayers(1);
+
+      const where = (prismaService as any).stock_levels.findMany.mock
+        .calls[0][0].where;
+      expect(where.quantity_on_hand).toEqual({ gt: 0 });
+      // `product_variants` no tiene columna `state`: el criterio SIEMPRE cuelga
+      // del producto padre.
+      expect(where.products).toEqual({ state: { not: 'archived' } });
+    });
+  });
+
+  /**
+   * CP-PURCHASE-TRANSPARENCY J.1 — el universo se lee POR LOTE.
+   *
+   * El defecto que cierra: la vista previa de compra llamaba al agregado una
+   * vez POR RENGLÓN, y cada llamada arrastraba además su propia resolución de
+   * ubicación (`inventory_locations.findUnique` + alcance operativo). En un
+   * endpoint que se redispara con cada tecla del encabezado, el costo crecía
+   * con el tamaño del carrito.
+   *
+   * Lo que estas pruebas fijan es que izar la lectura NO relaja nada de lo
+   * anterior: el aislamiento por organización sigue en el `WHERE`, `'archived'`
+   * sigue sin parametrizar (así que los índices `$n` no se corren), la
+   * consulta sigue siendo la misma con `tx` y sin `tx`, y cada par recibe SU
+   * universo y no el promedio de los demás.
+   */
+  describe('J.1 — agregado por lote', () => {
+    const makeTx = (
+      rows: any[],
+      location = { organization_id: 1, store_id: 42 },
+    ) => ({
+      $queryRaw: jest.fn().mockResolvedValue(rows),
+      inventory_locations: {
+        findUnique: jest.fn().mockResolvedValue(location),
+      },
+    });
+
+    beforeEach(() => {
+      operatingScopeService.getOperatingScope.mockResolvedValue('STORE');
+      (prismaService as any).inventory_locations.findUnique.mockResolvedValue({
+        organization_id: 1,
+        store_id: 42,
+      });
+    });
+
+    it('N pares → UNA consulta y UNA resolución de ubicación', async () => {
+      rawQuery.mockResolvedValue([]);
+
+      await service.getScopedStockAggregates({
+        keys: [
+          { product_id: 268 },
+          { product_id: 268, variant_id: 413 },
+          { product_id: 378 },
+        ],
+        location_id: 100,
+      });
+
+      expect(rawQuery).toHaveBeenCalledTimes(1);
+      // La ubicación receptora es de la CABECERA de la compra: se resuelve una
+      // sola vez para todo el lote, no una por renglón.
+      expect(
+        (prismaService as any).inventory_locations.findUnique,
+      ).toHaveBeenCalledTimes(1);
+      expect(
+        operatingScopeService.getOperatingScope,
+      ).toHaveBeenCalledTimes(1);
+    });
+
+    it('cada par recibe SU universo: los promedios no se mezclan', async () => {
+      // Dos productos con costos deliberadamente distintos. Si el servicio
+      // sumara los dos universos, ambos saldrían a 1.500.
+      rawQuery.mockResolvedValue([
+        {
+          product_id: 268,
+          product_variant_id: null,
+          quantity_on_hand: 10,
+          cost_per_unit: 1_000,
+          variant_cost_price: null,
+          product_cost_price: 1_000,
+        },
+        {
+          product_id: 268,
+          product_variant_id: null,
+          quantity_on_hand: 10,
+          cost_per_unit: 3_000,
+          variant_cost_price: null,
+          product_cost_price: 3_000,
+        },
+        {
+          product_id: 500,
+          product_variant_id: null,
+          quantity_on_hand: 5,
+          cost_per_unit: 7_000,
+          variant_cost_price: null,
+          product_cost_price: 7_000,
+        },
+      ]);
+
+      const aggregates = await service.getScopedStockAggregates({
+        keys: [{ product_id: 268 }, { product_id: 500 }],
+        location_id: 100,
+      });
+
+      expect(aggregates.get('268:base')).toEqual({
+        quantity: 20,
+        cost_per_unit: 2_000,
+      });
+      expect(aggregates.get('500:base')).toEqual({
+        quantity: 5,
+        cost_per_unit: 7_000,
+      });
+    });
+
+    it('la variante y la base del MISMO producto son universos distintos', async () => {
+      rawQuery.mockResolvedValue([
+        {
+          product_id: 268,
+          product_variant_id: null,
+          quantity_on_hand: 14,
+          cost_per_unit: 1_620_000,
+          variant_cost_price: null,
+          product_cost_price: 1_620_000,
+        },
+        {
+          product_id: 268,
+          product_variant_id: 413,
+          quantity_on_hand: 44,
+          cost_per_unit: 900_000,
+          variant_cost_price: 900_000,
+          product_cost_price: 1_620_000,
+        },
+      ]);
+
+      const aggregates = await service.getScopedStockAggregates({
+        keys: [{ product_id: 268 }, { product_id: 268, variant_id: 413 }],
+        location_id: 100,
+      });
+
+      expect(aggregates.get('268:base')?.quantity).toBe(14);
+      expect(aggregates.get('268:413')?.quantity).toBe(44);
+      expect(aggregates.get('268:413')?.cost_per_unit).toBe(900_000);
+    });
+
+    it('un par SIN stock viene en el mapa con ceros, no ausente', async () => {
+      rawQuery.mockResolvedValue([]);
+
+      const aggregates = await service.getScopedStockAggregates({
+        keys: [{ product_id: 268 }, { product_id: 378 }],
+        location_id: 100,
+      });
+
+      // El llamador nunca tiene que distinguir «no vino» de «vino en cero»:
+      // ese es justo el hueco por el que se cuela una reactivación falsa.
+      expect(aggregates.has('378:base')).toBe(true);
+      expect(aggregates.get('378:base')).toEqual({
+        quantity: 0,
+        cost_per_unit: 0,
+      });
+    });
+
+    it('llaves duplicadas se colapsan: un solo par viaja al motor', async () => {
+      rawQuery.mockResolvedValue([]);
+
+      await service.getScopedStockAggregates({
+        keys: [{ product_id: 268 }, { product_id: 268, variant_id: null }],
+        location_id: 100,
+      });
+
+      const sent = rawQuery.mock.calls[0][0];
+      // [product_id, organization_id, store_id] — el par aparece UNA vez.
+      expect(sent.values).toEqual([268, 1, 42]);
+    });
+
+    it('sin llaves no toca la base de datos', async () => {
+      const aggregates = await service.getScopedStockAggregates({
+        keys: [],
+        location_id: 100,
+      });
+
+      expect(aggregates.size).toBe(0);
+      expect(rawQuery).not.toHaveBeenCalled();
+      expect(
+        (prismaService as any).inventory_locations.findUnique,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('el lote de UNA llave emite exactamente la consulta de `getScopedStockAggregate`', async () => {
+      rawQuery.mockResolvedValue([]);
+
+      await service.getScopedStockAggregate({
+        product_id: 268,
+        location_id: 100,
+      });
+      await service.getScopedStockAggregates({
+        keys: [{ product_id: 268 }],
+        location_id: 100,
+      });
+
+      const single = rawQuery.mock.calls[0][0];
+      const batched = rawQuery.mock.calls[1][0];
+      // Una sola implementación del universo: la firma de una llave delega.
+      expect(normalize(batched.text)).toBe(normalize(single.text));
+      expect(batched.values).toEqual(single.values);
+    });
+
+    it('A.0 sigue en pie por lote: misma consulta con `tx` y sin `tx`', async () => {
+      rawQuery.mockResolvedValue([]);
+      const tx = makeTx([]);
+      const keys = [
+        { product_id: 268 },
+        { product_id: 268, variant_id: 413 },
+      ];
+
+      await service.getScopedStockAggregates({ keys, location_id: 100 });
+      await service.getScopedStockAggregates({ keys, location_id: 100 }, tx);
+
+      const preview = rawQuery.mock.calls[0][0];
+      const reception = tx.$queryRaw.mock.calls[0][0];
+      expect(normalize(reception.text)).toBe(normalize(preview.text));
+      expect(reception.values).toEqual(preview.values);
+      // Y la bodega central sigue dentro del universo en los dos caminos.
+      expect(normalize(reception.text)).toContain('il.store_id IS NULL');
+    });
+
+    it('el aislamiento por organización va en el WHERE, después de TODOS los pares', async () => {
+      rawQuery.mockResolvedValue([]);
+
+      await service.getScopedStockAggregates({
+        keys: [
+          { product_id: 268 },
+          { product_id: 268, variant_id: 413 },
+          { product_id: 378 },
+        ],
+        location_id: 100,
+      });
+
+      const sent = rawQuery.mock.calls[0][0];
+      const text = normalize(sent.text);
+      // 4 parámetros de pares (268, 268, 413, 378) ⇒ organización en $5.
+      expect(text).toContain('il.organization_id = $5');
+      expect(text).toContain('il.store_id = $6');
+      expect(sent.values).toEqual([268, 268, 413, 378, 1, 42]);
+      // El estado NO se parametriza ni siquiera con N pares: si lo hiciera,
+      // correría los índices y el aislamiento dejaría de estar donde se cree.
+      expect(text).toContain("p.state IS DISTINCT FROM 'archived'");
+      expect(sent.values).not.toContain('archived');
+    });
+
+    it('una ubicación de OTRA organización es inalcanzable también por lote', async () => {
+      (prismaService as any).inventory_locations.findUnique.mockResolvedValue({
+        organization_id: 99,
+        store_id: 7,
+      });
+
+      await expect(
+        service.getScopedStockAggregates({
+          keys: [{ product_id: 268 }, { product_id: 378 }],
+          location_id: 100,
+        }),
+      ).rejects.toThrow('Location 100 does not belong to organization 1');
+
+      expect(rawQuery).not.toHaveBeenCalled();
+    });
+
+    it('un par ARCHIVADO no trae filas: cero y cero, sin arrastrar a los vivos', async () => {
+      // El motor entrega ya filtrado por `p.state IS DISTINCT FROM 'archived'`:
+      // del producto 378 (archivado, 20.000@3) no llega nada.
+      rawQuery.mockResolvedValue([
+        {
+          product_id: 268,
+          product_variant_id: null,
+          quantity_on_hand: 14,
+          cost_per_unit: 1_620_000,
+          variant_cost_price: null,
+          product_cost_price: 1_620_000,
+        },
+      ]);
+
+      const aggregates = await service.getScopedStockAggregates({
+        keys: [{ product_id: 268 }, { product_id: 378 }],
+        location_id: 100,
+      });
+
+      expect(aggregates.get('378:base')).toEqual({
+        quantity: 0,
+        cost_per_unit: 0,
+      });
+      expect(aggregates.get('268:base')).toEqual({
+        quantity: 14,
+        cost_per_unit: 1_620_000,
+      });
+    });
+  });
+
 });

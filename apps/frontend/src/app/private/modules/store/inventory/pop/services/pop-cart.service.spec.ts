@@ -316,3 +316,69 @@ describe('PopCartService — discount normalization (CP-ORC-POP-MODAL-DISCOUNT-0
     });
   });
 });
+
+/**
+ * CP-PURCHASE-TRANSPARENCY (T2/D.1) — el rechazo del modo de flete deja de ser
+ * mudo.
+ *
+ * `setShippingCostAllocation` descarta el modo cuando no hay flete (el backend
+ * responde 400 a `prorate` sin monto). El rechazo es correcto; lo que no lo era
+ * es que ocurriera en silencio: `app-toggle` ya se había pintado solo al hacer
+ * clic y nadie revertía la pintura, así que la pantalla afirmaba «Prorratear»
+ * sobre un carrito sin modo. Ahora la función DICE si aplicó.
+ */
+describe('PopCartService — contrato de setShippingCostAllocation (T2/D.1)', () => {
+  let service: PopCartService;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        PopCartService,
+        {
+          provide: WithholdingTaxService,
+          useValue: {
+            previewWithholding: () => of({ lines: [], total_withholding: 0 }),
+          },
+        },
+        {
+          provide: AuthFacade,
+          useValue: { activeFiscalAreas: () => [] },
+        },
+      ],
+    });
+    service = TestBed.inject(PopCartService);
+  });
+
+  it('sin flete devuelve false y NO escribe el modo', () => {
+    service.setShippingMethod('freight');
+    service.setShippingCost(0);
+
+    expect(service.setShippingCostAllocation('expense')).toBe(false);
+    expect(service.currentState.shippingCostAllocation).toBeUndefined();
+  });
+
+  it('con flete devuelve true y escribe el modo pedido', () => {
+    service.setShippingMethod('freight');
+    service.setShippingCost(15000);
+
+    // `setShippingCost` siembra `prorate`: el modo es obligatorio en cuanto hay
+    // monto.
+    expect(service.currentState.shippingCostAllocation).toBe('prorate');
+
+    expect(service.setShippingCostAllocation('expense')).toBe(true);
+    expect(service.currentState.shippingCostAllocation).toBe('expense');
+
+    expect(service.setShippingCostAllocation('prorate')).toBe(true);
+    expect(service.currentState.shippingCostAllocation).toBe('prorate');
+  });
+
+  it('volver el flete a cero borra el modo y vuelve a rechazar', () => {
+    service.setShippingMethod('freight');
+    service.setShippingCost(15000);
+    service.setShippingCost(0);
+
+    expect(service.currentState.shippingCostAllocation).toBeUndefined();
+    expect(service.setShippingCostAllocation('prorate')).toBe(false);
+    expect(service.currentState.shippingCostAllocation).toBeUndefined();
+  });
+});
