@@ -86,7 +86,10 @@ import { PrintFormatType, StorePrintFormatSummary } from '../../../../../core/mo
         } @else {
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             @for (fmt of facade.filteredFormats(); track fmt.format_type) {
-              <div class="p-5 rounded-2xl border border-border bg-surface hover:border-primary-500/40 transition-all shadow-sm flex flex-col justify-between group">
+              <div
+                (click)="openFormat(fmt.format_type)"
+                class="p-5 rounded-2xl border border-border bg-surface hover:border-primary-500/40 cursor-pointer transition-all shadow-sm flex flex-col justify-between group"
+              >
                 <div>
                   <!-- Card Header -->
                   <div class="flex items-start justify-between gap-3 mb-3">
@@ -147,15 +150,21 @@ import { PrintFormatType, StorePrintFormatSummary } from '../../../../../core/mo
                     {{ fmt.format_type }}
                   </span>
 
-                  <app-button
-                    variant="primary"
-                    size="sm"
-                    (btnClick)="openFormat(fmt.format_type)"
+                  <button
+                    type="button"
+                    (click)="openFormat(fmt.format_type)"
+                    class="px-3 py-1.5 rounded-xl bg-primary-600 hover:bg-primary-500 text-white text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
                   >
-                    <app-icon name="sliders" [size]="14" class="mr-1.5"></app-icon>
+                    <app-icon name="sliders" [size]="14"></app-icon>
                     Personalizar
-                  </app-button>
+                  </button>
                 </div>
+              </div>
+            } @empty {
+              <div class="col-span-full py-12 text-center text-text-secondary">
+                <app-icon name="printer" [size]="36" class="mx-auto mb-2 opacity-40"></app-icon>
+                <p class="text-sm font-semibold text-text-primary">No se encontraron formatos</p>
+                <p class="text-xs text-text-secondary mt-1">Intenta con otro término de búsqueda o selecciona otra categoría.</p>
               </div>
             }
           </div>
@@ -180,6 +189,7 @@ export class PrintFormatsHubComponent implements OnInit {
   }
 
   openFormat(formatType: PrintFormatType): void {
+    console.log('OPEN FORMAT CLICKED:', formatType);
     this.facade.selectFormat(formatType);
   }
 

@@ -5,7 +5,7 @@ import { Roles } from '../domains/auth/decorators/roles.decorator';
 import { RequirePermissions } from '../domains/auth/decorators/permissions.decorator';
 import { Req } from '@nestjs/common';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
-import { Public } from '../domains/auth/decorators/public.decorator';
+import { Public } from '../common/decorators/public.decorator';
 import { EmailService } from '../email/email.service';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import { ResponseService } from '@common/responses/response.service';

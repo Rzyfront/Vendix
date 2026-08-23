@@ -52,17 +52,25 @@ import { DocumentPrintService } from '../../../../../../../shared/services/print
             >
               +
             </button>
+            <button
+              type="button"
+              (click)="resetZoom()"
+              class="px-2 py-1 text-slate-400 hover:text-white text-xs hover:bg-slate-800 rounded transition border-l border-slate-800"
+              title="Restablecer zoom a 100%"
+            >
+              Reset
+            </button>
           </div>
 
           <!-- Test Print Button -->
           <app-button
             variant="outline"
             size="sm"
-            (btnClick)="printTest()"
+            (clicked)="printTest()"
             class="text-xs"
           >
             <app-icon name="printer" [size]="14" class="mr-1.5"></app-icon>
-            Probar Impresión
+            Imprimir Prueba
           </app-button>
         </div>
       </div>
@@ -77,6 +85,8 @@ import { DocumentPrintService } from '../../../../../../../shared/services/print
           <div class="bg-white text-slate-900 rounded-sm shadow-lg overflow-hidden min-h-[400px]">
             <iframe
               #previewIframe
+              id="print-preview-iframe"
+              [srcdoc]="facade.previewHtml() || previewPlaceholderHtml"
               class="w-full h-full border-0 min-h-[520px] bg-white block"
               [style.width]="'100%'"
               sandbox="allow-same-origin allow-scripts"
@@ -103,6 +113,17 @@ import { DocumentPrintService } from '../../../../../../../shared/services/print
   `],
 })
 export class PrintLivePreviewComponent {
+  /**
+   * Marcador que ve el iframe mientras el facade no ha compilado la vista
+   * previa. Vive aqui y no en el binding porque el parser de expresiones de
+   * Angular no admite `\'` dentro de un literal: la barra invertida no escapa
+   * nada, la comilla cierra la cadena y lo que sigue se interpreta como una
+   * expresion — de ahi los 7 NG5002 y el `Property 'color' does not exist`,
+   * que eran el mismo defecto contado dos veces.
+   */
+  protected readonly previewPlaceholderHtml =
+    '<div style="font-family:sans-serif;padding:20px;color:#888;text-align:center;">Generando vista previa...</div>';
+
   readonly facade = inject(PrintFormatsFacade);
   private readonly printService = inject(DocumentPrintService);
 
@@ -139,6 +160,10 @@ export class PrintLivePreviewComponent {
 
   zoomOut(): void {
     this.zoomLevel.update((z) => Math.max(z - 10, 60));
+  }
+
+  resetZoom(): void {
+    this.zoomLevel.set(100);
   }
 
   async printTest(): Promise<void> {

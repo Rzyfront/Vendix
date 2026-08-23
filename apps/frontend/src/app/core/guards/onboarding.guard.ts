@@ -22,7 +22,10 @@ export const onboardingGuard: CanActivateFn = (
   const router = inject(Router);
 
   const isOwner = auth.hasAnyRole(['owner', 'OWNER']);
-  const done = auth.getCurrentUser()?.organizations?.onboarding === true;
+  const user = auth.getCurrentUser();
+  const done =
+    user?.organizations?.onboarding === true ||
+    user?.store?.organizations?.onboarding === true;
   const onOnb = state.url.includes('/admin/onboarding');
 
   // Non-owners, and owners who already finished onboarding, must never see the

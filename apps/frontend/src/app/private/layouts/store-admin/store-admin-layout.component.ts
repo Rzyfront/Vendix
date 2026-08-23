@@ -862,6 +862,7 @@ export class StoreAdminLayoutComponent {
     {
       label: 'Configuración',
       icon: 'settings',
+      alwaysVisible: true,
       children: [
         {
           label: 'General',
@@ -892,6 +893,7 @@ export class StoreAdminLayoutComponent {
           label: 'Formatos de Impresión',
           icon: 'circle',
           route: '/admin/settings/print-formats',
+          alwaysVisible: true,
         },
         {
           label: 'Apariencia',

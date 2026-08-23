@@ -63,29 +63,27 @@ export type EditorTab = 'sections' | 'columns' | 'styles' | 'custom';
           <app-button
             variant="outline"
             size="sm"
-            (btnClick)="openLibrary()"
+            (clicked)="openLibrary()"
           >
             <app-icon name="book-open" [size]="14" class="mr-1.5"></app-icon>
-            Biblioteca
+            Biblioteca de Plantillas
           </app-button>
 
-          <!-- Reset to defaults -->
           <app-button
             variant="outline"
             size="sm"
-            (btnClick)="resetToDefault()"
-            title="Restablecer valores del sistema"
+            [disabled]="facade.isSaving()"
+            (clicked)="resetToDefault()"
           >
             <app-icon name="rotate-ccw" [size]="14" class="mr-1.5"></app-icon>
             Restablecer
           </app-button>
 
-          <!-- Save Button -->
           <app-button
             variant="primary"
             size="sm"
-            [disabled]="facade.isSaving()"
-            (btnClick)="save()"
+            [loading]="facade.isSaving()"
+            (clicked)="save()"
           >
             <app-icon name="save" [size]="14" class="mr-1.5"></app-icon>
             {{ facade.isSaving() ? 'Guardando...' : 'Guardar Cambios' }}

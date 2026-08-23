@@ -76,10 +76,10 @@ export class PrintFormatsFacade {
       this.selectedFormatDetail.set(detail);
       // Clonar profundamente la definición para edición
       this.draftDefinition.set(JSON.parse(JSON.stringify(detail.definition)));
-      await this.refreshPreview();
+      this.isLoading.set(false);
+      this.refreshPreview();
     } catch (err: any) {
       this.toast.error(err?.error?.message || 'Error al cargar el detalle del formato.');
-    } finally {
       this.isLoading.set(false);
     }
   }
