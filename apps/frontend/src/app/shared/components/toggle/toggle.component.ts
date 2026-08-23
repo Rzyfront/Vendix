@@ -118,7 +118,15 @@ export class ToggleComponent implements ControlValueAccessor {
       'h-6',
       'w-11',
       'shrink-0',
-      'cursor-pointer',
+      // CP-PURCHASE-TRANSPARENCY (T2/D.1) — un conmutador inactivo tiene que
+      // PARECER inactivo. Antes salía con `cursor-pointer` y opacidad plena
+      // aunque `[disabled]` bloqueara el clic: el operador pulsaba y no pasaba
+      // nada, sin explicación — la misma negación muda que este plan persigue.
+      // Sólo cambia la rama deshabilitada, así que ningún consumidor de los 95
+      // `<app-toggle>` del repo cambia de aspecto mientras esté habilitado, y
+      // el contrato de pintado (el componente se autopinta al pulsarse) queda
+      // intacto.
+      this.isDisabled() ? 'cursor-not-allowed' : 'cursor-pointer',
       'rounded-full',
       'border-2',
       'border-transparent',
@@ -127,6 +135,10 @@ export class ToggleComponent implements ControlValueAccessor {
       'ease-out',
       'focus:outline-none',
     ];
+
+    if (this.isDisabled()) {
+      baseClasses.push('opacity-50');
+    }
 
     if (this.styleVariant() === 'modern') {
       // Modern: shadow-based focus

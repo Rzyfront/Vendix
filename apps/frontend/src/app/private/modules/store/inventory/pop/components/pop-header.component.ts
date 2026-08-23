@@ -32,6 +32,7 @@ const SHIPPING_METHOD_LABELS = {
 
 import { SuppliersService } from "../../services/suppliers.service";
 import { InventoryService } from "../../services/inventory.service";
+import { ToastService } from "../../../../../../shared/components/toast/toast.service";
 
 /**
  * POP Header Component
@@ -156,6 +157,7 @@ export class PopHeaderComponent {
   private popCartService = inject(PopCartService);
   private suppliersService = inject(SuppliersService);
   private inventoryService = inject(InventoryService);
+  private toastService = inject(ToastService);
   private destroyRef = inject(DestroyRef);
 
   // Data
@@ -446,8 +448,22 @@ export class PopHeaderComponent {
     this.popCartService.setShippingCost(amount);
   }
 
+  /**
+   * CP-PURCHASE-TRANSPARENCY (T2/D.1) — red de seguridad del rechazo.
+   *
+   * El modal de configuracion ya deja el conmutador inactivo mientras no haya
+   * flete, asi que este rechazo no deberia llegar por la pantalla. Si llega
+   * por cualquier otra via se DICE: setShippingCostAllocation devuelve false
+   * y el operador se entera de que su eleccion no se guardo, en vez de quedarse
+   * con una pantalla que afirma una imputacion que el carrito no tiene.
+   */
   onShippingCostAllocationChange(mode: PopShippingAllocation): void {
-    this.popCartService.setShippingCostAllocation(mode);
+    const applied = this.popCartService.setShippingCostAllocation(mode);
+    if (!applied) {
+      this.toastService.warning(
+        "Escribe primero el costo del flete: sin monto no hay nada que repartir, asi que la imputacion no se guardo.",
+      );
+    }
   }
 
   // ============================================================

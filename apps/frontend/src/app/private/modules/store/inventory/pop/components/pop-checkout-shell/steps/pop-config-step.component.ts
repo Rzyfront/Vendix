@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  effect,
   input,
   output,
   signal,
@@ -129,6 +130,17 @@ export class PopConfigStepComponent {
    * no lo re-evaluaría (regla dura de `vendix-zoneless-signals`).
    */
   private readonly shippingCostValue = signal<number>(0);
+
+  /**
+   * El espejo sigue al input: si el monto cambia por fuera del paso (el modal
+   * de configuración del encabezado escribe el mismo carrito), el conmutador
+   * tiene que enterarse. El paso NO se destruye al cambiar de paso — sólo se
+   * oculta por CSS —, así que sembrarlo únicamente en `ngOnInit` lo dejaría
+   * rancio.
+   */
+  private readonly syncShippingCostMirror = effect(() => {
+    this.shippingCostValue.set(Number(this.shippingCost()) || 0);
+  });
 
   /**
    * El campo de flete existe SÓLO cuando la entrega es por flete. Pintarlo
