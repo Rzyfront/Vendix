@@ -133,6 +133,11 @@ import {
   ExchangeRateService,
 } from '../../services/exchange-rate.service';
 import {
+  InvoiceProfileCatalogEntry,
+  InvoiceProfileService,
+} from '../../services/invoice-profile.service';
+import type { ProfileAiuConfig } from '../../../../../../core/utils/invoice-profile-config.contract';
+import {
   AIU_COMPONENT_OPTIONS,
   DOCUMENT_TYPE_NIT_CODE,
   DOCUMENT_TYPE_OPTIONS,
@@ -152,6 +157,20 @@ import {
   safeTaxType,
   toFiscalDocumentType,
 } from '../../components/invoice-create/invoice-dian-catalogs';
+
+/**
+ * Centinela de «sin perfil» del selector, o sea el flujo manual.
+ *
+ * Es `0` y no `null` porque `SelectorOption.value` sólo admite `string | number`:
+ * sin un valor representable, la opción «configuración de la tienda» no podría
+ * existir y el usuario no tendría manera de VOLVER al flujo manual después de
+ * elegir un perfil — la preselección del predeterminado se volvería una
+ * restricción, que es justo lo que ADR-9 descarta.
+ *
+ * Nunca sale en el payload: `buildPayload` manda `profile_id` sólo cuando hay un
+ * perfil real del catálogo, y el `@Min(1)` del backend rechazaría el `0`.
+ */
+const PROFILE_NONE = 0;
 
 // ─────────────────────────────────────────────────────────────
 // Contrato de salida
@@ -212,6 +231,21 @@ interface InvoiceCreatePayload {
    * un override y rompe la herencia.
    */
   aiu_contract_object?: string;
+  /**
+   * Perfil de facturación con el que se timbra ESTE documento.
+   *
+   * Omitido ⇒ flujo manual: el backend resuelve el AIU desde
+   * `store_settings.invoicing.aiu`, igual que antes de que existieran los
+   * perfiles. Presente ⇒ congela `(profile_id, profile_version)` en la factura y
+   * deriva la base gravable de esa versión, sin leer el setting ni como
+   * respaldo.
+   *
+   * Viaja SÓLO si el perfil está en el catálogo activo del tipo de operación
+   * vigente. Mandar uno de otro tipo devolvería 409 `INVOICING_PROFILE_008`
+   * nombrando un campo que el usuario ya no ve en pantalla, y mandar el
+   * centinela `0` un 400 por `@Min(1)`.
+   */
+  profile_id?: number;
   foreign_currency?: string;
   foreign_total_amount?: number;
   exchange_rate?: number;
@@ -654,6 +688,77 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   (valueChange)="onOperationTypeChange()"
                 ></app-selector>
               </div>
+
+              <!--
+                PERFIL DE FACTURACIÓN.
+
+                No se pinta si no hay NINGUNO activo del tipo de operación
+                elegido: sin perfiles, el wizard tiene que verse y comportarse
+                exactamente como antes de esta fase, porque un selector vacío o
+                deshabilitado dejaría al tenant sin poder facturar.
+              -->
+              @if (hasProfiles()) {
+                <div class="mt-3">
+                  <app-selector
+                    label="Perfil de facturación"
+                    formControlName="profile_id"
+                    [options]="profileOptions()"
+                    size="sm"
+                    (valueChange)="onProfileChange()"
+                  ></app-selector>
+
+                  @if (profileAutoSelected()) {
+                    <div
+                      class="mt-2 flex items-start gap-2.5 rounded-lg border border-[var(--color-primary)]/25 bg-[color-mix(in_srgb,var(--color-primary)_6%,transparent)] px-3 py-2.5"
+                    >
+                      <app-icon
+                        name="check-circle"
+                        [size]="15"
+                        class="mt-0.5 flex-shrink-0 text-[var(--color-primary)]"
+                      />
+                      <p class="text-xs leading-relaxed text-text-primary">
+                        Usando perfil predeterminado
+                        <strong>{{ selectedProfile()?.name }}</strong
+                        >. Es el único activo para este tipo de operación, y sus
+                        reglas quedan congeladas en la factura al emitirla.
+                        Cámbialo en el selector si este documento va con la
+                        configuración de la tienda.
+                      </p>
+                    </div>
+                  }
+
+                  @if (profileConfigFailed()) {
+                    <div
+                      class="mt-2 flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning-light px-3 py-2.5"
+                    >
+                      <app-icon
+                        name="alert-triangle"
+                        [size]="15"
+                        class="mt-0.5 flex-shrink-0 text-warning"
+                      />
+                      <div class="min-w-0">
+                        <p class="text-xs font-semibold text-warning">
+                          No se pudieron leer las reglas del perfil
+                        </p>
+                        <p class="mt-0.5 text-xs leading-relaxed text-warning">
+                          La factura se puede emitir igual: el servidor la timbra
+                          con la versión vigente del perfil, no con lo que muestre
+                          esta pantalla. Lo que falta es el instructivo del AIU —y
+                          no se sustituye por el de la tienda, porque instruiría
+                          sobre otra base gravable—.
+                        </p>
+                        <button
+                          type="button"
+                          class="mt-1.5 text-xs font-semibold text-warning underline underline-offset-2"
+                          (click)="retryProfileConfig()"
+                        >
+                          Reintentar
+                        </button>
+                      </div>
+                    </div>
+                  }
+                </div>
+              }
 
               <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
                 <app-selector
@@ -1241,9 +1346,8 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                     <p
                       class="mt-2 text-[11px] text-[var(--color-text-secondary)]"
                     >
-                      El régimen se elige en Ajustes → Facturación → AIU. Cuál
-                      aplica lo decide el objeto del contrato, no una preferencia
-                      del negocio.
+                      {{ aiuRegimeOriginHint() }} Cuál aplica lo decide el objeto
+                      del contrato, no una preferencia del negocio.
                     </p>
                   </div>
                 } @else {
@@ -1275,18 +1379,12 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                         [ngClass]="
                           note.source === 'invoice'
                             ? 'bg-[color-mix(in_srgb,var(--color-primary)_10%,transparent)] text-[var(--color-primary)] ring-[var(--color-primary)]/25'
-                            : note.source === 'store'
-                              ? 'bg-[var(--color-background)] text-[var(--color-text-secondary)] ring-border'
-                              : 'bg-error/5 text-error ring-error/30'
+                            : note.source === 'none'
+                              ? 'bg-error/5 text-error ring-error/30'
+                              : 'bg-[var(--color-background)] text-[var(--color-text-secondary)] ring-border'
                         "
                       >
-                        {{
-                          note.source === 'invoice'
-                            ? 'Propio de esta factura'
-                            : note.source === 'store'
-                              ? 'Heredado de la tienda'
-                              : 'Sin definir'
-                        }}
+                        {{ aiuNoteSourceLabel() }}
                       </span>
                     </div>
 
@@ -1297,7 +1395,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                       [error]="fieldError('aiu_contract_object')"
                       [rows]="2"
                       [placeholder]="
-                        note.source === 'store'
+                        note.source === 'store' || note.source === 'profile'
                           ? 'Heredado: ' + note.object
                           : 'Ej.: aseo y cafetería para la sede norte, contrato 2026-014'
                       "
@@ -1307,11 +1405,8 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                       class="mt-1.5 text-[11px] leading-relaxed text-[var(--color-text-secondary)]"
                     >
                       Se guarda con la factura, así que el documento conserva el
-                      contrato que describía aunque la tienda cambie el suyo
-                      después. Déjalo vacío para heredar el de
-                      <strong class="text-text-primary"
-                        >Ajustes → Facturación → AIU</strong
-                      >.
+                      contrato que describía aunque la tienda o el perfil cambien
+                      el suyo después. {{ aiuInheritanceHint() }}
                     </p>
 
                     <!-- Vista previa de la cadena que viaja en cbc:Note -->
@@ -1435,7 +1530,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                         <p class="mt-0.5 text-xs leading-relaxed text-error">
                           La regla CAV03 exige que la línea de Administración
                           lleve una nota que empiece por «{{
-                            aiuSettings()?.note_prefix
+                            effectiveAiu()?.note_prefix
                           }}» y mida entre {{ note.min }} y
                           {{ note.max }} caracteres; la actual mide
                           {{ note.length }}. Descríbelo arriba, en
@@ -2005,6 +2100,7 @@ export class InvoiceCreatePageComponent implements OnInit {
   private readonly withholdingCatalog = inject(InvoiceWithholdingCatalogService);
   private readonly exchangeRateService = inject(ExchangeRateService);
   private readonly emitReadinessService = inject(InvoiceEmitReadinessService);
+  private readonly profileService = inject(InvoiceProfileService);
 
   // ── Catálogos estáticos ─────────────────────────────────────
   readonly invoiceTypeOptions = INVOICE_TYPE_OPTIONS;
@@ -2094,6 +2190,16 @@ export class InvoiceCreatePageComponent implements OnInit {
     payment_form: [PAYMENT_FORM_CASH],
     payment_means_code: ['10'],
     operation_type: [OPERATION_TYPE_STANDARD],
+
+    /**
+     * Perfil de facturación elegido. `PROFILE_NONE` ⇒ flujo manual.
+     *
+     * SIN `Validators.required` y con el flujo manual como valor inicial: el
+     * wizard tiene que poder emitir sin perfiles, que es el estado de todo tenant
+     * que no los use. Exigirlo dejaría el formulario inválido en cada tienda que
+     * nunca creó uno.
+     */
+    profile_id: [PROFILE_NONE],
     notes: [''],
 
     // AIU. Vacío ⇒ hereda el objeto del contrato de la tienda. Es un campo por
@@ -2566,6 +2672,159 @@ export class InvoiceCreatePageComponent implements OnInit {
    */
   readonly aiuSettings = signal<InvoiceAiuSettings | null>(null);
 
+  // ── Perfiles de facturación ─────────────────────────────────
+
+  /** Catálogo de perfiles ACTIVOS del tenant, de todos los tipos de operación. */
+  readonly profileCatalog = signal<InvoiceProfileCatalogEntry[]>([]);
+
+  /** `true` mientras se leen las reglas de la versión vigente del perfil. */
+  readonly profileConfigLoading = signal(false);
+
+  /**
+   * `true` si esa lectura FALLÓ. Estado propio, no «configuración vacía».
+   *
+   * Sin él, un fallo de red degradaría al setting de la TIENDA y la sección AIU
+   * instruiría sobre una base gravable distinta de la que el backend va a
+   * aplicar. El documento se sigue pudiendo emitir —el cálculo es del servidor,
+   * contra la versión que congela al timbrar—, así que el fallo no bloquea: sólo
+   * deja sin instructivo, y eso hay que DECIRLO en vez de sustituirlo por otro.
+   */
+  readonly profileConfigFailed = signal(false);
+
+  /** Sección AIU de la versión vigente del perfil elegido. */
+  readonly profileAiu = signal<ProfileAiuConfig | null>(null);
+
+  /**
+   * Descarta respuestas fuera de orden.
+   *
+   * Cambiar de perfil dos veces seguidas puede resolver la primera petición
+   * DESPUÉS de la segunda, y sin este contador la pantalla acabaría instruyendo
+   * bajo el régimen del perfil que el usuario ya descartó.
+   */
+  private profileConfigRequest = 0;
+  private profileCatalogLoaded = false;
+
+  /**
+   * Perfiles activos del tipo de operación vigente.
+   *
+   * El filtro por tipo NO es cosmético: el backend rechaza con
+   * `INVOICING_PROFILE_008` un perfil cuyo `operation_type` no coincide con el
+   * del documento, así que ofrecer los de otro tipo sería ofrecer un 409.
+   */
+  readonly profilesForType = computed<InvoiceProfileCatalogEntry[]>(() => {
+    const type = String(this.rawValue()['operation_type'] ?? '');
+    return this.profileCatalog().filter(
+      (entry) => entry.operation_type === type,
+    );
+  });
+
+  /**
+   * `false` ⇒ el selector NO se pinta y el wizard se comporta como siempre.
+   *
+   * Es la condición que protege el radio de impacto de este paso: en un tenant
+   * sin perfiles, un selector vacío o deshabilitado dejaría el flujo manual
+   * inalcanzable y nadie podría facturar.
+   */
+  readonly hasProfiles = computed<boolean>(
+    () => this.profilesForType().length > 0,
+  );
+
+  /** Opciones del selector, con el flujo manual PRIMERO y siempre presente. */
+  readonly profileOptions = computed<SelectorOption[]>(() => [
+    {
+      value: PROFILE_NONE,
+      label: 'Sin perfil · configuración de la tienda',
+      description: 'El AIU se resuelve desde Ajustes → Facturación → AIU.',
+    },
+    ...this.profilesForType().map((entry) => ({
+      value: entry.id,
+      label: entry.name,
+      description:
+        (entry.is_default ? 'Predeterminado · ' : '') +
+        'versión ' +
+        entry.current_version,
+    })),
+  ]);
+
+  /** Id elegido, normalizado: cualquier cosa que no sea un entero positivo es el flujo manual. */
+  readonly selectedProfileId = computed<number>(() => {
+    const value = Number(this.rawValue()['profile_id']);
+    return Number.isFinite(value) && value > 0 ? value : PROFILE_NONE;
+  });
+
+  /**
+   * El perfil elegido, SÓLO si sigue estando en el catálogo activo del tipo.
+   *
+   * Es la fuente de la que `buildPayload` toma el `profile_id`, y por eso se
+   * resuelve contra `profilesForType()` y no contra el valor crudo: así un id que
+   * quedó puesto tras cambiar el tipo de operación, o cuando el catálogo no se
+   * pudo leer, no llega nunca al backend.
+   */
+  readonly selectedProfile = computed<InvoiceProfileCatalogEntry | null>(() => {
+    const id = this.selectedProfileId();
+    if (id === PROFILE_NONE) return null;
+    return this.profilesForType().find((entry) => entry.id === id) ?? null;
+  });
+
+  /**
+   * Banner de «Usando perfil predeterminado».
+   *
+   * Sólo con EXACTAMENTE un perfil activo del tipo (ADR-9). Con dos o más el
+   * selector ya muestra la elección a la vista y un banner sobraría; con uno
+   * solo no hay nada visible que delate qué configuración se está aplicando.
+   */
+  readonly profileAutoSelected = computed<boolean>(
+    () => this.profilesForType().length === 1 && this.selectedProfile() !== null,
+  );
+
+  /**
+   * Configuración AIU que REALMENTE va a aplicar este documento.
+   *
+   * Con perfil elegido manda el perfil, y `store_settings` no se mira NI COMO
+   * RESPALDO. Es la misma precedencia del backend —`profile_aiu ?? (await
+   * loadAiuSettings(...))`, donde el `??` corta el `await`—, y tiene que ser la
+   * misma: si acá se cayera al setting mientras el servidor calcula por el
+   * perfil, la pantalla instruiría sobre otra base gravable y el error no daría
+   * síntoma, porque la DIAN acepta el documento —el XML cuadra consigo mismo— y
+   * el faltante sólo aparece en una fiscalización.
+   *
+   * `null` mientras la lectura está en vuelo o falló: media instrucción es peor
+   * que ninguna, y la instrucción EQUIVOCADA es peor que las dos.
+   */
+  readonly effectiveAiu = computed<InvoiceAiuSettings | null>(() => {
+    const store = this.aiuSettings();
+    if (this.selectedProfileId() === PROFILE_NONE) return store;
+    if (this.profileConfigLoading() || this.profileConfigFailed()) return null;
+
+    const aiu = this.profileAiu();
+    // Un perfil SIN sección AIU no configura nada del AIU: el backend deja el
+    // snapshot vacío y `resolveAiuContext` rechaza con `INVOICING_AIU_002` si el
+    // documento es AIU. Caer al setting de la tienda acá pintaría un instructivo
+    // que el servidor no va a honrar.
+    if (!aiu || !store) return null;
+
+    // `note_prefix`, `note_min_length` y `note_max_length` son constantes DIAN,
+    // iguales para tienda y perfil: se heredan del setting en vez de duplicarse.
+    const object = (aiu.contract_object ?? '').trim();
+    const note = object ? `${store.note_prefix} ${object}` : '';
+    return {
+      ...store,
+      regime: aiu.regime,
+      contract_object: aiu.contract_object ?? '',
+      enforce_minimum_base: aiu.enforce_minimum_base,
+      // Conversión SÓLO para el texto del instructivo. El importe del piso lo
+      // calcula el backend con el decimal exacto de la versión congelada.
+      minimum_base_percent: Number(aiu.minimum_base_percent),
+      note,
+      note_length: note.length,
+      note_valid:
+        note.length >= store.note_min_length &&
+        note.length <= store.note_max_length,
+      // El perfil ELIGIÓ el régimen: no hay «valor por defecto» que advertir.
+      is_default: false,
+    };
+  });
+
   /** Última consulta a la TRM oficial, o `null` si aún no se ha pedido. */
   readonly exchangeRateQuote = signal<ExchangeRateQuote | null>(null);
   readonly loadingExchangeRate = signal(false);
@@ -2757,7 +3016,7 @@ export class InvoiceCreatePageComponent implements OnInit {
     minimumBase: string | null;
     isDefault: boolean;
   } | null>(() => {
-    const settings = this.aiuSettings();
+    const settings = this.effectiveAiu();
     if (!settings) return null;
 
     if (settings.regime === 'decreto_1372_1992') {
@@ -2810,7 +3069,7 @@ export class InvoiceCreatePageComponent implements OnInit {
   readonly aiuTaxableWithoutTax = computed<
     Array<{ index: number; label: string }>
   >(() => {
-    const settings = this.aiuSettings();
+    const settings = this.effectiveAiu();
     if (!settings) return [];
 
     // Bajo el Decreto 1372/1992 sólo la utilidad grava; bajo el 462-1, los tres
@@ -2859,7 +3118,7 @@ export class InvoiceCreatePageComponent implements OnInit {
    * ninguna.
    */
   readonly aiuEffectiveNote = computed<{
-    source: 'invoice' | 'store' | 'none';
+    source: 'invoice' | 'profile' | 'store' | 'none';
     object: string;
     note: string;
     length: number;
@@ -2868,7 +3127,7 @@ export class InvoiceCreatePageComponent implements OnInit {
     max: number;
     remaining: number;
   } | null>(() => {
-    const settings = this.aiuSettings();
+    const settings = this.effectiveAiu();
     if (!settings) return null;
 
     const own = this.aiuContractObject();
@@ -2877,7 +3136,16 @@ export class InvoiceCreatePageComponent implements OnInit {
     const note = object ? `${settings.note_prefix} ${object}` : '';
 
     return {
-      source: own ? 'invoice' : inherited ? 'store' : 'none',
+      // `profile` y `store` se separan porque el usuario tiene que saber DÓNDE
+      // ir a cambiar lo que está heredando: con perfil, el objeto sale de la
+      // versión del perfil y Ajustes → Facturación → AIU no lo toca.
+      source: own
+        ? 'invoice'
+        : inherited
+          ? this.selectedProfileId() === PROFILE_NONE
+            ? 'store'
+            : 'profile'
+          : 'none',
       object,
       note,
       length: note.length,
@@ -2906,6 +3174,48 @@ export class InvoiceCreatePageComponent implements OnInit {
   readonly aiuNoteBlocked = computed<boolean>(() => {
     const note = this.aiuEffectiveNote();
     return !!note && !note.valid;
+  });
+
+  /**
+   * Dónde se cambia el RÉGIMEN que se está aplicando.
+   *
+   * Con perfil, Ajustes → Facturación → AIU no gobierna este documento: el
+   * régimen sale de la versión del perfil. Mandar ahí al usuario le haría cambiar
+   * un valor que no afecta a la factura que tiene en pantalla, y creer que sí.
+   */
+  readonly aiuRegimeOriginHint = computed<string>(() => {
+    const profile = this.selectedProfile();
+    return profile
+      ? `El régimen viene del perfil «${profile.name}» (versión ${profile.current_version}) y se edita en Facturación → Perfiles.`
+      : 'El régimen se elige en Ajustes → Facturación → AIU.';
+  });
+
+  /** Insignia del origen del objeto del contrato que va a viajar en la nota. */
+  readonly aiuNoteSourceLabel = computed<string>(() => {
+    switch (this.aiuEffectiveNote()?.source) {
+      case 'invoice':
+        return 'Propio de esta factura';
+      case 'profile':
+        return 'Heredado del perfil';
+      case 'store':
+        return 'Heredado de la tienda';
+      default:
+        return 'Sin definir';
+    }
+  });
+
+  /**
+   * Dónde se cambia lo que este documento hereda.
+   *
+   * Con perfil elegido, mandar al usuario a Ajustes → Facturación → AIU sería
+   * mandarlo a una pantalla que NO afecta a este documento: el backend deriva el
+   * AIU de la versión del perfil y no lee el setting ni como respaldo.
+   */
+  readonly aiuInheritanceHint = computed<string>(() => {
+    const profile = this.selectedProfile();
+    return profile
+      ? `Déjalo vacío para heredar el del perfil «${profile.name}».`
+      : 'Déjalo vacío para heredar el de Ajustes → Facturación → AIU.';
   });
 
   /** Retención efectiva: la calculada por conceptos, o la escrita a mano. */
@@ -3245,6 +3555,7 @@ export class InvoiceCreatePageComponent implements OnInit {
 
     this.loadTaxCatalog();
     this.loadAiuSettings();
+    this.loadProfileCatalog();
     this.loadWithholdingConcepts();
     // Los productos YA NO se precargan: el selector busca contra el servidor
     // cada vez que se abre. Precargar una página era lo que hacía infacturable
@@ -3278,6 +3589,139 @@ export class InvoiceCreatePageComponent implements OnInit {
       .load()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((settings) => this.aiuSettings.set(settings));
+  }
+
+  /**
+   * Catálogo de perfiles activos del tenant.
+   *
+   * FALLA EN SILENCIO A PROPÓSITO. Si la petición no responde, el catálogo queda
+   * vacío, el selector no se pinta y el wizard se comporta exactamente como el
+   * flujo manual —que es lo que hacía antes de esta fase—. Cualquier otra
+   * degradación (bloquear el envío, reintentar en bucle, pintar el selector
+   * deshabilitado) dejaría al tenant sin poder facturar por un fallo en una
+   * lectura secundaria.
+   */
+  private loadProfileCatalog(): void {
+    if (this.profileCatalogLoaded) return;
+    this.profileCatalogLoaded = true;
+    this.profileService
+      .catalog()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.profileCatalog.set(response?.data ?? []);
+          this.syncProfileSelection();
+        },
+        error: () => this.profileCatalog.set([]),
+      });
+  }
+
+  /**
+   * Ajusta el perfil elegido al tipo de operación vigente.
+   *
+   * Se llama al llegar el catálogo, al cambiar el tipo de operación y al
+   * reiniciar el formulario. En el segundo caso es OBLIGATORIO: el backend
+   * rechaza con `INVOICING_PROFILE_008` un perfil cuyo `operation_type` no
+   * coincide con el del documento, así que dejar puesto el perfil AIU al volver a
+   * «Estándar» convertiría el envío en un 409 sobre un campo que ya no se ve.
+   *
+   * Precedencia (ADR-9): un perfil ya elegido que sigue siendo válido se respeta
+   * —nunca se pisa una elección del usuario—; si no, se preselecciona el
+   * predeterminado del tipo. Con exactamente un activo se elige ése aunque no
+   * esté marcado como predeterminado: es el caso de F.2, el que lleva banner.
+   * Sin candidatos, se vuelve al flujo manual.
+   */
+  private syncProfileSelection(): void {
+    const options = this.profilesForType();
+    const current = this.selectedProfileId();
+
+    if (current !== PROFILE_NONE && options.some((e) => e.id === current)) {
+      // Sigue siendo válido. Sólo hay que garantizar que sus reglas estén
+      // leídas: el catálogo pudo llegar después de que el usuario tocara el
+      // selector, y en ese orden nadie habría disparado la lectura.
+      if (
+        !this.profileAiu() &&
+        !this.profileConfigLoading() &&
+        !this.profileConfigFailed()
+      ) {
+        this.loadProfileConfig(current);
+      }
+      return;
+    }
+
+    const next =
+      options.length === 1
+        ? options[0]
+        : (options.find((entry) => entry.is_default) ?? null);
+
+    this.applyProfile(next ? next.id : PROFILE_NONE);
+  }
+
+  /** Escribe el perfil en el formulario y dispara la lectura de sus reglas. */
+  private applyProfile(id: number): void {
+    const control = this.invoiceForm.get('profile_id');
+    if (!control) return;
+    if (Number(control.value) === id) {
+      // Ya estaba puesto: sólo asegurar las reglas. Reescribir emitiría un
+      // `valueChanges` que no cambia nada y recomputaría media pantalla.
+      this.loadProfileConfig(id);
+      return;
+    }
+    // Con `emitEvent` por defecto: el `computed` que lee el valor crudo depende
+    // de `formValue()`, y silenciar el evento dejaría el selector pintando el
+    // valor anterior.
+    control.setValue(id);
+    this.loadProfileConfig(id);
+  }
+
+  /**
+   * Reglas de la versión vigente del perfil.
+   *
+   * Se leen de `GET /profiles/:id` y NO del catálogo: el catálogo vive en Redis y
+   * su propio contrato lo prohíbe —una `config` en caché es una tarifa fiscal con
+   * fecha de caducidad—. Lo que se pinta con esto es INSTRUCTIVO; el cálculo del
+   * documento lo hace el backend contra la versión que congela al timbrar, así
+   * que una lectura rancia acá no puede alterar el XML.
+   */
+  private loadProfileConfig(id: number): void {
+    const request = ++this.profileConfigRequest;
+
+    if (id === PROFILE_NONE) {
+      this.profileAiu.set(null);
+      this.profileConfigLoading.set(false);
+      this.profileConfigFailed.set(false);
+      return;
+    }
+
+    this.profileConfigLoading.set(true);
+    this.profileConfigFailed.set(false);
+    this.profileService
+      .getById(id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (request !== this.profileConfigRequest) return;
+          this.profileAiu.set(response?.data?.current_config?.aiu ?? null);
+          this.profileConfigLoading.set(false);
+        },
+        error: () => {
+          if (request !== this.profileConfigRequest) return;
+          this.profileAiu.set(null);
+          this.profileConfigLoading.set(false);
+          this.profileConfigFailed.set(true);
+        },
+      });
+  }
+
+  /** El usuario cambió de perfil en el selector. */
+  onProfileChange(): void {
+    this.clearSubmitError();
+    this.loadProfileConfig(this.selectedProfileId());
+  }
+
+  /** Reintento explícito cuando la lectura de las reglas del perfil falló. */
+  retryProfileConfig(): void {
+    this.loadProfileConfig(this.selectedProfileId());
   }
 
   // ── Tasa de cambio oficial ──────────────────────────────────
@@ -3503,6 +3947,10 @@ export class InvoiceCreatePageComponent implements OnInit {
   }
 
   onOperationTypeChange(): void {
+    // El perfil está ligado al tipo: cambiar el tipo puede invalidar el elegido
+    // y, con él, la base gravable que la pantalla está instruyendo.
+    this.syncProfileSelection();
+
     if (this.isAiu()) {
       this.setSection('aiu', true);
     } else {
@@ -4250,6 +4698,14 @@ export class InvoiceCreatePageComponent implements OnInit {
     if (raw['operation_type']) {
       payload.operation_type = String(raw['operation_type']);
     }
+    // Se toma del CATÁLOGO, no del valor crudo del control: así un id que quedó
+    // puesto tras cambiar el tipo de operación —o cuando el catálogo no se pudo
+    // leer— no llega nunca al backend, y el 409 `INVOICING_PROFILE_008` queda
+    // inalcanzable desde esta pantalla. Ausente ⇒ flujo manual, idéntico a hoy.
+    const selectedProfile = this.selectedProfile();
+    if (selectedProfile) {
+      payload.profile_id = selectedProfile.id;
+    }
     // Sólo si la operación es AIU y el usuario efectivamente escribió algo: en
     // cualquier otro caso se omite para que el backend herede el de la tienda,
     // que es la precedencia que aplica `resolveAiuContext`. Mandar cadena vacía
@@ -4620,6 +5076,11 @@ export class InvoiceCreatePageComponent implements OnInit {
       payment_form: PAYMENT_FORM_CASH,
       payment_means_code: '10',
       operation_type: OPERATION_TYPE_STANDARD,
+      // A `PROFILE_NONE` a propósito: `syncProfileSelection()` vuelve a
+      // preseleccionar el predeterminado del tipo en cuanto el formulario queda
+      // limpio. Conservar el anterior podría dejar puesto uno que se desactivó
+      // mientras se capturaba la factura anterior.
+      profile_id: PROFILE_NONE,
       notes: '',
       aiu_contract_object: '',
       customer_id: null,
@@ -4641,6 +5102,7 @@ export class InvoiceCreatePageComponent implements OnInit {
       default_account_code: '',
     });
     this.syncDueDate();
+    this.syncProfileSelection();
     this.orderIdControl.reset();
     this.mode.set('manual');
     this.pickerTargetUid.set(null);
