@@ -73,3 +73,9 @@ apps/mobile/.captures/
 # buildcheck logs (compile gate, scripts/buildcheck.sh)
 .buildcheck/
 test-results/
+
+# Respaldos de saneamiento de datos (scripts/writeoff-*, backfills).
+# Contienen una fotografía de datos productivos — nombre y SKU de producto,
+# cantidades, costos y nombre de la organización — y el script los escribe
+# ANTES de mover nada, así que existen justo cuando alguien va a commitear.
+apps/backend/scripts/backups/
