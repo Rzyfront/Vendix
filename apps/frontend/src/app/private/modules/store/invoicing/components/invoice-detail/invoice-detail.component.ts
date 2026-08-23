@@ -22,6 +22,7 @@ import {
   InvoiceTax,
 } from '../../interfaces/invoice.interface';
 import { InvoicingService } from '../../services/invoicing.service';
+import { DocumentPrintService } from '../../../../../../shared/services/print/document-print.service';
 import * as InvoicingActions from '../../state/actions/invoicing.actions';
 import {
   selectCurrentInvoice,
@@ -917,6 +918,21 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                 Regenerar PDF
               </app-button>
 
+              <!--
+                IMPRIMIR. El diseño lo resuelve el backend a partir del PERFIL
+                que esta factura congeló al emitirse, no de la plantilla que la
+                tienda tenga activa hoy: una reimpresión tiene que salir igual
+                que la primera copia.
+              -->
+              <app-button
+                variant="outline"
+                size="sm"
+                [loading]="printing()"
+                (clicked)="printInvoice()">
+                <app-icon slot="icon" name="printer" [size]="14"></app-icon>
+                Imprimir
+              </app-button>
+
               @if (inv.xml_document) {
                 <app-button
                   variant="outline"
@@ -1189,6 +1205,7 @@ export class InvoiceDetailComponent {
   private currencyService = inject(CurrencyFormatService);
   private invoicingService = inject(InvoicingService);
   private toast = inject(ToastService);
+  private printService = inject(DocumentPrintService);
 
   private readonly storeRejection = this.store.selectSignal(selectDianRejection);
   private readonly hydratedInvoice = this.store.selectSignal(selectCurrentInvoice);
@@ -1202,6 +1219,9 @@ export class InvoiceDetailComponent {
   /** Descarga del PDF en curso. Señal, no booleano plano: en zoneless un campo
    *  mutado dentro de un `subscribe` no repinta nada. */
   readonly pdfLoading = signal(false);
+
+  /** Impresión en curso. Misma razón que `pdfLoading`. */
+  readonly printing = signal(false);
 
   /** Visibilidad del modal de registro de eventos RADIAN. */
   readonly eventModalOpen = signal(false);
@@ -2096,6 +2116,44 @@ export class InvoiceDetailComponent {
           this.pdfLoading.set(false);
           this.toast.error(describeApiFailure(error).message);
         },
+      });
+  }
+
+  /**
+   * Imprime la factura por el Print Gateway.
+   *
+   * NO se le pasa plantilla: la resuelve el servidor leyendo el snapshot del
+   * perfil que la factura tiene congelado. Si el cliente pudiera elegirla, dos
+   * impresiones del mismo documento fiscal podrían verse distintas, y eso es
+   * exactamente lo que una reimpresión no debe poder hacer.
+   *
+   * Sin `fallbackRequest`: el emisor local no sabe armar un documento fiscal
+   * (CUFE, QR, resolución), así que un «fallback» produciría un papel que
+   * PARECE una factura y no lo es. Si el gateway falla, se dice.
+   */
+  printInvoice(): void {
+    const inv = this.detail();
+    if (!inv || this.printing()) {
+      return;
+    }
+    this.printing.set(true);
+    void this.printService
+      .printViaGateway({
+        formatType: 'fiscal_electronic_invoice',
+        documentId: inv.id,
+        title: inv.invoice_number,
+      })
+      .then((result) => {
+        this.printing.set(false);
+        if (!result) {
+          this.toast.error(
+            'No se pudo imprimir: revisa el formato «Factura Electrónica (DIAN)» en el Hub de formatos de impresión.',
+          );
+        }
+      })
+      .catch((error: unknown) => {
+        this.printing.set(false);
+        this.toast.error(describeApiFailure(error).message);
       });
   }
 

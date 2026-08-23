@@ -227,7 +227,29 @@ export interface ProfileModelLine {
 
 /** Sección 6 — Formato de impresión y presentación. */
 export interface ProfileFormatConfig {
-  /** Clave de plantilla de `default_templates`. */
+  /**
+   * Plantilla del Hub de formatos de impresion (`print_templates.id`).
+   *
+   * ## Por que un id y no la `template_key`
+   *
+   * `template_key` apunta a `default_templates`, que es el catalogo VIEJO de
+   * plantillas por clave de texto: nadie valida que la clave exista, asi que un
+   * error de tipeo se guarda sin queja y se descubre el dia que alguien imprime.
+   * El Hub —`print_templates` + `store_print_format_configs`— es el que la
+   * tienda edita hoy, y sus plantillas tienen id, `format_type` y dueno
+   * (`organization_id` / `is_system`), o sea que la referencia SI se puede
+   * verificar contra algo.
+   *
+   * `null` significa «la plantilla activa de la tienda para
+   * `fiscal_electronic_invoice`». Eso es lo correcto por omision: un perfil que
+   * no opina sobre el diseno no debe congelar uno.
+   *
+   * `template_key` se conserva y no se borra porque hay perfiles guardados que
+   * la traen. Cuando ambas vienen, manda `template_id`: es la unica de las dos
+   * que el motor de impresion sabe resolver.
+   */
+  template_id?: number | null;
+  /** Clave de plantilla de `default_templates`. Legado; ver `template_id`. */
   template_key?: string | null;
   /** Imprimir el desglose A/I/U en el documento humano. */
   show_aiu_breakdown: boolean;
@@ -811,6 +833,25 @@ function validateFormat(
       message: 'Hay que decir si se imprime el desglose de AIU.',
     });
   }
+  // `template_id` es una FK logica a `print_templates`. Aca solo se exige que
+  // sea un entero positivo; que EXISTA y que pertenezca a la organizacion lo
+  // decide quien imprime, no el validador del snapshot: el snapshot es
+  // inmutable y la plantilla se puede borrar despues de timbrar la factura.
+  // Rechazar el perfil por una plantilla borrada volveria irrepetible la
+  // impresion de un documento ya emitido.
+  const templateId = config.format?.template_id;
+  if (
+    templateId !== undefined &&
+    templateId !== null &&
+    (!Number.isInteger(templateId) || (templateId as number) <= 0)
+  ) {
+    issues.push({
+      field: 'format.template_id',
+      code: 'FORMAT_TEMPLATE_ID_INVALID',
+      message:
+        'La plantilla de impresion tiene que ser el identificador de una plantilla del Hub (entero positivo) o quedar vacia.',
+    });
+  }
 }
 
 /**
@@ -855,6 +896,7 @@ export function buildDefaultAiuProfileConfig(
     },
     model_lines: [],
     format: {
+      template_id: null,
       template_key: null,
       show_aiu_breakdown: true,
       display_decimals: 2,
@@ -1025,6 +1067,7 @@ const MODEL_LINE_KEYS = [
   'quantity',
 ] as const;
 const FORMAT_KEYS = [
+  'template_id',
   'template_key',
   'show_aiu_breakdown',
   'display_decimals',

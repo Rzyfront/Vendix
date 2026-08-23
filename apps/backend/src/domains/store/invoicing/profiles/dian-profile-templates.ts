@@ -51,7 +51,12 @@ const emptySections = {
     mapping_key_overrides: null,
   },
   model_lines: [],
-  format: { template_key: null, show_aiu_breakdown: false, display_decimals: 2 },
+  format: {
+    template_id: null,
+    template_key: null,
+    show_aiu_breakdown: false,
+    display_decimals: 2,
+  },
   dian: {
     payment_means_code: null,
     payment_method_code: null,

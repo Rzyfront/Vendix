@@ -136,7 +136,10 @@ import {
   InvoiceProfileCatalogEntry,
   InvoiceProfileService,
 } from '../../services/invoice-profile.service';
-import type { ProfileAiuConfig } from '../../../../../../core/utils/invoice-profile-config.contract';
+import type {
+  InvoiceProfileConfig,
+  ProfileAiuConfig,
+} from '../../../../../../core/utils/invoice-profile-config.contract';
 import {
   AIU_COMPONENT_OPTIONS,
   DOCUMENT_TYPE_NIT_CODE,
@@ -727,6 +730,60 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                     </div>
                   }
 
+                  <!--
+                    LO QUE EL PERFIL RELLENÓ. Va aquí, pegado al selector, y no
+                    al pie: quien acaba de elegir un perfil está mirando este
+                    punto de la pantalla, y es donde tiene que enterarse de qué
+                    campos cambiaron sin que él los tocara.
+
+                    Todo lo listado queda EDITABLE en su propia sección. Esto
+                    informa, no bloquea.
+                  -->
+                  @if (prefillSummary().length > 0) {
+                    <div
+                      class="mt-2 flex items-start gap-2.5 rounded-lg border border-border bg-[var(--color-surface-muted)] px-3 py-2.5"
+                    >
+                      <app-icon
+                        name="wand-2"
+                        [size]="15"
+                        class="mt-0.5 flex-shrink-0 text-[var(--color-primary)]"
+                      />
+                      <div class="min-w-0">
+                        <p class="text-xs leading-relaxed text-text-primary">
+                          El perfil precargó
+                          <strong>{{ prefillSummary().join(', ') }}</strong
+                          >. Todo queda editable: si cambias un campo a mano, el
+                          perfil no lo vuelve a pisar.
+                        </p>
+                      </div>
+                    </div>
+                  }
+
+                  <!--
+                    LÍNEAS DEL PERFIL NO SEMBRADAS. El usuario ya había
+                    capturado líneas, así que reemplazarlas sin preguntar
+                    borraría trabajo que no se recupera. Se ofrece.
+                  -->
+                  @if (pendingModelLines() > 0) {
+                    <div
+                      class="mt-2 flex flex-col gap-2 rounded-lg border border-[var(--color-primary)]/25 bg-[color-mix(in_srgb,var(--color-primary)_6%,transparent)] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <p class="text-xs leading-relaxed text-text-primary">
+                        Este perfil trae
+                        <strong>{{ pendingModelLines() }}</strong> línea(s)
+                        modelo. No se cargaron porque ya capturaste líneas
+                        propias: cargarlas las reemplaza.
+                      </p>
+                      <button
+                        type="button"
+                        class="shrink-0 rounded-lg border border-[var(--color-primary)] px-2.5 py-1.5 text-xs font-semibold text-[var(--color-primary)]"
+                        (click)="applyModelLines()"
+                      >
+                        Reemplazar por las del perfil
+                      </button>
+                    </div>
+                  }
+
                   @if (profileConfigFailed()) {
                     <div
                       class="mt-2 flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning-light px-3 py-2.5"
@@ -1085,14 +1142,57 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                       </div>
 
                       @if (isAiu()) {
-                        <div class="col-span-8 md:col-span-5">
-                          <app-selector
-                            formControlName="aiu_component"
-                            [options]="aiuComponentOptions"
-                            [errorText]="itemError(i, 'aiu_component') ?? ''"
-                            placeholder="Componente AIU"
-                            size="sm"
-                          ></app-selector>
+                        <!--
+                          INTERRUPTOR DE BASE AIU POR LÍNEA. Decide si este
+                          renglón entra a la base gravable del régimen o si es
+                          costo reembolsable. Es la misma decisión que antes se
+                          tomaba dejando el selector en blanco — sólo que ahora
+                          se ve que es una decisión.
+                        -->
+                        <div
+                          class="col-span-8 md:col-span-5 flex items-center gap-2"
+                        >
+                          <label
+                            class="flex shrink-0 cursor-pointer items-center gap-1.5"
+                            [title]="
+                              lineCarriesAiu(item)
+                                ? 'Esta línea lleva la base AIU configurada'
+                                : 'Costo reembolsable: no entra a la base AIU'
+                            "
+                          >
+                            <input
+                              type="checkbox"
+                              class="h-4 w-4 shrink-0 accent-[var(--color-primary)]"
+                              [checked]="lineCarriesAiu(item)"
+                              (change)="
+                                toggleLineAiu(
+                                  item,
+                                  $any($event.target).checked
+                                )
+                              "
+                            />
+                            <span
+                              class="text-[11px] font-medium text-[var(--color-text-secondary)]"
+                              >AIU</span
+                            >
+                          </label>
+                          @if (lineCarriesAiu(item)) {
+                            <div class="min-w-0 flex-1">
+                              <app-selector
+                                formControlName="aiu_component"
+                                [options]="aiuComponentOptions"
+                                [errorText]="itemError(i, 'aiu_component') ?? ''"
+                                placeholder="Componente AIU"
+                                size="sm"
+                              ></app-selector>
+                            </div>
+                          } @else {
+                            <span
+                              class="min-w-0 flex-1 truncate text-[11px] text-[var(--color-text-secondary)]"
+                            >
+                              Costo reembolsable — fuera de la base AIU
+                            </span>
+                          }
                         </div>
                       } @else {
                         <div class="col-span-8 md:col-span-5">
@@ -2695,6 +2795,39 @@ export class InvoiceCreatePageComponent implements OnInit {
   readonly profileAiu = signal<ProfileAiuConfig | null>(null);
 
   /**
+   * Snapshot COMPLETO de la versión vigente del perfil elegido.
+   *
+   * Antes sólo se guardaba `aiu`, y con eso el perfil no podía hacer lo único
+   * que un perfil existe para hacer: precargar el formulario. Elegir uno pintaba
+   * un instructivo y no rellenaba ni un campo.
+   *
+   * SIGUE SIENDO INSTRUCTIVO, no fuente de cálculo. Lo que se emite lo calcula
+   * el servidor contra la versión que congela al timbrar; esto sólo evita
+   * rediligenciar.
+   */
+  readonly profileConfig = signal<InvoiceProfileConfig | null>(null);
+
+  /**
+   * Campos que el perfil rellenó, por nombre de control.
+   *
+   * EXISTE PARA QUE LO PRECARGADO SEA VISIBLE. Un preset que inyecta un valor
+   * que el usuario nunca ve y termina emitido a la DIAN es el peor resultado
+   * posible de esta función: la marca «del perfil» junto al campo es lo que
+   * convierte una inyección silenciosa en una propuesta revisable.
+   */
+  readonly prefilledFields = signal<Set<string>>(new Set<string>());
+
+  /**
+   * Líneas modelo del perfil que NO se sembraron porque el usuario ya había
+   * capturado líneas propias.
+   *
+   * Pisar lo que alguien ya escribió es inaceptable en una pantalla que gasta
+   * numeración autorizada, así que en ese caso la siembra se OFRECE —con este
+   * contador y un botón— en vez de ejecutarse.
+   */
+  readonly pendingModelLines = signal<number>(0);
+
+  /**
    * Descarta respuestas fuera de orden.
    *
    * Cambiar de perfil dos veces seguidas puede resolver la primera petición
@@ -3701,16 +3834,223 @@ export class InvoiceCreatePageComponent implements OnInit {
       .subscribe({
         next: (response) => {
           if (request !== this.profileConfigRequest) return;
-          this.profileAiu.set(response?.data?.current_config?.aiu ?? null);
+          const config = response?.data?.current_config ?? null;
+          this.profileAiu.set(config?.aiu ?? null);
+          this.profileConfig.set(config);
           this.profileConfigLoading.set(false);
+          if (config) this.applyProfilePrefill(config);
         },
         error: () => {
           if (request !== this.profileConfigRequest) return;
           this.profileAiu.set(null);
+          this.profileConfig.set(null);
           this.profileConfigLoading.set(false);
           this.profileConfigFailed.set(true);
         },
       });
+  }
+
+  /**
+   * PRECARGA. Escribe en el formulario lo que el perfil trae preconfigurado.
+   *
+   * ─── LA REGLA QUE GOBIERNA TODO ESTO ─────────────────────────────────────
+   *
+   * **Nunca se pisa lo que el usuario escribió.** La condición es `pristine`:
+   * un control que el usuario tocó está `dirty`, y ese se deja intacto. Los que
+   * siguen vírgenes se rellenan. Así la precarga es útil la primera vez y no
+   * destructiva la segunda — y cambiar de perfil después de haber corregido un
+   * campo a mano no borra la corrección.
+   *
+   * `setValue` programático NO marca `dirty`, así que lo que precargó el perfil
+   * anterior sí se reemplaza al elegir otro. Es lo correcto: eso no lo escribió
+   * el usuario.
+   *
+   * ─── POR QUÉ TODO LO PRECARGADO QUEDA VISIBLE Y EDITABLE ─────────────────
+   *
+   * Cada campo escrito se registra en `prefilledFields` y la plantilla lo marca.
+   * Un preset que inyecta un valor que el usuario nunca ve y termina emitido a
+   * la DIAN es el peor resultado posible de esta función. Precargar es proponer,
+   * no decidir.
+   *
+   * ─── QUÉ NO PRECARGA, Y POR QUÉ ──────────────────────────────────────────
+   *
+   *  - **Adquiriente** — es del documento. Un cliente precargado es la clase de
+   *    error que se descubre cuando la factura ya tiene CUFE.
+   *  - **Resolución** — la elige `syncResolution` contra las vigentes y con
+   *    consecutivo disponible; una resolución del perfil podría estar vencida.
+   *  - **Fechas** — hoy, siempre. Una fecha de emisión guardada es un rechazo.
+   *
+   * ─── EL MAPEO DE LOS DOS CÓDIGOS DE PAGO ─────────────────────────────────
+   *
+   * `dian.payment_method_code` → `payment_form` (FormasPago: 1 contado / 2
+   * crédito) y `dian.payment_means_code` → `payment_means_code` (medio). Ningún
+   * otro consumidor lee esos dos campos del perfil —se comprobó con `grep` sobre
+   * los dos `src`—, así que esta precarga es lo que define su significado. Queda
+   * escrito aquí para que nadie lo invierta después: invertirlos mandaría «2» a
+   * un campo que sólo admite códigos de medio y el documento saldría a crédito
+   * cuando es de contado.
+   */
+  private applyProfilePrefill(config: InvoiceProfileConfig): void {
+    const filled = new Set<string>();
+
+    /** Escribe sólo si el usuario no tocó ese control. */
+    const put = (path: string, value: unknown): void => {
+      const control = this.invoiceForm.get(path);
+      if (!control || control.dirty) return;
+      const text = typeof value === 'string' ? value.trim() : value;
+      if (text === null || text === undefined || text === '') return;
+      control.setValue(text);
+      filled.add(path);
+    };
+
+    put('payment_form', config.dian.payment_method_code);
+    put('payment_means_code', config.dian.payment_means_code);
+
+    const notes = (config.dian.header_notes ?? [])
+      .map((note) => String(note ?? '').trim())
+      .filter((note) => note.length > 0);
+    if (notes.length > 0) put('notes', notes.join('\n'));
+
+    if (config.aiu) put('aiu_contract_object', config.aiu.contract_object);
+
+    // Cuenta contable por omisión: se toma la del COSTO reembolsable, que es la
+    // que aplica a una línea sin componente AIU. Las de A/I/U no caben en este
+    // campo único —se derraman por línea al sembrar las líneas modelo—.
+    put(
+      'default_account_code',
+      config.accounting.revenue_account_by_bucket?.costo ?? '',
+    );
+
+    this.prefilledFields.set(filled);
+    this.seedModelLines(config);
+  }
+
+  /**
+   * Siembra las líneas modelo del perfil en el `FormArray` de líneas.
+   *
+   * Sólo si NO hay nada que perder: el arreglo vacío, o con filas que siguen en
+   * blanco (sin descripción y sin precio). Si el usuario ya capturó líneas, la
+   * siembra se OFRECE con un botón —`pendingModelLines`— en vez de ejecutarse.
+   * Reemplazar veinte líneas escritas a mano por las del perfil es exactamente
+   * el tipo de acción que no se puede deshacer con Ctrl+Z en un formulario.
+   */
+  private seedModelLines(config: InvoiceProfileConfig): void {
+    const lines = config.model_lines ?? [];
+    if (lines.length === 0) {
+      this.pendingModelLines.set(0);
+      return;
+    }
+
+    const captured = this.itemsArray.controls.some((control) => {
+      const description = String(control.get('description')?.value ?? '').trim();
+      const price = Number(control.get('unit_price')?.value ?? 0);
+      return description.length > 0 || price > 0;
+    });
+
+    if (captured) {
+      this.pendingModelLines.set(lines.length);
+      return;
+    }
+
+    this.pendingModelLines.set(0);
+    this.writeModelLines(config);
+  }
+
+  /** Reemplaza las líneas por las del perfil. Acción explícita del usuario. */
+  applyModelLines(): void {
+    const config = this.profileConfig();
+    if (!config) return;
+    this.writeModelLines(config);
+    this.pendingModelLines.set(0);
+  }
+
+  private writeModelLines(config: InvoiceProfileConfig): void {
+    const accounts = config.accounting.revenue_account_by_bucket ?? {};
+    this.itemsArray.clear();
+    for (const line of config.model_lines ?? []) {
+      const group = this.appendItem();
+      if (!group) break;
+      group.patchValue({
+        description: line.description,
+        quantity: Number(line.quantity ?? 1) || 1,
+        unit_code: line.unit_code ?? UNIT_CODE_DEFAULT,
+        // `aiu_component` vacío para el costo reembolsable: es la única cubeta
+        // que NO es un componente del AIU, y mandarla como tal haría que el
+        // backend la sumara a la base gravable del régimen.
+        aiu_component: line.bucket === 'costo' ? '' : line.bucket,
+        account_code: accounts[line.bucket] ?? '',
+      });
+    }
+    this.itemsArray.updateValueAndValidity();
+  }
+
+  /**
+   * Etiquetas legibles de lo que el perfil rellenó.
+   *
+   * Se pinta como lista bajo el selector. No es decoración: es el único lugar
+   * donde el usuario puede comprobar QUÉ le tocaron sin recorrer las ocho
+   * secciones campo por campo.
+   */
+  readonly prefillSummary = computed<string[]>(() => {
+    const labels: Record<string, string> = {
+      payment_form: 'forma de pago',
+      payment_means_code: 'medio de pago',
+      notes: 'notas del documento',
+      aiu_contract_object: 'objeto del contrato',
+      default_account_code: 'cuenta contable por omisión',
+    };
+    const out: string[] = [];
+    for (const path of this.prefilledFields()) {
+      out.push(labels[path] ?? path);
+    }
+    const lines = this.itemCount();
+    if (lines > 0 && this.profileConfig()?.model_lines?.length === lines) {
+      out.push(lines === 1 ? '1 línea' : lines + ' líneas');
+    }
+    return out;
+  });
+
+  /**
+   * ¿Esta línea lleva la base AIU configurada?
+   *
+   * NO es un campo nuevo: es `aiu_component` no vacío. La semántica ya existía
+   * —una línea con componente participa de la base del régimen; una sin él es
+   * costo reembolsable y no la toca— pero estaba escondida en «dejar el selector
+   * en blanco», que nadie lee como una decisión fiscal. El interruptor la hace
+   * explícita sin inventar un campo que el backend no conoce.
+   */
+  lineCarriesAiu(item: AbstractControl): boolean {
+    return String(item.get('aiu_component')?.value ?? '').trim().length > 0;
+  }
+
+  /**
+   * Enciende o apaga la base AIU de una línea.
+   *
+   * Al encender se propone el primer componente GRAVABLE del régimen vigente:
+   * bajo el Decreto 1372/1992 sólo la Utilidad lleva IVA, así que proponer
+   * «Administración» ahí crearía una línea que el validador rechaza por declarar
+   * una base que su propio régimen no grava (FAU04). Bajo el art. 462-1 los tres
+   * son gravables y se propone Administración.
+   *
+   * Al apagar se limpia el componente: la línea pasa a costo reembolsable.
+   */
+  toggleLineAiu(item: AbstractControl, on: boolean): void {
+    const control = item.get('aiu_component');
+    if (!control) return;
+    if (!on) {
+      control.setValue('');
+      control.markAsDirty();
+      return;
+    }
+    if (this.lineCarriesAiu(item)) return;
+    const regime = this.effectiveAiu()?.regime;
+    control.setValue(regime === 'decreto_1372_1992' ? 'utilidad' : 'administracion');
+    control.markAsDirty();
+  }
+
+  /** ¿Este control lo rellenó el perfil? Lo usa la marca de la plantilla. */
+  isPrefilled(path: string): boolean {
+    return this.prefilledFields().has(path);
   }
 
   /** El usuario cambió de perfil en el selector. */

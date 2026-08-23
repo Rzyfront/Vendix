@@ -369,6 +369,29 @@ describe('InvoiceProfileConfig — la sección AIU está atada al tipo de operac
     });
     expect(codes(config)).toContain('AIU_CONTRACT_OBJECT_EMPTY');
   });
+
+  it('la plantilla de impresión vacía es legal: hereda la de la tienda', () => {
+    // El caso normal. Un perfil que no opina sobre el diseño NO debe congelar
+    // uno: si lo congelara, cambiar la plantilla de la tienda dejaría de
+    // afectar a las facturas de ese perfil sin que nadie lo haya pedido.
+    const config = aiuConfig((c) => {
+      c.format.template_id = null;
+    });
+    expect(codes(config)).not.toContain('FORMAT_TEMPLATE_ID_INVALID');
+  });
+
+  it('una plantilla de impresión que no es un id se rechaza', () => {
+    // `template_id` es una FK lógica a `print_templates`. Un 0, un negativo o
+    // un decimal no identifican ninguna fila, y guardarlos produciría un perfil
+    // que al imprimir cae al fallback en silencio — el operador vería otro
+    // diseño y no sabría por qué.
+    for (const bad of [0, -3, 1.5, '12']) {
+      const config = aiuConfig((c) => {
+        (c.format as { template_id?: unknown }).template_id = bad;
+      });
+      expect(codes(config)).toContain('FORMAT_TEMPLATE_ID_INVALID');
+    }
+  });
 });
 
 describe('InvoiceProfileConfig — devuelve TODOS los problemas', () => {

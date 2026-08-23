@@ -25,11 +25,10 @@ import {
 } from '../../../../../../shared/components/index';
 
 import type { InvoiceProfile } from '../../interfaces/invoice-profile.interface';
-import type { InvoiceProfileConfig } from '../../../../../../core/utils/invoice-profile-config.contract';
 import { operationTypeLabel } from '../../interfaces/invoice-profile.interface';
 import type { InvoiceProfileTemplate } from '../../services/invoice-profile.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
-import { InvoiceProfileEditorComponent } from '../invoice-profile-editor/invoice-profile-editor.component';
+import { Router } from '@angular/router';
 import * as ProfileActions from '../../state/actions/invoice-profile.actions';
 import {
     selectProfiles,
@@ -106,7 +105,6 @@ const FALLBACK_TEMPLATE_KEY = 'dian-standard';
         InputsearchComponent,
         ButtonComponent,
         IconComponent,
-        InvoiceProfileEditorComponent,
     ],
     template: `
         <div class="w-full">
@@ -363,15 +361,6 @@ const FALLBACK_TEMPLATE_KEY = 'dian-standard';
                 </div>
             </app-card>
 
-            <!-- Editor de las 7 secciones -->
-            @if (editor(); as open) {
-                <vendix-invoice-profile-editor
-                    [profileId]="open.id"
-                    [initialConfig]="open.config ?? null"
-                    [initialOperationType]="open.operationType ?? '09'"
-                    (closed)="closeEditor()"
-                ></vendix-invoice-profile-editor>
-            }
 
             <!-- Confirmación de activar / desactivar -->
             @if (pending_toggle(); as row) {
@@ -641,19 +630,9 @@ export class InvoiceProfilesPageComponent {
      * hace que la celda se pinte en las dos ramas. El campo es de presentación:
      * no viaja al backend ni se guarda.
      */
-    /**
-     * Editor abierto. `{ id: null }` es crear y `{ id: n }` es editar — no se usa
-     * `number | null` a secas porque `null` ya significa «cerrado», y las dos
-     * cosas colisionarían en el mismo valor.
-     */
-    readonly editor = signal<{
-        id: number | null;
-        /** Configuración con la que abrir en modo creación (una plantilla DIAN). */
-        config?: InvoiceProfileConfig | null;
-        operationType?: string;
-    } | null>(null);
 
     private readonly auth = inject(AuthFacade);
+    private readonly router = inject(Router);
 
     readonly templates = toSignal(this.store.select(selectProfileTemplates), {
         initialValue: [] as InvoiceProfileTemplate[],
@@ -926,15 +905,15 @@ export class InvoiceProfilesPageComponent {
     }
 
     createProfile(): void {
-        // Se limpia el perfil actual ANTES de abrir: si quedara el del último
+        // Se limpia el perfil actual ANTES de navegar: si quedara el del último
         // editado, el editor lo hidrataría y el «nuevo» perfil nacería con la
         // configuración de otro.
         this.store.dispatch(ProfileActions.clearCurrentProfile());
-        this.editor.set({ id: null });
+        void this.router.navigate(['/admin/invoicing/profiles/new']);
     }
 
     editProfile(row: InvoiceProfile): void {
-        this.editor.set({ id: row.id });
+        void this.router.navigate(['/admin/invoicing/profiles', row.id, 'edit']);
     }
 
     /**
@@ -971,24 +950,25 @@ export class InvoiceProfilesPageComponent {
      */
     useTemplate(template: InvoiceProfileTemplate): void {
         this.store.dispatch(ProfileActions.clearCurrentProfile());
-        // Cerrar el selector: ya cumplió. Sin esto, al salir del editor el
-        // usuario vuelve a una rejilla de plantillas abierta encima del
+        // Cerrar el selector: ya cumplió. Sin esto, al volver del editor el
+        // usuario encuentra una rejilla de plantillas abierta encima del
         // listado, invitándolo a sembrar un segundo perfil que no pidió.
         this.template_picker.set(false);
-        this.editor.set({
-            id: null,
-            config: template.config,
-            operationType: template.operation_type,
+        // Viaja la CLAVE de la plantilla, no su `config`. Un objeto no cabe en
+        // una URL, y guardarlo en un servicio intermedio haría que recargar la
+        // página perdiera la siembra sin decir nada. El editor la resuelve
+        // contra el catálogo, que es constante versionada en el backend.
+        void this.router.navigate(['/admin/invoicing/profiles/new'], {
+            queryParams: {
+                template: template.key,
+                operation_type: template.operation_type,
+            },
         });
     }
 
     /** Etiqueta legible del tipo de operación de una plantilla. */
     operationLabel(operationType: string): string {
         return operationTypeLabel(operationType);
-    }
-
-    closeEditor(): void {
-        this.editor.set(null);
     }
 
     cloneProfile(row: InvoiceProfile): void {

@@ -32,6 +32,38 @@ export const invoicingRoutes: Routes = [
             ),
     },
     {
+        // EDITOR DE PERFIL: ruta propia y HERMANA del shell, por la misma razón
+        // que `invoices/new` — el editor pinta su propio `app-sticky-header` y
+        // anidado dentro del shell quedarían dos cabeceras sticky apiladas.
+        //
+        // Va ANTES del shell porque Angular resuelve por orden: la ruta del
+        // shell capturaría el segmento antes de llegar aquí.
+        //
+        // Dos rutas y no una con `:id?` opcional: Angular no tiene parámetros
+        // opcionales de ruta, y `profiles/:id/edit` con `id = 'new'` obligaría
+        // al componente a distinguir un id de una palabra reservada.
+        path: 'profiles/new',
+        providers: [
+            provideState({ name: 'invoicing', reducer: invoicingReducer }),
+            provideEffects(InvoicingEffects, InvoiceProfileEffects),
+        ],
+        loadComponent: () =>
+            import('./pages/invoice-profile-editor/invoice-profile-editor.component').then(
+                (m) => m.InvoiceProfileEditorComponent,
+            ),
+    },
+    {
+        path: 'profiles/:id/edit',
+        providers: [
+            provideState({ name: 'invoicing', reducer: invoicingReducer }),
+            provideEffects(InvoicingEffects, InvoiceProfileEffects),
+        ],
+        loadComponent: () =>
+            import('./pages/invoice-profile-editor/invoice-profile-editor.component').then(
+                (m) => m.InvoiceProfileEditorComponent,
+            ),
+    },
+    {
         path: '',
         component: ModuleTabsShellComponent,
         // Centralized module: sub-sections render as internal sticky-header
