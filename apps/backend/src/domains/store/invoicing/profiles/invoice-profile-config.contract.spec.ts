@@ -8,6 +8,7 @@ import {
   buildDefaultAiuProfileConfig,
   formatPercentScaled,
   parsePercentScaled,
+  resolveAiuComponentsBasis,
   validateInvoiceProfileConfig,
 } from './invoice-profile-config.contract';
 
@@ -125,6 +126,8 @@ describe('InvoiceProfileConfig — el snapshot por omisión', () => {
 describe('InvoiceProfileConfig — porcentajes AIU', () => {
   it('un reparto que no suma 100 se rechaza nombrando la suma real', () => {
     const config = aiuConfig((c) => {
+      // Unidad `'aiu'`: es la única en la que «sumar 100» es la regla.
+      c.aiu!.components_basis = 'aiu';
       c.aiu!.components = {
         administracion: '50.00',
         imprevistos: '10.00',
@@ -142,6 +145,7 @@ describe('InvoiceProfileConfig — porcentajes AIU', () => {
 
   it('sumar 100.01 también se rechaza', () => {
     const config = aiuConfig((c) => {
+      c.aiu!.components_basis = 'aiu';
       c.aiu!.components = {
         administracion: '10.01',
         imprevistos: '5.00',
@@ -161,6 +165,128 @@ describe('InvoiceProfileConfig — porcentajes AIU', () => {
     expect(issues.map((i) => i.field)).toContain('aiu.components.utilidad');
     // No se acumula un AIU_PERCENT_SUM engañoso a partir de una suma parcial.
     expect(issues.map((i) => i.code)).not.toContain('AIU_PERCENT_SUM');
+  });
+});
+
+describe('InvoiceProfileConfig — la unidad de los porcentajes', () => {
+  it('resolveAiuComponentsBasis lee la ausencia como la unidad heredada', () => {
+    // La ausencia NO puede significar `'contract'`: los snapshots ya timbrados
+    // se escribieron sobre el AIU, y leer un `85.00` de utilidad como «85 % del
+    // contrato» multiplicaría por diez la base gravable de un documento emitido.
+    expect(resolveAiuComponentsBasis(null)).toBe('aiu');
+    expect(resolveAiuComponentsBasis(undefined)).toBe('aiu');
+    expect(resolveAiuComponentsBasis({ components_basis: null })).toBe('aiu');
+    expect(resolveAiuComponentsBasis({ components_basis: 'aiu' })).toBe('aiu');
+    expect(resolveAiuComponentsBasis({ components_basis: 'contract' })).toBe(
+      'contract',
+    );
+    // Una unidad corrupta cae del lado conservador, no del inflado.
+    expect(
+      resolveAiuComponentsBasis({ components_basis: 'kontrakt' as never }),
+    ).toBe('aiu');
+  });
+
+  it('el snapshot por omisión mide sobre el contrato y suma el piso legal', () => {
+    const aiu = buildDefaultAiuProfileConfig('x').aiu!;
+    expect(aiu.components_basis).toBe('contract');
+    const sum =
+      parsePercentScaled(aiu.components.administracion)! +
+      parsePercentScaled(aiu.components.imprevistos)! +
+      parsePercentScaled(aiu.components.utilidad)!;
+    expect(sum).toBe(AIU_LEGAL_FLOOR_PERCENT_SCALED);
+  });
+
+  it('sobre el contrato, un AIU del 70% es legítimo y no se rechaza', () => {
+    const config = aiuConfig((c) => {
+      c.aiu!.components_basis = 'contract';
+      c.aiu!.components = {
+        administracion: '40.00',
+        imprevistos: '10.00',
+        utilidad: '20.00',
+      };
+    });
+    const found = codes(config);
+    expect(found).not.toContain('AIU_PERCENT_SUM');
+    expect(found).not.toContain('AIU_PERCENT_SUM_OF_CONTRACT');
+    expect(found).not.toContain('AIU_PERCENT_SUM_BELOW_FLOOR');
+  });
+
+  it('sobre el contrato, cero y más del 100% se rechazan', () => {
+    for (const parts of [
+      { administracion: '0.00', imprevistos: '0.00', utilidad: '0.00' },
+      { administracion: '50.00', imprevistos: '50.00', utilidad: '0.01' },
+    ]) {
+      const config = aiuConfig((c) => {
+        c.aiu!.components_basis = 'contract';
+        c.aiu!.components = parts;
+      });
+      expect(codes(config)).toContain('AIU_PERCENT_SUM_OF_CONTRACT');
+    }
+  });
+
+  it('sobre el contrato, un AIU por debajo del piso se ataja AL GUARDAR', () => {
+    // Esta es la compuerta que la unidad `'aiu'` no puede tener: allí la suma
+    // es siempre 100 y no dice nada del contrato, así que el piso sólo se podía
+    // comprobar al calcular el documento — con el consecutivo ya gastado.
+    const config = aiuConfig((c) => {
+      c.aiu!.components_basis = 'contract';
+      c.aiu!.components = {
+        administracion: '4.00',
+        imprevistos: '2.00',
+        utilidad: '2.00',
+      };
+    });
+    const issue = validateInvoiceProfileConfig(config, {
+      operation_type: '09',
+    }).find((i) => i.code === 'AIU_PERCENT_SUM_BELOW_FLOOR');
+    expect(issue).toBeDefined();
+    expect(issue!.field).toBe('aiu.components');
+    expect(issue!.message).toContain('8.00');
+    expect(issue!.message).toContain('10.00');
+  });
+
+  it('sin exigir piso, el mismo 8% pasa', () => {
+    const config = aiuConfig((c) => {
+      c.aiu!.components_basis = 'contract';
+      c.aiu!.enforce_minimum_base = false;
+      c.aiu!.components = {
+        administracion: '4.00',
+        imprevistos: '2.00',
+        utilidad: '2.00',
+      };
+    });
+    expect(codes(config)).not.toContain('AIU_PERCENT_SUM_BELOW_FLOOR');
+  });
+
+  it('bajo el Decreto 1372/1992 no hay piso que exigir', () => {
+    const config = aiuConfig((c) => {
+      c.aiu!.components_basis = 'contract';
+      c.aiu!.regime = 'decreto_1372_1992';
+      c.aiu!.components = {
+        administracion: '4.00',
+        imprevistos: '2.00',
+        utilidad: '2.00',
+      };
+      // Bajo este régimen sólo la utilidad grava; si no se ajusta la matriz el
+      // ruido de `TAX_MATRIX_CONTRADICTS_REGIME` taparía lo que se mide acá.
+      c.taxes.rules = c.taxes.rules.map((r) =>
+        r.bucket === 'utilidad'
+          ? r
+          : { ...r, taxable: false, rate: '0.00' },
+      );
+    });
+    expect(codes(config)).not.toContain('AIU_PERCENT_SUM_BELOW_FLOOR');
+  });
+
+  it('una unidad desconocida se reporta y se trata como la heredada', () => {
+    const config = aiuConfig((c) => {
+      (c.aiu as { components_basis?: unknown }).components_basis = 'kontrakt';
+    });
+    const found = codes(config);
+    expect(found).toContain('AIU_BASIS_UNKNOWN');
+    // 5 + 2 + 3 = 10, que sobre el AIU no suma 100: al caer del lado
+    // conservador la configuración corrupta NO se aprueba en silencio.
+    expect(found).toContain('AIU_PERCENT_SUM');
   });
 });
 
@@ -398,6 +524,7 @@ describe('InvoiceProfileConfig — devuelve TODOS los problemas', () => {
   it('siete errores en un guardado se reportan juntos, no de a uno', () => {
     const config = aiuConfig((c) => {
       c.config_version = 99;
+      c.aiu!.components_basis = 'aiu';
       c.aiu!.components = {
         administracion: '1.00',
         imprevistos: '1.00',

@@ -38,10 +38,12 @@ import {
     formatPercentScaled,
     isBlockingIssue,
     parsePercentScaled,
+    resolveAiuComponentsBasis,
     validateInvoiceProfileConfig,
 } from '../../../../../../core/utils/invoice-profile-config.contract';
 import type {
     AiuBucket,
+    AiuComponentsBasis,
     InvoiceProfileConfig,
     ProfileConfigIssue,
     ProfileModelLine,
@@ -667,11 +669,22 @@ type SectionId =
                                     </div>
                                     <div class="p-3 space-y-3" formGroupName="aiu">
                                         <p class="text-xs text-text-secondary">
-                                            Cómo se reparte el valor del contrato
-                                            entre los tres componentes. Los tres
-                                            porcentajes tienen que sumar
-                                            exactamente 100,00 %.
+                                            El reparto que se aplica a las líneas
+                                            de la factura. Con la unidad «valor
+                                            del contrato» —como se redacta un
+                                            contrato AIU— la suma de los tres ES
+                                            el AIU, y lo que falte hasta el 100 %
+                                            es costo reembolsable.
                                         </p>
+                                        <div class="md:max-w-xs">
+                                            <app-selector
+                                                label="Los porcentajes se miden sobre"
+                                                formControlName="components_basis"
+                                                [options]="components_basis_options"
+                                                size="sm"
+                                                helpText="Los mismos tres números significan cosas distintas según la unidad. Los perfiles guardados antes de este campo usan «el AIU»."
+                                            ></app-selector>
+                                        </div>
                                         <div
                                             class="grid grid-cols-1 gap-2 md:grid-cols-3"
                                         >
@@ -682,7 +695,7 @@ type SectionId =
                                                 <app-input
                                                     [label]="
                                                         componentLabel(component) +
-                                                        ' (%)'
+                                                        componentUnitSuffix()
                                                     "
                                                     [formControlName]="component"
                                                     type="text"
@@ -709,7 +722,8 @@ type SectionId =
                                             role="status"
                                         >
                                             Suma de componentes:
-                                            {{ componentsSumLabel() }} / 100,00 %
+                                            {{ componentsSumLabel() }} %
+                                            {{ componentsSumTarget() }}
                                         </div>
 
                                         <div
@@ -777,6 +791,43 @@ type SectionId =
                                             alguna —y por eso no se rechaza por
                                             declarar una tarifa del 0 %—.
                                         </p>
+                                        @if (aiuOfContractLabel(); as aiuPct) {
+                                            <!-- Las bases del bloque 3, ya
+                                                 calculadas, para que elegir una
+                                                 base acá no obligue a volver
+                                                 arriba a sumar de cabeza. -->
+                                            <div
+                                                class="flex flex-wrap gap-x-4 gap-y-1 rounded-lg border border-border bg-[var(--color-surface-secondary)] px-3 py-2 text-xs text-text-secondary"
+                                            >
+                                                <span
+                                                    >Subtotal
+                                                    <strong class="text-text-primary"
+                                                        >100.00 %</strong
+                                                    ></span
+                                                >
+                                                <span
+                                                    >Base AIU
+                                                    <strong class="text-text-primary"
+                                                        >{{ aiuPct }} %</strong
+                                                    ></span
+                                                >
+                                                @if (
+                                                    utilidadOfContractLabel();
+                                                    as utilidadPct
+                                                ) {
+                                                    <span
+                                                        >Utilidad
+                                                        <strong
+                                                            class="text-text-primary"
+                                                            >{{ utilidadPct }} %</strong
+                                                        ></span
+                                                    >
+                                                }
+                                                <span class="italic"
+                                                    >del valor del contrato</span
+                                                >
+                                            </div>
+                                        }
                                         @if (regimeMismatch(); as mismatch) {
                                             <div
                                                 class="rounded-lg border border-danger/40 bg-danger/5 px-3 py-2 text-xs text-danger md:text-sm"
@@ -1318,9 +1369,13 @@ export class InvoiceProfileEditorComponent {
             contract_object: [''],
             enforce_minimum_base: [true],
             minimum_base_percent: [formatPercentScaled(AIU_LEGAL_FLOOR_PERCENT_SCALED)],
-            administracion: ['10.00'],
-            imprevistos: ['5.00'],
-            utilidad: ['85.00'],
+            // Unidad de los tres porcentajes de abajo. `'contract'` por
+            // omisión: es como se redacta un contrato AIU y es la única unidad
+            // en la que el piso legal se puede comprobar al guardar.
+            components_basis: ['contract' as AiuComponentsBasis],
+            administracion: ['5.00'],
+            imprevistos: ['2.00'],
+            utilidad: ['3.00'],
         }),
         accounting: this.fb.group({
             revenue_administracion: [''],
@@ -1477,7 +1532,9 @@ export class InvoiceProfileEditorComponent {
         const regime = this.aiuGroup.get('regime')?.value;
         const label =
             regime === 'decreto_1372_1992' ? 'Decreto 1372/1992' : 'Art. 462-1 E.T.';
-        return label + ' · componentes ' + this.componentsSumLabel() + ' %';
+        const basis =
+            this.componentsBasis() === 'contract' ? ' del contrato' : ' del AIU';
+        return label + ' · componentes ' + this.componentsSumLabel() + ' %' + basis;
     });
 
     /**
@@ -1701,15 +1758,81 @@ export class InvoiceProfileEditorComponent {
         }, 0);
     }
 
+    /** Unidad efectiva de los tres porcentajes. Ver `AiuComponentsBasis`. */
+    componentsBasis(): AiuComponentsBasis {
+        this.form_value();
+        return this.aiuGroup.get('components_basis')?.value === 'aiu'
+            ? 'aiu'
+            : 'contract';
+    }
+
     componentsSumOk(): boolean {
         this.form_value();
-        return !this.isAiu() || this.componentsSumScaled() === 10000;
+        if (!this.isAiu()) return true;
+        const sum = this.componentsSumScaled();
+        if (this.componentsBasis() === 'aiu') return sum === 10000;
+        // Sobre el contrato la suma ES el AIU: cualquier cosa entre un punto y
+        // el 100 % es legítima, pero por debajo del piso exigido no lo es —y
+        // eso se puede saber acá, antes de gastar un consecutivo.
+        if (sum <= 0 || sum > 10000) return false;
+        const floor = parsePercentScaled(
+            this.aiuGroup.get('minimum_base_percent')?.value,
+        );
+        const enforced =
+            this.aiuGroup.get('regime')?.value === 'et_462_1' &&
+            this.aiuGroup.get('enforce_minimum_base')?.value === true;
+        return !(enforced && floor !== null && sum < floor);
     }
 
     componentsSumLabel(): string {
         this.form_value();
         return formatPercentScaled(this.componentsSumScaled());
     }
+
+    /**
+     * La cifra que la referencia de negocio muestra como cabecera de la columna
+     * «Base AIU» de la matriz de impuestos: el AIU como porcentaje del contrato.
+     *
+     * Sólo existe con la unidad `'contract'`. Con la unidad `'aiu'` la suma es
+     * siempre 100 y no dice nada del contrato, así que aquí devuelve `null` en
+     * vez de un 100 % que se leería como «todo el contrato es AIU».
+     */
+    aiuOfContractLabel(): string | null {
+        this.form_value();
+        if (this.componentsBasis() !== 'contract') return null;
+        return formatPercentScaled(this.componentsSumScaled());
+    }
+
+    /**
+     * Cabecera de la columna «Utilidad»: la utilidad como porcentaje del
+     * contrato. Bajo el Decreto 1372/1992 es, literalmente, la base gravable
+     * del documento — el número que hay que revisar dos veces.
+     */
+    utilidadOfContractLabel(): string | null {
+        this.form_value();
+        if (this.componentsBasis() !== 'contract') return null;
+        const scaled = parsePercentScaled(this.aiuGroup.get('utilidad')?.value);
+        return scaled === null ? null : formatPercentScaled(scaled);
+    }
+
+    /** Sufijo de la etiqueta de cada porcentaje: sobre qué se mide. */
+    componentUnitSuffix(): string {
+        return this.componentsBasis() === 'contract'
+            ? ' (% del contrato)'
+            : ' (% del AIU)';
+    }
+
+    /** Lo que el operador tiene que ver junto a la suma. */
+    componentsSumTarget(): string {
+        return this.componentsBasis() === 'contract'
+            ? '= AIU del contrato'
+            : '/ 100,00 %';
+    }
+
+    readonly components_basis_options = [
+        { value: 'contract', label: 'Valor del contrato' },
+        { value: 'aiu', label: 'El AIU (suman 100 %)' },
+    ];
 
     /**
      * Aviso de contradicción entre el régimen y la matriz.
@@ -1871,6 +1994,10 @@ export class InvoiceProfileEditorComponent {
                     contract_object: config.aiu.contract_object,
                     enforce_minimum_base: config.aiu.enforce_minimum_base,
                     minimum_base_percent: config.aiu.minimum_base_percent,
+                    // Un perfil guardado antes de que existiera este campo
+                    // trae los porcentajes medidos sobre el AIU. Leerlo como
+                    // `'contract'` multiplicaría por diez su base gravable.
+                    components_basis: resolveAiuComponentsBasis(config.aiu),
                     administracion: config.aiu.components.administracion,
                     imprevistos: config.aiu.components.imprevistos,
                     utilidad: config.aiu.components.utilidad,
@@ -1982,6 +2109,11 @@ export class InvoiceProfileEditorComponent {
                       contract_object: String(aiuRaw['contract_object'] ?? ''),
                       enforce_minimum_base: Boolean(aiuRaw['enforce_minimum_base']),
                       minimum_base_percent: String(aiuRaw['minimum_base_percent'] ?? '0.00'),
+                      // Explícito y nunca ausente: en el snapshot la ausencia
+                      // significa la unidad heredada, y un perfil recién
+                      // guardado no debe depender de ese default.
+                      components_basis:
+                          aiuRaw['components_basis'] === 'aiu' ? 'aiu' : 'contract',
                       components: {
                           administracion: String(aiuRaw['administracion'] ?? '0.00'),
                           imprevistos: String(aiuRaw['imprevistos'] ?? '0.00'),

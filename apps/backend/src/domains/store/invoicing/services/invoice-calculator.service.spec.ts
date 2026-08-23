@@ -1152,6 +1152,78 @@ describe('InvoiceCalculatorService', () => {
       ).toBe(false);
     });
 
+    /**
+     * El caso del céntimo: un AIU que no reparte exacto.
+     *
+     * Con un costo de $1.000.000 y un AIU del 10 % del contrato, el AIU exacto
+     * es 1.000.000 × 10/90 = 111.111,111… — no cabe en dos decimales, y el
+     * reparto 5/2/3 tampoco. El frontend deduce el AIU en céntimos enteros con
+     * UNA división y deja el residuo en la utilidad, así que las tres líneas
+     * suman el AIU y el AIU más el costo suman el contrato SIN céntimo suelto
+     * (un céntimo de diferencia entre cabecera y líneas es rechazo FAU06).
+     *
+     * Lo que este caso fija es que ese redondeo no cruza el piso legal: el AIU
+     * en céntimos queda hasta medio céntimo POR DEBAJO del exacto, pero
+     * `minimum_base` se calcula con {@link dianAmount}, que TRUNCA, y el piso
+     * truncado nunca supera al AIU declarado. Si alguien cambiara ese truncado
+     * por un redondeo, o el reparto del frontend por un `floor`, este caso
+     * empezaría a emitir una divergencia y la factura se frenaría por diez
+     * milésimas de peso.
+     */
+    it('un AIU no divisible NO cae por debajo del piso: el piso se trunca', () => {
+      const iva = [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' as const }];
+      const result = service.calculate({
+        aiu: { regime: 'et_462_1', enforce_minimum_base: true },
+        items: [
+          { description: 'Costo directo', quantity: 1, unit_price: 1_000_000 },
+          {
+            description: 'Administración',
+            quantity: 1,
+            unit_price: 55_555.55,
+            aiu_component: 'administracion',
+            taxes: iva,
+          },
+          {
+            description: 'Imprevistos',
+            quantity: 1,
+            unit_price: 22_222.22,
+            aiu_component: 'imprevistos',
+            taxes: iva,
+          },
+          {
+            // El residuo del reparto vive acá: gravable bajo los DOS regímenes,
+            // así que el céntimo se declara de más, nunca de menos.
+            description: 'Utilidad',
+            quantity: 1,
+            unit_price: 33_333.34,
+            aiu_component: 'utilidad',
+            taxes: iva,
+          },
+        ],
+      });
+
+      expect(result.aiu?.aiu_value).toBe('111111.11');
+      expect(result.aiu?.contract_value).toBe('1111111.11');
+      // 10 % de 1.111.111,11 es 111.111,111 — truncado a 111.111,11, que es
+      // exactamente el AIU declarado.
+      expect(result.aiu?.minimum_base).toBe('111111.11');
+      expect(
+        result.divergences.some((d) => d.scope === 'aiu_base_below_minimum'),
+      ).toBe(false);
+
+      // El contrato es costo + AIU al céntimo: sin descuadre de cabecera.
+      // `total_before_tax` es el `ValFac` del CUFE y el
+      // `cac:LegalMonetaryTotal/cbc:LineExtensionAmount` del XML.
+      expect(result.totals.total_before_tax).toBe('1111111.11');
+      // El IVA de cabecera es la SUMA de los IVAs de línea, cada uno truncado
+      // a dos decimales (10555.55 + 4222.22 + 6333.33), y eso deja un céntimo
+      // por debajo del 19 % de la base (21111.1109 → 21111.11). El número
+      // correcto es el de la suma: la regla FAS02 compara el tributo de
+      // cabecera contra sus subtotales, no contra base × tarifa. «Arreglarlo»
+      // calculando el 19 % de la base es lo que descuadra el XML.
+      expect(result.totals.tax_iva).toBe('21111.10');
+    });
+
     it('descarta el impuesto que una línea fuera de base intente declarar', () => {
       const result = service.calculate({
         aiu: { regime: 'decreto_1372_1992' },

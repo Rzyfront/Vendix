@@ -137,9 +137,32 @@ import {
   InvoiceProfileService,
 } from '../../services/invoice-profile.service';
 import type {
+  AiuComponentLiteral,
+  AiuComponentsBasis,
   InvoiceProfileConfig,
   ProfileAiuConfig,
 } from '../../../../../../core/utils/invoice-profile-config.contract';
+import {
+  AIU_COMPONENTS,
+  formatPercentScaled,
+  parsePercentScaled,
+  resolveAiuComponentsBasis,
+} from '../../../../../../core/utils/invoice-profile-config.contract';
+
+/**
+ * Códigos de la tabla 13.2.2 del anexo que son tributos de DOCUMENTO, o sea los
+ * que viajan dentro de la línea (`cac:TaxTotal`) y suman al total.
+ *
+ * Los de retención (`05` ReteIVA, `06` ReteFuente, `07` ReteICA) quedan fuera a
+ * propósito: no suman al total y se capturan en la sección de retenciones, que
+ * exige un `concept_id` del catálogo de la tienda. Mapearlos acá los convertiría
+ * en impuestos de línea, que es exactamente el descuadre que la DIAN rechaza.
+ */
+const AIU_DOCUMENT_TAX_TYPE_BY_CODE: Readonly<Record<string, string>> = {
+  '01': 'iva',
+  '03': 'ica',
+  '04': 'inc',
+};
 import {
   AIU_COMPONENT_OPTIONS,
   DOCUMENT_TYPE_NIT_CODE,
@@ -1555,21 +1578,119 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   }
                 </div>
 
+                @if (aiuApplyPlan(); as plan) {
+                  <!-- Las cuatro configuraciones del perfil, aplicadas a las
+                       lineas. Es lo unico que convierte el bloque «Base AIU»
+                       del editor en importes: sin esto los porcentajes se
+                       configuran y no los lee nadie. -->
+                  <div
+                    class="mt-3 rounded-xl border border-border bg-[var(--color-surface)] px-3.5 py-3"
+                  >
+                    <div
+                      class="flex flex-wrap items-start justify-between gap-2"
+                    >
+                      <div class="min-w-0">
+                        <p class="text-sm font-medium text-text-primary">
+                          Base AIU configurada en el perfil
+                        </p>
+                        <p
+                          class="mt-0.5 text-xs leading-relaxed text-[var(--color-text-secondary)]"
+                        >
+                          @if (plan.ready) {
+                            AIU del
+                            <strong class="text-text-primary"
+                              >{{ plan.aiuPercentLabel }} %</strong
+                            >
+                            del valor del contrato, deducido de
+                            {{ formatCurrency(plan.costBase) }} en lineas de
+                            costo: contrato
+                            {{ formatCurrency(plan.contractAmount) }}, AIU
+                            {{ formatCurrency(plan.aiuAmount) }}.
+                          } @else {
+                            {{ plan.blocked }}
+                          }
+                        </p>
+                      </div>
+                      @if (plan.ready) {
+                        <app-button
+                          variant="secondary"
+                          size="sm"
+                          (clicked)="applyAiuBase()"
+                        >
+                          <app-icon slot="icon" name="calculator" [size]="14" />
+                          Aplicar a las lineas
+                        </app-button>
+                      }
+                    </div>
+
+                    @if (plan.ready) {
+                      <div
+                        class="mt-2.5 grid grid-cols-1 gap-2 sm:grid-cols-3"
+                      >
+                        @for (part of plan.parts; track part.bucket) {
+                          <div
+                            class="rounded-lg border border-border bg-[var(--color-background)] px-2.5 py-2"
+                          >
+                            <p
+                              class="text-[11px] uppercase tracking-wide text-[var(--color-text-secondary)]"
+                            >
+                              {{ part.label }} · {{ part.percentLabel }} %
+                            </p>
+                            <p
+                              class="mt-0.5 text-sm font-semibold tabular-nums text-text-primary"
+                            >
+                              {{ formatCurrency(part.amount) }}
+                            </p>
+                            <p
+                              class="mt-0.5 text-[11px] text-[var(--color-text-secondary)]"
+                            >
+                              @if (part.taxes.length > 0) {
+                                @for (
+                                  tax of part.taxes;
+                                  track tax.tax_rate_id;
+                                  let last = $last
+                                ) {
+                                  {{ tax.name }}{{ last ? '' : ' · ' }}
+                                }
+                              } @else {
+                                Sin impuesto
+                              }
+                              @if (part.account) {
+                                · cuenta {{ part.account }}
+                              }
+                            </p>
+                          </div>
+                        }
+                      </div>
+                      @if (plan.replaces > 0) {
+                        <p
+                          class="mt-2 text-[11px] text-[var(--color-text-secondary)]"
+                        >
+                          Reemplaza {{ plan.replaces }} linea(s) que ya llevan
+                          componente AIU. Las lineas de costo no se tocan.
+                        </p>
+                      }
+                    }
+                  </div>
+                }
+
                 @if (aiuUnassigned() > 0) {
                   <div
-                    class="mt-3 flex items-start gap-2.5 rounded-lg border border-error/30 bg-error/5 px-3 py-2.5"
+                    class="mt-3 flex items-start gap-2.5 rounded-lg border border-border bg-[var(--color-surface)] px-3 py-2.5"
                   >
                     <app-icon
-                      name="alert-triangle"
+                      name="info"
                       [size]="15"
-                      class="mt-0.5 flex-shrink-0 text-error"
+                      class="mt-0.5 flex-shrink-0 text-[var(--color-text-secondary)]"
                     />
-                    <p class="text-xs leading-relaxed text-error">
-                      Hay {{ aiuUnassigned() }} línea(s) sin componente AIU. La
-                      DIAN valida la coherencia entre el
-                      <code>CustomizationID</code> 09 y el desglose de las
-                      líneas: una línea sin marcar hace que rechace el documento
-                      entero.
+                    <p
+                      class="text-xs leading-relaxed text-[var(--color-text-secondary)]"
+                    >
+                      {{ aiuUnassigned() }} linea(s) sin componente: se facturan
+                      como <strong>costo reembolsable</strong> del contrato.
+                      Suman al valor del contrato y quedan fuera de la base
+                      gravable. Márcalas si alguna es administración,
+                      imprevistos o utilidad.
                     </p>
                   </div>
                 }
@@ -3122,9 +3243,308 @@ export class InvoiceCreatePageComponent implements OnInit {
     }));
   });
 
+  /**
+   * Líneas sin componente. NO son un error: son el costo reembolsable del
+   * contrato (ver `InvoiceCalculatorLineInput.aiu_component`, que lo documenta
+   * como el caso legítimo, y la cubeta `costo` del contrato del perfil).
+   */
   readonly aiuUnassigned = computed(
     () => this.itemsValue().filter((item) => !item.aiu_component).length,
   );
+
+  /**
+   * Documento AIU en el que NINGUNA línea es del AIU.
+   *
+   * Esto sí es un defecto: el `CustomizationID` 09 declara un contrato AIU y el
+   * desglose no trae ni administración, ni imprevistos, ni utilidad. La base
+   * gravable saldría en cero, y bajo el art. 462-1 el piso del 10 % la rechaza
+   * al calcular —con el consecutivo ya tomado— mientras que bajo el Decreto
+   * 1372 se emitiría un documento sin un peso de base.
+   *
+   * Con el arreglo vacío devuelve `false`: la falta de líneas la reporta su
+   * propia sección, y dos mensajes para un solo hecho mandan a arreglar dos
+   * cosas donde hay una.
+   */
+  readonly aiuWithoutAnyComponent = computed(() => {
+    const items = this.itemsValue();
+    return items.length > 0 && items.every((item) => !item.aiu_component);
+  });
+
+  /**
+   * Las CUATRO configuraciones AIU del perfil, ya convertidas en las líneas que
+   * van a escribirse — o la razón por la que hoy no se pueden aplicar.
+   *
+   * ## Qué aplica de cada bloque del editor
+   *
+   * · Bloque 1 «Modelo de contabilización» — hoy sólo existe el modelo 2 (base
+   *   AIU sumada al total), y es el que estas líneas producen: son líneas del
+   *   documento, así que suman. El modelo 1 no se puede aplicar todavía y el
+   *   editor lo dice donde se elige, no acá.
+   * · Bloque 2 «Cuentas para contabilización AIU» — `account_code` de cada
+   *   línea generada.
+   * · Bloque 3 «Base AIU» — los importes: es el bloque que da los porcentajes.
+   * · Bloque 4 «Base impuestos» — los impuestos de cada línea generada, sólo
+   *   las reglas gravables del componente y sólo tributos de documento
+   *   (IVA/INC/ICA). Las retenciones se capturan en su propia sección: viajan
+   *   en `withholdings` y no en la línea, y necesitan un `concept_id` del
+   *   catálogo que una regla del perfil no trae.
+   *
+   * ## Por qué el valor del contrato no se pide
+   *
+   * Se deduce. Con la unidad `'contract'` los porcentajes se miden sobre el
+   * valor del contrato, y lo que falte hasta el 100 % es costo reembolsable —o
+   * sea, exactamente las líneas que el operador ya capturó SIN componente. Así
+   * que el contrato es `costo / (1 − Σ%)` y el AIU es la diferencia. Pedir el
+   * valor del contrato aparte abriría la puerta a que no cuadre con las líneas.
+   *
+   * `null` cuando no hay nada que aplicar (documento no AIU, o sin perfil):
+   * el perfil es lo único que trae los porcentajes, y los ajustes de la tienda
+   * no los tienen.
+   */
+  readonly aiuApplyPlan = computed<{
+    ready: boolean;
+    blocked: string | null;
+    basis: AiuComponentsBasis;
+    aiuPercentLabel: string;
+    costBase: number;
+    aiuAmount: number;
+    contractAmount: number;
+    replaces: number;
+    parts: Array<{
+      bucket: AiuComponentLiteral;
+      label: string;
+      percentLabel: string;
+      amount: number;
+      account: string;
+      taxes: TaxSelection[];
+    }>;
+  } | null>(() => {
+    if (!this.isAiu()) return null;
+    const config = this.profileConfig();
+    const aiu = config?.aiu ?? null;
+    if (!config || !aiu) return null;
+
+    const basis = resolveAiuComponentsBasis(aiu);
+    const scaled = new Map<AiuComponentLiteral, number>();
+    for (const component of AIU_COMPONENTS) {
+      const value = parsePercentScaled(aiu.components?.[component]);
+      if (value === null) {
+        return this.blockedAiuPlan(
+          basis,
+          'Los porcentajes del perfil no son válidos. Corrígelos en el perfil: Base AIU.',
+        );
+      }
+      scaled.set(component, value);
+    }
+    const sum = [...scaled.values()].reduce((total, value) => total + value, 0);
+
+    if (basis !== 'contract') {
+      return this.blockedAiuPlan(
+        basis,
+        'Los porcentajes de este perfil están medidos sobre el AIU, no sobre el valor del contrato, así que no determinan cuánto AIU lleva este documento. Cambia la unidad en el perfil (Base AIU) o captura las líneas de administración, imprevistos y utilidad a mano.',
+      );
+    }
+    if (sum <= 0 || sum >= 10000) {
+      return this.blockedAiuPlan(
+        basis,
+        sum <= 0
+          ? 'El perfil no configura ningún porcentaje de AIU.'
+          : 'El perfil configura un AIU del 100 % del contrato: no queda costo reembolsable del que deducirlo, así que las líneas hay que capturarlas a mano.',
+      );
+    }
+
+    // Base = lo capturado SIN componente, o sea el costo reembolsable. Se lee
+    // de `lineMath` y no de cantidad × precio para restar el descuento igual
+    // que lo resta el cálculo del documento.
+    const items = this.itemsValue();
+    const math = this.lineMath();
+    let costCents = 0;
+    let replaces = 0;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i]?.aiu_component) {
+        replaces += 1;
+        continue;
+      }
+      costCents += Math.round((math[i]?.base ?? 0) * 100);
+    }
+
+    if (costCents <= 0) {
+      return this.blockedAiuPlan(
+        basis,
+        'Captura primero las líneas de costo del contrato (las que NO llevan la marca AIU): el AIU se deduce de ellas.',
+      );
+    }
+
+    // AIU = costo × Σ% / (100 % − Σ%). Todo en centavos y con una sola
+    // división, para que el contrato sea EXACTAMENTE costo + AIU y no quede un
+    // centavo suelto entre la cabecera y las líneas — que es un rechazo FAU06.
+    const aiuCents = Math.round((costCents * sum) / (10000 - sum));
+    const accounts = config.accounting.revenue_account_by_bucket ?? {};
+
+    let assigned = 0;
+    const parts = AIU_COMPONENTS.map((bucket) => {
+      const percent = scaled.get(bucket) ?? 0;
+      const cents = Math.floor((aiuCents * percent) / sum);
+      assigned += cents;
+      return {
+        bucket,
+        label: this.aiuComponentLabel(bucket),
+        percentLabel: formatPercentScaled(percent),
+        amount: cents / 100,
+        account: accounts[bucket] ?? '',
+        taxes: this.profileTaxesForBucket(config, bucket),
+      };
+    });
+
+    // El residuo del truncamiento —a lo sumo dos centavos— va a la UTILIDAD,
+    // que es gravable bajo los dos regímenes. Sumarlo ahí declara un centavo
+    // más de base, que es el lado recuperable del error; restarlo de un
+    // componente gravable declararía de menos ante la DIAN.
+    const residual = aiuCents - assigned;
+    if (residual !== 0) {
+      const utilidad = parts.find((part) => part.bucket === 'utilidad');
+      if (utilidad) utilidad.amount += residual / 100;
+    }
+
+    return {
+      ready: true,
+      blocked: null,
+      basis,
+      aiuPercentLabel: formatPercentScaled(sum),
+      costBase: costCents / 100,
+      aiuAmount: aiuCents / 100,
+      contractAmount: (costCents + aiuCents) / 100,
+      replaces,
+      parts: parts.filter((part) => part.amount > 0),
+    };
+  });
+
+  private blockedAiuPlan(
+    basis: AiuComponentsBasis,
+    blocked: string,
+  ): {
+    ready: false;
+    blocked: string;
+    basis: AiuComponentsBasis;
+    aiuPercentLabel: string;
+    costBase: number;
+    aiuAmount: number;
+    contractAmount: number;
+    replaces: number;
+    parts: [];
+  } {
+    return {
+      ready: false,
+      blocked,
+      basis,
+      aiuPercentLabel: '0.00',
+      costBase: 0,
+      aiuAmount: 0,
+      contractAmount: 0,
+      replaces: 0,
+      parts: [],
+    };
+  }
+
+  private aiuComponentLabel(bucket: AiuComponentLiteral): string {
+    const found = AIU_COMPONENT_OPTIONS.find(
+      (option) => String(option.value) === bucket,
+    );
+    return found ? found.label : bucket;
+  }
+
+  /**
+   * Las reglas GRAVABLES del bloque 4 para una cubeta, traducidas a los
+   * impuestos que la línea lleva.
+   *
+   * Se resuelven contra el catálogo real de la tienda (`availableTaxes`) y no
+   * se fabrican: `TaxSelection.tax_rate_id` es un id de `tax_rates`, y un id
+   * inventado se envía y el backend lo rechaza nombrando un impuesto que el
+   * operador nunca eligió. Si la tarifa configurada no existe en el catálogo,
+   * la línea sale sin ese impuesto y el aviso de
+   * `aiuTaxableWithoutTax` —que ya existe— lo señala.
+   *
+   * Sólo tributos de DOCUMENTO. Una regla de retención (`06`/`07`/`05`) no es
+   * un impuesto de línea: no suma al total y se captura en su propia sección.
+   */
+  private profileTaxesForBucket(
+    config: InvoiceProfileConfig,
+    bucket: AiuComponentLiteral,
+  ): TaxSelection[] {
+    const catalog = this.availableTaxes();
+    const selections: TaxSelection[] = [];
+    for (const rule of config.taxes?.rules ?? []) {
+      if (rule.bucket !== bucket || !rule.taxable) continue;
+      const taxType = AIU_DOCUMENT_TAX_TYPE_BY_CODE[rule.tax_code];
+      if (!taxType) continue;
+      const rate = parsePercentScaled(rule.rate);
+      if (rate === null) continue;
+      const option = catalog.find(
+        (candidate) =>
+          (candidate.tax_type ?? '').toLowerCase() === taxType &&
+          Math.round(candidate.rate * 100) === rate,
+      );
+      if (!option) continue;
+      selections.push({
+        tax_rate_id: option.id,
+        rate: option.rate,
+        name: option.name,
+        tax_type: option.tax_type,
+        is_inclusive: option.default_is_inclusive ?? false,
+      });
+    }
+    return selections;
+  }
+
+  /**
+   * Escribe las líneas del AIU con lo que las cuatro configuraciones del perfil
+   * dicen. Acción explícita del usuario.
+   *
+   * REEMPLAZA las líneas que ya llevan componente y NO TOCA las de costo. Por
+   * eso es idempotente —pulsarlo dos veces da el mismo documento— y por eso no
+   * puede destruir lo capturado a mano: el costo es lo que el operador escribió,
+   * y el AIU es lo que se deduce de él.
+   */
+  applyAiuBase(): void {
+    const plan = this.aiuApplyPlan();
+    if (!plan || !plan.ready) return;
+
+    // Primero fuera las viejas, de atrás hacia adelante: quitar por índice
+    // ascendente desplaza los que faltan y borra la línea equivocada.
+    for (let i = this.itemsArray.length - 1; i >= 0; i--) {
+      const component = String(
+        this.itemsArray.at(i).get('aiu_component')?.value ?? '',
+      ).trim();
+      if (component.length > 0) this.itemsArray.removeAt(i);
+    }
+
+    for (const part of plan.parts) {
+      const group = this.appendItem();
+      if (!group) break;
+      group.patchValue({
+        description:
+          part.label + ' — ' + part.percentLabel + ' % del valor del contrato',
+        quantity: 1,
+        unit_code: UNIT_CODE_DEFAULT,
+        unit_price: part.amount,
+        discount_amount: 0,
+        aiu_component: part.bucket,
+        account_code: part.account,
+        taxes: part.taxes,
+      });
+      group.markAsDirty();
+    }
+
+    this.itemsArray.updateValueAndValidity();
+    this.itemsArray.markAsDirty();
+    this.toastService.success(
+      'Base AIU aplicada: ' +
+        plan.parts.length +
+        ' línea(s) por ' +
+        this.formatCurrency(plan.aiuAmount) +
+        '.',
+    );
+  }
 
   /**
    * Instructivo del régimen AIU, derivado de la configuración REAL de la
@@ -3505,7 +3925,11 @@ export class InvoiceCreatePageComponent implements OnInit {
         }
       }
     }
-    if (this.isAiu() && this.aiuUnassigned() > 0) {
+    // Una línea sin componente NO es un error: es el costo reembolsable. Lo que
+    // sí lo es —y por eso lo cuenta— es que NINGUNA línea sea del AIU: un
+    // documento 09 sin administración, imprevistos ni utilidad no declara AIU
+    // alguno.
+    if (this.isAiu() && this.aiuWithoutAnyComponent()) {
       counts.aiu += 1;
     }
     // La nota CAV03 es bloqueante de emisión, así que la cabecera plegada de la
@@ -4818,9 +5242,19 @@ export class InvoiceCreatePageComponent implements OnInit {
         'El vencimiento es anterior a la fecha de emisión. Corrige una de las dos.',
       );
     }
-    if (this.isAiu() && this.aiuUnassigned() > 0) {
+    // Antes bloqueaba toda línea sin componente diciendo que la DIAN rechazaría
+    // el documento. Era FALSO y era más estricto que el servidor:
+    // `resolveAiuContext` sólo rechaza lo inverso —un componente en un documento
+    // que no es AIU— y el calculador documenta que `aiu_component = null` en un
+    // documento AIU es la porción de costo reembolsable. Con ese bloqueo, un
+    // contrato AIU real (costo + A + I + U) no se podía emitir.
+    //
+    // Lo que sí bloquea es el documento 09 en el que NINGUNA línea es del AIU:
+    // ahí no hay base gravable que declarar y el documento contradice su propio
+    // `CustomizationID`.
+    if (this.isAiu() && this.aiuWithoutAnyComponent()) {
       blockers.push(
-        'La operación es AIU (09) y hay líneas sin componente. La DIAN valida la coherencia entre el CustomizationID y el desglose de las líneas.',
+        'La operación es AIU (09) y ninguna línea es administración, imprevistos o utilidad: el documento no declararía AIU alguno. Marca las líneas del AIU o aplica la base configurada en el perfil.',
       );
     }
     // Espejo exacto de lo que el backend valida en `resolveAiuContext` antes de

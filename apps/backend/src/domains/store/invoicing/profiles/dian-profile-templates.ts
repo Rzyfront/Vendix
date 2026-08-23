@@ -100,10 +100,15 @@ export const DIAN_PROFILE_TEMPLATES: readonly DianProfileTemplate[] = [
         contract_object: '',
         enforce_minimum_base: true,
         minimum_base_percent: '10.00',
+        // Porcentajes del VALOR DEL CONTRATO, no del AIU: su suma (10 %) es el
+        // AIU, y es exactamente el piso del art. 462-1. Asi se redacta el
+        // contrato y asi la compuerta `AIU_PERCENT_SUM_BELOW_FLOOR` puede
+        // comprobar el piso al guardar el perfil, sin esperar a la emision.
+        components_basis: 'contract',
         components: {
-          administracion: '10.00',
-          imprevistos: '5.00',
-          utilidad: '85.00',
+          administracion: '5.00',
+          imprevistos: '2.00',
+          utilidad: '3.00',
         },
       },
       taxes: {
@@ -136,10 +141,14 @@ export const DIAN_PROFILE_TEMPLATES: readonly DianProfileTemplate[] = [
         // 0.00 permitiría en silencio una base gravable de cero.
         enforce_minimum_base: false,
         minimum_base_percent: '10.00',
+        // Del valor del contrato. Bajo el Decreto 1372 solo la utilidad grava,
+        // asi que el % de utilidad ES la base gravable del documento como
+        // porcentaje del contrato — el numero que hay que revisar dos veces.
+        components_basis: 'contract',
         components: {
-          administracion: '10.00',
-          imprevistos: '5.00',
-          utilidad: '85.00',
+          administracion: '5.00',
+          imprevistos: '2.00',
+          utilidad: '3.00',
         },
       },
       taxes: {

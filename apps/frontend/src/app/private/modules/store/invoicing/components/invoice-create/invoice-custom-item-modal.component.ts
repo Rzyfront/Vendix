@@ -247,7 +247,8 @@ export interface InvoiceCustomItemDraft {
                 label="Componente AIU"
                 formControlName="aiu_component"
                 [options]="aiuComponentOptions"
-                placeholder="Administración / Imprevistos / Utilidad"
+                placeholder="Sin componente — costo reembolsable"
+                helpText="Vacío = costo reembolsable del contrato: suma al valor del contrato y queda fuera de la base gravable."
               ></app-selector>
             }
           </div>
@@ -430,11 +431,17 @@ export class InvoiceCustomItemModalComponent {
         'El descuento iguala o supera el subtotal de la línea: quedaría en cero y la factura declararía un renglón que nadie cobra.',
       );
     }
-    if (this.isAiu() && !String(value.aiu_component ?? '').trim()) {
-      rows.push(
-        'La operación es AIU (09): toda línea tiene que declararse como administración, imprevistos o utilidad.',
-      );
-    }
+    // NO se exige componente AIU. Dejarlo vacío es la porción de COSTO
+    // reembolsable del contrato —la nómina del personal de aseo, los insumos— y
+    // es lo que distingue un contrato AIU de una venta ordinaria: entra al valor
+    // del contrato y no a la base gravable.
+    //
+    // Antes se exigía, y era una compuerta MÁS ESTRICTA QUE EL BACKEND:
+    // `resolveAiuContext` sólo rechaza lo inverso (un componente en un
+    // documento que no es AIU, `INVOICING_AIU_003`), y el propio contrato del
+    // perfil tiene una cubeta `costo` con su regla de impuesto no gravable. Con
+    // la exigencia puesta, la línea de costo no se podía capturar y por tanto un
+    // contrato AIU real no se podía facturar por esta pantalla.
     return rows;
   });
 

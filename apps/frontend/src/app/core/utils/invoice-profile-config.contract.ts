@@ -97,6 +97,52 @@ export const AIU_COMPONENTS: readonly AiuComponentLiteral[] = [
 export const AIU_BUCKETS: readonly AiuBucket[] = [...AIU_COMPONENTS, 'costo'];
 
 /**
+ * Unidad en la que estan escritos los tres porcentajes de `aiu.components`.
+ *
+ * ## Por que hay que decirlo y no se puede deducir
+ *
+ * `'5.00' / '2.00' / '3.00'` y `'50.00' / '20.00' / '30.00'` describen el MISMO
+ * contrato —un AIU del 10 % repartido mitad administracion, un quinto
+ * imprevistos, tres decimos utilidad— pero significan cosas distintas si no se
+ * dice respecto a que se miden. La suma no basta para distinguirlos: un AIU del
+ * 100 % del contrato (todo es utilidad, sin costo reembolsable) es legitimo, asi
+ * que `100.00` es una suma valida en las dos unidades.
+ *
+ * · `'contract'` — porcentajes **del valor del contrato**. Es como se redacta un
+ *   contrato AIU («AIU del 10 %: A 5 %, I 2 %, U 3 %») y es la unica unidad en
+ *   la que el piso legal se puede verificar AL CONFIGURAR: la suma ES el AIU
+ *   como porcentaje del contrato, asi que se compara contra el 10 % del art.
+ *   462-1 antes de que exista una factura, no despues de gastar el consecutivo.
+ * · `'aiu'` — porcentajes **del AIU**, sumando 100. Es lo que guardaron los
+ *   perfiles anteriores a este campo.
+ *
+ * La ausencia significa `'aiu'` y no `'contract'` a proposito: los snapshots ya
+ * timbrados son inmutables y se escribieron con esa unidad. Leerlos como
+ * `'contract'` convertiria un AIU del 100 % —correcto— en un reparto absurdo, y
+ * peor: un `85.00` de utilidad pasaria de «85 % del AIU» a «85 % del contrato»,
+ * multiplicando por diez la base gravable de un documento ya emitido.
+ */
+export type AiuComponentsBasis = 'contract' | 'aiu';
+
+export const AIU_COMPONENTS_BASES: readonly AiuComponentsBasis[] = [
+  'contract',
+  'aiu',
+];
+
+/**
+ * Unidad efectiva de `aiu.components`. Ausente o nula ⇒ `'aiu'` (heredado).
+ *
+ * Un valor desconocido tambien devuelve `'aiu'`, la unidad conservadora, y el
+ * validador lo reporta aparte: si devolviera `'contract'`, un snapshot con la
+ * unidad corrupta se leeria con la base gravable inflada diez veces.
+ */
+export function resolveAiuComponentsBasis(
+  aiu: Pick<ProfileAiuConfig, 'components_basis'> | null | undefined,
+): AiuComponentsBasis {
+  return aiu?.components_basis === 'contract' ? 'contract' : 'aiu';
+}
+
+/**
  * Componentes cuya suma ENTRA en la base gravable, por régimen.
  *
  * Es la tabla que decide si la matriz de impuestos del perfil se contradice con
@@ -158,8 +204,18 @@ export interface ProfileAiuConfig {
   /** Porcentaje del piso, como decimal en cadena. `'10.00'` es el legal. */
   minimum_base_percent: string;
   /**
-   * Reparto por omisión del AIU. Deben sumar exactamente `'100.00'`.
-   * Son porcentajes del AIU, no del contrato: el costo reembolsable va aparte.
+   * Unidad de los tres porcentajes de abajo. Ausente ⇒ `'aiu'`.
+   * Ver {@link AiuComponentsBasis}: no es preferencia de interfaz, cambia lo que
+   * los mismos tres numeros significan.
+   */
+  components_basis?: AiuComponentsBasis | null;
+  /**
+   * Reparto por omisión del AIU, en la unidad que declara `components_basis`.
+   *
+   * · `'contract'` — porcentajes del valor del contrato; su SUMA es el AIU, y lo
+   *   que falte hasta el 100 % es costo reembolsable.
+   * · `'aiu'` — porcentajes del AIU; suman exactamente `'100.00'` y el costo
+   *   reembolsable queda fuera de este reparto.
    */
   components: Readonly<Record<AiuComponentLiteral, string>>;
 }
@@ -604,7 +660,21 @@ function validateAiuSection(
     });
   }
 
-  // ── Los tres porcentajes suman exactamente 100 ──
+  // ── La unidad de los porcentajes ──
+  if (
+    aiu.components_basis !== undefined &&
+    aiu.components_basis !== null &&
+    !AIU_COMPONENTS_BASES.includes(aiu.components_basis)
+  ) {
+    issues.push({
+      field: 'aiu.components_basis',
+      code: 'AIU_BASIS_UNKNOWN',
+      message: `La unidad «${String(aiu.components_basis)}» no existe: los porcentajes se miden sobre el valor del contrato («contract») o sobre el AIU («aiu»).`,
+    });
+  }
+  const basis = resolveAiuComponentsBasis(aiu);
+
+  // ── Los tres porcentajes ──
   let sum = 0;
   let allParsed = true;
   for (const component of AIU_COMPONENTS) {
@@ -620,16 +690,48 @@ function validateAiuSection(
     }
     sum += scaled;
   }
-  if (allParsed && sum !== PERCENT_TOTAL_SCALED) {
+
+  const floorScaled = parsePercentScaled(aiu.minimum_base_percent);
+
+  if (allParsed && basis === 'aiu' && sum !== PERCENT_TOTAL_SCALED) {
     issues.push({
       field: 'aiu.components',
       code: 'AIU_PERCENT_SUM',
-      message: `Los porcentajes de AIU deben sumar 100% (actual: ${formatPercentScaled(sum)}%).`,
+      message: `Medidos sobre el AIU, los tres porcentajes deben sumar 100% (actual: ${formatPercentScaled(sum)}%).`,
     });
   }
 
+  if (allParsed && basis === 'contract') {
+    // Medidos sobre el contrato, la suma ES el AIU. Puede ser cualquier cosa
+    // entre un punto y el 100% —un contrato sin costo reembolsable es todo
+    // AIU— pero nunca cero ni mas del contrato entero.
+    if (sum <= 0 || sum > PERCENT_TOTAL_SCALED) {
+      issues.push({
+        field: 'aiu.components',
+        code: 'AIU_PERCENT_SUM_OF_CONTRACT',
+        message: `Medidos sobre el valor del contrato, los tres porcentajes suman el AIU: tiene que estar entre 0,01% y 100% (actual: ${formatPercentScaled(sum)}%).`,
+      });
+    } else if (
+      // Esta es la unica compuerta del sistema que puede atajar una base
+      // gravable insuficiente ANTES de que exista un consecutivo gastado. Con
+      // la unidad `'aiu'` la suma es siempre 100 y no dice nada del contrato,
+      // asi que el piso solo se podia comprobar al calcular el documento —o
+      // sea, con el numero ya asignado y el rechazo de la DIAN por delante.
+      aiu.regime === 'et_462_1' &&
+      aiu.enforce_minimum_base === true &&
+      floorScaled !== null &&
+      sum < floorScaled
+    ) {
+      issues.push({
+        field: 'aiu.components',
+        code: 'AIU_PERCENT_SUM_BELOW_FLOOR',
+        message: `El AIU configurado es el ${formatPercentScaled(sum)}% del contrato, por debajo del piso del ${formatPercentScaled(floorScaled)}% que exige el E.T. art. 462-1. Toda factura emitida con este perfil nacería sub-declarada.`,
+      });
+    }
+  }
+
   // ── El piso no puede bajar del legal, y sólo rige bajo et_462_1 ──
-  const floor = parsePercentScaled(aiu.minimum_base_percent);
+  const floor = floorScaled;
   if (floor === null) {
     issues.push({
       field: 'aiu.minimum_base_percent',
@@ -875,10 +977,14 @@ export function buildDefaultAiuProfileConfig(
       minimum_base_percent: formatPercentScaled(
         AIU_LEGAL_FLOOR_PERCENT_SCALED,
       ),
+      // Medidos sobre el CONTRATO, y sumando exactamente el piso legal del
+      // 10 %: 5 + 2 + 3. Es el reparto con que se redacta un contrato de aseo o
+      // vigilancia, y deja el 90 % restante como costo reembolsable.
+      components_basis: 'contract',
       components: {
-        administracion: '10.00',
-        imprevistos: '5.00',
-        utilidad: '85.00',
+        administracion: '5.00',
+        imprevistos: '2.00',
+        utilidad: '3.00',
       },
     },
     accounting: {
@@ -1051,6 +1157,7 @@ const AIU_KEYS = [
   'contract_object',
   'enforce_minimum_base',
   'minimum_base_percent',
+  'components_basis',
   'components',
 ] as const;
 const ACCOUNTING_KEYS = [
