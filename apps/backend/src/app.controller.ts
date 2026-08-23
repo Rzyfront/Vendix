@@ -8,7 +8,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { AppService } from './app.service';
-import { Public } from './domains/auth/decorators/public.decorator';
+import { Public } from './common/decorators/public.decorator';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
