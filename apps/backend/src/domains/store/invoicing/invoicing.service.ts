@@ -182,6 +182,38 @@ const INVOICE_INCLUDE = {
       issue_date: true,
     },
   },
+  /**
+   * IDENTIDAD del perfil congelado — no su configuración.
+   *
+   * Sin esto la factura devolvía `profile_id: 7, profile_version: 2` y ninguna
+   * pantalla podía decir de QUÉ perfil se trata: dos números que sólo alguien
+   * con acceso a la base puede resolver. La trazabilidad DIAN exige poder
+   * responder «con qué reglas salió este documento» desde el documento mismo.
+   *
+   * Se trae `profile.name` y nada más del contenido: `config` es el JSON de las
+   * 7 secciones del editor y este `include` lo usan también los caminos de
+   * escritura (`create`, `update`, `send`), donde arrastrarlo sería peso puro.
+   * Y no hace falta: la verdad fiscal EMITIDA no vive en el perfil sino en las
+   * columnas `aiu_regime` / `aiu_minimum_percent` / `aiu_taxable_matrix` de la
+   * propia factura, que es justo el punto de congelarlas. El perfil sólo dice
+   * de dónde vinieron.
+   */
+  profile_snapshot: {
+    select: {
+      profile_id: true,
+      version: true,
+      created_at: true,
+      profile: {
+        select: {
+          id: true,
+          name: true,
+          operation_type: true,
+          state: true,
+          current_version: true,
+        },
+      },
+    },
+  },
 };
 
 /**

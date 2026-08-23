@@ -1,5 +1,13 @@
 import { NgTemplateOutlet } from '@angular/common';
-import { Component, computed, effect, inject, signal } from '@angular/core';
+import {
+    Component,
+    ElementRef,
+    computed,
+    effect,
+    inject,
+    signal,
+    viewChild,
+} from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
 
@@ -346,6 +354,7 @@ const FALLBACK_TEMPLATE_KEY = 'dian-standard';
                             [columns]="columns"
                             [cardConfig]="card_config"
                             [actions]="table_actions"
+                            rowLabelKey="name"
                             [loading]="loading()"
                             [emptyMessage]="emptyMessage()"
                             emptyIcon="layout-template"
@@ -401,6 +410,7 @@ const FALLBACK_TEMPLATE_KEY = 'dian-standard';
                     role="dialog"
                     aria-modal="true"
                     aria-labelledby="delete-profile-title"
+                    (document:keydown.escape)="cancelDelete()"
                 >
                     <div
                         class="w-full max-w-md rounded-xl bg-surface p-4 shadow-xl md:p-6"
@@ -430,6 +440,7 @@ const FALLBACK_TEMPLATE_KEY = 'dian-standard';
                             Escribe <strong>{{ row.name }}</strong> para confirmar
                         </label>
                         <input
+                            #deleteConfirmInput
                             id="confirm-delete-name"
                             type="text"
                             class="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-text-primary
@@ -858,6 +869,19 @@ export class InvoiceProfilesPageComponent {
         badgeKey: 'state',
     };
 
+    // El input de confirmación del borrado duro. Se referencia para poder
+    // MOVER EL FOCO dentro del diálogo al abrirlo: el contenedor declara
+    // `aria-modal="true"`, y un lector de pantalla cuyo foco sigue en el botón
+    // de la tabla — fuera del contenedor — queda leyendo una tabla que el
+    // usuario ya no puede operar.
+    private readonly delete_confirm_input =
+        viewChild<ElementRef<HTMLInputElement>>('deleteConfirmInput');
+
+    // El elemento que abrió el diálogo, para devolverle el foco al cerrarlo.
+    // Sin esto, cerrar con Escape deja el foco en `<body>` y la siguiente
+    // tabulación reinicia el recorrido desde el principio de la página.
+    private delete_trigger: HTMLElement | null = null;
+
     constructor() {
         // Carga inicial. En el constructor y no en `ngOnInit`: el componente es
         // standalone y lazy, así que se instancia cuando la ruta se activa.
@@ -871,6 +895,15 @@ export class InvoiceProfilesPageComponent {
             if (!this.pending_delete()) {
                 this.delete_confirmation.set('');
             }
+        });
+
+        // Foco dentro del diálogo en cuanto el input existe. Se lee la señal de
+        // `viewChild` (no `pending_delete`) porque el input aparece un ciclo de
+        // detección DESPUÉS de que la señal cambia: enfocar al ver el cambio de
+        // `pending_delete` apuntaría a un elemento que aún no está en el DOM.
+        effect(() => {
+            const input = this.delete_confirm_input();
+            if (input) input.nativeElement.focus();
         });
     }
 
@@ -972,11 +1005,26 @@ export class InvoiceProfilesPageComponent {
 
     askDelete(row: InvoiceProfile): void {
         this.delete_confirmation.set('');
+        const active = document.activeElement;
+        this.delete_trigger = active instanceof HTMLElement ? active : null;
         this.pending_delete.set(row);
     }
 
     cancelDelete(): void {
         this.pending_delete.set(null);
+        this.restoreDeleteFocus();
+    }
+
+    /**
+     * Devuelve el foco al botón que abrió el diálogo. Se comprueba que el
+     * elemento siga en el documento: la fila puede haber desaparecido de la
+     * tabla (es justo lo que pasa cuando el borrado tuvo éxito), y enfocar un
+     * nodo desconectado es un no-op silencioso que deja el foco en `<body>`.
+     */
+    private restoreDeleteFocus(): void {
+        const trigger = this.delete_trigger;
+        this.delete_trigger = null;
+        if (trigger && trigger.isConnected) trigger.focus();
     }
 
     confirmDelete(row: InvoiceProfile): void {
@@ -985,6 +1033,7 @@ export class InvoiceProfilesPageComponent {
         if (!this.canConfirmDelete()) return;
         this.store.dispatch(ProfileActions.deleteProfile({ id: row.id }));
         this.pending_delete.set(null);
+        this.restoreDeleteFocus();
     }
 
     confirmToggle(row: InvoiceProfile): void {
