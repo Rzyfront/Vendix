@@ -437,6 +437,21 @@
   <!-- ═══════════════ Pie ═════════════════════════════════════════════════ -->
   <div slot="footer" class="flex w-full flex-wrap justify-end gap-2">
     @if (stage() === 'ready') {
+      <!--
+        CP-PURCHASE-TRANSPARENCY D.4 — el motivo del botón apagado, AL LADO del
+        botón. Un botón deshabilitado y mudo obliga al operador a adivinar qué
+        le falta; el aviso equivalente del cuerpo puede haber quedado fuera de
+        la pantalla tras la lista de productos.
+      -->
+      @if (confirmBlockedReason()) {
+        <p
+          class="mr-auto flex items-center gap-1.5 self-center text-[11px] leading-tight text-amber-700"
+          role="status"
+        >
+          <app-icon name="info" [size]="13" class="shrink-0" />
+          {{ confirmBlockedReason() }}
+        </p>
+      }
       <app-button variant="outline" size="sm" (clicked)="onClose()">
         Cancelar
       </app-button>

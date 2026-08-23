@@ -98,3 +98,15 @@
   color: var(--color-text-muted);
   padding-left: 2px;
 }
+
+/*
+  CP-PURCHASE-TRANSPARENCY (T2/D.1) — motivo visible del conmutador inactivo.
+  Se pinta en `warning` y no en `destructive`: no es un error del operador,
+  es un requisito que todavía no se cumple.
+*/
+.cfg-allocation-blocked {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-warning);
+  padding-left: 2px;
+}

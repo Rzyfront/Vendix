@@ -123,6 +123,14 @@ export class PopConfigStepComponent {
   private readonly allocation = signal<PopShippingAllocation>('prorate');
 
   /**
+   * Espejo en signal del monto de flete. Mismo motivo que
+   * `shippingMethodValue`: el valor vive en un `FormControl`, que es una
+   * propiedad plana y NO una señal, así que leerlo dentro de un `computed()`
+   * no lo re-evaluaría (regla dura de `vendix-zoneless-signals`).
+   */
+  private readonly shippingCostValue = signal<number>(0);
+
+  /**
    * El campo de flete existe SÓLO cuando la entrega es por flete. Pintarlo
    * siempre haría que el operador capturara flete en compras de mostrador,
    * inflando el costo del inventario.
@@ -135,13 +143,34 @@ export class PopConfigStepComponent {
   readonly isProrate = computed<boolean>(() => this.allocation() === 'prorate');
 
   /**
+   * CP-PURCHASE-TRANSPARENCY (T2/D.1) — hay flete que imputar.
+   *
+   * `PopCartService.setShippingCostAllocation()` rechaza el modo cuando el
+   * monto es 0 (el backend responde 400 a un modo sin monto), y lo hacía en
+   * silencio: el conmutador se pintaba solo, el carrito descartaba el cambio y
+   * la pantalla afirmaba una imputación inexistente. Sin monto el conmutador
+   * queda inactivo Y se dice por qué — negar la acción sin dar el motivo es el
+   * otro antipatrón que este plan persigue.
+   */
+  readonly hasShippingCost = computed<boolean>(
+    () => this.shippingCostValue() > 0,
+  );
+
+  /**
    * Leyenda del conmutador. Es una explicación de NEGOCIO, no de contabilidad:
    * dice qué le pasa al costo del producto y qué le pasa al total de la orden,
    * que es la duda inmediata del operador.
+   *
+   * CP-PURCHASE-TRANSPARENCY (T2/D.3) — no promete una DIRECCIÓN. La anterior
+   * decía «sube su costo unitario» y la vista previa de al lado mostraba
+   * «$4 → $3»: el costo se expresa por unidad de STOCK, y cuando una unidad
+   * comprada rinde varias (`purchase_to_stock_factor`) la conversión diluye
+   * más de lo que el flete suma. Se explica el mecanismo, cierto en ambos
+   * casos, en vez de un resultado que sólo lo es a veces.
    */
   readonly allocationLegend = computed<string>(() =>
     this.isProrate()
-      ? 'El flete se reparte entre los productos según su participación en la compra, así que cada producto queda valorado con lo que realmente costó ponerlo en bodega: sube su costo unitario y con él el margen que calcula el sistema. El flete se suma al total de la orden.'
+      ? 'El flete se reparte entre los productos según su participación en la compra y entra en el costo con el que cada uno queda valorado en bodega. El costo unitario resultante no siempre sube: también depende de cuántas unidades de stock entran por unidad comprada, así que un envase que rinde varias unidades reparte ese costo entre todas y puede terminar por debajo. La vista previa de costos muestra la cifra final de cada producto. El flete se suma al total de la orden.'
       : 'El flete no toca el costo de los productos: se registra como un costo de la orden y el costo unitario no se mueve. El flete se suma igual al total de la orden.',
   );
 
@@ -196,6 +225,7 @@ export class PopConfigStepComponent {
       { emitEvent: false },
     );
     this.shippingMethodValue.set(method);
+    this.shippingCostValue.set(Number(this.shippingCost()) || 0);
     this.allocation.set(this.shippingCostAllocation() ?? 'prorate');
   }
 
@@ -242,6 +272,7 @@ export class PopConfigStepComponent {
     this.shippingMethodChange.emit(method);
     if (method !== 'freight') {
       this.form.controls.shippingCost.setValue(0, { emitEvent: false });
+      this.shippingCostValue.set(0);
       this.shippingCostChange.emit(0);
     }
   }
@@ -253,6 +284,7 @@ export class PopConfigStepComponent {
   onShippingCostChange(raw: string): void {
     const value = raw === '' ? 0 : Number(raw);
     const safe = Number.isFinite(value) && value > 0 ? value : 0;
+    this.shippingCostValue.set(safe);
     this.shippingCostChange.emit(safe);
     // Al aparecer el flete hay que declarar su modo o el backend responde 400.
     // Se emite el que muestra el conmutador para que carrito y pantalla no

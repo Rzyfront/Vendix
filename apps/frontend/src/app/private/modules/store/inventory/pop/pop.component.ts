@@ -4,7 +4,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Observable, Subscription, firstValueFrom, of, throwError } from 'rxjs';
-import { catchError, map, switchMap } from 'rxjs/operators';
+import { catchError, map, switchMap, tap } from 'rxjs/operators';
 
 import type { SelectorOption } from '../../../../../shared/components/selector/selector.component';
 
@@ -271,7 +271,7 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
       [isOpen]="!!orderResult() && !orderResult()?.failedStage"
       [orderNumber]="orderResult()?.orderNumber ?? ''"
       [total]="orderResult()?.total ?? 0"
-      [state]="orderResult()?.state ?? 'created'"
+      [state]="orderResult()?.state ?? ''"
       [orderId]="orderResult()?.id ?? null"
       (newPurchase)="onNewPurchase()"
       (viewOrder)="onViewOrder()"
@@ -453,10 +453,18 @@ export class PopComponent implements OnInit, OnDestroy {
     total: number;
     orderNumber: string;
     /**
-     * CP-ID-VNDX-2026-08-21-POP-MODAL — Estado backend de la OC (`created`,
-     * `received`, `paid`, etc.). Lo usa el modal post-creación para mapear
-     * a una etiqueta legible + variante de badge. Si el backend no lo
-     * expone, el modal cae al genérico `Creada`.
+     * CP-ID-VNDX-2026-08-21-POP-MODAL — Estado backend de la OC. Lo usa el
+     * modal post-creación para mapear a una etiqueta legible + variante de
+     * badge.
+     *
+     * CP-PURCHASE-TRANSPARENCY (T2/D.2) — es SIEMPRE un valor de
+     * `purchase_order_status_enum` (`draft | approved | partial | received |
+     * cancelled`), releído del servidor DESPUÉS de recibir y pagar (ver
+     * `_readOrderStatus$`). Antes se congelaba el estado que devolvía la
+     * creación: una compra con recepción inmediata terminaba en `received` en
+     * base de datos y el modal anunciaba «Aprobada», invitando al operador a
+     * recibirla otra vez. Vacío significa «el servidor no lo informó», y el
+     * modal lo dice en esas palabras en vez de elegir un estado.
      */
     state?: string;
     stages?: Array<{
@@ -1796,8 +1804,23 @@ export class PopComponent implements OnInit, OnDestroy {
     this.loadCostPreview();
   }
 
+  /**
+   * CP-PURCHASE-TRANSPARENCY (T2/D.1) — red de seguridad del rechazo.
+   *
+   * El paso Configuración ya deja el conmutador inactivo sin flete, así que
+   * este rechazo no debería ocurrir por la pantalla. Si ocurre por cualquier
+   * otra vía, se DICE: `setShippingCostAllocation` devuelve `false` y el
+   * operador se entera de que su elección no se guardó, en vez de quedarse con
+   * una pantalla que afirma una imputación que el carrito no tiene.
+   */
   onShellShippingCostAllocationChange(value: PopShippingAllocation): void {
-    this.popCartService.setShippingCostAllocation(value);
+    const applied = this.popCartService.setShippingCostAllocation(value);
+    if (!applied) {
+      this.toastService.warning(
+        'Escribe primero el costo del flete: sin monto no hay nada que repartir, así que la imputación no se guardó.',
+      );
+      return;
+    }
     this.loadCostPreview();
   }
 
@@ -2415,7 +2438,7 @@ export class PopComponent implements OnInit, OnDestroy {
             : of(null);
 
           // Etapa pago (tras crear y, si aplica, tras recibir).
-          return reception$.pipe(
+          const payment$ = reception$.pipe(
             switchMap(() => {
               if (!doPay) return of(null);
               const amount =
@@ -2435,6 +2458,21 @@ export class PopComponent implements OnInit, OnDestroy {
                     throwError(() => ({ stage: 'pay' as const, err })),
                   ),
                 );
+            }),
+          );
+
+          // CP-PURCHASE-TRANSPARENCY (T2/D.2) — releer el estado REAL antes de
+          // pintar el modal de éxito. `createdOrder` es la foto que dejó la
+          // creación (+ aprobación): decía `approved` incluso después de que
+          // la recepción hubiera dejado la orden en `received`, y el operador
+          // leía «Aprobada» y podía intentar recibirla otra vez. No es
+          // inferencia — es el estado que responde el servidor.
+          return payment$.pipe(
+            switchMap(() => this._readOrderStatus$(createdOrder?.id)),
+            tap((status) => {
+              if (status && createdOrder) {
+                createdOrder = { ...createdOrder, status };
+              }
             }),
           );
         }),
@@ -2635,9 +2673,13 @@ export class PopComponent implements OnInit, OnDestroy {
       total: Number(order.total_amount ?? 0),
       orderNumber: order.order_number ?? '',
       // CP-ID-VNDX-2026-08-21-POP-MODAL — el modal pinta este campo en el
-      // badge. Si el backend no lo manda, el modal cae a 'created' via el
-      // `?? 'created'` del padre.
-      state: order.state ?? order.status ?? 'created',
+      // badge.
+      //
+      // CP-PURCHASE-TRANSPARENCY (T2/D.2) — `purchase_orders` NO tiene columna
+      // `state`; el estado vive en `status`. Se conserva la lectura de `state`
+      // por si alguna respuesta lo trae, pero el fallback ya no inventa
+      // 'created': un estado ausente se declara ausente.
+      state: order.state ?? order.status ?? '',
       ...(extras.stages ? { stages: extras.stages } : {}),
       ...(extras.failedStage ? { failedStage: extras.failedStage } : {}),
     });
@@ -2826,6 +2868,28 @@ export class PopComponent implements OnInit, OnDestroy {
         this.dispatchNotesService.confirm(dn.id).pipe(map(() => dn)),
       ),
       switchMap((dn) => this.dispatchNotesService.receive(dn.id)),
+    );
+  }
+
+  /**
+   * CP-PURCHASE-TRANSPARENCY (T2/D.2) — estado REAL de la OC leído del
+   * servidor tras la cadena `crear → recibir → pagar`.
+   *
+   * Ni la recepción por remisión ni el registro de pago devuelven la orden:
+   * la primera responde la remisión y el segundo el pago. Sin esta relectura
+   * el modal se queda con el estado de la creación. Falla en silencio a
+   * propósito (`null`): la OC ya existe y el operador tiene que ver su modal
+   * — el badge dirá «Sin confirmar» antes que un estado equivocado.
+   */
+  private _readOrderStatus$(id: unknown): Observable<string | null> {
+    const orderId = Number(id);
+    if (!orderId) return of(null);
+    return this.purchaseOrdersService.getPurchaseOrderById(orderId).pipe(
+      map((response: any) => {
+        const status = response?.success ? response?.data?.status : null;
+        return typeof status === 'string' && status ? status : null;
+      }),
+      catchError(() => of(null)),
     );
   }
 

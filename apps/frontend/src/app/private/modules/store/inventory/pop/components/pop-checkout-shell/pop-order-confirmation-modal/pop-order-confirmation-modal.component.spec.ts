@@ -15,6 +15,10 @@ const buildCurrencyStub = () =>
  *
  * Contrato:
  *  - Pinta número + total + estado cuando `isOpen=true`.
+ *  - CP-PURCHASE-TRANSPARENCY (T2/D.2): el badge sólo traduce los cinco
+ *    valores de `purchase_order_status_enum`. `partial` es recepción parcial,
+ *    no pago parcial; sin estado dice «Sin confirmar»; un token fuera del enum
+ *    se pinta tal cual en vez de traducirse a un estado inventado.
  *  - El header X, el overlay y el ESC cuentan como «Nueva compra»
  *    (no obligan al operador a elegir un botón).
  *  - El botón «Nueva compra» emite `(newPurchase)`.
@@ -39,7 +43,7 @@ describe('PopOrderConfirmationModalComponent', () => {
     fixture.componentRef.setInput('isOpen', false);
     fixture.componentRef.setInput('orderNumber', 'ORC-1234');
     fixture.componentRef.setInput('total', 250000);
-    fixture.componentRef.setInput('state', 'created');
+    fixture.componentRef.setInput('state', 'approved');
     fixture.componentRef.setInput('orderId', 42);
     fixture.detectChanges();
   });
@@ -61,7 +65,7 @@ describe('PopOrderConfirmationModalComponent', () => {
     expect(text).toContain('¡Orden creada!');
     expect(text).toContain('ORC-1234');
     expect(text).toContain('$250000.00');
-    expect(text).toContain('Creada');
+    expect(text).toContain('Aprobada');
   });
 
   it('(c) state=received mapea a etiqueta Recibida y variante success', () => {
@@ -76,22 +80,64 @@ describe('PopOrderConfirmationModalComponent', () => {
     expect(text).toContain('Recibida');
   });
 
-  it('(d) state=paid mapea a etiqueta Pagada', () => {
+  /**
+   * `partial` es un valor del EJE de estado de la orden y significa recepción
+   * parcial (`PurchaseOrdersService.receive`), no pago parcial: lo pagado vive
+   * en `payment_status`, que este badge no lee.
+   */
+  it('(d) state=partial dice «Recibida parcialmente», no «Pago parcial»', () => {
     fixture.componentRef.setInput('isOpen', true);
-    fixture.componentRef.setInput('state', 'paid');
+    fixture.componentRef.setInput('state', 'partial');
     fixture.detectChanges();
 
-    expect(component.stateLabel()).toBe('Pagada');
-    expect(component.stateVariant()).toBe('success');
+    expect(component.stateLabel()).toBe('Recibida parcialmente');
+    expect(component.stateVariant()).toBe('warning');
+
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('Recibida parcialmente');
+    expect(text).not.toContain('Pago parcial');
   });
 
-  it('(e) state desconocido cae al genérico Creada (defensivo)', () => {
+  it('(d2) los cinco valores del enum tienen etiqueta, y sólo esos', () => {
+    fixture.componentRef.setInput('isOpen', true);
+    const expected: Record<string, string> = {
+      draft: 'Borrador',
+      approved: 'Aprobada',
+      partial: 'Recibida parcialmente',
+      received: 'Recibida',
+      cancelled: 'Cancelada',
+    };
+    for (const [state, label] of Object.entries(expected)) {
+      fixture.componentRef.setInput('state', state);
+      fixture.detectChanges();
+      expect(component.stateLabel()).toBe(label);
+    }
+
+    // `paid` NO es un estado de la orden — el eje de pago es otra columna.
+    // Antes se traducía a «Pagada» y el badge afirmaba algo que `status` no
+    // puede decir.
+    fixture.componentRef.setInput('state', 'paid');
+    fixture.detectChanges();
+    expect(component.stateLabel()).toBe('paid');
+    expect(component.stateVariant()).toBe('neutral');
+  });
+
+  it('(e) state desconocido se pinta tal cual, sin inventar una etiqueta', () => {
     fixture.componentRef.setInput('isOpen', true);
     fixture.componentRef.setInput('state', 'mystery-state');
     fixture.detectChanges();
 
-    expect(component.stateLabel()).toBe('Creada');
-    expect(component.stateVariant()).toBe('primary');
+    expect(component.stateLabel()).toBe('mystery-state');
+    expect(component.stateVariant()).toBe('neutral');
+  });
+
+  it('(e2) sin estado el badge dice «Sin confirmar» (no elige uno)', () => {
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.componentRef.setInput('state', '');
+    fixture.detectChanges();
+
+    expect(component.stateLabel()).toBe('Sin confirmar');
+    expect(component.stateVariant()).toBe('neutral');
   });
 
   it('(f) orderNumber vacío cae al placeholder OC (no rompe la UI)', () => {

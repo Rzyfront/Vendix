@@ -137,13 +137,27 @@
         }
       </div>
 
+      <!--
+        CP-PURCHASE-TRANSPARENCY (T2/D.1) — sin flete el conmutador queda
+        INACTIVO y se dice qué falta. Antes quedaba armado: al pulsarlo
+        `app-toggle` se pintaba solo, `PopCartService` descartaba el modo en
+        silencio (rechaza la imputación sin monto) y la pantalla afirmaba una
+        imputación que el carrito no tenía.
+      -->
       <div class="cfg-allocation">
         <app-toggle
           [checked]="isProrate()"
+          [disabled]="!hasShippingCost()"
           label="Prorratear el flete en el costo de los productos"
           ariaLabel="Prorratear el flete en el costo de los productos"
           (toggled)="onAllocationToggle($event)"
         ></app-toggle>
+        @if (!hasShippingCost()) {
+          <p class="cfg-allocation-blocked">
+            Escribe primero el costo del flete: sin monto no hay nada que
+            repartir, así que la imputación no se puede elegir todavía.
+          </p>
+        }
         <p class="cfg-allocation-mode">
           {{ isProrate() ? 'Prorratear' : 'Asumirlo como costo de la orden' }}
         </p>

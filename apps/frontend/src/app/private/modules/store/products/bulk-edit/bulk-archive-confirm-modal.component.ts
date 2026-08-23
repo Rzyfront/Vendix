@@ -249,6 +249,31 @@ export class BulkArchiveConfirmModalComponent {
       this.acknowledged(),
   );
 
+  /**
+   * CP-PURCHASE-TRANSPARENCY (T2/D.4) — POR QUÉ el botón de confirmar está
+   * apagado.
+   *
+   * El botón se pintaba deshabilitado sin decir qué faltaba: la interfaz
+   * negando una acción sin dar el motivo, que es exactamente el antipatrón
+   * que este plan persigue. El aviso de «no se puede eliminar ninguno» ya
+   * existía dentro del cuerpo, pero el cuerpo es scrollable (la lista llega a
+   * `max-h-[40vh]`) y el botón vive en el pie: cuando el operador mira el
+   * botón, el motivo puede estar fuera de la pantalla. Aquí va JUNTO al
+   * botón, que es donde se hace la pregunta.
+   *
+   * Cadena vacía = el botón está habilitado y no hay nada que explicar.
+   */
+  readonly confirmBlockedReason = computed<string>(() => {
+    if (this.stage() !== 'ready') return '';
+    if (this.archivableCount() === 0) {
+      return 'No hay ningún producto que se pueda eliminar en esta selección.';
+    }
+    if (!this.acknowledged()) {
+      return 'Marca la casilla de arriba para habilitar la eliminación.';
+    }
+    return '';
+  });
+
   /** Items ordenados: primero los bloqueados, para que no pasen desapercibidos. */
   readonly previewItems = computed<BulkArchivePreviewItem[]>(() => {
     const preview = this.previewResult();

@@ -93,8 +93,19 @@
       @if ((costPreview()?.shipping_cost ?? 0) > 0) {
         <p class="freight-note">
           @if (costPreview()?.shipping_cost_allocation_applied === 'prorate') {
+            <!--
+              CP-PURCHASE-TRANSPARENCY (T2/D.3) — decía «sube el costo unitario
+              de cada producto» con las cifras «$4 → $3» justo debajo. El costo
+              se expresa por unidad de STOCK: cuando una unidad comprada rinde
+              varias (`purchase_to_stock_factor`), la conversión diluye más de
+              lo que el flete suma y el costo BAJA. Se nombra el mecanismo, no
+              una dirección que sólo se cumple a veces.
+            -->
             Flete de {{ costPreview()!.shipping_cost | currency }} prorrateado
-            entre las líneas: sube el costo unitario de cada producto.
+            entre las líneas según su participación: entra en el costo con el
+            que cada producto queda valorado. Si una unidad comprada rinde
+            varias de stock, el costo unitario final puede quedar por debajo
+            del costo de la línea — las cifras de abajo son el resultado.
           } @else {
             Flete de {{ costPreview()!.shipping_cost | currency }} asumido como
             costo de la orden: no toca el costo unitario de los productos.

@@ -352,11 +352,27 @@ export class PopCartService {
 
   /**
    * C.5 — cómo se imputa el flete. Sólo tiene sentido con flete > 0; con flete
-   * en cero se ignora, porque el backend rechaza un modo sin monto.
+   * en cero no hay modo que declarar, porque el backend rechaza un modo sin
+   * monto.
+   *
+   * CP-PURCHASE-TRANSPARENCY (T2/D.1) — DEVUELVE si el modo se aplicó.
+   *
+   * Antes retornaba `void` y descartaba la petición EN SILENCIO. El conmutador
+   * de `app-toggle` ya se había pintado solo al hacer clic (es un componente
+   * que se autopinta; ver el censo en el informe de T2), el carrito rechazaba
+   * el cambio sin avisar y nadie revertía la pintura: la pantalla afirmaba una
+   * imputación que el carrito no tenía. Quien llama TIENE que poder saber que
+   * su petición no se cumplió para decírselo al operador — que es exactamente
+   * lo que este plan persigue: si el sistema no va a hacer lo que le pidieron,
+   * lo dice.
+   *
+   * @returns `true` si el modo quedó escrito; `false` si se rechazó por no
+   *          haber flete que imputar.
    */
-  setShippingCostAllocation(mode: 'prorate' | 'expense') {
-    if (!(Number(this.currentState.shippingCost) > 0)) return;
+  setShippingCostAllocation(mode: 'prorate' | 'expense'): boolean {
+    if (!(Number(this.currentState.shippingCost) > 0)) return false;
     this.updateState({ shippingCostAllocation: mode });
+    return true;
   }
 
   /**

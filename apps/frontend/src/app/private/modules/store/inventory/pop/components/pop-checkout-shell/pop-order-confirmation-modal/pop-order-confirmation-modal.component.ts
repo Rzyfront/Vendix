@@ -14,35 +14,44 @@ import {
 import { CurrencyPipe } from '../../../../../../../../shared/pipes/currency';
 
 /**
- * Estado legible de la OC para el badge del modal. Mapea los valores que el
- * backend puede adjuntar a `orderResult.state` (la misma forma que el `state`
- * interno del carrito) a etiquetas cortas que el operador entiende a primera
- * vista. Cualquier valor desconocido cae al genérico «Creada» para no
- * inventar una etiqueta no validada.
+ * Estado legible de la OC para el badge del modal.
+ *
+ * CP-PURCHASE-TRANSPARENCY (T2/D.2) — las claves son EXACTAMENTE los cinco
+ * valores de `purchase_order_status_enum`
+ * (`apps/backend/prisma/schema.prisma`):
+ *
+ *   draft · approved · partial · received · cancelled
+ *
+ * El mapa anterior declaraba además `created`, `paid` y `closed`, que la
+ * columna `purchase_orders.status` NO puede tomar, y traducía `partial` como
+ * «Pago parcial» cuando en ESTE eje significa recepción parcial (ver
+ * `PurchaseOrdersService.receive`: `all_items_received → received`,
+ * `some_items_received → partial`). Lo pagado vive en otra columna
+ * (`payment_status`) y este badge no habla de ella.
+ *
+ * Un valor fuera del enum ya no se traduce a una etiqueta inventada: se pinta
+ * tal cual llegó (ver `stateLabel`). Antes caía a «Creada», que es un estado
+ * que no existe — la interfaz nombraba una situación que la base de datos no
+ * podía tener.
  */
 const STATE_LABELS: Record<string, string> = {
   draft: 'Borrador',
-  created: 'Creada',
   approved: 'Aprobada',
+  partial: 'Recibida parcialmente',
   received: 'Recibida',
-  paid: 'Pagada',
-  partial: 'Pago parcial',
-  canceled: 'Cancelada',
   cancelled: 'Cancelada',
-  closed: 'Cerrada',
 };
 
 const STATE_BADGE_VARIANT: Record<string, 'success' | 'primary' | 'warning' | 'neutral'> = {
   draft: 'neutral',
-  created: 'primary',
-  approved: 'success',
-  received: 'success',
-  paid: 'success',
+  approved: 'primary',
   partial: 'warning',
-  canceled: 'neutral',
+  received: 'success',
   cancelled: 'neutral',
-  closed: 'neutral',
 };
+
+/** Lo que se pinta cuando el servidor no informó estado alguno. */
+const STATE_UNKNOWN_LABEL = 'Sin confirmar';
 
 /**
  * CP-ID-VNDX-2026-08-21-POP-MODAL — Modal standalone post-creación de OC.
@@ -74,7 +83,13 @@ export class PopOrderConfirmationModalComponent {
   readonly isOpen = input<boolean>(false);
   readonly orderNumber = input<string>('');
   readonly total = input<number>(0);
-  readonly state = input<string>('created');
+  /**
+   * Estado real de la OC, tal como lo devolvió el servidor. Arranca VACÍO —
+   * antes traía `'created'` por defecto, un estado que
+   * `purchase_order_status_enum` no contempla: el modal afirmaba algo cuando
+   * el padre no le había dicho nada.
+   */
+  readonly state = input<string>('');
   /**
    * ID numérico de la OC recién creada. Se proyecta al output `viewOrder`
    * para que el padre navegue al detalle. Es opcional: si el padre no lo
@@ -88,19 +103,25 @@ export class PopOrderConfirmationModalComponent {
   /** El operador eligió ir al detalle de la OC recién creada. */
   readonly viewOrder = output<void>();
 
-  /** Etiqueta legible del estado para el badge. */
+  /**
+   * Etiqueta legible del estado para el badge.
+   *
+   * Sin estado ⇒ «Sin confirmar»: no sabemos en qué quedó la orden y decirlo
+   * es más honesto que elegirle un estado. Estado desconocido ⇒ el token del
+   * servidor tal cual, para no traducirlo a algo que podría no ser cierto.
+   */
   readonly stateLabel = computed<string>(() => {
     const raw = (this.state() ?? '').toString().trim().toLowerCase();
-    if (!raw) return STATE_LABELS['created'];
-    return STATE_LABELS[raw] ?? STATE_LABELS['created'];
+    if (!raw) return STATE_UNKNOWN_LABEL;
+    return STATE_LABELS[raw] ?? raw;
   });
 
-  /** Variante del badge según estado. Default `primary` (Creada). */
+  /** Variante del badge según estado. Lo no reconocido va en `neutral`. */
   readonly stateVariant = computed<
     'success' | 'primary' | 'warning' | 'neutral'
   >(() => {
     const raw = (this.state() ?? '').toString().trim().toLowerCase();
-    return STATE_BADGE_VARIANT[raw] ?? 'primary';
+    return STATE_BADGE_VARIANT[raw] ?? 'neutral';
   });
 
   /**

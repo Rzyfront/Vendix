@@ -161,11 +161,28 @@ import { PopShippingAllocation } from '../interfaces';
               customWrapperClass="!mt-0"
             ></app-input>
 
+            <!--
+              CP-PURCHASE-TRANSPARENCY (T2/D.1) — el conmutador se DESHABILITA
+              cuando no hay flete, y dice por qué. Antes quedaba armado: el
+              operador lo pulsaba, app-toggle se pintaba solo, el carrito
+              descartaba el cambio en silencio y la pantalla quedaba afirmando
+              una imputación que el carrito no tenía. Deshabilitarlo SIN dar el
+              motivo sería el otro antipatrón (ver D.4): la interfaz negando
+              una acción sin decir qué falta.
+            -->
             <app-toggle
               [checked]="isProrate()"
+              [disabled]="!hasShippingCost()"
               label="Prorratear el flete en el costo de los productos"
+              ariaLabel="Prorratear el flete en el costo de los productos"
               (toggled)="onAllocationToggle($event)"
             ></app-toggle>
+            @if (!hasShippingCost()) {
+              <p class="text-[11px] leading-snug text-warning">
+                Escribe primero el costo del flete: sin monto no hay nada que
+                repartir, así que la imputación no se puede elegir todavía.
+              </p>
+            }
             <p class="text-[11px] leading-snug text-text-secondary">
               {{ allocationLegend() }}
             </p>
@@ -217,13 +234,34 @@ export class PopOrderConfigModalComponent {
   );
 
   /**
+   * CP-PURCHASE-TRANSPARENCY (T2/D.1) — hay flete que imputar.
+   *
+   * `PopCartService.setShippingCostAllocation()` rechaza el modo cuando el
+   * monto es 0 (el backend responde 400 a un modo sin monto). Ese rechazo es
+   * legítimo; lo que no lo era es que ocurriera sin que nadie se enterara. La
+   * pantalla lo anticipa: sin monto el conmutador no se puede accionar y se
+   * explica qué falta para poder accionarlo.
+   */
+  readonly hasShippingCost = computed<boolean>(
+    () => Number(this.shippingCost()) > 0,
+  );
+
+  /**
    * La leyenda va en términos de negocio, no de contabilidad: la duda del
-   * operador es inmediata y es la misma en los dos modos — «¿esto me sube el
+   * operador es inmediata y es la misma en los dos modos — «¿esto me toca el
    * costo del producto?» y «¿esto suma al total?».
+   *
+   * CP-PURCHASE-TRANSPARENCY (T2/D.3) — la versión anterior prometía una
+   * DIRECCIÓN («sube su costo unitario»), y la dirección no es universal: el
+   * costo se expresa por unidad de STOCK, así que cuando una unidad comprada
+   * rinde varias de stock (`purchase_to_stock_factor`) la conversión diluye
+   * más de lo que el flete suma y el costo unitario BAJA. La vista previa lo
+   * enseñaba —«$4 → $3»— con esta leyenda al lado afirmando lo contrario.
+   * Ahora se explica el MECANISMO, que es cierto en los dos casos.
    */
   readonly allocationLegend = computed<string>(() =>
     this.isProrate()
-      ? 'El flete se reparte entre los productos según su participación en la compra, así que cada producto queda valorado con lo que realmente costó ponerlo en bodega: sube su costo unitario y con él el margen que calcula el sistema. El flete se suma al total de la orden.'
+      ? 'El flete se reparte entre los productos según su participación en la compra y entra en el costo con el que cada uno queda valorado en bodega. El costo unitario resultante no siempre sube: también depende de cuántas unidades de stock entran por unidad comprada, así que un envase que rinde varias unidades reparte ese costo entre todas y puede terminar por debajo. La vista previa de costos muestra la cifra final de cada producto. El flete se suma al total de la orden.'
       : 'El flete no toca el costo de los productos: se registra como un costo de la orden y el costo unitario no se mueve. El flete se suma igual al total de la orden.',
   );
 
