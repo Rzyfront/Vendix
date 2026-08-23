@@ -132,9 +132,23 @@ export class PurchaseOrderItemDto {
   @Min(1)
   quantity: number;
 
+  /**
+   * CP-PURCHASE-TRANSPARENCY R2 — piso 0, no 0.01.
+   *
+   * Este precio multiplica la cantidad y funda `subtotal_amount` y
+   * `total_amount` de la orden, la capa de costo FIFO/CPP de la recepción y el
+   * saldo de la CxP. Un negativo invierte el signo de todos ellos: el total de
+   * la orden baja, el costo unitario del inventario se corrompe y la deuda con
+   * el proveedor se convierte en un cobro. Lo rechazaba nadie.
+   *
+   * El piso es `0` y no `0.01` a propósito: una línea de BONIFICACIÓN
+   * (mercancía que el proveedor regala) entra con precio 0 y es un caso de
+   * negocio real en distribución.
+   */
   @ApiProperty({ description: 'Unit price' })
   @IsNumber()
   @IsNotEmpty()
+  @Min(0)
   unit_price: number;
 
   /**
@@ -340,6 +354,8 @@ export class PurchaseOrderItemDto {
   @ApiProperty({ description: 'Product Weight (for new products)' })
   @IsNumber()
   @IsOptional()
+  // Magnitud física: no existe el peso negativo.
+  @Min(0)
   weight?: number;
 
   @ApiProperty({ description: 'Available for Ecommerce (for new products)' })
@@ -419,14 +435,25 @@ export class PurchaseOrderItemDto {
   @IsOptional()
   sale_unit_is_default?: any;
 
+  /**
+   * CP-PURCHASE-TRANSPARENCY R2 — precio y margen del producto que NACE con
+   * esta orden. Se escriben directo en `products`, así que un negativo aquí
+   * publica en el catálogo un artículo que resta al cobrarlo.
+   *
+   * `@Min(0)` y no `@Min(0.01)` por paridad con los hermanos que ya estaban
+   * acotados en este mismo DTO —`sale_unit_price` y `sale_unit_profit_margin`,
+   * ambos `@Min(0)`—: un precio 0 es un obsequio declarado, no un error.
+   */
   @ApiProperty({ description: 'Base Price (for new products)' })
   @IsNumber()
   @IsOptional()
+  @Min(0)
   base_price?: number;
 
   @ApiProperty({ description: 'Profit Margin (for new products)' })
   @IsNumber()
   @IsOptional()
+  @Min(0)
   profit_margin?: number;
 
   @ApiProperty({ description: 'Is on sale (for new products)' })
@@ -436,6 +463,7 @@ export class PurchaseOrderItemDto {
   @ApiProperty({ description: 'Sale price (for new products)' })
   @IsNumber()
   @IsOptional()
+  @Min(0)
   sale_price?: number;
 
   @ApiProperty({ description: 'Brand name (for new products)' })
@@ -763,19 +791,31 @@ export class CreatePurchaseOrderDto {
   @IsOptional()
   shipping_cost_allocation?: ShippingCostAllocation;
 
+  /**
+   * CP-PURCHASE-TRANSPARENCY R2 — los tres totales de cabecera que el cliente
+   * puede enviar. `create()` los RECALCULA a partir de las líneas (igual que
+   * ignora el `status` del cliente, ver A.10 en el spec), así que acotarlos no
+   * cambia ningún camino feliz; lo que cierra es la puerta a que un cliente
+   * declare una cabecera imposible y la respuesta se la dé por buena. Un total
+   * negativo no es una compra: es una nota crédito, y esa tiene su propio
+   * flujo (`return_order_type_enum.purchase_return`).
+   */
   @ApiProperty({ description: 'Subtotal amount' })
   @IsNumber()
   @IsOptional()
+  @Min(0)
   subtotal_amount?: number;
 
   @ApiProperty({ description: 'Tax amount' })
   @IsNumber()
   @IsOptional()
+  @Min(0)
   tax_amount?: number;
 
   @ApiProperty({ description: 'Total amount' })
   @IsNumber()
   @IsOptional()
+  @Min(0)
   total_amount?: number;
 
   @ApiProperty({ description: 'Discount amount' })

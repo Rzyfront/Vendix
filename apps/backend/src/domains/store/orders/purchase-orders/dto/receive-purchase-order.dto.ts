@@ -61,9 +61,20 @@ export class ReceiveItemDto {
    * receipt time. When omitted alongside new_base_price, the existing
    * base_price is preserved and the margin is recomputed from the new
    * cost_price.
+   *
+   * CP-PURCHASE-TRANSPARENCY R2 — piso 0 por paridad con los dos hermanos que
+   * ya lo tenían: `new_base_price` (arriba, `@Min(0)`) y
+   * `sale_unit_profit_margin` en `create-purchase-order.dto.ts`. Sin cota, un
+   * margen negativo llega a `resolvePricingAfterReceipt()` y deriva un precio
+   * de venta por DEBAJO del costo, o directamente negativo, en el catálogo.
+   *
+   * JUICIO DECLARADO: esto prohíbe el "loss leader" deliberado por esta vía.
+   * Si el negocio lo quiere, es quitar esta línea — pero entonces hay que
+   * quitarla también de los dos hermanos, no dejar el contrato a medias.
    */
   @IsOptional()
   @IsNumber()
+  @Min(0)
   new_profit_margin?: number;
 }
 

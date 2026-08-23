@@ -1,9 +1,11 @@
 import {
   IsOptional,
   IsNumber,
+  IsPositive,
   IsString,
   IsBoolean,
   IsArray,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -283,9 +285,25 @@ export interface InvoiceMatchResult {
 
 // --- DTOs for confirmation (validated, these come from the user) ---
 
+/**
+ * CP-PURCHASE-TRANSPARENCY R2 — por qué las cotas de estas dos clases NO son
+ * redundantes con las de `CreatePurchaseOrderDto`.
+ *
+ * `confirmAndCreatePO()` no reenvía este body por HTTP: construye a mano un
+ * `PurchaseOrderItemDto` (`poItem.quantity = item.quantity`,
+ * `poItem.unit_price = item.unit_cost`) y llama a
+ * `purchaseOrdersService.create()` con el objeto ya instanciado. El
+ * `ValidationPipe` global solo corre en el borde HTTP, así que los
+ * `@IsInt() @Min(1)` de `PurchaseOrderItemDto` NUNCA se ejecutan en este
+ * camino. Estas clases son la única validación que ve la ruta del escáner de
+ * facturas, y hasta ahora no acotaba ninguno de sus campos numéricos.
+ */
 export class ConfirmScannedInvoiceItemDto {
   @IsOptional()
   @IsNumber()
+  // FK a `products.id` (autoincremental desde 1). Cuando la línea es de un
+  // producto NUEVO el campo llega ausente, no en 0: el 0 lo pone el servicio.
+  @IsPositive()
   product_id?: number;
 
   @IsOptional()
@@ -296,10 +314,17 @@ export class ConfirmScannedInvoiceItemDto {
   @IsString()
   sku?: string;
 
+  // `@IsPositive()` y no `@Min(1)`: comprar 0 o −3 unidades no es una línea de
+  // factura, pero acotar a entero aquí estrecharía el contrato más allá de lo
+  // que hoy acepta el escáner.
   @IsNumber()
+  @IsPositive()
   quantity: number;
 
+  // Piso 0 —no 0.01—: la bonificación del proveedor entra a costo cero. El
+  // negativo sí se rechaza: invierte la capa de costo y el total de la orden.
   @IsNumber()
+  @Min(0)
   unit_cost: number;
 
   @IsOptional()
@@ -313,15 +338,21 @@ export class ConfirmScannedInvoiceItemDto {
    */
   @IsOptional()
   @IsNumber()
+  // El servicio solo lo reenvía cuando es `> 0`, así que un negativo se
+  // descartaba en silencio en vez de decir que el body venía mal.
+  @Min(0)
   discount_amount?: number;
 }
 
 export class ConfirmScannedInvoiceDto {
   @IsOptional()
   @IsNumber()
+  @IsPositive()
   supplier_id?: number;
 
+  // FK obligatoria: es la bodega donde entrará la mercancía.
   @IsNumber()
+  @IsPositive()
   location_id: number;
 
   @IsArray()
@@ -337,12 +368,16 @@ export class ConfirmScannedInvoiceDto {
   @IsString()
   invoice_date?: string;
 
+  // Cabecera: ambos viajan tal cual a `CreatePurchaseOrderDto` sin pasar por
+  // el pipe (ver la nota de la clase de arriba).
   @IsOptional()
   @IsNumber()
+  @Min(0)
   tax_amount?: number;
 
   @IsOptional()
   @IsNumber()
+  @Min(0)
   discount_amount?: number;
 
   @IsOptional()
