@@ -2198,8 +2198,52 @@ export class PurchaseOrdersService {
     });
   }
 
-  findOne(id: number) {
-    return this.prisma.purchase_orders.findUnique({
+  /**
+   * CP-PURCHASE-TRANSPARENCY R2 — una orden inexistente ya no se disfraza de
+   * éxito.
+   *
+   * `findUnique` devuelve `null` cuando no hay fila, y el handler envolvía ese
+   * `null` en el sobre de éxito del `ResponseService`. `GET /:id` con un id
+   * inventado respondía:
+   *
+   *     HTTP/1.1 200 OK
+   *     {"success":true,"message":"Orden de compra obtenida exitosamente","data":null}
+   *
+   * Con eso el detalle del frontend pinta una página entera: título
+   * «OC #undefined», todos los campos en «—», «Productos (0)» y el botón
+   * Imprimir operativo. El cliente pidió un recurso y recibió otra cosa sin que
+   * nada se lo dijera: es el mismo defecto que persigue este plan un nivel más
+   * abajo que el `responseService.error` que arregló `fe9736bd7`.
+   *
+   * Se lanza `PO_FIND_001` (404), el código YA REGISTRADO en
+   * `error-codes.ts` para «Orden de compra no encontrada» — el mismo que ya
+   * usan `loadOrderOrFail()` y `configurePaymentPlan()`. No se introduce
+   * ningún código nuevo.
+   *
+   * **Alcance multi-tenant — 404, nunca 403.** `this.prisma` es el
+   * `StorePrismaService`: la extensión de alcance inyecta
+   * `{ location: { store_id } }` en el `where` (registro relacional
+   * `purchase_orders` en `store-prisma.service.ts`), así que una orden de OTRA
+   * tienda tampoco casa y sale por esta misma rama. El resultado es
+   * deliberado: un 403 confirmaría la existencia del recurso a quien no debe
+   * saber ni que existe. `purchase_orders.location_id` es `Int` NOT NULL, de
+   * modo que el filtro relacional nunca deja fuera una orden propia.
+   *
+   * Consumidores auditados antes de lanzar (el riesgo real es quien ramificaba
+   * sobre el `null`):
+   *   · `purchase-orders.controller.ts` `findOne()` — el destinatario del
+   *     arreglo: la excepción sube al `AllExceptionsFilter` y sale 404 con
+   *     `error_code`.
+   *   · `configurePaymentPlan()` (final del método, más abajo en este mismo
+   *     fichero) — reusa `findOne()` para devolver la orden ya modificada, y
+   *     ese camino solo se alcanza tras haber lanzado `PO_FIND_001` él mismo
+   *     si la orden no existía. Inalcanzable con `null`; sin cambio.
+   *   · `OrgPurchaseOrdersService.findOne()` es un método DISTINTO (alcance
+   *     organización) y ya lanzaba `NotFoundException`: este cambio alinea el
+   *     alcance tienda con el hermano que siempre estuvo bien.
+   */
+  async findOne(id: number) {
+    const order = await this.prisma.purchase_orders.findUnique({
       where: { id },
       include: {
         suppliers: true,
@@ -2218,6 +2262,16 @@ export class PurchaseOrdersService {
         },
       },
     });
+
+    if (!order) {
+      throw new VendixHttpException(
+        ErrorCodes.PO_FIND_001,
+        `La orden de compra ${id} no existe.`,
+        { purchase_order_id: id },
+      );
+    }
+
+    return order;
   }
 
   /**

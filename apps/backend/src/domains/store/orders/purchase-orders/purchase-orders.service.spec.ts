@@ -2475,3 +2475,146 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
     expect(meta.shipping_cost_allocation_applied).toBe('expense');
   });
 });
+
+/**
+ * CP-PURCHASE-TRANSPARENCY R2 — `GET /store/orders/purchase-orders/:id` sobre
+ * una orden que no existe.
+ *
+ * El defecto medido contra el backend local antes del arreglo:
+ *
+ *     GET /api/store/orders/purchase-orders/999999
+ *     → HTTP/1.1 200 OK
+ *       {"success":true,"message":"Orden de compra obtenida exitosamente","data":null}
+ *
+ * `findUnique` devolvía `null` y el handler lo envolvía en el sobre de ÉXITO.
+ * Con ese 200 el detalle del frontend pinta la página entera —«OC #undefined»,
+ * todos los campos en «—», «Productos (0)» y el botón Imprimir operativo—:
+ * el cliente pidió un recurso y recibió otra cosa sin que nada se lo dijera.
+ *
+ * El hermano de alcance ORGANIZACIÓN (`OrgPurchaseOrdersService.findOne`) ya
+ * lanzaba `NotFoundException`; el de alcance TIENDA era el que estaba solo.
+ */
+describe('PurchaseOrdersService.findOne() — un recurso ausente es 404, no un sobre de éxito', () => {
+  let service: PurchaseOrdersService;
+  let prismaService: any;
+
+  const ORG_ID = 1;
+  const STORE_ID = 10;
+  const PO_ID = 215;
+
+  beforeEach(async () => {
+    prismaService = {
+      purchase_orders: { findUnique: jest.fn() },
+      $transaction: jest.fn(),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PurchaseOrdersService,
+        { provide: StorePrismaService, useValue: prismaService },
+        { provide: StockLevelManager, useValue: {} as any },
+        { provide: CostingService, useValue: {} as any },
+        { provide: CostingMethodResolverService, useValue: {} as any },
+        { provide: InventorySerialNumbersService, useValue: {} as any },
+        { provide: SerialNumberEnforcementService, useValue: {} as any },
+        { provide: AuditService, useValue: { log: jest.fn() } },
+        { provide: S3Service, useValue: {} as any },
+        { provide: SettingsService, useValue: {} as any },
+        { provide: FiscalScopeService, useValue: {} as any },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: AccountsPayableService, useValue: {} as any },
+        VatResponsibilityService,
+      ],
+    }).compile();
+
+    service = module.get(PurchaseOrdersService);
+
+    jest
+      .spyOn(RequestContextService, 'getOrganizationId')
+      .mockReturnValue(ORG_ID);
+    jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(STORE_ID);
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+    jest.restoreAllMocks();
+  });
+
+  it('una orden inexistente lanza PO_FIND_001 en vez de devolver null', async () => {
+    prismaService.purchase_orders.findUnique.mockResolvedValue(null);
+
+    await expect(service.findOne(999999)).rejects.toMatchObject({
+      errorCode: 'PO_FIND_001',
+    });
+  });
+
+  /**
+   * El código, no solo el hecho de lanzar: `PO_FIND_001` ya está registrado en
+   * `error-codes.ts` con `httpStatus: 404`. Se fija aquí para que nadie lo
+   * cambie por un código nuevo ni degrade el estado.
+   */
+  it('el rechazo viaja como 404 con un código YA registrado, no como 500 sin código', async () => {
+    prismaService.purchase_orders.findUnique.mockResolvedValue(null);
+
+    const fallo = await service.findOne(999999).catch((e) => e);
+
+    // `getStatus()` y no la propiedad `status`: es la API pública de
+    // `HttpException` y la que lee el `AllExceptionsFilter` para poner el
+    // status en la línea de respuesta.
+    expect(fallo.getStatus()).toBe(404);
+    expect(fallo.errorCode).toBe('PO_FIND_001');
+  });
+
+  /**
+   * Alcance multi-tenant: una orden que SÍ existe pero es de otra tienda tiene
+   * que dar 404, nunca 403 — un 403 le confirmaría su existencia a quien no
+   * debe saber ni que existe.
+   *
+   * Quien produce ese efecto es el `StorePrismaService`: `purchase_orders` está
+   * registrado como modelo de alcance RELACIONAL
+   * (`{ location: { store_id } }`), así que la fila de otra tienda no casa y el
+   * `findUnique` responde `null` — indistinguible de «no existe». Este spec fija
+   * las dos mitades del contrato: que la lectura pasa por el cliente CON
+   * alcance (no por uno crudo, que expondría la orden ajena) y que su `null`
+   * sale por la MISMA rama 404, sin ninguna bifurcación a 403.
+   */
+  it('una orden de OTRA tienda sale por la misma puerta 404, nunca 403', async () => {
+    // Lo que el cliente con alcance devuelve cuando la fila pertenece a otro
+    // store_id: exactamente lo mismo que cuando la fila no existe.
+    prismaService.purchase_orders.findUnique.mockResolvedValue(null);
+
+    const fallo = await service.findOne(PO_ID).catch((e) => e);
+
+    expect(fallo.getStatus()).toBe(404);
+    expect(fallo.getStatus()).not.toBe(403);
+    expect(fallo.errorCode).toBe('PO_FIND_001');
+    // La lectura sale por el cliente con alcance de tienda; si alguien la
+    // moviera a un cliente sin alcance, la orden ajena se volvería legible.
+    expect(prismaService.purchase_orders.findUnique).toHaveBeenCalledTimes(1);
+  });
+
+  it('una orden propia sigue devolviéndose igual que antes', async () => {
+    const orden = {
+      id: PO_ID,
+      order_number: 'PO-20260822-668',
+      suppliers: { id: 122, name: 'Debug Test Supplier' },
+      location: { id: 50, store_id: STORE_ID },
+      purchase_order_items: [{ id: 1 }],
+      payment_schedules: [],
+    };
+    prismaService.purchase_orders.findUnique.mockResolvedValue(orden);
+
+    await expect(service.findOne(PO_ID)).resolves.toBe(orden);
+
+    // El include no cambió: proveedor, ubicación, líneas y el calendario de
+    // pagos ordenado (QUI-647) siguen viajando en el mismo read.
+    const args = prismaService.purchase_orders.findUnique.mock.calls[0][0];
+    expect(args.where).toEqual({ id: PO_ID });
+    expect(args.include.suppliers).toBe(true);
+    expect(args.include.location).toBe(true);
+    expect(args.include.purchase_order_items).toBeDefined();
+    expect(args.include.payment_schedules).toEqual({
+      orderBy: { scheduled_date: 'asc' },
+    });
+  });
+});
