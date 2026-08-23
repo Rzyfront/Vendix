@@ -55,6 +55,11 @@ import {
   PosInvoicingSettings,
 } from '../settings/interfaces/store-settings.interface';
 import { DIAN_INVOICE_OPERATION_TYPES } from './providers/dian-direct/constants/dian-document-types';
+import type {
+  InvoiceProfileConfig,
+  ProfileAiuConfig,
+} from './profiles/invoice-profile-config.contract';
+import { profileNotFound } from './profiles/profile-errors';
 import { WithholdingFlowService } from '../withholding-tax/withholding-flow.service';
 import {
   buildWithholdingAccountRole,
@@ -929,12 +934,24 @@ export class InvoicingService {
     // resuelven ANTES del recálculo porque el catálogo es quien manda sobre la
     // tarifa y el tipo fiscal. Ver `resolveTenantTaxRateCatalog`.
     const tax_catalog = await this.resolveTenantTaxRateCatalog(dto.items);
+    // PERFIL CONGELADO. Por encima del consecutivo por la misma razón que todo
+    // lo demás en este bloque: sus cuatro puertas (no existe, inactivo, tipo de
+    // operación distinto, sin versión) pueden rechazar, y un rechazo por debajo
+    // de `generateNextNumber` dejaría un hueco permanente en la numeración
+    // autorizada por la DIAN. `null` cuando el documento va por el flujo manual.
+    const profile_snapshot = await this.resolveProfileSnapshot(
+      dto.profile_id,
+      dto.operation_type,
+    );
     // Régimen de AIU y validación del objeto del contrato. Por encima del
     // consecutivo por la misma razón que el recálculo: puede rechazar.
     const aiu_context = await this.resolveAiuContext(
       dto.operation_type,
       dto.items,
       dto.aiu_contract_object,
+      // Con perfil, el régimen sale de la versión congelada y `store_settings`
+      // no se consulta. Sin perfil, `undefined` y el flujo manual queda igual.
+      profile_snapshot?.config.aiu,
     );
     const calculated = this.recalculateDocument(
       dto.items,
@@ -1063,6 +1080,20 @@ export class InvoicingService {
               'invoice:create',
             )
           : undefined,
+        // PROCEDENCIA CONGELADA — las dos columnas van JUNTAS o ninguna.
+        //
+        // Apuntan a `invoice_profile_versions` por su único
+        // `(profile_id, version)`, no al perfil: lo que la factura debe poder
+        // reproducir es la CONFIGURACIÓN con la que se calculó, y esa vive en la
+        // versión. El perfil es un puntero móvil; la versión es inmutable.
+        //
+        // La FK compuesta admite NULL si CUALQUIERA de las dos lo es, así que
+        // `(profile_id = 5, profile_version = NULL)` pasaría la FK. El «ambas o
+        // ninguna» lo impone el CHECK de la tabla — ver el docblock de las
+        // columnas en `schema.prisma`. Escribirlas del mismo objeto, como acá,
+        // es lo que hace que el CHECK nunca se ejerza en la práctica.
+        profile_id: profile_snapshot?.profile_id,
+        profile_version: profile_snapshot?.version,
         // Divisa extranjera: SOLO declara la conversión. El documento se emite
         // siempre en COP (Res. DIAN 000042/2020 art. 73) y el importe legal
         // sigue siendo `total_amount`.
@@ -2009,6 +2040,25 @@ export class InvoicingService {
       // Mismo régimen de AIU que la creación. El tipo de operación es el que
       // trae el PATCH si lo cambia, y el persistido si no: editar un borrador
       // no puede convertir un contrato AIU en una venta estándar por omisión.
+      // La factura que YA congeló un perfil sigue leyendo ESA versión, no la
+      // vigente del perfil.
+      //
+      // Es la mitad que hace cierta la promesa de F.3: «editar el perfil después
+      // no altera el XML proyectado de la factura ya creada». Si el PATCH
+      // volviera a resolver el perfil por su `current_version`, editar el perfil
+      // y luego tocar una línea del borrador migraría el documento a un régimen
+      // distinto en silencio — y `profile_version` seguiría diciendo la versión
+      // vieja, con lo cual la procedencia declarada sería falsa. Peor que no
+      // tener las columnas.
+      //
+      // Cambiar de perfil NO es una edición: `UpdateInvoiceDto` no acepta
+      // `profile_id` a propósito. Quien quiera otro perfil descarta el borrador
+      // y lo crea de nuevo, que es la única forma de que los importes y la
+      // procedencia se recalculen juntos.
+      const frozen_profile_aiu = await this.loadFrozenProfileAiu(
+        invoice.profile_id,
+        invoice.profile_version,
+      );
       const aiu_context = await this.resolveAiuContext(
         dto.operation_type ?? invoice.operation_type,
         dto.items,
@@ -2016,6 +2066,7 @@ export class InvoicingService {
         // persistido si no. Editar un borrador no puede borrar por omisión el
         // objeto del contrato con el que se validó la nota CAV03.
         dto.aiu_contract_object ?? invoice.aiu_contract_object,
+        frozen_profile_aiu,
       );
       const calculated = this.recalculateDocument(
         dto.items,
@@ -3076,6 +3127,168 @@ export class InvoicingService {
     } as Prisma.InputJsonValue;
   }
 
+  /**
+   * PERFIL CONGELADO — resuelve la versión vigente de un perfil de facturación
+   * y la devuelve para que la factura la persista en
+   * `(profile_id, profile_version)`.
+   *
+   * ## Qué problema cierra
+   *
+   * Sin esto, la configuración fiscal de un documento se lee de
+   * `store_settings.invoicing.aiu` en CADA paso: al calcular, al validar, y otra
+   * vez al construir el XML días después. Entre la captura y la transmisión la
+   * tienda puede cambiar de régimen, y entonces el XML declara una gravabilidad
+   * que contradice los importes que lleva dentro — rechazo por FAU04 con el
+   * consecutivo ya gastado, o peor, aceptación con el IVA equivocado.
+   *
+   * Con un perfil, la configuración sale de `invoice_profile_versions.config`,
+   * que es **append-only**: `commitVersion` inserta la versión N+1 y no toca la
+   * N. Editar el perfil mañana no altera ninguna factura ya emitida, y
+   * reconstruir el documento desde su versión reproduce exactamente el XML que
+   * la DIAN validó. Eso es el objetivo del plan, y estas dos columnas son
+   * dónde vive.
+   *
+   * ## Por qué se lee por `current_version` y no por `orderBy version desc`
+   *
+   * `current_version` es el puntero que `commitVersion` mantiene dentro de la
+   * misma transacción que inserta la fila, así que es lo que «vigente»
+   * SIGNIFICA. Un `orderBy desc` devolvería la fila más alta que exista, que en
+   * una transacción a medias puede no ser la publicada. La diferencia sólo se
+   * nota en el caso raro, y en el caso raro es la que congela la configuración
+   * equivocada.
+   *
+   * ## Por qué las cuatro puertas rechazan en vez de caer al flujo manual
+   *
+   * Caer a `store_settings` cuando el usuario pidió un perfil es la opción
+   * cómoda y la peligrosa: los dos regímenes AIU gravan bases INCOMPATIBLES
+   * (E.T. 462-1 grava A+I+U completo; Decreto 1372/1992 grava sólo la Utilidad),
+   * así que la sustitución cambia el IVA declarado sin dejar rastro de que hubo
+   * sustitución. El usuario vería un 201. Ver `INVOICING_PROFILE_006`, `_008` y
+   * `_009`.
+   *
+   * ## Aislamiento
+   *
+   * El `findFirst` va por el cliente SCOPEADO (`StorePrismaService` lista
+   * `invoice_profiles` en sus modelos por tienda), así que un id de otro tenant
+   * no encuentra fila y sale por el 404 idéntico de `profileNotFound` — el mismo
+   * que devuelve un id inexistente, para que el endpoint no sea un oráculo de
+   * enumeración.
+   */
+  /**
+   * Configuración AIU de una versión YA congelada en una factura.
+   *
+   * Distinta de `resolveProfileSnapshot` en lo único que importa: aquí NO se
+   * consulta el estado del perfil ni su `current_version`. La versión ya está
+   * elegida y es inmutable, así que desactivar el perfil, renombrarlo o
+   * publicarle diez versiones nuevas no puede cambiar lo que esta factura
+   * reproduce. Aplicar las puertas de la emisión acá haría que desactivar un
+   * perfil rompiera la edición de borradores que ya lo referencian, que es
+   * exactamente lo contrario de lo que el congelado promete.
+   *
+   * Devuelve `null` cuando la factura no tiene perfil (flujo manual) o cuando la
+   * versión referenciada no aparece. Este segundo caso no puede ocurrir por la
+   * API —la FK compuesta con `onDelete: Restrict` lo impide— y por eso NO se
+   * convierte en excepción: si alguien lo produjera por SQL, fallar acá dejaría
+   * la factura inservible para siempre. Se devuelve `null` y el documento cae al
+   * flujo manual, que es degradación visible en las columnas `aiu_*` y no
+   * pérdida de acceso al documento.
+   */
+  private async loadFrozenProfileAiu(
+    profile_id: number | null | undefined,
+    profile_version: number | null | undefined,
+  ): Promise<ProfileAiuConfig | null> {
+    if (profile_id == null || profile_version == null) return null;
+
+    const row = await this.prisma.invoice_profile_versions.findFirst({
+      where: { profile_id, version: profile_version },
+      select: { config: true },
+    });
+    if (!row) return null;
+
+    const config = row.config as unknown as InvoiceProfileConfig;
+    return config?.aiu ?? null;
+  }
+
+  private async resolveProfileSnapshot(
+    profile_id: number | null | undefined,
+    operation_type: string | null | undefined,
+  ): Promise<{
+    profile_id: number;
+    version: number;
+    config: InvoiceProfileConfig;
+  } | null> {
+    if (profile_id == null) return null;
+
+    const profile = await this.prisma.invoice_profiles.findFirst({
+      where: { id: profile_id },
+      select: {
+        id: true,
+        name: true,
+        operation_type: true,
+        state: true,
+        current_version: true,
+      },
+    });
+    if (!profile) throw profileNotFound(profile_id);
+
+    if (profile.state !== 'active') {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_PROFILE_006,
+        `El perfil «${profile.name}» está inactivo y no puede usarse para emitir. ` +
+          `Actívalo, o elige otro perfil del catálogo.`,
+        {
+          profile_id,
+          state: profile.state,
+          operation_type: profile.operation_type,
+        },
+      );
+    }
+
+    // El tipo de operación del DOCUMENTO. `undefined` equivale a '10'
+    // (estándar) — la misma equivalencia que aplica el builder UBL, donde NULL
+    // en `invoices.operation_type` significa CustomizationID '10'. Resolverla
+    // acá evita que una factura estándar sin el campo explícito choque contra
+    // un perfil estándar por una diferencia que no existe.
+    const document_operation_type =
+      (operation_type || '').trim() || DIAN_INVOICE_OPERATION_TYPES.STANDARD;
+
+    if (profile.operation_type !== document_operation_type) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_PROFILE_008,
+        `El perfil «${profile.name}» es para operaciones de tipo ` +
+          `${profile.operation_type} y esta factura declara tipo ` +
+          `${document_operation_type}. Cambia el tipo de operación de la ` +
+          `factura, o elige un perfil de tipo ${document_operation_type}.`,
+        {
+          profile_id,
+          profile_operation_type: profile.operation_type,
+          invoice_operation_type: document_operation_type,
+        },
+      );
+    }
+
+    const version = await this.prisma.invoice_profile_versions.findFirst({
+      where: { profile_id, version: profile.current_version },
+      select: { version: true, config: true },
+    });
+
+    if (!version) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_PROFILE_009,
+        `El perfil «${profile.name}» todavía no tiene una versión guardada, así ` +
+          `que no hay configuración que congelar en la factura. Abre el perfil ` +
+          `y guárdalo una vez.`,
+        { profile_id, current_version: profile.current_version },
+      );
+    }
+
+    return {
+      profile_id,
+      version: version.version,
+      config: version.config as unknown as InvoiceProfileConfig,
+    };
+  }
+
   private async resolveAiuContext(
     operation_type: string | null | undefined,
     items: Array<{ aiu_component?: string | null }>,
@@ -3085,6 +3298,13 @@ export class InvoicingService {
      * tiene varios contratos AIU y hasta ahora sólo podía describir uno.
      */
     invoice_contract_object?: string | null,
+    /**
+     * Configuración AIU de la VERSIÓN del perfil bajo el que se timbra. Cuando
+     * llega, `store_settings.invoicing.aiu` NO se lee: la configuración de un
+     * documento fiscal sale de lo que quedó congelado, nunca de configuración
+     * viva. Ausente ⇒ flujo manual, idéntico a antes de los perfiles.
+     */
+    profile_aiu?: ProfileAiuConfig | null,
   ): Promise<{
     aiu?: InvoiceCalculatorAiuInput;
     note?: string;
@@ -3112,14 +3332,31 @@ export class InvoicingService {
     }
 
     const context = this.getContext();
-    const settings = await this.loadAiuSettings(context.store_id);
 
-    // Precedencia documento → tienda. El objeto de la tienda no desaparece: es
-    // el DEFAULT, para que quien factura un solo contrato no tenga que
-    // reescribirlo en cada documento.
+    // FUENTE DE LA CONFIGURACIÓN — el perfil gana, y cuando gana la tienda no
+    // se consulta.
+    //
+    // El `??` corta el `await`: con perfil NO hay lectura de `store_settings`,
+    // ni como respaldo. Es deliberado y es el punto entero del congelado. Un
+    // merge «perfil sobre tienda» sería peor que no tener perfiles: un campo que
+    // el perfil no declare se rellenaría con configuración VIVA, así que el
+    // documento quedaría mitad congelado y mitad no, sin que nada lo indique.
+    // Si a la configuración del perfil le falta algo que la emisión necesita,
+    // eso es un defecto del contrato `InvoiceProfileConfig` y se arregla ahí
+    // —con su validador y su versión de contrato—, no tapándolo acá.
+    const source: {
+      regime?: ProfileAiuConfig['regime'];
+      contract_object?: string;
+      enforce_minimum_base?: boolean;
+      minimum_base_percent?: number | string;
+    } = profile_aiu ?? (await this.loadAiuSettings(context.store_id));
+
+    // Precedencia documento → perfil/tienda. El objeto de la fuente no
+    // desaparece: es el DEFAULT, para que quien factura un solo contrato no
+    // tenga que reescribirlo en cada documento.
     const contract_object =
       (invoice_contract_object || '').trim() ||
-      (settings.contract_object || '').trim();
+      (source.contract_object || '').trim();
     // MISMA función que usa la emisión: lo que se valida acá es exactamente la
     // cadena que va a viajar en `cbc:Note`. Ver `buildAiuNote`.
     const note = buildAiuNote(contract_object);
@@ -3128,14 +3365,35 @@ export class InvoicingService {
       note.length < DIAN_AIU_NOTE_MIN_LENGTH ||
       note.length > DIAN_AIU_NOTE_MAX_LENGTH
     ) {
+      // EL CONSEJO DEPENDE DE QUIÉN MANDA, y por eso el mensaje se bifurca.
+      //
+      // Con perfil, `store_settings` NO se lee —ver la fuente de configuración
+      // más arriba—, así que mandar al usuario a «la configuración de
+      // facturación de la tienda» sería un consejo FALSO: puede escribirlo ahí,
+      // guardar, reintentar, y recibir el mismo 422 sin entender por qué. El
+      // objeto vacío en un perfil es legítimo (`AIU_CONTRACT_OBJECT_EMPTY` es un
+      // aviso, no un bloqueo, justo para que una empresa con varios contratos lo
+      // declare por factura), así que las dos salidas reales son: escribirlo en
+      // ESTA factura, o ponérselo al perfil.
+      const guidance = profile_aiu
+        ? `Descríbelo en el campo «Objeto del contrato» de esta factura, o edita el perfil ` +
+          `de facturación para que lo traiga. La configuración de la tienda NO se usa cuando ` +
+          `la factura se emite bajo un perfil: lo que gobierna es la versión congelada del perfil.`
+        : `Descríbelo en el campo «Objeto del contrato» de esta factura o, si es siempre el mismo, ` +
+          `en la configuración de facturación de la tienda.`;
       throw new VendixHttpException(
         ErrorCodes.INVOICING_AIU_002,
         `El objeto del contrato AIU falta o no tiene la longitud que exige la DIAN: la nota de la ` +
           `línea de Administración debe medir entre ${DIAN_AIU_NOTE_MIN_LENGTH} y ${DIAN_AIU_NOTE_MAX_LENGTH} ` +
           `caracteres contando el prefijo obligatorio «${DIAN_AIU_NOTE_PREFIX}». ` +
-          `Descríbelo en el campo «Objeto del contrato» de esta factura o, si es siempre el mismo, ` +
-          `en la configuración de facturación de la tienda.`,
-        { note_length: note.length, has_contract_object: !!contract_object },
+          guidance,
+        {
+          note_length: note.length,
+          has_contract_object: !!contract_object,
+          // Qué fuente gobernó. Sin esto el frontend no puede saber a qué
+          // pantalla mandar al usuario, y adivinarlo es la mitad del defecto.
+          config_source: profile_aiu ? 'profile' : 'store_settings',
+        },
       );
     }
 
@@ -3146,9 +3404,14 @@ export class InvoicingService {
         // Default explícito y conservador: bajo `et_462_1` tributa el AIU
         // completo. Una tienda que no configuró nada declara de más, no de
         // menos.
-        regime: settings.regime ?? 'et_462_1',
-        enforce_minimum_base: settings.enforce_minimum_base,
-        minimum_base_percent: settings.minimum_base_percent,
+        regime: source.regime ?? 'et_462_1',
+        enforce_minimum_base: source.enforce_minimum_base,
+        // Se pasa TAL CUAL, sin convertir a `number`. El calculador acepta
+        // `DianNumericInput`, así que el porcentaje del perfil —un `string`
+        // decimal exacto, por diseño del contrato— llega intacto. Convertirlo a
+        // float acá reintroduciría el error binario que el contrato evita
+        // guardando los porcentajes como cadena.
+        minimum_base_percent: source.minimum_base_percent,
       },
     };
   }

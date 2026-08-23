@@ -2416,6 +2416,106 @@ export const ErrorCodes = {
   },
 
   /**
+   * Se intentó timbrar una factura contra un perfil INACTIVO.
+   *
+   * ## Por qué 409 y no 422
+   *
+   * El cuerpo de la petición es válido: el `profile_id` existe, es de este
+   * tenant, y su configuración es correcta. Lo que no se puede es usarlo AHORA,
+   * porque alguien lo desactivó. Es un conflicto con el estado del recurso, no
+   * un error de forma, y la diferencia importa para el frontend: un 422 lo
+   * mandaría a resaltar un campo del formulario, cuando lo que hay que hacer es
+   * volver a pedir el catálogo y ofrecer los perfiles que sí están activos.
+   *
+   * ## Por qué se rechaza en vez de caer al flujo manual
+   *
+   * Caer al flujo manual —ignorar el perfil y leer `store_settings`— es la
+   * opción cómoda y es la peligrosa: la factura se emitiría con el régimen AIU
+   * de la tienda en vez del del perfil que el usuario eligió, y los dos
+   * regímenes gravan bases INCOMPATIBLES (E.T. 462-1 grava A+I+U; Decreto
+   * 1372/1992 grava sólo la Utilidad). El usuario vería un 201, la DIAN
+   * recibiría un IVA distinto del que quiso declarar, y no quedaría rastro de
+   * que hubo una sustitución. Un consecutivo gastado con la base equivocada se
+   * corrige sólo con nota crédito y con la sanción ya corriendo.
+   *
+   * Un perfil desactivado DESPUÉS de emitir no invalida nada: la factura quedó
+   * apuntando a `(profile_id, profile_version)` y esa versión es inmutable.
+   * Este código sólo gobierna la emisión NUEVA.
+   *
+   * `details` lleva `profile_id` y `operation_type` para que el frontend pueda
+   * repedir el catálogo del tipo correcto sin adivinar.
+   */
+  INVOICING_PROFILE_006: {
+    code: 'INVOICING_PROFILE_006',
+    httpStatus: 409,
+    devMessage:
+      'An inactive billing profile cannot be used to stamp a new invoice: falling back to store settings would silently swap the VAT taxable base, because the two AIU regimes (E.T. 462-1 vs Decreto 1372/1992) are incompatible',
+  },
+
+  /**
+   * El `operation_type` de la factura y el del perfil no coinciden.
+   *
+   * ## Qué se rompe si esto no se valida
+   *
+   * Un perfil pertenece a UN tipo de operación: su configuración AIU, sus reglas
+   * de tributo por componente y sus cuentas contables sólo tienen sentido para
+   * ese tipo. Congelar un perfil AIU en una factura estándar —o al revés— deja
+   * `(profile_id, profile_version)` apuntando a una configuración que NO es la
+   * que gobernó el cálculo, y ahí muere la reproducibilidad fiscal que las dos
+   * columnas existen para dar: reconstruir el documento desde su versión daría
+   * un XML distinto del que la DIAN validó, con el consecutivo ya gastado.
+   *
+   * Y es silencioso. Con un perfil AIU en una factura estándar,
+   * `resolveAiuContext` devuelve `{}` porque el documento no es AIU, así que las
+   * tres columnas `aiu_*` quedan NULL y nada falla: la factura sale, parece
+   * correcta, y su procedencia declarada es falsa.
+   *
+   * ## Por qué no se coacciona el tipo de la factura al del perfil
+   *
+   * Porque `operation_type` es el `cbc:CustomizationID` del UBL y cambia cómo la
+   * DIAN calcula la base gravable del documento entero. Cambiarlo por detrás
+   * para que cuadre con el perfil es reescribir el hecho fiscal que el usuario
+   * declaró. Se rechaza y se le dice cuál de los dos corregir.
+   */
+  INVOICING_PROFILE_008: {
+    code: 'INVOICING_PROFILE_008',
+    httpStatus: 409,
+    devMessage:
+      "The invoice operation_type does not match the profile's: freezing (profile_id, profile_version) from a profile of another type would make the stamped provenance false, and the aiu_* columns would stay NULL with no error",
+  },
+
+  /**
+   * El perfil existe y está activo, pero no tiene ninguna versión comprometida.
+   *
+   * ## Por qué esto no puede ser un 500
+   *
+   * `invoice_profiles.current_version` es `@default(0)`, así que la fila puede
+   * existir apuntando a nada. Por la API no debería pasar —la creación
+   * compromete la versión 1 en la misma transacción— pero un `INSERT` por SQL o
+   * una transacción a medias lo produce. Sin este código, la lectura de la
+   * versión devolvería `null` y el `.config` de un `null` saldría como
+   * `TypeError` → 500 crudo, sin código sobre el que el frontend pueda ramificar
+   * y sin decirle a nadie qué hacer.
+   *
+   * ## Por qué NO se cae al flujo manual
+   *
+   * Misma razón que `INVOICING_PROFILE_006`: emitir leyendo `store_settings`
+   * cuando el usuario pidió un perfil sustituye el régimen de base gravable sin
+   * dejar rastro. Aquí es incluso más claro, porque no hay NINGUNA configuración
+   * congelada que respaldar: las dos columnas quedarían NULL en una factura que
+   * dice haberse emitido bajo un perfil.
+   *
+   * La salida es guardar el perfil una vez desde el editor, lo que compromete la
+   * versión 1. El mensaje lo dice explícitamente.
+   */
+  INVOICING_PROFILE_009: {
+    code: 'INVOICING_PROFILE_009',
+    httpStatus: 409,
+    devMessage:
+      'The billing profile has no committed version (current_version = 0), so there is no frozen config to stamp: emission is refused instead of silently falling back to live store settings',
+  },
+
+  /**
    * Nombre de perfil ya usado en la misma tienda.
    *
    * ## Por qué esto ES la idempotencia de la creación
