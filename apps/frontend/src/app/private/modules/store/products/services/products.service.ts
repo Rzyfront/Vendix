@@ -34,6 +34,10 @@ interface ApiResponse<T> {
   meta?: any;
   message: string;
   error?: string;
+  /** Código tipado de error para enrutar al mensaje UX correcto. Opcional
+   *  porque solo lo emiten los envelopes que vienen del `AllExceptionsFilter`
+   *  (errores), no los `responseService.success()` / `created()` etc. */
+  error_code?: string;
 }
 
 export interface ProductImageEnhancementRequest {
@@ -74,23 +78,62 @@ export class ProductsService {
     private analytics: AnalyticsService,
   ) {}
 
+  /**
+   * Valida `response.success` antes de devolver `response.data`. Si el backend
+   * respondió HTTP 200 con `success:false`, lanza un objeto que
+   * `handleError` / `handleSaveError` / `handleArchiveError` saben leer para
+   * preservar `error_code` y `details`. Ver `vendix-error-handling/SKILL.md`.
+   *
+   * Los controllers backend YA NO deberían producir este caso: el patrón
+   * `try/catch + responseService.error()` (FB-09) fue eliminado en
+   * `products.controller.ts`. Este guard protege frente a regresiones y a
+   * servidores upstream que aún respondan 200+success:false.
+   *
+   * Sin `this` — seguro pasarlo por referencia como `map(this.unwrap)`.
+   */
+  private unwrap<T>(response: ApiResponse<T>): T {
+    if (!response.success) {
+      throw {
+        error: response,
+        error_code: response.error_code ?? null,
+        message:
+          response.message || response.error || 'Operación fallida',
+      };
+    }
+    return response.data;
+  }
+
+  /**
+   * Variante paginada: convierte `ApiResponse<T[]>` con `meta` al shape
+   * `PaginatedResponse<T>` que esperan los componentes. Mismo contrato de
+   * error que `unwrap`. Sin `this`.
+   */
+  private unwrapPaginated<T>(
+    response: ApiResponse<T[]> & { meta?: any },
+  ): PaginatedResponse<T> {
+    if (!response.success) {
+      throw {
+        error: response,
+        error_code: response.error_code ?? null,
+        message:
+          response.message || response.error || 'Operación fallida',
+      };
+    }
+    return {
+      data: response.data,
+      pagination: response.meta,
+    };
+  }
+
   // CRUD Básico
   getProducts(
     query: ProductQueryDto = {},
   ): Observable<PaginatedResponse<Product>> {
     const params = this.buildParams(query);
     return this.http
-      .get<
-        ApiResponse<PaginatedResponse<Product>>
-      >(`${this.apiUrl}/store/products`, { params })
+      .get<ApiResponse<Product[]>>(`${this.apiUrl}/store/products`, { params })
       .pipe(
-        map(
-          (response: any) =>
-            ({
-              data: response.data,
-              pagination: response.meta,
-            }) as PaginatedResponse<Product>,
-        ),
+        map(this.unwrapPaginated),
         catchError(this.handleError),
       );
   }
@@ -99,7 +142,7 @@ export class ProductsService {
     return this.http
       .get<ApiResponse<Product>>(`${this.apiUrl}/store/products/${id}`)
       .pipe(
-        map((response) => response.data),
+        map(this.unwrap),
         catchError(this.handleError),
       );
   }
@@ -110,7 +153,7 @@ export class ProductsService {
         ApiResponse<Product>
       >(`${this.apiUrl}/store/products/slug/${slug}/store/${storeId}`)
       .pipe(
-        map((response) => response.data),
+        map(this.unwrap),
         catchError(this.handleError),
       );
   }
@@ -122,16 +165,10 @@ export class ProductsService {
     const params = this.buildParams(query);
     return this.http
       .get<
-        ApiResponse<PaginatedResponse<Product>>
+        ApiResponse<Product[]>
       >(`${this.apiUrl}/store/products/store/${storeId}`, { params })
       .pipe(
-        map(
-          (response: any) =>
-            ({
-              data: response.data,
-              pagination: response.meta,
-            }) as PaginatedResponse<Product>,
-        ),
+        map(this.unwrapPaginated),
         catchError(this.handleError),
       );
   }
@@ -140,7 +177,7 @@ export class ProductsService {
     return this.http
       .post<ApiResponse<Product>>(`${this.apiUrl}/store/products`, product)
       .pipe(
-        map((response) => response.data),
+        map(this.unwrap),
         // Invalidar el cache de analytics: nuevos productos / cambios de
         // stock_quantity / track_inventory afectan las métricas (Unidades
         // en Mano, Valor en Stock, Bajo Stock). El flag global se consume
@@ -158,7 +195,7 @@ export class ProductsService {
         ApiResponse<Product>
       >(`${this.apiUrl}/store/products/${id}`, product)
       .pipe(
-        map((response) => response.data),
+        map(this.unwrap),
         // Invalidar cache de analytics por cambios de stock/state.
         tap(() => this.analytics.requestInvalidation()),
         // Ruta de error DEDICADA: preserva `error_code` para el modal de
@@ -173,12 +210,7 @@ export class ProductsService {
         ApiResponse<OnlinePurchaseLinkResult>
       >(`${this.apiUrl}/store/products/${id}/online-purchase-link`, {})
       .pipe(
-        map((response) => {
-          if (!response.success) {
-            throw response.message || response.error || 'No se pudo generar';
-          }
-          return response.data;
-        }),
+        map(this.unwrap),
         catchError(this.handleError),
       );
   }
@@ -189,7 +221,7 @@ export class ProductsService {
         ApiResponse<Product>
       >(`${this.apiUrl}/store/products/${id}/deactivate`, {})
       .pipe(
-        map((response) => response.data),
+        map(this.unwrap),
         catchError(this.handleError),
       );
   }
@@ -209,7 +241,7 @@ export class ProductsService {
         ApiResponse<ArchiveWriteOffPlan>
       >(`${this.apiUrl}/store/products/${id}/archive-preview`)
       .pipe(
-        map((response) => response.data),
+        map(this.unwrap),
         catchError(this.handleArchiveError),
       );
   }
@@ -259,7 +291,7 @@ export class ProductsService {
         ApiResponse<ProductVariant[]>
       >(`${this.apiUrl}/store/products/${productId}/variants`)
       .pipe(
-        map((response) => response.data),
+        map(this.unwrap),
         catchError(this.handleError),
       );
   }
@@ -273,7 +305,7 @@ export class ProductsService {
         ApiResponse<ProductVariant>
       >(`${this.apiUrl}/store/products/${productId}/variants`, variant)
       .pipe(
-        map((response) => response.data),
+        map(this.unwrap),
         catchError(this.handleError),
       );
   }
@@ -287,7 +319,7 @@ export class ProductsService {
         ApiResponse<ProductVariant>
       >(`${this.apiUrl}/store/products/variants/${variantId}`, variant)
       .pipe(
-        map((response) => response.data),
+        map(this.unwrap),
         catchError(this.handleError),
       );
   }
@@ -305,7 +337,7 @@ export class ProductsService {
         ApiResponse<ProductImage[]>
       >(`${this.apiUrl}/store/products/${productId}/images`)
       .pipe(
-        map((response) => response.data),
+        map(this.unwrap),
         catchError(this.handleError),
       );
   }
@@ -319,7 +351,7 @@ export class ProductsService {
         ApiResponse<ProductImage>
       >(`${this.apiUrl}/store/products/${productId}/images`, image)
       .pipe(
-        map((response) => response.data),
+        map(this.unwrap),
         catchError(this.handleError),
       );
   }
@@ -336,7 +368,7 @@ export class ProductsService {
         ApiResponse<ProductImage>
       >(`${this.apiUrl}/store/products/${productId}/images/${imageId}/main`, {})
       .pipe(
-        map((response) => response.data),
+        map(this.unwrap),
         catchError(this.handleError),
       );
   }
@@ -366,7 +398,7 @@ export class ProductsService {
         ApiResponse<any>
       >(`${this.apiUrl}/store/products/generate-description`, data)
       .pipe(
-        map((response) => response.data),
+        map(this.unwrap),
         catchError(this.handleError),
       );
   }
@@ -401,7 +433,7 @@ export class ProductsService {
     const url = `${this.apiUrl}/store/products/stats/store/${storeId}`;
     const observable$ = this.http.get<ApiResponse<ProductStats>>(url).pipe(
       shareReplay({ bufferSize: 1, refCount: false }),
-      map((response) => response.data),
+      map(this.unwrap),
       tap(() => {
         const entry = storeProductsStatsCache.get(storeId);
         if (entry) {
@@ -426,17 +458,9 @@ export class ProductsService {
   ): Observable<PaginatedResponse<Product>> {
     const params = this.buildParams({ ...query, search });
     return this.http
-      .get<
-        ApiResponse<PaginatedResponse<Product>>
-      >(`${this.apiUrl}/store/products/search`, { params })
+      .get<ApiResponse<Product[]>>(`${this.apiUrl}/store/products/search`, { params })
       .pipe(
-        map(
-          (response: any) =>
-            ({
-              data: response.data,
-              pagination: response.meta,
-            }) as PaginatedResponse<Product>,
-        ),
+        map(this.unwrapPaginated),
         catchError(this.handleError),
       );
   }
@@ -448,16 +472,10 @@ export class ProductsService {
     const params = this.buildParams(query);
     return this.http
       .get<
-        ApiResponse<PaginatedResponse<Product>>
+        ApiResponse<Product[]>
       >(`${this.apiUrl}/store/products/category/${categoryId}`, { params })
       .pipe(
-        map(
-          (response: any) =>
-            ({
-              data: response.data,
-              pagination: response.meta,
-            }) as PaginatedResponse<Product>,
-        ),
+        map(this.unwrapPaginated),
         catchError(this.handleError),
       );
   }
@@ -469,16 +487,10 @@ export class ProductsService {
     const params = this.buildParams(query);
     return this.http
       .get<
-        ApiResponse<PaginatedResponse<Product>>
+        ApiResponse<Product[]>
       >(`${this.apiUrl}/store/products/brand/${brandId}`, { params })
       .pipe(
-        map(
-          (response: any) =>
-            ({
-              data: response.data,
-              pagination: response.meta,
-            }) as PaginatedResponse<Product>,
-        ),
+        map(this.unwrapPaginated),
         catchError(this.handleError),
       );
   }
@@ -490,16 +502,10 @@ export class ProductsService {
     const params = this.buildParams({ ...query, limit: 100 }); // Límite para bajo stock
     return this.http
       .get<
-        ApiResponse<PaginatedResponse<Product>>
+        ApiResponse<Product[]>
       >(`${this.apiUrl}/store/products/low-stock/${threshold}`, { params })
       .pipe(
-        map(
-          (response: any) =>
-            ({
-              data: response.data,
-              pagination: response.meta,
-            }) as PaginatedResponse<Product>,
-        ),
+        map(this.unwrapPaginated),
         catchError(this.handleError),
       );
   }
@@ -571,7 +577,7 @@ export class ProductsService {
         ApiResponse<any>
       >(`${this.apiUrl}/store/products/bulk/upload/file`, formData)
       .pipe(
-        map((response) => response.data),
+        map(this.unwrap),
         catchError(this.handleError),
       );
   }
@@ -582,7 +588,7 @@ export class ProductsService {
         products,
       })
       .pipe(
-        map((response) => response.data),
+        map(this.unwrap),
         catchError(this.handleError),
       );
   }
@@ -608,7 +614,7 @@ export class ProductsService {
         ApiResponse<any>
       >(`${this.apiUrl}/store/products/bulk-images/upload`, formData)
       .pipe(
-        map((response) => response.data),
+        map(this.unwrap),
         catchError(this.handleError),
       );
   }
@@ -621,7 +627,7 @@ export class ProductsService {
         ApiResponse<BulkImageAnalysisResult>
       >(`${this.apiUrl}/store/products/bulk-images/analyze`, formData)
       .pipe(
-        map((response) => response.data),
+        map(this.unwrap),
         catchError(this.handleError),
       );
   }
@@ -634,7 +640,7 @@ export class ProductsService {
         ApiResponse<BulkImageUploadResult>
       >(`${this.apiUrl}/store/products/bulk-images/upload-session`, { session_id: sessionId })
       .pipe(
-        map((response) => response.data),
+        map(this.unwrap),
         catchError(this.handleError),
       );
   }
@@ -648,7 +654,7 @@ export class ProductsService {
         ApiResponse<BulkProductAnalysisResult>
       >(`${this.apiUrl}/store/products/bulk/analyze`, formData)
       .pipe(
-        map((response) => response.data),
+        map(this.unwrap),
         catchError(this.handleError),
       );
   }
@@ -661,7 +667,7 @@ export class ProductsService {
         ApiResponse<BulkProductUploadResult>
       >(`${this.apiUrl}/store/products/bulk/upload-session`, { session_id: sessionId })
       .pipe(
-        map((response) => response.data),
+        map(this.unwrap),
         catchError(this.handleError),
       );
   }
@@ -679,7 +685,7 @@ export class ProductsService {
         ApiResponse<any[]>
       >(`${this.apiUrl}/store/products/${productId}/promotions`)
       .pipe(
-        map((response) => response.data),
+        map(this.unwrap),
         catchError(this.handleError),
       );
   }
@@ -693,7 +699,7 @@ export class ProductsService {
         ApiResponse<any[]>
       >(`${this.apiUrl}/store/products/${productId}/promotions`, { promotion_ids: promotionIds })
       .pipe(
-        map((response) => response.data),
+        map(this.unwrap),
         catchError(this.handleError),
       );
   }

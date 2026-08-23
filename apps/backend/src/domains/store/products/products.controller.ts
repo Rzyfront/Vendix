@@ -31,7 +31,6 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { Req } from '@nestjs/common';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
 import { ResponseService } from '@common/responses/response.service';
-import { VendixHttpException } from '@common/errors';
 
 @Controller('store/products')
 @UseGuards(PermissionsGuard)
@@ -48,19 +47,14 @@ export class ProductsController {
   @Post('generate-description')
   @Permissions('store:products:create')
   async generateDescription(@Body() dto: GenerateProductDescriptionDto) {
-    try {
-      const result = await this.productsService.generateDescription(dto);
-      return this.responseService.success(
-        result,
-        'Descripción generada exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al generar la descripción',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    // SIN try/catch (mismo contrato de error que `remove`/`createVariant` en este
+    // archivo). Ver `vendix-error-handling/SKILL.md` — el `AllExceptionsFilter`
+    // traduce `VendixHttpException` y los errores genéricos a su status real.
+    const result = await this.productsService.generateDescription(dto);
+    return this.responseService.success(
+      result,
+      'Descripción generada exitosamente',
+    );
   }
 
   @ApiOperation({
@@ -84,23 +78,19 @@ export class ProductsController {
     @Body() createProductDto: CreateProductDto,
     @Req() req: AuthenticatedRequest,
   ) {
-    try {
-      const result = await this.productsService.create(createProductDto);
-      return this.responseService.created(
-        result,
-        'Producto creado exitosamente',
-      );
-    } catch (error) {
-      // IVA cycle (F4): deja propagar las excepciones tipadas Vendix (p.ej.
-      // FISCAL_VAT_NOT_RESPONSIBLE_001) al AllExceptionsFilter para conservar
-      // el status 412 + error_code + details; el resto usa el legacy.
-      if (error instanceof VendixHttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al crear el producto',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    // SIN try/catch (mismo contrato de error que `remove`/`createVariant` en este
+    // archivo). `responseService.error()` RETORNA el sobre en vez de lanzarlo,
+    // así que atraparlo acá convertía cualquier rechazo (incluido un fallo de
+    // Prisma) en HTTP 201 con `success:false` enterrado en el cuerpo — el
+    // frontend celebraba un producto que nunca se persistió. Ver FB-09 +
+    // `vendix-error-handling/SKILL.md`. Las excepciones tipadas (p.ej.
+    // FISCAL_VAT_NOT_RESPONSIBLE_001) suben al `AllExceptionsFilter` que las
+    // traduce a su status real (409/412/422/500) y `error_code`.
+    const result = await this.productsService.create(createProductDto);
+    return this.responseService.created(
+      result,
+      'Producto creado exitosamente',
+    );
   }
 
   @ApiOperation({
@@ -113,28 +103,21 @@ export class ProductsController {
     @Query() query: ProductQueryDto,
     @Req() req: AuthenticatedRequest,
   ) {
-    try {
-      const result = await this.productsService.findAll(query);
-      if (result.data && result.meta) {
-        return this.responseService.paginated(
-          result.data,
-          result.meta.total,
-          result.meta.page,
-          result.meta.limit,
-          'Productos obtenidos exitosamente',
-        );
-      }
-      return this.responseService.success(
-        result,
+    // SIN try/catch — ver `create` más arriba para la justificación completa.
+    const result = await this.productsService.findAll(query);
+    if (result.data && result.meta) {
+      return this.responseService.paginated(
+        result.data,
+        result.meta.total,
+        result.meta.page,
+        result.meta.limit,
         'Productos obtenidos exitosamente',
       );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener los productos',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
     }
+    return this.responseService.success(
+      result,
+      'Productos obtenidos exitosamente',
+    );
   }
 
   @ApiOperation({
@@ -144,19 +127,12 @@ export class ProductsController {
   @Get(':id/promotions')
   @Permissions('store:products:read')
   async getProductPromotions(@Param('id', ParseIntPipe) id: number) {
-    try {
-      const result = await this.productsService.getProductPromotions(id);
-      return this.responseService.success(
-        result,
-        'Promociones del producto obtenidas exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener las promociones del producto',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    // SIN try/catch — ver `create` más arriba.
+    const result = await this.productsService.getProductPromotions(id);
+    return this.responseService.success(
+      result,
+      'Promociones del producto obtenidas exitosamente',
+    );
   }
 
   @ApiOperation({
@@ -169,22 +145,15 @@ export class ProductsController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateProductPromotionsDto,
   ) {
-    try {
-      const result = await this.productsService.updateProductPromotions(
-        id,
-        dto.promotion_ids,
-      );
-      return this.responseService.success(
-        result,
-        'Promociones del producto actualizadas exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al actualizar las promociones del producto',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    // SIN try/catch — ver `create` más arriba.
+    const result = await this.productsService.updateProductPromotions(
+      id,
+      dto.promotion_ids,
+    );
+    return this.responseService.success(
+      result,
+      'Promociones del producto actualizadas exitosamente',
+    );
   }
 
   /**
@@ -209,19 +178,12 @@ export class ProductsController {
   @Get('ids')
   @Permissions('store:products:read')
   async findIds(@Query() query: ProductQueryDto) {
-    try {
-      const result = await this.productsService.findIds(query);
-      return this.responseService.success(
-        result,
-        'IDs de productos obtenidos exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener los IDs de productos',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    // SIN try/catch — ver `create` más arriba.
+    const result = await this.productsService.findIds(query);
+    return this.responseService.success(
+      result,
+      'IDs de productos obtenidos exitosamente',
+    );
   }
 
   @ApiOperation({
@@ -231,19 +193,12 @@ export class ProductsController {
   @Get(':id')
   @Permissions('store:products:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
-    try {
-      const result = await this.productsService.findOne(id);
-      return this.responseService.success(
-        result,
-        'Producto obtenido exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener el producto',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    // SIN try/catch — ver `create` más arriba.
+    const result = await this.productsService.findOne(id);
+    return this.responseService.success(
+      result,
+      'Producto obtenido exitosamente',
+    );
   }
 
   @ApiOperation({
@@ -253,19 +208,12 @@ export class ProductsController {
   @Get('store/:storeId')
   @Permissions('store:products:read')
   async findByStore(@Param('storeId', ParseIntPipe) storeId: number) {
-    try {
-      const result = await this.productsService.getProductsByStore(storeId);
-      return this.responseService.success(
-        result,
-        'Productos de la tienda obtenidos exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener los productos de la tienda',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    // SIN try/catch — ver `create` más arriba.
+    const result = await this.productsService.getProductsByStore(storeId);
+    return this.responseService.success(
+      result,
+      'Productos de la tienda obtenidos exitosamente',
+    );
   }
 
   @ApiOperation({
@@ -278,19 +226,12 @@ export class ProductsController {
     @Param('slug') slug: string,
     @Param('storeId', ParseIntPipe) storeId: number,
   ) {
-    try {
-      const result = await this.productsService.findBySlug(storeId, slug);
-      return this.responseService.success(
-        result,
-        'Producto obtenido exitosamente por slug',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener el producto por slug',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    // SIN try/catch — ver `create` más arriba.
+    const result = await this.productsService.findBySlug(storeId, slug);
+    return this.responseService.success(
+      result,
+      'Producto obtenido exitosamente por slug',
+    );
   }
 
   @ApiOperation({
@@ -303,21 +244,12 @@ export class ProductsController {
     @Param('id', ParseIntPipe) id: number,
     @Body() updateProductDto: UpdateProductDto,
   ) {
-    try {
-      const result = await this.productsService.update(id, updateProductDto);
-      return this.responseService.updated(
-        result,
-        'Producto actualizado exitosamente',
-      );
-    } catch (error) {
-      // IVA cycle (F4): propaga la excepción tipada del gate al filtro.
-      if (error instanceof VendixHttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al actualizar el producto',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    // SIN try/catch — ver `create` más arriba para la justificación completa.
+    const result = await this.productsService.update(id, updateProductDto);
+    return this.responseService.updated(
+      result,
+      'Producto actualizado exitosamente',
+    );
   }
 
   @ApiOperation({
@@ -327,19 +259,12 @@ export class ProductsController {
   @Post(':id/online-purchase-link')
   @Permissions('store:products:update')
   async generateOnlinePurchaseLink(@Param('id', ParseIntPipe) id: number) {
-    try {
-      const result = await this.productsService.generateOnlinePurchaseLink(id);
-      return this.responseService.success(
-        result,
-        'Link y QR de compra online generados exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al generar el link y QR de compra online',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    // SIN try/catch — ver `create` más arriba.
+    const result = await this.productsService.generateOnlinePurchaseLink(id);
+    return this.responseService.success(
+      result,
+      'Link y QR de compra online generados exitosamente',
+    );
   }
 
   @ApiOperation({
@@ -349,19 +274,12 @@ export class ProductsController {
   @Patch(':id/deactivate')
   @Permissions('store:products:delete')
   async deactivate(@Param('id', ParseIntPipe) id: number) {
-    try {
-      await this.productsService.deactivate(id);
-      return this.responseService.success(
-        null,
-        'Producto desactivado exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al desactivar el producto',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    // SIN try/catch — ver `create` más arriba.
+    await this.productsService.deactivate(id);
+    return this.responseService.success(
+      null,
+      'Producto desactivado exitosamente',
+    );
   }
 
   /**
@@ -511,19 +429,12 @@ export class ProductsController {
     @Param('id', ParseIntPipe) productId: number,
     @Body() imageDto: ProductImageDto,
   ) {
-    try {
-      const result = await this.productsService.addImage(productId, imageDto);
-      return this.responseService.created(
-        result,
-        'Imagen de producto agregada exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al agregar la imagen del producto',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    // SIN try/catch — ver `create` más arriba.
+    const result = await this.productsService.addImage(productId, imageDto);
+    return this.responseService.created(
+      result,
+      'Imagen de producto agregada exitosamente',
+    );
   }
 
   @ApiOperation({
@@ -533,18 +444,11 @@ export class ProductsController {
   @Delete('images/:imageId')
   @Permissions('store:products:update')
   async removeImage(@Param('imageId', ParseIntPipe) imageId: number) {
-    try {
-      await this.productsService.removeImage(imageId);
-      return this.responseService.deleted(
-        'Imagen de producto eliminada exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al eliminar la imagen del producto',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    // SIN try/catch — ver `create` más arriba.
+    await this.productsService.removeImage(imageId);
+    return this.responseService.deleted(
+      'Imagen de producto eliminada exitosamente',
+    );
   }
 
   @ApiOperation({
@@ -554,18 +458,11 @@ export class ProductsController {
   @Get('stats/store/:storeId')
   @Permissions('store:products:read')
   async getProductStats(@Param('storeId', ParseIntPipe) storeId: number) {
-    try {
-      const result = await this.productsService.getProductStats(storeId);
-      return this.responseService.success(
-        result,
-        'Estadísticas de productos obtenidas exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener las estadísticas de productos',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    // SIN try/catch — ver `create` más arriba.
+    const result = await this.productsService.getProductStats(storeId);
+    return this.responseService.success(
+      result,
+      'Estadísticas de productos obtenidas exitosamente',
+    );
   }
 }
