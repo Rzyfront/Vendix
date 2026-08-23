@@ -849,6 +849,36 @@ export const DIAN_RULES = {
       },
     },
   },
+  header_tax_exclusive: {
+    requirement:
+      'La base imponible del documento debe ser la suma de las bases ' +
+      'imponibles que declaran sus líneas de detalle. Una línea que omite su ' +
+      'grupo de tributos no declara base, así que no puede sumar en la cabecera.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAU04',
+        dian_message:
+          'Base Imponible es distinto a la suma de los valores de las bases imponibles de todas líneas de detalle.',
+        xpath: '…//cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount',
+        annex_line: 22432,
+      },
+      CreditNote: {
+        id: 'CAU04',
+        dian_message:
+          'Base Imponible, es distinto a la suma de los valores de las bases imponibles de todas líneas de detalle.',
+        xpath: '…//LegalMonetaryTotal/cbc:TaxExclusiveAmount',
+        annex_line: 26177,
+      },
+      DebitNote: {
+        id: 'DAU04',
+        dian_message:
+          'Base Imponible, es distinto a la suma de los valores de las bases imponibles de todas líneas de detalle.',
+        xpath: '…//cac:RequestedMonetaryTotal/cbc:TaxExclusiveAmount',
+        annex_line: 29553,
+      },
+    },
+  },
   header_tax_inclusive: {
     requirement:
       'El valor bruto más tributos debe ser el valor bruto más la suma de los ' +

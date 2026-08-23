@@ -61,9 +61,21 @@ describe('FAU04 — la base de la cabecera es la que declaran las líneas', () =
   }
 
   /**
-   * Emite líneas + totales en el MISMO documento y devuelve el XML junto con los
-   * importes del grupo de totales. El orden importa poco para estas dos reglas,
-   * pero se emite como el emisor real: totales antes de líneas.
+   * Emite el documento COMPLETO —grupos de tributos de cabecera, totales y
+   * líneas— y devuelve el XML junto con los importes del grupo de totales.
+   *
+   * ## Por qué llama a `buildTaxTotals`
+   *
+   * La versión anterior emitía sólo totales y líneas, porque FAU04 no necesita
+   * los grupos de cabecera. Al entrar FAU06 al validador eso dejó de valer: esa
+   * regla suma justamente `//cac:TaxTotal[not(ancestor::cac:InvoiceLine)]`, así
+   * que un fixture sin grupos de cabecera declara 0,00 de tributo y hace fallar
+   * un documento que el emisor real produce bien. El orden es el del emisor
+   * (`ubl-invoice.builder.ts`): `TaxTotal` → `LegalMonetaryTotal` → líneas.
+   *
+   * Y con eso el fixture cubre las CUATRO identidades de totales de una vez, que
+   * es lo que hace falta: los dos lados de cada comparación los escriben
+   * funciones distintas, y sólo el documento entero delata el desacuerdo.
    */
   function emit(data: {
     discount_amount: string;
@@ -72,6 +84,7 @@ describe('FAU04 — la base de la cabecera es la que declaran las líneas', () =
     taxes: ProviderInvoiceTax[];
   }): { xml: string; totals: Record<string, string> } {
     const doc = createInvoice();
+    UblCommonBuilder.buildTaxTotals(doc, data.taxes, 'COP');
     UblCommonBuilder.buildLegalMonetaryTotal(doc, data, 'COP');
     UblCommonBuilder.buildInvoiceLines(doc, data.items, data.taxes, 'COP');
     const xml = doc.end({ prettyPrint: false });
@@ -203,6 +216,12 @@ describe('FAU04 — la base de la cabecera es la que declaran las líneas', () =
     // `cbc:TaxableAmount`, así que la Σ de línea es 2000 y la cabecera tiene que
     // declarar 2000 para cuadrar. "Corregir" el doble conteo a 1000 produciría el
     // rechazo — la regla no admite la interpretación contable.
+    //
+    // Los DOS tributos van también en `taxes`, no sólo en la línea. Antes iba
+    // `[tax({})]` —sólo el IVA— y el documento declaraba 270,00 de tributo en el
+    // total con un único grupo de cabecera de 190,00: un rechazo FAU06 que
+    // ninguna aserción de este archivo podía ver, porque el fixture no emitía
+    // los grupos de cabecera.
     const { xml, totals } = emit({
       discount_amount: '0.00',
       tax_amount: '270.00',
@@ -223,11 +242,84 @@ describe('FAU04 — la base de la cabecera es la que declaran las líneas', () =
           ],
         }),
       ],
-      taxes: [tax({})],
+      taxes: [
+        tax({}),
+        tax({
+          tax_name: 'INC',
+          tax_rate: '8.00',
+          taxable_amount: '1000.00',
+          tax_amount: '80.00',
+          tax_type: 'inc',
+        }),
+      ],
     });
 
     expect(totals.TaxExclusiveAmount).toBe('2000.00');
+    expect(totals.TaxInclusiveAmount).toBe('1270.00');
     expect(lineTaxableSum(xml)).toBe(2000);
+    expectClean(xml);
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // FAU06 — la grieta entre el escalar y el arreglo
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /**
+   * `buildMonetaryTotal` calcula `TaxInclusiveAmount` con `data.tax_amount` —un
+   * ESCALAR— mientras `buildTaxTotals` publica los grupos de cabecera desde
+   * `data.taxes` —un ARREGLO—. Son dos entradas independientes del mismo hecho,
+   * y nada dentro del emisor las obliga a coincidir: la única compuerta que ve
+   * la divergencia es FAU06 sobre el XML armado.
+   *
+   * Este par de casos fija ese contrato. No es hipotético: el fixture de los dos
+   * tributos de arriba llevaba exactamente esa divergencia (270,00 en el escalar,
+   * 190,00 en el arreglo) y pasaba en verde.
+   */
+  it('rechaza el escalar que no cuadra con los grupos de cabecera', () => {
+    const { xml, totals } = emit({
+      discount_amount: '0.00',
+      // 270,00 en el total, pero abajo sólo se declara el grupo de IVA (190,00).
+      tax_amount: '270.00',
+      items: [
+        line({
+          unit_price: '1000.00',
+          total_amount: '1190.00',
+          tax_amount: '190.00',
+          taxes: [tax({})],
+        }),
+      ],
+      taxes: [tax({})],
+    });
+
+    expect(totals.TaxInclusiveAmount).toBe('1270.00');
+
+    const result = DianTotalsValidator.validate(xml);
+
+    expect(result.violations.map((v) => v.rule)).toEqual(['FAU06']);
+    expect(result.violations[0].details).toMatchObject({
+      declared: '1270.00',
+      line_extension: '1000.00',
+      header_tax_amount: '190.00',
+      expected: '1190.00',
+    });
+  });
+
+  it('acepta el mismo documento cuando el escalar es la Σ del arreglo', () => {
+    const { xml, totals } = emit({
+      discount_amount: '0.00',
+      tax_amount: '190.00',
+      items: [
+        line({
+          unit_price: '1000.00',
+          total_amount: '1190.00',
+          tax_amount: '190.00',
+          taxes: [tax({})],
+        }),
+      ],
+      taxes: [tax({})],
+    });
+
+    expect(totals.TaxInclusiveAmount).toBe('1190.00');
     expectClean(xml);
   });
 });

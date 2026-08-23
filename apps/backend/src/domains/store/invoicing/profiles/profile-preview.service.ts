@@ -948,7 +948,8 @@ export class ProfilePreviewService {
   }
 
   /**
-   * FAU04 y FAS01b — **la compuerta real**, no una imitación.
+   * FAS01b y las cuatro identidades de totales — **la compuerta real**, no una
+   * imitación.
    *
    * `DianTotalsValidator` es el validador que corre en `signXml` justo antes de
    * firmar, en el camino de emisión de verdad. Llamarlo desde acá es el punto
@@ -981,7 +982,7 @@ export class ProfilePreviewService {
       // regla se hubiera cumplido.
       return [
         {
-          rule: 'FAU04/FAS01b',
+          rule: 'FAS01b + AU02/AU04/AU06/AU14',
           passed: true,
           severity: 'info',
           code: null,
@@ -1002,13 +1003,17 @@ export class ProfilePreviewService {
     if (result.valid) {
       return [
         {
-          rule: 'FAU04/FAS01b',
+          rule: 'FAS01b + AU02/AU04/AU06/AU14',
           passed: true,
           severity: 'blocker',
           code: null,
           message:
-            `La base imponible de cabecera coincide con la suma de las bases que declaran las líneas, ` +
-            'y ninguna totalización aparece sobre un documento sin impuestos.',
+            'Las cuatro identidades de totales cierran: el bruto de cabecera es ' +
+            'la suma de las líneas, la base imponible es la que declaran las ' +
+            'líneas, el bruto más tributos es el bruto más los tributos de ' +
+            'cabecera, y el valor a pagar sale de esa cifra menos el descuento ' +
+            'más el cargo. Y ninguna totalización aparece sobre un documento sin ' +
+            'impuestos.',
           details: { root: result.root },
         },
       ];
@@ -1070,32 +1075,56 @@ export class ProfilePreviewService {
   }
 
   /**
-   * Las identidades de `cac:LegalMonetaryTotal` que NADIE MÁS comprueba.
+   * DESGLOSE de los totales de cabecera. **No dictamina: describe.**
    *
-   * `TaxExclusiveAmount` no está acá: lo valida `DianTotalsValidator` (regla
-   * FAU04 real, contra las bases que declaran LAS LÍNEAS), y esa es la compuerta
-   * que de verdad corre antes de firmar. Ver `checkDianTotals`.
+   * ## Por qué dejó de dictaminar
    *
-   * ## Por qué son tres y no una
+   * Esta función comprobaba a mano tres identidades, y las tres estaban mal de
+   * una forma que sólo se ve al lado del anexo:
    *
-   * En un documento AIU los tres totales de cabecera valen COSAS DISTINTAS, y
-   * ésa es exactamente la parte que un régimen de base segregada rompe:
+   * · Llamaba **`FAU14`** a «cabecera = Σ líneas». Esa identidad es **FAU02**;
+   *   FAU14 es el valor a pagar. Un operador que recibiera el rechazo real
+   *   buscaría la regla equivocada en esta pantalla.
+   * · Llamaba **`TOTALES-COHERENCIA`** —un identificador inventado, que la DIAN
+   *   nunca devuelve— a lo que son **FAU06** y **FAU14**.
+   * · Comparaba con `.equals()`, es decir a la última cifra decimal, cuando las
+   *   reglas comparan con `round()` a peso entero. Un truncado hoja por hoja de
+   *   40 centavos —normal en un documento con varias líneas— producía un
+   *   BLOQUEO FALSO sobre un documento que la DIAN acepta.
+   * · Exigía `PayableAmount == TaxInclusiveAmount`, que sólo vale sin descuento
+   *   global. FAU14 es `TaxInclusive − AllowanceTotal + ChargeTotal`, así que
+   *   todo perfil con descuento de documento se reportaba como defectuoso.
+   *
+   * Este archivo ya advierte, sobre otra regla, que «un falso bloqueo en esta
+   * pantalla enseña al operador a ignorar los avisos, que es peor que no
+   * tenerlos». Era el caso.
+   *
+   * ## Quién dictamina ahora
+   *
+   * `checkDianTotals`, que corre `DianTotalsValidator` —la MISMA compuerta de
+   * `signXml`— y cubre las cuatro identidades (`AU02`, `AU04`, `AU06`, `AU14`)
+   * más `FAS01b`, con los identificadores resueltos del catálogo del anexo y con
+   * la semántica de `round()`. Un predicado, una implementación: dos copias de la
+   * misma regla divergen, y la divergencia es invisible al spec que prueba una
+   * sola de las dos.
+   *
+   * ## Qué aporta entonces este desglose
+   *
+   * Las cifras, que el veredicto no muestra. En un documento AIU los totales de
+   * cabecera valen COSAS DISTINTAS y ésa es justo la parte que un régimen de base
+   * segregada rompe:
    *
    * · `cbc:LineExtensionAmount` = **el valor del contrato** = Σ de las líneas.
    * · `cbc:TaxExclusiveAmount` = **la base gravable** = Σ de los
    *   `cac:TaxSubtotal/cbc:TaxableAmount`. En AIU es sólo la porción que grava —
    *   los 10 M de un contrato de 100 M—, NO la suma de las líneas.
-   * · `cbc:TaxInclusiveAmount` = `LineExtensionAmount + TaxAmount`. Se apoya en
-   *   el valor del contrato, no en la base gravable: sumarle el impuesto a la
-   *   base daría 11,9 M donde el cliente debe 101,9 M.
+   * · `cbc:TaxInclusiveAmount` = `LineExtensionAmount + tributos de CABECERA`. Se
+   *   apoya en el valor del contrato, no en la base gravable: sumarle el impuesto
+   *   a la base daría 11,9 M donde el cliente debe 101,9 M.
    *
-   * Esta separación se verificó contra el XML que el builder produce hoy, y la
-   * primera versión de esta comprobación la tenía mal: comparaba
-   * `TaxExclusiveAmount` con la suma de líneas y reportaba un descuadre
-   * inexistente sobre un documento correcto. Se deja escrito porque el error es
-   * atractivo —el nombre del campo dice «total sin impuestos»— y porque un falso
-   * bloqueo en esta pantalla enseña al operador a ignorar los avisos, que es peor
-   * que no tenerlos.
+   * Se deja escrito porque el error es atractivo —el nombre del campo dice «total
+   * sin impuestos»— y porque ver las cinco cifras juntas es lo que permite
+   * entender un rechazo en vez de sólo leerlo.
    */
   private checkMonetaryTotals(doc: any): ProfilePreviewValidation[] {
     const lines = this.elements(doc, 'InvoiceLine');
@@ -1112,56 +1141,51 @@ export class ProfilePreviewService {
         acc.plus(toDecimal(this.textOf(line, 'LineExtensionAmount'))),
       toDecimal(0),
     );
+    const header_tax_amount = header_taxes.reduce(
+      (acc, tax_total) =>
+        acc.plus(toDecimal(this.textOf(tax_total, 'TaxAmount'))),
+      toDecimal(0),
+    );
 
+    const declared_tax_exclusive = toDecimal(
+      this.textOf(totals, 'TaxExclusiveAmount'),
+    );
     const declared_tax_inclusive = toDecimal(
       this.textOf(totals, 'TaxInclusiveAmount'),
     );
-    const declared_tax_amount = header_taxes.reduce(
-      (acc, tax_total) => acc.plus(toDecimal(this.textOf(tax_total, 'TaxAmount'))),
-      toDecimal(0),
+    const declared_allowance = toDecimal(
+      this.textOf(totals, 'AllowanceTotalAmount'),
     );
-    const expected_tax_inclusive = declared_line_extension.plus(
-      declared_tax_amount,
-    );
+    const declared_charge = toDecimal(this.textOf(totals, 'ChargeTotalAmount'));
     const declared_payable = toDecimal(this.textOf(totals, 'PayableAmount'));
-
-    const fau14_ok = declared_line_extension.equals(sum_of_lines);
-    const coherent_ok =
-      declared_tax_inclusive.equals(expected_tax_inclusive) &&
-      declared_payable.equals(declared_tax_inclusive);
 
     return [
       {
-        rule: 'FAU14',
-        passed: fau14_ok,
-        severity: 'blocker',
+        rule: 'Totales del documento',
+        passed: true,
+        severity: 'info',
         code: null,
-        message: fau14_ok
-          ? `El valor del contrato (${dianAmount(declared_line_extension)}) es exactamente la suma de las ${lines.length} líneas.`
-          : `El valor del contrato declarado (${dianAmount(declared_line_extension)}) no coincide con la ` +
-            `suma de las líneas (${dianAmount(sum_of_lines)}). La DIAN recomputa este total desde el ` +
-            'XML y rechaza el descuadre.',
+        message:
+          `Valor del contrato ${dianAmount(declared_line_extension)} ` +
+          `(Σ de ${lines.length} línea(s): ${dianAmount(sum_of_lines)}) · ` +
+          `base gravable ${dianAmount(declared_tax_exclusive)} · ` +
+          `tributos de cabecera ${dianAmount(header_tax_amount)} · ` +
+          `bruto más tributos ${dianAmount(declared_tax_inclusive)} · ` +
+          `a pagar ${dianAmount(declared_payable)}. ` +
+          'Que el valor del contrato y la base gravable difieran es el régimen ' +
+          'AIU funcionando, no un descuadre. El veredicto sobre estas cifras lo ' +
+          'da la compuerta real (AU02, AU04, AU06, AU14), más arriba en este ' +
+          'mismo informe.',
         details: {
           line_extension_amount: dianAmount(declared_line_extension),
           sum_of_lines: dianAmount(sum_of_lines),
           line_count: lines.length,
-        },
-      },
-      {
-        rule: 'TOTALES-COHERENCIA',
-        passed: coherent_ok,
-        severity: 'blocker',
-        code: null,
-        message: coherent_ok
-          ? `El total con impuestos (${dianAmount(declared_tax_inclusive)}) es el valor del contrato más el impuesto, y el total a pagar coincide con él.`
-          : `El total con impuestos declarado (${dianAmount(declared_tax_inclusive)}) no es el valor del ` +
-            `contrato más el impuesto (${dianAmount(expected_tax_inclusive)}), o el total a pagar ` +
-            `(${dianAmount(declared_payable)}) no coincide con él. Es la cifra que el cliente paga.`,
-        details: {
+          tax_exclusive_amount: dianAmount(declared_tax_exclusive),
+          header_tax_amount: dianAmount(header_tax_amount),
           tax_inclusive_amount: dianAmount(declared_tax_inclusive),
-          expected: dianAmount(expected_tax_inclusive),
+          allowance_total_amount: dianAmount(declared_allowance),
+          charge_total_amount: dianAmount(declared_charge),
           payable_amount: dianAmount(declared_payable),
-          header_tax_amount: dianAmount(declared_tax_amount),
         },
       },
     ];

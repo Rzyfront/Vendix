@@ -1677,17 +1677,27 @@ export class UblCommonBuilder {
    * The defect this replaces: the header published the GROSS subtotal as
    * `LineExtensionAmount` while every line published its NET amount
    * (`qty × price − discount`), so any invoice carrying a discount broke rule
-   * `FAU14` (header ≠ Σ lines) and was rejected. `TaxExclusiveAmount` carried the
+   * `FAU02` (header ≠ Σ lines) and was rejected. `TaxExclusiveAmount` carried the
    * same gross value even though the taxable base is net, and
    * `AllowanceTotalAmount` restated a discount the lines had already applied.
    *
    * Invariants enforced here:
    * - `LineExtensionAmount` = Σ line `LineExtensionAmount` (same function, so
-   *   the two cannot drift) — rule `FAU14`.
-   * - `TaxExclusiveAmount` = base gravable REALMENTE DECLARADA — ver abajo.
-   * - `TaxInclusiveAmount` = Σ líneas + tributos.
-   * - `PayableAmount` = `TaxInclusiveAmount − AllowanceTotalAmount`, computed
-   *   rather than copied, so the identity holds by construction.
+   *   the two cannot drift) — rule `FAU02`.
+   * - `TaxExclusiveAmount` = base gravable REALMENTE DECLARADA — rule `FAU04`,
+   *   ver abajo.
+   * - `TaxInclusiveAmount` = `LineExtensionAmount + data.tax_amount` — rule
+   *   `FAU06`. ⚠️ `data.tax_amount` es un ESCALAR y los grupos de tributos de
+   *   cabecera los publica `buildTaxTotals` desde `data.taxes`, un ARREGLO: son
+   *   dos entradas independientes del mismo hecho y nada acá las obliga a
+   *   coincidir. FAU06 suma `//cac:TaxTotal[not(ancestor::cac:InvoiceLine)]`, es
+   *   decir el arreglo, así que un escalar que no sea su Σ es rechazo. Lo
+   *   comprueba `DianTotalsValidator` sobre el XML armado, que es el único sitio
+   *   donde las dos entradas ya se ven juntas.
+   * - `PayableAmount` = `TaxInclusiveAmount − AllowanceTotalAmount + ChargeTotalAmount`
+   *   (el cargo total no se emite hoy, así que vale 0,00), computed rather than
+   *   copied, so the identity holds by construction — rule `FAU14`. El ANTICIPO
+   *   no se resta: el anexo liga `$PrepaidAmount` y no lo usa.
    *
    * ## `TaxExclusiveAmount` NO es el bruto de líneas
    *
