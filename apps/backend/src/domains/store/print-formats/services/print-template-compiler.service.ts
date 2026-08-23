@@ -130,10 +130,22 @@ export class PrintTemplateCompilerService {
     // 3. Procesar tokens simples y helpers
     result = this.processTokens(result, data, usedTokens);
 
+    // 4. Sanitizar HTML contra inyecciones de scripts y handlers maliciosos
+    result = this.sanitizeHtml(result);
+
     return {
       compiled: result,
       usedTokens: Array.from(new Set(usedTokens)),
     };
+  }
+
+  private sanitizeHtml(html: string): string {
+    if (!html) return '';
+    return html
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+      .replace(/\s*on\w+\s*=\s*(['"]).*?\1/gi, '')
+      .replace(/\s*on\w+\s*=\s*[^>\s]+/gi, '')
+      .replace(/javascript:/gi, '');
   }
 
   private compileInner(template: string, data: any, usedTokens: string[]): string {

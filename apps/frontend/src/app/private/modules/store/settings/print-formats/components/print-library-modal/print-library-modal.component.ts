@@ -60,9 +60,9 @@ import { PrintTemplate } from '../../../../../../../core/models/print-formats.mo
                   <app-button
                     variant="primary"
                     size="sm"
-                    (btnClick)="applyTemplate(tpl.id)"
+                    (clicked)="applyTemplate(tpl.id)"
                   >
-                    <app-icon name="check" [size]="14" class="mr-1"></app-icon>
+                    <app-icon name="download" [size]="14" class="mr-1.5"></app-icon>
                     Usar esta Plantilla
                   </app-button>
                 </div>
@@ -73,7 +73,7 @@ import { PrintTemplate } from '../../../../../../../core/models/print-formats.mo
       </div>
 
       <div slot="footer" class="flex justify-end">
-        <app-button variant="outline" size="sm" (btnClick)="close()">Cerrar</app-button>
+        <app-button variant="outline" size="sm" (clicked)="close()">Cerrar</app-button>
       </div>
     </app-modal>
   `,

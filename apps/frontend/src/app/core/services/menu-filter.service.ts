@@ -246,6 +246,11 @@ export class MenuFilterService {
       'settings',
     ],
     'Precios y Tarifas': 'settings_price_tiers',
+    'Formatos de Impresión': [
+      'settings_print_formats',
+      'settings_general',
+      'settings',
+    ],
     Apariencia: 'settings_appearance',
     Seguridad: 'settings_security',
     // 'Dominios' supports both ORG_ADMIN (domains) and STORE_ADMIN (settings_domains)
