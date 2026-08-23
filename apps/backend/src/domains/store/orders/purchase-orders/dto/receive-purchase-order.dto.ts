@@ -74,7 +74,7 @@ export class ReceiveItemDto {
    */
   @IsOptional()
   @IsNumber()
-  @Min(0)
+  @Min(0, { message: 'El margen de ganancia no puede ser negativo' })
   new_profit_margin?: number;
 }
 
