@@ -40,6 +40,30 @@ export interface ApiResponse<T> {
   message?: string;
 }
 
+/**
+ * Estado de resolución de la moneda del tenant. Es una máquina de 3 estados,
+ * NO un booleano, porque "todavía no sé" y "ya intenté y no hay" exigen
+ * pinturas distintas (ver `format()`):
+ *
+ * - `pending`    — nadie ha terminado un intento de carga todavía (o hay uno
+ *                  en vuelo). NO sabemos la moneda: no se pinta cifra.
+ * - `resolved`   — `currentCurrency()` trae la fila real de la tienda.
+ * - `unresolved` — un intento TERMINÓ sin moneda (sin sesión, sin tienda, o el
+ *                  backend falló). Aquí sí degradamos al fallback histórico:
+ *                  esconder el dinero para siempre sería peor que mostrarlo con
+ *                  un formato genérico.
+ */
+export type CurrencyResolutionState = 'pending' | 'resolved' | 'unresolved';
+
+/**
+ * Marcador que ocupa el hueco de una cifra mientras la moneda del tenant no se
+ * conoce. Deliberadamente NO es `'—'`: ese guion ya significa "no aplica /
+ * sin valor" en el resto de la app (`dateOnly()`, celdas vacías de tabla), y
+ * confundir "no hay dato" con "todavía no sé formatearlo" es justo el tipo de
+ * ambigüedad que este arreglo elimina.
+ */
+export const CURRENCY_PENDING_PLACEHOLDER = '…';
+
 // ============================================================================
 // CURRENCY SERVICE - Servicio global con Signals
 // ============================================================================
@@ -60,6 +84,7 @@ export class CurrencyFormatService {
   // Signals para estado reactivo
   private currentCurrencySignal = signal<Currency | null>(null);
   private loadingSignal = signal<boolean>(false);
+  private resolutionSignal = signal<CurrencyResolutionState>('pending');
   private lastFetchTime = 0;
   private activeCurrencies: Currency[] | null = null;
   private activeCurrenciesFetchTime = 0;
@@ -68,6 +93,7 @@ export class CurrencyFormatService {
   // Signals públicos de solo lectura
   readonly currentCurrency = this.currentCurrencySignal.asReadonly();
   readonly loading = this.loadingSignal.asReadonly();
+  readonly resolution = this.resolutionSignal.asReadonly();
 
   // Computed: moneda formateada (por si se necesita en código TS)
   readonly currencySymbol = computed(
@@ -84,6 +110,19 @@ export class CurrencyFormatService {
     () => this.currentCurrency()?.format_style || 'comma_dot',
   );
 
+  constructor() {
+    // AUTO-ARRANQUE. Hasta ahora el único que disparaba la carga era el
+    // constructor del `CurrencyPipe`, así que una pantalla que consume la
+    // moneda SIN el pipe —llamando a `format()` desde un helper de plantilla,
+    // como `money()` en `purchase-order-detail.component.ts`— podía no pedirla
+    // nunca. Con el hueco de 'pending' eso ya no es "formato feo": sería
+    // quedarse sin cifras. Quien inyecta este servicio pide moneda, punto.
+    //
+    // En microtarea para NO escribir signals dentro del ciclo de detección de
+    // cambios que construyó al primer consumidor.
+    queueMicrotask(() => void this.loadCurrency());
+  }
+
   /**
    * Carga la moneda configurada en la tienda
    * @param force - Forza recarga ignorando caché
@@ -98,6 +137,10 @@ export class CurrencyFormatService {
       return this.currentCurrency();
     }
 
+    // Ya hay un intento en vuelo. Salir SIN tocar `resolution`: seguimos en
+    // 'pending' y quien arrancó el intento publicará el desenlace. Marcar
+    // 'unresolved' aquí haría que el primer `| currency` de la pantalla
+    // degradara al fallback justo cuando la respuesta buena venía en camino.
     if (this.loading()) {
       return null;
     }
@@ -105,52 +148,89 @@ export class CurrencyFormatService {
     this.loadingSignal.set(true);
 
     try {
-      // 1. Try to get currency from domain config (injected at boot, no HTTP needed)
-      const domainCurrency =
-        this.tenantFacade.getCurrentDomainConfig()?.customConfig?.currency;
-      if (domainCurrency) {
-        this.currentCurrencySignal.set(domainCurrency);
-        this.lastFetchTime = Date.now();
-        return domainCurrency;
+      const currency = await this.resolveCurrency(force);
+      if (!currency) {
+        this.markUnresolved();
       }
-
-      // 2. Fallback: fetch via HTTP (for store-admin context where domain config may lack currency)
-      // Only attempt /store/settings if the user is authenticated AND has a store context
-      if (!this.hasValidAuthState()) {
-        return null;
-      }
-
-      const cachedCurrencyCode = this.getCurrencyCodeFromAuthState();
-      if (cachedCurrencyCode) {
-        return this.loadCurrencyForCode(cachedCurrencyCode, force);
-      }
-
-      const storeId = this.tenantFacade.getCurrentStoreId();
-      if (!storeId) {
-        return null;
-      }
-
-      const settingsResponse = await firstValueFrom(
-        this.http.get<ApiResponse<StoreSettings>>(
-          `${environment.apiUrl}/store/settings`,
-        ),
-      );
-
-      if (
-        !settingsResponse.success ||
-        !settingsResponse.data?.general?.currency
-      ) {
-        return null;
-      }
-
-      const currencyCode = settingsResponse.data.general.currency;
-
-      return this.loadCurrencyForCode(currencyCode, force);
+      return currency;
     } catch (error) {
       console.error('[CurrencyFormat] Error fetching currency:', error);
+      this.markUnresolved();
       return null;
     } finally {
       this.loadingSignal.set(false);
+    }
+  }
+
+  /**
+   * Cascada de resolución de la moneda. Devuelve `null` cuando el intento
+   * terminó sin moneda; el estado `resolution` lo publica `loadCurrency()`,
+   * que es el único dueño del ciclo de vida del intento.
+   */
+  private async resolveCurrency(force: boolean): Promise<Currency | null> {
+    // 1. Try to get currency from domain config (injected at boot, no HTTP needed)
+    const domainCurrency =
+      this.tenantFacade.getCurrentDomainConfig()?.customConfig?.currency;
+    if (domainCurrency) {
+      this.setCurrency(domainCurrency);
+      return domainCurrency;
+    }
+
+    // 2. Fallback: fetch via HTTP (for store-admin context where domain config may lack currency)
+    // Only attempt /store/settings if the user is authenticated AND has a store context
+    if (!this.hasValidAuthState()) {
+      return null;
+    }
+
+    const cachedCurrencyCode = this.getCurrencyCodeFromAuthState();
+    if (cachedCurrencyCode) {
+      return this.loadCurrencyForCode(cachedCurrencyCode, force);
+    }
+
+    const storeId = this.tenantFacade.getCurrentStoreId();
+    if (!storeId) {
+      return null;
+    }
+
+    const settingsResponse = await firstValueFrom(
+      this.http.get<ApiResponse<StoreSettings>>(
+        `${environment.apiUrl}/store/settings`,
+      ),
+    );
+
+    if (
+      !settingsResponse.success ||
+      !settingsResponse.data?.general?.currency
+    ) {
+      return null;
+    }
+
+    return this.loadCurrencyForCode(
+      settingsResponse.data.general.currency,
+      force,
+    );
+  }
+
+  /**
+   * Publica la moneda resuelta. Único punto que escribe
+   * `currentCurrencySignal`: escribirlo en varios sitios fue lo que dejó
+   * `resolution` desincronizado del valor.
+   */
+  private setCurrency(currency: Currency): void {
+    this.currentCurrencySignal.set(currency);
+    this.lastFetchTime = Date.now();
+    this.resolutionSignal.set('resolved');
+  }
+
+  /**
+   * Un intento TERMINÓ sin moneda. Degrada a 'unresolved' para que `format()`
+   * deje de esconder cifras y vuelva al fallback histórico. No pisa un
+   * 'resolved' previo: una recarga fallida no debe borrar la moneda que ya
+   * teníamos buena.
+   */
+  private markUnresolved(): void {
+    if (this.currentCurrencySignal() === null) {
+      this.resolutionSignal.set('unresolved');
     }
   }
 
@@ -181,8 +261,7 @@ export class CurrencyFormatService {
       return null;
     }
 
-    this.currentCurrencySignal.set(currency);
-    this.lastFetchTime = Date.now();
+    this.setCurrency(currency);
 
     return currency;
   }
@@ -270,7 +349,39 @@ export class CurrencyFormatService {
   }
 
   /**
-   * Formatea un monto con la moneda actual
+   * Formatea un monto con la moneda actual.
+   *
+   * ── Por qué la primera pintura NO muestra cifra ────────────────────────────
+   * Entrando en frío por enlace profundo (p. ej. `/admin/orders/
+   * purchase-orders/215` en pestaña nueva), la moneda viaja por HTTP y llega
+   * DESPUÉS del primer render. Había dos salidas posibles:
+   *
+   *   (a) no pintar cifra hasta que la moneda resuelva, o
+   *   (b) pintar con un formato por defecto.
+   *
+   * Se eligió (a). Razón: en (b) NO existe un defecto correcto. La moneda es
+   * por tienda (`stores.settings.general.currency`) y el estilo y los decimales
+   * viven en la fila de `currencies` (`format_style`, `decimal_places`), así que
+   * cualquier defecto miente a la mitad de los tenants — y miente de la peor
+   * manera: `$100,436.18` es una cifra PLAUSIBLE, y un operador colombiano la
+   * lee como cien pesos con céntimos cuando en realidad son `$100.436`. El
+   * lector no tiene forma de saber que era provisional. Un hueco, en cambio, se
+   * ve como lo que es: "todavía no". El plan al que pertenece este arreglo
+   * existe justamente para que el operador nunca lea una cifra distinta de la
+   * que es, y una cifra provisional creíble viola eso; un hueco de ~300 ms, no.
+   *
+   * El hueco solo dura mientras `resolution() === 'pending'`. Cuando un intento
+   * termina sin moneda (`'unresolved'`: sin sesión, sin tienda, backend caído)
+   * se degrada al fallback histórico en-US: esconder el dinero PARA SIEMPRE
+   * sería peor que mostrarlo con un formato genérico.
+   *
+   * ── Por qué repinta cuando llega la moneda ─────────────────────────────────
+   * `currentCurrency()` y `resolution()` se leen DENTRO de este método, que las
+   * plantillas invocan (vía `CurrencyPipe` impuro o vía helpers de componente
+   * tipo `money()`), y Angular ejecuta la plantilla dentro del consumidor
+   * reactivo de la vista. Esas lecturas quedan registradas como dependencias de
+   * la vista, así que al resolver la moneda la vista se marca sucia y se
+   * repinta sola. Es CD por Signals, no `markForCheck()`.
    */
   format(
     amount: number | string | null | undefined,
@@ -279,13 +390,15 @@ export class CurrencyFormatService {
     const num = Number(amount) || 0;
     const currency = this.currentCurrency();
     if (!currency) {
-      // Fallback con símbolo por defecto mientras carga la moneda
+      if (this.resolution() === 'pending') {
+        return CURRENCY_PENDING_PLACEHOLDER;
+      }
+      // Fallback con símbolo por defecto: la resolución terminó sin moneda
       const dec = decimals ?? 2;
       const formatted = num.toLocaleString('en-US', {
         minimumFractionDigits: dec,
         maximumFractionDigits: dec,
       });
-      // Usar $ como fallback mientras carga
       return `$${formatted}`;
     }
 
@@ -358,15 +471,22 @@ export class CurrencyFormatService {
    */
   async refresh(): Promise<void> {
     this.currentCurrencySignal.set(null);
+    this.resolutionSignal.set('pending');
     this.lastFetchTime = 0;
     await this.loadCurrency(true);
   }
 
   /**
-   * Limpia la caché (sin recargar)
+   * Limpia la caché (sin recargar).
+   *
+   * Vuelve a 'pending' a propósito: olvidar la moneda y seguir declarándola
+   * resuelta dejaría a `format()` pintando el fallback en-US como si fuera la
+   * verdad. Quien llame a esto debe recargar (`loadCurrency`) o la app se queda
+   * sin cifras.
    */
   clearCache(): void {
     this.currentCurrencySignal.set(null);
+    this.resolutionSignal.set('pending');
     this.lastFetchTime = 0;
   }
 }
@@ -382,6 +502,15 @@ export class CurrencyFormatService {
  * @example
  * {{ 1234.56 | currency }}           // Usa moneda de la tienda
  * {{ 1234.56 | currency: 2 }}         // Forza 2 decimales
+ *
+ * SIGUE SIENDO IMPURO, a propósito. Sus argumentos (`value`, `forceDecimals`)
+ * no cambian cuando llega la moneda, así que un pipe puro quedaría memoizado
+ * con el resultado del primer render y jamás repintaría. La reactividad no la
+ * da la impureza por sí sola: la da la lectura de `currentCurrency()` /
+ * `resolution()` dentro de `CurrencyFormatService.format()`, que Angular
+ * registra en el consumidor reactivo de la vista y por tanto marca la vista
+ * sucia cuando la moneda resuelve. La impureza solo garantiza que, una vez la
+ * vista se re-chequea, el `transform` vuelva a correr.
  */
 @Pipe({
   name: 'currency',

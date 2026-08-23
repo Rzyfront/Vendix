@@ -189,6 +189,51 @@ describe('PoPaymentModalComponent — payment plan unified modal', () => {
       http.verify();
     });
 
+    /**
+     * Camino triste legible. `isPayValid()` apaga el submit con "a > 0 &&
+     * a <= remaining", pero hasta ahora solo el techo se explicaba: un monto
+     * en cero o negativo dejaba el botón muerto sin decir por qué. El piso
+     * coincide con lo que el servidor rechaza desde RegisterPaymentDto
+     * (Min 0.01, commit 2762dd995): cero incluido, no solo los negativos.
+     */
+    const errorTexts = (): string[] =>
+      Array.from(
+        (fixture.nativeElement as HTMLElement).querySelectorAll('p.text-destructive'),
+      ).map((el) => (el.textContent ?? '').trim());
+
+    it('(k) amount negativo → explica el piso y no dispara POST', () => {
+      component.amountValue.set(-5000);
+      fixture.detectChanges();
+
+      expect(errorTexts()).toContain('El monto debe ser mayor que cero.');
+      component.submit();
+      http.expectNone((r) => r.url.includes('/payments'));
+    });
+
+    it('(l) amount en cero → mismo mensaje: cero tampoco es un pago válido', () => {
+      component.amountValue.set(0);
+      fixture.detectChanges();
+
+      expect(errorTexts()).toContain('El monto debe ser mayor que cero.');
+      component.submit();
+      http.expectNone((r) => r.url.includes('/payments'));
+    });
+
+    it('(m) amount > pendiente → sigue explicando el techo, y solo el techo', () => {
+      component.amountValue.set(5000); // > total=1000
+      fixture.detectChanges();
+
+      expect(errorTexts()).toContain('El monto no puede superar el saldo pendiente.');
+      expect(errorTexts()).not.toContain('El monto debe ser mayor que cero.');
+    });
+
+    it('(n) amount válido → ningún mensaje de monto', () => {
+      component.amountValue.set(500);
+      fixture.detectChanges();
+
+      expect(errorTexts()).not.toContain('El monto debe ser mayor que cero.');
+      expect(errorTexts()).not.toContain('El monto no puede superar el saldo pendiente.');
+    });
     it('(j) toggle interno entre vistas: setView("plan") cambia activeView()', () => {
       expect(component.activeView()).toBe('pay');
       component.setView('plan');

@@ -151,7 +151,18 @@ export interface PoPaymentModalOrder {
               <p class="text-xs text-text-muted mt-1">
                 Total orden: {{ formatCurrency(total()) }} · Pagado: {{ formatCurrency(paidAmount()) }} · Pendiente: {{ formatCurrency(remaining()) }}
               </p>
-              @if (amountValue() > remaining()) {
+              <!--
+                Los dos límites del monto tienen que DECIRSE, no solo apagar el
+                submit: isPayValid() exige "a > 0 && a <= remaining", y hasta
+                aquí el sobrepago se explicaba pero un monto en cero o negativo
+                dejaba el botón muerto sin motivo visible (camino triste sin
+                salida legible). El piso coincide con lo que el servidor rechaza
+                desde RegisterPaymentDto (Min 0.01): cero también es un pago
+                inválido, no solo los negativos.
+              -->
+              @if (amountValue() <= 0) {
+                <p class="text-xs text-destructive mt-1">El monto debe ser mayor que cero.</p>
+              } @else if (amountValue() > remaining()) {
                 <p class="text-xs text-destructive mt-1">El monto no puede superar el saldo pendiente.</p>
               }
             </div>
