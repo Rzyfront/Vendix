@@ -1,3 +1,4 @@
+import { NgTemplateOutlet } from '@angular/common';
 import { Component, computed, effect, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
@@ -89,6 +90,7 @@ const FALLBACK_TEMPLATE_KEY = 'dian-standard';
     selector: 'vendix-invoice-profiles-page',
     standalone: true,
     imports: [
+        NgTemplateOutlet,
         CardComponent,
         ConfirmationModalComponent,
         StatsComponent,
@@ -163,6 +165,29 @@ const FALLBACK_TEMPLATE_KEY = 'dian-standard';
                                 [debounceTime]="300"
                                 (searchChange)="onSearch($event)"
                             ></app-inputsearch>
+                            @if (!show_onboarding()) {
+                                <!--
+                                  Segunda puerta a las plantillas DIAN. El estado
+                                  vacío ya ofrece la suya, y con perfiles ese bloque
+                                  no se pinta: sin este botón el catálogo quedaba
+                                  inalcanzable en cuanto la tienda creaba su primer
+                                  perfil. Se esconde durante el onboarding para no
+                                  ofrecer la misma acción dos veces en pantalla.
+                                -->
+                                <app-button
+                                    variant="outline"
+                                    [disabled]="saving()"
+                                    (clicked)="toggleTemplatePicker()"
+                                    data-testid="header-templates"
+                                >
+                                    <app-icon
+                                        slot="icon"
+                                        name="layout-template"
+                                        [size]="16"
+                                    ></app-icon>
+                                    Usar plantilla DIAN
+                                </app-button>
+                            }
                             <app-button
                                 variant="primary"
                                 [disabled]="saving()"
@@ -173,6 +198,14 @@ const FALLBACK_TEMPLATE_KEY = 'dian-standard';
                             </app-button>
                         </div>
                     </div>
+
+                    @if (template_picker() && !show_onboarding()) {
+                        <div class="mt-3">
+                            <ng-container
+                                [ngTemplateOutlet]="templatePickerTpl"
+                            ></ng-container>
+                        </div>
+                    }
 
                     <!-- Filtros. Chips y no un <select>: en móvil un select
                          nativo tapa la tabla entera, y aquí sólo hay 2×N
@@ -302,77 +335,9 @@ const FALLBACK_TEMPLATE_KEY = 'dian-standard';
                             </div>
 
                             @if (template_picker()) {
-                                <div class="w-full max-w-3xl pt-2">
-                                    @if (templates_loading()) {
-                                        <p class="text-sm text-[var(--text-secondary)]">
-                                            Cargando plantillas…
-                                        </p>
-                                    } @else if (templates_error(); as message) {
-                                        <!--
-                                          El fallo del catálogo se pinta acá y NO
-                                          bloquea: «Crear primer perfil» sigue
-                                          arriba y no depende de las plantillas.
-                                        -->
-                                        <p
-                                            class="text-sm text-[var(--color-danger)]"
-                                            role="alert"
-                                        >
-                                            {{ message }}
-                                        </p>
-                                    } @else {
-                                        <div
-                                            class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
-                                        >
-                                            @for (
-                                                template of templates();
-                                                track template.key
-                                            ) {
-                                                <button
-                                                    type="button"
-                                                    class="flex h-full flex-col gap-1 rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-4 text-left transition-colors hover:border-[var(--color-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]"
-                                                    (click)="useTemplate(template)"
-                                                    [attr.data-testid]="
-                                                        'template-' + template.key
-                                                    "
-                                                >
-                                                    <div
-                                                        class="flex items-center justify-between gap-2"
-                                                    >
-                                                        <span
-                                                            class="text-sm font-semibold text-[var(--text-primary)]"
-                                                        >
-                                                            {{ template.label }}
-                                                        </span>
-                                                        @if (
-                                                            template.key ===
-                                                            suggested_template_key()
-                                                        ) {
-                                                            <span
-                                                                class="shrink-0 rounded-full bg-[var(--color-primary)]/10 px-2 py-0.5 text-[11px] font-medium text-[var(--color-primary)]"
-                                                            >
-                                                                Recomendada
-                                                            </span>
-                                                        }
-                                                    </div>
-                                                    <span
-                                                        class="text-xs text-[var(--text-secondary)]"
-                                                    >
-                                                        {{ template.description }}
-                                                    </span>
-                                                    <span
-                                                        class="mt-auto pt-2 text-[11px] uppercase tracking-wide text-[var(--text-tertiary)]"
-                                                    >
-                                                        {{
-                                                            operationLabel(
-                                                                template.operation_type
-                                                            )
-                                                        }}
-                                                    </span>
-                                                </button>
-                                            }
-                                        </div>
-                                    }
-                                </div>
+                                <ng-container
+                                    [ngTemplateOutlet]="templatePickerTpl"
+                                ></ng-container>
                             }
                         </div>
                     } @else {
@@ -489,6 +454,94 @@ const FALLBACK_TEMPLATE_KEY = 'dian-standard';
                 </div>
             }
         </div>
+
+            <!--
+              OJO: ni un solo acento grave dentro de esta plantilla. La plantilla
+              ES un literal delimitado por acentos graves y uno solo la cierra.
+
+              Selector de plantillas DIAN, extraído a ng-template porque lo
+              consumen DOS sitios: el estado vacío (el original) y el encabezado
+              del listado. Antes vivía sólo en el estado vacío, y como ese bloque
+              se apaga en cuanto existe un perfil, las tres plantillas quedaban
+              inalcanzables para siempre: quien quisiera un segundo perfil AIU
+              tenía que rearmar el régimen AIU a mano, que es justo el campo
+              donde equivocarse cambia la base gravable. Un solo ng-template en
+              vez de duplicar el markup, para que la lista, la recomendada y el
+              manejo del fallo no puedan divergir entre las dos superficies.
+            -->
+            <ng-template #templatePickerTpl>
+                <div class="w-full max-w-3xl pt-2">
+                    @if (templates_loading()) {
+                        <p class="text-sm text-[var(--text-secondary)]">
+                            Cargando plantillas…
+                        </p>
+                    } @else if (templates_error(); as message) {
+                        <!--
+                          El fallo del catálogo se pinta acá y NO
+                          bloquea: «Crear primer perfil» sigue
+                          arriba y no depende de las plantillas.
+                        -->
+                        <p
+                            class="text-sm text-[var(--color-danger)]"
+                            role="alert"
+                        >
+                            {{ message }}
+                        </p>
+                    } @else {
+                        <div
+                            class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+                        >
+                            @for (
+                                template of templates();
+                                track template.key
+                            ) {
+                                <button
+                                    type="button"
+                                    class="flex h-full flex-col gap-1 rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-4 text-left transition-colors hover:border-[var(--color-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]"
+                                    (click)="useTemplate(template)"
+                                    [attr.data-testid]="
+                                        'template-' + template.key
+                                    "
+                                >
+                                    <div
+                                        class="flex items-center justify-between gap-2"
+                                    >
+                                        <span
+                                            class="text-sm font-semibold text-[var(--text-primary)]"
+                                        >
+                                            {{ template.label }}
+                                        </span>
+                                        @if (
+                                            template.key ===
+                                            suggested_template_key()
+                                        ) {
+                                            <span
+                                                class="shrink-0 rounded-full bg-[var(--color-primary)]/10 px-2 py-0.5 text-[11px] font-medium text-[var(--color-primary)]"
+                                            >
+                                                Recomendada
+                                            </span>
+                                        }
+                                    </div>
+                                    <span
+                                        class="text-xs text-[var(--text-secondary)]"
+                                    >
+                                        {{ template.description }}
+                                    </span>
+                                    <span
+                                        class="mt-auto pt-2 text-[11px] uppercase tracking-wide text-[var(--text-tertiary)]"
+                                    >
+                                        {{
+                                            operationLabel(
+                                                template.operation_type
+                                            )
+                                        }}
+                                    </span>
+                                </button>
+                            }
+                        </div>
+                    }
+                </div>
+            </ng-template>
     `,
 })
 export class InvoiceProfilesPageComponent {
@@ -885,6 +938,10 @@ export class InvoiceProfilesPageComponent {
      */
     useTemplate(template: InvoiceProfileTemplate): void {
         this.store.dispatch(ProfileActions.clearCurrentProfile());
+        // Cerrar el selector: ya cumplió. Sin esto, al salir del editor el
+        // usuario vuelve a una rejilla de plantillas abierta encima del
+        // listado, invitándolo a sembrar un segundo perfil que no pidió.
+        this.template_picker.set(false);
         this.editor.set({
             id: null,
             config: template.config,
