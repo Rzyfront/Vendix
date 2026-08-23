@@ -2,7 +2,22 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci || npm install
+# `npm ci` SIN fallback a `npm install`. El fallback convertía un lock
+# desincronizado en un warning invisible: `npm ci` fallaba con EUSAGE, `npm
+# install` resolvía versiones frescas dentro de los rangos caret, y el run de
+# CI concluía `success`. Resultado: dos builds del MISMO commit podían embarcar
+# árboles de dependencias distintos, y el lock del repo nunca se arreglaba.
+#
+# Ojo con `apps/backend/package-lock.json`: en local `npm ci` sube al root del
+# workspace (`workspaces: apps/*`) y usa el lock RAÍZ, así que este lock solo lo
+# ve Docker y nadie lo mantiene al instalar. Para regenerarlo hay que hacerlo
+# aislado, fuera del workspace:
+#   mkdir /tmp/lockgen && cp apps/backend/package*.json /tmp/lockgen/
+#   cd /tmp/lockgen && npm install --package-lock-only
+#   cp /tmp/lockgen/package-lock.json apps/backend/package-lock.json
+#
+# Si esto falla, el build se cae ANTES de tocar EC2 — no hay riesgo en prod.
+RUN npm ci
 COPY prisma ./prisma
 COPY . .
 # Generate Prisma Client sin necesidad de base de datos
