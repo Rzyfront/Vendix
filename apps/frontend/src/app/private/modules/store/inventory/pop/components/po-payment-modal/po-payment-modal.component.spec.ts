@@ -5,13 +5,32 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { PoPaymentModalComponent } from './po-payment-modal.component';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
+import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 
 const buildCurrencyStub = () =>
   ({
     format: (n: number | string | null | undefined) =>
       `$${Number(n ?? 0).toFixed(2)}`,
     loadCurrency: () => undefined,
+    // El app-input en modo moneda lee estas dos senales del servicio para
+    // decidir separadores y decimales al escribir el valor (writeValue ->
+    // currencyFormatForDisplay). Sin ellas el stub explota con
+    // "currencyFormatStyle is not a function" en cuanto un FormControl de
+    // dinero recibe setValue.
+    currencyFormatStyle: () => 'comma_dot' as const,
+    currencyDecimals: () => 2,
   }) as unknown as CurrencyFormatService;
+
+/**
+ * El modal lee storeSettings.settings()?.general?.timezone para fechar el pago.
+ * Sin este stub, TestBed construye el facade real, que inyecta el Store de NgRx
+ * y revienta con NG0201 al crear el componente: los 14 casos fallaban ahi, antes
+ * de ejercitar una sola linea de logica del modal.
+ */
+const buildStoreSettingsStub = () =>
+  ({
+    settings: () => null,
+  }) as unknown as StoreSettingsFacade;
 
 const buildToastStub = () =>
   ({
@@ -47,6 +66,7 @@ describe('PoPaymentModalComponent — payment plan unified modal', () => {
         provideHttpClientTesting(),
         { provide: CurrencyFormatService, useFactory: buildCurrencyStub },
         { provide: ToastService, useFactory: buildToastStub },
+        { provide: StoreSettingsFacade, useFactory: buildStoreSettingsStub },
       ],
     });
     fixture = TestBed.createComponent(PoPaymentModalComponent);
