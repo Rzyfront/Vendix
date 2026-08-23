@@ -593,6 +593,20 @@ export class InvoiceProfileEditorComponent {
     readonly profileId = input<number | null>(null);
     /** Tipo de operación propuesto al crear. */
     readonly initialOperationType = input<string>('09');
+    /**
+     * Configuración con la que sembrar el formulario al CREAR. `null` ⇒ la
+     * plantilla AIU por omisión.
+     *
+     * Es la vía por la que una plantilla DIAN llega al editor. Se siembra en vez
+     * de crear el perfil de un clic a propósito: así el usuario le pone nombre
+     * —que es lo único que la plantilla no puede aportar— y el guardado recorre
+     * la MISMA validación que cualquier otro perfil. Un create silencioso desde
+     * la plantilla usaría su etiqueta como nombre y chocaría con
+     * `INVOICING_PROFILE_004` la segunda vez que alguien la usara.
+     *
+     * Se ignora en modo edición: ahí la configuración es la del perfil.
+     */
+    readonly initialConfig = input<InvoiceProfileConfig | null>(null);
 
     readonly closed = output<void>();
 
@@ -763,11 +777,12 @@ export class InvoiceProfileEditorComponent {
             this.hydrate(profile, config);
         });
 
-        // En modo creación, sembrar la plantilla por omisión una sola vez.
+        // En modo creación, sembrar una sola vez: la configuración que llegó por
+        // `initialConfig` (una plantilla DIAN) o la AIU por omisión.
         effect(() => {
             if (this.isEdit() || this.loaded_config() !== null) return;
             this.hydrateFromConfig(
-                buildDefaultAiuProfileConfig(),
+                this.initialConfig() ?? buildDefaultAiuProfileConfig(),
                 '',
                 this.initialOperationType(),
             );

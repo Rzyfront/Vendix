@@ -15,6 +15,7 @@ import type {
   InvoiceProfileVersionSummary,
   ProfilePreviewResult,
 } from '../interfaces/invoice-profile.interface';
+import type { InvoiceProfileTemplate } from '../services/invoice-profile.service';
 
 export interface InvoicingState {
   invoices: Invoice[];
@@ -138,6 +139,29 @@ export interface InvoicingState {
    * editor la consulta desde varias secciones y volver a pedirla en cada cambio
    * de pestaña reconstruiría el XML sin necesidad.
    */
+  /**
+   * Catálogo de plantillas DIAN. Constante versionada en el backend (ADR-10),
+   * así que se carga una vez por sesión de módulo y NO se invalida cuando se
+   * crea, edita o borra un perfil: publicar una plantilla nueva es un deploy,
+   * no una escritura de tenant.
+   *
+   * `profileTemplatesLoaded` es una bandera aparte de `profileTemplates.length`
+   * porque un catálogo legítimamente vacío y un catálogo aún no pedido no son lo
+   * mismo: sin ella el estado vacío reintentaría la carga en cada render.
+   */
+  profileTemplates: InvoiceProfileTemplate[];
+  profileTemplatesLoading: boolean;
+  profileTemplatesLoaded: boolean;
+  /**
+   * Fallo del catálogo de plantillas, en campo PROPIO y no en `profilesError`.
+   *
+   * Las plantillas son un atajo, la lista es la función. Compartir el campo
+   * haría que el error de lo opcional tapara el de lo esencial, y la pantalla
+   * mostraría «no se pudieron cargar las plantillas» encima de una lista que
+   * tampoco cargó.
+   */
+  profileTemplatesError: string | null;
+
   profilePreview: ProfilePreviewResult | null;
   profilePreviewProfileId: number | null;
   profilePreviewLoading: boolean;
@@ -212,6 +236,10 @@ export const initialInvoicingState: InvoicingState = {
   profileVersionsProfileId: null,
   profileVersionsLoading: false,
 
+  profileTemplates: [],
+  profileTemplatesLoading: false,
+  profileTemplatesLoaded: false,
+  profileTemplatesError: null,
   profilePreview: null,
   profilePreviewProfileId: null,
   profilePreviewLoading: false,

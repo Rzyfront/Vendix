@@ -665,6 +665,31 @@ export const invoicingReducer = createReducer(
     profilePreviewError: null,
   })),
 
+  // ── Plantillas DIAN ─────────────────────────────────────
+  on(ProfileActions.loadProfileTemplates, (state) => ({
+    ...state,
+    profileTemplatesLoading: true,
+  })),
+  on(ProfileActions.loadProfileTemplatesSuccess, (state, { templates }) => ({
+    ...state,
+    profileTemplates: templates,
+    profileTemplatesLoading: false,
+    // `loaded` se marca aquí y NUNCA se limpia en un fallo: la bandera dice «ya
+    // se preguntó», no «hay plantillas». Limpiarla al fallar convertiría el
+    // estado vacío en un reintento por render.
+    profileTemplatesLoaded: true,
+  })),
+  on(ProfileActions.loadProfileTemplatesFailure, (state, { error }) => ({
+    ...state,
+    profileTemplatesLoading: false,
+    profileTemplatesLoaded: true,
+    // El fallo del catálogo NO pisa `profilesError`: son dos cosas que la
+    // pantalla trata distinto —la lista sigue siendo usable sin plantillas— y
+    // compartir el campo haría que el error de un catálogo opcional tapara el
+    // de la lista, que no lo es.
+    profileTemplatesError: error,
+  })),
+
   // ── Clear State ─────────────────────────────────────────
   on(InvoicingActions.clearInvoicingState, () => initialInvoicingState),
 );

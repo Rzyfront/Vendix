@@ -16,7 +16,10 @@ import {
 } from '../../../../../../shared/components/index';
 
 import type { InvoiceProfile } from '../../interfaces/invoice-profile.interface';
+import type { InvoiceProfileConfig } from '../../../../../../core/utils/invoice-profile-config.contract';
 import { operationTypeLabel } from '../../interfaces/invoice-profile.interface';
+import type { InvoiceProfileTemplate } from '../../services/invoice-profile.service';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { InvoiceProfileEditorComponent } from '../invoice-profile-editor/invoice-profile-editor.component';
 import * as ProfileActions from '../../state/actions/invoice-profile.actions';
 import {
@@ -27,7 +30,41 @@ import {
     selectProfilesMeta,
     selectProfileSaving,
     selectProfileDeleteBlock,
+    selectProfileTemplates,
+    selectProfileTemplatesError,
+    selectProfileTemplatesLoading,
 } from '../../state/selectors/invoice-profile.selectors';
+
+/**
+ * Qué plantilla DIAN se recomienda según la industria de la tienda.
+ *
+ * Las dos entradas mapean el régimen a la actividad que la norma nombra, no a
+ * un parecido:
+ *
+ * · `construction` → 1372/1992, que es literalmente construcción de bien
+ *   inmueble. La industria se añadió para esto (migración
+ *   `20260823060000_industry_enum_construction`): sin ella una constructora
+ *   arrancaba con el régimen equivocado, y en una factura electrónica eso no es
+ *   un detalle de UI sino una base gravable mal declarada ante la DIAN.
+ * · `service` → 462-1 del Estatuto Tributario, que nombra aseo, vigilancia y
+ *   servicios temporales.
+ *
+ * Los dos AIU calculan la base gravable distinto, así que NO son
+ * intercambiables: recomendar el 462-1 a una constructora sería peor que no
+ * recomendar nada, porque parece correcto.
+ *
+ * La recomendación es una SUGERENCIA visual, no un filtro: el selector muestra
+ * siempre las tres plantillas. Ocultarlas por industria dejaría a una tienda mal
+ * clasificada sin acceso a la que le corresponde, y la industria se edita en
+ * otro módulo.
+ */
+const TEMPLATE_BY_INDUSTRY: Readonly<Record<string, string>> = {
+    construction: 'dian-aiu-1372',
+    service: 'dian-aiu-462-1',
+};
+
+/** Plantilla recomendada cuando ninguna industria de la tienda tiene una propia. */
+const FALLBACK_TEMPLATE_KEY = 'dian-standard';
 
 /**
  * Perfiles de facturación — listado.
@@ -216,15 +253,139 @@ import {
                         </div>
                     }
 
-                    <app-responsive-data-view
-                        [data]="rows()"
-                        [columns]="columns"
-                        [cardConfig]="card_config"
-                        [actions]="table_actions"
-                        [loading]="loading()"
-                        [emptyMessage]="emptyMessage()"
-                        emptyIcon="layout-template"
-                    ></app-responsive-data-view>
+                    <!--
+                      Onboarding en vez de la tabla SÓLO cuando no hay ningún
+                      perfil y no hay filtros: con filtros activos, el vacío que
+                      corresponde es el del RDV, que ofrece quitarlos.
+                    -->
+                    @if (show_onboarding()) {
+                        <div
+                            class="flex flex-col items-center gap-4 px-4 py-10 text-center"
+                            data-testid="profiles-onboarding"
+                        >
+                            <div
+                                class="flex h-16 w-16 items-center justify-center rounded-2xl bg-[var(--color-primary)]/10 text-[var(--color-primary)]"
+                                aria-hidden="true"
+                            >
+                                <app-icon name="layout-template" [size]="32"></app-icon>
+                            </div>
+
+                            <div class="max-w-xl space-y-1">
+                                <h3 class="text-lg font-semibold text-[var(--text-primary)]">
+                                    Aún no hay perfiles de facturación
+                                </h3>
+                                <p class="text-sm text-[var(--text-secondary)]">
+                                    Un perfil define el régimen, los impuestos y el
+                                    formato con que se timbra una factura. Puedes
+                                    partir de una plantilla de la DIAN y ajustarla, o
+                                    configurarlo desde cero.
+                                </p>
+                            </div>
+
+                            <div class="flex flex-wrap items-center justify-center gap-2">
+                                <app-button
+                                    variant="primary"
+                                    icon="plus"
+                                    (clicked)="createProfile()"
+                                    data-testid="onboarding-create"
+                                >
+                                    Crear primer perfil
+                                </app-button>
+                                <app-button
+                                    variant="outline"
+                                    icon="layout-template"
+                                    (clicked)="toggleTemplatePicker()"
+                                    data-testid="onboarding-templates"
+                                >
+                                    Usar plantilla DIAN
+                                </app-button>
+                            </div>
+
+                            @if (template_picker()) {
+                                <div class="w-full max-w-3xl pt-2">
+                                    @if (templates_loading()) {
+                                        <p class="text-sm text-[var(--text-secondary)]">
+                                            Cargando plantillas…
+                                        </p>
+                                    } @else if (templates_error(); as message) {
+                                        <!--
+                                          El fallo del catálogo se pinta acá y NO
+                                          bloquea: «Crear primer perfil» sigue
+                                          arriba y no depende de las plantillas.
+                                        -->
+                                        <p
+                                            class="text-sm text-[var(--color-danger)]"
+                                            role="alert"
+                                        >
+                                            {{ message }}
+                                        </p>
+                                    } @else {
+                                        <div
+                                            class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+                                        >
+                                            @for (
+                                                template of templates();
+                                                track template.key
+                                            ) {
+                                                <button
+                                                    type="button"
+                                                    class="flex h-full flex-col gap-1 rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-4 text-left transition-colors hover:border-[var(--color-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]"
+                                                    (click)="useTemplate(template)"
+                                                    [attr.data-testid]="
+                                                        'template-' + template.key
+                                                    "
+                                                >
+                                                    <div
+                                                        class="flex items-center justify-between gap-2"
+                                                    >
+                                                        <span
+                                                            class="text-sm font-semibold text-[var(--text-primary)]"
+                                                        >
+                                                            {{ template.label }}
+                                                        </span>
+                                                        @if (
+                                                            template.key ===
+                                                            suggested_template_key()
+                                                        ) {
+                                                            <span
+                                                                class="shrink-0 rounded-full bg-[var(--color-primary)]/10 px-2 py-0.5 text-[11px] font-medium text-[var(--color-primary)]"
+                                                            >
+                                                                Recomendada
+                                                            </span>
+                                                        }
+                                                    </div>
+                                                    <span
+                                                        class="text-xs text-[var(--text-secondary)]"
+                                                    >
+                                                        {{ template.description }}
+                                                    </span>
+                                                    <span
+                                                        class="mt-auto pt-2 text-[11px] uppercase tracking-wide text-[var(--text-tertiary)]"
+                                                    >
+                                                        {{
+                                                            operationLabel(
+                                                                template.operation_type
+                                                            )
+                                                        }}
+                                                    </span>
+                                                </button>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    } @else {
+                        <app-responsive-data-view
+                            [data]="rows()"
+                            [columns]="columns"
+                            [cardConfig]="card_config"
+                            [actions]="table_actions"
+                            [loading]="loading()"
+                            [emptyMessage]="emptyMessage()"
+                            emptyIcon="layout-template"
+                        ></app-responsive-data-view>
+                    }
                 </div>
             </app-card>
 
@@ -232,6 +393,8 @@ import {
             @if (editor(); as open) {
                 <vendix-invoice-profile-editor
                     [profileId]="open.id"
+                    [initialConfig]="open.config ?? null"
+                    [initialOperationType]="open.operationType ?? '09'"
                     (closed)="closeEditor()"
                 ></vendix-invoice-profile-editor>
             }
@@ -419,7 +582,82 @@ export class InvoiceProfilesPageComponent {
      * `number | null` a secas porque `null` ya significa «cerrado», y las dos
      * cosas colisionarían en el mismo valor.
      */
-    readonly editor = signal<{ id: number | null } | null>(null);
+    readonly editor = signal<{
+        id: number | null;
+        /** Configuración con la que abrir en modo creación (una plantilla DIAN). */
+        config?: InvoiceProfileConfig | null;
+        operationType?: string;
+    } | null>(null);
+
+    private readonly auth = inject(AuthFacade);
+
+    readonly templates = toSignal(this.store.select(selectProfileTemplates), {
+        initialValue: [] as InvoiceProfileTemplate[],
+    });
+    readonly templates_loading = toSignal(
+        this.store.select(selectProfileTemplatesLoading),
+        { initialValue: false },
+    );
+    readonly templates_error = toSignal(
+        this.store.select(selectProfileTemplatesError),
+        { initialValue: null as string | null },
+    );
+
+    /** El selector de plantillas está desplegado. */
+    readonly template_picker = signal(false);
+
+    /**
+     * Hay filtros o búsqueda activos.
+     *
+     * Un solo sitio para el predicado. `emptyMessage` y `show_onboarding` lo
+     * leen los dos, y si cada uno lo recalculara bastaría añadir un filtro nuevo
+     * a uno para que la pantalla ofreciera «Crea tu primer perfil» a alguien que
+     * tiene doce y escribió mal la búsqueda.
+     */
+    readonly is_filtered = computed(() => {
+        const { search, state, operation_type } = this.filters();
+        return Boolean(search || state || operation_type);
+    });
+
+    /**
+     * Mostrar el onboarding en vez de la tabla.
+     *
+     * Las tres condiciones son necesarias. Sin `!loading()` el onboarding
+     * parpadea en cada carga antes de que lleguen las filas; sin `!is_filtered()`
+     * sale cuando un filtro no arroja nada, que es el caso en el que el usuario
+     * necesita quitar el filtro y no crear un perfil.
+     */
+    readonly show_onboarding = computed(
+        () => !this.loading() && this.rows().length === 0 && !this.is_filtered(),
+    );
+
+    /**
+     * Plantilla recomendada para esta tienda, o `null` si el catálogo aún no
+     * llegó o si la recomendada no está en él.
+     *
+     * Se comprueba contra el catálogo VIVO y no se asume: una plantilla retirada
+     * por un deploy dejaría la insignia «Recomendado» sobre una tarjeta que no
+     * existe, o peor, sobre ninguna, con el usuario buscándola.
+     */
+    readonly suggested_template_key = computed<string | null>(() => {
+        const catalog = this.templates();
+        if (catalog.length === 0) return null;
+        // Se recorre el MAPA, no el arreglo de industrias: una tienda puede ser
+        // `construction` y `service` a la vez, y recorrer sus industrias haría
+        // que ganara la que el backend devolvió primero — orden que nadie
+        // declaró y que puede cambiar sin aviso. Recorriendo el mapa, la
+        // precedencia es la del orden de declaración y es explícita: construcción
+        // antes que servicios, porque el 1372 es el régimen más específico de los
+        // dos y quien hace obra además de servicios factura la obra.
+        const industries = new Set(this.auth.storeIndustries());
+        const match = Object.keys(TEMPLATE_BY_INDUSTRY).find((industry) =>
+            industries.has(industry),
+        );
+        const key = match
+            ? TEMPLATE_BY_INDUSTRY[match]
+            : FALLBACK_TEMPLATE_KEY;
+        return catalog.some((template) => template.key === key) ? key : null;
+    });
 
     readonly rows = computed(() =>
         this.profiles().map((profile) => ({
@@ -453,9 +691,7 @@ export class InvoiceProfilesPageComponent {
      * al usuario creyendo que la tienda no tiene perfiles.
      */
     readonly emptyMessage = computed(() => {
-        const { search, state, operation_type } = this.filters();
-        const filtered = Boolean(search || state || operation_type);
-        return filtered
+        return this.is_filtered()
             ? 'Ningún perfil coincide con la búsqueda o los filtros aplicados'
             : 'Aún no hay perfiles de facturación. Crea uno para definir el régimen, los impuestos y el formato con que se timbra.';
     });
@@ -613,6 +849,52 @@ export class InvoiceProfilesPageComponent {
 
     editProfile(row: InvoiceProfile): void {
         this.editor.set({ id: row.id });
+    }
+
+    /**
+     * Despliega el selector de plantillas y pide el catálogo si nunca se pidió.
+     *
+     * La carga es perezosa a propósito: el catálogo sólo lo necesita este
+     * bloque, y una tienda con perfiles nunca lo ve. Pedirlo al montar la página
+     * sería una petición en cada visita al listado para nada.
+     *
+     * Se dispara siempre que se abre y el efecto es `exhaustMap`, así que un
+     * doble clic no produce dos peticiones. No se comprueba `loaded` acá porque
+     * eso duplicaría en la vista una decisión que ya vive en el efecto.
+     */
+    toggleTemplatePicker(): void {
+        const open = !this.template_picker();
+        this.template_picker.set(open);
+        if (open) {
+            this.store.dispatch(ProfileActions.loadProfileTemplates());
+        }
+    }
+
+    /**
+     * Abre el editor sembrado con la plantilla, en modo creación.
+     *
+     * No crea el perfil: lo siembra. Así el usuario le pone el nombre —lo único
+     * que la plantilla no puede aportar— y el guardado recorre la misma
+     * validación que cualquier otro perfil. Un create de un clic usaría la
+     * etiqueta de la plantilla como nombre y la segunda vez que alguien usara la
+     * misma chocaría con `INVOICING_PROFILE_004`.
+     *
+     * `clearCurrentProfile` por la misma razón que en `createProfile`: si
+     * quedara el último perfil editado en el store, el editor lo hidrataría y la
+     * plantilla no se vería.
+     */
+    useTemplate(template: InvoiceProfileTemplate): void {
+        this.store.dispatch(ProfileActions.clearCurrentProfile());
+        this.editor.set({
+            id: null,
+            config: template.config,
+            operationType: template.operation_type,
+        });
+    }
+
+    /** Etiqueta legible del tipo de operación de una plantilla. */
+    operationLabel(operationType: string): string {
+        return operationTypeLabel(operationType);
     }
 
     closeEditor(): void {

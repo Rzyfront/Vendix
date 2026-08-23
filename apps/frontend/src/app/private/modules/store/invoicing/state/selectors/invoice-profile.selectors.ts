@@ -203,3 +203,25 @@ export const selectProfileVersionSnapshotLoading = createSelector(
     selectInvoicingState,
     (state) => state.profileVersionSnapshotLoading,
 );
+
+// ── Plantillas DIAN ──────────────────────────────────────────────────────────
+
+export const selectProfileTemplates = createSelector(
+    selectInvoicingState,
+    (state) => state.profileTemplates,
+);
+
+export const selectProfileTemplatesLoading = createSelector(
+    selectInvoicingState,
+    (state) => state.profileTemplatesLoading,
+);
+
+export const selectProfileTemplatesLoaded = createSelector(
+    selectInvoicingState,
+    (state) => state.profileTemplatesLoaded,
+);
+
+export const selectProfileTemplatesError = createSelector(
+    selectInvoicingState,
+    (state) => state.profileTemplatesError,
+);

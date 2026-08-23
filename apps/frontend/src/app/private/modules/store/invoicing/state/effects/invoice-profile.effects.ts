@@ -335,6 +335,42 @@ export class InvoiceProfileEffects {
     );
 
     /**
+     * Catálogo de plantillas DIAN.
+     *
+     * `exhaustMap`: el catálogo es una constante versionada del backend
+     * (ADR-10), así que dos disparos concurrentes traerían lo mismo dos veces.
+     * Ignorar el segundo mientras el primero vuela es lo correcto — con
+     * `switchMap` el estado vacío y el editor pidiéndolo a la vez cancelarían
+     * uno al otro sin ganar nada.
+     *
+     * `silent: true`: el estado vacío pinta el fallo en su propio bloque y sigue
+     * ofreciendo «Crear perfil en blanco», que es la salida que no depende del
+     * catálogo. Un toast encima sería una segunda voz sobre un fallo que ya está
+     * explicado y que no bloquea nada.
+     */
+    readonly loadTemplates$ = createEffect(() =>
+        this.actions$.pipe(
+            ofType(ProfileActions.loadProfileTemplates),
+            exhaustMap(() =>
+                this.profiles.templates().pipe(
+                    map((response) =>
+                        ProfileActions.loadProfileTemplatesSuccess({
+                            templates: response.data,
+                        }),
+                    ),
+                    catchError((error) =>
+                        of(
+                            ProfileActions.loadProfileTemplatesFailure(
+                                this.fail(error, { silent: true }),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    );
+
+    /**
      * Punto único de reporte de fallos.
      *
      * `describeApiFailure` traduce el `error_code` a la copia en español del

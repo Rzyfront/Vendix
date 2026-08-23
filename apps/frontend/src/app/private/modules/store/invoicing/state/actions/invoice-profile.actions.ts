@@ -12,6 +12,7 @@ import type {
     PreviewProfilePayload,
     ProfilePreviewResult,
 } from '../../interfaces/invoice-profile.interface';
+import type { InvoiceProfileTemplate } from '../../services/invoice-profile.service';
 import type { MutationFailure } from './invoicing.actions';
 
 /**
@@ -244,3 +245,23 @@ export const previewProfileFailure = createAction(
     props<MutationFailure>(),
 );
 export const clearProfilePreview = createAction('[Invoicing/Profiles] Clear Preview');
+
+
+// ── Plantillas DIAN ──────────────────────────────────────────────────────────
+// El catálogo de plantillas es CONSTANTE VERSIONADA en el backend (ADR-10), no
+// dato editable, así que se carga una vez y no se invalida por mutaciones de
+// perfiles. Va al store —y no a una llamada suelta del componente— porque el
+// estado vacío y el editor la necesitan y una segunda petición por pantalla es
+// tráfico sin razón sobre algo que no cambia entre ellas.
+
+export const loadProfileTemplates = createAction(
+    '[Invoicing/Profiles] Load Templates',
+);
+export const loadProfileTemplatesSuccess = createAction(
+    '[Invoicing/Profiles] Load Templates Success',
+    props<{ templates: InvoiceProfileTemplate[] }>(),
+);
+export const loadProfileTemplatesFailure = createAction(
+    '[Invoicing/Profiles] Load Templates Failure',
+    props<MutationFailure>(),
+);
