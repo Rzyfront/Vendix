@@ -1784,26 +1784,11 @@ export class InvoiceProfileEditorComponent {
             costo: 'accounting.revenue_costo',
         },
         vat_payable_account: 'accounting.vat_payable_account',
-        // FALTA `accounting_model: 'aiu.accounting_model'`.
-        //
-        // El control YA EXISTE en el formulario de arriba, se hidrata desde el
-        // snapshot y viaja en el payload; lo que falta es pintarlo. El bloque
-        // «Modelo de contabilización» son todavía dos `div` estáticos con
-        // insignias `ACTIVO` / `NO DISPONIBLE`, y vive en
-        // `components/invoice-sections/invoice-section-aiu.component.ts`, que es
-        // de otro paso del plan y no de éste. Añadir la ruta acá sin declarar
-        // primero la clave en `AiuSectionPaths` —que se declara en ese mismo
-        // archivo— no compila.
-        //
-        // Para cerrarlo hacen falta exactamente tres cosas, todas allá:
-        //   1. `AiuSectionPaths` gana `accounting_model: string`.
-        //   2. Los dos `div` pasan a ser un grupo de radio enlazado con
-        //      `[formControl]` a esa ruta, con el de `'no_sumada'` deshabilitado
-        //      por `isAccountingModelEnabled()`.
-        //   3. La insignia muda se reemplaza por
-        //      `accountingModelDisabledReason('no_sumada')`, que ya dice el
-        //      motivo y lo fecha a la Fase D.
-        // Y esta línea se descomenta.
+        // El control ya existía en el formulario de arriba (hidratado desde el
+        // snapshot, viaja en el payload); lo que faltaba era pintarlo. C.6 lo
+        // cierra: el BLOQUE 1 de `invoice-section-aiu.component.ts` pasó de dos
+        // `div` estáticos a un radio real enlazado a esta ruta.
+        accounting_model: 'aiu.accounting_model',
     };
 
     /**

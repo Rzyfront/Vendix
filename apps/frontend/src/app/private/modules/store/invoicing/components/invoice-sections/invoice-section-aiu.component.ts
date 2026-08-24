@@ -26,7 +26,9 @@ import { ToggleComponent } from '../../../../../../shared/components/toggle/togg
 import { AccountCodeSelectComponent } from '../../../products/components/account-code-select.component';
 import {
   AIU_COMPONENTS,
+  accountingModelDisabledReason,
   formatPercentScaled,
+  isAccountingModelEnabled,
   parsePercentScaled,
 } from '../../../../../../core/utils/invoice-profile-config.contract';
 import type {
@@ -105,6 +107,14 @@ export interface AiuSectionPaths {
   revenue_account: Readonly<Record<AiuBucket, string>>;
   /** IVA generado. Quinta cuenta de la sección. */
   vat_payable_account: string;
+  /**
+   * Modelo de contabilización del AIU — `'sumada'` / `'no_sumada'`. C.6.
+   *
+   * El control real vive en la pantalla que aloja la sección (la factura lo
+   * declara en su grupo `aiu`; el perfil, en el suyo); acá sólo se declara la
+   * ruta, igual que el resto del mapa.
+   */
+  accounting_model: string;
 }
 
 /**
@@ -274,12 +284,26 @@ const SECTION = 'AIU';
             motivo a la vista: ofrecerlo antes de que el armado del XML esté
             verificado produciría documentos que la compuerta de totales rechaza
             al firmar, y el usuario no tendría forma de saber por qué.
+
+            Es un control REAL, no dos divs: las dos etiquetas comparten el
+            mismo FormControl — accountingModelControl() es un computed
+            memoizado, así que las dos referencias son la MISMA instancia — y
+            Angular agrupa los radios por instancia de control más name
+            (RadioControlRegistry), sin necesitar formGroup/formControlName
+            en la plantilla.
           -->
-          <div
-            class="rounded-lg border-2 border-[var(--color-primary)] bg-[color-mix(in_srgb,var(--color-primary)_6%,transparent)] p-3"
+          <label
+            class="flex cursor-pointer items-start justify-between gap-2 rounded-lg border-2 border-[var(--color-primary)] bg-[color-mix(in_srgb,var(--color-primary)_6%,transparent)] p-3"
           >
-            <div class="flex items-start justify-between gap-2">
-              <div class="min-w-0">
+            <span class="flex items-start gap-2 min-w-0">
+              <input
+                type="radio"
+                class="mt-1 shrink-0"
+                name="aiu-accounting-model"
+                value="sumada"
+                [formControl]="accountingModelControl()"
+              />
+              <span class="min-w-0">
                 <p class="text-sm font-semibold text-text-primary">
                   Base AIU sumada al total de la factura
                 </p>
@@ -290,20 +314,30 @@ const SECTION = 'AIU';
                   documento. El valor del contrato es su suma, y la base gravable
                   sólo la componen las líneas que la base declarada grava.
                 </p>
-              </div>
-              <span
-                class="shrink-0 rounded-full bg-[var(--color-primary)] px-2 py-0.5 text-[10px] font-bold text-[var(--color-text-on-primary)]"
-              >
-                ACTIVO
               </span>
-            </div>
-          </div>
+            </span>
+            <span
+              class="shrink-0 rounded-full bg-[var(--color-primary)] px-2 py-0.5 text-[10px] font-bold text-[var(--color-text-on-primary)]"
+            >
+              ACTIVO
+            </span>
+          </label>
 
-          <div
-            class="rounded-lg border border-border bg-[var(--color-surface-muted)] p-3 opacity-70"
+          <label
+            class="flex items-start justify-between gap-2 rounded-lg border border-border bg-[var(--color-surface-muted)] p-3"
+            [class.opacity-70]="!isAccountingModelEnabled('no_sumada')"
+            [class.cursor-pointer]="isAccountingModelEnabled('no_sumada')"
           >
-            <div class="flex items-start justify-between gap-2">
-              <div class="min-w-0">
+            <span class="flex items-start gap-2 min-w-0">
+              <input
+                type="radio"
+                class="mt-1 shrink-0"
+                name="aiu-accounting-model"
+                value="no_sumada"
+                [formControl]="accountingModelControl()"
+                [disabled]="!isAccountingModelEnabled('no_sumada')"
+              />
+              <span class="min-w-0">
                 <p class="text-sm font-semibold text-text-primary">
                   Base AIU NO sumada al total de la factura
                 </p>
@@ -312,29 +346,26 @@ const SECTION = 'AIU';
                   una línea por el valor del contrato, con una base gravable
                   menor que su propio importe.
                 </p>
-              </div>
-              <span
-                class="shrink-0 rounded-full border border-border px-2 py-0.5 text-[10px] font-bold text-text-secondary"
-              >
-                NO DISPONIBLE
+                @if (accountingModelDisabledReason('no_sumada'); as reason) {
+                  <p
+                    class="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-warning"
+                  >
+                    <app-icon
+                      name="alert-triangle"
+                      [size]="13"
+                      class="mt-0.5 shrink-0"
+                    ></app-icon>
+                    <span>{{ reason }}</span>
+                  </p>
+                }
               </span>
-            </div>
-            <p
-              class="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-warning"
+            </span>
+            <span
+              class="shrink-0 rounded-full border border-border px-2 py-0.5 text-[10px] font-bold text-text-secondary"
             >
-              <app-icon
-                name="alert-triangle"
-                [size]="13"
-                class="mt-0.5 shrink-0"
-              ></app-icon>
-              <span>
-                Cambia los totales monetarios del XML (FAU02, FAU04, FAU06). Se
-                habilita cuando el armado del documento pase la compuerta de
-                totales en los dos modelos; hasta entonces elegirlo produciría
-                facturas rechazadas al firmar.
-              </span>
-            </p>
-          </div>
+              {{ isAccountingModelEnabled('no_sumada') ? 'ACTIVO' : 'NO DISPONIBLE' }}
+            </span>
+          </label>
         </div>
       </div>
 
@@ -813,6 +844,12 @@ export class InvoiceSectionAiuComponent {
   readonly customerFiscalResponsibilities = input<readonly string[]>([]);
 
   readonly components = AIU_COMPONENTS;
+  // Referencias a funciones puras de `invoice-profile-config.contract`: la
+  // plantilla no puede invocar un import suelto, así que se cuelgan como
+  // propiedades — igual que `components` arriba — para poder llamarlas desde
+  // el HTML (`isAccountingModelEnabled('no_sumada')`, etc.).
+  readonly isAccountingModelEnabled = isAccountingModelEnabled;
+  readonly accountingModelDisabledReason = accountingModelDisabledReason;
   // Copias mutables de las listas del módulo de lógica: `app-selector` declara
   // `options` como `SelectorOption[]`, y un `readonly` no es asignable a él
   // bajo `strictTemplates`.
@@ -935,6 +972,21 @@ export class InvoiceSectionAiuComponent {
       requireControl(
         this.form(),
         this.paths().minimum_base_percent,
+        SECTION,
+      ) as FormControl,
+  );
+
+  /**
+   * `'sumada'` / `'no_sumada'`. C.6: antes eran dos `div` sin control; ahora
+   * las dos etiquetas de radio del BLOQUE 1 se enlazan a ESTE `FormControl`
+   * —la misma instancia memoizada por `computed`, no una nueva por render—,
+   * que es lo que deja a Angular agrupar los dos radios sin `formGroup`.
+   */
+  readonly accountingModelControl = computed<FormControl>(
+    () =>
+      requireControl(
+        this.form(),
+        this.paths().accounting_model,
         SECTION,
       ) as FormControl,
   );

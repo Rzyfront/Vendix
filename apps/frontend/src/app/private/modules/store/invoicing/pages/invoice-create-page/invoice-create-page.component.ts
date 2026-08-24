@@ -174,6 +174,7 @@ import {
   InvoiceProfileService,
 } from '../../services/invoice-profile.service';
 import type {
+  AccountingModel,
   AiuBucket,
   AiuComponentLiteral,
   AiuComponentsBasis,
@@ -2871,6 +2872,11 @@ export class InvoiceCreatePageComponent implements OnInit {
       revenue_imprevistos: [''],
       revenue_utilidad: [''],
       vat_payable_account: [''],
+      // Modelo de contabilización. `'sumada'` por omisión: es el ÚNICO
+      // habilitado (`ENABLED_ACCOUNTING_MODELS`) y lo que el calculador hace
+      // por construcción, así que un documento que abre con este valor no
+      // cambia de comportamiento ni nace `dirty`. C.6.
+      accounting_model: ['sumada' as AccountingModel],
     }),
 
     /**
@@ -4017,6 +4023,10 @@ export class InvoiceCreatePageComponent implements OnInit {
       costo: 'default_account_code',
     },
     vat_payable_account: 'aiu.vat_payable_account',
+    // C.6: el control ya existe en el grupo `aiu` de arriba; esta ruta es lo
+    // que le faltaba para que la sección compartida deje de pintar los dos
+    // `div` estáticos y pinte un radio real.
+    accounting_model: 'aiu.accounting_model',
   };
 
   /**
