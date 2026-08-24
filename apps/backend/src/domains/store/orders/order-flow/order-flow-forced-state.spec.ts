@@ -79,8 +79,8 @@ describe('OrderFlowService — carril forzado (QUI-557)', () => {
       releaseReservationsByReference: jest.fn().mockResolvedValue(undefined),
     };
 
-    // 8 args del constructor, en orden: prisma, eventEmitter, settings,
-    // sessions, movements, stockLevelManager, orderEta, orderStockCommit.
+    // 9 args del constructor, en orden: prisma, eventEmitter, settings,
+    // sessions, movements, stockLevelManager, orderEta, orderStockCommit, auditService.
     service = new OrderFlowService(
       prismaMock as unknown as StorePrismaService,
       eventEmitterMock as any,
@@ -90,6 +90,7 @@ describe('OrderFlowService — carril forzado (QUI-557)', () => {
       stockLevelManagerMock as any,
       {} as any,
       {} as any,
+      { log: jest.fn(), logCustom: jest.fn() } as any,
     );
   });
 

@@ -1217,7 +1217,11 @@ export class PromotionEngineService {
    */
   async getTierLaddersForQuote(
     promotionIds: number[],
-    cartItems: Array<{ product_id: number; quantity: number }>,
+    cartItems: Array<{
+      product_id: number;
+      quantity: number;
+      stock_units_consumed?: number | null;
+    }>,
     perProductQuantity?: Map<number, number>,
   ): Promise<
     Array<{
@@ -1285,7 +1289,13 @@ export class PromotionEngineService {
         const qty = Number(item?.quantity) || 0;
         if (!Number.isFinite(pid)) continue;
         if (qty <= 0) continue;
-        quantityByProduct.set(pid, (quantityByProduct.get(pid) ?? 0) + qty);
+        const stockUnits = Number(item?.stock_units_consumed);
+        const effectiveUnits =
+          Number.isFinite(stockUnits) && stockUnits > 0 ? stockUnits : qty;
+        quantityByProduct.set(
+          pid,
+          (quantityByProduct.get(pid) ?? 0) + effectiveUnits,
+        );
       }
     }
 

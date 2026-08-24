@@ -189,6 +189,13 @@ export class PosPaymentService {
       applied_price_tier_id: isCustomItem
         ? null
         : item.applied_price_tier_id || null,
+      stock_units_consumed: isCustomItem
+        ? null
+        : (item.units_per_package && item.units_per_package > 1
+          ? Number(item.quantity) * Number(item.units_per_package)
+          : item.stock_units_per_sale_unit && item.stock_units_per_sale_unit > 1
+          ? Number(item.quantity) * Number(item.stock_units_per_sale_unit)
+          : null),
       weight: item.weight || undefined,
       weight_unit: item.weight_unit || undefined,
       price_override_reason: item.isPriceOverridden
