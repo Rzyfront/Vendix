@@ -27,6 +27,10 @@ import { AddProductOptions, CartService } from '../../services/cart.service';
 import { SaleUnitSelectorComponent } from '../sale-unit-selector/sale-unit-selector.component';
 import { TableContextService } from '../../services/table-context.service';
 import { ShareModalComponent } from '../share-modal/share-modal.component';
+import {
+  PromotionStackComponent,
+  PromotionStackItem,
+} from '../../../../../shared/components/promotion-stack/promotion-stack.component';
 
 @Component({
   selector: 'app-product-quick-view-modal',
@@ -43,6 +47,7 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
     ShareModalComponent,
     CurrencyPipe,
     SaleUnitSelectorComponent,
+    PromotionStackComponent,
   ],
   template: `
     <app-modal
@@ -117,6 +122,21 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
                 <span class="discount-badge">{{ promotionBadgeLabel() }}</span>
               }
             </div>
+
+            @if (
+              prod.active_promotion?.quantity_tiers?.length ||
+              prod.active_promotion?.badge_label
+            ) {
+              <div class="quick-view-promotions mb-3">
+                <app-promotion-stack
+                  mode="expanded-cards"
+                  [items]="expandedTierItems()"
+                  [currentQuantity]="quantity()"
+                  [ariaLabel]="'Niveles de descuento por cantidad'"
+                  (tierSelected)="quantity.set($event.min_quantity)"
+                />
+              </div>
+            }
 
             <!-- Presentaciones de venta (multitarifa). Por QUI-648 un
                  producto tiene presentaciones O variantes, nunca ambas: los
@@ -714,6 +734,42 @@ export class ProductQuickViewModalComponent {
   readonly promotionBadgeLabel = computed(
     () => this.product()?.active_promotion?.badge_label ?? '',
   );
+
+  readonly expandedTierItems = computed<PromotionStackItem[]>(() => {
+    const promo = this.product()?.active_promotion;
+    if (!promo) return [];
+
+    const tiers = promo.quantity_tiers;
+    if (Array.isArray(tiers) && tiers.length > 0) {
+      const sorted = [...tiers].sort((a, b) => a.sort_order - b.sort_order);
+      return sorted.map((tier, index) => ({
+        id: `${promo.id}-modal-tier-${index}`,
+        original_promotion_id: promo.id,
+        label: promo.badge_label,
+        type: promo.type,
+        value: tier.value,
+        scope: promo.scope,
+        min_quantity: tier.min_quantity,
+        max_quantity: tier.max_quantity ?? null,
+        tier_index: index,
+      }));
+    }
+
+    if (promo.badge_label) {
+      return [
+        {
+          id: promo.id,
+          label: promo.badge_label,
+          type: promo.type,
+          value:
+            promo.discount_percentage ?? promo.discount_amount ?? undefined,
+          scope: promo.scope,
+        },
+      ];
+    }
+
+    return [];
+  });
 
   readonly displayStock = computed<number | null>(() => {
     // Con presentación elegida el stock son PAQUETES de ESA presentación.

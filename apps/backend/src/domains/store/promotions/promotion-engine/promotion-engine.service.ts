@@ -568,11 +568,30 @@ export class PromotionEngineService {
       });
     });
 
+    // Fetch store_settings to read the promotion evaluation strategy and guards
+    const settingsRow = await this.prisma.store_settings?.findFirst?.({
+      select: { settings: true },
+    });
+    const rawPromoSettings = (settingsRow?.settings as any)?.promotions;
+    const strategy: 'winner_takes_all' | 'stacking_groups' =
+      input.strategy ??
+      rawPromoSettings?.evaluation_strategy ??
+      'winner_takes_all';
+    const maxCombinedDiscountPercent =
+      rawPromoSettings?.max_combined_discount_percentage != null
+        ? Number(rawPromoSettings.max_combined_discount_percentage)
+        : null;
+    const allowOrderPromoStacking =
+      rawPromoSettings?.allow_order_promo_stacking !== false;
+    const excludeTierPricedLines =
+      rawPromoSettings?.exclude_tier_priced_lines === true;
+
     if (items.length === 0) {
       return {
         subtotal: 0,
         total_discount: 0,
         promotional_subtotal: 0,
+        strategy_applied: strategy,
         applied_promotions: [],
         items: [],
         order_promotions_snapshot: [],
@@ -600,11 +619,7 @@ export class PromotionEngineService {
 
     // CP-ECOM-PROMO-UX-001 convergence-R5-N+1: batch per-customer usage
     // counts via a single `groupBy` instead of issuing one `count` per
-    // candidate promo. With N promos carrying `per_customer_limit`, the
-    // winner-takes-all loop below used to issue N extra queries per
-    // `quoteDiscounts`; now it is a single round-trip and the per-promo
-    // check is a Map lookup. Same shape as the optimization applied to
-    // `getEligiblePromotions`.
+    // candidate promo.
     const customerUsageByPromotion = new Map<number, number>();
     const candidateIds = candidates.map((c) => Number(c.id));
     if (customerId && candidateIds.length > 0) {
@@ -624,43 +639,30 @@ export class PromotionEngineService {
       }
     }
 
-    /**
-     * WINNER-TAKES-ALL policy (per Edward's design):
-     *   An order should only have ONE active promotion. Among all eligible
-     *   candidates, the engine picks the single one with the highest priority
-     *   (lowest id as tiebreaker) and discards all others — even if they
-     *   apply to non-overlapping products.
-     *
-     * Implementation: we evaluate each candidate (run guards, compute its
-     * potential discount) and remember the best one so far. Per-line share
-     * math is deferred until we know the winner; the per-line breakdown is
-     * applied exactly ONCE for the winner.
-     */
-    let winner:
-      | {
-          promo: PromotionRecord;
-          applicableIndexes: number[];
-          discountAmount: number;
-          perLineShares: Map<number, number>;
-        }
-      | null = null;
+    // Evaluate all candidates against current items
+    const evaluatedCandidates: Array<{
+      promo: PromotionRecord;
+      applicableIndexes: number[];
+      chargedIndexes: number[];
+      discountAmount: number;
+      perLineShares: Map<number, number>;
+    }> = [];
 
     for (const promo of candidates) {
       const isManual = !promo.is_auto_apply;
-
-      // Manual promotions only apply if caller passed their id.
       if (isManual && !manualIds.includes(promo.id)) continue;
-
-      // Usage limit (global).
       if (promo.usage_limit && promo.usage_count >= promo.usage_limit) continue;
-
-      // Per-customer usage limit (looked up from the batched Map above).
       if (promo.per_customer_limit && customerId) {
         const customerUsage = customerUsageByPromotion.get(promo.id) ?? 0;
         if (customerUsage >= promo.per_customer_limit) continue;
       }
 
-      const applicableIndexes = this.resolveApplicableItemIndexes(promo, items);
+      let applicableIndexes = this.resolveApplicableItemIndexes(promo, items);
+      if (excludeTierPricedLines && promo.scope !== 'order') {
+        applicableIndexes = applicableIndexes.filter(
+          (idx) => !(Number(items[idx].applied_price_tier_id) > 0),
+        );
+      }
       if (applicableIndexes.length === 0) continue;
 
       const applicableTotal = this.roundMoney(
@@ -671,31 +673,13 @@ export class PromotionEngineService {
       );
       if (applicableTotal <= 0) continue;
 
-      // Min purchase is evaluated against the cart subtotal (not the scoped
-      // applicable total) to mirror current `getEligiblePromotions` behaviour.
       if (
         promo.min_purchase_amount &&
         subtotal < Number(promo.min_purchase_amount)
-      )
+      ) {
         continue;
+      }
 
-      // Evaluate this candidate's potential discount. We compute per-line
-      // shares so we can apply them later if this promo wins the
-      // "winner-takes-all" comparison below.
-      let candidateResult:
-        | {
-            discountAmount: number;
-            perLineShares: Map<number, number>;
-            // Lines actually charged. Narrower than `applicableIndexes` for
-            // per_product tiered promos; omitted means "the whole scope".
-            chargedIndexes?: number[];
-          }
-        | null = null;
-
-      // ---------------------------------------------------------------
-      // quantity_tiered branch: resolve ONE tier from the AGGREGATED scope
-      // quantity, apply it to every line, sum, then global cap.
-      // ---------------------------------------------------------------
       if (promo.rule_type === 'quantity_tiered') {
         const tiers = (promo.promotion_quantity_tiers ?? [])
           .slice()
@@ -709,29 +693,13 @@ export class PromotionEngineService {
 
         if (tiers.length === 0) continue;
 
-        // Resolve the winning tier based on how quantities are counted.
-        //   cart_total (default, legacy): sum quantity across every applicable
-        //     line in scope (order = whole cart, category = category lines,
-        //     product = product lines including variants/derivatives that
-        //     share the same product_id).
-        //   per_product: each product_id is evaluated independently; the tier
-        //     fires only when a single product reaches min_quantity on its
-        //     own. Different SKUs are NOT aggregated.
         const grouping = promo.quantity_grouping ?? 'cart_total';
         let matchedTier: (typeof tiers)[number] | undefined;
         let scopedQty = 0;
-
-        // Lines the resolved tier is actually charged against. For cart_total
-        // that is the whole scope; for per_product it narrows below to the
-        // products that reached the tier on their own.
         let tierIndexes = applicableIndexes;
         let tierTotal = applicableTotal;
 
         if (grouping === 'per_product') {
-          // Group by product_id, then pick the BEST tier across all groups
-          // (largest discount value wins). This keeps the "best discount for
-          // the customer" semantics when multiple products individually meet
-          // different tier thresholds.
           const byProduct = new Map<number, number>();
           for (const idx of applicableIndexes) {
             const pid = Number(items[idx].product_id);
@@ -756,11 +724,6 @@ export class PromotionEngineService {
             }
           }
 
-          // Charge the winning tier ONLY to the products that reached it.
-          // Without this narrowing a single qualifying product would bleed its
-          // tier onto every other line in scope (e.g. one product with qty=2
-          // discounting a 3-line cart), which contradicts the per_product
-          // contract above and inflates the discount.
           if (matchedTier) {
             const winningTierId = matchedTier.id;
             const qualifyingPids = new Set(
@@ -779,7 +742,6 @@ export class PromotionEngineService {
             );
           }
         } else {
-          // cart_total: legacy behavior — sum across every applicable line.
           scopedQty = applicableIndexes.reduce(
             (sum, idx) => sum + this.toSaleUnits(items[idx], saleUnitScale),
             0,
@@ -794,34 +756,12 @@ export class PromotionEngineService {
         if (!matchedTier) continue;
         if (tierIndexes.length === 0 || tierTotal <= 0) continue;
 
-        // CP-ECOM-PROMO-UX-001 M7: trace which tier was selected so that
-        // "I added 3 and got the wrong band" reports can be reconstructed.
-        // Promoted from `debug` to `log` (convergence-R5): `debug` is filtered
-        // out by Nest in production, so the trace was effectively dead and
-        // "the wrong tier fired" support tickets couldn't be diagnosed.
-        this.logger.log(
-          {
-            promotionId: promo.id,
-            tierMinQuantity: matchedTier.min_quantity,
-            tierMaxQuantity: matchedTier.max_quantity,
-            quantityInCart: scopedQty,
-          },
-          'Tier selected',
-        );
-
-        // Per-line discount computed from the FIXED winning tier (resolved once
-        // from scopedQty above), not from each line's individual quantity.
-        // percentage tiers apply per line; fixed_amount tiers apply a single
-        // flat amount across the charged lines (capped at tierTotal) split
-        // proportionally across them — see computeTierDiscountForResolvedTier.
         const perLineShares = new Map<number, number>();
         let rawTotal = 0;
         for (const idx of tierIndexes) {
           const item = items[idx];
           const lineDiscount = this.computeTierDiscountForResolvedTier(
             Number(item.unit_price),
-            // Unidades de PRECIO: el tramo ya se resolvió arriba con
-            // `toSaleUnits`; acá solo se cobra dinero.
             this.toPriceUnits(item, saleUnitScale),
             matchedTier,
             tierTotal,
@@ -832,8 +772,6 @@ export class PromotionEngineService {
 
         if (rawTotal <= 0) continue;
 
-        // Apply the existing global max_discount_amount cap on top of the
-        // summed line discounts; never exceed applicable scoped total either.
         let discountAmount = rawTotal;
         const maxDiscount = Number(promo.max_discount_amount);
         if (Number.isFinite(maxDiscount) && maxDiscount > 0) {
@@ -843,23 +781,6 @@ export class PromotionEngineService {
         discountAmount = this.roundMoney(discountAmount);
         if (discountAmount <= 0) continue;
 
-        // CP-ECOM-PROMO-UX-001 M7: trace when the cap silently clips the
-        // discount so support can confirm "the engine honored max_discount_amount".
-        if (discountAmount < rawTotal) {
-          this.logger.debug(
-            {
-              promotionId: promo.id,
-              rawDiscount: rawTotal,
-              cappedAt: discountAmount,
-            },
-            'Discount capped',
-          );
-        }
-
-        // Rescale the per-line shares so the SUM of shares matches the capped
-        // `discountAmount` exactly. The proportional split preserves the
-        // tier's intent (heavier discount on higher-priced lines) while the
-        // cap respects the global promotion limit.
         const scale = rawTotal > 0 ? discountAmount / rawTotal : 0;
         let assigned = 0;
         for (let i = 0; i < tierIndexes.length; i++) {
@@ -874,22 +795,21 @@ export class PromotionEngineService {
           assigned = this.roundMoney(assigned + share);
         }
 
-        candidateResult = {
+        evaluatedCandidates.push({
+          promo,
+          applicableIndexes,
+          chargedIndexes: tierIndexes,
           discountAmount,
           perLineShares,
-          chargedIndexes: tierIndexes,
-        };
+        });
       } else {
-        // flat (default) branch
+        // Flat promotion branch
         const discountAmount = this.computeDiscountAmount(
           promo,
           applicableTotal,
         );
         if (discountAmount <= 0) continue;
 
-        // Compute per-line shares proportional to line total so the
-        // breakdown is exact once we apply the winner. We track the running
-        // remainder and assign it to the last line to avoid rounding drift.
         const perLineShares = new Map<number, number>();
         let assigned = 0;
         for (let i = 0; i < applicableIndexes.length; i++) {
@@ -904,65 +824,275 @@ export class PromotionEngineService {
           assigned = this.roundMoney(assigned + share);
         }
 
-        candidateResult = { discountAmount, perLineShares };
-      }
-
-      if (!candidateResult) continue;
-
-      // Compare to the current winner. LOWER priority number = HIGHER
-      // importance (per Edward's design — priority 1 is the "first" promo
-      // to apply, like a priority queue). Ties broken by lowest
-      // promotion_id (the older one wins on tie).
-      if (
-        winner === null ||
-        promo.priority < winner.promo.priority ||
-        (promo.priority === winner.promo.priority && promo.id < winner.promo.id)
-      ) {
-        winner = {
+        evaluatedCandidates.push({
           promo,
-          applicableIndexes: candidateResult.chargedIndexes ?? applicableIndexes,
-          discountAmount: candidateResult.discountAmount,
-          perLineShares: candidateResult.perLineShares,
-        };
+          applicableIndexes,
+          chargedIndexes: applicableIndexes,
+          discountAmount,
+          perLineShares,
+        });
       }
     }
 
-    // CP-ECOM-PROMO-UX-001 M7: trace which candidate won the tiebreak so that
-    // customer reports ("the wrong promo applied") can be diagnosed without
-    // re-running the cart.
-    // Promoted from `debug` to `log` (convergence-R5): `debug` is filtered
-    // out by Nest in production, so the trace was effectively dead and
-    // "the wrong promo applied" support tickets couldn't be diagnosed.
-    if (winner) {
-      this.logger.log(
-        {
-          promotionId: winner.promo.id,
-          priority: winner.promo.priority,
-          scope: winner.promo.scope,
-        },
-        'Winner resolved',
+    // Determine final applied promotions based on configured strategy
+    const winningPromotions: Array<{
+      promo: PromotionRecord;
+      applicableIndexes: number[];
+      discountAmount: number;
+      perLineShares: Map<number, number>;
+    }> = [];
+
+    if (strategy === 'winner_takes_all') {
+      let winner: (typeof evaluatedCandidates)[number] | null = null;
+      for (const candidate of evaluatedCandidates) {
+        if (
+          winner === null ||
+          candidate.promo.priority < winner.promo.priority ||
+          (candidate.promo.priority === winner.promo.priority &&
+            candidate.promo.id < winner.promo.id)
+        ) {
+          winner = candidate;
+        }
+      }
+      if (winner) {
+        winningPromotions.push({
+          promo: winner.promo,
+          applicableIndexes: winner.chargedIndexes ?? winner.applicableIndexes,
+          discountAmount: winner.discountAmount,
+          perLineShares: winner.perLineShares,
+        });
+      }
+    } else {
+      // ---------------------------------------------------------------
+      // STACKING GROUPS strategy:
+      // 1. Separate item/category promos from order-level promos.
+      // 2. For each line, assign at most ONE item/category promo (highest priority).
+      // 3. Recompute each item promo's share on its won lines.
+      // 4. If allowed, apply the best order-level promo over residual subtotal.
+      // ---------------------------------------------------------------
+      const itemCandidates = evaluatedCandidates.filter(
+        (c) => c.promo.scope === 'product' || c.promo.scope === 'category',
       );
+      const orderCandidates = evaluatedCandidates.filter(
+        (c) => c.promo.scope === 'order',
+      );
+
+      // Line assignment: lineIndex -> winning item candidate
+      const lineWinnerMap = new Map<
+        number,
+        (typeof evaluatedCandidates)[number]
+      >();
+      for (const candidate of itemCandidates) {
+        for (const lineIdx of candidate.chargedIndexes) {
+          const existing = lineWinnerMap.get(lineIdx);
+          if (!existing) {
+            lineWinnerMap.set(lineIdx, candidate);
+          } else {
+            // Conflict resolution on same line: lower priority wins. Tiebreak: higher line discount, then lower promo.id
+            const existingShare = existing.perLineShares.get(lineIdx) ?? 0;
+            const currentShare = candidate.perLineShares.get(lineIdx) ?? 0;
+            if (
+              candidate.promo.priority < existing.promo.priority ||
+              (candidate.promo.priority === existing.promo.priority &&
+                currentShare > existingShare) ||
+              (candidate.promo.priority === existing.promo.priority &&
+                currentShare === existingShare &&
+                candidate.promo.id < existing.promo.id)
+            ) {
+              lineWinnerMap.set(lineIdx, candidate);
+            }
+          }
+        }
+      }
+
+      // Group won lines by candidate promo
+      const wonLinesByPromo = new Map<number, number[]>();
+      for (const [lineIdx, candidate] of lineWinnerMap.entries()) {
+        const list = wonLinesByPromo.get(candidate.promo.id) ?? [];
+        list.push(lineIdx);
+        wonLinesByPromo.set(candidate.promo.id, list);
+      }
+
+      // Build item-level winners
+      for (const candidate of itemCandidates) {
+        const wonLines = wonLinesByPromo.get(candidate.promo.id);
+        if (!wonLines || wonLines.length === 0) continue;
+
+        let promoRawTotal = 0;
+        const perLineShares = new Map<number, number>();
+        for (const lineIdx of wonLines) {
+          const share = candidate.perLineShares.get(lineIdx) ?? 0;
+          perLineShares.set(lineIdx, share);
+          promoRawTotal = this.roundMoney(promoRawTotal + share);
+        }
+
+        if (promoRawTotal <= 0) continue;
+
+        let promoDiscount = promoRawTotal;
+        const maxDiscount = Number(candidate.promo.max_discount_amount);
+        if (Number.isFinite(maxDiscount) && maxDiscount > 0) {
+          promoDiscount = Math.min(promoDiscount, maxDiscount);
+        }
+        promoDiscount = this.roundMoney(promoDiscount);
+
+        if (promoDiscount < promoRawTotal) {
+          const scale = promoRawTotal > 0 ? promoDiscount / promoRawTotal : 0;
+          let assigned = 0;
+          for (let i = 0; i < wonLines.length; i++) {
+            const lineIdx = wonLines[i];
+            const isLast = i === wonLines.length - 1;
+            const rawShare = perLineShares.get(lineIdx) ?? 0;
+            const share = isLast
+              ? this.roundMoney(promoDiscount - assigned)
+              : this.roundMoney(rawShare * scale);
+            perLineShares.set(lineIdx, share);
+            assigned = this.roundMoney(assigned + share);
+          }
+        }
+
+        winningPromotions.push({
+          promo: candidate.promo,
+          applicableIndexes: wonLines,
+          discountAmount: promoDiscount,
+          perLineShares,
+        });
+      }
+
+      // Order-level promotion evaluation in stacking mode
+      if (
+        orderCandidates.length > 0 &&
+        (allowOrderPromoStacking || winningPromotions.length === 0)
+      ) {
+        orderCandidates.sort((a, b) => {
+          if (a.promo.priority !== b.promo.priority)
+            return a.promo.priority - b.promo.priority;
+          return a.promo.id - b.promo.id;
+        });
+
+        const bestOrderCandidate = orderCandidates[0];
+        const itemDiscountsSum = winningPromotions.reduce(
+          (sum, p) => sum + p.discountAmount,
+          0,
+        );
+        const residualSubtotal = this.roundMoney(
+          Math.max(0, subtotal - itemDiscountsSum),
+        );
+
+        if (residualSubtotal > 0) {
+          let orderDiscount = 0;
+          if (bestOrderCandidate.promo.type === 'percentage') {
+            orderDiscount = this.roundMoney(
+              residualSubtotal * (Number(bestOrderCandidate.promo.value) / 100),
+            );
+          } else {
+            orderDiscount = Math.min(
+              Number(bestOrderCandidate.promo.value),
+              residualSubtotal,
+            );
+          }
+
+          const maxOrderDiscount = Number(
+            bestOrderCandidate.promo.max_discount_amount,
+          );
+          if (Number.isFinite(maxOrderDiscount) && maxOrderDiscount > 0) {
+            orderDiscount = Math.min(orderDiscount, maxOrderDiscount);
+          }
+          orderDiscount = this.roundMoney(orderDiscount);
+
+          if (orderDiscount > 0) {
+            const orderLineShares = new Map<number, number>();
+            let assigned = 0;
+            for (let i = 0; i < items.length; i++) {
+              const item = items[i];
+              const lineTotal = this.lineTotal(item, saleUnitScale);
+              const isLast = i === items.length - 1;
+              const share = isLast
+                ? this.roundMoney(orderDiscount - assigned)
+                : this.roundMoney(
+                    (lineTotal / subtotal) * orderDiscount,
+                  );
+              orderLineShares.set(i, share);
+              assigned = this.roundMoney(assigned + share);
+            }
+
+            winningPromotions.push({
+              promo: bestOrderCandidate.promo,
+              applicableIndexes:
+                bestOrderCandidate.chargedIndexes ??
+                bestOrderCandidate.applicableIndexes,
+              discountAmount: orderDiscount,
+              perLineShares: orderLineShares,
+            });
+          }
+        }
+      }
     }
 
+    // Global combined discount cap enforcement (when max_combined_discount_percentage is configured)
+    if (maxCombinedDiscountPercent !== null && maxCombinedDiscountPercent > 0) {
+      const totalDiscountBeforeCap = winningPromotions.reduce(
+        (sum, p) => sum + p.discountAmount,
+        0,
+      );
+      const maxAllowedDiscount = this.roundMoney(
+        subtotal *
+          (Math.min(90, Math.max(1, maxCombinedDiscountPercent)) / 100),
+      );
 
-    // Apply ONLY the winner (if any) to the per-item breakdown. All other
-    // candidates were evaluated but discarded by the "highest priority wins"
-    // rule.
+      if (
+        totalDiscountBeforeCap > maxAllowedDiscount &&
+        maxAllowedDiscount > 0
+      ) {
+        const globalScale = maxAllowedDiscount / totalDiscountBeforeCap;
+        let assignedPromoTotal = 0;
+
+        for (let i = 0; i < winningPromotions.length; i++) {
+          const wp = winningPromotions[i];
+          const isLast = i === winningPromotions.length - 1;
+          const scaledAmount = isLast
+            ? this.roundMoney(maxAllowedDiscount - assignedPromoTotal)
+            : this.roundMoney(wp.discountAmount * globalScale);
+          assignedPromoTotal = this.roundMoney(
+            assignedPromoTotal + scaledAmount,
+          );
+
+          const promoLineScale =
+            wp.discountAmount > 0 ? scaledAmount / wp.discountAmount : 0;
+          let assignedLineTotal = 0;
+          const lineEntries = Array.from(wp.perLineShares.entries());
+
+          for (let j = 0; j < lineEntries.length; j++) {
+            const [lineIdx, share] = lineEntries[j];
+            const isLastLine = j === lineEntries.length - 1;
+            const scaledShare = isLastLine
+              ? this.roundMoney(scaledAmount - assignedLineTotal)
+              : this.roundMoney(share * promoLineScale);
+            wp.perLineShares.set(lineIdx, scaledShare);
+            assignedLineTotal = this.roundMoney(
+              assignedLineTotal + scaledShare,
+            );
+          }
+
+          wp.discountAmount = scaledAmount;
+        }
+      }
+    }
+
+    // Apply winning promotions to itemBreakdownMap
     const appliedPromotions: PromotionQuoteApplied[] = [];
-    if (winner) {
-      for (const [idx, share] of winner.perLineShares.entries()) {
+    for (const wp of winningPromotions) {
+      for (const [idx, share] of wp.perLineShares.entries()) {
         const current = itemBreakdownMap.get(idx);
         if (!current) continue;
         const item = items[idx];
         const priceUnits = this.toPriceUnits(item, saleUnitScale);
         const lineTotal = Number(item.unit_price) * priceUnits;
-        const cappedDiscount = Math.min(share, lineTotal);
+
+        const accumulatedDiscount = this.roundMoney(
+          current.promotion_discount + share,
+        );
+        const cappedDiscount = Math.min(accumulatedDiscount, lineTotal);
         const remainingLineTotal = this.roundMoney(lineTotal - cappedDiscount);
-        // `final_unit_price` sigue siendo el precio de UNA unidad de PRECIO
-        // (el metro), no de una unidad de stock: lo que la escala cambia es el
-        // multiplicador, nunca la magnitud del precio unitario. Un 10% sobre
-        // $5.000/m da $4.500/m — dividir por la cantidad cruda daría $4,5 y el
-        // POS cobraría una milésima parte.
         const nextUnitPrice =
           priceUnits > 0
             ? this.roundMoney(remainingLineTotal / priceUnits)
@@ -973,40 +1103,30 @@ export class PromotionEngineService {
           promotion_discount: cappedDiscount,
           final_unit_price: Math.max(0, nextUnitPrice),
           final_line_total: Math.max(0, remainingLineTotal),
-          promotion_ids: current.promotion_ids.includes(winner.promo.id)
+          promotion_ids: current.promotion_ids.includes(wp.promo.id)
             ? current.promotion_ids
-            : [...current.promotion_ids, winner.promo.id],
+            : [...current.promotion_ids, wp.promo.id],
         });
       }
 
       appliedPromotions.push({
-        promotion_id: winner.promo.id,
-        name: winner.promo.name,
-        code: winner.promo.code ?? null,
-        type: winner.promo.type,
-        scope: winner.promo.scope,
-        value: Number(winner.promo.value),
-        is_auto_apply: winner.promo.is_auto_apply,
-        priority: winner.promo.priority,
-        discount_amount: this.roundMoney(winner.discountAmount),
-        applicable_item_ids: winner.applicableIndexes
+        promotion_id: wp.promo.id,
+        name: wp.promo.name,
+        code: wp.promo.code ?? null,
+        type: wp.promo.type,
+        scope: wp.promo.scope,
+        value: Number(wp.promo.value),
+        is_auto_apply: wp.promo.is_auto_apply,
+        priority: wp.promo.priority,
+        discount_amount: this.roundMoney(wp.discountAmount),
+        applicable_item_ids: wp.applicableIndexes
           .map((idx) => itemBreakdownMap.get(idx)?.line_id)
           .filter((lineId): lineId is string | number => lineId !== undefined),
-        /**
-         * For `quantity_grouping='per_product'` promos the engine narrows
-         * `applicableIndexes` (via `chargedIndexes`) to the products that
-         * actually reached the tier on their own, so we can derive a clean
-         * list of `product_id`s that unlocked the deal. For `cart_total`
-         * (legacy) the discount is prorated across the whole scope and the
-         * concept of "which product triggered it" doesn't apply — we return
-         * an empty array so the frontend knows not to render a "en: X, Y"
-         * line that would mislead the customer.
-         */
         target_product_ids:
-          (winner.promo.quantity_grouping ?? 'cart_total') === 'per_product'
+          (wp.promo.quantity_grouping ?? 'cart_total') === 'per_product'
             ? Array.from(
                 new Set(
-                  winner.applicableIndexes.map((idx) =>
+                  wp.applicableIndexes.map((idx) =>
                     Number(items[idx].product_id),
                   ),
                 ),
@@ -1028,19 +1148,21 @@ export class PromotionEngineService {
       discount_amount: p.discount_amount,
     }));
 
-    // Pure, non-mutating read over the SAME candidate set resolved above. Never
-    // touches the discount math; the return only GAINS this field.
     const tierProgress = this.buildTierProgress(
       candidates,
       items,
       saleUnitScale,
-      winner?.promo ?? null,
+      appliedPromotions.length === 1 && strategy === 'winner_takes_all'
+        ? candidates.find((c) => c.id === appliedPromotions[0].promotion_id) ??
+            null
+        : null,
     );
 
     return {
       subtotal,
       total_discount: totalDiscount,
       promotional_subtotal: promotionalSubtotal,
+      strategy_applied: strategy,
       applied_promotions: appliedPromotions,
       items: itemBreakdown,
       order_promotions_snapshot: snapshot,

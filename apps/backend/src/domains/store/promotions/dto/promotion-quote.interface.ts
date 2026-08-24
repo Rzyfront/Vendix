@@ -65,6 +65,11 @@ export interface PromotionQuoteInput {
    * Useful for deterministic tests and replays.
    */
   now?: Date;
+  /**
+   * Optional evaluation strategy override. When omitted, reads from `store_settings.promotions.evaluation_strategy`
+   * with fallback to `'winner_takes_all'`.
+   */
+  strategy?: 'winner_takes_all' | 'stacking_groups';
 }
 
 export interface PromotionQuoteApplied {
@@ -169,6 +174,8 @@ export interface PromotionQuoteResult {
   total_discount: number;
   /** subtotal - total_discount (>= 0). */
   promotional_subtotal: number;
+  /** Strategy used to evaluate and apply promotions for this quote. */
+  strategy_applied?: 'winner_takes_all' | 'stacking_groups';
   applied_promotions: PromotionQuoteApplied[];
   items: PromotionQuoteItemBreakdown[];
   /** Order_promotions records ready to persist (one per applied promotion). */

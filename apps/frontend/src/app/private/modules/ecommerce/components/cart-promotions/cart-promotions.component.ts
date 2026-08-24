@@ -15,6 +15,10 @@ import {
   PromotionStackItem,
 } from '../../../../../shared/components/promotion-stack/promotion-stack.component';
 import {
+  GamifiedIncentiveBarComponent,
+  IncentiveProgressData,
+} from '../../../../../shared/components/gamified-incentive-bar/gamified-incentive-bar.component';
+import {
   CurrencyPipe,
   CurrencyFormatService,
 } from '../../../../../shared/pipes/currency';
@@ -44,7 +48,12 @@ import {
 @Component({
   selector: 'app-cart-promotions',
   standalone: true,
-  imports: [CommonModule, PromotionStackComponent, CurrencyPipe],
+  imports: [
+    CommonModule,
+    PromotionStackComponent,
+    GamifiedIncentiveBarComponent,
+    CurrencyPipe,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- CP-ECOM-PROMO-UX-001 convergence-R5: degraded-load banner. When the
@@ -62,6 +71,15 @@ import {
         <span>No pudimos cargar las promociones. Refresca para reintentar.</span>
       </div>
     }
+
+    <!-- High-Conversion Gamified Incentive Bar -->
+    @if (incentiveData()) {
+      <app-gamified-incentive-bar
+        [data]="incentiveData()"
+        class="block mb-2.5"
+      />
+    }
+
     @if (inline()) {
       <!-- Modo inline: SOLO el nudge de próximo tramo, como pill compacto
            (para el bannersito del carrito). -->
@@ -196,6 +214,45 @@ export class CartPromotionsComponent {
   protected readonly showDegradedBanner = computed<boolean>(
     () => this.cart()?.promotions_load_state === 'degraded',
   );
+
+  /**
+   * Data for the gamified incentive progress bar.
+   * Derives real-time progress towards the next reachable tier or highlights unlocked benefits.
+   */
+  readonly incentiveData = computed<IncentiveProgressData | null>(() => {
+    const currentCart = this.cart();
+    const tiers = currentCart?.tier_progress ?? [];
+    if (tiers.length > 0) {
+      const first = tiers[0];
+      const benefitLabel =
+        first.benefit_type === 'percentage'
+          ? `-${first.benefit_value}% OFF`
+          : `-$${this.currencyFormat.format(first.benefit_value)} OFF`;
+      const remaining = first.remaining_quantity;
+      const targetName = this.resolveProductName(first.target_product_id);
+
+      return {
+        remaining_quantity: remaining,
+        benefit_label: benefitLabel,
+        target_product_name: targetName,
+        progress_percentage: Math.max(15, Math.min(90, 100 - remaining * 20)),
+        unlocked: false,
+      };
+    }
+
+    const applied = currentCart?.applied_promotions ?? [];
+    if (applied.length > 0) {
+      const first = applied[0];
+      const benefitLabel = `-$${this.currencyFormat.format(first.discount_amount)} Ahorro`;
+      return {
+        benefit_label: benefitLabel,
+        unlocked: true,
+        progress_percentage: 100,
+      };
+    }
+
+    return null;
+  });
 
   // ── Primary projections (Phase E.1) ───────────────────────────────────
 

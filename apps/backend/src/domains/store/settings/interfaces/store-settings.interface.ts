@@ -538,6 +538,9 @@ export interface StoreSettings {
   // Vexi - the AI assistant's master switch
   vexi?: VexiSettings;
 
+  // Promotions - Evaluation strategy (winner_takes_all vs stacking_groups) & display settings
+  promotions?: PromotionsSettings;
+
   // Secciones existentes
   general: GeneralSettings;
   inventory: InventorySettings;
@@ -987,6 +990,40 @@ export interface AvailabilitySettings {
    * remain the source of truth when they exist.
    */
   working_days: number[];
+}
+
+// ============================================================================
+// PROMOTIONS - Evaluation strategy (winner_takes_all vs stacking_groups) & UI
+// ============================================================================
+export type PromotionEvaluationStrategy = 'winner_takes_all' | 'stacking_groups';
+
+export interface PromotionsSettings {
+  /**
+   * Evaluacion de promociones en cotizaciones, carrito, checkout y POS.
+   * - `winner_takes_all` (default): 1 sola promocion ganadora por orden segun priority.
+   * - `stacking_groups`: Promociones de alcance disjunto (producto/categoria) se aplican concurrentemente.
+   */
+  evaluation_strategy: PromotionEvaluationStrategy;
+  /**
+   * Tope maximo porcentual de descuento acumulado permitido sobre la orden (default 50, rango 1-90).
+   * Evita perdidas por acumulacion descontrolada de promociones.
+   */
+  max_combined_discount_percentage: number;
+  /**
+   * Permite que las promociones de orden (scope='order') se apliquen sobre el subtotal residual
+   * tras los descuentos por item. Default true.
+   */
+  allow_order_promo_stacking: boolean;
+  /**
+   * Excluye productos que ya cuenten con una tarifa mayorista (`price_tiers.kind='customer_tier'`)
+   * aplicada de recibir promociones automaticas adicionales. Default false.
+   */
+  exclude_tier_priced_lines: boolean;
+  /**
+   * Activa la visualizacion gamificada de alta conversion (escalas, badges de ahorro, barra de progreso)
+   * en el storefront y POS. Default true.
+   */
+  enable_high_conversion_ui?: boolean;
 }
 
 export interface OperationsSettings {

@@ -1745,4 +1745,206 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       expect(result[0].promotion_id).toBe(403);
     });
   });
+
+  describe('strategy: stacking_groups and multi-tier rules', () => {
+    it('applies multiple promotions concurrently on disjoint products in stacking_groups mode', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 501,
+          name: '10% en Camisas',
+          scope: 'product',
+          type: 'percentage',
+          value: 10,
+          priority: 1,
+          promotion_products: [{ product_id: 1 }],
+        }),
+        buildPromotion({
+          id: 502,
+          name: '20% en Pantalones',
+          scope: 'product',
+          type: 'percentage',
+          value: 20,
+          priority: 2,
+          promotion_products: [{ product_id: 2 }],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'l1', product_id: 1, unit_price: 100, quantity: 1 },
+          { line_id: 'l2', product_id: 2, unit_price: 200, quantity: 1 },
+        ],
+        strategy: 'stacking_groups',
+        now: REFERENCE_NOW,
+      });
+
+      expect(result.strategy_applied).toBe('stacking_groups');
+      expect(result.applied_promotions).toHaveLength(2);
+      expect(result.total_discount).toBe(50); // $10 (10% of 100) + $40 (20% of 200)
+      expect(result.promotional_subtotal).toBe(250);
+      expect(result.items[0].promotion_discount).toBe(10);
+      expect(result.items[1].promotion_discount).toBe(40);
+    });
+
+    it('resolves collision on the same line by giving priority to higher priority promo in stacking_groups', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 501,
+          name: '10% en Categoria',
+          scope: 'category',
+          type: 'percentage',
+          value: 10,
+          priority: 1,
+          promotion_categories: [{ category_id: 10 }],
+        }),
+        buildPromotion({
+          id: 502,
+          name: '20% en Producto',
+          scope: 'product',
+          type: 'percentage',
+          value: 20,
+          priority: 2,
+          promotion_products: [{ product_id: 1 }],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [
+          {
+            line_id: 'l1',
+            product_id: 1,
+            category_id: 10,
+            unit_price: 100,
+            quantity: 1,
+          },
+        ],
+        strategy: 'stacking_groups',
+        now: REFERENCE_NOW,
+      });
+
+      // Priority 1 wins for line l1
+      expect(result.applied_promotions).toHaveLength(1);
+      expect(result.applied_promotions[0].promotion_id).toBe(501);
+      expect(result.total_discount).toBe(10);
+      expect(result.items[0].final_unit_price).toBe(90);
+    });
+
+    it('stacks order-level promotion on residual subtotal after item promotions', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 501,
+          name: '20% en Producto 1',
+          scope: 'product',
+          type: 'percentage',
+          value: 20,
+          priority: 1,
+          promotion_products: [{ product_id: 1 }],
+        }),
+        buildPromotion({
+          id: 502,
+          name: '10% en Todo el Carrito',
+          scope: 'order',
+          type: 'percentage',
+          value: 10,
+          priority: 2,
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'l1', product_id: 1, unit_price: 100, quantity: 1 },
+          { line_id: 'l2', product_id: 2, unit_price: 100, quantity: 1 },
+        ],
+        strategy: 'stacking_groups',
+        now: REFERENCE_NOW,
+      });
+
+      // Subtotal = 200
+      // Item promo = 20% on line 1 = $20
+      // Residual subtotal = 180
+      // Order promo = 10% on residual 180 = $18
+      // Total discount = $38
+      expect(result.applied_promotions).toHaveLength(2);
+      expect(result.total_discount).toBe(38);
+      expect(result.promotional_subtotal).toBe(162);
+    });
+
+    it('enforces max_combined_discount_percentage cap when configured in store settings', async () => {
+      (prisma as any).store_settings = {
+        findFirst: jest.fn().mockResolvedValue({
+          settings: {
+            promotions: {
+              evaluation_strategy: 'stacking_groups',
+              max_combined_discount_percentage: 30, // Cap at 30% max
+            },
+          },
+        }),
+      };
+
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 501,
+          name: '50% en Producto 1',
+          scope: 'product',
+          type: 'percentage',
+          value: 50,
+          priority: 1,
+          promotion_products: [{ product_id: 1 }],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [{ line_id: 'l1', product_id: 1, unit_price: 100, quantity: 1 }],
+        now: REFERENCE_NOW,
+      });
+
+      // 50% requested, but store max_combined_discount_percentage is 30%
+      expect(result.total_discount).toBe(30);
+      expect(result.promotional_subtotal).toBe(70);
+    });
+
+    it('excludes lines with applied_price_tier_id when exclude_tier_priced_lines is true', async () => {
+      (prisma as any).store_settings = {
+        findFirst: jest.fn().mockResolvedValue({
+          settings: {
+            promotions: {
+              evaluation_strategy: 'stacking_groups',
+              exclude_tier_priced_lines: true,
+            },
+          },
+        }),
+      };
+
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 501,
+          name: '15% en Producto 1',
+          scope: 'product',
+          type: 'percentage',
+          value: 15,
+          priority: 1,
+          promotion_products: [{ product_id: 1 }],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [
+          {
+            line_id: 'l1',
+            product_id: 1,
+            unit_price: 100,
+            quantity: 1,
+            applied_price_tier_id: 99, // Customer tier applied
+          },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      // Line is excluded because it has a price tier applied
+      expect(result.applied_promotions).toHaveLength(0);
+      expect(result.total_discount).toBe(0);
+      expect(result.promotional_subtotal).toBe(100);
+    });
+  });
 });
+

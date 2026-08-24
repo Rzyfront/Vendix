@@ -125,7 +125,7 @@
       @for (item of expandedTiers(); track item.id; let i = $index; let total = $count) {
         <div
           role="listitem"
-          class="promotion-stack__tier"
+          class="promotion-stack__tier cursor-pointer transition-transform active:scale-95"
           [ngClass]="{
             'promotion-stack__tier--current': isCurrentTier(item),
             'promotion-stack__tier--next': isNextTier(item) && !isCurrentTier(item),
@@ -133,6 +133,7 @@
           }"
           [attr.data-testid]="'promotion-stack-item-' + i"
           [attr.aria-label]="tierAriaLabel(item, i, total)"
+          (click)="onTierClick(item)"
         >
           <div class="promotion-stack__tier-header">
             <span class="promotion-stack__tier-min">{{ tierHeader(item) }}</span>

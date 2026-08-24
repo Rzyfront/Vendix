@@ -203,7 +203,7 @@ import {
                             variant="success"
                             size="xsm"
                             badgeStyle="solid"
-                            title="Esta es la promoción aplicada. El motor descartó las demás promos elegibles porque solo se permite una promoción por orden."
+                            title="Promoción activa aplicada."
                           >
                             Aplicada
                           </app-badge>

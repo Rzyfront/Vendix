@@ -240,6 +240,7 @@ import {
                     data-testid="detail-promo-tier-ladder"
                     (promotionViewed)="onPromotionViewed($event)"
                     (promotionIntent)="onPromotionIntent($event)"
+                    (tierSelected)="quantity.set($event.min_quantity)"
                   />
                 }
               </div>

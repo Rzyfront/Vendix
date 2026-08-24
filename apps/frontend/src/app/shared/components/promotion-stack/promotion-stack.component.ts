@@ -142,6 +142,15 @@ export class PromotionStackComponent {
     quantity: number;
   }>();
 
+  /**
+   * Emite cuando el usuario hace clic en una tarjeta de tramo (tier) en expanded-cards.
+   * Permite que la vista (PDP/Modal) seleccione automáticamente la cantidad necesaria.
+   */
+  readonly tierSelected = output<{
+    min_quantity: number;
+    tier_index: number;
+  }>();
+
   // ── Refs ──────────────────────────────────────────────────────────────
   private readonly scrollerRef = viewChild<ElementRef<HTMLElement>>('scroller');
 
@@ -572,4 +581,14 @@ export class PromotionStackComponent {
       this.intersectionObserver = null;
     }
   }
+
+  onTierClick(item: PromotionStackItem): void {
+    if (item && item.min_quantity !== undefined && Number.isFinite(item.min_quantity)) {
+      this.tierSelected.emit({
+        min_quantity: item.min_quantity,
+        tier_index: item.tier_index ?? 0,
+      });
+    }
+  }
 }
+
