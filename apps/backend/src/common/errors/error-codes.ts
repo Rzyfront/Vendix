@@ -246,6 +246,17 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Source document to render was not found in domain',
   },
+  // 501 y no 404 ni 500 a propósito: el formato SÍ está registrado y el
+  // documento SÍ puede existir; lo que falta es el lector real de ese dominio.
+  // Un 404 mentiría diciendo que el documento no existe y un 500 haría pensar en
+  // una caída. Sustituye a devolver la muestra fabricada, que respondía 200 con
+  // datos de un tercero.
+  PRINT_DOCUMENT_READER_MISSING_001: {
+    code: 'PRINT_DOCUMENT_READER_MISSING_001',
+    httpStatus: 501,
+    devMessage:
+      'Print format is registered but has no real document reader yet; refusing to serve sample data on the real print path',
+  },
   PRINT_DATA_PROVIDER_MISSING_001: {
     code: 'PRINT_DATA_PROVIDER_MISSING_001',
     httpStatus: 500,

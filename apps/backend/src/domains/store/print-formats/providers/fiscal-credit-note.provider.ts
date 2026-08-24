@@ -1,21 +1,107 @@
 import { Injectable } from '@nestjs/common';
 import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { QrService } from '../../../../common/services/qr.service';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
+import {
+  FISCAL_DOCUMENT_PRINT_INCLUDE,
+  mapFiscalDocumentToPrintData,
+} from './fiscal-document-print.mapper';
+
+/**
+ * Tipos de `invoices.invoice_type` que ESTE formato puede imprimir.
+ *
+ * La compuerta no es defensiva por costumbre: sin ella, pasar el id de una
+ * factura de venta imprimiría la factura con el encabezado y las etiquetas de
+ * una nota de crédito, y quien la reciba tendría en la mano un documento que
+ * dice ser algo que no es. `credit-notes.service.ts:250` escribe las notas en la
+ * misma tabla `invoices` con `invoice_type` = `credit_note`, así que el id de
+ * una factura y el de una nota viven en el mismo espacio de numeración interna y
+ * confundirlos es un error de un dígito.
+ */
+const CREDIT_NOTE_TYPES = ['credit_note'] as const;
 
 @Injectable()
 export class FiscalCreditNoteDataProvider implements IDocumentDataProvider {
   readonly formatType: print_format_type_enum = 'fiscal_credit_note';
 
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly qrService: QrService,
+  ) {}
 
+  /**
+   * Lee la nota de crédito REAL.
+   *
+   * Antes del 2026-08-24 esto era `return this.getSampleData(storeId)`, y el
+   * `documentId` se ignoraba. Como `print-gateway.service.ts:174` lo alcanza por
+   * el carril de impresión real (no por la previsualización), imprimir una nota
+   * de crédito entregaba al cliente un documento fiscal con el adquiriente, el
+   * NIT, el CUFE y la resolución de la muestra —datos de un tercero
+   * inexistente— con formato impecable. Un documento falso con apariencia de
+   * legítimo es peor que un formato que no existe.
+   *
+   * Que falle es seguro para la previsualización: `print-gateway.service.ts:280`
+   * envuelve `fetchDocumentData` en un `try/catch` y cae a `getSampleData`, que
+   * es para lo que la muestra existe.
+   */
   async fetchDocumentData(
     storeId: number,
     documentId: number | string,
   ): Promise<StandardPrintDataModel> {
-    return this.getSampleData(storeId);
+    const id = Number(documentId);
+    if (!Number.isFinite(id)) {
+      throw new VendixHttpException(ErrorCodes.PRINT_DOCUMENT_NOT_FOUND_001);
+    }
+
+    const note = await this.prisma.invoices.findFirst({
+      where: {
+        id,
+        store_id: storeId,
+        invoice_type: { in: [...CREDIT_NOTE_TYPES] },
+      },
+      include: FISCAL_DOCUMENT_PRINT_INCLUDE,
+    });
+
+    if (!note) {
+      throw new VendixHttpException(ErrorCodes.PRINT_DOCUMENT_NOT_FOUND_001);
+    }
+
+    // La factura corregida se lee aparte y NO se incluye en la consulta
+    // anterior: `related_invoice_id` es opcional en el esquema, y un `include`
+    // anidado sobre la misma tabla arrastraría otra vez ítems, impuestos y
+    // direcciones para usar un solo campo.
+    let referenceDocumentNumber: string | undefined;
+    if (note.related_invoice_id) {
+      const related = await this.prisma.invoices.findFirst({
+        where: { id: note.related_invoice_id, store_id: storeId },
+        select: { invoice_number: true },
+      });
+      referenceDocumentNumber = related?.invoice_number
+        ? String(related.invoice_number)
+        : undefined;
+    }
+
+    let qrBase64: string | undefined;
+    if (note.qr_code) {
+      try {
+        const qrBuffer = await this.qrService.generateBuffer(note.qr_code, 240);
+        qrBase64 = qrBuffer.toString('base64');
+      } catch (e) {
+        // El QR es ilustrativo: su contenido de texto ya va en `qr_code_content`
+        // y el documento sigue siendo verificable sin la imagen.
+      }
+    }
+
+    return mapFiscalDocumentToPrintData(note, {
+      qrBase64,
+      acceptedLabel: 'Nota crédito aprobada por DIAN',
+      pendingLabel: 'Nota crédito pendiente',
+      referenceDocumentNumber,
+    });
   }
 
   async getSampleData(storeId?: number): Promise<StandardPrintDataModel> {
