@@ -41,7 +41,7 @@ const nulo = null as any;
 const PROVEEDORES: Array<[string, { getSampleData(id?: number): Promise<any> }]> =
   [
     ['fiscal_electronic_invoice', new FiscalInvoiceDataProvider(nulo, nulo)],
-    ['fiscal_credit_note', new FiscalCreditNoteDataProvider(nulo)],
+    ['fiscal_credit_note', new FiscalCreditNoteDataProvider(nulo, nulo)],
     ['dispatch_note', new DispatchNoteDataProvider(nulo)],
     ['kitchen_ticket', new KitchenTicketDataProvider(nulo)],
     ['pos_sale_ticket', new PosSaleTicketDataProvider(nulo)],
@@ -80,7 +80,7 @@ describe('formato del número de documento impreso', () => {
   });
 
   it('la nota de crédito fiscal deja `prefix` fuera por el mismo motivo', async () => {
-    const data = await new FiscalCreditNoteDataProvider(nulo).getSampleData(1);
+    const data = await new FiscalCreditNoteDataProvider(nulo, nulo).getSampleData(1);
     expect(data.document?.prefix).toBeUndefined();
     expect(data.document?.number).toBe('NC-SETP-0012');
   });
