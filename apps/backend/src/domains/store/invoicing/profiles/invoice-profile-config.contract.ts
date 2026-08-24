@@ -88,6 +88,38 @@ export type AiuComponentLiteral = 'administracion' | 'imprevistos' | 'utilidad';
  */
 export type AiuBucket = AiuComponentLiteral | 'costo';
 
+/**
+ * Tipo de documento con que nace la factura (`invoice_type` del formulario de
+ * emisión, traducido después a `fiscal_document_type` por `toFiscalDocumentType`).
+ *
+ * Vive en el perfil porque una empresa que exporta factura SIEMPRE al exterior:
+ * dejarlo en «venta nacional» por omisión obliga a cambiarlo en cada documento,
+ * y el día que alguien lo olvide sale una exportación declarada como venta
+ * nacional. La lista es cerrada a propósito: un valor desconocido acá se
+ * traduciría a un tipo de documento DIAN que no corresponde.
+ */
+export type ProfileDocumentType = 'sales_invoice' | 'export_invoice';
+
+export const PROFILE_DOCUMENT_TYPES: readonly ProfileDocumentType[] = [
+  'sales_invoice',
+  'export_invoice',
+];
+
+/**
+ * Lado de una retención.
+ *
+ * `practiced` = la tienda retiene al cliente. `suffered` = al cliente le
+ * corresponde retener a la tienda. Son importes que van a asientos distintos y
+ * a declaraciones distintas: confundirlos no produce un error de forma, produce
+ * una declaración equivocada.
+ */
+export type WithholdingRole = 'practiced' | 'suffered';
+
+export const WITHHOLDING_ROLES: readonly WithholdingRole[] = [
+  'practiced',
+  'suffered',
+];
+
 export const AIU_COMPONENTS: readonly AiuComponentLiteral[] = [
   'administracion',
   'imprevistos',
@@ -279,6 +311,22 @@ export interface ProfileModelLine {
   unit_code?: string | null;
   /** Cantidad por omisión, decimal en cadena. */
   quantity?: string | null;
+  /**
+   * Precio unitario por omisión, decimal en cadena.
+   *
+   * ## Por qué es cadena y no número
+   *
+   * El snapshot es `jsonb` y un `number` de JavaScript no representa exactamente
+   * `0.1`: guardar el precio como número lo redondearía al escribirlo y otra vez
+   * al leerlo, y un precio que cambia solo entre guardar y precargar es
+   * indistinguible de un precio mal teclado. La cadena viaja tal cual y quien la
+   * consume decide la escala.
+   *
+   * Hasta SEIS decimales, que es lo que el anexo admite en el precio unitario
+   * (`cbc:PriceAmount`), aunque los totales se declaren con dos. `null` = el
+   * precio se teclea en cada factura, que es lo correcto cuando cambia por mes.
+   */
+  unit_price?: string | null;
 }
 
 /** Sección 6 — Formato de impresión y presentación. */
@@ -320,6 +368,11 @@ export interface ProfileFormatConfig {
  * es columna. Aquí va lo que la acompaña.
  */
 export interface ProfileDianConfig {
+  /**
+   * Tipo de documento con que nace la factura. Ausente = venta nacional, que
+   * es el caso de la inmensa mayoría y el valor que el formulario ya trae.
+   */
+  document_type?: ProfileDocumentType | null;
   /** Medio de pago por omisión (`cbc:PaymentMeansCode`). */
   payment_means_code?: string | null;
   /** Método de pago por omisión (`cbc:PaymentMeansID`). */
@@ -358,7 +411,78 @@ export interface ProfileDianConfig {
   resolution_number?: string | null;
 }
 
-/** El snapshot completo. Las 7 secciones, todas presentes. */
+/**
+ * Sección 8 — una retención preconfigurada.
+ *
+ * ## Por qué NO lleva base
+ *
+ * La base de una retención es el importe de la factura concreta, y el backend
+ * la recalcula al emitir. Guardarla en el perfil crearía un segundo número que
+ * dice cuál era la base —el del perfil, escrito hace meses— y el día que los dos
+ * discrepen nadie sabría cuál manda. Lo que el perfil aporta es lo que de
+ * verdad se olvida: QUÉ concepto aplica, de qué lado, y a qué tarifa.
+ */
+export interface ProfileWithholdingRule {
+  /**
+   * `withholding_concepts.id`. FK LÓGICA, igual que `format.template_id`: acá
+   * sólo se exige la forma. Que el concepto exista y sea de la tienda lo
+   * comprueba quien precarga, contra el catálogo vivo.
+   */
+  concept_id: number;
+  role: WithholdingRole;
+  /**
+   * Tarifa como PORCENTAJE decimal en cadena (`'2.50'` = 2,5 %).
+   *
+   * La misma escala que la matriz de impuestos, para que las dos secciones se
+   * lean igual. La conversión a fracción —que es lo que el backend recibe— la
+   * hace quien precarga, en un solo sitio.
+   */
+  rate: string;
+}
+
+/** Sección 8 — Retenciones por omisión. */
+export interface ProfileWithholdingConfig {
+  rules: readonly ProfileWithholdingRule[];
+}
+
+/**
+ * Sección 9 — Divisa.
+ *
+ * ## Por qué se guarda la divisa y NO la tasa
+ *
+ * La factura se emite SIEMPRE en pesos colombianos (Res. DIAN 000042/2020,
+ * art. 73): la divisa extranjera sólo declara la conversión en
+ * `cac:PaymentAlternativeExchangeRate` y no cambia el importe exigible. La TASA,
+ * en cambio, es del día de la operación. Guardarla en el perfil sería declarar
+ * el cambio de la fecha en que alguien configuró el perfil —un dato que parece
+ * verificado y no lo está—, así que se consulta al emitir y punto.
+ */
+export interface ProfileCurrencyConfig {
+  /**
+   * Si las facturas de este perfil declaran conversión a divisa extranjera.
+   *
+   * Ausente o `false` = no. Es lo mismo para un snapshot viejo que no traía la
+   * sección y para uno nuevo que dice que no la declara, y eso es correcto: las
+   * dos cosas significan «esta factura no declara conversión».
+   */
+  declare_foreign?: boolean | null;
+  /** Código ISO 4217 de tres letras (`cbc:TargetCurrencyCode`). */
+  code?: string | null;
+}
+
+/**
+ * El snapshot completo. Las 9 secciones, todas presentes.
+ *
+ * ## Por qué añadir secciones NO sube `config_version`
+ *
+ * La versión existe para que un snapshot viejo no se confunda con uno nuevo
+ * INCOMPLETO. Acá no hay tal ambigüedad: un snapshot sin `withholdings` y uno
+ * con `withholdings.rules: []` significan exactamente lo mismo —este perfil no
+ * precarga retenciones—, igual que la ausencia de `currency` y
+ * `declare_foreign: false`. Subir la versión sólo conseguiría que cada perfil
+ * guardado antes de hoy se reportara «incompatible» hasta que alguien lo
+ * reabriera, sin que ningún dato hubiera cambiado de significado.
+ */
 export interface InvoiceProfileConfig {
   config_version: number;
   general: ProfileGeneralConfig;
@@ -369,6 +493,8 @@ export interface InvoiceProfileConfig {
   model_lines: readonly ProfileModelLine[];
   format: ProfileFormatConfig;
   dian: ProfileDianConfig;
+  withholdings: ProfileWithholdingConfig;
+  currency: ProfileCurrencyConfig;
 }
 
 // ─── Aritmética exacta de porcentajes ─────────────────────────────────────
@@ -505,6 +631,8 @@ export function validateInvoiceProfileConfig(
   validateModelLines(config, issues);
   validateFormat(config, issues);
   validateDianSection(config, issues);
+  validateWithholdings(config, issues);
+  validateCurrency(config, issues);
   validateBounds(config, issues);
 
   return issues;
@@ -648,7 +776,14 @@ function validateBounds(
       CONFIG_LIMITS.line_description,
     );
     text(line?.unit_code, `model_lines[${index}].unit_code`, CONFIG_LIMITS.unit_code);
+    text(
+      line?.unit_price,
+      `model_lines[${index}].unit_price`,
+      CONFIG_LIMITS.unit_price,
+    );
   });
+
+  text(config.currency?.code, 'currency.code', CONFIG_LIMITS.currency_code);
 
   text(config.format?.template_key, 'format.template_key', CONFIG_LIMITS.template_key);
   text(
@@ -950,7 +1085,41 @@ function validateModelLines(
         message: 'La cantidad no es un número válido con hasta dos decimales.',
       });
     }
+    // El precio NO se mide con `parsePercentScaled`: ese parser acota a dos
+    // decimales porque un `cbc:Percent` lleva dos, y el precio unitario del
+    // anexo admite seis. Medirlo con la regla del porcentaje rechazaría un
+    // precio legítimo de un servicio prorrateado por hora.
+    // La cadena vacía cuenta como AUSENTE, no como precio ilegal: el editor
+    // envía `''` cuando el campo se deja en blanco, y ese es justamente el caso
+    // legítimo —«el precio se teclea en cada factura»—. Rechazarlo volvería
+    // inguardable un perfil al que nadie le puso precio.
+    const price =
+      typeof line.unit_price === 'string' ? line.unit_price.trim() : line.unit_price;
+    if (price != null && price !== '' && !isDecimalString(price, 6)) {
+      issues.push({
+        field: `${at}.unit_price`,
+        code: 'LINE_UNIT_PRICE_INVALID',
+        message:
+          'El precio unitario tiene que ser un número no negativo con hasta seis decimales, o quedar vacío.',
+      });
+    }
   });
+}
+
+/**
+ * `true` si la cadena es un decimal no negativo con como máximo `maxDecimals`
+ * decimales.
+ *
+ * Deliberadamente NO usa `Number(value)`: `Number('')` es `0`, `Number(' 1 ')`
+ * es `1` y `Number('1e3')` es `1000` — tres cadenas que ningún importe fiscal
+ * debería aceptar y que un chequeo por conversión dejaría pasar convertidas en
+ * algo distinto de lo que el usuario escribió.
+ */
+function isDecimalString(value: unknown, maxDecimals: number): boolean {
+  if (typeof value !== 'string') return false;
+  const match = /^(\d{1,15})(?:\.(\d+))?$/.exec(value);
+  if (!match) return false;
+  return (match[2]?.length ?? 0) <= maxDecimals;
 }
 
 function validateFormat(
@@ -1031,6 +1200,151 @@ function validateDianSection(
         'La resolucion preferida tiene que ser el identificador de una resolucion registrada (entero positivo) o quedar vacia.',
     });
   }
+
+  const documentType = config.dian?.document_type;
+  if (
+    documentType !== undefined &&
+    documentType !== null &&
+    // `String(...)` y no `documentType !== ''`: el tipo declarado no incluye la
+    // cadena vacía, así que la comparación directa es un error de compilación
+    // —y el dato SÍ puede llegar vacío, porque el `jsonb` no está tipado.
+    String(documentType) !== '' &&
+    !PROFILE_DOCUMENT_TYPES.includes(documentType as ProfileDocumentType)
+  ) {
+    issues.push({
+      field: 'dian.document_type',
+      code: 'DIAN_DOCUMENT_TYPE_UNKNOWN',
+      message: `El tipo de documento «${String(documentType)}» no existe. Elige factura de venta o factura de exportación.`,
+    });
+  }
+}
+
+/**
+ * Las retenciones del perfil: concepto, lado y tarifa. Nunca la base.
+ *
+ * ## Por qué una tarifa en cero SÍ bloquea
+ *
+ * En la matriz de impuestos, `'0.00'` con `taxable: true` es legítimo: un
+ * servicio exento declara su grupo con `Percent` en cero, y eso es distinto de
+ * no declarar el tributo. Una RETENCIÓN al 0 % no tiene ese significado: no
+ * existe la retención exenta. Una fila así precarga una retención que no retiene
+ * nada, el operador la ve puesta y da por hecho que el cálculo está cubierto.
+ * Vale más no dejar guardarla.
+ */
+function validateWithholdings(
+  config: InvoiceProfileConfig,
+  issues: ProfileConfigIssue[],
+): void {
+  const rules = config.withholdings?.rules ?? [];
+  if (rules.length > CONFIG_LIMITS.withholding_rules_count) {
+    issues.push({
+      field: 'withholdings.rules',
+      code: 'TOO_MANY_ITEMS',
+      message: `Se admiten hasta ${CONFIG_LIMITS.withholding_rules_count} retenciones por omisión (llegaron ${rules.length}).`,
+    });
+  }
+
+  const seen = new Set<string>();
+  rules
+    .slice(0, CONFIG_LIMITS.withholding_rules_count)
+    .forEach((rule, index) => {
+      const at = `withholdings.rules[${index}]`;
+
+      if (!Number.isInteger(rule?.concept_id) || rule.concept_id <= 0) {
+        issues.push({
+          field: `${at}.concept_id`,
+          code: 'WITHHOLDING_CONCEPT_INVALID',
+          message:
+            'Cada retención necesita el concepto al que corresponde: sin él la fila no se puede resolver al emitir.',
+        });
+      }
+
+      if (!WITHHOLDING_ROLES.includes(rule?.role)) {
+        issues.push({
+          field: `${at}.role`,
+          code: 'WITHHOLDING_ROLE_UNKNOWN',
+          message:
+            'Hay que decir si la tienda practica la retención o la sufre: son asientos y declaraciones distintas.',
+        });
+      }
+
+      const rate = parsePercentScaled(rule?.rate);
+      if (rate === null) {
+        issues.push({
+          field: `${at}.rate`,
+          code: 'WITHHOLDING_RATE_INVALID',
+          message:
+            'La tarifa de retención tiene que ser un porcentaje con hasta dos decimales.',
+        });
+      } else if (rate === 0) {
+        issues.push({
+          field: `${at}.rate`,
+          code: 'WITHHOLDING_RATE_ZERO',
+          message:
+            'Una retención al 0 % no retiene nada y aparentaría estar configurada. Pon la tarifa o quita la fila.',
+        });
+      } else if (rate > PERCENT_TOTAL_SCALED) {
+        issues.push({
+          field: `${at}.rate`,
+          code: 'WITHHOLDING_RATE_OUT_OF_RANGE',
+          message: 'La tarifa de retención no puede pasar del 100 %.',
+        });
+      }
+
+      // Dos filas del mismo concepto y el mismo lado retendrían DOS VECES sobre
+      // la misma base. El duplicado no es redundancia: es una retención doble.
+      const key = `${String(rule?.concept_id)}|${String(rule?.role)}`;
+      if (seen.has(key)) {
+        issues.push({
+          field: `${at}.concept_id`,
+          code: 'WITHHOLDING_RULE_DUPLICATED',
+          message:
+            'Este concepto ya está en la lista con el mismo lado de la operación: se retendría dos veces sobre la misma base.',
+        });
+      }
+      seen.add(key);
+    });
+}
+
+/**
+ * La divisa del perfil.
+ *
+ * `COP` se rechaza a propósito: la factura ya se emite en pesos, así que
+ * declarar pesos como divisa ALTERNA no declara ninguna conversión y produce un
+ * `cac:PaymentAlternativeExchangeRate` que dice que un peso vale un peso. Es la
+ * clase de dato que pasa toda validación de forma y no significa nada.
+ */
+function validateCurrency(
+  config: InvoiceProfileConfig,
+  issues: ProfileConfigIssue[],
+): void {
+  const currency = config.currency ?? {};
+  const code = typeof currency.code === 'string' ? currency.code.trim() : '';
+
+  if (code !== '' && !/^[A-Z]{3}$/.test(code)) {
+    issues.push({
+      field: 'currency.code',
+      code: 'CURRENCY_CODE_INVALID',
+      message:
+        'La divisa tiene que ser un código ISO 4217 de tres letras mayúsculas (USD, EUR…).',
+    });
+  } else if (code === 'COP') {
+    issues.push({
+      field: 'currency.code',
+      code: 'CURRENCY_CODE_IS_LOCAL',
+      message:
+        'La factura ya se emite en pesos colombianos: como divisa alterna, COP no declara ninguna conversión. Elige otra o deja la sección apagada.',
+    });
+  }
+
+  if (currency.declare_foreign === true && code === '') {
+    issues.push({
+      field: 'currency.code',
+      code: 'CURRENCY_CODE_REQUIRED',
+      message:
+        'Si el perfil declara conversión a divisa extranjera, hay que decir a cuál.',
+    });
+  }
 }
 
 /**
@@ -1085,12 +1399,18 @@ export function buildDefaultAiuProfileConfig(
       display_decimals: 2,
     },
     dian: {
+      document_type: null,
       payment_means_code: null,
       payment_method_code: null,
       header_notes: null,
       resolution_id: null,
       resolution_number: null,
     },
+    // Sin retenciones y sin divisa: un perfil recién creado no puede saber a
+    // quién se le retiene. Sembrar una retención por omisión pondría una fila
+    // que el operador vería puesta y daría por revisada.
+    withholdings: { rules: [] },
+    currency: { declare_foreign: false, code: null },
   };
 }
 
@@ -1136,6 +1456,9 @@ export const CONFIG_LIMITS = {
   header_note: 500,
   header_notes_count: 10,
   resolution_number: 60,
+  withholding_rules_count: 20,
+  currency_code: 3,
+  unit_price: 24,
 } as const;
 
 // ─── Normalización estructural ────────────────────────────────────────────
@@ -1247,11 +1570,15 @@ const ACCOUNTING_KEYS = [
 ] as const;
 const TAXES_KEYS = ['rules'] as const;
 const TAX_RULE_KEYS = ['bucket', 'taxable', 'tax_code', 'rate'] as const;
+const WITHHOLDINGS_KEYS = ['rules'] as const;
+const WITHHOLDING_RULE_KEYS = ['concept_id', 'role', 'rate'] as const;
+const CURRENCY_KEYS = ['declare_foreign', 'code'] as const;
 const MODEL_LINE_KEYS = [
   'bucket',
   'description',
   'unit_code',
   'quantity',
+  'unit_price',
 ] as const;
 const FORMAT_KEYS = [
   'template_id',
@@ -1260,6 +1587,7 @@ const FORMAT_KEYS = [
   'display_decimals',
 ] as const;
 const DIAN_KEYS = [
+  'document_type',
   'payment_means_code',
   'payment_method_code',
   'header_notes',
@@ -1275,6 +1603,8 @@ const ROOT_KEYS = [
   'model_lines',
   'format',
   'dian',
+  'withholdings',
+  'currency',
 ] as const;
 
 /**
@@ -1424,6 +1754,38 @@ export function normalizeInvoiceProfileConfig(
   }
   const dian = dianRaw as unknown as ProfileDianConfig;
 
+  // Las dos secciones nuevas se proyectan igual que `taxes`: la ausencia da la
+  // sección vacía SIN reportar problema. Un perfil guardado antes de que
+  // existieran no precargaba retenciones ni divisa, que es exactamente lo que
+  // significa la sección vacía — tratar la ausencia como error volvería
+  // «incompatible» todo perfil anterior sin que ningún dato hubiera cambiado.
+  const withholdingsRaw = pickKnownKeys(
+    expectObject(root['withholdings'], 'withholdings', issues),
+    WITHHOLDINGS_KEYS,
+    'withholdings',
+    issues,
+  );
+  const withholdingRules = expectArray(
+    withholdingsRaw['rules'],
+    'withholdings.rules',
+    issues,
+  ).map(
+    (entry, index) =>
+      pickKnownKeys(
+        expectObject(entry, `withholdings.rules[${index}]`, issues),
+        WITHHOLDING_RULE_KEYS,
+        `withholdings.rules[${index}]`,
+        issues,
+      ) as unknown as ProfileWithholdingRule,
+  );
+
+  const currency = pickKnownKeys(
+    expectObject(root['currency'], 'currency', issues),
+    CURRENCY_KEYS,
+    'currency',
+    issues,
+  ) as unknown as ProfileCurrencyConfig;
+
   return {
     config: {
       config_version: root['config_version'] as number,
@@ -1434,6 +1796,8 @@ export function normalizeInvoiceProfileConfig(
       model_lines,
       format,
       dian,
+      withholdings: { rules: withholdingRules },
+      currency,
     },
     issues,
   };
@@ -1457,5 +1821,7 @@ function emptyConfigShell(): InvoiceProfileConfig {
     model_lines: [],
     format: undefined as unknown as ProfileFormatConfig,
     dian: {},
+    withholdings: { rules: [] },
+    currency: {},
   };
 }

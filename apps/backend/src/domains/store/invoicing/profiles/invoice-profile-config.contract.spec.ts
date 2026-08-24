@@ -559,6 +559,209 @@ describe('InvoiceProfileConfig — la sección AIU está atada al tipo de operac
   });
 });
 
+describe('InvoiceProfileConfig — retenciones por omisión', () => {
+  const rule = (patch: Record<string, unknown> = {}) => ({
+    concept_id: 7,
+    role: 'practiced' as const,
+    rate: '2.50',
+    ...patch,
+  });
+
+  it('sin retenciones el perfil es válido: no todo cliente retiene', () => {
+    expect(codes(aiuConfig())).toEqual([]);
+  });
+
+  it('una retención completa pasa', () => {
+    const config = aiuConfig((c) => {
+      (c as { withholdings: unknown }).withholdings = { rules: [rule()] };
+    });
+    expect(codes(config)).toEqual([]);
+  });
+
+  it('sin concepto la fila se rechaza: al emitir no se podría resolver', () => {
+    const config = aiuConfig((c) => {
+      (c as { withholdings: unknown }).withholdings = {
+        rules: [rule({ concept_id: 0 })],
+      };
+    });
+    expect(codes(config)).toContain('WITHHOLDING_CONCEPT_INVALID');
+  });
+
+  it('un lado desconocido se rechaza: practicada y sufrida no son lo mismo', () => {
+    const config = aiuConfig((c) => {
+      (c as { withholdings: unknown }).withholdings = {
+        rules: [rule({ role: 'both' })],
+      };
+    });
+    expect(codes(config)).toContain('WITHHOLDING_ROLE_UNKNOWN');
+  });
+
+  /**
+   * El contraste con la matriz de impuestos es el punto del test: allí `'0.00'`
+   * con `taxable: true` es un servicio exento y es LEGAL. Acá no existe la
+   * retención exenta, así que el mismo número tiene que decidirse distinto.
+   */
+  it('una retención al 0 % se rechaza, aunque un IVA al 0 % sea legal', () => {
+    const config = aiuConfig((c) => {
+      (c as { withholdings: unknown }).withholdings = {
+        rules: [rule({ rate: '0.00' })],
+      };
+    });
+    expect(codes(config)).toContain('WITHHOLDING_RATE_ZERO');
+  });
+
+  it('una tarifa por encima del 100 % se rechaza', () => {
+    const config = aiuConfig((c) => {
+      (c as { withholdings: unknown }).withholdings = {
+        rules: [rule({ rate: '150.00' })],
+      };
+    });
+    expect(codes(config)).toContain('WITHHOLDING_RATE_OUT_OF_RANGE');
+  });
+
+  it('una tarifa con tres decimales se rechaza', () => {
+    const config = aiuConfig((c) => {
+      (c as { withholdings: unknown }).withholdings = {
+        rules: [rule({ rate: '2.505' })],
+      };
+    });
+    expect(codes(config)).toContain('WITHHOLDING_RATE_INVALID');
+  });
+
+  it('el mismo concepto y el mismo lado dos veces se retendría doble', () => {
+    const config = aiuConfig((c) => {
+      (c as { withholdings: unknown }).withholdings = {
+        rules: [rule(), rule({ rate: '4.00' })],
+      };
+    });
+    expect(codes(config)).toContain('WITHHOLDING_RULE_DUPLICATED');
+  });
+
+  it('el mismo concepto en los DOS lados es legítimo y no se marca', () => {
+    const config = aiuConfig((c) => {
+      (c as { withholdings: unknown }).withholdings = {
+        rules: [rule(), rule({ role: 'suffered' })],
+      };
+    });
+    expect(codes(config)).toEqual([]);
+  });
+
+  it('pasado el tope se reporta y no se validan las de más', () => {
+    const config = aiuConfig((c) => {
+      (c as { withholdings: unknown }).withholdings = {
+        rules: Array.from({ length: 21 }, (_, i) => rule({ concept_id: i + 1 })),
+      };
+    });
+    expect(codes(config)).toEqual(['TOO_MANY_ITEMS']);
+  });
+});
+
+describe('InvoiceProfileConfig — divisa', () => {
+  const withCurrency = (currency: unknown) =>
+    aiuConfig((c) => {
+      (c as { currency: unknown }).currency = currency;
+    });
+
+  it('sin divisa el perfil es válido: la factura se emite en pesos', () => {
+    expect(codes(withCurrency({ declare_foreign: false, code: null }))).toEqual(
+      [],
+    );
+  });
+
+  it('una divisa declarada con su código pasa', () => {
+    expect(
+      codes(withCurrency({ declare_foreign: true, code: 'USD' })),
+    ).toEqual([]);
+  });
+
+  it('declarar conversión sin decir a qué divisa se rechaza', () => {
+    expect(codes(withCurrency({ declare_foreign: true, code: '' }))).toContain(
+      'CURRENCY_CODE_REQUIRED',
+    );
+  });
+
+  it('un código que no es ISO 4217 de tres mayúsculas se rechaza', () => {
+    expect(codes(withCurrency({ declare_foreign: true, code: 'usd' }))).toContain(
+      'CURRENCY_CODE_INVALID',
+    );
+    expect(
+      codes(withCurrency({ declare_foreign: true, code: 'DOLAR' })),
+    ).toContain('CURRENCY_CODE_INVALID');
+  });
+
+  /** Declararía que un peso vale un peso: pasa la forma y no significa nada. */
+  it('COP como divisa alterna se rechaza', () => {
+    expect(codes(withCurrency({ declare_foreign: true, code: 'COP' }))).toContain(
+      'CURRENCY_CODE_IS_LOCAL',
+    );
+  });
+
+  it('un código sin declarar conversión no bloquea: queda apagado', () => {
+    expect(
+      codes(withCurrency({ declare_foreign: false, code: 'EUR' })),
+    ).toEqual([]);
+  });
+});
+
+describe('InvoiceProfileConfig — tipo de documento y precio de la línea', () => {
+  it('sin tipo de documento el perfil es válido: manda la venta nacional', () => {
+    expect(codes(aiuConfig())).toEqual([]);
+  });
+
+  it('los dos tipos del formulario pasan', () => {
+    for (const type of ['sales_invoice', 'export_invoice']) {
+      const config = aiuConfig((c) => {
+        c.dian = { ...c.dian, document_type: type as never };
+      });
+      expect(codes(config)).toEqual([]);
+    }
+  });
+
+  it('un tipo que no existe se rechaza: se traduciría a otro documento DIAN', () => {
+    const config = aiuConfig((c) => {
+      c.dian = { ...c.dian, document_type: 'nota_credito' as never };
+    });
+    expect(codes(config)).toContain('DIAN_DOCUMENT_TYPE_UNKNOWN');
+  });
+
+  const withPrice = (unit_price: unknown) =>
+    aiuConfig((c) => {
+      (c as { model_lines: unknown }).model_lines = [
+        {
+          bucket: 'administracion',
+          description: 'Servicio mensual',
+          unit_code: '94',
+          quantity: '1',
+          unit_price,
+        },
+      ];
+    });
+
+  it('un precio con hasta seis decimales pasa: el anexo los admite', () => {
+    expect(codes(withPrice('1500'))).toEqual([]);
+    expect(codes(withPrice('1500.5'))).toEqual([]);
+    expect(codes(withPrice('1500.123456'))).toEqual([]);
+  });
+
+  it('el precio en blanco es legal: se teclea en cada factura', () => {
+    expect(codes(withPrice(''))).toEqual([]);
+    expect(codes(withPrice(null))).toEqual([]);
+  });
+
+  it('siete decimales, negativo o notación científica se rechazan', () => {
+    for (const bad of ['1500.1234567', '-5', '1e3', '1.500,50', 'gratis']) {
+      expect(codes(withPrice(bad))).toContain('LINE_UNIT_PRICE_INVALID');
+    }
+  });
+
+  it('los espacios alrededor no invalidan el precio: el validador recorta', () => {
+    // Deliberado, y por eso está escrito: un precio pegado desde una hoja de
+    // cálculo llega con espacios. Rechazarlo obligaría a un usuario a mirar un
+    // campo que a la vista tiene un número correcto.
+    expect(codes(withPrice(' 12 '))).toEqual([]);
+  });
+});
+
 describe('InvoiceProfileConfig — devuelve TODOS los problemas', () => {
   it('siete errores en un guardado se reportan juntos, no de a uno', () => {
     const config = aiuConfig((c) => {

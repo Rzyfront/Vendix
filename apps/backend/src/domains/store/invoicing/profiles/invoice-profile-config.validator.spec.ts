@@ -17,6 +17,13 @@ describe('assertValidInvoiceProfileConfig', () => {
 
   it('lanza INVOICING_PROFILE_005 con 422 y la lista completa de problemas', () => {
     const config = valid();
+    // `components_basis` tiene que ser 'aiu' para que la suma se mida contra
+    // 100: bajo la unidad por omisión ('contract') los tres componentes son
+    // porcentajes DEL VALOR DEL CONTRATO, y 50+10+10 = 70 % es un reparto
+    // perfectamente legal —el 30 % restante es costo—. Sin esta línea el
+    // fixture sólo produce UN problema y el test dejaba de comprobar lo que
+    // dice comprobar: que la excepción lista TODOS los problemas juntos.
+    config.aiu.components_basis = 'aiu';
     config.aiu.components = {
       administracion: '50.00',
       imprevistos: '10.00',

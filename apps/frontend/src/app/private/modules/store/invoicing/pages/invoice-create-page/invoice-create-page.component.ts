@@ -1433,6 +1433,14 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
             </vendix-invoice-form-section>
 
             <!-- ── 5. AIU ───────────────────────────────────────────── -->
+            <!--
+              SE OCULTA cuando el tipo de operación no es AIU (09) y no hay nada
+              capturado dentro. Una sección que sólo puede decir «esto no aplica»
+              gasta la atención del operador en la pantalla donde menos sobra.
+              Si YA hay objeto de contrato o alguna línea con componente, NO se
+              oculta: ese dato viaja al XML y tiene que poder revisarse.
+            -->
+            @if (showAiuSection()) {
             <vendix-invoice-form-section
               title="AIU"
               [help]="help('aiu')"
@@ -1805,7 +1813,16 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               }
             </vendix-invoice-form-section>
 
+            }
+
             <!-- ── 6. RETENCIONES ───────────────────────────────────── -->
+            <!--
+              SE OCULTA en una exportación sin nada capturado: el comprador está
+              fuera del país y no puede ser agente retenedor de la DIAN, así que
+              no hay retención que practicar ni sufrir. Con filas dentro se sigue
+              viendo, con su aviso.
+            -->
+            @if (showWithholdingSection()) {
             <vendix-invoice-form-section
               title="Retenciones"
               [help]="help('retenciones')"
@@ -1816,6 +1833,23 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               [expanded]="isSectionOpen('retenciones')"
               (expandedChange)="setSection('retenciones', $event)"
             >
+              @if (isExportInvoice()) {
+                <p
+                  class="mb-2 flex items-start gap-1.5 text-xs text-warning"
+                >
+                  <app-icon
+                    name="alert-triangle"
+                    [size]="14"
+                    class="mt-0.5 shrink-0"
+                  />
+                  <span
+                    >El documento es una factura de exportación: el comprador
+                    está fuera del país y no puede ser agente retenedor de la
+                    DIAN. Estas retenciones se enviarán tal como están —no se
+                    descartan en silencio—; quítalas si no corresponden.</span
+                  >
+                </p>
+              }
               <p class="text-xs text-[var(--color-text-secondary)] mb-2">
                 La retención NO reduce el total que se declara a la DIAN
                 (<code>PayableAmount</code> se valida sin mirar la retención):
@@ -1985,7 +2019,14 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               }
             </vendix-invoice-form-section>
 
+            }
+
             <!-- ── 7. DIVISA ────────────────────────────────────────── -->
+            <!--
+              NO se gatea por tipo de documento: una venta nacional pactada en
+              dólares también declara la conversión, así que esconderla en un
+              documento nacional ocultaría una captura legítima.
+            -->
             <vendix-invoice-form-section
               title="Divisa"
               [help]="help('divisa')"
@@ -2592,6 +2633,56 @@ export class InvoiceCreatePageComponent implements OnInit {
 
   readonly isAiu = computed(
     () => this.rawValue()['operation_type'] === OPERATION_TYPE_AIU,
+  );
+
+  /**
+   * `true` si el documento es una factura de EXPORTACIÓN.
+   *
+   * Decide qué secciones aplican: una exportación no está sujeta a retención en
+   * Colombia, porque el comprador está fuera del país y no puede ser agente
+   * retenedor de la DIAN.
+   */
+  readonly isExportInvoice = computed(
+    () => this.rawValue()['invoice_type'] === 'export_invoice',
+  );
+
+  /**
+   * ¿Hay algo capturado que pertenezca al AIU?
+   *
+   * Se mira ANTES de ocultar la sección. Una sección invisible con datos
+   * fiscales dentro es un dato que nadie puede revisar ni borrar, y en un
+   * documento que gasta numeración autorizada eso es peor que una sección de
+   * más: el objeto del contrato viaja al XML aunque el tipo de operación haya
+   * dejado de ser AIU.
+   */
+  readonly hasAiuData = computed<boolean>(() => {
+    const contract = String(
+      this.rawValue()['aiu_contract_object'] ?? '',
+    ).trim();
+    if (contract.length > 0) return true;
+    return this.itemsValue().some((item) =>
+      String(item.aiu_component ?? '').trim().length > 0,
+    );
+  });
+
+  /** La sección AIU se pinta si aplica, o si ya hay algo dentro. */
+  readonly showAiuSection = computed<boolean>(
+    () => this.isAiu() || this.hasAiuData(),
+  );
+
+  /** Retenciones capturadas, por fila o por importe manual. */
+  readonly hasWithholdingData = computed<boolean>(() => {
+    if (this.withholdingsValue().length > 0) return true;
+    return Number(this.rawValue()['withholding_amount'] ?? 0) > 0;
+  });
+
+  /**
+   * La sección de retenciones se pinta salvo en una exportación SIN nada
+   * capturado. Misma regla que el AIU: se oculta lo vacío e inaplicable, nunca
+   * lo que tiene datos.
+   */
+  readonly showWithholdingSection = computed<boolean>(
+    () => !this.isExportInvoice() || this.hasWithholdingData(),
   );
 
   readonly isNitCustomer = computed(
@@ -4504,8 +4595,21 @@ export class InvoiceCreatePageComponent implements OnInit {
       filled.add(path);
     };
 
+    // El TIPO primero: decide qué secciones se ven, así que escribirlo después
+    // de sembrar retenciones dejaría visible un instante una sección que el
+    // documento no aplica.
+    put('invoice_type', config.dian.document_type);
     put('payment_form', config.dian.payment_method_code);
     put('payment_means_code', config.dian.payment_means_code);
+
+    // Divisa: sólo si el perfil DECLARA la conversión y dice a cuál. El código
+    // sin la bandera es una divisa guardada con la sección apagada, y encender
+    // la conversión por él declararía un cambio que nadie pidió.
+    const currencyCode = String(config.currency?.code ?? '').trim();
+    if (config.currency?.declare_foreign === true && currencyCode) {
+      put('use_foreign_currency', true);
+      put('foreign_currency', currencyCode);
+    }
 
     const notes = (config.dian.header_notes ?? [])
       .map((note) => String(note ?? '').trim())
@@ -4523,7 +4627,43 @@ export class InvoiceCreatePageComponent implements OnInit {
     );
 
     this.prefilledFields.set(filled);
+    this.seedWithholdings(config);
     this.seedModelLines(config);
+  }
+
+  /**
+   * Siembra las retenciones del perfil.
+   *
+   * Sólo si el arreglo está VACÍO. Una fila capturada a mano es una decisión del
+   * operador sobre este documento concreto, y reemplazarla por la del perfil
+   * cambiaría un importe que no se cobra sin que nadie lo pidiera.
+   *
+   * La BASE no viene del perfil —no la guarda— y la tarifa se copia tal cual: es
+   * la del contrato, no la del catálogo, y sustituirla sería cambiar un dato
+   * fiscal en silencio.
+   */
+  private seedWithholdings(config: InvoiceProfileConfig): void {
+    const rules = config.withholdings?.rules ?? [];
+    if (rules.length === 0 || this.withholdingsArray.length > 0) return;
+
+    for (const rule of rules) {
+      this.addWithholding();
+      const group = this.withholdingsArray.at(
+        this.withholdingsArray.length - 1,
+      );
+      const concept = this.withholdingConcepts().find(
+        (candidate) => candidate.id === rule.concept_id,
+      );
+      group.patchValue({
+        concept_id: rule.concept_id,
+        // La etiqueta se resuelve contra el catálogo VIVO: un concepto borrado
+        // deja la fila con su id y sin nombre, que es visible, en vez de con un
+        // nombre viejo que ya no corresponde a nada.
+        concept: concept ? concept.code + ' · ' + concept.name : '',
+        role: rule.role,
+        rate: Number(rule.rate) || 0,
+      });
+    }
   }
 
   /**
@@ -4582,6 +4722,11 @@ export class InvoiceCreatePageComponent implements OnInit {
       group.patchValue({
         description: line.description,
         quantity: Number(line.quantity ?? 1) || 1,
+        // El precio del perfil, o 0 si no lo trae. `Number('')` es 0 y `|| 0`
+        // cubre el NaN de una cadena que no era número —el validador del
+        // contrato ya la habría rechazado al guardarla, pero un snapshot viejo
+        // pudo entrar antes de que el campo existiera.
+        unit_price: Number(line.unit_price ?? 0) || 0,
         unit_code: line.unit_code ?? UNIT_CODE_DEFAULT,
         // Vacío también para el costo reembolsable: es la única cubeta que NO es
         // un componente del AIU, y mandarla como tal haría que el backend la
@@ -4605,21 +4750,30 @@ export class InvoiceCreatePageComponent implements OnInit {
    */
   readonly prefillSummary = computed<string[]>(() => {
     const labels: Record<string, string> = {
+      invoice_type: 'tipo de documento',
+      use_foreign_currency: 'divisa',
+      foreign_currency: 'divisa',
       payment_form: 'forma de pago',
       payment_means_code: 'medio de pago',
       notes: 'notas del documento',
       aiu_contract_object: 'objeto del contrato',
       default_account_code: 'cuenta contable por omisión',
     };
-    const out: string[] = [];
+    // Un `Set` y no un arreglo: `use_foreign_currency` y `foreign_currency` son
+    // dos controles con una sola etiqueta, y la lista diría «divisa» dos veces.
+    const out = new Set<string>();
     for (const path of this.prefilledFields()) {
-      out.push(labels[path] ?? path);
+      out.add(labels[path] ?? path);
     }
     const lines = this.itemCount();
     if (lines > 0 && this.profileConfig()?.model_lines?.length === lines) {
-      out.push(lines === 1 ? '1 línea' : lines + ' líneas');
+      out.add(lines === 1 ? '1 línea' : lines + ' líneas');
     }
-    return out;
+    const rules = this.profileConfig()?.withholdings?.rules?.length ?? 0;
+    if (rules > 0 && this.withholdingsArray.length === rules) {
+      out.add(rules === 1 ? '1 retención' : rules + ' retenciones');
+    }
+    return [...out];
   });
 
   /**

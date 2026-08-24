@@ -342,6 +342,11 @@ describe('validateBounds — cotas del snapshot', () => {
       model_lines: [],
       format: { template_key: null, show_aiu_breakdown: false, display_decimals: 2 },
       dian: { payment_means_code: null, payment_method_code: null, header_notes: null },
+      // Las dos secciones nuevas van vacías a propósito: probar que un snapshot
+      // SIN retenciones ni divisa sigue siendo válido es justamente lo que
+      // demuestra que añadirlas no rompió los perfiles ya guardados.
+      withholdings: { rules: [] },
+      currency: {},
     };
     expect(
       codes(validateInvoiceProfileConfig(standard, { operation_type: '10' })),

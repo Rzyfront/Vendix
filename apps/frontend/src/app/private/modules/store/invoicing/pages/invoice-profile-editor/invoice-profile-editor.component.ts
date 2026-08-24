@@ -5,7 +5,7 @@ import {
     inject,
     signal,
 } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import {
     FormBuilder,
     FormArray,
@@ -36,6 +36,7 @@ import {
     AIU_LEGAL_FLOOR_PERCENT_SCALED,
     CONFIG_LIMITS,
     INVOICE_PROFILE_CONFIG_VERSION,
+    PROFILE_DOCUMENT_TYPES,
     blockingIssues,
     buildDefaultAiuProfileConfig,
     formatPercentScaled,
@@ -49,8 +50,11 @@ import type {
     AiuComponentsBasis,
     InvoiceProfileConfig,
     ProfileConfigIssue,
+    ProfileDocumentType,
     ProfileModelLine,
     ProfileTaxRule,
+    ProfileWithholdingRule,
+    WithholdingRole,
 } from '../../../../../../core/utils/invoice-profile-config.contract';
 import type {
     InvoiceProfileDetail,
@@ -61,9 +65,15 @@ import { InvoiceProfilePreviewPanelComponent } from '../../components/invoice-pr
 import { InvoiceProfileVersionsPanelComponent } from '../../components/invoice-profile-versions-panel/invoice-profile-versions-panel.component';
 import { InvoiceFormSectionComponent } from '../../components/invoice-create/invoice-form-section.component';
 import {
+    FOREIGN_CURRENCY_OPTIONS,
+    INVOICE_TYPE_OPTIONS,
     PAYMENT_FORM_OPTIONS,
     PAYMENT_MEANS_OPTIONS,
 } from '../../components/invoice-create/invoice-dian-catalogs';
+import {
+    InvoiceWithholdingCatalogService,
+    WithholdingConceptOption,
+} from '../../components/invoice-create/invoice-withholding-catalog.service';
 import { PrintGatewayClientService } from '../../../../../../shared/services/print/print-gateway-client.service';
 import * as ProfileActions from '../../state/actions/invoice-profile.actions';
 import { loadResolutions } from '../../state/actions/invoicing.actions';
@@ -100,13 +110,14 @@ import {
  *    Precargar un adquiriente sería el peor default imaginable en una pantalla
  *    que gasta numeración autorizada.
  *  - **Divisa** — la TRM tiene fecha; un perfil no puede llevarla congelada.
- *  - **Retenciones** — se derivan de la matriz de impuestos, que sí está aquí.
  */
 type SectionId =
     | 'documento'
     | 'lineas'
     | 'impuestos'
     | 'aiu'
+    | 'retenciones'
+    | 'divisa'
     | 'contabilidad'
     | 'formato'
     | 'general'
@@ -267,6 +278,44 @@ type SectionId =
                         (expandedChange)="setSection('documento', $event)"
                     >
                         <div class="space-y-3" formGroupName="dian">
+                            <!--
+                                El TIPO va primero porque decide qué secciones
+                                tienen sentido más abajo: una exportación no está
+                                sujeta a retención en Colombia, y verlo después de
+                                haber llenado retenciones es verlo tarde.
+                            -->
+                            <app-selector
+                                label="Tipo de documento"
+                                formControlName="document_type"
+                                [options]="document_type_options"
+                                size="sm"
+                                helpText="Se precarga en la factura. Una exportación es un documento DIAN distinto de una venta nacional."
+                            ></app-selector>
+
+                            @if (inapplicableWithholdings(); as count) {
+                                <p
+                                    class="text-xs text-warning flex items-start gap-1.5"
+                                >
+                                    <app-icon
+                                        name="alert-triangle"
+                                        [size]="14"
+                                        class="mt-0.5 shrink-0"
+                                    ></app-icon>
+                                    <span
+                                        >Este perfil tiene {{ count }}
+                                        {{
+                                            count === 1
+                                                ? 'retención configurada'
+                                                : 'retenciones configuradas'
+                                        }}
+                                        y una factura de exportación no está sujeta
+                                        a retención en Colombia. Quítalas o cambia
+                                        el tipo de documento: se seguirán
+                                        precargando tal como están.</span
+                                    >
+                                </p>
+                            }
+
                             <div
                                 class="rounded-lg border border-border p-3 space-y-2"
                             >
@@ -432,7 +481,7 @@ type SectionId =
                             <div class="space-y-2" formArrayName="model_lines">
                                 @for (line of modelLines.controls; track $index) {
                                     <div
-                                        class="grid grid-cols-1 items-end gap-2 rounded-lg border border-border p-2 md:grid-cols-6"
+                                        class="grid grid-cols-1 items-end gap-2 rounded-lg border border-border p-2 md:grid-cols-7"
                                         [formGroupName]="$index"
                                     >
                                         <!--
@@ -443,14 +492,57 @@ type SectionId =
                                             de AIU se oculta y la línea nace en
                                             «costo», que es la única cubeta que
                                             no es componente del régimen.
+
+                                            El INTERRUPTOR es el mismo que la
+                                            vista de emisión pone en cada línea:
+                                            «lleva la base AIU» no es un campo
+                                            nuevo, es bucket distinto de
+                                            «costo». Sin él la decisión fiscal
+                                            queda escondida en elegir una opción
+                                            de un selector de cuatro, y nadie lee
+                                            eso como encender o apagar el AIU de
+                                            la línea.
                                         -->
                                         @if (isAiu()) {
-                                            <app-selector
-                                                label="Componente"
-                                                formControlName="bucket"
-                                                [options]="bucket_options"
-                                                size="sm"
-                                            ></app-selector>
+                                            <div class="space-y-1">
+                                                <label
+                                                    class="flex cursor-pointer items-center gap-1.5"
+                                                    [title]="
+                                                        lineCarriesAiu($index)
+                                                            ? 'Esta línea lleva la base AIU configurada'
+                                                            : 'Costo reembolsable: no entra a la base AIU'
+                                                    "
+                                                >
+                                                    <input
+                                                        type="checkbox"
+                                                        class="h-4 w-4 shrink-0 accent-[var(--color-primary)]"
+                                                        [checked]="lineCarriesAiu($index)"
+                                                        (change)="
+                                                            toggleLineAiu(
+                                                                $index,
+                                                                $any($event.target)
+                                                                    .checked
+                                                            )
+                                                        "
+                                                    />
+                                                    <span
+                                                        class="text-[11px] font-medium text-text-secondary"
+                                                        >AIU</span
+                                                    >
+                                                </label>
+                                                @if (lineCarriesAiu($index)) {
+                                                    <app-selector
+                                                        formControlName="bucket"
+                                                        [options]="component_options"
+                                                        size="sm"
+                                                    ></app-selector>
+                                                } @else {
+                                                    <span
+                                                        class="block truncate text-[11px] text-text-secondary"
+                                                        >Costo reembolsable</span
+                                                    >
+                                                }
+                                            </div>
                                         }
                                         <div
                                             [class.md:col-span-2]="isAiu()"
@@ -485,6 +577,28 @@ type SectionId =
                                                     'model_lines[' +
                                                         $index +
                                                         '].unit_code'
+                                                )
+                                            "
+                                        ></app-input>
+                                        <!--
+                                            Precio en BLANCO = se teclea en cada
+                                            factura. No es un campo de dinero con
+                                            formato: es la cadena que viaja al
+                                            snapshot, y darle formato de moneda
+                                            acá la redondearía a dos decimales
+                                            cuando el anexo admite seis en el
+                                            precio unitario.
+                                        -->
+                                        <app-input
+                                            label="Precio"
+                                            formControlName="unit_price"
+                                            size="sm"
+                                            placeholder="Se teclea"
+                                            [error]="
+                                                issueFor(
+                                                    'model_lines[' +
+                                                        $index +
+                                                        '].unit_price'
                                                 )
                                             "
                                         ></app-input>
@@ -1070,6 +1184,188 @@ type SectionId =
                         </vendix-invoice-form-section>
                     }
 
+                    <!-- ══ RETENCIONES ══ espejo de la sección homónima.
+
+                         SE OCULTA cuando el tipo de documento es exportación Y
+                         no hay nada configurado: una exportación no está sujeta
+                         a retención en Colombia, así que la sección vacía sólo
+                         estorba. Si YA hay filas, NO se oculta —se avisa arriba—
+                         porque una sección invisible con datos dentro es un dato
+                         fiscal que nadie puede revisar ni borrar. -->
+                    @if (showWithholdings()) {
+                        <vendix-invoice-form-section
+                            title="Retenciones"
+                            [help]="help('retenciones')"
+                            icon="hand-coins"
+                            [optional]="true"
+                            [summary]="withholdingsSummary()"
+                            [errorCount]="sectionErrors().retenciones"
+                            [expanded]="isSectionOpen('retenciones')"
+                            (expandedChange)="setSection('retenciones', $event)"
+                        >
+                            <div class="space-y-3">
+                                <div
+                                    class="flex flex-wrap items-center justify-between gap-2"
+                                >
+                                    <p class="text-xs text-text-secondary">
+                                        Conceptos que se precargarán en la
+                                        factura. La BASE no se guarda: es el
+                                        importe de cada documento y se calcula al
+                                        emitir.
+                                    </p>
+                                    <app-button
+                                        variant="secondary"
+                                        size="sm"
+                                        (clicked)="addWithholding()"
+                                    >
+                                        <app-icon
+                                            slot="icon"
+                                            name="plus"
+                                            [size]="14"
+                                        ></app-icon>
+                                        Retención
+                                    </app-button>
+                                </div>
+
+                                @if (isExport() && withholdingRules.length > 0) {
+                                    <p
+                                        class="text-xs text-warning flex items-start gap-1.5"
+                                    >
+                                        <app-icon
+                                            name="alert-triangle"
+                                            [size]="14"
+                                            class="mt-0.5 shrink-0"
+                                        ></app-icon>
+                                        <span
+                                            >El tipo de documento es exportación y
+                                            una exportación no está sujeta a
+                                            retención en Colombia. Estas filas se
+                                            seguirán precargando: quítalas si no
+                                            corresponden.</span
+                                        >
+                                    </p>
+                                }
+
+                                @if (withholdingRules.controls.length === 0) {
+                                    <p class="text-xs text-text-secondary italic">
+                                        Sin retenciones. La factura abrirá sin
+                                        ninguna fila, y se pueden añadir al
+                                        emitir.
+                                    </p>
+                                }
+
+                                <div
+                                    class="space-y-2"
+                                    formArrayName="withholdings"
+                                >
+                                    @for (
+                                        rule of withholdingRules.controls;
+                                        track $index
+                                    ) {
+                                        <div
+                                            class="grid grid-cols-1 items-end gap-2 rounded-lg border border-border p-2 md:grid-cols-6"
+                                            [formGroupName]="$index"
+                                        >
+                                            <div class="md:col-span-3">
+                                                <app-selector
+                                                    label="Concepto"
+                                                    formControlName="concept_id"
+                                                    [options]="
+                                                        withholding_concept_options()
+                                                    "
+                                                    size="sm"
+                                                    placeholder="Elige el concepto"
+                                                    [errorText]="
+                                                        issueFor(
+                                                            'withholdings.rules[' +
+                                                                $index +
+                                                                '].concept_id'
+                                                        )
+                                                    "
+                                                ></app-selector>
+                                            </div>
+                                            <app-selector
+                                                label="Lado"
+                                                formControlName="role"
+                                                [options]="
+                                                    withholding_role_options
+                                                "
+                                                size="sm"
+                                            ></app-selector>
+                                            <app-input
+                                                label="Tarifa %"
+                                                formControlName="rate"
+                                                size="sm"
+                                                [helperText]="
+                                                    catalogRateFor($index)
+                                                        ? 'Catálogo: ' +
+                                                          catalogRateFor($index) +
+                                                          ' %'
+                                                        : ''
+                                                "
+                                                [error]="
+                                                    issueFor(
+                                                        'withholdings.rules[' +
+                                                            $index +
+                                                            '].rate'
+                                                    )
+                                                "
+                                            ></app-input>
+                                            <app-button
+                                                variant="outline-danger"
+                                                size="sm"
+                                                (clicked)="removeWithholding($index)"
+                                            >
+                                                <app-icon
+                                                    slot="icon"
+                                                    name="trash-2"
+                                                    [size]="14"
+                                                ></app-icon>
+                                                Quitar
+                                            </app-button>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        </vendix-invoice-form-section>
+                    }
+
+                    <!-- ══ DIVISA ══ espejo de la sección homónima.
+
+                         NO se oculta por tipo de documento: una venta nacional
+                         pactada en dólares también declara la conversión, así
+                         que gatearla por «exportación» esconderría una
+                         configuración legítima. Lo que NO vive acá es la TASA:
+                         es del día de la operación y se consulta al emitir. -->
+                    <vendix-invoice-form-section
+                        title="Divisa"
+                        [help]="help('divisa')"
+                        icon="globe"
+                        [optional]="true"
+                        [summary]="currencySummary()"
+                        [errorCount]="sectionErrors().divisa"
+                        [expanded]="isSectionOpen('divisa')"
+                        (expandedChange)="setSection('divisa', $event)"
+                    >
+                        <div class="space-y-3" formGroupName="currency">
+                            <app-toggle
+                                label="Declarar conversión a divisa extranjera"
+                                formControlName="declare_foreign"
+                                helpText="La factura se emite SIEMPRE en pesos. Esto sólo añade la conversión al XML (Res. DIAN 000042/2020, art. 73)."
+                            ></app-toggle>
+
+                            <app-selector
+                                label="Divisa"
+                                formControlName="code"
+                                [options]="currency_options"
+                                size="sm"
+                                placeholder="Sin divisa"
+                                helpText="Se guarda la divisa, no la tasa: la tasa es del día de cada factura."
+                                [errorText]="issueFor('currency.code')"
+                            ></app-selector>
+                        </div>
+                    </vendix-invoice-form-section>
+
                     <!-- ══ CONTABILIDAD ══ espejo de la sección homónima. Las
                          cuentas por componente AIU NO están aquí: viven en el
                          bloque 2 del AIU. Aquí queda lo que no es por
@@ -1415,6 +1711,21 @@ export class InvoiceProfileEditorComponent {
     ];
 
     /**
+     * Sólo los tres componentes del AIU, sin «costo».
+     *
+     * El selector de la línea lo gobierna el interruptor: si «costo» siguiera
+     * entre las opciones, se podría dejar el interruptor encendido y elegir
+     * «costo», que es la contradicción exacta que el interruptor existe para
+     * impedir. La matriz de impuestos SÍ usa las cuatro, porque allí «costo» es
+     * una porción que se declara o no se declara.
+     */
+    readonly component_options = [
+        { value: 'administracion', label: 'Administración' },
+        { value: 'imprevistos', label: 'Imprevistos' },
+        { value: 'utilidad', label: 'Utilidad' },
+    ];
+
+    /**
      * Tributos de la tabla 13.2.2 del anexo, por CÓDIGO.
      *
      * Se ofrecen los seis que un contrato AIU usa en la práctica y no la tabla
@@ -1442,6 +1753,39 @@ export class InvoiceProfileEditorComponent {
     /** Mismas listas que la vista de emisión: un solo catálogo, dos pantallas. */
     readonly payment_form_options = PAYMENT_FORM_OPTIONS;
     readonly payment_means_options = PAYMENT_MEANS_OPTIONS;
+    readonly document_type_options = INVOICE_TYPE_OPTIONS;
+    readonly currency_options = FOREIGN_CURRENCY_OPTIONS;
+
+    // ─── Retenciones ──────────────────────────────────────────────────────
+
+    private readonly withholdingCatalog = inject(InvoiceWithholdingCatalogService);
+
+    /** Conceptos de `withholding_concepts` del tenant. */
+    private readonly withholding_concepts = signal<WithholdingConceptOption[]>([]);
+
+    /**
+     * Opciones del selector de concepto, con la tarifa del catálogo a la vista.
+     *
+     * La tarifa se MUESTRA pero no se impone: el perfil guarda la suya porque un
+     * concepto admite tarifas distintas según el contrato, y sustituirla en
+     * silencio por la del catálogo cambiaría un dato fiscal que alguien decidió.
+     */
+    readonly withholding_concept_options = computed<SelectorOption[]>(() =>
+        this.withholding_concepts().map((concept) => ({
+            value: concept.id,
+            label: concept.code + ' · ' + concept.name,
+            description:
+                concept.ratePercent.toFixed(2) +
+                ' %' +
+                (concept.withholdingType ? ' · ' + concept.withholdingType : ''),
+        })),
+    );
+
+    /** Los dos lados, con las mismas etiquetas que la vista de emisión. */
+    readonly withholding_role_options: SelectorOption[] = [
+        { value: 'practiced', label: 'La tienda retiene' },
+        { value: 'suffered', label: 'A la tienda le retienen' },
+    ];
 
     // ─── Resolución preferida ─────────────────────────────────────────────
 
@@ -1669,7 +2013,18 @@ export class InvoiceProfileEditorComponent {
             show_aiu_breakdown: [true],
             display_decimals: [2],
         }),
+        // Retenciones y divisa: dos secciones que NO son de la operación AIU
+        // sino del CLIENTE al que se factura, y por eso viven fuera del grupo
+        // `aiu` y sobreviven a un cambio de tipo de operación.
+        withholdings: this.fb.array([] as FormGroup[]),
+        currency: this.fb.group({
+            declare_foreign: [false],
+            code: [''],
+        }),
         dian: this.fb.group({
+            // Venta nacional por omisión: es el caso de la inmensa mayoría, y
+            // el mismo valor con que abre el formulario de emisión.
+            document_type: ['sales_invoice'],
             // Resolución PREFERIDA. `null` = sin preferencia, y es el valor por
             // omisión a propósito: sin preferencia manda el criterio de la
             // pantalla de emisión (la vigente más antigua), que es lo que evita
@@ -1851,6 +2206,61 @@ export class InvoiceProfileEditorComponent {
         );
     });
 
+    // ─── Tipo de documento y qué secciones aplican ───────────────────────
+
+    /**
+     * `true` si el perfil precarga una factura de EXPORTACIÓN.
+     *
+     * Se lee del formulario y no del snapshot cargado: el usuario puede cambiar
+     * el tipo antes de guardar, y las secciones tienen que responder a lo que
+     * está viendo, no a lo que había en la base.
+     */
+    readonly isExport = computed<boolean>(() => {
+        this.form_value();
+        return this.form.get('dian.document_type')?.value === 'export_invoice';
+    });
+
+    /**
+     * Si la sección de retenciones se pinta.
+     *
+     * Una exportación no está sujeta a retención en Colombia, así que la sección
+     * vacía sólo estorba. Pero si YA hay filas configuradas NO se oculta: una
+     * sección invisible con datos fiscales dentro es un dato que nadie puede
+     * revisar ni borrar, y eso es peor que una sección de más.
+     */
+    readonly showWithholdings = computed<boolean>(() => {
+        this.form_value();
+        return !this.isExport() || this.withholdingRules.length > 0;
+    });
+
+    /**
+     * Cuántas retenciones hay configuradas que el tipo de documento no aplica.
+     * `0` se traduce a `null` para que la plantilla no pinte el aviso.
+     */
+    readonly inapplicableWithholdings = computed<number | null>(() => {
+        this.form_value();
+        if (!this.isExport()) return null;
+        const count = this.withholdingRules.length;
+        return count > 0 ? count : null;
+    });
+
+    readonly withholdingsSummary = computed<string>(() => {
+        this.form_value();
+        const count = this.withholdingRules.controls.filter(
+            (control) => Number(control.get('concept_id')?.value ?? 0) > 0,
+        ).length;
+        if (count === 0) return 'Sin retenciones precargadas';
+        return count === 1 ? '1 concepto' : count + ' conceptos';
+    });
+
+    readonly currencySummary = computed<string>(() => {
+        this.form_value();
+        const declares = this.form.get('currency.declare_foreign')?.value === true;
+        const code = String(this.form.get('currency.code')?.value ?? '').trim();
+        if (!declares) return 'Sólo pesos colombianos';
+        return code ? 'Declara conversión a ' + code : 'Declara conversión — falta la divisa';
+    });
+
     readonly formatSummary = computed<string>(() => {
         this.form_value();
         const id = this.numberOrNull(this.form.get('format.template_id')?.value);
@@ -1875,6 +2285,8 @@ export class InvoiceProfileEditorComponent {
             lineas: 0,
             impuestos: 0,
             aiu: 0,
+            retenciones: 0,
+            divisa: 0,
             contabilidad: 0,
             formato: 0,
             general: 0,
@@ -1918,6 +2330,15 @@ export class InvoiceProfileEditorComponent {
         // preferida. Se piden acá y no se asume que ya estén: al entrar por URL
         // directa al editor, nadie pasó por el listado que los carga.
         this.store.dispatch(loadResolutions());
+
+        // Conceptos de retención. Mismo servicio que la vista de emisión: si el
+        // editor tuviera su propia carga, un concepto nuevo aparecería en una
+        // pantalla y no en la otra, y el perfil podría guardar un `concept_id`
+        // que la factura no sabe pintar.
+        this.withholdingCatalog
+            .load()
+            .pipe(takeUntilDestroyed())
+            .subscribe((concepts) => this.withholding_concepts.set(concepts));
 
         // Al entrar en modo edición, cargar el detalle. El listado sólo trae la
         // fila; el snapshot de configuración viene con el detalle.
@@ -1992,6 +2413,12 @@ export class InvoiceProfileEditorComponent {
     }
     get headerNotes(): FormArray {
         return this.form.get('dian.header_notes') as FormArray;
+    }
+    get withholdingRules(): FormArray {
+        return this.form.get('withholdings') as FormArray;
+    }
+    get currencyGroup(): FormGroup {
+        return this.form.get('currency') as FormGroup;
     }
 
     /** Versión vigente del perfil abierto; 0 mientras no hay detalle. */
@@ -2177,6 +2604,10 @@ export class InvoiceProfileEditorComponent {
                 return 'lineas';
             case 'format':
                 return 'formato';
+            case 'withholdings':
+                return 'retenciones';
+            case 'currency':
+                return 'divisa';
             case 'dian':
                 return 'documento';
             default:
@@ -2223,12 +2654,85 @@ export class InvoiceProfileEditorComponent {
                 description: [''],
                 unit_code: ['94'],
                 quantity: ['1'],
+                // Precio EN BLANCO por omisión, no cero: un cero se ve como un
+                // precio decidido y una factura con línea a cero pasa la
+                // validación de forma. El blanco dice «esto se teclea».
+                unit_price: [''],
             }),
         );
     }
     removeModelLine(index: number): void {
         this.modelLines.removeAt(index);
     }
+
+    /**
+     * ¿Esta línea modelo lleva la base AIU configurada?
+     *
+     * Es `bucket` distinto de «costo», la misma semántica que la vista de
+     * emisión lee de `aiu_component` no vacío. No hay campo nuevo en el
+     * snapshot: el interruptor sólo hace visible una decisión que ya viajaba.
+     */
+    lineCarriesAiu(index: number): boolean {
+        const bucket = this.modelLines.at(index)?.get('bucket')?.value;
+        return String(bucket ?? '') !== 'costo';
+    }
+
+    /**
+     * Enciende o apaga la base AIU de una línea modelo.
+     *
+     * Al encender se propone el primer componente GRAVABLE del régimen elegido:
+     * bajo el Decreto 1372/1992 sólo la Utilidad lleva IVA, así que proponer
+     * «Administración» ahí sembraría en el perfil una línea que declara una base
+     * que su propio régimen no grava. Es la misma regla que aplica la vista de
+     * emisión, y está escrita dos veces a propósito: cada pantalla lee el régimen
+     * de una fuente distinta —acá el formulario, allá los ajustes de la tienda—.
+     */
+    toggleLineAiu(index: number, on: boolean): void {
+        const control = this.modelLines.at(index)?.get('bucket');
+        if (!control) return;
+        if (!on) {
+            control.setValue('costo');
+            control.markAsDirty();
+            return;
+        }
+        if (this.lineCarriesAiu(index)) return;
+        const regime = this.form.get('aiu.regime')?.value;
+        control.setValue(
+            regime === 'decreto_1372_1992' ? 'utilidad' : 'administracion',
+        );
+        control.markAsDirty();
+    }
+    /**
+     * Nueva fila de retención.
+     *
+     * La tarifa nace VACÍA a propósito. Sembrarla con la del catálogo en cuanto
+     * se elige el concepto sería más cómodo, pero dejaría una tarifa fiscal
+     * puesta por el sistema y con aspecto de revisada; acá el operador la
+     * escribe, y el selector le muestra al lado la del catálogo para compararla.
+     */
+    addWithholding(): void {
+        this.withholdingRules.push(
+            this.fb.group({
+                concept_id: [null as number | null],
+                role: ['practiced'],
+                rate: [''],
+            }),
+        );
+    }
+    removeWithholding(index: number): void {
+        this.withholdingRules.removeAt(index);
+    }
+
+    /** La tarifa del catálogo para el concepto de una fila, o `null`. */
+    catalogRateFor(index: number): string | null {
+        const id = Number(
+            this.withholdingRules.at(index)?.get('concept_id')?.value ?? 0,
+        );
+        if (!id) return null;
+        const concept = this.withholding_concepts().find((c) => c.id === id);
+        return concept ? concept.ratePercent.toFixed(2) : null;
+    }
+
     addHeaderNote(): void {
         this.headerNotes.push(this.fb.control(''));
     }
@@ -2279,8 +2783,16 @@ export class InvoiceProfileEditorComponent {
                 },
                 dian: {
                     resolution_id: config.dian.resolution_id ?? null,
+                    // Un snapshot anterior a este campo no dice nada del tipo de
+                    // documento, y «nada» significa venta nacional: es el valor
+                    // con que se guardó y con que se emitió entonces.
+                    document_type: config.dian.document_type ?? 'sales_invoice',
                     payment_means_code: config.dian.payment_means_code ?? '',
                     payment_method_code: config.dian.payment_method_code ?? '',
+                },
+                currency: {
+                    declare_foreign: config.currency?.declare_foreign === true,
+                    code: config.currency?.code ?? '',
                 },
             },
             { emitEvent: false },
@@ -2326,6 +2838,19 @@ export class InvoiceProfileEditorComponent {
                     description: [line.description],
                     unit_code: [line.unit_code ?? ''],
                     quantity: [line.quantity ?? ''],
+                    unit_price: [line.unit_price ?? ''],
+                }),
+                { emitEvent: false },
+            );
+        }
+
+        this.withholdingRules.clear({ emitEvent: false });
+        for (const rule of config.withholdings?.rules ?? []) {
+            this.withholdingRules.push(
+                this.fb.group({
+                    concept_id: [rule.concept_id ?? null],
+                    role: [rule.role ?? 'practiced'],
+                    rate: [rule.rate ?? ''],
                 }),
                 { emitEvent: false },
             );
@@ -2364,6 +2889,21 @@ export class InvoiceProfileEditorComponent {
         return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
     }
 
+    /**
+     * El tipo de documento del formulario, o `null` si no es uno de los dos.
+     *
+     * Un valor desconocido se guarda como `null` —«venta nacional»— y NO se
+     * copia tal cual: el snapshot es lo que se precarga meses después, y un
+     * literal inventado ahí acabaría traduciéndose a un `fiscal_document_type`
+     * que no corresponde. El validador también lo rechaza; esto evita llegar a
+     * enseñarle un 422 por algo que el selector nunca debió producir.
+     */
+    private documentTypeOrNull(value: unknown): ProfileDocumentType | null {
+        return PROFILE_DOCUMENT_TYPES.includes(value as ProfileDocumentType)
+            ? (value as ProfileDocumentType)
+            : null;
+    }
+
     private buildConfig(): InvoiceProfileConfig {
         const raw = this.form.getRawValue() as Record<string, any>;
         const accounting = raw['accounting'] ?? {};
@@ -2386,7 +2926,25 @@ export class InvoiceProfileEditorComponent {
             description: String(control.get('description')?.value ?? ''),
             unit_code: this.nullIfEmpty(control.get('unit_code')?.value),
             quantity: this.nullIfEmpty(control.get('quantity')?.value),
+            unit_price: this.nullIfEmpty(control.get('unit_price')?.value),
         }));
+
+        // Sólo las filas con concepto elegido. Una fila a medio llenar —el
+        // usuario pulsó «Retención» y no eligió nada— no es una retención sin
+        // concepto: es una fila que no existe. Guardarla produciría un 422 que
+        // nombra un campo que el operador no llegó a tocar.
+        const withholding_rules: ProfileWithholdingRule[] = this.withholdingRules.controls
+            .filter((control) => Number(control.get('concept_id')?.value ?? 0) > 0)
+            .map((control) => ({
+                concept_id: Number(control.get('concept_id')?.value),
+                role: (control.get('role')?.value === 'suffered'
+                    ? 'suffered'
+                    : 'practiced') as WithholdingRole,
+                rate: String(control.get('rate')?.value ?? '').trim(),
+            }));
+
+        const currencyRaw = raw['currency'] ?? {};
+        const currencyCode = this.nullIfEmpty(currencyRaw['code']);
 
         const notes = this.headerNotes.controls
             .map((control) => String(control.value ?? '').trim())
@@ -2433,7 +2991,17 @@ export class InvoiceProfileEditorComponent {
                 show_aiu_breakdown: Boolean(raw['format']?.show_aiu_breakdown),
                 display_decimals: Number(raw['format']?.display_decimals ?? 2),
             },
+            withholdings: { rules: withholding_rules },
+            currency: {
+                declare_foreign: currencyRaw['declare_foreign'] === true,
+                // El código se guarda aunque la conversión esté apagada: apagar
+                // la sección no debería borrar la divisa que alguien eligió, y
+                // el validador ya declara legal ese par (`code` sin
+                // `declare_foreign` no bloquea).
+                code: currencyCode ? currencyCode.toUpperCase() : null,
+            },
             dian: {
+                document_type: this.documentTypeOrNull(raw['dian']?.document_type),
                 payment_means_code: this.nullIfEmpty(raw['dian']?.payment_means_code),
                 payment_method_code: this.nullIfEmpty(raw['dian']?.payment_method_code),
                 header_notes: notes.length > 0 ? notes : null,

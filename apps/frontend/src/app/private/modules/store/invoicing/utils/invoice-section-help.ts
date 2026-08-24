@@ -40,11 +40,11 @@ La RESOLUCIÓN decide el prefijo y el consecutivo que gasta esta factura. Cada n
 La FORMA DE PAGO (contado o crédito) y el MEDIO DE PAGO (efectivo, transferencia, tarjeta…) son dos códigos distintos del anexo técnico y viajan separados. La forma decide si hay vencimiento; el medio sólo describe con qué se pagó.
 
 Las NOTAS de cabecera viajan al XML como «cbc:Note» y las ve el adquiriente. Lo que no debe salir del negocio va en Notas internas.`,
-    `Lo que traerá precargada cada factura de este perfil: resolución preferida, forma y medio de pago, plazo y notas de cabecera.
+    `Lo que traerá precargada cada factura de este perfil: tipo de documento, resolución preferida, forma y medio de pago, y notas de cabecera.
+
+El TIPO DE DOCUMENTO decide qué secciones tienen sentido. Una factura de exportación no lleva retenciones colombianas: si se elige, la sección de retenciones desaparece —salvo que ya tenga filas, porque esconder un dato guardado sería peor que mostrar una sección que no aplica—.
 
 La RESOLUCIÓN PREFERIDA es una preferencia, no una orden: la emisión la usa sólo si ese rango puede numerar el día de la factura —activo, vigente, con consecutivo y de producción—. Si no puede, se elige la vigente más antigua y la pantalla dice por qué. Un perfil se configura una vez y se usa durante meses: la numeración vence, se agota y se reemplaza.
-
-El PLAZO en días sólo se aplica cuando la forma de pago es a crédito; en contado la factura vence el mismo día de la emisión.
 
 Todo lo de aquí se puede cambiar factura por factura. El perfil es el punto de partida, no un candado.`,
   ),

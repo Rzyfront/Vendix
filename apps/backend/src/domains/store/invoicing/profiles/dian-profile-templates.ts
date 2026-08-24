@@ -58,6 +58,9 @@ const emptySections = {
     display_decimals: 2,
   },
   dian: {
+    // Sin tipo de documento: una plantilla no sabe si el negocio exporta. La
+    // ausencia deja el formulario en venta nacional, que es su valor propio.
+    document_type: null,
     payment_means_code: null,
     payment_method_code: null,
     header_notes: null,
@@ -67,6 +70,11 @@ const emptySections = {
     resolution_id: null,
     resolution_number: null,
   },
+  // Ni retenciones ni divisa: las dos dependen de a QUIÉN se factura, y una
+  // plantilla es global. Una retención sembrada por plantilla aparecería
+  // configurada en tiendas que no retienen a nadie.
+  withholdings: { rules: [] },
+  currency: { declare_foreign: false, code: null },
 } as const;
 
 export const DIAN_PROFILE_TEMPLATES: readonly DianProfileTemplate[] = [
