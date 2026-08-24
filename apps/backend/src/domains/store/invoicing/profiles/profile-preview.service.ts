@@ -198,6 +198,55 @@ const BUCKET_DEFAULT_DESCRIPTION: Readonly<Record<AiuBucket, string>> = {
   costo: 'Costo reembolsable',
 };
 
+/**
+ * Los tres componentes del AIU en el orden del **anexo**, que es el orden en el
+ * que se emiten las líneas: Administración primero, porque es la que lleva la
+ * nota CAV03 y la que el operador busca.
+ *
+ * Es una tupla literal y no `Object.keys(config.aiu.components)`: el orden de
+ * iteración de un objeto viene del JSON persistido y dos snapshots con las
+ * mismas cifras podrían recorrerse distinto. Ese orden decide a dónde cae el
+ * céntimo residual (ver {@link AIU_RESIDUE_PRIORITY}), así que tomarlo del dato
+ * haría que la misma entrada produjera dos muestras distintas.
+ */
+const AIU_EMISSION_ORDER: readonly AiuComponent[] = [
+  'administracion',
+  'imprevistos',
+  'utilidad',
+];
+
+/**
+ * Orden de desempate del céntimo residual del reparto AIU: **utilidad primero**.
+ *
+ * El reparto por resto mayor decide por sí solo en cuanto las partes
+ * fraccionarias difieren; esta tupla sólo interviene cuando dos componentes
+ * empatan al céntimo (33,33 / 33,33 / 33,34 empata Administración con
+ * Imprevistos). Existe por dos razones:
+ *
+ * · **Determinismo.** Es un literal, no el orden de claves de un objeto: la
+ *   misma entrada da siempre la misma muestra, y ningún reordenamiento del JSON
+ *   persistido puede moverla.
+ * · **Dirección fiscal segura.** La utilidad es la única porción gravable bajo
+ *   las TRES bases (`'aiu'`, `'utilidad'` y `'subtotal'`). Bajo `'aiu'` y
+ *   `'subtotal'` la base ya contiene el AIU completo, así que el destino del
+ *   céntimo no mueve la base ni un peso; sólo importa bajo `'utilidad'`, y ahí
+ *   sumarlo declara un céntimo MÁS —el lado recuperable con nota crédito—
+ *   mientras dárselo a un componente no gravable declararía de menos, que ante
+ *   la DIAN es sanción e intereses.
+ *
+ * Es la misma regla que ya aplica la captura de la factura real
+ * (`invoice-create-page.component.ts`, `aiuApplyPlan`), y escribirla igual acá
+ * es lo que hace que la muestra prediga el documento en vez de aproximarlo.
+ */
+const AIU_RESIDUE_PRIORITY: readonly AiuComponent[] = [
+  'utilidad',
+  'administracion',
+  'imprevistos',
+];
+
+/** Un céntimo, la unidad en la que se reparte el residuo del truncamiento. */
+const ONE_CENT = toDecimal('0.01');
+
 /** Severidad de una validación del informe. */
 export type PreviewValidationSeverity = 'blocker' | 'warning' | 'info';
 
@@ -563,6 +612,37 @@ export class ProfilePreviewService {
    *
    * Un perfil sin sección AIU (operación estándar) reparte todo el contrato en
    * una única línea de costo: no hay componentes que repartir.
+   *
+   * ## El reparto CUADRA AL CÉNTIMO, y por qué es la mitad de la promesa
+   *
+   * La tercera consecuencia de arriba —«si el mínimo falla, el defecto está en
+   * el perfil y no en la muestra»— sólo es cierta si la muestra no pierde nada
+   * al repartir. Truncando cada porción por separado sí perdía:
+   *
+   *     contrato 1.000.050,00 · AIU 10 % = 100.005,00 · reparto 33,33/33,33/33,34
+   *     33.331,66 + 33.331,66 + 33.341,66 = 100.004,98   ← se fugan 0,02
+   *     Σ líneas = 100.004,98 + 900.045,00 = 1.000.049,98 ← no es el contrato
+   *     piso = 10 % × 1.000.049,98 = 100.004,998 → truncado 100.004,99
+   *     100.004,98 < 100.004,99  ⇒  `aiu_base_below_minimum`
+   *
+   * Un perfil perfectamente legal se reportaba con `INVOICING_AIU_001` por dos
+   * céntimos, y el mensaje culpaba al perfil de un defecto de la muestra —lo
+   * contrario exacto de lo que este método promete—. Con una fuga de 0,01 el
+   * truncado del piso lo salvaba, así que el caso intuitivo no lo delataba: es
+   * una asimetría del truncado, no una casualidad.
+   *
+   * Hoy el reparto va por {@link splitAiuByComponents} (resto mayor) y la línea
+   * de costo se obtiene POR RESTA del contrato, no truncando aparte. Los dos
+   * invariantes que quedan cerrados por construcción:
+   *
+   * · Σ porciones A+I+U = el valor del AIU, al céntimo.
+   * · Σ TODAS las líneas = el valor del contrato que escribió el operador.
+   *
+   * Y se cierran **sin** tapar el defecto que el docblock promete delatar: el
+   * residuo que se reparte es el del truncamiento, medido contra el total que
+   * el propio reparto representa. Un perfil cuyos porcentajes no sumen 100
+   * sigue produciendo un AIU distinto del declarado —y por tanto sigue cayendo
+   * por debajo del piso— porque esa diferencia no es un céntimo de redondeo.
    */
   private derivePreviewLines(
     dto: PreviewProfileDto,
@@ -604,26 +684,36 @@ export class ProfilePreviewService {
       );
     }
 
-    const cost_value = contract_value.minus(aiu_value);
+    const portions = this.splitAiuByComponents(aiu_value, config);
     const lines: SampleLine[] = [];
 
     // Los tres componentes, en el orden del anexo: Administración primero,
     // porque es la línea que lleva la nota CAV03 y la que el operador busca.
-    (['administracion', 'imprevistos', 'utilidad'] as const).forEach(
-      (component) => {
-        const share = toDecimal(config.aiu!.components[component]);
-        const value = aiu_value.times(share).dividedBy(100);
-        lines.push({
-          index: lines.length,
-          bucket: component,
-          description: this.modelDescription(config, component),
-          quantity: 1,
-          unit_price: Number(dianAmount(value)),
-          discount_amount: 0,
-          unit_code: this.modelUnitCode(config, component),
-        });
-      },
+    // El ORDEN DE EMISIÓN es ése; el orden en el que se reparte el céntimo
+    // residual es otro y vive en `splitAiuByComponents`.
+    AIU_EMISSION_ORDER.forEach((component) => {
+      lines.push({
+        index: lines.length,
+        bucket: component,
+        description: this.modelDescription(config, component),
+        quantity: 1,
+        unit_price: Number(dianAmount(portions.get(component) ?? toDecimal(0))),
+        discount_amount: 0,
+        unit_code: this.modelUnitCode(config, component),
+      });
+    });
+
+    // El costo reembolsable se obtiene POR RESTA de lo ya emitido, no truncando
+    // `contrato − AIU` aparte. Es lo que ata la segunda mitad del invariante:
+    // Σ líneas es el valor del contrato TAL COMO SE EMITE, sin que un céntimo
+    // se pierda entre el AIU y el costo. Truncados por separado, los dos lados
+    // podían perder medio céntimo cada uno y la cabecera acababa declarando un
+    // contrato que ninguna línea sostiene.
+    const emitted_aiu = [...portions.values()].reduce(
+      (acc, value) => acc.plus(value),
+      toDecimal(0),
     );
+    const cost_value = toDecimal(dianAmount(contract_value)).minus(emitted_aiu);
 
     // La línea de costo reembolsable sólo existe si sobra contrato. Emitir una
     // línea en cero declararía un concepto que no se factura, y el propio DTO
@@ -641,6 +731,86 @@ export class ProfilePreviewService {
     }
 
     return lines;
+  }
+
+  /**
+   * Reparte el AIU entre sus tres componentes **por el método del resto mayor**,
+   * de modo que la suma de las porciones sea EXACTAMENTE el total que el reparto
+   * representa, y no ese total menos los céntimos que se fugaron al truncar.
+   *
+   * ## El algoritmo, y por qué es estable
+   *
+   * 1. Porción exacta de cada componente, en `Decimal` y a precisión plena.
+   * 2. `objetivo` = la suma exacta, truncada a 2 decimales — lo que el reparto
+   *    vale como importe emitible.
+   * 3. Cada porción truncada a 2 decimales (truncar, nunca redondear: Anexo 1.9
+   *    §11.2), guardando su parte fraccionaria.
+   * 4. `residuo` = objetivo − Σ truncadas. Es ≥ 0 y menor que 3 céntimos, así
+   *    que se reparte de uno en uno entre las porciones de mayor parte
+   *    fraccionaria. Empate ⇒ {@link AIU_RESIDUE_PRIORITY}, que es un literal:
+   *    dos ejecuciones con la misma entrada dan el mismo resultado, y nada
+   *    depende del orden de iteración del JSON persistido.
+   *
+   * El residuo sólo puede ENTRAR al AIU, nunca salir, que es la dirección que
+   * protege el piso legal: la base sube como máximo dos céntimos respecto del
+   * truncado puro, y jamás baja.
+   *
+   * ## Qué NO hace: no fuerza el total al AIU declarado
+   *
+   * El objetivo del paso 2 es la suma de las porciones, no `aiu_value`. Con
+   * porcentajes que suman 100 son el mismo número. Con porcentajes que no suman
+   * 100 —un perfil mal configurado, o un snapshot cuya unidad es `'contract'`—
+   * son distintos, y la diferencia se queda fuera del AIU a propósito: es
+   * exactamente el defecto del perfil que la previsualización existe para
+   * delatar (ver el docblock de {@link derivePreviewLines}). Forzar el total a
+   * `aiu_value` lo taparía, y la muestra pasaría el piso legal mientras toda
+   * factura emitida con ese perfil nacería sub-declarada.
+   */
+  private splitAiuByComponents(
+    aiu_value: ReturnType<typeof toDecimal>,
+    config: InvoiceProfileConfig,
+  ): Map<AiuComponent, ReturnType<typeof toDecimal>> {
+    const parts = AIU_EMISSION_ORDER.map((component) => {
+      const share = toDecimal(config.aiu?.components?.[component]);
+      const exact = aiu_value.times(share).dividedBy(100);
+      const truncated = toDecimal(dianAmount(exact));
+      return {
+        component,
+        exact,
+        amount: truncated,
+        remainder: exact.minus(truncated),
+      };
+    });
+
+    const target = toDecimal(
+      dianAmount(
+        parts.reduce((acc, part) => acc.plus(part.exact), toDecimal(0)),
+      ),
+    );
+    let residue = parts.reduce(
+      (acc, part) => acc.minus(part.amount),
+      target,
+    );
+
+    // Resto mayor primero; a igualdad de resto, la prioridad fiscal. Las dos
+    // claves son totales sobre tres elementos, así que el orden es único y no
+    // se apoya en la estabilidad de `sort`.
+    const by_largest_remainder = [...parts].sort((a, b) => {
+      const by_remainder = b.remainder.comparedTo(a.remainder);
+      if (by_remainder !== 0) return by_remainder;
+      return (
+        AIU_RESIDUE_PRIORITY.indexOf(a.component) -
+        AIU_RESIDUE_PRIORITY.indexOf(b.component)
+      );
+    });
+
+    for (const part of by_largest_remainder) {
+      if (residue.lessThan(ONE_CENT)) break;
+      part.amount = part.amount.plus(ONE_CENT);
+      residue = residue.minus(ONE_CENT);
+    }
+
+    return new Map(parts.map((part) => [part.component, part.amount]));
   }
 
   private modelDescription(
