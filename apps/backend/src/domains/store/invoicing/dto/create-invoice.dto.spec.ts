@@ -201,11 +201,24 @@ const messagesAt = (errors: ValidationError[], path: string): string => {
   return walk(errors).join(' | ');
 };
 
-/** Tipos de constraint registrados por propiedad, leídos de class-validator. */
-const constraintTypesByProperty = (
+/**
+ * Nombres de constraint (`min`, `isNumber`, `maxLength`, …) por propiedad,
+ * leídos de los metadatos reales de class-validator.
+ *
+ * OJO CON `metadata.type` — NO sirve para esto. En class-validator 0.14 todos
+ * los decoradores pasan por `ValidateBy`, así que TODOS se registran con
+ * `type === 'customValidation'` y el nombre real vive en el constraint
+ * asociado (`getTargetValidatorConstraints(metadata.constraintCls)[0].name`).
+ * La primera versión de este helper leía `type`, no encontraba ni un
+ * `'isNumber'` y devolvía el conjunto vacío: la compuerta de más abajo pasaba
+ * **sin comparar nada** y seguía verde con un `@Min` retirado a mano. Por eso
+ * el test cuenta cuántas propiedades numéricas encontró antes de juzgarlas.
+ */
+const constraintNamesByProperty = (
   target: ClassConstructor<object>,
 ): Map<string, Set<string>> => {
-  const metadatas = getMetadataStorage().getTargetValidationMetadatas(
+  const storage = getMetadataStorage();
+  const metadatas = storage.getTargetValidationMetadatas(
     target,
     target.name,
     true,
@@ -213,8 +226,13 @@ const constraintTypesByProperty = (
   );
   const byProperty = new Map<string, Set<string>>();
   for (const metadata of metadatas) {
+    const names = metadata.constraintCls
+      ? storage
+          .getTargetValidatorConstraints(metadata.constraintCls)
+          .map((constraint) => constraint.name)
+      : [metadata.type];
     const bucket = byProperty.get(metadata.propertyName) ?? new Set<string>();
-    bucket.add(metadata.type);
+    for (const name of names) bucket.add(name);
     byProperty.set(metadata.propertyName, bucket);
   }
   return byProperty;
@@ -904,15 +922,33 @@ describe('CreateInvoiceDto — las 7 llaves foráneas tienen piso', () => {
     CreateInvoiceTaxDto,
   };
 
+  /**
+   * Cuántas propiedades `@IsNumber` tiene cada clase HOY. Medido, no estimado:
+   * 8 + 6 + 4 = 18. Existe para que la compuerta no pueda pasar en vacío — si
+   * la lectura de metadatos se rompe y devuelve cero propiedades, esto falla
+   * antes de que el «no hay ninguna sin piso» mienta. Y si nace un campo
+   * numérico, obliga a actualizar el número a conciencia.
+   */
+  const NUMERIC_PROPERTY_COUNT: Record<string, number> = {
+    CreateInvoiceDto: 8,
+    CreateInvoiceItemDto: 6,
+    CreateInvoiceTaxDto: 4,
+  };
+
   it.each(Object.keys(DTO_CLASSES))(
     'ninguna propiedad numérica de %s queda sin piso',
     (name) => {
-      const byProperty = constraintTypesByProperty(DTO_CLASSES[name]);
-      const floorless = [...byProperty.entries()]
-        .filter(
-          ([, types]) =>
-            (types.has('isNumber') || types.has('isInt')) && !types.has('min'),
-        )
+      const byProperty = constraintNamesByProperty(DTO_CLASSES[name]);
+      const numeric = [...byProperty.entries()].filter(
+        ([, names]) => names.has('isNumber') || names.has('isInt'),
+      );
+
+      expect(numeric.map(([property]) => property).sort()).toHaveLength(
+        NUMERIC_PROPERTY_COUNT[name],
+      );
+
+      const floorless = numeric
+        .filter(([, names]) => !names.has('min'))
         .map(([property]) => property)
         .sort();
 
