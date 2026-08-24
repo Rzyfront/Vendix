@@ -4123,9 +4123,17 @@ export class InvoiceCreatePageComponent implements OnInit {
       rule.tax_code +
       '|' +
       String(parsePercentScaled(rule.rate) ?? 0);
-    const profileKeys = profileRules.map(key).sort().join(';');
-    const draftKeys = draftRules.map(key).sort().join(';');
-    if (profileKeys !== draftKeys) out.push('taxes');
+    // La fila del costo reembolsable NO se compara: es DERIVADA de la base por
+    // `reprojectAiuTaxRules`, y un perfil viejo puede traerla con otra tarifa
+    // sin que nadie la haya elegido. Compararla anunciaría un apartado en cuanto
+    // la siembra la reproyecta, que es lo contrario de lo que el aviso significa.
+    const own = (rules: readonly AiuTaxRuleValue[]): string =>
+      rules
+        .filter((rule) => rule.bucket !== 'costo')
+        .map(key)
+        .sort()
+        .join(';');
+    if (own(profileRules) !== own(draftRules)) out.push('taxes');
 
     return out;
   });
@@ -4241,10 +4249,14 @@ export class InvoiceCreatePageComponent implements OnInit {
     }>;
   } | null>(() => {
     if (!this.isAiu()) return null;
-    const config = this.profileConfig();
-    const aiu = config?.aiu ?? null;
-    if (!config || !aiu) return null;
 
+    // YA NO EXIGE PERFIL. Antes el plan devolvía `null` sin perfil elegido,
+    // porque el perfil era lo único que traía los porcentajes. Ahora los trae el
+    // documento, y mantener la exigencia dejaría una sección AIU entera —
+    // reparto, cuentas y matriz, todo editable— sin un solo botón que la
+    // aplique: una superficie muda, que es peor que no tenerla. Sin perfil los
+    // tres porcentajes nacen vacíos y el plan dice exactamente qué falta.
+    //
     // LOS VALORES SON LOS DEL DOCUMENTO, no los del snapshot del perfil.
     //
     // Es lo que convierte la sección AIU de esta pantalla en algo más que un
