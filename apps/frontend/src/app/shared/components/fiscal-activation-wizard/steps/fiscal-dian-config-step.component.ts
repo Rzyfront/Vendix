@@ -394,7 +394,13 @@ type SuccessInfo =
             <div class="blocking-reasons__body">
               <p class="blocking-reasons__title">Para continuar falta:</p>
               <ul class="blocking-reasons__list">
-                @for (reason of blockingReasons(); track reason) {
+                <!--
+                  track $index y no la cadena: dos motivos pueden coincidir
+                  palabra por palabra (dos controles con la misma etiqueta y
+                  el mismo error) y una clave duplicada revienta el @for en
+                  runtime. Es una lista de diagnóstico, no tiene identidad.
+                -->
+                @for (reason of blockingReasons(); track $index) {
                   <li>{{ reason }}</li>
                 }
               </ul>
@@ -1577,9 +1583,14 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
       // lanzar acá por un faltante contradiría esa puerta y volvería a
       // dejar varado al tenant que solo tiene el RUT a mano.
       const docs = this.identityDocuments();
-      const attached = this.requiredDocumentTypes().filter(
-        (document_type) => docs[document_type] !== null,
-      );
+      // El predicado de tipo evita un cast: lo que sobrevive al filtro tiene
+      // `file: File`, no `File | null`, y el bucle no vuelve a preguntarlo.
+      const attached = this.requiredDocumentTypes()
+        .map((document_type) => ({ document_type, file: docs[document_type] }))
+        .filter(
+          (entry): entry is { document_type: IdentityDocumentType; file: File } =>
+            entry.file !== null,
+        );
       if (attached.length === 0) {
         // Guarda defensiva: `valid` ya debería haber impedido llegar acá.
         // Si llegamos, subir cero documentos dejaría una fila vacía que
@@ -1588,8 +1599,7 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
           'Adjunta al menos un documento de identidad para continuar.',
         );
       }
-      for (const document_type of attached) {
-        const file = docs[document_type] as File;
+      for (const { document_type, file } of attached) {
         const fd = new FormData();
         fd.append('document', file);
         fd.append('document_type', document_type);
