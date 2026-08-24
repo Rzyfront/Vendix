@@ -231,12 +231,18 @@ jobs:
     # (@angular/build:karma) es `watch: true`, que nunca termina y colgaria el
     # runner hasta el timeout.
     #
-    # `--browsers=ChromeHeadlessNoSandbox` usa el customLauncher que el propio
-    # builder declara (--no-sandbox --headless --disable-gpu
+    # `--browsers=ChromeHeadlessNoSandbox` usa el customLauncher declarado en
+    # `apps/frontend/karma.conf.js` (--no-sandbox --headless --disable-gpu
     # --disable-dev-shm-usage). Sin --no-sandbox Chrome no arranca dentro del
     # runner, y sin --disable-dev-shm-usage se cae por /dev/shm pequeno. El
     # binario lo autodetecta karma-chrome-launcher: la imagen ubuntu-latest
     # trae google-chrome-stable preinstalado.
+    #
+    # `karma.conf.js` tambien sube `browserNoActivityTimeout` a 180s. Con el
+    # default (30s) la suite se cortaba con "Disconnected, because no message in
+    # 30000 ms" a mitad de camino -- y un renglon final que dice DISCONNECTED en
+    # vez de SUCCESS/FAILED es cobertura apagada disfrazada de corrida. Se
+    # reproducia igual con y sin Zone.js, asi que preexiste al arnes zoneless.
     #
     # El arnes corre SIN Zone.js (target `test` con "polyfills": []), igual que
     # el build de produccion. Ver apps/frontend/src/test-init.ts.
@@ -272,6 +278,15 @@ jobs:
       - name: Generar Prisma Client
         working-directory: apps/backend
         run: npx prisma generate
+      # SALVEDAD (KG-9(a)): esto NO es un "typecheck completo" del backend.
+      # `apps/backend/tsconfig.build.json` excluye `**/*spec.ts`, asi que ni
+      # `nest build` aqui ni `npm run buildcheck:be` en local compilan las
+      # specs. Un spec con error de tipos -- p.ej. los 4 `TS2554` de aridad de
+      # `reservations.service.spec.ts` (QUI-649), que llegaron a produccion --
+      # pasa este job en verde. La unica compuerta que SI las compila es
+      # `backend-test` (jest via ts-jest), y hoy esta con `if: false`. Cualquier
+      # afirmacion de "typecheck completo" apoyada en este job hereda esta
+      # salvedad y debe decirlo.
       - name: nest build
         working-directory: apps/backend
         run: npm run build

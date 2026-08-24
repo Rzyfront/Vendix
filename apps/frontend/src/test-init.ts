@@ -22,6 +22,16 @@
  * `TestBed` queda zoneless para los 40 specs, en vez de que cada spec lo
  * parchee por su cuenta.
  *
+ * **Orden determinista.** `jasmine.getEnv().configure({ random: false })` no es
+ * cosmético: con el `random: true` por defecto, tres corridas consecutivas de
+ * esta misma suite dieron **tres conjuntos de fallos distintos** (21, 40 y 11
+ * tests rojos), porque el punto en que la corrida se corta depende del orden en
+ * que caiga el spec que bloquea el hilo. Una compuerta de CI que sale roja o
+ * verde según la semilla no es una compuerta: es una moneda. El coste de fijar
+ * el orden es perder la detección de acoplamiento entre specs que da el orden
+ * aleatorio; se acepta a cambio de que un rojo sea reproducible y se pueda
+ * atribuir a un archivo.
+ *
  * `errorOnUnknownElements` / `errorOnUnknownProperties` se conservan en `true`
  * porque son el valor con el que el builder genera su módulo virtual: bajarlos
  * aquí relajaría en silencio la validación de plantillas de todos los specs.
@@ -39,6 +49,8 @@ import {
   providers: [provideZonelessChangeDetection()],
 })
 export class ZonelessTestingModule {}
+
+jasmine.getEnv().configure({ random: false });
 
 getTestBed().initTestEnvironment(
   [BrowserTestingModule, ZonelessTestingModule],
