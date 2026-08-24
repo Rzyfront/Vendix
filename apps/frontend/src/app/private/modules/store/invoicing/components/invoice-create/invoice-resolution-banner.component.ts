@@ -39,6 +39,11 @@ type BannerState = 'ok' | 'low' | 'expired' | 'exhausted' | 'missing';
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [NgClass, IconComponent],
+  // Host en BLOQUE por lo mismo que app-alert-banner: un elemento a medida se
+  // muestra inline, y un elemento inline ignora los márgenes verticales, así
+  // que la clase space-y-* del contenedor no lo separaba del control de arriba.
+  // Medido en el navegador: 0 px de separación antes de esto.
+  host: { class: 'block' },
   template: `
     <div
       class="rounded-lg border p-3 flex items-start gap-3"

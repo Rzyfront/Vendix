@@ -46,6 +46,7 @@ import {
   selectResolutions,
 } from '../../state/selectors/invoicing.selectors';
 import { invoiceHelp } from '../../utils/invoice-section-help';
+import type { InvoiceScreenSectionId } from '../../utils/invoice-section-order';
 import {
   applyBackendValidationErrors,
   clearBackendError,
@@ -434,18 +435,23 @@ const DIAN_TECHNICAL_KEY_LENGTHS = [40, 64] as const;
 /** Destino único al salir de la captura, se emita o no. */
 const INVOICES_LIST_ROUTE = '/admin/invoicing/invoices';
 
-type SectionId =
-  | 'documento'
-  | 'adquiriente'
-  | 'lineas'
-  | 'impuestos'
-  | 'aiu'
-  | 'retenciones'
-  | 'divisa'
-  | 'contabilidad';
+/**
+ * Las secciones de esta pantalla NO se enumeran aquí: se derivan del orden
+ * canónico compartido con el editor de perfiles
+ * (`utils/invoice-section-order.ts`). Enumerarlas dos veces es lo que hizo que
+ * AIU acabara en distinta posición en cada pantalla.
+ */
+type SectionId = InvoiceScreenSectionId;
 
 /** Qué controles de cabecera pertenecen a cada sección, para contar errores. */
 const SECTION_FIELDS: Record<SectionId, string[]> = {
+  /**
+   * El perfil no valida NADA del documento: elegirlo no puede dejar la factura
+   * en error, y no elegirlo tampoco. Por eso la lista va vacía —el contador de
+   * errores de esta sección tiene que quedarse en cero siempre— mientras que la
+   * sección sí existe, para que se plegue y se cuente como una más.
+   */
+  perfil: [],
   documento: [
     'invoice_type',
     'issue_date',
@@ -618,27 +624,21 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
         <!-- Banner de error: persistente a propósito. El usuario tiene que
              poder leerlo MIENTRAS corrige. -->
         @if (submitError()) {
-          <div
-            role="alert"
-            class="rounded-lg border border-error bg-error-light p-3"
+          <app-alert-banner
+            variant="danger"
+            icon="alert-triangle"
+            tone="token"
+            heading="No se pudo crear la factura"
           >
-            <div class="flex items-start gap-2">
-              <app-icon name="alert-triangle" [size]="16" class="text-error" />
-              <div class="flex-1 min-w-0">
-                <p class="text-sm font-semibold text-error">
-                  No se pudo crear la factura
-                </p>
-                <p class="text-sm text-error">{{ submitError() }}</p>
-                @if (submitErrorDetails().length) {
-                  <ul class="mt-1 list-disc pl-4 text-xs text-error space-y-0.5">
-                    @for (detail of submitErrorDetails(); track detail) {
-                      <li>{{ detail }}</li>
-                    }
-                  </ul>
+            {{ submitError() }}
+            @if (submitErrorDetails().length) {
+              <ul class="mt-1 list-disc space-y-0.5 pl-4 text-xs">
+                @for (detail of submitErrorDetails(); track detail) {
+                  <li>{{ detail }}</li>
                 }
-              </div>
-            </div>
-          </div>
+              </ul>
+            }
+          </app-alert-banner>
         }
 
         <!-- Modo: manual vs desde pedido -->
@@ -690,41 +690,46 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
             siendo el mismo del formulario, así que el payload, el reset y los
             computed que leen el valor crudo no cambian.
 
-            No se pinta si no hay NINGUNO activo del tipo de operación elegido:
-            sin perfiles, el wizard tiene que verse y comportarse exactamente
-            como antes de esta fase, porque un selector vacío o deshabilitado
-            dejaría al tenant sin poder facturar. El tipo de operación se queda
-            en «Documento»: es el filtro de esta lista, no parte de ella, y
-            moverlo dejaría su contador de errores señalando una sección que ya
-            no lo contiene.
+            SE PINTA SIEMPRE, TAMBIÉN SIN PERFILES DEL TIPO ELEGIDO.
+
+            Antes se escondía cuando la lista quedaba vacía, y eso hacía
+            indistinguibles dos cosas muy distintas: «esta tienda no tiene
+            perfiles de operación Estándar» y «esta pantalla no trabaja con
+            perfiles». Quien nunca ve el control no descubre que existe.
+
+            Lo que NO se hace es ofrecer perfiles de otro tipo de operación: el
+            backend responde «INVOICING_PROFILE_008» a un perfil cuyo
+            «operation_type» no coincide con el del documento, así que cruzarlos
+            sería ofrecer un 409 tras llenar la factura entera. Sin perfiles del
+            tipo elegido se dice eso mismo, con el tipo por su nombre, y se
+            ofrece crear uno.
+
+            El tipo de operación se queda en «Documento»: es el filtro de esta
+            lista, no parte de ella, y moverlo dejaría su contador de errores
+            señalando una sección que ya no lo contiene.
+
+            Es una «vendix-invoice-form-section» y no un «<section>» propio para
+            que se pliegue como todas las demás y para que la cabecera se lea
+            igual. El cuerpo de esa sección se OCULTA al plegarse, no se
+            desmonta, así que «profileControl» sigue registrado con la sección
+            cerrada.
           -->
-          @if (hasProfiles()) {
-            <section
-              class="rounded-lg border p-3 sm:p-4"
-              [style.border-color]="'var(--color-primary)'"
-              [style.background]="
-                'color-mix(in srgb, var(--color-primary) 4%, var(--color-surface))'
-              "
-            >
-              <div class="mb-2 flex items-start gap-2.5">
-                <app-icon
-                  name="wand-2"
-                  [size]="16"
-                  class="mt-0.5 shrink-0 text-[var(--color-primary)]"
-                />
-                <div class="min-w-0">
-                  <h3 class="text-sm font-semibold text-text-primary">
-                    Perfil de facturación
-                  </h3>
-                  <p
-                    class="mt-0.5 text-xs leading-relaxed text-[var(--color-text-secondary)]"
-                  >
-                    Elegirlo preconfigura el documento completo —empezando por la
-                    resolución— y reemplaza lo que ya hubiera escrito. Si la
-                    factura ya está modificada, se pregunta antes.
-                  </p>
-                </div>
-              </div>
+          <vendix-invoice-form-section
+            title="Perfil de facturación"
+            icon="wand-2"
+            [summary]="profileSummary()"
+            [help]="profileSectionHelp"
+            [expanded]="isSectionOpen('perfil')"
+            (expandedChange)="setSection('perfil', $event)"
+          >
+            @if (hasProfiles()) {
+              <p
+                class="mb-3 text-xs leading-relaxed text-[var(--color-text-secondary)]"
+              >
+                Elegirlo preconfigura el documento completo —empezando por la
+                resolución— y reemplaza lo que ya hubiera escrito. Si la factura
+                ya está modificada, se pregunta antes.
+              </p>
               <app-selector
                 label="Perfil de facturación"
                 [formControl]="profileControl"
@@ -735,7 +740,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
 
               @if (profileAutoSelected()) {
                 <div
-                  class="mt-2 flex items-start gap-2.5 rounded-lg border border-[var(--color-primary)]/25 bg-[color-mix(in_srgb,var(--color-primary)_6%,transparent)] px-3 py-2.5"
+                  class="mt-3 flex items-start gap-2.5 rounded-lg border border-[var(--color-primary)]/25 bg-[color-mix(in_srgb,var(--color-primary)_6%,transparent)] px-3 py-2.5"
                 >
                   <app-icon
                     name="check-circle"
@@ -764,7 +769,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               -->
               @if (prefillSummary().length > 0) {
                 <div
-                  class="mt-2 flex items-start gap-2.5 rounded-lg border border-border bg-[var(--color-surface-muted)] px-3 py-2.5"
+                  class="mt-3 flex items-start gap-2.5 rounded-lg border border-border bg-[var(--color-surface-muted)] px-3 py-2.5"
                 >
                   <app-icon
                     name="wand-2"
@@ -789,7 +794,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               -->
               @if (pendingModelLines() > 0) {
                 <div
-                  class="mt-2 flex flex-col gap-2 rounded-lg border border-[var(--color-primary)]/25 bg-[color-mix(in_srgb,var(--color-primary)_6%,transparent)] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+                  class="mt-3 flex flex-col gap-2 rounded-lg border border-[var(--color-primary)]/25 bg-[color-mix(in_srgb,var(--color-primary)_6%,transparent)] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <p class="text-xs leading-relaxed text-text-primary">
                     Este perfil trae
@@ -809,7 +814,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
 
               @if (profileConfigFailed()) {
                 <div
-                  class="mt-2 flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning-light px-3 py-2.5"
+                  class="mt-3 flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning-light px-3 py-2.5"
                 >
                   <app-icon
                     name="alert-triangle"
@@ -837,88 +842,41 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   </div>
                 </div>
               }
-            </section>
-          }
-
-          <!--
-            LA RESOLUCIÓN SE ELIGE ARRIBA Y SE EXPLICA DEBAJO.
-
-            El selector va FUERA del «form» del documento, así que se enlaza con
-            «[formControl]» y no con «formControlName»: sin un «formGroup»
-            ancestro, el nombre no resolvería contra nada.
-          -->
-          <div class="space-y-2">
-            <app-selector
-              label="Resolución de numeración"
-              [formControl]="resolutionControl"
-              [options]="resolutionOptions()"
-              [errorText]="fieldError('resolution_id') ?? ''"
-              [disabled]="resolutionOptions().length === 0"
-              placeholder="Elige el rango autorizado"
-              size="sm"
-            ></app-selector>
-
-            @if (profileResolutionNotice(); as notice) {
+            } @else {
               <!--
-                El perfil pidió un rango y se usó otro. Callarlo dejaría al
-                operador con una factura numerada distinto de lo que configuró y
-                sin nada en pantalla que lo relacione con el perfil.
-              -->
-              <app-alert-banner variant="warning" icon="alert-triangle">
-                {{ notice }}
-              </app-alert-banner>
-            }
+                ESTADO VACÍO, NO SECCIÓN AUSENTE.
 
-            @if (resolutionEmptyReason(); as reason) {
-              <!--
-                Una lista vacía y muda en la pantalla que gasta numeración
-                autorizada es un callejón sin salida: hay que decir si están
-                vencidas, agotadas o si no hay ninguna.
+                Nombra el tipo de operación —«Estándar (10)», no «este tipo»—
+                porque la razón de que la lista esté vacía ES el tipo, y sin
+                decirlo la frase se lee como una avería. Y no ofrece los perfiles
+                de otro tipo: ver «INVOICING_PROFILE_008».
               -->
-              <div
-                role="alert"
-                class="flex items-start gap-2 rounded-lg border border-error bg-error-light px-3 py-2.5"
-              >
+              <div class="flex items-start gap-2.5">
                 <app-icon
-                  name="alert-triangle"
-                  [size]="14"
-                  class="mt-0.5 shrink-0 text-error"
+                  name="wand-2"
+                  [size]="16"
+                  class="mt-0.5 shrink-0 text-[var(--color-text-secondary)]"
                 />
-                <p class="text-xs leading-relaxed text-error">{{ reason }}</p>
+                <div class="min-w-0">
+                  <p class="text-xs leading-relaxed text-text-primary">
+                    No hay perfiles activos para la operación
+                    <strong>{{ operationTypeLabel() }}</strong>. Esta factura se
+                    llena a mano y se emite igual: el perfil sólo ahorra
+                    escribir lo que se repite.
+                  </p>
+                  <button
+                    type="button"
+                    class="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-[var(--color-primary)] underline underline-offset-2"
+                    (click)="goToProfileCreate()"
+                  >
+                    <app-icon name="plus" [size]="13" />
+                    Crear un perfil para esta operación
+                  </button>
+                </div>
               </div>
             }
+          </vendix-invoice-form-section>
 
-            @if (habilitationWarning(); as warning) {
-              <!--
-                Va ANTES del aviso de clave técnica: el aviso de clave es una
-                sospecha sobre un dato ambiguo, y este es un hecho. Una factura
-                emitida contra el rango de habilitación no es una factura.
-              -->
-              <div
-                role="alert"
-                class="flex items-start gap-2 rounded-lg border border-error bg-error-light px-3 py-2.5"
-              >
-                <app-icon
-                  name="alert-triangle"
-                  [size]="14"
-                  class="mt-0.5 shrink-0 text-error"
-                />
-                <p class="text-xs leading-relaxed text-error">{{ warning }}</p>
-              </div>
-            }
-
-            @if (technicalKeyWarning(); as warning) {
-              <app-alert-banner variant="warning" icon="alert-triangle">
-                {{ warning }}
-              </app-alert-banner>
-            }
-
-            <!-- El selector elige; el banner sigue informando qué se eligió. -->
-            <vendix-invoice-resolution-banner
-              [resolution]="activeResolution()"
-              [documentLabel]="documentLabel()"
-            />
-          </div>
 
           <!--
             Mismo aire que el editor de perfiles: las dos pantallas son la misma
@@ -926,7 +884,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
             distinto haría que la segunda no se leyera como espejo de la primera.
           -->
           <form [formGroup]="invoiceForm" class="space-y-6">
-            <!-- ── 1. DOCUMENTO ─────────────────────────────────────── -->
+            <!-- ── DOCUMENTO ─────────────────────────────────────── -->
             <vendix-invoice-form-section
               title="Documento"
               [help]="help('documento')"
@@ -936,6 +894,107 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               [expanded]="isSectionOpen('documento')"
               (expandedChange)="setSection('documento', $event)"
             >
+              <!--
+                LA RESOLUCIÓN, DENTRO DE «DOCUMENTO» Y SOBRE FONDO PROPIO.
+
+                Vivía suelta entre la cabecera de la página y el formulario, sin
+                tarjeta detrás y a tamaño «sm». Ahí era el único control de toda
+                la pantalla sin superficie propia, y por eso «casi no se veía»:
+                el problema no era el color del control, era que flotaba.
+
+                Va dentro de la sección Documento porque es un dato de cabecera
+                del documento, y va en un bloque con fondo «--color-background» y
+                no directamente sobre la tarjeta: el control se pinta sobre
+                «--color-surface», así que sobre la propia superficie de la
+                tarjeta sólo lo separaría el borde. Con el fondo de la página
+                debajo, el control queda claro sobre oscuro y se lee de un
+                vistazo.
+
+                Tamaño «md», no «sm»: es el campo que gasta numeración
+                autorizada, y cada número que se toma de un rango se consume
+                aunque la DIAN rechace el documento.
+
+                Sigue enlazado con «[formControl]» y no con «formControlName»
+                aunque ahora esté DENTRO del «form». «resolution_id» tiene un
+                único escritor —«preselectEligibleResolution»— y el enlace
+                directo al control es lo que deja ese hecho a la vista.
+              -->
+              <div
+                class="mb-4 space-y-3 rounded-lg border border-border p-3"
+                [style.background]="'var(--color-background)'"
+              >
+                <app-selector
+                  label="Resolución de numeración"
+                  [formControl]="resolutionControl"
+                  [options]="resolutionOptions()"
+                  [errorText]="fieldError('resolution_id') ?? ''"
+                  [disabled]="resolutionOptions().length === 0"
+                  placeholder="Elige el rango autorizado"
+                  size="md"
+                ></app-selector>
+
+                @if (profileResolutionNotice(); as notice) {
+                  <!--
+                    El perfil pidió un rango y se usó otro. Callarlo dejaría al
+                    operador con una factura numerada distinto de lo que configuró y
+                    sin nada en pantalla que lo relacione con el perfil.
+                  -->
+                  <app-alert-banner
+                    variant="warning"
+                    icon="alert-triangle"
+                    tone="token"
+                  >
+                    {{ notice }}
+                  </app-alert-banner>
+                }
+
+                @if (resolutionEmptyReason(); as reason) {
+                  <!--
+                    Una lista vacía y muda en la pantalla que gasta numeración
+                    autorizada es un callejón sin salida: hay que decir si están
+                    vencidas, agotadas o si no hay ninguna.
+                  -->
+                  <app-alert-banner
+                    variant="danger"
+                    icon="alert-triangle"
+                    tone="token"
+                  >
+                    {{ reason }}
+                  </app-alert-banner>
+                }
+
+                @if (habilitationWarning(); as warning) {
+                  <!--
+                    Va ANTES del aviso de clave técnica: el aviso de clave es una
+                    sospecha sobre un dato ambiguo, y este es un hecho. Una factura
+                    emitida contra el rango de habilitación no es una factura.
+                  -->
+                  <app-alert-banner
+                    variant="danger"
+                    icon="alert-triangle"
+                    tone="token"
+                  >
+                    {{ warning }}
+                  </app-alert-banner>
+                }
+
+                @if (technicalKeyWarning(); as warning) {
+                  <app-alert-banner
+                    variant="warning"
+                    icon="alert-triangle"
+                    tone="token"
+                  >
+                    {{ warning }}
+                  </app-alert-banner>
+                }
+
+                <!-- El selector elige; el banner sigue informando qué se eligió. -->
+                <vendix-invoice-resolution-banner
+                  [resolution]="activeResolution()"
+                  [documentLabel]="documentLabel()"
+                />
+              </div>
+
               <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <app-selector
                   label="Tipo de documento"
@@ -1004,7 +1063,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               ></app-textarea>
             </vendix-invoice-form-section>
 
-            <!-- ── 2. ADQUIRIENTE ───────────────────────────────────── -->
+            <!-- ── ADQUIRIENTE ───────────────────────────────────── -->
             <vendix-invoice-form-section
               title="Adquiriente"
               [help]="help('adquiriente')"
@@ -1231,324 +1290,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               </fieldset>
             </vendix-invoice-form-section>
 
-            <!-- ── 3. LÍNEAS ────────────────────────────────────────── -->
-            <vendix-invoice-form-section
-              title="Líneas"
-              [help]="help('lineas')"
-              icon="list"
-              [badge]="itemCount() + (itemCount() === 1 ? ' línea' : ' líneas')"
-              [summary]="linesSummary()"
-              [errorCount]="sectionErrors().lineas"
-              [expanded]="isSectionOpen('lineas')"
-              (expandedChange)="setSection('lineas', $event)"
-            >
-              <div formArrayName="items" class="space-y-2">
-                @for (item of itemControls(); track rowUid(item); let i = $index) {
-                  <div
-                    [formGroupName]="i"
-                    class="rounded-lg border border-border bg-[var(--color-surface-secondary)] p-2 space-y-2"
-                  >
-                    <div class="grid grid-cols-12 gap-2 items-end">
-                      <div class="col-span-12 md:col-span-4">
-                        <app-input
-                          label="Descripción"
-                          formControlName="description"
-                          [control]="item.get('description')"
-                          [error]="itemError(i, 'description')"
-                          [required]="true"
-                          size="sm"
-                        ></app-input>
-                      </div>
-                      <div class="col-span-6 md:col-span-2">
-                        <app-input
-                          label="Cantidad"
-                          type="number"
-                          formControlName="quantity"
-                          [control]="item.get('quantity')"
-                          [error]="itemError(i, 'quantity')"
-                          [required]="true"
-                          min="0.0001"
-                          step="any"
-                          size="sm"
-                        ></app-input>
-                      </div>
-                      <div class="col-span-6 md:col-span-2">
-                        <app-selector
-                          label="Unidad"
-                          formControlName="unit_code"
-                          [options]="unitCodeOptions"
-                          [errorText]="itemError(i, 'unit_code') ?? ''"
-                          size="sm"
-                        ></app-selector>
-                      </div>
-                      <div class="col-span-6 md:col-span-2">
-                        <app-input
-                          label="Precio unitario"
-                          [currency]="true"
-                          formControlName="unit_price"
-                          [control]="item.get('unit_price')"
-                          [error]="itemError(i, 'unit_price')"
-                          [required]="true"
-                          size="sm"
-                        ></app-input>
-                      </div>
-                      <div class="col-span-6 md:col-span-2">
-                        <app-input
-                          label="Descuento"
-                          [currency]="true"
-                          formControlName="discount_amount"
-                          [control]="item.get('discount_amount')"
-                          [error]="itemError(i, 'discount_amount')"
-                          size="sm"
-                        ></app-input>
-                      </div>
-                    </div>
-
-                    <div class="grid grid-cols-12 gap-2 items-center">
-                      <div class="col-span-12 md:col-span-5">
-                        <button
-                          type="button"
-                          class="w-full flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-md border border-border hover:border-primary-600 transition-colors text-left"
-                          (click)="openProductPicker(item)"
-                        >
-                          <app-icon name="package" [size]="14" />
-                          <span class="flex-1 min-w-0 truncate">
-                            {{ productLabel(item) }}
-                          </span>
-                        </button>
-                      </div>
-
-                      @if (isAiu()) {
-                        <!--
-                          INTERRUPTOR DE BASE AIU POR LÍNEA. Decide si este
-                          renglón entra a la base gravable del régimen o si es
-                          costo reembolsable. Es la misma decisión que antes se
-                          tomaba dejando el selector en blanco — sólo que ahora
-                          se ve que es una decisión.
-                        -->
-                        <div
-                          class="col-span-8 md:col-span-5 flex items-center gap-2"
-                        >
-                          <!--
-                            «app-toggle» y no un «<input type="checkbox">»: es el
-                            control on/off del sistema, con el color del tenant,
-                            foco visible y área táctil. Mismo control que en el
-                            editor de perfiles, para que la decisión fiscal se
-                            vea igual donde se preconfigura y donde se emite.
-                          -->
-                          <div
-                            class="flex shrink-0 items-center"
-                            [title]="
-                              lineCarriesAiu(item)
-                                ? 'Esta línea lleva la base AIU configurada'
-                                : 'Costo reembolsable: no entra a la base AIU'
-                            "
-                          >
-                            <app-toggle
-                              label="AIU"
-                              ariaLabel="Aplicar la base AIU a esta línea"
-                              [checked]="lineCarriesAiu(item)"
-                              (changed)="toggleLineAiu(item, $event)"
-                            ></app-toggle>
-                          </div>
-                          @if (lineCarriesAiu(item)) {
-                            <div class="min-w-0 flex-1">
-                              <app-selector
-                                formControlName="aiu_component"
-                                [options]="aiuComponentOptions"
-                                [errorText]="itemError(i, 'aiu_component') ?? ''"
-                                placeholder="Componente AIU"
-                                size="sm"
-                              ></app-selector>
-                            </div>
-                          } @else {
-                            <span
-                              class="min-w-0 flex-1 truncate text-[11px] text-[var(--color-text-secondary)]"
-                            >
-                              Costo reembolsable — fuera de la base AIU
-                            </span>
-                          }
-                        </div>
-                      } @else {
-                        <div class="col-span-8 md:col-span-5">
-                          <span
-                            class="text-xs text-[var(--color-text-secondary)]"
-                          >
-                            {{ lineSummary(i) }}
-                          </span>
-                        </div>
-                      }
-
-                      <div class="col-span-4 md:col-span-2 flex justify-end gap-1">
-                        <!--
-                          Configuración avanzada de ESTA línea. La tira de la
-                          tabla no da para todo lo que una línea puede declarar
-                          (unidad, varios impuestos, cuenta PUC, componente AIU)
-                          y, sobre todo, no cabe la previsión de la aritmética.
-                        -->
-                        <button
-                          type="button"
-                          (click)="openAdvancedItem(item)"
-                          class="text-[var(--color-text-secondary)] hover:text-primary transition-colors p-1"
-                          title="Configuración avanzada de la línea"
-                          aria-label="Configuración avanzada de la línea"
-                        >
-                          <app-icon name="sliders-horizontal" [size]="16" />
-                        </button>
-                        <button
-                          type="button"
-                          (click)="removeItem(i)"
-                          class="text-[var(--color-text-secondary)] hover:text-error transition-colors p-1"
-                          title="Eliminar línea"
-                          aria-label="Eliminar línea"
-                        >
-                          <app-icon name="x" [size]="16" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <!--
-                      LOS IMPUESTOS OCUPAN SU PROPIA FILA, a ancho completo.
-                      Compartían celda con el selector de producto en cuatro de
-                      doce columnas, y con dos o tres impuestos declarados las
-                      píldoras empujaban el disparador a otro renglón. No es un
-                      adorno al lado del producto: es la afirmación fiscal de la
-                      línea, y necesita el sitio de un campo.
-                    -->
-                    <vendix-invoice-line-taxes
-                      formControlName="taxes"
-                      [taxes]="availableTaxes()"
-                    />
-                  </div>
-                }
-              </div>
-
-              @if (itemCount() === 0) {
-                <p
-                  class="text-center py-4 text-sm text-[var(--color-text-secondary)]"
-                >
-                  Una factura sin líneas no es una factura: quemaría un
-                  consecutivo autorizado para declarar un total de cero.
-                </p>
-              }
-
-              <!--
-                TRES caminos a una línea, no uno. El comerciante pidió
-                explícitamente poder «tanto buscar los productos de mi
-                inventario (productos y servicios) como crear un producto
-                personalizado»; la línea en blanco se conserva para quien sólo
-                quiere teclear.
-              -->
-              <div class="flex flex-wrap justify-end gap-2 mt-4">
-                <app-button
-                  variant="outline"
-                  size="sm"
-                  type="button"
-                  (clicked)="openProductPickerForNewLine()"
-                  [disabled]="itemCount() >= 100"
-                >
-                  <app-icon slot="icon" name="search" [size]="14" />
-                  Buscar en inventario
-                </app-button>
-                <app-button
-                  variant="outline"
-                  size="sm"
-                  type="button"
-                  (clicked)="openCustomItemForNewLine()"
-                  [disabled]="itemCount() >= 100"
-                >
-                  <app-icon slot="icon" name="sparkles" [size]="14" />
-                  Ítem personalizado
-                </app-button>
-                <app-button
-                  variant="ghost"
-                  size="sm"
-                  type="button"
-                  (clicked)="addItem()"
-                  [disabled]="itemCount() >= 100"
-                >
-                  <app-icon slot="icon" name="plus" [size]="14" />
-                  Línea en blanco
-                </app-button>
-              </div>
-            </vendix-invoice-form-section>
-
-            <!-- ── 4. IMPUESTOS ─────────────────────────────────────── -->
-            <!--
-              El id «taxes_section» es el ancla del CTA de los hallazgos de
-              impuesto. NO se usa «taxes» a secas: cada línea ya tiene un
-              formControlName="taxes" y el selector lo encontraría PRIMERO,
-              desplazando a la primera línea en vez de al desglose agregado que
-              el hallazgo está discutiendo.
-            -->
-            <vendix-invoice-form-section
-              id="taxes_section"
-              title="Impuestos"
-              [help]="help('impuestos')"
-              icon="percent"
-              [summary]="taxSummary()"
-              [errorCount]="sectionErrors().impuestos"
-              [expanded]="isSectionOpen('impuestos')"
-              (expandedChange)="setSection('impuestos', $event)"
-            >
-              <p class="text-xs text-[var(--color-text-secondary)] mb-2">
-                Los impuestos se declaran POR LÍNEA, en la sección Líneas. Aquí
-                se ve el agregado que el servidor va a recomputar: el importe
-                que se envía es siempre cero y la DIAN recibe el que calcula el
-                motor fiscal, no el que se escriba en pantalla.
-              </p>
-
-              @if (taxBreakdown().length === 0) {
-                <p class="text-sm text-[var(--color-text-secondary)]">
-                  Ninguna línea declara impuesto. Sólo es correcto si la
-                  operación es realmente excluida o exenta.
-                </p>
-              } @else {
-                <div class="overflow-x-auto">
-                  <table class="w-full text-xs">
-                    <thead>
-                      <tr
-                        class="text-left text-[var(--color-text-secondary)] border-b border-border"
-                      >
-                        <th class="py-1 pr-2">Impuesto</th>
-                        <th class="py-1 pr-2">Tarifa</th>
-                        <th class="py-1 pr-2">Aplicación</th>
-                        <th class="py-1 pr-2 text-right">Base</th>
-                        <th class="py-1 text-right">Importe</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @for (row of taxBreakdown(); track row.key) {
-                        <tr class="border-b border-border last:border-0">
-                          <td class="py-1 pr-2 text-text-primary">
-                            {{ row.name }}
-                          </td>
-                          <td class="py-1 pr-2">{{ row.rate }}%</td>
-                          <td class="py-1 pr-2">
-                            {{ row.isInclusive ? 'Incluido' : 'Adicional' }}
-                          </td>
-                          <td class="py-1 pr-2 text-right">
-                            {{ formatCurrency(row.base) }}
-                          </td>
-                          <td class="py-1 text-right font-medium">
-                            {{ formatCurrency(row.amount) }}
-                          </td>
-                        </tr>
-                      }
-                    </tbody>
-                  </table>
-                </div>
-              }
-
-              @if (availableTaxes().length === 0) {
-                <p class="mt-2 text-xs text-warning">
-                  El catálogo de impuestos de la tienda está vacío o no se pudo
-                  cargar. Configúralo en Ajustes → Impuestos.
-                </p>
-              }
-            </vendix-invoice-form-section>
-
-            <!-- ── 5. AIU ───────────────────────────────────────────── -->
+            <!-- ── AIU ───────────────────────────────────────────── -->
             <!--
               SE OCULTA COMPLETA cuando el tipo de operación no es AIU (09).
 
@@ -1917,7 +1659,324 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
 
             }
 
-            <!-- ── 6. RETENCIONES ───────────────────────────────────── -->
+            <!-- ── LÍNEAS ────────────────────────────────────────── -->
+            <vendix-invoice-form-section
+              title="Líneas"
+              [help]="help('lineas')"
+              icon="list"
+              [badge]="itemCount() + (itemCount() === 1 ? ' línea' : ' líneas')"
+              [summary]="linesSummary()"
+              [errorCount]="sectionErrors().lineas"
+              [expanded]="isSectionOpen('lineas')"
+              (expandedChange)="setSection('lineas', $event)"
+            >
+              <div formArrayName="items" class="space-y-2">
+                @for (item of itemControls(); track rowUid(item); let i = $index) {
+                  <div
+                    [formGroupName]="i"
+                    class="rounded-lg border border-border bg-[var(--color-surface-secondary)] p-2 space-y-2"
+                  >
+                    <div class="grid grid-cols-12 gap-2 items-end">
+                      <div class="col-span-12 md:col-span-4">
+                        <app-input
+                          label="Descripción"
+                          formControlName="description"
+                          [control]="item.get('description')"
+                          [error]="itemError(i, 'description')"
+                          [required]="true"
+                          size="sm"
+                        ></app-input>
+                      </div>
+                      <div class="col-span-6 md:col-span-2">
+                        <app-input
+                          label="Cantidad"
+                          type="number"
+                          formControlName="quantity"
+                          [control]="item.get('quantity')"
+                          [error]="itemError(i, 'quantity')"
+                          [required]="true"
+                          min="0.0001"
+                          step="any"
+                          size="sm"
+                        ></app-input>
+                      </div>
+                      <div class="col-span-6 md:col-span-2">
+                        <app-selector
+                          label="Unidad"
+                          formControlName="unit_code"
+                          [options]="unitCodeOptions"
+                          [errorText]="itemError(i, 'unit_code') ?? ''"
+                          size="sm"
+                        ></app-selector>
+                      </div>
+                      <div class="col-span-6 md:col-span-2">
+                        <app-input
+                          label="Precio unitario"
+                          [currency]="true"
+                          formControlName="unit_price"
+                          [control]="item.get('unit_price')"
+                          [error]="itemError(i, 'unit_price')"
+                          [required]="true"
+                          size="sm"
+                        ></app-input>
+                      </div>
+                      <div class="col-span-6 md:col-span-2">
+                        <app-input
+                          label="Descuento"
+                          [currency]="true"
+                          formControlName="discount_amount"
+                          [control]="item.get('discount_amount')"
+                          [error]="itemError(i, 'discount_amount')"
+                          size="sm"
+                        ></app-input>
+                      </div>
+                    </div>
+
+                    <div class="grid grid-cols-12 gap-2 items-center">
+                      <div class="col-span-12 md:col-span-5">
+                        <button
+                          type="button"
+                          class="w-full flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-md border border-border hover:border-primary-600 transition-colors text-left"
+                          (click)="openProductPicker(item)"
+                        >
+                          <app-icon name="package" [size]="14" />
+                          <span class="flex-1 min-w-0 truncate">
+                            {{ productLabel(item) }}
+                          </span>
+                        </button>
+                      </div>
+
+                      @if (isAiu()) {
+                        <!--
+                          INTERRUPTOR DE BASE AIU POR LÍNEA. Decide si este
+                          renglón entra a la base gravable del régimen o si es
+                          costo reembolsable. Es la misma decisión que antes se
+                          tomaba dejando el selector en blanco — sólo que ahora
+                          se ve que es una decisión.
+                        -->
+                        <div
+                          class="col-span-8 md:col-span-5 flex items-center gap-2"
+                        >
+                          <!--
+                            «app-toggle» y no un «<input type="checkbox">»: es el
+                            control on/off del sistema, con el color del tenant,
+                            foco visible y área táctil. Mismo control que en el
+                            editor de perfiles, para que la decisión fiscal se
+                            vea igual donde se preconfigura y donde se emite.
+                          -->
+                          <div
+                            class="flex shrink-0 items-center"
+                            [title]="
+                              lineCarriesAiu(item)
+                                ? 'Esta línea lleva la base AIU configurada'
+                                : 'Costo reembolsable: no entra a la base AIU'
+                            "
+                          >
+                            <app-toggle
+                              label="AIU"
+                              ariaLabel="Aplicar la base AIU a esta línea"
+                              [checked]="lineCarriesAiu(item)"
+                              (changed)="toggleLineAiu(item, $event)"
+                            ></app-toggle>
+                          </div>
+                          @if (lineCarriesAiu(item)) {
+                            <div class="min-w-0 flex-1">
+                              <app-selector
+                                formControlName="aiu_component"
+                                [options]="aiuComponentOptions"
+                                [errorText]="itemError(i, 'aiu_component') ?? ''"
+                                placeholder="Componente AIU"
+                                size="sm"
+                              ></app-selector>
+                            </div>
+                          } @else {
+                            <span
+                              class="min-w-0 flex-1 truncate text-[11px] text-[var(--color-text-secondary)]"
+                            >
+                              Costo reembolsable — fuera de la base AIU
+                            </span>
+                          }
+                        </div>
+                      } @else {
+                        <div class="col-span-8 md:col-span-5">
+                          <span
+                            class="text-xs text-[var(--color-text-secondary)]"
+                          >
+                            {{ lineSummary(i) }}
+                          </span>
+                        </div>
+                      }
+
+                      <div class="col-span-4 md:col-span-2 flex justify-end gap-1">
+                        <!--
+                          Configuración avanzada de ESTA línea. La tira de la
+                          tabla no da para todo lo que una línea puede declarar
+                          (unidad, varios impuestos, cuenta PUC, componente AIU)
+                          y, sobre todo, no cabe la previsión de la aritmética.
+                        -->
+                        <button
+                          type="button"
+                          (click)="openAdvancedItem(item)"
+                          class="text-[var(--color-text-secondary)] hover:text-primary transition-colors p-1"
+                          title="Configuración avanzada de la línea"
+                          aria-label="Configuración avanzada de la línea"
+                        >
+                          <app-icon name="sliders-horizontal" [size]="16" />
+                        </button>
+                        <button
+                          type="button"
+                          (click)="removeItem(i)"
+                          class="text-[var(--color-text-secondary)] hover:text-error transition-colors p-1"
+                          title="Eliminar línea"
+                          aria-label="Eliminar línea"
+                        >
+                          <app-icon name="x" [size]="16" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <!--
+                      LOS IMPUESTOS OCUPAN SU PROPIA FILA, a ancho completo.
+                      Compartían celda con el selector de producto en cuatro de
+                      doce columnas, y con dos o tres impuestos declarados las
+                      píldoras empujaban el disparador a otro renglón. No es un
+                      adorno al lado del producto: es la afirmación fiscal de la
+                      línea, y necesita el sitio de un campo.
+                    -->
+                    <vendix-invoice-line-taxes
+                      formControlName="taxes"
+                      [taxes]="availableTaxes()"
+                    />
+                  </div>
+                }
+              </div>
+
+              @if (itemCount() === 0) {
+                <p
+                  class="text-center py-4 text-sm text-[var(--color-text-secondary)]"
+                >
+                  Una factura sin líneas no es una factura: quemaría un
+                  consecutivo autorizado para declarar un total de cero.
+                </p>
+              }
+
+              <!--
+                TRES caminos a una línea, no uno. El comerciante pidió
+                explícitamente poder «tanto buscar los productos de mi
+                inventario (productos y servicios) como crear un producto
+                personalizado»; la línea en blanco se conserva para quien sólo
+                quiere teclear.
+              -->
+              <div class="flex flex-wrap justify-end gap-2 mt-4">
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  (clicked)="openProductPickerForNewLine()"
+                  [disabled]="itemCount() >= 100"
+                >
+                  <app-icon slot="icon" name="search" [size]="14" />
+                  Buscar en inventario
+                </app-button>
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  (clicked)="openCustomItemForNewLine()"
+                  [disabled]="itemCount() >= 100"
+                >
+                  <app-icon slot="icon" name="sparkles" [size]="14" />
+                  Ítem personalizado
+                </app-button>
+                <app-button
+                  variant="ghost"
+                  size="sm"
+                  type="button"
+                  (clicked)="addItem()"
+                  [disabled]="itemCount() >= 100"
+                >
+                  <app-icon slot="icon" name="plus" [size]="14" />
+                  Línea en blanco
+                </app-button>
+              </div>
+            </vendix-invoice-form-section>
+
+            <!-- ── IMPUESTOS ─────────────────────────────────────── -->
+            <!--
+              El id «taxes_section» es el ancla del CTA de los hallazgos de
+              impuesto. NO se usa «taxes» a secas: cada línea ya tiene un
+              formControlName="taxes" y el selector lo encontraría PRIMERO,
+              desplazando a la primera línea en vez de al desglose agregado que
+              el hallazgo está discutiendo.
+            -->
+            <vendix-invoice-form-section
+              id="taxes_section"
+              title="Impuestos"
+              [help]="help('impuestos')"
+              icon="percent"
+              [summary]="taxSummary()"
+              [errorCount]="sectionErrors().impuestos"
+              [expanded]="isSectionOpen('impuestos')"
+              (expandedChange)="setSection('impuestos', $event)"
+            >
+              <p class="text-xs text-[var(--color-text-secondary)] mb-2">
+                Los impuestos se declaran POR LÍNEA, en la sección Líneas. Aquí
+                se ve el agregado que el servidor va a recomputar: el importe
+                que se envía es siempre cero y la DIAN recibe el que calcula el
+                motor fiscal, no el que se escriba en pantalla.
+              </p>
+
+              @if (taxBreakdown().length === 0) {
+                <p class="text-sm text-[var(--color-text-secondary)]">
+                  Ninguna línea declara impuesto. Sólo es correcto si la
+                  operación es realmente excluida o exenta.
+                </p>
+              } @else {
+                <div class="overflow-x-auto">
+                  <table class="w-full text-xs">
+                    <thead>
+                      <tr
+                        class="text-left text-[var(--color-text-secondary)] border-b border-border"
+                      >
+                        <th class="py-1 pr-2">Impuesto</th>
+                        <th class="py-1 pr-2">Tarifa</th>
+                        <th class="py-1 pr-2">Aplicación</th>
+                        <th class="py-1 pr-2 text-right">Base</th>
+                        <th class="py-1 text-right">Importe</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (row of taxBreakdown(); track row.key) {
+                        <tr class="border-b border-border last:border-0">
+                          <td class="py-1 pr-2 text-text-primary">
+                            {{ row.name }}
+                          </td>
+                          <td class="py-1 pr-2">{{ row.rate }}%</td>
+                          <td class="py-1 pr-2">
+                            {{ row.isInclusive ? 'Incluido' : 'Adicional' }}
+                          </td>
+                          <td class="py-1 pr-2 text-right">
+                            {{ formatCurrency(row.base) }}
+                          </td>
+                          <td class="py-1 text-right font-medium">
+                            {{ formatCurrency(row.amount) }}
+                          </td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              }
+
+              @if (availableTaxes().length === 0) {
+                <p class="mt-2 text-xs text-warning">
+                  El catálogo de impuestos de la tienda está vacío o no se pudo
+                  cargar. Configúralo en Ajustes → Impuestos.
+                </p>
+              }
+            </vendix-invoice-form-section>
+
+            <!-- ── RETENCIONES ───────────────────────────────────── -->
             <!--
               SE OCULTA en una exportación sin nada capturado: el comprador está
               fuera del país y no puede ser agente retenedor de la DIAN, así que
@@ -2085,7 +2144,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
 
                       @if (incompleteWithholdingRow() === i + 1) {
                         <p
-                          class="mt-2 flex items-center gap-1.5 text-[11px] text-warning"
+                          class="mt-3 flex items-center gap-1.5 text-[11px] text-warning"
                         >
                           <app-icon name="alert-circle" [size]="12" />
                           Falta concepto, tarifa o base. La factura no se envía
@@ -2131,7 +2190,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
 
             }
 
-            <!-- ── 7. DIVISA ────────────────────────────────────────── -->
+            <!-- ── DIVISA ────────────────────────────────────────── -->
             <!--
               NO se gatea por tipo de documento: una venta nacional pactada en
               dólares también declara la conversión, así que esconderla en un
@@ -2275,7 +2334,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               }
             </vendix-invoice-form-section>
 
-            <!-- ── 8. CONTABILIDAD ──────────────────────────────────── -->
+            <!-- ── CONTABILIDAD ──────────────────────────────────── -->
             <vendix-invoice-form-section
               title="Contabilidad"
               [help]="help('contabilidad')"
@@ -2585,7 +2644,10 @@ export class InvoiceCreatePageComponent implements OnInit {
   private readonly customItemTargetUid = signal<string | null>(null);
 
   private readonly openSections = signal<Set<SectionId>>(
-    new Set<SectionId>(['documento', 'adquiriente', 'lineas']),
+    // AIU va abierta por lo mismo que va antes de Líneas: decide qué porción
+    // lleva cada línea. Cuando la operación no es AIU la sección no se pinta,
+    // así que tenerla en el conjunto no cuesta nada.
+    new Set<SectionId>(['perfil', 'documento', 'adquiriente', 'aiu', 'lineas']),
   );
 
   readonly submitError = signal<string | null>(null);
@@ -4254,6 +4316,42 @@ export class InvoiceCreatePageComponent implements OnInit {
     return this.documentLabel() + ' · ' + credit + operation;
   });
 
+  /**
+   * Resumen de la sección de perfil, legible con la sección plegada.
+   *
+   * Dice el nombre del perfil aplicado, o que no hay perfiles de este tipo. Lo
+   * segundo importa tanto como lo primero: plegada, la sección sería un título
+   * mudo y nadie la abriría para descubrir que está vacía.
+   */
+  readonly profileSummary = computed<string>(() => {
+    if (!this.hasProfiles()) {
+      return 'Sin perfiles para ' + this.operationTypeLabel();
+    }
+    const applied = this.selectedProfile();
+    return applied ? applied.name : 'Ninguno elegido';
+  });
+
+  /**
+   * Etiqueta del tipo de operación tal como la ve el comerciante.
+   *
+   * Sale del MISMO catálogo que alimenta el selector, no de un mapa paralelo:
+   * dos listas de los mismos cuatro códigos acabarían diciendo cosas distintas
+   * del mismo documento.
+   */
+  readonly operationTypeLabel = computed<string>(() => {
+    const code = String(this.rawValue()['operation_type'] ?? '');
+    return (
+      this.operationTypeOptions.find((option) => option.value === code)
+        ?.label ?? code
+    );
+  });
+
+  /** Ayuda de la sección de perfil. Constante: no depende del documento. */
+  readonly profileSectionHelp =
+    'Un perfil de facturación es la preconfiguración de todo lo que se repite entre facturas del mismo tipo de operación.\n\n' +
+    'Elegirlo aquí rellena la resolución, los códigos de pago, las notas de cabecera, las líneas modelo y —en un documento AIU— la base gravable y sus cuentas. Todo queda editable después: el perfil es el punto de partida, no un candado.\n\n' +
+    'Sólo se listan los perfiles del tipo de operación de esta factura. Un perfil de otro tipo lo rechaza el servidor, así que ofrecerlo sería ofrecer un error tras llenar el documento.';
+
   readonly customerSummary = computed(() => {
     const name = (this.rawValue()['customer_name'] as string) || '';
     const document = (this.rawValue()['customer_tax_id'] as string) || '';
@@ -4340,16 +4438,12 @@ export class InvoiceCreatePageComponent implements OnInit {
     this.formValue();
     const backend = this.backendFieldErrors();
 
-    const counts: Record<SectionId, number> = {
-      documento: 0,
-      adquiriente: 0,
-      lineas: 0,
-      impuestos: 0,
-      aiu: 0,
-      retenciones: 0,
-      divisa: 0,
-      contabilidad: 0,
-    };
+    // Se deriva de SECTION_FIELDS en vez de escribirse a mano: una sección
+    // nueva ahí aparece aquí sola. Escribirlas dos veces es lo que hace que
+    // una sección quede sin contador y su badge no se pinte nunca.
+    const counts = Object.fromEntries(
+      (Object.keys(SECTION_FIELDS) as SectionId[]).map((section) => [section, 0]),
+    ) as Record<SectionId, number>;
 
     for (const section of Object.keys(SECTION_FIELDS) as SectionId[]) {
       for (const field of SECTION_FIELDS[section]) {
@@ -5396,6 +5490,17 @@ export class InvoiceCreatePageComponent implements OnInit {
     return this.isCredit()
       ? 'Obligatorio en venta a crédito.'
       : 'En contado vence el mismo día de la emisión.';
+  }
+
+  /**
+   * Salida al editor de perfiles desde el estado vacío.
+   *
+   * Navega, no abre modal: crear un perfil son nueve secciones y ya se midió
+   * que dentro de un modal no se encuentra nada. Lo capturado en esta factura
+   * se pierde al salir, igual que con cualquier otra navegación de la pantalla.
+   */
+  goToProfileCreate(): void {
+    void this.router.navigate(['/admin/invoicing/profiles/new']);
   }
 
   isSectionOpen(section: SectionId): boolean {

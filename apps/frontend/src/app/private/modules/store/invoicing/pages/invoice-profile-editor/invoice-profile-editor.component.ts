@@ -91,6 +91,8 @@ import { loadResolutions } from '../../state/actions/invoicing.actions';
 import { selectResolutions } from '../../state/selectors/invoicing.selectors';
 import type { InvoiceResolution } from '../../interfaces/invoice.interface';
 import { profileHelp } from '../../utils/invoice-section-help';
+import { sectionsFor } from '../../utils/invoice-section-order';
+import type { ProfileScreenSectionId } from '../../utils/invoice-section-order';
 import {
     compareResolutionsForSelection,
     hasRemainingRange,
@@ -108,32 +110,31 @@ import {
 } from '../../state/selectors/invoice-profile.selectors';
 
 /**
- * Secciones del editor, en el MISMO orden con que la vista de emisión presenta
- * las suyas. No es cosmético: el editor es un semi espejo de «Nueva factura»
- * —quien configura un perfil y quien emite una factura recorren la misma
- * pantalla— y una sección que aquí va tercera y allá séptima obliga a aprender
- * dos mapas de la misma cosa.
+ * Secciones del editor. NO se enumeran aquí: se derivan del orden canónico que
+ * comparte con «Nueva factura» (`utils/invoice-section-order.ts`).
  *
- * «Semi» porque tres secciones de la emisión NO existen en un perfil, y no por
+ * El editor es un espejo de la emisión —quien configura un perfil y quien emite
+ * una factura recorren la misma pantalla—, y una sección que aquí va tercera y
+ * allá séptima obliga a aprender dos mapas de la misma cosa. Enumerarlas por
+ * separado en cada pantalla es exactamente lo que hizo que AIU acabara antes de
+ * Líneas en una y después en la otra.
+ *
+ * Del lado de la emisión hay dos secciones que un perfil NO tiene, y no por
  * falta de trabajo:
  *
+ *  - **Perfil** — un perfil no se preconfigura con otro perfil.
  *  - **Adquiriente** — el cliente es del documento, no de la configuración.
  *    Precargar un adquiriente sería el peor default imaginable en una pantalla
  *    que gasta numeración autorizada.
- *  - **Divisa** — la TRM tiene fecha; un perfil no puede llevarla congelada.
+ *
+ * **Divisa sí está en las dos**: lo que el perfil no puede llevar congelado es
+ * la TASA, que es del día de cada factura. La divisa sí se preconfigura.
+ *
+ * Las que hoy existen sólo aquí —Formato, Notas internas, Previsualización e
+ * Historial— están en la constante compartida marcadas como tales; el orden es
+ * el mismo para el día en que las tres primeras suban a la emisión.
  */
-type SectionId =
-    | 'documento'
-    | 'lineas'
-    | 'impuestos'
-    | 'aiu'
-    | 'retenciones'
-    | 'divisa'
-    | 'contabilidad'
-    | 'formato'
-    | 'general'
-    | 'preview'
-    | 'historial';
+type SectionId = ProfileScreenSectionId;
 
 /**
  * Editor de un perfil de facturación — VISTA, no modal.
@@ -457,204 +458,6 @@ type SectionId =
                                         </div>
                                     }
                                 </div>
-                            </div>
-                        </div>
-                    </vendix-invoice-form-section>
-
-                    <!-- ══ LÍNEAS MODELO ══ espejo de «Líneas». -->
-                    <vendix-invoice-form-section
-                        title="Líneas modelo"
-                        [help]="help('lineas')"
-                        icon="list"
-                        [summary]="modelLinesSummary()"
-                        [errorCount]="sectionErrors().lineas"
-                        [expanded]="isSectionOpen('lineas')"
-                        (expandedChange)="setSection('lineas', $event)"
-                    >
-                        <div class="space-y-3">
-                            <div
-                                class="flex flex-wrap items-center justify-between gap-2"
-                            >
-                                <p class="text-xs text-text-secondary">
-                                    Las líneas con que nacerá la factura al elegir
-                                    este perfil. Se pueden editar y borrar en la
-                                    factura: son un punto de partida, no un
-                                    candado.
-                                </p>
-                                <app-button
-                                    variant="secondary"
-                                    size="sm"
-                                    (clicked)="addModelLine()"
-                                >
-                                    <app-icon
-                                        slot="icon"
-                                        name="plus"
-                                        [size]="14"
-                                    ></app-icon>
-                                    Línea
-                                </app-button>
-                            </div>
-                            @if (modelLines.controls.length === 0) {
-                                <p class="text-xs text-text-secondary italic">
-                                    Sin líneas modelo. La factura abrirá con una
-                                    línea vacía, como en el flujo manual.
-                                </p>
-                            }
-                            <div class="space-y-2" formArrayName="model_lines">
-                                @for (line of modelLines.controls; track $index) {
-                                    <div
-                                        class="grid grid-cols-1 items-end gap-2 rounded-lg border border-border p-2 md:grid-cols-7"
-                                        [formGroupName]="$index"
-                                    >
-                                        <!--
-                                            El COMPONENTE sólo existe en un
-                                            documento AIU: las cubetas son
-                                            porciones del AIU y en una venta
-                                            ordinaria no significan nada. Fuera
-                                            de AIU se oculta y la línea nace en
-                                            «costo», que es la única cubeta que
-                                            no es componente del régimen.
-
-                                            El INTERRUPTOR es el mismo que la
-                                            vista de emisión pone en cada línea:
-                                            «lleva la base AIU» no es un campo
-                                            nuevo, es bucket distinto de
-                                            «costo». Sin él la decisión fiscal
-                                            queda escondida en elegir una opción
-                                            de un selector de cuatro, y nadie lee
-                                            eso como encender o apagar el AIU de
-                                            la línea.
-                                        -->
-                                        @if (isAiu()) {
-                                            <div class="space-y-1">
-                                                <!--
-                                                    «app-toggle» y no un
-                                                    «<input type="checkbox">»
-                                                    suelto: es el control de
-                                                    encendido/apagado del sistema,
-                                                    así que hereda el color del
-                                                    tenant, el foco visible y el
-                                                    área táctil. Un checkbox de
-                                                    16 px pintado con «accent-»
-                                                    no tenía ninguna de las tres.
-                                                    No se le pasa «styleVariant».
-                                                -->
-                                                <div
-                                                    class="flex items-center"
-                                                    [title]="
-                                                        lineCarriesAiu($index)
-                                                            ? 'Esta línea lleva la base AIU configurada'
-                                                            : 'Costo reembolsable: no entra a la base AIU'
-                                                    "
-                                                >
-                                                    <app-toggle
-                                                        label="AIU"
-                                                        ariaLabel="Aplicar la base AIU a esta línea"
-                                                        [checked]="
-                                                            lineCarriesAiu($index)
-                                                        "
-                                                        (changed)="
-                                                            toggleLineAiu(
-                                                                $index,
-                                                                $event
-                                                            )
-                                                        "
-                                                    ></app-toggle>
-                                                </div>
-                                                @if (lineCarriesAiu($index)) {
-                                                    <app-selector
-                                                        formControlName="bucket"
-                                                        [options]="component_options"
-                                                        size="sm"
-                                                    ></app-selector>
-                                                } @else {
-                                                    <span
-                                                        class="block truncate text-[11px] text-text-secondary"
-                                                        >Costo reembolsable</span
-                                                    >
-                                                }
-                                            </div>
-                                        }
-                                        <div
-                                            [class.md:col-span-2]="isAiu()"
-                                            [class.md:col-span-3]="!isAiu()"
-                                        >
-                                            <app-input
-                                                label="Descripción"
-                                                formControlName="description"
-                                                [maxlength]="line_description_limit"
-                                                size="sm"
-                                                [error]="
-                                                    issueFor(
-                                                        'model_lines[' +
-                                                            $index +
-                                                            '].description'
-                                                    )
-                                                "
-                                            ></app-input>
-                                        </div>
-                                        <app-input
-                                            label="Cantidad"
-                                            formControlName="quantity"
-                                            size="sm"
-                                        ></app-input>
-                                        <app-input
-                                            label="Unidad"
-                                            formControlName="unit_code"
-                                            [maxlength]="4"
-                                            size="sm"
-                                            [error]="
-                                                issueFor(
-                                                    'model_lines[' +
-                                                        $index +
-                                                        '].unit_code'
-                                                )
-                                            "
-                                        ></app-input>
-                                        <!--
-                                            Precio en BLANCO = se teclea en cada
-                                            factura. No es un campo de dinero con
-                                            formato: es la cadena que viaja al
-                                            snapshot, y darle formato de moneda
-                                            acá la redondearía a dos decimales
-                                            cuando el anexo admite seis en el
-                                            precio unitario.
-                                        -->
-                                        <app-input
-                                            label="Precio"
-                                            formControlName="unit_price"
-                                            size="sm"
-                                            placeholder="Se teclea"
-                                            [error]="
-                                                issueFor(
-                                                    'model_lines[' +
-                                                        $index +
-                                                        '].unit_price'
-                                                )
-                                            "
-                                        ></app-input>
-                                        <!--
-                                            SÓLO EL ICONO. La palabra «Quitar» repetida en cada fila de
-                                            cada matriz no aporta nada que el bote de basura no diga, y
-                                            ensancha el botón hasta empujar los campos de la fila. El
-                                            nombre accesible viaja en «ariaLabel», que app-button pone en
-                                            el <button> interno junto con el «title»: sin él, un botón de
-                                            sólo icono se anuncia sin nombre.
-                                        -->
-                                        <app-button
-                                            variant="outline-danger"
-                                            size="sm"
-                                            ariaLabel="Quitar esta línea modelo"
-                                            (clicked)="removeModelLine($index)"
-                                        >
-                                            <app-icon
-                                                slot="icon"
-                                                name="trash-2"
-                                                [size]="15"
-                                            ></app-icon>
-                                        </app-button>
-                                    </div>
-                                }
                             </div>
                         </div>
                     </vendix-invoice-form-section>
@@ -1071,12 +874,13 @@ type SectionId =
                                             </div>
                                         }
                                         @if (regimeMismatch(); as mismatch) {
-                                            <div
-                                                class="rounded-lg border border-danger/40 bg-danger/5 px-3 py-2 text-xs text-danger md:text-sm"
-                                                role="alert"
+                                            <app-alert-banner
+                                                variant="danger"
+                                                icon="alert-triangle"
+                                                tone="token"
                                             >
                                                 {{ mismatch }}
-                                            </div>
+                                            </app-alert-banner>
                                         }
                                         @if (taxRules.controls.length === 0) {
                                             <p
@@ -1156,6 +960,204 @@ type SectionId =
                             </div>
                         </vendix-invoice-form-section>
                     }
+
+                    <!-- ══ LÍNEAS MODELO ══ espejo de «Líneas». -->
+                    <vendix-invoice-form-section
+                        title="Líneas modelo"
+                        [help]="help('lineas')"
+                        icon="list"
+                        [summary]="modelLinesSummary()"
+                        [errorCount]="sectionErrors().lineas"
+                        [expanded]="isSectionOpen('lineas')"
+                        (expandedChange)="setSection('lineas', $event)"
+                    >
+                        <div class="space-y-3">
+                            <div
+                                class="flex flex-wrap items-center justify-between gap-2"
+                            >
+                                <p class="text-xs text-text-secondary">
+                                    Las líneas con que nacerá la factura al elegir
+                                    este perfil. Se pueden editar y borrar en la
+                                    factura: son un punto de partida, no un
+                                    candado.
+                                </p>
+                                <app-button
+                                    variant="secondary"
+                                    size="sm"
+                                    (clicked)="addModelLine()"
+                                >
+                                    <app-icon
+                                        slot="icon"
+                                        name="plus"
+                                        [size]="14"
+                                    ></app-icon>
+                                    Línea
+                                </app-button>
+                            </div>
+                            @if (modelLines.controls.length === 0) {
+                                <p class="text-xs text-text-secondary italic">
+                                    Sin líneas modelo. La factura abrirá con una
+                                    línea vacía, como en el flujo manual.
+                                </p>
+                            }
+                            <div class="space-y-2" formArrayName="model_lines">
+                                @for (line of modelLines.controls; track $index) {
+                                    <div
+                                        class="grid grid-cols-1 items-end gap-2 rounded-lg border border-border p-2 md:grid-cols-7"
+                                        [formGroupName]="$index"
+                                    >
+                                        <!--
+                                            El COMPONENTE sólo existe en un
+                                            documento AIU: las cubetas son
+                                            porciones del AIU y en una venta
+                                            ordinaria no significan nada. Fuera
+                                            de AIU se oculta y la línea nace en
+                                            «costo», que es la única cubeta que
+                                            no es componente del régimen.
+
+                                            El INTERRUPTOR es el mismo que la
+                                            vista de emisión pone en cada línea:
+                                            «lleva la base AIU» no es un campo
+                                            nuevo, es bucket distinto de
+                                            «costo». Sin él la decisión fiscal
+                                            queda escondida en elegir una opción
+                                            de un selector de cuatro, y nadie lee
+                                            eso como encender o apagar el AIU de
+                                            la línea.
+                                        -->
+                                        @if (isAiu()) {
+                                            <div class="space-y-1">
+                                                <!--
+                                                    «app-toggle» y no un
+                                                    «<input type="checkbox">»
+                                                    suelto: es el control de
+                                                    encendido/apagado del sistema,
+                                                    así que hereda el color del
+                                                    tenant, el foco visible y el
+                                                    área táctil. Un checkbox de
+                                                    16 px pintado con «accent-»
+                                                    no tenía ninguna de las tres.
+                                                    No se le pasa «styleVariant».
+                                                -->
+                                                <div
+                                                    class="flex items-center"
+                                                    [title]="
+                                                        lineCarriesAiu($index)
+                                                            ? 'Esta línea lleva la base AIU configurada'
+                                                            : 'Costo reembolsable: no entra a la base AIU'
+                                                    "
+                                                >
+                                                    <app-toggle
+                                                        label="AIU"
+                                                        ariaLabel="Aplicar la base AIU a esta línea"
+                                                        [checked]="
+                                                            lineCarriesAiu($index)
+                                                        "
+                                                        (changed)="
+                                                            toggleLineAiu(
+                                                                $index,
+                                                                $event
+                                                            )
+                                                        "
+                                                    ></app-toggle>
+                                                </div>
+                                                @if (lineCarriesAiu($index)) {
+                                                    <app-selector
+                                                        formControlName="bucket"
+                                                        [options]="component_options"
+                                                        size="sm"
+                                                    ></app-selector>
+                                                } @else {
+                                                    <span
+                                                        class="block truncate text-[11px] text-text-secondary"
+                                                        >Costo reembolsable</span
+                                                    >
+                                                }
+                                            </div>
+                                        }
+                                        <div
+                                            [class.md:col-span-2]="isAiu()"
+                                            [class.md:col-span-3]="!isAiu()"
+                                        >
+                                            <app-input
+                                                label="Descripción"
+                                                formControlName="description"
+                                                [maxlength]="line_description_limit"
+                                                size="sm"
+                                                [error]="
+                                                    issueFor(
+                                                        'model_lines[' +
+                                                            $index +
+                                                            '].description'
+                                                    )
+                                                "
+                                            ></app-input>
+                                        </div>
+                                        <app-input
+                                            label="Cantidad"
+                                            formControlName="quantity"
+                                            size="sm"
+                                        ></app-input>
+                                        <app-input
+                                            label="Unidad"
+                                            formControlName="unit_code"
+                                            [maxlength]="4"
+                                            size="sm"
+                                            [error]="
+                                                issueFor(
+                                                    'model_lines[' +
+                                                        $index +
+                                                        '].unit_code'
+                                                )
+                                            "
+                                        ></app-input>
+                                        <!--
+                                            Precio en BLANCO = se teclea en cada
+                                            factura. No es un campo de dinero con
+                                            formato: es la cadena que viaja al
+                                            snapshot, y darle formato de moneda
+                                            acá la redondearía a dos decimales
+                                            cuando el anexo admite seis en el
+                                            precio unitario.
+                                        -->
+                                        <app-input
+                                            label="Precio"
+                                            formControlName="unit_price"
+                                            size="sm"
+                                            placeholder="Se teclea"
+                                            [error]="
+                                                issueFor(
+                                                    'model_lines[' +
+                                                        $index +
+                                                        '].unit_price'
+                                                )
+                                            "
+                                        ></app-input>
+                                        <!--
+                                            SÓLO EL ICONO. La palabra «Quitar» repetida en cada fila de
+                                            cada matriz no aporta nada que el bote de basura no diga, y
+                                            ensancha el botón hasta empujar los campos de la fila. El
+                                            nombre accesible viaja en «ariaLabel», que app-button pone en
+                                            el <button> interno junto con el «title»: sin él, un botón de
+                                            sólo icono se anuncia sin nombre.
+                                        -->
+                                        <app-button
+                                            variant="outline-danger"
+                                            size="sm"
+                                            ariaLabel="Quitar esta línea modelo"
+                                            (clicked)="removeModelLine($index)"
+                                        >
+                                            <app-icon
+                                                slot="icon"
+                                                name="trash-2"
+                                                [size]="15"
+                                            ></app-icon>
+                                        </app-button>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    </vendix-invoice-form-section>
 
                     <!-- ══ IMPUESTOS ══ sólo cuando NO es AIU: en un perfil AIU
                          la matriz vive dentro del bloque 4, que es donde la
@@ -1586,9 +1588,9 @@ type SectionId =
                         [help]="help('notas_internas')"
                         icon="info"
                         summary="No viajan al XML"
-                        [errorCount]="sectionErrors().general"
-                        [expanded]="isSectionOpen('general')"
-                        (expandedChange)="setSection('general', $event)"
+                        [errorCount]="sectionErrors().notas_internas"
+                        [expanded]="isSectionOpen('notas_internas')"
+                        (expandedChange)="setSection('notas_internas', $event)"
                     >
                         <div class="space-y-2" formGroupName="general">
                             <app-textarea
@@ -1616,8 +1618,8 @@ type SectionId =
                         icon="eye"
                         summary="Cómo quedaría un documento con este perfil"
                         [errorCount]="0"
-                        [expanded]="isSectionOpen('preview')"
-                        (expandedChange)="setSection('preview', $event)"
+                        [expanded]="isSectionOpen('previsualizacion')"
+                        (expandedChange)="setSection('previsualizacion', $event)"
                     >
                         <vendix-invoice-profile-preview-panel
                             [profileId]="profileId()"
@@ -1665,9 +1667,11 @@ type SectionId =
                 <!-- Bloqueos: la lista COMPLETA, no el primero. El validador
                      los devuelve todos a propósito. -->
                 @if (blockers().length > 0) {
-                    <div
-                        class="rounded-lg border border-danger/40 bg-danger/5 px-3 py-2 text-xs text-danger md:text-sm"
-                        role="alert"
+                    <app-alert-banner
+                        variant="danger"
+                        icon="alert-triangle"
+                        tone="token"
+                        heading="Falta esto para poder guardar"
                     >
                         <ul class="list-inside list-disc">
                             @for (
@@ -1677,16 +1681,17 @@ type SectionId =
                                 <li>{{ blocker.message }}</li>
                             }
                         </ul>
-                    </div>
+                    </app-alert-banner>
                 }
 
                 @if (server_error(); as message) {
-                    <div
-                        class="rounded-lg border border-danger/40 bg-danger/5 px-3 py-2 text-xs text-danger md:text-sm"
-                        role="alert"
+                    <app-alert-banner
+                        variant="danger"
+                        icon="alert-triangle"
+                        tone="token"
                     >
                         {{ message }}
-                    </div>
+                    </app-alert-banner>
                 }
 
                 <!--
@@ -2149,18 +2154,38 @@ export class InvoiceProfileEditorComponent {
     });
 
     readonly isEdit = computed(() => this.profileId() !== null);
-    readonly isAiu = computed(() => this.operationType() === '09');
+
+    /**
+     * ¿Es un perfil AIU? Decide qué secciones se pintan —la configuración AIU
+     * frente a la matriz de impuestos ordinaria— y qué valida el snapshot.
+     *
+     * `form_value()` se lee sólo para DECLARAR LA DEPENDENCIA. El valor de un
+     * `FormControl` no es una señal: sin ese disparador el `computed` se
+     * calculaba una vez con el tipo inicial y no volvía a evaluarse nunca.
+     * Cambiar «Tipo de operación» de AIU a Estándar dejaba la sección AIU
+     * pintada y escondía la de Impuestos, así que se guardaba un perfil
+     * Estándar habiendo configurado —y visto— un reparto AIU que el backend
+     * descarta. Un perfil que muestra una cosa y guarda otra es peor que uno
+     * incompleto.
+     */
+    readonly isAiu = computed(() => {
+        this.form_value();
+        return this.operationType() === '09';
+    });
 
     /**
      * Secciones abiertas al entrar.
      *
-     * Se abren las tres que TODO perfil necesita tocar —documento, líneas
-     * modelo y AIU—, igual que la vista de emisión abre sus tres primeras.
-     * Abrirlas todas convierte la página en un muro de ocho metros; abrir sólo
-     * una obliga a descubrir las otras siete a ciegas.
+     * Se abren las tres que TODO perfil necesita tocar, en el orden en que se
+     * recorren: documento, AIU y líneas modelo. Abrirlas todas convierte la
+     * página en un muro de ocho metros; abrir sólo una obliga a descubrir las
+     * otras siete a ciegas.
+     *
+     * AIU va abierta ANTES de líneas porque decide qué componente lleva cada
+     * línea: si se capturan primero las líneas, hay que recorrerlas otra vez.
      */
     private readonly openSections = signal<Set<SectionId>>(
-        new Set<SectionId>(['documento', 'lineas', 'aiu']),
+        new Set<SectionId>(['documento', 'aiu', 'lineas']),
     );
 
     /** Problemas del snapshot actual, con la MISMA función que usa el backend. */
@@ -2363,19 +2388,17 @@ export class InvoiceProfileEditorComponent {
      * salida: el problema vive tres secciones más abajo, cerrado.
      */
     readonly sectionErrors = computed<Record<SectionId, number>>(() => {
-        const empty: Record<SectionId, number> = {
-            documento: 0,
-            lineas: 0,
-            impuestos: 0,
-            aiu: 0,
-            retenciones: 0,
-            divisa: 0,
-            contabilidad: 0,
-            formato: 0,
-            general: 0,
-            preview: 0,
-            historial: 0,
-        };
+        // Disparador explícito: además de `blockers()` esta cuenta mira si el
+        // control «name» está TOCADO, y tocar un control sin cambiar su valor no
+        // mueve ninguna señal. Sin esto, salir del nombre vacío no pintaba el
+        // contador hasta el siguiente cambio en cualquier otro campo.
+        this.form_value();
+        // Se deriva del orden compartido en vez de escribirse a mano: una
+        // sección nueva aparece aquí sola. Escribirlas dos veces es lo que hace
+        // que una sección quede sin contador y su badge no se pinte nunca.
+        const empty = Object.fromEntries(
+            sectionsFor('profile').map((section) => [section, 0]),
+        ) as Record<SectionId, number>;
         for (const issue of this.blockers()) {
             empty[this.sectionOf(issue.field)] += 1;
         }
@@ -2713,7 +2736,12 @@ export class InvoiceProfileEditorComponent {
             case 'dian':
                 return 'documento';
             default:
-                return 'general';
+                // Fallback deliberado: un campo cuya raíz no reconocemos vive,
+                // por descarte, en el bloque de datos generales del perfil —el
+                // que la pantalla titula «Notas internas»—. Mandar el foco a
+                // una sección concreta y equivocada es peor que mandarlo a la
+                // única que no valida nada.
+                return 'notas_internas';
         }
     }
 
