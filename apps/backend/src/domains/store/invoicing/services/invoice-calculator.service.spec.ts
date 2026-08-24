@@ -1130,6 +1130,83 @@ describe('InvoiceCalculatorService', () => {
       ).toBe(false);
     });
 
+    /**
+     * EL DOCUMENTO CAPTURABLE E INEMITIBLE — la divergencia tiene que VER la
+     * línea de costo.
+     *
+     * Contrato de 100 M bajo `'subtotal'`: 90 M de costo reembolsable
+     * capturados SIN impuesto y 10 M de A/I/U con IVA al 19 %. Bajo esta base el
+     * costo ENTRA a la base gravable, así que capturarlo sin tarifa
+     * sub-declara el IVA de los 90 M — nueve veces el daño de la factura 83.
+     *
+     * El defecto que este caso fija: la divergencia exigía
+     * `aiu_component !== null`, que es una SEGUNDA derivación de «la línea entra
+     * a la base». La primera es `omit_tax_total`, y las dos se separaron justo
+     * en esta base, donde la línea sin componente sí grava. Resultado: CERO
+     * divergencias en el calculador, captura exitosa, consecutivo gastado, y el
+     * rechazo apareciendo recién al emitir en
+     * `InvoiceFlowService.assertAiuLineTaxCoherence` con `INVOICING_AIU_004` —
+     * un documento que existe, tiene número, y no se puede emitir nunca.
+     *
+     * Restaurar `aiu_component !== null` vuelve `sin_tarifa` a longitud 0 y este
+     * caso falla. Es la única razón de que esté escrito con `toHaveLength(1)` y
+     * no con un `some(...)`.
+     */
+    it('Subtotal: la línea de COSTO sin impuesto produce su divergencia', () => {
+      const result = service.calculate(
+        aiuContract({ taxable_basis: 'subtotal' }),
+      );
+
+      // El costo llega sin impuesto: es la línea 0 del contrato.
+      expect(result.lines[0].taxes).toHaveLength(0);
+      expect(result.lines[0].omit_tax_total).toBe(false);
+
+      const sin_tarifa = result.divergences.filter(
+        (d) => d.scope === 'aiu_taxable_line_without_tax',
+      );
+      // UNA divergencia, y en la línea del costo. Las tres de A/I/U declaran su
+      // IVA, así que no divergen.
+      expect(sin_tarifa).toHaveLength(1);
+      expect(sin_tarifa[0].line_index).toBe(0);
+      expect(sin_tarifa[0].line_description).toBe(
+        'Costo reembolsable (nómina e insumos)',
+      );
+      // Sin componente que nombrar: el campo va ausente, no inventado.
+      expect(sin_tarifa[0].tax_type).toBeUndefined();
+      // El motor no conoce la tarifa del costo: informa el hecho, no el importe.
+      expect(sin_tarifa[0].expected).toBe('0.00');
+      expect(sin_tarifa[0].received).toBe('0.00');
+      expect(sin_tarifa[0].difference).toBe('0.00');
+
+      // La contradicción que la divergencia explica: la base gravable declarada
+      // es el contrato entero, pero el impuesto calculado es el 19 % de 10 M.
+      // Los dos números pueden convivir —los produjo la captura— pero no pueden
+      // viajar sin que la respuesta diga por qué.
+      expect(result.aiu?.taxable_base).toBe('100000000.00');
+      expect(result.totals.tax_amount).toBe('1900000.00');
+    });
+
+    /**
+     * La contracara: bajo `'aiu'` y `'utilidad'` el nuevo predicado NO inventa
+     * divergencias sobre la línea de costo. Ahí esa línea no entra a la base
+     * (`omit_tax_total: true`), y exigirle impuesto habría vuelto inemitible
+     * TODA factura AIU del régimen normal — el falso positivo que un
+     * `!omit_tax_total` mal razonado produciría.
+     */
+    it.each(['aiu', 'utilidad'] as const)(
+      'base «%s»: el costo sin impuesto NO diverge, porque no entra a la base',
+      (basis) => {
+        const result = service.calculate(aiuContract({ taxable_basis: basis }));
+
+        expect(result.lines[0].omit_tax_total).toBe(true);
+        expect(
+          result.divergences.filter(
+            (d) => d.scope === 'aiu_taxable_line_without_tax',
+          ),
+        ).toHaveLength(0);
+      },
+    );
+
     it('reporta —sin inflar— el AIU que no llega al 10 % del contrato', () => {
       const result = service.calculate({
         aiu: { taxable_basis: 'aiu' },

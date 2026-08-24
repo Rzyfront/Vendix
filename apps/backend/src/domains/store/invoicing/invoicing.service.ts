@@ -3091,8 +3091,18 @@ export class InvoicingService {
     for (const line of lines) {
       const component = line.aiu_component;
       // Una línea SIN componente en un documento AIU es la porción de COSTO
-      // reembolsable del contrato: no grava bajo ninguno de los dos regímenes
-      // y no pertenece a esta matriz.
+      // reembolsable del contrato. La matriz está indexada POR COMPONENTE, así
+      // que no tiene casilla donde ponerla y se omite.
+      //
+      // Bajo `'aiu'` y `'utilidad'` la omisión además es correcta de fondo: esa
+      // línea no grava. Bajo `'subtotal'` sí grava —el contrato entero es la
+      // base— y entonces la matriz describe sólo el A+I+U del documento, no toda
+      // su base gravable. No es un hueco de control: la única casilla con
+      // consecuencia, `taxable_without_rate`, alimenta `INVOICING_AIU_004`, y
+      // ese caso —línea en la base sin tarifa— ya no llega hasta acá porque
+      // `recalculateDocument` lo rechaza ANTES de persistir. Cuando la matriz
+      // necesite declarar el costo habrá que darle un bucket `'costo'`, que es
+      // el que `AIU_TAXABLE_BUCKETS_BY_BASIS.subtotal` ya contempla.
       if (!component) continue;
 
       const entry =
@@ -3165,6 +3175,32 @@ export class InvoicingService {
 
     return {
       taxable_basis: aiu.taxable_basis,
+      /**
+       * VENTANA DE TRANSICIÓN — la matriz escribe las DOS claves.
+       *
+       * `taxable_basis` es la nueva y la que manda: es la pregunta que la UI le
+       * hace al operador y la única que puede expresar `'subtotal'`. `regime` es
+       * la vieja, y se sigue escribiendo porque `aiu_taxable_matrix` es un
+       * `jsonb` con FILAS YA ESCRITAS y con lectores vivos: el panel de
+       * trazabilidad de la factura (`invoice-detail`) lee `matrix.regime`, y al
+       * quitarla leía `undefined` — o sea que un documento emitido, que sí dejó
+       * constancia de su base gravable, aparecía en pantalla como si no la
+       * hubiera dejado. Eso es peor que un dato viejo: es un dato ausente sobre
+       * un hecho fiscal que ocurrió.
+       *
+       * Se deriva con `regimeFromTaxableBasis`, NO con
+       * `regimeStringFromTaxableBasis`: acá `'subtotal'` tiene que salir como
+       * `null` explícito y no colapsado al literal. `null` dice la verdad —esa
+       * base no tiene régimen legal al que citar— mientras que escribir
+       * `'subtotal'` en un campo llamado `regime` haría que un lector viejo lo
+       * tratara como un régimen desconocido y cayera a su rama por defecto.
+       *
+       * `regime` se retira cuando no queden lectores, y sólo entonces: primero
+       * los consumidores pasan a `taxable_basis`, después se deja de escribir.
+       * Al revés —que es lo que pasó— el dato desaparece de la pantalla antes de
+       * que nadie note que lo estaba usando.
+       */
+      regime: regimeFromTaxableBasis(aiu.taxable_basis),
       stage,
       minimum: {
         enforced: minimum_enforced,
@@ -3215,11 +3251,14 @@ export class InvoicingService {
    * ## Por qué las cuatro puertas rechazan en vez de caer al flujo manual
    *
    * Caer a `store_settings` cuando el usuario pidió un perfil es la opción
-   * cómoda y la peligrosa: los dos regímenes AIU gravan bases INCOMPATIBLES
-   * (E.T. 462-1 grava A+I+U completo; Decreto 1372/1992 grava sólo la Utilidad),
-   * así que la sustitución cambia el IVA declarado sin dejar rastro de que hubo
-   * sustitución. El usuario vería un 201. Ver `INVOICING_PROFILE_006`, `_008` y
-   * `_009`.
+   * cómoda y la peligrosa: las TRES bases gravables del AIU gravan porciones
+   * INCOMPATIBLES del contrato (`'aiu'` / E.T. 462-1 grava A+I+U completo;
+   * `'utilidad'` / Decreto 1372/1992 grava sólo la Utilidad; `'subtotal'`
+   * declina el tratamiento AIU y grava el contrato ENTERO, costo reembolsable
+   * incluido), así que la sustitución cambia el IVA declarado sin dejar rastro
+   * de que hubo sustitución. Entre la primera y la tercera la diferencia es de
+   * un orden de magnitud —el 10 % del contrato contra el 100 %— y el usuario
+   * vería un 201. Ver `INVOICING_PROFILE_006`, `_008` y `_009`.
    *
    * ## Aislamiento
    *
@@ -4020,14 +4059,23 @@ export class InvoicingService {
           aiu_untaxed.line_description
             ? ` («${aiu_untaxed.line_description}»)`
             : ''
-        } es el componente «${aiu_untaxed.tax_type ?? 'AIU'}» del contrato, que bajo el régimen de ` +
-          `base gravable configurado SÍ hace parte de la base del IVA, y no declara ningún impuesto. ` +
+        } ${
+          // Sin componente la línea es la porción de COSTO reembolsable, y sólo
+          // llega acá bajo la base `'subtotal'`, que grava el contrato entero.
+          // Llamarla «el componente AIU» —como hacía el `?? 'AIU'`— mandaba al
+          // operador a buscar un componente que la línea no tiene.
+          aiu_untaxed.tax_type
+            ? `es el componente «${aiu_untaxed.tax_type}» del contrato`
+            : `es la porción de costo reembolsable del contrato (sin componente AIU)`
+        }, que bajo la base gravable configurada ` +
+          `SÍ hace parte de la base del IVA, y no declara ningún impuesto. ` +
           `No se emite el documento: la DIAN lo aceptaría declarando menos IVA del debido y el ` +
           `faltante sólo se corregiría después con nota crédito. Declara el impuesto de esta línea ` +
           `con su tarifa (por ejemplo IVA 19%); si el servicio es exento o excluido, declárala con ` +
-          `tarifa 0 —no la dejes sin impuesto—. Si lo que no corresponde es que este componente ` +
-          `grave, cambia el régimen de AIU en la configuración de facturación de la tienda: bajo el ` +
-          `Decreto 1372/1992 sólo la Utilidad hace parte de la base.`,
+          `tarifa 0 —no la dejes sin impuesto—. Si lo que no corresponde es que esta porción ` +
+          `grave, cambia la base gravable de AIU en la configuración de facturación de la tienda: ` +
+          `bajo el Decreto 1372/1992 sólo la Utilidad hace parte de la base, y la base Subtotal ` +
+          `grava el contrato completo incluido el costo reembolsable.`,
         {
           line_index: aiu_untaxed.line_index,
           aiu_component: aiu_untaxed.tax_type ?? null,

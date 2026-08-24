@@ -392,16 +392,27 @@ export type InvoiceCalculatorDivergenceScope =
    *
    * Es la simétrica de la anterior y hasta ahora no existía, así que el hueco
    * sólo se abría en un sentido: quitar un impuesto de más se reportaba, y
-   * dejar de cobrar uno obligatorio pasaba en silencio. Bajo `et_462_1` la base
+   * dejar de cobrar uno obligatorio pasaba en silencio. Bajo `'aiu'` la base
    * es el AIU COMPLETO —A, I y U—, de modo que una factura con IVA sólo en
    * Administración sub-declara el impuesto de las otras dos líneas. La DIAN la
    * acepta sin chistar: el XML cuadra consigo mismo, y el error sólo aparece en
    * una fiscalización, cuando ya sólo se corrige con nota crédito.
    *
-   * NO bloquea, y la razón es la asimetría del daño: exigir impuesto en una
-   * línea AIU tumbaría la captura legítima de un componente exento o excluido,
-   * que existe. Se reporta para que la superficie de alistamiento lo muestre y
-   * el usuario decida — el mismo trato que `aiu_untaxable_line_declares_tax`.
+   * La línea SIN componente también la produce, pero sólo bajo `'subtotal'`:
+   * ahí el costo reembolsable ENTRA a la base gravable, así que capturarlo sin
+   * impuesto es la misma sub-declaración —y sobre el 90 % del contrato, no
+   * sobre el 10 %—. En ese caso `tax_type` viaja ausente, porque no hay
+   * componente que nombrar. El predicado que la decide es `omit_tax_total`, no
+   * la presencia de componente: ver la nota en `calculateLine`.
+   *
+   * Este servicio nunca lanza: informa. La decisión de no emitir la toma
+   * `InvoicingService.recalculateDocument`, que convierte esta divergencia en
+   * `INVOICING_AIU_004` y **sí bloquea** la captura —entre emitir
+   * sub-declarando y no emitir, no emitir es la única opción defendible—, y
+   * `InvoiceFlowService.assertAiuLineTaxCoherence` la vuelve a cortar antes de
+   * firmar para los documentos creados antes de ese bloqueo. Un servicio
+   * realmente exento se declara con tarifa 0, que emite su grupo y no produce
+   * esta divergencia; omitir el impuesto no es lo mismo que declararlo en cero.
    */
   | 'aiu_taxable_line_without_tax'
   /**
@@ -480,7 +491,16 @@ export interface CalculatedAiu {
   contract_value: string;
   /** Σ `line_extension_amount` de las líneas A+I+U, entren o no a la base. */
   aiu_value: string;
-  /** Σ `line_extension_amount` de las líneas que SÍ gravan bajo este régimen. */
+  /**
+   * Σ `line_extension_amount` de las líneas que SÍ gravan bajo esta base.
+   *
+   * NO es Σ de las bases de los impuestos calculados: una línea puede entrar a
+   * la base gravable y no declarar ninguna tarifa. Cuando eso pasa, este número
+   * queda por ENCIMA de lo que `totals.tax_amount` grava, y la respuesta trae
+   * una divergencia `aiu_taxable_line_without_tax` por cada línea responsable.
+   * Los dos números no pueden contradecirse en silencio: si el cociente no da
+   * la tarifa esperada, `divergences` dice exactamente qué línea falta.
+   */
   taxable_base: string;
   /** Piso legal exigido (`contract_value × minimum_base_percent`), o `'0.00'`. */
   minimum_base: string;
@@ -713,12 +733,35 @@ export class InvoiceCalculatorService {
     // documento arriba, y es exactamente el caso que hay que reportar. Bajo
     // `et_462_1` la base es el AIU completo, así que Imprevistos y Utilidad sin
     // IVA sub-declaran el impuesto sin que nada en pantalla lo diga.
-    if (aiu && aiu_component !== null && !omit_tax_total && document_taxes.length === 0) {
+    //
+    // EL PREDICADO ES `!omit_tax_total` Y NADA MÁS. Antes exigía además
+    // `aiu_component !== null`, que era una SEGUNDA derivación del mismo hecho
+    // —«esta línea entra a la base»— y las dos derivaciones se separaron en el
+    // momento en que apareció la base `'subtotal'`: ahí `isAiuTaxable` devuelve
+    // `true` para la línea SIN componente (el costo reembolsable), así que la
+    // línea entraba a la base gravable y la divergencia la saltaba por no tener
+    // componente. Un contrato de 100 M —90 M de costo capturado sin impuesto y
+    // 10 M de A/I/U con IVA— salía del calculador con CERO divergencias, se
+    // capturaba, tomaba consecutivo, y luego `assertAiuLineTaxCoherence` lo
+    // rechazaba al emitir con `INVOICING_AIU_004`: documento inemitible con la
+    // numeración ya gastada, que es el daño exacto que este bloque existe para
+    // evitar. `omit_tax_total` es el MISMO hecho que usa la compuerta de
+    // emisión, y usar el mismo predicado en las dos puntas es lo que hace
+    // imposible que vuelvan a discrepar.
+    //
+    // Bajo `'aiu'` y `'utilidad'` no cambia nada: ahí `isAiuTaxable(null, …)`
+    // es `false`, la línea de costo trae `omit_tax_total: true` y no entra a
+    // este bloque. No hay falso positivo posible.
+    if (aiu && !omit_tax_total && document_taxes.length === 0) {
       divergences.push({
         scope: 'aiu_taxable_line_without_tax',
         line_index: index,
         line_description: item.description,
-        tax_type: aiu_component,
+        // `undefined` cuando la línea no tiene componente: es la porción de
+        // costo reembolsable gravada por la base `'subtotal'`. El campo dice de
+        // QUÉ parte del contrato se trata, y afirmar un componente que la línea
+        // no declara sería peor que dejarlo ausente.
+        tax_type: aiu_component ?? undefined,
         // No se puede afirmar CUÁNTO debía: la tarifa depende del bien o
         // servicio y este servicio no la conoce. Los tres importes van en cero
         // —el contrato del tipo los exige— y lo que informa es el hecho.
@@ -874,6 +917,24 @@ export class InvoiceCalculatorService {
    * El piso NO se aplica bajo `decreto_1372_1992`: el Decreto no fija ninguno
    * sobre la utilidad del constructor, y trasplantarle el 10 % del 462-1
    * rechazaría facturas de construcción perfectamente legales.
+   *
+   * ## `taxable_base` no puede contradecir a `totals.tax_amount` en silencio
+   *
+   * `taxable_base` suma las líneas que ENTRAN a la base; `totals.tax_amount`
+   * suma el impuesto que las líneas DECLARARON. Son dos cosas distintas y
+   * pueden legítimamente no guardar la proporción de una tarifa única: bases
+   * mixtas, tarifa 0 en un componente exento, INC junto al IVA.
+   *
+   * Lo que NO puede pasar es que difieran porque una línea de la base llegó sin
+   * ninguna tarifa y nadie lo diga. Bajo `'subtotal'` ese era el caso real:
+   * `taxable_base` salía en 100.000.000,00 con `tax_amount` en 1.900.000,00
+   * —el 19 % de 10 M, no de 100 M— y `divergences` venía vacío, porque la
+   * divergencia de captura exigía componente y la línea de costo no lo tiene.
+   * Corregido el predicado en `calculateLine` (`!omit_tax_total` a secas), toda
+   * línea que suma a `taxable_base` sin declarar impuesto del documento aporta
+   * su `aiu_taxable_line_without_tax`. El invariante que sostiene la respuesta
+   * es ese: la contradicción sigue siendo posible —la produce el usuario— pero
+   * ya no puede viajar sin su divergencia.
    */
   private summarizeAiu(
     lines: CalculatedLine[],

@@ -2157,10 +2157,21 @@ export class InvoiceFlowService {
    *      camino que hoy funciona y funciona bien, porque `et_462_1` declara MÁS
    *      IVA: de más es recuperable, de menos es sanción.
    *
+   * La columna se sigue llamando `aiu_regime` por compatibilidad, pero lo que
+   * guarda es la BASE GRAVABLE declarada, y `'subtotal'` es un valor legal en
+   * ella: es la base que declina el tratamiento AIU y no tiene régimen legal al
+   * que colapsar. El nombre de la columna es exactamente la confusión que
+   * produjo los defectos de esta ventana —código que preguntaba «¿qué régimen?»
+   * donde la pregunta ya era «¿qué porción del contrato grava?»—, así que leer
+   * `aiu_regime` como si sólo pudiera contener un régimen es el error a no
+   * repetir. `KNOWN`, abajo, es la lista completa y son TRES.
+   *
    * Un valor desconocido en la columna NO cae al default: se rechaza. Es el
-   * único caso realmente irresoluble —el documento afirma un régimen y ninguno
-   * de los dos conocidos es— y adivinar entre dos bases incompatibles cambia el
-   * IVA declarado sin dejar rastro de que se adivinó.
+   * único caso realmente irresoluble —el documento afirma una base y ninguna de
+   * las tres conocidas es— y adivinar entre tres bases incompatibles cambia el
+   * IVA declarado sin dejar rastro de que se adivinó. Entre `'aiu'` y
+   * `'subtotal'` la diferencia es de un orden de magnitud: el 10 % del contrato
+   * contra el 100 %.
    */
   private resolveAiuRegimeForEmission(
     invoice: { id: number; aiu_regime?: string | null },
@@ -2212,10 +2223,14 @@ export class InvoiceFlowService {
    * ¿La línea entra a la base gravable del IVA bajo el régimen declarado?
    *
    * Espeja `InvoiceCalculatorService.isAiuTaxable`, que es el que produjo los
-   * importes persistidos. Las dos respuestas son legales y la diferencia es toda
-   * la base gravable: `et_462_1` grava el AIU completo, `decreto_1372_1992`
-   * grava sólo la Utilidad. Una línea SIN componente nunca grava en ninguno de
-   * los dos: es la porción de COSTO reembolsable del contrato.
+   * importes persistidos. Las TRES respuestas son legales y la diferencia es
+   * toda la base gravable: `et_462_1` grava el AIU completo,
+   * `decreto_1372_1992` grava sólo la Utilidad, y `subtotal` declina el
+   * tratamiento AIU y grava el contrato entero.
+   *
+   * Una línea SIN componente —la porción de COSTO reembolsable— no grava bajo
+   * los dos primeros, pero **sí bajo `subtotal`**, y ahí está toda la diferencia
+   * entre gravar el 10 % del contrato y gravar el 100 %.
    */
   private isAiuComponentTaxable(
     component: string | null,
@@ -2272,8 +2287,10 @@ export class InvoiceFlowService {
    *   dentro del `cac:TaxTotal` de cabecera y del `cbc:PayableAmount`. FAU04
    *   contrasta el total contra la suma de las líneas: descuadre, rechazo.
    *
-   * · Línea que EMITE su grupo, es componente gravable y no trae impuesto ⇒ es
-   *   la sub-declaración que `INVOICING_AIU_004` corta al capturar. Acá se
+   * · Línea que EMITE su grupo —o sea que ENTRA a la base gravable, tenga
+   *   componente AIU o sea el costo reembolsable bajo `subtotal`— y no trae
+   *   impuesto ⇒ es la sub-declaración que `INVOICING_AIU_004` corta al
+   *   capturar. Acá se
    *   vuelve a comprobar porque las facturas creadas ANTES de ese bloqueo
    *   siguen en la base —la 83 entre ellas— y emitirlas ahora produciría
    *   exactamente el documento que la DIAN acepta con menos IVA del debido.
@@ -2317,16 +2334,27 @@ export class InvoiceFlowService {
         );
       }
 
-      // `!omit_tax_total` en un documento AIU YA significa "componente gravable":
-      // `isAiuComponentTaxable(null, …)` es false, así que la línea SIN componente
-      // —el costo reembolsable— también calla su grupo. No hace falta un segundo
-      // predicado, y tenerlo habría sido una segunda derivación del mismo hecho.
+      // `!omit_tax_total` es el ÚNICO predicado, y significa «esta línea entra a
+      // la base gravable» — no «esta línea es un componente A/I/U».
+      //
+      // La distinción dejó de ser académica con la base `'subtotal'`: ahí
+      // `isAiuComponentTaxable(null, …)` devuelve **true**, así que la línea SIN
+      // componente —el costo reembolsable, que suele ser el 90 % del contrato—
+      // SÍ emite su grupo y SÍ tiene que declarar impuesto. Bajo `et_462_1` y
+      // `decreto_1372_1992` esa misma línea calla, y entonces `omit_tax_total`
+      // ya la excluye de esta comprobación sin necesidad de preguntar por el
+      // componente. Un segundo predicado (`component !== null`) sería una
+      // segunda derivación del mismo hecho, y es exactamente la que se separó de
+      // la primera en el calculador: allí la divergencia de captura lo exigía y
+      // por eso el documento de 100 M bajo `'subtotal'` se capturaba sin una
+      // sola divergencia y moría acá, con el consecutivo ya gastado.
       if (!line.omit_tax_total && !declared) {
         throw new VendixHttpException(
           ErrorCodes.INVOICING_AIU_004,
           `No se puede emitir la factura ${invoice.invoice_number ?? invoice.id}: la línea ` +
-            `${index + 1} («${line.description}») es un componente que ${describeAiuRegime(aiu.regime)} ` +
-            `SÍ grava y no declara ningún impuesto. La DIAN aceptaría el ` +
+            `${index + 1} («${line.description}») es una porción del contrato que ` +
+            `${describeAiuRegime(aiu.regime)} SÍ grava y no declara ningún impuesto. ` +
+            `La DIAN aceptaría el ` +
             `documento declarando menos IVA del debido, y el faltante sólo se corregiría ` +
             `después con nota crédito. Corrige la factura declarando el impuesto de esa línea ` +
             `con su tarifa —o con tarifa 0 si el servicio es exento— antes de emitirla.`,

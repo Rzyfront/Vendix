@@ -48,8 +48,10 @@ import { dianAmount, toDecimal } from '../utils/dian-money.util';
 
 import {
   AiuBucket,
+  AiuVatRegimeLiteral,
   InvoiceProfileConfig,
   ProfileTaxRule,
+  regimeFromTaxableBasis,
   resolveAiuTaxableBasis,
 } from './invoice-profile-config.contract';
 import {
@@ -276,7 +278,26 @@ export interface ProfilePreviewResult {
       payable_amount: string;
     };
   };
-  aiu_summary: (CalculatedAiu & { note: string | null }) | null;
+  /**
+   * Resumen AIU del cálculo, más la nota CAV03 proyectada.
+   *
+   * `taxable_basis` (dentro de {@link CalculatedAiu}) es la respuesta viva: es
+   * lo que decide qué porciones del contrato gravan, y la única capaz de
+   * expresar `'subtotal'`. `regime` viaja al lado por la MISMA razón que en
+   * `invoices.aiu_taxable_matrix`: el panel que consume esta previsualización se
+   * escribió contra `regime`, y quitarlo de golpe le dejaba `undefined` en la
+   * casilla donde muestra la base gravable del documento proyectado.
+   *
+   * Vale `null` bajo `'subtotal'`, que no tiene régimen legal al que citar —no
+   * el literal `'subtotal'`, que un lector viejo trataría como régimen
+   * desconocido—. Se retira cuando no queden lectores de `regime`, nunca antes.
+   */
+  aiu_summary:
+    | (CalculatedAiu & {
+        note: string | null;
+        regime: AiuVatRegimeLiteral | null;
+      })
+    | null;
   validations: ProfilePreviewValidation[];
 }
 
@@ -454,7 +475,12 @@ export class ProfilePreviewService {
         totals: this.readXmlTotals(doc),
       },
       aiu_summary: calculation.aiu
-        ? { ...calculation.aiu, note: note || null }
+        ? {
+            ...calculation.aiu,
+            note: note || null,
+            // Ventana de transición: las DOS claves. Ver el tipo.
+            regime: regimeFromTaxableBasis(calculation.aiu.taxable_basis),
+          }
         : null,
       validations,
     };
