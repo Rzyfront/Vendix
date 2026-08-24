@@ -81,10 +81,17 @@ export type AiuVatRegimeLiteral = 'et_462_1' | 'decreto_1372_1992';
 export type AiuComponentLiteral = 'administracion' | 'imprevistos' | 'utilidad';
 
 /**
- * Porción de costo reembolsable del contrato: entra en el VALOR del contrato
- * —y por tanto mueve el piso legal— pero no forma parte de la base gravable
- * bajo ninguno de los dos regímenes. Eso es lo que distingue un contrato AIU de
- * una venta ordinaria.
+ * Porción de costo reembolsable del contrato: entra siempre en el VALOR del
+ * contrato —y por tanto mueve el piso legal—, pero si forma parte de la base
+ * gravable depende de la base declarada. Bajo `'aiu'` y `'utilidad'` queda
+ * FUERA, y eso es exactamente lo que distingue un contrato AIU de una venta
+ * ordinaria. Bajo `'subtotal'` entra, porque esa base declina el tratamiento
+ * AIU y grava el contrato completo.
+ *
+ * Este comentario decía «bajo ninguno de los dos regímenes», que era cierto
+ * cuando había dos y dejó de serlo al añadirse la tercera base. La tabla que
+ * manda es `AIU_TAXABLE_BUCKETS_BY_BASIS`; ninguna otra afirmación sobre qué
+ * porción entra a la base debe escribirse aquí a mano.
  */
 export type AiuBucket = AiuComponentLiteral | 'costo';
 

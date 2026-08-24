@@ -88,9 +88,9 @@ Las tarifas se guardan; las bases no. La base es el importe de cada factura conc
   aiu: help(
     `Administración, Imprevistos y Utilidad: el desglose que exige la DIAN cuando el IVA no se calcula sobre el valor total del contrato.
 
-El RÉGIMEN decide qué entra a la base gravable, y los dos que existen son incompatibles: bajo el art. 462-1 del E.T. (aseo, vigilancia, servicios temporales) el IVA se calcula sobre A+I+U completo, con un piso del 10 % del valor del contrato; bajo el Decreto 1372/1992 (construcción de bien inmueble) sólo grava la Utilidad.
+La BASE GRAVABLE decide qué entra al impuesto, y son tres, incompatibles entre sí: bajo el art. 462-1 del E.T. (aseo, vigilancia, servicios temporales) el IVA se calcula sobre A+I+U completo, con un piso del 10 % del valor del contrato; bajo el Decreto 1372/1992 (construcción de bien inmueble) sólo grava la Utilidad; y «Subtotal» declina el tratamiento AIU y grava el contrato COMPLETO —costo reembolsable incluido—, sin piso.
 
-Elegir el régimen equivocado no da error: produce una factura que declara de menos o de más, y sólo se corrige con nota crédito.
+Elegir la base equivocada no da error: produce una factura que declara de menos o de más, y sólo se corrige con nota crédito.
 
 El OBJETO DEL CONTRATO es obligatorio para emitir: sin él el documento se rechaza antes de tomar consecutivo.`,
     `La configuración AIU por omisión de este perfil, en cuatro bloques que se preconfiguran una vez y se aplican después a las líneas de cada factura.
@@ -101,7 +101,7 @@ CUENTAS — la cuenta del PUC contra la que se reconoce el ingreso de cada compo
 
 BASE AIU — el reparto en porcentajes, y la unidad sobre la que se miden. Los mismos tres números significan cosas distintas si se miden sobre el valor del contrato o sobre el AIU: revísala antes que los números.
 
-BASE IMPUESTOS — qué impuesto grava qué componente y con qué tarifa.`,
+BASE IMPUESTOS — qué impuesto grava qué componente y con qué tarifa. Lo que PUEDE quedar gravado lo decide la base gravable, no esta matriz: cambiar la base mueve las porciones que entran, así que las dos se guardan juntas o el servidor rechaza el perfil señalando una casilla que nadie tocó.`,
   ),
 
   retenciones: help(
@@ -138,7 +138,7 @@ El asiento se genera al emitir. Una cuenta que no exista en el PUC de la tienda 
 
 Vacío = el mapeo contable de la tienda. Poner una cuenta aquí sirve cuando este tipo de operación se reconoce en una cuenta distinta de la que usa el resto del negocio — un ingreso por servicios frente a uno por mercancía, por ejemplo.
 
-En un documento AIU las cuentas de Administración, Imprevistos y Utilidad no se configuran acá: viven en el bloque «Cuentas para contabilización AIU», junto al régimen que las gobierna.`,
+En un documento AIU las cuentas de Administración, Imprevistos y Utilidad no se configuran acá: viven en el bloque «Cuentas para contabilización AIU», junto a la base gravable que las gobierna.`,
   ),
 
   formato: help(

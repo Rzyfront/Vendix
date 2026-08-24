@@ -2330,18 +2330,31 @@ export const ErrorCodes = {
    *
    * La regla que justifica el código es la última de la lista, y es la que este
    * plan entero existe para hacer cumplir: **la matriz de impuestos no puede
-   * contradecir el régimen del perfil.** El régimen decide, línea por línea,
+   * contradecir la base gravable del perfil.** La base decide, línea por línea,
    * cuál emite `cac:TaxTotal`; los importes salen de los tributos persistidos.
-   * Si las dos mitades salen de regímenes distintos, el XML declara una
+   * Si las dos mitades salen de bases distintas, el XML declara una
    * gravabilidad que contradice sus propios números y la DIAN lo rechaza por
    * FAU04 con el consecutivo ya gastado. Un perfil guardado con esa
    * contradicción la reproduciría en cada factura que lo use.
+   *
+   * Se dice la BASE y no el régimen porque son tres y no dos, y porque la
+   * tercera —«subtotal»— no tiene régimen legal al que colapsar: declina el
+   * tratamiento AIU y grava el contrato completo, costo reembolsable incluido.
+   * Un mensaje redactado sobre el régimen imprimía el heredado, o `undefined`,
+   * sobre un perfil cuya base era otra.
+   *
+   * Consecuencia práctica para quien construya el control de base gravable: la
+   * base y la matriz son UN SOLO cambio. Escribir sólo `taxable_basis` deja la
+   * matriz apuntando a las porciones de la base anterior, y este código salta
+   * sobre una casilla que la persona no tocó. Bajo «subtotal» el costo
+   * reembolsable ENTRA en la base, así que `costo.taxable = false` —que es el
+   * valor por omisión— es una contradicción desde el primer guardado.
    */
   INVOICING_PROFILE_005: {
     code: 'INVOICING_PROFILE_005',
     httpStatus: 422,
     devMessage:
-      'Billing profile configuration is fiscally invalid: AIU component percentages must sum to exactly 100, the minimum taxable base cannot fall below the 10% legal floor under E.T. art. 462-1, and the tax matrix must agree with the profile regime (et_462_1 taxes A+I+U, decreto_1372_1992 taxes only Utilidad). All offending fields are returned in details.issues with their dotted path so the editor can mark them',
+      'Billing profile configuration is fiscally invalid: AIU component percentages must sum to exactly 100, the minimum taxable base cannot fall below the 10% legal floor when the base is aiu (E.T. art. 462-1), and the tax matrix must agree with the declared taxable_basis (aiu taxes A+I+U; utilidad taxes only Utilidad, Decreto 1372/1992; subtotal declines AIU treatment and taxes the whole contract including the reimbursable cost). AIU_TAXABLE_BUCKETS_BY_BASIS is the single table that decides which buckets enter the base per basis, so changing taxable_basis without reprojecting the matrix in the same write raises this on a field the user never touched. All offending fields are returned in details.issues with their dotted path so the editor can mark them',
   },
 
   /**
@@ -2665,7 +2678,7 @@ export const ErrorCodes = {
     code: 'INVOICING_AIU_006',
     httpStatus: 422,
     devMessage:
-      'The invoice declares an aiu_regime that is not one of the two known regimes: emission is refused rather than coerced to a default, because E.T. 462-1 (taxes A+I+U) and Decreto 1372/1992 (taxes only Utilidad) are incompatible bases and picking one would change the VAT declared with no trace that it was guessed. A MISSING regime is not this error: it falls back to the store setting, and then to the same conservative et_462_1 default the creation path uses, both logged',
+      'The invoice declares an aiu_regime that is none of the THREE known taxable bases: emission is refused rather than coerced to a default, because E.T. 462-1 (taxes A+I+U, 10% legal floor), Decreto 1372/1992 (taxes only Utilidad, no floor) and subtotal (declines AIU treatment and taxes the whole contract including the reimbursable cost, no floor) are incompatible bases, and picking one would change the VAT declared with no trace that it was guessed. A MISSING base is not this error: it falls back to the store setting, and then to the same conservative et_462_1 default the creation path uses, both logged. The column is still named aiu_regime for compatibility; what it holds is the base, and subtotal is a legal value in it with no regime to collapse to',
   },
   /**
    * DIVISA — la factura electrónica colombiana se emite SIEMPRE en pesos
