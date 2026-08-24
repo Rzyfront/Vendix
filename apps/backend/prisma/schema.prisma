@@ -964,6 +964,9 @@ model stores {
   // Print Formats Hub
   store_print_format_configs store_print_format_configs[]
 
+  // CRM Landing (QUI-719)
+  crm_landing_page crm_landing_pages?
+
   @@unique([organization_id, slug])
   @@index([onboarding])
 }
@@ -975,6 +978,26 @@ model store_settings {
   created_at DateTime? @default(now()) @db.Timestamp(6)
   updated_at DateTime? @default(now()) @db.Timestamp(6)
   stores     stores    @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+}
+
+/// CRM Landing (QUI-719) — landing generada con IA por tienda.
+/// `content_json` es el draft editable; `published_json` es la copia inmutable servida públicamente.
+model crm_landing_pages {
+  id                    Int                        @id @default(autoincrement())
+  store_id              Int                        @unique
+  enabled               Boolean                    @default(false)
+  content_json          Json?
+  published_json        Json?
+  published_at          DateTime?                  @db.Timestamp(6)
+  version               Int                        @default(0)
+  generation_status     crm_generation_status_enum @default(idle)
+  last_job_id           String?                    @db.VarChar(64)
+  last_generation_error String?                    @db.Text
+  created_at            DateTime                   @default(now()) @db.Timestamp(6)
+  updated_at            DateTime                   @default(now()) @db.Timestamp(6)
+  stores                stores                     @relation(fields: [store_id], references: [id], onDelete: Cascade)
+
+  @@index([enabled])
 }
 
 model domain_settings {
@@ -3998,6 +4021,14 @@ enum industry_enum {
   service
   gym
   construction
+}
+
+enum crm_generation_status_enum {
+  idle
+  pending
+  generating
+  ready
+  failed
 }
 
 // ===================== MEMBERSHIPS (industria-genérico, Ola 1) =====================

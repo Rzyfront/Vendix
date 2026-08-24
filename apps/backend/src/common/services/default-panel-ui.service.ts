@@ -107,6 +107,9 @@ export class DefaultPanelUIService {
         customers_all: true,
         customers_reviews: true,
         customers_data_collection: true,
+        // CRM Landing (QUI-719): incluido por defecto (decisión de plan:
+        // default_visible_for_privileged_users=true, show_new_badge=yes)
+        customers_crm: true,
         marketing: true,
         marketing_promotions: true,
         marketing_coupons: true,
