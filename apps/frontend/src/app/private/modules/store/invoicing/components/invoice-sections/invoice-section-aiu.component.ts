@@ -1108,7 +1108,7 @@ export class InvoiceSectionAiuComponent {
   // ── Sugerencia de tributos: PROPONE, nunca aplica ───────────────────────
   //
   // Las cinco propiedades de C.4, y dónde vive cada una:
-  //  · sólo en contexto «invoice» ......... `taxSuggestionRows`, primer return
+  //  · sólo en contexto «invoice» ......... `taxSuggestions`, primer return
   //  · nada se aplica sin acción .......... no hay escritura fuera de
   //                                        `applyTaxSuggestion`, que es un
   //                                        (clicked) de la plantilla
