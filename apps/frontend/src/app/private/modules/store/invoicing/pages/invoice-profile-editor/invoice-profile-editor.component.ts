@@ -9,6 +9,7 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import {
     FormBuilder,
     FormArray,
+    FormControl,
     FormGroup,
     ReactiveFormsModule,
     Validators,
@@ -27,6 +28,8 @@ import {
     TextareaComponent,
     ToggleComponent,
 } from '../../../../../../shared/components/index';
+import type { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
+import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 import {
     AIU_BUCKETS,
     AIU_COMPONENTS,
@@ -63,6 +66,17 @@ import {
 } from '../../components/invoice-create/invoice-dian-catalogs';
 import { PrintGatewayClientService } from '../../../../../../shared/services/print/print-gateway-client.service';
 import * as ProfileActions from '../../state/actions/invoice-profile.actions';
+import { loadResolutions } from '../../state/actions/invoicing.actions';
+import { selectResolutions } from '../../state/selectors/invoicing.selectors';
+import type { InvoiceResolution } from '../../interfaces/invoice.interface';
+import {
+    compareResolutionsForSelection,
+    hasRemainingRange,
+    isWithinValidity,
+    nextConsecutive,
+    toDateOnly,
+} from '../../utils/resolution-selection.util';
+import { isHabilitationNumbering } from '../../../../../../shared/utils/habilitation-numbering.util';
 import {
     selectCurrentProfile,
     selectCurrentProfileConfig,
@@ -240,12 +254,48 @@ type SectionId =
                     <vendix-invoice-form-section
                         title="Documento"
                         icon="file-text"
-                        summary="Forma y medio de pago, y notas de cabecera"
+                        summary="Resolución preferida, forma y medio de pago, y notas de cabecera"
                         [errorCount]="sectionErrors().documento"
                         [expanded]="isSectionOpen('documento')"
                         (expandedChange)="setSection('documento', $event)"
                     >
                         <div class="space-y-3" formGroupName="dian">
+                            <div
+                                class="rounded-lg border border-border p-3 space-y-2"
+                            >
+                                <app-selector
+                                    label="Resolución de numeración preferida"
+                                    [formControl]="resolutionControl"
+                                    [options]="resolution_options()"
+                                    [placeholder]="
+                                        'Sin preferencia — la factura elige la vigente más antigua'
+                                    "
+                                    size="sm"
+                                    helpText="Para cuando la tienda tiene varios rangos autorizados vivos a la vez. Es una preferencia: si el rango no puede numerar el día de la emisión, la factura usa la vigente más antigua y lo avisa."
+                                ></app-selector>
+                                @if (resolution_options().length === 0) {
+                                    <p class="text-xs text-text-secondary">
+                                        No hay resoluciones de factura de venta
+                                        registradas. Regístralas en Facturación →
+                                        Resoluciones; sin rango autorizado la
+                                        emisión no tiene de dónde tomar el
+                                        consecutivo.
+                                    </p>
+                                }
+                                @if (resolutionWarning(); as warning) {
+                                    <p
+                                        class="text-xs text-warning flex items-start gap-1.5"
+                                    >
+                                        <app-icon
+                                            name="alert-triangle"
+                                            [size]="14"
+                                            class="mt-0.5 shrink-0"
+                                        ></app-icon>
+                                        <span>{{ warning }}</span>
+                                    </p>
+                                }
+                            </div>
+
                             <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
                                 <app-selector
                                     label="Forma de pago"
@@ -1357,6 +1407,197 @@ export class InvoiceProfileEditorComponent {
     readonly payment_form_options = PAYMENT_FORM_OPTIONS;
     readonly payment_means_options = PAYMENT_MEANS_OPTIONS;
 
+    // ─── Resolución preferida ─────────────────────────────────────────────
+
+    /**
+     * TODAS las resoluciones de la tienda, activas e inactivas.
+     *
+     * Deliberadamente NO es `selectActiveResolutions`: ese selector filtra
+     * `is_active` y aquí no se numera nada, se elige una preferencia. Si una
+     * resolución se desactiva, con el selector de activas desaparecería del
+     * combo y el perfil que la tenía guardada pasaría de «prefiero una que está
+     * inactiva» a «nunca elegí nada» — sin que nadie tocara el perfil. Lo que
+     * corresponde es seguir mostrándola y DECIR que está inactiva.
+     */
+    private readonly resolutions = toSignal(
+        this.store.select(selectResolutions),
+        { initialValue: [] as InvoiceResolution[] },
+    );
+
+    /**
+     * La preferencia tal como venía guardada, para no perderla al reguardar.
+     *
+     * Si la resolución preferida se borró de la tienda ya no está en
+     * `resolutions()`, así que `selectedResolution()` devuelve `null`. Sin esta
+     * copia, guardar el perfil por cualquier OTRA razón escribiría
+     * `resolution_number: null` conservando el id, y la versión nueva tendría
+     * una preferencia que nadie puede nombrar: el aviso de la emisión pasaría de
+     * «prefiere la 18764000000123, que ya no figura» a un aviso sin sujeto.
+     */
+    private readonly hydrated_resolution = signal<{
+        id: number | null;
+        number: string | null;
+    }>({ id: null, number: null });
+
+    /**
+     * Las resoluciones que un perfil puede PREFERIR.
+     *
+     * Filtra por documento —una resolución de documento soporte no numera una
+     * factura de venta— y por nada más. En particular NO filtra por vigencia ni
+     * por actividad, que es la diferencia con la pantalla de emisión y no es un
+     * descuido:
+     *
+     *  - una resolución cuya vigencia EMPIEZA el mes entrante es una preferencia
+     *    perfectamente legítima, y esconderla obligaría a volver a editar el
+     *    perfil el día que entre a regir;
+     *  - una VENCIDA o DESACTIVADA se sigue mostrando porque es la que el perfil
+     *    ya tiene guardada, y desaparecerla del selector convertiría «tengo una
+     *    preferencia que caducó» en «nunca elegí nada».
+     *
+     * Lo que sí se hace es DECIRLO en la descripción de cada opción, y que la
+     * precarga la ignore cuando no pueda numerar el día de la emisión.
+     */
+    readonly resolution_options = computed<SelectorOption[]>(() => {
+        const today = toLocalDateString();
+        return this.resolutions()
+            .filter(
+                (res) =>
+                    (res.document_type ?? 'sales_invoice') === 'sales_invoice',
+            )
+            .sort(compareResolutionsForSelection)
+            .map((res) => ({
+                value: res.id,
+                label:
+                    (isHabilitationNumbering(res) ? 'PRUEBAS · ' : '') +
+                    (res.prefix || 'sin prefijo') +
+                    ' · ' +
+                    res.resolution_number,
+                description: this.describeResolution(res, today),
+            }));
+    });
+
+    /** El estado de un rango, en el lenguaje del operador. */
+    private describeResolution(res: InvoiceResolution, today: string): string {
+        const parts: string[] = [];
+        if (isHabilitationNumbering(res)) {
+            parts.push('Numeración de habilitación: nunca emite una factura real');
+        }
+        if (res.is_active !== true) {
+            parts.push('Inactiva');
+        }
+        const from = toDateOnly(res.valid_from);
+        if (from && today < from) {
+            parts.push('Empieza a regir el ' + from);
+        } else if (!isWithinValidity(res, today)) {
+            parts.push('Fuera de vigencia desde el ' + toDateOnly(res.valid_to));
+        }
+        if (!hasRemainingRange(res)) {
+            parts.push('Rango agotado');
+        } else {
+            parts.push(
+                'Consecutivo ' + nextConsecutive(res) + ' de ' + res.range_to,
+            );
+        }
+        return parts.join(' · ');
+    }
+
+    /**
+     * El control se expone tipado porque se pinta con `[formControl]` fuera del
+     * `formGroupName`, y `form.get(...)` en la plantilla está prohibido por
+     * `vendix-angular-forms`. Es un getter y no un `computed`: devolvería la
+     * REFERENCIA, que nunca cambia, así que un `computed` sólo aparentaría
+     * reactividad.
+     */
+    get resolutionControl(): FormControl<number | null> {
+        return this.form.get('dian.resolution_id') as FormControl<number | null>;
+    }
+
+    selectedResolutionId(): number | null {
+        const raw = Number(this.form.get('dian.resolution_id')?.value);
+        return Number.isInteger(raw) && raw > 0 ? raw : null;
+    }
+
+    selectedResolution(): InvoiceResolution | null {
+        const id = this.selectedResolutionId();
+        if (id === null) return null;
+        return this.resolutions().find((res) => res.id === id) ?? null;
+    }
+
+    /**
+     * El número que se guarda junto al id: el de la fila viva si se puede leer
+     * y, si no, el que ya venía guardado — siempre que el id NO haya cambiado.
+     * Si el usuario eligió otra resolución, el número viejo no aplica.
+     */
+    private resolvedResolutionNumber(): string | null {
+        const id = this.selectedResolutionId();
+        if (id === null) return null;
+        const live = this.selectedResolution()?.resolution_number;
+        if (live) return live;
+        const hydrated = this.hydrated_resolution();
+        return hydrated.id === id ? hydrated.number : null;
+    }
+
+    /**
+     * El aviso que acompaña a la preferencia elegida.
+     *
+     * Se calcula con la fecha de HOY, que es lo único que se puede saber al
+     * configurar. No bloquea el guardado: un perfil con una preferencia que hoy
+     * no numera sigue siendo un perfil correcto —la resolución puede entrar a
+     * regir mañana— y lo que hace falta es que quien lo guarda sepa qué va a
+     * pasar cuando alguien lo use.
+     */
+    resolutionWarning(): string | null {
+        this.form_value();
+        const res = this.selectedResolution();
+
+        // Hay id guardado pero no hay fila que lo respalde: la resolución se
+        // borró, o el id venía de otra tienda. Sin este aviso el selector se ve
+        // VACÍO y el operador concluye «este perfil no tiene preferencia»,
+        // cuando en realidad la tiene y es inservible: la emisión va a avisar en
+        // cada factura y nadie va a saber dónde arreglarlo. No se limpia solo
+        // —seria una escritura silenciosa sobre configuración fiscal—: se dice.
+        if (!res && this.selectedResolutionId() !== null) {
+            const hydrated = this.hydrated_resolution();
+            const named =
+                hydrated.id === this.selectedResolutionId() && hydrated.number
+                    ? 'la resolución ' + hydrated.number
+                    : 'una resolución';
+            return (
+                'El perfil tiene guardada ' +
+                named +
+                ' que ya no figura entre las de esta tienda. La emisión la ignora y elige la vigente más antigua: elige una de la lista o déjalo sin preferencia.'
+            );
+        }
+        if (!res) return null;
+        const today = toLocalDateString();
+
+        if (isHabilitationNumbering(res)) {
+            return 'Es la numeración de habilitación, idéntica para todos los contribuyentes. La emisión NUNCA la preselecciona sola: si la dejas como preferencia del perfil, tampoco la va a usar.';
+        }
+        if (res.is_active !== true) {
+            return 'Esta resolución está inactiva. Mientras lo esté, la emisión la ignora y elige la vigente más antigua.';
+        }
+        if (!hasRemainingRange(res)) {
+            return 'Este rango ya está agotado. La emisión lo ignora y elige la vigente más antigua; solicita el rango nuevo a la DIAN.';
+        }
+        const from = toDateOnly(res.valid_from);
+        if (from && today < from) {
+            return (
+                'Esta resolución empieza a regir el ' +
+                from +
+                '. Hasta entonces la emisión elige la vigente más antigua y desde esa fecha usará esta.'
+            );
+        }
+        if (!isWithinValidity(res, today)) {
+            return (
+                'Esta resolución quedó fuera de vigencia el ' +
+                toDateOnly(res.valid_to) +
+                '. La emisión la ignora y elige la vigente más antigua.'
+            );
+        }
+        return null;
+    }
+
     readonly form: FormGroup = this.fb.group({
         name: ['', [Validators.required, Validators.maxLength(120)]],
         operation_type: ['09', Validators.required],
@@ -1393,6 +1634,11 @@ export class InvoiceProfileEditorComponent {
             display_decimals: [2],
         }),
         dian: this.fb.group({
+            // Resolución PREFERIDA. `null` = sin preferencia, y es el valor por
+            // omisión a propósito: sin preferencia manda el criterio de la
+            // pantalla de emisión (la vigente más antigua), que es lo que evita
+            // dejar vencer numeración autorizada sin gastar.
+            resolution_id: [null as number | null],
             payment_means_code: [''],
             payment_method_code: [''],
             header_notes: this.fb.array([] as unknown[]),
@@ -1631,6 +1877,11 @@ export class InvoiceProfileEditorComponent {
         // Es constante versionada en el backend, así que pedirlo al entrar no
         // compite con nada ni se invalida.
         this.store.dispatch(ProfileActions.loadProfileTemplates());
+
+        // Los rangos autorizados de la tienda, para el selector de resolución
+        // preferida. Se piden acá y no se asume que ya estén: al entrar por URL
+        // directa al editor, nadie pasó por el listado que los carga.
+        this.store.dispatch(loadResolutions());
 
         // Al entrar en modo edición, cargar el detalle. El listado sólo trae la
         // fila; el snapshot de configuración viene con el detalle.
@@ -1954,6 +2205,12 @@ export class InvoiceProfileEditorComponent {
         name: string,
         operation_type: string,
     ): void {
+        // Antes del patch: lo que el snapshot ya decía de la resolución, para
+        // poder reguardarlo si la fila viva desapareció (ver `hydrated_resolution`).
+        this.hydrated_resolution.set({
+            id: config.dian.resolution_id ?? null,
+            number: config.dian.resolution_number ?? null,
+        });
         this.form.patchValue(
             {
                 name,
@@ -1980,6 +2237,7 @@ export class InvoiceProfileEditorComponent {
                     display_decimals: config.format.display_decimals,
                 },
                 dian: {
+                    resolution_id: config.dian.resolution_id ?? null,
                     payment_means_code: config.dian.payment_means_code ?? '',
                     payment_method_code: config.dian.payment_method_code ?? '',
                 },
@@ -2138,6 +2396,12 @@ export class InvoiceProfileEditorComponent {
                 payment_means_code: this.nullIfEmpty(raw['dian']?.payment_means_code),
                 payment_method_code: this.nullIfEmpty(raw['dian']?.payment_method_code),
                 header_notes: notes.length > 0 ? notes : null,
+                resolution_id: this.selectedResolutionId(),
+                // El número se guarda JUNTO al id para que un aviso pueda
+                // nombrar la resolución a la que apuntaba el perfil cuando esa
+                // fila ya no puede numerar. Con sólo el id, el aviso diría «la
+                // preferencia no sirve» sin decir cuál era.
+                resolution_number: this.resolvedResolutionNumber(),
             },
         };
     }

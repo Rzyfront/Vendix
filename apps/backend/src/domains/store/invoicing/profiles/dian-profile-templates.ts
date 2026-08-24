@@ -61,6 +61,11 @@ const emptySections = {
     payment_means_code: null,
     payment_method_code: null,
     header_notes: null,
+    // Sin resolución preferida: una plantilla es global y los rangos
+    // autorizados son de cada tienda. Precargar un id acá apuntaría a la
+    // numeración de otro contribuyente.
+    resolution_id: null,
+    resolution_number: null,
   },
 } as const;
 

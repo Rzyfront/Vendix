@@ -518,6 +518,45 @@ describe('InvoiceProfileConfig — la sección AIU está atada al tipo de operac
       expect(codes(config)).toContain('FORMAT_TEMPLATE_ID_INVALID');
     }
   });
+
+  it('sin resolución preferida el perfil es válido: la elige la factura', () => {
+    // El caso normal. Un perfil que no opina sobre el rango deja que la
+    // pantalla de emisión aplique su criterio (la vigente más antigua), que es
+    // lo que evita dejar vencer numeración autorizada sin usar.
+    const config = aiuConfig((c) => {
+      c.dian.resolution_id = null;
+      c.dian.resolution_number = null;
+    });
+    expect(codes(config)).not.toContain('DIAN_RESOLUTION_ID_INVALID');
+  });
+
+  it('una resolución preferida que no es un id se rechaza', () => {
+    for (const bad of [0, -1, 2.5, '7', true]) {
+      const config = aiuConfig((c) => {
+        (c.dian as { resolution_id?: unknown }).resolution_id = bad;
+      });
+      expect(codes(config)).toContain('DIAN_RESOLUTION_ID_INVALID');
+    }
+  });
+
+  it('una resolución preferida VENCIDA se guarda: la vigencia no se juzga acá', () => {
+    // El snapshot es inmutable y la numeración autorizada caduca. Si guardar
+    // exigiera vigencia, el día que venciera el rango quedaría inguardable un
+    // perfil correcto en todo lo demás. Quien decide si sirve es la precarga,
+    // con la fecha de hoy y contra las resoluciones de la propia tienda.
+    const config = aiuConfig((c) => {
+      c.dian.resolution_id = 41;
+      c.dian.resolution_number = '18764000000123';
+    });
+    expect(codes(config)).not.toContain('DIAN_RESOLUTION_ID_INVALID');
+  });
+
+  it('el número de la resolución se acota: viaja en el aviso, no al XML', () => {
+    const config = aiuConfig((c) => {
+      c.dian.resolution_number = 'X'.repeat(61);
+    });
+    expect(codes(config)).toContain('TEXT_TOO_LONG');
+  });
 });
 
 describe('InvoiceProfileConfig — devuelve TODOS los problemas', () => {

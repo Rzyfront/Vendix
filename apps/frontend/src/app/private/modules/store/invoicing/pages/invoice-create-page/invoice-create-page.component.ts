@@ -41,7 +41,10 @@ import {
   createInvoiceSuccess,
   loadResolutions,
 } from '../../state/actions/invoicing.actions';
-import { selectActiveResolutions } from '../../state/selectors/invoicing.selectors';
+import {
+  selectActiveResolutions,
+  selectResolutions,
+} from '../../state/selectors/invoicing.selectors';
 import {
   applyBackendValidationErrors,
   clearBackendError,
@@ -64,6 +67,12 @@ import {
 } from '../../services/invoice-emit-readiness.service';
 import { toEmitRequirements } from '../../utils/invoice-emit-requirements';
 import { isHabilitationNumbering } from '../../../../../../shared/utils/habilitation-numbering.util';
+import {
+  compareResolutionsForSelection,
+  hasRemainingRange,
+  isWithinValidity,
+  nextConsecutive,
+} from '../../utils/resolution-selection.util';
 
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
@@ -615,6 +624,24 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               placeholder="Elige el rango autorizado"
               size="sm"
             ></app-selector>
+
+            @if (profileResolutionNotice(); as notice) {
+              <!--
+                El perfil pidió un rango y se usó otro. Callarlo dejaría al
+                operador con una factura numerada distinto de lo que configuró y
+                sin nada en pantalla que lo relacione con el perfil.
+              -->
+              <div
+                class="flex items-start gap-2 rounded-lg border border-warning bg-warning-light px-3 py-2.5"
+              >
+                <app-icon
+                  name="alert-triangle"
+                  [size]="14"
+                  class="mt-0.5 shrink-0 text-warning"
+                />
+                <p class="text-xs leading-relaxed text-warning">{{ notice }}</p>
+              </div>
+            }
 
             @if (resolutionEmptyReason(); as reason) {
               <!--
@@ -2575,6 +2602,24 @@ export class InvoiceCreatePageComponent implements OnInit {
   );
 
   /**
+   * La lista COMPLETA, activas e inactivas, y sólo para EXPLICAR.
+   *
+   * No sustituye a `activeResolutions()` a propósito: de esa cuelgan la
+   * elegibilidad y la preselección, o sea la ruta que gasta numeración
+   * autorizada, y ampliarle la fuente sería relajar la compuerta que impide
+   * numerar con una resolución desactivada.
+   *
+   * Existe porque `selectActiveResolutions` ya filtra `is_active`, y sin la
+   * lista completa el aviso no puede distinguir «la resolución preferida se
+   * borró» de «está desactivada» — dos causas con dos remedios distintos
+   * (registrarla de nuevo, o reactivarla) que el operador no puede adivinar.
+   */
+  private readonly allResolutions = toSignal(
+    this.store.select(selectResolutions),
+    { initialValue: [] as InvoiceResolution[] },
+  );
+
+  /**
    * El control vive en `invoiceForm` pero se pinta FUERA de él, así que se
    * expone tipado para enlazarlo con `[formControl]`. `form.get(...)` en la
    * plantilla queda prohibido por `vendix-angular-forms`.
@@ -2610,7 +2655,7 @@ export class InvoiceCreatePageComponent implements OnInit {
           (res.document_type ?? 'sales_invoice') === target &&
           res.is_active === true &&
           isWithinValidity(res, today) &&
-          Number(res.current_number) < Number(res.range_to),
+          hasRemainingRange(res),
       )
       .sort(compareResolutionsForSelection);
   });
@@ -2644,7 +2689,7 @@ export class InvoiceCreatePageComponent implements OnInit {
           ? 'Numeración de habilitación, idéntica para todos los contribuyentes · '
           : '') +
         'Consecutivo ' +
-        (Math.max(Number(res.current_number) || 0, (Number(res.range_from) || 0) - 1) + 1) +
+        nextConsecutive(res) +
         ' de ' +
         res.range_to +
         ' · vence ' +
@@ -2678,9 +2723,7 @@ export class InvoiceCreatePageComponent implements OnInit {
 
     const today = toLocalDateString();
     const expired = sameType.filter((res) => !isWithinValidity(res, today));
-    const exhausted = sameType.filter(
-      (res) => Number(res.current_number) >= Number(res.range_to),
-    );
+    const exhausted = sameType.filter((res) => !hasRemainingRange(res));
 
     const reasons: string[] = [];
     if (expired.length > 0) {
@@ -2704,6 +2747,71 @@ export class InvoiceCreatePageComponent implements OnInit {
       ' puede numerar hoy: ' +
       (reasons.length > 0 ? reasons.join(' y ') : 'ninguna cumple los requisitos') +
       '. Solicita el rango nuevo a la DIAN y regístralo en Facturación → Resoluciones antes de emitir.'
+    );
+  });
+
+  /** El id que el perfil activo prefiere, o `null` si no opina. */
+  private readonly profilePreferredResolutionId = computed<number | null>(() => {
+    const raw = Number(this.profileConfig()?.dian?.resolution_id);
+    return Number.isInteger(raw) && raw > 0 ? raw : null;
+  });
+
+  /**
+   * Qué pasó con la preferencia del perfil, cuando no se pudo honrar.
+   *
+   * Callar acá sería lo peor de los dos mundos: el operador configuró un rango
+   * en el perfil, la factura salió con otro, y nada en la pantalla lo relaciona.
+   * El aviso nombra la resolución guardada —de ahí que el perfil guarde también
+   * `resolution_number`— y el motivo, que son las tres cosas que hacen falta
+   * para decidir si se sigue o se va a renovar el rango.
+   */
+  readonly profileResolutionNotice = computed<string | null>(() => {
+    const preferred = this.profilePreferredResolutionId();
+    if (preferred === null) return null;
+    if (this.autoSelectableResolutions().some((res) => res.id === preferred)) {
+      return null;
+    }
+
+    const config = this.profileConfig();
+    const label = config?.dian?.resolution_number
+      ? 'la resolución ' + config.dian.resolution_number
+      : 'una resolución que ya no está disponible';
+    const chosen = this.activeResolution();
+    const found = this.allResolutions().find((res) => res.id === preferred);
+
+    // El ORDEN de las ramas es el de GRAVEDAD, no el de evaluación de
+    // `eligibleResolutions`. La numeración de habilitación va primero porque es
+    // lo único que no se arregla: un rango agotado se renueva y una vigencia se
+    // prorroga, pero una resolución de pruebas nunca debe numerar una factura
+    // real. Y las dos cosas coinciden a menudo —el rango de pruebas se gasta
+    // rápido—, así que si ganara «agotó su rango» el aviso mandaría a pedirle a
+    // la DIAN un rango nuevo para una numeración que jamás hay que usar.
+    let reason: string;
+    if (!found) {
+      reason = 'ya no figura entre las resoluciones de la tienda';
+    } else if (isHabilitationNumbering(found)) {
+      reason =
+        'es numeración de habilitación, que nunca se preselecciona para una factura real';
+    } else if (found.is_active !== true) {
+      reason = 'está inactiva';
+    } else if (!hasRemainingRange(found)) {
+      reason = 'agotó su rango';
+    } else if (!isWithinValidity(found, toLocalDateString())) {
+      reason = 'está fuera de vigencia';
+    } else {
+      reason = 'no puede numerar este documento';
+    }
+
+    return (
+      'El perfil prefiere ' +
+      label +
+      ', pero ' +
+      reason +
+      '. Se preseleccionó ' +
+      (chosen
+        ? (chosen.prefix || 'sin prefijo') + ' · ' + chosen.resolution_number
+        : 'ninguna') +
+      '.'
     );
   });
 
@@ -2731,19 +2839,55 @@ export class InvoiceCreatePageComponent implements OnInit {
     if (!control) return;
 
     const current = Number(control.value) || null;
-    // Lo ya elegido manda mientras siga siendo elegible. Si dejó de serlo
-    // (cambió el tipo de documento, se agotó el rango), se rehace: dejarlo
-    // puesto mandaría al backend un id que la pantalla ya no ofrece.
+
+    // La PREFERENCIA DEL PERFIL, honrada sólo si hoy puede numerar de verdad. Se
+    // contrasta contra las auto-elegibles y no contra `eligible`: eso descarta
+    // de un golpe la vencida, la agotada, la inactiva y la de habilitación, que
+    // son justo los cuatro casos en que obedecer al perfil produciría una
+    // factura mal numerada.
+    const preferred = this.profilePreferredResolutionId();
+    const honoured =
+      preferred !== null &&
+      this.autoSelectableResolutions().some((res) => res.id === preferred)
+        ? preferred
+        : null;
+
+    // ─── QUIÉN LE GANA A QUIÉN ───────────────────────────────────────────────
     //
-    // Se contrasta contra `eligible`, no contra las auto-elegibles: una fila de
-    // habilitación marcada A MANO es una elección legítima y no se le puede
-    // deshacer bajo los dedos al usuario.
+    // Lo que el USUARIO eligió a mano manda sobre todo, mientras siga siendo
+    // elegible. Se contrasta contra `eligible` y no contra las auto-elegibles:
+    // una fila de habilitación marcada A MANO es una elección legítima —durante
+    // la habilitación es justo lo que hace falta— y no se le puede deshacer bajo
+    // los dedos.
+    //
+    // `dirty` es lo que separa «lo eligió el usuario» de «lo puso este efecto»:
+    // `setValue` programático NO marca dirty, así que sólo la interacción real
+    // lo enciende. Distinguirlo importa porque el perfil llega DESPUÉS de la
+    // primera pasada de este efecto —hay que elegir tipo de operación para que
+    // haya perfil—, y sin la distinción la preselección automática de esa
+    // primera pasada bloqueaba para siempre la preferencia del perfil: se
+    // guardaba una resolución preferida que jamás se aplicaba, en silencio y sin
+    // aviso, porque desde el punto de vista del aviso todo estaba en orden.
+    if (control.dirty && current && eligible.some((res) => res.id === current)) {
+      return;
+    }
+
+    // La preferencia del perfil desplaza a la preselección automática. No es
+    // pisarle nada al usuario: es para lo que se configuró el perfil.
+    if (honoured !== null) {
+      if ((control.value ?? null) !== honoured) control.setValue(honoured);
+      return;
+    }
+
+    // Sin preferencia honorable, lo automático ya puesto se queda. Si dejó de
+    // ser elegible (cambió el tipo de documento, se agotó el rango) se rehace:
+    // dejarlo puesto mandaría al backend un id que la pantalla ya no ofrece.
     if (current && eligible.some((res) => res.id === current)) return;
 
-    // Pero elegir SOLA solo elige producción. Si no hay ninguna, se queda vacío
-    // y lo dice `habilitationWarning()`: preseleccionar el rango de pruebas
-    // porque es lo único que quedaba convierte un descuido en una factura real
-    // con numeración que no es de nadie.
+    // Y elegir SOLA sólo elige producción. Si no hay ninguna se queda vacío y lo
+    // dice `habilitationWarning()`: preseleccionar el rango de pruebas porque es
+    // lo único que quedaba convierte un descuido en una factura real con
+    // numeración que no es de nadie.
     const next = this.autoSelectableResolutions()[0]?.id ?? null;
     if ((control.value ?? null) === next) return;
     control.setValue(next);
@@ -4300,9 +4444,21 @@ export class InvoiceCreatePageComponent implements OnInit {
    *
    *  - **Adquiriente** — es del documento. Un cliente precargado es la clase de
    *    error que se descubre cuando la factura ya tiene CUFE.
-   *  - **Resolución** — la elige `syncResolution` contra las vigentes y con
-   *    consecutivo disponible; una resolución del perfil podría estar vencida.
    *  - **Fechas** — hoy, siempre. Una fecha de emisión guardada es un rechazo.
+   *
+   * ─── LA RESOLUCIÓN SÍ SE PRECARGA, PERO NO SE OBEDECE ────────────────────
+   *
+   * `dian.resolution_id` es una PREFERENCIA del perfil, no un dato que esta
+   * pantalla acate. Se honra únicamente si ese id está entre las que pueden
+   * numerar HOY —vigente, activa, con consecutivo y de producción—; si no, se
+   * cae al criterio automático y `profileResolutionNotice()` dice por qué. Un
+   * perfil se configura una vez y se usa durante meses: la numeración
+   * autorizada que hoy sirve puede estar vencida cuando alguien lo use, y
+   * preseleccionarla a ciegas emitiría con un rango que la DIAN ya no reconoce.
+   *
+   * Por eso tampoco se escribe con `put()`: el control de resolución lo gobierna
+   * `preselectEligibleResolution`, y dos escritores sobre el mismo control se
+   * pisarían en un orden que depende de cuál efecto corra primero.
    *
    * ─── EL MAPEO DE LOS DOS CÓDIGOS DE PAGO ─────────────────────────────────
    *
@@ -5998,72 +6154,7 @@ function round2(value: number): number {
   return Math.round((Number(value) || 0) * 100) / 100;
 }
 
-/**
- * Recorta un valor de fecha a su parte `YYYY-MM-DD`.
- *
- * `valid_from` / `valid_to` / `resolution_date` son fechas-sola guardadas en
- * columnas de marca de tiempo: llegan como `2026-01-01T00:00:00.000Z` y hay que
- * leerlas por su componente UTC. Convertirlas a `Date` local haría que una
- * vigencia que termina el día 31 se declarara vencida la tarde del 30 en
- * cualquier huso al oeste de Greenwich.
- */
-function toDateOnly(value: string | null | undefined): string {
-  return value ? String(value).slice(0, 10) : '';
-}
-
-/** `true` cuando `today` (YYYY-MM-DD local) cae dentro de la vigencia declarada. */
-function isWithinValidity(res: InvoiceResolution, today: string): boolean {
-  const from = toDateOnly(res.valid_from);
-  const to = toDateOnly(res.valid_to);
-  // Una vigencia sin declarar no descalifica: la resolución existe y el backend
-  // la acepta. Lo que descalifica es una vigencia declarada que ya no cubre hoy.
-  if (from && today < from) return false;
-  if (to && today > to) return false;
-  return true;
-}
-
-/**
- * Orden TOTAL de las resoluciones, de la más antigua a la más nueva.
- *
- * El desempate encadenado existe porque el empate es un caso real, no teórico:
- * dos resoluciones de factura de venta pueden compartir `resolution_date`. Sin
- * un criterio que llegue hasta el `id`, `Array.sort` conservaría el orden en que
- * llegó el arreglo y la preselección cambiaría sola entre recargas.
- */
-function compareResolutionsByAge(
-  a: InvoiceResolution,
-  b: InvoiceResolution,
-): number {
-  const aDate = toDateOnly(a.resolution_date) || toDateOnly(a.valid_from);
-  const bDate = toDateOnly(b.resolution_date) || toDateOnly(b.valid_from);
-  if (aDate !== bDate) return aDate < bDate ? -1 : 1;
-
-  const aFrom = toDateOnly(a.valid_from);
-  const bFrom = toDateOnly(b.valid_from);
-  if (aFrom !== bFrom) return aFrom < bFrom ? -1 : 1;
-
-  const aCreated = String(a.created_at ?? '');
-  const bCreated = String(b.created_at ?? '');
-  if (aCreated !== bCreated) return aCreated < bCreated ? -1 : 1;
-
-  return (Number(a.id) || 0) - (Number(b.id) || 0);
-}
-
-/**
- * El orden con el que se PINTA el selector: producción primero, pruebas al
- * final, y dentro de cada grupo de la más antigua a la más nueva.
- *
- * El grupo va ANTES que la antigüedad a propósito. La numeración de habilitación
- * es de 2019 en la mayoría de los tenants, así que ordenar solo por antigüedad
- * la dejaría siempre primera — encabezando la lista y quedando preseleccionada
- * justo el rango que jamás debe emitir una factura real.
- */
-function compareResolutionsForSelection(
-  a: InvoiceResolution,
-  b: InvoiceResolution,
-): number {
-  const aTest = isHabilitationNumbering(a) ? 1 : 0;
-  const bTest = isHabilitationNumbering(b) ? 1 : 0;
-  if (aTest !== bTest) return aTest - bTest;
-  return compareResolutionsByAge(a, b);
-}
+// La vigencia y el orden de las resoluciones viven en
+// `utils/resolution-selection.util.ts`: el editor de perfiles decide sobre el
+// MISMO rango autorizado, y una segunda implementación del predicado de
+// vigencia sólo divergiría el día en que una vigencia empieza o termina.

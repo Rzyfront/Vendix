@@ -326,6 +326,36 @@ export interface ProfileDianConfig {
   payment_method_code?: string | null;
   /** Notas fijas que se anexan al documento (`cbc:Note` de cabecera). */
   header_notes?: readonly string[] | null;
+  /**
+   * Resolución de numeración PREFERIDA (`invoicing_resolutions.id`).
+   *
+   * Es una PREFERENCIA, no una autoridad. La numeración autorizada vence, se
+   * agota y se reemplaza, así que un id guardado en un snapshot inmutable
+   * envejece por diseño: la resolución que hoy numera puede estar vencida
+   * cuando alguien use el perfil el mes entrante. Quien precarga tiene que
+   * comprobarla contra las vigentes con consecutivo disponible y, si ya no
+   * sirve, caer en el criterio automático DICIÉNDOLO — nunca obedecerla a
+   * ciegas ni fallar en silencio.
+   *
+   * Para qué sirve entonces: una tienda con varios rangos autorizados vivos a
+   * la vez (una sede, un proyecto, un punto de venta por rango) necesita decir
+   * cuál le toca a cada perfil. Sin este campo el operador tiene que elegirlo a
+   * mano en cada factura, que es justo lo que el perfil existe para evitar.
+   *
+   * Igual que `format.template_id`, es una FK LÓGICA: acá sólo se exige la
+   * forma. Rechazar el perfil porque la resolución se venció volvería
+   * inguardable un perfil por completo correcto en todo lo demás.
+   */
+  resolution_id?: number | null;
+  /**
+   * Número de la resolución preferida, tal como estaba al guardar el perfil.
+   *
+   * Redundante a propósito. Sin él, una preferencia que ya no puede numerar es
+   * un id huérfano y el aviso no puede decir a QUÉ resolución apuntaba el
+   * perfil: el operador vería «la preferencia del perfil no sirve» sin poder
+   * relacionarlo con el papel que tiene en la mano.
+   */
+  resolution_number?: string | null;
 }
 
 /** El snapshot completo. Las 7 secciones, todas presentes. */
@@ -474,6 +504,7 @@ export function validateInvoiceProfileConfig(
   validateTaxSection(config, issues);
   validateModelLines(config, issues);
   validateFormat(config, issues);
+  validateDianSection(config, issues);
   validateBounds(config, issues);
 
   return issues;
@@ -629,6 +660,12 @@ function validateBounds(
     config.dian?.payment_method_code,
     'dian.payment_method_code',
     CONFIG_LIMITS.payment_code,
+  );
+
+  text(
+    config.dian?.resolution_number,
+    'dian.resolution_number',
+    CONFIG_LIMITS.resolution_number,
   );
 
   const notes = config.dian?.header_notes;
@@ -957,6 +994,46 @@ function validateFormat(
 }
 
 /**
+ * La sección DIAN: forma, no vigencia.
+ *
+ * `resolution_id` es una FK logica a `invoicing_resolutions`, y lo que se
+ * comprueba acá es que pueda ser un identificador — nada mas. Que EXISTA, que
+ * este vigente, que le quede consecutivo y que no sea el rango de habilitacion
+ * lo decide quien precarga la factura, contra la lista de resoluciones de la
+ * tienda y con la fecha de HOY.
+ *
+ * POR QUE LA VIGENCIA NO SE VALIDA ACA. Un snapshot es inmutable y la
+ * numeracion autorizada caduca: si guardar el perfil exigiera una resolucion
+ * vigente, el dia que venciera el rango quedaria inguardable un perfil correcto
+ * en todo lo demas —no se podria ni corregirle una cuenta contable— hasta que
+ * alguien registrara el rango nuevo. Y al contrario: validar la vigencia al
+ * GUARDAR no prueba nada sobre el momento de EMITIR, que es meses despues.
+ *
+ * El riesgo que esto deja abierto —un id de otra tienda metido a mano en el
+ * `jsonb`— no lo cierra este validador sino el consumidor: la precarga solo
+ * honra ids que esten en la lista de resoluciones de la propia tienda, asi que
+ * un id ajeno no llega nunca a preseleccionarse ni a viajar a la emision.
+ */
+function validateDianSection(
+  config: InvoiceProfileConfig,
+  issues: ProfileConfigIssue[],
+): void {
+  const resolutionId = config.dian?.resolution_id;
+  if (
+    resolutionId !== undefined &&
+    resolutionId !== null &&
+    (!Number.isInteger(resolutionId) || (resolutionId as number) <= 0)
+  ) {
+    issues.push({
+      field: 'dian.resolution_id',
+      code: 'DIAN_RESOLUTION_ID_INVALID',
+      message:
+        'La resolucion preferida tiene que ser el identificador de una resolucion registrada (entero positivo) o quedar vacia.',
+    });
+  }
+}
+
+/**
  * Snapshot por omisión de un perfil AIU bajo el régimen conservador.
  *
  * El régimen por omisión es `et_462_1` porque grava el AIU COMPLETO, o sea
@@ -1011,6 +1088,8 @@ export function buildDefaultAiuProfileConfig(
       payment_means_code: null,
       payment_method_code: null,
       header_notes: null,
+      resolution_id: null,
+      resolution_number: null,
     },
   };
 }
@@ -1056,6 +1135,7 @@ export const CONFIG_LIMITS = {
   payment_code: 4,
   header_note: 500,
   header_notes_count: 10,
+  resolution_number: 60,
 } as const;
 
 // ─── Normalización estructural ────────────────────────────────────────────
@@ -1183,6 +1263,8 @@ const DIAN_KEYS = [
   'payment_means_code',
   'payment_method_code',
   'header_notes',
+  'resolution_id',
+  'resolution_number',
 ] as const;
 const ROOT_KEYS = [
   'config_version',
