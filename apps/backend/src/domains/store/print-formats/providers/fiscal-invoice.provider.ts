@@ -7,6 +7,7 @@ import { IDocumentDataProvider } from '../interfaces/document-data-provider.inte
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import { RESOLUTION_PUBLIC_SELECT } from '../../invoicing/utils/technical-key.util';
+import { amountToSpanishWords } from '@common/utils/amount-in-words.util';
 
 @Injectable()
 export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
@@ -145,6 +146,11 @@ export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
         tax_total_formatted: `$${tax.toLocaleString('es-CO')}`,
         grand_total: total,
         grand_total_formatted: `$${total.toLocaleString('es-CO')}`,
+        // Mismo `total` que la fila en cifras: una segunda fuente aquí sería una
+        // contradicción interna del documento legal.
+        grand_total_in_words: Number.isFinite(total)
+          ? amountToSpanishWords(total, { suffix: 'M/CTE' })
+          : undefined,
       },
     };
   }
@@ -224,6 +230,9 @@ export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
         tax_total_formatted: '$855.000',
         grand_total: 5355000,
         grand_total_formatted: '$5.355.000',
+        grand_total_in_words: amountToSpanishWords(5355000, {
+          suffix: 'M/CTE',
+        }),
       },
     };
   }

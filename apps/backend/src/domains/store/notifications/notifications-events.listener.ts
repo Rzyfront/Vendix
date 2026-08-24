@@ -18,6 +18,11 @@ import {
 } from './interfaces/notification-events.interface';
 import { QueueEntryEvent } from '../customer-queue/interfaces/queue-events.interface';
 import { InvoiceDataRequestEvent } from '../invoicing/invoice-data-requests/interfaces/invoice-data-request-events.interface';
+import {
+  buildDianEmailSubject,
+  resolveDianDocumentTypeCode,
+} from '../invoicing/utils/dian-email-subject.util';
+import { tryResolveTenantFiscalIdentity } from '../../../common/helpers/fiscal-identity.helper';
 import { AppointmentQueueService } from '../reservations/appointment-queue/appointment-queue.service';
 
 @Injectable()
@@ -584,6 +589,91 @@ export class NotificationsEventsListener {
 
   // ===== INVOICE EMAIL EVENTS =====
 
+  /**
+   * Asunto del correo de entrega — Anexo Técnico FEV 1.9 §9.1 (p. 635-636).
+   *
+   * La DIAN fija el formato del asunto con el que el emisor entrega el
+   * documento electrónico al adquiriente. No es una etiqueta legible: es un
+   * contrato de cinco campos separados por «;» que el software de recepción del
+   * adquiriente parsea. El asunto artesanal que había aquí
+   * —«{razón social} - Factura {número}»— no cumplía ninguno de los cinco.
+   *
+   * Dos decisiones que el lector merece ver explícitas:
+   *
+   * 1. Solo se aplica al documento ELECTRÓNICO. `dian_status =
+   *    'not_applicable'` marca el recibo interno que nunca fue a la DIAN; §9.1
+   *    gobierna la entrega del documento electrónico, así que imponerle el
+   *    formato normativo sería inventar alcance. Ese caso conserva el asunto
+   *    legible.
+   * 2. Ante una identidad fiscal incompleta `buildDianEmailSubject` LANZA. Aquí
+   *    eso NO puede tumbar el envío: hoy el correo sale siempre, y dejar al
+   *    adquiriente sin su factura por una razón social ausente es una
+   *    regresión peor que un asunto no normativo. Se registra el campo que
+   *    falta y se cae al asunto legible — nunca a un asunto normativo a medias,
+   *    que es lo único que el receptor no puede detectar.
+   */
+  private buildInvoiceEmailSubject(
+    invoice: any,
+    fallback_store_name: string,
+  ): string {
+    const fallback = `${fallback_store_name} - Factura ${invoice.invoice_number}`;
+
+    if (invoice.dian_status === 'not_applicable') {
+      return fallback;
+    }
+
+    try {
+      const org = invoice.organization as any;
+      const store = invoice.store as any;
+
+      // Misma decisión de alcance que `InvoicePdfService.resolveIssuer`: bajo
+      // `fiscal_scope = 'STORE'` la identidad del emisor vive en los ajustes de
+      // la TIENDA. Leer `organizations.tax_id` a pelo —lo que hacía este
+      // listener para `store_nit`— hace que el asunto discrepe del XML firmado.
+      const scope: string = org?.fiscal_scope ?? 'STORE';
+      const scoped_settings =
+        scope === 'STORE'
+          ? store?.store_settings?.settings
+          : org?.organization_settings?.settings;
+      const owner = scope === 'STORE' ? store : org;
+
+      // El resolvedor permisivo, no una precedencia copiada: es el mismo que
+      // alimenta el PDF y el XML, así que los tres coinciden por construcción.
+      const { identity } = tryResolveTenantFiscalIdentity({
+        nit: org?.tax_id || store?.tax_id || '',
+        fiscal_data: ((scoped_settings as any)?.fiscal_data ?? null) as
+          | Record<string, unknown>
+          | null,
+        entity: org ? { legal_name: org.legal_name, name: org.name } : null,
+        organization: org
+          ? {
+              legal_name: org.legal_name,
+              name: org.name,
+              email: org.email,
+              phone: org.phone,
+              document_type: org.document_type,
+              person_type: org.person_type,
+            }
+          : null,
+        email: org?.email,
+      });
+
+      return buildDianEmailSubject({
+        issuer_nit: identity.nit,
+        issuer_legal_name: identity.legal_name,
+        document_number: invoice.invoice_number,
+        document_type_code: resolveDianDocumentTypeCode(invoice.invoice_type),
+        issuer_trade_name: owner?.name,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Invoice #${invoice.invoice_number}: DIAN subject unavailable, ` +
+          `falling back to the legible form — ${error?.message ?? error}`,
+      );
+      return fallback;
+    }
+  }
+
   @OnEvent('invoice.pdf.generated')
   async handleInvoicePdfGenerated(payload: {
     invoice_id: number;
@@ -611,6 +701,23 @@ export class NotificationsEventsListener {
               phone: true,
               email: true,
               addresses: { take: 1 },
+              // Fuentes de la identidad fiscal del EMISOR. Sin ellas el asunto
+              // normativo (Anexo 1.9 §9.1) tendría que leer
+              // `organizations.tax_id` a pelo y discreparía del XML firmado en
+              // toda organización con `fiscal_scope = 'STORE'`.
+              fiscal_scope: true,
+              document_type: true,
+              person_type: true,
+              organization_settings: { select: { settings: true } },
+            },
+          },
+          store: {
+            select: {
+              id: true,
+              name: true,
+              legal_name: true,
+              tax_id: true,
+              store_settings: { select: { settings: true } },
             },
           },
           invoice_items: true,
@@ -691,7 +798,10 @@ export class NotificationsEventsListener {
 
       const html = generateInvoiceEmailHtml(email_data);
       const text = generateInvoiceEmailText(email_data);
-      const subject = `${email_data.store_name} - Factura ${invoice.invoice_number}`;
+      const subject = this.buildInvoiceEmailSubject(
+        invoice,
+        email_data.store_name,
+      );
 
       // 6. Download PDF from S3 for attachment
       const attachments: EmailAttachment[] = [];

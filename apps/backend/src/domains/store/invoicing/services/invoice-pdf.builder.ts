@@ -3,6 +3,7 @@
 // así que tsc emite `pdfkit_1.default` sin el helper `__importDefault` y pdfkit
 // exporta la clase directamente. Ver `@common/pdf/pdfkit` para el detalle.
 import { PDFDocument } from '@common/pdf/pdfkit';
+import { amountToSpanishWords } from '@common/utils/amount-in-words.util';
 import { PrintFormat } from '../../settings/interfaces/store-settings.interface';
 
 export interface InvoicePdfData {
@@ -383,7 +384,10 @@ export class InvoicePdfBuilder {
         // --- Totals ---
         // The totals block paints a filled rectangle at absolute coordinates,
         // which PDFKit will not reflow, so it needs whole-block room.
-        this.ensureSpace(doc, L, 80);
+        // 80 pt bastaban antes del valor en letras; la frase ocupa una o dos
+        // líneas más y, si el bloque se parte, la caja gris del TOTAL queda en
+        // una página y su importe en letras en la siguiente.
+        this.ensureSpace(doc, L, 110);
         doc.moveDown(0.5);
         this.drawTotals(doc, L, data);
 
@@ -1126,6 +1130,35 @@ export class InvoicePdfBuilder {
     });
 
     doc.y = total_y + box_height + 2;
+
+    // VALOR EN LETRAS. Es la única cifra del documento que se escribe dos veces
+    // —en números y en palabras—, así que las dos salen del MISMO
+    // `data.total_amount` y por el mismo camino de truncado que el XML
+    // (`amountToSpanishWords` trunca a 2 decimales, Anexo 1.9 §11.2). Una
+    // segunda fuente aquí sería una discrepancia visible al adquiriente sobre un
+    // consecutivo ya quemado.
+    //
+    // Va a ancho completo y no en la columna de totales porque la frase de un
+    // importe de nueve cifras no cabe en media página sin partirse en cuatro
+    // líneas.
+    // La guarda no es paranoia: `amountToSpanishWords` LANZA ante un importe no
+    // finito, y este builder es el camino de `GET /:id/pdf`. Un documento sin la
+    // línea en letras es recuperable; un 500 al descargar la factura no.
+    if (Number.isFinite(data.total_amount)) {
+      doc
+        .font('Helvetica')
+        .fontSize(this.fs(L, 8))
+        .fillColor('#000000')
+        .text(
+          `Valor en letras: ${amountToSpanishWords(data.total_amount, {
+            suffix: 'M/CTE',
+          })}`,
+          L.margin,
+          doc.y + 2,
+          { width: L.content },
+        );
+      doc.moveDown(0.2);
+    }
   }
 
   private static drawPaymentInfo(

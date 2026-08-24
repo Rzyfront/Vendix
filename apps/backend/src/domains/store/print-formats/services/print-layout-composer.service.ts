@@ -284,6 +284,11 @@ export class PrintLayoutComposerService {
             </tr>` : ''}
           </table>
         </div>
+        ${totals.grand_total_in_words ? `
+        <div class="total-in-words">
+          <span class="total-in-words-label">Valor en letras:</span>
+          <span class="total-in-words-value">${this.compiler.escapeHtml(totals.grand_total_in_words)}</span>
+        </div>` : ''}
       </div>
     `;
   }
@@ -468,6 +473,25 @@ export class PrintLayoutComposerService {
     .total-label { text-align: left; }
     .total-val { text-align: right; font-weight: 500; }
     .grand-total { font-weight: bold; font-size: ${fontSize + 2}pt; color: ${primaryColor}; }
+    /*
+     * El valor en letras va a ancho completo y NO dentro de .totals-table
+     * (260px en hoja): la frase de un importe de nueve cifras se rompería en
+     * cuatro líneas dentro de esa columna. clear:both porque la tabla de
+     * totales flota a la derecha con margin-left:auto.
+     *
+     * Sin acentos graves en este comentario: vive DENTRO de un template
+     * literal, y una comilla invertida aquí cierra la plantilla — el error que
+     * tsc reporta entonces es «';' expected» en una línea de CSS intacta.
+     */
+    .total-in-words {
+      clear: both;
+      margin-top: 6px;
+      font-size: ${fontSize - 1}pt;
+      line-height: 1.35;
+      text-align: right;
+    }
+    .total-in-words-label { text-transform: uppercase; color: #6b7280; }
+    .total-in-words-value { font-weight: 600; }
     .section-cufe-box {
       background: #f3f4f6;
       padding: 6px;
