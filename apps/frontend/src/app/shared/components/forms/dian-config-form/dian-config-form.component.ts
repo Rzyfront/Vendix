@@ -16,6 +16,7 @@ import {
   FormGroup,
   ReactiveFormsModule,
   ValidationErrors,
+  ValidatorFn,
   Validators,
 } from '@angular/forms';
 
@@ -70,6 +71,11 @@ function hasAnyResolutionValue(raw: Record<string, unknown>): boolean {
   return RESOLUTION_REQUIRED_FIELDS.some((field) => isFilled(raw[field]));
 }
 
+/** True when EVERY resolution field carries a value — es decir, persistible. */
+function hasAllResolutionValues(raw: Record<string, unknown>): boolean {
+  return RESOLUTION_REQUIRED_FIELDS.every((field) => isFilled(raw[field]));
+}
+
 /**
  * The resolution block is optional as a whole but all-or-nothing once started:
  * a half-filled resolution cannot be persisted (the API requires number,
@@ -86,6 +92,49 @@ function resolutionCompletenessValidator(
     (field) => !isFilled(raw[field]),
   );
   return missing.length ? { resolutionIncomplete: missing } : null;
+}
+
+/**
+ * Validadores del `software_id` según la rama del wizard (QUI-657).
+ *
+ * En la rama «no tengo certificado» la DIAN todavía no emitió el identificador
+ * —lo tramita la plataforma con los documentos de identidad del tenant—, así que
+ * exigirlo deja al usuario atrapado en un paso que no puede completar por
+ * definición. Se cae el `required`, NO el formato: `dianUuidValidator` ya deja
+ * pasar el vacío y solo se pronuncia sobre lo que el usuario sí escribió, y un
+ * UUID mal copiado es peor que uno ausente (el ausente detiene el flujo aquí, el
+ * mal copiado llega a la DIAN y el documento nunca clasifica).
+ */
+function buildSoftwareIdValidators(
+  requireDianCredentials: boolean,
+): ValidatorFn[] {
+  return requireDianCredentials
+    ? [Validators.required, dianUuidValidator]
+    : [dianUuidValidator];
+}
+
+/**
+ * Validadores de grupo según la rama del wizard (QUI-657).
+ *
+ * `resolutionCompletenessValidator` es la única credencial DIAN de los tres: la
+ * resolución de numeración también la emite la DIAN, y en la rama sin
+ * certificado el tenant no la tiene. Los otros dos se quedan en AMBAS ramas
+ * porque validan la IDENTIDAD del tenant, no sus credenciales: el DV entra en el
+ * CUFE y un rango invertido no puede emitir nada, con o sin certificado.
+ *
+ * Con el validador fuera, «hay algo escrito en la resolución» deja de implicar
+ * «la resolución se puede guardar» — de ahí `hasCompleteResolutionInput()`.
+ */
+function buildGroupValidators(requireDianCredentials: boolean): ValidatorFn[] {
+  return [
+    ...(requireDianCredentials ? [resolutionCompletenessValidator] : []),
+    // El DV entra en el CUFE: un dígito equivocado hace que la DIAN recompute
+    // otro hash y rechace cada documento, con el consecutivo gastado. Es de
+    // grupo porque compara `nit` con `nit_dv`.
+    nitDvValidator,
+    // Un rango invertido produce una resolución que no puede emitir nada.
+    rangeOrderValidator('resolution_range_from', 'resolution_range_to'),
+  ];
 }
 
 export interface DianConfigValue {
@@ -323,68 +372,70 @@ interface DianConfigControls {
       </section>
 
       <!-- Certificado -->
-      <section class="space-y-3">
-        <h3 class="text-sm font-semibold text-text-primary">
-          Certificado digital
-        </h3>
+      @if (showCertificateSection()) {
+        <section class="space-y-3">
+          <h3 class="text-sm font-semibold text-text-primary">
+            Certificado digital
+          </h3>
 
-        @if (hasCertificate()) {
-          <div
-            class="flex items-start gap-3 p-3 rounded-lg border border-border"
-          >
-            <app-icon
-              [name]="certificateExpired() ? 'alert-triangle' : 'check-circle'"
-              [size]="18"
-              class="mt-0.5"
-              [class.text-warning]="certificateExpired()"
-              [class.text-primary]="!certificateExpired()"
-            ></app-icon>
-            <div class="text-sm">
-              <p class="font-medium text-text-primary">Certificado cargado</p>
-              @if (certificateExpiryDisplay()) {
-                @if (certificateExpired()) {
-                  <p class="text-warning">
-                    Vencido el {{ certificateExpiryDisplay() }}. Puedes
-                    continuar, pero renueva el certificado pronto.
-                  </p>
-                } @else {
-                  <p class="text-text-secondary">
-                    Vigente hasta {{ certificateExpiryDisplay() }}
-                  </p>
+          @if (hasCertificate()) {
+            <div
+              class="flex items-start gap-3 p-3 rounded-lg border border-border"
+            >
+              <app-icon
+                [name]="certificateExpired() ? 'alert-triangle' : 'check-circle'"
+                [size]="18"
+                class="mt-0.5"
+                [class.text-warning]="certificateExpired()"
+                [class.text-primary]="!certificateExpired()"
+              ></app-icon>
+              <div class="text-sm">
+                <p class="font-medium text-text-primary">Certificado cargado</p>
+                @if (certificateExpiryDisplay()) {
+                  @if (certificateExpired()) {
+                    <p class="text-warning">
+                      Vencido el {{ certificateExpiryDisplay() }}. Puedes
+                      continuar, pero renueva el certificado pronto.
+                    </p>
+                  } @else {
+                    <p class="text-text-secondary">
+                      Vigente hasta {{ certificateExpiryDisplay() }}
+                    </p>
+                  }
                 }
-              }
-              <p class="text-xs text-text-secondary mt-1">
-                No necesitas volver a subirlo. Sube un archivo solo si deseas
-                reemplazarlo.
-              </p>
+                <p class="text-xs text-text-secondary mt-1">
+                  No necesitas volver a subirlo. Sube un archivo solo si deseas
+                  reemplazarlo.
+                </p>
+              </div>
             </div>
-          </div>
-        }
+          }
 
-        @if (!hideCertificate()) {
-          <!--
-            Bloque de cert. Envuelto en @if para que la rama "no tengo cert"
-            del wizard (QUI-657) lo oculte. El FormControl certificate_password
-            sigue existiendo con el sentinel MASKED_SECRET; el backend solo
-            recibe el pin si el usuario lo tipeó de verdad.
-          -->
-          <app-file-upload-dropzone
-            accept=".p12,.pfx"
-            icon="upload-cloud"
-            [label]="hasCertificate() ? 'Haga clic para reemplazar el certificado' : 'Subir certificado .p12'"
-            [helperText]="selectedFileName() ? selectedFileName() : 'Obligatorio · Solo .p12 o .pfx con contraseña'"
-            (fileSelected)="onFileSelected($event)"
-            (fileRemoved)="removeFile()"
-          ></app-file-upload-dropzone>
-          <app-input
-            label="Contraseña del certificado"
-            type="password"
-            formControlName="certificate_password"
-            placeholder="Contraseña del archivo .p12"
-            helperText="Solo se pide cuando subes un archivo nuevo."
-          ></app-input>
-        }
-      </section>
+          @if (!hideCertificate()) {
+            <!--
+              Bloque de cert. Envuelto en @if para que la rama "no tengo cert"
+              del wizard (QUI-657) lo oculte. El FormControl certificate_password
+              sigue existiendo con el sentinel MASKED_SECRET; el backend solo
+              recibe el pin si el usuario lo tipeó de verdad.
+            -->
+            <app-file-upload-dropzone
+              accept=".p12,.pfx"
+              icon="upload-cloud"
+              [label]="hasCertificate() ? 'Haga clic para reemplazar el certificado' : 'Subir certificado .p12'"
+              [helperText]="selectedFileName() ? selectedFileName() : 'Obligatorio · Solo .p12 o .pfx con contraseña'"
+              (fileSelected)="onFileSelected($event)"
+              (fileRemoved)="removeFile()"
+            ></app-file-upload-dropzone>
+            <app-input
+              label="Contraseña del certificado"
+              type="password"
+              formControlName="certificate_password"
+              placeholder="Contraseña del archivo .p12"
+              helperText="Solo se pide cuando subes un archivo nuevo."
+            ></app-input>
+          }
+        </section>
+      }
     </form>
   `,
 })
@@ -410,6 +461,34 @@ export class DianConfigFormComponent {
    * están presentes.
    */
   readonly hideCertificate = input<boolean>(false);
+
+  /**
+   * Si el formulario puede exigir las credenciales que emite la DIAN.
+   *
+   * `false` es la rama de documentos de identidad (QUI-657): la plataforma
+   * tramita la habilitación por el tenant, así que en ese momento no existen ni
+   * el `software_id` ni la resolución de numeración. Exigirlos ahí es pedirle al
+   * usuario un dato que nadie le ha entregado todavía, y el paso se vuelve
+   * imposible de completar — ese es el bloqueo que este input levanta.
+   *
+   * NO afecta `name`, `nit`, `nit_dv` ni `environment`: esos son la identidad del
+   * tenant, la sabe él, y se exigen igual en las dos ramas.
+   */
+  readonly requireDianCredentials = input<boolean>(true);
+
+  /**
+   * La sección «Certificado digital» se pinta solo si tiene algo que decir.
+   *
+   * El `<section>` y su `<h3>` vivían FUERA del `@if (!hideCertificate())`, así
+   * que la rama sin certificado seguía anunciando un encabezado sobre el vacío —
+   * exactamente lo contrario de lo que el usuario acababa de declarar. Se
+   * conserva el caso «ya hay certificado cargado»: ahí el banner informa aunque
+   * el bloque de subida esté oculto, y perderlo sería esconder un dato que el
+   * tenant sí tiene.
+   */
+  readonly showCertificateSection = computed<boolean>(
+    () => !this.hideCertificate() || this.hasCertificate(),
+  );
 
   /**
    * Longitud de la clave técnica YA GUARDADA, o `null` si no hay ninguna.
@@ -480,10 +559,16 @@ export class DianConfigFormComponent {
         nonNullable: true,
         validators: [Validators.required],
       }),
+      // Los validadores arrancan en la rama exigente (el default del input) y el
+      // `effect` del constructor los re-aplica si el wizard dice lo contrario.
       software_id: new FormControl('', {
         nonNullable: true,
-        validators: [Validators.required, dianUuidValidator],
+        validators: buildSoftwareIdValidators(true),
       }),
+      // `software_pin` y `test_set_id` NO llevan `required` en ninguna rama, y
+      // sus validadores de formato ya devuelven `null` ante el vacío
+      // (`dianSoftwarePinValidator` / `dianUuidValidator`): un campo en blanco
+      // pasa, uno escrito se valida. No hay nada que relajar por rama.
       software_pin: new FormControl('', {
         nonNullable: true,
         validators: [dianSoftwarePinValidator],
@@ -503,15 +588,7 @@ export class DianConfigFormComponent {
       certificate_password: new FormControl('', { nonNullable: true }),
     },
     {
-      validators: [
-        resolutionCompletenessValidator,
-        // El DV entra en el CUFE: un dígito equivocado hace que la DIAN recompute
-        // otro hash y rechace cada documento, con el consecutivo gastado. Es de
-        // grupo porque compara `nit` con `nit_dv`.
-        nitDvValidator,
-        // Un rango invertido produce una resolución que no puede emitir nada.
-        rangeOrderValidator('resolution_range_from', 'resolution_range_to'),
-      ],
+      validators: buildGroupValidators(true),
     },
   );
 
@@ -522,6 +599,20 @@ export class DianConfigFormComponent {
    */
   hasResolutionInput(): boolean {
     return hasAnyResolutionValue(this.form.getRawValue());
+  }
+
+  /**
+   * True cuando TODOS los campos de la resolución están llenos (persistible).
+   *
+   * Distinto de `hasResolutionInput()`, al que le basta UNO. La diferencia solo
+   * importa cuando `requireDianCredentials()` es `false`: ahí el validador de
+   * grupo ya no exige completar el bloque, así que un formulario válido puede
+   * llevar media resolución escrita. Si el padre decidiera el POST con
+   * `hasResolutionInput()`, mandaría ese cuerpo incompleto y el backend lo
+   * rechazaría con un 400 que el usuario no puede relacionar con nada.
+   */
+  hasCompleteResolutionInput(): boolean {
+    return hasAllResolutionValues(this.form.getRawValue());
   }
 
   readonly nitTypeOptions: SelectorOption[] = [
@@ -577,6 +668,35 @@ export class DianConfigFormComponent {
   );
 
   constructor() {
+    /**
+     * Re-aplica los validadores cuando el wizard cambia de rama.
+     *
+     * VA PRIMERO a propósito: el `effect` de `initialValue` parcha y emite, y si
+     * corriera antes que este el padre recibiría un veredicto calculado con los
+     * validadores de la rama equivocada.
+     *
+     * `emitEvent: false` evita que `updateValueAndValidity` dispare
+     * `valueChanges`/`statusChanges` —serían dos emisiones por un solo cambio—,
+     * a cambio de espejar los errores a mano. Y la validez se vuelve a emitir
+     * explícitamente porque un `FormGroup` no notifica al grafo de señales: sin
+     * esa línea el padre conserva el veredicto viejo hasta que el usuario teclee
+     * algo, que es justo el botón «Continuar» que se queda muerto.
+     */
+    effect(() => {
+      const require = this.requireDianCredentials();
+
+      const softwareId = this.form.controls.software_id;
+      softwareId.setValidators(buildSoftwareIdValidators(require));
+      softwareId.updateValueAndValidity({ emitEvent: false });
+
+      this.form.setValidators(buildGroupValidators(require));
+      this.form.updateValueAndValidity({ emitEvent: false });
+
+      this.syncResolutionErrors();
+      this.syncGroupErrors();
+      this.emitValidity();
+    });
+
     effect(() => {
       const v = this.initialValue();
       if (v) {
@@ -695,10 +815,22 @@ export class DianConfigFormComponent {
     };
   }
 
-  private emitCurrent(): void {
+  /**
+   * Publica el veredicto de validez, y nada más.
+   *
+   * Separado de `emitCurrent` porque recalcular validadores cambia la VALIDEZ sin
+   * tocar el VALOR: emitir también `valueChange` ahí anunciaría un cambio que no
+   * ocurrió, y el padre tiene todo el derecho a tratarlo como edición del
+   * usuario.
+   */
+  private emitValidity(): void {
     const isValid = this.form.valid;
     this.valid.set(isValid);
     this.validityChange.emit(isValid);
+  }
+
+  private emitCurrent(): void {
+    this.emitValidity();
     this.valueChange.emit(this.toValue());
   }
 }
