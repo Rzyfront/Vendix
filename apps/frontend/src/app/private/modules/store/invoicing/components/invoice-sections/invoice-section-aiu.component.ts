@@ -170,6 +170,14 @@ const SECTION = 'AIU';
               <span>{{ departureFieldNote }}</span>
             </p>
           }
+          @if (frozen('taxable_basis')) {
+            <p
+              class="mt-1 flex items-start gap-1.5 text-[11px] text-text-secondary"
+            >
+              <app-icon name="lock" [size]="12" class="mt-0.5 shrink-0" />
+              <span>{{ frozenReason() }}</span>
+            </p>
+          }
         </div>
         <div>
           <app-textarea
@@ -435,6 +443,12 @@ const SECTION = 'AIU';
               <span>{{ departureFieldNote }}</span>
             </p>
           }
+          @if (frozen('minimum_base_percent') || frozen('enforce_minimum_base')) {
+            <p class="flex items-start gap-1.5 text-[11px] text-text-secondary">
+              <app-icon name="lock" [size]="12" class="mt-0.5 shrink-0" />
+              <span>{{ frozenReason() }}</span>
+            </p>
+          }
         </div>
       </div>
 
@@ -630,6 +644,26 @@ export class InvoiceSectionAiuComponent {
   /** Campos en los que este documento se apartó del perfil que lo precargó. */
   readonly departures = input<readonly AiuDepartureField[]>([]);
 
+  /**
+   * Campos que la pantalla que aloja la sección NO PUEDE PERSISTIR hoy.
+   *
+   * No es lo mismo que `context` y por eso no se deriva de él: `context` dice
+   * en qué pantalla estamos, y esto dice qué puede guardar el endpoint de esa
+   * pantalla. Son dos hechos distintos y el segundo cambia solo cuando el
+   * backend cambia.
+   *
+   * Los controles se pintan igual —la estructura es la misma en las dos
+   * pantallas— pero se DESHABILITAN, porque un control que acepta un valor que
+   * el servidor va a ignorar es la peor variante del error de este módulo:
+   * la pantalla instruye sobre una base gravable y el documento se emite con
+   * otra, la DIAN acepta el XML porque cuadra consigo mismo, y el faltante sólo
+   * aparece en una fiscalización.
+   */
+  readonly frozenFields = input<readonly AiuDepartureField[]>([]);
+
+  /** Por qué están congelados. Se pinta junto a ellos; obligatorio si hay. */
+  readonly frozenReason = input<string>('');
+
   readonly components = AIU_COMPONENTS;
   // Copias mutables de las listas del módulo de lógica: `app-selector` declara
   // `options` como `SelectorOption[]`, y un `readonly` no es asignable a él
@@ -666,6 +700,31 @@ export class InvoiceSectionAiuComponent {
         groupSub.unsubscribe();
         rulesSub.unsubscribe();
       });
+    });
+
+    // CONGELADO DE CONTROLES NO PERSISTIBLES. Se hace sobre el control y no con
+    // un `[disabled]` en la plantilla: `app-selector`, `app-input` y
+    // `app-toggle` son CVAs, y en Reactive Forms mezclar `[disabled]` con un
+    // `formControl` deja el control habilitado en el modelo aunque se vea gris
+    // —la advertencia que Angular imprime como `ReactiveFormsModule`— así que el
+    // valor seguiría viajando.
+    effect(() => {
+      const frozen = new Set(this.frozenFields());
+      const pairs: ReadonlyArray<readonly [AiuDepartureField, FormControl]> = [
+        ['taxable_basis', this.taxableBasisControl()],
+        ['contract_object', this.contractObjectControl()],
+        ['components_basis', this.componentsBasisControl()],
+        ['enforce_minimum_base', this.enforceMinimumBaseControl()],
+        ['minimum_base_percent', this.minimumBasePercentControl()],
+      ];
+      for (const [field, control] of pairs) {
+        const shouldFreeze = frozen.has(field);
+        if (shouldFreeze === control.disabled) continue;
+        // `emitEvent: false`: habilitar o deshabilitar no es un cambio de valor
+        // y emitirlo re-dispararía la reproyección de la matriz.
+        if (shouldFreeze) control.disable({ emitEvent: false });
+        else control.enable({ emitEvent: false });
+      }
     });
 
     // LA BASE Y LA MATRIZ SE ESCRIBEN JUNTAS. Suscripción y no `computed`: el
@@ -903,6 +962,15 @@ export class InvoiceSectionAiuComponent {
   departed(field: AiuDepartureField): boolean {
     return this.departures().includes(field);
   }
+
+  frozen(field: AiuDepartureField): boolean {
+    return this.frozenFields().includes(field);
+  }
+
+  /** ¿Hay algo congelado? Decide el aviso de alcance de la sección. */
+  readonly hasFrozenFields = computed<boolean>(
+    () => this.frozenFields().length > 0,
+  );
 
   private static readonly DEPARTURE_LABELS: Readonly<
     Record<AiuDepartureField, string>

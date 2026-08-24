@@ -140,6 +140,22 @@ import {
   InvoiceCustomItemModalComponent,
 } from '../../components/invoice-create/invoice-custom-item-modal.component';
 import { InvoiceOrderSelectComponent } from '../../components/invoice-create/invoice-order-select.component';
+/**
+ * SECCIÓN AIU COMPARTIDA con el editor de perfiles. Es el mismo componente y
+ * los mismos controles en las dos pantallas: lo que cambia es qué significa
+ * dejar uno vacío, no qué campos hay. Ver su docblock.
+ */
+import { InvoiceSectionAiuComponent } from '../../components/invoice-sections/index';
+import {
+  asAiuComponentsBasis,
+  asAiuTaxableBasis,
+  reprojectAiuTaxRules,
+} from '../../components/invoice-sections/index';
+import type {
+  AiuDepartureField,
+  AiuSectionPaths,
+  AiuTaxRuleValue,
+} from '../../components/invoice-sections/index';
 import { InvoiceTaxCatalogService } from '../../components/invoice-create/invoice-tax-catalog.service';
 import {
   InvoiceAiuSettings,
@@ -158,15 +174,18 @@ import {
   InvoiceProfileService,
 } from '../../services/invoice-profile.service';
 import type {
+  AiuBucket,
   AiuComponentLiteral,
   AiuComponentsBasis,
   AiuTaxableBasis,
   AiuVatRegimeLiteral,
   InvoiceProfileConfig,
   ProfileAiuConfig,
+  ProfileConfigIssue,
 } from '../../../../../../core/utils/invoice-profile-config.contract';
 import {
   AIU_COMPONENTS,
+  AIU_LEGAL_FLOOR_PERCENT_SCALED,
   AIU_TAXABLE_BUCKETS_BY_BASIS,
   formatPercentScaled,
   parsePercentScaled,
@@ -629,6 +648,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     InvoiceItemPickerModalComponent,
     InvoiceCustomItemModalComponent,
     InvoiceOrderSelectComponent,
+    InvoiceSectionAiuComponent,
   ],
   template: `
     <div class="w-full max-w-[1400px] mx-auto">
@@ -1395,8 +1415,8 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   <p
                     class="mt-2 text-[11px] text-[var(--color-text-secondary)]"
                   >
-                    {{ aiuRegimeOriginHint() }} Cuál aplica lo decide el objeto
-                    del contrato, no una preferencia del negocio.
+                    Cuál aplica lo decide el objeto del contrato, no una
+                    preferencia del negocio.
                   </p>
                 </div>
               } @else {
@@ -1405,7 +1425,41 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                 ></div>
               }
 
-              <!-- Objeto del contrato de ESTE documento (regla CAV03) -->
+              <!--
+                LA SECCIÓN AIU ES UN SOLO COMPONENTE, COMPARTIDO CON EL EDITOR
+                DE PERFILES.
+
+                Antes acá había 359 líneas de sólo lectura con UN control
+                editable —el objeto del contrato— y el resto remitiendo a
+                «Facturación → Perfiles»: corregir un reparto obligaba a salir
+                de la emisión, crear una versión N+1 del perfil —que rige para
+                TODAS las facturas siguientes— y volver.
+
+                Ahora los controles son los mismos que los del perfil y editarlos
+                NO toca el perfil ni crea versión (ADR-3). Los tres que este
+                documento no puede llevar —base gravable y piso— llegan
+                congelados con el motivo a la vista: ver «aiuFrozenFields».
+
+                «issues» sólo lleva el rechazo del backend traducido al nombre
+                canónico: el validador del contrato corre al GUARDAR UN PERFIL, y
+                una factura no se guarda como perfil.
+              -->
+              <vendix-invoice-section-aiu
+                class="mt-3"
+                context="invoice"
+                [form]="invoiceForm"
+                [paths]="aiuSectionPaths"
+                [taxRules]="aiuTaxesArray"
+                [issues]="aiuSectionIssues()"
+                [departures]="aiuDepartures()"
+                [frozenFields]="aiuFrozenFields"
+                [frozenReason]="aiuFrozenReason()"
+              ></vendix-invoice-section-aiu>
+
+              <!-- Nota CAV03 que viaja al XML. El campo que la alimenta —el
+                   objeto del contrato— lo pinta la sección de arriba; acá queda
+                   el ORIGEN del valor heredado y la cadena exacta con su
+                   longitud, que es lo que la DIAN mide. -->
               @if (aiuEffectiveNote(); as note) {
                 <div
                   class="mt-3 rounded-xl border border-border bg-[var(--color-surface)] px-4 py-3.5"
@@ -1437,22 +1491,20 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                     </span>
                   </div>
 
-                  <app-textarea
-                    class="mt-2.5 block"
-                    formControlName="aiu_contract_object"
-                    [control]="control('aiu_contract_object')"
-                    [error]="fieldError('aiu_contract_object')"
-                    [rows]="2"
-                    [placeholder]="
-                      note.source === 'store' || note.source === 'profile'
-                        ? 'Heredado: ' + note.object
-                        : 'Ej.: aseo y cafetería para la sede norte, contrato 2026-014'
-                    "
-                  ></app-textarea>
-
+                  <!--
+                    EL CONTROL NO SE REPITE ACÁ. Lo pinta la sección AIU de
+                    arriba, y atar un segundo «formControl» a la misma casilla
+                    dejaría dos cajas idénticas en la misma pantalla: se
+                    sincronizarían, pero el operador no sabría cuál manda y
+                    buscaría la diferencia. Acá queda lo que la sección no puede
+                    decir: de DÓNDE sale el valor cuando se hereda.
+                  -->
                   <p
-                    class="mt-1.5 text-[11px] leading-relaxed text-[var(--color-text-secondary)]"
+                    class="mt-2 text-[11px] leading-relaxed text-[var(--color-text-secondary)]"
                   >
+                    @if (note.source === 'store' || note.source === 'profile') {
+                      Heredado: «{{ note.object }}».
+                    }
                     Se guarda con la factura, así que el documento conserva el
                     contrato que describía aunque la tienda o el perfil cambien
                     el suyo después. {{ aiuInheritanceHint() }}
@@ -2737,6 +2789,62 @@ export class InvoiceCreatePageComponent implements OnInit {
     // varias obras a la vez y la nota CAV03 describe UNA de ellas.
     aiu_contract_object: [''],
 
+    /**
+     * EL AIU DE ESTE DOCUMENTO — no del perfil.
+     *
+     * Antes esta pantalla tenía UN control AIU editable —el objeto del
+     * contrato— y todo lo demás en sólo lectura, remitiendo a «Facturación →
+     * Perfiles». Corregir un reparto obligaba a salir de la emisión y crear una
+     * versión N+1 del perfil, que afecta a TODAS las facturas futuras, para
+     * arreglar una. Estos controles son la copia de trabajo del documento: se
+     * precargan del perfil y editarlos no lo toca (ADR-3).
+     *
+     * QUÉ HACE CADA UNO CON LO QUE SE EMITE:
+     * · los tres porcentajes y su unidad, las cinco cuentas y la matriz de
+     *   tributos gobiernan `applyAiuBase()`, que ESCRIBE LAS LÍNEAS del
+     *   documento —importe, cuenta e impuestos—, y las líneas sí viajan en el
+     *   payload. Editarlos cambia lo que se emite.
+     * · `taxable_basis`, `enforce_minimum_base` y `minimum_base_percent` NO
+     *   viajan: `CreateInvoiceDto` no los declara y el backend los toma de la
+     *   versión del perfil (`invoicing.service.ts`, `aiu_context`). Se pintan
+     *   —la estructura es la misma en las dos pantallas— pero llegan
+     *   CONGELADOS desde `aiuFrozenFields`, con el motivo a la vista. Dejarlos
+     *   editables aceptaría un valor que el servidor ignora, y ese es el fallo
+     *   mudo de este módulo: la pantalla instruye sobre una base y el documento
+     *   se emite con otra.
+     *
+     * El objeto del contrato y la cuenta del costo reembolsable NO se duplican
+     * acá: la sección los toma de `aiu_contract_object` y `default_account_code`
+     * por el mapa de rutas (`aiuSectionPaths`).
+     */
+    aiu: this.fb.group({
+      taxable_basis: ['aiu' as AiuTaxableBasis],
+      enforce_minimum_base: [true],
+      minimum_base_percent: [
+        formatPercentScaled(AIU_LEGAL_FLOOR_PERCENT_SCALED),
+      ],
+      components_basis: ['contract' as AiuComponentsBasis],
+      // VACÍOS a propósito, y no los 5/2/3 con que nace un perfil nuevo: un
+      // documento sin perfil no tiene reparto configurado, y sembrar unos
+      // porcentajes plausibles haría que «Aplicar a las líneas» escribiera
+      // importes que nadie acordó. Vacío suma 0,00 % y el plan lo dice.
+      administracion: [''],
+      imprevistos: [''],
+      utilidad: [''],
+      revenue_administracion: [''],
+      revenue_imprevistos: [''],
+      revenue_utilidad: [''],
+      vat_payable_account: [''],
+    }),
+
+    /**
+     * Matriz de tributos DEL DOCUMENTO. Mismas filas que la del perfil, con la
+     * del costo reembolsable incluida y nunca pintada: es la constancia de qué
+     * hizo el documento con ese costo, y `derivedCostTaxRule` la mantiene
+     * coherente con la base.
+     */
+    aiu_taxes: this.fb.array([] as FormGroup[]),
+
     // Adquiriente
     customer_id: [null],
     customer_name: ['', [Validators.required, Validators.minLength(2)]],
@@ -3836,6 +3944,253 @@ export class InvoiceCreatePageComponent implements OnInit {
     return items.length > 0 && items.every((item) => !item.aiu_component);
   });
 
+  // ── La sección AIU compartida ───────────────────────────────
+  //
+  // Las rutas: el objeto del contrato y la cuenta del costo reembolsable
+  // apuntan a controles que YA EXISTÍAN en la raíz del formulario
+  // (`aiu_contract_object` y `default_account_code`). No se duplican dentro del
+  // grupo `aiu` porque duplicar un control fiscal es lo que produce el fallo de
+  // «dos campos que se ven iguales y guardan distinto»: `buildPayload` lee
+  // `aiu_contract_object` y `default_account_code` se derrama sobre las líneas,
+  // así que el segundo par nunca viajaría y el operador no tendría forma de
+  // saber cuál de los dos leyó el servidor.
+  readonly aiuSectionPaths: AiuSectionPaths = {
+    taxable_basis: 'aiu.taxable_basis',
+    contract_object: 'aiu_contract_object',
+    enforce_minimum_base: 'aiu.enforce_minimum_base',
+    minimum_base_percent: 'aiu.minimum_base_percent',
+    components_basis: 'aiu.components_basis',
+    components: {
+      administracion: 'aiu.administracion',
+      imprevistos: 'aiu.imprevistos',
+      utilidad: 'aiu.utilidad',
+    },
+    revenue_account: {
+      administracion: 'aiu.revenue_administracion',
+      imprevistos: 'aiu.revenue_imprevistos',
+      utilidad: 'aiu.revenue_utilidad',
+      costo: 'default_account_code',
+    },
+    vat_payable_account: 'aiu.vat_payable_account',
+  };
+
+  /**
+   * LO QUE ESTE DOCUMENTO NO PUEDE LLEVAR — medido, no supuesto.
+   *
+   * `CreateInvoiceDto` declara del AIU exactamente dos cosas:
+   * `aiu_contract_object` y el `aiu_component` de cada línea. No declara
+   * `taxable_basis`, ni el piso, ni la matriz; y `main.ts` corre con
+   * `forbidNonWhitelisted: true`, así que mandar una clave que el DTO no declara
+   * devuelve 400 antes de tocar nada. El backend deriva `aiu_regime`,
+   * `aiu_minimum_percent` y `aiu_taxable_matrix` del `aiu_context` —la versión
+   * congelada del perfil, o los ajustes de la tienda— en `invoicing.service.ts`.
+   *
+   * Por eso estos tres se pintan y se congelan en vez de aceptar un valor: un
+   * control que acepta lo que el servidor ignora es el fallo mudo de este
+   * módulo. Los demás campos de la sección SÍ gobiernan lo que se emite, porque
+   * gobiernan las LÍNEAS (ver `applyAiuBase`).
+   */
+  readonly aiuFrozenFields: readonly AiuDepartureField[] = [
+    'taxable_basis',
+    'enforce_minimum_base',
+    'minimum_base_percent',
+  ];
+
+  readonly aiuFrozenReason = computed<string>(() => {
+    const profile = this.selectedProfile();
+    return profile
+      ? `Este documento no puede apartarse de la base gravable ni del piso: el servidor los toma de la versión ${profile.current_version} del perfil «${profile.name}». Cambiarlos exige una versión nueva del perfil, que rige para todas las facturas siguientes.`
+      : 'Este documento no puede apartarse de la base gravable ni del piso: el servidor los toma de los ajustes AIU de la tienda.';
+  });
+
+  /**
+   * Errores que la sección AIU tiene que pintar por campo.
+   *
+   * El validador del contrato de perfiles no corre acá —una factura no se
+   * guarda como perfil—, pero el RECHAZO DEL BACKEND sí llega por campo, y el
+   * del objeto del contrato se pintaba en el textarea que la sección ahora
+   * aloja. Sin este puente, un 422 sobre `aiu_contract_object` dejaría de
+   * verse: se traduce al nombre canónico que la sección conoce.
+   */
+  readonly aiuSectionIssues = computed<readonly ProfileConfigIssue[]>(() => {
+    const message = this.fieldError('aiu_contract_object');
+    return message
+      ? [
+          {
+            field: 'aiu.contract_object',
+            code: 'INVOICING_AIU_CONTRACT_OBJECT',
+            message,
+          },
+        ]
+      : [];
+  });
+
+  /**
+   * ¿La sección AIU ya se sembró del perfil vigente?
+   *
+   * Sin esta marca, entre elegir un perfil y recibir su configuración el grupo
+   * `aiu` sigue en blanco y la comparación con el perfil delataría un
+   * «apartado» que nadie hizo — un banner de advertencia que aparece y
+   * desaparece solo es lo que entrena a ignorar los banners.
+   */
+  private readonly aiuSeeded = signal(false);
+
+  /** El grupo `aiu` del documento, como valor plano y reactivo. */
+  private readonly aiuDraft = computed<Record<string, unknown>>(
+    () => (this.rawValue()['aiu'] ?? {}) as Record<string, unknown>,
+  );
+
+  /** La matriz del documento, como filas planas para la lógica compartida. */
+  private readonly aiuDraftRules = computed<AiuTaxRuleValue[]>(() =>
+    ((this.rawValue()['aiu_taxes'] ?? []) as Array<Record<string, unknown>>).map(
+      (row) => ({
+        bucket: String(row['bucket'] ?? '') as AiuBucket,
+        taxable: Boolean(row['taxable']),
+        tax_code: String(row['tax_code'] ?? ''),
+        rate: String(row['rate'] ?? '0.00'),
+      }),
+    ),
+  );
+
+  /**
+   * En qué se apartó este documento del perfil que lo precargó.
+   *
+   * ADR-3 lo exige en pantalla: sin esto el operador cree que emitió con la
+   * configuración configurada. Se compara EN CENTÉSIMAS y no como cadena —
+   * `'19'` y `'19.00'` son el mismo porcentaje y señalarlos como diferencia
+   * entrenaría a ignorar el aviso.
+   *
+   * El objeto del contrato vacío NO es apartarse: vacío significa «hereda», y
+   * es su comportamiento documentado.
+   */
+  readonly aiuDepartures = computed<readonly AiuDepartureField[]>(() => {
+    if (!this.isAiu()) return [];
+    const config = this.profileConfig();
+    const profileAiu = config?.aiu ?? null;
+    if (!config || !profileAiu) return [];
+
+    if (!this.aiuSeeded()) return [];
+
+    const raw = this.rawValue();
+    const draft = this.aiuDraft();
+    const out: AiuDepartureField[] = [];
+
+    const object = String(raw['aiu_contract_object'] ?? '').trim();
+    if (
+      object.length > 0 &&
+      object !== String(profileAiu.contract_object ?? '').trim()
+    ) {
+      out.push('contract_object');
+    }
+
+    if (
+      asAiuComponentsBasis(draft['components_basis']) !==
+      resolveAiuComponentsBasis(profileAiu)
+    ) {
+      out.push('components_basis');
+    }
+
+    for (const component of AIU_COMPONENTS) {
+      if (
+        parsePercentScaled(String(draft[component] ?? '').trim()) !==
+        parsePercentScaled(profileAiu.components[component])
+      ) {
+        out.push('components');
+        break;
+      }
+    }
+
+    const accounts = config.accounting.revenue_account_by_bucket ?? {};
+    const same = (left: unknown, right: unknown): boolean =>
+      String(left ?? '').trim() === String(right ?? '').trim();
+    if (
+      !same(draft['revenue_administracion'], accounts.administracion) ||
+      !same(draft['revenue_imprevistos'], accounts.imprevistos) ||
+      !same(draft['revenue_utilidad'], accounts.utilidad) ||
+      !same(raw['default_account_code'], accounts.costo) ||
+      !same(draft['vat_payable_account'], config.accounting.vat_payable_account)
+    ) {
+      out.push('accounts');
+    }
+
+    const profileRules = config.taxes?.rules ?? [];
+    const draftRules = this.aiuDraftRules();
+    const key = (rule: AiuTaxRuleValue): string =>
+      rule.bucket +
+      '|' +
+      String(rule.taxable) +
+      '|' +
+      rule.tax_code +
+      '|' +
+      String(parsePercentScaled(rule.rate) ?? 0);
+    const profileKeys = profileRules.map(key).sort().join(';');
+    const draftKeys = draftRules.map(key).sort().join(';');
+    if (profileKeys !== draftKeys) out.push('taxes');
+
+    return out;
+  });
+
+  /**
+   * Siembra la sección AIU del documento con lo que trae el perfil.
+   *
+   * Escribe con `emitEvent` por omisión: en Zoneless la sección se redibuja por
+   * `valueChanges`, y un `emitEvent: false` dejaría los porcentajes sembrados en
+   * el modelo y en blanco en pantalla. Y NO marca nada como `dirty`: un control
+   * que nace sucio haría que la siguiente precarga lo respetara como si el
+   * operador lo hubiera escrito.
+   */
+  private seedAiuFromProfile(
+    config: InvoiceProfileConfig,
+    forced: boolean,
+  ): void {
+    const aiu = config.aiu;
+    if (!aiu) return;
+    const group = this.aiuGroup;
+
+    const put = (name: string, value: unknown): void => {
+      const control = group.get(name);
+      if (!control) return;
+      // Lo escrito a mano manda, salvo aplicación completa CONFIRMADA: el
+      // usuario acabó de leer en el modal que se reemplaza y dijo que sí.
+      if (control.dirty && !forced) return;
+      control.setValue(value ?? '');
+    };
+
+    put('components_basis', resolveAiuComponentsBasis(aiu));
+    for (const component of AIU_COMPONENTS) {
+      put(component, aiu.components?.[component] ?? '');
+    }
+
+    const accounts = config.accounting.revenue_account_by_bucket ?? {};
+    put('revenue_administracion', accounts.administracion ?? '');
+    put('revenue_imprevistos', accounts.imprevistos ?? '');
+    put('revenue_utilidad', accounts.utilidad ?? '');
+    put('vat_payable_account', config.accounting.vat_payable_account ?? '');
+    this.aiuSeeded.set(true);
+
+    // LA MATRIZ. Sólo si está vacía —o si la aplicación completa lo autoriza—:
+    // una fila editada a mano es una decisión sobre este documento, y
+    // reemplazarla cambiaría un impuesto sin que nadie lo pidiera.
+    if (this.aiuTaxesArray.length > 0 && !forced) return;
+    this.aiuTaxesArray.clear();
+    // Se reproyecta sobre la base del DOCUMENTO al sembrarla: un perfil viejo
+    // puede traer una matriz que su propia base ya no admite, y sembrarla tal
+    // cual pintaría una contradicción que el operador no causó.
+    const basis = asAiuTaxableBasis(
+      this.aiuGroup.get('taxable_basis')?.value,
+    );
+    for (const rule of reprojectAiuTaxRules(config.taxes?.rules ?? [], basis)) {
+      this.aiuTaxesArray.push(
+        this.fb.group({
+          bucket: [rule.bucket],
+          taxable: [rule.taxable],
+          tax_code: [rule.tax_code],
+          rate: [rule.rate],
+        }),
+      );
+    }
+  }
+
   /**
    * Las CUATRO configuraciones AIU del perfil, ya convertidas en las líneas que
    * van a escribirse — o la razón por la que hoy no se pueden aplicar.
@@ -3890,14 +4245,32 @@ export class InvoiceCreatePageComponent implements OnInit {
     const aiu = config?.aiu ?? null;
     if (!config || !aiu) return null;
 
-    const basis = resolveAiuComponentsBasis(aiu);
+    // LOS VALORES SON LOS DEL DOCUMENTO, no los del snapshot del perfil.
+    //
+    // Es lo que convierte la sección AIU de esta pantalla en algo más que un
+    // formulario decorativo: los porcentajes, la unidad, las cuentas y la
+    // matriz que el operador tiene delante son los que escriben las líneas, y
+    // las líneas son lo que viaja al backend. Leer el perfil acá haría que
+    // corregir un reparto en la factura no cambiara ni un peso de lo emitido —
+    // exactamente el fallo que la sección editable existe para cerrar.
+    //
+    // El perfil sigue siendo requisito para que el plan EXISTA: es lo único que
+    // pudo sembrar un reparto acordado. Sin perfil los tres porcentajes nacen
+    // vacíos y el plan lo dice, en vez de inventar un 5/2/3.
+    const draft = this.aiuDraft();
+    const basis = asAiuComponentsBasis(draft['components_basis']);
     const scaled = new Map<AiuComponentLiteral, number>();
     for (const component of AIU_COMPONENTS) {
-      const value = parsePercentScaled(aiu.components?.[component]);
+      // Vacío NO es inválido: es «esta porción no lleva nada», y se cuenta como
+      // cero. `parsePercentScaled` devuelve `null` para los dos casos, y
+      // confundirlos diría «los porcentajes no son válidos» en un documento sin
+      // reparto configurado, que es el estado normal antes de elegir perfil.
+      const text = String(draft[component] ?? '').trim();
+      const value = text === '' ? 0 : parsePercentScaled(text);
       if (value === null) {
         return this.blockedAiuPlan(
           basis,
-          'Los porcentajes del perfil no son válidos. Corrígelos en el perfil: Base AIU.',
+          'Los porcentajes de la sección AIU no son válidos: se escriben con hasta dos decimales y punto (por ejemplo 5.00). Corrígelos arriba, en Base AIU.',
         );
       }
       scaled.set(component, value);
@@ -3907,15 +4280,15 @@ export class InvoiceCreatePageComponent implements OnInit {
     if (basis !== 'contract') {
       return this.blockedAiuPlan(
         basis,
-        'Los porcentajes de este perfil están medidos sobre el AIU, no sobre el valor del contrato, así que no determinan cuánto AIU lleva este documento. Cambia la unidad en el perfil (Base AIU) o captura las líneas de administración, imprevistos y utilidad a mano.',
+        'Los porcentajes están medidos sobre el AIU, no sobre el valor del contrato, así que no determinan cuánto AIU lleva este documento. Cambia la unidad arriba, en Base AIU, o captura las líneas de administración, imprevistos y utilidad a mano.',
       );
     }
     if (sum <= 0 || sum >= 10000) {
       return this.blockedAiuPlan(
         basis,
         sum <= 0
-          ? 'El perfil no configura ningún porcentaje de AIU.'
-          : 'El perfil configura un AIU del 100 % del contrato: no queda costo reembolsable del que deducirlo, así que las líneas hay que capturarlas a mano.',
+          ? 'No hay ningún porcentaje de AIU configurado. Escríbelos arriba, en Base AIU.'
+          : 'El reparto declara un AIU del 100 % del contrato: no queda costo reembolsable del que deducirlo, así que las líneas hay que capturarlas a mano.',
       );
     }
 
@@ -3945,7 +4318,13 @@ export class InvoiceCreatePageComponent implements OnInit {
     // división, para que el contrato sea EXACTAMENTE costo + AIU y no quede un
     // centavo suelto entre la cabecera y las líneas — que es un rechazo FAU06.
     const aiuCents = Math.round((costCents * sum) / (10000 - sum));
-    const accounts = config.accounting.revenue_account_by_bucket ?? {};
+    // Las cuentas y los tributos, también del DOCUMENTO. Ver arriba.
+    const accounts: Readonly<Record<AiuComponentLiteral, string>> = {
+      administracion: String(draft['revenue_administracion'] ?? ''),
+      imprevistos: String(draft['revenue_imprevistos'] ?? ''),
+      utilidad: String(draft['revenue_utilidad'] ?? ''),
+    };
+    const draftRules = this.aiuDraftRules();
 
     let assigned = 0;
     const parts = AIU_COMPONENTS.map((bucket) => {
@@ -3958,7 +4337,7 @@ export class InvoiceCreatePageComponent implements OnInit {
         percentLabel: formatPercentScaled(percent),
         amount: cents / 100,
         account: accounts[bucket] ?? '',
-        taxes: this.profileTaxesForBucket(config, bucket),
+        taxes: this.aiuTaxesForBucket(draftRules, bucket),
       };
     });
 
@@ -4039,13 +4418,13 @@ export class InvoiceCreatePageComponent implements OnInit {
    * Sólo tributos de DOCUMENTO. Una regla de retención (`06`/`07`/`05`) no es
    * un impuesto de línea: no suma al total y se captura en su propia sección.
    */
-  private profileTaxesForBucket(
-    config: InvoiceProfileConfig,
+  private aiuTaxesForBucket(
+    rules: readonly AiuTaxRuleValue[],
     bucket: AiuComponentLiteral,
   ): TaxSelection[] {
     const catalog = this.availableTaxes();
     const selections: TaxSelection[] = [];
-    for (const rule of config.taxes?.rules ?? []) {
+    for (const rule of rules) {
       if (rule.bucket !== bucket || !rule.taxable) continue;
       const taxType = AIU_DOCUMENT_TAX_TYPE_BY_CODE[rule.tax_code];
       if (!taxType) continue;
@@ -4324,20 +4703,6 @@ export class InvoiceCreatePageComponent implements OnInit {
   readonly aiuNoteBlocked = computed<boolean>(() => {
     const note = this.aiuEffectiveNote();
     return !!note && !note.valid;
-  });
-
-  /**
-   * Dónde se cambia el RÉGIMEN que se está aplicando.
-   *
-   * Con perfil, Ajustes → Facturación → AIU no gobierna este documento: el
-   * régimen sale de la versión del perfil. Mandar ahí al usuario le haría cambiar
-   * un valor que no afecta a la factura que tiene en pantalla, y creer que sí.
-   */
-  readonly aiuRegimeOriginHint = computed<string>(() => {
-    const profile = this.selectedProfile();
-    return profile
-      ? `El régimen viene del perfil «${profile.name}» (versión ${profile.current_version}) y se edita en Facturación → Perfiles.`
-      : 'El régimen se elige en Ajustes → Facturación → AIU.';
   });
 
   /** Insignia del origen del objeto del contrato que va a viajar en la nota. */
@@ -4673,6 +5038,29 @@ export class InvoiceCreatePageComponent implements OnInit {
     this.currencyService.loadCurrency();
     this.destroyRef.onDestroy(() => this.backendErrorSubs.unsubscribe());
 
+    // LA BASE GRAVABLE Y EL PISO SE SIEMBRAN DE LO QUE MANDA, y llegan
+    // congelados (ver `aiuFrozenFields`). Sin esto los controles mostrarían la
+    // base más amplia por omisión sobre una tienda del Decreto 1372/1992, que
+    // grava sólo la utilidad: la pantalla instruiría declarar de más y el
+    // operador seguiría la instrucción.
+    //
+    // Se escribe con `emitEvent` por omisión: en Zoneless la sección se
+    // redibuja por `valueChanges`, y silenciarlo dejaría el valor sembrado en el
+    // modelo y la base anterior en pantalla. No hay ciclo posible porque
+    // `effectiveAiu()` no lee el formulario.
+    effect(() => {
+      const inherited = this.effectiveAiu();
+      if (!inherited) return;
+      const percent = Number(inherited.minimum_base_percent);
+      this.aiuGroup.patchValue({
+        taxable_basis: inherited.taxable_basis,
+        enforce_minimum_base: inherited.enforce_minimum_base === true,
+        minimum_base_percent: Number.isFinite(percent)
+          ? formatPercentScaled(Math.round(percent * 100))
+          : formatPercentScaled(AIU_LEGAL_FLOOR_PERCENT_SCALED),
+      });
+    });
+
     // EL MODAL ESPERA EL DESENLACE. Sin esto, "cerrar" significaba únicamente
     // "se despachó la acción", que es cierto tanto cuando la factura se creó
     // como cuando el backend la rechazó.
@@ -4721,6 +5109,14 @@ export class InvoiceCreatePageComponent implements OnInit {
 
   get withholdingsArray(): FormArray {
     return this.invoiceForm.get('withholdings') as FormArray;
+  }
+
+  get aiuGroup(): FormGroup {
+    return this.invoiceForm.get('aiu') as FormGroup;
+  }
+
+  get aiuTaxesArray(): FormArray {
+    return this.invoiceForm.get('aiu_taxes') as FormArray;
   }
 
   // ── Ciclo de vida de la página ──────────────────────────────
@@ -4887,6 +5283,10 @@ export class InvoiceCreatePageComponent implements OnInit {
    */
   private loadProfileConfig(id: number): void {
     const request = ++this.profileConfigRequest;
+    // La siembra del perfil ANTERIOR deja de valer en cuanto se cambia de
+    // perfil: sin esto, la sección AIU compararía lo sembrado del perfil viejo
+    // contra el nuevo y anunciaría un apartado que el operador no hizo.
+    this.aiuSeeded.set(false);
 
     if (id === PROFILE_NONE) {
       this.profileAiu.set(null);
@@ -5033,6 +5433,7 @@ export class InvoiceCreatePageComponent implements OnInit {
     );
 
     this.prefilledFields.set(filled);
+    this.seedAiuFromProfile(config, forced);
     this.seedWithholdings(config, forced);
     this.seedModelLines(config, forced);
   }
@@ -6786,6 +7187,12 @@ export class InvoiceCreatePageComponent implements OnInit {
   private resetForm(): void {
     this.itemsArray.clear();
     this.withholdingsArray.clear();
+    // LA MATRIZ AIU TAMBIÉN. Un `reset()` no vacía un `FormArray`: le pone
+    // `null` a las filas que ya tiene, y la sección seguiría pintando filas
+    // huecas con la matriz del documento anterior. Se vuelve a sembrar cuando
+    // llegue la configuración del perfil.
+    this.aiuTaxesArray.clear();
+    this.aiuSeeded.set(false);
     this.invoiceForm.reset({
       invoice_type: 'sales_invoice',
       // A `null` a propósito: el efecto de preselección vuelve a elegir la
@@ -6804,6 +7211,24 @@ export class InvoiceCreatePageComponent implements OnInit {
       profile_id: PROFILE_NONE,
       notes: '',
       aiu_contract_object: '',
+      // El AIU del documento vuelve a «nada configurado»: los porcentajes
+      // vacíos, no un 5/2/3 plausible. La base y el piso los vuelve a sembrar
+      // el efecto que los hereda de lo que manda.
+      aiu: {
+        taxable_basis: 'aiu' as AiuTaxableBasis,
+        enforce_minimum_base: true,
+        minimum_base_percent: formatPercentScaled(
+          AIU_LEGAL_FLOOR_PERCENT_SCALED,
+        ),
+        components_basis: 'contract' as AiuComponentsBasis,
+        administracion: '',
+        imprevistos: '',
+        utilidad: '',
+        revenue_administracion: '',
+        revenue_imprevistos: '',
+        revenue_utilidad: '',
+        vat_payable_account: '',
+      },
       customer_id: null,
       customer_name: '',
       customer_document_type: DOCUMENT_TYPE_NIT_CODE,
