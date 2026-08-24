@@ -402,8 +402,30 @@ export class DianConfigService {
         is_default: should_be_default,
         configuration_type,
         operation_mode,
-        software_id: dto.software_id,
-        software_pin_encrypted: this.encryption.encrypt(dto.software_pin),
+        // QUI-657. Las dos credenciales las EMITE la DIAN al inscribir el
+        // software, y el tenant de la rama `without_cert` llega acá antes de
+        // poder inscribirlo. La columna es NOT NULL, así que la ausencia se
+        // guarda como cadena vacía — que es lo que los tres lectores del dato
+        // (`fiscal-production-readiness`, el checklist de plataforma y el
+        // directorio de tenants) ya leen como "sin configurar". Un centinela
+        // tipo 'PENDING' daría un falso verde en el primero de ellos.
+        software_id: dto.software_id ?? '',
+        // COMPROBADO, no supuesto: `encrypt('')` NO es reversible. Produce
+        // `v2:<salt>:<iv>:<tag>:` con el ciphertext vacío, y `parseEnvelope()`
+        // exige `/^[0-9a-f]+$/` en ese segmento — así que devuelve `null` y
+        // `decrypt()` lanza 'Invalid encrypted data format', mientras
+        // `isEncrypted()` reporta `false`. Sería guardar 100 caracteres de
+        // ruido que ningún lector puede abrir ni reconocer como cifrado.
+        // Además `encrypt()` lanza FISCAL_ENCRYPTION_KEY_MISSING en producción
+        // sin llave configurada: no vale la pena arriesgar una excepción para
+        // cifrar un secreto que no tenemos.
+        //
+        // Por eso el vacío se escribe DIRECTO. `''` es falsy, así que
+        // `needsReencryption`/`reencrypt` lo saltan y todo `Boolean(...)` del
+        // checklist lo cuenta como pendiente, que es exactamente la verdad.
+        software_pin_encrypted: dto.software_pin
+          ? this.encryption.encrypt(dto.software_pin)
+          : '',
         environment: dto.environment || 'test',
         enablement_status: 'not_started',
         // QUI-657. `without_cert` NO desbloquea nada: la fila queda esperando
@@ -531,10 +553,18 @@ export class DianConfigService {
     if (dto.operation_mode !== undefined) {
       update_data.operation_mode = dto.operation_mode;
     }
-    if (dto.software_id !== undefined)
-      update_data.software_id = dto.software_id;
-    // Skip if masked sentinel — frontend sends '****' to indicate "no change"
-    if (dto.software_pin !== undefined && dto.software_pin !== '****')
+    // Vacío es "todavía no lo tengo", no "bórralo". El formulario del wizard
+    // reenvía el objeto completo, así que un tenant en la rama `without_cert`
+    // que edita cualquier otro campo mandaría `software_id: ''` en cada PATCH:
+    // con la comparación contra `undefined` eso borraba un Software ID ya
+    // registrado en silencio. Se retira por el mismo camino por el que se puso
+    // (escribiendo el nuevo), nunca por omisión.
+    if (dto.software_id) update_data.software_id = dto.software_id;
+    // Dos valores que no son un PIN: '****' es el enmascarado que el front
+    // reenvía para decir "no lo cambies", y '' es "aún no lo emiten". Ninguno
+    // se cifra — ver la nota de `create()` sobre por qué `encrypt('')` no se
+    // puede revertir.
+    if (dto.software_pin && dto.software_pin !== '****')
       update_data.software_pin_encrypted = this.encryption.encrypt(
         dto.software_pin,
       );

@@ -7,6 +7,7 @@ import {
   MinLength,
   Matches,
   IsIn,
+  ValidateIf,
 } from 'class-validator';
 import {
   TrimString,
@@ -83,7 +84,20 @@ export class UpdateDianConfigDto {
   // Same contract as CreateDianConfigDto: these are DIAN-issued UUIDs pasted by
   // hand, so they are trimmed and shape-checked. Values such as "9547" reached
   // production before this guard existed.
+  //
+  // QUI-657 — la cadena vacía es un valor legítimo del formulario, no un intento
+  // de escribir basura. El wizard manda el campo SIEMPRE (devuelve el objeto
+  // completo), y el tenant de la rama `without_cert` todavía no tiene el dato,
+  // así que `@IsOptional()` no alcanzaba: `''` está definido y chocaba contra
+  // `@IsUUID`. Devolver 400 por un campo que el usuario aún no puede llenar
+  // convertía "no me deja avanzar" en "no me deja guardar".
+  //
+  // Vacío significa "sigo sin tenerlo", NUNCA "bórralo": el servicio ignora el
+  // valor al construir el update, de modo que un PATCH del formulario no puede
+  // desconfigurar un Software ID ya registrado. Con contenido, se valida como
+  // UUID exactamente igual que antes.
   @IsOptional()
+  @ValidateIf((o: UpdateDianConfigDto) => o.software_id !== '')
   @TrimString()
   @IsString()
   @IsUUID(undefined, {
@@ -91,7 +105,12 @@ export class UpdateDianConfigDto {
   })
   software_id?: string;
 
+  // Mismo criterio que `software_id`. Ojo con los dos valores que NO son un PIN:
+  // `'****'` es el enmascarado que el front reenvía para decir "no lo cambies",
+  // y `''` es "todavía no lo tengo". Ambos los descarta el servicio antes de
+  // cifrar; acá solo se deja pasar el vacío para que no explote el `@MinLength(1)`.
   @IsOptional()
+  @ValidateIf((o: UpdateDianConfigDto) => o.software_pin !== '')
   @TrimString()
   @IsString()
   @MinLength(1)
