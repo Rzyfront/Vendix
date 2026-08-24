@@ -382,6 +382,144 @@ describe('InvoiceProfileConfig — la matriz no puede contradecir el régimen', 
     ]);
   });
 
+  /**
+   * El MENSAJE, no sólo el código.
+   *
+   * `describeTaxableBasis` produce tres textos y ninguna aseveración los tocaba:
+   * se podían intercambiar «AIU completo» y «sólo utilidad» y la suite entera
+   * seguía verde. Ese mensaje es lo único que le dice a la persona qué corregir,
+   * así que intercambiarlo la manda a arreglar exactamente lo contrario —y en
+   * materia de IVA eso es declarar de menos, que es sanción e intereses.
+   *
+   * Se afirma la CITA LEGAL de cada base, que es la parte que no se puede
+   * reescribir por gusto: el art. 462-1 y el Decreto 1372/1992 no son
+   * intercambiables, y «Subtotal» no tiene ninguna porque no es un régimen.
+   */
+  it('el mensaje de la contradicción nombra la base declarada, no el régimen heredado', () => {
+    const decreto = validateInvoiceProfileConfig(
+      aiuConfig((c) => {
+        c.aiu!.regime = 'decreto_1372_1992';
+        c.aiu!.minimum_base_percent = '10.00';
+      }),
+      { operation_type: '09' },
+    ).filter((i) => i.code === 'TAX_MATRIX_CONTRADICTS_REGIME');
+    expect(decreto.length).toBeGreaterThan(0);
+    for (const issue of decreto) {
+      expect(issue.message).toContain('Decreto 1372/1992');
+      expect(issue.message).not.toContain('462-1');
+    }
+
+    const et = validateInvoiceProfileConfig(
+      aiuConfig((c) => {
+        c.taxes.rules = c.taxes.rules.map((r) =>
+          r.bucket === 'utilidad' ? { ...r, taxable: false, rate: '0.00' } : r,
+        );
+      }),
+      { operation_type: '09' },
+    ).filter((i) => i.code === 'TAX_MATRIX_CONTRADICTS_REGIME');
+    expect(et.length).toBeGreaterThan(0);
+    for (const issue of et) {
+      expect(issue.message).toContain('462-1');
+      expect(issue.message).not.toContain('1372');
+    }
+  });
+
+  /**
+   * Bajo «subtotal» el mensaje NO puede citar un régimen, porque esa base no
+   * colapsa a ninguno: declina el tratamiento AIU. Los mensajes que
+   * interpolaban `config.aiu.regime` imprimían acá el régimen heredado —o
+   * `undefined`— sobre un perfil cuya base era otra.
+   */
+  /**
+   * LA GUARDA QUE CARGA CON TODOS LOS PERFILES ORDINARIOS.
+   *
+   * `validateTaxSection` se llama sin condición, y lo único que impide que su
+   * cola AIU se aplique a un perfil de venta corriente es un `if (!config.aiu)
+   * return;` de una línea. Sin ella, `resolveAiuTaxableBasis(undefined)` NO
+   * lanza: devuelve `'aiu'` por su propio fallback conservador, la matriz
+   * esperada pasa a ser A+I+U, y el recorrido exige `TAX_RULE_MISSING` de tres
+   * porciones a un perfil que no tiene AIU en absoluto. Resultado: TODO perfil
+   * ordinario deja de poder guardarse, con un 422 que le pide reglas de
+   * impuesto de Administración a quien vende empanadas.
+   *
+   * Antes de este caso ningún test pasaba una config sin sección `aiu` por acá,
+   * así que borrar esa línea dejaba la suite entera en verde.
+   */
+  it('un perfil SIN sección aiu no recibe ningún problema de la matriz AIU', () => {
+    const config = aiuConfig((c) => {
+      delete (c as unknown as Record<string, unknown>).aiu;
+    });
+    const found = codes(config).filter((c) => c.startsWith('TAX_'));
+    expect(found).toEqual([]);
+  });
+
+  /**
+   * El SENTIDO del mensaje, no sólo su cita legal.
+   *
+   * `TAX_MATRIX_CONTRADICTS_REGIME` tiene dos redacciones y las elige un
+   * ternario sobre `shouldBeTaxable`. Invertirlo produce mensajes que dicen
+   * exactamente lo contrario de lo que hay que hacer —«no puede quedar sin
+   * gravar» sobre una casilla que hay que DESgravar— y ninguna aseveración lo
+   * notaba. Es el peor mutante posible en un mensaje de corrección: no confunde,
+   * dirige mal.
+   */
+  it('el mensaje dice DESgravar cuando sobra el impuesto y gravar cuando falta', () => {
+    // Bajo el decreto sólo la utilidad entra: gravar administración es de MÁS.
+    const sobra = validateInvoiceProfileConfig(
+      aiuConfig((c) => {
+        c.aiu!.regime = 'decreto_1372_1992';
+        c.aiu!.minimum_base_percent = '10.00';
+      }),
+      { operation_type: '09' },
+    ).find(
+      (i) =>
+        i.code === 'TAX_MATRIX_CONTRADICTS_REGIME' &&
+        i.field === 'taxes.rules.administracion.taxable',
+    );
+    expect(sobra).toBeDefined();
+    expect(sobra!.message).toContain('no incluye');
+    expect(sobra!.message).toContain('no puede quedar gravado');
+
+    // Bajo el art. 462-1 los tres entran: desgravar imprevistos es de MENOS.
+    const falta = validateInvoiceProfileConfig(
+      aiuConfig((c) => {
+        c.taxes.rules = c.taxes.rules.map((r) =>
+          r.bucket === 'imprevistos' ? { ...r, taxable: false, rate: '0.00' } : r,
+        );
+      }),
+      { operation_type: '09' },
+    ).find(
+      (i) =>
+        i.code === 'TAX_MATRIX_CONTRADICTS_REGIME' &&
+        i.field === 'taxes.rules.imprevistos.taxable',
+    );
+    expect(falta).toBeDefined();
+    expect(falta!.message).toContain('incluye');
+    expect(falta!.message).not.toContain('no incluye');
+    expect(falta!.message).toContain('no puede quedar sin gravar');
+  });
+
+  it('bajo subtotal el mensaje no cita ningún régimen legal', () => {
+    const issues = validateInvoiceProfileConfig(
+      aiuConfig((c) => {
+        c.aiu!.taxable_basis = 'subtotal';
+      }),
+      { operation_type: '09' },
+    ).filter(
+      (i) =>
+        i.code === 'TAX_MATRIX_CONTRADICTS_REGIME' ||
+        i.code === 'TAX_RULE_MISSING',
+    );
+    // El default deja el costo fuera de la base, y bajo «subtotal» entra: hay
+    // al menos una contradicción que reportar.
+    expect(issues.length).toBeGreaterThan(0);
+    for (const issue of issues) {
+      expect(issue.message).not.toContain('462-1');
+      expect(issue.message).not.toContain('1372');
+      expect(issue.message).not.toContain('undefined');
+    }
+  });
+
   it('falta la regla de un componente → se rechaza, no se asume', () => {
     const config = aiuConfig((c) => {
       c.taxes.rules = c.taxes.rules.filter((r) => r.bucket !== 'utilidad');
