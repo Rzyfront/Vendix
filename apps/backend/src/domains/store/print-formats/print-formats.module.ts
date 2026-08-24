@@ -29,7 +29,14 @@ import { KitchenTicketDataProvider } from './providers/kitchen-ticket.provider';
 
 @Module({
   imports: [PrismaModule],
-  controllers: [PrintFormatsController, PrintTemplatesLibraryController],
+  // ORDEN DELIBERADO. `PrintTemplatesLibraryController` sirve
+  // `store/print-formats/library`; `PrintFormatsController` sirve
+  // `store/print-formats/:formatType`. Nest resuelve por orden de registro, así
+  // que con el orden inverso la ruta parametrizada se tragaba «library» y
+  // `GET /store/print-formats/library` respondía 500 (`PrismaClientValidation`:
+  // «library» no es un valor de `print_format_type_enum`). La biblioteca del Hub
+  // quedaba inalcanzable y el selector de plantilla del perfil, siempre vacío.
+  controllers: [PrintTemplatesLibraryController, PrintFormatsController],
   providers: [
     ResponseService,
     QrService,

@@ -250,6 +250,7 @@
                         ]"
                         [disabled]="isActionDisabled(action, item)"
                         [title]="getActionTooltip(action, item)"
+                        [attr.aria-label]="getActionAccessibleName(action, item)"
                         (click)="executeAction(action, item, $event)"
                       >
                         <app-icon
@@ -266,6 +267,7 @@
                       (click)="toggleMenu(i, $event)"
                       type="button"
                       title="Acciones"
+                      [attr.aria-label]="getMenuTriggerAccessibleName(item)"
                     >
                       <app-icon name="more-horizontal" [size]="18"></app-icon>
                     </button>
@@ -287,6 +289,7 @@
                             : '',
                         ]"
                         [disabled]="isActionDisabled(action, item)"
+                        [attr.aria-label]="getActionAccessibleName(action, item)"
                         (click)="executeAction(action, item, $event)"
                       >
                         @if (getActionIcon(action, item)) {

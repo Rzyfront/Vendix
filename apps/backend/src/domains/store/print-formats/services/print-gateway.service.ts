@@ -34,6 +34,7 @@ export class PrintGatewayService {
   async resolveEffectiveConfig(
     storeId: number,
     formatType: print_format_type_enum,
+    templateIdOverride?: number | null,
   ): Promise<{
     configId?: number;
     definition: PrintFormatDefinition;
@@ -54,6 +55,47 @@ export class PrintGatewayService {
 
     let baseDefinition: PrintFormatDefinition | null = null;
     let templateFound = false;
+
+    // 0. Plantilla EXPLÍCITA (la que congeló el perfil de facturación).
+    //
+    // Va antes de la de la tienda a propósito: el documento se imprime con el
+    // diseño que su perfil eligió, no con el que la tienda tenga activo hoy.
+    //
+    // Dos decisiones que no son cosméticas:
+    //
+    // a) La consulta filtra por `format_type` Y por dueño. Sin el filtro de
+    //    dueño, un id de plantilla convertido en parámetro sería un IDOR entre
+    //    organizaciones; sin el de `format_type`, una factura se podría
+    //    renderizar con la plantilla de una comanda de cocina y el validador
+    //    fiscal la rechazaría por ausencias que nadie relacionaría con esto.
+    //
+    // b) Si la plantilla no aparece NO se lanza: se cae a la cadena normal y se
+    //    deja advertencia. Una plantilla borrada después de timbrar la factura
+    //    no puede volver imposible reimprimir un documento ya emitido.
+    if (templateIdOverride) {
+      const owned = await this.resolveOwnedTemplate(storeId, formatType, templateIdOverride);
+      if (owned) {
+        baseDefinition = owned as unknown as PrintFormatDefinition;
+        templateFound = true;
+      } else {
+        this.logger.warn(
+          `PrintGateway: la plantilla ${templateIdOverride} no existe para ${formatType} en la tienda ${storeId}; se usa la plantilla activa de la tienda.`,
+        );
+      }
+    }
+
+    if (baseDefinition) {
+      // Los `overrides` de la tienda se escribieron CONTRA OTRA base. Aplicarlos
+      // sobre esta plantilla mezclaría dos diseños y produciría un documento que
+      // nadie diseñó. Con plantilla explícita se imprime la plantilla, limpia.
+      return {
+        configId: storeConfig?.id,
+        definition: baseDefinition,
+        is_active: storeConfig?.is_active ?? true,
+        gateway_enabled: storeConfig?.gateway_enabled ?? false,
+        is_customized: true,
+      };
+    }
 
     if (storeConfig?.template?.definition) {
       baseDefinition = storeConfig.template.definition as unknown as PrintFormatDefinition;
@@ -102,7 +144,20 @@ export class PrintGatewayService {
     engine: 'html' | 'pdf' = 'html',
   ): Promise<RenderResult> {
     const start = Date.now();
-    const effective = await this.resolveEffectiveConfig(storeId, formatType);
+    // La plantilla NO llega del cliente: se lee del perfil que la factura
+    // congeló al emitirse. Que el cliente la pudiera elegir significaría que dos
+    // impresiones del MISMO documento fiscal pueden verse distintas, y una
+    // reimpresión debe ser idéntica a la primera.
+    const profileTemplateId = await this.resolveProfileTemplateId(
+      storeId,
+      formatType,
+      documentId,
+    );
+    const effective = await this.resolveEffectiveConfig(
+      storeId,
+      formatType,
+      profileTemplateId,
+    );
 
     if (!effective.is_active) {
       throw new VendixHttpException(
@@ -133,6 +188,76 @@ export class PrintGatewayService {
       is_roll: effective.definition.paper.is_roll,
       width_mm: effective.definition.paper.width_mm,
     };
+  }
+
+  /**
+   * Plantilla del Hub verificada contra el tipo de formato y el dueño.
+   *
+   * `print_templates` es un modelo de ORGANIZACIÓN y el cliente de esta clase
+   * es el de TIENDA, que no lo alcanza con su filtro: por eso el dueño se filtra
+   * a mano. La organización se deriva de la tienda —no del contexto de la
+   * petición— para que la regla siga valiendo si algún día esto se llama desde
+   * una cola, donde no hay contexto.
+   */
+  private async resolveOwnedTemplate(
+    storeId: number,
+    formatType: print_format_type_enum,
+    templateId: number,
+  ): Promise<unknown | null> {
+    const store = await this.prisma.stores.findFirst({
+      where: { id: storeId },
+      select: { organization_id: true },
+    });
+    if (!store?.organization_id) return null;
+
+    const template = await this.prisma.print_templates.findFirst({
+      where: {
+        id: templateId,
+        format_type: formatType,
+        OR: [{ is_system: true }, { organization_id: store.organization_id }],
+      },
+      select: { definition: true },
+    });
+
+    return template?.definition ?? null;
+  }
+
+  /**
+   * Plantilla que el perfil de facturación congeló para este documento.
+   *
+   * Se lee de `invoice_profile_versions`, no de `invoice_profiles`: la factura
+   * apunta a la VERSIÓN, que es inmutable. Leer el perfil vivo haría que editar
+   * un perfil cambiara el diseño de facturas ya timbradas.
+   *
+   * Sólo aplica a la factura electrónica. Las notas crédito no traen las
+   * columnas del perfil, así que no hay nada que resolver para ellas; devolver
+   * `null` las deja en la plantilla activa de la tienda, que es lo que hacían
+   * antes de este cambio.
+   */
+  private async resolveProfileTemplateId(
+    storeId: number,
+    formatType: print_format_type_enum,
+    documentId: number | string,
+  ): Promise<number | null> {
+    if (formatType !== 'fiscal_electronic_invoice') return null;
+
+    const id = Number(documentId);
+    if (!Number.isInteger(id) || id <= 0) return null;
+
+    const invoice = await this.prisma.invoices.findFirst({
+      where: { id, store_id: storeId },
+      select: { profile_snapshot: { select: { config: true } } },
+    });
+
+    const config = invoice?.profile_snapshot?.config as
+      | { format?: { template_id?: unknown } }
+      | null
+      | undefined;
+    const templateId = config?.format?.template_id;
+
+    return typeof templateId === 'number' && Number.isInteger(templateId) && templateId > 0
+      ? templateId
+      : null;
   }
 
   /**

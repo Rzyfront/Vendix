@@ -24,6 +24,13 @@ import { InputComponent } from '../../../../../../shared/components/input/input.
 import { SelectorComponent } from '../../../../../../shared/components/selector/selector.component';
 import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+/**
+ * Selector de cuenta PUC con búsqueda (5 por página). Se importa desde
+ * `products` en vez de duplicarse: es el único traductor código↔id contra el
+ * plan de cuentas, y una segunda copia de esa traducción es justo el fallo mudo
+ * que ese componente existe para evitar. Merece subir a `shared/components`.
+ */
+import { AccountCodeSelectComponent } from '../../../products/components/account-code-select.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { TaxOption, TaxSelection } from '../../../../../../shared/components/tax-selector';
 
@@ -92,6 +99,7 @@ export interface InvoiceCustomItemDraft {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     ReactiveFormsModule,
+    AccountCodeSelectComponent,
     ModalComponent,
     ButtonComponent,
     InputComponent,
@@ -234,20 +242,19 @@ export interface InvoiceCustomItemDraft {
             Clasificación contable
           </h3>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <app-input
+            <app-account-code-select
               label="Cuenta PUC (opcional)"
               formControlName="account_code"
-              [control]="control('account_code')"
-              [maxlength]="20"
-              placeholder="Ej. 413505"
+              placeholder="Mapeo automático de cuentas"
               helperText="Vacío ⇒ el mapeo automático de cuentas decide."
-            ></app-input>
+            ></app-account-code-select>
             @if (isAiu()) {
               <app-selector
                 label="Componente AIU"
                 formControlName="aiu_component"
                 [options]="aiuComponentOptions"
-                placeholder="Administración / Imprevistos / Utilidad"
+                placeholder="Sin componente — costo reembolsable"
+                helpText="Vacío = costo reembolsable del contrato: suma al valor del contrato y queda fuera de la base gravable."
               ></app-selector>
             }
           </div>
@@ -430,11 +437,17 @@ export class InvoiceCustomItemModalComponent {
         'El descuento iguala o supera el subtotal de la línea: quedaría en cero y la factura declararía un renglón que nadie cobra.',
       );
     }
-    if (this.isAiu() && !String(value.aiu_component ?? '').trim()) {
-      rows.push(
-        'La operación es AIU (09): toda línea tiene que declararse como administración, imprevistos o utilidad.',
-      );
-    }
+    // NO se exige componente AIU. Dejarlo vacío es la porción de COSTO
+    // reembolsable del contrato —la nómina del personal de aseo, los insumos— y
+    // es lo que distingue un contrato AIU de una venta ordinaria: entra al valor
+    // del contrato y no a la base gravable.
+    //
+    // Antes se exigía, y era una compuerta MÁS ESTRICTA QUE EL BACKEND:
+    // `resolveAiuContext` sólo rechaza lo inverso (un componente en un
+    // documento que no es AIU, `INVOICING_AIU_003`), y el propio contrato del
+    // perfil tiene una cubeta `costo` con su regla de impuesto no gravable. Con
+    // la exigencia puesta, la línea de costo no se podía capturar y por tanto un
+    // contrato AIU real no se podía facturar por esta pantalla.
     return rows;
   });
 

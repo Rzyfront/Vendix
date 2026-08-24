@@ -1,6 +1,7 @@
 import { createReducer, on } from '@ngrx/store';
 import { InvoicingState, initialInvoicingState } from '../invoicing.state';
 import * as InvoicingActions from '../actions/invoicing.actions';
+import * as ProfileActions from '../actions/invoice-profile.actions';
 
 export const invoicingReducer = createReducer(
   initialInvoicingState,
@@ -409,6 +410,303 @@ export const invoicingReducer = createReducer(
     dateTo: '',
   })),
 
+  // ═══════════════════════════════════════════════════════
+  // PERFILES DE FACTURACIÓN
+  // ═══════════════════════════════════════════════════════
+  // Cada mutación toca SU bandera. Reusar `profilesLoading` para guardar
+  // cambiaría la tabla por un esqueleto mientras se edita una fila, y el
+  // usuario perdería de vista justo lo que está tocando.
+
+  on(ProfileActions.loadProfiles, (state) => ({
+    ...state,
+    profilesLoading: true,
+    profilesError: null,
+  })),
+  on(ProfileActions.loadProfilesSuccess, (state, { profiles, meta }) => ({
+    ...state,
+    profiles,
+    profilesMeta: meta,
+    profilesLoading: false,
+    profilesError: null,
+  })),
+  on(ProfileActions.loadProfilesFailure, (state, { error }) => ({
+    ...state,
+    profilesLoading: false,
+    profilesError: error,
+    // La lista NO se vacía en el fallo: dejar los datos anteriores con el aviso
+    // de error es más honesto que un «no hay perfiles», que es una afirmación
+    // falsa sobre la tienda.
+  })),
+
+  // Filtros: cualquier cambio vuelve a la página 1, porque el resultado que
+  // había en la página 3 del filtro anterior no existe en el nuevo.
+  on(ProfileActions.setProfilesSearch, (state, { search }) => ({
+    ...state,
+    profilesSearch: search,
+    profilesPage: 1,
+  })),
+  on(ProfileActions.setProfilesStateFilter, (state, { state: value }) => ({
+    ...state,
+    profilesStateFilter: value,
+    profilesPage: 1,
+  })),
+  on(ProfileActions.setProfilesOperationFilter, (state, { operation_type }) => ({
+    ...state,
+    profilesOperationFilter: operation_type,
+    profilesPage: 1,
+  })),
+  on(ProfileActions.setProfilesPage, (state, { page }) => ({
+    ...state,
+    profilesPage: page,
+  })),
+
+  // ── Detalle ──────────────────────────────────────────────
+  on(ProfileActions.loadProfile, (state) => ({
+    ...state,
+    currentProfileLoading: true,
+    profilesError: null,
+  })),
+  on(ProfileActions.loadProfileSuccess, (state, { profile }) => ({
+    ...state,
+    currentProfile: profile,
+    currentProfileLoading: false,
+  })),
+  on(ProfileActions.loadProfileFailure, (state, { error }) => ({
+    ...state,
+    currentProfileLoading: false,
+    profilesError: error,
+    // `currentProfile` a null: si falló la carga, seguir mostrando el perfil
+    // anterior haría que el editor guardara cambios contra el id equivocado.
+    currentProfile: null,
+  })),
+  on(ProfileActions.clearCurrentProfile, (state) => ({
+    ...state,
+    currentProfile: null,
+    // Se limpia también el historial y la previsualización: pertenecen al
+    // perfil que se está cerrando, no al siguiente.
+    profileVersions: [],
+    profileVersionsProfileId: null,
+    profilePreview: null,
+    profilePreviewProfileId: null,
+    profilePreviewError: null,
+    profileVersionSnapshot: null,
+    profileVersionSnapshotProfileId: null,
+  })),
+
+  // ── Mutaciones ───────────────────────────────────────────
+  on(
+    ProfileActions.createProfile,
+    ProfileActions.cloneProfile,
+    ProfileActions.updateProfile,
+    ProfileActions.deleteProfile,
+    ProfileActions.activateProfile,
+    ProfileActions.deactivateProfile,
+    ProfileActions.setProfileDefault,
+    (state) => ({ ...state, profileSaving: true, profilesError: null }),
+  ),
+  on(
+    ProfileActions.createProfileSuccess,
+    ProfileActions.cloneProfileSuccess,
+    (state, { profile }) => ({
+      ...state,
+      profileSaving: false,
+      currentProfile: profile,
+      // El listado NO se parchea a mano con la fila nueva: el efecto recarga.
+      // Insertarla aquí la pondría fuera del orden y del filtro vigentes, y la
+      // fila aparecería donde no le toca hasta el siguiente refresco.
+    }),
+  ),
+  on(ProfileActions.updateProfileSuccess, (state, { profile }) => ({
+    ...state,
+    profileSaving: false,
+    currentProfile: profile,
+    // La fila del listado sí se reemplaza en sitio: ya está en la lista, en su
+    // posición, y sustituirla evita el parpadeo de una recarga completa.
+    profiles: state.profiles.map((row) =>
+      row.id === profile.id ? { ...row, ...stripDetail(profile) } : row,
+    ),
+    // Una edición con `config` creó una versión nueva, así que el historial
+    // cargado quedó viejo. Se invalida en vez de dejarlo mentir.
+    profileVersions: [],
+    profileVersionsProfileId: null,
+    // Y la previsualización también: describía la versión anterior.
+    profilePreview: null,
+    profilePreviewProfileId: null,
+  })),
+  on(ProfileActions.profileStateChangeSuccess, (state, { profile }) => ({
+    ...state,
+    profileSaving: false,
+    currentProfile:
+      state.currentProfile?.id === profile.id ? profile : state.currentProfile,
+    // `set-default` mueve la bandera de OTRA fila (la que era predeterminada),
+    // así que no basta con reemplazar la tocada: se apaga en todas las del
+    // mismo tipo de operación y se prende en la que responde el backend. Sin
+    // esto, la tabla mostraría dos perfiles predeterminados hasta recargar.
+    profiles: state.profiles.map((row) => {
+      if (row.id === profile.id) return { ...row, ...stripDetail(profile) };
+      if (profile.is_default && row.operation_type === profile.operation_type) {
+        return { ...row, is_default: false };
+      }
+      return row;
+    }),
+  })),
+  on(ProfileActions.deleteProfileSuccess, (state, { id }) => ({
+    ...state,
+    profileSaving: false,
+    profiles: state.profiles.filter((row) => row.id !== id),
+    currentProfile: state.currentProfile?.id === id ? null : state.currentProfile,
+    profilesMeta: state.profilesMeta
+      ? { ...state.profilesMeta, total: Math.max(0, state.profilesMeta.total - 1) }
+      : null,
+  })),
+  on(
+    ProfileActions.createProfileFailure,
+    ProfileActions.cloneProfileFailure,
+    ProfileActions.updateProfileFailure,
+    ProfileActions.deleteProfileFailure,
+    ProfileActions.profileStateChangeFailure,
+    // Se guarda el fallo COMPLETO, no sólo el texto: el 409 de borrado bloqueado
+    // trae `details.invoice_count`, y ese número es lo que convierte un aviso
+    // genérico en una decisión informada.
+    (state, { error, errorCode, details }) => ({
+      ...state,
+      profileSaving: false,
+      profilesError: error,
+      profileMutationFailure: {
+        message: error,
+        errorCode: errorCode ?? null,
+        details: details ?? null,
+      },
+    }),
+  ),
+  // Cualquier mutación que arranca limpia el fallo anterior: dejarlo pintado
+  // mientras se reintenta hace parecer que el reintento también falló.
+  on(
+    ProfileActions.createProfile,
+    ProfileActions.cloneProfile,
+    ProfileActions.updateProfile,
+    ProfileActions.deleteProfile,
+    ProfileActions.activateProfile,
+    ProfileActions.deactivateProfile,
+    ProfileActions.setProfileDefault,
+    (state) => ({ ...state, profileMutationFailure: null }),
+  ),
+
+  // ── Snapshot de una versión ──────────────────────────────
+  on(ProfileActions.loadProfileVersion, (state) => ({
+    ...state,
+    profileVersionSnapshotLoading: true,
+  })),
+  on(ProfileActions.loadProfileVersionSuccess, (state, { profileId, snapshot }) => ({
+    ...state,
+    profileVersionSnapshotLoading: false,
+    profileVersionSnapshot: snapshot,
+    profileVersionSnapshotProfileId: profileId,
+  })),
+  on(ProfileActions.loadProfileVersionFailure, (state, { error }) => ({
+    ...state,
+    profileVersionSnapshotLoading: false,
+    profilesError: error,
+  })),
+  on(ProfileActions.clearProfileVersionSnapshot, (state) => ({
+    ...state,
+    profileVersionSnapshot: null,
+    profileVersionSnapshotProfileId: null,
+  })),
+
+  // ── Historial ────────────────────────────────────────────
+  on(ProfileActions.loadProfileVersions, (state) => ({
+    ...state,
+    profileVersionsLoading: true,
+  })),
+  on(
+    ProfileActions.loadProfileVersionsSuccess,
+    (state, { profileId, versions }) => ({
+      ...state,
+      profileVersions: versions,
+      profileVersionsProfileId: profileId,
+      profileVersionsLoading: false,
+    }),
+  ),
+  on(ProfileActions.loadProfileVersionsFailure, (state, { error }) => ({
+    ...state,
+    profileVersionsLoading: false,
+    profileVersions: [],
+    profileVersionsProfileId: null,
+    profilesError: error,
+  })),
+
+  // ── Previsualización ─────────────────────────────────────
+  on(ProfileActions.previewProfile, (state) => ({
+    ...state,
+    profilePreviewLoading: true,
+    profilePreviewError: null,
+  })),
+  on(ProfileActions.previewProfileSuccess, (state, { profileId, result }) => ({
+    ...state,
+    profilePreview: result,
+    profilePreviewProfileId: profileId,
+    profilePreviewLoading: false,
+    profilePreviewError: null,
+  })),
+  on(ProfileActions.previewProfileFailure, (state, { error, errorCode }) => ({
+    ...state,
+    profilePreviewLoading: false,
+    // El XML anterior se descarta: mostrarlo junto al error haría creer que ese
+    // es el documento que el perfil produce ahora, y es el de antes del cambio.
+    profilePreview: null,
+    profilePreviewProfileId: null,
+    profilePreviewError: { code: errorCode ?? null, message: error },
+  })),
+  on(ProfileActions.clearProfilePreview, (state) => ({
+    ...state,
+    profilePreview: null,
+    profilePreviewProfileId: null,
+    profilePreviewError: null,
+  })),
+
+  // ── Plantillas DIAN ─────────────────────────────────────
+  on(ProfileActions.loadProfileTemplates, (state) => ({
+    ...state,
+    profileTemplatesLoading: true,
+  })),
+  on(ProfileActions.loadProfileTemplatesSuccess, (state, { templates }) => ({
+    ...state,
+    profileTemplates: templates,
+    profileTemplatesLoading: false,
+    // `loaded` se marca aquí y NUNCA se limpia en un fallo: la bandera dice «ya
+    // se preguntó», no «hay plantillas». Limpiarla al fallar convertiría el
+    // estado vacío en un reintento por render.
+    profileTemplatesLoaded: true,
+  })),
+  on(ProfileActions.loadProfileTemplatesFailure, (state, { error }) => ({
+    ...state,
+    profileTemplatesLoading: false,
+    profileTemplatesLoaded: true,
+    // El fallo del catálogo NO pisa `profilesError`: son dos cosas que la
+    // pantalla trata distinto —la lista sigue siendo usable sin plantillas— y
+    // compartir el campo haría que el error de un catálogo opcional tapara el
+    // de la lista, que no lo es.
+    profileTemplatesError: error,
+  })),
+
   // ── Clear State ─────────────────────────────────────────
   on(InvoicingActions.clearInvoicingState, () => initialInvoicingState),
 );
+
+/**
+ * Quita del detalle los campos que la fila del listado no tiene.
+ *
+ * El backend devuelve `InvoiceProfileDetail` (con `version` y `current_config`)
+ * en las mutaciones, pero `state.profiles` es de `InvoiceProfile`. Meter el
+ * detalle entero en la lista guardaría un snapshot completo por fila y haría
+ * que la tabla creyera tener config disponible — que es justo lo que la
+ * interfaz del listado evita declarar.
+ */
+function stripDetail(profile: {
+  version?: unknown;
+  current_config?: unknown;
+}): Record<string, unknown> {
+  const { version: _version, current_config: _config, ...row } = profile;
+  return row;
+}

@@ -693,6 +693,49 @@ export class CreateInvoiceDto {
   operation_type?: string;
 
   /**
+   * Perfil de facturación bajo el que se timbra este documento.
+   *
+   * ## Qué cambia cuando llega
+   *
+   * La configuración fiscal deja de leerse de `store_settings` y sale de la
+   * versión VIGENTE del perfil, y la factura persiste
+   * `(profile_id, profile_version)`. Eso es lo que hace reproducible el
+   * documento: `invoice_profile_versions` es append-only, así que editar el
+   * perfil mañana crea la versión N+1 y no toca la N que esta factura congeló.
+   *
+   * ## Y qué pasa cuando NO llega
+   *
+   * Nada cambia: el flujo manual sigue leyendo `store_settings.invoicing.aiu`
+   * exactamente como antes y las dos columnas quedan NULL. Es deliberado —los
+   * tenants que ya facturan sin perfiles no pueden verse obligados a crear uno
+   * para seguir emitiendo—. El CHECK de la tabla impone «ambas o ninguna», así
+   * que no existe el estado intermedio.
+   *
+   * ## Por qué `@Min(1)` y no sólo `@IsNumber`
+   *
+   * Con `enableImplicitConversion`, `@IsNumber()` aprueba la cadena `"-5000"`:
+   * no es una compuerta de signo. Un id negativo o cero llegaría al `findFirst`
+   * y saldría como 404, que es un error correcto por la razón equivocada — y
+   * `0` es justamente el valor que un formulario a medio llenar manda. El piso
+   * se declara acá para que el rechazo ocurra antes de tocar la base.
+   */
+  @IsOptional()
+  @Transform(blankToUndefined)
+  @Type(() => Number)
+  @IsNumber(
+    {},
+    {
+      message:
+        'profile_id debe ser el id numérico de un perfil de facturación de esta tienda.',
+    },
+  )
+  @Min(1, {
+    message:
+      'profile_id debe ser un entero positivo. Omite el campo para facturar con el flujo manual (configuración de la tienda).',
+  })
+  profile_id?: number;
+
+  /**
    * Objeto del contrato AIU de ESTA factura (regla CAV03).
    *
    * Opcional: sin él se usa el de la tienda

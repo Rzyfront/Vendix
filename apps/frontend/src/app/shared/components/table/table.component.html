@@ -199,6 +199,9 @@
                                 dropdown-item
                                 type="button"
                                 [class]="getActionMenuItemClasses(action, item)"
+                                [attr.aria-label]="
+                                  getActionAccessibleName(action, item)
+                                "
                                 [disabled]="isActionDisabled(action, item)"
                                 (click)="
                                   executeAction(action, item);
@@ -228,7 +231,10 @@
                             <button [class]="getActionClasses(action, item)"
                               [disabled]="isActionDisabled(action, item)" (click)="
                                 executeAction(action, item); $event.stopPropagation()
-                              " [attr.title]="getActionTooltip(action, item)">
+                              " [attr.title]="getActionTooltip(action, item)"
+                              [attr.aria-label]="
+                                getActionAccessibleName(action, item)
+                              ">
                               <!-- Icon if provided -->
                               @if (getActionIcon(action, item)) {
                                 <app-icon [name]="getActionIcon(action, item)"

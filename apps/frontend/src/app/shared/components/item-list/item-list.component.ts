@@ -48,6 +48,12 @@ export class ItemListComponent {
   /** Key (dot notation supported) that identifies a row. */
   readonly rowIdKey = input<string>('id');
   /**
+   * Clave que IDENTIFICA la tarjeta para quien no la ve. Misma razón y misma
+   * semántica que en `app-table`: los botones del pie son iconos, y «Eliminar»
+   * repetido quince veces no dice qué se elimina.
+   */
+  readonly rowLabelKey = input<string | null>(null);
+  /**
    * Two-way selection state owned by the PARENT, so it survives pagination and
    * the desktop/mobile switch. Never mutated in place — a NEW Set is published
    * on every change, otherwise signal change detection would not react.
@@ -382,6 +388,34 @@ export class ItemListComponent {
 
   isActionDisabled(action: TableAction, item: any): boolean {
     return action.disabled ? action.disabled(item) : false;
+  }
+
+  /**
+   * Nombre accesible del botón de acción: la etiqueta más la tarjeta, cuando la
+   * tarjeta se puede nombrar. Ver `rowLabelKey`.
+   */
+  /**
+   * Nombre accesible del disparador del menú de desborde.
+   *
+   * Sin esto son N botones «Acciones» idénticos: el `title` da nombre, pero no
+   * dice de qué tarjeta, que es justo lo que un lector de pantalla necesita
+   * cuando detrás del menú hay un «Eliminar».
+   */
+  getMenuTriggerAccessibleName(item: any): string {
+    const key = this.rowLabelKey();
+    if (!key) return 'Acciones';
+    const raw = this.getNestedValue(item, key);
+    const name = raw === null || raw === undefined ? '' : String(raw).trim();
+    return name ? `Más acciones: ${name}` : 'Acciones';
+  }
+
+  getActionAccessibleName(action: TableAction, item: any): string {
+    const label = this.getActionLabel(action, item);
+    const key = this.rowLabelKey();
+    if (!key) return label;
+    const raw = this.getNestedValue(item, key);
+    const name = raw === null || raw === undefined ? '' : String(raw).trim();
+    return name ? `${label}: ${name}` : label;
   }
 
   getActionLabel(action: TableAction, item: any): string {

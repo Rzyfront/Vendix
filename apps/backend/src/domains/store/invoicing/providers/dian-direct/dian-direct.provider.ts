@@ -2766,9 +2766,10 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
   /**
    * Aborta si la totalización del XML no cierra contra las reglas de la DIAN.
    *
-   * Bloquea por la misma asimetría que la compuerta estructural: `FAS01b` y
-   * `FAU04` garantizan el rechazo, y ese rechazo quema el consecutivo. Acá no
-   * hay nada perdido — el borrador conserva su número.
+   * Bloquea por la misma asimetría que la compuerta estructural: `FAS01b` y las
+   * cuatro identidades de totales —`AU02` bruto, `AU04` base, `AU06` bruto más
+   * tributos, `AU14` valor a pagar— garantizan el rechazo, y ese rechazo quema
+   * el consecutivo. Acá no hay nada perdido — el borrador conserva su número.
    *
    * Un documento sin totales que juzgar (`ApplicationResponse`,
    * `AttachedDocument`) devuelve `root: null` y pasa: no aplicaba.

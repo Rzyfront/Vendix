@@ -1152,6 +1152,78 @@ describe('InvoiceCalculatorService', () => {
       ).toBe(false);
     });
 
+    /**
+     * El caso del céntimo: un AIU que no reparte exacto.
+     *
+     * Con un costo de $1.000.000 y un AIU del 10 % del contrato, el AIU exacto
+     * es 1.000.000 × 10/90 = 111.111,111… — no cabe en dos decimales, y el
+     * reparto 5/2/3 tampoco. El frontend deduce el AIU en céntimos enteros con
+     * UNA división y deja el residuo en la utilidad, así que las tres líneas
+     * suman el AIU y el AIU más el costo suman el contrato SIN céntimo suelto
+     * (un céntimo de diferencia entre cabecera y líneas es rechazo FAU06).
+     *
+     * Lo que este caso fija es que ese redondeo no cruza el piso legal: el AIU
+     * en céntimos queda hasta medio céntimo POR DEBAJO del exacto, pero
+     * `minimum_base` se calcula con {@link dianAmount}, que TRUNCA, y el piso
+     * truncado nunca supera al AIU declarado. Si alguien cambiara ese truncado
+     * por un redondeo, o el reparto del frontend por un `floor`, este caso
+     * empezaría a emitir una divergencia y la factura se frenaría por diez
+     * milésimas de peso.
+     */
+    it('un AIU no divisible NO cae por debajo del piso: el piso se trunca', () => {
+      const iva = [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' as const }];
+      const result = service.calculate({
+        aiu: { regime: 'et_462_1', enforce_minimum_base: true },
+        items: [
+          { description: 'Costo directo', quantity: 1, unit_price: 1_000_000 },
+          {
+            description: 'Administración',
+            quantity: 1,
+            unit_price: 55_555.55,
+            aiu_component: 'administracion',
+            taxes: iva,
+          },
+          {
+            description: 'Imprevistos',
+            quantity: 1,
+            unit_price: 22_222.22,
+            aiu_component: 'imprevistos',
+            taxes: iva,
+          },
+          {
+            // El residuo del reparto vive acá: gravable bajo los DOS regímenes,
+            // así que el céntimo se declara de más, nunca de menos.
+            description: 'Utilidad',
+            quantity: 1,
+            unit_price: 33_333.34,
+            aiu_component: 'utilidad',
+            taxes: iva,
+          },
+        ],
+      });
+
+      expect(result.aiu?.aiu_value).toBe('111111.11');
+      expect(result.aiu?.contract_value).toBe('1111111.11');
+      // 10 % de 1.111.111,11 es 111.111,111 — truncado a 111.111,11, que es
+      // exactamente el AIU declarado.
+      expect(result.aiu?.minimum_base).toBe('111111.11');
+      expect(
+        result.divergences.some((d) => d.scope === 'aiu_base_below_minimum'),
+      ).toBe(false);
+
+      // El contrato es costo + AIU al céntimo: sin descuadre de cabecera.
+      // `total_before_tax` es el `ValFac` del CUFE y el
+      // `cac:LegalMonetaryTotal/cbc:LineExtensionAmount` del XML.
+      expect(result.totals.total_before_tax).toBe('1111111.11');
+      // El IVA de cabecera es la SUMA de los IVAs de línea, cada uno truncado
+      // a dos decimales (10555.55 + 4222.22 + 6333.33), y eso deja un céntimo
+      // por debajo del 19 % de la base (21111.1109 → 21111.11). El número
+      // correcto es el de la suma: la regla FAS02 compara el tributo de
+      // cabecera contra sus subtotales, no contra base × tarifa. «Arreglarlo»
+      // calculando el 19 % de la base es lo que descuadra el XML.
+      expect(result.totals.tax_iva).toBe('21111.10');
+    });
+
     it('descarta el impuesto que una línea fuera de base intente declarar', () => {
       const result = service.calculate({
         aiu: { regime: 'decreto_1372_1992' },
@@ -1222,6 +1294,145 @@ describe('InvoiceCalculatorService', () => {
 
       // Cabecera: una fila por esquema, no una sola con la suma.
       expect(result.header_taxes).toHaveLength(2);
+    });
+  });
+
+  /**
+   * La factura 83 de producción, reproducida a escala: el cliente declara IVA
+   * SÓLO en Administración y deja Imprevistos y Utilidad limpios. Bajo
+   * `et_462_1` los tres componentes hacen parte de la base gravable, así que el
+   * documento sale corto — y la DIAN lo ACEPTA, porque es internamente
+   * consistente. Faltan 95.000 COP que sólo se corrigen con nota crédito.
+   *
+   * Lo que el motor puede y no puede hacer acá está en el centro del diseño:
+   * sabe QUÉ componentes gravan (lo decide el régimen) pero no A QUÉ TARIFA,
+   * porque la tarifa depende del bien o servicio y este servicio no tiene el
+   * catálogo. Por eso reporta el hecho con los tres importes en cero en vez de
+   * inventar el faltante, y la decisión de no emitir la toma
+   * `InvoicingService.recalculateDocument` con `INVOICING_AIU_004`.
+   */
+  describe('AIU — el componente gravable que llega sin tarifa', () => {
+    const factura83 = (
+      aiu: InvoiceCalculatorInput['aiu'],
+      taxUtilidad = false,
+    ): InvoiceCalculatorInput => ({
+      aiu,
+      items: [
+        {
+          description: 'Administracion',
+          quantity: 1,
+          unit_price: 1_000_000,
+          aiu_component: 'administracion',
+          taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+        },
+        {
+          description: 'Imprevistos',
+          quantity: 1,
+          unit_price: 200_000,
+          aiu_component: 'imprevistos',
+        },
+        {
+          description: 'Utilidad',
+          quantity: 1,
+          unit_price: 300_000,
+          aiu_component: 'utilidad',
+          ...(taxUtilidad
+            ? { taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }] }
+            : {}),
+        },
+      ],
+    });
+
+    it('reporta una divergencia por CADA componente gravable sin tarifa', () => {
+      const result = service.calculate(factura83({ regime: 'et_462_1' }));
+
+      const sin_tarifa = result.divergences.filter(
+        (d) => d.scope === 'aiu_taxable_line_without_tax',
+      );
+      expect(sin_tarifa.map((d) => d.line_index)).toEqual([1, 2]);
+      // El componente viaja en `tax_type` para que quien decide sepa DE QUÉ
+      // parte del contrato se trata sin volver a leer las líneas.
+      expect(sin_tarifa.map((d) => d.tax_type)).toEqual([
+        'imprevistos',
+        'utilidad',
+      ]);
+
+      // Los tres importes en cero NO son un descuido: el motor no puede afirmar
+      // cuánto faltaba sin conocer la tarifa. Lo que informa es el hecho.
+      expect(sin_tarifa[0].expected).toBe('0.00');
+      expect(sin_tarifa[0].received).toBe('0.00');
+      expect(sin_tarifa[0].difference).toBe('0.00');
+
+      // El daño, en cifras: 190.000 declarados sobre una base de 1.500.000.
+      expect(result.aiu?.taxable_base).toBe('1500000.00');
+      expect(result.totals.tax_amount).toBe('190000.00');
+    });
+
+    it('con la tarifa declarada en las tres líneas la base cierra en 285.000', () => {
+      // Es lo que el formulario del panel produce por defecto, y es la cifra
+      // correcta: 19 % de 1.500.000. Los 95.000 de diferencia contra el caso
+      // anterior son exactamente el faltante de la factura 83.
+      const result = service.calculate({
+        aiu: { regime: 'et_462_1' },
+        items: factura83({ regime: 'et_462_1' }, true).items.map((item) => ({
+          ...item,
+          taxes: item.taxes ?? [
+            { tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' },
+          ],
+        })),
+      });
+
+      expect(result.totals.tax_amount).toBe('285000.00');
+      expect(
+        result.divergences.filter(
+          (d) => d.scope === 'aiu_taxable_line_without_tax',
+        ),
+      ).toHaveLength(0);
+    });
+
+    it('bajo Decreto 1372/1992 las mismas líneas NO divergen', () => {
+      // Sólo la Utilidad grava, y es la única que necesita tarifa. El mismo
+      // documento es correcto o incorrecto según el régimen: por eso el régimen
+      // se congela en la factura y no se relee en la emisión.
+      const result = service.calculate(
+        factura83({ regime: 'decreto_1372_1992' }, true),
+      );
+
+      expect(
+        result.divergences.filter(
+          (d) => d.scope === 'aiu_taxable_line_without_tax',
+        ),
+      ).toHaveLength(0);
+      expect(result.totals.tax_amount).toBe('57000.00');
+    });
+
+    it('tarifa 0 explícita no es lo mismo que omitir el impuesto', () => {
+      // Exento emite `cac:TaxTotal` con `cbc:Percent` en 0,00; excluido no lo
+      // emite. Colapsar las dos cosas en «no tiene impuesto» borraría la
+      // diferencia justo donde cambia el resultado — y dejaría al componente
+      // exento indistinguible del sub-declarado.
+      const result = service.calculate({
+        aiu: { regime: 'decreto_1372_1992' },
+        items: [
+          {
+            description: 'Utilidad exenta',
+            quantity: 1,
+            unit_price: 300_000,
+            aiu_component: 'utilidad',
+            taxes: [{ tax_name: 'IVA exento', tax_rate: 0, tax_type: 'iva' }],
+          },
+        ],
+      });
+
+      expect(
+        result.divergences.filter(
+          (d) => d.scope === 'aiu_taxable_line_without_tax',
+        ),
+      ).toHaveLength(0);
+      expect(result.lines[0].omit_tax_total).toBe(false);
+      expect(result.lines[0].taxes).toHaveLength(1);
+      expect(result.lines[0].taxes[0].tax_rate).toBe('0.00');
+      expect(result.totals.tax_amount).toBe('0.00');
     });
   });
 });

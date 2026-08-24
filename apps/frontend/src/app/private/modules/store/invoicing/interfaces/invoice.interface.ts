@@ -222,6 +222,119 @@ export interface Invoice {
 
   /** Flete facturado, ya incluido en `total_amount`. */
   shipping_amount?: number | string | null;
+
+  // ─── AIU congelado en el documento ─────────────────────────────────────
+  //
+  // Las cuatro columnas de abajo son la VERDAD EMITIDA, no configuración. El
+  // backend las escribe una vez, al calcular los importes, y no vuelve a
+  // derivarlas: `invoice-flow` decide con ellas qué línea lleva
+  // `cac:TaxTotal` en el XML. Faltaban en esta interfaz, así que el detalle no
+  // podía mostrar con qué reglas salió el documento — y una factura AIU cuya
+  // gravabilidad no se puede leer desde la propia factura no es auditable.
+
+  /**
+   * Régimen con el que se decidió la base gravable. `et_462_1` grava
+   * Administración + Imprevistos + Utilidad; `decreto_1372_1992` grava sólo
+   * Utilidad. NULL en documentos que no son AIU.
+   */
+  aiu_regime?: AiuRegime | null;
+
+  /**
+   * Piso legal aplicado sobre la base gravable, en porcentaje del valor total
+   * del contrato. Sólo existe bajo `et_462_1`: el Decreto 1372/1992 no fija
+   * piso sobre la utilidad del constructor.
+   */
+  aiu_minimum_percent?: number | string | null;
+
+  /** Objeto del contrato. Va al XML como la nota exigida por el Anexo §CAV03. */
+  aiu_contract_object?: string | null;
+
+  /**
+   * Radiografía de la gravabilidad, componente por componente, tal como quedó
+   * al calcular. Es el espejo de lo que el XML declara.
+   */
+  aiu_taxable_matrix?: AiuTaxableMatrix | null;
+
+  // ─── Perfil de facturación congelado ───────────────────────────────────
+
+  /**
+   * Perfil con el que se emitió, congelado en el par `(profile_id,
+   * profile_version)`. Ambas columnas o ninguna — lo impone un CHECK en base,
+   * porque la FK compuesta de Postgres no valida el par cuando una mitad es
+   * NULL.
+   *
+   * NULL significa emitida SIN perfil: la configuración vino de
+   * `store_settings.invoicing.aiu`, que es mutable. Es un dato relevante para
+   * auditoría, no un hueco: dice que el documento no tiene una versión
+   * inmutable que respalde su gravabilidad.
+   */
+  profile_id?: number | null;
+  profile_version?: number | null;
+
+  /** Identidad del perfil congelado, para poder nombrarlo y enlazarlo. */
+  profile_snapshot?: InvoiceProfileSnapshot | null;
+}
+
+/** Los dos regímenes de IVA sobre AIU que el sistema conoce. */
+export type AiuRegime = 'et_462_1' | 'decreto_1372_1992';
+
+/**
+ * Una tarifa concreta que un componente declaró. `rate_basis` distingue la
+ * base sobre la que se aplicó el porcentaje, que bajo AIU no es el total de la
+ * línea sino la porción gravable.
+ */
+export interface AiuTaxableMatrixRate {
+    tax_type?: string | null;
+    dian_tax_code?: string | null;
+    tax_rate?: number | string | null;
+    rate_basis?: number | string | null;
+}
+
+export interface AiuTaxableMatrixComponent {
+    component: AiuComponent;
+    /** Si el régimen lo metió en la base gravable. */
+    taxable: boolean;
+    /** Cuántas líneas del documento aportaron a este componente. */
+    lines: number;
+    taxable_amount: number | string;
+    tax_amount: number | string;
+    rates: AiuTaxableMatrixRate[];
+}
+
+export interface AiuTaxableMatrix {
+    regime: AiuRegime;
+    /** En qué momento se construyó: `invoice:create`, `invoice:update:{id}`… */
+    stage?: string | null;
+    minimum?: {
+        /** Si el piso legal se aplicó de verdad, no si estaba configurado. */
+        enforced: boolean;
+        percent: number | string | null;
+    } | null;
+    components: AiuTaxableMatrixComponent[];
+    /**
+     * Componentes que el régimen SÍ grava y que aun así no declararon ninguna
+     * tarifa. Cada entrada es IVA que el documento debía declarar y no
+     * declara: vacío es lo correcto, no vacío es un rechazo FAU04 esperando.
+     */
+    taxable_without_rate?: AiuComponent[];
+}
+
+export interface InvoiceProfileSnapshot {
+    profile_id: number;
+    version: number;
+    created_at?: string | null;
+    profile?: {
+        id: number;
+        name: string;
+        operation_type: string;
+        state: string;
+        /**
+         * La versión VIGENTE del perfil hoy. Si es mayor que la congelada, el
+         * perfil cambió después de emitir — que es exactamente lo que el
+         * congelado protege, y merece decirse en pantalla.
+         */
+        current_version: number;
+    } | null;
 }
 
 /**

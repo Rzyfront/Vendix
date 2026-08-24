@@ -1,4 +1,5 @@
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
@@ -340,6 +341,22 @@ interface AiuEmissionContext {
   regime: AiuVatRegime;
   /** Cadena YA COMPUESTA para `cbc:Note` de la línea de Administración. */
   note: string;
+  /**
+   * De dónde salió el régimen. No es adorno de log: `settings` significa que el
+   * XML se está construyendo con configuración VIVA que pudo cambiar después de
+   * que se calcularon los importes que el documento lleva dentro. Cuando la
+   * DIAN rechaza por descuadre de base gravable, esto es lo que dice si el
+   * documento se emitió con su propio régimen o con el que la tienda tenía en
+   * ese instante.
+   */
+  regime_source: 'snapshot' | 'settings' | 'default';
+  /**
+   * Piso legal que rige para ESTE documento, ya resuelto: el porcentaje si
+   * aplica, `null` si no aplica ninguno. Viene del snapshot de la factura
+   * cuando existe, para que la re-verificación antes de firmar compare contra
+   * el mismo número con el que se calculó y no contra el ajuste de hoy.
+   */
+  minimum_percent: Prisma.Decimal | null;
 }
 
 /**
@@ -2022,6 +2039,8 @@ export class InvoiceFlowService {
     store_id: number | bigint | null;
     operation_type?: string | null;
     aiu_contract_object?: string | null;
+    aiu_regime?: string | null;
+    aiu_minimum_percent?: Prisma.Decimal | null;
   }): Promise<AiuEmissionContext | null> {
     const operation_type = (invoice.operation_type || '').trim();
     if (operation_type !== DIAN_INVOICE_OPERATION_TYPES.AIU) return null;
@@ -2063,14 +2082,97 @@ export class InvoiceFlowService {
       );
     }
 
-    return {
-      // Default explícito y conservador, el mismo que la creación: bajo
-      // `et_462_1` tributa el AIU completo, o sea se declara MÁS IVA. Una tienda
-      // que no configuró nada declara de más —recuperable— y no de menos, que es
-      // sanción.
-      regime: settings.regime ?? 'et_462_1',
-      note,
-    };
+    const regime = this.resolveAiuRegimeForEmission(invoice, settings);
+
+    // EL PISO SALE DEL SNAPSHOT, con la misma precedencia y por la misma razón
+    // que el régimen. Sólo rige bajo `et_462_1` —el Decreto 1372/1992 no fija
+    // ninguno sobre la utilidad del constructor— y el default es ACTIVO: en el
+    // ajuste de la tienda sólo se apaga declarando `false`, así que la ausencia
+    // no significa "sin piso".
+    const minimum_percent =
+      regime.regime !== 'et_462_1'
+        ? null
+        : invoice.aiu_minimum_percent != null
+          ? new Prisma.Decimal(invoice.aiu_minimum_percent)
+          : settings.enforce_minimum_base === false
+            ? null
+            : new Prisma.Decimal(settings.minimum_base_percent ?? 10);
+
+    return { ...regime, minimum_percent, note };
+  }
+
+  /**
+   * Régimen con el que se va a construir el XML, y de dónde salió.
+   *
+   * EL SNAPSHOT DEL DOCUMENTO MANDA, por la misma razón que manda para el
+   * objeto del contrato, y con más consecuencia. El régimen no describe el
+   * documento: decide, línea por línea, cuál emite `cac:TaxTotal` y cuál no
+   * (`attachAiuLineExtras` → `omit_tax_total`). Los IMPORTES, en cambio, salen
+   * de los tributos ya persistidos. Las dos mitades tienen que venir del mismo
+   * régimen o el XML declara una gravabilidad que no corresponde a los números
+   * que lleva dentro: una línea con impuesto persistido a la que se le suprime
+   * el `cac:TaxTotal` descuadra el total contra la suma de líneas (FAU04), y
+   * una línea sin impuesto a la que se le permite emitirlo hereda el `Percent`
+   * de la cabecera (FAX01). Los dos son rechazo, y el consecutivo ya se gastó.
+   *
+   * Orden de precedencia y por qué:
+   *
+   *   1. `invoices.aiu_regime` — el régimen con el que se calcularon estos
+   *      importes. Es el único dato que no puede contradecirlos.
+   *   2. `store_settings.invoicing.aiu.regime` — respaldo para las facturas
+   *      anteriores a la columna. Se avisa en el log, porque es precisamente la
+   *      lectura viva que el snapshot vino a reemplazar.
+   *   3. `'et_462_1'` — el MISMO default que usa la creación. Que las dos
+   *      puntas caigan al mismo valor es lo que hace consistente a la tienda
+   *      que nunca configuró AIU; cambiarlo por un rechazo acá rompería un
+   *      camino que hoy funciona y funciona bien, porque `et_462_1` declara MÁS
+   *      IVA: de más es recuperable, de menos es sanción.
+   *
+   * Un valor desconocido en la columna NO cae al default: se rechaza. Es el
+   * único caso realmente irresoluble —el documento afirma un régimen y ninguno
+   * de los dos conocidos es— y adivinar entre dos bases incompatibles cambia el
+   * IVA declarado sin dejar rastro de que se adivinó.
+   */
+  private resolveAiuRegimeForEmission(
+    invoice: { id: number; aiu_regime?: string | null },
+    settings: AiuSettings,
+  ): Pick<AiuEmissionContext, 'regime' | 'regime_source'> {
+    const KNOWN: readonly AiuVatRegime[] = ['et_462_1', 'decreto_1372_1992'];
+    const frozen = (invoice.aiu_regime || '').trim();
+
+    if (frozen) {
+      if (!KNOWN.includes(frozen as AiuVatRegime)) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_AIU_006,
+          `La factura declara un régimen de base gravable AIU que el sistema no reconoce ` +
+            `(«${frozen}»). No se emite: los dos regímenes válidos gravan partes distintas del ` +
+            `contrato —E.T. art. 462-1 grava Administración + Imprevistos + Utilidad, Decreto ` +
+            `1372/1992 grava sólo la Utilidad— y elegir uno por defecto cambiaría el IVA ` +
+            `declarado. Corrige el régimen en la configuración de facturación de la tienda y ` +
+            `vuelve a guardar la factura.`,
+          { invoice_id: invoice.id, declared_regime: frozen, known: KNOWN },
+        );
+      }
+      return { regime: frozen as AiuVatRegime, regime_source: 'snapshot' };
+    }
+
+    if (settings.regime) {
+      this.logger.warn(
+        `Factura ${invoice.id}: contrato AIU sin régimen congelado. Se usa el ajuste VIVO de la ` +
+          `tienda («${settings.regime}») para decidir qué líneas emiten cac:TaxTotal. Es una ` +
+          `factura anterior a invoices.aiu_regime: si el ajuste cambió después de que se ` +
+          `calcularon sus importes, la gravabilidad del XML puede no corresponder a los tributos ` +
+          `persistidos.`,
+      );
+      return { regime: settings.regime, regime_source: 'settings' };
+    }
+
+    this.logger.warn(
+      `Factura ${invoice.id}: contrato AIU sin régimen congelado y sin configuración AIU en la ` +
+        `tienda. Se usa el default conservador «et_462_1», el mismo que aplicó la creación, que ` +
+        `grava el AIU completo y por tanto declara de más antes que de menos.`,
+    );
+    return { regime: 'et_462_1', regime_source: 'default' };
   }
 
   /**
@@ -2116,6 +2218,162 @@ export class InvoiceFlowService {
         line.note = aiu.note;
       }
     });
+  }
+
+  /**
+   * ¿Dice el XML lo mismo que los importes que lleva dentro?
+   *
+   * Es la última compuerta antes de firmar, y cubre el descuadre que ninguna de
+   * las dos mitades puede ver sola. La gravabilidad por línea la acaba de
+   * decidir el RÉGIMEN (`attachAiuLineExtras` → `omit_tax_total`); los IMPORTES
+   * salen de los tributos PERSISTIDOS al crear el documento. Cada mitad es
+   * internamente coherente, así que ni el calculador ni el builder detectan que
+   * se contradicen entre sí:
+   *
+   * · Línea que CALLA su grupo pero trae impuesto persistido ⇒ el
+   *   `cac:TaxTotal` de línea desaparece del XML mientras el importe sigue
+   *   dentro del `cac:TaxTotal` de cabecera y del `cbc:PayableAmount`. FAU04
+   *   contrasta el total contra la suma de las líneas: descuadre, rechazo.
+   *
+   * · Línea que EMITE su grupo, es componente gravable y no trae impuesto ⇒ es
+   *   la sub-declaración que `INVOICING_AIU_004` corta al capturar. Acá se
+   *   vuelve a comprobar porque las facturas creadas ANTES de ese bloqueo
+   *   siguen en la base —la 83 entre ellas— y emitirlas ahora produciría
+   *   exactamente el documento que la DIAN acepta con menos IVA del debido.
+   *
+   * Se rechaza en vez de corregir por la misma razón que en el piso legal: los
+   * importes ya están persistidos y son los que el cliente vio y firmó. Cambiar
+   * uno en el camino a la firma emitiría un documento distinto del que existe en
+   * la base, y el descuadre reaparecería entre la factura y su contabilidad.
+   */
+  private assertAiuLineTaxCoherence(
+    invoice: { id: number; invoice_number?: string | null },
+    lines: UblDocumentLine[],
+    aiu: AiuEmissionContext,
+  ): void {
+    lines.forEach((line, index) => {
+      const declared = (line.taxes ?? []).length > 0;
+      const amount = new Prisma.Decimal(line.tax_amount ?? 0);
+
+      if (line.omit_tax_total && (declared || !amount.isZero())) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_AIU_005,
+          `No se puede emitir la factura ${invoice.invoice_number ?? invoice.id}: la línea ` +
+            `${index + 1} («${line.description}») lleva un impuesto de ${amount.toFixed(2)} ` +
+            `persistido, pero bajo el régimen de base gravable con el que se emite ` +
+            `(${aiu.regime}, tomado ${
+              aiu.regime_source === 'snapshot'
+                ? 'de la propia factura'
+                : `del ajuste de la tienda por procedencia «${aiu.regime_source}»`
+            }) ese componente NO hace parte de la base gravable, así que la línea no puede ` +
+            `declarar su impuesto en el XML. El importe quedaría en el total del documento sin ` +
+            `respaldo en ninguna línea y la DIAN rechaza el descuadre. Los importes de la factura ` +
+            `se calcularon con un régimen distinto del que se está usando ahora: recalcula la ` +
+            `factura guardándola de nuevo, o corrige el régimen de AIU antes de emitir.`,
+          {
+            invoice_id: invoice.id,
+            line_index: index,
+            regime: aiu.regime,
+            regime_source: aiu.regime_source,
+            persisted_tax_amount: amount.toFixed(2),
+          },
+        );
+      }
+
+      // `!omit_tax_total` en un documento AIU YA significa "componente gravable":
+      // `isAiuComponentTaxable(null, …)` es false, así que la línea SIN componente
+      // —el costo reembolsable— también calla su grupo. No hace falta un segundo
+      // predicado, y tenerlo habría sido una segunda derivación del mismo hecho.
+      if (!line.omit_tax_total && !declared) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_AIU_004,
+          `No se puede emitir la factura ${invoice.invoice_number ?? invoice.id}: la línea ` +
+            `${index + 1} («${line.description}») es un componente que el régimen ` +
+            `${aiu.regime} SÍ grava y no declara ningún impuesto. La DIAN aceptaría el ` +
+            `documento declarando menos IVA del debido, y el faltante sólo se corregiría ` +
+            `después con nota crédito. Corrige la factura declarando el impuesto de esa línea ` +
+            `con su tarifa —o con tarifa 0 si el servicio es exento— antes de emitirla.`,
+          {
+            invoice_id: invoice.id,
+            line_index: index,
+            regime: aiu.regime,
+            regime_source: aiu.regime_source,
+          },
+        );
+      }
+    });
+  }
+
+  /**
+   * Re-verifica el piso legal del AIU ANTES de firmar.
+   *
+   * `InvoicingService.recalculateDocument` ya lo comprueba al crear y al editar,
+   * y lanza `INVOICING_AIU_001`. Se vuelve a comprobar acá por la misma razón
+   * por la que se re-comprueba la nota CAV03 unas líneas más arriba: entre la
+   * captura y la transmisión pueden pasar días, y en el intervalo cambia lo que
+   * la comprobación original no vio. Concretamente, el piso se mide contra el
+   * VALOR DEL CONTRATO, que es la suma de TODAS las líneas —incluida la porción
+   * de costo reembolsable, que no lleva componente AIU—; añadir o quitar una
+   * línea de costo mueve el piso sin tocar ninguna línea de AIU. La creación no
+   * puede anticipar eso.
+   *
+   * Se mide con `dianLineExtension`, la MISMA función con la que el builder
+   * escribe cada `cbc:LineExtensionAmount`, y no con los importes persistidos:
+   * lo que tiene que cumplir el piso es el documento que se va a firmar, no una
+   * aproximación suya.
+   *
+   * Rechaza en vez de inflar la base. El AIU es un valor PACTADO en el contrato
+   * y subirlo por cuenta propia cambiaría la cifra que el cliente firmó; dejarlo
+   * pasar produce una factura que la DIAN ACEPTA declarando menos IVA del
+   * debido, con el faltante apareciendo después con sanción e intereses.
+   */
+  private assertAiuMinimumBase(
+    invoice: {
+      id: number;
+      invoice_number?: string | null;
+      invoice_items?: Array<{ aiu_component?: string | null }> | null;
+    },
+    lines: UblDocumentLine[],
+    aiu: AiuEmissionContext,
+  ): void {
+    if (aiu.minimum_percent === null) return;
+
+    const rows = invoice.invoice_items || [];
+    const contract_value = toDecimal(
+      dianSum(lines.map((line) => dianLineExtension(line))),
+    );
+    const aiu_value = toDecimal(
+      dianSum(
+        lines
+          .filter((_line, index) => !!rows[index]?.aiu_component)
+          .map((line) => dianLineExtension(line)),
+      ),
+    );
+    const minimum = toDecimal(
+      dianAmount(contract_value.times(aiu.minimum_percent).dividedBy(100)),
+    );
+
+    if (aiu_value.greaterThanOrEqualTo(minimum)) return;
+
+    throw new VendixHttpException(
+      ErrorCodes.INVOICING_AIU_001,
+      `No se puede emitir la factura ${invoice.invoice_number ?? invoice.id}: el AIU declarado ` +
+        `(${aiu_value.toFixed(2)}) quedó por debajo del mínimo legal de ${minimum.toFixed(2)}, ` +
+        `que es el ${aiu.minimum_percent.toFixed(2)}% del valor del contrato ` +
+        `(${contract_value.toFixed(2)}) exigido por el artículo 462-1 del Estatuto Tributario. ` +
+        `El valor del contrato incluye las líneas de costo reembolsable, así que agregar costo sin ` +
+        `subir el AIU baja la proporción: sube el AIU, o si el contrato es de construcción de bien ` +
+        `inmueble cambia el régimen —bajo el Decreto 1372/1992 la base es sólo la utilidad y este ` +
+        `piso no aplica—.`,
+      {
+        invoice_id: invoice.id,
+        aiu_value: aiu_value.toFixed(2),
+        minimum_base: minimum.toFixed(2),
+        contract_value: contract_value.toFixed(2),
+        minimum_percent: aiu.minimum_percent.toFixed(2),
+        regime_source: aiu.regime_source,
+      },
+    );
   }
 
   /**
@@ -2789,6 +3047,10 @@ export class InvoiceFlowService {
 
     if (aiu) {
       this.attachAiuLineExtras(provider_items, invoice.invoice_items || [], aiu);
+      // PUERTA, justo después de decidir qué líneas callan su grupo de tributos
+      // y ANTES de firmar. Ver `assertAiuLineTaxCoherence`.
+      this.assertAiuLineTaxCoherence(invoice, provider_items, aiu);
+      this.assertAiuMinimumBase(invoice, provider_items, aiu);
     }
 
     // ClTec: lectura APARTE y en el punto de uso. Ya no viaja en

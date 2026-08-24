@@ -38,10 +38,19 @@ import {
 } from '../../services/chart-account-lookup.service';
 
 const SEARCH_DEBOUNCE_MS = 300;
-/** "que no cargue todos los asientos sino que cargue sólo 5". */
-const INITIAL_PAGE_SIZE = 5;
-/** Typing deserves a slightly wider window than the idle first page. */
-const SEARCH_PAGE_SIZE = 20;
+/**
+ * Tope de filas del desplegable, EN LAS DOS RUTAS: la lista en reposo y la
+ * búsqueda tecleada.
+ *
+ * Antes eran dos números —5 en reposo, 20 al teclear— y eso hacía que el mismo
+ * selector devolviera 8 resultados a «mercancías» con el pie diciendo que
+ * mostraba todo. El requisito es «máximo 5 resultados», así que el tope es uno
+ * solo: pasado el quinto, el pie invita a afinar en vez de crecer.
+ *
+ * Cinco filas caben sin scroll en `max-h-64`, que es lo que hace que la lista se
+ * lea de un vistazo en lugar de ojearse.
+ */
+const MAX_RESULTS = 5;
 
 const EMPTY_RESULT: ChartAccountSearchResult = {
   items: [],
@@ -54,7 +63,7 @@ const EMPTY_RESULT: ChartAccountSearchResult = {
  *
  * - Standalone, OnPush, zoneless + signals.
  * - ControlValueAccessor whose value is the account id (`number | null`).
- * - Loads only the first {@link INITIAL_PAGE_SIZE} accounts; everything else is
+ * - Loads at most {@link MAX_RESULTS} accounts; everything else is
  *   reached by typing, debounced and cancelled through `switchMap`.
  * - Searches by **code or name** — the backend ORs both columns, so `4135` and
  *   `comercio` are equally valid queries.
@@ -91,6 +100,7 @@ const EMPTY_RESULT: ChartAccountSearchResult = {
           [class.cursor-not-allowed]="isDisabled()"
           role="button"
           tabindex="0"
+          [attr.aria-label]="ariaLabel() || null"
           [attr.aria-disabled]="isDisabled()"
           (click)="openDropdown()"
           (keydown.enter)="openDropdown()"
@@ -221,7 +231,11 @@ const EMPTY_RESULT: ChartAccountSearchResult = {
                 class="px-3 py-2 text-xs text-center text-[var(--color-text-secondary)] border-t border-border"
               >
                 Mostrando {{ results().length }} de {{ total() }} cuentas —
-                escribe código o nombre para filtrar
+                @if (query().trim()) {
+                  afina la búsqueda para ver el resto
+                } @else {
+                  escribe código o nombre para filtrar
+                }
               </p>
             }
           }
@@ -275,6 +289,16 @@ export class AccountSelectComponent implements ControlValueAccessor, OnInit {
   readonly placeholder = input<string>('Seleccione cuenta');
   readonly searchPlaceholder = input<string>('Buscar por código o nombre...');
   readonly disabled = input<boolean>(false);
+  /**
+   * Nombre accesible del disparador.
+   *
+   * El disparador es un `div role="button"`, que NO es un elemento etiquetable:
+   * un `<label>` externo no se le asocia por más que se pinte al lado. Sin esto,
+   * un formulario con varias cuentas —el mapeo AIU son tres seguidas— se
+   * anuncia como tres botones idénticos que dicen sólo su placeholder, y el
+   * lector de pantalla no puede distinguir Administración de Utilidad.
+   */
+  readonly ariaLabel = input<string>('');
   /** `'organization'` routes the lookup to the org controller. */
   readonly scope = input<ChartAccountScope>('store');
   /** Narrows an org-level read to a single store. */
@@ -453,7 +477,7 @@ export class AccountSelectComponent implements ControlValueAccessor, OnInit {
       scope: this.scope(),
       storeId: this.storeId(),
       acceptsEntriesOnly: this.acceptsEntriesOnly(),
-      limit: term.trim() ? SEARCH_PAGE_SIZE : INITIAL_PAGE_SIZE,
+      limit: MAX_RESULTS,
     };
   }
 

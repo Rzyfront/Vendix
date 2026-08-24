@@ -122,6 +122,8 @@ model users {
 
   // Invoicing, Accounting & Payroll relations
   invoices_created           invoices[]           @relation("invoices_created_by")
+  invoice_profiles_created         invoice_profiles[]         @relation("invoice_profiles_created_by")
+  invoice_profile_versions_created invoice_profile_versions[] @relation("invoice_profile_versions_created_by")
   invoices_as_customer       invoices[]           @relation("invoices_customer")
   fiscal_periods_closed      fiscal_periods[]     @relation("fiscal_periods_closed_by")
   accounting_entries_created accounting_entries[] @relation("accounting_entries_created_by")
@@ -566,6 +568,7 @@ model organizations {
   support_tickets               support_tickets[]
   invoices                      invoices[]
   invoice_resolutions           invoice_resolutions[]
+  invoice_profiles              invoice_profiles[]
   chart_of_accounts             chart_of_accounts[]
   fiscal_periods                fiscal_periods[]
   accounting_entries            accounting_entries[]
@@ -831,6 +834,7 @@ model stores {
   support_tickets             support_tickets[]
   invoices                    invoices[]
   invoice_resolutions         invoice_resolutions[]
+  invoice_profiles            invoice_profiles[]
   accounting_entries          accounting_entries[]
   accounting_entities         accounting_entities[]
   employee_stores             employee_stores[]
@@ -3991,6 +3995,7 @@ enum industry_enum {
   manufacturing
   service
   gym
+  construction
 }
 
 // ===================== MEMBERSHIPS (industria-genérico, Ola 1) =====================
@@ -5443,6 +5448,48 @@ model invoices {
   /// 4900 y no 5000: el prefijo obligatorio ya ocupa parte de la cota de CAV03.
   /// Misma longitud que `contract_object` en `settings-schemas.dto.ts`.
   aiu_contract_object              String?                         @db.VarChar(4900)
+  /// Régimen de base gravable AIU con el que se calculó ESTE documento, y el
+  /// piso legal y la matriz de gravabilidad que aplicaron. Tres columnas, un
+  /// solo propósito: hacer del régimen un SNAPSHOT, por la misma razón que
+  /// `aiu_contract_object` lo es.
+  ///
+  /// El régimen decide qué parte del contrato es base gravable, y los dos son
+  /// incompatibles: E.T. art. 462-1 grava A+I+U completo con piso del 10 % del
+  /// valor del contrato; Decreto 1372/1992 art. 3 grava sólo la Utilidad.
+  /// Vivía SÓLO en `store_settings.invoicing.aiu.regime`, y `invoice-flow`
+  /// volvía a leerlo VIVO en la emisión (`resolveAiuEmissionContext`). Cambiar
+  /// ese ajuste entre que se captura la factura y se transmite hacía que una
+  /// línea calculada sin impuesto se emitiera con el `Percent` heredado de la
+  /// cabecera por la ruta histórica del constructor UBL — un XML que declara
+  /// 19 % sobre una base sin impuesto, que es justo lo que prohíben FAX01 y
+  /// FAU04 del Anexo Técnico 1.9.
+  ///
+  /// NULL ⇒ se cae al ajuste vivo de la tienda, con traza explícita. Es el caso
+  /// de las facturas anteriores a esta columna: rellenarlas sería inventar la
+  /// configuración con la que se emitieron.
+  ///
+  /// `aiu_taxable_matrix` guarda la gravabilidad EFECTIVA por componente y la
+  /// tarifa que la sostiene, que es el dato que el calculador no tenía y por el
+  /// cual no podía imponer el impuesto de una línea gravable sin declarar.
+  aiu_regime                       String?                         @db.VarChar(30)
+  aiu_minimum_percent              Decimal?                        @db.Decimal(5, 2)
+  aiu_taxable_matrix               Json?
+  /// Versión del perfil de facturación con la que se calculó este documento.
+  ///
+  /// Las dos columnas apuntan JUNTAS a `invoice_profile_versions` por su único
+  /// `(profile_id, version)`, no al perfil: lo que una factura debe poder
+  /// reproducir es la CONFIGURACIÓN con la que se calculó, y el perfil es
+  /// mutable. Referenciar la cabeza haría que editar un perfil cambiara
+  /// retroactivamente lo que una factura timbrada afirma.
+  ///
+  /// La FK compuesta hace cumplir en la BASE el invariante DB-03 —si hay perfil,
+  /// la versión referenciada existe—. Falta lo que la FK NO puede: en Postgres
+  /// una FK multi-columna con `MATCH SIMPLE` (el default) no se verifica si
+  /// CUALQUIERA de las columnas es NULL, así que `(profile_id = 5,
+  /// profile_version = NULL)` pasaría. El «ambas o ninguna» lo impone un CHECK
+  /// en la migración, que Prisma no puede declarar.
+  profile_id                       Int?
+  profile_version                  Int?
   customer_id                      Int?
   supplier_id                      Int?
   customer_name                    String?                         @db.VarChar(255)
@@ -5561,6 +5608,11 @@ model invoices {
   related_invoice          invoices?                  @relation("invoice_credit_debit_notes", fields: [related_invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   credit_debit_notes       invoices[]                 @relation("invoice_credit_debit_notes")
   resolution               invoice_resolutions?       @relation(fields: [resolution_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  /// `map` explícito: sin él Prisma esperaría el nombre
+  /// `invoices_profile_id_profile_version_fkey` y cada `migrate diff` reportaría
+  /// drift contra la constraint que la migración ya creó. Mismo patrón que el
+  /// `map` de `idx_invoice_resolutions_technical_key_fingerprint`.
+  profile_snapshot         invoice_profile_versions?  @relation(fields: [profile_id, profile_version], references: [profile_id, version], onDelete: Restrict, onUpdate: NoAction, map: "invoices_profile_snapshot_fkey")
   accounting_entry         accounting_entries?        @relation(fields: [accounting_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   created_by_user          users?                     @relation("invoices_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   invoice_items            invoice_items[]
@@ -5571,6 +5623,7 @@ model invoices {
   dispatch_notes           dispatch_notes[]
 
   @@unique([accounting_entity_id, invoice_type, invoice_number])
+  @@index([profile_id, profile_version])
   @@index([store_id, status])
   @@index([accounting_entity_id])
   @@index([organization_id, accounting_entity_id])
@@ -5777,6 +5830,130 @@ model invoice_resolutions {
   // Prisma lo llamaría `invoice_resolutions_technical_key_fingerprint_idx` y
   // cada `migrate dev` posterior detectaría drift contra un índice que ya existe.
   @@index([technical_key_fingerprint], map: "idx_invoice_resolutions_technical_key_fingerprint")
+}
+
+/// Perfil de facturación: la cabeza MUTABLE de una configuración fiscal.
+///
+/// Existe porque el motor de cálculo sabe QUÉ componentes de un contrato AIU
+/// entran a la base gravable —lo decide el régimen— pero NO a qué tarifa: la
+/// tarifa depende del bien o servicio y el servicio no tiene catálogo. Sin un
+/// sitio donde declararla, la única salida correcta ante una línea gravable sin
+/// impuesto es rechazar (`INVOICING_AIU_004`). La matriz de impuestos del perfil
+/// es la que aporta esa tarifa que falta.
+///
+/// La configuración NO vive acá: vive en `invoice_profile_versions`, inmutable.
+/// Esta fila guarda sólo lo que puede cambiar sin alterar lo que una factura ya
+/// emitida reproduce — el nombre, el estado, cuál es el predeterminado.
+model invoice_profiles {
+  id              Int @id @default(autoincrement())
+  organization_id Int
+  /// NO nullable, a diferencia de `invoice_resolutions.store_id`.
+  ///
+  /// El invariante del módulo es «exactamente un predeterminado por
+  /// (`store_id`, `operation_type`)», y en Postgres dos NULL son DISTINTOS: con
+  /// la columna nullable el índice único parcial admitiría dos perfiles de
+  /// ámbito organización marcados como predeterminados del mismo tipo de
+  /// operación, y el wizard elegiría uno al azar. La sección vive en el menú de
+  /// tienda (`admin/invoicing/profiles`), así que el ámbito de tienda es además
+  /// el que corresponde.
+  store_id        Int
+
+  name String @db.VarChar(150)
+  /// Código DIAN de tipo de operación (`09` = AIU, `10` = estándar).
+  ///
+  /// `VarChar` y no enum de Prisma a propósito: agregar un código DIAN nuevo a
+  /// un enum exige `ALTER TYPE ... ADD VALUE`, que no puede ir en la misma
+  /// transacción que otras sentencias y convierte cada código nuevo en una
+  /// migración frágil. La validación vive en el DTO contra
+  /// `DIAN_INVOICE_OPERATION_TYPES`, que es la fuente única.
+  operation_type String @db.VarChar(2)
+  /// `active` | `inactive`. VarChar y no `Boolean is_active`.
+  ///
+  /// El ciclo de vida ya tiene tres posiciones con significado distinto: activo,
+  /// desactivado, y «no eliminable porque tiene facturas timbradas»
+  /// (`INVOICING_PROFILE_003`, que ofrece desactivar como alternativa al
+  /// borrado). Un `Boolean` no admite una cuarta sin cambio de tipo, y un enum
+  /// de Prisma la exigiría por `ALTER TYPE`. La validación vive en el DTO.
+  state          String @db.VarChar(20) @default("active")
+
+  /// Predeterminado para su `operation_type`. El único parcial se garantiza con
+  /// un índice `UNIQUE ... WHERE is_default` que Prisma NO puede representar:
+  /// vive únicamente en el SQL de la migración. No lo borres de ahí creyendo que
+  /// el esquema lo cubre.
+  is_default Boolean @default(false)
+
+  /// Número de la última versión COMPROMETIDA. Arranca en 0, no en 1.
+  ///
+  /// La fila del perfil y su versión 1 se escriben en la misma transacción. Un
+  /// default de 1 afirmaría una versión que una transacción interrumpida nunca
+  /// escribió; el 0 significa «sin versión comprometida» y es detectable como
+  /// corrupción con una consulta.
+  current_version Int @default(0)
+
+  /// Clonar produce un perfil INDEPENDIENTE (ADR-1): estas dos columnas son
+  /// procedencia para el historial, no una dependencia viva. Por eso
+  /// `onDelete: SetNull` — borrar el perfil de origen no puede tocar al clon.
+  cloned_from_profile_id Int?
+  cloned_from_version    Int?
+
+  created_by Int?
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+  updated_at DateTime? @default(now()) @db.Timestamp(6)
+
+  /// `Restrict`, no `Cascade` — a diferencia de `invoices` e `invoice_resolutions`.
+  ///
+  /// Declarar `Cascade` acá sería mentira: `invoice_profile_versions` es
+  /// `Restrict` hacia el perfil, así que borrar una tienda intentaría cascadear
+  /// al perfil y el RESTRICT de las versiones lo bloquearía igual. La cadena
+  /// entera es `Restrict` para que la base diga lo que de verdad hace, y para no
+  /// añadir un `ON DELETE CASCADE` sobre una tabla padre con datos de negocio.
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  store        stores        @relation(fields: [store_id], references: [id], onDelete: Restrict)
+  creator      users?        @relation("invoice_profiles_created_by", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  cloned_from  invoice_profiles?  @relation("invoice_profile_clones", fields: [cloned_from_profile_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  clones       invoice_profiles[] @relation("invoice_profile_clones")
+  versions     invoice_profile_versions[]
+
+  @@index([store_id, state, operation_type])
+  @@index([organization_id])
+  @@index([cloned_from_profile_id])
+}
+
+/// Versión INMUTABLE de la configuración de un perfil. Solo INSERT.
+///
+/// Es lo que una factura congela y lo que reproduce años después al reenviarse.
+/// Nunca se hace `UPDATE` ni `DELETE` sobre esta tabla: editar un perfil inserta
+/// una versión nueva y mueve `invoice_profiles.current_version`. Si se pudiera
+/// editar, una factura timbrada dejaría de poder reproducir la configuración con
+/// la que se calculó, que es exactamente el defecto que el snapshot cierra.
+model invoice_profile_versions {
+  id         Int @id @default(autoincrement())
+  profile_id Int
+  /// Contiguo desde 1. El invariante es `count(*) = max(version)` por perfil:
+  /// un hueco significaría una versión perdida, y con ella la reproducibilidad
+  /// de las facturas que la referencian.
+  version    Int
+
+  /// El snapshot completo de configuración. Su forma es un CONTRATO FISCAL
+  /// (`InvoiceProfileConfig`, paso B.5), no una preferencia de UI: si omite algo
+  /// que la emisión necesita, la emisión vuelve a leer configuración viva y
+  /// reabre el defecto que el congelado cierra.
+  config Json
+
+  created_by Int?
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+
+  /// `Restrict` y no `Cascade`: borrar un perfil NO puede llevarse el historial
+  /// que las facturas timbradas referencian. El borrado de un perfil con
+  /// facturas ya está prohibido (`INVOICING_PROFILE_003`); esta FK es la red que
+  /// lo sostiene a nivel de base, no a nivel de servicio.
+  profile invoice_profiles @relation(fields: [profile_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  creator users?           @relation("invoice_profile_versions_created_by", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  invoices invoices[]
+
+  @@unique([profile_id, version])
+  @@index([profile_id, created_at])
 }
 
 // ===== ACCOUNTING DOMAIN =====
