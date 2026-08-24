@@ -892,7 +892,9 @@ export class DianConfigFormComponent {
    * hecho. La regla es «si ya hay un valor y está mal, dilo ya».
    */
   private touchPrefilledInvalidControls(): void {
-    for (const control of Object.values(this.form.controls) as AbstractControl[]) {
+    const controls = Object.values(this.form.controls) as AbstractControl[];
+
+    for (const control of controls) {
       if (isFilled(control.value) && control.invalid) {
         control.markAsTouched({ onlySelf: true });
       }
