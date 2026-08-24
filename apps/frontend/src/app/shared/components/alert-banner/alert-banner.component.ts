@@ -138,7 +138,12 @@ export class AlertBannerComponent {
     },
     info: {
       container:
-        'border-[var(--color-primary)]/25 bg-[color-mix(in_srgb,var(--color-primary)_6%,transparent)]',
+        // `border-primary/25`, no `border-[var(--color-primary)]/25`: el valor
+        // arbitrario con la variable cruda no compone alfa —Tailwind no puede
+        // inyectar el canal dentro de un `var()` ya resuelto—, mientras el
+        // token `primary.DEFAULT` sí está declarado como
+        // `rgba(var(--color-primary-rgb), <alpha-value>)`.
+        'border-primary/25 bg-[color-mix(in_srgb,var(--color-primary)_6%,transparent)]',
       icon: 'text-[var(--color-primary)]',
       text: 'text-text-primary',
     },

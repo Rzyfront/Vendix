@@ -1848,6 +1848,17 @@ html[data-theme="light"][data-theme-preset="monocromo"] {
   --color-success: color-mix(in srgb, #22c55e 58%, #000);
   --color-info: color-mix(in srgb, #3b82f6 72%, #000);
 
+  /* Los canales van junto a los hex, no detrás. Tailwind resuelve `warning`,
+     `error` y `success` como `rgba(var(--color-*-rgb), <alpha-value>)` para que
+     el modificador de alfa componga; si este preset moviera sólo el hex, el
+     borde de un banner usaría el canal base y el texto de la MISMA tarjeta el
+     oscurecido. `color-mix(... N%, #000)` es escalar cada canal por N%, así que
+     estos valores son los de arriba, no una aproximación a ojo. */
+  --color-warning-rgb: 138, 80, 33;
+  --color-error-rgb: 143, 41, 41;
+  --color-success-rgb: 20, 114, 55;
+  --color-info-rgb: 42, 94, 177;
+
   /* Hover un escalón más marcado que en el tema base. El hover no es un color
      propio: la raíz lo define como `surface + 6% del primario`. Ese 6% se
      calculó contra un surface casi blanco, donde alcanza para notarse; ahora

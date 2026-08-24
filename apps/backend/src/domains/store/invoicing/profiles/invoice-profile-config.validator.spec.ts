@@ -1,7 +1,16 @@
 import { VendixHttpException } from 'src/common/errors';
 
-import { buildDefaultAiuProfileConfig } from './invoice-profile-config.contract';
-import { assertValidInvoiceProfileConfig } from './invoice-profile-config.validator';
+import {
+  AIU_BUCKETS,
+  AIU_TAXABLE_BUCKETS_BY_BASIS,
+  AiuTaxableBasis,
+  buildDefaultAiuProfileConfig,
+  resolveAiuTaxableBasis,
+} from './invoice-profile-config.contract';
+import {
+  assertValidInvoiceProfileConfig,
+  normalizeAndAssertProfileConfig,
+} from './invoice-profile-config.validator';
 
 describe('assertValidInvoiceProfileConfig', () => {
   const valid = () =>
@@ -109,5 +118,121 @@ describe('assertValidInvoiceProfileConfig', () => {
     } catch (e: any) {
       expect(e.getResponse().details).not.toHaveProperty('profile_id');
     }
+  });
+});
+
+/**
+ * Estos tests entran por `normalizeAndAssertProfileConfig` —la puerta que
+ * `ProfilesService` usa de verdad (`profiles.service.ts:420`, `:502`, `:511`,
+ * `:598`)— y NO por `validateInvoiceProfileConfig`.
+ *
+ * La distinción es la que dejó `taxable_basis` inerte al introducirlo: el
+ * validador puro aprobaba el campo, pero la puerta real normaliza ANTES de
+ * validar, y `pickKnownKeys` borraba toda clave ausente de la allowlist
+ * `AIU_KEYS` emitiendo `UNKNOWN_KEY`, que bloquea. Nueve tests verdes contra un
+ * objeto que el sistema rechazaba con 422 en las cuatro rutas de escritura.
+ *
+ * Regla que estos tests fijan: una config sólo está probada si atravesó la
+ * puerta y salió con el campo puesto.
+ */
+describe('normalizeAndAssertProfileConfig — taxable_basis atraviesa la puerta real', () => {
+  const opts = { operation_type: '09' as const };
+  /**
+   * Construye una config con la base pedida Y la matriz de tributos coherente
+   * con ella.
+   *
+   * Las dos cosas van juntas por obligación, no por comodidad del test: la
+   * matriz declara qué porciones del contrato se gravan, y bajo `'subtotal'`
+   * entra también el costo reembolsable. Dejar la matriz por omisión
+   * —`costo.taxable = false`— y sólo mover la base produce un perfil que
+   * `validateTaxSection` rechaza, y con razón: `isAiuTaxable` grava toda
+   * porción bajo esa base, así que el documento se emitiría gravando un costo
+   * que su propio perfil declara exento.
+   *
+   * Consecuencia para la UI: el control de base gravable no puede escribir sólo
+   * `taxable_basis`. Tiene que reproyectar la matriz sobre
+   * `AIU_TAXABLE_BUCKETS_BY_BASIS[base]` en el mismo cambio, o el guardado sale
+   * 422 sobre una casilla que la persona no tocó.
+   */
+  const withBasis = (basis: string) => {
+    const config: any = JSON.parse(
+      JSON.stringify(buildDefaultAiuProfileConfig('Vigilancia sede sur')),
+    );
+    config.aiu.taxable_basis = basis;
+    const taxable = AIU_TAXABLE_BUCKETS_BY_BASIS[basis as AiuTaxableBasis];
+    // Una base inválida no tiene matriz que proyectar: se deja la de por
+    // omisión, que es lo que un cliente mandaría de verdad —basura en la base,
+    // matriz normal—, y así el rechazo lo produce la puerta y no este helper.
+    if (!taxable) return config;
+    config.taxes.rules = AIU_BUCKETS.map((bucket) => {
+      const existing = config.taxes.rules.find((r: any) => r.bucket === bucket);
+      const shouldBeTaxable = taxable.includes(bucket);
+      return {
+        bucket,
+        tax_code: existing?.tax_code ?? '01',
+        rate: shouldBeTaxable ? (existing?.rate ?? '19.00') : '0.00',
+        taxable: shouldBeTaxable,
+      };
+    });
+    return config;
+  };
+
+  it.each(['aiu', 'utilidad', 'subtotal'])(
+    "'%s' sobrevive a la normalización y sale en el snapshot persistible",
+    (basis) => {
+      const saved = normalizeAndAssertProfileConfig(withBasis(basis), opts);
+
+      // No basta con que no lance: `pickKnownKeys` PROYECTA sobre la allowlist,
+      // así que una clave ausente de `AIU_KEYS` se iría en silencio si el
+      // `UNKNOWN_KEY` no fuera bloqueante. Se afirma el valor de salida.
+      expect(saved.aiu?.taxable_basis).toBe(basis);
+      expect(resolveAiuTaxableBasis(saved.aiu)).toBe(basis);
+    },
+  );
+
+  it('la base declarada gana sobre el `regime` heredado, no al revés', () => {
+    // Un perfil migrado trae los dos campos. Si la puerta resolviera por
+    // `regime`, `'subtotal'` sería inalcanzable para todo perfil preexistente.
+    const config = withBasis('subtotal');
+    config.aiu.regime = 'et_462_1';
+
+    const saved = normalizeAndAssertProfileConfig(config, opts);
+
+    expect(resolveAiuTaxableBasis(saved.aiu)).toBe('subtotal');
+  });
+
+  it('una base inventada se rechaza en la puerta, no se guarda en silencio', () => {
+    let error: any;
+    try {
+      normalizeAndAssertProfileConfig(withBasis('solo_el_iva'), opts);
+    } catch (e) {
+      error = e;
+    }
+
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.getStatus()).toBe(422);
+    expect(error.getResponse()).toEqual(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          issues: expect.arrayContaining([
+            expect.objectContaining({ field: 'aiu.taxable_basis' }),
+          ]),
+        }),
+      }),
+    );
+  });
+
+  it('un `regime` corrupto cae en la base MÁS AMPLIA, no en la más estrecha', () => {
+    // Dirección deliberada: declarar de más se corrige con nota crédito;
+    // declarar de menos es sanción e intereses. Escrito al revés —preguntando
+    // por `et_462_1`— este caso gravaría sólo la utilidad y ningún otro test
+    // lo notaría, porque los demás sólo usan los dos valores donde ambas
+    // versiones del ternario coinciden.
+    expect(resolveAiuTaxableBasis({ regime: 'et_999' as any })).toBe('aiu');
+    expect(resolveAiuTaxableBasis({} as any)).toBe('aiu');
+    expect(resolveAiuTaxableBasis(null)).toBe('aiu');
+    expect(
+      resolveAiuTaxableBasis({ regime: 'decreto_1372_1992' } as any),
+    ).toBe('utilidad');
   });
 });

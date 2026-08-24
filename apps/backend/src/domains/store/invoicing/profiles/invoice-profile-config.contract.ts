@@ -237,11 +237,18 @@ export function regimeFromTaxableBasis(
  * `regime` → `taxable_basis` equivalente. Existe para leer snapshots viejos
  * —de antes de este campo— sin reescribirlos: `taxable_basis` ausente se
  * deriva de `regime`, nunca al revés.
+ *
+ * El ternario pregunta por `decreto_1372_1992`, NO por `et_462_1`, y eso es
+ * deliberado: la rama por defecto tiene que caer en la base MÁS AMPLIA. Un
+ * `regime` corrupto o de una versión futura debe declarar de más (recuperable
+ * con nota crédito) y nunca de menos (sanción e intereses ante la DIAN).
+ * Escrito al revés, `regime: 'et_999'` gravaría sólo la utilidad. No lo
+ * inviertas.
  */
 export function taxableBasisFromRegime(
   regime: AiuVatRegimeLiteral,
 ): AiuTaxableBasis {
-  return regime === 'et_462_1' ? 'aiu' : 'utilidad';
+  return regime === 'decreto_1372_1992' ? 'utilidad' : 'aiu';
 }
 
 /**
@@ -1123,53 +1130,81 @@ function validateTaxSection(
     }
   });
 
-  // ── La matriz no puede contradecir el régimen ──
+  // ── La matriz no puede contradecir la base gravable declarada ──
+  //
+  // Un solo recorrido gobernado por AIU_TAXABLE_BUCKETS_BY_BASIS, que es la
+  // ÚNICA tabla que sabe qué porciones entran a la base para cada una de las
+  // tres bases. Antes había un `return` temprano bajo «subtotal» que apagaba
+  // las cuatro guardas de golpe —la regla ausente, la contradicción por
+  // componente y la del costo—, con el argumento de que bajo esa base la
+  // gravabilidad la decide `isAiuTaxable` y no la matriz. Cierto para el costo,
+  // falso para todo lo demás: `administracion.taxable = false` pasaba muda y
+  // `isAiuTaxable` la grava igual, así que el perfil validaba limpio y sus
+  // documentos morían en INVOICING_AIU_004 al emitir, con consecutivo ya
+  // asignado. La matriz sigue gobernada bajo las tres bases; lo que cambia por
+  // base es QUÉ dice la tabla, no si se valida.
   if (!config.aiu) return;
   const taxableBasis = resolveAiuTaxableBasis(config.aiu);
-  if (taxableBasis === 'subtotal') {
-    // Bajo «subtotal» se declina el tratamiento AIU: la gravabilidad de cada
-    // porción la decide InvoiceCalculatorService.isAiuTaxable a partir de la
-    // base, no de esta matriz, así que no hay contradicción que detectar ni
-    // costo que proteger aquí.
-    return;
-  }
-  const regimeForMatrix = regimeFromTaxableBasis(taxableBasis) ?? config.aiu.regime;
-  const expected = AIU_TAXABLE_COMPONENTS_BY_REGIME[regimeForMatrix];
-  if (!expected) return;
+  const expectedTaxable = AIU_TAXABLE_BUCKETS_BY_BASIS[taxableBasis];
+  if (!expectedTaxable) return;
+  const basisLabel = describeTaxableBasis(taxableBasis);
 
-  for (const component of AIU_COMPONENTS) {
-    const rule = rules.find((r) => r.bucket === component);
+  for (const bucket of AIU_BUCKETS) {
+    const rule = rules.find((r) => r.bucket === bucket);
+    const shouldBeTaxable = expectedTaxable.includes(bucket);
+
     if (!rule) {
+      // El costo sólo necesita regla cuando ENTRA en la base: bajo «aiu» y
+      // «utilidad» queda fuera por definición y exigirla rompería todo perfil
+      // que hoy no la declara. Bajo «subtotal» el costo es la porción más
+      // grande del contrato, y sin tarifa la emisión no sabe cómo gravarla.
+      if (bucket === 'costo' && !shouldBeTaxable) continue;
       issues.push({
-        field: `taxes.rules.${component}`,
+        field: `taxes.rules.${bucket}`,
         code: 'TAX_RULE_MISSING',
-        message: `Falta la regla de impuesto de ${component}. Sin ella la emisión no sabe a qué tarifa gravarla y la factura puede salir declarando de menos.`,
+        message: `Falta la regla de impuesto de ${bucket}. Sin ella la emisión no sabe a qué tarifa gravarla y la factura puede salir declarando de menos.`,
       });
       continue;
     }
-    const shouldBeTaxable = expected.includes(component);
-    if (rule.taxable !== shouldBeTaxable) {
-      issues.push({
-        field: `taxes.rules.${component}.taxable`,
-        code: 'TAX_MATRIX_CONTRADICTS_REGIME',
-        message: shouldBeTaxable
-          ? `Bajo ${config.aiu.regime} la base gravable incluye ${component}, así que no puede quedar sin gravar.`
-          : `Bajo ${config.aiu.regime} la base gravable es sólo la utilidad, así que ${component} no puede quedar gravado.`,
-      });
-    }
-  }
 
-  // El costo reembolsable nunca entra en la base gravable: eso es lo que
-  // distingue un contrato AIU de una venta ordinaria. Si entrara, el piso legal
-  // se mediría contra un contrato y el IVA contra otro.
-  const cost = rules.find((r) => r.bucket === 'costo');
-  if (cost?.taxable) {
+    if (rule.taxable === shouldBeTaxable) continue;
+
+    if (bucket === 'costo' && !shouldBeTaxable) {
+      // El costo reembolsable fuera de la base es lo que distingue un contrato
+      // AIU de una venta ordinaria. Si entrara, el piso legal se mediría contra
+      // un contrato y el IVA contra otro.
+      issues.push({
+        field: 'taxes.rules.costo.taxable',
+        code: 'TAX_COST_MUST_NOT_BE_TAXABLE',
+        message: `El costo reembolsable no forma parte de la base gravable bajo ${basisLabel}.`,
+      });
+      continue;
+    }
+
     issues.push({
-      field: 'taxes.rules.costo.taxable',
-      code: 'TAX_COST_MUST_NOT_BE_TAXABLE',
-      message:
-        'El costo reembolsable no forma parte de la base gravable del AIU bajo ninguno de los dos regímenes.',
+      field: `taxes.rules.${bucket}.taxable`,
+      code: 'TAX_MATRIX_CONTRADICTS_REGIME',
+      message: shouldBeTaxable
+        ? `Bajo ${basisLabel} la base gravable incluye ${bucket}, así que no puede quedar sin gravar.`
+        : `Bajo ${basisLabel} la base gravable no incluye ${bucket}, así que no puede quedar gravado.`,
     });
+  }
+}
+
+/**
+ * Nombre de la base gravable para un mensaje de error. Se dice la BASE y no el
+ * régimen porque «subtotal» no tiene régimen legal al que colapsar: los
+ * mensajes que interpolaban `config.aiu.regime` imprimían el régimen heredado
+ * —o `undefined`— sobre un perfil cuya base era otra.
+ */
+function describeTaxableBasis(basis: AiuTaxableBasis): string {
+  switch (basis) {
+    case 'aiu':
+      return 'la base AIU completo (E.T. art. 462-1)';
+    case 'utilidad':
+      return 'la base sólo utilidad (Decreto 1372/1992)';
+    case 'subtotal':
+      return 'la base Subtotal (sin tratamiento AIU)';
   }
 }
 
@@ -1673,6 +1708,7 @@ function expectArray(
 const GENERAL_KEYS = ['description', 'internal_note'] as const;
 const AIU_KEYS = [
   'regime',
+  'taxable_basis',
   'contract_object',
   'enforce_minimum_base',
   'minimum_base_percent',

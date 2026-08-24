@@ -496,12 +496,50 @@ describe('InvoiceProfileConfig — taxable_basis (Subtotal / AIU / Utilidad)', (
     expect(codes(config)).not.toContain('TAX_MATRIX_CONTRADICTS_REGIME');
   });
 
-  it('con base subtotal no se exige TAX_RULE_MISSING aunque falte una regla', () => {
+  /**
+   * Este caso afirmaba lo contrario cuando se introdujo `taxable_basis`, con el
+   * argumento de que bajo «subtotal» la gravabilidad la decide `isAiuTaxable` y
+   * no la matriz. El argumento vale para el SENTIDO de cada casilla y no para su
+   * AUSENCIA: si falta la regla de una porción que la base sí grava, la emisión
+   * no tiene tarifa que aplicar y la factura sale declarando de menos. Bajo esa
+   * lectura el `return` temprano apagaba cuatro guardas de golpe, y una config
+   * con `administracion.taxable = false` validaba limpia para producir
+   * documentos que INVOICING_AIU_004 corta al emitir, con consecutivo gastado.
+   */
+  it('con base subtotal SÍ se exige la regla de una porción que la base grava', () => {
     const config = aiuConfig((c) => {
       (c.aiu as any).taxable_basis = 'subtotal';
+      c.taxes.rules = c.taxes.rules.map((r) => ({
+        ...r,
+        taxable: true,
+        rate: '19.00',
+      }));
       c.taxes.rules = c.taxes.rules.filter((r) => r.bucket !== 'utilidad');
     });
-    expect(codes(config)).not.toContain('TAX_RULE_MISSING');
+    expect(codes(config)).toContain('TAX_RULE_MISSING');
+  });
+
+  it('con base subtotal el costo sin regla también se exige: entra en la base', () => {
+    // Bajo «aiu» y «utilidad» el costo queda fuera por definición y su regla es
+    // opcional. Bajo «subtotal» es la porción MÁS GRANDE del contrato, así que
+    // omitirla es dejar sin tarifa el 90 % de lo facturado.
+    const config = aiuConfig((c) => {
+      (c.aiu as any).taxable_basis = 'subtotal';
+      c.taxes.rules = c.taxes.rules
+        .map((r) => ({ ...r, taxable: true, rate: '19.00' }))
+        .filter((r) => r.bucket !== 'costo');
+    });
+    expect(codes(config)).toContain('TAX_RULE_MISSING');
+  });
+
+  it('bajo aiu y utilidad el costo sin regla NO se exige: queda fuera de la base', () => {
+    for (const basis of ['aiu', 'utilidad']) {
+      const config = aiuConfig((c) => {
+        (c.aiu as any).taxable_basis = basis;
+        c.taxes.rules = c.taxes.rules.filter((r) => r.bucket !== 'costo');
+      });
+      expect(codes(config)).not.toContain('TAX_RULE_MISSING');
+    }
   });
 });
 
