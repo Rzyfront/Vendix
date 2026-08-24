@@ -238,11 +238,18 @@ jobs:
     # binario lo autodetecta karma-chrome-launcher: la imagen ubuntu-latest
     # trae google-chrome-stable preinstalado.
     #
-    # `karma.conf.js` tambien sube `browserNoActivityTimeout` a 180s. Con el
-    # default (30s) la suite se cortaba con "Disconnected, because no message in
-    # 30000 ms" a mitad de camino -- y un renglon final que dice DISCONNECTED en
-    # vez de SUCCESS/FAILED es cobertura apagada disfrazada de corrida. Se
-    # reproducia igual con y sin Zone.js, asi que preexiste al arnes zoneless.
+    # `karma.conf.js` sube `browserNoActivityTimeout` de 30s (default) a 60s,
+    # que es el margen que necesita un runner de CI cargado. OJO: eso NO cura el
+    # corte de la suite. Medido: con 30s da "Disconnected, because no message in
+    # 30000 ms" y `Executed 172 of 399 ... DISCONNECTED`; con 180s da `Executed
+    # 111 of 412 ... DISCONNECTED (3 mins 2.038 secs / 1.881 secs)`. O sea que
+    # tras ~1,9s de tests algo bloquea el hilo del navegador de forma indefinida
+    # y subir el umbral solo alarga la espera. Se reproduce igual CON Zone.js
+    # (172/399) y SIN (189/399): el cuelgue PREEXISTE al arnes zoneless y es un
+    # defecto aparte, todavia sin dueno. Mientras viva, este job puede terminar
+    # en DISCONNECTED -- que no es SUCCESS ni FAILED, sino cobertura apagada
+    # disfrazada de corrida. Subconjuntos aislados si completan (120 de 120),
+    # asi que el culpable es un spec concreto, no el arnes.
     #
     # El arnes corre SIN Zone.js (target `test` con "polyfills": []), igual que
     # el build de produccion. Ver apps/frontend/src/test-init.ts.
