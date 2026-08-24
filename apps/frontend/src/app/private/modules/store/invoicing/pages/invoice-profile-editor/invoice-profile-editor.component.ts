@@ -1,5 +1,6 @@
 import {
     Component,
+    DestroyRef,
     computed,
     effect,
     inject,
@@ -19,6 +20,7 @@ import { Store } from '@ngrx/store';
 import { map } from 'rxjs/operators';
 
 import {
+    AlertBannerComponent,
     ButtonComponent,
     IconComponent,
     InputComponent,
@@ -183,6 +185,7 @@ type SectionId =
         RouterLink,
         StickyHeaderComponent,
         InvoiceFormSectionComponent,
+        AlertBannerComponent,
         ButtonComponent,
         IconComponent,
         InputComponent,
@@ -293,27 +296,28 @@ type SectionId =
                             ></app-selector>
 
                             @if (inapplicableWithholdings(); as count) {
-                                <p
-                                    class="text-xs text-warning flex items-start gap-1.5"
+                                <!--
+                                    «app-alert-banner» y no un párrafo teñido: un
+                                    texto «text-warning» sobre fondo claro no
+                                    llega al contraste AA, y el aviso es
+                                    justamente el que evita emitir una
+                                    exportación con retención colombiana.
+                                -->
+                                <app-alert-banner
+                                    variant="warning"
+                                    icon="alert-triangle"
                                 >
-                                    <app-icon
-                                        name="alert-triangle"
-                                        [size]="14"
-                                        class="mt-0.5 shrink-0"
-                                    ></app-icon>
-                                    <span
-                                        >Este perfil tiene {{ count }}
-                                        {{
-                                            count === 1
-                                                ? 'retención configurada'
-                                                : 'retenciones configuradas'
-                                        }}
-                                        y una factura de exportación no está sujeta
-                                        a retención en Colombia. Quítalas o cambia
-                                        el tipo de documento: se seguirán
-                                        precargando tal como están.</span
-                                    >
-                                </p>
+                                    Este perfil tiene {{ count }}
+                                    {{
+                                        count === 1
+                                            ? 'retención configurada'
+                                            : 'retenciones configuradas'
+                                    }}
+                                    y una factura de exportación no está sujeta a
+                                    retención en Colombia. Quítalas o cambia el
+                                    tipo de documento: se seguirán precargando tal
+                                    como están.
+                                </app-alert-banner>
                             }
 
                             <div
@@ -505,31 +509,40 @@ type SectionId =
                                         -->
                                         @if (isAiu()) {
                                             <div class="space-y-1">
-                                                <label
-                                                    class="flex cursor-pointer items-center gap-1.5"
+                                                <!--
+                                                    «app-toggle» y no un
+                                                    «<input type="checkbox">»
+                                                    suelto: es el control de
+                                                    encendido/apagado del sistema,
+                                                    así que hereda el color del
+                                                    tenant, el foco visible y el
+                                                    área táctil. Un checkbox de
+                                                    16 px pintado con «accent-»
+                                                    no tenía ninguna de las tres.
+                                                    No se le pasa «styleVariant».
+                                                -->
+                                                <div
+                                                    class="flex items-center"
                                                     [title]="
                                                         lineCarriesAiu($index)
                                                             ? 'Esta línea lleva la base AIU configurada'
                                                             : 'Costo reembolsable: no entra a la base AIU'
                                                     "
                                                 >
-                                                    <input
-                                                        type="checkbox"
-                                                        class="h-4 w-4 shrink-0 accent-[var(--color-primary)]"
-                                                        [checked]="lineCarriesAiu($index)"
-                                                        (change)="
+                                                    <app-toggle
+                                                        label="AIU"
+                                                        ariaLabel="Aplicar la base AIU a esta línea"
+                                                        [checked]="
+                                                            lineCarriesAiu($index)
+                                                        "
+                                                        (changed)="
                                                             toggleLineAiu(
                                                                 $index,
-                                                                $any($event.target)
-                                                                    .checked
+                                                                $event
                                                             )
                                                         "
-                                                    />
-                                                    <span
-                                                        class="text-[11px] font-medium text-text-secondary"
-                                                        >AIU</span
-                                                    >
-                                                </label>
+                                                    ></app-toggle>
+                                                </div>
                                                 @if (lineCarriesAiu($index)) {
                                                     <app-selector
                                                         formControlName="bucket"
@@ -628,6 +641,20 @@ type SectionId =
                          invita a llenarla y que después se contradiga con su
                          propio régimen. -->
                     @if (isAiu()) {
+                        <!--
+                            Este banner existe porque la pantalla ESCONDE
+                            secciones según el tipo de operación y el tipo de
+                            documento. Sin él, un usuario que no ve «Retenciones»
+                            no puede distinguir «no aplica» de «se rompió»: dice
+                            qué manda, y así el hueco se lee como una decisión.
+                        -->
+                        <app-alert-banner variant="info" icon="info">
+                            Las secciones que ves dependen del tipo de operación
+                            —ahora <strong>AIU (09)</strong>— y del tipo de
+                            documento. Las que no aplican se ocultan, salvo que ya
+                            tengan datos guardados.
+                        </app-alert-banner>
+
                         <vendix-invoice-form-section
                             title="Configuración AIU"
                         [help]="help('aiu')"
@@ -856,12 +883,7 @@ type SectionId =
                                     </div>
                                     <div class="p-3 space-y-3" formGroupName="aiu">
                                         <p class="text-xs text-text-secondary">
-                                            El reparto que se aplica a las líneas
-                                            de la factura. Con la unidad «valor
-                                            del contrato» —como se redacta un
-                                            contrato AIU— la suma de los tres ES
-                                            el AIU, y lo que falte hasta el 100 %
-                                            es costo reembolsable.
+                                            {{ componentsBasisExplainer() }}
                                         </p>
                                         <div class="md:max-w-xs">
                                             <app-selector
@@ -1567,16 +1589,21 @@ type SectionId =
                 <!-- Avisos que NO bloquean. Siempre visibles: el usuario tiene
                      que poder verlos antes de pulsar Guardar, desde donde esté. -->
                 @if (warnings().length > 0) {
-                    <div
-                        class="rounded-lg border border-warning/40 bg-warning/5 px-3 py-2 text-xs text-warning md:text-sm"
-                        role="status"
-                    >
-                        <ul class="list-inside list-disc">
-                            @for (warning of warnings(); track warning.code) {
-                                <li>{{ warning.message }}</li>
-                            }
-                        </ul>
-                    </div>
+                    <!--
+                        «bg-warning/5» era un tinte del 5 % con texto del mismo
+                        tono: legible en la pantalla de quien lo escribió y por
+                        debajo de AA en cualquier otra. El banner del sistema trae
+                        el par fondo/texto ya calibrado.
+                    -->
+                    <app-alert-banner variant="warning" icon="alert-triangle">
+                        <span role="status">
+                            <ul class="list-inside list-disc">
+                                @for (warning of warnings(); track warning.code) {
+                                    <li>{{ warning.message }}</li>
+                                }
+                            </ul>
+                        </span>
+                    </app-alert-banner>
                 }
 
                 <!-- Bloqueos: la lista COMPLETA, no el primero. El validador
@@ -1640,6 +1667,7 @@ type SectionId =
 export class InvoiceProfileEditorComponent {
     private readonly store = inject(Store);
     private readonly fb = inject(FormBuilder);
+    private readonly destroyRef = inject(DestroyRef);
     private readonly route = inject(ActivatedRoute);
     private readonly router = inject(Router);
     private readonly printGateway = inject(PrintGatewayClientService);
@@ -2480,6 +2508,25 @@ export class InvoiceProfileEditorComponent {
             : 'contract';
     }
 
+    /**
+     * El párrafo que explica el reparto, dicho SOBRE LA UNIDAD ELEGIDA.
+     *
+     * Antes era prosa fija que explicaba la unidad `'contract'`. Con la unidad
+     * puesta en `'aiu'` la pantalla quedaba diciendo que «la suma de los tres
+     * ES el AIU y lo que falte hasta el 100 % es costo» justo al lado de un
+     * contador que exige que sumen 100: dos afirmaciones incompatibles, y la
+     * equivocada era la que se lee primero.
+     *
+     * Los mismos tres números significan cosas distintas según la unidad —es
+     * la advertencia que ya trae el selector—, así que la explicación no puede
+     * ser la misma en los dos casos.
+     */
+    componentsBasisExplainer(): string {
+        return this.componentsBasis() === 'aiu'
+            ? 'El reparto que se aplica a las líneas de la factura. Con la unidad «el AIU» los tres porcentajes reparten el AIU entre sí y por eso tienen que sumar 100 %: qué porción del contrato es AIU lo decide el importe de cada factura, no este reparto.'
+            : 'El reparto que se aplica a las líneas de la factura. Con la unidad «valor del contrato» —como se redacta un contrato AIU— la suma de los tres ES el AIU, y lo que falte hasta el 100 % es costo reembolsable.';
+    }
+
     componentsSumOk(): boolean {
         this.form_value();
         if (!this.isAiu()) return true;
@@ -2711,16 +2758,53 @@ export class InvoiceProfileEditorComponent {
      * escribe, y el selector le muestra al lado la del catálogo para compararla.
      */
     addWithholding(): void {
-        this.withholdingRules.push(
-            this.fb.group({
-                concept_id: [null as number | null],
-                role: ['practiced'],
-                rate: [''],
-            }),
-        );
+        const group = this.fb.group({
+            concept_id: [null as number | null],
+            role: ['practiced'],
+            rate: [''],
+        });
+        this.wireCatalogRate(group);
+        this.withholdingRules.push(group);
     }
     removeWithholding(index: number): void {
         this.withholdingRules.removeAt(index);
+    }
+
+    /**
+     * Al elegir concepto, escribe su tarifa de catálogo — pero SÓLO si la
+     * casilla está vacía.
+     *
+     * Sin esto la fila nace en error: la tarifa vacía es inválida, y el mensaje
+     * de error tapa justamente el texto de ayuda que decía cuál es la tarifa del
+     * catálogo. El operador veía «la tarifa tiene que ser un porcentaje» sin
+     * ninguna pista de cuál.
+     *
+     * No sobrescribe una tarifa ya escrita a propósito: el catálogo es el caso
+     * normal, no la única verdad. Un mismo concepto se retiene a tarifa distinta
+     * cuando hay un convenio o una base especial, y pisar ese número al volver a
+     * tocar el selector sería cambiar un dato fiscal sin que nadie lo pidiera.
+     *
+     * `takeUntilDestroyed` necesita el `DestroyRef` explícito: esto corre desde
+     * un método, fuera del contexto de inyección del constructor.
+     */
+    private wireCatalogRate(group: FormGroup): void {
+        const concept = group.get('concept_id');
+        const rate = group.get('rate');
+        if (!concept || !rate) return;
+        concept.valueChanges
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe((value) => {
+                if (String(rate.value ?? '').trim() !== '') return;
+                const found = this.withholding_concepts().find(
+                    (c) => c.id === Number(value ?? 0),
+                );
+                if (!found) return;
+                rate.setValue(found.ratePercent.toFixed(2));
+                // `setValue` NO marca el control como `dirty`, y el guardado se
+                // apoya en el estado del formulario para saber que hay algo que
+                // guardar. Sin esto la tarifa se ve en pantalla y no se envía.
+                rate.markAsDirty();
+            });
     }
 
     /** La tarifa del catálogo para el concepto de una fila, o `null`. */
@@ -2846,14 +2930,17 @@ export class InvoiceProfileEditorComponent {
 
         this.withholdingRules.clear({ emitEvent: false });
         for (const rule of config.withholdings?.rules ?? []) {
-            this.withholdingRules.push(
-                this.fb.group({
-                    concept_id: [rule.concept_id ?? null],
-                    role: [rule.role ?? 'practiced'],
-                    rate: [rule.rate ?? ''],
-                }),
-                { emitEvent: false },
-            );
+            const group = this.fb.group({
+                concept_id: [rule.concept_id ?? null],
+                role: [rule.role ?? 'practiced'],
+                rate: [rule.rate ?? ''],
+            });
+            // También en las filas hidratadas: si alguien borra la tarifa y
+            // cambia el concepto, el catálogo vuelve a rellenarla. Con la tarifa
+            // ya escrita el enganche no hace nada, así que no puede pisar lo
+            // guardado.
+            this.wireCatalogRate(group);
+            this.withholdingRules.push(group, { emitEvent: false });
         }
 
         this.headerNotes.clear({ emitEvent: false });

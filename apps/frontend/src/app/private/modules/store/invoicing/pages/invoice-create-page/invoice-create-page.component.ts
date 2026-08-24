@@ -75,6 +75,7 @@ import {
   nextConsecutive,
 } from '../../utils/resolution-selection.util';
 
+import { AlertBannerComponent } from '../../../../../../shared/components/alert-banner/alert-banner.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import {
@@ -502,6 +503,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     NgClass,
     ReactiveFormsModule,
     StickyHeaderComponent,
+    AlertBannerComponent,
     ButtonComponent,
     InputComponent,
     SelectorComponent,
@@ -632,16 +634,9 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                 operador con una factura numerada distinto de lo que configuró y
                 sin nada en pantalla que lo relacione con el perfil.
               -->
-              <div
-                class="flex items-start gap-2 rounded-lg border border-warning bg-warning-light px-3 py-2.5"
-              >
-                <app-icon
-                  name="alert-triangle"
-                  [size]="14"
-                  class="mt-0.5 shrink-0 text-warning"
-                />
-                <p class="text-xs leading-relaxed text-warning">{{ notice }}</p>
-              </div>
+              <app-alert-banner variant="warning" icon="alert-triangle">
+                {{ notice }}
+              </app-alert-banner>
             }
 
             @if (resolutionEmptyReason(); as reason) {
@@ -683,18 +678,9 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
             }
 
             @if (technicalKeyWarning(); as warning) {
-              <div
-                class="flex items-start gap-2 rounded-lg border border-warning bg-warning-light px-3 py-2.5"
-              >
-                <app-icon
-                  name="alert-triangle"
-                  [size]="14"
-                  class="mt-0.5 shrink-0 text-warning"
-                />
-                <p class="text-xs leading-relaxed text-warning">
-                  {{ warning }}
-                </p>
-              </div>
+              <app-alert-banner variant="warning" icon="alert-triangle">
+                {{ warning }}
+              </app-alert-banner>
             }
 
             <!-- El selector elige; el banner sigue informando qué se eligió. -->
@@ -1090,11 +1076,38 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                 <div
                   class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5"
                 >
+                  <!--
+                    Trece casillas y no trece interruptores: esto es una lista
+                    de selección múltiple de códigos del RUT, no trece ajustes
+                    independientes. Un interruptor promete «activar algo» y
+                    ocuparía tres veces el alto.
+
+                    Lo que sí cambia es el contraste. Antes eran casillas
+                    desnudas sobre el fondo de la tarjeta: lo marcado y lo no
+                    marcado se distinguían por un cuadro de 13 px con el color
+                    por omisión del navegador. Ahora cada opción es una ficha
+                    con borde propio, y la marcada tiñe borde y fondo con el
+                    color primario del tema. El cuadro sigue ahí —el estado no
+                    puede comunicarse SÓLO por color— y el área pulsable pasa a
+                    ser toda la ficha.
+                  -->
                   @for (code of fiscalResponsibilities; track code) {
-                    <label class="flex items-center gap-2 cursor-pointer">
+                    <label
+                      class="flex items-center gap-2 cursor-pointer rounded-lg border px-2 py-2 transition-colors"
+                      [style.border-color]="
+                        hasResponsibility(code)
+                          ? 'var(--color-primary)'
+                          : 'var(--color-border)'
+                      "
+                      [style.background]="
+                        hasResponsibility(code)
+                          ? 'color-mix(in srgb, var(--color-primary) 8%, transparent)'
+                          : 'var(--color-surface)'
+                      "
+                    >
                       <input
                         type="checkbox"
-                        class="rounded border-border"
+                        class="h-4 w-4 shrink-0 rounded border-border accent-[var(--color-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
                         [checked]="hasResponsibility(code)"
                         (change)="toggleResponsibility(code)"
                       />
@@ -1211,30 +1224,28 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                         <div
                           class="col-span-8 md:col-span-5 flex items-center gap-2"
                         >
-                          <label
-                            class="flex shrink-0 cursor-pointer items-center gap-1.5"
+                          <!--
+                            «app-toggle» y no un «<input type="checkbox">»: es el
+                            control on/off del sistema, con el color del tenant,
+                            foco visible y área táctil. Mismo control que en el
+                            editor de perfiles, para que la decisión fiscal se
+                            vea igual donde se preconfigura y donde se emite.
+                          -->
+                          <div
+                            class="flex shrink-0 items-center"
                             [title]="
                               lineCarriesAiu(item)
                                 ? 'Esta línea lleva la base AIU configurada'
                                 : 'Costo reembolsable: no entra a la base AIU'
                             "
                           >
-                            <input
-                              type="checkbox"
-                              class="h-4 w-4 shrink-0 accent-[var(--color-primary)]"
+                            <app-toggle
+                              label="AIU"
+                              ariaLabel="Aplicar la base AIU a esta línea"
                               [checked]="lineCarriesAiu(item)"
-                              (change)="
-                                toggleLineAiu(
-                                  item,
-                                  $any($event.target).checked
-                                )
-                              "
-                            />
-                            <span
-                              class="text-[11px] font-medium text-[var(--color-text-secondary)]"
-                              >AIU</span
-                            >
-                          </label>
+                              (changed)="toggleLineAiu(item, $event)"
+                            ></app-toggle>
+                          </div>
                           @if (lineCarriesAiu(item)) {
                             <div class="min-w-0 flex-1">
                               <app-selector
@@ -1858,15 +1869,22 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                 un impuesto negativo.
               </p>
 
-              <label class="flex items-center gap-2 mb-3 cursor-pointer">
+              <!--
+                La etiqueta va DENTRO del interruptor y no en un «label» que lo
+                envuelve. El componente pone su propio «aria-label» al control,
+                y ese atributo gana sobre el texto del «label» de alrededor: el
+                lector de pantalla anunciaba «Toggle» y el texto visible no se
+                leía nunca. Además un «label» que envuelve un botón dispara el
+                clic dos veces.
+              -->
+              <div class="mb-3">
                 <app-toggle
                   formControlName="manual_withholding"
+                  label="Escribir el importe a mano en vez de calcularlo por concepto"
+                  ariaLabel="Escribir el importe de retención a mano en vez de calcularlo por concepto"
                   (toggled)="onManualWithholdingChange()"
                 />
-                <span class="text-xs text-text-primary">
-                  Escribir el importe a mano en vez de calcularlo por concepto
-                </span>
-              </label>
+              </div>
 
               @if (isManualWithholding()) {
                 <app-input
@@ -2054,12 +2072,13 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                 </p>
               </div>
 
-              <label class="flex items-center gap-2 mb-3 cursor-pointer">
-                <app-toggle formControlName="use_foreign_currency" />
-                <span class="text-xs text-text-primary">
-                  Declarar la conversión a una divisa extranjera
-                </span>
-              </label>
+              <div class="mb-3">
+                <app-toggle
+                  formControlName="use_foreign_currency"
+                  label="Declarar la conversión a una divisa extranjera"
+                  ariaLabel="Declarar la conversión a una divisa extranjera"
+                />
+              </div>
 
               @if (usesForeignCurrency()) {
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -4079,7 +4098,18 @@ export class InvoiceCreatePageComponent implements OnInit {
 
   readonly withholdingSummary = computed(() => {
     const amount = this.effectiveWithholding();
-    return amount > 0 ? this.formatCurrency(amount) : 'Sin retenciones';
+    if (amount > 0) return this.formatCurrency(amount);
+
+    // Con filas pero sin importe, decir «Sin retenciones» es FALSO y además
+    // engaña en el caso que más importa: el perfil acaba de precargar el
+    // concepto y la tarifa, y la base se calcula al emitir, así que el importe
+    // es 0 hasta que haya líneas. El resumen que se lee con la sección plegada
+    // decía que no había nada mientras dentro había un concepto configurado.
+    const rows = this.withholdingsValue().length;
+    if (rows === 0) return 'Sin retenciones';
+    return rows === 1
+      ? '1 concepto · base pendiente'
+      : rows + ' conceptos · base pendiente';
   });
 
   readonly currencySummary = computed(() =>

@@ -8,6 +8,7 @@ import {
   signal,
 } from '@angular/core';
 
+import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 
 /**
@@ -63,22 +64,61 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
  * El botón de ayuda es HERMANO del botón de plegado, no hijo: un `<button>`
  * dentro de otro es HTML inválido, y el clic de dentro además plegaría la
  * sección que se acaba de intentar entender.
+ *
+ * ─── POR QUÉ LA TARJETA LLEVA SUPERFICIE PROPIA ──────────────────────────────
+ *
+ * Antes la sección era sólo un borde: el cuerpo heredaba el fondo de la página,
+ * así que ocho formularios de campos fiscales se leían como una sola lámina
+ * dividida por líneas de 1 px. Ahora el cuerpo pinta `--color-surface` y la
+ * cabecera `--color-surface-secondary`: el escalón entre las dos es lo que hace
+ * que la cabecera se lea como cabecera sin depender del tamaño de la letra.
+ *
+ * Cuando la sección tiene errores la cabecera se tiñe (`bg-error-light`). El
+ * contador solo no basta: en una pantalla con ocho secciones plegadas hay que
+ * poder encontrar la que falla de un barrido, y el color de la banda se ve desde
+ * más lejos que un número de 11 px. El contador se queda porque el estado no
+ * puede comunicarse SÓLO por color.
+ *
+ * ─── POR QUÉ EL HOST LLEVA `display: block` ──────────────────────────────────
+ *
+ * Un componente Angular no trae display propio: su host es `inline`. Y los
+ * márgenes VERTICALES no aplican sobre un elemento inline no reemplazado, así
+ * que el `space-y-6` del contenedor padre —que se traduce a `margin-top` en
+ * `> * + *`— se calculaba y se descartaba: ocho secciones pegadas sin ningún
+ * error visible, con la clase correcta puesta en el sitio correcto.
+ *
+ * Es la misma trampa que la nota del chevron de más abajo, en el otro sentido.
+ * Se arregla acá y no en cada página para que la separación no dependa de que
+ * quien use la sección se acuerde del detalle.
  */
 @Component({
   selector: 'vendix-invoice-form-section',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent],
+  host: { class: 'block' },
+  imports: [BadgeComponent, IconComponent],
   template: `
     <section
-      class="border rounded-lg transition-colors"
+      class="border rounded-lg bg-[var(--color-surface)] shadow-sm transition-colors"
       [class.border-error]="errorCount() > 0"
       [class.border-border]="errorCount() === 0"
     >
+      <!--
+        El fondo va por «[style.background]» y no por dos clases de Tailwind: una
+        clase con valor arbitrario —«bg-[var(--x)]»— NO se puede poner dentro de
+        un «[class.x]» porque el corchete cierra la expresión del binding, y
+        dejar las dos como clases estáticas haría que ganara la que el bundler
+        emita última, que no es algo sobre lo que se pueda razonar.
+      -->
       <div
-        class="relative flex items-stretch bg-[var(--color-surface-secondary)] transition-colors"
+        class="relative flex items-stretch transition-colors"
         [class.rounded-t-lg]="expanded()"
         [class.rounded-lg]="!expanded()"
+        [style.background]="
+          errorCount() > 0
+            ? 'var(--color-error-light)'
+            : 'var(--color-surface-secondary)'
+        "
       >
       <button
         type="button"
@@ -118,20 +158,19 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
         }
 
         @if (errorCount() > 0) {
-          <span
-            class="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-error-light text-error"
-            [attr.aria-label]="errorLabel()"
-          >
-            <app-icon name="alert-triangle" [size]="12" />
-            {{ errorCount() }}
+          <span class="shrink-0" [attr.aria-label]="errorLabel()">
+            <app-badge variant="error" size="xs" badgeStyle="outline">
+              <app-icon name="alert-triangle" [size]="11" class="mr-1" />
+              {{ errorCount() }}
+            </app-badge>
           </span>
         }
 
         @if (optional()) {
-          <span
-            class="shrink-0 text-[11px] text-[var(--color-text-muted)] hidden sm:inline"
-          >
-            Opcional
+          <span class="shrink-0 hidden sm:inline">
+            <app-badge variant="neutral" size="xs" badgeStyle="outline">
+              Opcional
+            </app-badge>
           </span>
         }
 
@@ -193,7 +232,7 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
         selección visible de impuestos de cada línea.
       -->
       <div
-        class="p-3 border-t border-border rounded-b-lg"
+        class="p-3 sm:p-4 border-t border-border rounded-b-lg bg-[var(--color-surface)]"
         [class.hidden]="!expanded()"
         [attr.aria-hidden]="!expanded()"
       >
