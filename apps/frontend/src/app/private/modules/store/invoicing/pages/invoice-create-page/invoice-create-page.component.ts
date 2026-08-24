@@ -303,6 +303,15 @@ const PROFILE_NONE = 0;
  * Las LÍNEAS y las RETENCIONES no están acá: son `FormArray`, no se gobiernan
  * por `pristine` sino por las banderas `forced` de sus dos siembras, y se
  * advierten aparte porque su aviso lleva el conteo.
+ *
+ * LA MATRIZ DE TRIBUTOS (`aiu_taxes`) tampoco, y no por olvido: su `dirty` no
+ * significa «escrito a mano». La reproyección que mantiene la matriz coherente
+ * con la base gravable —`reprojectAiuTaxRules`, disparada al sembrar la base
+ * heredada— añade la fila derivada del costo reembolsable y con eso marca el
+ * arreglo `dirty` sin que nadie haya tocado nada. Advertir sobre esa señal
+ * pondría en el modal una pérdida que el operador no causó, y un aviso que
+ * aparece solo es lo que entrena a ignorar los avisos. Mientras la matriz no
+ * tenga una marca propia de captura manual, se queda fuera.
  */
 const PROFILE_PREFILL_LABELS: ReadonlyArray<readonly [string, string]> = [
   ['resolution_id', 'la resolución elegida'],
@@ -315,6 +324,32 @@ const PROFILE_PREFILL_LABELS: ReadonlyArray<readonly [string, string]> = [
   ['exchange_rate', 'la tasa de cambio'],
   ['aiu_contract_object', 'el objeto del contrato'],
   ['default_account_code', 'la cuenta contable por omisión'],
+  // ── LO QUE LA SECCIÓN AIU AÑADIÓ AL DOCUMENTO ────────────────────────────
+  //
+  // Estas ocho rutas viven en el grupo `aiu` y las escribe
+  // `seedAiuFromProfile`, no el `put()` de `applyProfilePrefill`. Aun así
+  // pertenecen a esta lista, que no es «lo que escribe put()» sino «lo que un
+  // perfil precarga»: sin ellos, elegir un perfil sobre un reparto escrito a
+  // mano lo reemplazaba SIN avisar de que se perdía, y era la mitad de la
+  // sección AIU la que desaparecía en silencio.
+  //
+  // Varias rutas comparten etiqueta —igual que las dos de la divisa— porque el
+  // aviso se lee por concepto y no por control: «el reparto de la base AIU» es
+  // una sola cosa para quien la escribió, aunque sean tres campos.
+  //
+  // Las TRES congeladas —`taxable_basis`, `enforce_minimum_base`,
+  // `minimum_base_percent`— NO entran: no las precarga el perfil sino los
+  // ajustes efectivos, y no se pueden escribir a mano (ver `aiuFrozenFields`),
+  // así que nunca pueden estar `dirty`. Advertir de perderlas sería avisar de
+  // una pérdida que no ocurre.
+  ['aiu.components_basis', 'la unidad de los porcentajes del AIU'],
+  ['aiu.administracion', 'el reparto de la base AIU'],
+  ['aiu.imprevistos', 'el reparto de la base AIU'],
+  ['aiu.utilidad', 'el reparto de la base AIU'],
+  ['aiu.revenue_administracion', 'las cuentas contables del AIU'],
+  ['aiu.revenue_imprevistos', 'las cuentas contables del AIU'],
+  ['aiu.revenue_utilidad', 'las cuentas contables del AIU'],
+  ['aiu.vat_payable_account', 'las cuentas contables del AIU'],
 ];
 
 /**
@@ -1454,6 +1489,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                 [departures]="aiuDepartures()"
                 [frozenFields]="aiuFrozenFields"
                 [frozenReason]="aiuFrozenReason()"
+                [customerFiscalResponsibilities]="responsibilitiesValue()"
               ></vendix-invoice-section-aiu>
 
               <!-- Nota CAV03 que viaja al XML. El campo que la alimenta —el
@@ -3027,7 +3063,16 @@ export class InvoiceCreatePageComponent implements OnInit {
     () => this.rawValue()['foreign_currency'] || 'divisa',
   );
 
-  private readonly responsibilitiesValue = computed<string[]>(() => {
+  /**
+   * Responsabilidades fiscales del adquiriente, reactivas.
+   *
+   * PÚBLICA porque la sección AIU deriva de ellas su SUGERENCIA de tributos y
+   * la recibe como entrada. Se pasa el valor y no la ruta del control a
+   * propósito: la sección no debe poder escribir el RUT del cliente, sólo
+   * leerlo. Cuelga de `rawValue()`, así que cambia con el cliente elegido y con
+   * cada casilla que se marque a mano.
+   */
+  readonly responsibilitiesValue = computed<string[]>(() => {
     const value = this.rawValue()['customer_fiscal_responsibilities'];
     return Array.isArray(value) ? value : [];
   });

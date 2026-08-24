@@ -42,6 +42,7 @@ import type {
   AiuTaxableBasis,
   ProfileTaxRule,
 } from '../../../../../../core/utils/invoice-profile-config.contract';
+import { getFiscalResponsibilityLabel } from '../../../../../../shared/constants/fiscal-responsibilities.constants';
 import type { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
 
 /**
@@ -459,4 +460,253 @@ export function aiuCostRuleNote(
     'Esa constancia es la que hace que la previsualización lo siga listando ' +
     'entre las porciones omitidas.'
   );
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// SUGERENCIA DE TRIBUTOS DESDE LAS RESPONSABILIDADES DEL ADQUIRIENTE
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * ## La matriz PROPONE. Nunca aplica.
+ *
+ * Las responsabilidades fiscales del adquiriente —campo 9 del RUT, que el
+ * documento ya trae cargado— insinúan qué tributos suele llevar un contrato
+ * con ese cliente. Insinuar no es decidir, y la diferencia acá no es de estilo:
+ *
+ * · Si la sugerencia se aplicara sola, un cliente marcado «Gran contribuyente»
+ *   —agente de retención por ley— sembraría una retención que nadie pidió, y
+ *   una retención RESTA de lo que se cobra. El operador vería un total menor sin
+ *   haber tocado nada.
+ * · Al contrario, un IVA sugerido y aplicado en silencio sobre un servicio
+ *   excluido declararía un impuesto que no existe.
+ *
+ * Por eso la sugerencia vive FUERA de la matriz hasta que alguien la aplica, y
+ * lo que se quita no vuelve: ver {@link aiuTaxSuggestions}.
+ *
+ * ## Por qué la responsabilidad del cliente no basta, y se dice en pantalla
+ *
+ * Quien cobra IVA es el EMISOR, por la naturaleza del servicio; que el cliente
+ * sea responsable de IVA sólo significa que podrá descontarlo. La sugerencia es
+ * entonces una pista sobre el cliente, no una conclusión sobre el documento, y
+ * cada fila lleva su advertencia (`caveat`) diciéndolo. Sin esa frase la
+ * pantalla afirmaría una obligación fiscal que no puede derivar de ese dato.
+ *
+ * ## Por qué unas traen tarifa y otras no
+ *
+ * El validador del contrato fija las tarifas admisibles del IVA (0 / 5 / 16 /
+ * 19 %) y del INC (2 / 4 / 8 / 16 %), y no fija ninguna para las retenciones —
+ * porque las tablas de retefuente están indexadas por CONCEPTO y hay tarifas
+ * repetidas para conceptos distintos. Donde la ley no fija una sola tarifa,
+ * proponer un número sería inventarlo: la sugerencia se queda en aviso, sin
+ * botón de aplicar, y dice de dónde sacar la tarifa. Un número inventado en una
+ * casilla de impuestos es peor que una casilla vacía, porque se guarda igual.
+ */
+export interface AiuTaxSuggestionSource {
+  /** Código de la responsabilidad, tal como está en el RUT del cliente. */
+  code: string;
+  /** Su etiqueta en español. La procedencia se dice con nombre, no con código. */
+  label: string;
+}
+
+export interface AiuTaxSuggestion {
+  /** Código del tributo, tabla 13.2.2 del anexo técnico. */
+  tax_code: string;
+  /** Etiqueta del tributo, la MISMA que ofrece el selector de la matriz. */
+  tax_label: string;
+  /**
+   * Tarifa propuesta, o `null` cuando la ley no fija una sola y proponer un
+   * número sería inventarlo. `null` significa además NO APLICABLE: sin tarifa
+   * determinada no hay fila que escribir.
+   */
+  rate: string | null;
+  /** Responsabilidades del adquiriente que la produjeron. Nunca vacío. */
+  sources: readonly AiuTaxSuggestionSource[];
+  /** Qué hay que confirmar antes de aplicarla. Se pinta siempre. */
+  caveat: string;
+}
+
+const IVA_CAVEAT =
+  'Confirma que el servicio esté gravado: el IVA lo cobra el emisor por la naturaleza del servicio, y la responsabilidad del cliente sólo dice que podrá descontarlo.';
+
+const INC_CAVEAT =
+  'Sin tarifa sugerida: el INC admite 2 %, 4 %, 8 % y 16 % según el bien o el servicio, y proponer una sería inventarla. Agrégalo con «Agregar impuesto» y escribe la del concepto.';
+
+const RETEFUENTE_CAVEAT =
+  'Sin tarifa sugerida: la retención depende del concepto y la DIAN no fija una sola. Agrégala con «Agregar impuesto», o captúrala en la sección de retenciones, que es donde viaja con su concepto.';
+
+/**
+ * Responsabilidad del RUT → tributo que insinúa.
+ *
+ * Los códigos son los del catálogo compartido con el backend
+ * (`fiscal-responsibilities.constants.ts`), que es espejo del validador: un
+ * código que no esté ahí no puede llegar en el formulario.
+ *
+ * Lo que NO está acá está fuera a propósito, y por qué:
+ * · `O-15` Autorretenedor — retiene sobre sus PROPIOS ingresos; como comprador
+ *   no practica retención sobre esta factura. Sugerir una sería al revés.
+ * · `O-47` Régimen simple — no es agente de retención en renta.
+ * · `O-49` / `O-22` No responsable de IVA — que el cliente no lo sea NO quita
+ *   el IVA del documento: lo decide el servicio y el emisor. Un mapeo inverso
+ *   que quitara el IVA por esto declararía de menos.
+ * · `R-99-PN`, `O-14`, `O-16`, `O-32` — no dicen nada sobre los tributos de un
+ *   contrato AIU.
+ */
+const AIU_TAX_SUGGESTION_BY_RESPONSIBILITY: Readonly<
+  Record<string, { tax_code: string; rate: string | null; caveat: string }>
+> = {
+  'O-48': { tax_code: '01', rate: '19.00', caveat: IVA_CAVEAT },
+  'O-17': { tax_code: '01', rate: '19.00', caveat: IVA_CAVEAT },
+  'O-19': { tax_code: '04', rate: null, caveat: INC_CAVEAT },
+  'O-33': { tax_code: '04', rate: null, caveat: INC_CAVEAT },
+  'O-13': { tax_code: '06', rate: null, caveat: RETEFUENTE_CAVEAT },
+};
+
+/** Etiqueta del tributo según el selector de la matriz. Un solo sitio. */
+export function aiuTaxCodeLabel(code: string): string {
+  const option = AIU_TAX_CODE_OPTIONS.find(
+    (candidate) => String(candidate.value) === code,
+  );
+  return option ? String(option.label) : 'Tributo ' + code;
+}
+
+/**
+ * Los tributos que las responsabilidades del adquiriente sugieren y que la
+ * matriz TODAVÍA no declara.
+ *
+ * Tres filtros, y el orden importa menos que el hecho de que los tres existan:
+ *
+ *  1. **Descartados** — `dismissed` es la memoria de lo que la persona quitó.
+ *     Sin ella la sugerencia se recalcularía sobre el estado actual de la
+ *     matriz, así que quitar una fila la haría REAPARECER como sugerencia y
+ *     volver a ofrecerla: el operador quita, la pantalla repone, y el segundo
+ *     clic vuelve a poner el tributo. Es el defecto que este parámetro cierra.
+ *  2. **Ya declarados** — un tributo con fila GRAVABLE en la matriz no se
+ *     sugiere: ya está. Se mira `taxable` y no la sola presencia del código,
+ *     porque bajo la base «sólo Utilidad» las porciones excluidas conservan su
+ *     `tax_code` con `taxable:false` y tarifa 0,00 — están en la matriz sin
+ *     declarar nada, y tratarlas como declaradas esconderría la sugerencia
+ *     justo cuando hace falta.
+ *  3. **Sin duplicar** — dos responsabilidades pueden insinuar el mismo tributo
+ *     (`O-48` y `O-17`, las dos de IVA). Se emite UNA sugerencia con las dos
+ *     procedencias, porque dos tarjetas idénticas se leen como dos tributos.
+ */
+export function aiuTaxSuggestions(params: {
+  responsibilities: readonly string[];
+  rules: readonly AiuTaxRuleValue[];
+  dismissed?: ReadonlySet<string>;
+}): AiuTaxSuggestion[] {
+  const dismissed = params.dismissed ?? new Set<string>();
+  const declared = new Set(
+    params.rules
+      .filter((rule) => Boolean(rule.taxable))
+      .map((rule) => String(rule.tax_code ?? '').trim()),
+  );
+
+  const byTaxCode = new Map<string, AiuTaxSuggestion>();
+
+  for (const raw of params.responsibilities) {
+    const code = String(raw ?? '').trim();
+    const entry = AIU_TAX_SUGGESTION_BY_RESPONSIBILITY[code];
+    if (!entry) continue;
+    if (dismissed.has(entry.tax_code)) continue;
+    if (declared.has(entry.tax_code)) continue;
+
+    const source: AiuTaxSuggestionSource = {
+      code,
+      label: getFiscalResponsibilityLabel(code),
+    };
+    const existing = byTaxCode.get(entry.tax_code);
+    if (existing) {
+      // Misma sugerencia, otra procedencia. Se acumulan las dos: el operador
+      // tiene que poder ver por cuál de las responsabilidades del RUT aparece.
+      byTaxCode.set(entry.tax_code, {
+        ...existing,
+        sources: [...existing.sources, source],
+      });
+      continue;
+    }
+    byTaxCode.set(entry.tax_code, {
+      tax_code: entry.tax_code,
+      tax_label: aiuTaxCodeLabel(entry.tax_code),
+      rate: entry.rate,
+      sources: [source],
+      caveat: entry.caveat,
+    });
+  }
+
+  return [...byTaxCode.values()];
+}
+
+/** «sugerido por «Gran contribuyente» (O-13)», con todas sus procedencias. */
+export function aiuTaxSuggestionOrigin(suggestion: AiuTaxSuggestion): string {
+  const named = suggestion.sources
+    .map((source) => '«' + source.label + '» (' + source.code + ')')
+    .join(' y ');
+  return 'Sugerido por ' + named + ' en las responsabilidades fiscales del cliente.';
+}
+
+/**
+ * Las porciones del AIU que la base elegida grava, sin el costo.
+ *
+ * Consulta {@link AIU_TAXABLE_BUCKETS_BY_BASIS} en vez de afirmarlo: es la
+ * única tabla que sabe qué entra a la base, y es espejo del validador. El costo
+ * se excluye porque su fila la ESCRIBE {@link derivedCostTaxRule} y no una
+ * persona.
+ */
+export function aiuTaxableComponents(
+  basis: AiuTaxableBasis,
+): AiuComponentLiteral[] {
+  return AIU_TAXABLE_BUCKETS_BY_BASIS[basis].filter(
+    (bucket): bucket is AiuComponentLiteral => bucket !== 'costo',
+  );
+}
+
+/**
+ * Qué haría exactamente aplicar una sugerencia, ANTES de aplicarla.
+ *
+ * Se calcula aparte para poder DECIRLO en la tarjeta: aplicar escribe sobre la
+ * matriz, y una acción que escribe tiene que enumerar lo que va a tocar.
+ *
+ * · `writes` — porciones que la base grava y que hoy no declaran ese tributo.
+ *   Reciben la fila (o la que tenían, si no declaraba nada).
+ * · `keeps` — porciones que YA declaran otro tributo. No se tocan: la matriz
+ *   admite UNA regla por porción —`TAX_BUCKET_DUPLICATED` rechaza dos— así que
+ *   escribir ahí no sería añadir un tributo, sería REEMPLAZAR el que alguien
+ *   eligió. Se nombran en pantalla para que el hueco no parezca un fallo.
+ */
+export function aiuSuggestionPlan(params: {
+  suggestion: AiuTaxSuggestion;
+  rules: readonly AiuTaxRuleValue[];
+  basis: AiuTaxableBasis;
+}): {
+  writes: AiuComponentLiteral[];
+  keeps: { bucket: AiuComponentLiteral; tax_code: string }[];
+} {
+  const writes: AiuComponentLiteral[] = [];
+  const keeps: { bucket: AiuComponentLiteral; tax_code: string }[] = [];
+
+  for (const bucket of aiuTaxableComponents(params.basis)) {
+    const rule = params.rules.find((candidate) => candidate.bucket === bucket);
+    const declaredCode = String(rule?.tax_code ?? '').trim();
+    if (
+      rule &&
+      Boolean(rule.taxable) &&
+      declaredCode !== params.suggestion.tax_code
+    ) {
+      keeps.push({ bucket, tax_code: declaredCode });
+      continue;
+    }
+    writes.push(bucket);
+  }
+
+  return { writes, keeps };
+}
+
+/** «Administración, Imprevistos y Utilidad», para decir qué se escribiría. */
+export function aiuBucketListLabel(
+  buckets: readonly AiuComponentLiteral[],
+): string {
+  const labels = buckets.map((bucket) => AIU_COMPONENT_LABELS[bucket]);
+  if (labels.length <= 1) return labels.join('');
+  return labels.slice(0, -1).join(', ') + ' y ' + labels[labels.length - 1];
 }

@@ -4,6 +4,7 @@ import {
   computed,
   inject,
   input,
+  linkedSignal,
   signal,
   effect,
 } from '@angular/core';
@@ -44,6 +45,7 @@ import {
   AIU_MATRIX_BUCKET_OPTIONS,
   AIU_TAXABLE_BASIS_OPTIONS,
   AIU_TAX_CODE_OPTIONS,
+  aiuBucketListLabel,
   aiuComponentUnitSuffix,
   aiuComponentsBasisExplainer,
   aiuComponentsSumOk,
@@ -51,12 +53,44 @@ import {
   aiuComponentsSumTarget,
   aiuCostRuleNote,
   aiuMinimumBaseHelp,
+  aiuSuggestionPlan,
+  aiuTaxCodeLabel,
   aiuTaxMatrixMismatchMessage,
+  aiuTaxSuggestionOrigin,
+  aiuTaxSuggestions,
   asAiuComponentsBasis,
   asAiuTaxableBasis,
+  derivedCostTaxRule,
   reprojectAiuTaxRules,
 } from './invoice-section-aiu.logic';
-import type { AiuTaxRuleValue } from './invoice-section-aiu.logic';
+import type {
+  AiuTaxRuleValue,
+  AiuTaxSuggestion,
+} from './invoice-section-aiu.logic';
+
+/**
+ * Una sugerencia YA RESUELTA para la plantilla: el tributo, de dónde sale, qué
+ * escribiría y qué respetaría.
+ *
+ * Se arma en un `computed` y no en la plantilla porque la plantilla no puede
+ * decidir nada: `applicable` depende de que la ley fije una tarifa Y de que
+ * quede alguna porción donde escribirla, y esa conjunción escrita en un `@if`
+ * sería la clase de regla que se duplica y luego divergirá del botón.
+ */
+interface AiuTaxSuggestionRow {
+  tax_code: string;
+  tax_label: string;
+  /** Tarifa con su símbolo, o cadena vacía cuando no hay tarifa determinada. */
+  rate_label: string;
+  origin: string;
+  caveat: string;
+  /** ¿Hay algo que aplicar? Decide el botón, no la plantilla. */
+  applicable: boolean;
+  /** Porciones que recibirían la fila. Vacío si no hay ninguna. */
+  writes_label: string;
+  /** Porciones que ya declaran otro tributo y no se tocan. */
+  keeps_label: string;
+}
 
 /** Rutas de los controles AIU en el formulario de la pantalla que los aloja. */
 export interface AiuSectionPaths {
@@ -550,6 +584,106 @@ const SECTION = 'AIU';
           <p class="text-[11px] leading-relaxed text-text-secondary">
             {{ taxSuggestionNote }}
           </p>
+          <!--
+            LOS TRIBUTOS SUGERIDOS. Viven FUERA de la matriz hasta que alguien
+            los aplica, y eso no es estética: si se aplicaran solos, un cliente
+            marcado «Gran contribuyente» —agente de retención por ley— sembraría
+            una retención que nadie pidió, y una retención RESTA de lo que se
+            cobra. El operador vería un total menor sin haber tocado nada.
+
+            Cada tarjeta dice de dónde sale (la responsabilidad del RUT, con
+            nombre y código), qué habría que confirmar, y qué escribiría si se
+            aplica. Las que la ley no tarifa no traen botón: proponer un
+            porcentaje de retefuente sería inventarlo, y un número inventado en
+            una casilla de impuestos se guarda igual que uno correcto.
+          -->
+          @if (taxSuggestionRows().length > 0) {
+            <div
+              class="rounded-lg border border-dashed border-[var(--color-primary)] bg-[color-mix(in_srgb,var(--color-primary)_4%,transparent)] p-3 space-y-2"
+            >
+              <div class="flex items-start gap-1.5">
+                <app-icon
+                  name="lightbulb"
+                  [size]="14"
+                  class="mt-0.5 shrink-0 text-[var(--color-primary)]"
+                ></app-icon>
+                <p class="text-xs font-semibold text-text-primary">
+                  Sugeridos por las responsabilidades fiscales del cliente
+                </p>
+              </div>
+              <p class="text-[11px] leading-relaxed text-text-secondary">
+                Nada de esto está aplicado. Son pistas del RUT del adquiriente,
+                no conclusiones sobre este contrato: aplicar es una acción tuya,
+                y lo que descartes no se vuelve a proponer.
+              </p>
+              @for (
+                suggestion of taxSuggestionRows();
+                track suggestion.tax_code
+              ) {
+                <div
+                  class="rounded-lg border border-border bg-[var(--color-surface)] p-2.5"
+                >
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0 space-y-1">
+                      <p class="text-sm font-semibold text-text-primary">
+                        {{ suggestion.tax_label }}
+                        @if (suggestion.rate_label) {
+                          <span class="font-normal text-text-secondary">
+                            · {{ suggestion.rate_label }}
+                          </span>
+                        }
+                      </p>
+                      <p
+                        class="text-[11px] leading-relaxed text-text-secondary"
+                      >
+                        {{ suggestion.origin }}
+                      </p>
+                      <p class="text-[11px] leading-relaxed text-warning">
+                        {{ suggestion.caveat }}
+                      </p>
+                      @if (suggestion.applicable) {
+                        <p
+                          class="text-[11px] leading-relaxed text-text-secondary"
+                        >
+                          Al aplicar se escribe en:
+                          <strong class="text-text-primary">{{
+                            suggestion.writes_label
+                          }}</strong
+                          >.
+                        </p>
+                      }
+                      @if (suggestion.keeps_label) {
+                        <p
+                          class="text-[11px] leading-relaxed text-text-secondary"
+                        >
+                          {{ suggestion.keeps_label }}
+                        </p>
+                      }
+                    </div>
+                    <div class="flex shrink-0 items-center gap-1.5">
+                      @if (suggestion.applicable) {
+                        <app-button
+                          variant="secondary"
+                          size="sm"
+                          (clicked)="applyTaxSuggestion(suggestion.tax_code)"
+                        >
+                          Aplicar
+                        </app-button>
+                      }
+                      <app-button
+                        variant="ghost"
+                        size="sm"
+                        ariaLabel="Descartar este tributo sugerido"
+                        (clicked)="dismissTaxSuggestion(suggestion.tax_code)"
+                      >
+                        <app-icon slot="icon" name="x" [size]="15"></app-icon>
+                      </app-button>
+                    </div>
+                  </div>
+                </div>
+              }
+            </div>
+          }
           @if (visibleTaxRules().length === 0) {
             <p class="text-xs italic text-text-secondary">
               Sin impuestos. El documento no declararía ninguno: agrégalos con el
@@ -663,6 +797,20 @@ export class InvoiceSectionAiuComponent {
 
   /** Por qué están congelados. Se pinta junto a ellos; obligatorio si hay. */
   readonly frozenReason = input<string>('');
+
+  /**
+   * Responsabilidades fiscales del ADQUIRIENTE — campo 9 de su RUT.
+   *
+   * Es el único dato de fuera de la sección que entra acá, y entra como valor
+   * plano y no como ruta del formulario a propósito: no es un control del AIU
+   * —vive en el bloque del adquiriente— y la sección no debe poder escribirlo.
+   * De él sale la SUGERENCIA de tributos, que propone y nunca aplica.
+   *
+   * Vacío en el editor de perfiles, donde no hay adquiriente: un perfil se
+   * configura antes de saber a quién se le factura. La pantalla lo dice en vez
+   * de dejar el hueco, ver `taxSuggestionNote`.
+   */
+  readonly customerFiscalResponsibilities = input<readonly string[]>([]);
 
   readonly components = AIU_COMPONENTS;
   // Copias mutables de las listas del módulo de lógica: `app-selector` declara
@@ -957,6 +1105,208 @@ export class InvoiceSectionAiuComponent {
       : 'Acá no hay adquiriente, así que no hay tributos sugeridos: un perfil se configura antes de saber a quién se le factura. La sugerencia por responsabilidades fiscales del cliente sólo existe al emitir.';
   }
 
+  // ── Sugerencia de tributos: PROPONE, nunca aplica ───────────────────────
+  //
+  // Las cinco propiedades de C.4, y dónde vive cada una:
+  //  · sólo en contexto «invoice» ......... `taxSuggestionRows`, primer return
+  //  · nada se aplica sin acción .......... no hay escritura fuera de
+  //                                        `applyTaxSuggestion`, que es un
+  //                                        (clicked) de la plantilla
+  //  · la procedencia se dice ............. `aiuTaxSuggestionOrigin`
+  //  · lo quitado no vuelve ............... `dismissedTaxSuggestions`
+  //  · en el perfil se explica ............ `taxSuggestionNote`, rama 'profile'
+
+  /**
+   * Huella de las responsabilidades, como CADENA.
+   *
+   * Tiene que ser una cadena y no el arreglo: la pantalla que aloja la sección
+   * recalcula su lista en cada cambio del formulario, así que la referencia del
+   * arreglo cambia con cada tecla aunque el contenido sea el mismo. Comparada
+   * por referencia, esa huella «cambiaría» constantemente y borraría los
+   * descartes en cada pulsación —reponiendo justo el tributo que la persona
+   * acaba de quitar—. Comparada como cadena, sólo cambia cuando cambia el
+   * cliente o cuando alguien edita sus responsabilidades a mano.
+   */
+  private readonly responsibilitiesKey = computed<string>(() =>
+    [...this.customerFiscalResponsibilities()]
+      .map((code) => String(code ?? '').trim())
+      .filter((code) => code.length > 0)
+      .sort()
+      .join(','),
+  );
+
+  /**
+   * Tributos que la persona QUITÓ o descartó, por código.
+   *
+   * Es la memoria que hace que una sugerencia no vuelva. Sin ella la sugerencia
+   * se recalcularía sobre el estado actual de la matriz, así que quitar la fila
+   * la devolvería a la lista de sugeridos y volvería a ofrecerla: el operador
+   * quita, la pantalla repone. Se alimenta desde los dos caminos por los que un
+   * tributo sugerido desaparece —el botón «Descartar» y el bote de basura de la
+   * fila—, porque los dos significan lo mismo.
+   *
+   * `linkedSignal` y no `signal`: cuando cambia el ADQUIRIENTE cambian sus
+   * responsabilidades, y con ellas la decisión. Los descartes del cliente
+   * anterior no pueden esconder un tributo que el nuevo sí insinúa. La fuente
+   * es la huella en cadena, no el arreglo, por lo dicho arriba.
+   */
+  private readonly dismissedTaxSuggestions = linkedSignal<
+    string,
+    readonly string[]
+  >({
+    source: () => this.responsibilitiesKey(),
+    computation: () => [],
+  });
+
+  /** Las sugerencias vivas, ya filtradas por descartes y por lo ya declarado. */
+  private readonly taxSuggestions = computed<AiuTaxSuggestion[]>(() => {
+    if (this.context() !== 'invoice') return [];
+    return aiuTaxSuggestions({
+      responsibilities: this.customerFiscalResponsibilities(),
+      rules: this.ruleValues(),
+      dismissed: new Set(this.dismissedTaxSuggestions()),
+    });
+  });
+
+  /** Lo que la plantilla pinta: sugerencia, procedencia y alcance. */
+  readonly taxSuggestionRows = computed<AiuTaxSuggestionRow[]>(() => {
+    const basis = this.taxableBasis();
+    const rules = this.ruleValues();
+    return this.taxSuggestions().map((suggestion) => {
+      const plan = aiuSuggestionPlan({ suggestion, rules, basis });
+      const keeps = plan.keeps
+        .map(
+          (kept) =>
+            AIU_COMPONENT_LABELS[kept.bucket] +
+            ' ya declara ' +
+            aiuTaxCodeLabel(kept.tax_code),
+        )
+        .join('; ');
+      return {
+        tax_code: suggestion.tax_code,
+        tax_label: suggestion.tax_label,
+        rate_label: suggestion.rate === null ? '' : suggestion.rate + ' %',
+        origin: aiuTaxSuggestionOrigin(suggestion),
+        caveat: suggestion.caveat,
+        // Aplicable exige las DOS cosas: una tarifa que la ley fije, y alguna
+        // porción donde escribirla. Un botón que no escribiera nada sería peor
+        // que no tenerlo: la persona lo pulsaría y creería que quedó aplicado.
+        applicable: suggestion.rate !== null && plan.writes.length > 0,
+        writes_label: aiuBucketListLabel(plan.writes),
+        // Sólo se dice qué se respeta cuando aplicar es posible: en una
+        // sugerencia sin tarifa nada se va a escribir, y enumerar lo que «no se
+        // toca» sugeriría que algo sí se toca.
+        keeps_label:
+          suggestion.rate !== null && keeps ? keeps + ', y no se toca.' : '',
+      };
+    });
+  });
+
+  /**
+   * Aplica una sugerencia. ES UN ACTO EXPLÍCITO y el único escritor.
+   *
+   * Escribe UNA fila por porción que la base grava, respetando la que ya
+   * declara otro tributo: la matriz admite una sola regla por porción
+   * —`TAX_BUCKET_DUPLICATED` rechaza dos— así que escribir encima no añadiría
+   * un tributo, reemplazaría el que alguien eligió.
+   *
+   * NO llama a la reproyección completa: reproyectar volteando también las
+   * porciones que hoy contradicen la base sería un efecto que nadie pidió al
+   * pulsar «Aplicar», y la sección ya avisa de esa contradicción por su cuenta.
+   * Lo único que sí se sincroniza es la fila del costo, porque su tarifa se
+   * DERIVA de la de las porciones y acaba de cambiar.
+   */
+  applyTaxSuggestion(taxCode: string): void {
+    const suggestion = this.taxSuggestions().find(
+      (candidate) => candidate.tax_code === taxCode,
+    );
+    if (!suggestion || suggestion.rate === null) return;
+
+    const basis = this.taxableBasis();
+    const rules = this.taxRules();
+    const plan = aiuSuggestionPlan({
+      suggestion,
+      rules: this.ruleValues(),
+      basis,
+    });
+
+    for (const bucket of plan.writes) {
+      const index = this.taxRules().controls.findIndex(
+        (control) => String(control.get('bucket')?.value ?? '') === bucket,
+      );
+      if (index >= 0) {
+        const control = rules.at(index);
+        control.patchValue({
+          taxable: true,
+          tax_code: suggestion.tax_code,
+          rate: suggestion.rate,
+        });
+        control.markAsDirty();
+        continue;
+      }
+      rules.push(
+        this.fb.group({
+          bucket: [bucket],
+          taxable: [true],
+          tax_code: [suggestion.tax_code],
+          rate: [suggestion.rate],
+        }),
+      );
+    }
+    // Aplicar es una decisión sobre ESTE documento: la matriz queda `dirty` para
+    // que un cambio de perfil posterior avise de que la reemplazaría.
+    rules.markAsDirty();
+    this.syncCostRule(basis);
+  }
+
+  /** «No aplica a este contrato». Se recuerda: no se vuelve a proponer. */
+  dismissTaxSuggestion(taxCode: string): void {
+    this.dismissedTaxSuggestions.update((codes) =>
+      codes.includes(taxCode) ? codes : [...codes, taxCode],
+    );
+  }
+
+  /**
+   * Sincroniza la fila del costo reembolsable con la base y las tarifas de
+   * arriba, sin tocar nada más.
+   *
+   * Bajo «Subtotal» el costo grava con la tarifa de referencia de las porciones,
+   * así que aplicar un tributo la cambia; bajo las otras dos bases la fila queda
+   * exenta y su ausencia o su tarifa sobrante son dos 422 distintos
+   * (`TAX_RULE_MISSING`, `TAX_RATE_ON_NON_TAXABLE`).
+   */
+  private syncCostRule(basis: AiuTaxableBasis): void {
+    const rules = this.taxRules();
+    const derived = derivedCostTaxRule(this.ruleValues(), basis);
+    const index = rules.controls.findIndex(
+      (control) => String(control.get('bucket')?.value ?? '') === 'costo',
+    );
+    if (index < 0) {
+      rules.push(
+        this.fb.group({
+          bucket: [derived.bucket],
+          taxable: [derived.taxable],
+          tax_code: [derived.tax_code],
+          rate: [derived.rate],
+        }),
+      );
+      return;
+    }
+    const control = rules.at(index);
+    if (
+      Boolean(control.get('taxable')?.value) === derived.taxable &&
+      String(control.get('tax_code')?.value ?? '') === derived.tax_code &&
+      String(control.get('rate')?.value ?? '') === derived.rate
+    ) {
+      return;
+    }
+    control.patchValue({
+      taxable: derived.taxable,
+      tax_code: derived.tax_code,
+      rate: derived.rate,
+    });
+  }
+
   // ── Apartamiento del perfil ─────────────────────────────────────────────
 
   departed(field: AiuDepartureField): boolean {
@@ -1022,9 +1372,23 @@ export class InvoiceSectionAiuComponent {
     this.taxRules().markAsDirty();
   }
 
+  /**
+   * Quita una fila de la matriz — y RECUERDA el tributo que llevaba.
+   *
+   * Recordarlo es lo que cierra la casilla «quitar un tributo sugerido no lo
+   * vuelve a poner». La sugerencia se calcula sobre lo que la matriz declara,
+   * así que sin esta anotación quitar la fila devolvería el tributo a la lista
+   * de sugeridos y la pantalla lo volvería a ofrecer, en el sitio exacto donde
+   * la persona acaba de decir que no. Se anota el código pase lo que pase: no
+   * proponer de más es el lado seguro del error.
+   */
   removeTaxRule(index: number): void {
+    const removed = String(
+      this.taxRules().at(index)?.get('tax_code')?.value ?? '',
+    ).trim();
     this.taxRules().removeAt(index);
     this.taxRules().markAsDirty();
+    if (removed) this.dismissTaxSuggestion(removed);
   }
 
   /**
