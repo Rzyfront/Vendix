@@ -77,6 +77,15 @@ import {
     WithholdingConceptOption,
 } from '../../components/invoice-create/invoice-withholding-catalog.service';
 import { PrintGatewayClientService } from '../../../../../../shared/services/print/print-gateway-client.service';
+/**
+ * SELECTOR DE CUENTA PUC CON BÚSQUEDA. Vive bajo `products` porque nació allí,
+ * y se importa desde aquí en vez de duplicarse: es el único sitio del frontend
+ * que traduce código↔id contra el plan de cuentas, y su propio docblock explica
+ * qué se rompe cuando alguien guarda un id donde el motor contable espera un
+ * código. Una segunda copia de esa traducción es exactamente el fallo mudo que
+ * ese componente existe para evitar. Merece subir a `shared/components`.
+ */
+import { AccountCodeSelectComponent } from '../../../products/components/account-code-select.component';
 import * as ProfileActions from '../../state/actions/invoice-profile.actions';
 import { loadResolutions } from '../../state/actions/invoicing.actions';
 import { selectResolutions } from '../../state/selectors/invoicing.selectors';
@@ -192,6 +201,7 @@ type SectionId =
         TextareaComponent,
         SelectorComponent,
         ToggleComponent,
+        AccountCodeSelectComponent,
         InvoiceProfilePreviewPanelComponent,
         InvoiceProfileVersionsPanelComponent,
     ],
@@ -424,17 +434,25 @@ type SectionId =
                                                     "
                                                 ></app-input>
                                             </div>
+                                            <!--
+                                                SÓLO EL ICONO. La palabra «Quitar» repetida en cada fila de
+                                                cada matriz no aporta nada que el bote de basura no diga, y
+                                                ensancha el botón hasta empujar los campos de la fila. El
+                                                nombre accesible viaja en «ariaLabel», que app-button pone en
+                                                el <button> interno junto con el «title»: sin él, un botón de
+                                                sólo icono se anuncia sin nombre.
+                                            -->
                                             <app-button
                                                 variant="outline-danger"
                                                 size="sm"
+                                                ariaLabel="Quitar esta nota de cabecera"
                                                 (clicked)="removeHeaderNote($index)"
                                             >
                                                 <app-icon
                                                     slot="icon"
                                                     name="trash-2"
-                                                    [size]="14"
+                                                    [size]="15"
                                                 ></app-icon>
-                                                Quitar
                                             </app-button>
                                         </div>
                                     }
@@ -615,17 +633,25 @@ type SectionId =
                                                 )
                                             "
                                         ></app-input>
+                                        <!--
+                                            SÓLO EL ICONO. La palabra «Quitar» repetida en cada fila de
+                                            cada matriz no aporta nada que el bote de basura no diga, y
+                                            ensancha el botón hasta empujar los campos de la fila. El
+                                            nombre accesible viaja en «ariaLabel», que app-button pone en
+                                            el <button> interno junto con el «title»: sin él, un botón de
+                                            sólo icono se anuncia sin nombre.
+                                        -->
                                         <app-button
                                             variant="outline-danger"
                                             size="sm"
+                                            ariaLabel="Quitar esta línea modelo"
                                             (clicked)="removeModelLine($index)"
                                         >
                                             <app-icon
                                                 slot="icon"
                                                 name="trash-2"
-                                                [size]="14"
+                                                [size]="15"
                                             ></app-icon>
-                                            Quitar
                                         </app-button>
                                     </div>
                                 }
@@ -843,21 +869,19 @@ type SectionId =
                                                 component of aiu_components;
                                                 track component
                                             ) {
-                                                <app-input
+                                                <app-account-code-select
                                                     [label]="componentLabel(component)"
                                                     [formControlName]="
                                                         'revenue_' + component
                                                     "
-                                                    [maxlength]="account_code_limit"
-                                                    size="sm"
-                                                    placeholder="Ej. 413501"
+                                                    placeholder="Mapeo contable de la tienda"
                                                     [error]="
                                                         issueFor(
                                                             'accounting.revenue_account_by_bucket.' +
                                                                 component
                                                         )
                                                     "
-                                                ></app-input>
+                                                ></app-account-code-select>
                                             }
                                         </div>
                                     </div>
@@ -978,6 +1002,15 @@ type SectionId =
                                                 Base impuestos
                                             </h4>
                                         </div>
+                                        <!--
+                                            «Agregar impuesto» y no «Regla»: la
+                                            fila que crea es (impuesto, base,
+                                            tarifa), y quien busca dónde añadir
+                                            un IVA no reconoce «Regla» como el
+                                            sitio. El mismo texto que usa la
+                                            vista de emisión, para que las dos
+                                            pantallas se lean igual.
+                                        -->
                                         <app-button
                                             variant="secondary"
                                             size="sm"
@@ -988,7 +1021,7 @@ type SectionId =
                                                 name="plus"
                                                 [size]="14"
                                             ></app-icon>
-                                            Regla
+                                            Agregar impuesto
                                         </app-button>
                                     </div>
                                     <div class="p-3 space-y-2">
@@ -1049,8 +1082,9 @@ type SectionId =
                                             <p
                                                 class="text-xs italic text-text-secondary"
                                             >
-                                                Sin reglas. El documento no
-                                                declararía ningún impuesto.
+                                                Sin impuestos. El documento no
+                                                declararía ninguno: agrégalos con
+                                                el botón de arriba.
                                             </p>
                                         }
                                         <div class="space-y-2" formArrayName="taxes">
@@ -1094,17 +1128,25 @@ type SectionId =
                                                             label="Gravable"
                                                         ></app-toggle>
                                                     </div>
+                                                    <!--
+                                                        SÓLO EL ICONO. La palabra «Quitar» repetida en cada fila de
+                                                        cada matriz no aporta nada que el bote de basura no diga, y
+                                                        ensancha el botón hasta empujar los campos de la fila. El
+                                                        nombre accesible viaja en «ariaLabel», que app-button pone en
+                                                        el <button> interno junto con el «title»: sin él, un botón de
+                                                        sólo icono se anuncia sin nombre.
+                                                    -->
                                                     <app-button
                                                         variant="outline-danger"
                                                         size="sm"
+                                                        ariaLabel="Quitar esta regla de impuesto"
                                                         (clicked)="removeTaxRule($index)"
                                                     >
                                                         <app-icon
                                                             slot="icon"
                                                             name="trash-2"
-                                                            [size]="14"
+                                                            [size]="15"
                                                         ></app-icon>
-                                                        Quitar
                                                     </app-button>
                                                 </div>
                                             }
@@ -1148,7 +1190,7 @@ type SectionId =
                                             name="plus"
                                             [size]="14"
                                         ></app-icon>
-                                        Regla
+                                        Agregar impuesto
                                     </app-button>
                                 </div>
                                 <div class="space-y-2" formArrayName="taxes">
@@ -1187,17 +1229,25 @@ type SectionId =
                                                     label="Gravable"
                                                 ></app-toggle>
                                             </div>
+                                            <!--
+                                                SÓLO EL ICONO. La palabra «Quitar» repetida en cada fila de
+                                                cada matriz no aporta nada que el bote de basura no diga, y
+                                                ensancha el botón hasta empujar los campos de la fila. El
+                                                nombre accesible viaja en «ariaLabel», que app-button pone en
+                                                el <button> interno junto con el «title»: sin él, un botón de
+                                                sólo icono se anuncia sin nombre.
+                                            -->
                                             <app-button
                                                 variant="outline-danger"
                                                 size="sm"
+                                                ariaLabel="Quitar esta regla de impuesto"
                                                 (clicked)="removeTaxRule($index)"
                                             >
                                                 <app-icon
                                                     slot="icon"
                                                     name="trash-2"
-                                                    [size]="14"
+                                                    [size]="15"
                                                 ></app-icon>
-                                                Quitar
                                             </app-button>
                                         </div>
                                     }
@@ -1333,17 +1383,25 @@ type SectionId =
                                                     )
                                                 "
                                             ></app-input>
+                                            <!--
+                                                SÓLO EL ICONO. La palabra «Quitar» repetida en cada fila de
+                                                cada matriz no aporta nada que el bote de basura no diga, y
+                                                ensancha el botón hasta empujar los campos de la fila. El
+                                                nombre accesible viaja en «ariaLabel», que app-button pone en
+                                                el <button> interno junto con el «title»: sin él, un botón de
+                                                sólo icono se anuncia sin nombre.
+                                            -->
                                             <app-button
                                                 variant="outline-danger"
                                                 size="sm"
+                                                ariaLabel="Quitar este concepto de retención"
                                                 (clicked)="removeWithholding($index)"
                                             >
                                                 <app-icon
                                                     slot="icon"
                                                     name="trash-2"
-                                                    [size]="14"
+                                                    [size]="15"
                                                 ></app-icon>
-                                                Quitar
                                             </app-button>
                                         </div>
                                     }
@@ -1411,24 +1469,22 @@ type SectionId =
                                 }
                             </p>
                             <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
-                                <app-input
+                                <app-account-code-select
                                     label="Ingreso · Costo reembolsable"
                                     formControlName="revenue_costo"
-                                    [maxlength]="account_code_limit"
-                                    size="sm"
+                                    placeholder="Mapeo contable de la tienda"
                                     [error]="
                                         issueFor(
                                             'accounting.revenue_account_by_bucket.costo'
                                         )
                                     "
-                                ></app-input>
-                                <app-input
+                                ></app-account-code-select>
+                                <app-account-code-select
                                     label="Cuenta de IVA por pagar"
                                     formControlName="vat_payable_account"
-                                    [maxlength]="account_code_limit"
-                                    size="sm"
+                                    placeholder="Mapeo contable de la tienda"
                                     [error]="issueFor('accounting.vat_payable_account')"
-                                ></app-input>
+                                ></app-account-code-select>
                             </div>
                         </div>
                     </vendix-invoice-form-section>
@@ -1714,7 +1770,6 @@ export class InvoiceProfileEditorComponent {
 
     readonly aiu_components = AIU_COMPONENTS;
     readonly aiu_buckets = AIU_BUCKETS;
-    readonly account_code_limit = CONFIG_LIMITS.account_code;
     readonly line_description_limit = CONFIG_LIMITS.line_description;
     readonly template_key_limit = CONFIG_LIMITS.template_key;
     readonly header_note_limit = CONFIG_LIMITS.header_note;

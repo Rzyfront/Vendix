@@ -24,6 +24,13 @@ import { InputComponent } from '../../../../../../shared/components/input/input.
 import { SelectorComponent } from '../../../../../../shared/components/selector/selector.component';
 import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+/**
+ * Selector de cuenta PUC con búsqueda (5 por página). Se importa desde
+ * `products` en vez de duplicarse: es el único traductor código↔id contra el
+ * plan de cuentas, y una segunda copia de esa traducción es justo el fallo mudo
+ * que ese componente existe para evitar. Merece subir a `shared/components`.
+ */
+import { AccountCodeSelectComponent } from '../../../products/components/account-code-select.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { TaxOption, TaxSelection } from '../../../../../../shared/components/tax-selector';
 
@@ -92,6 +99,7 @@ export interface InvoiceCustomItemDraft {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     ReactiveFormsModule,
+    AccountCodeSelectComponent,
     ModalComponent,
     ButtonComponent,
     InputComponent,
@@ -234,14 +242,12 @@ export interface InvoiceCustomItemDraft {
             Clasificación contable
           </h3>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <app-input
+            <app-account-code-select
               label="Cuenta PUC (opcional)"
               formControlName="account_code"
-              [control]="control('account_code')"
-              [maxlength]="20"
-              placeholder="Ej. 413505"
+              placeholder="Mapeo automático de cuentas"
               helperText="Vacío ⇒ el mapeo automático de cuentas decide."
-            ></app-input>
+            ></app-account-code-select>
             @if (isAiu()) {
               <app-selector
                 label="Componente AIU"

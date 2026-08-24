@@ -11,6 +11,7 @@ import {
 } from '@angular/core';
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
 
+import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import {
   TaxOption,
@@ -53,7 +54,7 @@ import {
   selector: 'vendix-invoice-line-taxes',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent],
+  imports: [BadgeComponent, IconComponent],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
@@ -114,35 +115,47 @@ import {
         }
 
         <!--
-          Disparador con altura y borde de control, no una píldora punteada.
-          Se alinea con los app-input vecinos (min-h-[38px], text-sm) para que la
-          rejilla lo lea como un campo más.
+          EL DISPARADOR ES UN BOTÓN DE AGREGAR, SIEMPRE.
 
-          VACÍO = ADVERTENCIA, no neutro. En una factura colombiana una línea sin
-          impuesto es una AFIRMACIÓN fiscal —excluida o exenta—, no un campo por
-          llenar; pintarla gris la hace invisible justo cuando más hay que
-          mirarla. Sin impuestos ocupa el ancho completo, porque es lo único que
-          hay que ver en la fila.
+          Antes, con la línea sin impuestos, el botón se pintaba con el borde y
+          el texto de advertencia y decía «Sin impuesto» con un triángulo: se
+          leía como un aviso, no como algo que se pulsa. El resultado era el
+          contrario del buscado —la línea se quedaba sin impuesto porque nadie
+          descubría que ahí se agregaba—.
+
+          El estado sigue estando a la vista, pero donde corresponde: en una
+          insignia propia al lado, y en el párrafo que explica qué afirma una
+          línea sin impuesto. En una factura colombiana eso es una AFIRMACIÓN
+          fiscal —excluida o exenta—, no un campo por llenar, así que no puede
+          quedar en gris; pero tampoco puede disfrazar la única acción de la
+          fila.
+
+          Altura y radio de control (min-h-[38px], text-sm) para alinearse con
+          los app-input vecinos; tinte del color primario para que se lea como
+          acción y no como campo.
         -->
+        @if (value().length === 0) {
+          <app-badge variant="warning" size="xs" badgeStyle="outline">
+            <app-icon name="alert-triangle" [size]="11" class="mr-1" />
+            Sin impuesto
+          </app-badge>
+        }
+
         <button
           type="button"
-          class="inline-flex items-center justify-center gap-1.5 px-3 min-h-[38px] rounded-lg border text-sm transition-colors hover:opacity-80 disabled:opacity-50"
-          [class.w-full]="value().length === 0"
-          [class.border-warning]="value().length === 0"
-          [class.text-warning]="value().length === 0"
-          [class.border-border]="value().length > 0"
-          [class.text-text-primary]="value().length > 0"
+          class="inline-flex items-center justify-center gap-1.5 px-3 min-h-[38px] rounded-lg border text-sm font-medium transition-colors disabled:opacity-50"
+          [class.flex-1]="value().length === 0"
+          [style.border-color]="'var(--color-primary)'"
+          [style.color]="'var(--color-primary)'"
+          [style.background]="
+            'color-mix(in srgb, var(--color-primary) 6%, transparent)'
+          "
           [disabled]="isDisabled()"
           [title]="triggerHint()"
           (click)="togglePanel($event)"
         >
-          @if (value().length === 0) {
-            <app-icon name="alert-triangle" [size]="14" />
-            Sin impuesto
-          } @else {
-            <app-icon name="plus" [size]="14" />
-            Agregar impuesto
-          }
+          <app-icon name="plus" [size]="14" />
+          Agregar impuesto
         </button>
       </div>
 

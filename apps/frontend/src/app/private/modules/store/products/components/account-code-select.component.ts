@@ -62,11 +62,28 @@ const PUC_ACCOUNT_CODE_REGEX = /^[0-9]{4,20}$/;
     },
   ],
   template: `
+    @if (label()) {
+      <span class="mb-1 block text-xs font-medium text-[var(--color-text-primary)]">
+        {{ label() }}
+      </span>
+    }
+
     <app-account-select
       [formControl]="idControl"
       [placeholder]="placeholder()"
+      [ariaLabel]="ariaLabel() || label()"
       [acceptsEntriesOnly]="true"
     />
+
+    @if (error(); as message) {
+      <p class="mt-1 text-xs text-error">{{ message }}</p>
+    }
+
+    @if (helperText() && !error()) {
+      <p class="mt-1 text-xs text-[var(--color-text-secondary)]">
+        {{ helperText() }}
+      </p>
+    }
 
     @if (unresolvedCode(); as code) {
       <p class="mt-1 text-xs text-amber-600">
@@ -90,6 +107,40 @@ export class AccountCodeSelectComponent implements ControlValueAccessor {
 
   readonly placeholder = input<string>('Cuenta por defecto de la organización');
   readonly disabled = input<boolean>(false);
+
+  /**
+   * Etiqueta visible, y también el nombre accesible del disparador.
+   *
+   * Opcional para no cambiar nada donde ya se pinta la etiqueta por fuera. La
+   * facturación la pasa: allí hay hasta cinco cuentas seguidas en la misma
+   * rejilla —los tres componentes del AIU, el costo reembolsable y el IVA por
+   * pagar— y sin etiqueta propia son cinco selectores indistinguibles.
+   */
+  readonly label = input<string>('');
+
+  /**
+   * Nombre accesible cuando NO hay etiqueta visible.
+   *
+   * La rejilla de cuentas por línea de la factura pone el nombre de la línea en
+   * la columna de al lado, así que el selector no lleva etiqueta propia: sin
+   * esto serían N botones que dicen todos «Cuenta PUC (opcional)». Vacío ⇒ se
+   * usa `label()`.
+   */
+  readonly ariaLabel = input<string>('');
+
+  /**
+   * Error del contrato, pintado bajo el selector como en `app-input`.
+   *
+   * Admite `undefined` además de `null` porque los ayudantes que lo alimentan
+   * devuelven lo uno o lo otro según de dónde salgan —`itemError()` de la
+   * factura devuelve `string | undefined`, `issueFor()` del editor de perfiles
+   * devuelve `string | null`—, y estrechar el tipo aquí sólo obligaría a cada
+   * llamador a normalizar lo mismo.
+   */
+  readonly error = input<string | null | undefined>(null);
+
+  /** Ayuda breve. Se calla cuando hay error: el error es lo urgente. */
+  readonly helperText = input<string>('');
 
   /** Control interno que habla ids: es lo que consume `app-account-select`. */
   readonly idControl = new FormControl<number | null>(null);
