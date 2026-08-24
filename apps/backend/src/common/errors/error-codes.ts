@@ -1950,8 +1950,14 @@ export const ErrorCodes = {
     devMessage: 'Resolution validity window is inverted or empty',
   },
   /**
-   * La clave técnica (ClTec) no tiene la FORMA que emite la DIAN: 40 caracteres
-   * hexadecimales, el hex de un SHA-1.
+   * La clave técnica (ClTec) no tiene la FORMA que emite la DIAN: 40 o 64
+   * caracteres hexadecimales, el hex de un SHA-1 o de un SHA-256.
+   *
+   * Son DOS anchuras exactas, no «lo que diga la DIAN». El servicio de rangos de
+   * numeración devuelve la de 64, y darle 40 por única posible rechazaba claves
+   * legítimas (FAD06 de HIDRO). Pero la lista sigue cerrada a esas dos: un hash no
+   * tiene longitud variable, así que las de 36/38/39 que reportó el mismo
+   * contribuyente eran la misma clave con caracteres perdidos al copiarla.
    *
    * No es una validación cosmética — es la que faltaba. En producción se guardó
    * una ClTec de 38 caracteres (todos hex, sin espacios: un par de caracteres
@@ -1971,7 +1977,7 @@ export const ErrorCodes = {
     code: 'INVOICING_RESOLUTION_011',
     httpStatus: 422,
     devMessage:
-      'Technical key (ClTec) must be exactly 40 hexadecimal characters as issued by the DIAN numbering-range web service',
+      'Technical key (ClTec) must be exactly 40 (SHA-1) or 64 (SHA-256) hexadecimal characters as issued by the DIAN numbering-range web service',
   },
   INVOICING_DUP_001: {
     code: 'INVOICING_DUP_001',

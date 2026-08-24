@@ -771,10 +771,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
    * recupera.
    *
    * Por eso el texto dice DÓNDE conseguirla y no solo qué está mal: quien captura
-   * una resolución no tiene por qué saber que son 40 caracteres.
+   * una resolución no tiene por qué saber que son 40 o 64 caracteres.
    */
   INVOICING_RESOLUTION_011:
-    'La clave técnica (ClTec) debe tener exactamente 40 caracteres hexadecimales. Cópiala completa del PDF de la autorización de numeración de la DIAN: si está incompleta, la DIAN rechaza cada factura por CUFE mal calculado y el consecutivo que gasta no se recupera.',
+    'La clave técnica (ClTec) debe tener 40 o 64 caracteres hexadecimales, según la emita la DIAN. Cópiala completa del PDF de la autorización de numeración: si está incompleta, la DIAN rechaza cada factura por CUFE mal calculado y el consecutivo que gasta no se recupera.',
   INVOICING_DUP_001: 'Ya existe una factura con ese numero.',
   INVOICING_PROVIDER_001:
     'Fallo la comunicacion con el proveedor de facturacion electronica.',
@@ -844,9 +844,9 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La resolución de numeración no respalda este documento: revisa su vigencia, su rango y que el prefijo coincida con el número emitido. Se corrige en Facturación → Resoluciones.',
   // El caso real: una clave técnica de 38 caracteres hizo rechazar una factura y
   // quemó el consecutivo. El texto dice DÓNDE conseguirla porque quien captura
-  // una resolución no tiene por qué saber que son 40 caracteres.
+  // una resolución no tiene por qué saber que son 40 o 64 caracteres.
   INVOICING_PREVALIDATION_003:
-    'La clave técnica (ClTec) de la resolución falta o está incompleta. Cópiala completa del PDF de la autorización de numeración de la DIAN: son 40 caracteres, y si falta uno solo la DIAN rechaza cada factura y el consecutivo que gasta no se recupera.',
+    'La clave técnica (ClTec) de la resolución falta o está incompleta. Cópiala completa del PDF de la autorización de numeración de la DIAN: son 40 o 64 caracteres, y si falta uno solo la DIAN rechaza cada factura y el consecutivo que gasta no se recupera.',
   INVOICING_PREVALIDATION_004:
     'El contenido del documento no se puede emitir tal como está: revisa la moneda, las unidades de medida de las líneas y el tipo de operación. El detalle señala cada línea y qué corregir.',
 
