@@ -3061,36 +3061,43 @@ export class PaymentsService {
       }
     }
 
-    // Close the table session so the table flips back to its terminal
-    // status. The order itself is left in `created` so the rest of the
-    // POS payment pipeline (payments row, inventory, journal) runs as
-    // usual; the table just stops accumulating new items.
+    // Table lifecycle on POS sale confirmation:
     //
-    // We also transition the table row to `cleaning` to match the canonical
-    // close path in `TableSessionsService.closeSession`. Without this the
-    // `tables.status` would stay `occupied` after a POS close-out, which
-    // is misleading to staff (the seat is free, but the next cashier sees the
-    // table as still occupied) and can race with the next `openTableSession`
-    // call on the same table.
+    // The table STAYS `occupied` and the session STAYS OPEN after a POS
+    // sale. The order is persisted (with its order_items, totals, payments
+    // row, inventory, journal) and the table remains on the "occupied" list
+    // for staff. The session is only closed (and the table transitions to
+    // `cleaning`) when the operator explicitly closes the account via the
+    // canonical `TableSessionsService.closeSession` endpoint — never at
+    // sale time. This matches the user's expected flow:
+    //   1. POS sale confirmed → table `occupied`, session OPEN
+    //   2. Staff closes account via tables module → `closeSession` →
+    //      session closed, table → `cleaning`
+    //   3. Staff marks table ready → `cleaning` → `available`
     //
-    // Edge Wompi (Obj 6): a DEFERRED digital payment (wompi/wallet) must NOT
-    // close the table here — the charge is only pending. The session stays open
-    // + the table `occupied`; the close is reconciled by the gateway webhook
-    // (`WebhookHandlerService.confirmOrderPaid`). Cash/card/transfer close in
-    // the act. The auto-fire above and the totals write are NEVER deferred.
-    const isDeferred = await this.isDeferredDigitalMethod(tx, dto);
-    let closedSessionId: number | null = null;
-    if (!isDeferred) {
-      await tx.table_sessions.update({
-        where: { id: session.id },
-        data: { closed_at: new Date() },
-      });
-      await tx.tables.update({
-        where: { id: session.table_id },
-        data: { status: 'cleaning', updated_at: new Date() },
-      });
-      closedSessionId = session.id;
-    }
+    // Deferred payments (Wompi / wallet pending) ALREADY keep the session
+    // open and the table `occupied` (the canonical closeSession path closes
+    // it later when the gateway webhook confirms payment). For non-deferred
+    // payments, we used to close the session here AND set the table to
+    // `cleaning` — that was the bug: the table vanished from the
+    // "occupied" list and the operator lost track of the active session
+    // until they explicitly re-opened it. The fix removes both side effects
+    // so both flows behave the same: session open, table `occupied` until
+    // someone calls the canonical closeSession.
+    //
+    // POS sale confirmation must never auto-close the table session or flip
+    // `tables.status`. The canonical `TableSessionsService.closeSession`
+    // endpoint owns that transition, called explicitly by staff when the
+    // account is closed out. Deferred digital payments (Wompi/wallet) close
+    // through the gateway webhook, never here. `closedSessionId` is kept
+    // in the return shape so the post-commit `session_closed` SSE emission,
+    // gated on `result.closed_session_id`, never fires from POS.
+    //
+    // `isDeferredDigitalMethod` was historically queried in this branch; it
+    // is no longer needed because both deferred and non-deferred flows now
+    // share the same lifecycle. Re-introduce it here only if a downstream
+    // consumer (operator hint, async messaging) needs to branch on it.
+    const closedSessionId: number | null = null;
 
     // QUI-431 — detección de serializados sobre TODAS las líneas del pedido de
     // la mesa (las que ya vivían en el draft + las nuevas del cierre), no solo
