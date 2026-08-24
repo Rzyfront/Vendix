@@ -5,6 +5,7 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import { InvoiceEmissionGateService } from '../services/invoice-emission-gate.service';
 import {
   CreateCreditNoteDto,
   CreateDebitNoteDto,
@@ -51,6 +52,7 @@ export class CreditNotesService {
     private readonly invoice_number_generator: InvoiceNumberGenerator,
     private readonly event_emitter: EventEmitter2,
     private readonly fiscalScope: FiscalScopeService,
+    private readonly emissionGate: InvoiceEmissionGateService,
   ) {}
 
   private getContext() {
@@ -177,6 +179,35 @@ export class CreditNotesService {
     // escritura, y se prefiere duplicar catorce líneas antes que dejar el
     // carril de notas sin puerta.
     await this.assertNoteLinesResolvable(dto.items);
+
+    // ANTES de tomar el consecutivo, por la misma razón que la guarda de arriba:
+    // un consecutivo gastado no se devuelve.
+    //
+    // Este carril no cruzaba la compuerta de emisión porque los dos criterios
+    // vivían como métodos privados de `InvoicingService`. Medido el 2026-08-24
+    // sobre la tienda 10, misma sesión y mismo token: `POST /store/invoicing`
+    // respondía 403 `INVOICING_ENABLEMENT_001` y `POST .../credit-notes`
+    // respondía 201, nota 169, número NC6, con `invoice_resolutions.current_number`
+    // de la resolución 40 pasando de 5 a 6. La compuerta pertenece al acto de
+    // NUMERAR, no al tipo de documento: la nota llama al mismo generador, con el
+    // mismo `accounting_entity_id`, y la resolución se elige igual por
+    // `document_type` sin mirar ambiente.
+    //
+    // La compuerta transitiva del `status = 'accepted'` de la factura
+    // relacionada (arriba, `INVOICING_STATUS_002`) NO alcanza: basta una factura
+    // histórica aceptada para que este carril quede abierto para siempre,
+    // incluso si la habilitación de la tienda se cae después. Medido: 18
+    // facturas con `status='accepted'`, 5 de ellas en la tienda 10.
+    //
+    // Se invoca el predicado compartido, no una copia. Y conserva su indulgencia
+    // con quien no tiene configuración DIAN (`if (!config) return`), que cubre 20
+    // de las 21 tiendas de dev: sin eso, la compuerta sería una pérdida de
+    // función mayor que el hueco que cierra.
+    const gate_context = this.getContext();
+    await this.emissionGate.assertAreaActive({
+      organization_id: gate_context.organization_id,
+      store_id: gate_context.store_id,
+    });
 
     const { invoice_number, resolution_id } =
       await this.invoice_number_generator.generateNextNumber({

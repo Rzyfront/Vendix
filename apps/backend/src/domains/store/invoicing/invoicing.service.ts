@@ -21,6 +21,7 @@ import {
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { FiscalGateService } from '@common/services/fiscal-gate.service';
+import { InvoiceEmissionGateService } from './services/invoice-emission-gate.service';
 import {
   CreateInvoiceDto,
   CreateInvoiceItemDto,
@@ -274,6 +275,7 @@ export class InvoicingService {
     private readonly fiscalScope: FiscalScopeService,
     private readonly retry_queue: InvoiceRetryQueueService,
     private readonly fiscalGate: FiscalGateService,
+    private readonly emissionGate: InvoiceEmissionGateService,
     private readonly fiscalInvoiceThreshold: FiscalInvoiceThresholdService,
     private readonly calculator: InvoiceCalculatorService,
     // TRM oficial para las operaciones pactadas en divisa. NUNCA tumba la
@@ -356,85 +358,12 @@ export class InvoicingService {
     organization_id?: number;
     store_id?: number;
   }): Promise<void> {
-    const enabled = await this.fiscalGate.isAreaEnabled(
-      Number(context.organization_id),
-      context.store_id != null ? Number(context.store_id) : null,
-      'invoicing',
-    );
-    if (!enabled) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_AREA_001,
-        'La facturación electrónica no está activa para esta tienda. ' +
-          'Actívala en Configuración fiscal antes de emitir documentos.',
-      );
-    }
-
-    await this.assertElectronicEmissionLive(context);
-  }
-
-  /**
-   * Segunda compuerta: si el tenant SÍ configuró facturación electrónica, crear
-   * facturas exige que la habilitación esté viva (producción + enabled).
-   *
-   * `fiscal_status.invoicing` sólo afirma que el área fiscal está activa, y se
-   * pone ACTIVE al terminar el wizard fiscal. Una tienda en set de pruebas la
-   * pasaba y creaba facturas que consumen numeración: InvoiceNumberGenerator
-   * elige la resolución por `accounting_entity_id` + `document_type` con
-   * `is_active`, sin distinguir ambiente, así que los números que gastara un
-   * trámite salían del rango que la tienda usará en producción, y la DIAN
-   * rechaza numeración duplicada o con huecos que no puede explicar.
-   *
-   * NO se exige a quien no tiene configuración DIAN: la facturación de Vendix
-   * también emite documentos para comercios sin habilitación, y bloquearlos
-   * convertiría una compuerta en una pérdida de función. El criterio es "si
-   * configuraste FE, no emites hasta estar habilitado".
-   *
-   * El set de pruebas no pasa por aquí: DianTestService reserva su bloque
-   * directamente sobre `invoice_resolutions`, sin crear facturas.
-   */
-  private async assertElectronicEmissionLive(context: {
-    organization_id?: number;
-    store_id?: number;
-  }): Promise<void> {
-    const organization_id = Number(context.organization_id);
-    if (!Number.isFinite(organization_id)) return;
-
-    const scope = await this.fiscalScope.requireFiscalScope(organization_id);
-
-    // Same resolution as DianConfigService.getEmissionStatus: the habilitación
-    // belongs to the scope that owns the NIT.
-    const config = await this.prisma
-      .withoutScope()
-      .dian_configurations.findFirst({
-        where: {
-          ...(scope === 'ORGANIZATION'
-            ? { organization_id, store_id: null }
-            : { store_id: context.store_id }),
-          configuration_type: 'invoicing',
-        },
-        orderBy: [{ is_default: 'desc' }, { id: 'asc' }],
-        select: { environment: true, enablement_status: true },
-      });
-
-    if (!config) return;
-
-    const is_live =
-      config.environment === 'production' &&
-      config.enablement_status === 'enabled';
-
-    if (!is_live) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_ENABLEMENT_001,
-        'La facturación electrónica de esta tienda aún no está habilitada en producción ante la DIAN, así que no puede emitir facturas que consuman la numeración de la resolución. Completa el set de pruebas y activa producción.',
-        // El ambiente sí es público —el comerciante lo eligió— y saber si está
-        // en habilitación o en producción es justo lo que le dice qué paso le
-        // falta. `enablement_status` viaja por el mismo motivo.
-        {
-          environment: config.environment,
-          enablement_status: config.enablement_status,
-        },
-      );
-    }
+    // Delega en `InvoiceEmissionGateService`. Los dos criterios vivían aquí como
+    // métodos privados, y por eso el carril de notas de crédito —que está en
+    // otro servicio— no los cruzaba: medido el 2026-08-24, la misma tienda daba
+    // 403 al crear factura y 201 al crear nota de crédito, gastando consecutivo.
+    // El nombre del método se conserva para no tocar los tres sitios de llamada.
+    await this.emissionGate.assertAreaActive(context);
   }
 
   /**

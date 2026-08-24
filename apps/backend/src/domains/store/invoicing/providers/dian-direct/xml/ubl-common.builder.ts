@@ -1498,7 +1498,32 @@ export class UblCommonBuilder {
   }
 
   /**
-   * Builds tax total elements from invoice taxes.
+   * `cac:TaxTotal` de CABECERA — un `cac:TaxSubtotal` por (esquema, tarifa).
+   *
+   * ## La cardinalidad de los SUBTOTALES: por tarifa, no por esquema
+   *
+   * FAS01a (pág. 428): «si hay más de una tarifa del mismo impuesto se deben
+   * informar en `TaxSubtotal` diferentes dentro del mismo `TaxTotal`». FAS04
+   * (pág. 78 / 429): «debe ser informado un grupo de estos para cada tarifa». Y
+   * FAS07 (pág. 78-79 / 430) lo hace de rechazo definiendo el nodo como «el
+   * resultado del porcentaje aplicado sobre la base imponible»: un subtotal que
+   * publica UNA tarifa sobre la suma de bases de DOS afirma una identidad que él
+   * mismo no cumple. La agrupación la resuelve `groupTaxRowsBySchemeAndRate`,
+   * compartida con la línea y las retenciones.
+   *
+   * `cbc:TaxAmount` del grupo se computa DESDE los cubos ya truncados, no desde
+   * la Σ cruda de las filas: FAS02 (pág. 77 / 428) exige que sea la Σ de los
+   * subtotales, y con los subtotales partidos las dos cifras pueden separarse un
+   * céntimo (ver `DianTaxRateBucket`).
+   *
+   * ## Lo que esta función NO hace, a propósito
+   *
+   * Sigue abriendo UN solo `cac:TaxTotal` aunque el documento traiga dos
+   * tributos. FAS01 (pág. 76-77) pide «un bloque para cada código de tributo», y
+   * eso es una divergencia SEPARADA de las de arriba —cardinalidad del GRUPO, no
+   * de sus subtotales— con su propio caso `DIVERGE` en
+   * `ubl-anexo-fas-aiu-sweep.spec.ts` fijando la conducta de hoy. La línea sí
+   * abre un bloque por esquema (FAX01); la cabecera todavía no.
    *
    * ## Un documento SIN tributos no informa el grupo
    *

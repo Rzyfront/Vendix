@@ -12,6 +12,7 @@ import { SuperAdminCertificatesPendingController } from './dian-config/dian-conf
 import { InvoicingService } from './invoicing.service';
 import { InvoiceFlowService } from './invoice-flow/invoice-flow.service';
 import { CreditNotesService } from './credit-notes/credit-notes.service';
+import { InvoiceEmissionGateService } from './services/invoice-emission-gate.service';
 import { ResolutionsService } from './resolutions/resolutions.service';
 import { ResolutionScannerService } from './resolutions/resolution-scanner.service';
 import { DianHabilitationScannerService } from './dian-config/dian-habilitation-scanner.service';
@@ -82,6 +83,11 @@ import { ProfilesModule } from './profiles/profiles.module';
     // graphic representation. Registered as a direct provider, matching how
     // `products.module.ts` consumes it — there is no `QrModule` in this repo.
     QrService,
+    // Las dos compuertas de emisión (área fiscal activa + habilitación DIAN
+    // viva) extraídas de `InvoicingService`, para que el carril de notas de
+    // crédito cruce el MISMO predicado y no una copia. Va antes que sus dos
+    // consumidores por legibilidad; el orden no importa para Nest.
+    InvoiceEmissionGateService,
     InvoicingService,
     InvoiceFlowService,
     CreditNotesService,
