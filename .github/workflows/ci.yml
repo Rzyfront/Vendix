@@ -300,6 +300,59 @@ jobs:
     name: Backend Tests (jest)
     runs-on: ubuntu-latest
     needs: changes
+    #
+    # ---------------------------------------------------------------------
+    # PROPUESTA PARA @lider-dev sobre este `if: false` (2026-08-24, paso G.5)
+    # ---------------------------------------------------------------------
+    # NO se toca el flag. Es una decision con dueno y fecha, y su precondicion
+    # ("re-enable when baseline tests fixed") NO esta cumplida. Lo que sigue es
+    # lo medido, para que la decision se tome con datos y no con impresiones.
+    #
+    # 1. Tu diagnostico del 14-ago ("JEST too heavy for GH runners") queda
+    #    CONFIRMADO por medicion, no era una impresion. Corriendo la suite
+    #    completa en local (305 specs, --maxWorkers=2 --workerIdleMemoryLimit=
+    #    1024MB, los topes de apps/backend/package.json) se reportaron
+    #    5 suites en ~13 minutos, con tiempos por suite de 128 s, 144 s,
+    #    160 s y 224 s. A ese ritmo la suite entera no cabe en el
+    #    `timeout-minutes: 25` de este job: se necesitarian HORAS. Ademas un
+    #    worker murio con `FatalProcessOutOfMemory` de V8.
+    #
+    # 2. La linea base esta ROJA, y de las dos maneras que hay que distinguir:
+    #    - Fallo de asercion (el test corre y no cuadra) -- 33 en esas 5 suites.
+    #      Ejemplos: `audit.controller.spec.ts` espera el prefijo 'admin/audit'
+    #      y recibe 'superadmin/admin/audit' (el controlador cambio de namespace
+    #      y el spec no); `reservations.service.spec.ts` espera
+    #      BadRequestException y recibe NotFoundException.
+    #    - "Test suite failed to run" (CERO tests ejecutados, que es cobertura
+    #      apagada y NO un test rojo) -- 1: `audit.module.spec.ts`, y su causa
+    #      es colateral: "A jest worker process was terminated by another
+    #      process: signal=SIGTERM", o sea el OOM del punto 1. Esta categoria es
+    #      la peligrosa porque NO aparece en el conteo de "Tests": una suite que
+    #      no arranca se lee como verde si solo se mira esa linea.
+    #    - Aparte, `audit.service.spec.ts` falla con "Nest can't resolve
+    #      dependencies of SuperAdminAuditService ... GlobalPrismaService at
+    #      index [0]": el TestBed se quedo atras del constructor real.
+    #
+    # 3. Por tanto la propuesta NO es "reactivar y listo", ni ahora ni con este
+    #    contenido. Es esta secuencia, y el flag se voltea al final y lo
+    #    volteas tu:
+    #      (a) Arreglar las suites rojas por lotes, empezando por las 5 de
+    #          arriba. Cada lote se verifica con
+    #          `npm run buildcheck:test -- src/<ruta>` (--runInBand, ~1,5 GB).
+    #      (b) Atacar el coste: 128-224 s por suite es tiempo de arranque de
+    #          ts-jest reconstruyendo el programa TypeScript por worker. Los
+    #          candidatos son `isolatedModules`/SWC como transform, o partir
+    #          este job por dominio con `matrix:` para que ningun shard pase de
+    #          los 25 minutos.
+    #      (c) Solo cuando (a) y (b) esten hechas y una corrida completa termine
+    #          en verde dentro del timeout, quitar el `if: false`.
+    #
+    # 4. Mientras tanto la Fase G NO se queda sin compuerta automatica: el job
+    #    `frontend-test` (arriba) es nuevo y SI corre, y el typecheck de las
+    #    specs del backend sigue cubierto en local por `buildcheck:test` por
+    #    dominio. Lo que este job cubriria y hoy nadie cubre en CI es la
+    #    ejecucion de los 305 specs del backend.
+    # ---------------------------------------------------------------------
     if: false  # disabled per @lider-dev WhatsApp 2026-08-14 (JEST too heavy for GH runners). Re-enable when baseline tests fixed.
     timeout-minutes: 25
     steps:
