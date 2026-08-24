@@ -189,13 +189,12 @@ export class SubscriptionBannerComponent implements OnInit {
 
   readonly level = computed<BannerLevel>(() => {
     // The banner only renders when `visible()` matches a known UI-state kind
-    // (expiring_soon / grace_* / billing-warning). Drive severity from the
-    // SAME selector so the CSS modifier always matches a defined palette —
-    // otherwise we render `sub-banner--none`, which has no background/border/
-    // color and produces a ghost banner with only icons visible.
+    // (payment_due / expiring_soon / grace_* / billing-warning). Drive severity
+    // from the SAME selector so the CSS modifier always matches a defined palette.
     const ui = this.facade.subscriptionUiState();
     if (ui.kind === 'grace_hard') return 'danger';
     if (ui.kind === 'grace_soft') return 'warning';
+    if (ui.kind === 'payment_due') return 'warning';
     if (ui.kind === 'expiring_soon') {
       return ui.daysUntilRenewal <= 1 ? 'danger' : 'warning';
     }
@@ -239,12 +238,11 @@ export class SubscriptionBannerComponent implements OnInit {
     if (!this.canManageSubscription()) return false;
     if (this.dismissed()) return false;
     // RNC-PaidPlan — Top alert is now driven by the unified subscription UI
-    // state (ADR-4). Only `expiring_soon`, `grace_*`, and the billing-warning
-    // kinds surface here; pending changes and terminal states are absorbed by
-    // the local subscription module banners so the user never sees two
-    // simultaneous messages about the same concern.
+    // state (ADR-4). Only `payment_due`, `expiring_soon`, `grace_*`, and
+    // billing-warning kinds surface here.
     const ui = this.facade.subscriptionUiState();
     return (
+      ui.kind === 'payment_due' ||
       ui.kind === 'expiring_soon' ||
       ui.kind === 'grace_soft' ||
       ui.kind === 'grace_hard' ||
@@ -262,6 +260,32 @@ export class SubscriptionBannerComponent implements OnInit {
     const isScheduledCancel =
       !!scheduledCancelAt &&
       (status === 'active' || status === 'trialing' || status === 'trial');
+
+    if (ui.kind === 'payment_due') {
+      const formattedTotal = new Intl.NumberFormat('es-CO', {
+        style: 'currency',
+        currency: ui.invoice.currency || 'COP',
+        maximumFractionDigits: 0,
+      }).format(ui.invoice.total);
+
+      const dueText = ui.invoice.due_at
+        ? ` Vence el ${new Date(ui.invoice.due_at).toLocaleDateString('es-CO', {
+            day: 'numeric',
+            month: 'short',
+          })}.`
+        : '.';
+
+      return {
+        title: `Tienes un pago pendiente de ${formattedTotal}`,
+        detail: `Tu período de suscripción requiere pago.${dueText}${
+          ui.autoRenewPaused
+            ? ' Deberás pagar cada período manualmente.'
+            : ''
+        }`,
+        ctaText: 'Pagar',
+        iconName: 'credit-card',
+      };
+    }
 
     if (ui.kind === 'expiring_soon') {
       // Scheduled cancel wins over the renewal-soon copy: explicit user action
@@ -287,8 +311,8 @@ export class SubscriptionBannerComponent implements OnInit {
             : 'Tu suscripción se renueva pronto',
         detail:
           d <= 1
-            ? 'Asegúrate de tener saldo o un método de pago válido para evitar interrupciones.'
-            : `Te quedan ${d} días. Verifica tu método de pago para evitar interrupciones.`,
+            ? 'Asegúrate de pagar tu factura a tiempo para evitar interrupciones en el servicio.'
+            : `Te quedan ${d} días. Prepara tu pago para evitar interrupciones.`,
         ctaText: 'Gestionar',
         iconName: 'alert-triangle',
       };
@@ -307,33 +331,28 @@ export class SubscriptionBannerComponent implements OnInit {
       return {
         title: 'Tu suscripción entró en gracia crítica',
         detail: graceDetail(ui.daysOverdue, ui.daysRemaining, 'la suspensión total'),
-        // Mismo rótulo que `grace_soft`: ambos aterrizan directo en la vista de
-        // pago del plan, así que el CTA debe prometer lo mismo. La urgencia la
-        // comunican el nivel `danger` y el detalle, no un verbo distinto.
         ctaText: 'Pagar ahora',
         iconName: 'alert-octagon',
       };
     }
 
     // Billing-warning detection — banner surfaces ONLY when the
-    // subscription is otherwise `active`. The CTA lands on the existing
-    // PM-edit modal flow (`paymentMethodEditUrl` is the route from the
-    // facade, currently `/admin/subscription/payment`).
+    // subscription is otherwise `active` and has no pending invoice.
     if (ui.kind === 'auto_renew_disabled_no_credential') {
       return {
-        title: 'Tu autopago no se pudo activar',
+        title: 'Tu plan no se renovará solo',
         detail:
-          'Pagaste por un medio que no permite cobros recurrentes. La renovación automática solo funciona con tarjeta: agrega una para que tu plan se renueve solo.',
-        ctaText: 'Agregar tarjeta',
+          'El medio con el que pagaste no admite cobros automáticos. Deberás pagar cada período manualmente.',
+        ctaText: 'Ver mi plan',
         iconName: 'alert-triangle',
       };
     }
     if (ui.kind === 'renewal_failed') {
       return {
-        title: 'Tu renovación automática falló',
+        title: 'No pudimos cobrar tu renovación',
         detail:
-          'No pudimos cobrar tu suscripción. Revisa tu tarjeta: la renovación automática solo funciona con tarjeta.',
-        ctaText: 'Revisar mi tarjeta',
+          'Tienes un pago pendiente de tu suscripción. Paga tu factura para continuar con el servicio.',
+        ctaText: 'Pagar',
         iconName: 'alert-octagon',
       };
     }
@@ -363,13 +382,6 @@ export class SubscriptionBannerComponent implements OnInit {
   /**
    * Línea secundaria que informa del autopago pausado en los estados donde otro
    * aviso más urgente se queda con el título y el CTA.
-   *
-   * Existe porque el caso reportado cayó en `grace_soft`: el aviso de autopago
-   * solo se derivaba dentro de la rama `active`, así que el cliente cuya
-   * renovación quedó pausada por no tener tarjeta no lo veía en ninguna parte.
-   * La regla de producto es que el cliente lo sepa SIEMPRE. Cuando el aviso ya
-   * es el motivo del banner (`renewal_failed` / `auto_renew_disabled_no_credential`)
-   * se calla, para no repetir el mismo texto dos veces.
    */
   readonly autoRenewSecondaryNotice = computed<string | null>(() => {
     const warning = this.facade.autoRenewWarning();
@@ -378,22 +390,19 @@ export class SubscriptionBannerComponent implements OnInit {
     const kind = this.facade.subscriptionUiState().kind;
     if (
       kind === 'renewal_failed' ||
-      kind === 'auto_renew_disabled_no_credential'
+      kind === 'auto_renew_disabled_no_credential' ||
+      kind === 'payment_due'
     ) {
       return null;
     }
 
     return warning.type === 'auto_renew_charge_failed'
-      ? 'Además, tu renovación automática falló. Recuerda que el pago automático solo funciona con tarjeta.'
-      : 'Además, tu renovación automática está pausada porque no tienes una tarjeta guardada. El pago automático solo funciona con tarjeta.';
+      ? 'Además, tu renovación automática falló y quedó pausada.'
+      : 'Además, tu renovación automática está pausada. Deberás pagar cada período manualmente.';
   });
 
   /**
    * Vista de pago del plan vigente, o `null` cuando no hay plan al que pagarle.
-   *
-   * `plan_id` es lo que espera la ruta `/admin/subscription/checkout/:planId`;
-   * `paid_plan_id` es el respaldo para filas donde el plan seleccionado quedó
-   * en null pero el pagado sigue siendo la referencia de facturación.
    */
   private readonly planPaymentUrl = computed<string | null>(() => {
     const sub = this.facade.current() as {
@@ -406,32 +415,18 @@ export class SubscriptionBannerComponent implements OnInit {
   });
 
   readonly ctaLink = computed(() => {
-    // S1.2 — Banner is STORE-ONLY (super-admin only manages plans, never
-    // consumes them; org-admin is plan-agnostic). visible() already gates
-    // rendering on `currentStoreId !== null`, so every CTA below targets a
-    // store-admin route.
     const ui = this.facade.subscriptionUiState();
-    // Billing-warning detection — both kinds route to the PM-edit page
-    // surfaced by the facade. Centralising the URL in the facade means the
-    // route can evolve (deep-link a specific method, add returnTo, etc.)
-    // without touching the banner component.
+    if (ui.kind === 'payment_due') {
+      return '/admin/subscription/payment';
+    }
     if (ui.kind === 'auto_renew_disabled_no_credential') {
-      return ui.paymentMethodEditUrl;
+      return '/admin/subscription';
     }
     if (ui.kind === 'renewal_failed') {
-      return ui.paymentMethodEditUrl;
+      return '/admin/subscription/payment';
     }
-    // En gracia el CTA dice "Pagar ahora", así que debe llevar a pagar: la vista
-    // de pago del plan. Antes aterrizaba en el tablero de mora, que exige un
-    // clic más y cuyo propio botón era el que el cliente leía como "cobrar".
-    //
-    // Se decide por `ui.kind` — la misma fuente que `visible()`, `level()` y
-    // `copy()` — y no por `facade.status()`: el reducer prefiere el campo
-    // `status` del backend sobre `state`, así que un `status: 'past_due'` con
-    // `state: 'grace_soft'` dejaba la rama de abajo sin disparar mientras el
-    // banner sí se pintaba en gracia.
     if (ui.kind === 'grace_soft' || ui.kind === 'grace_hard') {
-      return this.planPaymentUrl() ?? '/admin/subscription/dunning';
+      return '/admin/subscription/payment';
     }
     const subLevel = this.facade.bannerLevel();
     const pm = this.pmWarning();

@@ -5,6 +5,10 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
+import {
+  FISCAL_DOCUMENT_PRINT_INCLUDE,
+  mapFiscalDocumentToPrintData,
+} from './fiscal-document-print.mapper';
 
 @Injectable()
 export class CreditNoteDataProvider implements IDocumentDataProvider {
@@ -12,12 +16,54 @@ export class CreditNoteDataProvider implements IDocumentDataProvider {
 
   constructor(private readonly prisma: StorePrismaService) {}
 
+  /**
+   * Lee la nota de crédito REAL, por la misma proyección que el formato fiscal.
+   *
+   * Antes del 2026-08-24 devolvía la muestra e ignoraba el `documentId`, igual
+   * que su gemelo fiscal. Este formato no es fiscal, así que el daño era
+   * operativo y no legal —una nota de crédito que enumera ítems que no son los
+   * de la nota—, pero es el mismo defecto y el arreglo es el mismo: la nota vive
+   * en `invoices` con `invoice_type` = `credit_note`.
+   *
+   * Comparte el mapeador con el formato fiscal a propósito. Los tokens fiscales
+   * que el mapeador rellena (CUFE, resolución) simplemente no aparecen en la
+   * plantilla no fiscal; tener dos proyecciones de la misma tabla sería la
+   * duplicación que este cambio vino a quitar.
+   */
   async fetchDocumentData(
     storeId: number,
     documentId: number | string,
   ): Promise<StandardPrintDataModel> {
-    const sample = await this.getSampleData(storeId);
-    return sample;
+    const id = Number(documentId);
+    if (!Number.isFinite(id)) {
+      throw new VendixHttpException(ErrorCodes.PRINT_DOCUMENT_NOT_FOUND_001);
+    }
+
+    const note = await this.prisma.invoices.findFirst({
+      where: { id, store_id: storeId, invoice_type: 'credit_note' },
+      include: FISCAL_DOCUMENT_PRINT_INCLUDE,
+    });
+
+    if (!note) {
+      throw new VendixHttpException(ErrorCodes.PRINT_DOCUMENT_NOT_FOUND_001);
+    }
+
+    let referenceDocumentNumber: string | undefined;
+    if (note.related_invoice_id) {
+      const related = await this.prisma.invoices.findFirst({
+        where: { id: note.related_invoice_id, store_id: storeId },
+        select: { invoice_number: true },
+      });
+      referenceDocumentNumber = related?.invoice_number
+        ? String(related.invoice_number)
+        : undefined;
+    }
+
+    return mapFiscalDocumentToPrintData(note, {
+      acceptedLabel: 'Nota crédito aplicada',
+      pendingLabel: 'Nota crédito en borrador',
+      referenceDocumentNumber,
+    });
   }
 
   async getSampleData(storeId?: number): Promise<StandardPrintDataModel> {

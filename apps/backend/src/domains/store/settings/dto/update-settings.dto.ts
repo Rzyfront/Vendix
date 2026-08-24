@@ -24,11 +24,18 @@ import {
   AvailabilitySettingsDto,
   ServicesSettingsDto,
   ReservationsSettingsDto,
+  PromotionsSettingsDto,
 } from './settings-schemas.dto';
 import { EcommerceSettingsDto } from '../../ecommerce/dto/ecommerce-settings.dto';
 
 @ApiSchema({ name: 'StoreUpdateSettingsDto' })
 export class UpdateSettingsDto {
+  @ApiProperty({ type: PromotionsSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PromotionsSettingsDto)
+  promotions?: PromotionsSettingsDto;
+
   @ApiProperty({ type: GeneralSettingsDto, required: false })
   @IsOptional()
   @ValidateNested()

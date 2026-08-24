@@ -4,16 +4,15 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 import { PosSettingsForm } from '../components/pos-settings-form/pos-settings-form.component';
 import { PrintFormatsSettingsForm } from '../components/print-formats-settings-form/print-formats-settings-form.component';
 import { ReceiptsSettingsForm } from '../components/receipts-settings-form/receipts-settings-form.component';
+import { PromotionsSettingsForm } from '../components/promotions-settings-form/promotions-settings-form.component';
 import { SettingsSectionComponent } from '../components/settings-section/settings-section.component';
 import { GeneralSettingsStore } from '../services/general-settings.store';
 
 /**
  * Pestaña «Venta»: cómo se cobra y qué documento sale impreso.
  *
- * Reúne «Punto de Venta», «Recibos y Facturación» y «Formatos de Impresión».
- * Las tres viven juntas a propósito: `receipts` lo editan dos de ellas y
- * `pos.auto_print_receipt` lo edita la de Recibos aunque pertenezca al bloque
- * POS — el store se encarga de mezclar en vez de reemplazar.
+ * Reúne «Punto de Venta», «Recibos y Facturación», «Formatos de Impresión» y «Promociones».
+ * Las cuatro viven juntas a propósito: el store se encarga de persistir cada bloque.
  */
 @Component({
   selector: 'app-sales-settings-page',
@@ -24,6 +23,7 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
     PosSettingsForm,
     ReceiptsSettingsForm,
     PrintFormatsSettingsForm,
+    PromotionsSettingsForm,
   ],
   template: `
     <div class="settings-page">
@@ -38,6 +38,19 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
           formato sale por la impresora.
         </p>
       </div>
+
+      <!-- Promociones y Descuentos -->
+      <app-settings-section
+        anchorId="section-promotions"
+        icon="tag"
+        iconTone="green"
+        title="Promociones y Descuentos"
+        hint="Define si las promociones compiten (Winner-Takes-All) o se acumulan inteligentemente (Stacking Groups).">
+        <app-promotions-settings-form
+          [settings]="store.settings().promotions"
+          [settingsLoaded]="store.settingsLoaded()"
+          (settingsChange)="store.onSectionChange('promotions', $event)" />
+      </app-settings-section>
 
       <!-- Punto de Venta -->
       <app-settings-section

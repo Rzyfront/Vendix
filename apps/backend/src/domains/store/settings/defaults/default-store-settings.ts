@@ -486,6 +486,15 @@ export function getDefaultStoreSettings(): StoreSettings {
       voice_engine: 'pipeline',
     },
 
+    // Promotions - Evaluation strategy (winner_takes_all vs stacking_groups) & UI
+    promotions: {
+      evaluation_strategy: 'winner_takes_all',
+      max_combined_discount_percentage: 50,
+      allow_order_promo_stacking: true,
+      exclude_tier_priced_lines: false,
+      enable_high_conversion_ui: true,
+    },
+
     // Legacy: Mantener por compatibilidad (redundante con branding)
     app: {
       name: 'Vendix',

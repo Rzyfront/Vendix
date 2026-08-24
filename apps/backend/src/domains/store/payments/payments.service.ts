@@ -2101,6 +2101,8 @@ export class PaymentsService {
             item.final_unit_price ?? item.unit_price ?? 0,
           ),
           quantity: Number(item.quantity || 0),
+          applied_price_tier_id: item.applied_price_tier_id ?? null,
+          stock_units_consumed: item.stock_units_consumed ?? null,
         })),
     };
 

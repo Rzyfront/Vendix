@@ -201,8 +201,20 @@ export class OrgDianConfigService {
           is_default: should_be_default,
           configuration_type,
           operation_mode,
-          software_id: dto.software_id,
-          software_pin_encrypted: this.encryption.encrypt(dto.software_pin),
+          // QUI-657, mismo contrato que el servicio de tienda: las dos
+          // credenciales las emite la DIAN al inscribir el software y el
+          // tenant de la rama `without_cert` todavía no las tiene. Columnas
+          // NOT NULL, así que la ausencia se guarda como cadena vacía — el
+          // valor que los lectores del checklist ya cuentan como pendiente.
+          software_id: dto.software_id ?? '',
+          // El vacío NO se cifra: `encrypt('')` deja el ciphertext vacío en el
+          // sobre `v2:salt:iv:tag:` y `parseEnvelope()` lo rechaza, así que el
+          // valor resultante no se puede descifrar ni se reconoce como
+          // cifrado. Se escribe `''` directo, que sí es falsy para todos los
+          // `Boolean(...)` que preguntan si hay PIN.
+          software_pin_encrypted: dto.software_pin
+            ? this.encryption.encrypt(dto.software_pin)
+            : '',
           environment: dto.environment || 'test',
           enablement_status: 'not_started',
           test_set_id: dto.test_set_id,
@@ -291,8 +303,13 @@ export class OrgDianConfigService {
     if (dto.operation_mode !== undefined) {
       update_data.operation_mode = dto.operation_mode;
     }
-    if (dto.software_id !== undefined) update_data.software_id = dto.software_id;
-    if (dto.software_pin !== undefined && dto.software_pin !== '****')
+    // Vacío es "todavía no lo tengo", no "bórralo". Antes la comparación
+    // contra `undefined` dejaba que un PATCH del formulario —que reenvía el
+    // objeto completo— pisara con `''` un Software ID ya registrado.
+    if (dto.software_id) update_data.software_id = dto.software_id;
+    // '****' es el enmascarado "no lo cambies"; '' es "aún no lo emiten".
+    // Ninguno llega a `encrypt()`.
+    if (dto.software_pin && dto.software_pin !== '****')
       update_data.software_pin_encrypted = this.encryption.encrypt(
         dto.software_pin,
       );

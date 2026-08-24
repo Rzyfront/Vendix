@@ -22,8 +22,44 @@ export type SubscriptionUiState =
       toPlanName: string;
       invoiceId: number | null;
     }
-  | { kind: 'grace_soft'; daysRemaining: number; daysOverdue: number }
-  | { kind: 'grace_hard'; daysRemaining: number; daysOverdue: number }
+  | {
+      kind: 'payment_due';
+      invoice: {
+        id: number;
+        total: number;
+        currency: string;
+        due_at: string | null;
+        period_start?: string | null;
+        period_end?: string | null;
+      };
+      autoRenewPaused: boolean;
+    }
+  | {
+      kind: 'grace_soft';
+      daysRemaining: number;
+      daysOverdue: number;
+      invoice?: {
+        id: number;
+        total: number;
+        currency: string;
+        due_at: string | null;
+        period_start?: string | null;
+        period_end?: string | null;
+      } | null;
+    }
+  | {
+      kind: 'grace_hard';
+      daysRemaining: number;
+      daysOverdue: number;
+      invoice?: {
+        id: number;
+        total: number;
+        currency: string;
+        due_at: string | null;
+        period_start?: string | null;
+        period_end?: string | null;
+      } | null;
+    }
   | { kind: 'expiring_soon'; daysUntilRenewal: number }
   | { kind: 'cancelled' }
   | { kind: 'expired' }
@@ -271,6 +307,7 @@ export class SubscriptionFacade {
         kind: 'grace_hard',
         daysRemaining: daysBetween(graceDeadline(sub, 'grace_hard_until', 'grace_period_hard_days')),
         daysOverdue: daysSince(sub.current_period_end),
+        invoice: sub.payable_invoice ?? null,
       };
     }
     if (state === 'grace_soft') {
@@ -278,6 +315,7 @@ export class SubscriptionFacade {
         kind: 'grace_soft',
         daysRemaining: daysBetween(graceDeadline(sub, 'grace_soft_until', 'grace_period_soft_days')),
         daysOverdue: daysSince(sub.current_period_end),
+        invoice: sub.payable_invoice ?? null,
       };
     }
     if (state === 'cancelled' || state === 'canceled') {
@@ -342,6 +380,20 @@ export class SubscriptionFacade {
     }
 
     if (state === 'active') {
+      // Payment-due detection (active with unpaid payable invoice) — this has
+      // maximum priority because owing money is more urgent and actionable
+      // than "expiring soon" or an informative auto-renew warning.
+      if (sub.payable_invoice) {
+        const warning = this.autoRenewWarning();
+        return {
+          kind: 'payment_due',
+          invoice: sub.payable_invoice,
+          autoRenewPaused:
+            sub.auto_renew === false ||
+            warning?.type === 'auto_renew_disabled_no_credential',
+        };
+      }
+
       const daysUntilRenewal = daysBetween(sub.next_billing_at);
       if (daysUntilRenewal > 0 && daysUntilRenewal <= EXPIRING_SOON_THRESHOLD_DAYS) {
         return { kind: 'expiring_soon', daysUntilRenewal };

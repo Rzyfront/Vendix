@@ -771,10 +771,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
    * recupera.
    *
    * Por eso el texto dice DÓNDE conseguirla y no solo qué está mal: quien captura
-   * una resolución no tiene por qué saber que son 40 caracteres.
+   * una resolución no tiene por qué saber que son 40 o 64 caracteres.
    */
   INVOICING_RESOLUTION_011:
-    'La clave técnica (ClTec) debe tener exactamente 40 caracteres hexadecimales. Cópiala completa del PDF de la autorización de numeración de la DIAN: si está incompleta, la DIAN rechaza cada factura por CUFE mal calculado y el consecutivo que gasta no se recupera.',
+    'La clave técnica (ClTec) debe tener 40 o 64 caracteres hexadecimales, según la emita la DIAN. Cópiala completa del PDF de la autorización de numeración: si está incompleta, la DIAN rechaza cada factura por CUFE mal calculado y el consecutivo que gasta no se recupera.',
   INVOICING_DUP_001: 'Ya existe una factura con ese numero.',
   INVOICING_PROVIDER_001:
     'Fallo la comunicacion con el proveedor de facturacion electronica.',
@@ -844,9 +844,9 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La resolución de numeración no respalda este documento: revisa su vigencia, su rango y que el prefijo coincida con el número emitido. Se corrige en Facturación → Resoluciones.',
   // El caso real: una clave técnica de 38 caracteres hizo rechazar una factura y
   // quemó el consecutivo. El texto dice DÓNDE conseguirla porque quien captura
-  // una resolución no tiene por qué saber que son 40 caracteres.
+  // una resolución no tiene por qué saber que son 40 o 64 caracteres.
   INVOICING_PREVALIDATION_003:
-    'La clave técnica (ClTec) de la resolución falta o está incompleta. Cópiala completa del PDF de la autorización de numeración de la DIAN: son 40 caracteres, y si falta uno solo la DIAN rechaza cada factura y el consecutivo que gasta no se recupera.',
+    'La clave técnica (ClTec) de la resolución falta o está incompleta. Cópiala completa del PDF de la autorización de numeración de la DIAN: son 40 o 64 caracteres, y si falta uno solo la DIAN rechaza cada factura y el consecutivo que gasta no se recupera.',
   INVOICING_PREVALIDATION_004:
     'El contenido del documento no se puede emitir tal como está: revisa la moneda, las unidades de medida de las líneas y el tipo de operación. El detalle señala cada línea y qué corregir.',
 
@@ -879,6 +879,56 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Falta el objeto del contrato AIU, o no tiene la longitud que exige la DIAN (entre 20 y 5.000 caracteres). Descríbelo en Configuración → Facturación → AIU: viaja en la línea de Administración y sin él la DIAN rechaza el documento.',
   INVOICING_AIU_003:
     'Una línea está marcada como componente AIU (Administración, Imprevistos o Utilidad) pero el documento no es un contrato AIU. Cambia el tipo de operación a AIU o quita la marca de la línea: como está, el componente se ignora y la línea se factura como una venta normal.',
+
+  /**
+   * AIU 004-006 — los tres nacen de la misma decisión: **la base gravable la
+   * fija el régimen, nunca lo que la línea declare.** El servidor se niega a
+   * inventar la tarifa ausente porque una factura sub-declarada la DIAN la
+   * ACEPTA, y el faltante sólo se corrige con nota crédito y la sanción ya
+   * corriendo. Es preferible no emitir.
+   */
+  INVOICING_AIU_004:
+    'Una línea del AIU entra a la base gravable y no declara impuesto, y no hay perfil de facturación que aporte la tarifa de ese componente. Declara el impuesto en la línea o elige un perfil que defina la tarifa: si se emitiera así, el IVA quedaría por debajo del que corresponde y eso sólo se corrige después con nota crédito.',
+  INVOICING_AIU_005:
+    'El impuesto de una línea contradice el régimen AIU del documento. La base gravable la determina el régimen —artículo 462-1 grava Administración, Imprevistos y Utilidad; Decreto 1372/1992 grava sólo la Utilidad—, no lo que la línea declare. Revisa el impuesto de la línea o el régimen del perfil: como está, el documento declararía un IVA que sus líneas no respaldan.',
+  INVOICING_AIU_006:
+    'El documento declara un régimen de AIU que no existe. Los dos válidos son el del artículo 462-1 del Estatuto Tributario y el del Decreto 1372/1992, y no son intercambiables: gravan bases distintas. Elige uno en el perfil de facturación.',
+
+  /**
+   * XSD_002 — el descuadre de totales. Lo PRIMERO que hay que decir es lo mismo
+   * que en `XSD_001`: no se gastó numeración. Quien ve fallar una emisión teme
+   * haber quemado un consecutivo autorizado, y aquí la comprobación corre
+   * ANTES de firmar.
+   */
+  INVOICING_XSD_002:
+    'Los totales del documento no cuadran con lo que declaran sus líneas, así que no se firmó ni se transmitió nada y el borrador conserva su número: no se gastó numeración. Ocurre cuando la base gravable de la cabecera no coincide con la suma de las bases de las líneas. Previsualiza el perfil para ver qué línea no está aportando su base.',
+
+  // ── Perfiles de facturación ───────────────────────────────────────────────
+  INVOICING_PROFILE_001:
+    'El perfil de facturación no existe o no pertenece a esta tienda.',
+  INVOICING_PROFILE_002:
+    'Otro perfil del mismo tipo de operación quedó como predeterminado al mismo tiempo. Vuelve a intentarlo: sólo puede haber un predeterminado por tipo, y la base lo garantiza.',
+  INVOICING_PROFILE_003:
+    'Este perfil no se puede eliminar porque hay facturas timbradas que lo referencian: su configuración es la que reproduce esas facturas y borrarla las dejaría sin respaldo. Desactívalo en su lugar — deja de ofrecerse al facturar y las facturas existentes siguen intactas.',
+  INVOICING_PROFILE_004:
+    'Ya existe un perfil con ese nombre en esta tienda. Elige otro nombre.',
+  INVOICING_PROFILE_005:
+    'La configuración del perfil no es válida fiscalmente. Los porcentajes de Administración, Imprevistos y Utilidad deben sumar exactamente 100, la base gravable no puede quedar por debajo del 10% mínimo del artículo 462-1, y la matriz de impuestos tiene que estar de acuerdo con el régimen elegido. Los campos con problema quedan marcados en el formulario.',
+  INVOICING_PROFILE_007:
+    'Un perfil inactivo no puede ser el predeterminado. Actívalo primero: el predeterminado es el que se usa al facturar sin elegir perfil, así que tiene que estar disponible.',
+  INVOICING_PROFILE_VERSION_001:
+    'Esa versión del perfil no existe. El historial puede haberse actualizado mientras la mirabas: vuelve a abrirlo para ver las versiones disponibles.',
+
+  /**
+   * PREVIEW_001 — no es un error del usuario, es un cinturón de seguridad que
+   * salta. La previsualización tiene prohibido tocar la numeración autorizada:
+   * un consecutivo tomado y no usado es irrecuperable. Si este código aparece,
+   * el cinturón funcionó — pero hay un defecto que reportar.
+   */
+  INVOICING_PREVIEW_001:
+    'La previsualización no se generó porque intentó consumir numeración autorizada, y eso está prohibido: no se reservó ningún número. Es un fallo interno, no un dato tuyo — reporta este caso a soporte.',
+  INVOICING_PREVIEW_002:
+    'Los datos de la muestra no permiten calcular la previsualización. Indica el valor del contrato o las líneas de ejemplo —uno de los dos, no ambos— y comprueba que el AIU no supere el valor del contrato.',
 
   /**
    * DIVISA — la factura siempre se emite en pesos; la divisa sólo se DECLARA.

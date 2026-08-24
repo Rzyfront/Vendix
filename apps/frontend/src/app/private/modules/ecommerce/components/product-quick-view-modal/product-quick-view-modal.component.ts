@@ -27,6 +27,10 @@ import { AddProductOptions, CartService } from '../../services/cart.service';
 import { SaleUnitSelectorComponent } from '../sale-unit-selector/sale-unit-selector.component';
 import { TableContextService } from '../../services/table-context.service';
 import { ShareModalComponent } from '../share-modal/share-modal.component';
+import {
+  PromotionStackComponent,
+  PromotionStackItem,
+} from '../../../../../shared/components/promotion-stack/promotion-stack.component';
 
 @Component({
   selector: 'app-product-quick-view-modal',
@@ -43,6 +47,7 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
     ShareModalComponent,
     CurrencyPipe,
     SaleUnitSelectorComponent,
+    PromotionStackComponent,
   ],
   template: `
     <app-modal
@@ -106,17 +111,76 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
             }
 
             <!-- Price -->
-            <div class="product-price">
-              <span class="current-price">{{ displayPrice() | currency }}</span>
-              @if (prod.is_on_sale && !selectedVariant()?.price_override) {
-                <span class="original-price">
-                  {{ prod.base_price | currency }}
+            <div class="product-price flex items-baseline flex-wrap gap-2">
+              <span class="current-price text-xl md:text-2xl font-extrabold text-text-primary">
+                {{ (hasActiveDiscount() ? effectiveUnitPrice() : displayPrice()) | currency }}
+              </span>
+              @if (selectedPresentation(); as unit) {
+                <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                  / {{ unit.name }}
                 </span>
               }
-              @if (promotionBadgeLabel()) {
+              @if (hasActiveDiscount() || (prod.is_on_sale && !selectedVariant()?.price_override)) {
+                <span class="original-price text-sm text-text-muted line-through opacity-70">
+                  {{ (hasActiveDiscount() ? displayPrice() : prod.base_price) | currency }}
+                </span>
+              }
+              @if (hasActiveDiscount() && activePromoDiscount()?.type === 'percentage') {
+                <span class="savings-pill inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-500 text-white shadow-xs">
+                  -{{ activePromoDiscount()?.value }}% OFF
+                </span>
+              } @else if (promotionBadgeLabel()) {
                 <span class="discount-badge">{{ promotionBadgeLabel() }}</span>
               }
             </div>
+
+            <!-- Dynamic Live Total & Savings breakdown when quantity > 1 or discount is active -->
+            @if ((quantity() > 1) || hasActiveDiscount()) {
+              <div class="total-breakdown-card p-2.5 rounded-lg bg-surface border border-border/70 flex items-center justify-between gap-3 shadow-xs my-2">
+                <div class="flex flex-col">
+                  <span class="text-[11px] text-text-secondary font-medium">
+                    Total por {{ quantity() }} {{ quantity() === 1 ? (selectedPresentation()?.name || 'unidad') : (selectedPresentation()?.name ? quantity() + ' ' + selectedPresentation()?.name : 'unidades') }}:
+                  </span>
+                  <div class="flex items-baseline gap-2">
+                    <span class="text-lg font-bold text-primary dark:text-primary-light">
+                      {{ totalFinalPrice() | currency }}
+                    </span>
+                    @if (hasActiveDiscount()) {
+                      <span class="text-xs text-text-muted line-through">
+                        {{ totalUndiscountedPrice() | currency }}
+                      </span>
+                    }
+                  </div>
+                </div>
+
+                @if (hasActiveDiscount()) {
+                  <div class="flex flex-col items-end">
+                    <span class="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                      🎉 ¡Ahorro!
+                    </span>
+                    <span class="text-xs font-extrabold text-emerald-600 dark:text-emerald-400">
+                      -{{ totalSavingsAmount() | currency }}
+                    </span>
+                  </div>
+                }
+              </div>
+            }
+
+            @if (
+              prod.active_promotion?.quantity_tiers?.length ||
+              prod.active_promotion?.badge_label
+            ) {
+              <div class="quick-view-promotions mb-3">
+                <app-promotion-stack
+                  mode="expanded-cards"
+                  [items]="expandedTierItems()"
+                  [currentQuantity]="quantity()"
+                  [unitsPerPackage]="packSize()"
+                  [ariaLabel]="'Niveles de descuento por cantidad'"
+                  (tierSelected)="quantity.set($event.package_quantity)"
+                />
+              </div>
+            }
 
             <!-- Presentaciones de venta (multitarifa). Por QUI-648 un
                  producto tiene presentaciones O variantes, nunca ambas: los
@@ -714,6 +778,127 @@ export class ProductQuickViewModalComponent {
   readonly promotionBadgeLabel = computed(
     () => this.product()?.active_promotion?.badge_label ?? '',
   );
+
+  /** Unidades base acumuladas considerando unidades por presentación */
+  readonly effectiveBaseUnits = computed<number>(() => {
+    return (this.quantity() || 1) * this.packSize();
+  });
+
+  /** Subtotal sin descuentos por la cantidad seleccionada */
+  readonly totalUndiscountedPrice = computed<number>(() => {
+    return this.displayPrice() * (this.quantity() || 1);
+  });
+
+  /** Porcentaje o monto de descuento activo según el tramo alcanzado */
+  readonly activePromoDiscount = computed<{
+    type: 'percentage' | 'fixed_amount';
+    value: number;
+    amount: number;
+    tierLabel?: string;
+  } | null>(() => {
+    const promo = this.product()?.active_promotion;
+    if (!promo) return null;
+    const baseQty = this.effectiveBaseUnits();
+    const undiscounted = this.totalUndiscountedPrice();
+
+    if (promo.quantity_tiers && Array.isArray(promo.quantity_tiers) && promo.quantity_tiers.length > 0) {
+      const sorted = [...promo.quantity_tiers].sort((a, b) => b.min_quantity - a.min_quantity);
+      const match = sorted.find((t) => baseQty >= t.min_quantity && (!t.max_quantity || baseQty <= t.max_quantity));
+      if (match) {
+        const isFixed = match.type === 'fixed_amount';
+        const amount = isFixed
+          ? match.value * (this.quantity() || 1)
+          : (undiscounted * match.value) / 100;
+        return {
+          type: isFixed ? 'fixed_amount' : 'percentage',
+          value: match.value,
+          amount: Math.min(undiscounted, amount),
+          tierLabel: promo.badge_label,
+        };
+      }
+      return null;
+    }
+
+    if (promo.discount_percentage && promo.discount_percentage > 0) {
+      const amount = (undiscounted * promo.discount_percentage) / 100;
+      return {
+        type: 'percentage',
+        value: promo.discount_percentage,
+        amount: Math.min(undiscounted, amount),
+        tierLabel: promo.badge_label,
+      };
+    }
+
+    if (promo.discount_amount && promo.discount_amount > 0) {
+      const amount = Math.min(undiscounted, promo.discount_amount * (this.quantity() || 1));
+      return {
+        type: 'fixed_amount',
+        value: promo.discount_amount,
+        amount,
+        tierLabel: promo.badge_label,
+      };
+    }
+
+    return null;
+  });
+
+  /** Total final a pagar tras aplicar el descuento del tramo */
+  readonly totalFinalPrice = computed<number>(() => {
+    const discount = this.activePromoDiscount()?.amount ?? 0;
+    return Math.max(0, this.totalUndiscountedPrice() - discount);
+  });
+
+  /** Precio unitario efectivo con el descuento aplicado */
+  readonly effectiveUnitPrice = computed<number>(() => {
+    const qty = this.quantity() || 1;
+    return this.totalFinalPrice() / qty;
+  });
+
+  /** Ahorro total acumulado */
+  readonly totalSavingsAmount = computed<number>(() => {
+    return this.activePromoDiscount()?.amount ?? 0;
+  });
+
+  /** ¿Hay descuento activo aplicado en la cantidad actual? */
+  readonly hasActiveDiscount = computed<boolean>(() => {
+    return this.totalSavingsAmount() > 0.01;
+  });
+
+  readonly expandedTierItems = computed<PromotionStackItem[]>(() => {
+    const promo = this.product()?.active_promotion;
+    if (!promo) return [];
+
+    const tiers = promo.quantity_tiers;
+    if (Array.isArray(tiers) && tiers.length > 0) {
+      const sorted = [...tiers].sort((a, b) => a.sort_order - b.sort_order);
+      return sorted.map((tier, index) => ({
+        id: `${promo.id}-modal-tier-${index}`,
+        original_promotion_id: promo.id,
+        label: promo.badge_label,
+        type: promo.type,
+        value: tier.value,
+        scope: promo.scope,
+        min_quantity: tier.min_quantity,
+        max_quantity: tier.max_quantity ?? null,
+        tier_index: index,
+      }));
+    }
+
+    if (promo.badge_label) {
+      return [
+        {
+          id: promo.id,
+          label: promo.badge_label,
+          type: promo.type,
+          value:
+            promo.discount_percentage ?? promo.discount_amount ?? undefined,
+          scope: promo.scope,
+        },
+      ];
+    }
+
+    return [];
+  });
 
   readonly displayStock = computed<number | null>(() => {
     // Con presentación elegida el stock son PAQUETES de ESA presentación.

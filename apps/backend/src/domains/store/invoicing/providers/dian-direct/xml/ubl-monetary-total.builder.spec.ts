@@ -1,7 +1,10 @@
 import { create } from 'xmlbuilder2';
 import { UblCommonBuilder } from './ubl-common.builder';
 import { UBL_NAMESPACES } from './xml-namespaces';
-import { ProviderInvoiceItem } from '../../invoice-provider.interface';
+import {
+  ProviderInvoiceItem,
+  ProviderInvoiceTax,
+} from '../../invoice-provider.interface';
 import { toDecimal } from '../../../utils/dian-money.util';
 
 /**
@@ -15,6 +18,25 @@ import { toDecimal } from '../../../utils/dian-money.util';
  * taxable base is net, and `AllowanceTotalAmount` restated a discount the lines
  * had already applied — with no document-level `AllowanceCharge` backing it.
  */
+/**
+ * Tributo de CABECERA por defecto de estos casos.
+ *
+ * Está acá porque la base imponible de la cabecera se DERIVA de lo que emiten las
+ * líneas, y una línea sin desglose propio sólo emite su `cac:TaxTotal` si hay un
+ * tributo de cabecera del que heredar. Un fixture con `tax_amount` pero sin
+ * `taxes` describe un documento que el emisor NO puede producir: era ese fixture
+ * imposible el que ocultaba el desacuerdo de FAU04.
+ *
+ * Los casos de este archivo afirman sobre descuentos y FAU14. Lo único que
+ * necesitan del tributo es que EXISTA; ninguna aserción lee su tarifa.
+ */
+const HEADER_IVA: ProviderInvoiceTax = {
+  tax_name: 'IVA',
+  tax_rate: '19.00',
+  taxable_amount: '0.00',
+  tax_amount: '0.00',
+};
+
 describe('UblCommonBuilder monetary totals', () => {
   function createRoot(): any {
     return create({ version: '1.0', encoding: 'UTF-8' }).ele(
@@ -52,10 +74,13 @@ describe('UblCommonBuilder monetary totals', () => {
     discount_amount: string;
     tax_amount: string;
     items: ProviderInvoiceItem[];
+    /** Ausente ⇒ `HEADER_IVA`. Ver el comentario de la constante. */
+    taxes?: ProviderInvoiceTax[];
   }): string {
     const doc = createRoot();
-    UblCommonBuilder.buildDocumentAllowanceCharge(doc, data, 'COP');
-    UblCommonBuilder.buildLegalMonetaryTotal(doc, data, 'COP');
+    const full = { ...data, taxes: data.taxes ?? [HEADER_IVA] };
+    UblCommonBuilder.buildDocumentAllowanceCharge(doc, full, 'COP');
+    UblCommonBuilder.buildLegalMonetaryTotal(doc, full, 'COP');
     return doc.end({ prettyPrint: false });
   }
 
@@ -323,9 +348,12 @@ describe('UblCommonBuilder TaxExclusiveAmount — base declarada (FAU04)', () =>
     discount_amount: string;
     tax_amount: string;
     items: any[];
+    /** Ausente ⇒ `HEADER_IVA`. Ver el comentario de la constante. */
+    taxes?: ProviderInvoiceTax[];
   }): Record<string, string> {
     const doc = createRoot();
-    UblCommonBuilder.buildLegalMonetaryTotal(doc, data as any, 'COP');
+    const full = { ...data, taxes: data.taxes ?? [HEADER_IVA] };
+    UblCommonBuilder.buildLegalMonetaryTotal(doc, full, 'COP');
     const xml = doc.end({ prettyPrint: false });
     const out: Record<string, string> = {};
     for (const m of xml.matchAll(/<cbc:(\w+) currencyID="COP">([^<]*)<\/cbc:\1>/g)) {

@@ -6,6 +6,16 @@ import {
   DianDocumentEvent,
 } from '../interfaces/invoice.interface';
 import { DianRejection } from '../utils/invoicing-errors.util';
+import type {
+  InvoiceProfile,
+  InvoiceProfileDetail,
+  InvoiceProfilePageMeta,
+  InvoiceProfileState as InvoiceProfileStateLiteral,
+  InvoiceProfileVersion,
+  InvoiceProfileVersionSummary,
+  ProfilePreviewResult,
+} from '../interfaces/invoice-profile.interface';
+import type { InvoiceProfileTemplate } from '../services/invoice-profile.service';
 
 export interface InvoicingState {
   invoices: Invoice[];
@@ -63,6 +73,115 @@ export interface InvoicingState {
    */
   pdfRegenerating: boolean;
 
+  // ── Perfiles de facturación ───────────────────────────────────────────────
+  // Campos planos con prefijo `profile*`, siguiendo el patrón del resto del
+  // slice. No se anidan en un sub-objeto: un `profiles: {...}` obligaría a cada
+  // reducer a hacer spread de dos niveles, y ese es el sitio donde se pierden
+  // banderas sin que nada avise.
+  profiles: InvoiceProfile[];
+  profilesLoading: boolean;
+  profilesMeta: InvoiceProfilePageMeta | null;
+  profilesError: string | null;
+
+  currentProfile: InvoiceProfileDetail | null;
+  currentProfileLoading: boolean;
+
+  /**
+   * Mutación de un perfil en curso. Bandera propia y NO `profilesLoading`:
+   * reusar la de la lista cambiaría la tabla por un esqueleto mientras se
+   * guarda, y el usuario perdería de vista la fila que está editando.
+   */
+  profileSaving: boolean;
+
+  /**
+   * Último fallo de mutación de un perfil, COMPLETO.
+   *
+   * `profilesError` guarda sólo el texto, y con eso no se puede pintar el
+   * refuerzo que el requerimiento 12 pide: el 409 de borrado bloqueado trae
+   * `details.invoice_count` —cuántas facturas timbradas referencian el
+   * perfil— y `describeApiFailure` prefiere el copy curado sobre el mensaje
+   * del backend, así que el número sólo sobrevive si se guarda el `details`.
+   * Sin él la confirmación reforzada diría «tiene facturas» sin decir cuántas,
+   * que es la mitad del dato que hace tomar la decisión correcta.
+   */
+  profileMutationFailure: {
+    message: string;
+    errorCode: string | null;
+    details: unknown;
+  } | null;
+
+  /**
+   * Snapshot de la versión que el usuario abrió del historial, y de quién es.
+   *
+   * El `profileId` se guarda al lado por la misma razón que en el historial y
+   * en la previsualización: sin él, abrir el perfil B tras haber mirado una
+   * versión del perfil A mostraría el snapshot de A como si fuera de B.
+   */
+  profileVersionSnapshot: InvoiceProfileVersion | null;
+  profileVersionSnapshotProfileId: number | null;
+  profileVersionSnapshotLoading: boolean;
+
+  profileVersions: InvoiceProfileVersionSummary[];
+  /**
+   * A qué perfil pertenece el historial cargado.
+   *
+   * No es redundante — es el mismo defecto que `dianEventsInvoiceId` ya
+   * resuelve: sin él, las versiones del perfil A siguen en el store al abrir el
+   * B y el historial las pinta como suyas. En un perfil de facturación eso es
+   * peor que un dato feo: el diff compararía snapshots de perfiles distintos y
+   * mostraría cambios fiscales que nunca ocurrieron.
+   */
+  profileVersionsProfileId: number | null;
+  profileVersionsLoading: boolean;
+
+  /**
+   * Última previsualización. Vive en el state y no en el componente porque el
+   * editor la consulta desde varias secciones y volver a pedirla en cada cambio
+   * de pestaña reconstruiría el XML sin necesidad.
+   */
+  /**
+   * Catálogo de plantillas DIAN. Constante versionada en el backend (ADR-10),
+   * así que se carga una vez por sesión de módulo y NO se invalida cuando se
+   * crea, edita o borra un perfil: publicar una plantilla nueva es un deploy,
+   * no una escritura de tenant.
+   *
+   * `profileTemplatesLoaded` es una bandera aparte de `profileTemplates.length`
+   * porque un catálogo legítimamente vacío y un catálogo aún no pedido no son lo
+   * mismo: sin ella el estado vacío reintentaría la carga en cada render.
+   */
+  profileTemplates: InvoiceProfileTemplate[];
+  profileTemplatesLoading: boolean;
+  profileTemplatesLoaded: boolean;
+  /**
+   * Fallo del catálogo de plantillas, en campo PROPIO y no en `profilesError`.
+   *
+   * Las plantillas son un atajo, la lista es la función. Compartir el campo
+   * haría que el error de lo opcional tapara el de lo esencial, y la pantalla
+   * mostraría «no se pudieron cargar las plantillas» encima de una lista que
+   * tampoco cargó.
+   */
+  profileTemplatesError: string | null;
+
+  profilePreview: ProfilePreviewResult | null;
+  profilePreviewProfileId: number | null;
+  profilePreviewLoading: boolean;
+  /**
+   * Fallo de la previsualización con su código. Se guarda el CÓDIGO y no sólo
+   * el mensaje: `INVOICING_PREVIEW_002` (muestra inutilizable) se corrige en el
+   * formulario, mientras `INVOICING_PROFILE_VERSION_001` (historial roto) es un
+   * error que el usuario no puede arreglar. Un solo string no distingue eso.
+   */
+  profilePreviewError: { code: string | null; message: string } | null;
+
+  // Filter-as-state de perfiles, separado del de facturas: comparten slice
+  // pero no vista, y un `search` común haría que buscar en una tabla filtrara
+  // la otra.
+  profilesSearch: string;
+  profilesStateFilter: InvoiceProfileStateLiteral | '';
+  profilesOperationFilter: string;
+  profilesPage: number;
+  profilesLimit: number;
+
   // Filter-as-state
   search: string;
   page: number;
@@ -98,6 +217,39 @@ export const initialInvoicingState: InvoicingState = {
   dianEventsLoading: false,
   dianEventRegistering: false,
   pdfRegenerating: false,
+
+  profiles: [],
+  profilesLoading: false,
+  profilesMeta: null,
+  profilesError: null,
+
+  currentProfile: null,
+  currentProfileLoading: false,
+  profileSaving: false,
+  profileMutationFailure: null,
+
+  profileVersionSnapshot: null,
+  profileVersionSnapshotProfileId: null,
+  profileVersionSnapshotLoading: false,
+
+  profileVersions: [],
+  profileVersionsProfileId: null,
+  profileVersionsLoading: false,
+
+  profileTemplates: [],
+  profileTemplatesLoading: false,
+  profileTemplatesLoaded: false,
+  profileTemplatesError: null,
+  profilePreview: null,
+  profilePreviewProfileId: null,
+  profilePreviewLoading: false,
+  profilePreviewError: null,
+
+  profilesSearch: '',
+  profilesStateFilter: '',
+  profilesOperationFilter: '',
+  profilesPage: 1,
+  profilesLimit: 20,
 
   search: '',
   page: 1,

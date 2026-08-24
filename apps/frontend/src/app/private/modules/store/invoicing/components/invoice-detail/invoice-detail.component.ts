@@ -20,8 +20,10 @@ import {
   Invoice,
   InvoiceItem,
   InvoiceTax,
+  resolveInvoiceAiuTaxableBasis,
 } from '../../interfaces/invoice.interface';
 import { InvoicingService } from '../../services/invoicing.service';
+import { DocumentPrintService } from '../../../../../../shared/services/print/document-print.service';
 import * as InvoicingActions from '../../state/actions/invoicing.actions';
 import {
   selectCurrentInvoice,
@@ -541,6 +543,144 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
               </div>
             </section>
           }
+          <!-- ── TRAZABILIDAD AIU ──────────────────────────────────────────
+               Con qué reglas salió ESTE documento. Son las columnas que el
+               backend escribió al calcular los importes, y son las mismas que
+               invoice-flow lee para decidir qué línea lleva «cac:TaxTotal» en
+               el XML. El perfil NO participa de esa decisión —la emisión no lo
+               consulta nunca—: aparece sólo como procedencia, para saber desde
+               qué preset se capturó. Vive en el detalle y no en la pantalla de
+               perfiles porque la pregunta que contesta es sobre la factura: un
+               perfil que cambió ayer no dice nada de lo que se emitió el mes
+               pasado.
+          -->
+          @if (aiuTrace(); as aiu) {
+            <section
+              class="mb-4 rounded-xl border p-4"
+              [ngClass]="
+                aiu.gaps.length
+                  ? 'border-[var(--color-error)]/40 bg-error-light'
+                  : 'border-border bg-surface'
+              "
+            >
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                    <app-icon name="shield" [size]="14" />
+                    Base gravable AIU
+                  </p>
+                  <p class="mt-1 text-sm font-semibold text-text-primary">
+                    {{ aiu.regimeLabel }}
+                  </p>
+                  <p class="text-xs text-text-secondary">{{ aiu.regimeHint }}</p>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2">
+                  <span
+                    class="rounded-full px-2.5 py-1 text-xs font-medium"
+                    [ngClass]="aiu.profileTone"
+                    [title]="aiu.profileHint"
+                  >
+                    {{ aiu.profileLabel }}
+                  </span>
+                  <span
+                    class="rounded-full px-2.5 py-1 text-xs font-medium"
+                    [ngClass]="
+                      aiu.minimumApplied
+                        ? 'bg-info-light text-[var(--color-info)]'
+                        : 'bg-surface text-text-secondary'
+                    "
+                    [title]="aiu.minimumHint"
+                  >
+                    {{ aiu.minimumLabel }}
+                  </span>
+                </div>
+              </div>
+
+              <!-- El perfil se movió DESPUÉS de emitir. No es un error: es
+                   exactamente lo que el par congelado protege. Se dice porque
+                   quien audita necesita saber que el perfil que vería hoy en
+                   pantalla no es el que produjo estos números. -->
+              @if (aiu.profileMovedLabel) {
+                <p class="mt-3 flex items-start gap-2 text-xs text-text-secondary">
+                  <app-icon name="info" [size]="14" class="mt-0.5 flex-shrink-0" />
+                  {{ aiu.profileMovedLabel }}
+                </p>
+              }
+
+              <!-- Componentes gravados que no declararon ninguna tarifa. Cada
+                   uno es IVA que el documento debía declarar y no declara:
+                   rechazo FAU04 con el consecutivo ya quemado. -->
+              @if (aiu.gaps.length) {
+                <p
+                  class="mt-3 flex items-start gap-2 rounded-lg bg-surface px-3 py-2 text-xs font-medium text-error"
+                  role="alert"
+                >
+                  <app-icon name="alert-triangle" [size]="14" class="mt-0.5 flex-shrink-0" />
+                  <span>
+                    Gravado sin tarifa: {{ aiu.gapsLabel }}. El régimen mete
+                    {{ aiu.gaps.length === 1 ? 'este componente' : 'estos componentes' }}
+                    en la base gravable y el documento no declara IVA sobre
+                    {{ aiu.gaps.length === 1 ? 'él' : 'ellos' }}.
+                  </span>
+                </p>
+              }
+
+              @if (aiu.rows.length) {
+                <div class="mt-3 overflow-x-auto">
+                  <table class="w-full min-w-[520px] text-xs">
+                    <thead>
+                      <tr class="border-b border-border text-left text-text-secondary">
+                        <th class="py-1.5 pr-3 font-medium">Componente</th>
+                        <th class="py-1.5 pr-3 font-medium">En la base</th>
+                        <th class="py-1.5 pr-3 text-right font-medium">Base</th>
+                        <th class="py-1.5 pr-3 text-right font-medium">Impuesto</th>
+                        <th class="py-1.5 font-medium">Tarifas</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (row of aiu.rows; track row.component) {
+                        <tr class="border-b border-border/60 last:border-0">
+                          <td class="py-1.5 pr-3 font-medium text-text-primary">
+                            {{ row.label }}
+                            <span class="font-normal text-text-secondary">
+                              ({{ row.lines }}
+                              {{ row.lines === 1 ? 'línea' : 'líneas' }})
+                            </span>
+                          </td>
+                          <td class="py-1.5 pr-3">
+                            <span
+                              class="rounded-full px-2 py-0.5 text-[11px] font-medium"
+                              [ngClass]="
+                                row.taxable
+                                  ? 'bg-success-light text-success'
+                                  : 'bg-surface text-text-secondary'
+                              "
+                            >
+                              {{ row.taxable ? 'Grava' : 'No grava' }}
+                            </span>
+                          </td>
+                          <td class="py-1.5 pr-3 text-right tabular-nums text-text-primary">
+                            {{ row.base }}
+                          </td>
+                          <td class="py-1.5 pr-3 text-right tabular-nums text-text-primary">
+                            {{ row.tax }}
+                          </td>
+                          <td class="py-1.5 text-text-secondary">
+                            @if (row.rates) {
+                              {{ row.rates }}
+                            } @else {
+                              <span [ngClass]="row.taxable ? 'text-error' : ''">—</span>
+                            }
+                          </td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              }
+            </section>
+          }
           <!-- Items Table -->
           <div class="mb-4">
             <h4 class="text-sm font-semibold text-text-primary mb-2">Productos / Servicios</h4>
@@ -777,6 +917,21 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                 (clicked)="regeneratePdf()">
                 <app-icon slot="icon" name="rotate-cw" [size]="14"></app-icon>
                 Regenerar PDF
+              </app-button>
+
+              <!--
+                IMPRIMIR. El diseño lo resuelve el backend a partir del PERFIL
+                que esta factura congeló al emitirse, no de la plantilla que la
+                tienda tenga activa hoy: una reimpresión tiene que salir igual
+                que la primera copia.
+              -->
+              <app-button
+                variant="outline"
+                size="sm"
+                [loading]="printing()"
+                (clicked)="printInvoice()">
+                <app-icon slot="icon" name="printer" [size]="14"></app-icon>
+                Imprimir
               </app-button>
 
               @if (inv.xml_document) {
@@ -1051,6 +1206,7 @@ export class InvoiceDetailComponent {
   private currencyService = inject(CurrencyFormatService);
   private invoicingService = inject(InvoicingService);
   private toast = inject(ToastService);
+  private printService = inject(DocumentPrintService);
 
   private readonly storeRejection = this.store.selectSignal(selectDianRejection);
   private readonly hydratedInvoice = this.store.selectSignal(selectCurrentInvoice);
@@ -1064,6 +1220,9 @@ export class InvoiceDetailComponent {
   /** Descarga del PDF en curso. Señal, no booleano plano: en zoneless un campo
    *  mutado dentro de un `subscribe` no repinta nada. */
   readonly pdfLoading = signal(false);
+
+  /** Impresión en curso. Misma razón que `pdfLoading`. */
+  readonly printing = signal(false);
 
   /** Visibilidad del modal de registro de eventos RADIAN. */
   readonly eventModalOpen = signal(false);
@@ -1372,6 +1531,156 @@ export class InvoiceDetailComponent {
    * ver es cuánto rango le queda y cuándo vence, porque las dos cosas hacen
    * fallar la PRÓXIMA emisión y este es el sitio donde las está mirando.
    */
+  /**
+   * TRAZABILIDAD AIU — qué reglas produjeron los importes de ESTE documento.
+   *
+   * Se lee de las columnas congeladas de la factura (`aiu_regime`,
+   * `aiu_minimum_percent`, `aiu_taxable_matrix`) y NUNCA de la configuración
+   * viva de la tienda ni del perfil actual. La razón es la única que importa
+   * en un módulo fiscal: el perfil es mutable y el documento emitido no. Si
+   * este panel leyera el perfil de hoy, una factura de hace tres meses
+   * mostraría una gravabilidad que no es la que se declaró a la DIAN — y sería
+   * un panel que miente justo donde se lo consulta para auditar.
+   *
+   * Devuelve `null` cuando no hay matriz: los documentos que no son AIU no
+   * tienen nada que explicar acá y la sección no se pinta.
+   */
+  readonly aiuTrace = computed(() => {
+    const inv = this.detail();
+    const matrix = inv?.aiu_taxable_matrix ?? null;
+    if (!inv || !matrix) return null;
+
+    // Se nombra la BASE GRAVABLE, no el régimen, y por eso hay un resolvedor en
+    // vez de un `??` entre dos claves: bajo `'subtotal'` NINGUNA de las dos
+    // trae un régimen legal —no existe— y la cascada anterior caía en «Régimen
+    // no declarado / el documento no dejó constancia». Era el peor sitio
+    // posible para un hueco: este panel es el que se abre cuando la DIAN
+    // pregunta, y afirmaba que no se sabía con qué se calculó un documento que
+    // sí lo dejó dicho.
+    const basis = resolveInvoiceAiuTaxableBasis(inv);
+    const regimeLabel =
+      basis === 'utilidad'
+        ? 'Decreto 1372/1992 · sólo Utilidad'
+        : basis === 'subtotal'
+          ? 'Sin tratamiento AIU · base = contrato completo'
+          : 'Art. 462-1 ET · AIU completo';
+    const regimeHint =
+      basis === 'utilidad'
+        ? 'Grava sólo la Utilidad. Es el régimen de los contratos de construcción.'
+        : basis === 'subtotal'
+          ? 'El documento declinó el tratamiento AIU: el impuesto se calculó sobre el valor TOTAL del contrato —costo reembolsable incluido— y sin piso legal, porque no hay AIU que pisar.'
+          : 'Grava Administración, Imprevistos y Utilidad.';
+
+    // ── Perfil congelado. La ausencia es información, no un hueco: dice que
+    //    la configuración vino de `store_settings`, que es mutable, y que por
+    //    tanto no hay una versión inmutable que respalde estos números.
+    const snap = inv.profile_snapshot ?? null;
+    const has_profile = inv.profile_id != null && inv.profile_version != null;
+    const profileLabel = has_profile
+      ? `Perfil: ${snap?.profile?.name ?? '#' + inv.profile_id} v${inv.profile_version}`
+      : 'Sin perfil';
+    const profileTone = has_profile
+      ? 'bg-success-light text-success'
+      : 'bg-warning-light text-warning';
+    const profileHint = has_profile
+      ? 'Procedencia: el documento se capturó partiendo de este perfil y guarda de qué versión. La gravabilidad emitida son las columnas de la factura, no el perfil — cambiarlo no altera este documento.'
+      : 'Se capturó sin partir de un perfil. Los importes y la gravabilidad son los del documento; no hay preset del que provengan.';
+
+    const frozen_version = inv.profile_version ?? null;
+    const current_version = snap?.profile?.current_version ?? null;
+    const profileMovedLabel =
+      has_profile &&
+      frozen_version !== null &&
+      current_version !== null &&
+      current_version > frozen_version
+        ? `El perfil ya va en la versión ${current_version}; este documento se capturó desde la ${frozen_version}. Lo que ves abajo son los importes del documento, no los que el perfil propondría hoy.`
+        : null;
+
+    // ── Piso legal. `enforced` dice si se APLICÓ, no si estaba configurado:
+    //    son cosas distintas y la que importa para auditar es la primera.
+    const minimum = matrix.minimum ?? null;
+    const minimumApplied = minimum?.enforced === true;
+    const percent = minimum?.percent ?? inv.aiu_minimum_percent ?? null;
+    const minimumLabel = minimumApplied
+      ? `Piso ${this.formatPercent(percent)}`
+      : 'Sin piso legal';
+    const minimumHint = minimumApplied
+      ? 'La base gravable no bajó de este porcentaje del valor del contrato.'
+      : basis === 'utilidad'
+        ? 'El Decreto 1372/1992 no fija piso sobre la utilidad del constructor.'
+        : basis === 'subtotal'
+          ? 'Sin tratamiento AIU no hay piso que aplicar: la base gravable ya es el valor total del contrato.'
+          : 'El piso quedó desactivado explícitamente para este documento.';
+
+    // `costo` es el CUARTO bucket, y aparece en la matriz cuando la base es
+    // `'subtotal'`: ahí el costo reembolsable sí grava. Sin esta entrada la
+    // fila se pintaba con su clave cruda —«costo», en minúscula y sin
+    // explicación— justo en la tabla que sustenta la gravabilidad declarada.
+    const componentLabel: Record<string, string> = {
+      administracion: 'Administración',
+      imprevistos: 'Imprevistos',
+      utilidad: 'Utilidad',
+      costo: 'Costo reembolsable',
+    };
+
+    const rows = (matrix.components ?? []).map((c) => ({
+      component: c.component,
+      label: componentLabel[c.component] ?? c.component,
+      taxable: c.taxable === true,
+      lines: Number(c.lines) || 0,
+      // La matriz guarda los importes como cadena de 2 decimales (viene de
+      // `Decimal.toFixed(2)`), así que hay que numerizar antes de formatear:
+      // `formatCurrency` recibe `number` y una cadena entraría por el `|| 0`.
+      base: this.formatCurrency(Number(c.taxable_amount) || 0),
+      tax: this.formatCurrency(Number(c.tax_amount) || 0),
+      // Una tarifa se lee como «IVA 19%». `rate_basis` no se pinta: bajo AIU
+      // la base no es el total de la línea, y mostrar dos números sin explicar
+      // la diferencia confunde más de lo que aclara.
+      rates: (c.rates ?? [])
+        .map((r) =>
+          [
+            // `tax_type` viene en minúsculas de la base («iva», «inc»). Son
+            // siglas, y en sigla el usuario las reconoce: «IVA 19%».
+            r.tax_type ? String(r.tax_type).toUpperCase() : null,
+            r.tax_rate != null ? this.formatPercent(r.tax_rate) : null,
+          ]
+            .filter(Boolean)
+            .join(' '),
+        )
+        .filter((t) => t.length > 0)
+        .join(' · '),
+    }));
+
+    const gaps = (matrix.taxable_without_rate ?? []).slice();
+
+    return {
+      regimeLabel,
+      regimeHint,
+      profileLabel,
+      profileTone,
+      profileHint,
+      profileMovedLabel,
+      minimumApplied,
+      minimumLabel,
+      minimumHint,
+      rows,
+      gaps,
+      gapsLabel: gaps.map((g) => componentLabel[g] ?? g).join(', '),
+    };
+  });
+
+  /**
+   * Porcentaje legible. Se recorta el `.00` porque «19%» es lo que dice la
+   * norma y «19.00%» es lo que dice el `Decimal(5,2)` de la base — el usuario
+   * está leyendo la norma, no la columna.
+   */
+  private formatPercent(value: number | string | null | undefined): string {
+    if (value === null || value === undefined || value === '') return '—';
+    const n = Number(value);
+    if (!Number.isFinite(n)) return String(value);
+    return `${Number.isInteger(n) ? n : n.toFixed(2)}%`;
+  }
+
   readonly resolutionBanner = computed(() => {
     const res = this.detail()?.resolution;
     if (!res) return null;
@@ -1648,11 +1957,16 @@ export class InvoiceDetailComponent {
   /**
    * Cómo se rotula la marca AIU de una línea, y qué explica al pasar el cursor.
    *
-   * El texto de ayuda no es adorno: bajo el Art. 462-1 ET se grava el AIU
-   * completo y bajo el Decreto 1372/1992 sólo la utilidad, así que la MISMA
-   * línea de «Imprevistos» lleva impuesto o no según el régimen configurado. Lo
-   * que la pantalla puede afirmar sin conocer el régimen es qué componente es;
-   * lo demás lo dice la línea misma con su columna de impuestos.
+   * El texto de ayuda no es adorno: hay TRES bases gravables y la misma línea
+   * de «Imprevistos» lleva impuesto o no según cuál rija —`'aiu'` y
+   * `'subtotal'` la gravan, `'utilidad'` no—. Lo que la pantalla puede afirmar
+   * sin conocer la base es qué componente es; lo demás lo dice la línea misma
+   * con su columna de impuestos, y el panel de trazabilidad de arriba nombra la
+   * base con la que se calculó.
+   *
+   * Los textos decían «los dos regímenes» y contaban de menos: con la tercera
+   * base, «gravable en los dos» es una afirmación falsa en el sitio donde se
+   * audita un documento ya emitido.
    */
   aiuLabel(item: InvoiceItem): { label: string; hint: string } | null {
     switch (item.aiu_component) {
@@ -1664,12 +1978,12 @@ export class InvoiceDetailComponent {
       case 'imprevistos':
         return {
           label: 'AIU · Imprevistos',
-          hint: 'Componente de Imprevistos. Grava sólo bajo el Art. 462-1 ET; bajo el Decreto 1372/1992 queda fuera de la base gravable y se emite sin bloque de impuestos.',
+          hint: 'Componente de Imprevistos. Grava bajo el Art. 462-1 ET y cuando se declinó el tratamiento AIU (base = contrato completo); bajo el Decreto 1372/1992 queda fuera de la base gravable y se emite sin bloque de impuestos.',
         };
       case 'utilidad':
         return {
           label: 'AIU · Utilidad',
-          hint: 'Componente de Utilidad. Es base gravable en los dos regímenes.',
+          hint: 'Componente de Utilidad. Es la única porción que es base gravable en las TRES bases: AIU completo, sólo utilidad, y contrato completo.',
         };
       default:
         return null;
@@ -1822,6 +2136,44 @@ export class InvoiceDetailComponent {
           this.pdfLoading.set(false);
           this.toast.error(describeApiFailure(error).message);
         },
+      });
+  }
+
+  /**
+   * Imprime la factura por el Print Gateway.
+   *
+   * NO se le pasa plantilla: la resuelve el servidor leyendo el snapshot del
+   * perfil que la factura tiene congelado. Si el cliente pudiera elegirla, dos
+   * impresiones del mismo documento fiscal podrían verse distintas, y eso es
+   * exactamente lo que una reimpresión no debe poder hacer.
+   *
+   * Sin `fallbackRequest`: el emisor local no sabe armar un documento fiscal
+   * (CUFE, QR, resolución), así que un «fallback» produciría un papel que
+   * PARECE una factura y no lo es. Si el gateway falla, se dice.
+   */
+  printInvoice(): void {
+    const inv = this.detail();
+    if (!inv || this.printing()) {
+      return;
+    }
+    this.printing.set(true);
+    void this.printService
+      .printViaGateway({
+        formatType: 'fiscal_electronic_invoice',
+        documentId: inv.id,
+        title: inv.invoice_number,
+      })
+      .then((result) => {
+        this.printing.set(false);
+        if (!result) {
+          this.toast.error(
+            'No se pudo imprimir: revisa el formato «Factura Electrónica (DIAN)» en el Hub de formatos de impresión.',
+          );
+        }
+      })
+      .catch((error: unknown) => {
+        this.printing.set(false);
+        this.toast.error(describeApiFailure(error).message);
       });
   }
 

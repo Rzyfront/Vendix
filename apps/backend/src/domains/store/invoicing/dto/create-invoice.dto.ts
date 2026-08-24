@@ -29,6 +29,11 @@ import { DIAN_ID_TYPES } from '../providers/dian-direct/constants/dian-document-
 import { InvoiceAddressDto, liftInvoiceAddress } from './invoice-address.dto';
 import { IsWithinFiscalIssueDateWindow } from './invoice-issue-date-window.validator';
 import { InvoiceWithholdingInputDto } from './invoice-withholding-input.dto';
+import {
+  ENABLED_ACCOUNTING_MODELS,
+  accountingModelDisabledReason,
+} from '../profiles/invoice-profile-config.contract';
+import type { AccountingModel } from '../profiles/invoice-profile-config.contract';
 
 /**
  * Códigos DIAN del tipo de identificación del adquiriente (Anexo Técnico 1.9,
@@ -57,6 +62,40 @@ const blankToUndefined = ({ value }: TransformFnParams): unknown =>
 /** Normaliza códigos que el estándar exige en mayúsculas (ISO 4217, 3166-1). */
 const upperCodeOrUndefined = ({ value }: TransformFnParams): unknown =>
   typeof value === 'string' ? value.trim().toUpperCase() || undefined : value;
+
+/**
+ * Mensaje del piso de una llave foránea numérica del documento.
+ *
+ * ## Por qué toda FK necesita `@Min(1)` y por qué `@IsNumber()` no basta
+ *
+ * El `ValidationPipe` global se monta con `transform: true` y
+ * `transformOptions.enableImplicitConversion: true`
+ * (`apps/backend/src/main.ts`). Bajo esa configuración `@IsNumber()` **no es
+ * una compuerta de signo**: coerciona la cadena `"-5000"` a `-5000` y la
+ * aprueba, y aprueba el `0` —que es justo lo que serializa un formulario a
+ * medio llenar—. El id imposible atraviesa la validación, entra al servicio
+ * como número válido y sólo falla más abajo: un `findFirst` que no encuentra
+ * nada y contesta 404 por la razón equivocada, o un 500 sobre lo que era una
+ * petición mal formada. Un fallo de petición presentado como fallo de
+ * servidor no se puede atribuir al input, que es lo que lo vuelve caro de
+ * depurar.
+ *
+ * Con el piso declarado acá el rechazo es un **400** del pipe que nombra el
+ * campo, antes de tocar la base.
+ *
+ * El precedente está en este MISMO archivo: `profile_id` ya lleva `@Min(1)`
+ * con esta razón escrita en su docblock. La asimetría no era entre archivos —
+ * era entre campos vecinos—, así que estas siete llaves eran una omisión y no
+ * una decisión de diseño.
+ *
+ * Nota de alcance: estas son llaves de la base de Vendix, no nodos del XML. El
+ * Anexo Técnico DIAN no las gobierna y no se le atribuye cifra alguna: el piso
+ * `1` sale de que `id` es un `Int` autoincremental que arranca en 1.
+ */
+const foreignKeyFloorMessage = (field: string, consequence = ''): string =>
+  `${field} debe ser un entero positivo: el mínimo es 1 porque es el id de una ` +
+  `fila existente. Omite el campo si no aplica — un 0 o un negativo no ` +
+  `identifica ninguna fila.${consequence ? ` ${consequence}` : ''}`;
 
 /**
  * Códigos que ISO 4217 asigna a unidades que NO son dinero.
@@ -96,14 +135,28 @@ const NON_MONETARY_ISO_4217_CODES: readonly string[] = [
 ];
 
 export class CreateInvoiceItemDto {
+  /** Piso: ver `foreignKeyFloorMessage`. */
   @IsOptional()
   @IsNumber()
   @Type(() => Number)
+  @Min(1, {
+    message: foreignKeyFloorMessage(
+      'product_id',
+      'Para crear el producto en la misma transacción usa inline_product en vez de un id inventado.',
+    ),
+  })
   product_id?: number;
 
+  /** Piso: ver `foreignKeyFloorMessage`. */
   @IsOptional()
   @IsNumber()
   @Type(() => Number)
+  @Min(1, {
+    message: foreignKeyFloorMessage(
+      'product_variant_id',
+      'Si la línea no es de una variante, omite el campo: un 0 haría buscar la variante «cero» y la línea saldría sin variante igual, pero con un 404 de por medio.',
+    ),
+  })
   product_variant_id?: number;
 
   /**
@@ -198,13 +251,23 @@ export class CreateInvoiceItemDto {
    * `cbc:InvoicedQuantity` (`NIU` unidad, `KGM` kilo, `LTR` litro, `MTR` metro…).
    * Sin ella el proveedor UBL escribe el default histórico; declararla es lo que
    * permite facturar a granel sin mentir en la unidad.
+   *
+   * ## Por qué 5 y no los 10 que tenía
+   *
+   * El Anexo Técnico 1.9 acota `@unitCode` a 5 caracteres en las TRES tablas de
+   * documento, así que no hay conflicto que resolver: **FAV05**
+   * (`/Invoice/cac:InvoiceLine/cbc:InvoicedQuantity/@unitCode`, `A A 1-5`),
+   * **CAV05** (nota crédito, `A A 2-5`) y **DAV05** (nota débito, `A A 2-5`).
+   * El 10 anterior no citaba ninguna regla y dejaba pasar un código de 6 a 10
+   * caracteres que la DIAN devuelve al validar la línea. Los códigos reales de
+   * la rec. 20 son de 2 o 3 caracteres.
    */
   @IsOptional()
   @Transform(blankToUndefined)
   @IsString()
-  @MaxLength(10, {
+  @MaxLength(5, {
     message:
-      'unit_code no puede superar 10 caracteres. Usa el código UN/ECE rec. 20 (ej. "NIU", "KGM", "LTR"), no el nombre de la unidad.',
+      'unit_code no puede superar 5 caracteres: el Anexo Técnico DIAN 1.9 acota @unitCode a 5 en las tres tablas (FAV05 factura, CAV05 nota crédito, DAV05 nota débito). Usa el código UN/ECE rec. 20 (ej. "NIU", "KGM", "LTR"), no el nombre de la unidad.',
   })
   unit_code?: string;
 
@@ -252,9 +315,16 @@ export class CreateInvoiceItemDto {
 }
 
 export class CreateInvoiceTaxDto {
+  /** Piso: ver `foreignKeyFloorMessage`. */
   @IsOptional()
   @IsNumber()
   @Type(() => Number)
+  @Min(1, {
+    message: foreignKeyFloorMessage(
+      'tax_rate_id',
+      'Sin id de catálogo el impuesto se declara con tax_name, tax_rate y tax_type; no hace falta inventar un 0.',
+    ),
+  })
   tax_rate_id?: number;
 
   @IsString()
@@ -355,9 +425,16 @@ export class CreateInvoiceDto {
     | 'pos_equivalent_document'
     | 'equivalent_adjustment_note';
 
+  /** Piso: ver `foreignKeyFloorMessage`. */
   @IsOptional()
   @IsNumber()
   @Type(() => Number)
+  @Min(1, {
+    message: foreignKeyFloorMessage(
+      'customer_id',
+      'Para una venta anónima omite el campo; para crear el cliente al vuelo usa inline_customer.',
+    ),
+  })
   customer_id?: number;
 
   /**
@@ -372,14 +449,28 @@ export class CreateInvoiceDto {
   @Type(() => CreateCustomerDto)
   inline_customer?: CreateCustomerDto;
 
+  /** Piso: ver `foreignKeyFloorMessage`. */
   @IsOptional()
   @IsNumber()
   @Type(() => Number)
+  @Min(1, {
+    message: foreignKeyFloorMessage(
+      'supplier_id',
+      'Sólo aplica a documento soporte y factura de compra; en una venta se omite.',
+    ),
+  })
   supplier_id?: number;
 
+  /** Piso: ver `foreignKeyFloorMessage`. */
   @IsOptional()
   @IsNumber()
   @Type(() => Number)
+  @Min(1, {
+    message: foreignKeyFloorMessage(
+      'related_invoice_id',
+      'Es la factura original que este documento ajusta. Un 0 dejaría una nota de ajuste apuntando a la nada, y el vínculo es lo único que la hace válida ante la DIAN.',
+    ),
+  })
   related_invoice_id?: number;
 
   @IsOptional()
@@ -574,9 +665,25 @@ export class CreateInvoiceDto {
   })
   currency?: string;
 
+  /**
+   * Resolución de facturación de la que sale el consecutivo. Piso: ver
+   * `foreignKeyFloorMessage`.
+   *
+   * Es la llave más sensible de las siete: el formulario del panel ya sabe que
+   * `0` significa «sin resolución» y lo filtra antes de enviar
+   * (`invoice-section-field-map.ts:120`, `fields.resolution_id > 0`). El
+   * backend nunca impuso lo mismo, así que cualquier otro llamador —POS, una
+   * herramienta de IA, un `curl`— podía mandar `0` y llegar al servicio.
+   */
   @IsOptional()
   @IsNumber()
   @Type(() => Number)
+  @Min(1, {
+    message: foreignKeyFloorMessage(
+      'resolution_id',
+      'Omite el campo para que el servicio resuelva la resolución vigente del tipo de documento; no mandes 0 para decir «ninguna».',
+    ),
+  })
   resolution_id?: number;
 
   /**
@@ -693,7 +800,57 @@ export class CreateInvoiceDto {
   operation_type?: string;
 
   /**
-   * Objeto del contrato AIU de ESTA factura (regla CAV03).
+   * Perfil de facturación bajo el que se timbra este documento.
+   *
+   * ## Qué cambia cuando llega
+   *
+   * La configuración fiscal deja de leerse de `store_settings` y sale de la
+   * versión VIGENTE del perfil, y la factura persiste
+   * `(profile_id, profile_version)`. Eso es lo que hace reproducible el
+   * documento: `invoice_profile_versions` es append-only, así que editar el
+   * perfil mañana crea la versión N+1 y no toca la N que esta factura congeló.
+   *
+   * ## Y qué pasa cuando NO llega
+   *
+   * Nada cambia: el flujo manual sigue leyendo `store_settings.invoicing.aiu`
+   * exactamente como antes y las dos columnas quedan NULL. Es deliberado —los
+   * tenants que ya facturan sin perfiles no pueden verse obligados a crear uno
+   * para seguir emitiendo—. El CHECK de la tabla impone «ambas o ninguna», así
+   * que no existe el estado intermedio.
+   *
+   * ## Por qué `@Min(1)` y no sólo `@IsNumber`
+   *
+   * Con `enableImplicitConversion`, `@IsNumber()` aprueba la cadena `"-5000"`:
+   * no es una compuerta de signo. Un id negativo o cero llegaría al `findFirst`
+   * y saldría como 404, que es un error correcto por la razón equivocada — y
+   * `0` es justamente el valor que un formulario a medio llenar manda. El piso
+   * se declara acá para que el rechazo ocurra antes de tocar la base.
+   */
+  @IsOptional()
+  @Transform(blankToUndefined)
+  @Type(() => Number)
+  @IsNumber(
+    {},
+    {
+      message:
+        'profile_id debe ser el id numérico de un perfil de facturación de esta tienda.',
+    },
+  )
+  @Min(1, {
+    message:
+      'profile_id debe ser un entero positivo. Omite el campo para facturar con el flujo manual (configuración de la tienda).',
+  })
+  profile_id?: number;
+
+  /**
+   * Objeto del contrato AIU de ESTA factura.
+   *
+   * La regla que la gobierna en una FACTURA es **FAV03**
+   * (`/Invoice/cac:InvoiceLine/cbc:Note`, `E A 20..5000`), no CAV03: CAV03 y
+   * DAV03 son sus gemelas de nota crédito y nota débito, con los mismos
+   * `20..5000`, y este DTO no emite ninguna de las dos. La cifra 4900 no cambia
+   * por la corrección de la cita; el nombre sí importa para poder volver al
+   * anexo y encontrar la fila.
    *
    * Opcional: sin él se usa el de la tienda
    * (`store_settings.invoicing.aiu.contract_object`), que sigue siendo el valor
@@ -712,9 +869,38 @@ export class CreateInvoiceDto {
   @IsString()
   @MaxLength(4900, {
     message:
-      'aiu_contract_object no puede superar 4900 caracteres: la regla CAV03 limita la nota completa a 5000 y el prefijo obligatorio «Contrato de servicios AIU por concepto de:» ya ocupa parte.',
+      'aiu_contract_object no puede superar 4900 caracteres: la regla FAV03 del Anexo Técnico DIAN 1.9 limita la nota completa a 5000 y el prefijo obligatorio «Contrato de servicios AIU por concepto de:» ya ocupa parte.',
   })
   aiu_contract_object?: string;
+
+  /**
+   * Modelo de contabilización del AIU de ESTA factura.
+   *
+   * Se declara acá **por obligación, no por comodidad**: el `ValidationPipe`
+   * global corre con `forbidNonWhitelisted: true` (`main.ts:206`), así que una
+   * clave no declarada en el DTO devuelve 400 antes de que ninguna lógica la
+   * mire. Sin esta propiedad, el campo que el perfil ya guarda sería
+   * inexpresable por documento y el 400 llegaría con un mensaje que no explica
+   * nada.
+   *
+   * Opcional, y **la ausencia significa `'sumada'`** —ver
+   * `resolveAccountingModel`—, que es lo que el calculador hace por
+   * construcción: un cliente que no manda el campo emite exactamente igual que
+   * antes de que existiera.
+   *
+   * La lista contra la que se valida es `ENABLED_ACCOUNTING_MODELS`, no
+   * `ACCOUNTING_MODELS`: es el mismo interruptor único que gobierna la
+   * escritura del perfil, así que `'no_sumada'` se rechaza en la puerta —con el
+   * motivo y su fecha— en vez de tomar consecutivo y que la DIAN devuelva el
+   * documento al firmar. Habilitarlo es añadir el valor a esa constante (paso
+   * D.7), y las dos superficies se levantan a la vez.
+   */
+  @IsOptional()
+  @Transform(blankToUndefined)
+  @IsIn(ENABLED_ACCOUNTING_MODELS as readonly string[], {
+    message: `aiu_accounting_model sólo admite ${ENABLED_ACCOUNTING_MODELS.join(', ')} por ahora. ${accountingModelDisabledReason('no_sumada') ?? ''}`.trim(),
+  })
+  aiu_accounting_model?: AccountingModel;
 
   /**
    * Divisa extranjera de la operación, ISO 4217. Acompaña a
@@ -776,8 +962,39 @@ export class CreateInvoiceDto {
   })
   exchange_rate?: number;
 
+  /**
+   * Información adicional del documento. Viaja tal cual a `/Invoice/cbc:Note`
+   * (`ubl-invoice.builder.ts:147-149`).
+   *
+   * ## De dónde sale el 500
+   *
+   * Anexo Técnico 1.9, regla **FAD13** — `/Invoice/cbc:Note`, formato
+   * `E A 1-500`. No es una cifra elegida acá: es la longitud que la DIAN
+   * publica para ese nodo. Y la columna `invoices.notes` es `String?`
+   * (Postgres `text`, sin límite), así que la base no ataja nada — esta era la
+   * única propiedad de texto del DTO sin ninguna cota, y por tanto la única por
+   * la que un texto arbitrariamente largo llegaba al XML.
+   *
+   * El costo de no tenerla no es un 400 tardío: el consecutivo autorizado se
+   * toma ANTES de firmar, así que la DIAN devuelve el documento con el número
+   * ya gastado y ese número no se recupera.
+   *
+   * ## Por qué 500 y no 5000
+   *
+   * 5000 es el techo de las notas crédito y débito (reglas **CAD11** y
+   * **DAD11**, `E A 5-5000`), que viajan por `CreateCreditNoteDto` /
+   * `CreateDebitNoteDto` y no por acá. 500 es la cota del documento que ESTE
+   * DTO emite.
+   *
+   * No confundir con la nota AIU: esa es de LÍNEA (regla FAV03, `20..5000`) y
+   * la compone `buildAiuNote` a partir de `aiu_contract_object`.
+   */
   @IsOptional()
   @IsString()
+  @MaxLength(500, {
+    message:
+      'notes no puede superar 500 caracteres: es el límite que el Anexo Técnico DIAN 1.9 (regla FAD13) fija para /Invoice/cbc:Note. Un texto más largo hace que la DIAN devuelva la factura DESPUÉS de haber consumido el consecutivo autorizado, que no se recupera.',
+  })
   notes?: string;
 
   /**

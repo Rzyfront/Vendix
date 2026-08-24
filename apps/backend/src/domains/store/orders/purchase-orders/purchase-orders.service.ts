@@ -26,6 +26,7 @@ import { VendixHttpException } from '@common/errors/vendix-http.exception';
 import { ErrorCodes } from '@common/errors/error-codes';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { buildTaxCategoryScopeWhere } from '@common/helpers/tax-category-scope.helper';
 import {
   localDateString,
   resolveStoreTimezone,
@@ -71,6 +72,28 @@ import {
  */
 const PO_ADVANCE_SOURCE = 'po_advance';
 const PO_ADVANCE_PAYMENT_METHOD = 'advance';
+
+/**
+ * Normaliza el `tax_category_ids` que llega del carrito/plantilla: acepta
+ * arreglo o cadena separada por coma/punto y coma y descarta lo que no sea un
+ * entero positivo. Vive a nivel de módulo (antes era un closure dentro del
+ * `$transaction`) porque `create()` ahora los valida ANTES de abrir la
+ * transacción.
+ */
+function normalizeTaxCategoryIds(value: unknown): number[] | undefined {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+  const rawValues = Array.isArray(value)
+    ? value
+    : String(value)
+        .split(/[;,]/)
+        .map((item) => item.trim());
+  const ids = rawValues
+    .map((item) => Number(item))
+    .filter((item) => Number.isInteger(item) && item > 0);
+  return ids.length > 0 ? Array.from(new Set(ids)) : undefined;
+}
 
 @Injectable()
 export class PurchaseOrdersService {
@@ -751,6 +774,43 @@ export class PurchaseOrdersService {
     });
   }
 
+  /**
+   * Tienda contra la que se valida el alcance de las categorías de impuesto
+   * cuando el contexto no la trae (la puerta de ORGANIZACIÓN llama a `create()`
+   * directamente). Replica la cascada que el bloque de alta de productos usa
+   * dentro de la transacción: ubicación → tienda, y si no, la primera tienda
+   * de la organización. Lee sin alcance porque con contexto de organización el
+   * cliente de tienda rechazaría `inventory_locations`.
+   */
+  private async resolveTaxScopeStoreId(
+    dto: CreatePurchaseOrderDto,
+  ): Promise<number | null> {
+    const organizationId = RequestContextService.getOrganizationId();
+    if (dto.location_id) {
+      const location = await this.prisma
+        .withoutScope()
+        .inventory_locations.findUnique({
+          where: { id: dto.location_id },
+          select: { store_id: true, stores: { select: { organization_id: true } } },
+        });
+      // La ubicación tiene que ser del inquilino: si no, no sirve como ancla.
+      if (
+        location?.store_id &&
+        (!organizationId ||
+          location.stores?.organization_id === organizationId)
+      ) {
+        return location.store_id;
+      }
+    }
+    if (!organizationId) return null;
+    const firstStore = await this.prisma.withoutScope().stores.findFirst({
+      where: { organization_id: organizationId },
+      select: { id: true },
+      orderBy: { id: 'asc' },
+    });
+    return firstStore?.id ?? null;
+  }
+
   async create(createPurchaseOrderDto: CreatePurchaseOrderDto) {
     // ===== C.7 — la regla de flete e impuesto se valida en el SERVICIO =====
     //
@@ -791,6 +851,64 @@ export class PurchaseOrdersService {
       planNeedsDateValidation && ctxStoreId
         ? await resolveStoreTimezone(this.prisma, ctxStoreId)
         : DEFAULT_STORE_TIMEZONE;
+
+    // ===== HOTFIX impuestos — el escáner sugiere, esto valida =====
+    //
+    // La validación vivía DENTRO del `$transaction` y usaba `tx.tax_categories`
+    // (cliente CON alcance de tienda). `tax_categories` está en
+    // `store_scoped_models`, así que `mergeScopedWhere` sumaba
+    // `store_id = <contexto>` al where y anulaba con un AND el
+    // `OR ... store_id: null` que el código creía tener: ninguna categoría de
+    // nivel ORGANIZACIÓN pasaba nunca, y la orden moría con «Una o más
+    // categorías de impuesto no existen para esta tienda».
+    //
+    // Se resuelve ACÁ, antes de abrir la transacción, por dos razones: la
+    // lectura necesita `withoutScope()` (única forma de ver la rama global) y
+    // hacerla dentro del tx abriría una segunda conexión — el patrón que ya
+    // sigue `storeTz` unas líneas más arriba.
+    const requestedTaxCategoryIds = new Set<number>();
+    for (const item of createPurchaseOrderDto.items ?? []) {
+      for (const id of normalizeTaxCategoryIds(
+        (item as any)?.tax_category_ids,
+      ) ?? []) {
+        requestedTaxCategoryIds.add(id);
+      }
+    }
+    const allowedTaxCategoryIds = new Set<number>();
+    if (requestedTaxCategoryIds.size > 0) {
+      const taxScopeStoreId =
+        ctxStoreId ?? (await this.resolveTaxScopeStoreId(createPurchaseOrderDto));
+      if (!taxScopeStoreId) {
+        throw new BadRequestException(
+          'No se pudo resolver la tienda de la orden para validar las categorías de impuesto.',
+        );
+      }
+      const taxCategories = await this.prisma
+        .withoutScope()
+        .tax_categories.findMany({
+          where: {
+            id: { in: Array.from(requestedTaxCategoryIds) },
+            ...buildTaxCategoryScopeWhere(
+              taxScopeStoreId,
+              RequestContextService.getOrganizationId(),
+            ),
+          },
+          select: { id: true },
+        });
+      for (const taxCategory of taxCategories) {
+        allowedTaxCategoryIds.add(taxCategory.id);
+      }
+      const missing = Array.from(requestedTaxCategoryIds).filter(
+        (id) => !allowedTaxCategoryIds.has(id),
+      );
+      if (missing.length > 0) {
+        // El mensaje NOMBRA los ids: sin eso el operador veía un 400 opaco y no
+        // tenía cómo saber qué renglón corregir.
+        throw new BadRequestException(
+          `Una o más categorías de impuesto no existen para esta tienda (ids: ${missing.join(', ')}).`,
+        );
+      }
+    }
 
     // La transacción devuelve la orden + (si hubo abono) el pago de anticipo
     // registrado: el evento contable se emite por FUERA, después del commit.
@@ -866,21 +984,6 @@ export class PurchaseOrdersService {
         ['peso', 'weight', 'por peso'].includes(normalizeText(value))
           ? 'weight'
           : 'unit';
-
-      const normalizeTaxCategoryIds = (value: unknown): number[] | undefined => {
-        if (value === undefined || value === null || value === '') {
-          return undefined;
-        }
-        const rawValues = Array.isArray(value)
-          ? value
-          : String(value)
-              .split(/[;,]/)
-              .map((item) => item.trim());
-        const ids = rawValues
-          .map((item) => Number(item))
-          .filter((item) => Number.isInteger(item) && item > 0);
-        return ids.length > 0 ? Array.from(new Set(ids)) : undefined;
-      };
 
       for (const item of createPurchaseOrderDto.items) {
         let finalProductId = item.product_id;
@@ -1028,7 +1131,7 @@ export class PurchaseOrdersService {
             (item as any).has_multiple_price_tiers,
             false,
           );
-          const requestedTaxCategoryIds = normalizeTaxCategoryIds(
+          const itemTaxCategoryIds = normalizeTaxCategoryIds(
             (item as any).tax_category_ids,
           );
 
@@ -1160,22 +1263,13 @@ export class PurchaseOrdersService {
             }
           }
 
-          let taxCategoryIds: number[] | undefined;
-          if (requestedTaxCategoryIds?.length) {
-            const taxCategories = await tx.tax_categories.findMany({
-              where: {
-                id: { in: requestedTaxCategoryIds },
-                OR: [{ store_id: storeId }, { store_id: null }],
-              },
-              select: { id: true },
-            });
-            if (taxCategories.length !== requestedTaxCategoryIds.length) {
-              throw new BadRequestException(
-                'Una o más categorías de impuesto no existen para esta tienda.',
-              );
-            }
-            taxCategoryIds = taxCategories.map((taxCategory) => taxCategory.id);
-          }
+          // Las categorías ya se validaron ANTES de abrir la transacción
+          // (`allowedTaxCategoryIds`): acá solo se toman las que sobrevivieron.
+          // Leerlas de nuevo con `tx` volvería a aplicar el alcance de tienda
+          // que dejaba fuera a las de nivel ORGANIZACIÓN.
+          const taxCategoryIds = itemTaxCategoryIds?.filter((id) =>
+            allowedTaxCategoryIds.has(id),
+          );
 
           if (existingProduct) {
             finalProductId = existingProduct.id;

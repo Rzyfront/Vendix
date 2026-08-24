@@ -1,3 +1,4 @@
+import { STORE_INDUSTRIES } from '../../../../../shared/constants/industry-modules.constant';
 // Local enum definitions to avoid circular dependencies
 export enum StoreType {
   PHYSICAL = 'physical',
@@ -15,7 +16,16 @@ export enum StoreState {
   ARCHIVED = 'archived',
 }
 
-export type StoreIndustry = 'retail' | 'restaurant' | 'manufacturing' | 'service' | 'gym';
+/**
+ * Derivada de `STORE_INDUSTRIES`, no escrita a mano.
+ *
+ * Había tres copias de esta unión en el frontend, una de ellas con sólo cuatro
+ * industrias —le faltaba `gym` desde que se añadió— y ninguna avisaba: una unión
+ * a mano no falla al quedarse corta, sólo rechaza el valor nuevo en el sitio más
+ * lejano al cambio. Derivándola, agregar una industria al constante compartido
+ * la propaga sola y olvidarla es imposible.
+ */
+export type StoreIndustry = (typeof STORE_INDUSTRIES)[number];
 
 export interface Store {
   // Core properties from API

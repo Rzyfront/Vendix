@@ -41,7 +41,12 @@ import {
   createInvoiceSuccess,
   loadResolutions,
 } from '../../state/actions/invoicing.actions';
-import { selectActiveResolutions } from '../../state/selectors/invoicing.selectors';
+import {
+  selectActiveResolutions,
+  selectResolutions,
+} from '../../state/selectors/invoicing.selectors';
+import { invoiceHelp } from '../../utils/invoice-section-help';
+import type { InvoiceScreenSectionId } from '../../utils/invoice-section-order';
 import {
   applyBackendValidationErrors,
   clearBackendError,
@@ -64,7 +69,14 @@ import {
 } from '../../services/invoice-emit-readiness.service';
 import { toEmitRequirements } from '../../utils/invoice-emit-requirements';
 import { isHabilitationNumbering } from '../../../../../../shared/utils/habilitation-numbering.util';
+import {
+  compareResolutionsForSelection,
+  hasRemainingRange,
+  isWithinValidity,
+  nextConsecutive,
+} from '../../utils/resolution-selection.util';
 
+import { AlertBannerComponent } from '../../../../../../shared/components/alert-banner/alert-banner.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import {
@@ -79,6 +91,7 @@ import {
   TaxSelection,
 } from '../../../../../../shared/components/tax-selector';
 import {
+  ConfirmationModalComponent,
   DialogService,
   SaveRequirement,
   SaveRequirementsModalComponent,
@@ -86,6 +99,14 @@ import {
   StickyHeaderComponent,
 } from '../../../../../../shared/components/index';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+/**
+ * SELECTOR DE CUENTA PUC CON BÚSQUEDA (5 resultados por página, el resto se
+ * alcanza escribiendo). Vive bajo `products` porque nació allí y se importa en
+ * vez de duplicarse: es el único sitio que traduce código↔id contra el plan de
+ * cuentas, y guardar un id donde el motor contable espera un código manda el
+ * ingreso a la cuenta por defecto sin error visible. Merece subir a `shared`.
+ */
+import { AccountCodeSelectComponent } from '../../../products/components/account-code-select.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import {
   formatDateOnlyUTC,
@@ -119,6 +140,22 @@ import {
   InvoiceCustomItemModalComponent,
 } from '../../components/invoice-create/invoice-custom-item-modal.component';
 import { InvoiceOrderSelectComponent } from '../../components/invoice-create/invoice-order-select.component';
+/**
+ * SECCIÓN AIU COMPARTIDA con el editor de perfiles. Es el mismo componente y
+ * los mismos controles en las dos pantallas: lo que cambia es qué significa
+ * dejar uno vacío, no qué campos hay. Ver su docblock.
+ */
+import { InvoiceSectionAiuComponent } from '../../components/invoice-sections/index';
+import {
+  asAiuComponentsBasis,
+  asAiuTaxableBasis,
+  reprojectAiuTaxRules,
+} from '../../components/invoice-sections/index';
+import type {
+  AiuDepartureField,
+  AiuSectionPaths,
+  AiuTaxRuleValue,
+} from '../../components/invoice-sections/index';
 import { InvoiceTaxCatalogService } from '../../components/invoice-create/invoice-tax-catalog.service';
 import {
   InvoiceAiuSettings,
@@ -132,6 +169,81 @@ import {
   ExchangeRateQuote,
   ExchangeRateService,
 } from '../../services/exchange-rate.service';
+import {
+  InvoiceProfileCatalogEntry,
+  InvoiceProfileService,
+} from '../../services/invoice-profile.service';
+import type {
+  AiuBucket,
+  AiuComponentLiteral,
+  AiuComponentsBasis,
+  AiuTaxableBasis,
+  AiuVatRegimeLiteral,
+  InvoiceProfileConfig,
+  ProfileAiuConfig,
+  ProfileConfigIssue,
+} from '../../../../../../core/utils/invoice-profile-config.contract';
+import {
+  AIU_COMPONENTS,
+  AIU_LEGAL_FLOOR_PERCENT_SCALED,
+  AIU_TAXABLE_BUCKETS_BY_BASIS,
+  formatPercentScaled,
+  parsePercentScaled,
+  regimeFromTaxableBasis,
+  resolveAiuComponentsBasis,
+  resolveAiuTaxableBasis,
+} from '../../../../../../core/utils/invoice-profile-config.contract';
+
+/**
+ * La configuración AIU efectiva del documento, con la BASE GRAVABLE al frente.
+ *
+ * ─── POR QUÉ NO ES `InvoiceAiuSettings` A SECAS ──────────────────────────────
+ *
+ * `InvoiceAiuSettings` es el espejo de `GET /store/invoicing/aiu-settings`, y
+ * ese endpoint responde SÓLO `regime`, con los dos regímenes legales. No es un
+ * rezago de la transición: `AiuSettings.regime` —el ajuste de tienda, en
+ * `settings/interfaces/store-settings.interface.ts`— nunca tuvo `taxable_basis`
+ * y no va a tenerlo, porque `'subtotal'` no es un default de tienda. Lo dice el
+ * backend en su propio comentario sobre `AiuRegimeSnapshot`
+ * (`invoice-flow.service.ts`): «el tercer valor sólo llega vía snapshot de
+ * perfil o de factura, nunca vía ajuste vivo». Verificado en
+ * `InvoicingService.getAiuSettingsView`.
+ *
+ * Así que en la rama SIN perfil el `regime` de la tienda es la fuente legítima
+ * y completa —pero se lee DERIVANDO con `resolveAiuTaxableBasis`, nunca
+ * comparándolo contra un literal—, y en la rama CON perfil la fuente es
+ * `taxable_basis` del snapshot, que sí puede decir `'subtotal'`. Meter ese
+ * tercer valor en un campo tipado `'et_462_1' | 'decreto_1372_1992'` obligaría
+ * al compilador a elegir uno de los dos: es la mentira que este tipo existe
+ * para hacer imposible.
+ *
+ * Por eso la base viaja aparte y `regime` pasa a ser NULLABLE —el régimen legal
+ * equivalente cuando existe, `null` bajo `'subtotal'`—. Quien decide
+ * gravabilidad lee `taxable_basis`; `regime` queda sólo para citar la norma. Es
+ * la misma decisión —separar en vez de ampliar— que el backend tomó con
+ * `AiuRegimeSnapshot` y esta rama con `PersistedAiuRegime`.
+ */
+type EffectiveAiuSettings = Omit<InvoiceAiuSettings, 'regime'> & {
+  /** Qué porción del contrato grava. Es la única fuente de la decisión. */
+  taxable_basis: AiuTaxableBasis;
+  /** Régimen legal equivalente, o `null` cuando no hay ninguno que citar. */
+  regime: AiuVatRegimeLiteral | null;
+};
+
+/**
+ * Códigos de la tabla 13.2.2 del anexo que son tributos de DOCUMENTO, o sea los
+ * que viajan dentro de la línea (`cac:TaxTotal`) y suman al total.
+ *
+ * Los de retención (`05` ReteIVA, `06` ReteFuente, `07` ReteICA) quedan fuera a
+ * propósito: no suman al total y se capturan en la sección de retenciones, que
+ * exige un `concept_id` del catálogo de la tienda. Mapearlos acá los convertiría
+ * en impuestos de línea, que es exactamente el descuadre que la DIAN rechaza.
+ */
+const AIU_DOCUMENT_TAX_TYPE_BY_CODE: Readonly<Record<string, string>> = {
+  '01': 'iva',
+  '03': 'ica',
+  '04': 'inc',
+};
 import {
   AIU_COMPONENT_OPTIONS,
   DOCUMENT_TYPE_NIT_CODE,
@@ -152,6 +264,108 @@ import {
   safeTaxType,
   toFiscalDocumentType,
 } from '../../components/invoice-create/invoice-dian-catalogs';
+
+/**
+ * Centinela de «sin perfil» del selector, o sea el flujo manual.
+ *
+ * Es `0` y no `null` porque `SelectorOption.value` sólo admite `string | number`:
+ * sin un valor representable, la opción «configuración de la tienda» no podría
+ * existir y el usuario no tendría manera de VOLVER al flujo manual después de
+ * elegir un perfil — la preselección del predeterminado se volvería una
+ * restricción, que es justo lo que ADR-9 descarta.
+ *
+ * Nunca sale en el payload: `buildPayload` manda `profile_id` sólo cuando hay un
+ * perfil real del catálogo, y el `@Min(1)` del backend rechazaría el `0`.
+ */
+const PROFILE_NONE = 0;
+
+/**
+ * LOS CONTROLES QUE EL PERFIL PRECARGA, con su nombre en español.
+ *
+ * Una sola lista para tres usos que TIENEN que coincidir:
+ *
+ *  1. `profileOverwriteFields()` — qué se le advierte al usuario que perderá.
+ *  2. `applyProfileFully()` — a qué controles se les devuelve el `pristine` que
+ *     autoriza a `applyProfilePrefill` a escribirlos.
+ *  3. Documentación de qué toca un perfil y qué no.
+ *
+ * Si estuvieran en tres sitios, la divergencia sería silenciosa y del peor tipo:
+ * una ruta añadida a `put()` pero no a la lista del `pristine` dejaría de
+ * aplicarse sin error alguno, y el usuario vería un perfil que «no hace nada» en
+ * un campo concreto. Peor todavía al contrario: una ruta advertida pero no
+ * aplicada avisa de una pérdida que no ocurre.
+ *
+ * `resolution_id` y `exchange_rate` entran aunque `put()` no los escriba:
+ * la resolución la gobierna `preselectEligibleResolution` —que también respeta
+ * `dirty`— y la tasa se limpia cuando el perfil no declara conversión. Las dos
+ * cambian al aplicar un perfil, así que las dos se advierten.
+ *
+ * Las LÍNEAS y las RETENCIONES no están acá: son `FormArray`, no se gobiernan
+ * por `pristine` sino por las banderas `forced` de sus dos siembras, y se
+ * advierten aparte porque su aviso lleva el conteo.
+ *
+ * LA MATRIZ DE TRIBUTOS (`aiu_taxes`) tampoco, y no por olvido: su `dirty` no
+ * significa «escrito a mano». La reproyección que mantiene la matriz coherente
+ * con la base gravable —`reprojectAiuTaxRules`, disparada al sembrar la base
+ * heredada— añade la fila derivada del costo reembolsable y con eso marca el
+ * arreglo `dirty` sin que nadie haya tocado nada. Advertir sobre esa señal
+ * pondría en el modal una pérdida que el operador no causó, y un aviso que
+ * aparece solo es lo que entrena a ignorar los avisos. Mientras la matriz no
+ * tenga una marca propia de captura manual, se queda fuera.
+ */
+const PROFILE_PREFILL_LABELS: ReadonlyArray<readonly [string, string]> = [
+  ['resolution_id', 'la resolución elegida'],
+  ['invoice_type', 'el tipo de documento'],
+  ['payment_form', 'la forma de pago'],
+  ['payment_means_code', 'el medio de pago'],
+  ['notes', 'las notas del documento'],
+  ['use_foreign_currency', 'la divisa'],
+  ['foreign_currency', 'la divisa'],
+  ['exchange_rate', 'la tasa de cambio'],
+  ['aiu_contract_object', 'el objeto del contrato'],
+  ['default_account_code', 'la cuenta contable por omisión'],
+  // ── LO QUE LA SECCIÓN AIU AÑADIÓ AL DOCUMENTO ────────────────────────────
+  //
+  // Estas ocho rutas viven en el grupo `aiu` y las escribe
+  // `seedAiuFromProfile`, no el `put()` de `applyProfilePrefill`. Aun así
+  // pertenecen a esta lista, que no es «lo que escribe put()» sino «lo que un
+  // perfil precarga»: sin ellos, elegir un perfil sobre un reparto escrito a
+  // mano lo reemplazaba SIN avisar de que se perdía, y era la mitad de la
+  // sección AIU la que desaparecía en silencio.
+  //
+  // Varias rutas comparten etiqueta —igual que las dos de la divisa— porque el
+  // aviso se lee por concepto y no por control: «el reparto de la base AIU» es
+  // una sola cosa para quien la escribió, aunque sean tres campos.
+  //
+  // Las TRES congeladas —`taxable_basis`, `enforce_minimum_base`,
+  // `minimum_base_percent`— NO entran: no las precarga el perfil sino los
+  // ajustes efectivos, y no se pueden escribir a mano (ver `aiuFrozenFields`),
+  // así que nunca pueden estar `dirty`. Advertir de perderlas sería avisar de
+  // una pérdida que no ocurre.
+  ['aiu.components_basis', 'la unidad de los porcentajes del AIU'],
+  ['aiu.administracion', 'el reparto de la base AIU'],
+  ['aiu.imprevistos', 'el reparto de la base AIU'],
+  ['aiu.utilidad', 'el reparto de la base AIU'],
+  ['aiu.revenue_administracion', 'las cuentas contables del AIU'],
+  ['aiu.revenue_imprevistos', 'las cuentas contables del AIU'],
+  ['aiu.revenue_utilidad', 'las cuentas contables del AIU'],
+  ['aiu.vat_payable_account', 'las cuentas contables del AIU'],
+];
+
+/**
+ * Escapa el texto que entra al mensaje del modal de confirmación.
+ *
+ * El mensaje se pinta con `[innerHTML]` —lo necesita para la lista de viñetas—
+ * y lleva el NOMBRE DEL PERFIL, que lo escribe el tenant. Angular sanea el
+ * `innerHTML`, así que esto no es la barrera de seguridad; es lo que evita que
+ * un perfil llamado «Aseo <A&B>» se lea partido o con el nombre a medias.
+ */
+function escapeHtmlText(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
 
 // ─────────────────────────────────────────────────────────────
 // Contrato de salida
@@ -212,6 +426,21 @@ interface InvoiceCreatePayload {
    * un override y rompe la herencia.
    */
   aiu_contract_object?: string;
+  /**
+   * Perfil de facturación con el que se timbra ESTE documento.
+   *
+   * Omitido ⇒ flujo manual: el backend resuelve el AIU desde
+   * `store_settings.invoicing.aiu`, igual que antes de que existieran los
+   * perfiles. Presente ⇒ congela `(profile_id, profile_version)` en la factura y
+   * deriva la base gravable de esa versión, sin leer el setting ni como
+   * respaldo.
+   *
+   * Viaja SÓLO si el perfil está en el catálogo activo del tipo de operación
+   * vigente. Mandar uno de otro tipo devolvería 409 `INVOICING_PROFILE_008`
+   * nombrando un campo que el usuario ya no ve en pantalla, y mandar el
+   * centinela `0` un 400 por `@Min(1)`.
+   */
+  profile_id?: number;
   foreign_currency?: string;
   foreign_total_amount?: number;
   exchange_rate?: number;
@@ -301,18 +530,23 @@ const DIAN_TECHNICAL_KEY_LENGTHS = [40, 64] as const;
 /** Destino único al salir de la captura, se emita o no. */
 const INVOICES_LIST_ROUTE = '/admin/invoicing/invoices';
 
-type SectionId =
-  | 'documento'
-  | 'adquiriente'
-  | 'lineas'
-  | 'impuestos'
-  | 'aiu'
-  | 'retenciones'
-  | 'divisa'
-  | 'contabilidad';
+/**
+ * Las secciones de esta pantalla NO se enumeran aquí: se derivan del orden
+ * canónico compartido con el editor de perfiles
+ * (`utils/invoice-section-order.ts`). Enumerarlas dos veces es lo que hizo que
+ * AIU acabara en distinta posición en cada pantalla.
+ */
+type SectionId = InvoiceScreenSectionId;
 
 /** Qué controles de cabecera pertenecen a cada sección, para contar errores. */
 const SECTION_FIELDS: Record<SectionId, string[]> = {
+  /**
+   * El perfil no valida NADA del documento: elegirlo no puede dejar la factura
+   * en error, y no elegirlo tampoco. Por eso la lista va vacía —el contador de
+   * errores de esta sección tiene que quedarse en cero siempre— mientras que la
+   * sección sí existe, para que se plegue y se cuente como una más.
+   */
+  perfil: [],
   documento: [
     'invoice_type',
     'issue_date',
@@ -432,13 +666,16 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     NgClass,
     ReactiveFormsModule,
     StickyHeaderComponent,
+    AlertBannerComponent,
     ButtonComponent,
     InputComponent,
     SelectorComponent,
     TextareaComponent,
     ToggleComponent,
     IconComponent,
+    AccountCodeSelectComponent,
     CustomerModalComponent,
+    ConfirmationModalComponent,
     SaveRequirementsModalComponent,
     InvoiceFormSectionComponent,
     InvoiceResolutionBannerComponent,
@@ -446,6 +683,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     InvoiceItemPickerModalComponent,
     InvoiceCustomItemModalComponent,
     InvoiceOrderSelectComponent,
+    InvoiceSectionAiuComponent,
   ],
   template: `
     <div class="w-full max-w-[1400px] mx-auto">
@@ -482,27 +720,21 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
         <!-- Banner de error: persistente a propósito. El usuario tiene que
              poder leerlo MIENTRAS corrige. -->
         @if (submitError()) {
-          <div
-            role="alert"
-            class="rounded-lg border border-error bg-error-light p-3"
+          <app-alert-banner
+            variant="danger"
+            icon="alert-triangle"
+            tone="token"
+            heading="No se pudo crear la factura"
           >
-            <div class="flex items-start gap-2">
-              <app-icon name="alert-triangle" [size]="16" class="text-error" />
-              <div class="flex-1 min-w-0">
-                <p class="text-sm font-semibold text-error">
-                  No se pudo crear la factura
-                </p>
-                <p class="text-sm text-error">{{ submitError() }}</p>
-                @if (submitErrorDetails().length) {
-                  <ul class="mt-1 list-disc pl-4 text-xs text-error space-y-0.5">
-                    @for (detail of submitErrorDetails(); track detail) {
-                      <li>{{ detail }}</li>
-                    }
-                  </ul>
+            {{ submitError() }}
+            @if (submitErrorDetails().length) {
+              <ul class="mt-1 list-disc space-y-0.5 pl-4 text-xs">
+                @for (detail of submitErrorDetails(); track detail) {
+                  <li>{{ detail }}</li>
                 }
-              </div>
-            </div>
-          </div>
+              </ul>
+            }
+          </app-alert-banner>
         }
 
         <!-- Modo: manual vs desde pedido -->
@@ -539,93 +771,320 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
 
         @if (mode() === 'manual') {
           <!--
-            LA RESOLUCIÓN SE ELIGE ARRIBA Y SE EXPLICA DEBAJO.
+            EL PERFIL VA PRIMERO, ANTES QUE CUALQUIER DATO DEL DOCUMENTO.
 
-            El selector va FUERA del «form» del documento, así que se enlaza con
-            «[formControl]» y no con «formControlName»: sin un «formGroup»
-            ancestro, el nombre no resolvería contra nada.
+            Estaba dentro de «Documento», debajo de la resolución. Es el orden
+            equivocado: elegir un perfil REESCRIBE la resolución, los códigos de
+            pago, las notas de cabecera, las líneas y el bloque AIU, así que
+            ponerlo después de esos campos invita a llenarlos para verlos cambiar
+            solos. Arriba del todo se lee como lo que es: el punto de partida del
+            documento, no un ajuste más de la cabecera.
+
+            El selector va FUERA del «form», así que se enlaza con
+            «[formControl]» y no con «formControlName» —sin un «formGroup»
+            ancestro el nombre no resolvería contra nada—. El control sigue
+            siendo el mismo del formulario, así que el payload, el reset y los
+            computed que leen el valor crudo no cambian.
+
+            SE PINTA SIEMPRE, TAMBIÉN SIN PERFILES DEL TIPO ELEGIDO.
+
+            Antes se escondía cuando la lista quedaba vacía, y eso hacía
+            indistinguibles dos cosas muy distintas: «esta tienda no tiene
+            perfiles de operación Estándar» y «esta pantalla no trabaja con
+            perfiles». Quien nunca ve el control no descubre que existe.
+
+            Lo que NO se hace es ofrecer perfiles de otro tipo de operación: el
+            backend responde «INVOICING_PROFILE_008» a un perfil cuyo
+            «operation_type» no coincide con el del documento, así que cruzarlos
+            sería ofrecer un 409 tras llenar la factura entera. Sin perfiles del
+            tipo elegido se dice eso mismo, con el tipo por su nombre, y se
+            ofrece crear uno.
+
+            El tipo de operación se queda en «Documento»: es el filtro de esta
+            lista, no parte de ella, y moverlo dejaría su contador de errores
+            señalando una sección que ya no lo contiene.
+
+            Es una «vendix-invoice-form-section» y no un «<section>» propio para
+            que se pliegue como todas las demás y para que la cabecera se lea
+            igual. El cuerpo de esa sección se OCULTA al plegarse, no se
+            desmonta, así que «profileControl» sigue registrado con la sección
+            cerrada.
           -->
-          <div class="space-y-2">
-            <app-selector
-              label="Resolución de numeración"
-              [formControl]="resolutionControl"
-              [options]="resolutionOptions()"
-              [errorText]="fieldError('resolution_id') ?? ''"
-              [disabled]="resolutionOptions().length === 0"
-              placeholder="Elige el rango autorizado"
-              size="sm"
-            ></app-selector>
+          <vendix-invoice-form-section
+            title="Perfil de facturación"
+            icon="wand-2"
+            [summary]="profileSummary()"
+            [help]="profileSectionHelp"
+            [expanded]="isSectionOpen('perfil')"
+            (expandedChange)="setSection('perfil', $event)"
+          >
+            @if (hasProfiles()) {
+              <p
+                class="mb-3 text-xs leading-relaxed text-[var(--color-text-secondary)]"
+              >
+                Elegirlo preconfigura el documento completo —empezando por la
+                resolución— y reemplaza lo que ya hubiera escrito. Si la factura
+                ya está modificada, se pregunta antes.
+              </p>
+              <app-selector
+                label="Perfil de facturación"
+                [formControl]="profileControl"
+                [options]="profileOptions()"
+                size="sm"
+                (valueChange)="onProfileChange()"
+              ></app-selector>
 
-            @if (resolutionEmptyReason(); as reason) {
+              @if (profileAutoSelected()) {
+                <div
+                  class="mt-3 flex items-start gap-2.5 rounded-lg border border-[var(--color-primary)]/25 bg-[color-mix(in_srgb,var(--color-primary)_6%,transparent)] px-3 py-2.5"
+                >
+                  <app-icon
+                    name="check-circle"
+                    [size]="15"
+                    class="mt-0.5 flex-shrink-0 text-[var(--color-primary)]"
+                  />
+                  <p class="text-xs leading-relaxed text-text-primary">
+                    Usando perfil predeterminado
+                    <strong>{{ selectedProfile()?.name }}</strong
+                    >. Es el único activo para este tipo de operación, y sus
+                    reglas quedan congeladas en la factura al emitirla.
+                    Cámbialo en el selector si este documento va con la
+                    configuración de la tienda.
+                  </p>
+                </div>
+              }
+
               <!--
-                Una lista vacía y muda en la pantalla que gasta numeración
-                autorizada es un callejón sin salida: hay que decir si están
-                vencidas, agotadas o si no hay ninguna.
-              -->
-              <div
-                role="alert"
-                class="flex items-start gap-2 rounded-lg border border-error bg-error-light px-3 py-2.5"
-              >
-                <app-icon
-                  name="alert-triangle"
-                  [size]="14"
-                  class="mt-0.5 shrink-0 text-error"
-                />
-                <p class="text-xs leading-relaxed text-error">{{ reason }}</p>
-              </div>
-            }
+                LO QUE EL PERFIL RELLENÓ. Va aquí, pegado al selector, y no
+                al pie: quien acaba de elegir un perfil está mirando este
+                punto de la pantalla, y es donde tiene que enterarse de qué
+                campos cambiaron sin que él los tocara.
 
-            @if (habilitationWarning(); as warning) {
+                Todo lo listado queda EDITABLE en su propia sección. Esto
+                informa, no bloquea.
+              -->
+              @if (prefillSummary().length > 0) {
+                <app-alert-banner
+                  class="mt-3"
+                  variant="info"
+                  icon="wand-2"
+                  tone="token"
+                >
+                  El perfil precargó
+                  <strong>{{ prefillSummary().join(', ') }}</strong
+                  >. Todo queda editable: si cambias un campo a mano, el perfil
+                  no lo vuelve a pisar.
+                </app-alert-banner>
+              }
+
               <!--
-                Va ANTES del aviso de clave técnica: el aviso de clave es una
-                sospecha sobre un dato ambiguo, y este es un hecho. Una factura
-                emitida contra el rango de habilitación no es una factura.
+                LÍNEAS DEL PERFIL NO SEMBRADAS. El usuario ya había
+                capturado líneas, así que reemplazarlas sin preguntar
+                borraría trabajo que no se recupera. Se ofrece.
               -->
-              <div
-                role="alert"
-                class="flex items-start gap-2 rounded-lg border border-error bg-error-light px-3 py-2.5"
-              >
+              @if (pendingModelLines() > 0) {
+                <div
+                  class="mt-3 flex flex-col gap-2 rounded-lg border border-[var(--color-primary)]/25 bg-[color-mix(in_srgb,var(--color-primary)_6%,transparent)] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <p class="text-xs leading-relaxed text-text-primary">
+                    Este perfil trae
+                    <strong>{{ pendingModelLines() }}</strong> línea(s)
+                    modelo. No se cargaron porque ya capturaste líneas
+                    propias: cargarlas las reemplaza.
+                  </p>
+                  <button
+                    type="button"
+                    class="shrink-0 rounded-lg border border-[var(--color-primary)] px-2.5 py-1.5 text-xs font-semibold text-[var(--color-primary)]"
+                    (click)="applyModelLines()"
+                  >
+                    Reemplazar por las del perfil
+                  </button>
+                </div>
+              }
+
+              @if (profileConfigFailed()) {
+                <div
+                  class="mt-3 flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning-light px-3 py-2.5"
+                >
+                  <app-icon
+                    name="alert-triangle"
+                    [size]="15"
+                    class="mt-0.5 flex-shrink-0 text-warning"
+                  />
+                  <div class="min-w-0">
+                    <p class="text-xs font-semibold text-warning">
+                      No se pudieron leer las reglas del perfil
+                    </p>
+                    <p class="mt-0.5 text-xs leading-relaxed text-warning">
+                      La factura se puede emitir igual: el servidor la timbra
+                      con la versión vigente del perfil, no con lo que muestre
+                      esta pantalla. Lo que falta es el instructivo del AIU —y
+                      no se sustituye por el de la tienda, porque instruiría
+                      sobre otra base gravable—.
+                    </p>
+                    <button
+                      type="button"
+                      class="mt-1.5 text-xs font-semibold text-warning underline underline-offset-2"
+                      (click)="retryProfileConfig()"
+                    >
+                      Reintentar
+                    </button>
+                  </div>
+                </div>
+              }
+            } @else {
+              <!--
+                ESTADO VACÍO, NO SECCIÓN AUSENTE.
+
+                Nombra el tipo de operación —«Estándar (10)», no «este tipo»—
+                porque la razón de que la lista esté vacía ES el tipo, y sin
+                decirlo la frase se lee como una avería. Y no ofrece los perfiles
+                de otro tipo: ver «INVOICING_PROFILE_008».
+              -->
+              <div class="flex items-start gap-2.5">
                 <app-icon
-                  name="alert-triangle"
-                  [size]="14"
-                  class="mt-0.5 shrink-0 text-error"
+                  name="wand-2"
+                  [size]="16"
+                  class="mt-0.5 shrink-0 text-[var(--color-text-secondary)]"
                 />
-                <p class="text-xs leading-relaxed text-error">{{ warning }}</p>
+                <div class="min-w-0">
+                  <p class="text-xs leading-relaxed text-text-primary">
+                    No hay perfiles activos para la operación
+                    <strong>{{ operationTypeLabel() }}</strong>. Esta factura se
+                    llena a mano y se emite igual: el perfil sólo ahorra
+                    escribir lo que se repite.
+                  </p>
+                  <button
+                    type="button"
+                    class="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-[var(--color-primary)] underline underline-offset-2"
+                    (click)="goToProfileCreate()"
+                  >
+                    <app-icon name="plus" [size]="13" />
+                    Crear un perfil para esta operación
+                  </button>
+                </div>
               </div>
             }
+          </vendix-invoice-form-section>
 
-            @if (technicalKeyWarning(); as warning) {
-              <div
-                class="flex items-start gap-2 rounded-lg border border-warning bg-warning-light px-3 py-2.5"
-              >
-                <app-icon
-                  name="alert-triangle"
-                  [size]="14"
-                  class="mt-0.5 shrink-0 text-warning"
-                />
-                <p class="text-xs leading-relaxed text-warning">
-                  {{ warning }}
-                </p>
-              </div>
-            }
 
-            <!-- El selector elige; el banner sigue informando qué se eligió. -->
-            <vendix-invoice-resolution-banner
-              [resolution]="activeResolution()"
-              [documentLabel]="documentLabel()"
-            />
-          </div>
-
-          <form [formGroup]="invoiceForm" class="space-y-4">
-            <!-- ── 1. DOCUMENTO ─────────────────────────────────────── -->
+          <!--
+            Mismo aire que el editor de perfiles: las dos pantallas son la misma
+            captura, una por documento y otra preconfigurada, y separarlas
+            distinto haría que la segunda no se leyera como espejo de la primera.
+          -->
+          <form [formGroup]="invoiceForm" class="space-y-6">
+            <!-- ── DOCUMENTO ─────────────────────────────────────── -->
             <vendix-invoice-form-section
               title="Documento"
+              [help]="help('documento')"
               icon="file-text"
               [summary]="documentSummary()"
               [errorCount]="sectionErrors().documento"
               [expanded]="isSectionOpen('documento')"
               (expandedChange)="setSection('documento', $event)"
             >
+              <!--
+                LA RESOLUCIÓN, DENTRO DE «DOCUMENTO» Y SOBRE FONDO PROPIO.
+
+                Vivía suelta entre la cabecera de la página y el formulario, sin
+                tarjeta detrás y a tamaño «sm». Ahí era el único control de toda
+                la pantalla sin superficie propia, y por eso «casi no se veía»:
+                el problema no era el color del control, era que flotaba.
+
+                Va dentro de la sección Documento porque es un dato de cabecera
+                del documento, y va en un bloque con fondo «--color-background» y
+                no directamente sobre la tarjeta: el control se pinta sobre
+                «--color-surface», así que sobre la propia superficie de la
+                tarjeta sólo lo separaría el borde. Con el fondo de la página
+                debajo, el control queda claro sobre oscuro y se lee de un
+                vistazo.
+
+                Tamaño «md», no «sm»: es el campo que gasta numeración
+                autorizada, y cada número que se toma de un rango se consume
+                aunque la DIAN rechace el documento.
+
+                Sigue enlazado con «[formControl]» y no con «formControlName»
+                aunque ahora esté DENTRO del «form». «resolution_id» tiene un
+                único escritor —«preselectEligibleResolution»— y el enlace
+                directo al control es lo que deja ese hecho a la vista.
+              -->
+              <div
+                class="mb-4 space-y-3 rounded-lg border border-border p-3"
+                [style.background]="'var(--color-background)'"
+              >
+                <app-selector
+                  label="Resolución de numeración"
+                  [formControl]="resolutionControl"
+                  [options]="resolutionOptions()"
+                  [errorText]="fieldError('resolution_id') ?? ''"
+                  [disabled]="resolutionOptions().length === 0"
+                  placeholder="Elige el rango autorizado"
+                  size="md"
+                ></app-selector>
+
+                @if (profileResolutionNotice(); as notice) {
+                  <!--
+                    El perfil pidió un rango y se usó otro. Callarlo dejaría al
+                    operador con una factura numerada distinto de lo que configuró y
+                    sin nada en pantalla que lo relacione con el perfil.
+                  -->
+                  <app-alert-banner
+                    variant="warning"
+                    icon="alert-triangle"
+                    tone="token"
+                  >
+                    {{ notice }}
+                  </app-alert-banner>
+                }
+
+                @if (resolutionEmptyReason(); as reason) {
+                  <!--
+                    Una lista vacía y muda en la pantalla que gasta numeración
+                    autorizada es un callejón sin salida: hay que decir si están
+                    vencidas, agotadas o si no hay ninguna.
+                  -->
+                  <app-alert-banner
+                    variant="danger"
+                    icon="alert-triangle"
+                    tone="token"
+                  >
+                    {{ reason }}
+                  </app-alert-banner>
+                }
+
+                @if (habilitationWarning(); as warning) {
+                  <!--
+                    Va ANTES del aviso de clave técnica: el aviso de clave es una
+                    sospecha sobre un dato ambiguo, y este es un hecho. Una factura
+                    emitida contra el rango de habilitación no es una factura.
+                  -->
+                  <app-alert-banner
+                    variant="danger"
+                    icon="alert-triangle"
+                    tone="token"
+                  >
+                    {{ warning }}
+                  </app-alert-banner>
+                }
+
+                @if (technicalKeyWarning(); as warning) {
+                  <app-alert-banner
+                    variant="warning"
+                    icon="alert-triangle"
+                    tone="token"
+                  >
+                    {{ warning }}
+                  </app-alert-banner>
+                }
+
+                <!-- El selector elige; el banner sigue informando qué se eligió. -->
+                <vendix-invoice-resolution-banner
+                  [resolution]="activeResolution()"
+                  [documentLabel]="documentLabel()"
+                />
+              </div>
+
               <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <app-selector
                   label="Tipo de documento"
@@ -694,9 +1153,10 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               ></app-textarea>
             </vendix-invoice-form-section>
 
-            <!-- ── 2. ADQUIRIENTE ───────────────────────────────────── -->
+            <!-- ── ADQUIRIENTE ───────────────────────────────────── -->
             <vendix-invoice-form-section
               title="Adquiriente"
+              [help]="help('adquiriente')"
               icon="user-round"
               [summary]="customerSummary()"
               [errorCount]="sectionErrors().adquiriente"
@@ -870,11 +1330,38 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                 <div
                   class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5"
                 >
+                  <!--
+                    Trece casillas y no trece interruptores: esto es una lista
+                    de selección múltiple de códigos del RUT, no trece ajustes
+                    independientes. Un interruptor promete «activar algo» y
+                    ocuparía tres veces el alto.
+
+                    Lo que sí cambia es el contraste. Antes eran casillas
+                    desnudas sobre el fondo de la tarjeta: lo marcado y lo no
+                    marcado se distinguían por un cuadro de 13 px con el color
+                    por omisión del navegador. Ahora cada opción es una ficha
+                    con borde propio, y la marcada tiñe borde y fondo con el
+                    color primario del tema. El cuadro sigue ahí —el estado no
+                    puede comunicarse SÓLO por color— y el área pulsable pasa a
+                    ser toda la ficha.
+                  -->
                   @for (code of fiscalResponsibilities; track code) {
-                    <label class="flex items-center gap-2 cursor-pointer">
+                    <label
+                      class="flex items-center gap-2 cursor-pointer rounded-lg border px-2 py-2 transition-colors"
+                      [style.border-color]="
+                        hasResponsibility(code)
+                          ? 'var(--color-primary)'
+                          : 'var(--color-border)'
+                      "
+                      [style.background]="
+                        hasResponsibility(code)
+                          ? 'color-mix(in srgb, var(--color-primary) 8%, transparent)'
+                          : 'var(--color-surface)'
+                      "
+                    >
                       <input
                         type="checkbox"
-                        class="rounded border-border"
+                        class="h-4 w-4 shrink-0 rounded border-border accent-[var(--color-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
                         [checked]="hasResponsibility(code)"
                         (change)="toggleResponsibility(code)"
                       />
@@ -893,9 +1380,399 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               </fieldset>
             </vendix-invoice-form-section>
 
-            <!-- ── 3. LÍNEAS ────────────────────────────────────────── -->
+            <!-- ── AIU ───────────────────────────────────────────── -->
+            <!--
+              SE OCULTA COMPLETA cuando el tipo de operación no es AIU (09).
+
+              Antes se seguía pintando si había algo capturado dentro —objeto de
+              contrato, o una línea con componente— con el argumento de que «ese
+              dato viaja al XML y tiene que poder revisarse». No viaja:
+              «buildPayload» condiciona AMBOS campos a «isAiu()»
+              («aiu_contract_object» y el «aiu_component» de cada línea), así que
+              en un documento que no es AIU nada de esto llega al backend. La
+              sección sólo podía decir «esto no aplica» y, peor, sugería
+              configurar algo que se iba a descartar.
+
+              Lo capturado NO se borra al ocultar: volver a poner el tipo en AIU
+              lo muestra intacto. Borrarlo por cambiar un selector destruiría el
+              trabajo de quien se equivocó de tipo un segundo.
+            -->
+            @if (isAiu()) {
+            <vendix-invoice-form-section
+              title="AIU"
+              [help]="help('aiu')"
+              icon="calculator"
+              [optional]="true"
+              [summary]="aiuSummary()"
+              [errorCount]="sectionErrors().aiu"
+              [expanded]="isSectionOpen('aiu')"
+              (expandedChange)="setSection('aiu', $event)"
+            >
+              @if (aiuGuidance(); as guide) {
+                <!-- Régimen efectivo de la tienda: qué se grava y por qué -->
+                <div
+                  class="rounded-xl border border-[var(--color-primary)]/25 bg-[color-mix(in_srgb,var(--color-primary)_6%,transparent)] px-4 py-3.5"
+                >
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span
+                      class="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-primary)]/12 px-2.5 py-1 text-[11px] font-semibold text-[var(--color-primary)]"
+                    >
+                      <app-icon name="scale" [size]="12" />
+                      {{ guide.regimeLabel }}
+                    </span>
+                    <span
+                      class="inline-flex items-center rounded-full bg-[var(--color-background)] px-2.5 py-1 text-[11px] font-medium text-text-primary ring-1 ring-border"
+                    >
+                      Base gravable: {{ guide.taxableLabel }}
+                    </span>
+                    @if (guide.isDefault) {
+                      <span
+                        class="inline-flex items-center rounded-full bg-[var(--color-background)] px-2.5 py-1 text-[11px] text-[var(--color-text-secondary)] ring-1 ring-border"
+                        title="La tienda nunca eligió régimen. Se aplica el default conservador, que declara MÁS IVA."
+                      >
+                        Valor por defecto
+                      </span>
+                    }
+                  </div>
+                  <p class="mt-2 text-xs text-[var(--color-text-secondary)]">
+                    {{ guide.regimeCitation }}
+                  </p>
+                  <p class="mt-2 text-xs leading-relaxed text-text-primary">
+                    {{ guide.instruction }}
+                  </p>
+                  @if (guide.minimumBase) {
+                    <p
+                      class="mt-2 text-xs leading-relaxed text-[var(--color-text-secondary)]"
+                    >
+                      {{ guide.minimumBase }}
+                    </p>
+                  }
+                  <p
+                    class="mt-2 text-[11px] text-[var(--color-text-secondary)]"
+                  >
+                    Cuál aplica lo decide el objeto del contrato, no una
+                    preferencia del negocio.
+                  </p>
+                </div>
+              } @else {
+                <div
+                  class="h-20 animate-pulse rounded-xl bg-[var(--color-surface)]"
+                ></div>
+              }
+
+              <!--
+                LA SECCIÓN AIU ES UN SOLO COMPONENTE, COMPARTIDO CON EL EDITOR
+                DE PERFILES.
+
+                Antes acá había 359 líneas de sólo lectura con UN control
+                editable —el objeto del contrato— y el resto remitiendo a
+                «Facturación → Perfiles»: corregir un reparto obligaba a salir
+                de la emisión, crear una versión N+1 del perfil —que rige para
+                TODAS las facturas siguientes— y volver.
+
+                Ahora los controles son los mismos que los del perfil y editarlos
+                NO toca el perfil ni crea versión (ADR-3). Los tres que este
+                documento no puede llevar —base gravable y piso— llegan
+                congelados con el motivo a la vista: ver «aiuFrozenFields».
+
+                «issues» sólo lleva el rechazo del backend traducido al nombre
+                canónico: el validador del contrato corre al GUARDAR UN PERFIL, y
+                una factura no se guarda como perfil.
+              -->
+              <vendix-invoice-section-aiu
+                class="mt-3"
+                context="invoice"
+                [form]="invoiceForm"
+                [paths]="aiuSectionPaths"
+                [taxRules]="aiuTaxesArray"
+                [issues]="aiuSectionIssues()"
+                [departures]="aiuDepartures()"
+                [frozenFields]="aiuFrozenFields"
+                [frozenReason]="aiuFrozenReason()"
+                [customerFiscalResponsibilities]="responsibilitiesValue()"
+              ></vendix-invoice-section-aiu>
+
+              <!-- Nota CAV03 que viaja al XML. El campo que la alimenta —el
+                   objeto del contrato— lo pinta la sección de arriba; acá queda
+                   el ORIGEN del valor heredado y la cadena exacta con su
+                   longitud, que es lo que la DIAN mide. -->
+              @if (aiuEffectiveNote(); as note) {
+                <div
+                  class="mt-3 rounded-xl border border-border bg-[var(--color-surface)] px-4 py-3.5"
+                >
+                  <div
+                    class="flex flex-wrap items-center justify-between gap-2"
+                  >
+                    <div class="flex items-center gap-2">
+                      <app-icon
+                        name="file-text"
+                        [size]="15"
+                        class="text-[var(--color-text-secondary)]"
+                      />
+                      <span class="text-sm font-medium text-text-primary">
+                        Objeto del contrato
+                      </span>
+                    </div>
+                    <span
+                      class="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium ring-1"
+                      [ngClass]="
+                        note.source === 'invoice'
+                          ? 'bg-[color-mix(in_srgb,var(--color-primary)_10%,transparent)] text-[var(--color-primary)] ring-[var(--color-primary)]/25'
+                          : note.source === 'none'
+                            ? 'bg-error/5 text-error ring-error/30'
+                            : 'bg-[var(--color-background)] text-[var(--color-text-secondary)] ring-border'
+                      "
+                    >
+                      {{ aiuNoteSourceLabel() }}
+                    </span>
+                  </div>
+
+                  <!--
+                    EL CONTROL NO SE REPITE ACÁ. Lo pinta la sección AIU de
+                    arriba, y atar un segundo «formControl» a la misma casilla
+                    dejaría dos cajas idénticas en la misma pantalla: se
+                    sincronizarían, pero el operador no sabría cuál manda y
+                    buscaría la diferencia. Acá queda lo que la sección no puede
+                    decir: de DÓNDE sale el valor cuando se hereda.
+                  -->
+                  <p
+                    class="mt-2 text-[11px] leading-relaxed text-[var(--color-text-secondary)]"
+                  >
+                    @if (note.source === 'store' || note.source === 'profile') {
+                      Heredado: «{{ note.object }}».
+                    }
+                    Se guarda con la factura, así que el documento conserva el
+                    contrato que describía aunque la tienda o el perfil cambien
+                    el suyo después. {{ aiuInheritanceHint() }}
+                  </p>
+
+                  <!-- Vista previa de la cadena que viaja en cbc:Note -->
+                  @if (note.note) {
+                    <div
+                      class="mt-2.5 rounded-lg border border-border bg-[var(--color-background)] px-3 py-2"
+                    >
+                      <div
+                        class="flex items-center justify-between gap-2 text-[10px] uppercase tracking-wide text-[var(--color-text-secondary)]"
+                      >
+                        <span>Nota que viaja al XML</span>
+                        <span
+                          class="tabular-nums font-semibold"
+                          [ngClass]="note.valid ? 'text-success' : 'text-error'"
+                        >
+                          {{ note.length }} / {{ note.max }}
+                        </span>
+                      </div>
+                      <p
+                        class="mt-1 break-words text-[11px] leading-relaxed text-text-primary"
+                      >
+                        {{ note.note }}
+                      </p>
+                    </div>
+                  }
+                </div>
+              }
+
+              <!-- Desglose por componente -->
+              <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                @for (row of aiuBreakdown(); track row.key) {
+                  <div
+                    class="rounded-xl border border-border bg-[var(--color-surface)] px-3 py-2.5"
+                  >
+                    <p
+                      class="text-[11px] uppercase tracking-wide text-[var(--color-text-secondary)]"
+                    >
+                      {{ row.label }}
+                    </p>
+                    <p
+                      class="mt-0.5 text-sm font-semibold text-text-primary tabular-nums"
+                    >
+                      {{ formatCurrency(row.amount) }}
+                    </p>
+                  </div>
+                }
+              </div>
+
+              @if (aiuApplyPlan(); as plan) {
+                <!-- Las cuatro configuraciones del perfil, aplicadas a las
+                     lineas. Es lo unico que convierte el bloque «Base AIU»
+                     del editor en importes: sin esto los porcentajes se
+                     configuran y no los lee nadie. -->
+                <div
+                  class="mt-3 rounded-xl border border-border bg-[var(--color-surface)] px-3.5 py-3"
+                >
+                  <div
+                    class="flex flex-wrap items-start justify-between gap-2"
+                  >
+                    <div class="min-w-0">
+                      <p class="text-sm font-medium text-text-primary">
+                        Base AIU configurada en el perfil
+                      </p>
+                      <p
+                        class="mt-0.5 text-xs leading-relaxed text-[var(--color-text-secondary)]"
+                      >
+                        @if (plan.ready) {
+                          AIU del
+                          <strong class="text-text-primary"
+                            >{{ plan.aiuPercentLabel }} %</strong
+                          >
+                          del valor del contrato, deducido de
+                          {{ formatCurrency(plan.costBase) }} en lineas de
+                          costo: contrato
+                          {{ formatCurrency(plan.contractAmount) }}, AIU
+                          {{ formatCurrency(plan.aiuAmount) }}.
+                        } @else {
+                          {{ plan.blocked }}
+                        }
+                      </p>
+                    </div>
+                    @if (plan.ready) {
+                      <app-button
+                        variant="secondary"
+                        size="sm"
+                        (clicked)="applyAiuBase()"
+                      >
+                        <app-icon slot="icon" name="calculator" [size]="14" />
+                        Aplicar a las lineas
+                      </app-button>
+                    }
+                  </div>
+
+                  @if (plan.ready) {
+                    <div
+                      class="mt-2.5 grid grid-cols-1 gap-2 sm:grid-cols-3"
+                    >
+                      @for (part of plan.parts; track part.bucket) {
+                        <div
+                          class="rounded-lg border border-border bg-[var(--color-background)] px-2.5 py-2"
+                        >
+                          <p
+                            class="text-[11px] uppercase tracking-wide text-[var(--color-text-secondary)]"
+                          >
+                            {{ part.label }} · {{ part.percentLabel }} %
+                          </p>
+                          <p
+                            class="mt-0.5 text-sm font-semibold tabular-nums text-text-primary"
+                          >
+                            {{ formatCurrency(part.amount) }}
+                          </p>
+                          <p
+                            class="mt-0.5 text-[11px] text-[var(--color-text-secondary)]"
+                          >
+                            @if (part.taxes.length > 0) {
+                              @for (
+                                tax of part.taxes;
+                                track tax.tax_rate_id;
+                                let last = $last
+                              ) {
+                                {{ tax.name }}{{ last ? '' : ' · ' }}
+                              }
+                            } @else {
+                              Sin impuesto
+                            }
+                            @if (part.account) {
+                              · cuenta {{ part.account }}
+                            }
+                          </p>
+                        </div>
+                      }
+                    </div>
+                    @if (plan.replaces > 0) {
+                      <p
+                        class="mt-2 text-[11px] text-[var(--color-text-secondary)]"
+                      >
+                        Reemplaza {{ plan.replaces }} linea(s) que ya llevan
+                        componente AIU. Las lineas de costo no se tocan.
+                      </p>
+                    }
+                  }
+                </div>
+              }
+
+              @if (aiuUnassigned() > 0) {
+                <app-alert-banner
+                  class="mt-3"
+                  variant="info"
+                  icon="info"
+                  tone="token"
+                >
+                  {{ aiuUnassigned() }} linea(s) sin componente: se facturan como
+                  <strong>costo reembolsable</strong> del contrato. Suman al valor
+                  del contrato y quedan fuera de la base gravable. Márcalas si
+                  alguna es administración, imprevistos o utilidad.
+                </app-alert-banner>
+              }
+
+              @if (aiuTaxableWithoutTax().length > 0) {
+                <app-alert-banner
+                  class="mt-3"
+                  variant="warning"
+                  icon="alert-triangle"
+                  tone="token"
+                  [heading]="
+                    aiuTaxableWithoutTax().length +
+                    ' línea(s) de la base gravable no declaran impuesto'
+                  "
+                >
+                  Bajo {{ aiuGuidance()?.regimeLabel }} la base gravable es
+                  {{ aiuGuidance()?.taxableLabel }}, así que
+                  @for (
+                    row of aiuTaxableWithoutTax();
+                    track row.index;
+                    let last = $last
+                  ) {
+                    <strong>{{ row.label }}</strong
+                    >{{ last ? '' : ', ' }}
+                  }
+                  también debería(n) llevarlo. La DIAN acepta el documento igual
+                  —el XML cuadra consigo mismo—, y el faltante sólo aparece en
+                  una fiscalización, cuando ya sólo se corrige con nota crédito.
+                  Déjalas sin impuesto únicamente si el concepto está exento o
+                  excluido.
+                </app-alert-banner>
+              }
+
+              @if (aiuEffectiveNote(); as note) {
+                @if (!note.valid) {
+                  <div
+                    class="mt-3 flex items-start gap-2.5 rounded-lg border border-error/30 bg-error/5 px-3 py-2.5"
+                  >
+                    <app-icon
+                      name="alert-triangle"
+                      [size]="15"
+                      class="mt-0.5 flex-shrink-0 text-error"
+                    />
+                    <div class="min-w-0">
+                      <p class="text-xs font-semibold text-error">
+                        @if (note.length > note.max) {
+                          El objeto del contrato AIU es demasiado largo
+                        } @else {
+                          Falta el objeto del contrato AIU
+                        }
+                      </p>
+                      <p class="mt-0.5 text-xs leading-relaxed text-error">
+                        La regla CAV03 exige que la línea de Administración
+                        lleve una nota que empiece por «{{
+                          effectiveAiu()?.note_prefix
+                        }}» y mida entre {{ note.min }} y
+                        {{ note.max }} caracteres; la actual mide
+                        {{ note.length }}. Descríbelo arriba, en
+                        <strong>Objeto del contrato</strong>, o —si es siempre
+                        el mismo— en Ajustes → Facturación → AIU. Sin eso la
+                        emisión se rechaza y el documento no llega a tomar
+                        consecutivo.
+                      </p>
+                    </div>
+                  </div>
+                }
+              }
+            </vendix-invoice-form-section>
+
+            }
+
+            <!-- ── LÍNEAS ────────────────────────────────────────── -->
             <vendix-invoice-form-section
               title="Líneas"
+              [help]="help('lineas')"
               icon="list"
               [badge]="itemCount() + (itemCount() === 1 ? ' línea' : ' líneas')"
               [summary]="linesSummary()"
@@ -980,14 +1857,55 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                       </div>
 
                       @if (isAiu()) {
-                        <div class="col-span-8 md:col-span-5">
-                          <app-selector
-                            formControlName="aiu_component"
-                            [options]="aiuComponentOptions"
-                            [errorText]="itemError(i, 'aiu_component') ?? ''"
-                            placeholder="Componente AIU"
-                            size="sm"
-                          ></app-selector>
+                        <!--
+                          INTERRUPTOR DE BASE AIU POR LÍNEA. Decide si este
+                          renglón entra a la base gravable del régimen o si es
+                          costo reembolsable. Es la misma decisión que antes se
+                          tomaba dejando el selector en blanco — sólo que ahora
+                          se ve que es una decisión.
+                        -->
+                        <div
+                          class="col-span-8 md:col-span-5 flex items-center gap-2"
+                        >
+                          <!--
+                            «app-toggle» y no un «<input type="checkbox">»: es el
+                            control on/off del sistema, con el color del tenant,
+                            foco visible y área táctil. Mismo control que en el
+                            editor de perfiles, para que la decisión fiscal se
+                            vea igual donde se preconfigura y donde se emite.
+                          -->
+                          <div
+                            class="flex shrink-0 items-center"
+                            [title]="
+                              lineCarriesAiu(item)
+                                ? 'Esta línea lleva la base AIU configurada'
+                                : 'Costo reembolsable: no entra a la base AIU'
+                            "
+                          >
+                            <app-toggle
+                              label="AIU"
+                              ariaLabel="Aplicar la base AIU a esta línea"
+                              [checked]="lineCarriesAiu(item)"
+                              (changed)="toggleLineAiu(item, $event)"
+                            ></app-toggle>
+                          </div>
+                          @if (lineCarriesAiu(item)) {
+                            <div class="min-w-0 flex-1">
+                              <app-selector
+                                formControlName="aiu_component"
+                                [options]="aiuComponentOptions"
+                                [errorText]="itemError(i, 'aiu_component') ?? ''"
+                                placeholder="Componente AIU"
+                                size="sm"
+                              ></app-selector>
+                            </div>
+                          } @else {
+                            <span
+                              class="min-w-0 flex-1 truncate text-[11px] text-[var(--color-text-secondary)]"
+                            >
+                              Costo reembolsable — fuera de la base AIU
+                            </span>
+                          }
                         </div>
                       } @else {
                         <div class="col-span-8 md:col-span-5">
@@ -1093,7 +2011,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               </div>
             </vendix-invoice-form-section>
 
-            <!-- ── 4. IMPUESTOS ─────────────────────────────────────── -->
+            <!-- ── IMPUESTOS ─────────────────────────────────────── -->
             <!--
               El id «taxes_section» es el ancla del CTA de los hallazgos de
               impuesto. NO se usa «taxes» a secas: cada línea ya tiene un
@@ -1104,6 +2022,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
             <vendix-invoice-form-section
               id="taxes_section"
               title="Impuestos"
+              [help]="help('impuestos')"
               icon="percent"
               [summary]="taxSummary()"
               [errorCount]="sectionErrors().impuestos"
@@ -1167,293 +2086,17 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               }
             </vendix-invoice-form-section>
 
-            <!-- ── 5. AIU ───────────────────────────────────────────── -->
-            <vendix-invoice-form-section
-              title="AIU"
-              icon="calculator"
-              [optional]="true"
-              [summary]="aiuSummary()"
-              [errorCount]="sectionErrors().aiu"
-              [expanded]="isSectionOpen('aiu')"
-              (expandedChange)="setSection('aiu', $event)"
-            >
-              @if (!isAiu()) {
-                <div
-                  class="flex items-start gap-3 rounded-xl border border-dashed border-border bg-[var(--color-surface)] px-4 py-3.5"
-                >
-                  <div
-                    class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--color-background)] text-[var(--color-text-secondary)]"
-                  >
-                    <app-icon name="calculator" [size]="18" />
-                  </div>
-                  <div class="min-w-0">
-                    <p class="text-sm font-medium text-text-primary">
-                      El documento no está declarado como AIU
-                    </p>
-                    <p class="mt-0.5 text-xs text-[var(--color-text-secondary)]">
-                      Cambia el tipo de operación a
-                      <strong class="text-text-primary">AIU (09)</strong> en la
-                      sección Documento para marcar cada línea como
-                      administración, imprevistos o utilidad.
-                    </p>
-                  </div>
-                </div>
-              } @else {
-                @if (aiuGuidance(); as guide) {
-                  <!-- Régimen efectivo de la tienda: qué se grava y por qué -->
-                  <div
-                    class="rounded-xl border border-[var(--color-primary)]/25 bg-[color-mix(in_srgb,var(--color-primary)_6%,transparent)] px-4 py-3.5"
-                  >
-                    <div class="flex flex-wrap items-center gap-2">
-                      <span
-                        class="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-primary)]/12 px-2.5 py-1 text-[11px] font-semibold text-[var(--color-primary)]"
-                      >
-                        <app-icon name="scale" [size]="12" />
-                        {{ guide.regimeLabel }}
-                      </span>
-                      <span
-                        class="inline-flex items-center rounded-full bg-[var(--color-background)] px-2.5 py-1 text-[11px] font-medium text-text-primary ring-1 ring-border"
-                      >
-                        Base gravable: {{ guide.taxableLabel }}
-                      </span>
-                      @if (guide.isDefault) {
-                        <span
-                          class="inline-flex items-center rounded-full bg-[var(--color-background)] px-2.5 py-1 text-[11px] text-[var(--color-text-secondary)] ring-1 ring-border"
-                          title="La tienda nunca eligió régimen. Se aplica el default conservador, que declara MÁS IVA."
-                        >
-                          Valor por defecto
-                        </span>
-                      }
-                    </div>
-                    <p class="mt-2 text-xs text-[var(--color-text-secondary)]">
-                      {{ guide.regimeCitation }}
-                    </p>
-                    <p class="mt-2 text-xs leading-relaxed text-text-primary">
-                      {{ guide.instruction }}
-                    </p>
-                    @if (guide.minimumBase) {
-                      <p
-                        class="mt-2 text-xs leading-relaxed text-[var(--color-text-secondary)]"
-                      >
-                        {{ guide.minimumBase }}
-                      </p>
-                    }
-                    <p
-                      class="mt-2 text-[11px] text-[var(--color-text-secondary)]"
-                    >
-                      El régimen se elige en Ajustes → Facturación → AIU. Cuál
-                      aplica lo decide el objeto del contrato, no una preferencia
-                      del negocio.
-                    </p>
-                  </div>
-                } @else {
-                  <div
-                    class="h-20 animate-pulse rounded-xl bg-[var(--color-surface)]"
-                  ></div>
-                }
-
-                <!-- Objeto del contrato de ESTE documento (regla CAV03) -->
-                @if (aiuEffectiveNote(); as note) {
-                  <div
-                    class="mt-3 rounded-xl border border-border bg-[var(--color-surface)] px-4 py-3.5"
-                  >
-                    <div
-                      class="flex flex-wrap items-center justify-between gap-2"
-                    >
-                      <div class="flex items-center gap-2">
-                        <app-icon
-                          name="file-text"
-                          [size]="15"
-                          class="text-[var(--color-text-secondary)]"
-                        />
-                        <span class="text-sm font-medium text-text-primary">
-                          Objeto del contrato
-                        </span>
-                      </div>
-                      <span
-                        class="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium ring-1"
-                        [ngClass]="
-                          note.source === 'invoice'
-                            ? 'bg-[color-mix(in_srgb,var(--color-primary)_10%,transparent)] text-[var(--color-primary)] ring-[var(--color-primary)]/25'
-                            : note.source === 'store'
-                              ? 'bg-[var(--color-background)] text-[var(--color-text-secondary)] ring-border'
-                              : 'bg-error/5 text-error ring-error/30'
-                        "
-                      >
-                        {{
-                          note.source === 'invoice'
-                            ? 'Propio de esta factura'
-                            : note.source === 'store'
-                              ? 'Heredado de la tienda'
-                              : 'Sin definir'
-                        }}
-                      </span>
-                    </div>
-
-                    <app-textarea
-                      class="mt-2.5 block"
-                      formControlName="aiu_contract_object"
-                      [control]="control('aiu_contract_object')"
-                      [error]="fieldError('aiu_contract_object')"
-                      [rows]="2"
-                      [placeholder]="
-                        note.source === 'store'
-                          ? 'Heredado: ' + note.object
-                          : 'Ej.: aseo y cafetería para la sede norte, contrato 2026-014'
-                      "
-                    ></app-textarea>
-
-                    <p
-                      class="mt-1.5 text-[11px] leading-relaxed text-[var(--color-text-secondary)]"
-                    >
-                      Se guarda con la factura, así que el documento conserva el
-                      contrato que describía aunque la tienda cambie el suyo
-                      después. Déjalo vacío para heredar el de
-                      <strong class="text-text-primary"
-                        >Ajustes → Facturación → AIU</strong
-                      >.
-                    </p>
-
-                    <!-- Vista previa de la cadena que viaja en cbc:Note -->
-                    @if (note.note) {
-                      <div
-                        class="mt-2.5 rounded-lg border border-border bg-[var(--color-background)] px-3 py-2"
-                      >
-                        <div
-                          class="flex items-center justify-between gap-2 text-[10px] uppercase tracking-wide text-[var(--color-text-secondary)]"
-                        >
-                          <span>Nota que viaja al XML</span>
-                          <span
-                            class="tabular-nums font-semibold"
-                            [ngClass]="note.valid ? 'text-success' : 'text-error'"
-                          >
-                            {{ note.length }} / {{ note.max }}
-                          </span>
-                        </div>
-                        <p
-                          class="mt-1 break-words text-[11px] leading-relaxed text-text-primary"
-                        >
-                          {{ note.note }}
-                        </p>
-                      </div>
-                    }
-                  </div>
-                }
-
-                <!-- Desglose por componente -->
-                <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  @for (row of aiuBreakdown(); track row.key) {
-                    <div
-                      class="rounded-xl border border-border bg-[var(--color-surface)] px-3 py-2.5"
-                    >
-                      <p
-                        class="text-[11px] uppercase tracking-wide text-[var(--color-text-secondary)]"
-                      >
-                        {{ row.label }}
-                      </p>
-                      <p
-                        class="mt-0.5 text-sm font-semibold text-text-primary tabular-nums"
-                      >
-                        {{ formatCurrency(row.amount) }}
-                      </p>
-                    </div>
-                  }
-                </div>
-
-                @if (aiuUnassigned() > 0) {
-                  <div
-                    class="mt-3 flex items-start gap-2.5 rounded-lg border border-error/30 bg-error/5 px-3 py-2.5"
-                  >
-                    <app-icon
-                      name="alert-triangle"
-                      [size]="15"
-                      class="mt-0.5 flex-shrink-0 text-error"
-                    />
-                    <p class="text-xs leading-relaxed text-error">
-                      Hay {{ aiuUnassigned() }} línea(s) sin componente AIU. La
-                      DIAN valida la coherencia entre el
-                      <code>CustomizationID</code> 09 y el desglose de las
-                      líneas: una línea sin marcar hace que rechace el documento
-                      entero.
-                    </p>
-                  </div>
-                }
-
-                @if (aiuTaxableWithoutTax().length > 0) {
-                  <div
-                    class="mt-3 flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning-light px-3 py-2.5"
-                  >
-                    <app-icon
-                      name="alert-triangle"
-                      [size]="15"
-                      class="mt-0.5 flex-shrink-0 text-warning"
-                    />
-                    <div class="min-w-0">
-                      <p class="text-xs font-semibold text-warning">
-                        {{ aiuTaxableWithoutTax().length }} línea(s) de la base
-                        gravable no declaran impuesto
-                      </p>
-                      <p class="mt-0.5 text-xs leading-relaxed text-warning">
-                        Bajo {{ aiuGuidance()?.regimeLabel }} la base gravable es
-                        {{ aiuGuidance()?.taxableLabel }}, así que
-                        @for (
-                          row of aiuTaxableWithoutTax();
-                          track row.index;
-                          let last = $last
-                        ) {
-                          <strong>{{ row.label }}</strong
-                          >{{ last ? '' : ', ' }}
-                        }
-                        también debería(n) llevarlo. La DIAN acepta el documento
-                        igual —el XML cuadra consigo mismo—, y el faltante sólo
-                        aparece en una fiscalización, cuando ya sólo se corrige
-                        con nota crédito. Déjalas sin impuesto únicamente si el
-                        concepto está exento o excluido.
-                      </p>
-                    </div>
-                  </div>
-                }
-
-                @if (aiuEffectiveNote(); as note) {
-                  @if (!note.valid) {
-                    <div
-                      class="mt-3 flex items-start gap-2.5 rounded-lg border border-error/30 bg-error/5 px-3 py-2.5"
-                    >
-                      <app-icon
-                        name="alert-triangle"
-                        [size]="15"
-                        class="mt-0.5 flex-shrink-0 text-error"
-                      />
-                      <div class="min-w-0">
-                        <p class="text-xs font-semibold text-error">
-                          @if (note.length > note.max) {
-                            El objeto del contrato AIU es demasiado largo
-                          } @else {
-                            Falta el objeto del contrato AIU
-                          }
-                        </p>
-                        <p class="mt-0.5 text-xs leading-relaxed text-error">
-                          La regla CAV03 exige que la línea de Administración
-                          lleve una nota que empiece por «{{
-                            aiuSettings()?.note_prefix
-                          }}» y mida entre {{ note.min }} y
-                          {{ note.max }} caracteres; la actual mide
-                          {{ note.length }}. Descríbelo arriba, en
-                          <strong>Objeto del contrato</strong>, o —si es siempre
-                          el mismo— en Ajustes → Facturación → AIU. Sin eso la
-                          emisión se rechaza y el documento no llega a tomar
-                          consecutivo.
-                        </p>
-                      </div>
-                    </div>
-                  }
-                }
-              }
-            </vendix-invoice-form-section>
-
-            <!-- ── 6. RETENCIONES ───────────────────────────────────── -->
+            <!-- ── RETENCIONES ───────────────────────────────────── -->
+            <!--
+              SE OCULTA en una exportación sin nada capturado: el comprador está
+              fuera del país y no puede ser agente retenedor de la DIAN, así que
+              no hay retención que practicar ni sufrir. Con filas dentro se sigue
+              viendo, con su aviso.
+            -->
+            @if (showWithholdingSection()) {
             <vendix-invoice-form-section
               title="Retenciones"
+              [help]="help('retenciones')"
               icon="hand-coins"
               [optional]="true"
               [summary]="withholdingSummary()"
@@ -1461,6 +2104,23 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               [expanded]="isSectionOpen('retenciones')"
               (expandedChange)="setSection('retenciones', $event)"
             >
+              @if (isExportInvoice()) {
+                <p
+                  class="mb-2 flex items-start gap-1.5 text-xs text-warning"
+                >
+                  <app-icon
+                    name="alert-triangle"
+                    [size]="14"
+                    class="mt-0.5 shrink-0"
+                  />
+                  <span
+                    >El documento es una factura de exportación: el comprador
+                    está fuera del país y no puede ser agente retenedor de la
+                    DIAN. Estas retenciones se enviarán tal como están —no se
+                    descartan en silencio—; quítalas si no corresponden.</span
+                  >
+                </p>
+              }
               <p class="text-xs text-[var(--color-text-secondary)] mb-2">
                 La retención NO reduce el total que se declara a la DIAN
                 (<code>PayableAmount</code> se valida sin mirar la retención):
@@ -1469,15 +2129,22 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                 un impuesto negativo.
               </p>
 
-              <label class="flex items-center gap-2 mb-3 cursor-pointer">
+              <!--
+                La etiqueta va DENTRO del interruptor y no en un «label» que lo
+                envuelve. El componente pone su propio «aria-label» al control,
+                y ese atributo gana sobre el texto del «label» de alrededor: el
+                lector de pantalla anunciaba «Toggle» y el texto visible no se
+                leía nunca. Además un «label» que envuelve un botón dispara el
+                clic dos veces.
+              -->
+              <div class="mb-3">
                 <app-toggle
                   formControlName="manual_withholding"
+                  label="Escribir el importe a mano en vez de calcularlo por concepto"
+                  ariaLabel="Escribir el importe de retención a mano en vez de calcularlo por concepto"
                   (toggled)="onManualWithholdingChange()"
                 />
-                <span class="text-xs text-text-primary">
-                  Escribir el importe a mano en vez de calcularlo por concepto
-                </span>
-              </label>
+              </div>
 
               @if (isManualWithholding()) {
                 <app-input
@@ -1490,21 +2157,17 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                 ></app-input>
               } @else {
                 @if (withholdingConcepts().length === 0) {
-                  <div
-                    class="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning-light px-3 py-2.5 mb-3"
+                  <app-alert-banner
+                    class="mb-3"
+                    variant="warning"
+                    icon="alert-triangle"
+                    tone="token"
                   >
-                    <app-icon
-                      name="alert-triangle"
-                      [size]="14"
-                      class="text-warning mt-0.5 shrink-0"
-                    />
-                    <p class="text-xs text-text-primary leading-relaxed">
-                      No hay conceptos de retención configurados. Créalos en
-                      <span class="font-medium">Contabilidad › Retenciones</span>
-                      o activa el importe manual de arriba: sin concepto, el
-                      desglose no se puede guardar.
-                    </p>
-                  </div>
+                    No hay conceptos de retención configurados. Créalos en
+                    <span class="font-medium">Contabilidad › Retenciones</span> o
+                    activa el importe manual de arriba: sin concepto, el desglose
+                    no se puede guardar.
+                  </app-alert-banner>
                 }
 
                 <div formArrayName="withholdings" class="space-y-2">
@@ -1575,18 +2238,19 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                           </div>
                           <button
                             type="button"
-                            class="shrink-0 rounded-md p-1.5 text-[var(--color-text-secondary)] transition-colors hover:bg-error-light hover:text-error"
-                            title="Quitar retención"
+                            class="shrink-0 rounded-md p-1.5 text-[var(--color-text-secondary)] transition-colors hover:bg-error-light hover:text-error focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
+                            aria-label="Quitar este concepto de retención"
+                            title="Quitar este concepto de retención"
                             (click)="removeWithholding(i)"
                           >
-                            <app-icon name="x" [size]="14" />
+                            <app-icon name="trash-2" [size]="15" />
                           </button>
                         </div>
                       </div>
 
                       @if (incompleteWithholdingRow() === i + 1) {
                         <p
-                          class="mt-2 flex items-center gap-1.5 text-[11px] text-warning"
+                          class="mt-3 flex items-center gap-1.5 text-[11px] text-warning"
                         >
                           <app-icon name="alert-circle" [size]="12" />
                           Falta concepto, tarifa o base. La factura no se envía
@@ -1630,9 +2294,17 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               }
             </vendix-invoice-form-section>
 
-            <!-- ── 7. DIVISA ────────────────────────────────────────── -->
+            }
+
+            <!-- ── DIVISA ────────────────────────────────────────── -->
+            <!--
+              NO se gatea por tipo de documento: una venta nacional pactada en
+              dólares también declara la conversión, así que esconderla en un
+              documento nacional ocultaría una captura legítima.
+            -->
             <vendix-invoice-form-section
               title="Divisa"
+              [help]="help('divisa')"
               icon="globe"
               [optional]="true"
               [summary]="currencySummary()"
@@ -1657,12 +2329,13 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                 </p>
               </div>
 
-              <label class="flex items-center gap-2 mb-3 cursor-pointer">
-                <app-toggle formControlName="use_foreign_currency" />
-                <span class="text-xs text-text-primary">
-                  Declarar la conversión a una divisa extranjera
-                </span>
-              </label>
+              <div class="mb-3">
+                <app-toggle
+                  formControlName="use_foreign_currency"
+                  label="Declarar la conversión a una divisa extranjera"
+                  ariaLabel="Declarar la conversión a una divisa extranjera"
+                />
+              </div>
 
               @if (usesForeignCurrency()) {
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -1767,9 +2440,10 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               }
             </vendix-invoice-form-section>
 
-            <!-- ── 8. CONTABILIDAD ──────────────────────────────────── -->
+            <!-- ── CONTABILIDAD ──────────────────────────────────── -->
             <vendix-invoice-form-section
               title="Contabilidad"
+              [help]="help('contabilidad')"
               icon="book"
               [optional]="true"
               [summary]="accountingSummary()"
@@ -1785,14 +2459,20 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
 
               <div class="flex items-end gap-2 mb-3">
                 <div class="flex-1">
-                  <app-input
+                  <!--
+                    SELECTOR CON BÚSQUEDA, no un campo de texto. Teclear el
+                    código a mano es la vía directa a un PUC que no existe en
+                    esta tienda: el asiento no cuadra nada y la factura sale
+                    igual, así que el descuadre aparece al cerrar el mes. El
+                    selector sólo ofrece cuentas del plan que aceptan
+                    movimientos, trae 5 por página y el resto se alcanza
+                    escribiendo código o nombre.
+                  -->
+                  <app-account-code-select
                     label="Cuenta PUC por defecto"
                     formControlName="default_account_code"
-                    [control]="control('default_account_code')"
-                    placeholder="Ej. 413505"
-                    [maxlength]="20"
-                    size="sm"
-                  ></app-input>
+                    placeholder="Mapeo automático de cuentas"
+                  ></app-account-code-select>
                 </div>
                 <app-button
                   variant="outline"
@@ -1821,14 +2501,12 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                       </span>
                     </div>
                     <div class="col-span-12 md:col-span-5">
-                      <app-input
+                      <app-account-code-select
                         [formControl]="accountControl(item)"
-                        [control]="accountControl(item)"
                         [error]="itemError(i, 'account_code')"
                         placeholder="Cuenta PUC (opcional)"
-                        [maxlength]="20"
-                        size="sm"
-                      ></app-input>
+                        [ariaLabel]="'Cuenta PUC de ' + lineLabel(i)"
+                      ></app-account-code-select>
                     </div>
                   </div>
                 }
@@ -1988,6 +2666,31 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
       [requirements]="emitRequirements()"
       (action)="onEmitRequirementAction($event)"
     />
+
+    <!--
+      «¿RECONFIGURO LA FACTURA CON ESTE PERFIL?»
+
+      Sólo aparece si hay algo escrito a mano que el perfil pisaría. Con la
+      factura virgen —el caso normal— el perfil se aplica sin preguntar nada.
+
+      El estado de apertura se ATA a la señal en una sola dirección y el cierre
+      se escucha aparte: app-modal cierra con Escape por su cuenta, y sin
+      escuchar isOpenChange esa tecla dejaría el modal invisible con la
+      pregunta sin responder y el selector mostrando un perfil que nunca se
+      aplicó — que es exactamente el estado que este modal existe para impedir.
+    -->
+    <app-confirmation-modal
+      [isOpen]="profilePendingConfirm() !== null"
+      (isOpenChange)="onProfileConfirmOpenChange($event)"
+      title="Reconfigurar la factura con el perfil"
+      [message]="profileConfirmMessage()"
+      confirmText="Aplicar el perfil"
+      cancelText="Dejarla como está"
+      confirmVariant="danger"
+      size="md"
+      (confirm)="confirmProfileApply()"
+      (cancel)="cancelProfileApply()"
+    />
   `,
 })
 export class InvoiceCreatePageComponent implements OnInit {
@@ -2005,6 +2708,7 @@ export class InvoiceCreatePageComponent implements OnInit {
   private readonly withholdingCatalog = inject(InvoiceWithholdingCatalogService);
   private readonly exchangeRateService = inject(ExchangeRateService);
   private readonly emitReadinessService = inject(InvoiceEmitReadinessService);
+  private readonly profileService = inject(InvoiceProfileService);
 
   // ── Catálogos estáticos ─────────────────────────────────────
   readonly invoiceTypeOptions = INVOICE_TYPE_OPTIONS;
@@ -2015,6 +2719,13 @@ export class InvoiceCreatePageComponent implements OnInit {
   readonly taxRegimeOptions = TAX_REGIME_OPTIONS;
   readonly unitCodeOptions = UNIT_CODE_OPTIONS;
   readonly aiuComponentOptions = AIU_COMPONENT_OPTIONS;
+  /**
+   * La ayuda larga de cada sección, del catálogo compartido con el editor de
+   * perfiles. Método y no mapa inline: la misma regla fiscal explicada de dos
+   * maneras en dos pantallas acaba contradiciéndose.
+   */
+  readonly help = invoiceHelp;
+
   readonly foreignCurrencyOptions = FOREIGN_CURRENCY_OPTIONS;
   readonly fiscalResponsibilities = FISCAL_RESPONSIBILITIES;
   readonly responsibilityLabels = FISCAL_RESPONSIBILITY_LABELS;
@@ -2039,7 +2750,10 @@ export class InvoiceCreatePageComponent implements OnInit {
   private readonly customItemTargetUid = signal<string | null>(null);
 
   private readonly openSections = signal<Set<SectionId>>(
-    new Set<SectionId>(['documento', 'adquiriente', 'lineas']),
+    // AIU va abierta por lo mismo que va antes de Líneas: decide qué porción
+    // lleva cada línea. Cuando la operación no es AIU la sección no se pinta,
+    // así que tenerla en el conjunto no cuesta nada.
+    new Set<SectionId>(['perfil', 'documento', 'adquiriente', 'aiu', 'lineas']),
   );
 
   readonly submitError = signal<string | null>(null);
@@ -2094,12 +2808,78 @@ export class InvoiceCreatePageComponent implements OnInit {
     payment_form: [PAYMENT_FORM_CASH],
     payment_means_code: ['10'],
     operation_type: [OPERATION_TYPE_STANDARD],
+
+    /**
+     * Perfil de facturación elegido. `PROFILE_NONE` ⇒ flujo manual.
+     *
+     * SIN `Validators.required` y con el flujo manual como valor inicial: el
+     * wizard tiene que poder emitir sin perfiles, que es el estado de todo tenant
+     * que no los use. Exigirlo dejaría el formulario inválido en cada tienda que
+     * nunca creó uno.
+     */
+    profile_id: [PROFILE_NONE],
     notes: [''],
 
     // AIU. Vacío ⇒ hereda el objeto del contrato de la tienda. Es un campo por
     // documento y no sólo de configuración porque una constructora factura
     // varias obras a la vez y la nota CAV03 describe UNA de ellas.
     aiu_contract_object: [''],
+
+    /**
+     * EL AIU DE ESTE DOCUMENTO — no del perfil.
+     *
+     * Antes esta pantalla tenía UN control AIU editable —el objeto del
+     * contrato— y todo lo demás en sólo lectura, remitiendo a «Facturación →
+     * Perfiles». Corregir un reparto obligaba a salir de la emisión y crear una
+     * versión N+1 del perfil, que afecta a TODAS las facturas futuras, para
+     * arreglar una. Estos controles son la copia de trabajo del documento: se
+     * precargan del perfil y editarlos no lo toca (ADR-3).
+     *
+     * QUÉ HACE CADA UNO CON LO QUE SE EMITE:
+     * · los tres porcentajes y su unidad, las cinco cuentas y la matriz de
+     *   tributos gobiernan `applyAiuBase()`, que ESCRIBE LAS LÍNEAS del
+     *   documento —importe, cuenta e impuestos—, y las líneas sí viajan en el
+     *   payload. Editarlos cambia lo que se emite.
+     * · `taxable_basis`, `enforce_minimum_base` y `minimum_base_percent` NO
+     *   viajan: `CreateInvoiceDto` no los declara y el backend los toma de la
+     *   versión del perfil (`invoicing.service.ts`, `aiu_context`). Se pintan
+     *   —la estructura es la misma en las dos pantallas— pero llegan
+     *   CONGELADOS desde `aiuFrozenFields`, con el motivo a la vista. Dejarlos
+     *   editables aceptaría un valor que el servidor ignora, y ese es el fallo
+     *   mudo de este módulo: la pantalla instruye sobre una base y el documento
+     *   se emite con otra.
+     *
+     * El objeto del contrato y la cuenta del costo reembolsable NO se duplican
+     * acá: la sección los toma de `aiu_contract_object` y `default_account_code`
+     * por el mapa de rutas (`aiuSectionPaths`).
+     */
+    aiu: this.fb.group({
+      taxable_basis: ['aiu' as AiuTaxableBasis],
+      enforce_minimum_base: [true],
+      minimum_base_percent: [
+        formatPercentScaled(AIU_LEGAL_FLOOR_PERCENT_SCALED),
+      ],
+      components_basis: ['contract' as AiuComponentsBasis],
+      // VACÍOS a propósito, y no los 5/2/3 con que nace un perfil nuevo: un
+      // documento sin perfil no tiene reparto configurado, y sembrar unos
+      // porcentajes plausibles haría que «Aplicar a las líneas» escribiera
+      // importes que nadie acordó. Vacío suma 0,00 % y el plan lo dice.
+      administracion: [''],
+      imprevistos: [''],
+      utilidad: [''],
+      revenue_administracion: [''],
+      revenue_imprevistos: [''],
+      revenue_utilidad: [''],
+      vat_payable_account: [''],
+    }),
+
+    /**
+     * Matriz de tributos DEL DOCUMENTO. Mismas filas que la del perfil, con la
+     * del costo reembolsable incluida y nunca pintada: es la constancia de qué
+     * hizo el documento con ese costo, y `derivedCostTaxRule` la mantiene
+     * coherente con la base.
+     */
+    aiu_taxes: this.fb.array([] as FormGroup[]),
 
     // Adquiriente
     customer_id: [null],
@@ -2219,6 +2999,54 @@ export class InvoiceCreatePageComponent implements OnInit {
     () => this.rawValue()['operation_type'] === OPERATION_TYPE_AIU,
   );
 
+  /**
+   * `true` si el documento es una factura de EXPORTACIÓN.
+   *
+   * Decide qué secciones aplican: una exportación no está sujeta a retención en
+   * Colombia, porque el comprador está fuera del país y no puede ser agente
+   * retenedor de la DIAN.
+   */
+  readonly isExportInvoice = computed(
+    () => this.rawValue()['invoice_type'] === 'export_invoice',
+  );
+
+  /**
+   * ¿Se pinta la sección AIU? SÓLO si el documento es de operación AIU (09).
+   *
+   * Hubo una versión anterior que además la pintaba cuando ya había algo
+   * capturado dentro —objeto de contrato, o una línea con componente—, con el
+   * argumento de que «ese dato viaja al XML aunque el tipo de operación haya
+   * dejado de ser AIU». La premisa era falsa: `buildPayload` condiciona los dos
+   * únicos campos AIU del documento a `isAiu()` —`aiu_contract_object` y el
+   * `aiu_component` de cada línea—, así que en un documento que no es AIU ni uno
+   * de los dos llega al backend, y menos al XML.
+   *
+   * Sin esa premisa sólo quedaba el coste: una sección que únicamente podía
+   * decir «esto no aplica», con su propio contador de errores, en la pantalla
+   * que gasta numeración autorizada. Y algo peor que ruido — invitaba a
+   * configurar un régimen y unas bases que se iban a descartar en silencio.
+   *
+   * Ocultar NO borra: los valores siguen en el formulario y reaparecen intactos
+   * si el tipo vuelve a AIU. Limpiarlos al cambiar un selector destruiría el
+   * trabajo de quien se equivocó de tipo durante un segundo.
+   */
+  readonly showAiuSection = computed<boolean>(() => this.isAiu());
+
+  /** Retenciones capturadas, por fila o por importe manual. */
+  readonly hasWithholdingData = computed<boolean>(() => {
+    if (this.withholdingsValue().length > 0) return true;
+    return Number(this.rawValue()['withholding_amount'] ?? 0) > 0;
+  });
+
+  /**
+   * La sección de retenciones se pinta salvo en una exportación SIN nada
+   * capturado. Misma regla que el AIU: se oculta lo vacío e inaplicable, nunca
+   * lo que tiene datos.
+   */
+  readonly showWithholdingSection = computed<boolean>(
+    () => !this.isExportInvoice() || this.hasWithholdingData(),
+  );
+
   readonly isNitCustomer = computed(
     () => this.rawValue()['customer_document_type'] === DOCUMENT_TYPE_NIT_CODE,
   );
@@ -2235,7 +3063,16 @@ export class InvoiceCreatePageComponent implements OnInit {
     () => this.rawValue()['foreign_currency'] || 'divisa',
   );
 
-  private readonly responsibilitiesValue = computed<string[]>(() => {
+  /**
+   * Responsabilidades fiscales del adquiriente, reactivas.
+   *
+   * PÚBLICA porque la sección AIU deriva de ellas su SUGERENCIA de tributos y
+   * la recibe como entrada. Se pasa el valor y no la ruta del control a
+   * propósito: la sección no debe poder escribir el RUT del cliente, sólo
+   * leerlo. Cuelga de `rawValue()`, así que cambia con el cliente elegido y con
+   * cada casilla que se marque a mano.
+   */
+  readonly responsibilitiesValue = computed<string[]>(() => {
     const value = this.rawValue()['customer_fiscal_responsibilities'];
     return Array.isArray(value) ? value : [];
   });
@@ -2248,12 +3085,42 @@ export class InvoiceCreatePageComponent implements OnInit {
   );
 
   /**
+   * La lista COMPLETA, activas e inactivas, y sólo para EXPLICAR.
+   *
+   * No sustituye a `activeResolutions()` a propósito: de esa cuelgan la
+   * elegibilidad y la preselección, o sea la ruta que gasta numeración
+   * autorizada, y ampliarle la fuente sería relajar la compuerta que impide
+   * numerar con una resolución desactivada.
+   *
+   * Existe porque `selectActiveResolutions` ya filtra `is_active`, y sin la
+   * lista completa el aviso no puede distinguir «la resolución preferida se
+   * borró» de «está desactivada» — dos causas con dos remedios distintos
+   * (registrarla de nuevo, o reactivarla) que el operador no puede adivinar.
+   */
+  private readonly allResolutions = toSignal(
+    this.store.select(selectResolutions),
+    { initialValue: [] as InvoiceResolution[] },
+  );
+
+  /**
    * El control vive en `invoiceForm` pero se pinta FUERA de él, así que se
    * expone tipado para enlazarlo con `[formControl]`. `form.get(...)` en la
    * plantilla queda prohibido por `vendix-angular-forms`.
    */
   get resolutionControl(): FormControl<number | null> {
     return this.invoiceForm.get('resolution_id') as FormControl<number | null>;
+  }
+
+  /**
+   * Igual que `resolutionControl`, y por el mismo motivo: el selector de perfil
+   * se pinta ARRIBA del `form` —elegir un perfil reescribe el documento entero,
+   * así que va antes de los campos que reescribe— y sin un `formGroup` ancestro
+   * `formControlName` no resolvería contra nada. El control sigue siendo el del
+   * formulario, así que `buildPayload`, el reset y los computed que leen el
+   * valor crudo no se enteran del cambio de sitio.
+   */
+  get profileControl(): FormControl<number | null> {
+    return this.invoiceForm.get('profile_id') as FormControl<number | null>;
   }
 
   /**
@@ -2283,7 +3150,7 @@ export class InvoiceCreatePageComponent implements OnInit {
           (res.document_type ?? 'sales_invoice') === target &&
           res.is_active === true &&
           isWithinValidity(res, today) &&
-          Number(res.current_number) < Number(res.range_to),
+          hasRemainingRange(res),
       )
       .sort(compareResolutionsForSelection);
   });
@@ -2317,7 +3184,7 @@ export class InvoiceCreatePageComponent implements OnInit {
           ? 'Numeración de habilitación, idéntica para todos los contribuyentes · '
           : '') +
         'Consecutivo ' +
-        (Math.max(Number(res.current_number) || 0, (Number(res.range_from) || 0) - 1) + 1) +
+        nextConsecutive(res) +
         ' de ' +
         res.range_to +
         ' · vence ' +
@@ -2351,9 +3218,7 @@ export class InvoiceCreatePageComponent implements OnInit {
 
     const today = toLocalDateString();
     const expired = sameType.filter((res) => !isWithinValidity(res, today));
-    const exhausted = sameType.filter(
-      (res) => Number(res.current_number) >= Number(res.range_to),
-    );
+    const exhausted = sameType.filter((res) => !hasRemainingRange(res));
 
     const reasons: string[] = [];
     if (expired.length > 0) {
@@ -2380,6 +3245,71 @@ export class InvoiceCreatePageComponent implements OnInit {
     );
   });
 
+  /** El id que el perfil activo prefiere, o `null` si no opina. */
+  private readonly profilePreferredResolutionId = computed<number | null>(() => {
+    const raw = Number(this.profileConfig()?.dian?.resolution_id);
+    return Number.isInteger(raw) && raw > 0 ? raw : null;
+  });
+
+  /**
+   * Qué pasó con la preferencia del perfil, cuando no se pudo honrar.
+   *
+   * Callar acá sería lo peor de los dos mundos: el operador configuró un rango
+   * en el perfil, la factura salió con otro, y nada en la pantalla lo relaciona.
+   * El aviso nombra la resolución guardada —de ahí que el perfil guarde también
+   * `resolution_number`— y el motivo, que son las tres cosas que hacen falta
+   * para decidir si se sigue o se va a renovar el rango.
+   */
+  readonly profileResolutionNotice = computed<string | null>(() => {
+    const preferred = this.profilePreferredResolutionId();
+    if (preferred === null) return null;
+    if (this.autoSelectableResolutions().some((res) => res.id === preferred)) {
+      return null;
+    }
+
+    const config = this.profileConfig();
+    const label = config?.dian?.resolution_number
+      ? 'la resolución ' + config.dian.resolution_number
+      : 'una resolución que ya no está disponible';
+    const chosen = this.activeResolution();
+    const found = this.allResolutions().find((res) => res.id === preferred);
+
+    // El ORDEN de las ramas es el de GRAVEDAD, no el de evaluación de
+    // `eligibleResolutions`. La numeración de habilitación va primero porque es
+    // lo único que no se arregla: un rango agotado se renueva y una vigencia se
+    // prorroga, pero una resolución de pruebas nunca debe numerar una factura
+    // real. Y las dos cosas coinciden a menudo —el rango de pruebas se gasta
+    // rápido—, así que si ganara «agotó su rango» el aviso mandaría a pedirle a
+    // la DIAN un rango nuevo para una numeración que jamás hay que usar.
+    let reason: string;
+    if (!found) {
+      reason = 'ya no figura entre las resoluciones de la tienda';
+    } else if (isHabilitationNumbering(found)) {
+      reason =
+        'es numeración de habilitación, que nunca se preselecciona para una factura real';
+    } else if (found.is_active !== true) {
+      reason = 'está inactiva';
+    } else if (!hasRemainingRange(found)) {
+      reason = 'agotó su rango';
+    } else if (!isWithinValidity(found, toLocalDateString())) {
+      reason = 'está fuera de vigencia';
+    } else {
+      reason = 'no puede numerar este documento';
+    }
+
+    return (
+      'El perfil prefiere ' +
+      label +
+      ', pero ' +
+      reason +
+      '. Se preseleccionó ' +
+      (chosen
+        ? (chosen.prefix || 'sin prefijo') + ' · ' + chosen.resolution_number
+        : 'ninguna') +
+      '.'
+    );
+  });
+
   /**
    * PRESELECCIÓN: la resolución elegible MÁS ANTIGUA.
    *
@@ -2400,23 +3330,63 @@ export class InvoiceCreatePageComponent implements OnInit {
    */
   private readonly preselectEligibleResolution = effect(() => {
     const eligible = this.eligibleResolutions();
+    // Dependencia DELIBERADA y sin uso: aplicar un perfil a la fuerza tiene que
+    // volver a correr este efecto aunque la resolución preferida sea la misma
+    // que la del perfil anterior. Ver `profileApplyToken`.
+    this.profileApplyToken();
     const control = this.invoiceForm.get('resolution_id');
     if (!control) return;
 
     const current = Number(control.value) || null;
-    // Lo ya elegido manda mientras siga siendo elegible. Si dejó de serlo
-    // (cambió el tipo de documento, se agotó el rango), se rehace: dejarlo
-    // puesto mandaría al backend un id que la pantalla ya no ofrece.
+
+    // La PREFERENCIA DEL PERFIL, honrada sólo si hoy puede numerar de verdad. Se
+    // contrasta contra las auto-elegibles y no contra `eligible`: eso descarta
+    // de un golpe la vencida, la agotada, la inactiva y la de habilitación, que
+    // son justo los cuatro casos en que obedecer al perfil produciría una
+    // factura mal numerada.
+    const preferred = this.profilePreferredResolutionId();
+    const honoured =
+      preferred !== null &&
+      this.autoSelectableResolutions().some((res) => res.id === preferred)
+        ? preferred
+        : null;
+
+    // ─── QUIÉN LE GANA A QUIÉN ───────────────────────────────────────────────
     //
-    // Se contrasta contra `eligible`, no contra las auto-elegibles: una fila de
-    // habilitación marcada A MANO es una elección legítima y no se le puede
-    // deshacer bajo los dedos al usuario.
+    // Lo que el USUARIO eligió a mano manda sobre todo, mientras siga siendo
+    // elegible. Se contrasta contra `eligible` y no contra las auto-elegibles:
+    // una fila de habilitación marcada A MANO es una elección legítima —durante
+    // la habilitación es justo lo que hace falta— y no se le puede deshacer bajo
+    // los dedos.
+    //
+    // `dirty` es lo que separa «lo eligió el usuario» de «lo puso este efecto»:
+    // `setValue` programático NO marca dirty, así que sólo la interacción real
+    // lo enciende. Distinguirlo importa porque el perfil llega DESPUÉS de la
+    // primera pasada de este efecto —hay que elegir tipo de operación para que
+    // haya perfil—, y sin la distinción la preselección automática de esa
+    // primera pasada bloqueaba para siempre la preferencia del perfil: se
+    // guardaba una resolución preferida que jamás se aplicaba, en silencio y sin
+    // aviso, porque desde el punto de vista del aviso todo estaba en orden.
+    if (control.dirty && current && eligible.some((res) => res.id === current)) {
+      return;
+    }
+
+    // La preferencia del perfil desplaza a la preselección automática. No es
+    // pisarle nada al usuario: es para lo que se configuró el perfil.
+    if (honoured !== null) {
+      if ((control.value ?? null) !== honoured) control.setValue(honoured);
+      return;
+    }
+
+    // Sin preferencia honorable, lo automático ya puesto se queda. Si dejó de
+    // ser elegible (cambió el tipo de documento, se agotó el rango) se rehace:
+    // dejarlo puesto mandaría al backend un id que la pantalla ya no ofrece.
     if (current && eligible.some((res) => res.id === current)) return;
 
-    // Pero elegir SOLA solo elige producción. Si no hay ninguna, se queda vacío
-    // y lo dice `habilitationWarning()`: preseleccionar el rango de pruebas
-    // porque es lo único que quedaba convierte un descuido en una factura real
-    // con numeración que no es de nadie.
+    // Y elegir SOLA sólo elige producción. Si no hay ninguna se queda vacío y lo
+    // dice `habilitationWarning()`: preseleccionar el rango de pruebas porque es
+    // lo único que quedaba convierte un descuido en una factura real con
+    // numeración que no es de nadie.
     const next = this.autoSelectableResolutions()[0]?.id ?? null;
     if ((control.value ?? null) === next) return;
     control.setValue(next);
@@ -2565,6 +3535,268 @@ export class InvoiceCreatePageComponent implements OnInit {
    * «resolviendo» en vez de arriesgar una instrucción.
    */
   readonly aiuSettings = signal<InvoiceAiuSettings | null>(null);
+
+  // ── Perfiles de facturación ─────────────────────────────────
+
+  /** Catálogo de perfiles ACTIVOS del tenant, de todos los tipos de operación. */
+  readonly profileCatalog = signal<InvoiceProfileCatalogEntry[]>([]);
+
+  /** `true` mientras se leen las reglas de la versión vigente del perfil. */
+  readonly profileConfigLoading = signal(false);
+
+  /**
+   * `true` si esa lectura FALLÓ. Estado propio, no «configuración vacía».
+   *
+   * Sin él, un fallo de red degradaría al setting de la TIENDA y la sección AIU
+   * instruiría sobre una base gravable distinta de la que el backend va a
+   * aplicar. El documento se sigue pudiendo emitir —el cálculo es del servidor,
+   * contra la versión que congela al timbrar—, así que el fallo no bloquea: sólo
+   * deja sin instructivo, y eso hay que DECIRLO en vez de sustituirlo por otro.
+   */
+  readonly profileConfigFailed = signal(false);
+
+  /** Sección AIU de la versión vigente del perfil elegido. */
+  readonly profileAiu = signal<ProfileAiuConfig | null>(null);
+
+  /**
+   * Snapshot COMPLETO de la versión vigente del perfil elegido.
+   *
+   * Antes sólo se guardaba `aiu`, y con eso el perfil no podía hacer lo único
+   * que un perfil existe para hacer: precargar el formulario. Elegir uno pintaba
+   * un instructivo y no rellenaba ni un campo.
+   *
+   * SIGUE SIENDO INSTRUCTIVO, no fuente de cálculo. Lo que se emite lo calcula
+   * el servidor contra la versión que congela al timbrar; esto sólo evita
+   * rediligenciar.
+   */
+  readonly profileConfig = signal<InvoiceProfileConfig | null>(null);
+
+  /**
+   * Campos que el perfil rellenó, por nombre de control.
+   *
+   * EXISTE PARA QUE LO PRECARGADO SEA VISIBLE. Un preset que inyecta un valor
+   * que el usuario nunca ve y termina emitido a la DIAN es el peor resultado
+   * posible de esta función: la marca «del perfil» junto al campo es lo que
+   * convierte una inyección silenciosa en una propuesta revisable.
+   */
+  readonly prefilledFields = signal<Set<string>>(new Set<string>());
+
+  /**
+   * Líneas modelo del perfil que NO se sembraron porque el usuario ya había
+   * capturado líneas propias.
+   *
+   * Pisar lo que alguien ya escribió es inaceptable en una pantalla que gasta
+   * numeración autorizada, así que en ese caso la siembra se OFRECE —con este
+   * contador y un botón— en vez de ejecutarse.
+   */
+  readonly pendingModelLines = signal<number>(0);
+
+  /**
+   * Perfil que el usuario acaba de elegir y que ESPERA CONFIRMACIÓN, porque
+   * aplicarlo pisaría datos que él ya había escrito. `null` = nada pendiente.
+   *
+   * Elegir un perfil no es un ajuste más de la cabecera: reescribe la
+   * resolución, los códigos de pago, las notas, las líneas, las retenciones y
+   * el bloque AIU. Sobre un formulario recién abierto eso es exactamente lo que
+   * se quiere y no hay nada que preguntar; sobre un formulario a medio llenar es
+   * destrucción de trabajo que ningún Ctrl+Z recupera. La pregunta sólo aparece
+   * en el segundo caso — ver `profileOverwriteFields()`.
+   */
+  readonly profilePendingConfirm = signal<number | null>(null);
+
+  /** Lo que se perdería al aplicar el perfil pendiente. Se pinta en el modal. */
+  readonly profileOverwriteList = signal<string[]>([]);
+
+  /**
+   * Contador que sólo existe para RE-DISPARAR `preselectEligibleResolution`.
+   *
+   * El efecto honra la resolución preferida del perfil, pero sus dependencias
+   * son valores: si dos perfiles distintos prefieren la MISMA resolución,
+   * `profilePreferredResolutionId()` no cambia, el efecto no vuelve a correr, y
+   * una resolución que el usuario había cambiado a mano se quedaría puesta pese
+   * a que acaba de pedir «aplícame todo el perfil». Incrementar este contador es
+   * lo que fuerza la reevaluación SIN añadir un segundo escritor sobre
+   * `resolution_id` — que es lo que el propio efecto prohíbe.
+   */
+  private readonly profileApplyToken = signal(0);
+
+  /**
+   * El último perfil que de verdad se aplicó, para poder devolver el selector
+   * a su sitio si el usuario cancela la confirmación. El selector muestra lo que
+   * él eligió mientras la pregunta está en pantalla; si dice «no», tiene que
+   * volver a mostrar el perfil bajo el que está trabajando y no el que descartó.
+   */
+  private appliedProfileId = PROFILE_NONE;
+
+  /**
+   * `true` durante UNA sola precarga: la que el usuario confirmó.
+   *
+   * Es lo que convierte la precarga conservadora —que respeta todo lo escrito—
+   * en la aplicación completa que se acaba de autorizar. Se consume al leerlo,
+   * así que ninguna precarga posterior (un reintento, el catálogo que llega
+   * tarde) hereda el permiso de sobrescribir.
+   */
+  private forceProfileSeed = false;
+
+  /**
+   * Descarta respuestas fuera de orden.
+   *
+   * Cambiar de perfil dos veces seguidas puede resolver la primera petición
+   * DESPUÉS de la segunda, y sin este contador la pantalla acabaría instruyendo
+   * bajo el régimen del perfil que el usuario ya descartó.
+   */
+  private profileConfigRequest = 0;
+  private profileCatalogLoaded = false;
+
+  /**
+   * Perfiles activos del tipo de operación vigente.
+   *
+   * El filtro por tipo NO es cosmético: el backend rechaza con
+   * `INVOICING_PROFILE_008` un perfil cuyo `operation_type` no coincide con el
+   * del documento, así que ofrecer los de otro tipo sería ofrecer un 409.
+   */
+  readonly profilesForType = computed<InvoiceProfileCatalogEntry[]>(() => {
+    const type = String(this.rawValue()['operation_type'] ?? '');
+    return this.profileCatalog().filter(
+      (entry) => entry.operation_type === type,
+    );
+  });
+
+  /**
+   * `false` ⇒ el selector NO se pinta y el wizard se comporta como siempre.
+   *
+   * Es la condición que protege el radio de impacto de este paso: en un tenant
+   * sin perfiles, un selector vacío o deshabilitado dejaría el flujo manual
+   * inalcanzable y nadie podría facturar.
+   */
+  readonly hasProfiles = computed<boolean>(
+    () => this.profilesForType().length > 0,
+  );
+
+  /** Opciones del selector, con el flujo manual PRIMERO y siempre presente. */
+  readonly profileOptions = computed<SelectorOption[]>(() => [
+    {
+      value: PROFILE_NONE,
+      label: 'Sin perfil · configuración de la tienda',
+      description: 'El AIU se resuelve desde Ajustes → Facturación → AIU.',
+    },
+    ...this.profilesForType().map((entry) => ({
+      value: entry.id,
+      label: entry.name,
+      description:
+        (entry.is_default ? 'Predeterminado · ' : '') +
+        'versión ' +
+        entry.current_version,
+    })),
+  ]);
+
+  /** Id elegido, normalizado: cualquier cosa que no sea un entero positivo es el flujo manual. */
+  readonly selectedProfileId = computed<number>(() => {
+    const value = Number(this.rawValue()['profile_id']);
+    return Number.isFinite(value) && value > 0 ? value : PROFILE_NONE;
+  });
+
+  /**
+   * El perfil elegido, SÓLO si sigue estando en el catálogo activo del tipo.
+   *
+   * Es la fuente de la que `buildPayload` toma el `profile_id`, y por eso se
+   * resuelve contra `profilesForType()` y no contra el valor crudo: así un id que
+   * quedó puesto tras cambiar el tipo de operación, o cuando el catálogo no se
+   * pudo leer, no llega nunca al backend.
+   */
+  readonly selectedProfile = computed<InvoiceProfileCatalogEntry | null>(() => {
+    const id = this.selectedProfileId();
+    if (id === PROFILE_NONE) return null;
+    return this.profilesForType().find((entry) => entry.id === id) ?? null;
+  });
+
+  /**
+   * Banner de «Usando perfil predeterminado».
+   *
+   * Sólo con EXACTAMENTE un perfil activo del tipo (ADR-9). Con dos o más el
+   * selector ya muestra la elección a la vista y un banner sobraría; con uno
+   * solo no hay nada visible que delate qué configuración se está aplicando.
+   */
+  readonly profileAutoSelected = computed<boolean>(
+    () => this.profilesForType().length === 1 && this.selectedProfile() !== null,
+  );
+
+  /**
+   * Configuración AIU que REALMENTE va a aplicar este documento.
+   *
+   * Con perfil elegido manda el perfil, y `store_settings` no se mira NI COMO
+   * RESPALDO. Es la misma precedencia del backend —`profile_aiu ?? (await
+   * loadAiuSettings(...))`, donde el `??` corta el `await`—, y tiene que ser la
+   * misma: si acá se cayera al setting mientras el servidor calcula por el
+   * perfil, la pantalla instruiría sobre otra base gravable y el error no daría
+   * síntoma, porque la DIAN acepta el documento —el XML cuadra consigo mismo— y
+   * el faltante sólo aparece en una fiscalización.
+   *
+   * `null` mientras la lectura está en vuelo o falló: media instrucción es peor
+   * que ninguna, y la instrucción EQUIVOCADA es peor que las dos.
+   */
+  readonly effectiveAiu = computed<EffectiveAiuSettings | null>(() => {
+    const store = this.aiuSettings();
+    if (this.selectedProfileId() === PROFILE_NONE) {
+      // Sin perfil manda `store_settings`, que no tiene `taxable_basis`: se
+      // deriva de su `regime` con el MISMO resolvedor del backend en vez de
+      // asumir `'aiu'`. Asumirla instruiría «AIU completo» a toda tienda del
+      // Decreto 1372/1992, que grava sólo la utilidad.
+      return store
+        ? {
+            ...store,
+            taxable_basis: resolveAiuTaxableBasis({
+              regime: store.regime,
+              taxable_basis: null,
+            }),
+            regime: store.regime,
+          }
+        : null;
+    }
+    if (this.profileConfigLoading() || this.profileConfigFailed()) return null;
+
+    const aiu = this.profileAiu();
+    // Un perfil SIN sección AIU no configura nada del AIU: el backend deja el
+    // snapshot vacío y `resolveAiuContext` rechaza con `INVOICING_AIU_002` si el
+    // documento es AIU. Caer al setting de la tienda acá pintaría un instructivo
+    // que el servidor no va a honrar.
+    if (!aiu || !store) return null;
+
+    // `note_prefix`, `note_min_length` y `note_max_length` son constantes DIAN,
+    // iguales para tienda y perfil: se heredan del setting en vez de duplicarse.
+    const object = (aiu.contract_object ?? '').trim();
+    const note = object ? `${store.note_prefix} ${object}` : '';
+    // LA BASE SE DERIVA, NO SE COPIA. `aiu.regime` seguía existiendo en el
+    // snapshot del perfil incluso cuando su `taxable_basis` decía otra cosa, y
+    // leerlo a secas producía el peor desalineamiento del módulo: un perfil
+    // `{ taxable_basis: 'subtotal', regime: 'et_462_1' }` hacía que esta
+    // pantalla instruyera «AIU completo, piso del 10 %» mientras el backend
+    // —que resuelve por `resolveAiuTaxableBasis`— gravaba el contrato entero,
+    // costo reembolsable incluido, sin piso alguno. El operador seguía la
+    // instrucción, la DIAN aceptaba el documento porque el XML cuadra consigo
+    // mismo, y el faltante sólo aparecía en una fiscalización.
+    const taxable_basis = resolveAiuTaxableBasis(aiu);
+    return {
+      ...store,
+      taxable_basis,
+      // El régimen legal se deriva de la base, nunca al revés: bajo
+      // `'subtotal'` no hay régimen que citar y el campo queda en `null`.
+      regime: regimeFromTaxableBasis(taxable_basis),
+      contract_object: aiu.contract_object ?? '',
+      enforce_minimum_base: aiu.enforce_minimum_base,
+      // Conversión SÓLO para el texto del instructivo. El importe del piso lo
+      // calcula el backend con el decimal exacto de la versión congelada.
+      minimum_base_percent: Number(aiu.minimum_base_percent),
+      note,
+      note_length: note.length,
+      note_valid:
+        note.length >= store.note_min_length &&
+        note.length <= store.note_max_length,
+      // El perfil ELIGIÓ la base gravable: no hay «valor por defecto» que
+      // advertir.
+      is_default: false,
+    };
+  });
 
   /** Última consulta a la TRM oficial, o `null` si aún no se ha pedido. */
   readonly exchangeRateQuote = signal<ExchangeRateQuote | null>(null);
@@ -2730,9 +3962,597 @@ export class InvoiceCreatePageComponent implements OnInit {
     }));
   });
 
+  /**
+   * Líneas sin componente. NO son un error: son el costo reembolsable del
+   * contrato (ver `InvoiceCalculatorLineInput.aiu_component`, que lo documenta
+   * como el caso legítimo, y la cubeta `costo` del contrato del perfil).
+   */
   readonly aiuUnassigned = computed(
     () => this.itemsValue().filter((item) => !item.aiu_component).length,
   );
+
+  /**
+   * Documento AIU en el que NINGUNA línea es del AIU.
+   *
+   * Esto sí es un defecto: el `CustomizationID` 09 declara un contrato AIU y el
+   * desglose no trae ni administración, ni imprevistos, ni utilidad. La base
+   * gravable saldría en cero, y bajo el art. 462-1 el piso del 10 % la rechaza
+   * al calcular —con el consecutivo ya tomado— mientras que bajo el Decreto
+   * 1372 se emitiría un documento sin un peso de base.
+   *
+   * Con el arreglo vacío devuelve `false`: la falta de líneas la reporta su
+   * propia sección, y dos mensajes para un solo hecho mandan a arreglar dos
+   * cosas donde hay una.
+   */
+  readonly aiuWithoutAnyComponent = computed(() => {
+    const items = this.itemsValue();
+    return items.length > 0 && items.every((item) => !item.aiu_component);
+  });
+
+  // ── La sección AIU compartida ───────────────────────────────
+  //
+  // Las rutas: el objeto del contrato y la cuenta del costo reembolsable
+  // apuntan a controles que YA EXISTÍAN en la raíz del formulario
+  // (`aiu_contract_object` y `default_account_code`). No se duplican dentro del
+  // grupo `aiu` porque duplicar un control fiscal es lo que produce el fallo de
+  // «dos campos que se ven iguales y guardan distinto»: `buildPayload` lee
+  // `aiu_contract_object` y `default_account_code` se derrama sobre las líneas,
+  // así que el segundo par nunca viajaría y el operador no tendría forma de
+  // saber cuál de los dos leyó el servidor.
+  readonly aiuSectionPaths: AiuSectionPaths = {
+    taxable_basis: 'aiu.taxable_basis',
+    contract_object: 'aiu_contract_object',
+    enforce_minimum_base: 'aiu.enforce_minimum_base',
+    minimum_base_percent: 'aiu.minimum_base_percent',
+    components_basis: 'aiu.components_basis',
+    components: {
+      administracion: 'aiu.administracion',
+      imprevistos: 'aiu.imprevistos',
+      utilidad: 'aiu.utilidad',
+    },
+    revenue_account: {
+      administracion: 'aiu.revenue_administracion',
+      imprevistos: 'aiu.revenue_imprevistos',
+      utilidad: 'aiu.revenue_utilidad',
+      costo: 'default_account_code',
+    },
+    vat_payable_account: 'aiu.vat_payable_account',
+  };
+
+  /**
+   * LO QUE ESTE DOCUMENTO NO PUEDE LLEVAR — medido, no supuesto.
+   *
+   * `CreateInvoiceDto` declara del AIU exactamente dos cosas:
+   * `aiu_contract_object` y el `aiu_component` de cada línea. No declara
+   * `taxable_basis`, ni el piso, ni la matriz; y `main.ts` corre con
+   * `forbidNonWhitelisted: true`, así que mandar una clave que el DTO no declara
+   * devuelve 400 antes de tocar nada. El backend deriva `aiu_regime`,
+   * `aiu_minimum_percent` y `aiu_taxable_matrix` del `aiu_context` —la versión
+   * congelada del perfil, o los ajustes de la tienda— en `invoicing.service.ts`.
+   *
+   * Por eso estos tres se pintan y se congelan en vez de aceptar un valor: un
+   * control que acepta lo que el servidor ignora es el fallo mudo de este
+   * módulo. Los demás campos de la sección SÍ gobiernan lo que se emite, porque
+   * gobiernan las LÍNEAS (ver `applyAiuBase`).
+   */
+  readonly aiuFrozenFields: readonly AiuDepartureField[] = [
+    'taxable_basis',
+    'enforce_minimum_base',
+    'minimum_base_percent',
+  ];
+
+  readonly aiuFrozenReason = computed<string>(() => {
+    const profile = this.selectedProfile();
+    return profile
+      ? `Este documento no puede apartarse de la base gravable ni del piso: el servidor los toma de la versión ${profile.current_version} del perfil «${profile.name}». Cambiarlos exige una versión nueva del perfil, que rige para todas las facturas siguientes.`
+      : 'Este documento no puede apartarse de la base gravable ni del piso: el servidor los toma de los ajustes AIU de la tienda.';
+  });
+
+  /**
+   * Errores que la sección AIU tiene que pintar por campo.
+   *
+   * El validador del contrato de perfiles no corre acá —una factura no se
+   * guarda como perfil—, pero el RECHAZO DEL BACKEND sí llega por campo, y el
+   * del objeto del contrato se pintaba en el textarea que la sección ahora
+   * aloja. Sin este puente, un 422 sobre `aiu_contract_object` dejaría de
+   * verse: se traduce al nombre canónico que la sección conoce.
+   */
+  readonly aiuSectionIssues = computed<readonly ProfileConfigIssue[]>(() => {
+    const message = this.fieldError('aiu_contract_object');
+    return message
+      ? [
+          {
+            field: 'aiu.contract_object',
+            code: 'INVOICING_AIU_CONTRACT_OBJECT',
+            message,
+          },
+        ]
+      : [];
+  });
+
+  /**
+   * ¿La sección AIU ya se sembró del perfil vigente?
+   *
+   * Sin esta marca, entre elegir un perfil y recibir su configuración el grupo
+   * `aiu` sigue en blanco y la comparación con el perfil delataría un
+   * «apartado» que nadie hizo — un banner de advertencia que aparece y
+   * desaparece solo es lo que entrena a ignorar los banners.
+   */
+  private readonly aiuSeeded = signal(false);
+
+  /** El grupo `aiu` del documento, como valor plano y reactivo. */
+  private readonly aiuDraft = computed<Record<string, unknown>>(
+    () => (this.rawValue()['aiu'] ?? {}) as Record<string, unknown>,
+  );
+
+  /** La matriz del documento, como filas planas para la lógica compartida. */
+  private readonly aiuDraftRules = computed<AiuTaxRuleValue[]>(() =>
+    ((this.rawValue()['aiu_taxes'] ?? []) as Array<Record<string, unknown>>).map(
+      (row) => ({
+        bucket: String(row['bucket'] ?? '') as AiuBucket,
+        taxable: Boolean(row['taxable']),
+        tax_code: String(row['tax_code'] ?? ''),
+        rate: String(row['rate'] ?? '0.00'),
+      }),
+    ),
+  );
+
+  /**
+   * En qué se apartó este documento del perfil que lo precargó.
+   *
+   * ADR-3 lo exige en pantalla: sin esto el operador cree que emitió con la
+   * configuración configurada. Se compara EN CENTÉSIMAS y no como cadena —
+   * `'19'` y `'19.00'` son el mismo porcentaje y señalarlos como diferencia
+   * entrenaría a ignorar el aviso.
+   *
+   * El objeto del contrato vacío NO es apartarse: vacío significa «hereda», y
+   * es su comportamiento documentado.
+   */
+  readonly aiuDepartures = computed<readonly AiuDepartureField[]>(() => {
+    if (!this.isAiu()) return [];
+    const config = this.profileConfig();
+    const profileAiu = config?.aiu ?? null;
+    if (!config || !profileAiu) return [];
+
+    if (!this.aiuSeeded()) return [];
+
+    const raw = this.rawValue();
+    const draft = this.aiuDraft();
+    const out: AiuDepartureField[] = [];
+
+    const object = String(raw['aiu_contract_object'] ?? '').trim();
+    if (
+      object.length > 0 &&
+      object !== String(profileAiu.contract_object ?? '').trim()
+    ) {
+      out.push('contract_object');
+    }
+
+    if (
+      asAiuComponentsBasis(draft['components_basis']) !==
+      resolveAiuComponentsBasis(profileAiu)
+    ) {
+      out.push('components_basis');
+    }
+
+    for (const component of AIU_COMPONENTS) {
+      if (
+        parsePercentScaled(String(draft[component] ?? '').trim()) !==
+        parsePercentScaled(profileAiu.components[component])
+      ) {
+        out.push('components');
+        break;
+      }
+    }
+
+    const accounts = config.accounting.revenue_account_by_bucket ?? {};
+    const same = (left: unknown, right: unknown): boolean =>
+      String(left ?? '').trim() === String(right ?? '').trim();
+    if (
+      !same(draft['revenue_administracion'], accounts.administracion) ||
+      !same(draft['revenue_imprevistos'], accounts.imprevistos) ||
+      !same(draft['revenue_utilidad'], accounts.utilidad) ||
+      !same(raw['default_account_code'], accounts.costo) ||
+      !same(draft['vat_payable_account'], config.accounting.vat_payable_account)
+    ) {
+      out.push('accounts');
+    }
+
+    const profileRules = config.taxes?.rules ?? [];
+    const draftRules = this.aiuDraftRules();
+    const key = (rule: AiuTaxRuleValue): string =>
+      rule.bucket +
+      '|' +
+      String(rule.taxable) +
+      '|' +
+      rule.tax_code +
+      '|' +
+      String(parsePercentScaled(rule.rate) ?? 0);
+    // La fila del costo reembolsable NO se compara: es DERIVADA de la base por
+    // `reprojectAiuTaxRules`, y un perfil viejo puede traerla con otra tarifa
+    // sin que nadie la haya elegido. Compararla anunciaría un apartado en cuanto
+    // la siembra la reproyecta, que es lo contrario de lo que el aviso significa.
+    const own = (rules: readonly AiuTaxRuleValue[]): string =>
+      rules
+        .filter((rule) => rule.bucket !== 'costo')
+        .map(key)
+        .sort()
+        .join(';');
+    if (own(profileRules) !== own(draftRules)) out.push('taxes');
+
+    return out;
+  });
+
+  /**
+   * Siembra la sección AIU del documento con lo que trae el perfil.
+   *
+   * Escribe con `emitEvent` por omisión: en Zoneless la sección se redibuja por
+   * `valueChanges`, y un `emitEvent: false` dejaría los porcentajes sembrados en
+   * el modelo y en blanco en pantalla. Y NO marca nada como `dirty`: un control
+   * que nace sucio haría que la siguiente precarga lo respetara como si el
+   * operador lo hubiera escrito.
+   */
+  private seedAiuFromProfile(
+    config: InvoiceProfileConfig,
+    forced: boolean,
+  ): void {
+    const aiu = config.aiu;
+    if (!aiu) return;
+    const group = this.aiuGroup;
+
+    const put = (name: string, value: unknown): void => {
+      const control = group.get(name);
+      if (!control) return;
+      // Lo escrito a mano manda, salvo aplicación completa CONFIRMADA: el
+      // usuario acabó de leer en el modal que se reemplaza y dijo que sí.
+      if (control.dirty && !forced) return;
+      control.setValue(value ?? '');
+    };
+
+    put('components_basis', resolveAiuComponentsBasis(aiu));
+    for (const component of AIU_COMPONENTS) {
+      put(component, aiu.components?.[component] ?? '');
+    }
+
+    const accounts = config.accounting.revenue_account_by_bucket ?? {};
+    put('revenue_administracion', accounts.administracion ?? '');
+    put('revenue_imprevistos', accounts.imprevistos ?? '');
+    put('revenue_utilidad', accounts.utilidad ?? '');
+    put('vat_payable_account', config.accounting.vat_payable_account ?? '');
+    this.aiuSeeded.set(true);
+
+    // LA MATRIZ. Sólo si está vacía —o si la aplicación completa lo autoriza—:
+    // una fila editada a mano es una decisión sobre este documento, y
+    // reemplazarla cambiaría un impuesto sin que nadie lo pidiera.
+    if (this.aiuTaxesArray.length > 0 && !forced) return;
+    this.aiuTaxesArray.clear();
+    // Se reproyecta sobre la base del DOCUMENTO al sembrarla: un perfil viejo
+    // puede traer una matriz que su propia base ya no admite, y sembrarla tal
+    // cual pintaría una contradicción que el operador no causó.
+    const basis = asAiuTaxableBasis(
+      this.aiuGroup.get('taxable_basis')?.value,
+    );
+    for (const rule of reprojectAiuTaxRules(config.taxes?.rules ?? [], basis)) {
+      this.aiuTaxesArray.push(
+        this.fb.group({
+          bucket: [rule.bucket],
+          taxable: [rule.taxable],
+          tax_code: [rule.tax_code],
+          rate: [rule.rate],
+        }),
+      );
+    }
+  }
+
+  /**
+   * Las CUATRO configuraciones AIU del perfil, ya convertidas en las líneas que
+   * van a escribirse — o la razón por la que hoy no se pueden aplicar.
+   *
+   * ## Qué aplica de cada bloque del editor
+   *
+   * · Bloque 1 «Modelo de contabilización» — hoy sólo existe el modelo 2 (base
+   *   AIU sumada al total), y es el que estas líneas producen: son líneas del
+   *   documento, así que suman. El modelo 1 no se puede aplicar todavía y el
+   *   editor lo dice donde se elige, no acá.
+   * · Bloque 2 «Cuentas para contabilización AIU» — `account_code` de cada
+   *   línea generada.
+   * · Bloque 3 «Base AIU» — los importes: es el bloque que da los porcentajes.
+   * · Bloque 4 «Base impuestos» — los impuestos de cada línea generada, sólo
+   *   las reglas gravables del componente y sólo tributos de documento
+   *   (IVA/INC/ICA). Las retenciones se capturan en su propia sección: viajan
+   *   en `withholdings` y no en la línea, y necesitan un `concept_id` del
+   *   catálogo que una regla del perfil no trae.
+   *
+   * ## Por qué el valor del contrato no se pide
+   *
+   * Se deduce. Con la unidad `'contract'` los porcentajes se miden sobre el
+   * valor del contrato, y lo que falte hasta el 100 % es costo reembolsable —o
+   * sea, exactamente las líneas que el operador ya capturó SIN componente. Así
+   * que el contrato es `costo / (1 − Σ%)` y el AIU es la diferencia. Pedir el
+   * valor del contrato aparte abriría la puerta a que no cuadre con las líneas.
+   *
+   * `null` cuando no hay nada que aplicar (documento no AIU, o sin perfil):
+   * el perfil es lo único que trae los porcentajes, y los ajustes de la tienda
+   * no los tienen.
+   */
+  readonly aiuApplyPlan = computed<{
+    ready: boolean;
+    blocked: string | null;
+    basis: AiuComponentsBasis;
+    aiuPercentLabel: string;
+    costBase: number;
+    aiuAmount: number;
+    contractAmount: number;
+    replaces: number;
+    parts: Array<{
+      bucket: AiuComponentLiteral;
+      label: string;
+      percentLabel: string;
+      amount: number;
+      account: string;
+      taxes: TaxSelection[];
+    }>;
+  } | null>(() => {
+    if (!this.isAiu()) return null;
+
+    // YA NO EXIGE PERFIL. Antes el plan devolvía `null` sin perfil elegido,
+    // porque el perfil era lo único que traía los porcentajes. Ahora los trae el
+    // documento, y mantener la exigencia dejaría una sección AIU entera —
+    // reparto, cuentas y matriz, todo editable— sin un solo botón que la
+    // aplique: una superficie muda, que es peor que no tenerla. Sin perfil los
+    // tres porcentajes nacen vacíos y el plan dice exactamente qué falta.
+    //
+    // LOS VALORES SON LOS DEL DOCUMENTO, no los del snapshot del perfil.
+    //
+    // Es lo que convierte la sección AIU de esta pantalla en algo más que un
+    // formulario decorativo: los porcentajes, la unidad, las cuentas y la
+    // matriz que el operador tiene delante son los que escriben las líneas, y
+    // las líneas son lo que viaja al backend. Leer el perfil acá haría que
+    // corregir un reparto en la factura no cambiara ni un peso de lo emitido —
+    // exactamente el fallo que la sección editable existe para cerrar.
+    //
+    // El perfil sigue siendo requisito para que el plan EXISTA: es lo único que
+    // pudo sembrar un reparto acordado. Sin perfil los tres porcentajes nacen
+    // vacíos y el plan lo dice, en vez de inventar un 5/2/3.
+    const draft = this.aiuDraft();
+    const basis = asAiuComponentsBasis(draft['components_basis']);
+    const scaled = new Map<AiuComponentLiteral, number>();
+    for (const component of AIU_COMPONENTS) {
+      // Vacío NO es inválido: es «esta porción no lleva nada», y se cuenta como
+      // cero. `parsePercentScaled` devuelve `null` para los dos casos, y
+      // confundirlos diría «los porcentajes no son válidos» en un documento sin
+      // reparto configurado, que es el estado normal antes de elegir perfil.
+      const text = String(draft[component] ?? '').trim();
+      const value = text === '' ? 0 : parsePercentScaled(text);
+      if (value === null) {
+        return this.blockedAiuPlan(
+          basis,
+          'Los porcentajes de la sección AIU no son válidos: se escriben con hasta dos decimales y punto (por ejemplo 5.00). Corrígelos arriba, en Base AIU.',
+        );
+      }
+      scaled.set(component, value);
+    }
+    const sum = [...scaled.values()].reduce((total, value) => total + value, 0);
+
+    if (basis !== 'contract') {
+      return this.blockedAiuPlan(
+        basis,
+        'Los porcentajes están medidos sobre el AIU, no sobre el valor del contrato, así que no determinan cuánto AIU lleva este documento. Cambia la unidad arriba, en Base AIU, o captura las líneas de administración, imprevistos y utilidad a mano.',
+      );
+    }
+    if (sum <= 0 || sum >= 10000) {
+      return this.blockedAiuPlan(
+        basis,
+        sum <= 0
+          ? 'No hay ningún porcentaje de AIU configurado. Escríbelos arriba, en Base AIU.'
+          : 'El reparto declara un AIU del 100 % del contrato: no queda costo reembolsable del que deducirlo, así que las líneas hay que capturarlas a mano.',
+      );
+    }
+
+    // Base = lo capturado SIN componente, o sea el costo reembolsable. Se lee
+    // de `lineMath` y no de cantidad × precio para restar el descuento igual
+    // que lo resta el cálculo del documento.
+    const items = this.itemsValue();
+    const math = this.lineMath();
+    let costCents = 0;
+    let replaces = 0;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i]?.aiu_component) {
+        replaces += 1;
+        continue;
+      }
+      costCents += Math.round((math[i]?.base ?? 0) * 100);
+    }
+
+    if (costCents <= 0) {
+      return this.blockedAiuPlan(
+        basis,
+        'Captura primero las líneas de costo del contrato (las que NO llevan la marca AIU): el AIU se deduce de ellas.',
+      );
+    }
+
+    // AIU = costo × Σ% / (100 % − Σ%). Todo en centavos y con una sola
+    // división, para que el contrato sea EXACTAMENTE costo + AIU y no quede un
+    // centavo suelto entre la cabecera y las líneas — que es un rechazo FAU06.
+    const aiuCents = Math.round((costCents * sum) / (10000 - sum));
+    // Las cuentas y los tributos, también del DOCUMENTO. Ver arriba.
+    const accounts: Readonly<Record<AiuComponentLiteral, string>> = {
+      administracion: String(draft['revenue_administracion'] ?? ''),
+      imprevistos: String(draft['revenue_imprevistos'] ?? ''),
+      utilidad: String(draft['revenue_utilidad'] ?? ''),
+    };
+    const draftRules = this.aiuDraftRules();
+
+    let assigned = 0;
+    const parts = AIU_COMPONENTS.map((bucket) => {
+      const percent = scaled.get(bucket) ?? 0;
+      const cents = Math.floor((aiuCents * percent) / sum);
+      assigned += cents;
+      return {
+        bucket,
+        label: this.aiuComponentLabel(bucket),
+        percentLabel: formatPercentScaled(percent),
+        amount: cents / 100,
+        account: accounts[bucket] ?? '',
+        taxes: this.aiuTaxesForBucket(draftRules, bucket),
+      };
+    });
+
+    // El residuo del truncamiento —a lo sumo dos centavos— va a la UTILIDAD,
+    // que es la única porción gravable bajo las TRES bases (`'aiu'`,
+    // `'utilidad'` y `'subtotal'`). El razonamiento sigue en pie con la tercera
+    // y de hecho se estrecha: bajo `'aiu'` y bajo `'subtotal'` la base ya
+    // contiene el AIU completo —y con `'subtotal'` también el costo—, así que
+    // repartir el centavo entre componentes NO mueve la base ni un peso; el
+    // destino sólo importa bajo `'utilidad'`, donde la base es ese único
+    // componente. Y ahí sumarlo declara un centavo MÁS de base, que es el lado
+    // recuperable del error; restarlo del componente gravable declararía de
+    // menos ante la DIAN.
+    const residual = aiuCents - assigned;
+    if (residual !== 0) {
+      const utilidad = parts.find((part) => part.bucket === 'utilidad');
+      if (utilidad) utilidad.amount += residual / 100;
+    }
+
+    return {
+      ready: true,
+      blocked: null,
+      basis,
+      aiuPercentLabel: formatPercentScaled(sum),
+      costBase: costCents / 100,
+      aiuAmount: aiuCents / 100,
+      contractAmount: (costCents + aiuCents) / 100,
+      replaces,
+      parts: parts.filter((part) => part.amount > 0),
+    };
+  });
+
+  private blockedAiuPlan(
+    basis: AiuComponentsBasis,
+    blocked: string,
+  ): {
+    ready: false;
+    blocked: string;
+    basis: AiuComponentsBasis;
+    aiuPercentLabel: string;
+    costBase: number;
+    aiuAmount: number;
+    contractAmount: number;
+    replaces: number;
+    parts: [];
+  } {
+    return {
+      ready: false,
+      blocked,
+      basis,
+      aiuPercentLabel: '0.00',
+      costBase: 0,
+      aiuAmount: 0,
+      contractAmount: 0,
+      replaces: 0,
+      parts: [],
+    };
+  }
+
+  private aiuComponentLabel(bucket: AiuComponentLiteral): string {
+    const found = AIU_COMPONENT_OPTIONS.find(
+      (option) => String(option.value) === bucket,
+    );
+    return found ? found.label : bucket;
+  }
+
+  /**
+   * Las reglas GRAVABLES del bloque 4 para una cubeta, traducidas a los
+   * impuestos que la línea lleva.
+   *
+   * Se resuelven contra el catálogo real de la tienda (`availableTaxes`) y no
+   * se fabrican: `TaxSelection.tax_rate_id` es un id de `tax_rates`, y un id
+   * inventado se envía y el backend lo rechaza nombrando un impuesto que el
+   * operador nunca eligió. Si la tarifa configurada no existe en el catálogo,
+   * la línea sale sin ese impuesto y el aviso de
+   * `aiuTaxableWithoutTax` —que ya existe— lo señala.
+   *
+   * Sólo tributos de DOCUMENTO. Una regla de retención (`06`/`07`/`05`) no es
+   * un impuesto de línea: no suma al total y se captura en su propia sección.
+   */
+  private aiuTaxesForBucket(
+    rules: readonly AiuTaxRuleValue[],
+    bucket: AiuComponentLiteral,
+  ): TaxSelection[] {
+    const catalog = this.availableTaxes();
+    const selections: TaxSelection[] = [];
+    for (const rule of rules) {
+      if (rule.bucket !== bucket || !rule.taxable) continue;
+      const taxType = AIU_DOCUMENT_TAX_TYPE_BY_CODE[rule.tax_code];
+      if (!taxType) continue;
+      const rate = parsePercentScaled(rule.rate);
+      if (rate === null) continue;
+      const option = catalog.find(
+        (candidate) =>
+          (candidate.tax_type ?? '').toLowerCase() === taxType &&
+          Math.round(candidate.rate * 100) === rate,
+      );
+      if (!option) continue;
+      selections.push({
+        tax_rate_id: option.id,
+        rate: option.rate,
+        name: option.name,
+        tax_type: option.tax_type,
+        is_inclusive: option.default_is_inclusive ?? false,
+      });
+    }
+    return selections;
+  }
+
+  /**
+   * Escribe las líneas del AIU con lo que las cuatro configuraciones del perfil
+   * dicen. Acción explícita del usuario.
+   *
+   * REEMPLAZA las líneas que ya llevan componente y NO TOCA las de costo. Por
+   * eso es idempotente —pulsarlo dos veces da el mismo documento— y por eso no
+   * puede destruir lo capturado a mano: el costo es lo que el operador escribió,
+   * y el AIU es lo que se deduce de él.
+   */
+  applyAiuBase(): void {
+    const plan = this.aiuApplyPlan();
+    if (!plan || !plan.ready) return;
+
+    // Primero fuera las viejas, de atrás hacia adelante: quitar por índice
+    // ascendente desplaza los que faltan y borra la línea equivocada.
+    for (let i = this.itemsArray.length - 1; i >= 0; i--) {
+      const component = String(
+        this.itemsArray.at(i).get('aiu_component')?.value ?? '',
+      ).trim();
+      if (component.length > 0) this.itemsArray.removeAt(i);
+    }
+
+    for (const part of plan.parts) {
+      const group = this.appendItem();
+      if (!group) break;
+      group.patchValue({
+        description:
+          part.label + ' — ' + part.percentLabel + ' % del valor del contrato',
+        quantity: 1,
+        unit_code: UNIT_CODE_DEFAULT,
+        unit_price: part.amount,
+        discount_amount: 0,
+        aiu_component: part.bucket,
+        account_code: part.account,
+        taxes: part.taxes,
+      });
+      group.markAsDirty();
+    }
+
+    this.itemsArray.updateValueAndValidity();
+    this.itemsArray.markAsDirty();
+    this.toastService.success(
+      'Base AIU aplicada: ' +
+        plan.parts.length +
+        ' línea(s) por ' +
+        this.formatCurrency(plan.aiuAmount) +
+        '.',
+    );
+  }
 
   /**
    * Instructivo del régimen AIU, derivado de la configuración REAL de la
@@ -2757,10 +4577,10 @@ export class InvoiceCreatePageComponent implements OnInit {
     minimumBase: string | null;
     isDefault: boolean;
   } | null>(() => {
-    const settings = this.aiuSettings();
+    const settings = this.effectiveAiu();
     if (!settings) return null;
 
-    if (settings.regime === 'decreto_1372_1992') {
+    if (settings.taxable_basis === 'utilidad') {
       return {
         regimeLabel: 'Decreto 1372/1992',
         regimeCitation: 'art. 3 — contratos de construcción de inmueble',
@@ -2770,6 +4590,27 @@ export class InvoiceCreatePageComponent implements OnInit {
         // El piso del 10 % es del 462-1; bajo el decreto no existe, y
         // mencionarlo acá haría que el comerciante infle una base que la ley
         // no le exige.
+        minimumBase: null,
+        isDefault: settings.is_default,
+      };
+    }
+
+    // TERCERA RAMA — no había ninguna, y su ausencia era el defecto: un perfil
+    // con `taxable_basis: 'subtotal'` caía en el `return` de abajo y se le
+    // instruía «AIU completo, piso del 10 %» mientras el servidor gravaba el
+    // contrato ENTERO sin piso. La instrucción no sólo era distinta: pedía
+    // dejar SIN impuesto la línea de costo reembolsable, que bajo esta base es
+    // justo la que grava.
+    if (settings.taxable_basis === 'subtotal') {
+      return {
+        regimeLabel: 'Sin tratamiento AIU',
+        regimeCitation: 'el IVA grava el valor total del contrato',
+        taxableLabel: 'Contrato completo',
+        instruction:
+          'Declara el impuesto sobre TODAS las líneas, incluida la de costo reembolsable: este perfil declinó el desglose AIU y la base gravable es el valor total del contrato. Dejar el costo sin impuesto contradice la base declarada y la emisión se rechaza (INVOICING_AIU_004).',
+        // No hay piso: el piso del art. 462-1 protege una base que es una
+        // FRACCIÓN del contrato. Acá la base ya es el contrato entero, así que
+        // no hay nada por debajo de lo cual pueda quedar.
         minimumBase: null,
         isDefault: settings.is_default,
       };
@@ -2810,14 +4651,18 @@ export class InvoiceCreatePageComponent implements OnInit {
   readonly aiuTaxableWithoutTax = computed<
     Array<{ index: number; label: string }>
   >(() => {
-    const settings = this.aiuSettings();
+    const settings = this.effectiveAiu();
     if (!settings) return [];
 
-    // Bajo el Decreto 1372/1992 sólo la utilidad grava; bajo el 462-1, los tres
-    // componentes. Es la misma pregunta que responde `isAiuTaxable` en el
-    // backend, y se escribe igual para que no puedan divergir.
+    // Qué buckets gravan lo dice `AIU_TAXABLE_BUCKETS_BY_BASIS`, la MISMA tabla
+    // que consulta `isAiuTaxable` en el backend. Se lee de ahí en vez de
+    // reescribir el ternario: el ternario anterior sólo conocía dos regímenes,
+    // así que bajo `'subtotal'` —donde gravan los cuatro buckets— caía en la
+    // rama del Decreto y avisaba únicamente por la utilidad, callando el IVA
+    // faltante de administración e imprevistos.
+    const taxableBuckets = AIU_TAXABLE_BUCKETS_BY_BASIS[settings.taxable_basis];
     const isTaxable = (component: string): boolean =>
-      settings.regime === 'et_462_1' ? true : component === 'utilidad';
+      taxableBuckets.includes(component as AiuComponentLiteral);
 
     const labels = new Map(
       AIU_COMPONENT_OPTIONS.map((option) => [
@@ -2859,7 +4704,7 @@ export class InvoiceCreatePageComponent implements OnInit {
    * ninguna.
    */
   readonly aiuEffectiveNote = computed<{
-    source: 'invoice' | 'store' | 'none';
+    source: 'invoice' | 'profile' | 'store' | 'none';
     object: string;
     note: string;
     length: number;
@@ -2868,7 +4713,7 @@ export class InvoiceCreatePageComponent implements OnInit {
     max: number;
     remaining: number;
   } | null>(() => {
-    const settings = this.aiuSettings();
+    const settings = this.effectiveAiu();
     if (!settings) return null;
 
     const own = this.aiuContractObject();
@@ -2877,7 +4722,16 @@ export class InvoiceCreatePageComponent implements OnInit {
     const note = object ? `${settings.note_prefix} ${object}` : '';
 
     return {
-      source: own ? 'invoice' : inherited ? 'store' : 'none',
+      // `profile` y `store` se separan porque el usuario tiene que saber DÓNDE
+      // ir a cambiar lo que está heredando: con perfil, el objeto sale de la
+      // versión del perfil y Ajustes → Facturación → AIU no lo toca.
+      source: own
+        ? 'invoice'
+        : inherited
+          ? this.selectedProfileId() === PROFILE_NONE
+            ? 'store'
+            : 'profile'
+          : 'none',
       object,
       note,
       length: note.length,
@@ -2908,6 +4762,34 @@ export class InvoiceCreatePageComponent implements OnInit {
     return !!note && !note.valid;
   });
 
+  /** Insignia del origen del objeto del contrato que va a viajar en la nota. */
+  readonly aiuNoteSourceLabel = computed<string>(() => {
+    switch (this.aiuEffectiveNote()?.source) {
+      case 'invoice':
+        return 'Propio de esta factura';
+      case 'profile':
+        return 'Heredado del perfil';
+      case 'store':
+        return 'Heredado de la tienda';
+      default:
+        return 'Sin definir';
+    }
+  });
+
+  /**
+   * Dónde se cambia lo que este documento hereda.
+   *
+   * Con perfil elegido, mandar al usuario a Ajustes → Facturación → AIU sería
+   * mandarlo a una pantalla que NO afecta a este documento: el backend deriva el
+   * AIU de la versión del perfil y no lee el setting ni como respaldo.
+   */
+  readonly aiuInheritanceHint = computed<string>(() => {
+    const profile = this.selectedProfile();
+    return profile
+      ? `Déjalo vacío para heredar el del perfil «${profile.name}».`
+      : 'Déjalo vacío para heredar el de Ajustes → Facturación → AIU.';
+  });
+
   /** Retención efectiva: la calculada por conceptos, o la escrita a mano. */
   readonly effectiveWithholding = computed<number>(() => {
     if (this.isManualWithholding()) {
@@ -2933,6 +4815,42 @@ export class InvoiceCreatePageComponent implements OnInit {
     const operation = this.isAiu() ? ' · AIU' : '';
     return this.documentLabel() + ' · ' + credit + operation;
   });
+
+  /**
+   * Resumen de la sección de perfil, legible con la sección plegada.
+   *
+   * Dice el nombre del perfil aplicado, o que no hay perfiles de este tipo. Lo
+   * segundo importa tanto como lo primero: plegada, la sección sería un título
+   * mudo y nadie la abriría para descubrir que está vacía.
+   */
+  readonly profileSummary = computed<string>(() => {
+    if (!this.hasProfiles()) {
+      return 'Sin perfiles para ' + this.operationTypeLabel();
+    }
+    const applied = this.selectedProfile();
+    return applied ? applied.name : 'Ninguno elegido';
+  });
+
+  /**
+   * Etiqueta del tipo de operación tal como la ve el comerciante.
+   *
+   * Sale del MISMO catálogo que alimenta el selector, no de un mapa paralelo:
+   * dos listas de los mismos cuatro códigos acabarían diciendo cosas distintas
+   * del mismo documento.
+   */
+  readonly operationTypeLabel = computed<string>(() => {
+    const code = String(this.rawValue()['operation_type'] ?? '');
+    return (
+      this.operationTypeOptions.find((option) => option.value === code)
+        ?.label ?? code
+    );
+  });
+
+  /** Ayuda de la sección de perfil. Constante: no depende del documento. */
+  readonly profileSectionHelp =
+    'Un perfil de facturación es la preconfiguración de todo lo que se repite entre facturas del mismo tipo de operación.\n\n' +
+    'Elegirlo aquí rellena la resolución, los códigos de pago, las notas de cabecera, las líneas modelo y —en un documento AIU— la base gravable y sus cuentas. Todo queda editable después: el perfil es el punto de partida, no un candado.\n\n' +
+    'Sólo se listan los perfiles del tipo de operación de esta factura. Un perfil de otro tipo lo rechaza el servidor, así que ofrecerlo sería ofrecer un error tras llenar el documento.';
 
   readonly customerSummary = computed(() => {
     const name = (this.rawValue()['customer_name'] as string) || '';
@@ -2960,7 +4878,18 @@ export class InvoiceCreatePageComponent implements OnInit {
 
   readonly withholdingSummary = computed(() => {
     const amount = this.effectiveWithholding();
-    return amount > 0 ? this.formatCurrency(amount) : 'Sin retenciones';
+    if (amount > 0) return this.formatCurrency(amount);
+
+    // Con filas pero sin importe, decir «Sin retenciones» es FALSO y además
+    // engaña en el caso que más importa: el perfil acaba de precargar el
+    // concepto y la tarifa, y la base se calcula al emitir, así que el importe
+    // es 0 hasta que haya líneas. El resumen que se lee con la sección plegada
+    // decía que no había nada mientras dentro había un concepto configurado.
+    const rows = this.withholdingsValue().length;
+    if (rows === 0) return 'Sin retenciones';
+    return rows === 1
+      ? '1 concepto · base pendiente'
+      : rows + ' conceptos · base pendiente';
   });
 
   readonly currencySummary = computed(() =>
@@ -3009,16 +4938,12 @@ export class InvoiceCreatePageComponent implements OnInit {
     this.formValue();
     const backend = this.backendFieldErrors();
 
-    const counts: Record<SectionId, number> = {
-      documento: 0,
-      adquiriente: 0,
-      lineas: 0,
-      impuestos: 0,
-      aiu: 0,
-      retenciones: 0,
-      divisa: 0,
-      contabilidad: 0,
-    };
+    // Se deriva de SECTION_FIELDS en vez de escribirse a mano: una sección
+    // nueva ahí aparece aquí sola. Escribirlas dos veces es lo que hace que
+    // una sección quede sin contador y su badge no se pinte nunca.
+    const counts = Object.fromEntries(
+      (Object.keys(SECTION_FIELDS) as SectionId[]).map((section) => [section, 0]),
+    ) as Record<SectionId, number>;
 
     for (const section of Object.keys(SECTION_FIELDS) as SectionId[]) {
       for (const field of SECTION_FIELDS[section]) {
@@ -3062,7 +4987,11 @@ export class InvoiceCreatePageComponent implements OnInit {
         }
       }
     }
-    if (this.isAiu() && this.aiuUnassigned() > 0) {
+    // Una línea sin componente NO es un error: es el costo reembolsable. Lo que
+    // sí lo es —y por eso lo cuenta— es que NINGUNA línea sea del AIU: un
+    // documento 09 sin administración, imprevistos ni utilidad no declara AIU
+    // alguno.
+    if (this.isAiu() && this.aiuWithoutAnyComponent()) {
       counts.aiu += 1;
     }
     // La nota CAV03 es bloqueante de emisión, así que la cabecera plegada de la
@@ -3166,6 +5095,29 @@ export class InvoiceCreatePageComponent implements OnInit {
     this.currencyService.loadCurrency();
     this.destroyRef.onDestroy(() => this.backendErrorSubs.unsubscribe());
 
+    // LA BASE GRAVABLE Y EL PISO SE SIEMBRAN DE LO QUE MANDA, y llegan
+    // congelados (ver `aiuFrozenFields`). Sin esto los controles mostrarían la
+    // base más amplia por omisión sobre una tienda del Decreto 1372/1992, que
+    // grava sólo la utilidad: la pantalla instruiría declarar de más y el
+    // operador seguiría la instrucción.
+    //
+    // Se escribe con `emitEvent` por omisión: en Zoneless la sección se
+    // redibuja por `valueChanges`, y silenciarlo dejaría el valor sembrado en el
+    // modelo y la base anterior en pantalla. No hay ciclo posible porque
+    // `effectiveAiu()` no lee el formulario.
+    effect(() => {
+      const inherited = this.effectiveAiu();
+      if (!inherited) return;
+      const percent = Number(inherited.minimum_base_percent);
+      this.aiuGroup.patchValue({
+        taxable_basis: inherited.taxable_basis,
+        enforce_minimum_base: inherited.enforce_minimum_base === true,
+        minimum_base_percent: Number.isFinite(percent)
+          ? formatPercentScaled(Math.round(percent * 100))
+          : formatPercentScaled(AIU_LEGAL_FLOOR_PERCENT_SCALED),
+      });
+    });
+
     // EL MODAL ESPERA EL DESENLACE. Sin esto, "cerrar" significaba únicamente
     // "se despachó la acción", que es cierto tanto cuando la factura se creó
     // como cuando el backend la rechazó.
@@ -3216,6 +5168,14 @@ export class InvoiceCreatePageComponent implements OnInit {
     return this.invoiceForm.get('withholdings') as FormArray;
   }
 
+  get aiuGroup(): FormGroup {
+    return this.invoiceForm.get('aiu') as FormGroup;
+  }
+
+  get aiuTaxesArray(): FormArray {
+    return this.invoiceForm.get('aiu_taxes') as FormArray;
+  }
+
   // ── Ciclo de vida de la página ──────────────────────────────
 
   ngOnInit(): void {
@@ -3245,6 +5205,7 @@ export class InvoiceCreatePageComponent implements OnInit {
 
     this.loadTaxCatalog();
     this.loadAiuSettings();
+    this.loadProfileCatalog();
     this.loadWithholdingConcepts();
     // Los productos YA NO se precargan: el selector busca contra el servidor
     // cada vez que se abre. Precargar una página era lo que hacía infacturable
@@ -3278,6 +5239,647 @@ export class InvoiceCreatePageComponent implements OnInit {
       .load()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((settings) => this.aiuSettings.set(settings));
+  }
+
+  /**
+   * Catálogo de perfiles activos del tenant.
+   *
+   * FALLA EN SILENCIO A PROPÓSITO. Si la petición no responde, el catálogo queda
+   * vacío, el selector no se pinta y el wizard se comporta exactamente como el
+   * flujo manual —que es lo que hacía antes de esta fase—. Cualquier otra
+   * degradación (bloquear el envío, reintentar en bucle, pintar el selector
+   * deshabilitado) dejaría al tenant sin poder facturar por un fallo en una
+   * lectura secundaria.
+   */
+  private loadProfileCatalog(): void {
+    if (this.profileCatalogLoaded) return;
+    this.profileCatalogLoaded = true;
+    this.profileService
+      .catalog()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.profileCatalog.set(response?.data ?? []);
+          this.syncProfileSelection();
+        },
+        error: () => this.profileCatalog.set([]),
+      });
+  }
+
+  /**
+   * Ajusta el perfil elegido al tipo de operación vigente.
+   *
+   * Se llama al llegar el catálogo, al cambiar el tipo de operación y al
+   * reiniciar el formulario. En el segundo caso es OBLIGATORIO: el backend
+   * rechaza con `INVOICING_PROFILE_008` un perfil cuyo `operation_type` no
+   * coincide con el del documento, así que dejar puesto el perfil AIU al volver a
+   * «Estándar» convertiría el envío en un 409 sobre un campo que ya no se ve.
+   *
+   * Precedencia (ADR-9): un perfil ya elegido que sigue siendo válido se respeta
+   * —nunca se pisa una elección del usuario—; si no, se preselecciona el
+   * predeterminado del tipo. Con exactamente un activo se elige ése aunque no
+   * esté marcado como predeterminado: es el caso de F.2, el que lleva banner.
+   * Sin candidatos, se vuelve al flujo manual.
+   */
+  private syncProfileSelection(): void {
+    const options = this.profilesForType();
+    const current = this.selectedProfileId();
+
+    if (current !== PROFILE_NONE && options.some((e) => e.id === current)) {
+      // Sigue siendo válido. Sólo hay que garantizar que sus reglas estén
+      // leídas: el catálogo pudo llegar después de que el usuario tocara el
+      // selector, y en ese orden nadie habría disparado la lectura.
+      if (
+        !this.profileAiu() &&
+        !this.profileConfigLoading() &&
+        !this.profileConfigFailed()
+      ) {
+        this.loadProfileConfig(current);
+      }
+      return;
+    }
+
+    const next =
+      options.length === 1
+        ? options[0]
+        : (options.find((entry) => entry.is_default) ?? null);
+
+    this.applyProfile(next ? next.id : PROFILE_NONE);
+  }
+
+  /** Escribe el perfil en el formulario y dispara la lectura de sus reglas. */
+  private applyProfile(id: number): void {
+    const control = this.invoiceForm.get('profile_id');
+    if (!control) return;
+    // Autoselección: no pregunta nada porque llega sobre un formulario virgen,
+    // donde la precarga conservadora ya equivale a la aplicación completa. Pero
+    // sí queda registrado, o un «cancelar» posterior devolvería el selector a
+    // «sin perfil» en vez de al predeterminado que estaba puesto.
+    this.appliedProfileId = id;
+    if (Number(control.value) === id) {
+      // Ya estaba puesto: sólo asegurar las reglas. Reescribir emitiría un
+      // `valueChanges` que no cambia nada y recomputaría media pantalla.
+      this.loadProfileConfig(id);
+      return;
+    }
+    // Con `emitEvent` por defecto: el `computed` que lee el valor crudo depende
+    // de `formValue()`, y silenciar el evento dejaría el selector pintando el
+    // valor anterior.
+    control.setValue(id);
+    this.loadProfileConfig(id);
+  }
+
+  /**
+   * Reglas de la versión vigente del perfil.
+   *
+   * Se leen de `GET /profiles/:id` y NO del catálogo: el catálogo vive en Redis y
+   * su propio contrato lo prohíbe —una `config` en caché es una tarifa fiscal con
+   * fecha de caducidad—. Lo que se pinta con esto es INSTRUCTIVO; el cálculo del
+   * documento lo hace el backend contra la versión que congela al timbrar, así
+   * que una lectura rancia acá no puede alterar el XML.
+   */
+  private loadProfileConfig(id: number): void {
+    const request = ++this.profileConfigRequest;
+    // La siembra del perfil ANTERIOR deja de valer en cuanto se cambia de
+    // perfil: sin esto, la sección AIU compararía lo sembrado del perfil viejo
+    // contra el nuevo y anunciaría un apartado que el operador no hizo.
+    this.aiuSeeded.set(false);
+
+    if (id === PROFILE_NONE) {
+      this.profileAiu.set(null);
+      this.profileConfigLoading.set(false);
+      this.profileConfigFailed.set(false);
+      return;
+    }
+
+    this.profileConfigLoading.set(true);
+    this.profileConfigFailed.set(false);
+    this.profileService
+      .getById(id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (request !== this.profileConfigRequest) return;
+          const config = response?.data?.current_config ?? null;
+          this.profileAiu.set(config?.aiu ?? null);
+          this.profileConfig.set(config);
+          this.profileConfigLoading.set(false);
+          if (config) this.applyProfilePrefill(config);
+        },
+        error: () => {
+          if (request !== this.profileConfigRequest) return;
+          this.profileAiu.set(null);
+          this.profileConfig.set(null);
+          this.profileConfigLoading.set(false);
+          this.profileConfigFailed.set(true);
+        },
+      });
+  }
+
+  /**
+   * PRECARGA. Escribe en el formulario lo que el perfil trae preconfigurado.
+   *
+   * ─── LA REGLA QUE GOBIERNA TODO ESTO ─────────────────────────────────────
+   *
+   * **Nunca se pisa lo que el usuario escribió.** La condición es `pristine`:
+   * un control que el usuario tocó está `dirty`, y ese se deja intacto. Los que
+   * siguen vírgenes se rellenan. Así la precarga es útil la primera vez y no
+   * destructiva la segunda — y cambiar de perfil después de haber corregido un
+   * campo a mano no borra la corrección.
+   *
+   * `setValue` programático NO marca `dirty`, así que lo que precargó el perfil
+   * anterior sí se reemplaza al elegir otro. Es lo correcto: eso no lo escribió
+   * el usuario.
+   *
+   * ─── POR QUÉ TODO LO PRECARGADO QUEDA VISIBLE Y EDITABLE ─────────────────
+   *
+   * Cada campo escrito se registra en `prefilledFields` y la plantilla lo marca.
+   * Un preset que inyecta un valor que el usuario nunca ve y termina emitido a
+   * la DIAN es el peor resultado posible de esta función. Precargar es proponer,
+   * no decidir.
+   *
+   * ─── QUÉ NO PRECARGA, Y POR QUÉ ──────────────────────────────────────────
+   *
+   *  - **Adquiriente** — es del documento. Un cliente precargado es la clase de
+   *    error que se descubre cuando la factura ya tiene CUFE.
+   *  - **Fechas** — hoy, siempre. Una fecha de emisión guardada es un rechazo.
+   *
+   * ─── LA RESOLUCIÓN SÍ SE PRECARGA, PERO NO SE OBEDECE ────────────────────
+   *
+   * `dian.resolution_id` es una PREFERENCIA del perfil, no un dato que esta
+   * pantalla acate. Se honra únicamente si ese id está entre las que pueden
+   * numerar HOY —vigente, activa, con consecutivo y de producción—; si no, se
+   * cae al criterio automático y `profileResolutionNotice()` dice por qué. Un
+   * perfil se configura una vez y se usa durante meses: la numeración
+   * autorizada que hoy sirve puede estar vencida cuando alguien lo use, y
+   * preseleccionarla a ciegas emitiría con un rango que la DIAN ya no reconoce.
+   *
+   * Por eso tampoco se escribe con `put()`: el control de resolución lo gobierna
+   * `preselectEligibleResolution`, y dos escritores sobre el mismo control se
+   * pisarían en un orden que depende de cuál efecto corra primero.
+   *
+   * ─── EL MAPEO DE LOS DOS CÓDIGOS DE PAGO ─────────────────────────────────
+   *
+   * `dian.payment_method_code` → `payment_form` (FormasPago: 1 contado / 2
+   * crédito) y `dian.payment_means_code` → `payment_means_code` (medio). Ningún
+   * otro consumidor lee esos dos campos del perfil —se comprobó con `grep` sobre
+   * los dos `src`—, así que esta precarga es lo que define su significado. Queda
+   * escrito aquí para que nadie lo invierta después: invertirlos mandaría «2» a
+   * un campo que sólo admite códigos de medio y el documento saldría a crédito
+   * cuando es de contado.
+   */
+  private applyProfilePrefill(config: InvoiceProfileConfig): void {
+    // Se CONSUME al leerlo: el permiso de sobrescribir vale para esta precarga y
+    // no para la siguiente. Un reintento tras un fallo de red, o el catálogo que
+    // llega tarde y vuelve a disparar la lectura, no heredan la autorización.
+    const forced = this.forceProfileSeed;
+    this.forceProfileSeed = false;
+
+    const filled = new Set<string>();
+
+    /** Escribe sólo si el usuario no tocó ese control. */
+    const put = (path: string, value: unknown): void => {
+      const control = this.invoiceForm.get(path);
+      if (!control || control.dirty) return;
+      const text = typeof value === 'string' ? value.trim() : value;
+      if (text === null || text === undefined || text === '') return;
+      control.setValue(text);
+      filled.add(path);
+    };
+
+    // El TIPO primero: decide qué secciones se ven, así que escribirlo después
+    // de sembrar retenciones dejaría visible un instante una sección que el
+    // documento no aplica.
+    put('invoice_type', config.dian.document_type);
+    put('payment_form', config.dian.payment_method_code);
+    put('payment_means_code', config.dian.payment_means_code);
+
+    // Divisa: sólo si el perfil DECLARA la conversión y dice a cuál. El código
+    // sin la bandera es una divisa guardada con la sección apagada, y encender
+    // la conversión por él declararía un cambio que nadie pidió.
+    const currencyCode = String(config.currency?.code ?? '').trim();
+    if (config.currency?.declare_foreign === true && currencyCode) {
+      put('use_foreign_currency', true);
+      put('foreign_currency', currencyCode);
+    } else if (forced) {
+      // APLICACIÓN COMPLETA: el perfil NO declara conversión, así que el
+      // documento tampoco. Dejarla encendida heredada del perfil anterior
+      // declararía un «cac:PaymentAlternativeExchangeRate» que este perfil
+      // nunca pidió, y con la tasa de la divisa vieja. La tasa se limpia con
+      // la bandera: sin conversión declarada no significa nada, y guardada
+      // volvería a aparecer si alguien reactiva el bloque a mano.
+      this.invoiceForm.get('use_foreign_currency')?.setValue(false);
+      this.invoiceForm.get('foreign_currency')?.setValue('');
+      this.invoiceForm.get('exchange_rate')?.setValue(null);
+      this.invoiceForm.get('exchange_rate_date')?.setValue('');
+    }
+
+    const notes = (config.dian.header_notes ?? [])
+      .map((note) => String(note ?? '').trim())
+      .filter((note) => note.length > 0);
+    if (notes.length > 0) put('notes', notes.join('\n'));
+
+    if (config.aiu) put('aiu_contract_object', config.aiu.contract_object);
+
+    // Cuenta contable por omisión: se toma la del COSTO reembolsable, que es la
+    // que aplica a una línea sin componente AIU. Las de A/I/U no caben en este
+    // campo único —se derraman por línea al sembrar las líneas modelo—.
+    put(
+      'default_account_code',
+      config.accounting.revenue_account_by_bucket?.costo ?? '',
+    );
+
+    this.prefilledFields.set(filled);
+    this.seedAiuFromProfile(config, forced);
+    this.seedWithholdings(config, forced);
+    this.seedModelLines(config, forced);
+  }
+
+  /**
+   * Siembra las retenciones del perfil.
+   *
+   * Sólo si el arreglo está VACÍO. Una fila capturada a mano es una decisión del
+   * operador sobre este documento concreto, y reemplazarla por la del perfil
+   * cambiaría un importe que no se cobra sin que nadie lo pidiera.
+   *
+   * La BASE no viene del perfil —no la guarda— y la tarifa se copia tal cual: es
+   * la del contrato, no la del catálogo, y sustituirla sería cambiar un dato
+   * fiscal en silencio.
+   */
+  private seedWithholdings(config: InvoiceProfileConfig, forced = false): void {
+    const rules = config.withholdings?.rules ?? [];
+    if (rules.length === 0) return;
+    if (this.withholdingsArray.length > 0) {
+      // Con la aplicación completa CONFIRMADA sí se reemplazan: el usuario acaba
+      // de leer en el modal que se pierden y dijo que sí. Sin confirmación, la
+      // fila capturada a mano manda.
+      if (!forced) return;
+      this.withholdingsArray.clear();
+    }
+
+    for (const rule of rules) {
+      this.addWithholding();
+      const group = this.withholdingsArray.at(
+        this.withholdingsArray.length - 1,
+      );
+      const concept = this.withholdingConcepts().find(
+        (candidate) => candidate.id === rule.concept_id,
+      );
+      group.patchValue({
+        concept_id: rule.concept_id,
+        // La etiqueta se resuelve contra el catálogo VIVO: un concepto borrado
+        // deja la fila con su id y sin nombre, que es visible, en vez de con un
+        // nombre viejo que ya no corresponde a nada.
+        concept: concept ? concept.code + ' · ' + concept.name : '',
+        role: rule.role,
+        rate: Number(rule.rate) || 0,
+      });
+    }
+  }
+
+  /**
+   * Siembra las líneas modelo del perfil en el `FormArray` de líneas.
+   *
+   * Sólo si NO hay nada que perder: el arreglo vacío, o con filas que siguen en
+   * blanco (sin descripción y sin precio). Si el usuario ya capturó líneas, la
+   * siembra se OFRECE con un botón —`pendingModelLines`— en vez de ejecutarse.
+   * Reemplazar veinte líneas escritas a mano por las del perfil es exactamente
+   * el tipo de acción que no se puede deshacer con Ctrl+Z en un formulario.
+   */
+  private seedModelLines(config: InvoiceProfileConfig, forced = false): void {
+    const lines = config.model_lines ?? [];
+    if (lines.length === 0) {
+      this.pendingModelLines.set(0);
+      return;
+    }
+
+    const captured = this.itemsArray.controls.some((control) => {
+      const description = String(control.get('description')?.value ?? '').trim();
+      const price = Number(control.get('unit_price')?.value ?? 0);
+      return description.length > 0 || price > 0;
+    });
+
+    // Con la aplicación completa confirmada NO se ofrece: se hace. El botón
+    // «Reemplazar por las del perfil» existe para el caso en que nadie autorizó
+    // nada, y aquí la autorización es explícita.
+    if (captured && !forced) {
+      this.pendingModelLines.set(lines.length);
+      return;
+    }
+
+    this.pendingModelLines.set(0);
+    this.writeModelLines(config);
+  }
+
+  /** Reemplaza las líneas por las del perfil. Acción explícita del usuario. */
+  applyModelLines(): void {
+    const config = this.profileConfig();
+    if (!config) return;
+    this.writeModelLines(config);
+    this.pendingModelLines.set(0);
+  }
+
+  private writeModelLines(config: InvoiceProfileConfig): void {
+    const accounts = config.accounting.revenue_account_by_bucket ?? {};
+    // El componente AIU sólo se escribe si el documento ES AIU. `bucket` es un
+    // campo obligatorio de la línea modelo y su valor por omisión histórico es
+    // `'administracion'`, así que un perfil ESTÁNDAR guardado sin tocar ese
+    // selector traía sus líneas marcadas como Administración. Copiarlo tal cual
+    // mandaba `aiu_component` en un documento tipo 10, donde el backend no tiene
+    // régimen con que interpretarlo: la línea entraba a una base gravable que no
+    // existe para esa operación. Fuera de AIU el componente NO se precarga.
+    const isAiuProfile = this.isAiu();
+    this.itemsArray.clear();
+    for (const line of config.model_lines ?? []) {
+      const group = this.appendItem();
+      if (!group) break;
+      group.patchValue({
+        description: line.description,
+        quantity: Number(line.quantity ?? 1) || 1,
+        // El precio del perfil, o 0 si no lo trae. `Number('')` es 0 y `|| 0`
+        // cubre el NaN de una cadena que no era número —el validador del
+        // contrato ya la habría rechazado al guardarla, pero un snapshot viejo
+        // pudo entrar antes de que el campo existiera.
+        unit_price: Number(line.unit_price ?? 0) || 0,
+        unit_code: line.unit_code ?? UNIT_CODE_DEFAULT,
+        // Vacío también para el costo reembolsable: es la única cubeta que NO es
+        // un componente del AIU, y mandarla como tal haría que el backend la
+        // sumara a la base gravable del régimen.
+        aiu_component:
+          isAiuProfile && line.bucket !== 'costo' ? line.bucket : '',
+        // La cuenta sí se copia siempre: un perfil estándar puede tener cuenta
+        // de ingreso configurada por cubeta y eso es contabilidad, no fiscalidad.
+        account_code: accounts[line.bucket] ?? '',
+      });
+    }
+    this.itemsArray.updateValueAndValidity();
+  }
+
+  /**
+   * Etiquetas legibles de lo que el perfil rellenó.
+   *
+   * Se pinta como lista bajo el selector. No es decoración: es el único lugar
+   * donde el usuario puede comprobar QUÉ le tocaron sin recorrer las ocho
+   * secciones campo por campo.
+   */
+  readonly prefillSummary = computed<string[]>(() => {
+    const labels: Record<string, string> = {
+      invoice_type: 'tipo de documento',
+      use_foreign_currency: 'divisa',
+      foreign_currency: 'divisa',
+      payment_form: 'forma de pago',
+      payment_means_code: 'medio de pago',
+      notes: 'notas del documento',
+      aiu_contract_object: 'objeto del contrato',
+      default_account_code: 'cuenta contable por omisión',
+    };
+    // Un `Set` y no un arreglo: `use_foreign_currency` y `foreign_currency` son
+    // dos controles con una sola etiqueta, y la lista diría «divisa» dos veces.
+    const out = new Set<string>();
+    for (const path of this.prefilledFields()) {
+      out.add(labels[path] ?? path);
+    }
+    const lines = this.itemCount();
+    if (lines > 0 && this.profileConfig()?.model_lines?.length === lines) {
+      out.add(lines === 1 ? '1 línea' : lines + ' líneas');
+    }
+    const rules = this.profileConfig()?.withholdings?.rules?.length ?? 0;
+    if (rules > 0 && this.withholdingsArray.length === rules) {
+      out.add(rules === 1 ? '1 retención' : rules + ' retenciones');
+    }
+    return [...out];
+  });
+
+  /**
+   * ¿Esta línea lleva la base AIU configurada?
+   *
+   * NO es un campo nuevo: es `aiu_component` no vacío. La semántica ya existía
+   * —una línea con componente participa de la base del régimen; una sin él es
+   * costo reembolsable y no la toca— pero estaba escondida en «dejar el selector
+   * en blanco», que nadie lee como una decisión fiscal. El interruptor la hace
+   * explícita sin inventar un campo que el backend no conoce.
+   */
+  lineCarriesAiu(item: AbstractControl): boolean {
+    return String(item.get('aiu_component')?.value ?? '').trim().length > 0;
+  }
+
+  /**
+   * Enciende o apaga la base AIU de una línea.
+   *
+   * Al encender se propone el primer componente GRAVABLE del régimen vigente:
+   * bajo el Decreto 1372/1992 sólo la Utilidad lleva IVA, así que proponer
+   * «Administración» ahí crearía una línea que el validador rechaza por declarar
+   * una base que su propio régimen no grava (FAU04). Bajo el art. 462-1 los tres
+   * son gravables y se propone Administración.
+   *
+   * Al apagar se limpia el componente: la línea pasa a costo reembolsable.
+   */
+  toggleLineAiu(item: AbstractControl, on: boolean): void {
+    const control = item.get('aiu_component');
+    if (!control) return;
+    if (!on) {
+      control.setValue('');
+      control.markAsDirty();
+      return;
+    }
+    if (this.lineCarriesAiu(item)) return;
+    // Primer componente GRAVABLE de la base vigente, leído de la tabla del
+    // contrato. Con `'utilidad'` sólo grava la utilidad; con `'aiu'` y con
+    // `'subtotal'` graban los tres, y se propone Administración.
+    const basis = this.effectiveAiu()?.taxable_basis ?? 'aiu';
+    const first = AIU_TAXABLE_BUCKETS_BY_BASIS[basis].find(
+      (bucket): bucket is AiuComponentLiteral => bucket !== 'costo',
+    );
+    control.setValue(first ?? 'administracion');
+    control.markAsDirty();
+  }
+
+  /** ¿Este control lo rellenó el perfil? Lo usa la marca de la plantilla. */
+  isPrefilled(path: string): boolean {
+    return this.prefilledFields().has(path);
+  }
+
+  /**
+   * El usuario cambió de perfil en el selector.
+   *
+   * ─── POR QUÉ AQUÍ HAY UNA PREGUNTA Y NO UNA ACCIÓN DIRECTA ───────────────
+   *
+   * Elegir un perfil no ajusta un campo: reescribe el documento —resolución,
+   * códigos de pago, notas, objeto del contrato, cuenta contable, líneas y
+   * retenciones—. Sobre un formulario recién abierto eso es justo lo que se
+   * pide y preguntar sería ruido. Sobre uno a medio llenar es borrar trabajo
+   * que no se recupera, en una pantalla que además gasta numeración autorizada.
+   *
+   * La diferencia entre los dos casos la da `profileOverwriteFields()`: si nada
+   * de lo que el perfil precarga está escrito a mano, se aplica sin más.
+   */
+  onProfileChange(): void {
+    this.clearSubmitError();
+    const target = this.selectedProfileId();
+
+    // Volver al flujo manual no precarga nada, así que no hay nada que perder:
+    // sólo se apaga el instructivo del perfil. Lo ya escrito se queda —quitar el
+    // perfil no es deshacerlo, y vaciar la factura acá sería la sorpresa opuesta
+    // a la que este modal existe para evitar—.
+    if (target === PROFILE_NONE) {
+      this.profilePendingConfirm.set(null);
+      this.profileOverwriteList.set([]);
+      this.appliedProfileId = PROFILE_NONE;
+      this.loadProfileConfig(PROFILE_NONE);
+      return;
+    }
+
+    const risky = this.profileOverwriteFields();
+    if (risky.length === 0) {
+      this.applyProfileFully(target);
+      return;
+    }
+
+    this.profileOverwriteList.set(risky);
+    this.profilePendingConfirm.set(target);
+  }
+
+  /**
+   * Qué se perdería al aplicar un perfil sobre lo que ya está escrito.
+   *
+   * Es un MÉTODO y no un `computed` a propósito: `dirty` no es una señal, así
+   * que un `computed` que lo leyera devolvería el primer valor calculado para
+   * siempre. Se llama en el instante del cambio y su resultado se congela en
+   * `profileOverwriteList`, que sí es señal y es lo que pinta el modal.
+   *
+   * El aviso es CONSERVADOR con las líneas y las retenciones: en este punto
+   * todavía no se han leído las reglas del perfil elegido —eso pasa después de
+   * confirmar—, así que no se puede saber si trae líneas modelo con las que
+   * reemplazarlas. Se advierte de lo que puede perderse, y el texto del modal lo
+   * dice así. Al contrario —callarlo y reemplazar— sería la sorpresa que este
+   * modal existe para evitar.
+   */
+  private profileOverwriteFields(): string[] {
+    const out = new Set<string>();
+
+    for (const [path, label] of PROFILE_PREFILL_LABELS) {
+      if (this.invoiceForm.get(path)?.dirty === true) out.add(label);
+    }
+
+    const lines = this.itemsArray.controls.filter((control) => {
+      const description = String(control.get('description')?.value ?? '').trim();
+      const price = Number(control.get('unit_price')?.value ?? 0);
+      return description.length > 0 || price > 0;
+    }).length;
+    if (lines > 0) {
+      out.add(lines === 1 ? 'la línea capturada' : 'las ' + lines + ' líneas capturadas');
+    }
+
+    const rows = this.withholdingsArray.length;
+    if (rows > 0) {
+      out.add(
+        rows === 1
+          ? 'la retención capturada'
+          : 'las ' + rows + ' retenciones capturadas',
+      );
+    }
+
+    return [...out];
+  }
+
+  /** Texto del modal de confirmación. Se pinta con `innerHTML`: lleva viñetas. */
+  readonly profileConfirmMessage = computed<string>(() => {
+    const id = this.profilePendingConfirm();
+    if (id === null) return '';
+    const name =
+      this.profilesForType().find((entry) => entry.id === id)?.name ?? '';
+    const label = name ? '«' + escapeHtmlText(name) + '»' : 'este perfil';
+    const bullets = this.profileOverwriteList()
+      .map((item) => '• ' + escapeHtmlText(item))
+      .join('<br>');
+
+    return (
+      'Esta factura ya tiene datos escritos a mano. Aplicar <strong>' +
+      label +
+      '</strong> la reconfigura por completo, empezando por la resolución.' +
+      '<br><br>Puede perderse:<br>' +
+      bullets +
+      '<br><br>Lo que el perfil no traiga configurado se queda como está. El ' +
+      'adquiriente y las fechas no se tocan nunca. Esto no se puede deshacer.'
+    );
+  });
+
+  /**
+   * El modal se cerró. Cerrar SIN responder —Escape, la «X»— es no aplicar.
+   *
+   * `cancelProfileApply()` es idempotente: cuando el cierre viene de haber
+   * confirmado, `applyProfileFully` ya dejó el perfil aplicado en el control y
+   * no queda nada que revertir.
+   */
+  onProfileConfirmOpenChange(open: boolean): void {
+    if (open) return;
+    this.cancelProfileApply();
+  }
+
+  /** El usuario autorizó reconfigurar la factura con el perfil elegido. */
+  confirmProfileApply(): void {
+    const id = this.profilePendingConfirm();
+    if (id === null) return;
+    this.applyProfileFully(id);
+  }
+
+  /**
+   * El usuario dijo que no. El selector vuelve al perfil bajo el que trabajaba.
+   *
+   * Devolverlo importa: dejarlo mostrando el perfil descartado haría que la
+   * pantalla afirmara una configuración que no se aplicó, y `buildPayload` toma
+   * el `profile_id` de ese mismo control — la factura se timbraría contra la
+   * versión de un perfil que el usuario acabó de rechazar.
+   */
+  cancelProfileApply(): void {
+    this.profilePendingConfirm.set(null);
+    this.profileOverwriteList.set([]);
+    const control = this.invoiceForm.get('profile_id');
+    if (!control) return;
+    if (Number(control.value) === this.appliedProfileId) return;
+    // `setValue` programático llega al selector por `writeValue`, que NO emite
+    // `valueChange`: no se vuelve a entrar por `onProfileChange()`.
+    control.setValue(this.appliedProfileId);
+  }
+
+  /**
+   * APLICACIÓN COMPLETA del perfil: lo que el usuario pidió al elegirlo.
+   *
+   * Las dos reglas que protegen lo escrito a mano —`applyProfilePrefill` sólo
+   * escribe controles `pristine`, y `preselectEligibleResolution` respeta la
+   * resolución marcada a mano mientras siga `dirty`— siguen intactas. Lo que
+   * hace esta función es quitarles el motivo: devuelve a `pristine` EXACTAMENTE
+   * los controles que el perfil precarga, ni uno más.
+   *
+   * Que sean sólo esos y no `invoiceForm.markAsPristine()` no es una sutileza:
+   * el adquiriente, el cliente buscado y las fechas también viven en este
+   * formulario, no los precarga ningún perfil, y borrarles el `dirty` haría que
+   * un cambio de perfil POSTERIOR no los contara como escritos a mano.
+   *
+   * El token es lo que fuerza a reevaluar la resolución cuando dos perfiles
+   * prefieren la misma. Y la resolución preferida sigue pasando por la compuerta
+   * de elegibilidad: si está vencida, agotada, inactiva o es de habilitación, se
+   * cae al criterio automático y `profileResolutionNotice()` dice por qué.
+   * Obedecer un rango muerto emitiría contra numeración que la DIAN ya no
+   * reconoce, y eso no lo arregla ninguna confirmación del usuario.
+   */
+  private applyProfileFully(id: number): void {
+    this.profilePendingConfirm.set(null);
+    this.profileOverwriteList.set([]);
+    this.appliedProfileId = id;
+
+    for (const [path] of PROFILE_PREFILL_LABELS) {
+      this.invoiceForm.get(path)?.markAsPristine();
+    }
+
+    this.forceProfileSeed = true;
+    this.profileApplyToken.update((token) => token + 1);
+    this.loadProfileConfig(id);
+  }
+
+  /** Reintento explícito cuando la lectura de las reglas del perfil falló. */
+  retryProfileConfig(): void {
+    this.loadProfileConfig(this.selectedProfileId());
   }
 
   // ── Tasa de cambio oficial ──────────────────────────────────
@@ -3432,6 +6034,17 @@ export class InvoiceCreatePageComponent implements OnInit {
       : 'En contado vence el mismo día de la emisión.';
   }
 
+  /**
+   * Salida al editor de perfiles desde el estado vacío.
+   *
+   * Navega, no abre modal: crear un perfil son nueve secciones y ya se midió
+   * que dentro de un modal no se encuentra nada. Lo capturado en esta factura
+   * se pierde al salir, igual que con cualquier otra navegación de la pantalla.
+   */
+  goToProfileCreate(): void {
+    void this.router.navigate(['/admin/invoicing/profiles/new']);
+  }
+
   isSectionOpen(section: SectionId): boolean {
     return this.openSections().has(section);
   }
@@ -3503,6 +6116,10 @@ export class InvoiceCreatePageComponent implements OnInit {
   }
 
   onOperationTypeChange(): void {
+    // El perfil está ligado al tipo: cambiar el tipo puede invalidar el elegido
+    // y, con él, la base gravable que la pantalla está instruyendo.
+    this.syncProfileSelection();
+
     if (this.isAiu()) {
       this.setSection('aiu', true);
     } else {
@@ -4030,9 +6647,19 @@ export class InvoiceCreatePageComponent implements OnInit {
         'El vencimiento es anterior a la fecha de emisión. Corrige una de las dos.',
       );
     }
-    if (this.isAiu() && this.aiuUnassigned() > 0) {
+    // Antes bloqueaba toda línea sin componente diciendo que la DIAN rechazaría
+    // el documento. Era FALSO y era más estricto que el servidor:
+    // `resolveAiuContext` sólo rechaza lo inverso —un componente en un documento
+    // que no es AIU— y el calculador documenta que `aiu_component = null` en un
+    // documento AIU es la porción de costo reembolsable. Con ese bloqueo, un
+    // contrato AIU real (costo + A + I + U) no se podía emitir.
+    //
+    // Lo que sí bloquea es el documento 09 en el que NINGUNA línea es del AIU:
+    // ahí no hay base gravable que declarar y el documento contradice su propio
+    // `CustomizationID`.
+    if (this.isAiu() && this.aiuWithoutAnyComponent()) {
       blockers.push(
-        'La operación es AIU (09) y hay líneas sin componente. La DIAN valida la coherencia entre el CustomizationID y el desglose de las líneas.',
+        'La operación es AIU (09) y ninguna línea es administración, imprevistos o utilidad: el documento no declararía AIU alguno. Marca las líneas del AIU o aplica la base configurada en el perfil.',
       );
     }
     // Espejo exacto de lo que el backend valida en `resolveAiuContext` antes de
@@ -4249,6 +6876,14 @@ export class InvoiceCreatePageComponent implements OnInit {
     }
     if (raw['operation_type']) {
       payload.operation_type = String(raw['operation_type']);
+    }
+    // Se toma del CATÁLOGO, no del valor crudo del control: así un id que quedó
+    // puesto tras cambiar el tipo de operación —o cuando el catálogo no se pudo
+    // leer— no llega nunca al backend, y el 409 `INVOICING_PROFILE_008` queda
+    // inalcanzable desde esta pantalla. Ausente ⇒ flujo manual, idéntico a hoy.
+    const selectedProfile = this.selectedProfile();
+    if (selectedProfile) {
+      payload.profile_id = selectedProfile.id;
     }
     // Sólo si la operación es AIU y el usuario efectivamente escribió algo: en
     // cualquier otro caso se omite para que el backend herede el de la tienda,
@@ -4609,6 +7244,12 @@ export class InvoiceCreatePageComponent implements OnInit {
   private resetForm(): void {
     this.itemsArray.clear();
     this.withholdingsArray.clear();
+    // LA MATRIZ AIU TAMBIÉN. Un `reset()` no vacía un `FormArray`: le pone
+    // `null` a las filas que ya tiene, y la sección seguiría pintando filas
+    // huecas con la matriz del documento anterior. Se vuelve a sembrar cuando
+    // llegue la configuración del perfil.
+    this.aiuTaxesArray.clear();
+    this.aiuSeeded.set(false);
     this.invoiceForm.reset({
       invoice_type: 'sales_invoice',
       // A `null` a propósito: el efecto de preselección vuelve a elegir la
@@ -4620,8 +7261,31 @@ export class InvoiceCreatePageComponent implements OnInit {
       payment_form: PAYMENT_FORM_CASH,
       payment_means_code: '10',
       operation_type: OPERATION_TYPE_STANDARD,
+      // A `PROFILE_NONE` a propósito: `syncProfileSelection()` vuelve a
+      // preseleccionar el predeterminado del tipo en cuanto el formulario queda
+      // limpio. Conservar el anterior podría dejar puesto uno que se desactivó
+      // mientras se capturaba la factura anterior.
+      profile_id: PROFILE_NONE,
       notes: '',
       aiu_contract_object: '',
+      // El AIU del documento vuelve a «nada configurado»: los porcentajes
+      // vacíos, no un 5/2/3 plausible. La base y el piso los vuelve a sembrar
+      // el efecto que los hereda de lo que manda.
+      aiu: {
+        taxable_basis: 'aiu' as AiuTaxableBasis,
+        enforce_minimum_base: true,
+        minimum_base_percent: formatPercentScaled(
+          AIU_LEGAL_FLOOR_PERCENT_SCALED,
+        ),
+        components_basis: 'contract' as AiuComponentsBasis,
+        administracion: '',
+        imprevistos: '',
+        utilidad: '',
+        revenue_administracion: '',
+        revenue_imprevistos: '',
+        revenue_utilidad: '',
+        vat_payable_account: '',
+      },
       customer_id: null,
       customer_name: '',
       customer_document_type: DOCUMENT_TYPE_NIT_CODE,
@@ -4641,6 +7305,7 @@ export class InvoiceCreatePageComponent implements OnInit {
       default_account_code: '',
     });
     this.syncDueDate();
+    this.syncProfileSelection();
     this.orderIdControl.reset();
     this.mode.set('manual');
     this.pickerTargetUid.set(null);
@@ -4762,72 +7427,7 @@ function round2(value: number): number {
   return Math.round((Number(value) || 0) * 100) / 100;
 }
 
-/**
- * Recorta un valor de fecha a su parte `YYYY-MM-DD`.
- *
- * `valid_from` / `valid_to` / `resolution_date` son fechas-sola guardadas en
- * columnas de marca de tiempo: llegan como `2026-01-01T00:00:00.000Z` y hay que
- * leerlas por su componente UTC. Convertirlas a `Date` local haría que una
- * vigencia que termina el día 31 se declarara vencida la tarde del 30 en
- * cualquier huso al oeste de Greenwich.
- */
-function toDateOnly(value: string | null | undefined): string {
-  return value ? String(value).slice(0, 10) : '';
-}
-
-/** `true` cuando `today` (YYYY-MM-DD local) cae dentro de la vigencia declarada. */
-function isWithinValidity(res: InvoiceResolution, today: string): boolean {
-  const from = toDateOnly(res.valid_from);
-  const to = toDateOnly(res.valid_to);
-  // Una vigencia sin declarar no descalifica: la resolución existe y el backend
-  // la acepta. Lo que descalifica es una vigencia declarada que ya no cubre hoy.
-  if (from && today < from) return false;
-  if (to && today > to) return false;
-  return true;
-}
-
-/**
- * Orden TOTAL de las resoluciones, de la más antigua a la más nueva.
- *
- * El desempate encadenado existe porque el empate es un caso real, no teórico:
- * dos resoluciones de factura de venta pueden compartir `resolution_date`. Sin
- * un criterio que llegue hasta el `id`, `Array.sort` conservaría el orden en que
- * llegó el arreglo y la preselección cambiaría sola entre recargas.
- */
-function compareResolutionsByAge(
-  a: InvoiceResolution,
-  b: InvoiceResolution,
-): number {
-  const aDate = toDateOnly(a.resolution_date) || toDateOnly(a.valid_from);
-  const bDate = toDateOnly(b.resolution_date) || toDateOnly(b.valid_from);
-  if (aDate !== bDate) return aDate < bDate ? -1 : 1;
-
-  const aFrom = toDateOnly(a.valid_from);
-  const bFrom = toDateOnly(b.valid_from);
-  if (aFrom !== bFrom) return aFrom < bFrom ? -1 : 1;
-
-  const aCreated = String(a.created_at ?? '');
-  const bCreated = String(b.created_at ?? '');
-  if (aCreated !== bCreated) return aCreated < bCreated ? -1 : 1;
-
-  return (Number(a.id) || 0) - (Number(b.id) || 0);
-}
-
-/**
- * El orden con el que se PINTA el selector: producción primero, pruebas al
- * final, y dentro de cada grupo de la más antigua a la más nueva.
- *
- * El grupo va ANTES que la antigüedad a propósito. La numeración de habilitación
- * es de 2019 en la mayoría de los tenants, así que ordenar solo por antigüedad
- * la dejaría siempre primera — encabezando la lista y quedando preseleccionada
- * justo el rango que jamás debe emitir una factura real.
- */
-function compareResolutionsForSelection(
-  a: InvoiceResolution,
-  b: InvoiceResolution,
-): number {
-  const aTest = isHabilitationNumbering(a) ? 1 : 0;
-  const bTest = isHabilitationNumbering(b) ? 1 : 0;
-  if (aTest !== bTest) return aTest - bTest;
-  return compareResolutionsByAge(a, b);
-}
+// La vigencia y el orden de las resoluciones viven en
+// `utils/resolution-selection.util.ts`: el editor de perfiles decide sobre el
+// MISMO rango autorizado, y una segunda implementación del predicado de
+// vigencia sólo divergiría el día en que una vigencia empieza o termina.

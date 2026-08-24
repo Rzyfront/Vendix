@@ -102,6 +102,18 @@ export class TableComponent {
   /** Key (dot notation supported) that identifies a row. */
   readonly rowIdKey = input<string>('id');
   /**
+   * Clave de la fila que la IDENTIFICA para quien no ve la tabla.
+   *
+   * Los botones de acción son iconos con `title`, y el `title` sí da nombre
+   * accesible —«Eliminar»— pero no dice de QUÉ. Sobre 15 filas un lector de
+   * pantalla anuncia «Eliminar» quince veces, y «Eliminar» es destructivo. Con
+   * esta clave el nombre accesible pasa a ser «Eliminar: Estándar DIAN».
+   *
+   * Ausente ⇒ el nombre accesible es la etiqueta sola, exactamente lo que ya
+   * derivaba del `title`: ningún consumidor cambia por no declararla.
+   */
+  readonly rowLabelKey = input<string | null>(null);
+  /**
    * Two-way selection state. The PARENT owns it, so it survives pagination and
    * breakpoint switches. Never mutated in place — every change publishes a NEW
    * Set, otherwise signal-based change detection would not react.
@@ -308,6 +320,19 @@ export class TableComponent {
     return typeof action.label === 'function'
       ? action.label(item)
       : action.label;
+  }
+
+  /**
+   * Nombre accesible del botón de acción: la etiqueta más la fila, cuando la
+   * fila se puede nombrar. Ver `rowLabelKey`.
+   */
+  getActionAccessibleName(action: TableAction, item: any): string {
+    const label = this.getActionLabel(action, item);
+    const key = this.rowLabelKey();
+    if (!key) return label;
+    const raw = this.getNestedValue(item, key);
+    const name = raw === null || raw === undefined ? '' : String(raw).trim();
+    return name ? `${label}: ${name}` : label;
   }
 
   getActionTooltip(action: TableAction, item: any): string {

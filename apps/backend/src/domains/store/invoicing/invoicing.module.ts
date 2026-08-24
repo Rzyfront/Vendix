@@ -12,6 +12,7 @@ import { SuperAdminCertificatesPendingController } from './dian-config/dian-conf
 import { InvoicingService } from './invoicing.service';
 import { InvoiceFlowService } from './invoice-flow/invoice-flow.service';
 import { CreditNotesService } from './credit-notes/credit-notes.service';
+import { InvoiceEmissionGateService } from './services/invoice-emission-gate.service';
 import { ResolutionsService } from './resolutions/resolutions.service';
 import { ResolutionScannerService } from './resolutions/resolution-scanner.service';
 import { DianHabilitationScannerService } from './dian-config/dian-habilitation-scanner.service';
@@ -36,6 +37,8 @@ import { WithholdingTaxModule } from '../withholding-tax/withholding-tax.module'
 import { PosFiscalController } from './pos/pos-fiscal.controller';
 import { PosFiscalEmissionService } from './pos/pos-fiscal-emission.service';
 import { PosSaleCompletedListener } from './pos/pos-sale-completed.listener';
+import { ProfilesController } from './profiles/profiles.controller';
+import { ProfilesModule } from './profiles/profiles.module';
 
 @Module({
   imports: [
@@ -49,6 +52,9 @@ import { PosSaleCompletedListener } from './pos/pos-sale-completed.listener';
     // `DianTestService` en sus providers, porque Nest instancia el servicio una
     // vez por módulo y cada instancia necesita resolver su `@InjectQueue`.
     BullModule.registerQueue({ name: 'dian-test-set' }),
+    // Proveedores de los perfiles de facturación. Su CONTROLLER va en el array
+    // de abajo, no acá: ver la nota de `profiles.module.ts`.
+    ProfilesModule,
   ],
   controllers: [
     DianConfigController,
@@ -58,6 +64,13 @@ import { PosSaleCompletedListener } from './pos/pos-sale-completed.listener';
     // sin reexportarlos; su prefijo de ruta y su permiso sí son de plataforma.
     SuperAdminCertificatesPendingController,
     ResolutionsController,
+    // ANTES de `InvoicingController`, igual que resolutions y dian-config, y por
+    // el mismo motivo verificado: `InvoicingController` monta en `store/invoicing`
+    // con `@Get(':id')`, así que registrado primero atrapa
+    // `GET /api/store/invoicing/profiles` y `ParseIntPipe` responde 400 sobre la
+    // cadena «profiles». Express resuelve por orden de registro y el orden es la
+    // posición en ESTE array. No lo muevas debajo.
+    ProfilesController,
     InvoicingController,
     // Superficie fiscal del POS. Controller aparte a propósito: no lleva
     // `@RequireModuleFlow('invoicing')`, porque el indicador del cajero tiene
@@ -70,6 +83,11 @@ import { PosSaleCompletedListener } from './pos/pos-sale-completed.listener';
     // graphic representation. Registered as a direct provider, matching how
     // `products.module.ts` consumes it — there is no `QrModule` in this repo.
     QrService,
+    // Las dos compuertas de emisión (área fiscal activa + habilitación DIAN
+    // viva) extraídas de `InvoicingService`, para que el carril de notas de
+    // crédito cruce el MISMO predicado y no una copia. Va antes que sus dos
+    // consumidores por legibilidad; el orden no importa para Nest.
+    InvoiceEmissionGateService,
     InvoicingService,
     InvoiceFlowService,
     CreditNotesService,

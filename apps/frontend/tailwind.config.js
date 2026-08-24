@@ -237,11 +237,18 @@ module.exports = {
         'destructive-foreground': 'var(--color-destructive-foreground)',
         'text-primary': 'rgba(var(--color-text-primary-rgb), <alpha-value>)',
         'text-secondary': 'rgba(var(--color-text-secondary-rgb), <alpha-value>)',
-        success: 'var(--color-success)',
+        // Compuestos por canal RGB, como `text-primary` arriba, y NO como
+        // `var(--color-success)` a secas: un token declarado con el hex crudo
+        // no puede recibir modificador de alfa, así que `border-warning/30`
+        // —y las 163 apariciones de `<app-alert-banner>` que dependen de él—
+        // no emitían NINGUNA regla, y el `border` sin color caía en el gris del
+        // preflight. El resultado no era «sin borde» sino «borde equivocado»:
+        // un aviso de peligro y uno de éxito se pintaban iguales.
+        success: 'rgba(var(--color-success-rgb), <alpha-value>)',
         'success-light': 'var(--color-success-light)',
-        warning: 'var(--color-warning)',
+        warning: 'rgba(var(--color-warning-rgb), <alpha-value>)',
         'warning-light': 'var(--color-warning-light)',
-        error: 'var(--color-error)',
+        error: 'rgba(var(--color-error-rgb), <alpha-value>)',
         'error-light': 'var(--color-error-light)',
         // `--color-info` y `--color-info-light` ya existían en styles.scss (light
         // y dark), pero sin este mapeo no había utilidad que los alcanzara:

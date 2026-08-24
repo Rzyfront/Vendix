@@ -7,6 +7,7 @@ import {
   MinLength,
   Matches,
   IsIn,
+  ValidateIf,
 } from 'class-validator';
 import {
   TrimString,
@@ -83,21 +84,55 @@ export class CreateDianConfigDto {
   // the DIAN as-is and get the batch discarded without a verdict. Any UUID
   // version is allowed (the portal's version is not part of our contract), but
   // the shape is enforced.
+  //
+  // QUI-657 — exigirlo SIEMPRE era un bloqueo circular. La DIAN emite el
+  // Software ID al inscribir el software, y el tenant de la rama `without_cert`
+  // llega acá justamente porque todavía no ha podido inscribirlo: no tiene
+  // certificado de firma. Pedirle el dato que viene DESPUÉS para dejarlo
+  // empezar cerraba el wizard sobre sí mismo. El mismo razonamiento ya está
+  // escrito en `subscription-fiscal.service.ts` para `platform_settings`.
+  //
+  // Se exige, entonces, en función de la rama — no de la existencia del campo:
+  //   - `with_cert` (y cualquier cliente viejo que no mande `certificate_branch`)
+  //     se comporta EXACTAMENTE igual que antes: obligatorio y con forma de UUID.
+  //   - `without_cert` lo acepta ausente o vacío, porque es un estado de espera.
+  //
+  // Lo que NO se relaja es la forma: si el usuario escribió algo, se valida como
+  // UUID igual que siempre. Un "9547" mal copiado no falla acá, falla en la DIAN
+  // descartando el lote sin veredicto — que es la razón por la que este
+  // `@IsUUID` existe. Ausencia y error no son lo mismo.
+  //
+  // La columna es NOT NULL, así que la ausencia se guarda como cadena vacía: es
+  // lo que los tres lectores del dato (`readiness`, checklist de plataforma,
+  // directorio de tenants) ya interpretan como "sin configurar".
+  @ValidateIf(
+    (o: CreateDianConfigDto) =>
+      o.certificate_branch !== 'without_cert' || !!o.software_id,
+  )
   @TrimString()
   @IsString()
   @IsUUID(undefined, {
     message: 'software_id must be the UUID issued by the DIAN portal',
   })
-  software_id: string;
+  software_id?: string;
 
   // The PIN is numeric in practice but its format is not contractually fixed by
   // DIAN, so it is only trimmed and bounded — a false rejection here would block
   // a legitimate configuration.
+  //
+  // Mismo trato que `software_id`: el PIN lo define el tenant AL inscribir el
+  // software en la DIAN, así que en `without_cert` todavía no existe. Si lo
+  // manda, se valida entero; si no, la fila nace sin PIN y el checklist de
+  // habilitación lo sigue reportando como pendiente.
+  @ValidateIf(
+    (o: CreateDianConfigDto) =>
+      o.certificate_branch !== 'without_cert' || !!o.software_pin,
+  )
   @TrimString()
   @IsString()
   @MinLength(1)
   @MaxLength(100)
-  software_pin: string;
+  software_pin?: string;
 
   @IsOptional()
   @IsIn(['test', 'production'])

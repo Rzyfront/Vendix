@@ -57,14 +57,18 @@ export class SubscriptionRenewalBillingJob {
     this.isRunning = true;
 
     try {
+      const now = new Date();
       const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
       const subscriptions = await this.prisma.store_subscriptions.findMany({
         where: {
-          next_billing_at: { lte: tomorrow },
           state: { in: ['active', 'grace_soft', 'grace_hard'] },
           // RNC-39: defensive — never bill subscriptions without a plan.
           plan_id: { not: null },
+          OR: [
+            { next_billing_at: { lte: tomorrow } },
+            { scheduled_cancel_at: { lte: now } },
+          ],
         },
         select: {
           id: true,
@@ -144,7 +148,7 @@ export class SubscriptionRenewalBillingJob {
               data: {
                 store_subscription_id: sub.id,
                 type: 'state_transition',
-                from_state: 'active',
+                from_state: sub.state,
                 to_state: 'cancelled',
                 payload: {
                   reason: 'scheduled_cancel_executed',
@@ -156,7 +160,7 @@ export class SubscriptionRenewalBillingJob {
 
             this.eventEmitter.emit('subscription.state.changed', {
               storeId: sub.store_id,
-              fromState: 'active',
+              fromState: sub.state,
               toState: 'cancelled',
               reason: 'scheduled_cancel_executed',
               triggeredByJob: 'subscription-renewal-billing',

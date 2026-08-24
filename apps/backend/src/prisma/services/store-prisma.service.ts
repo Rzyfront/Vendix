@@ -28,6 +28,12 @@ export class StorePrismaService extends BasePrismaService {
     'notification_subscriptions',
     'push_subscriptions',
     'invoices',
+    // QUI — perfiles de facturación. `store_id` propio y NO nullable: el
+    // invariante «un solo predeterminado por (store_id, operation_type)» se
+    // apoya en un índice único PARCIAL, y en Postgres dos NULL son distintos.
+    // Su tabla de versiones NO va acá —no tiene `store_id`—: se scopea
+    // relacionalmente a través del perfil, más abajo.
+    'invoice_profiles',
     // dian_configurations is intentionally NOT here. Since
     // organizations.fiscal_scope can be ORGANIZATION (store_id IS NULL on the
     // row) or STORE (store_id NOT NULL), we apply a relational OR-scope below
@@ -268,6 +274,12 @@ export class StorePrismaService extends BasePrismaService {
       'expense_categories', // Org scoped
       'product_tax_assignments', // Relational
       'invoice_resolutions', // Fiscal entity scoped
+      // Versiones de perfil de facturación. Scoped RELACIONALMENTE a través del
+      // perfil: la tabla no tiene `store_id` a propósito, porque duplicarlo
+      // permitiría que una versión declarara una tienda distinta de la de su
+      // perfil. El perfil es el ancla de tenant y no hay segunda fuente que
+      // pueda divergir.
+      'invoice_profile_versions', // Relational
       'invoice_items', // Relational
       'invoice_taxes', // Relational
       // Relational OR-scope (organization_id + store_id|null). Without this
@@ -457,6 +469,9 @@ export class StorePrismaService extends BasePrismaService {
       inventory_valuation_snapshots: { store_id: context.store_id },
       shipping_rates: { shipping_zone: { store_id: context.store_id } },
       product_tax_assignments: { products: { store_id: context.store_id } },
+      invoice_profile_versions: {
+        profile: { store_id: context.store_id },
+      },
       invoice_items: { invoice: { store_id: context.store_id } },
       invoice_taxes: { invoice: { store_id: context.store_id } },
       // DIAN configs may be store-scoped (store_id = current store) or
@@ -1137,6 +1152,24 @@ export class StorePrismaService extends BasePrismaService {
 
   get invoice_resolutions() {
     return this.scoped_client.invoice_resolutions;
+  }
+
+  get invoice_profiles() {
+    return this.scoped_client.invoice_profiles;
+  }
+
+  /**
+   * `scoped_client`, no `baseClient` — contraejemplo vivo en
+   * `get invoice_data_requests()`, que devuelve el cliente sin scope y deja
+   * cualquier `where: { id }` legible entre tenants.
+   *
+   * Acá el riesgo es mayor que una fuga de lectura: el `config` de una versión
+   * es la configuración fiscal con la que se calcula un documento. Leer la de
+   * otro tenant no filtraría datos ajenos, calcularía IVA con las tarifas de
+   * otra empresa.
+   */
+  get invoice_profile_versions() {
+    return this.scoped_client.invoice_profile_versions;
   }
 
   get dian_configurations() {

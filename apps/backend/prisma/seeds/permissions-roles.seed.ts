@@ -2230,6 +2230,63 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/invoicing/:id',
       method: 'DELETE',
     },
+
+    // Perfiles de facturación (CP-INVOICE-PROFILES-AIU-DIAN)
+    //
+    // El `path` de una fila NO es documentación: es una CONCESIÓN. `PermissionsGuard`
+    // autoriza por dos vías en disyunción, y la primera ignora por completo lo que el
+    // handler declaró en `@Permissions(...)` — le basta que alguna fila del usuario
+    // case `path === route.path && method === request.method`
+    // (`domains/auth/guards/permissions.guard.ts:47-84`). O sea: quien porte una de
+    // estas filas entra a ESA ruta exacta aunque el handler pida otro permiso.
+    //
+    // Y `permissions` lleva `@@unique([path, method])`, así que el par es EXCLUSIVO:
+    // dos nombres no pueden compartirlo. El segundo insert levanta P2002 y el bucle
+    // de arriba lo captura como «ya existe» — la fila simplemente no se crea, en
+    // silencio, y `@Permissions('<ese nombre>')` acaba negando a todo el mundo porque
+    // no hay fila que casar por nombre. De ahí que los 4 pares de abajo sean
+    // deliberadamente distintos entre sí y distintos de las 3 filas `invoicing:*`
+    // preexistentes (`/api/store/invoicing` GET/POST y `/api/store/invoicing/:id`
+    // DELETE): la coincidencia es EXACTA desde que se arregló la fuga del prefijo, así
+    // que `/api/store/invoicing` no franquea `/api/store/invoicing/profiles`.
+    {
+      name: 'invoicing:profiles:read',
+      description:
+        'Leer perfiles de facturación (listado, detalle, versiones, plantillas y catálogo)',
+      path: '/api/store/invoicing/profiles',
+      method: 'GET',
+    },
+    {
+      name: 'invoicing:profiles:write',
+      description:
+        'Crear, editar, clonar, activar y desactivar perfiles de facturación',
+      path: '/api/store/invoicing/profiles',
+      method: 'POST',
+    },
+    {
+      name: 'invoicing:profiles:delete',
+      description: 'Eliminar un perfil de facturación sin facturas timbradas',
+      path: '/api/store/invoicing/profiles/:id',
+      method: 'DELETE',
+    },
+    // `set_default` va aparte de `write` a propósito, y no por gusto de granularidad:
+    // marcar un perfil como predeterminado cambia con qué configuración fiscal se
+    // calculan las facturas que se emitan DESPUÉS sin elegir perfil explícitamente.
+    // Editar un perfil afecta a un perfil; cambiar el predeterminado redirige el
+    // camino por omisión de toda la tienda. Son alcances distintos y merecen
+    // decisiones de asignación distintas.
+    //
+    // Que sea «aparte» sólo es real si su par (path, method) es propio: si compartiera
+    // el de `write`, el `@@unique` impediría crear la fila y la separación existiría
+    // únicamente en el nombre. Por eso la ruta de la Fase C es
+    // `POST …/profiles/:id/set-default` y no un campo dentro del PATCH del perfil.
+    {
+      name: 'invoicing:profiles:set_default',
+      description:
+        'Marcar un perfil de facturación como predeterminado de su tipo de operación',
+      path: '/api/store/invoicing/profiles/:id/set-default',
+      method: 'POST',
+    },
     // Promociones
     {
       name: 'store:promotions:read',

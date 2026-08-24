@@ -233,6 +233,26 @@ export class StoreSubscriptionsController {
     const autoRenewWarning =
       await this.accessService.getAutoRenewWarningState(storeId);
 
+    // Factura pagable más antigua con saldo pendiente (issued u overdue).
+    // Permite que la UI detecte pagos pendientes en cualquier estado (active,
+    // grace_*, suspended) y ofrezca el camino de pago inmediato.
+    const payableInvoice = await this.prisma.subscription_invoices.findFirst({
+      where: {
+        store_subscription_id: sub.id,
+        state: { in: ['issued', 'overdue'] },
+      },
+      orderBy: { id: 'asc' },
+      select: {
+        id: true,
+        total: true,
+        currency: true,
+        due_at: true,
+        period_start: true,
+        period_end: true,
+        state: true,
+      },
+    });
+
     // RNC-39: stores in `no_plan` state have plan_id IS NULL (canonical), so
     // sub.plan naturally resolves to null via the relation. Always expose the
     // live resolver output so Store Admin does not depend on stale snapshots.
@@ -241,6 +261,23 @@ export class StoreSubscriptionsController {
         ...sub,
         resolved_features: resolved.features,
         ...autoRenewWarning,
+        payable_invoice: payableInvoice
+          ? {
+              id: payableInvoice.id,
+              total: Number(payableInvoice.total),
+              currency: payableInvoice.currency,
+              due_at: payableInvoice.due_at
+                ? payableInvoice.due_at.toISOString()
+                : null,
+              period_start: payableInvoice.period_start
+                ? payableInvoice.period_start.toISOString()
+                : null,
+              period_end: payableInvoice.period_end
+                ? payableInvoice.period_end.toISOString()
+                : null,
+              state: payableInvoice.state,
+            }
+          : null,
       },
       'Subscription retrieved',
     );

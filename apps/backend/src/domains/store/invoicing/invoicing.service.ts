@@ -21,6 +21,7 @@ import {
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { FiscalGateService } from '@common/services/fiscal-gate.service';
+import { InvoiceEmissionGateService } from './services/invoice-emission-gate.service';
 import {
   CreateInvoiceDto,
   CreateInvoiceItemDto,
@@ -35,6 +36,7 @@ import { InvoiceRetryQueueService } from './services/invoice-retry-queue.service
 import {
   CalculatedLine,
   CalculatedTax,
+  DEFAULT_AIU_MINIMUM_PERCENT,
   InvoiceCalculatorAiuInput,
   InvoiceCalculatorResult,
   InvoiceCalculatorService,
@@ -54,6 +56,16 @@ import {
   PosInvoicingSettings,
 } from '../settings/interfaces/store-settings.interface';
 import { DIAN_INVOICE_OPERATION_TYPES } from './providers/dian-direct/constants/dian-document-types';
+import {
+  regimeFromTaxableBasis,
+  resolveAiuTaxableBasis,
+} from './profiles/invoice-profile-config.contract';
+import type {
+  AiuTaxableBasis,
+  InvoiceProfileConfig,
+  ProfileAiuConfig,
+} from './profiles/invoice-profile-config.contract';
+import { profileNotFound } from './profiles/profile-errors';
 import { WithholdingFlowService } from '../withholding-tax/withholding-flow.service';
 import {
   buildWithholdingAccountRole,
@@ -176,6 +188,38 @@ const INVOICE_INCLUDE = {
       issue_date: true,
     },
   },
+  /**
+   * IDENTIDAD del perfil congelado — no su configuración.
+   *
+   * Sin esto la factura devolvía `profile_id: 7, profile_version: 2` y ninguna
+   * pantalla podía decir de QUÉ perfil se trata: dos números que sólo alguien
+   * con acceso a la base puede resolver. La trazabilidad DIAN exige poder
+   * responder «con qué reglas salió este documento» desde el documento mismo.
+   *
+   * Se trae `profile.name` y nada más del contenido: `config` es el JSON de las
+   * 7 secciones del editor y este `include` lo usan también los caminos de
+   * escritura (`create`, `update`, `send`), donde arrastrarlo sería peso puro.
+   * Y no hace falta: la verdad fiscal EMITIDA no vive en el perfil sino en las
+   * columnas `aiu_regime` / `aiu_minimum_percent` / `aiu_taxable_matrix` de la
+   * propia factura, que es justo el punto de congelarlas. El perfil sólo dice
+   * de dónde vinieron.
+   */
+  profile_snapshot: {
+    select: {
+      profile_id: true,
+      version: true,
+      created_at: true,
+      profile: {
+        select: {
+          id: true,
+          name: true,
+          operation_type: true,
+          state: true,
+          current_version: true,
+        },
+      },
+    },
+  },
 };
 
 /**
@@ -231,6 +275,7 @@ export class InvoicingService {
     private readonly fiscalScope: FiscalScopeService,
     private readonly retry_queue: InvoiceRetryQueueService,
     private readonly fiscalGate: FiscalGateService,
+    private readonly emissionGate: InvoiceEmissionGateService,
     private readonly fiscalInvoiceThreshold: FiscalInvoiceThresholdService,
     private readonly calculator: InvoiceCalculatorService,
     // TRM oficial para las operaciones pactadas en divisa. NUNCA tumba la
@@ -313,85 +358,12 @@ export class InvoicingService {
     organization_id?: number;
     store_id?: number;
   }): Promise<void> {
-    const enabled = await this.fiscalGate.isAreaEnabled(
-      Number(context.organization_id),
-      context.store_id != null ? Number(context.store_id) : null,
-      'invoicing',
-    );
-    if (!enabled) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_AREA_001,
-        'La facturación electrónica no está activa para esta tienda. ' +
-          'Actívala en Configuración fiscal antes de emitir documentos.',
-      );
-    }
-
-    await this.assertElectronicEmissionLive(context);
-  }
-
-  /**
-   * Segunda compuerta: si el tenant SÍ configuró facturación electrónica, crear
-   * facturas exige que la habilitación esté viva (producción + enabled).
-   *
-   * `fiscal_status.invoicing` sólo afirma que el área fiscal está activa, y se
-   * pone ACTIVE al terminar el wizard fiscal. Una tienda en set de pruebas la
-   * pasaba y creaba facturas que consumen numeración: InvoiceNumberGenerator
-   * elige la resolución por `accounting_entity_id` + `document_type` con
-   * `is_active`, sin distinguir ambiente, así que los números que gastara un
-   * trámite salían del rango que la tienda usará en producción, y la DIAN
-   * rechaza numeración duplicada o con huecos que no puede explicar.
-   *
-   * NO se exige a quien no tiene configuración DIAN: la facturación de Vendix
-   * también emite documentos para comercios sin habilitación, y bloquearlos
-   * convertiría una compuerta en una pérdida de función. El criterio es "si
-   * configuraste FE, no emites hasta estar habilitado".
-   *
-   * El set de pruebas no pasa por aquí: DianTestService reserva su bloque
-   * directamente sobre `invoice_resolutions`, sin crear facturas.
-   */
-  private async assertElectronicEmissionLive(context: {
-    organization_id?: number;
-    store_id?: number;
-  }): Promise<void> {
-    const organization_id = Number(context.organization_id);
-    if (!Number.isFinite(organization_id)) return;
-
-    const scope = await this.fiscalScope.requireFiscalScope(organization_id);
-
-    // Same resolution as DianConfigService.getEmissionStatus: the habilitación
-    // belongs to the scope that owns the NIT.
-    const config = await this.prisma
-      .withoutScope()
-      .dian_configurations.findFirst({
-        where: {
-          ...(scope === 'ORGANIZATION'
-            ? { organization_id, store_id: null }
-            : { store_id: context.store_id }),
-          configuration_type: 'invoicing',
-        },
-        orderBy: [{ is_default: 'desc' }, { id: 'asc' }],
-        select: { environment: true, enablement_status: true },
-      });
-
-    if (!config) return;
-
-    const is_live =
-      config.environment === 'production' &&
-      config.enablement_status === 'enabled';
-
-    if (!is_live) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_ENABLEMENT_001,
-        'La facturación electrónica de esta tienda aún no está habilitada en producción ante la DIAN, así que no puede emitir facturas que consuman la numeración de la resolución. Completa el set de pruebas y activa producción.',
-        // El ambiente sí es público —el comerciante lo eligió— y saber si está
-        // en habilitación o en producción es justo lo que le dice qué paso le
-        // falta. `enablement_status` viaja por el mismo motivo.
-        {
-          environment: config.environment,
-          enablement_status: config.enablement_status,
-        },
-      );
-    }
+    // Delega en `InvoiceEmissionGateService`. Los dos criterios vivían aquí como
+    // métodos privados, y por eso el carril de notas de crédito —que está en
+    // otro servicio— no los cruzaba: medido el 2026-08-24, la misma tienda daba
+    // 403 al crear factura y 201 al crear nota de crédito, gastando consecutivo.
+    // El nombre del método se conserva para no tocar los tres sitios de llamada.
+    await this.emissionGate.assertAreaActive(context);
   }
 
   /**
@@ -928,12 +900,24 @@ export class InvoicingService {
     // resuelven ANTES del recálculo porque el catálogo es quien manda sobre la
     // tarifa y el tipo fiscal. Ver `resolveTenantTaxRateCatalog`.
     const tax_catalog = await this.resolveTenantTaxRateCatalog(dto.items);
+    // PERFIL CONGELADO. Por encima del consecutivo por la misma razón que todo
+    // lo demás en este bloque: sus cuatro puertas (no existe, inactivo, tipo de
+    // operación distinto, sin versión) pueden rechazar, y un rechazo por debajo
+    // de `generateNextNumber` dejaría un hueco permanente en la numeración
+    // autorizada por la DIAN. `null` cuando el documento va por el flujo manual.
+    const profile_snapshot = await this.resolveProfileSnapshot(
+      dto.profile_id,
+      dto.operation_type,
+    );
     // Régimen de AIU y validación del objeto del contrato. Por encima del
     // consecutivo por la misma razón que el recálculo: puede rechazar.
     const aiu_context = await this.resolveAiuContext(
       dto.operation_type,
       dto.items,
       dto.aiu_contract_object,
+      // Con perfil, el régimen sale de la versión congelada y `store_settings`
+      // no se consulta. Sin perfil, `undefined` y el flujo manual queda igual.
+      profile_snapshot?.config.aiu,
     );
     const calculated = this.recalculateDocument(
       dto.items,
@@ -1034,6 +1018,50 @@ export class InvoicingService {
         // haga que el XML describa un contrato distinto del que se facturó.
         // `undefined` en un documento no-AIU: la columna queda NULL.
         aiu_contract_object: aiu_context.contract_object,
+        // SNAPSHOT DEL RÉGIMEN. Misma razón que la línea de arriba, y más
+        // grave: el régimen no describe el documento, DECIDE qué parte del
+        // contrato es base gravable, y los dos son incompatibles —E.T. art.
+        // 462-1 grava A+I+U completo, Decreto 1372/1992 grava sólo la
+        // Utilidad—. En emisión el régimen es lo que decide `omit_tax_total`
+        // por línea, mientras los importes salen de los tributos persistidos:
+        // si el ajuste de la tienda cambia entre la captura y la firma, el XML
+        // declara una gravabilidad que no corresponde a los importes que lleva
+        // dentro. Eso es rechazo por FAU04 con el consecutivo ya gastado, o
+        // peor, aceptación con el IVA equivocado.
+        //
+        // `undefined` en documentos no-AIU: `resolveAiuContext` devuelve `{}` y
+        // las tres columnas quedan NULL.
+        aiu_regime: aiu_context.aiu
+          ? this.regimeStringFromTaxableBasis(aiu_context.aiu.taxable_basis)
+          : undefined,
+        // El porcentaje EFECTIVO, no el declarado: bajo `et_462_1` el piso rige
+        // aunque la tienda no lo escriba, así que NULL habría significado «no
+        // hay piso» en una factura que sí lo tiene. Ausente solo cuando de
+        // verdad no aplica: régimen del Decreto 1372, o piso apagado explícito.
+        aiu_minimum_percent: aiu_context.aiu
+          ? this.resolveAiuMinimumPercent(aiu_context.aiu)
+          : undefined,
+        aiu_taxable_matrix: aiu_context.aiu
+          ? this.buildAiuTaxableMatrix(
+              calculated.lines,
+              aiu_context.aiu,
+              'invoice:create',
+            )
+          : undefined,
+        // PROCEDENCIA CONGELADA — las dos columnas van JUNTAS o ninguna.
+        //
+        // Apuntan a `invoice_profile_versions` por su único
+        // `(profile_id, version)`, no al perfil: lo que la factura debe poder
+        // reproducir es la CONFIGURACIÓN con la que se calculó, y esa vive en la
+        // versión. El perfil es un puntero móvil; la versión es inmutable.
+        //
+        // La FK compuesta admite NULL si CUALQUIERA de las dos lo es, así que
+        // `(profile_id = 5, profile_version = NULL)` pasaría la FK. El «ambas o
+        // ninguna» lo impone el CHECK de la tabla — ver el docblock de las
+        // columnas en `schema.prisma`. Escribirlas del mismo objeto, como acá,
+        // es lo que hace que el CHECK nunca se ejerza en la práctica.
+        profile_id: profile_snapshot?.profile_id,
+        profile_version: profile_snapshot?.version,
         // Divisa extranjera: SOLO declara la conversión. El documento se emite
         // siempre en COP (Res. DIAN 000042/2020 art. 73) y el importe legal
         // sigue siendo `total_amount`.
@@ -1980,6 +2008,25 @@ export class InvoicingService {
       // Mismo régimen de AIU que la creación. El tipo de operación es el que
       // trae el PATCH si lo cambia, y el persistido si no: editar un borrador
       // no puede convertir un contrato AIU en una venta estándar por omisión.
+      // La factura que YA congeló un perfil sigue leyendo ESA versión, no la
+      // vigente del perfil.
+      //
+      // Es la mitad que hace cierta la promesa de F.3: «editar el perfil después
+      // no altera el XML proyectado de la factura ya creada». Si el PATCH
+      // volviera a resolver el perfil por su `current_version`, editar el perfil
+      // y luego tocar una línea del borrador migraría el documento a un régimen
+      // distinto en silencio — y `profile_version` seguiría diciendo la versión
+      // vieja, con lo cual la procedencia declarada sería falsa. Peor que no
+      // tener las columnas.
+      //
+      // Cambiar de perfil NO es una edición: `UpdateInvoiceDto` no acepta
+      // `profile_id` a propósito. Quien quiera otro perfil descarta el borrador
+      // y lo crea de nuevo, que es la única forma de que los importes y la
+      // procedencia se recalculen juntos.
+      const frozen_profile_aiu = await this.loadFrozenProfileAiu(
+        invoice.profile_id,
+        invoice.profile_version,
+      );
       const aiu_context = await this.resolveAiuContext(
         dto.operation_type ?? invoice.operation_type,
         dto.items,
@@ -1987,6 +2034,7 @@ export class InvoicingService {
         // persistido si no. Editar un borrador no puede borrar por omisión el
         // objeto del contrato con el que se validó la nota CAV03.
         dto.aiu_contract_object ?? invoice.aiu_contract_object,
+        frozen_profile_aiu,
       );
       const calculated = this.recalculateDocument(
         dto.items,
@@ -1995,6 +2043,34 @@ export class InvoicingService {
         aiu_context.aiu,
         tax_catalog,
       );
+      // EL SNAPSHOT SE REFRESCA EN CADA EDICIÓN QUE TOCA LÍNEAS.
+      //
+      // Dejarlo quieto sería peor que no tenerlo: los importes de abajo se
+      // reescriben con el régimen que acaba de resolver `resolveAiuContext`, y
+      // un snapshot viejo describiría una gravabilidad que ya no es la de los
+      // importes que quedan persistidos. El snapshot vale por coincidir con los
+      // números del documento, no por ser antiguo.
+      //
+      // El caso no-AIU no se resuelve acá sino en la puerta de más abajo, que
+      // corre aunque el PATCH no traiga líneas.
+      if (aiu_context.aiu) {
+        update_data.aiu_regime = this.regimeStringFromTaxableBasis(
+          aiu_context.aiu.taxable_basis,
+        );
+        update_data.aiu_minimum_percent =
+          this.resolveAiuMinimumPercent(aiu_context.aiu) ?? null;
+        update_data.aiu_taxable_matrix = this.buildAiuTaxableMatrix(
+          calculated.lines,
+          aiu_context.aiu,
+          `invoice:update:${id}`,
+        );
+        // Se persiste el objeto RESUELTO, no el crudo del PATCH, que es lo que
+        // ya hace `create()`. Sin esto las dos puntas divergían: crear con el
+        // objeto de la tienda lo congelaba en la columna, y editar la misma
+        // factura sin mandarlo la dejaba con el crudo —o con nada—.
+        update_data.aiu_contract_object = aiu_context.contract_object;
+      }
+
       recalculated_header_taxes = calculated.header_taxes;
       recalculated_line_taxes = this.needsPersistedLineTaxes(
         calculated.header_taxes,
@@ -2062,6 +2138,33 @@ export class InvoicingService {
           ),
         };
       }
+    }
+
+    // PUERTA: un documento que NO es AIU no puede quedarse con datos AIU.
+    //
+    // Corre fuera del bloque de líneas a propósito: un PATCH puede cambiar
+    // `operation_type` sin mandar `items`, y por ese camino el recálculo ni se
+    // ejecuta. Las cuatro columnas describen un contrato AIU —el régimen de
+    // base gravable, su piso, la matriz de gravabilidad y el objeto del
+    // contrato—; en una venta estándar ninguna aplica, y dejarlas es dejar
+    // datos fiscales que contradicen el documento que los lleva. Hoy la emisión
+    // no los lee (`resolveAiuEmissionContext` corta antes en todo documento
+    // no-AIU), pero eso es una salvaguarda del lector, no una razón para
+    // persistir basura: cualquier reporte, exportación o auditoría que lea la
+    // columna directamente vería un contrato AIU donde no hay ninguno.
+    //
+    // `Prisma.DbNull` y no `undefined`: en una columna JSON `undefined` significa
+    // "no la toques", que es exactamente el bug.
+    const resulting_operation_type =
+      dto.operation_type ?? invoice.operation_type;
+    if (
+      (resulting_operation_type || '').trim() !==
+      DIAN_INVOICE_OPERATION_TYPES.AIU
+    ) {
+      update_data.aiu_regime = null;
+      update_data.aiu_minimum_percent = null;
+      update_data.aiu_taxable_matrix = Prisma.DbNull;
+      update_data.aiu_contract_object = null;
     }
 
     const updated = await this.prisma.invoices.update({
@@ -2841,6 +2944,374 @@ export class InvoicingService {
    *   que la recompone con la misma `buildAiuNote` desde la misma
    *   configuración, así que las dos no pueden divergir.
    */
+  /**
+   * Matriz de gravabilidad AIU que se CONGELA en el documento.
+   *
+   * No es telemetría: es el dato que faltaba. `InvoiceCalculatorService` sabe
+   * qué componentes entran a la base gravable del régimen —eso lo decide
+   * `isAiuTaxable`— pero **no sabe a qué tarifa**, porque la tarifa depende del
+   * bien o servicio y ese servicio no tiene el catálogo. Por eso, ante una
+   * línea gravable que llegó SIN impuesto, lo único que podía hacer era
+   * reportar el hecho con los tres importes en cero: no podía afirmar cuánto
+   * debía. El resultado es una factura que sale sub-declarada y que la DIAN
+   * ACEPTA, porque un XML internamente consistente con menos IVA del debido es
+   * un XML válido — el error solo se corrige después con nota crédito.
+   *
+   * Esta matriz deja ese hueco por escrito y legible por máquina en
+   * `taxable_without_rate`, en vez de dejarlo en una línea de log. Es lo que
+   * consume el rechazo `INVOICING_AIU_004` y lo que la versión del perfil de
+   * facturación va a poder completar con la tarifa que hoy nadie aporta.
+   *
+   * Se congela junto al régimen por la misma razón que `aiu_contract_object`:
+   * lo que se declaró tiene que quedar legible tal como se declaró, aunque la
+   * configuración cambie entre la captura y la firma.
+   */
+  /**
+   * Porcentaje del piso legal que rige para ESTE documento, o `undefined` cuando
+   * no rige ninguno.
+   *
+   * Un solo sitio para la regla, consumido por la creación, la edición y la
+   * matriz. Tenerla escrita tres veces es cómo `enforce_minimum_base !== false`
+   * se convierte en `?? false` en una de las tres y la factura queda declarando
+   * un piso que no es el que se le aplicó.
+   */
+  /**
+   * `taxable_basis` → cadena que se persiste en `invoices.aiu_regime`.
+   *
+   * La columna es libre (`String? @db.VarChar(30)`, no un enum de Postgres) y
+   * hoy guarda literales de régimen legal (`'et_462_1'`, `'decreto_1372_1992'`)
+   * más el literal nuevo `'subtotal'` — que no tiene régimen, así que
+   * `regimeFromTaxableBasis` devuelve `null` y se usa `basis` tal cual.
+   * `InvoiceFlowService.resolveAiuRegimeForEmission` es quien vuelve a leer
+   * esta misma columna al emitir.
+   */
+  private regimeStringFromTaxableBasis(basis: AiuTaxableBasis): string {
+    return regimeFromTaxableBasis(basis) ?? basis;
+  }
+
+  private resolveAiuMinimumPercent(
+    aiu: InvoiceCalculatorAiuInput,
+  ): Prisma.Decimal | undefined {
+    if (aiu.taxable_basis !== 'aiu' || aiu.enforce_minimum_base === false) {
+      return undefined;
+    }
+    return aiu.minimum_base_percent != null
+      ? new Prisma.Decimal(String(aiu.minimum_base_percent))
+      : DEFAULT_AIU_MINIMUM_PERCENT;
+  }
+
+  private buildAiuTaxableMatrix(
+    lines: CalculatedLine[],
+    aiu: InvoiceCalculatorAiuInput,
+    stage: string,
+  ): Prisma.InputJsonValue {
+    const by_component = new Map<
+      string,
+      {
+        component: string;
+        taxable: boolean;
+        lines: number;
+        taxable_amount: Prisma.Decimal;
+        tax_amount: Prisma.Decimal;
+        rates: Array<Record<string, string>>;
+      }
+    >();
+
+    for (const line of lines) {
+      const component = line.aiu_component;
+      // Una línea SIN componente en un documento AIU es la porción de COSTO
+      // reembolsable del contrato. La matriz está indexada POR COMPONENTE, así
+      // que no tiene casilla donde ponerla y se omite.
+      //
+      // Bajo `'aiu'` y `'utilidad'` la omisión además es correcta de fondo: esa
+      // línea no grava. Bajo `'subtotal'` sí grava —el contrato entero es la
+      // base— y entonces la matriz describe sólo el A+I+U del documento, no toda
+      // su base gravable. No es un hueco de control: la única casilla con
+      // consecuencia, `taxable_without_rate`, alimenta `INVOICING_AIU_004`, y
+      // ese caso —línea en la base sin tarifa— ya no llega hasta acá porque
+      // `recalculateDocument` lo rechaza ANTES de persistir. Cuando la matriz
+      // necesite declarar el costo habrá que darle un bucket `'costo'`, que es
+      // el que `AIU_TAXABLE_BUCKETS_BY_BASIS.subtotal` ya contempla.
+      if (!component) continue;
+
+      const entry =
+        by_component.get(component) ??
+        {
+          component,
+          // `omit_tax_total` es el flag que el calculador YA derivó del
+          // régimen. Se lee de ahí en vez de recalcularlo: dos derivaciones
+          // del mismo hecho es exactamente cómo se desincronizan.
+          taxable: !line.omit_tax_total,
+          lines: 0,
+          taxable_amount: new Prisma.Decimal(0),
+          tax_amount: new Prisma.Decimal(0),
+          rates: [],
+        };
+
+      entry.lines += 1;
+      entry.taxable_amount = entry.taxable_amount.plus(
+        new Prisma.Decimal(line.line_extension_amount),
+      );
+      entry.tax_amount = entry.tax_amount.plus(
+        new Prisma.Decimal(line.tax_amount),
+      );
+
+      for (const tax of line.taxes) {
+        const key = `${tax.tax_type}|${tax.dian_tax_code}|${tax.tax_rate}|${tax.rate_basis}`;
+        if (entry.rates.some((r) => r.key === key)) continue;
+        entry.rates.push({
+          key,
+          tax_type: tax.tax_type,
+          dian_tax_code: tax.dian_tax_code,
+          tax_rate: tax.tax_rate,
+          rate_basis: tax.rate_basis,
+        });
+      }
+
+      by_component.set(component, entry);
+    }
+
+    const components = Array.from(by_component.values()).map((entry) => ({
+      component: entry.component,
+      taxable: entry.taxable,
+      lines: entry.lines,
+      taxable_amount: entry.taxable_amount.toFixed(2),
+      tax_amount: entry.tax_amount.toFixed(2),
+      // `key` era solo para deduplicar; no viaja al documento.
+      rates: entry.rates.map(({ key: _key, ...rate }) => rate),
+    }));
+
+    // ESPEJO EXACTO de `InvoiceCalculatorService.summarizeAiu`. Las dos
+    // condiciones importan y no son las obvias:
+    //
+    // · `!== false`, no `=== true`: el piso está activo POR DEFECTO bajo
+    //   `et_462_1`. Solo se apaga declarándolo explícitamente. Escribirlo como
+    //   `?? false` registraba «piso apagado» en documentos donde el motor SÍ lo
+    //   aplicó — la matriz afirmaba lo contrario de lo que pasó.
+    // · Bajo `decreto_1372_1992` NUNCA aplica: el Decreto no fija piso sobre la
+    //   utilidad del constructor y trasplantarle el 10 % del 462-1 rechazaría
+    //   facturas de construcción legales.
+    //
+    // El porcentaje se guarda ya resuelto, con el default aplicado, para que la
+    // re-verificación antes de firmar lea el mismo número y no vuelva a
+    // derivarlo.
+    const minimum_enforced =
+      aiu.taxable_basis === 'aiu' && aiu.enforce_minimum_base !== false;
+    const minimum_percent =
+      aiu.minimum_base_percent != null
+        ? new Prisma.Decimal(String(aiu.minimum_base_percent))
+        : DEFAULT_AIU_MINIMUM_PERCENT;
+
+    return {
+      taxable_basis: aiu.taxable_basis,
+      /**
+       * VENTANA DE TRANSICIÓN — la matriz escribe las DOS claves.
+       *
+       * `taxable_basis` es la nueva y la que manda: es la pregunta que la UI le
+       * hace al operador y la única que puede expresar `'subtotal'`. `regime` es
+       * la vieja, y se sigue escribiendo porque `aiu_taxable_matrix` es un
+       * `jsonb` con FILAS YA ESCRITAS y con lectores vivos: el panel de
+       * trazabilidad de la factura (`invoice-detail`) lee `matrix.regime`, y al
+       * quitarla leía `undefined` — o sea que un documento emitido, que sí dejó
+       * constancia de su base gravable, aparecía en pantalla como si no la
+       * hubiera dejado. Eso es peor que un dato viejo: es un dato ausente sobre
+       * un hecho fiscal que ocurrió.
+       *
+       * Se deriva con `regimeFromTaxableBasis`, NO con
+       * `regimeStringFromTaxableBasis`: acá `'subtotal'` tiene que salir como
+       * `null` explícito y no colapsado al literal. `null` dice la verdad —esa
+       * base no tiene régimen legal al que citar— mientras que escribir
+       * `'subtotal'` en un campo llamado `regime` haría que un lector viejo lo
+       * tratara como un régimen desconocido y cayera a su rama por defecto.
+       *
+       * `regime` se retira cuando no queden lectores, y sólo entonces: primero
+       * los consumidores pasan a `taxable_basis`, después se deja de escribir.
+       * Al revés —que es lo que pasó— el dato desaparece de la pantalla antes de
+       * que nadie note que lo estaba usando.
+       */
+      regime: regimeFromTaxableBasis(aiu.taxable_basis),
+      stage,
+      minimum: {
+        enforced: minimum_enforced,
+        percent: minimum_enforced ? minimum_percent.toFixed(2) : null,
+      },
+      components,
+      /**
+       * Componentes que el régimen SÍ grava y que aun así no declararon
+       * ninguna tarifa. Cada uno es IVA que el documento debía declarar y no
+       * declara. Vacío es lo correcto; no vacío es la brecha de ADR-3.
+       */
+      taxable_without_rate: components
+        .filter((c) => c.taxable && c.rates.length === 0)
+        .map((c) => c.component),
+    } as Prisma.InputJsonValue;
+  }
+
+  /**
+   * PERFIL CONGELADO — resuelve la versión vigente de un perfil de facturación
+   * y la devuelve para que la factura la persista en
+   * `(profile_id, profile_version)`.
+   *
+   * ## Qué problema cierra
+   *
+   * Sin esto, la configuración fiscal de un documento se lee de
+   * `store_settings.invoicing.aiu` en CADA paso: al calcular, al validar, y otra
+   * vez al construir el XML días después. Entre la captura y la transmisión la
+   * tienda puede cambiar de régimen, y entonces el XML declara una gravabilidad
+   * que contradice los importes que lleva dentro — rechazo por FAU04 con el
+   * consecutivo ya gastado, o peor, aceptación con el IVA equivocado.
+   *
+   * Con un perfil, la configuración sale de `invoice_profile_versions.config`,
+   * que es **append-only**: `commitVersion` inserta la versión N+1 y no toca la
+   * N. Editar el perfil mañana no altera ninguna factura ya emitida, y
+   * reconstruir el documento desde su versión reproduce exactamente el XML que
+   * la DIAN validó. Eso es el objetivo del plan, y estas dos columnas son
+   * dónde vive.
+   *
+   * ## Por qué se lee por `current_version` y no por `orderBy version desc`
+   *
+   * `current_version` es el puntero que `commitVersion` mantiene dentro de la
+   * misma transacción que inserta la fila, así que es lo que «vigente»
+   * SIGNIFICA. Un `orderBy desc` devolvería la fila más alta que exista, que en
+   * una transacción a medias puede no ser la publicada. La diferencia sólo se
+   * nota en el caso raro, y en el caso raro es la que congela la configuración
+   * equivocada.
+   *
+   * ## Por qué las cuatro puertas rechazan en vez de caer al flujo manual
+   *
+   * Caer a `store_settings` cuando el usuario pidió un perfil es la opción
+   * cómoda y la peligrosa: las TRES bases gravables del AIU gravan porciones
+   * INCOMPATIBLES del contrato (`'aiu'` / E.T. 462-1 grava A+I+U completo;
+   * `'utilidad'` / Decreto 1372/1992 grava sólo la Utilidad; `'subtotal'`
+   * declina el tratamiento AIU y grava el contrato ENTERO, costo reembolsable
+   * incluido), así que la sustitución cambia el IVA declarado sin dejar rastro
+   * de que hubo sustitución. Entre la primera y la tercera la diferencia es de
+   * un orden de magnitud —el 10 % del contrato contra el 100 %— y el usuario
+   * vería un 201. Ver `INVOICING_PROFILE_006`, `_008` y `_009`.
+   *
+   * ## Aislamiento
+   *
+   * El `findFirst` va por el cliente SCOPEADO (`StorePrismaService` lista
+   * `invoice_profiles` en sus modelos por tienda), así que un id de otro tenant
+   * no encuentra fila y sale por el 404 idéntico de `profileNotFound` — el mismo
+   * que devuelve un id inexistente, para que el endpoint no sea un oráculo de
+   * enumeración.
+   */
+  /**
+   * Configuración AIU de una versión YA congelada en una factura.
+   *
+   * Distinta de `resolveProfileSnapshot` en lo único que importa: aquí NO se
+   * consulta el estado del perfil ni su `current_version`. La versión ya está
+   * elegida y es inmutable, así que desactivar el perfil, renombrarlo o
+   * publicarle diez versiones nuevas no puede cambiar lo que esta factura
+   * reproduce. Aplicar las puertas de la emisión acá haría que desactivar un
+   * perfil rompiera la edición de borradores que ya lo referencian, que es
+   * exactamente lo contrario de lo que el congelado promete.
+   *
+   * Devuelve `null` cuando la factura no tiene perfil (flujo manual) o cuando la
+   * versión referenciada no aparece. Este segundo caso no puede ocurrir por la
+   * API —la FK compuesta con `onDelete: Restrict` lo impide— y por eso NO se
+   * convierte en excepción: si alguien lo produjera por SQL, fallar acá dejaría
+   * la factura inservible para siempre. Se devuelve `null` y el documento cae al
+   * flujo manual, que es degradación visible en las columnas `aiu_*` y no
+   * pérdida de acceso al documento.
+   */
+  private async loadFrozenProfileAiu(
+    profile_id: number | null | undefined,
+    profile_version: number | null | undefined,
+  ): Promise<ProfileAiuConfig | null> {
+    if (profile_id == null || profile_version == null) return null;
+
+    const row = await this.prisma.invoice_profile_versions.findFirst({
+      where: { profile_id, version: profile_version },
+      select: { config: true },
+    });
+    if (!row) return null;
+
+    const config = row.config as unknown as InvoiceProfileConfig;
+    return config?.aiu ?? null;
+  }
+
+  private async resolveProfileSnapshot(
+    profile_id: number | null | undefined,
+    operation_type: string | null | undefined,
+  ): Promise<{
+    profile_id: number;
+    version: number;
+    config: InvoiceProfileConfig;
+  } | null> {
+    if (profile_id == null) return null;
+
+    const profile = await this.prisma.invoice_profiles.findFirst({
+      where: { id: profile_id },
+      select: {
+        id: true,
+        name: true,
+        operation_type: true,
+        state: true,
+        current_version: true,
+      },
+    });
+    if (!profile) throw profileNotFound(profile_id);
+
+    if (profile.state !== 'active') {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_PROFILE_006,
+        `El perfil «${profile.name}» está inactivo y no puede usarse para emitir. ` +
+          `Actívalo, o elige otro perfil del catálogo.`,
+        {
+          profile_id,
+          state: profile.state,
+          operation_type: profile.operation_type,
+        },
+      );
+    }
+
+    // El tipo de operación del DOCUMENTO. `undefined` equivale a '10'
+    // (estándar) — la misma equivalencia que aplica el builder UBL, donde NULL
+    // en `invoices.operation_type` significa CustomizationID '10'. Resolverla
+    // acá evita que una factura estándar sin el campo explícito choque contra
+    // un perfil estándar por una diferencia que no existe.
+    const document_operation_type =
+      (operation_type || '').trim() || DIAN_INVOICE_OPERATION_TYPES.STANDARD;
+
+    if (profile.operation_type !== document_operation_type) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_PROFILE_008,
+        `El perfil «${profile.name}» es para operaciones de tipo ` +
+          `${profile.operation_type} y esta factura declara tipo ` +
+          `${document_operation_type}. Cambia el tipo de operación de la ` +
+          `factura, o elige un perfil de tipo ${document_operation_type}.`,
+        {
+          profile_id,
+          profile_operation_type: profile.operation_type,
+          invoice_operation_type: document_operation_type,
+        },
+      );
+    }
+
+    const version = await this.prisma.invoice_profile_versions.findFirst({
+      where: { profile_id, version: profile.current_version },
+      select: { version: true, config: true },
+    });
+
+    if (!version) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_PROFILE_009,
+        `El perfil «${profile.name}» todavía no tiene una versión guardada, así ` +
+          `que no hay configuración que congelar en la factura. Abre el perfil ` +
+          `y guárdalo una vez.`,
+        { profile_id, current_version: profile.current_version },
+      );
+    }
+
+    return {
+      profile_id,
+      version: version.version,
+      config: version.config as unknown as InvoiceProfileConfig,
+    };
+  }
+
   private async resolveAiuContext(
     operation_type: string | null | undefined,
     items: Array<{ aiu_component?: string | null }>,
@@ -2850,6 +3321,13 @@ export class InvoicingService {
      * tiene varios contratos AIU y hasta ahora sólo podía describir uno.
      */
     invoice_contract_object?: string | null,
+    /**
+     * Configuración AIU de la VERSIÓN del perfil bajo el que se timbra. Cuando
+     * llega, `store_settings.invoicing.aiu` NO se lee: la configuración de un
+     * documento fiscal sale de lo que quedó congelado, nunca de configuración
+     * viva. Ausente ⇒ flujo manual, idéntico a antes de los perfiles.
+     */
+    profile_aiu?: ProfileAiuConfig | null,
   ): Promise<{
     aiu?: InvoiceCalculatorAiuInput;
     note?: string;
@@ -2877,14 +3355,42 @@ export class InvoicingService {
     }
 
     const context = this.getContext();
-    const settings = await this.loadAiuSettings(context.store_id);
 
-    // Precedencia documento → tienda. El objeto de la tienda no desaparece: es
-    // el DEFAULT, para que quien factura un solo contrato no tenga que
-    // reescribirlo en cada documento.
+    // FUENTE DE LA CONFIGURACIÓN — el perfil gana, y cuando gana la tienda no
+    // se consulta.
+    //
+    // El `??` corta el `await`: con perfil NO hay lectura de `store_settings`,
+    // ni como respaldo. Es deliberado y es el punto entero del congelado. Un
+    // merge «perfil sobre tienda» sería peor que no tener perfiles: un campo que
+    // el perfil no declare se rellenaría con configuración VIVA, así que el
+    // documento quedaría mitad congelado y mitad no, sin que nada lo indique.
+    // Si a la configuración del perfil le falta algo que la emisión necesita,
+    // eso es un defecto del contrato `InvoiceProfileConfig` y se arregla ahí
+    // —con su validador y su versión de contrato—, no tapándolo acá.
+    const source: {
+      regime?: ProfileAiuConfig['regime'];
+      taxable_basis?: AiuTaxableBasis | null;
+      contract_object?: string;
+      enforce_minimum_base?: boolean;
+      minimum_base_percent?: number | string;
+    } = profile_aiu ?? (await this.loadAiuSettings(context.store_id));
+
+    // `loadAiuSettings` (ajuste de tienda) es de 2 valores y nunca declara
+    // `taxable_basis`: «subtotal» sólo llega vía perfil, nunca como default de
+    // tienda — ver el docblock de `getAiuSettingsView`. Con perfil, si éste no
+    // trae `taxable_basis` (snapshot de antes de este campo), se deriva de su
+    // `regime` sin reescribir nada.
+    const taxable_basis = resolveAiuTaxableBasis({
+      regime: source.regime ?? 'et_462_1',
+      taxable_basis: source.taxable_basis,
+    });
+
+    // Precedencia documento → perfil/tienda. El objeto de la fuente no
+    // desaparece: es el DEFAULT, para que quien factura un solo contrato no
+    // tenga que reescribirlo en cada documento.
     const contract_object =
       (invoice_contract_object || '').trim() ||
-      (settings.contract_object || '').trim();
+      (source.contract_object || '').trim();
     // MISMA función que usa la emisión: lo que se valida acá es exactamente la
     // cadena que va a viajar en `cbc:Note`. Ver `buildAiuNote`.
     const note = buildAiuNote(contract_object);
@@ -2893,14 +3399,35 @@ export class InvoicingService {
       note.length < DIAN_AIU_NOTE_MIN_LENGTH ||
       note.length > DIAN_AIU_NOTE_MAX_LENGTH
     ) {
+      // EL CONSEJO DEPENDE DE QUIÉN MANDA, y por eso el mensaje se bifurca.
+      //
+      // Con perfil, `store_settings` NO se lee —ver la fuente de configuración
+      // más arriba—, así que mandar al usuario a «la configuración de
+      // facturación de la tienda» sería un consejo FALSO: puede escribirlo ahí,
+      // guardar, reintentar, y recibir el mismo 422 sin entender por qué. El
+      // objeto vacío en un perfil es legítimo (`AIU_CONTRACT_OBJECT_EMPTY` es un
+      // aviso, no un bloqueo, justo para que una empresa con varios contratos lo
+      // declare por factura), así que las dos salidas reales son: escribirlo en
+      // ESTA factura, o ponérselo al perfil.
+      const guidance = profile_aiu
+        ? `Descríbelo en el campo «Objeto del contrato» de esta factura, o edita el perfil ` +
+          `de facturación para que lo traiga. La configuración de la tienda NO se usa cuando ` +
+          `la factura se emite bajo un perfil: lo que gobierna es la versión congelada del perfil.`
+        : `Descríbelo en el campo «Objeto del contrato» de esta factura o, si es siempre el mismo, ` +
+          `en la configuración de facturación de la tienda.`;
       throw new VendixHttpException(
         ErrorCodes.INVOICING_AIU_002,
         `El objeto del contrato AIU falta o no tiene la longitud que exige la DIAN: la nota de la ` +
           `línea de Administración debe medir entre ${DIAN_AIU_NOTE_MIN_LENGTH} y ${DIAN_AIU_NOTE_MAX_LENGTH} ` +
           `caracteres contando el prefijo obligatorio «${DIAN_AIU_NOTE_PREFIX}». ` +
-          `Descríbelo en el campo «Objeto del contrato» de esta factura o, si es siempre el mismo, ` +
-          `en la configuración de facturación de la tienda.`,
-        { note_length: note.length, has_contract_object: !!contract_object },
+          guidance,
+        {
+          note_length: note.length,
+          has_contract_object: !!contract_object,
+          // Qué fuente gobernó. Sin esto el frontend no puede saber a qué
+          // pantalla mandar al usuario, y adivinarlo es la mitad del defecto.
+          config_source: profile_aiu ? 'profile' : 'store_settings',
+        },
       );
     }
 
@@ -2908,12 +3435,17 @@ export class InvoicingService {
       note,
       contract_object,
       aiu: {
-        // Default explícito y conservador: bajo `et_462_1` tributa el AIU
+        // Default explícito y conservador: bajo `'aiu'` tributa el AIU
         // completo. Una tienda que no configuró nada declara de más, no de
         // menos.
-        regime: settings.regime ?? 'et_462_1',
-        enforce_minimum_base: settings.enforce_minimum_base,
-        minimum_base_percent: settings.minimum_base_percent,
+        taxable_basis,
+        enforce_minimum_base: source.enforce_minimum_base,
+        // Se pasa TAL CUAL, sin convertir a `number`. El calculador acepta
+        // `DianNumericInput`, así que el porcentaje del perfil —un `string`
+        // decimal exacto, por diseño del contrato— llega intacto. Convertirlo a
+        // float acá reintroduciría el error binario que el contrato evita
+        // guardando los porcentajes como cadena.
+        minimum_base_percent: source.minimum_base_percent,
       },
     };
   }
@@ -3414,6 +3946,68 @@ export class InvoicingService {
           aiu_value: aiu_floor.received,
           minimum_base: aiu_floor.expected,
           difference: aiu_floor.difference,
+        },
+      );
+    }
+
+    // Componente AIU que el régimen GRAVA y que llegó sin ningún impuesto
+    // declarado ⇒ **bloquea**.
+    //
+    // Es el caso simétrico del piso legal y hace exactamente el mismo daño, por
+    // la misma vía: la DIAN ACEPTA el documento. Un XML que declara menos IVA
+    // del debido pero es internamente consistente pasa la validación, y el
+    // faltante sólo se corrige después con nota crédito, o aparece en una
+    // fiscalización con sanción e intereses. Nada de eso es recuperable
+    // cambiando el borrador: la numeración ya se gastó.
+    //
+    // Y a diferencia de `line_tax`, acá el servidor NO puede ganar: la tarifa
+    // depende del bien o servicio y `InvoiceCalculatorService` no tiene el
+    // catálogo, así que lo único que podía hacer era reportar el hecho con los
+    // tres importes en cero —no puede afirmar CUÁNTO faltaba—. Entre emitir
+    // sub-declarando y no emitir, no emitir es la única opción defendible.
+    //
+    // Esto NO rompe el formulario del panel, que es lo que hacía inviable
+    // bloquear el caso simétrico: el panel pone IVA en TODAS las líneas por
+    // defecto, así que el motor le quita el impuesto a las que el régimen no
+    // grava (`aiu_untaxable_line_declares_tax`, que sigue sin bloquear) y
+    // ninguna línea gravable se queda sin tarifa. Lo que este bloqueo corta es
+    // el cliente que declara IVA sólo en Administración y deja Imprevistos y
+    // Utilidad limpios: la factura 83 en producción, corta por 95.000 COP.
+    //
+    // Un servicio realmente exento o excluido se declara con tarifa 0, no
+    // omitiendo el impuesto. La DIAN distingue las dos cosas —exento emite
+    // `cac:TaxTotal` con `cbc:Percent` en 0,00, excluido no lo emite— y
+    // colapsarlas borraría la diferencia justo donde cambia el resultado.
+    const aiu_untaxed = result.divergences.find(
+      (divergence) => divergence.scope === 'aiu_taxable_line_without_tax',
+    );
+    if (aiu_untaxed) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_AIU_004,
+        `La línea ${aiu_untaxed.line_index + 1}${
+          aiu_untaxed.line_description
+            ? ` («${aiu_untaxed.line_description}»)`
+            : ''
+        } ${
+          // Sin componente la línea es la porción de COSTO reembolsable, y sólo
+          // llega acá bajo la base `'subtotal'`, que grava el contrato entero.
+          // Llamarla «el componente AIU» —como hacía el `?? 'AIU'`— mandaba al
+          // operador a buscar un componente que la línea no tiene.
+          aiu_untaxed.tax_type
+            ? `es el componente «${aiu_untaxed.tax_type}» del contrato`
+            : `es la porción de costo reembolsable del contrato (sin componente AIU)`
+        }, que bajo la base gravable configurada ` +
+          `SÍ hace parte de la base del IVA, y no declara ningún impuesto. ` +
+          `No se emite el documento: la DIAN lo aceptaría declarando menos IVA del debido y el ` +
+          `faltante sólo se corregiría después con nota crédito. Declara el impuesto de esta línea ` +
+          `con su tarifa (por ejemplo IVA 19%); si el servicio es exento o excluido, declárala con ` +
+          `tarifa 0 —no la dejes sin impuesto—. Si lo que no corresponde es que esta porción ` +
+          `grave, cambia la base gravable de AIU en la configuración de facturación de la tienda: ` +
+          `bajo el Decreto 1372/1992 sólo la Utilidad hace parte de la base, y la base Subtotal ` +
+          `grava el contrato completo incluido el costo reembolsable.`,
+        {
+          line_index: aiu_untaxed.line_index,
+          aiu_component: aiu_untaxed.tax_type ?? null,
         },
       );
     }

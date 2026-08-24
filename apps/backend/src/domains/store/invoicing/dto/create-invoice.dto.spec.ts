@@ -1,6 +1,11 @@
 import 'reflect-metadata';
 import { ClassConstructor, plainToInstance } from 'class-transformer';
-import { validate, ValidationError, ValidatorOptions } from 'class-validator';
+import {
+  getMetadataStorage,
+  validate,
+  ValidationError,
+  ValidatorOptions,
+} from 'class-validator';
 import {
   CreateInvoiceDto,
   CreateInvoiceItemDto,
@@ -173,6 +178,65 @@ const whitelistOrphans = (errors: ValidationError[], prefix = ''): string[] =>
         : [];
     return [...own, ...whitelistOrphans(error.children ?? [], path)];
   });
+
+/**
+ * Mensajes de los constraints que fallaron EXACTAMENTE en `path`
+ * (`items.0.product_id`, `items.0.taxes.0.tax_rate_id`, …), concatenados.
+ *
+ * Existe porque «devuelve 400» no es la mitad del contrato: un tope que
+ * rechaza sin decir qué campo ni cuánto sobra obliga al comerciante a adivinar,
+ * y adivinar sobre una factura llena es cómo se pierde el trabajo de media
+ * mañana.
+ */
+const messagesAt = (errors: ValidationError[], path: string): string => {
+  const walk = (list: ValidationError[], prefix = ''): string[] =>
+    list.flatMap((error) => {
+      const here = prefix ? `${prefix}.${error.property}` : error.property;
+      const own =
+        here === path && error.constraints
+          ? Object.values(error.constraints)
+          : [];
+      return [...own, ...walk(error.children ?? [], here)];
+    });
+  return walk(errors).join(' | ');
+};
+
+/**
+ * Nombres de constraint (`min`, `isNumber`, `maxLength`, …) por propiedad,
+ * leídos de los metadatos reales de class-validator.
+ *
+ * OJO CON `metadata.type` — NO sirve para esto. En class-validator 0.14 todos
+ * los decoradores pasan por `ValidateBy`, así que TODOS se registran con
+ * `type === 'customValidation'` y el nombre real vive en el constraint
+ * asociado (`getTargetValidatorConstraints(metadata.constraintCls)[0].name`).
+ * La primera versión de este helper leía `type`, no encontraba ni un
+ * `'isNumber'` y devolvía el conjunto vacío: la compuerta de más abajo pasaba
+ * **sin comparar nada** y seguía verde con un `@Min` retirado a mano. Por eso
+ * el test cuenta cuántas propiedades numéricas encontró antes de juzgarlas.
+ */
+const constraintNamesByProperty = (
+  target: ClassConstructor<object>,
+): Map<string, Set<string>> => {
+  const storage = getMetadataStorage();
+  const metadatas = storage.getTargetValidationMetadatas(
+    target,
+    target.name,
+    true,
+    false,
+  );
+  const byProperty = new Map<string, Set<string>>();
+  for (const metadata of metadatas) {
+    const names = metadata.constraintCls
+      ? storage
+          .getTargetValidatorConstraints(metadata.constraintCls)
+          .map((constraint) => constraint.name)
+      : [metadata.type];
+    const bucket = byProperty.get(metadata.propertyName) ?? new Set<string>();
+    for (const name of names) bucket.add(name);
+    byProperty.set(metadata.propertyName, bucket);
+  }
+  return byProperty;
+};
 
 const assertNoOrphans = (orphans: string[], where: string): void => {
   if (orphans.length === 0) return;
@@ -716,5 +780,262 @@ describe('CreateInvoiceDto — customer_address (string vs objeto)', () => {
       customer_address: { address_line: 'Cra 43A', barrio: 'Laureles' },
     });
     expect(whitelistOrphans(errors)).toContain('customer_address.barrio');
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Fase F — piso de las llaves foráneas numéricas                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * POR QUÉ ESTE BLOQUE
+ * -------------------
+ * Siete llaves foráneas del documento estaban declaradas `@IsNumber()` a secas.
+ * Eso NO es una compuerta de signo: el `ValidationPipe` global corre con
+ * `transform: true` y `transformOptions.enableImplicitConversion: true`
+ * (`apps/backend/src/main.ts`), así que la cadena `"-5000"` se coerciona a
+ * `-5000` y se aprueba, y el `0` —lo que serializa un formulario a medio
+ * llenar— también. El id imposible entraba al servicio como número válido y el
+ * fallo aparecía más abajo: un 404 por la razón equivocada, o un 500 sobre lo
+ * que era una petición mal formada.
+ *
+ * `profile_id` ya llevaba `@Min(1)` con esa razón escrita en su docblock, en el
+ * MISMO archivo. La asimetría no era entre archivos: era entre campos vecinos.
+ *
+ * Cada llave se prueba con `0`, con `-1` y con la cadena `"-5000"`, y se
+ * comprueba que el `1` sigue pasando —un piso mal puesto que rechace el id
+ * válido es peor que no tener piso—.
+ */
+type ForeignKeyCase = {
+  /** Nombre del campo, tal como debe aparecer en el mensaje de error. */
+  field: string;
+  /** Ruta del error en el árbol de validación. */
+  path: string;
+  /** Payload completo con ese campo puesto al valor bajo prueba. */
+  build: (value: unknown) => Record<string, unknown>;
+};
+
+const itemWith = (extra: Record<string, unknown>) => ({
+  ...baseInvoice(),
+  items: [
+    { description: 'Servicio', quantity: 1, unit_price: 1000, ...extra },
+  ],
+});
+
+const FOREIGN_KEY_CASES: readonly ForeignKeyCase[] = [
+  {
+    field: 'customer_id',
+    path: 'customer_id',
+    build: (customer_id) => ({ ...baseInvoice(), customer_id }),
+  },
+  {
+    field: 'supplier_id',
+    path: 'supplier_id',
+    build: (supplier_id) => ({ ...baseInvoice(), supplier_id }),
+  },
+  {
+    field: 'related_invoice_id',
+    path: 'related_invoice_id',
+    build: (related_invoice_id) => ({ ...baseInvoice(), related_invoice_id }),
+  },
+  {
+    field: 'resolution_id',
+    path: 'resolution_id',
+    build: (resolution_id) => ({ ...baseInvoice(), resolution_id }),
+  },
+  {
+    field: 'product_id',
+    path: 'items.0.product_id',
+    build: (product_id) => itemWith({ product_id }),
+  },
+  {
+    field: 'product_variant_id',
+    path: 'items.0.product_variant_id',
+    build: (product_variant_id) => itemWith({ product_variant_id }),
+  },
+  {
+    field: 'tax_rate_id',
+    path: 'items.0.taxes.0.tax_rate_id',
+    build: (tax_rate_id) =>
+      itemWith({
+        taxes: [{ tax_name: 'IVA 19%', tax_rate: 19, tax_rate_id }],
+      }),
+  },
+];
+
+describe('CreateInvoiceDto — las 7 llaves foráneas tienen piso', () => {
+  it('el inventario del spec cubre exactamente las 7 llaves de la fase F', () => {
+    // Si mañana nace una FK y nadie la añade acá, el test de metadatos de más
+    // abajo la delata igual; esta aserción es el cinturón de este bloque.
+    expect(FOREIGN_KEY_CASES.map((c) => c.field).sort()).toEqual([
+      'customer_id',
+      'product_id',
+      'product_variant_id',
+      'related_invoice_id',
+      'resolution_id',
+      'supplier_id',
+      'tax_rate_id',
+    ]);
+  });
+
+  for (const testCase of FOREIGN_KEY_CASES) {
+    describe(testCase.field, () => {
+      it.each([0, -1])('rechaza el id %s', async (value) => {
+        const errors = await validateAsPipe(testCase.build(value));
+        expect(failedPaths(errors)).toContain(testCase.path);
+      });
+
+      it('rechaza la cadena "-5000", que @IsNumber por sí solo aprueba', async () => {
+        // Con `enableImplicitConversion` la cadena se coerciona a -5000 y pasa
+        // el chequeo de tipo. Que el mensaje sea el del PISO —y no el de tipo—
+        // es la prueba de que el que rechaza es @Min, no @IsNumber.
+        const errors = await validateAsPipe(testCase.build('-5000'));
+        expect(failedPaths(errors)).toContain(testCase.path);
+        expect(messagesAt(errors, testCase.path)).toContain('el mínimo es 1');
+      });
+
+      it('sigue aceptando el id 1', async () => {
+        const errors = await validateAsPipe(testCase.build(1));
+        expect(failedPaths(errors)).toEqual([]);
+      });
+
+      it('el mensaje nombra el campo y su límite', async () => {
+        const errors = await validateAsPipe(testCase.build(0));
+        const message = messagesAt(errors, testCase.path);
+        expect(message).toContain(testCase.field);
+        expect(message).toContain('el mínimo es 1');
+      });
+    });
+  }
+
+  /**
+   * La compuerta que sobrevive al próximo campo. Enumera los metadatos reales
+   * de class-validator en las tres clases y exige que TODA propiedad declarada
+   * `@IsNumber`/`@IsInt` lleve además un `min`.
+   *
+   * Cubre las 7 llaves foráneas y, de paso, todo campo monetario: un importe
+   * `@IsNumber` sin piso acepta la cadena `"-5000"` por la misma puerta.
+   */
+  const DTO_CLASSES: Record<string, ClassConstructor<object>> = {
+    CreateInvoiceDto,
+    CreateInvoiceItemDto,
+    CreateInvoiceTaxDto,
+  };
+
+  /**
+   * Cuántas propiedades `@IsNumber` tiene cada clase HOY. Medido, no estimado:
+   * 8 + 6 + 4 = 18. Existe para que la compuerta no pueda pasar en vacío — si
+   * la lectura de metadatos se rompe y devuelve cero propiedades, esto falla
+   * antes de que el «no hay ninguna sin piso» mienta. Y si nace un campo
+   * numérico, obliga a actualizar el número a conciencia.
+   */
+  const NUMERIC_PROPERTY_COUNT: Record<string, number> = {
+    CreateInvoiceDto: 8,
+    CreateInvoiceItemDto: 6,
+    CreateInvoiceTaxDto: 4,
+  };
+
+  it.each(Object.keys(DTO_CLASSES))(
+    'ninguna propiedad numérica de %s queda sin piso',
+    (name) => {
+      const byProperty = constraintNamesByProperty(DTO_CLASSES[name]);
+      const numeric = [...byProperty.entries()].filter(
+        ([, names]) => names.has('isNumber') || names.has('isInt'),
+      );
+
+      expect(numeric.map(([property]) => property).sort()).toHaveLength(
+        NUMERIC_PROPERTY_COUNT[name],
+      );
+
+      const floorless = numeric
+        .filter(([, names]) => !names.has('min'))
+        .map(([property]) => property)
+        .sort();
+
+      if (floorless.length > 0) {
+        throw new Error(
+          `${name} declara ${floorless.length} propiedad(es) numérica(s) sin ` +
+            `@Min: ${floorless.join(', ')}.\n\n` +
+            `El ValidationPipe global corre con enableImplicitConversion, así ` +
+            `que @IsNumber() NO es una compuerta de signo: aprueba la cadena ` +
+            `"-5000" y aprueba el 0. En una llave foránea eso entra al ` +
+            `servicio como id válido y sale como 404 por la razón equivocada o ` +
+            `como 500 sobre una petición mal formada; en un importe, como un ` +
+            `total negativo. Declara @Min con un mensaje que nombre el campo y ` +
+            `el límite — el patrón está en foreignKeyFloorMessage.`,
+        );
+      }
+      expect(floorless).toEqual([]);
+    },
+  );
+});
+
+/* -------------------------------------------------------------------------- */
+/* Fase F — cotas de longitud citadas del Anexo Técnico DIAN 1.9               */
+/* -------------------------------------------------------------------------- */
+
+const chars = (n: number): string => 'A'.repeat(n);
+
+describe('CreateInvoiceDto — notes: cota FAD13 (/Invoice/cbc:Note, 1-500)', () => {
+  it('acepta exactamente 500 caracteres', async () => {
+    const errors = await validateAsPipe({
+      ...baseInvoice(),
+      notes: chars(500),
+    });
+    expect(failedPaths(errors)).toEqual([]);
+  });
+
+  it('rechaza 501 caracteres', async () => {
+    // Era la ÚNICA propiedad de texto del DTO sin cota alguna, y la columna
+    // `invoices.notes` es `text` sin límite: nada ataja el texto largo antes de
+    // que viaje al XML. La DIAN devuelve el documento al validar, con el
+    // consecutivo autorizado ya gastado.
+    const errors = await validateAsPipe({
+      ...baseInvoice(),
+      notes: chars(501),
+    });
+    expect(failedPaths(errors)).toContain('notes');
+  });
+
+  it('el mensaje nombra el campo, el tope y la regla del anexo', async () => {
+    const errors = await validateAsPipe({
+      ...baseInvoice(),
+      notes: chars(501),
+    });
+    const message = messagesAt(errors, 'notes');
+    expect(message).toContain('notes');
+    expect(message).toContain('500');
+    expect(message).toContain('FAD13');
+  });
+});
+
+describe('CreateInvoiceItemDto — unit_code: cota FAV05 (@unitCode, 1-5)', () => {
+  it.each(['NIU', 'KGM', 'LTR', '94'])(
+    'acepta el código UN/ECE rec. 20 %s',
+    async (unit_code) => {
+      const errors = await validateAsPipe(itemWith({ unit_code }));
+      expect(failedPaths(errors)).toEqual([]);
+    },
+  );
+
+  it('acepta exactamente 5 caracteres', async () => {
+    const errors = await validateAsPipe(itemWith({ unit_code: chars(5) }));
+    expect(failedPaths(errors)).toEqual([]);
+  });
+
+  it('rechaza 6 caracteres', async () => {
+    // El tope anterior era 10 y no citaba ninguna regla: dejaba pasar 6 a 10
+    // caracteres que la DIAN devuelve al validar la línea. FAV05, CAV05 y
+    // DAV05 coinciden en 5, así que no hay conflicto entre tipos de documento.
+    const errors = await validateAsPipe(itemWith({ unit_code: chars(6) }));
+    expect(failedPaths(errors)).toContain('items.0.unit_code');
+  });
+
+  it('el mensaje nombra el campo, el tope y la regla del anexo', async () => {
+    const errors = await validateAsPipe(itemWith({ unit_code: chars(6) }));
+    const message = messagesAt(errors, 'items.0.unit_code');
+    expect(message).toContain('unit_code');
+    expect(message).toContain('5');
+    expect(message).toContain('FAV05');
   });
 });

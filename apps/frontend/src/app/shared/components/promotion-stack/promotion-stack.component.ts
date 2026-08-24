@@ -89,7 +89,7 @@ export interface PromotionStackItem {
   selector: 'app-promotion-stack',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgClass, NgSwitch, NgSwitchCase, NgSwitchDefault, BadgeComponent, IconComponent, CurrencyPipe],
+  imports: [NgClass, NgSwitch, NgSwitchCase, BadgeComponent, IconComponent],
   templateUrl: './promotion-stack.component.html',
   styleUrl: './promotion-stack.component.scss',
 })
@@ -102,6 +102,8 @@ export class PromotionStackComponent {
   readonly mode = input<PromotionStackMode>('compact-pills');
   /** Cantidad actual del producto en cotización. Usado por `expanded-cards`. */
   readonly currentQuantity = input<number | null>(null);
+  /** Unidades base por presentación/paquete (default 1 para unidades sueltas). */
+  readonly unitsPerPackage = input<number>(1);
   readonly ariaLabel = input<string>('Promociones');
   /** Autoplay en ms para `scroll-batch`. Default 3500. */
   readonly autoplayMs = input<number>(3500);
@@ -142,6 +144,16 @@ export class PromotionStackComponent {
     quantity: number;
   }>();
 
+  /**
+   * Emite cuando el usuario hace clic en una tarjeta de tramo (tier) en expanded-cards.
+   * Permite que la vista (PDP/Modal) seleccione automáticamente la cantidad necesaria en paquetes o unidades.
+   */
+  readonly tierSelected = output<{
+    min_quantity: number;
+    tier_index: number;
+    package_quantity: number;
+  }>();
+
   // ── Refs ──────────────────────────────────────────────────────────────
   private readonly scrollerRef = viewChild<ElementRef<HTMLElement>>('scroller');
 
@@ -180,9 +192,17 @@ export class PromotionStackComponent {
       .sort((a, b) => (a.min_quantity ?? 0) - (b.min_quantity ?? 0)),
   );
 
-  /** Tier activo (currentQuantity dentro del rango del tier). */
+  /** Cantidad base acumulada considerando unidades por paquete. */
+  readonly effectiveBaseQuantity = computed<number | null>(() => {
+    const q = this.currentQuantity();
+    if (q === null) return null;
+    const scale = Math.max(1, this.unitsPerPackage());
+    return q * scale;
+  });
+
+  /** Tier activo (effectiveBaseQuantity dentro del rango del tier). */
   readonly currentTier = computed<PromotionStackItem | null>(() => {
-    const qty = this.currentQuantity();
+    const qty = this.effectiveBaseQuantity();
     if (qty === null) return null;
     const tiers = this.expandedTiers();
     return (
@@ -194,9 +214,9 @@ export class PromotionStackComponent {
     );
   });
 
-  /** Próximo tier (currentQuantity aún no llega). */
+  /** Próximo tier (effectiveBaseQuantity aún no llega). */
   readonly nextTier = computed<PromotionStackItem | null>(() => {
-    const qty = this.currentQuantity();
+    const qty = this.effectiveBaseQuantity();
     if (qty === null) {
       const tiers = this.expandedTiers();
       return tiers.length > 0 ? tiers[0] : null;
@@ -207,27 +227,18 @@ export class PromotionStackComponent {
 
   /**
    * Ancho de la barra de progreso (0–100).
-   *
-   * CP-ECOM-PROMO-UX-001 R3-M4: anchor at the LOWER BOUND MINUS ONE of the
-   * customer's current tier (NOT at `min_quantity` exactly). With the exact
-   * threshold, `currentQuantity === min_quantity` reported `0%` — which
-   * looked broken the instant a tier was unlocked. Anchoring one unit below
-   * the threshold means "0% only when BELOW the tier" and the bar starts
-   * showing movement as soon as the customer lands on the tier.
    */
   readonly progressPercent = computed<number>(() => {
-    const qty = this.currentQuantity();
+    const qty = this.effectiveBaseQuantity();
     const current = this.currentTier();
     const next = this.nextTier();
     if (qty === null) return 0;
     if (!current && !next) return 0;
     if (!next) return 100;
     if (!current) {
-      // Todavía no se cruzó el primer tier; progreso "hacia el primero".
       const target = next.min_quantity ?? 1;
       return Math.min(100, Math.round((qty / target) * 100));
     }
-    // Anchor at min_quantity - 1 so 0% only when BELOW the tier.
     const lowerBound = (current.min_quantity ?? 0) - 1;
     const upperBound = next.min_quantity ?? lowerBound + 1;
     const span = upperBound - lowerBound;
@@ -235,6 +246,13 @@ export class PromotionStackComponent {
     if (qty <= lowerBound) return 0;
     if (qty >= upperBound) return 100;
     return Math.min(100, Math.round(((qty - lowerBound) / span) * 100));
+  });
+
+  /** Paquetes que faltan para el próximo tier cuando unitsPerPackage > 1. */
+  readonly remainingPackages = computed<number>(() => {
+    const rem = this.remainingQty();
+    const scale = Math.max(1, this.unitsPerPackage());
+    return Math.ceil(rem / scale);
   });
 
   /** Posición del item activo en scroll-batch (para aria-current). */
@@ -377,9 +395,14 @@ export class PromotionStackComponent {
     return `Nivel ${index + 1} de ${total}: ${this.pillText(item)}`;
   }
 
-  /** Etiqueta del header "Desde N und". */
+  /** Etiqueta del header "Desde N und" (o "Desde N und (M paquetes)"). */
   tierHeader(item: PromotionStackItem): string {
     const min = item.min_quantity ?? 0;
+    const scale = Math.max(1, this.unitsPerPackage());
+    if (scale > 1) {
+      const packages = Math.ceil(min / scale);
+      return `Desde ${min} und (${packages} ${packages === 1 ? 'paquete' : 'paquetes'})`;
+    }
     return `Desde ${min} und`;
   }
 
@@ -395,15 +418,15 @@ export class PromotionStackComponent {
 
   /** ¿Es un tier ya superado (current o anterior)? */
   isAchievedTier(item: PromotionStackItem): boolean {
-    const qty = this.currentQuantity();
+    const qty = this.effectiveBaseQuantity();
     if (qty === null) return false;
     const min = item.min_quantity ?? 0;
     return qty >= min;
   }
 
-  /** Cantidad que falta para el próximo tier. */
+  /** Cantidad que falta para el próximo tier en unidades base. */
   remainingQty(): number {
-    const qty = this.currentQuantity();
+    const qty = this.effectiveBaseQuantity();
     const next = this.nextTier();
     if (qty === null || !next) return 0;
     const need = next.min_quantity ?? 0;
@@ -572,4 +595,17 @@ export class PromotionStackComponent {
       this.intersectionObserver = null;
     }
   }
+
+  onTierClick(item: PromotionStackItem): void {
+    if (item && item.min_quantity !== undefined && Number.isFinite(item.min_quantity)) {
+      const scale = Math.max(1, this.unitsPerPackage());
+      const packageQty = Math.max(1, Math.ceil(item.min_quantity / scale));
+      this.tierSelected.emit({
+        min_quantity: item.min_quantity,
+        tier_index: item.tier_index ?? 0,
+        package_quantity: packageQty,
+      });
+    }
+  }
 }
+

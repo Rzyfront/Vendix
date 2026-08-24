@@ -246,6 +246,17 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Source document to render was not found in domain',
   },
+  // 501 y no 404 ni 500 a propósito: el formato SÍ está registrado y el
+  // documento SÍ puede existir; lo que falta es el lector real de ese dominio.
+  // Un 404 mentiría diciendo que el documento no existe y un 500 haría pensar en
+  // una caída. Sustituye a devolver la muestra fabricada, que respondía 200 con
+  // datos de un tercero.
+  PRINT_DOCUMENT_READER_MISSING_001: {
+    code: 'PRINT_DOCUMENT_READER_MISSING_001',
+    httpStatus: 501,
+    devMessage:
+      'Print format is registered but has no real document reader yet; refusing to serve sample data on the real print path',
+  },
   PRINT_DATA_PROVIDER_MISSING_001: {
     code: 'PRINT_DATA_PROVIDER_MISSING_001',
     httpStatus: 500,
@@ -1939,8 +1950,14 @@ export const ErrorCodes = {
     devMessage: 'Resolution validity window is inverted or empty',
   },
   /**
-   * La clave técnica (ClTec) no tiene la FORMA que emite la DIAN: 40 caracteres
-   * hexadecimales, el hex de un SHA-1.
+   * La clave técnica (ClTec) no tiene la FORMA que emite la DIAN: 40 o 64
+   * caracteres hexadecimales, el hex de un SHA-1 o de un SHA-256.
+   *
+   * Son DOS anchuras exactas, no «lo que diga la DIAN». El servicio de rangos de
+   * numeración devuelve la de 64, y darle 40 por única posible rechazaba claves
+   * legítimas (FAD06 de HIDRO). Pero la lista sigue cerrada a esas dos: un hash no
+   * tiene longitud variable, así que las de 36/38/39 que reportó el mismo
+   * contribuyente eran la misma clave con caracteres perdidos al copiarla.
    *
    * No es una validación cosmética — es la que faltaba. En producción se guardó
    * una ClTec de 38 caracteres (todos hex, sin espacios: un par de caracteres
@@ -1960,7 +1977,7 @@ export const ErrorCodes = {
     code: 'INVOICING_RESOLUTION_011',
     httpStatus: 422,
     devMessage:
-      'Technical key (ClTec) must be exactly 40 hexadecimal characters as issued by the DIAN numbering-range web service',
+      'Technical key (ClTec) must be exactly 40 (SHA-1) or 64 (SHA-256) hexadecimal characters as issued by the DIAN numbering-range web service',
   },
   INVOICING_DUP_001: {
     code: 'INVOICING_DUP_001',
@@ -2272,6 +2289,413 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage:
       'Line declares an aiu_component on a document whose operation_type is not the AIU one (09); the component would be silently ignored and the line taxed as standard',
+  },
+  /**
+   * Los tres códigos siguientes cierran la vía por la que una factura AIU
+   * ACEPTADA declara menos IVA del debido, que es el daño que el bloque de
+   * arriba nombra pero no impedía.
+   *
+   * El hueco no era un descuido de cálculo. Bajo `et_462_1` la base es el AIU
+   * completo, así que Imprevistos y Utilidad sin IVA sub-declaran el impuesto;
+   * el calculador lo DETECTA (divergencia `aiu_taxable_line_without_tax`) pero
+   * no podía imponer el importe porque **no conocía la tarifa**: depende del
+   * bien o servicio y ese servicio no lo sabe. Con la divergencia reducida a un
+   * `logger.warn`, quien capturaba la factura decidía la base gravable por
+   * omisión. Evidencia real: la factura 83 (`QA102`, régimen `et_462_1`)
+   * declaró 190.000 donde correspondían 285.000 — 95.000 de IVA faltantes.
+   *
+   * El perfil de facturación es lo que aporta el dato ausente: su matriz de
+   * impuestos declara la tarifa por componente AIU, y con ella el servidor sí
+   * puede imponer. De ahí la asimetría deliberada de estos códigos:
+   *
+   * - con perfil y tarifa declarada ⇒ el servidor IMPONE, no hay error;
+   * - sin perfil ⇒ `INVOICING_AIU_004`, porque emitir sub-declarando es peor
+   *   que parar: la DIAN acepta el documento y el faltante solo se corrige con
+   *   nota crédito, ya con la sanción corriendo;
+   * - con perfil pero el cliente declara otra tarifa ⇒ `INVOICING_AIU_005`,
+   *   porque contradecir la configuración congelada señala un bug de cliente o
+   *   manipulación, y eso debe ser ruidoso y no resolverse en silencio.
+   *
+   * No bloquean el flujo del panel: el formulario pone IVA en TODAS las líneas,
+   * que es el caso simétrico (`aiu_untaxable_line_declares_tax`) y ese sí se
+   * resuelve quitando el impuesto sin bloquear.
+   */
+  INVOICING_AIU_004: {
+    code: 'INVOICING_AIU_004',
+    httpStatus: 422,
+    devMessage:
+      'AIU taxable line declares no tax and no billing profile supplies the rate for its component: the server cannot infer the rate and refuses to emit an under-declared document (the DIAN would accept it and the shortfall would only be fixable by credit note)',
+  },
+  INVOICING_AIU_005: {
+    code: 'INVOICING_AIU_005',
+    httpStatus: 422,
+    devMessage:
+      'A per-line tax contradicts the AIU taxable base for that component: the base is determined by the regime, never by what the line declares. Two sites raise it. At CAPTURE, the declared tax disagrees with the tax matrix frozen in the billing profile version (different rate, or a tax on a component the regime does not tax). At EMISSION, a line whose component the regime does not tax carries a tax PERSISTED under a different regime: the XML would drop that line cac:TaxTotal while the amount stays in the header total and cbc:PayableAmount, and FAU04 contrasts one against the sum of the other',
+  },
+
+  /**
+   * Configuración de un perfil de facturación que no se puede guardar.
+   *
+   * 422 y no 400: la forma es válida —el DTO ya pasó— y lo que falla es una
+   * regla FISCAL. La distinción importa para el editor, que ante un 400 muestra
+   * «revisa los datos» y ante esto puede marcar el campo exacto: `details.issues`
+   * trae la ruta con puntos dentro del snapshot (`aiu.components.utilidad`).
+   *
+   * Devuelve TODOS los problemas, no el primero. El editor tiene 7 secciones y
+   * uno por vez obligaría al usuario a guardar siete veces para descubrir siete
+   * errores.
+   *
+   * La regla que justifica el código es la última de la lista, y es la que este
+   * plan entero existe para hacer cumplir: **la matriz de impuestos no puede
+   * contradecir la base gravable del perfil.** La base decide, línea por línea,
+   * cuál emite `cac:TaxTotal`; los importes salen de los tributos persistidos.
+   * Si las dos mitades salen de bases distintas, el XML declara una
+   * gravabilidad que contradice sus propios números y la DIAN lo rechaza por
+   * FAU04 con el consecutivo ya gastado. Un perfil guardado con esa
+   * contradicción la reproduciría en cada factura que lo use.
+   *
+   * Se dice la BASE y no el régimen porque son tres y no dos, y porque la
+   * tercera —«subtotal»— no tiene régimen legal al que colapsar: declina el
+   * tratamiento AIU y grava el contrato completo, costo reembolsable incluido.
+   * Un mensaje redactado sobre el régimen imprimía el heredado, o `undefined`,
+   * sobre un perfil cuya base era otra.
+   *
+   * Consecuencia práctica para quien construya el control de base gravable: la
+   * base y la matriz son UN SOLO cambio. Escribir sólo `taxable_basis` deja la
+   * matriz apuntando a las porciones de la base anterior, y este código salta
+   * sobre una casilla que la persona no tocó. Bajo «subtotal» el costo
+   * reembolsable ENTRA en la base, así que `costo.taxable = false` —que es el
+   * valor por omisión— es una contradicción desde el primer guardado.
+   */
+  INVOICING_PROFILE_005: {
+    code: 'INVOICING_PROFILE_005',
+    httpStatus: 422,
+    devMessage:
+      'Billing profile configuration is fiscally invalid: AIU component percentages must sum to exactly 100, the minimum taxable base cannot fall below the 10% legal floor when the base is aiu (E.T. art. 462-1), and the tax matrix must agree with the declared taxable_basis (aiu taxes A+I+U; utilidad taxes only Utilidad, Decreto 1372/1992; subtotal declines AIU treatment and taxes the whole contract including the reimbursable cost). AIU_TAXABLE_BUCKETS_BY_BASIS is the single table that decides which buckets enter the base per basis, so changing taxable_basis without reprojecting the matrix in the same write raises this on a field the user never touched. All offending fields are returned in details.issues with their dotted path so the editor can mark them',
+  },
+
+  /**
+   * Perfil de facturación inexistente — o de otro tenant.
+   *
+   * **Los dos casos devuelven exactamente esto, y es deliberado.** El servicio
+   * busca con el cliente scopeado, así que el perfil de otra tienda simplemente
+   * no aparece en el resultado: para el llamador es indistinguible de un id que
+   * no existe. Distinguirlos —403 para «existe pero no es tuyo»— convertiría el
+   * endpoint en un oráculo de enumeración: probando ids se podría inventariar
+   * cuántos perfiles tiene la competencia.
+   */
+  /**
+   * Perfil de facturación inexistente — o de otra tienda.
+   *
+   * Las dos situaciones responden lo mismo A PROPÓSITO. El cliente scopeado no
+   * devuelve filas de otra tienda, así que el servicio no puede distinguirlas;
+   * y aunque pudiera, responder 403 al id ajeno y 404 al inexistente convertiría
+   * el endpoint en un oráculo de enumeración: barriendo ids se aprendería
+   * cuáles existen en tiendas ajenas.
+   *
+   * El texto que ve el usuario NO sale de aquí: lo construye
+   * `profileNotFound()` en `profiles/profile-errors.ts`, en español y sin
+   * explicar el mecanismo. Este `devMessage` es la red de seguridad para un
+   * `throw` que olvide pasarlo — por eso es corto y no revela el razonamiento.
+   */
+  INVOICING_PROFILE_001: {
+    code: 'INVOICING_PROFILE_001',
+    httpStatus: 404,
+    devMessage: 'Billing profile not found',
+  },
+
+  /**
+   * Carrera perdida al marcar predeterminado.
+   *
+   * El invariante «un solo predeterminado por (`store_id`, `operation_type`)» lo
+   * sostiene un índice único PARCIAL, no el código. Dos `set-default`
+   * simultáneos sobre perfiles del mismo tipo entran los dos, desmarcan los dos
+   * y marcan los dos: una de las dos transacciones choca con el índice y
+   * Postgres la aborta con `23505` (`P2002` en Prisma).
+   *
+   * 409 y no 500: el estado final es correcto —hay exactamente un
+   * predeterminado— y lo único que ocurrió es que este cliente perdió la
+   * carrera. Reintentar en el servidor sería peor: el usuario pidió que ganara
+   * SU perfil, y un reintento automático decidiría por él en función de quién
+   * llegó último. El frontend refresca y muestra cuál quedó.
+   */
+  INVOICING_PROFILE_002: {
+    code: 'INVOICING_PROFILE_002',
+    httpStatus: 409,
+    devMessage:
+      'Another profile of the same operation type was set as default concurrently: the partial unique index rejected this write',
+  },
+
+  /**
+   * Marcar predeterminado un perfil INACTIVO.
+   *
+   * Es un 409 de estado y no un 422 de validación: el `:id` es válido, el
+   * permiso es correcto y el cuerpo está vacío — lo que impide la operación es
+   * en qué estado está el recurso.
+   *
+   * Por qué se prohíbe en vez de activar y marcar de una: el predeterminado es
+   * lo que el wizard elige SOLO. Activar de rebote convertiría un clic en
+   * «Predeterminar» en dos efectos —uno pedido y otro no— y el perfil recién
+   * activado entraría al catálogo de facturación sin que nadie lo revisara.
+   * Activar es un paso aparte y visible.
+   */
+  INVOICING_PROFILE_007: {
+    code: 'INVOICING_PROFILE_007',
+    httpStatus: 409,
+    devMessage: 'An inactive billing profile cannot be made the default one',
+  },
+
+  /**
+   * Se intentó timbrar una factura contra un perfil INACTIVO.
+   *
+   * ## Por qué 409 y no 422
+   *
+   * El cuerpo de la petición es válido: el `profile_id` existe, es de este
+   * tenant, y su configuración es correcta. Lo que no se puede es usarlo AHORA,
+   * porque alguien lo desactivó. Es un conflicto con el estado del recurso, no
+   * un error de forma, y la diferencia importa para el frontend: un 422 lo
+   * mandaría a resaltar un campo del formulario, cuando lo que hay que hacer es
+   * volver a pedir el catálogo y ofrecer los perfiles que sí están activos.
+   *
+   * ## Por qué se rechaza en vez de caer al flujo manual
+   *
+   * Caer al flujo manual —ignorar el perfil y leer `store_settings`— es la
+   * opción cómoda y es la peligrosa: la factura se emitiría con el régimen AIU
+   * de la tienda en vez del del perfil que el usuario eligió, y los dos
+   * regímenes gravan bases INCOMPATIBLES (E.T. 462-1 grava A+I+U; Decreto
+   * 1372/1992 grava sólo la Utilidad). El usuario vería un 201, la DIAN
+   * recibiría un IVA distinto del que quiso declarar, y no quedaría rastro de
+   * que hubo una sustitución. Un consecutivo gastado con la base equivocada se
+   * corrige sólo con nota crédito y con la sanción ya corriendo.
+   *
+   * Un perfil desactivado DESPUÉS de emitir no invalida nada: la factura quedó
+   * apuntando a `(profile_id, profile_version)` y esa versión es inmutable.
+   * Este código sólo gobierna la emisión NUEVA.
+   *
+   * `details` lleva `profile_id` y `operation_type` para que el frontend pueda
+   * repedir el catálogo del tipo correcto sin adivinar.
+   */
+  INVOICING_PROFILE_006: {
+    code: 'INVOICING_PROFILE_006',
+    httpStatus: 409,
+    devMessage:
+      'An inactive billing profile cannot be used to stamp a new invoice: falling back to store settings would silently swap the VAT taxable base, because the two AIU regimes (E.T. 462-1 vs Decreto 1372/1992) are incompatible',
+  },
+
+  /**
+   * El `operation_type` de la factura y el del perfil no coinciden.
+   *
+   * ## Qué se rompe si esto no se valida
+   *
+   * Un perfil pertenece a UN tipo de operación: su configuración AIU, sus reglas
+   * de tributo por componente y sus cuentas contables sólo tienen sentido para
+   * ese tipo. Congelar un perfil AIU en una factura estándar —o al revés— deja
+   * `(profile_id, profile_version)` apuntando a una configuración que NO es la
+   * que gobernó el cálculo, y ahí muere la reproducibilidad fiscal que las dos
+   * columnas existen para dar: reconstruir el documento desde su versión daría
+   * un XML distinto del que la DIAN validó, con el consecutivo ya gastado.
+   *
+   * Y es silencioso. Con un perfil AIU en una factura estándar,
+   * `resolveAiuContext` devuelve `{}` porque el documento no es AIU, así que las
+   * tres columnas `aiu_*` quedan NULL y nada falla: la factura sale, parece
+   * correcta, y su procedencia declarada es falsa.
+   *
+   * ## Por qué no se coacciona el tipo de la factura al del perfil
+   *
+   * Porque `operation_type` es el `cbc:CustomizationID` del UBL y cambia cómo la
+   * DIAN calcula la base gravable del documento entero. Cambiarlo por detrás
+   * para que cuadre con el perfil es reescribir el hecho fiscal que el usuario
+   * declaró. Se rechaza y se le dice cuál de los dos corregir.
+   */
+  INVOICING_PROFILE_008: {
+    code: 'INVOICING_PROFILE_008',
+    httpStatus: 409,
+    devMessage:
+      "The invoice operation_type does not match the profile's: freezing (profile_id, profile_version) from a profile of another type would make the stamped provenance false, and the aiu_* columns would stay NULL with no error",
+  },
+
+  /**
+   * El perfil existe y está activo, pero no tiene ninguna versión comprometida.
+   *
+   * ## Por qué esto no puede ser un 500
+   *
+   * `invoice_profiles.current_version` es `@default(0)`, así que la fila puede
+   * existir apuntando a nada. Por la API no debería pasar —la creación
+   * compromete la versión 1 en la misma transacción— pero un `INSERT` por SQL o
+   * una transacción a medias lo produce. Sin este código, la lectura de la
+   * versión devolvería `null` y el `.config` de un `null` saldría como
+   * `TypeError` → 500 crudo, sin código sobre el que el frontend pueda ramificar
+   * y sin decirle a nadie qué hacer.
+   *
+   * ## Por qué NO se cae al flujo manual
+   *
+   * Misma razón que `INVOICING_PROFILE_006`: emitir leyendo `store_settings`
+   * cuando el usuario pidió un perfil sustituye el régimen de base gravable sin
+   * dejar rastro. Aquí es incluso más claro, porque no hay NINGUNA configuración
+   * congelada que respaldar: las dos columnas quedarían NULL en una factura que
+   * dice haberse emitido bajo un perfil.
+   *
+   * La salida es guardar el perfil una vez desde el editor, lo que compromete la
+   * versión 1. El mensaje lo dice explícitamente.
+   */
+  INVOICING_PROFILE_009: {
+    code: 'INVOICING_PROFILE_009',
+    httpStatus: 409,
+    devMessage:
+      'The billing profile has no committed version (current_version = 0), so there is no frozen config to stamp: emission is refused instead of silently falling back to live store settings',
+  },
+
+  /**
+   * Nombre de perfil ya usado en la misma tienda.
+   *
+   * ## Por qué esto ES la idempotencia de la creación
+   *
+   * El requerimiento pedía que un doble submit no creara dos perfiles. La forma
+   * barata sería una cabecera `Idempotency-Key` con su tabla de claves y su TTL;
+   * la forma correcta es notar que el nombre YA identifica al perfil para la
+   * persona que lo elige en el wizard, y hacer que la base lo haga cumplir. Con
+   * `(store_id, lower(name))` único, dos POST idénticos en paralelo terminan
+   * necesariamente en una sola fila, sin estado extra que expirar.
+   *
+   * ## Por qué 409 y no 200 con el perfil existente
+   *
+   * Devolver 200 con el perfil que ya existía es la respuesta cómoda y es
+   * peligrosa: quien envía "AIU obras" con una configuración nueva recibiría un
+   * 200 y un cuerpo con la configuración VIEJA, y creería que sus tarifas se
+   * guardaron. En un módulo cuya salida es un XML con el IVA que se declara a la
+   * DIAN, un guardado que no ocurrió y se anuncia como exitoso es peor que un
+   * error visible.
+   *
+   * El 409 lleva `existing_profile_id` en `details` justamente para que el
+   * frontend pueda distinguir los dos casos que llegan por la misma puerta: el
+   * doble clic accidental —mismo nombre, nada más que informar, se navega al
+   * perfil creado— y el choque real de nombres, donde hay que pedir otro.
+   *
+   * ## Por qué también lo emiten editar y clonar
+   *
+   * Renombrar un perfil al nombre de otro, o clonar hacia un nombre tomado,
+   * violan el mismo índice. Si sólo la creación tradujera el error, las otras
+   * dos rutas devolverían 500 por el mismo hecho.
+   */
+  INVOICING_PROFILE_004: {
+    code: 'INVOICING_PROFILE_004',
+    httpStatus: 409,
+    devMessage:
+      'A billing profile with that name already exists in this store (unique index on store_id + lower(name))',
+  },
+
+  /**
+   * Borrado de un perfil que facturas ya timbradas referencian.
+   *
+   * 409 y no 400: la petición está bien formada y el permiso es correcto; lo que
+   * la impide es el ESTADO del recurso. La FK
+   * `invoices.profile_id → invoice_profiles(id) ON DELETE RESTRICT` ya lo
+   * bloquearía a nivel de base, pero como error de Prisma sin traducir sería un
+   * 500 sin explicación. Este código es la versión legible del mismo NO, con el
+   * conteo en `details` para que el diálogo diga cuántas facturas y ofrezca
+   * desactivar en su lugar.
+   *
+   * El historial de versiones NO se puede borrar aunque el perfil sí: es lo que
+   * hace reproducible una factura de hace dos años.
+   */
+  INVOICING_PROFILE_003: {
+    code: 'INVOICING_PROFILE_003',
+    httpStatus: 409,
+    devMessage:
+      'Billing profile cannot be deleted because stamped invoices reference it. The FK is ON DELETE RESTRICT, so the database would refuse it anyway — this code is the readable version of the same refusal, with the invoice count in details and deactivation offered as the alternative',
+  },
+
+  /**
+   * Versión inexistente de un perfil que sí existe.
+   *
+   * Separado de `INVOICING_PROFILE_001` porque el frontend hace dos cosas
+   * distintas: ante el perfil ausente vuelve al listado, ante la versión ausente
+   * se queda en el historial y sólo muestra un toast. Un solo código obligaría a
+   * adivinar cuál de las dos por el texto del mensaje.
+   */
+  INVOICING_PROFILE_VERSION_001: {
+    code: 'INVOICING_PROFILE_VERSION_001',
+    httpStatus: 404,
+    devMessage:
+      'Requested version of an existing billing profile does not exist. Kept apart from INVOICING_PROFILE_001 because the frontend reacts differently: a missing profile sends the user back to the list, a missing version only raises a toast inside the history view',
+  },
+  /**
+   * La PREVISUALIZACIÓN alcanzó un camino que reserva numeración.
+   *
+   * ## Qué protege
+   *
+   * `POST /profiles/:id/preview` proyecta el XML que produciría un perfil sin
+   * transmitirlo (ADR-5). No numera, no firma, no persiste: por eso se puede
+   * llamar N veces mientras el operador ajusta las tarifas, y por eso funciona
+   * en una tienda que todavía no está habilitada ante la DIAN.
+   *
+   * `InvoiceNumberGenerator.generateNextNumber` mueve
+   * `invoice_resolutions.current_number` DENTRO de un `pg_advisory_xact_lock`, y
+   * un consecutivo autorizado que se toma y no se usa **no se recupera**: deja un
+   * hueco en la numeración que la DIAN no perdona y que nadie nota hasta la
+   * auditoría. Una previsualización que llegara a ese camino quemaría un
+   * consecutivo por cada clic en «ver factura de muestra».
+   *
+   * ## Por qué es un error y no una guarda silenciosa
+   *
+   * `ProfilesModule` sustituye el token `InvoiceNumberGenerator` por
+   * `PreviewNumberingGuard`, cuyo `generateNextNumber` lanza ESTE código. Así,
+   * si mañana alguien añade al camino de previsualización una llamada que reserve
+   * —directamente o a través de un servicio nuevo— el resultado es un 409
+   * ruidoso, no un hueco en la numeración. Devolver un número inventado en vez de
+   * fallar sería peor: el XML proyectado afirmaría un consecutivo que la
+   * resolución no otorgó y quien lo compare contra la base creería que hay
+   * corrupción.
+   *
+   * 409 y no 500: el servidor no falló. El estado del sistema —un camino de
+   * lectura conectado a un camino de escritura fiscal— es lo que hace imposible
+   * completar la operación, y eso es un conflicto, no un error interno.
+   */
+  INVOICING_PREVIEW_001: {
+    code: 'INVOICING_PREVIEW_001',
+    httpStatus: 409,
+    devMessage:
+      'The profile preview path reached numbering reservation. Preview must never move invoice_resolutions.current_number: an authorized consecutive taken and not used is unrecoverable. ProfilesModule swaps the InvoiceNumberGenerator token for PreviewNumberingGuard so this fails loudly instead of burning a consecutive per preview',
+  },
+
+  /**
+   * La muestra de la previsualización no es utilizable.
+   *
+   * Cubre exactamente dos formas de muestra imposible, y las dos son ambigüedad
+   * sobre el VALOR DEL CONTRATO —el número del que dependen la base gravable y
+   * el piso legal del art. 462-1—, así que ninguna se puede resolver adivinando:
+   *
+   * · `lines` y `contract_value` a la vez. Los dos definen el contrato y no hay
+   *   forma de saber cuál manda. Elegir uno por precedencia produciría un
+   *   desglose que cuadra consigo mismo mientras contradice lo que el operador
+   *   escribió — que es justo la confianza falsa que la previsualización existe
+   *   para no dar.
+   * · Ninguno de los dos. No hay nada que proyectar.
+   * · La porción AIU declarada excede el valor del contrato. No es ambigüedad
+   *   sino imposibilidad aritmética —el AIU es una PARTE del contrato, no un
+   *   recargo—, y el resultado sería una línea de costo reembolsable negativa.
+   *
+   * Es 422 y no 400 porque la petición está bien FORMADA: el DTO valida cada
+   * campo por separado sin problema. Lo que falla es la relación entre ellos,
+   * que es semántica. La distinción importa en el frontend: un 400 se muestra
+   * como «revisa el formulario» y un 422 puede señalar la contradicción concreta.
+   *
+   * No confundir con `INVOICING_PREVIEW_001`, que es el caso en que la
+   * previsualización intentó CONSUMIR numeración fiscal: ése es un defecto del
+   * servidor, no de la muestra.
+   */
+  INVOICING_PREVIEW_002: {
+    code: 'INVOICING_PREVIEW_002',
+    httpStatus: 422,
+    devMessage:
+      'The preview sample is unusable: it declares both `lines` and `contract_value` (which both define the contract value, leaving the taxable base and the art. 462-1 floor ambiguous), neither of them, or an aiu_value larger than the contract (which would make the reimbursable-cost line negative). Do not pick one by precedence — the resulting breakdown would be self-consistent and still contradict what the operator typed',
+  },
+
+  INVOICING_AIU_006: {
+    code: 'INVOICING_AIU_006',
+    httpStatus: 422,
+    devMessage:
+      'The invoice declares an aiu_regime that is none of the THREE known taxable bases: emission is refused rather than coerced to a default, because E.T. 462-1 (taxes A+I+U, 10% legal floor), Decreto 1372/1992 (taxes only Utilidad, no floor) and subtotal (declines AIU treatment and taxes the whole contract including the reimbursable cost, no floor) are incompatible bases, and picking one would change the VAT declared with no trace that it was guessed. A MISSING base is not this error: it falls back to the store setting, and then to the same conservative et_462_1 default the creation path uses, both logged. The column is still named aiu_regime for compatibility; what it holds is the base, and subtotal is a legal value in it with no regime to collapse to',
   },
   /**
    * DIVISA — la factura electrónica colombiana se emite SIEMPRE en pesos

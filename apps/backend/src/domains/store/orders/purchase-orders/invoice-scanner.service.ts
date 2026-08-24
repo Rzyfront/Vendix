@@ -8,6 +8,10 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import {
+  buildTaxCategoryScopeWhere,
+  preferOwnStoreCategories,
+} from '@common/helpers/tax-category-scope.helper';
+import {
   VatResponsibilityService,
   VatResponsibilityResult,
 } from '@common/helpers/vat-responsibility.helper';
@@ -1508,11 +1512,21 @@ export class InvoiceScannerService {
 
   /**
    * F3 IVA lifecycle: load the commerce's tax categories with their rates so
-   * `matchProducts` can suggest one by rate. tax_categories is store-scoped,
-   * but ORGANIZATION-level categories live with store_id = NULL; we mirror the
-   * PurchaseOrdersService.create pattern (withoutScope + OR store/null) so the
-   * suggestion sees both. Rates are read as fractions (Decimal(6,5)) to match
-   * the scanner's fractional tax_rate. Never throws (returns [] on failure).
+   * `matchProducts` can suggest one by rate. `tax_categories` es store-scoped,
+   * pero las categorías de nivel ORGANIZACIÓN viven con `store_id = NULL`, y
+   * esas son invisibles para el cliente con alcance de tienda — por eso la
+   * lectura va por `withoutScope()`.
+   *
+   * HOTFIX: antes el where era `OR: [{store_id}, {store_id: null}]` SIN acotar
+   * la organización, así que el catálogo de una tienda incluía las categorías
+   * globales de CUALQUIER otro inquilino. En producción eso hacía que una
+   * tienda recibiera como sugerencia el «IVA 19%» de otra organización y que
+   * `PurchaseOrdersService.create` lo rechazara con «Una o más categorías de
+   * impuesto no existen para esta tienda». El predicado ahora es uno solo
+   * (`buildTaxCategoryScopeWhere`) y lo comparten escáner y validación.
+   *
+   * Rates are read as fractions (Decimal(6,5)) to match the scanner's
+   * fractional tax_rate. Never throws (returns [] on failure).
    */
   private async loadTaxCategoryRates(): Promise<
     Array<{ id: number; rates: number[] }>
@@ -1520,13 +1534,16 @@ export class InvoiceScannerService {
     try {
       const storeId = RequestContextService.getStoreId();
       if (!storeId) return [];
+      const organizationId = RequestContextService.getOrganizationId();
       const categories = await this.prisma
         .withoutScope()
         .tax_categories.findMany({
-          where: { OR: [{ store_id: storeId }, { store_id: null }] },
-          select: { id: true, tax_rates: { select: { rate: true } } },
+          where: buildTaxCategoryScopeWhere(storeId, organizationId),
+          select: { id: true, store_id: true, tax_rates: { select: { rate: true } } },
         });
-      return categories.map((c) => ({
+      // Ante empate de tasa gana la categoría propia de la tienda: es la que el
+      // comercio administra y la que sus reportes fiscales esperan.
+      return preferOwnStoreCategories(categories, storeId).map((c) => ({
         id: c.id,
         rates: c.tax_rates.map((rate) => Number(rate.rate)),
       }));

@@ -11,6 +11,7 @@ import {
   ApiResponse,
   CouponValidationResponse,
   SubscriptionTimelineEvent,
+  PayDueResponse,
 } from '../interfaces/store-subscription.interface';
 import { WompiWidgetConfig } from '../../../../../core/services/wompi-checkout.service';
 
@@ -253,6 +254,26 @@ export class StoreSubscriptionService {
         body,
       )
       .pipe(map((res) => res.data as RetryPaymentResponse));
+  }
+
+  /**
+   * Paga directamente la factura pendiente de la suscripción (issued u overdue)
+   * sin forzar el estado de la suscripción a `pending_payment`. Funciona en
+   * active, grace_soft, grace_hard, suspended, etc.
+   */
+  payDue(params?: {
+    invoiceId?: number;
+    returnUrl?: string;
+  }): Observable<PayDueResponse> {
+    const body: Record<string, unknown> = {};
+    if (params?.invoiceId) body['invoiceId'] = params.invoiceId;
+    if (params?.returnUrl) body['returnUrl'] = params.returnUrl;
+    return this.http
+      .post<ApiResponse<PayDueResponse>>(
+        this.getApiUrl('checkout/pay-due'),
+        body,
+      )
+      .pipe(map((res) => res.data as PayDueResponse));
   }
 
   /**

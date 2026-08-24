@@ -90,6 +90,8 @@ export const KNOWN_SECTIONS = [
   // drops `{ vexi: { enabled: false } }` before validation and the endpoint
   // answers 200 with the old value — a switch that silently refuses to move.
   'vexi',
+  // Promotions - Evaluation strategy (winner_takes_all vs stacking_groups) & UI
+  'promotions',
   // `app` is intentionally accepted here because the service maps it to
   // branding via updateStoreBranding(); the migrator strips persisted `app`
   // afterwards. The legacy alias should not break update calls.

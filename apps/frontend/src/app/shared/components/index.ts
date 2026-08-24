@@ -274,3 +274,8 @@ export type {
   DianCertificateState,
   ReadinessSummary,
 } from './dian';
+export {
+  GamifiedIncentiveBarComponent,
+  type IncentiveProgressData,
+} from './gamified-incentive-bar/gamified-incentive-bar.component';
+

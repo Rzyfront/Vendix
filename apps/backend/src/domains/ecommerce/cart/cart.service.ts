@@ -1312,6 +1312,7 @@ export class CartService {
             resolvedItems.map((i) => ({
               product_id: i.product_id,
               quantity: i.quantity,
+              stock_units_consumed: i.stock_units_consumed,
             })),
           );
         // Keep only ladders whose (promotion_id, target_product_id) is also

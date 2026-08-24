@@ -20,6 +20,8 @@ export type ButtonSize = 'xsm' | 'sm' | 'md' | 'lg';
     <button
       [type]="type()"
       [attr.form]="form()"
+      [attr.aria-label]="ariaLabel() || null"
+      [attr.title]="ariaLabel() || null"
       [disabled]="disabled() || loading()"
       [class]="buttonClasses"
       (click)="handleClick($event)"
@@ -175,6 +177,18 @@ export class ButtonComponent {
   readonly fullWidth = input(false);
   readonly iconOnlyMobile = input(false);
   readonly customClasses = input('');
+  /**
+   * Nombre accesible del botón, para los que sólo llevan icono.
+   *
+   * Va en el `<button>` interno y no en el host: `aria-label` sobre
+   * `<app-button>` cae en un `div`, que no es el elemento que el lector de
+   * pantalla anuncia — el botón quedaría sin nombre igual. Se refleja también en
+   * `title`, que es lo que ve quien usa ratón.
+   *
+   * `|| null` para no emitir `aria-label=""` cuando no se pasa: una cadena vacía
+   * BORRA el nombre accesible que el propio texto del botón ya daba.
+   */
+  readonly ariaLabel = input('');
 
   @HostBinding('class.icon-only-mobile')
   get isIconOnlyMobile(): boolean {

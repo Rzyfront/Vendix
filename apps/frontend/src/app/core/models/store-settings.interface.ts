@@ -59,6 +59,20 @@ export interface StoreSettings {
    * Leer siempre con fallback a `AIU_SETTINGS_DEFAULTS`.
    */
   invoicing?: InvoicingSettings;
+
+  /**
+   * Reglas del motor de promociones y descuentos.
+   * Permite elegir entre 'winner_takes_all' y 'stacking_groups', topes de margen y visibilidad de promociones.
+   */
+  promotions?: PromotionsSettings;
+}
+
+export interface PromotionsSettings {
+  evaluation_strategy?: 'winner_takes_all' | 'stacking_groups';
+  max_combined_discount_percentage?: number;
+  allow_order_promo_stacking?: boolean;
+  exclude_tier_priced_lines?: boolean;
+  enable_high_conversion_ui?: boolean;
 }
 
 /**

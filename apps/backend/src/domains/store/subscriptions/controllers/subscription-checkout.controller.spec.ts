@@ -146,6 +146,9 @@ function buildHarness(opts: {
       }),
     },
     subscription_invoices: { findUnique: jest.fn() },
+    users: {
+      findUnique: jest.fn().mockResolvedValue({ email: 'owner@store.com' }),
+    },
   };
 
   const ensureOperational = jest
@@ -339,5 +342,115 @@ describe('SubscriptionCheckoutController.commit — reactivation seam', () => {
         expect(h.ensureOperational).toHaveBeenCalledTimes(1);
       },
     );
+  });
+
+  // -------------------------------------------------------------------------
+  // payDue() — direct payment for unpaid issued/overdue invoices.
+  // -------------------------------------------------------------------------
+  describe('payDue()', () => {
+    beforeEach(() => {
+      jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(STORE_ID);
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: STORE_ID,
+        user_id: 9,
+      } as any);
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('prepares payment widget for active subscription with due invoice and leaves state unchanged', async () => {
+      const h = buildHarness({ subState: 'active' });
+      const invoice = {
+        id: 19,
+        store_subscription_id: SUB_ID,
+        state: 'issued',
+        total: new Prisma.Decimal(69900),
+        currency: 'COP',
+        due_at: new Date('2026-08-27'),
+        period_start: new Date('2026-08-20'),
+        period_end: new Date('2026-09-19'),
+      };
+
+      (h.controller as any).prisma.subscription_invoices.findFirst = jest
+        .fn()
+        .mockResolvedValue(invoice);
+      (h.controller as any).payment.prepareWidgetCharge = jest.fn().mockResolvedValue({
+        widget: {
+          public_key: 'pub_test',
+          currency: 'COP',
+          amount_in_cents: 6990000,
+          reference: 'ref_123',
+        },
+      });
+
+      const res: any = await h.controller.payDue({});
+
+      expect(res.data.invoice.id).toBe(19);
+      expect(res.data.invoice.total).toBe('69900');
+      expect(res.data.widget.reference).toBe('ref_123');
+      expect(h.transition).not.toHaveBeenCalled();
+      expect(h.subUpdate).not.toHaveBeenCalled();
+    });
+
+    it('resolves explicit invoiceId and verifies subscription ownership', async () => {
+      const h = buildHarness({ subState: 'active' });
+      const invoice = {
+        id: 25,
+        store_subscription_id: SUB_ID,
+        state: 'issued',
+        total: new Prisma.Decimal(120000),
+        currency: 'COP',
+        due_at: new Date('2026-08-30'),
+        period_start: null,
+        period_end: null,
+      };
+
+      const findFirstMock = jest.fn().mockResolvedValue(invoice);
+      (h.controller as any).prisma.subscription_invoices.findFirst = findFirstMock;
+      (h.controller as any).payment.prepareWidgetCharge = jest.fn().mockResolvedValue({
+        widget: { public_key: 'pub_test' },
+      });
+
+      const res: any = await h.controller.payDue({ invoiceId: 25 });
+
+      expect(findFirstMock).toHaveBeenCalledWith({
+        where: { id: 25, store_subscription_id: SUB_ID },
+      });
+      expect(res.data.invoice.id).toBe(25);
+    });
+
+    it('throws SUBSCRIPTION_001 if invoice does not belong to subscription', async () => {
+      const h = buildHarness({ subState: 'active' });
+      (h.controller as any).prisma.subscription_invoices.findFirst = jest
+        .fn()
+        .mockResolvedValue(null);
+
+      await expect(h.controller.payDue({ invoiceId: 999 })).rejects.toThrow();
+    });
+
+    it('throws DUNNING_001 if no payable invoice exists', async () => {
+      const h = buildHarness({ subState: 'active' });
+      (h.controller as any).prisma.subscription_invoices.findFirst = jest
+        .fn()
+        .mockResolvedValue(null);
+
+      await expect(h.controller.payDue({})).rejects.toThrow();
+    });
+
+    it('throws SUBSCRIPTION_010 if invoice is already paid', async () => {
+      const h = buildHarness({ subState: 'active' });
+      (h.controller as any).prisma.subscription_invoices.findFirst = jest
+        .fn()
+        .mockResolvedValue({
+          id: 19,
+          store_subscription_id: SUB_ID,
+          state: 'paid',
+          total: new Prisma.Decimal(69900),
+        });
+
+      await expect(h.controller.payDue({ invoiceId: 19 })).rejects.toThrow();
+    });
   });
 });

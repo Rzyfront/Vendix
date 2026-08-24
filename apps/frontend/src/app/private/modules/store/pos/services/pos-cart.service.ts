@@ -1190,7 +1190,7 @@ export class PosCartService {
             // Tier is resolved ONCE from the AGGREGATED scope quantity, then
             // fixed for every line in scope — mirror of the backend engine.
             const scopedQty = applicableItems.reduce(
-              (sum, item) => sum + Number(item.quantity),
+              (sum, item) => sum + this.getEffectiveItemQuantity(item),
               0,
             );
             const matchedTier = sortedTiers.find(
@@ -1544,7 +1544,7 @@ export class PosCartService {
 
       const applicableItems = this.getPromotionApplicableItems(promo, items);
       const scopedQty = applicableItems.reduce(
-        (sum, item) => sum + Number(item.quantity),
+        (sum, item) => sum + this.getEffectiveItemQuantity(item),
         0,
       );
       // Only nudge when the customer already has in-scope items in the cart.
@@ -1571,6 +1571,22 @@ export class PosCartService {
     }
 
     return progress;
+  }
+
+  /**
+   * Resuelve la cantidad base efectiva de un item para acumulación de tramos de promoción.
+   * Si la línea es una presentación/paquete (units_per_package > 1) o tiene escala
+   * (stock_units_per_sale_unit > 1), multiplica la cantidad de paquetes por las unidades base.
+   */
+  private getEffectiveItemQuantity(item: CartItem): number {
+    const qty = Number(item?.quantity) || 0;
+    if (item?.units_per_package && item.units_per_package > 1) {
+      return qty * Number(item.units_per_package);
+    }
+    if (item?.stock_units_per_sale_unit && item.stock_units_per_sale_unit > 1) {
+      return qty * Number(item.stock_units_per_sale_unit);
+    }
+    return qty;
   }
 
   /**

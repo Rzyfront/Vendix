@@ -29,6 +29,7 @@ import {
 } from '../settings/interfaces/store-settings.interface';
 import { ResponseService } from '../../../common/responses/response.service';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import {
@@ -42,8 +43,18 @@ import {
 } from './credit-notes/dto/create-credit-note.dto';
 import { RegisterDianEventDto } from './dto/register-dian-event.dto';
 
+/*
+ * NOTA sobre el guard: hasta este cambio la clase no declaraba `PermissionsGuard`,
+ * así que los `@Permissions` de abajo eran decoración inerte —Nest sólo los lee si
+ * hay un guard que los consulte—. Verificado empíricamente: un usuario de rol
+ * `cashier` sin un solo permiso `invoicing:*` obtenía 200 en las lecturas y
+ * alcanzaba la capa de servicio en los `DELETE` (404 con `error_code` de dominio,
+ * prueba de que la autorización no se evaluaba). No es un permiso nuevo ni una
+ * restricción nueva: es hacer efectiva la que el archivo ya declaraba. Mismo
+ * criterio que `pos/pos-fiscal.controller.ts`.
+ */
 @Controller('store/invoicing')
-@UseGuards(ModuleFlowGuard)
+@UseGuards(ModuleFlowGuard, PermissionsGuard)
 @RequireModuleFlow('invoicing')
 export class InvoicingController {
   constructor(

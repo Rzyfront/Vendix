@@ -6,7 +6,11 @@ import { QrService } from '../../../../common/services/qr.service';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
-import { RESOLUTION_PUBLIC_SELECT } from '../../invoicing/utils/technical-key.util';
+import {
+  FISCAL_DOCUMENT_PRINT_INCLUDE,
+  mapFiscalDocumentToPrintData,
+} from './fiscal-document-print.mapper';
+import { amountToSpanishWords } from '@common/utils/amount-in-words.util';
 
 @Injectable()
 export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
@@ -28,22 +32,7 @@ export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
 
     const invoice = await this.prisma.invoices.findFirst({
       where: { id, store_id: storeId },
-      include: {
-        invoice_items: true,
-        invoice_taxes: true,
-        resolution: { select: RESOLUTION_PUBLIC_SELECT },
-        organization: {
-          include: {
-            addresses: { take: 1 },
-          },
-        },
-        store: {
-          include: {
-            addresses: { take: 1 },
-          },
-        },
-        customer: true,
-      },
+      include: FISCAL_DOCUMENT_PRINT_INCLUDE,
     });
 
     if (!invoice) {
@@ -60,93 +49,11 @@ export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
       }
     }
 
-    const store = invoice.store || {};
-    const org = invoice.organization || {};
-    const cust = invoice.customer || ({} as any);
-    const res = invoice.resolution || ({} as any);
-
-    const items = (invoice.invoice_items || []).map((it: any, idx: number) => ({
-      index: idx + 1,
-      product_name: it.name || it.description || 'Ítem',
-      variant_sku: it.sku || undefined,
-      quantity: Number(it.quantity || 1),
-      unit_price: Number(it.price || 0),
-      unit_price_formatted: `$${Number(it.price || 0).toLocaleString('es-CO')}`,
-      discount_amount: Number(it.discount_amount || 0),
-      discount_formatted: it.discount_amount ? `-$${Number(it.discount_amount).toLocaleString('es-CO')}` : undefined,
-      tax_rate: Number(it.tax_rate || 0),
-      tax_amount: Number(it.tax_amount || 0),
-      total_price: Number(it.total || 0),
-      total_price_formatted: `$${Number(it.total || 0).toLocaleString('es-CO')}`,
-    }));
-
-    const taxes = (invoice.invoice_taxes || []).map((t: any) => ({
-      name: t.tax_name || 'IVA',
-      rate: Number(t.tax_rate || 0),
-      base_amount: Number(t.taxable_amount || 0),
-      tax_amount: Number(t.tax_amount || 0),
-      base_formatted: `$${Number(t.taxable_amount || 0).toLocaleString('es-CO')}`,
-      tax_formatted: `$${Number(t.tax_amount || 0).toLocaleString('es-CO')}`,
-    }));
-
-    const subtotal = Number(invoice.subtotal_amount || 0);
-    const discount = Number(invoice.discount_amount || 0);
-    const tax = Number(invoice.tax_amount || 0);
-    const total = Number(invoice.total_amount || (subtotal - discount + tax));
-
-    return {
-      store: {
-        name: store.name || org.name || 'Vendix',
-        legal_name: store.legal_name || org.legal_name,
-        tax_id: org.tax_id,
-        phone: store.phone || org.phone,
-        email: store.email || org.email,
-        address: store.addresses?.[0]?.address_line1 || org.addresses?.[0]?.address_line1,
-        city: store.addresses?.[0]?.city || org.addresses?.[0]?.city,
-        logo_url: store.logo_url || org.logo_url,
-      },
-      customer: {
-        name: `${cust.first_name || ''} ${cust.last_name || ''}`.trim() || 'Consumidor Final',
-        tax_id: cust.document_number || '222222222222',
-        phone: cust.phone,
-        email: cust.email,
-      },
-      document: {
-        id: invoice.id,
-        number: invoice.invoice_number ? `${invoice.prefix || ''}${invoice.invoice_number}` : String(invoice.id),
-        prefix: invoice.prefix || undefined,
-        date: invoice.issue_date ? new Date(invoice.issue_date).toISOString() : new Date().toISOString(),
-        date_formatted: invoice.issue_date ? new Date(invoice.issue_date).toLocaleDateString('es-CO') : new Date().toLocaleDateString('es-CO'),
-        state: invoice.dian_status || 'draft',
-        state_label: invoice.dian_status === 'accepted' ? 'Aprobada por DIAN' : 'Pendiente',
-      },
-      fiscal: {
-        cufe: invoice.cufe || undefined,
-        qr_code_content: invoice.qr_code || undefined,
-        qr_code_png_base64: qrBase64,
-        resolution_number: res.resolution_number,
-        resolution_prefix: res.prefix,
-        resolution_range_from: res.range_from,
-        resolution_range_to: res.range_to,
-        resolution_date: res.resolution_date ? new Date(res.resolution_date).toLocaleDateString('es-CO') : undefined,
-        resolution_valid_from: res.valid_from ? new Date(res.valid_from).toLocaleDateString('es-CO') : undefined,
-        resolution_valid_to: res.valid_to ? new Date(res.valid_to).toLocaleDateString('es-CO') : undefined,
-      },
-      items,
-      taxes,
-      totals: {
-        subtotal,
-        subtotal_formatted: `$${subtotal.toLocaleString('es-CO')}`,
-        discount_total: discount,
-        discount_total_formatted: `$${discount.toLocaleString('es-CO')}`,
-        shipping_total: 0,
-        shipping_total_formatted: '$0',
-        tax_total: tax,
-        tax_total_formatted: `$${tax.toLocaleString('es-CO')}`,
-        grand_total: total,
-        grand_total_formatted: `$${total.toLocaleString('es-CO')}`,
-      },
-    };
+    return mapFiscalDocumentToPrintData(invoice, {
+      qrBase64,
+      acceptedLabel: 'Aprobada por DIAN',
+      pendingLabel: 'Pendiente',
+    });
   }
 
   async getSampleData(storeId?: number): Promise<StandardPrintDataModel> {
@@ -171,8 +78,12 @@ export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
       },
       document: {
         id: 888,
+        // Sin `prefix`: el compositor imprime `doc.prefix + '-'` ANTES del
+        // numero, asi que poblarlo con el prefijo que el numero ya lleva
+        // rendia `SETP-#SETP-990001` — el prefijo dos veces, en la pantalla
+        // de previsualizacion de formatos. La muestra imita ahora al camino
+        // real, que tampoco lo pobla.
         number: 'SETP-990001',
-        prefix: 'SETP',
         date: new Date().toISOString(),
         date_formatted: new Date().toLocaleDateString('es-CO'),
         time: '11:45',
@@ -224,6 +135,9 @@ export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
         tax_total_formatted: '$855.000',
         grand_total: 5355000,
         grand_total_formatted: '$5.355.000',
+        grand_total_in_words: amountToSpanishWords(5355000, {
+          suffix: 'M/CTE',
+        }),
       },
     };
   }

@@ -25,6 +25,18 @@ Tabla de datos con columnas configurables, ordenamiento, acciones y responsivida
 | `compact`       | `boolean`       | `false`                      | Modo compacto             |
 | `sortable`      | `boolean`       | `false`                      | Habilitar ordenamiento    |
 | `customClasses` | `string`        | `''`                         | Clases CSS adicionales    |
+| `rowLabelKey`   | `string \| null` | `null`                       | Clave que nombra la fila en el `aria-label` de los botones de accion (a11y) |
+
+
+### `rowLabelKey` — por que existe
+
+Los botones de accion son iconos con `title`. El `title` da nombre accesible
+(«Eliminar»), pero **no dice de que fila**: sobre 15 filas un lector de pantalla
+anuncia «Eliminar» quince veces, y «Eliminar» es destructivo. Con
+`rowLabelKey="name"` el nombre accesible pasa a «Eliminar: Estandar DIAN».
+
+Sin declararla, el nombre accesible es la etiqueta sola — lo mismo que ya
+derivaba del `title` —, asi que ningun consumidor existente cambia.
 
 ## Outputs
 

@@ -1638,3 +1638,59 @@ export class VexiSettingsDto {
   @IsIn(['realtime', 'pipeline'])
   voice_engine?: 'realtime' | 'pipeline';
 }
+
+export class PromotionsSettingsDto {
+  @ApiProperty({
+    example: 'winner_takes_all',
+    enum: ['winner_takes_all', 'stacking_groups'],
+    required: false,
+    description:
+      'Estrategia de evaluacion de promociones. `winner_takes_all` (default): 1 sola promocion por orden. `stacking_groups`: promociones disjuntas por producto/categoria se aplican concurrentemente.',
+  })
+  @IsOptional()
+  @IsIn(['winner_takes_all', 'stacking_groups'])
+  evaluation_strategy?: 'winner_takes_all' | 'stacking_groups';
+
+  @ApiProperty({
+    example: 50,
+    required: false,
+    description:
+      'Tope maximo porcentual de descuento acumulado permitido sobre la orden (1-90).',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(90)
+  max_combined_discount_percentage?: number;
+
+  @ApiProperty({
+    example: true,
+    required: false,
+    description:
+      'Permite que promociones de orden (scope=order) se apliquen sobre el residual tras descuentos por item.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  allow_order_promo_stacking?: boolean;
+
+  @ApiProperty({
+    example: false,
+    required: false,
+    description:
+      'Excluye lineas con tarifa mayorista de recibir promociones automaticas adicionales.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  exclude_tier_priced_lines?: boolean;
+
+  @ApiProperty({
+    example: true,
+    required: false,
+    description:
+      'Activa componentes visuales de alta conversion (escalas interactivas, barra de incentivo gamificada) en storefront y POS.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  enable_high_conversion_ui?: boolean;
+}
+

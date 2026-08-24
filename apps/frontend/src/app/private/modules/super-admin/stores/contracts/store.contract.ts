@@ -9,6 +9,7 @@
  */
 
 import type { AddressPayload } from '../../../../../shared/components/address-form-fields/address-form-fields.component';
+import { STORE_INDUSTRIES } from '../../../../../shared/constants/industry-modules.constant';
 
 /* -------------------------------------------------------------------------- */
 /*  Enums (mirror Prisma persisted values — DO NOT rename)                    */
@@ -32,12 +33,16 @@ export const StoreState = {
 } as const;
 export type StoreState = (typeof StoreState)[keyof typeof StoreState];
 
-export type StoreIndustry =
-  | 'retail'
-  | 'restaurant'
-  | 'manufacturing'
-  | 'service'
-  | 'gym';
+/**
+ * Derivada de `STORE_INDUSTRIES`, no escrita a mano.
+ *
+ * Había tres copias de esta unión en el frontend, una de ellas con sólo cuatro
+ * industrias —le faltaba `gym` desde que se añadió— y ninguna avisaba: una unión
+ * a mano no falla al quedarse corta, sólo rechaza el valor nuevo en el sitio más
+ * lejano al cambio. Derivándola, agregar una industria al constante compartido
+ * la propaga sola y olvidarla es imposible.
+ */
+export type StoreIndustry = (typeof STORE_INDUSTRIES)[number];
 
 /* -------------------------------------------------------------------------- */
 /*  Option shapes (returned by lookup endpoints)                              */

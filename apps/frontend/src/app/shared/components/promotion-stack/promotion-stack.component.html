@@ -125,7 +125,7 @@
       @for (item of expandedTiers(); track item.id; let i = $index; let total = $count) {
         <div
           role="listitem"
-          class="promotion-stack__tier"
+          class="promotion-stack__tier cursor-pointer transition-transform active:scale-95"
           [ngClass]="{
             'promotion-stack__tier--current': isCurrentTier(item),
             'promotion-stack__tier--next': isNextTier(item) && !isCurrentTier(item),
@@ -133,6 +133,7 @@
           }"
           [attr.data-testid]="'promotion-stack-item-' + i"
           [attr.aria-label]="tierAriaLabel(item, i, total)"
+          (click)="onTierClick(item)"
         >
           <div class="promotion-stack__tier-header">
             <span class="promotion-stack__tier-min">{{ tierHeader(item) }}</span>
@@ -153,6 +154,20 @@
         </div>
       }
 
+      @if (currentTier(); as current) {
+        <div class="promotion-stack__active-celebration" data-testid="promo-active-celebration">
+          <div class="promotion-stack__active-icon">
+            <app-icon name="sparkles" [size]="16"></app-icon>
+          </div>
+          <div class="promotion-stack__active-info">
+            <span class="promotion-stack__active-title">¡Promoción Activa!</span>
+            <span class="promotion-stack__active-detail">
+              Nivel <strong>{{ current.label || pillText(current) }}</strong> aplicado a tu selección.
+            </span>
+          </div>
+        </div>
+      }
+
       <div
         class="promotion-stack__progress"
         role="progressbar"
@@ -169,8 +184,15 @@
       </div>
       @if (nextTier() && currentQuantity() !== null) {
         <p class="promotion-stack__progress-text">
-          Te faltan {{ remainingQty() }} unidades para desbloquear
-          <strong>{{ pillText(nextTier()!) }}</strong>
+          🔥 Te faltan <strong>{{ remainingQty() }} {{ remainingQty() === 1 ? 'unidad' : 'unidades' }}</strong>
+          @if (unitsPerPackage() > 1 && remainingPackages() > 0) {
+            <span class="promotion-stack__progress-packages">({{ remainingPackages() }} {{ remainingPackages() === 1 ? 'paquete' : 'paquetes' }})</span>
+          }
+          para subir a <strong>{{ pillText(nextTier()!) }}</strong>
+        </p>
+      } @else if (currentTier() && currentQuantity() !== null) {
+        <p class="promotion-stack__progress-text promotion-stack__progress-text--max">
+          🏆 ¡Felicidades! Has desbloqueado el <strong>máximo descuento disponible</strong> para este producto.
         </p>
       }
     </div>

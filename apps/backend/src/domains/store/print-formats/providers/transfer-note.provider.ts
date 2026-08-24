@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
@@ -11,11 +12,33 @@ export class TransferNoteDataProvider implements IDocumentDataProvider {
 
   constructor(private readonly prisma: StorePrismaService) {}
 
+  /**
+   * Este formato NO tiene lector real todavía, y por eso falla en vez de
+   * devolver la muestra.
+   *
+   * Antes del 2026-08-24 hacía `return this.getSampleData(storeId)` e ignoraba
+   * el `documentId`. Como `print-gateway.service.ts:174` alcanza esto por el
+   * carril de impresión REAL, el resultado era un 200 con datos inventados:
+   * una remisión de traslado que enumera mercancía que no es la del traslado viaja con la carga y la recepción se firma contra ella.
+   *
+   * La decisión de fallar y no leer se tomó con dato, no por comodidad: el
+   * origen real vive en `stock_transfers` (`schema.prisma:2882`), en otro dominio, y proyectarlo bien es
+   * trabajo propio con su propia verificación. Mientras eso no exista, negarse
+   * es la única respuesta honesta — un documento operativo falso se firma y se
+   * archiva como si fuera cierto.
+   *
+   * No rompe la previsualización del hub: `print-gateway.service.ts:280`
+   * envuelve esta llamada en un `try/catch` y cae a `getSampleData`, que es
+   * exactamente para lo que la muestra existe.
+   */
   async fetchDocumentData(
     storeId: number,
     documentId: number | string,
   ): Promise<StandardPrintDataModel> {
-    return this.getSampleData(storeId);
+    throw new VendixHttpException(
+      ErrorCodes.PRINT_DOCUMENT_READER_MISSING_001,
+      `El formato ${this.formatType} todavía no lee su documento real (origen: stock_transfers); no se imprime una muestra en su lugar.`,
+    );
   }
 
   async getSampleData(storeId?: number): Promise<StandardPrintDataModel> {

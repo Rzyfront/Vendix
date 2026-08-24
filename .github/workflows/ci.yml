@@ -50,14 +50,17 @@ jobs:
               - *shared
               - 'apps/frontend/**'
               - 'scripts/state-refresh-audit.sh'
+              - 'scripts/industry-parity-audit.sh'
             mobile:
               - *shared
               - 'apps/mobile/**'
+              - 'scripts/industry-parity-audit.sh'
             backend:
               - *shared
               - 'apps/backend/**'
               - 'scripts/tz-audit.sh'
               - 'scripts/tenant-host-audit.sh'
+              - 'scripts/industry-parity-audit.sh'
 
   zoneless-audit:
     name: Zoneless Audit
@@ -135,6 +138,30 @@ jobs:
       - run: chmod +x scripts/tenant-host-audit.sh
       - run: ./scripts/tenant-host-audit.sh
 
+  industry-parity-audit:
+    name: Industry Parity Audit
+    runs-on: ubuntu-latest
+    needs: changes
+    # Corre si cambia CUALQUIERA de las tres apps: `industry_enum` vive en el
+    # backend y está espejado a mano en web y en móvil, así que la deriva puede
+    # nacer en cualquiera de los tres lados.
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true' || needs.changes.outputs.mobile == 'true'
+    # Pure grep guard over the checked-out tree (no build/deps needed): fails if
+    # `industry_enum` (schema.prisma, la verdad) y sus tres espejos a mano
+    # dejan de coincidir. NINGÚN tipo une el enum de Prisma con los espejos de
+    # web y móvil — viven en proyectos tsconfig distintos y ninguno importa
+    # `@prisma/client` — así que ni tsc ni los builds detectan esta deriva.
+    # Peor: en el móvil el `Record<StoreIndustry, string[]>` la ESCONDE, porque
+    # `StoreIndustry` se deriva de la propia lista del archivo; compila perfecto
+    # y en runtime la industria nueva se queda sin reglas de ocultamiento.
+    # Encontrado el 2026-08-23 al agregar `construction`: de cinco copias, dos
+    # llevaban rancias (`gym` faltaba en el wizard de onboarding desde que se
+    # agregó esa industria). See scripts/industry-parity-audit.sh.
+    steps:
+      - uses: actions/checkout@v4
+      - run: chmod +x scripts/industry-parity-audit.sh
+      - run: ./scripts/industry-parity-audit.sh
+
   mobile-typecheck:
     name: Mobile Typecheck
     runs-on: ubuntu-latest
@@ -189,6 +216,47 @@ jobs:
         working-directory: apps/frontend
         run: npm run build:prod
 
+  frontend-test:
+    name: Frontend Tests (karma zoneless)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    timeout-minutes: 20
+    # Este job NO existia: habia ~40 specs en apps/frontend y cero corridas en
+    # CI, asi que un spec roto llegaba a `dev` con todos los checks verdes. Es
+    # una compuerta de verdad -- sin `continue-on-error`: si un spec falla, el
+    # PR se pone rojo. Un job que no puede ponerse rojo no es una compuerta.
+    #
+    # `--watch=false` es obligatorio: el default del builder
+    # (@angular/build:karma) es `watch: true`, que nunca termina y colgaria el
+    # runner hasta el timeout.
+    #
+    # `--browsers=ChromeHeadlessNoSandbox` usa el customLauncher declarado en
+    # `apps/frontend/karma.conf.js` (--no-sandbox --headless --disable-gpu
+    # --disable-dev-shm-usage). Sin --no-sandbox Chrome no arranca dentro del
+    # runner, y sin --disable-dev-shm-usage se cae por /dev/shm pequeno. El
+    # binario lo autodetecta karma-chrome-launcher: la imagen ubuntu-latest
+    # trae google-chrome-stable preinstalado.
+    #
+    # `karma.conf.js` tambien sube `browserNoActivityTimeout` a 180s. Con el
+    # default (30s) la suite se cortaba con "Disconnected, because no message in
+    # 30000 ms" a mitad de camino -- y un renglon final que dice DISCONNECTED en
+    # vez de SUCCESS/FAILED es cobertura apagada disfrazada de corrida. Se
+    # reproducia igual con y sin Zone.js, asi que preexiste al arnes zoneless.
+    #
+    # El arnes corre SIN Zone.js (target `test` con "polyfills": []), igual que
+    # el build de produccion. Ver apps/frontend/src/test-init.ts.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: ng test (headless, sin watch, sin Zone.js)
+        working-directory: apps/frontend
+        run: npx ng test --watch=false --browsers=ChromeHeadlessNoSandbox --progress=false
+
   backend-build:
     name: Backend Build (prisma + nest)
     runs-on: ubuntu-latest
@@ -210,6 +278,15 @@ jobs:
       - name: Generar Prisma Client
         working-directory: apps/backend
         run: npx prisma generate
+      # SALVEDAD (KG-9(a)): esto NO es un "typecheck completo" del backend.
+      # `apps/backend/tsconfig.build.json` excluye `**/*spec.ts`, asi que ni
+      # `nest build` aqui ni `npm run buildcheck:be` en local compilan las
+      # specs. Un spec con error de tipos -- p.ej. los 4 `TS2554` de aridad de
+      # `reservations.service.spec.ts` (QUI-649), que llegaron a produccion --
+      # pasa este job en verde. La unica compuerta que SI las compila es
+      # `backend-test` (jest via ts-jest), y hoy esta con `if: false`. Cualquier
+      # afirmacion de "typecheck completo" apoyada en este job hereda esta
+      # salvedad y debe decirlo.
       - name: nest build
         working-directory: apps/backend
         run: npm run build
@@ -223,6 +300,59 @@ jobs:
     name: Backend Tests (jest)
     runs-on: ubuntu-latest
     needs: changes
+    #
+    # ---------------------------------------------------------------------
+    # PROPUESTA PARA @lider-dev sobre este `if: false` (2026-08-24, paso G.5)
+    # ---------------------------------------------------------------------
+    # NO se toca el flag. Es una decision con dueno y fecha, y su precondicion
+    # ("re-enable when baseline tests fixed") NO esta cumplida. Lo que sigue es
+    # lo medido, para que la decision se tome con datos y no con impresiones.
+    #
+    # 1. Tu diagnostico del 14-ago ("JEST too heavy for GH runners") queda
+    #    CONFIRMADO por medicion, no era una impresion. Corriendo la suite
+    #    completa en local (305 specs, --maxWorkers=2 --workerIdleMemoryLimit=
+    #    1024MB, los topes de apps/backend/package.json) se reportaron
+    #    5 suites en ~13 minutos, con tiempos por suite de 128 s, 144 s,
+    #    160 s y 224 s. A ese ritmo la suite entera no cabe en el
+    #    `timeout-minutes: 25` de este job: se necesitarian HORAS. Ademas un
+    #    worker murio con `FatalProcessOutOfMemory` de V8.
+    #
+    # 2. La linea base esta ROJA, y de las dos maneras que hay que distinguir:
+    #    - Fallo de asercion (el test corre y no cuadra) -- 33 en esas 5 suites.
+    #      Ejemplos: `audit.controller.spec.ts` espera el prefijo 'admin/audit'
+    #      y recibe 'superadmin/admin/audit' (el controlador cambio de namespace
+    #      y el spec no); `reservations.service.spec.ts` espera
+    #      BadRequestException y recibe NotFoundException.
+    #    - "Test suite failed to run" (CERO tests ejecutados, que es cobertura
+    #      apagada y NO un test rojo) -- 1: `audit.module.spec.ts`, y su causa
+    #      es colateral: "A jest worker process was terminated by another
+    #      process: signal=SIGTERM", o sea el OOM del punto 1. Esta categoria es
+    #      la peligrosa porque NO aparece en el conteo de "Tests": una suite que
+    #      no arranca se lee como verde si solo se mira esa linea.
+    #    - Aparte, `audit.service.spec.ts` falla con "Nest can't resolve
+    #      dependencies of SuperAdminAuditService ... GlobalPrismaService at
+    #      index [0]": el TestBed se quedo atras del constructor real.
+    #
+    # 3. Por tanto la propuesta NO es "reactivar y listo", ni ahora ni con este
+    #    contenido. Es esta secuencia, y el flag se voltea al final y lo
+    #    volteas tu:
+    #      (a) Arreglar las suites rojas por lotes, empezando por las 5 de
+    #          arriba. Cada lote se verifica con
+    #          `npm run buildcheck:test -- src/<ruta>` (--runInBand, ~1,5 GB).
+    #      (b) Atacar el coste: 128-224 s por suite es tiempo de arranque de
+    #          ts-jest reconstruyendo el programa TypeScript por worker. Los
+    #          candidatos son `isolatedModules`/SWC como transform, o partir
+    #          este job por dominio con `matrix:` para que ningun shard pase de
+    #          los 25 minutos.
+    #      (c) Solo cuando (a) y (b) esten hechas y una corrida completa termine
+    #          en verde dentro del timeout, quitar el `if: false`.
+    #
+    # 4. Mientras tanto la Fase G NO se queda sin compuerta automatica: el job
+    #    `frontend-test` (arriba) es nuevo y SI corre, y el typecheck de las
+    #    specs del backend sigue cubierto en local por `buildcheck:test` por
+    #    dominio. Lo que este job cubriria y hoy nadie cubre en CI es la
+    #    ejecucion de los 305 specs del backend.
+    # ---------------------------------------------------------------------
     if: false  # disabled per @lider-dev WhatsApp 2026-08-14 (JEST too heavy for GH runners). Re-enable when baseline tests fixed.
     timeout-minutes: 25
     steps:

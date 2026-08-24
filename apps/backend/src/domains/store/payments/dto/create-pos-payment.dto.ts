@@ -151,6 +151,12 @@ export class PosOrderItemDto {
   @Type(() => Number)
   applied_price_tier_id?: number;
 
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Min(0)
+  @Type(() => Number)
+  stock_units_consumed?: number;
+
   // Plan KDS fire-flows: marca de la intención del cajero en el POS
   // ("usar stock" en el modal de prepared-choice). Si true, el item NO
   // se enviará a cocina y su stock se descontará en el pago (sales

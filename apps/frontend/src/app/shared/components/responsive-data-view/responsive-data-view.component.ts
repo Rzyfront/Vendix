@@ -78,6 +78,7 @@ export type { ItemListCardConfig, ItemListSize };
           [rowClass]="rowClass()"
           [selectable]="selectable()"
           [rowIdKey]="rowIdKey()"
+          [rowLabelKey]="rowLabelKey()"
           [(selectedIds)]="selectedIds"
           (sort)="sort.emit($event)"
           (rowClick)="rowClick.emit($event)"
@@ -100,6 +101,7 @@ export type { ItemListCardConfig, ItemListSize };
           [rowClass]="rowClass()"
           [selectable]="selectable()"
           [rowIdKey]="rowIdKey()"
+          [rowLabelKey]="rowLabelKey()"
           [(selectedIds)]="selectedIds"
           (itemClick)="rowClick.emit($event)"
           (actionClick)="actionClick.emit($event)"
@@ -151,6 +153,12 @@ export class ResponsiveDataViewComponent {
   readonly selectable = input<boolean>(false);
   /** Key (dot notation supported) that identifies a row. */
   readonly rowIdKey = input<string>('id');
+  /**
+   * Clave que identifica la fila/tarjeta en el nombre accesible de los botones
+   * de acción. Se pasa tal cual a `app-table` y a `app-item-list`, para que el
+   * lector de pantalla diga lo mismo en escritorio y en móvil.
+   */
+  readonly rowLabelKey = input<string | null>(null);
   readonly selectedIds = model<Set<string | number>>(new Set<string | number>());
 
   // Empty state enhanced inputs

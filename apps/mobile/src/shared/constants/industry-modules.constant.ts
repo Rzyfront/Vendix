@@ -10,6 +10,15 @@
  * plumbing (vendix-monorepo-workspaces skill) and is out of scope for the
  * current parity pass. A future refactor should extract this into a shared
  * package and have BOTH consumers import from it.
+ *
+ * ⚠️ `Record<StoreIndustry, string[]>` NO protege contra una industria nueva
+ * aquí: `StoreIndustry` se deriva de `STORE_INDUSTRIES` de ESTE archivo, así
+ * que si el enum de Postgres gana un valor y esta lista no, el Record sigue
+ * siendo exhaustivo contra sí mismo y compila perfecto. En runtime
+ * `INDUSTRY_HIDDEN_MODULES['<nueva>']` es `undefined`, el `?? []` lo traga y
+ * la tienda ve TODOS los módulos. Pasó con `construction` el 2026-08-23.
+ * El guard que sí lo detecta: `npm run industries:audit`
+ * (scripts/industry-parity-audit.sh, corre en CI).
  */
 
 export const STORE_INDUSTRIES = [
@@ -18,6 +27,7 @@ export const STORE_INDUSTRIES = [
   'manufacturing',
   'service',
   'gym',
+  'construction',
 ] as const;
 
 export type StoreIndustry = (typeof STORE_INDUSTRIES)[number];
@@ -60,6 +70,12 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
   manufacturing: ['restaurant_ops', 'memberships', 'orders_reservations'],
   service: ['restaurant_ops'],
   gym: ['restaurant_ops', 'orders_reservations'],
+  // `construction` espeja la lista de `manufacturing` de ESTE archivo (no la
+  // de web, que oculta ocho módulos): una constructora factura obra con AIU,
+  // no lleva mesas ni membresías, pero sí reparte material, así que despacho
+  // se queda visible. Decisión conservadora — ocultar de menos deja un módulo
+  // sin usar a la vista; ocultar de más esconde uno que la tienda necesita.
+  construction: ['restaurant_ops', 'memberships', 'orders_reservations'],
 };
 
 /**

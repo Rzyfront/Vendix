@@ -104,6 +104,21 @@ export interface StandardPrintDataModel {
     tax_total_formatted: string;
     grand_total: number;
     grand_total_formatted: string;
+    /**
+     * Total en letras — la representación gráfica de un documento fiscal lo
+     * imprime al lado del total en cifras.
+     *
+     * OPCIONAL A PROPÓSITO. Sólo el proveedor de la factura fiscal lo llena; los
+     * otros nueve documentos del dominio (tiquete POS, remisión, cotización,
+     * ticket de cocina…) no lo exigen, y `print-layout-composer` sólo pinta la
+     * fila cuando el campo llega. Así añadir el requisito fiscal no cambia el
+     * papel de nueve documentos que este plan no toca.
+     *
+     * Lo produce `amountToSpanishWords` (`@common/utils/amount-in-words.util`),
+     * la única implementación de número a letras del repositorio, alimentada por
+     * el MISMO `grand_total` que la fila en cifras.
+     */
+    grand_total_in_words?: string;
     tip_amount?: number;
     tip_amount_formatted?: string;
   };

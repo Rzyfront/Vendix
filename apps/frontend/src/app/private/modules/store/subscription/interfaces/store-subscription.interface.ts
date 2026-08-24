@@ -112,6 +112,33 @@ export interface CurrentSubscription {
    * cancelled. Maps to `store_subscription_state_enum`.
    */
   pending_revert_state?: StoreSubscriptionState | null;
+  /**
+   * Oldest payable invoice with pending balance (state in issued/overdue).
+   * Exposed by GET /store/subscriptions/current for immediate payment flows.
+   */
+  payable_invoice?: PayableInvoiceInfo | null;
+}
+
+export interface PayableInvoiceInfo {
+  id: number;
+  total: number;
+  currency: string;
+  due_at: string | null;
+  period_start?: string | null;
+  period_end?: string | null;
+  state?: string;
+}
+
+export interface PayDueResponse {
+  widget: import('../../../../../core/services/wompi-checkout.service').WompiWidgetConfig;
+  invoice: {
+    id: number;
+    total: string;
+    currency: string;
+    due_at: string | null;
+    period_start: string | null;
+    period_end: string | null;
+  };
 }
 
 export interface FeatureUsage {
