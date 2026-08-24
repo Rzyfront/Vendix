@@ -82,6 +82,18 @@ type SuccessInfo =
       ref: Record<string, unknown>;
     }
   | {
+      /**
+       * Expediente PARCIAL: se guardó la configuración y los documentos que el
+       * usuario sí aportó, pero el trámite del certificado NO se envió a la
+       * cola del superadmin porque faltan piezas. Es un estado legítimo, no un
+       * error: el paso avanza y el tenant vuelve cuando tenga el resto.
+       * `missing` es lo que falta, para poder decírselo por su nombre.
+       */
+      kind: 'documents_partial';
+      ref: Record<string, unknown>;
+      missing: IdentityDocumentType[];
+    }
+  | {
       kind: 'config_saved';
       ref: Record<string, unknown>;
     };
@@ -144,6 +156,21 @@ type SuccessInfo =
                   tu certificado de firma. Tu tienda quedará
                   <strong>pendiente hasta que superadmin cargue tu certificado</strong>;
                   mientras tanto no podrá emitir documentos electrónicos.
+                </p>
+              }
+              @case ('documents_partial') {
+                <p class="banner-success__title">
+                  Guardamos lo que aportaste. El trámite aún no se envía.
+                </p>
+                <p class="banner-success__detail">
+                  Registramos la configuración DIAN y los documentos que ya
+                  adjuntaste. El trámite del certificado de firma
+                  <strong>todavía no se envió</strong>, porque el expediente
+                  está incompleto: falta
+                  {{ documentLabelList(success.missing) }}. Puedes continuar
+                  con la activación y volver a este paso para adjuntarlo; el
+                  envío ocurre cuando el expediente esté completo. Hasta
+                  entonces tu tienda no podrá emitir documentos electrónicos.
                 </p>
               }
               @case ('config_saved') {
@@ -258,7 +285,7 @@ type SuccessInfo =
           </fieldset>
         }
 
-        @if (certificateBranch() === 'without_cert' && !hasCertificate()) {
+        @if (identityBranchActive()) {
           <!--
             Carga de documentos de identidad. El juego depende de
             person_type: persona natural nunca aporta certificado de existencia
@@ -341,7 +368,8 @@ type SuccessInfo =
           [disabled]="submitting() || readOnlyForStore()"
           [hasCertificate]="hasCertificate()"
           [certificateExpiry]="certificateExpiry()"
-          [hideCertificate]="certificateBranch() === 'without_cert' && !hasCertificate()"
+          [hideCertificate]="identityBranchActive()"
+          [requireDianCredentials]="!identityBranchActive()"
           [storedTechnicalKeyLength]="storedTechnicalKey()?.length ?? null"
           (validityChange)="onValidity($event)"
         ></app-dian-config-form>
@@ -691,7 +719,20 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
   private readonly host = inject(ElementRef<HTMLElement>);
 
   readonly stepId: FiscalWizardStepId = 'dian_config';
+  /**
+   * Puerta de avance que LEE EL SHELL (`!step()?.valid()` deshabilita su
+   * "Continuar"). No es lo que emite el formulario: es el veredicto que
+   * calcula `recomputeValid()` combinando esa emisión con la regla de la rama
+   * activa. Sigue siendo una signal escribible porque `submit()` necesita
+   * poder forzarla a `false` y dejar el banner como único camino de salida.
+   */
   readonly valid = signal(false);
+  /**
+   * Última validez emitida por `app-dian-config-form`. Se guarda aparte de
+   * `valid` porque en la rama de documentos de identidad la validez del
+   * formulario deja de ser la única condición para avanzar.
+   */
+  private readonly formValid = signal(false);
   readonly submitting = signal(false);
   readonly localError = signal<string | null>(null);
   readonly initial = signal<Partial<DianConfigValue> | null>(null);
@@ -767,6 +808,34 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
   readonly requiredDocumentTypes = computed<IdentityDocumentType[]>(() =>
     this.personType() === 'natural' ? ['rut', 'id'] : ['rut', 'id', 'certificate_of_existence'],
   );
+
+  /**
+   * Rama de documentos de identidad activa: el usuario dijo "no tengo
+   * certificado" y no hay uno propio ni heredado que lo desmienta. Es el
+   * predicado ÚNICO del que cuelgan tres decisiones que antes se escribían
+   * a mano por separado: ocultar el bloque de certificado, relajar la
+   * exigencia de credenciales DIAN, y cambiar la puerta de avance.
+   */
+  readonly identityBranchActive = computed(
+    () => this.certificateBranch() === 'without_cert' && !this.hasCertificate(),
+  );
+
+  /**
+   * Documentos de identidad efectivamente adjuntos, contados SOLO sobre los
+   * que exige el `person_type` actual: un certificado de existencia cargado y
+   * luego cambiado a persona natural no debe seguir sumando.
+   */
+  readonly attachedDocumentCount = computed(() => {
+    const docs = this.identityDocuments();
+    return this.requiredDocumentTypes().filter((type) => docs[type] !== null)
+      .length;
+  });
+
+  /** Documentos del juego completo que todavía faltan por adjuntar. */
+  readonly missingDocumentTypes = computed<IdentityDocumentType[]>(() => {
+    const docs = this.identityDocuments();
+    return this.requiredDocumentTypes().filter((type) => docs[type] === null);
+  });
 
   /** Nombre legible del tenant para mostrar en el hint del expediente. */
   readonly entityDisplayName = computed(() => {
@@ -1025,7 +1094,34 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
   }
 
   onValidity(v: boolean): void {
-    this.valid.set(v);
+    this.formValid.set(v);
+    this.recomputeValid();
+  }
+
+  /**
+   * Decide si el shell puede habilitar su "Continuar".
+   *
+   * En la rama normal la regla es la de siempre: lo que diga el formulario.
+   * En la rama de documentos de identidad la DIAN todavía no ha emitido el
+   * software_id ni la resolución —son justamente lo que el tenant viene a
+   * tramitar—, así que exigirlos deja el botón muerto para siempre. Ahí la
+   * puerta pasa a ser "al menos UN documento adjunto": lo que el paso puede
+   * verificar y lo único que el tenant puede aportar hoy.
+   *
+   * Es un método imperativo y no un `computed` porque `valid` también se
+   * fuerza a `false` desde `submit()`: mientras el banner de resultado está
+   * en pantalla, el único camino de salida debe ser su botón.
+   */
+  private recomputeValid(): void {
+    if (this.successInfo()) {
+      this.valid.set(false);
+      return;
+    }
+    if (this.identityBranchActive()) {
+      this.valid.set(this.formValid() && this.attachedDocumentCount() > 0);
+      return;
+    }
+    this.valid.set(this.formValid());
   }
 
   /**
@@ -1036,6 +1132,9 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
    */
   onBranchChange(branch: 'with_cert' | 'without_cert'): void {
     this.certificateBranch.set(branch);
+    // La rama cambia la regla de avance Y borra los adjuntos: hay que
+    // reevaluar antes de que el usuario toque nada más.
+    this.recomputeValid();
     this.identityDocuments.set({
       rut: null,
       id: null,
@@ -1063,6 +1162,7 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
       ...state,
       [type]: null,
     }));
+    this.recomputeValid();
   }
 
   /**
@@ -1071,6 +1171,10 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
    */
   onDocumentFile(type: IdentityDocumentType, file: File): void {
     this.identityDocuments.update((state) => ({ ...state, [type]: file }));
+    // El primer adjunto es el que abre el "Continuar" en la rama de
+    // identidad; sin este recálculo el botón esperaría a que el formulario
+    // volviera a emitir validez, que puede no ocurrir nunca.
+    this.recomputeValid();
   }
 
   getDocumentFile(type: IdentityDocumentType): File | null {
@@ -1084,6 +1188,17 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
       certificate_of_existence:
         'Certificado de existencia y representación legal',
     }[type];
+  }
+
+  /**
+   * Enumera documentos faltantes en prosa ("el RUT y el documento de
+   * identidad"), para que el banner del expediente parcial diga qué falta
+   * con el mismo nombre que llevan los dropzones de arriba.
+   */
+  documentLabelList(types: IdentityDocumentType[]): string {
+    const labels = types.map((type) => this.documentLabel(type));
+    if (labels.length <= 1) return labels[0] ?? '';
+    return `${labels.slice(0, -1).join(', ')} y ${labels[labels.length - 1]}`;
   }
 
   /**
@@ -1138,6 +1253,17 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
   ): Promise<number | null> {
     const form = this.form();
     if (!form.hasResolutionInput()) {
+      return this.existingResolutionId();
+    }
+
+    // En la rama de documentos de identidad el validador de grupo está
+    // relajado (`requireDianCredentials=false`), así que "hay algo escrito"
+    // ya NO implica "está completo" — que era la premisa que hacía seguro
+    // decidir con `hasResolutionInput()`. Mandar un rango a medias devuelve
+    // 400 y tumba el paso entero por un bloque que la DIAN todavía no ha
+    // emitido. Se omite la persistencia y se conserva la resolución previa
+    // si la había.
+    if (this.identityBranchActive() && !form.hasCompleteResolutionInput()) {
       return this.existingResolutionId();
     }
 
@@ -1267,6 +1393,10 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
     // config has a cert already, so the "with cert" path is a no-op for
     // existing configs.
     const branch = this.certificateBranch();
+    // Lo que falta del juego completo decide DOS cosas más abajo: si el
+    // expediente se manda a la cola del superadmin, y qué banner ve el
+    // usuario. Se lee una sola vez, antes de tocar la red.
+    const missingDocuments = this.missingDocumentTypes();
     const pinTouched =
       Boolean(value.software_pin) && value.software_pin !== MASKED_SECRET;
     const body: Record<string, unknown> = {
@@ -1358,17 +1488,24 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
     } else {
       // ─── Rama "no tengo cert": documentos de identidad ───────────────
       //
-      // La resolución se persiste ANTES de enviar el expediente: la
-      // habilitación de la DIAN exige que la resolución esté registrada
-      // para poder emitir una vez que llegue el cert.
+      // Se sube LO QUE HAYA, sin exigir el juego completo. La puerta de
+      // avance del paso es "al menos un documento" (ver `recomputeValid`):
+      // lanzar acá por un faltante contradiría esa puerta y volvería a
+      // dejar varado al tenant que solo tiene el RUT a mano.
       const docs = this.identityDocuments();
-      for (const document_type of this.requiredDocumentTypes()) {
-        const file = docs[document_type];
-        if (!file) {
-          throw new Error(
-            `Falta el documento obligatorio: ${this.documentLabel(document_type)}.`,
-          );
-        }
+      const attached = this.requiredDocumentTypes().filter(
+        (document_type) => docs[document_type] !== null,
+      );
+      if (attached.length === 0) {
+        // Guarda defensiva: `valid` ya debería haber impedido llegar acá.
+        // Si llegamos, subir cero documentos dejaría una fila vacía que
+        // nadie puede tramitar.
+        throw new Error(
+          'Adjunta al menos un documento de identidad para continuar.',
+        );
+      }
+      for (const document_type of attached) {
+        const file = docs[document_type] as File;
         const fd = new FormData();
         fd.append('document', file);
         fd.append('document_type', document_type);
@@ -1379,15 +1516,24 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
           ),
         );
       }
-      // Enviar el expediente a la cola del superadmin. Falla acá si la
-      // entidad fiscal no tenía la `person_type` correcta o si la fila ya
-      // tenía cert.
-      await firstValueFrom(
-        this.http.post(
-          `${this.baseUrl()}/${configId}/identity-documents/submit`,
-          {},
-        ),
-      );
+
+      // El expediente se ENVÍA a la cola del superadmin SOLO cuando está
+      // completo. El backend (`dian-config.service.ts`,
+      // `submitIdentityDocuments`) rechaza con 400 un expediente incompleto,
+      // y lo documenta así: «Un expediente incompleto en la cola le hace
+      // perder el viaje a un humano y devuelve al tenant a la casilla de
+      // salida días después.» La fila ya nace en
+      // `certificate_provisioning_status = 'documents_pending'`, que es
+      // exactamente el estado de espera correcto para lo que falta. Decisión
+      // explícita: avanzar sí, enviar el expediente no.
+      if (missingDocuments.length === 0) {
+        await firstValueFrom(
+          this.http.post(
+            `${this.baseUrl()}/${configId}/identity-documents/submit`,
+            {},
+          ),
+        );
+      }
     }
 
     // La resolución se persiste en ambas ramas porque la habilitación DIAN
@@ -1416,7 +1562,16 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
         inherited_from: inheritedFrom,
       };
     } else if (branch === 'without_cert') {
-      successInfo = { kind: 'documents_submitted', ref: commitRef };
+      // El banner debe decir la verdad de lo que ACABA de pasar: expediente
+      // enviado solo si se envió; si quedó parcial, nombrar lo que falta.
+      successInfo =
+        missingDocuments.length === 0
+          ? { kind: 'documents_submitted', ref: commitRef }
+          : {
+              kind: 'documents_partial',
+              ref: commitRef,
+              missing: missingDocuments,
+            };
     } else {
       successInfo = { kind: 'config_saved', ref: commitRef };
     }
