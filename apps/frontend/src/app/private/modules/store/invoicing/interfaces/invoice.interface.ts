@@ -11,6 +11,19 @@ import {
   type DianConfigurationType,
   type FiscalDocumentType,
 } from '../../../../../shared/components/dian/fiscal-document-requirements';
+/**
+ * La gravabilidad AIU se lee del ESPEJO DEL CONTRATO, igual que arriba y por la
+ * misma razon: `resolveAiuTaxableBasis` ya sabe tolerar un snapshot sin
+ * `taxable_basis` derivandolo de `regime`, y ya cae hacia la base MAS AMPLIA
+ * ante un valor desconocido. Reescribir esa cascada aca crearia la segunda
+ * copia de la regla que decide cuanto IVA declara un documento fiscal.
+ */
+import {
+  resolveAiuTaxableBasis,
+  type AiuBucket,
+  type AiuTaxableBasis,
+  type AiuVatRegimeLiteral,
+} from '../../../../../core/utils/invoice-profile-config.contract';
 
 /**
  * Estrecha el `configuration_type` que llega del backend a la unión del
@@ -233,11 +246,19 @@ export interface Invoice {
   // gravabilidad no se puede leer desde la propia factura no es auditable.
 
   /**
-   * Régimen con el que se decidió la base gravable. `et_462_1` grava
-   * Administración + Imprevistos + Utilidad; `decreto_1372_1992` grava sólo
-   * Utilidad. NULL en documentos que no son AIU.
+   * Lo que la COLUMNA trae, que ya no es sólo un régimen legal.
+   *
+   * El backend escribe `regimeFromTaxableBasis(basis) ?? basis`, así que bajo
+   * la base `'subtotal'` —la que declina el tratamiento AIU y grava el valor
+   * total del contrato— la columna guarda el literal `'subtotal'`, que ningún
+   * régimen legal representa. Por eso el tipo es {@link PersistedAiuRegime} y
+   * no {@link AiuRegime}: ver el docblock de éste para por qué se separaron en
+   * vez de ampliar uno solo.
+   *
+   * NULL en documentos que no son AIU. Nunca se compara contra un literal a
+   * mano: se lee con {@link resolveInvoiceAiuTaxableBasis}.
    */
-  aiu_regime?: AiuRegime | null;
+  aiu_regime?: PersistedAiuRegime | null;
 
   /**
    * Piso legal aplicado sobre la base gravable, en porcentaje del valor total
@@ -275,8 +296,75 @@ export interface Invoice {
   profile_snapshot?: InvoiceProfileSnapshot | null;
 }
 
-/** Los dos regímenes de IVA sobre AIU que el sistema conoce. */
-export type AiuRegime = 'et_462_1' | 'decreto_1372_1992';
+/**
+ * Los dos regímenes LEGALES de IVA sobre AIU.
+ *
+ * Se toma del espejo del contrato en vez de reescribir la unión: es la misma
+ * que gobiernan `regimeFromTaxableBasis` y `taxableBasisFromRegime`, y una
+ * segunda copia sería el sitio donde se olvidaría un valor nuevo.
+ */
+export type AiuRegime = AiuVatRegimeLiteral;
+
+/**
+ * Lo que la columna `invoices.aiu_regime` puede traer.
+ *
+ * SE SEPARA de {@link AiuRegime} en vez de ampliarlo, y la decisión es lo
+ * importante: `'subtotal'` no es un régimen legal —es la AUSENCIA de
+ * tratamiento AIU—, y ampliar `AiuRegime` lo colaría en cada
+ * `regime === 'et_462_1' ? … : …` del código como si fuera uno. Ésa es
+ * exactamente la rama que acaba diciendo «sólo la utilidad grava» sobre un
+ * documento que gravó el contrato entero, costo reembolsable incluido.
+ *
+ * Con dos tipos, quien lea la columna tiene que decidir explícitamente qué hace
+ * con el tercer valor y el compilador no lo deja pasar por descuido. La lectura
+ * correcta es {@link resolveInvoiceAiuTaxableBasis}.
+ *
+ * Es la MISMA decisión que el backend tomó, con las mismas palabras, en
+ * `AiuRegimeSnapshot` (`invoice-flow/invoice-flow.service.ts`): «no se amplía
+ * `AiuVatRegime` en su archivo de origen porque esa interfaz sólo describe el
+ * ajuste de tienda». Las dos superficies quedan alineadas sin compartir código.
+ */
+export type PersistedAiuRegime = AiuRegime | 'subtotal';
+
+/**
+ * Base gravable EFECTIVA de un documento AIU, con tolerancia a las dos
+ * generaciones del dato persistido.
+ *
+ * Es el ÚNICO punto de lectura de la gravabilidad de una factura emitida: nadie
+ * compara literales de `aiu_regime` ni de `aiu_taxable_matrix.regime` a mano.
+ * Precedencia: la clave nueva de la matriz, luego la columna del documento,
+ * luego el `regime` viejo de la matriz.
+ *
+ * El valor encontrado se ofrece a `resolveAiuTaxableBasis` en LAS DOS ranuras a
+ * propósito. La columna guarda `regimeFromTaxableBasis(basis) ?? basis`, o sea
+ * a veces un régimen legal (`'et_462_1'`) y a veces una base (`'subtotal'`), y
+ * no hay forma de saber cuál sin probar: la ranura `taxable_basis` sólo acepta
+ * el valor si está en `AIU_TAXABLE_BASES`, y si no cae a `regime`. Pasarlo sólo
+ * como régimen convertiría un `'subtotal'` en `'aiu'` —y el panel afirmaría un
+ * piso del 10 % sobre un documento que se calculó sin piso—; pasarlo sólo como
+ * base perdería `'et_462_1'` y `'decreto_1372_1992'`, que son los dos únicos
+ * literales de régimen que la columna llega a guardar (`AiuVatRegimeLiteral`
+ * tiene exactamente esos dos; el tercer valor de la columna es la base
+ * `'subtotal'`, no un régimen).
+ *
+ * Sin ninguna de las tres fuentes devuelve `'aiu'`, la base MÁS AMPLIA, que es
+ * el default conservador del contrato: declarar de más se corrige con nota
+ * crédito, declarar de menos se sanciona.
+ */
+export function resolveInvoiceAiuTaxableBasis(
+  invoice:
+    | Pick<Invoice, 'aiu_regime' | 'aiu_taxable_matrix'>
+    | null
+    | undefined,
+): AiuTaxableBasis {
+  const matrix = invoice?.aiu_taxable_matrix ?? null;
+  const persisted =
+    matrix?.taxable_basis ?? invoice?.aiu_regime ?? matrix?.regime ?? null;
+  return resolveAiuTaxableBasis({
+    taxable_basis: persisted as AiuTaxableBasis | null,
+    regime: (persisted as AiuRegime | null) ?? 'et_462_1',
+  });
+}
 
 /**
  * Una tarifa concreta que un componente declaró. `rate_basis` distingue la
@@ -291,8 +379,14 @@ export interface AiuTaxableMatrixRate {
 }
 
 export interface AiuTaxableMatrixComponent {
-    component: AiuComponent;
-    /** Si el régimen lo metió en la base gravable. */
+    /**
+     * `AiuBucket` y no `AiuComponent`: bajo la base `'subtotal'` el COSTO
+     * reembolsable entra a la base gravable, así que la matriz declara una
+     * cuarta fila `'costo'` que la unión de tres componentes no podía nombrar
+     * —y la fila se pintaba con su clave cruda—.
+     */
+    component: AiuBucket;
+    /** Si la base gravable declarada lo metió en el impuesto. */
     taxable: boolean;
     /** Cuántas líneas del documento aportaron a este componente. */
     lines: number;
@@ -302,7 +396,28 @@ export interface AiuTaxableMatrixComponent {
 }
 
 export interface AiuTaxableMatrix {
-    regime: AiuRegime;
+    /**
+     * Base gravable con la que se calculó. Es la clave que el backend escribe
+     * hoy (`buildAiuTaxableMatrix`) y la única que puede representar
+     * `'subtotal'`.
+     *
+     * OPCIONAL a propósito, aunque el servidor la mande siempre: este `jsonb`
+     * es INMUTABLE y hay filas escritas antes de que el campo existiera.
+     * Declararlo requerido le diría a `tsc` que `matrix.taxable_basis` está
+     * presente en toda matriz, y un `AIU_TAXABLE_BUCKETS_BY_BASIS[…]` sobre una
+     * matriz vieja daría `undefined` sin una sola queja del compilador.
+     */
+    taxable_basis?: AiuTaxableBasis | null;
+    /**
+     * Régimen legal equivalente, cuando existe.
+     *
+     * Pasó de requerido a opcional porque ya nunca es la única fuente: las
+     * matrices viejas sólo tienen esta clave, y en las nuevas viaja derivada
+     * —o `null`, porque bajo `'subtotal'` no hay régimen que citar—. Leerla
+     * directamente es el defecto; la lectura correcta es
+     * {@link resolveInvoiceAiuTaxableBasis}.
+     */
+    regime?: AiuRegime | null;
     /** En qué momento se construyó: `invoice:create`, `invoice:update:{id}`… */
     stage?: string | null;
     minimum?: {
@@ -312,11 +427,14 @@ export interface AiuTaxableMatrix {
     } | null;
     components: AiuTaxableMatrixComponent[];
     /**
-     * Componentes que el régimen SÍ grava y que aun así no declararon ninguna
-     * tarifa. Cada entrada es IVA que el documento debía declarar y no
+     * Buckets que la base gravable SÍ grava y que aun así no declararon
+     * ninguna tarifa. Cada entrada es IVA que el documento debía declarar y no
      * declara: vacío es lo correcto, no vacío es un rechazo FAU04 esperando.
+     *
+     * `AiuBucket` por lo mismo que la fila de arriba: bajo `'subtotal'` el
+     * costo reembolsable grava, así que puede aparecer aquí.
      */
-    taxable_without_rate?: AiuComponent[];
+    taxable_without_rate?: AiuBucket[];
 }
 
 export interface InvoiceProfileSnapshot {

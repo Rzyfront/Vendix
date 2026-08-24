@@ -1,5 +1,6 @@
 import {
     AiuBucket,
+    AiuTaxableBasis,
     InvoiceProfileConfig,
 } from '../../../../../core/utils/invoice-profile-config.contract';
 
@@ -296,7 +297,25 @@ export interface ProfilePreviewTotals {
 
 /** Resumen AIU del preview. Ausente en un perfil no AIU. */
 export interface ProfilePreviewAiuSummary {
-    regime: string;
+    /**
+     * Base gravable con la que el preview calculó. Es la clave que
+     * `CalculatedAiu` manda hoy —el backend dejó de mandar `regime` en esta
+     * respuesta—, y la única que puede representar `'subtotal'`.
+     *
+     * Requerida y no opcional al contrario que en la matriz de la factura: el
+     * preview se CALCULA en cada petición y nunca se persiste, así que no
+     * existen respuestas de una generación anterior que tolerar.
+     */
+    taxable_basis: AiuTaxableBasis;
+    /**
+     * Régimen legal equivalente. Opcional y sólo por la ventana de transición
+     * —bajo `'subtotal'` no hay régimen y llega `null`—. No se lee para decidir
+     * nada: la gravabilidad la declara `taxable_basis`. Estaba declarado
+     * requerido mientras el servidor ya no lo mandaba, así que cualquier
+     * consumidor que lo leyera obtenía `undefined` con el tipo diciendo
+     * `string`.
+     */
+    regime?: string | null;
     contract_value: string;
     aiu_value: string;
     taxable_base: string;

@@ -43,6 +43,7 @@ import {
     buildDefaultAiuProfileConfig,
     formatPercentScaled,
     isBlockingIssue,
+    normalizeInvoiceProfileConfig,
     parsePercentScaled,
     resolveAiuComponentsBasis,
     validateInvoiceProfileConfig,
@@ -2188,15 +2189,44 @@ export class InvoiceProfileEditorComponent {
         new Set<SectionId>(['documento', 'aiu', 'lineas']),
     );
 
-    /** Problemas del snapshot actual, con la MISMA función que usa el backend. */
+    /**
+     * Problemas del snapshot actual, con las MISMAS DOS MITADES que corre el
+     * backend y en el mismo orden.
+     *
+     * ─── POR QUÉ NO BASTA CON `validateInvoiceProfileConfig` ─────────────────
+     *
+     * Porque no es la puerta del servidor. La única por la que un `config`
+     * puede entrar a `invoice_profile_versions.config` es
+     * `normalizeAndAssertProfileConfig`, que corre
+     * `normalizeInvoiceProfileConfig` **antes** de validar y concatena los
+     * problemas de las dos mitades en una sola lista: primero los
+     * ESTRUCTURALES —claves desconocidas, contenedores del tipo equivocado— y
+     * luego los FISCALES.
+     *
+     * Los `UNKNOWN_KEY` nacen en el normalizador, y este editor no lo corría.
+     * Así que la pantalla decía «sin problemas», habilitaba «Guardar», y el
+     * POST volvía con un 422 sobre un campo que la UI acababa de pintar —el
+     * peor momento posible, porque el usuario ya dio la orden y el mensaje
+     * nombra una clave que él no escribió—. Validar media puerta es peor que no
+     * validar: promete un veredicto que el servidor no honra.
+     *
+     * El validador corre sobre el config NORMALIZADO, no sobre el crudo, por lo
+     * mismo que en el backend: es la forma que de verdad se va a persistir.
+     */
     readonly issues = computed<ProfileConfigIssue[]>(() => {
         // Se lee `form_value()` sólo para declarar la dependencia: el snapshot
         // se arma desde el formulario, que es la fuente de verdad de los
         // `FormArray` (el valor plano no distingue arreglos vacíos de ausentes).
         this.form_value();
-        return validateInvoiceProfileConfig(this.buildConfig(), {
-            operation_type: this.operationType(),
-        });
+        const { config, issues: structural } = normalizeInvoiceProfileConfig(
+            this.buildConfig(),
+        );
+        return [
+            ...structural,
+            ...validateInvoiceProfileConfig(config, {
+                operation_type: this.operationType(),
+            }),
+        ];
     });
     readonly blockers = computed(() => blockingIssues(this.issues()));
     readonly warnings = computed(() => this.issues().filter((i) => !isBlockingIssue(i)));

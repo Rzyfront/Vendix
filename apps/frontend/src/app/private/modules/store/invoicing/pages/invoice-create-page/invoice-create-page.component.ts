@@ -160,15 +160,56 @@ import {
 import type {
   AiuComponentLiteral,
   AiuComponentsBasis,
+  AiuTaxableBasis,
+  AiuVatRegimeLiteral,
   InvoiceProfileConfig,
   ProfileAiuConfig,
 } from '../../../../../../core/utils/invoice-profile-config.contract';
 import {
   AIU_COMPONENTS,
+  AIU_TAXABLE_BUCKETS_BY_BASIS,
   formatPercentScaled,
   parsePercentScaled,
+  regimeFromTaxableBasis,
   resolveAiuComponentsBasis,
+  resolveAiuTaxableBasis,
 } from '../../../../../../core/utils/invoice-profile-config.contract';
+
+/**
+ * La configuración AIU efectiva del documento, con la BASE GRAVABLE al frente.
+ *
+ * ─── POR QUÉ NO ES `InvoiceAiuSettings` A SECAS ──────────────────────────────
+ *
+ * `InvoiceAiuSettings` es el espejo de `GET /store/invoicing/aiu-settings`, y
+ * ese endpoint responde SÓLO `regime`, con los dos regímenes legales. No es un
+ * rezago de la transición: `AiuSettings.regime` —el ajuste de tienda, en
+ * `settings/interfaces/store-settings.interface.ts`— nunca tuvo `taxable_basis`
+ * y no va a tenerlo, porque `'subtotal'` no es un default de tienda. Lo dice el
+ * backend en su propio comentario sobre `AiuRegimeSnapshot`
+ * (`invoice-flow.service.ts`): «el tercer valor sólo llega vía snapshot de
+ * perfil o de factura, nunca vía ajuste vivo». Verificado en
+ * `InvoicingService.getAiuSettingsView`.
+ *
+ * Así que en la rama SIN perfil el `regime` de la tienda es la fuente legítima
+ * y completa —pero se lee DERIVANDO con `resolveAiuTaxableBasis`, nunca
+ * comparándolo contra un literal—, y en la rama CON perfil la fuente es
+ * `taxable_basis` del snapshot, que sí puede decir `'subtotal'`. Meter ese
+ * tercer valor en un campo tipado `'et_462_1' | 'decreto_1372_1992'` obligaría
+ * al compilador a elegir uno de los dos: es la mentira que este tipo existe
+ * para hacer imposible.
+ *
+ * Por eso la base viaja aparte y `regime` pasa a ser NULLABLE —el régimen legal
+ * equivalente cuando existe, `null` bajo `'subtotal'`—. Quien decide
+ * gravabilidad lee `taxable_basis`; `regime` queda sólo para citar la norma. Es
+ * la misma decisión —separar en vez de ampliar— que el backend tomó con
+ * `AiuRegimeSnapshot` y esta rama con `PersistedAiuRegime`.
+ */
+type EffectiveAiuSettings = Omit<InvoiceAiuSettings, 'regime'> & {
+  /** Qué porción del contrato grava. Es la única fuente de la decisión. */
+  taxable_basis: AiuTaxableBasis;
+  /** Régimen legal equivalente, o `null` cuando no hay ninguno que citar. */
+  regime: AiuVatRegimeLiteral | null;
+};
 
 /**
  * Códigos de la tabla 13.2.2 del anexo que son tributos de DOCUMENTO, o sea los
@@ -3564,9 +3605,24 @@ export class InvoiceCreatePageComponent implements OnInit {
    * `null` mientras la lectura está en vuelo o falló: media instrucción es peor
    * que ninguna, y la instrucción EQUIVOCADA es peor que las dos.
    */
-  readonly effectiveAiu = computed<InvoiceAiuSettings | null>(() => {
+  readonly effectiveAiu = computed<EffectiveAiuSettings | null>(() => {
     const store = this.aiuSettings();
-    if (this.selectedProfileId() === PROFILE_NONE) return store;
+    if (this.selectedProfileId() === PROFILE_NONE) {
+      // Sin perfil manda `store_settings`, que no tiene `taxable_basis`: se
+      // deriva de su `regime` con el MISMO resolvedor del backend en vez de
+      // asumir `'aiu'`. Asumirla instruiría «AIU completo» a toda tienda del
+      // Decreto 1372/1992, que grava sólo la utilidad.
+      return store
+        ? {
+            ...store,
+            taxable_basis: resolveAiuTaxableBasis({
+              regime: store.regime,
+              taxable_basis: null,
+            }),
+            regime: store.regime,
+          }
+        : null;
+    }
     if (this.profileConfigLoading() || this.profileConfigFailed()) return null;
 
     const aiu = this.profileAiu();
@@ -3580,9 +3636,22 @@ export class InvoiceCreatePageComponent implements OnInit {
     // iguales para tienda y perfil: se heredan del setting en vez de duplicarse.
     const object = (aiu.contract_object ?? '').trim();
     const note = object ? `${store.note_prefix} ${object}` : '';
+    // LA BASE SE DERIVA, NO SE COPIA. `aiu.regime` seguía existiendo en el
+    // snapshot del perfil incluso cuando su `taxable_basis` decía otra cosa, y
+    // leerlo a secas producía el peor desalineamiento del módulo: un perfil
+    // `{ taxable_basis: 'subtotal', regime: 'et_462_1' }` hacía que esta
+    // pantalla instruyera «AIU completo, piso del 10 %» mientras el backend
+    // —que resuelve por `resolveAiuTaxableBasis`— gravaba el contrato entero,
+    // costo reembolsable incluido, sin piso alguno. El operador seguía la
+    // instrucción, la DIAN aceptaba el documento porque el XML cuadra consigo
+    // mismo, y el faltante sólo aparecía en una fiscalización.
+    const taxable_basis = resolveAiuTaxableBasis(aiu);
     return {
       ...store,
-      regime: aiu.regime,
+      taxable_basis,
+      // El régimen legal se deriva de la base, nunca al revés: bajo
+      // `'subtotal'` no hay régimen que citar y el campo queda en `null`.
+      regime: regimeFromTaxableBasis(taxable_basis),
       contract_object: aiu.contract_object ?? '',
       enforce_minimum_base: aiu.enforce_minimum_base,
       // Conversión SÓLO para el texto del instructivo. El importe del piso lo
@@ -3593,7 +3662,8 @@ export class InvoiceCreatePageComponent implements OnInit {
       note_valid:
         note.length >= store.note_min_length &&
         note.length <= store.note_max_length,
-      // El perfil ELIGIÓ el régimen: no hay «valor por defecto» que advertir.
+      // El perfil ELIGIÓ la base gravable: no hay «valor por defecto» que
+      // advertir.
       is_default: false,
     };
   });
@@ -3916,9 +3986,15 @@ export class InvoiceCreatePageComponent implements OnInit {
     });
 
     // El residuo del truncamiento —a lo sumo dos centavos— va a la UTILIDAD,
-    // que es gravable bajo los dos regímenes. Sumarlo ahí declara un centavo
-    // más de base, que es el lado recuperable del error; restarlo de un
-    // componente gravable declararía de menos ante la DIAN.
+    // que es la única porción gravable bajo las TRES bases (`'aiu'`,
+    // `'utilidad'` y `'subtotal'`). El razonamiento sigue en pie con la tercera
+    // y de hecho se estrecha: bajo `'aiu'` y bajo `'subtotal'` la base ya
+    // contiene el AIU completo —y con `'subtotal'` también el costo—, así que
+    // repartir el centavo entre componentes NO mueve la base ni un peso; el
+    // destino sólo importa bajo `'utilidad'`, donde la base es ese único
+    // componente. Y ahí sumarlo declara un centavo MÁS de base, que es el lado
+    // recuperable del error; restarlo del componente gravable declararía de
+    // menos ante la DIAN.
     const residual = aiuCents - assigned;
     if (residual !== 0) {
       const utilidad = parts.find((part) => part.bucket === 'utilidad');
@@ -4091,7 +4167,7 @@ export class InvoiceCreatePageComponent implements OnInit {
     const settings = this.effectiveAiu();
     if (!settings) return null;
 
-    if (settings.regime === 'decreto_1372_1992') {
+    if (settings.taxable_basis === 'utilidad') {
       return {
         regimeLabel: 'Decreto 1372/1992',
         regimeCitation: 'art. 3 — contratos de construcción de inmueble',
@@ -4101,6 +4177,27 @@ export class InvoiceCreatePageComponent implements OnInit {
         // El piso del 10 % es del 462-1; bajo el decreto no existe, y
         // mencionarlo acá haría que el comerciante infle una base que la ley
         // no le exige.
+        minimumBase: null,
+        isDefault: settings.is_default,
+      };
+    }
+
+    // TERCERA RAMA — no había ninguna, y su ausencia era el defecto: un perfil
+    // con `taxable_basis: 'subtotal'` caía en el `return` de abajo y se le
+    // instruía «AIU completo, piso del 10 %» mientras el servidor gravaba el
+    // contrato ENTERO sin piso. La instrucción no sólo era distinta: pedía
+    // dejar SIN impuesto la línea de costo reembolsable, que bajo esta base es
+    // justo la que grava.
+    if (settings.taxable_basis === 'subtotal') {
+      return {
+        regimeLabel: 'Sin tratamiento AIU',
+        regimeCitation: 'el IVA grava el valor total del contrato',
+        taxableLabel: 'Contrato completo',
+        instruction:
+          'Declara el impuesto sobre TODAS las líneas, incluida la de costo reembolsable: este perfil declinó el desglose AIU y la base gravable es el valor total del contrato. Dejar el costo sin impuesto contradice la base declarada y la emisión se rechaza (INVOICING_AIU_004).',
+        // No hay piso: el piso del art. 462-1 protege una base que es una
+        // FRACCIÓN del contrato. Acá la base ya es el contrato entero, así que
+        // no hay nada por debajo de lo cual pueda quedar.
         minimumBase: null,
         isDefault: settings.is_default,
       };
@@ -4144,11 +4241,15 @@ export class InvoiceCreatePageComponent implements OnInit {
     const settings = this.effectiveAiu();
     if (!settings) return [];
 
-    // Bajo el Decreto 1372/1992 sólo la utilidad grava; bajo el 462-1, los tres
-    // componentes. Es la misma pregunta que responde `isAiuTaxable` en el
-    // backend, y se escribe igual para que no puedan divergir.
+    // Qué buckets gravan lo dice `AIU_TAXABLE_BUCKETS_BY_BASIS`, la MISMA tabla
+    // que consulta `isAiuTaxable` en el backend. Se lee de ahí en vez de
+    // reescribir el ternario: el ternario anterior sólo conocía dos regímenes,
+    // así que bajo `'subtotal'` —donde gravan los cuatro buckets— caía en la
+    // rama del Decreto y avisaba únicamente por la utilidad, callando el IVA
+    // faltante de administración e imprevistos.
+    const taxableBuckets = AIU_TAXABLE_BUCKETS_BY_BASIS[settings.taxable_basis];
     const isTaxable = (component: string): boolean =>
-      settings.regime === 'et_462_1' ? true : component === 'utilidad';
+      taxableBuckets.includes(component as AiuComponentLiteral);
 
     const labels = new Map(
       AIU_COMPONENT_OPTIONS.map((option) => [
@@ -5147,8 +5248,14 @@ export class InvoiceCreatePageComponent implements OnInit {
       return;
     }
     if (this.lineCarriesAiu(item)) return;
-    const regime = this.effectiveAiu()?.regime;
-    control.setValue(regime === 'decreto_1372_1992' ? 'utilidad' : 'administracion');
+    // Primer componente GRAVABLE de la base vigente, leído de la tabla del
+    // contrato. Con `'utilidad'` sólo grava la utilidad; con `'aiu'` y con
+    // `'subtotal'` graban los tres, y se propone Administración.
+    const basis = this.effectiveAiu()?.taxable_basis ?? 'aiu';
+    const first = AIU_TAXABLE_BUCKETS_BY_BASIS[basis].find(
+      (bucket): bucket is AiuComponentLiteral => bucket !== 'costo',
+    );
+    control.setValue(first ?? 'administracion');
     control.markAsDirty();
   }
 

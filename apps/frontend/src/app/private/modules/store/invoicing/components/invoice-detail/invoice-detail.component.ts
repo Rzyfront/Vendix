@@ -20,6 +20,7 @@ import {
   Invoice,
   InvoiceItem,
   InvoiceTax,
+  resolveInvoiceAiuTaxableBasis,
 } from '../../interfaces/invoice.interface';
 import { InvoicingService } from '../../services/invoicing.service';
 import { DocumentPrintService } from '../../../../../../shared/services/print/document-print.service';
@@ -1549,19 +1550,26 @@ export class InvoiceDetailComponent {
     const matrix = inv?.aiu_taxable_matrix ?? null;
     if (!inv || !matrix) return null;
 
-    const regime = matrix.regime ?? inv.aiu_regime ?? null;
+    // Se nombra la BASE GRAVABLE, no el régimen, y por eso hay un resolvedor en
+    // vez de un `??` entre dos claves: bajo `'subtotal'` NINGUNA de las dos
+    // trae un régimen legal —no existe— y la cascada anterior caía en «Régimen
+    // no declarado / el documento no dejó constancia». Era el peor sitio
+    // posible para un hueco: este panel es el que se abre cuando la DIAN
+    // pregunta, y afirmaba que no se sabía con qué se calculó un documento que
+    // sí lo dejó dicho.
+    const basis = resolveInvoiceAiuTaxableBasis(inv);
     const regimeLabel =
-      regime === 'decreto_1372_1992'
-        ? 'Decreto 1372/1992'
-        : regime === 'et_462_1'
-          ? 'Art. 462-1 ET'
-          : 'Régimen no declarado';
+      basis === 'utilidad'
+        ? 'Decreto 1372/1992 · sólo Utilidad'
+        : basis === 'subtotal'
+          ? 'Sin tratamiento AIU · base = contrato completo'
+          : 'Art. 462-1 ET · AIU completo';
     const regimeHint =
-      regime === 'decreto_1372_1992'
+      basis === 'utilidad'
         ? 'Grava sólo la Utilidad. Es el régimen de los contratos de construcción.'
-        : regime === 'et_462_1'
-          ? 'Grava Administración, Imprevistos y Utilidad.'
-          : 'El documento no dejó constancia del régimen con el que se calculó.';
+        : basis === 'subtotal'
+          ? 'El documento declinó el tratamiento AIU: el impuesto se calculó sobre el valor TOTAL del contrato —costo reembolsable incluido— y sin piso legal, porque no hay AIU que pisar.'
+          : 'Grava Administración, Imprevistos y Utilidad.';
 
     // ── Perfil congelado. La ausencia es información, no un hueco: dice que
     //    la configuración vino de `store_settings`, que es mutable, y que por
@@ -1598,14 +1606,21 @@ export class InvoiceDetailComponent {
       : 'Sin piso legal';
     const minimumHint = minimumApplied
       ? 'La base gravable no bajó de este porcentaje del valor del contrato.'
-      : regime === 'decreto_1372_1992'
+      : basis === 'utilidad'
         ? 'El Decreto 1372/1992 no fija piso sobre la utilidad del constructor.'
-        : 'El piso quedó desactivado explícitamente para este documento.';
+        : basis === 'subtotal'
+          ? 'Sin tratamiento AIU no hay piso que aplicar: la base gravable ya es el valor total del contrato.'
+          : 'El piso quedó desactivado explícitamente para este documento.';
 
+    // `costo` es el CUARTO bucket, y aparece en la matriz cuando la base es
+    // `'subtotal'`: ahí el costo reembolsable sí grava. Sin esta entrada la
+    // fila se pintaba con su clave cruda —«costo», en minúscula y sin
+    // explicación— justo en la tabla que sustenta la gravabilidad declarada.
     const componentLabel: Record<string, string> = {
       administracion: 'Administración',
       imprevistos: 'Imprevistos',
       utilidad: 'Utilidad',
+      costo: 'Costo reembolsable',
     };
 
     const rows = (matrix.components ?? []).map((c) => ({
@@ -1942,11 +1957,16 @@ export class InvoiceDetailComponent {
   /**
    * Cómo se rotula la marca AIU de una línea, y qué explica al pasar el cursor.
    *
-   * El texto de ayuda no es adorno: bajo el Art. 462-1 ET se grava el AIU
-   * completo y bajo el Decreto 1372/1992 sólo la utilidad, así que la MISMA
-   * línea de «Imprevistos» lleva impuesto o no según el régimen configurado. Lo
-   * que la pantalla puede afirmar sin conocer el régimen es qué componente es;
-   * lo demás lo dice la línea misma con su columna de impuestos.
+   * El texto de ayuda no es adorno: hay TRES bases gravables y la misma línea
+   * de «Imprevistos» lleva impuesto o no según cuál rija —`'aiu'` y
+   * `'subtotal'` la gravan, `'utilidad'` no—. Lo que la pantalla puede afirmar
+   * sin conocer la base es qué componente es; lo demás lo dice la línea misma
+   * con su columna de impuestos, y el panel de trazabilidad de arriba nombra la
+   * base con la que se calculó.
+   *
+   * Los textos decían «los dos regímenes» y contaban de menos: con la tercera
+   * base, «gravable en los dos» es una afirmación falsa en el sitio donde se
+   * audita un documento ya emitido.
    */
   aiuLabel(item: InvoiceItem): { label: string; hint: string } | null {
     switch (item.aiu_component) {
@@ -1958,12 +1978,12 @@ export class InvoiceDetailComponent {
       case 'imprevistos':
         return {
           label: 'AIU · Imprevistos',
-          hint: 'Componente de Imprevistos. Grava sólo bajo el Art. 462-1 ET; bajo el Decreto 1372/1992 queda fuera de la base gravable y se emite sin bloque de impuestos.',
+          hint: 'Componente de Imprevistos. Grava bajo el Art. 462-1 ET y cuando se declinó el tratamiento AIU (base = contrato completo); bajo el Decreto 1372/1992 queda fuera de la base gravable y se emite sin bloque de impuestos.',
         };
       case 'utilidad':
         return {
           label: 'AIU · Utilidad',
-          hint: 'Componente de Utilidad. Es base gravable en los dos regímenes.',
+          hint: 'Componente de Utilidad. Es la única porción que es base gravable en las TRES bases: AIU completo, sólo utilidad, y contrato completo.',
         };
       default:
         return null;
