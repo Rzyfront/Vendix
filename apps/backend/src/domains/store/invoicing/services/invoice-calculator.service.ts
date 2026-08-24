@@ -14,7 +14,7 @@ import {
 } from '../providers/dian-direct/constants/dian-tax-codes';
 import { UblCommonBuilder } from '../providers/dian-direct/xml/ubl-common.builder';
 import type { ProviderInvoiceTax } from '../providers/invoice-provider.interface';
-import type { AiuVatRegime } from '../../settings/interfaces/store-settings.interface';
+import type { AiuTaxableBasis } from '../profiles/invoice-profile-config.contract';
 
 /**
  * MOTOR ARITMÉTICO ÚNICO DE UN DOCUMENTO FISCAL DIAN.
@@ -165,11 +165,18 @@ export type AiuComponent = 'administracion' | 'imprevistos' | 'utilidad';
  */
 export interface InvoiceCalculatorAiuInput {
   /**
-   * Qué componentes entran a la base gravable del IVA. Ver `AiuVatRegime`: es
+   * Qué porción entra a la base gravable del IVA. Ver `AiuTaxableBasis`: es
    * configuración explícita de la tienda porque depende del CONTRATO y porque
-   * equivocarse no produce ningún error visible, sólo menos IVA declarado.
+   * equivocarse no produce ningún error visible, sólo menos —o de más— IVA
+   * declarado.
+   *
+   * · `'aiu'` — A+I+U completo, con piso legal (espejo de `regime: 'et_462_1'`).
+   * · `'utilidad'` — sólo la Utilidad, sin piso (espejo de
+   *   `regime: 'decreto_1372_1992'`).
+   * · `'subtotal'` — se declina el tratamiento AIU: TODA línea graba, incluida
+   *   la de costo reembolsable. No tiene régimen legal asociado.
    */
-  regime: AiuVatRegime;
+  taxable_basis: AiuTaxableBasis;
   /**
    * Exigir el piso del 10 % del valor del contrato (E.T. art. 462-1). Sólo
    * aplica bajo `et_462_1`; el Decreto 1372/1992 no fija piso.
@@ -468,7 +475,7 @@ export interface InvoiceCalculatorTotals {
 
 /** Resumen del régimen AIU. Sólo presente cuando el documento lo declara. */
 export interface CalculatedAiu {
-  regime: AiuVatRegime;
+  taxable_basis: AiuTaxableBasis;
   /** Σ `line_extension_amount` de TODAS las líneas — el valor del contrato. */
   contract_value: string;
   /** Σ `line_extension_amount` de las líneas A+I+U, entren o no a la base. */
@@ -816,27 +823,36 @@ export class InvoiceCalculatorService {
   // --- AIU ---
 
   /**
-   * ¿La línea entra a la base gravable del IVA bajo el régimen declarado?
+   * ¿La línea entra a la base gravable del IVA bajo la base declarada?
    *
-   * Las DOS respuestas son legales y la diferencia es toda la base gravable:
+   * Las TRES respuestas son legales y la diferencia es toda la base gravable:
    *
-   * · `et_462_1` (E.T. art. 462-1 — aseo y cafetería, vigilancia autorizada,
-   *   servicios temporales de empleo, CTA): grava el AIU **completo**, o sea
-   *   las tres componentes.
-   * · `decreto_1372_1992` (art. 3 — contratos de construcción de bien
-   *   inmueble): grava **sólo la Utilidad**.
+   * · `'aiu'` (espejo de `et_462_1`, E.T. art. 462-1 — aseo y cafetería,
+   *   vigilancia autorizada, servicios temporales de empleo, CTA): grava el
+   *   AIU **completo**, o sea las tres componentes.
+   * · `'utilidad'` (espejo de `decreto_1372_1992`, art. 3 — contratos de
+   *   construcción de bien inmueble): grava **sólo la Utilidad**.
+   * · `'subtotal'`: se declina el tratamiento AIU y grava el contrato
+   *   **completo**, costo reembolsable incluido — no tiene régimen legal
+   *   asociado porque es, precisamente, la ausencia de uno.
    *
-   * Una línea SIN componente nunca grava, en ninguno de los dos regímenes: es
-   * la porción de COSTO reembolsable del contrato. En un contrato de aseo de
+   * Una línea SIN componente nunca grava bajo `'aiu'` ni `'utilidad'`: es la
+   * porción de COSTO reembolsable del contrato. En un contrato de aseo de
    * $100M con AIU de $10M, esos $90M de nómina e insumos son justamente esas
-   * líneas, y gravarlos multiplicaría por diez el IVA de la operación.
+   * líneas, y gravarlos multiplicaría por diez el IVA de la operación. Bajo
+   * `'subtotal'` esa protección no aplica a propósito: ahí no hay AIU que
+   * proteger, el contrato entero es la base.
    */
   private isAiuTaxable(
     component: AiuComponent | null,
     aiu: InvoiceCalculatorAiuInput,
   ): boolean {
+    // Bajo «subtotal» se declina el tratamiento AIU: TODA línea graba,
+    // incluida la de costo reembolsable (`component === null`) — es
+    // exactamente lo que distingue esta base de las otras dos.
+    if (aiu.taxable_basis === 'subtotal') return true;
     if (component === null) return false;
-    return aiu.regime === 'et_462_1' ? true : component === 'utilidad';
+    return aiu.taxable_basis === 'aiu' ? true : component === 'utilidad';
   }
 
   /**
@@ -881,7 +897,7 @@ export class InvoiceCalculatorService {
     );
 
     const enforce =
-      aiu.regime === 'et_462_1' && aiu.enforce_minimum_base !== false;
+      aiu.taxable_basis === 'aiu' && aiu.enforce_minimum_base !== false;
     const percent = this.hasValue(aiu.minimum_base_percent)
       ? toDecimal(aiu.minimum_base_percent)
       : DEFAULT_AIU_MINIMUM_PERCENT;
@@ -907,7 +923,7 @@ export class InvoiceCalculatorService {
     }
 
     return {
-      regime: aiu.regime,
+      taxable_basis: aiu.taxable_basis,
       contract_value,
       aiu_value,
       taxable_base,

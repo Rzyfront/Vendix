@@ -330,15 +330,44 @@ interface WithholdingBatch {
 }
 
 /**
- * Lo que el AIU cambia en la EMISIÓN: el régimen que decide qué líneas gravan y
- * la nota legal de la línea de Administración.
+ * Valor persistido en `invoices.aiu_regime`. Espejo local de `AiuVatRegime`
+ * (`settings/interfaces/store-settings.interface.ts`) con `'subtotal'`
+ * agregado: la tercera base gravable, que declina el tratamiento AIU y no
+ * tiene régimen legal asociado. No se amplía `AiuVatRegime` en su archivo de
+ * origen porque esa interfaz sólo describe el AJUSTE DE TIENDA (2 valores,
+ * `'subtotal'` nunca es un default de tienda, ver
+ * `InvoicingService.getAiuSettingsView`) — el tercer valor sólo llega vía
+ * snapshot de perfil o de factura, nunca vía ajuste vivo.
+ */
+type AiuRegimeSnapshot = AiuVatRegime | 'subtotal';
+
+/** Texto legible de {@link AiuRegimeSnapshot} para mensajes al operador. */
+function describeAiuRegime(regime: AiuRegimeSnapshot): string {
+  switch (regime) {
+    case 'et_462_1':
+      return 'el régimen E.T. art. 462-1 (AIU completo)';
+    case 'decreto_1372_1992':
+      return 'el régimen Decreto 1372/1992 (sólo la utilidad)';
+    case 'subtotal':
+      return 'la base Subtotal (sin tratamiento AIU)';
+  }
+}
+
+/**
+ * Lo que el AIU cambia en la EMISIÓN: la base gravable declarada que decide
+ * qué líneas gravan, y la nota legal de la línea de Administración.
  *
  * Se recompone acá, desde la misma configuración y con la misma `buildAiuNote`
  * que usó `InvoicingService` al crear el documento, porque la nota no se
  * persiste en ninguna columna. Ver la nota de `resolveAiuContext` allá.
  */
 interface AiuEmissionContext {
-  regime: AiuVatRegime;
+  /**
+   * Sigue llamándose `regime` porque así se llama la columna que lo persiste
+   * (`invoices.aiu_regime`), pero desde que existe `'subtotal'` ya no es
+   * siempre un régimen legal: puede ser la ausencia deliberada de uno.
+   */
+  regime: AiuRegimeSnapshot;
   /** Cadena YA COMPUESTA para `cbc:Note` de la línea de Administración. */
   note: string;
   /**
@@ -2137,23 +2166,27 @@ export class InvoiceFlowService {
     invoice: { id: number; aiu_regime?: string | null },
     settings: AiuSettings,
   ): Pick<AiuEmissionContext, 'regime' | 'regime_source'> {
-    const KNOWN: readonly AiuVatRegime[] = ['et_462_1', 'decreto_1372_1992'];
+    const KNOWN: readonly AiuRegimeSnapshot[] = [
+      'et_462_1',
+      'decreto_1372_1992',
+      'subtotal',
+    ];
     const frozen = (invoice.aiu_regime || '').trim();
 
     if (frozen) {
-      if (!KNOWN.includes(frozen as AiuVatRegime)) {
+      if (!KNOWN.includes(frozen as AiuRegimeSnapshot)) {
         throw new VendixHttpException(
           ErrorCodes.INVOICING_AIU_006,
-          `La factura declara un régimen de base gravable AIU que el sistema no reconoce ` +
-            `(«${frozen}»). No se emite: los dos regímenes válidos gravan partes distintas del ` +
+          `La factura declara una base gravable AIU que el sistema no reconoce ` +
+            `(«${frozen}»). No se emite: las tres bases válidas gravan partes distintas del ` +
             `contrato —E.T. art. 462-1 grava Administración + Imprevistos + Utilidad, Decreto ` +
-            `1372/1992 grava sólo la Utilidad— y elegir uno por defecto cambiaría el IVA ` +
-            `declarado. Corrige el régimen en la configuración de facturación de la tienda y ` +
-            `vuelve a guardar la factura.`,
+            `1372/1992 grava sólo la Utilidad, Subtotal declina el AIU y grava el contrato ` +
+            `completo— y elegir una por defecto cambiaría el IVA declarado. Corrige la base en ` +
+            `la configuración de facturación de la tienda y vuelve a guardar la factura.`,
           { invoice_id: invoice.id, declared_regime: frozen, known: KNOWN },
         );
       }
-      return { regime: frozen as AiuVatRegime, regime_source: 'snapshot' };
+      return { regime: frozen as AiuRegimeSnapshot, regime_source: 'snapshot' };
     }
 
     if (settings.regime) {
@@ -2186,8 +2219,12 @@ export class InvoiceFlowService {
    */
   private isAiuComponentTaxable(
     component: string | null,
-    regime: AiuVatRegime,
+    regime: AiuRegimeSnapshot,
   ): boolean {
+    // Bajo «subtotal» se declina el tratamiento AIU: TODAS las porciones
+    // gravan, incluida la de costo reembolsable (component === null) — es
+    // exactamente lo que distingue esta base de las otras dos.
+    if (regime === 'subtotal') return true;
     if (!component) return false;
     return regime === 'et_462_1' ? true : component === 'utilidad';
   }
@@ -2260,8 +2297,8 @@ export class InvoiceFlowService {
           ErrorCodes.INVOICING_AIU_005,
           `No se puede emitir la factura ${invoice.invoice_number ?? invoice.id}: la línea ` +
             `${index + 1} («${line.description}») lleva un impuesto de ${amount.toFixed(2)} ` +
-            `persistido, pero bajo el régimen de base gravable con el que se emite ` +
-            `(${aiu.regime}, tomado ${
+            `persistido, pero bajo ${describeAiuRegime(aiu.regime)}, con el que se emite ` +
+            `(tomado ${
               aiu.regime_source === 'snapshot'
                 ? 'de la propia factura'
                 : `del ajuste de la tienda por procedencia «${aiu.regime_source}»`
@@ -2288,8 +2325,8 @@ export class InvoiceFlowService {
         throw new VendixHttpException(
           ErrorCodes.INVOICING_AIU_004,
           `No se puede emitir la factura ${invoice.invoice_number ?? invoice.id}: la línea ` +
-            `${index + 1} («${line.description}») es un componente que el régimen ` +
-            `${aiu.regime} SÍ grava y no declara ningún impuesto. La DIAN aceptaría el ` +
+            `${index + 1} («${line.description}») es un componente que ${describeAiuRegime(aiu.regime)} ` +
+            `SÍ grava y no declara ningún impuesto. La DIAN aceptaría el ` +
             `documento declarando menos IVA del debido, y el faltante sólo se corregiría ` +
             `después con nota crédito. Corrige la factura declarando el impuesto de esa línea ` +
             `con su tarifa —o con tarifa 0 si el servicio es exento— antes de emitirla.`,

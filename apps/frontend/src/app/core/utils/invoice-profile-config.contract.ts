@@ -191,6 +191,91 @@ export const AIU_TAXABLE_COMPONENTS_BY_REGIME: Readonly<
   decreto_1372_1992: ['utilidad'],
 };
 
+/**
+ * Base gravable declarada del contrato AIU: qué porción entra en el IVA.
+ *
+ * · `'aiu'` — el A+I+U completo, con piso legal. Espejo de `regime: 'et_462_1'`.
+ * · `'utilidad'` — sólo la Utilidad, sin piso. Espejo de `regime: 'decreto_1372_1992'`.
+ * · `'subtotal'` — se declina el tratamiento AIU: el IVA grava el valor TOTAL
+ *   del contrato, costo reembolsable incluido, sin piso —porque no hay AIU que
+ *   pisar—. Es una tercera opción legítima que hoy no tiene representación: la
+ *   matriz de 4 casillas nunca pudo declarar «grava todo, sin desglose AIU».
+ *
+ * Reemplaza a los 2 regímenes como la pregunta que la UI le hace al operador
+ * —qué grabar, no qué régimen citar—, pero `regime` sigue existiendo y
+ * persistiéndose para quien ya lo lee (ver {@link regimeFromTaxableBasis}).
+ */
+export type AiuTaxableBasis = 'aiu' | 'utilidad' | 'subtotal';
+
+export const AIU_TAXABLE_BASES: readonly AiuTaxableBasis[] = [
+  'aiu',
+  'utilidad',
+  'subtotal',
+];
+
+/**
+ * `taxable_basis` → `regime` equivalente. `'subtotal'` no tiene régimen legal
+ * —es la ausencia de tratamiento AIU—, así que devuelve `null`.
+ *
+ * Inversa de {@link taxableBasisFromRegime} para los dos valores que sí tienen
+ * ida y vuelta: `regimeFromTaxableBasis(taxableBasisFromRegime(r)) === r`.
+ */
+export function regimeFromTaxableBasis(
+  basis: AiuTaxableBasis,
+): AiuVatRegimeLiteral | null {
+  switch (basis) {
+    case 'aiu':
+      return 'et_462_1';
+    case 'utilidad':
+      return 'decreto_1372_1992';
+    case 'subtotal':
+      return null;
+  }
+}
+
+/**
+ * `regime` → `taxable_basis` equivalente. Existe para leer snapshots viejos
+ * —de antes de este campo— sin reescribirlos: `taxable_basis` ausente se
+ * deriva de `regime`, nunca al revés.
+ */
+export function taxableBasisFromRegime(
+  regime: AiuVatRegimeLiteral,
+): AiuTaxableBasis {
+  return regime === 'et_462_1' ? 'aiu' : 'utilidad';
+}
+
+/**
+ * Base gravable efectiva de una config AIU: `taxable_basis` si está presente
+ * y es válida, si no la derivada de `regime`. Es el único punto de lectura:
+ * todo lo demás en este archivo (y en `InvoiceCalculatorService`,
+ * `InvoicingService`, `InvoiceFlowService`) debe pasar por aquí en vez de leer
+ * `regime` a secas, o la introducción de `'subtotal'` no los alcanza.
+ */
+export function resolveAiuTaxableBasis(
+  aiu: Pick<ProfileAiuConfig, 'regime' | 'taxable_basis'> | null | undefined,
+): AiuTaxableBasis {
+  if (aiu?.taxable_basis && AIU_TAXABLE_BASES.includes(aiu.taxable_basis)) {
+    return aiu.taxable_basis;
+  }
+  return taxableBasisFromRegime(aiu?.regime ?? 'et_462_1');
+}
+
+/**
+ * Buckets cuya suma ENTRA en la base gravable, por base declarada.
+ *
+ * Generaliza a {@link AIU_TAXABLE_COMPONENTS_BY_REGIME} sumando `'subtotal'` y
+ * el bucket `'costo'`: bajo `'subtotal'` los CUATRO buckets —incluido el costo
+ * reembolsable— entran a la base, porque no hay tratamiento AIU que los
+ * excluya.
+ */
+export const AIU_TAXABLE_BUCKETS_BY_BASIS: Readonly<
+  Record<AiuTaxableBasis, readonly AiuBucket[]>
+> = {
+  aiu: ['administracion', 'imprevistos', 'utilidad'],
+  utilidad: ['utilidad'],
+  subtotal: ['administracion', 'imprevistos', 'utilidad', 'costo'],
+};
+
 // ─── Las 7 secciones del editor ───────────────────────────────────────────
 
 /**
@@ -218,6 +303,14 @@ export interface ProfileGeneralConfig {
  */
 export interface ProfileAiuConfig {
   regime: AiuVatRegimeLiteral;
+  /**
+   * Base gravable declarada. Ver {@link AiuTaxableBasis}: reemplaza a `regime`
+   * como la pregunta que hace la UI, pero es OPCIONAL a propósito —un snapshot
+   * de antes de este campo no lo tiene, y se lee con
+   * {@link resolveAiuTaxableBasis} sin reescribir nada—. Ausente o nulo ⇒ se
+   * deriva de `regime`.
+   */
+  taxable_basis?: AiuTaxableBasis | null;
   /**
    * Objeto del contrato por omisión, que se concatena al prefijo obligatorio en
    * el `cbc:Note` de la línea de Administración (regla CAV03). La factura puede
@@ -832,6 +925,20 @@ function validateAiuSection(
     });
   }
 
+  // ── La base gravable declarada, si viene ──
+  if (
+    aiu.taxable_basis !== undefined &&
+    aiu.taxable_basis !== null &&
+    !AIU_TAXABLE_BASES.includes(aiu.taxable_basis)
+  ) {
+    issues.push({
+      field: 'aiu.taxable_basis',
+      code: 'AIU_TAXABLE_BASIS_UNKNOWN',
+      message: `La base gravable «${String(aiu.taxable_basis)}» no existe. Elige Subtotal, AIU completo o Utilidad.`,
+    });
+  }
+  const taxableBasis = resolveAiuTaxableBasis(aiu);
+
   // ── La unidad de los porcentajes ──
   if (
     aiu.components_basis !== undefined &&
@@ -889,7 +996,7 @@ function validateAiuSection(
       // la unidad `'aiu'` la suma es siempre 100 y no dice nada del contrato,
       // asi que el piso solo se podia comprobar al calcular el documento —o
       // sea, con el numero ya asignado y el rechazo de la DIAN por delante.
-      aiu.regime === 'et_462_1' &&
+      taxableBasis === 'aiu' &&
       aiu.enforce_minimum_base === true &&
       floorScaled !== null &&
       sum < floorScaled
@@ -912,7 +1019,7 @@ function validateAiuSection(
         'El porcentaje del piso legal no es un número válido con hasta dos decimales.',
     });
   } else if (
-    aiu.regime === 'et_462_1' &&
+    taxableBasis === 'aiu' &&
     aiu.enforce_minimum_base &&
     floor < AIU_LEGAL_FLOOR_PERCENT_SCALED
   ) {
@@ -1018,7 +1125,16 @@ function validateTaxSection(
 
   // ── La matriz no puede contradecir el régimen ──
   if (!config.aiu) return;
-  const expected = AIU_TAXABLE_COMPONENTS_BY_REGIME[config.aiu.regime];
+  const taxableBasis = resolveAiuTaxableBasis(config.aiu);
+  if (taxableBasis === 'subtotal') {
+    // Bajo «subtotal» se declina el tratamiento AIU: la gravabilidad de cada
+    // porción la decide InvoiceCalculatorService.isAiuTaxable a partir de la
+    // base, no de esta matriz, así que no hay contradicción que detectar ni
+    // costo que proteger aquí.
+    return;
+  }
+  const regimeForMatrix = regimeFromTaxableBasis(taxableBasis) ?? config.aiu.regime;
+  const expected = AIU_TAXABLE_COMPONENTS_BY_REGIME[regimeForMatrix];
   if (!expected) return;
 
   for (const component of AIU_COMPONENTS) {

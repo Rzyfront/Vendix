@@ -1067,7 +1067,7 @@ describe('InvoiceCalculatorService', () => {
     });
 
     it('E.T. art. 462-1: grava el AIU COMPLETO (A+I+U) y nunca el costo', () => {
-      const result = service.calculate(aiuContract({ regime: 'et_462_1' }));
+      const result = service.calculate(aiuContract({ taxable_basis: 'aiu' }));
 
       // La línea de costo reembolsable NO hace parte del AIU: sale sin grupo de
       // impuesto (regla CAX01), no con impuesto en cero.
@@ -1088,7 +1088,7 @@ describe('InvoiceCalculatorService', () => {
 
     it('Decreto 1372/1992: grava SÓLO la utilidad', () => {
       const result = service.calculate(
-        aiuContract({ regime: 'decreto_1372_1992' }),
+        aiuContract({ taxable_basis: 'utilidad' }),
       );
 
       // Administración e imprevistos quedan fuera de la base y por tanto sin
@@ -1105,9 +1105,34 @@ describe('InvoiceCalculatorService', () => {
       expect(result.aiu?.aiu_value).toBe('10000000.00');
     });
 
+    it('Subtotal: declina el AIU y grava el contrato COMPLETO, costo incluido', () => {
+      const result = service.calculate(
+        aiuContract({ taxable_basis: 'subtotal', enforce_minimum_base: true }),
+      );
+
+      // Las CUATRO líneas gravan, incluida la de costo reembolsable
+      // (`aiu_component` ausente): es exactamente lo que distingue esta base.
+      expect(result.lines[0].omit_tax_total).toBe(false);
+      expect(result.lines[1].omit_tax_total).toBe(false);
+      expect(result.lines[2].omit_tax_total).toBe(false);
+      expect(result.lines[3].omit_tax_total).toBe(false);
+
+      // La base gravable es el contrato completo, no sólo el AIU.
+      expect(result.aiu?.taxable_base).toBe('100000000.00');
+      expect(result.aiu?.contract_value).toBe('100000000.00');
+      // El AIU declarado sigue siendo el mismo dato informativo de siempre.
+      expect(result.aiu?.aiu_value).toBe('10000000.00');
+
+      // Sin piso: no hay régimen AIU al que aplicárselo. `enforce_minimum_base`
+      // en `true` no lo activa por accidente bajo esta base.
+      expect(
+        result.divergences.some((d) => d.scope === 'aiu_base_below_minimum'),
+      ).toBe(false);
+    });
+
     it('reporta —sin inflar— el AIU que no llega al 10 % del contrato', () => {
       const result = service.calculate({
-        aiu: { regime: 'et_462_1' },
+        aiu: { taxable_basis: 'aiu' },
         items: [
           { description: 'Costo', quantity: 1, unit_price: 95_000_000 },
           {
@@ -1134,7 +1159,7 @@ describe('InvoiceCalculatorService', () => {
 
     it('el piso del 10 % NO aplica bajo Decreto 1372/1992', () => {
       const result = service.calculate({
-        aiu: { regime: 'decreto_1372_1992' },
+        aiu: { taxable_basis: 'utilidad' },
         items: [
           { description: 'Obra', quantity: 1, unit_price: 95_000_000 },
           {
@@ -1173,7 +1198,7 @@ describe('InvoiceCalculatorService', () => {
     it('un AIU no divisible NO cae por debajo del piso: el piso se trunca', () => {
       const iva = [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' as const }];
       const result = service.calculate({
-        aiu: { regime: 'et_462_1', enforce_minimum_base: true },
+        aiu: { taxable_basis: 'aiu', enforce_minimum_base: true },
         items: [
           { description: 'Costo directo', quantity: 1, unit_price: 1_000_000 },
           {
@@ -1226,7 +1251,7 @@ describe('InvoiceCalculatorService', () => {
 
     it('descarta el impuesto que una línea fuera de base intente declarar', () => {
       const result = service.calculate({
-        aiu: { regime: 'decreto_1372_1992' },
+        aiu: { taxable_basis: 'utilidad' },
         items: [
           {
             description: 'Administración',
@@ -1344,7 +1369,7 @@ describe('InvoiceCalculatorService', () => {
     });
 
     it('reporta una divergencia por CADA componente gravable sin tarifa', () => {
-      const result = service.calculate(factura83({ regime: 'et_462_1' }));
+      const result = service.calculate(factura83({ taxable_basis: 'aiu' }));
 
       const sin_tarifa = result.divergences.filter(
         (d) => d.scope === 'aiu_taxable_line_without_tax',
@@ -1373,8 +1398,8 @@ describe('InvoiceCalculatorService', () => {
       // correcta: 19 % de 1.500.000. Los 95.000 de diferencia contra el caso
       // anterior son exactamente el faltante de la factura 83.
       const result = service.calculate({
-        aiu: { regime: 'et_462_1' },
-        items: factura83({ regime: 'et_462_1' }, true).items.map((item) => ({
+        aiu: { taxable_basis: 'aiu' },
+        items: factura83({ taxable_basis: 'aiu' }, true).items.map((item) => ({
           ...item,
           taxes: item.taxes ?? [
             { tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' },
@@ -1395,7 +1420,7 @@ describe('InvoiceCalculatorService', () => {
       // documento es correcto o incorrecto según el régimen: por eso el régimen
       // se congela en la factura y no se relee en la emisión.
       const result = service.calculate(
-        factura83({ regime: 'decreto_1372_1992' }, true),
+        factura83({ taxable_basis: 'utilidad' }, true),
       );
 
       expect(
@@ -1412,7 +1437,7 @@ describe('InvoiceCalculatorService', () => {
       // diferencia justo donde cambia el resultado — y dejaría al componente
       // exento indistinguible del sub-declarado.
       const result = service.calculate({
-        aiu: { regime: 'decreto_1372_1992' },
+        aiu: { taxable_basis: 'utilidad' },
         items: [
           {
             description: 'Utilidad exenta',

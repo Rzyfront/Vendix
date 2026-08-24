@@ -55,7 +55,12 @@ import {
   PosInvoicingSettings,
 } from '../settings/interfaces/store-settings.interface';
 import { DIAN_INVOICE_OPERATION_TYPES } from './providers/dian-direct/constants/dian-document-types';
+import {
+  regimeFromTaxableBasis,
+  resolveAiuTaxableBasis,
+} from './profiles/invoice-profile-config.contract';
 import type {
+  AiuTaxableBasis,
   InvoiceProfileConfig,
   ProfileAiuConfig,
 } from './profiles/invoice-profile-config.contract';
@@ -1097,7 +1102,9 @@ export class InvoicingService {
         //
         // `undefined` en documentos no-AIU: `resolveAiuContext` devuelve `{}` y
         // las tres columnas quedan NULL.
-        aiu_regime: aiu_context.aiu?.regime,
+        aiu_regime: aiu_context.aiu
+          ? this.regimeStringFromTaxableBasis(aiu_context.aiu.taxable_basis)
+          : undefined,
         // El porcentaje EFECTIVO, no el declarado: bajo `et_462_1` el piso rige
         // aunque la tienda no lo escriba, así que NULL habría significado «no
         // hay piso» en una factura que sí lo tiene. Ausente solo cuando de
@@ -2118,7 +2125,9 @@ export class InvoicingService {
       // El caso no-AIU no se resuelve acá sino en la puerta de más abajo, que
       // corre aunque el PATCH no traiga líneas.
       if (aiu_context.aiu) {
-        update_data.aiu_regime = aiu_context.aiu.regime;
+        update_data.aiu_regime = this.regimeStringFromTaxableBasis(
+          aiu_context.aiu.taxable_basis,
+        );
         update_data.aiu_minimum_percent =
           this.resolveAiuMinimumPercent(aiu_context.aiu) ?? null;
         update_data.aiu_taxable_matrix = this.buildAiuTaxableMatrix(
@@ -3037,10 +3046,24 @@ export class InvoicingService {
    * se convierte en `?? false` en una de las tres y la factura queda declarando
    * un piso que no es el que se le aplicó.
    */
+  /**
+   * `taxable_basis` → cadena que se persiste en `invoices.aiu_regime`.
+   *
+   * La columna es libre (`String? @db.VarChar(30)`, no un enum de Postgres) y
+   * hoy guarda literales de régimen legal (`'et_462_1'`, `'decreto_1372_1992'`)
+   * más el literal nuevo `'subtotal'` — que no tiene régimen, así que
+   * `regimeFromTaxableBasis` devuelve `null` y se usa `basis` tal cual.
+   * `InvoiceFlowService.resolveAiuRegimeForEmission` es quien vuelve a leer
+   * esta misma columna al emitir.
+   */
+  private regimeStringFromTaxableBasis(basis: AiuTaxableBasis): string {
+    return regimeFromTaxableBasis(basis) ?? basis;
+  }
+
   private resolveAiuMinimumPercent(
     aiu: InvoiceCalculatorAiuInput,
   ): Prisma.Decimal | undefined {
-    if (aiu.regime !== 'et_462_1' || aiu.enforce_minimum_base === false) {
+    if (aiu.taxable_basis !== 'aiu' || aiu.enforce_minimum_base === false) {
       return undefined;
     }
     return aiu.minimum_base_percent != null
@@ -3134,14 +3157,14 @@ export class InvoicingService {
     // re-verificación antes de firmar lea el mismo número y no vuelva a
     // derivarlo.
     const minimum_enforced =
-      aiu.regime === 'et_462_1' && aiu.enforce_minimum_base !== false;
+      aiu.taxable_basis === 'aiu' && aiu.enforce_minimum_base !== false;
     const minimum_percent =
       aiu.minimum_base_percent != null
         ? new Prisma.Decimal(String(aiu.minimum_base_percent))
         : DEFAULT_AIU_MINIMUM_PERCENT;
 
     return {
-      regime: aiu.regime,
+      taxable_basis: aiu.taxable_basis,
       stage,
       minimum: {
         enforced: minimum_enforced,
@@ -3378,10 +3401,21 @@ export class InvoicingService {
     // —con su validador y su versión de contrato—, no tapándolo acá.
     const source: {
       regime?: ProfileAiuConfig['regime'];
+      taxable_basis?: AiuTaxableBasis | null;
       contract_object?: string;
       enforce_minimum_base?: boolean;
       minimum_base_percent?: number | string;
     } = profile_aiu ?? (await this.loadAiuSettings(context.store_id));
+
+    // `loadAiuSettings` (ajuste de tienda) es de 2 valores y nunca declara
+    // `taxable_basis`: «subtotal» sólo llega vía perfil, nunca como default de
+    // tienda — ver el docblock de `getAiuSettingsView`. Con perfil, si éste no
+    // trae `taxable_basis` (snapshot de antes de este campo), se deriva de su
+    // `regime` sin reescribir nada.
+    const taxable_basis = resolveAiuTaxableBasis({
+      regime: source.regime ?? 'et_462_1',
+      taxable_basis: source.taxable_basis,
+    });
 
     // Precedencia documento → perfil/tienda. El objeto de la fuente no
     // desaparece: es el DEFAULT, para que quien factura un solo contrato no
@@ -3433,10 +3467,10 @@ export class InvoicingService {
       note,
       contract_object,
       aiu: {
-        // Default explícito y conservador: bajo `et_462_1` tributa el AIU
+        // Default explícito y conservador: bajo `'aiu'` tributa el AIU
         // completo. Una tienda que no configuró nada declara de más, no de
         // menos.
-        regime: source.regime ?? 'et_462_1',
+        taxable_basis,
         enforce_minimum_base: source.enforce_minimum_base,
         // Se pasa TAL CUAL, sin convertir a `number`. El calculador acepta
         // `DianNumericInput`, así que el porcentaje del perfil —un `string`

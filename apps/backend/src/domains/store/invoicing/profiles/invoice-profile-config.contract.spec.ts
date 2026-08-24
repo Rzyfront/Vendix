@@ -3,12 +3,16 @@ import { join } from 'path';
 
 import {
   AIU_LEGAL_FLOOR_PERCENT_SCALED,
+  AIU_TAXABLE_BASES,
   INVOICE_PROFILE_CONFIG_VERSION,
   InvoiceProfileConfig,
   buildDefaultAiuProfileConfig,
   formatPercentScaled,
   parsePercentScaled,
+  regimeFromTaxableBasis,
   resolveAiuComponentsBasis,
+  resolveAiuTaxableBasis,
+  taxableBasisFromRegime,
   validateInvoiceProfileConfig,
 } from './invoice-profile-config.contract';
 
@@ -402,6 +406,102 @@ describe('InvoiceProfileConfig — la matriz no puede contradecir el régimen', 
       ];
     });
     expect(codes(config)).toContain('TAX_BUCKET_DUPLICATED');
+  });
+});
+
+describe('InvoiceProfileConfig — taxable_basis (Subtotal / AIU / Utilidad)', () => {
+  it('regimeFromTaxableBasis y taxableBasisFromRegime son inversas para aiu y utilidad', () => {
+    expect(regimeFromTaxableBasis('aiu')).toBe('et_462_1');
+    expect(regimeFromTaxableBasis('utilidad')).toBe('decreto_1372_1992');
+    expect(taxableBasisFromRegime('et_462_1')).toBe('aiu');
+    expect(taxableBasisFromRegime('decreto_1372_1992')).toBe('utilidad');
+    for (const regime of ['et_462_1', 'decreto_1372_1992'] as const) {
+      expect(regimeFromTaxableBasis(taxableBasisFromRegime(regime))).toBe(
+        regime,
+      );
+    }
+  });
+
+  it('subtotal no tiene régimen legal: regimeFromTaxableBasis devuelve null', () => {
+    expect(regimeFromTaxableBasis('subtotal')).toBeNull();
+  });
+
+  it('un config sin taxable_basis se lee con la base derivada de regime, sin escribir', () => {
+    const config = aiuConfig();
+    delete (config.aiu as any).taxable_basis;
+    expect(config.aiu!.taxable_basis).toBeUndefined();
+    expect(resolveAiuTaxableBasis(config.aiu)).toBe('aiu');
+
+    const config2 = aiuConfig((c) => {
+      c.aiu!.regime = 'decreto_1372_1992';
+    });
+    delete (config2.aiu as any).taxable_basis;
+    expect(resolveAiuTaxableBasis(config2.aiu)).toBe('utilidad');
+
+    // La lectura no reescribe el snapshot.
+    expect(config.aiu).not.toHaveProperty('taxable_basis');
+  });
+
+  it('taxable_basis presente gana sobre regime cuando ambos están', () => {
+    const config = aiuConfig((c) => {
+      c.aiu!.regime = 'et_462_1';
+      (c.aiu as any).taxable_basis = 'utilidad';
+    });
+    expect(resolveAiuTaxableBasis(config.aiu)).toBe('utilidad');
+  });
+
+  it('un valor desconocido de taxable_basis se rechaza', () => {
+    const config = aiuConfig((c) => {
+      (c.aiu as any).taxable_basis = 'contrato_completo';
+    });
+    expect(codes(config)).toContain('AIU_TAXABLE_BASIS_UNKNOWN');
+  });
+
+  it('los tres valores válidos no producen AIU_TAXABLE_BASIS_UNKNOWN', () => {
+    for (const basis of AIU_TAXABLE_BASES) {
+      const config = aiuConfig((c) => {
+        (c.aiu as any).taxable_basis = basis;
+        if (basis === 'subtotal') {
+          // Bajo subtotal la matriz queda libre: se relaja a propósito.
+          c.taxes.rules = c.taxes.rules.map((r) => ({
+            ...r,
+            taxable: true,
+            rate: '19.00',
+          }));
+        }
+      });
+      expect(codes(config)).not.toContain('AIU_TAXABLE_BASIS_UNKNOWN');
+    }
+  });
+
+  it('con base subtotal no se exige el piso legal aunque el porcentaje sea bajo', () => {
+    const config = aiuConfig((c) => {
+      (c.aiu as any).taxable_basis = 'subtotal';
+      c.aiu!.minimum_base_percent = '0.00';
+    });
+    expect(codes(config)).not.toContain('AIU_FLOOR_BELOW_LEGAL');
+    expect(codes(config)).not.toContain('AIU_PERCENT_SUM_BELOW_FLOOR');
+  });
+
+  it('con base subtotal la matriz puede gravar el costo sin rechazo', () => {
+    const config = aiuConfig((c) => {
+      (c.aiu as any).taxable_basis = 'subtotal';
+      c.taxes.rules = c.taxes.rules.map((r) => ({
+        ...r,
+        taxable: true,
+        rate: '19.00',
+      }));
+    });
+    expect(codes(config)).not.toContain('TAX_COST_MUST_NOT_BE_TAXABLE');
+    expect(codes(config)).not.toContain('TAX_MATRIX_CONTRADICTS_REGIME');
+  });
+
+  it('con base subtotal no se exige TAX_RULE_MISSING aunque falte una regla', () => {
+    const config = aiuConfig((c) => {
+      (c.aiu as any).taxable_basis = 'subtotal';
+      c.taxes.rules = c.taxes.rules.filter((r) => r.bucket !== 'utilidad');
+    });
+    expect(codes(config)).not.toContain('TAX_RULE_MISSING');
   });
 });
 

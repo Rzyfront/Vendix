@@ -50,6 +50,7 @@ import {
   AiuBucket,
   InvoiceProfileConfig,
   ProfileTaxRule,
+  resolveAiuTaxableBasis,
 } from './invoice-profile-config.contract';
 import {
   PREVIEW_CUFE,
@@ -364,7 +365,10 @@ export class ProfilePreviewService {
       ...(is_aiu && config.aiu
         ? {
             aiu: {
-              regime: config.aiu.regime,
+              // Espeja InvoicingService.resolveAiuContext: `taxable_basis` si
+              // el perfil ya lo trae, si no derivado de `regime` sin
+              // reescribir el snapshot.
+              taxable_basis: resolveAiuTaxableBasis(config.aiu),
               enforce_minimum_base: config.aiu.enforce_minimum_base,
               minimum_base_percent: config.aiu.minimum_base_percent,
             },
