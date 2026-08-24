@@ -725,7 +725,9 @@ export class DianConfigFormComponent {
     // Los errores de GRUPO no cuelgan de ningún control, así que ningún
     // `app-input` los pinta jamás: sin esta parte el usuario vería la lista
     // vacía y el botón muerto al mismo tiempo, que es el peor de los mundos.
-    const groupErrors = this.form.errors ?? {};
+    // Anotado: sin el tipo, `?? {}` produce la unión `ValidationErrors | {}` y
+    // el `{}` no admite indexación por cadena bajo `strict`.
+    const groupErrors: ValidationErrors = this.form.errors ?? {};
 
     if (groupErrors['nitDv']) {
       items.push(
