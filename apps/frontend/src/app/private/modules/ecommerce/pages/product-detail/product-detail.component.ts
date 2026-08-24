@@ -204,44 +204,88 @@ import {
                 </div>
               }
 
-              <div class="price-line">
-                @if (displayPriceLabel(); as label) {
-                  <span class="text-sm text-text-muted font-medium mr-1">{{
-                    label
-                  }}</span>
+              <div class="price-section flex flex-col gap-2 my-2">
+                <div class="price-line flex items-baseline flex-wrap gap-2">
+                  @if (displayPriceLabel(); as label) {
+                    <span class="text-sm text-text-muted font-medium mr-1">{{
+                      label
+                    }}</span>
+                  }
+                  <span class="current-price text-2xl md:text-3xl font-extrabold text-text-primary">
+                    {{ (hasActiveDiscount() ? effectiveUnitPrice() : currentUnitPrice()) | currency }}
+                  </span>
+                  @if (selectedPresentation(); as unit) {
+                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                      / {{ unit.name }}
+                    </span>
+                  } @else if (product()?.price_unit; as priceUnit) {
+                    <span class="text-sm text-text-muted font-medium ml-1">{{
+                      priceUnit.label
+                    }}</span>
+                  }
+                  @if (hasActiveDiscount() || selectedPriceResolution()?.isOnSale) {
+                    <span
+                      class="original-price text-base text-text-muted line-through opacity-70 ml-1"
+                    >
+                      {{ (hasActiveDiscount() ? currentUnitPrice() : (selectedPriceResolution()?.compareAtPrice ?? currentUnitPrice())) | currency }}
+                    </span>
+                  }
+                  @if (hasActiveDiscount() && activePromoDiscount()?.type === 'percentage') {
+                    <span class="savings-pill inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-500 text-white shadow-xs">
+                      -{{ activePromoDiscount()?.value }}% OFF
+                    </span>
+                  }
+                </div>
+
+                <!-- Dynamic Live Total & Savings breakdown when quantity > 1 or discount is active -->
+                @if ((quantity() > 1) || hasActiveDiscount()) {
+                  <div class="total-breakdown-card p-3 rounded-xl bg-surface border border-border/70 flex items-center justify-between gap-3 shadow-xs">
+                    <div class="flex flex-col">
+                      <span class="text-xs text-text-secondary font-medium">
+                        Total por {{ quantity() }} {{ quantity() === 1 ? (selectedPresentation()?.name || 'unidad') : (selectedPresentation()?.name ? quantity() + ' ' + selectedPresentation()?.name : 'unidades') }}:
+                      </span>
+                      <div class="flex items-baseline gap-2">
+                        <span class="text-xl font-bold text-primary dark:text-primary-light">
+                          {{ totalFinalPrice() | currency }}
+                        </span>
+                        @if (hasActiveDiscount()) {
+                          <span class="text-xs text-text-muted line-through">
+                            {{ totalUndiscountedPrice() | currency }}
+                          </span>
+                        }
+                      </div>
+                    </div>
+
+                    @if (hasActiveDiscount()) {
+                      <div class="flex flex-col items-end">
+                        <span class="text-[11px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                          🎉 ¡Ahorro Aplicado!
+                        </span>
+                        <span class="text-sm font-extrabold text-emerald-600 dark:text-emerald-400">
+                          -{{ totalSavingsAmount() | currency }}
+                        </span>
+                      </div>
+                    }
+                  </div>
                 }
-                <span class="current-price">{{
-                  (displayPriceLabel() ? minVariantPrice() : displayPrice())
-                    | currency
-                }}</span>
-                @if (product()?.price_unit; as priceUnit) {
-                  <!-- "por m": sin la escala, un cable medido en milímetros
-                       publica un número que nadie sabe leer. -->
-                  <span class="text-sm text-text-muted font-medium ml-1">{{
-                    priceUnit.label
-                  }}</span>
-                }
-                @if (selectedPriceResolution()?.isOnSale) {
-                  <span
-                    class="original-price"
-                    style="text-decoration: line-through; opacity: 0.6; margin-left: 10px;"
-                    >{{ selectedPriceResolution()?.compareAtPrice | currency }}</span
-                  >
-                }
+
                 @if (
                   product()?.active_promotion?.quantity_tiers?.length ||
                   product()?.active_promotion?.badge_label
                 ) {
-                  <app-promotion-stack
-                    mode="expanded-cards"
-                    [items]="expandedTierItems()"
-                    [currentQuantity]="quantity()"
-                    [ariaLabel]="'Niveles de descuento por cantidad'"
-                    data-testid="detail-promo-tier-ladder"
-                    (promotionViewed)="onPromotionViewed($event)"
-                    (promotionIntent)="onPromotionIntent($event)"
-                    (tierSelected)="quantity.set($event.min_quantity)"
-                  />
+                  <div class="promotion-ladder-wrap mt-1">
+                    <app-promotion-stack
+                      mode="expanded-cards"
+                      [items]="expandedTierItems()"
+                      [currentQuantity]="quantity()"
+                      [unitsPerPackage]="packSize()"
+                      [ariaLabel]="'Niveles de descuento por cantidad'"
+                      data-testid="detail-promo-tier-ladder"
+                      (promotionViewed)="onPromotionViewed($event)"
+                      (promotionIntent)="onPromotionIntent($event)"
+                      (tierSelected)="quantity.set($event.package_quantity)"
+                    />
+                  </div>
                 }
               </div>
 
@@ -1836,6 +1880,96 @@ export class ProductDetailComponent implements OnInit {
   /** Informative label for the active promotion badge. */
   promotionBadgeLabel = computed((): string => {
     return this.product()?.active_promotion?.badge_label ?? '';
+  });
+
+  /** Unidades base acumuladas considerando unidades por presentación */
+  readonly effectiveBaseUnits = computed<number>(() => {
+    return (this.quantity() || 1) * this.packSize();
+  });
+
+  /** Precio unitario base de la presentación o variante seleccionada */
+  readonly currentUnitPrice = computed<number>(() => {
+    return this.displayPriceLabel() ? this.minVariantPrice() : this.displayPrice();
+  });
+
+  /** Subtotal sin descuentos por la cantidad seleccionada */
+  readonly totalUndiscountedPrice = computed<number>(() => {
+    return this.currentUnitPrice() * (this.quantity() || 1);
+  });
+
+  /** Porcentaje o monto de descuento activo según el tramo alcanzado */
+  readonly activePromoDiscount = computed<{
+    type: 'percentage' | 'fixed_amount';
+    value: number;
+    amount: number;
+    tierLabel?: string;
+  } | null>(() => {
+    const promo = this.product()?.active_promotion;
+    if (!promo) return null;
+    const baseQty = this.effectiveBaseUnits();
+    const undiscounted = this.totalUndiscountedPrice();
+
+    if (promo.quantity_tiers && Array.isArray(promo.quantity_tiers) && promo.quantity_tiers.length > 0) {
+      const sorted = [...promo.quantity_tiers].sort((a, b) => b.min_quantity - a.min_quantity);
+      const match = sorted.find((t) => baseQty >= t.min_quantity && (!t.max_quantity || baseQty <= t.max_quantity));
+      if (match) {
+        const isFixed = match.type === 'fixed_amount';
+        const amount = isFixed
+          ? match.value * (this.quantity() || 1)
+          : (undiscounted * match.value) / 100;
+        return {
+          type: isFixed ? 'fixed_amount' : 'percentage',
+          value: match.value,
+          amount: Math.min(undiscounted, amount),
+          tierLabel: promo.badge_label,
+        };
+      }
+      return null;
+    }
+
+    if (promo.discount_percentage && promo.discount_percentage > 0) {
+      const amount = (undiscounted * promo.discount_percentage) / 100;
+      return {
+        type: 'percentage',
+        value: promo.discount_percentage,
+        amount: Math.min(undiscounted, amount),
+        tierLabel: promo.badge_label,
+      };
+    }
+
+    if (promo.discount_amount && promo.discount_amount > 0) {
+      const amount = Math.min(undiscounted, promo.discount_amount * (this.quantity() || 1));
+      return {
+        type: 'fixed_amount',
+        value: promo.discount_amount,
+        amount,
+        tierLabel: promo.badge_label,
+      };
+    }
+
+    return null;
+  });
+
+  /** Total final a pagar tras aplicar el descuento del tramo */
+  readonly totalFinalPrice = computed<number>(() => {
+    const discount = this.activePromoDiscount()?.amount ?? 0;
+    return Math.max(0, this.totalUndiscountedPrice() - discount);
+  });
+
+  /** Precio unitario efectivo con el descuento aplicado */
+  readonly effectiveUnitPrice = computed<number>(() => {
+    const qty = this.quantity() || 1;
+    return this.totalFinalPrice() / qty;
+  });
+
+  /** Ahorro total acumulado */
+  readonly totalSavingsAmount = computed<number>(() => {
+    return this.activePromoDiscount()?.amount ?? 0;
+  });
+
+  /** ¿Hay descuento activo aplicado en la cantidad actual? */
+  readonly hasActiveDiscount = computed<boolean>(() => {
+    return this.totalSavingsAmount() > 0.01;
   });
 
   /**

@@ -466,7 +466,13 @@ export class PromotionEngineService {
     scaleByProduct: ReadonlyMap<number, number>,
   ): number {
     const quantity = Number(item.quantity) || 0;
-    if (this.isSoldByPresentation(item)) return quantity;
+    if (this.isSoldByPresentation(item)) {
+      const stockUnits = Number(item.stock_units_consumed);
+      if (Number.isFinite(stockUnits) && stockUnits > 0) {
+        return stockUnits;
+      }
+      return quantity;
+    }
     const scale = scaleByProduct.get(Number(item.product_id));
     if (!scale || scale <= 1) return quantity;
     const converted = resolvePriceUnits(quantity, scale);
@@ -646,6 +652,7 @@ export class PromotionEngineService {
       chargedIndexes: number[];
       discountAmount: number;
       perLineShares: Map<number, number>;
+      matchedTierValue?: number;
     }> = [];
 
     for (const promo of candidates) {
@@ -801,6 +808,7 @@ export class PromotionEngineService {
           chargedIndexes: tierIndexes,
           discountAmount,
           perLineShares,
+          matchedTierValue: Number(matchedTier.value),
         });
       } else {
         // Flat promotion branch
@@ -840,6 +848,7 @@ export class PromotionEngineService {
       applicableIndexes: number[];
       discountAmount: number;
       perLineShares: Map<number, number>;
+      matchedTierValue?: number;
     }> = [];
 
     if (strategy === 'winner_takes_all') {
@@ -860,6 +869,7 @@ export class PromotionEngineService {
           applicableIndexes: winner.chargedIndexes ?? winner.applicableIndexes,
           discountAmount: winner.discountAmount,
           perLineShares: winner.perLineShares,
+          matchedTierValue: winner.matchedTierValue,
         });
       }
     } else {
@@ -955,6 +965,7 @@ export class PromotionEngineService {
           applicableIndexes: wonLines,
           discountAmount: promoDiscount,
           perLineShares,
+          matchedTierValue: candidate.matchedTierValue,
         });
       }
 
@@ -1022,6 +1033,7 @@ export class PromotionEngineService {
                 bestOrderCandidate.applicableIndexes,
               discountAmount: orderDiscount,
               perLineShares: orderLineShares,
+              matchedTierValue: bestOrderCandidate.matchedTierValue,
             });
           }
         }
@@ -1115,7 +1127,7 @@ export class PromotionEngineService {
         code: wp.promo.code ?? null,
         type: wp.promo.type,
         scope: wp.promo.scope,
-        value: Number(wp.promo.value),
+        value: wp.matchedTierValue != null ? wp.matchedTierValue : Number(wp.promo.value),
         is_auto_apply: wp.promo.is_auto_apply,
         priority: wp.promo.priority,
         discount_amount: this.roundMoney(wp.discountAmount),

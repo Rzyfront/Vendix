@@ -284,6 +284,74 @@
   color: var(--color-text-secondary, #6b7280);
 }
 
+/* ── active celebration banner ───────────────────────────────────── */
+.promotion-stack__active-celebration {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 0.875rem;
+  border-radius: 0.625rem;
+  background: rgba(var(--color-success-rgb, 16, 185, 129), 0.12);
+  border: 1px solid rgba(var(--color-success-rgb, 16, 185, 129), 0.35);
+  color: var(--color-text-primary, #111827);
+  margin-top: 0.25rem;
+  animation: fadeIn 300ms ease;
+}
+
+.promotion-stack__active-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--color-success, #059669);
+  color: #ffffff;
+  flex-shrink: 0;
+}
+
+.promotion-stack__active-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  font-size: 0.8125rem;
+  line-height: 1.25;
+}
+
+.promotion-stack__active-title {
+  font-weight: 700;
+  color: var(--color-success, #059669);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.promotion-stack__active-detail {
+  color: var(--color-text-primary, #111827);
+}
+
+.promotion-stack__progress-packages {
+  color: var(--color-text-secondary, #6b7280);
+  font-size: 0.75rem;
+  margin-left: 0.25rem;
+}
+
+.promotion-stack__progress-text--max {
+  color: var(--color-success, #059669);
+  font-weight: 500;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* ── progress bar ────────────────────────────────────────────────── */
 .promotion-stack__progress {
   margin-top: 0.5rem;

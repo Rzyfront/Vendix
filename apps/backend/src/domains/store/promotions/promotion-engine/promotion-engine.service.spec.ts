@@ -38,6 +38,19 @@ function buildPromotion(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+function buildTier(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: 1,
+    promotion_id: 100,
+    min_quantity: 2,
+    max_quantity: null as number | null,
+    value: 10,
+    type: 'percentage',
+    sort_order: 0,
+    ...overrides,
+  };
+}
+
 describe('PromotionEngineService - quoteDiscounts', () => {
   let service: PromotionEngineService;
   let prisma: {
@@ -1944,6 +1957,64 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       expect(result.applied_promotions).toHaveLength(0);
       expect(result.total_discount).toBe(0);
       expect(result.promotional_subtotal).toBe(100);
+    });
+
+    it('triggers quantity tier when presentation item consumes enough base stock units', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 110,
+          rule_type: 'quantity_tiered',
+          scope: 'product',
+          promotion_products: [{ id: 1, promotion_id: 110, product_id: 1 }],
+          promotion_quantity_tiers: [
+            buildTier({ min_quantity: 10, max_quantity: 199, value: 10, discount_type: 'percentage' }),
+            buildTier({ min_quantity: 200, max_quantity: 999, value: 20, discount_type: 'percentage' }),
+            buildTier({ min_quantity: 1000, max_quantity: null, value: 30, discount_type: 'percentage' }),
+          ],
+        }),
+      ]);
+
+      // Customer buys 1 box of nails (200 units in the box, stock_units_consumed = 200)
+      const result1Box = await service.quoteDiscounts({
+        items: [
+          {
+            line_id: 'box1',
+            product_id: 1,
+            unit_price: 200000, // Box price
+            quantity: 1,
+            applied_price_tier_id: 5,
+            stock_units_consumed: 200, // 200 nails
+          },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      // Unlocks the >= 200 tier (20% discount on the box)
+      expect(result1Box.applied_promotions).toHaveLength(1);
+      expect(result1Box.applied_promotions[0].value).toBe(20);
+      expect(result1Box.total_discount).toBe(40000); // 20% of 200,000 = 40,000
+      expect(result1Box.promotional_subtotal).toBe(160000);
+
+      // Customer buys 5 boxes of nails (5 * 200 = 1000 base units, stock_units_consumed = 1000)
+      const result5Boxes = await service.quoteDiscounts({
+        items: [
+          {
+            line_id: 'box5',
+            product_id: 1,
+            unit_price: 200000,
+            quantity: 5,
+            applied_price_tier_id: 5,
+            stock_units_consumed: 1000, // 1000 nails
+          },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      // Unlocks the >= 1000 tier (30% discount on the 5 boxes)
+      expect(result5Boxes.applied_promotions).toHaveLength(1);
+      expect(result5Boxes.applied_promotions[0].value).toBe(30);
+      expect(result5Boxes.total_discount).toBe(300000); // 30% of 1,000,000 = 300,000
+      expect(result5Boxes.promotional_subtotal).toBe(700000);
     });
   });
 });
