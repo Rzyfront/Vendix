@@ -809,23 +809,17 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                 informa, no bloquea.
               -->
               @if (prefillSummary().length > 0) {
-                <div
-                  class="mt-3 flex items-start gap-2.5 rounded-lg border border-border bg-[var(--color-surface-muted)] px-3 py-2.5"
+                <app-alert-banner
+                  class="mt-3"
+                  variant="info"
+                  icon="wand-2"
+                  tone="token"
                 >
-                  <app-icon
-                    name="wand-2"
-                    [size]="15"
-                    class="mt-0.5 flex-shrink-0 text-[var(--color-primary)]"
-                  />
-                  <div class="min-w-0">
-                    <p class="text-xs leading-relaxed text-text-primary">
-                      El perfil precargó
-                      <strong>{{ prefillSummary().join(', ') }}</strong
-                      >. Todo queda editable: si cambias un campo a mano, el
-                      perfil no lo vuelve a pisar.
-                    </p>
-                  </div>
-                </div>
+                  El perfil precargó
+                  <strong>{{ prefillSummary().join(', ') }}</strong
+                  >. Todo queda editable: si cambias un campo a mano, el perfil
+                  no lo vuelve a pisar.
+                </app-alert-banner>
               }
 
               <!--
@@ -1607,59 +1601,46 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               }
 
               @if (aiuUnassigned() > 0) {
-                <div
-                  class="mt-3 flex items-start gap-2.5 rounded-lg border border-border bg-[var(--color-surface)] px-3 py-2.5"
+                <app-alert-banner
+                  class="mt-3"
+                  variant="info"
+                  icon="info"
+                  tone="token"
                 >
-                  <app-icon
-                    name="info"
-                    [size]="15"
-                    class="mt-0.5 flex-shrink-0 text-[var(--color-text-secondary)]"
-                  />
-                  <p
-                    class="text-xs leading-relaxed text-[var(--color-text-secondary)]"
-                  >
-                    {{ aiuUnassigned() }} linea(s) sin componente: se facturan
-                    como <strong>costo reembolsable</strong> del contrato.
-                    Suman al valor del contrato y quedan fuera de la base
-                    gravable. Márcalas si alguna es administración,
-                    imprevistos o utilidad.
-                  </p>
-                </div>
+                  {{ aiuUnassigned() }} linea(s) sin componente: se facturan como
+                  <strong>costo reembolsable</strong> del contrato. Suman al valor
+                  del contrato y quedan fuera de la base gravable. Márcalas si
+                  alguna es administración, imprevistos o utilidad.
+                </app-alert-banner>
               }
 
               @if (aiuTaxableWithoutTax().length > 0) {
-                <div
-                  class="mt-3 flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning-light px-3 py-2.5"
+                <app-alert-banner
+                  class="mt-3"
+                  variant="warning"
+                  icon="alert-triangle"
+                  tone="token"
+                  [heading]="
+                    aiuTaxableWithoutTax().length +
+                    ' línea(s) de la base gravable no declaran impuesto'
+                  "
                 >
-                  <app-icon
-                    name="alert-triangle"
-                    [size]="15"
-                    class="mt-0.5 flex-shrink-0 text-warning"
-                  />
-                  <div class="min-w-0">
-                    <p class="text-xs font-semibold text-warning">
-                      {{ aiuTaxableWithoutTax().length }} línea(s) de la base
-                      gravable no declaran impuesto
-                    </p>
-                    <p class="mt-0.5 text-xs leading-relaxed text-warning">
-                      Bajo {{ aiuGuidance()?.regimeLabel }} la base gravable es
-                      {{ aiuGuidance()?.taxableLabel }}, así que
-                      @for (
-                        row of aiuTaxableWithoutTax();
-                        track row.index;
-                        let last = $last
-                      ) {
-                        <strong>{{ row.label }}</strong
-                        >{{ last ? '' : ', ' }}
-                      }
-                      también debería(n) llevarlo. La DIAN acepta el documento
-                      igual —el XML cuadra consigo mismo—, y el faltante sólo
-                      aparece en una fiscalización, cuando ya sólo se corrige
-                      con nota crédito. Déjalas sin impuesto únicamente si el
-                      concepto está exento o excluido.
-                    </p>
-                  </div>
-                </div>
+                  Bajo {{ aiuGuidance()?.regimeLabel }} la base gravable es
+                  {{ aiuGuidance()?.taxableLabel }}, así que
+                  @for (
+                    row of aiuTaxableWithoutTax();
+                    track row.index;
+                    let last = $last
+                  ) {
+                    <strong>{{ row.label }}</strong
+                    >{{ last ? '' : ', ' }}
+                  }
+                  también debería(n) llevarlo. La DIAN acepta el documento igual
+                  —el XML cuadra consigo mismo—, y el faltante sólo aparece en
+                  una fiscalización, cuando ya sólo se corrige con nota crédito.
+                  Déjalas sin impuesto únicamente si el concepto está exento o
+                  excluido.
+                </app-alert-banner>
               }
 
               @if (aiuEffectiveNote(); as note) {
@@ -2088,21 +2069,17 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                 ></app-input>
               } @else {
                 @if (withholdingConcepts().length === 0) {
-                  <div
-                    class="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning-light px-3 py-2.5 mb-3"
+                  <app-alert-banner
+                    class="mb-3"
+                    variant="warning"
+                    icon="alert-triangle"
+                    tone="token"
                   >
-                    <app-icon
-                      name="alert-triangle"
-                      [size]="14"
-                      class="text-warning mt-0.5 shrink-0"
-                    />
-                    <p class="text-xs text-text-primary leading-relaxed">
-                      No hay conceptos de retención configurados. Créalos en
-                      <span class="font-medium">Contabilidad › Retenciones</span>
-                      o activa el importe manual de arriba: sin concepto, el
-                      desglose no se puede guardar.
-                    </p>
-                  </div>
+                    No hay conceptos de retención configurados. Créalos en
+                    <span class="font-medium">Contabilidad › Retenciones</span> o
+                    activa el importe manual de arriba: sin concepto, el desglose
+                    no se puede guardar.
+                  </app-alert-banner>
                 }
 
                 <div formArrayName="withholdings" class="space-y-2">

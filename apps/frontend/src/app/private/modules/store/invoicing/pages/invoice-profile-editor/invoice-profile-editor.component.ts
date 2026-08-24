@@ -36,6 +36,8 @@ import {
     AIU_BUCKETS,
     AIU_COMPONENTS,
     AIU_LEGAL_FLOOR_PERCENT_SCALED,
+    AIU_TAXABLE_BASES,
+    AIU_TAXABLE_BUCKETS_BY_BASIS,
     CONFIG_LIMITS,
     INVOICE_PROFILE_CONFIG_VERSION,
     PROFILE_DOCUMENT_TYPES,
@@ -45,12 +47,15 @@ import {
     isBlockingIssue,
     normalizeInvoiceProfileConfig,
     parsePercentScaled,
+    regimeFromTaxableBasis,
     resolveAiuComponentsBasis,
+    resolveAiuTaxableBasis,
     validateInvoiceProfileConfig,
 } from '../../../../../../core/utils/invoice-profile-config.contract';
 import type {
     AiuBucket,
     AiuComponentsBasis,
+    AiuTaxableBasis,
     InvoiceProfileConfig,
     ProfileConfigIssue,
     ProfileDocumentType,
@@ -464,12 +469,12 @@ type SectionId = ProfileScreenSectionId;
                     </vendix-invoice-form-section>
 
                     <!-- ══ AIU ══ los CUATRO BLOQUES.
-                         El régimen y el objeto del contrato van antes de los
-                         cuatro porque el régimen decide qué componentes son
+                         La BASE GRAVABLE y el objeto del contrato van antes de
+                         los cuatro porque la base decide qué porciones son
                          gravables, y el bloque 4 se lee contra esa decisión:
-                         presentar la matriz de impuestos antes del régimen
-                         invita a llenarla y que después se contradiga con su
-                         propio régimen. -->
+                         presentar la matriz de tributos antes de la base invita
+                         a llenarla y que después se contradiga con la base que
+                         el propio perfil declara. -->
                     @if (isAiu()) {
                         <!--
                             Este banner existe porque la pantalla ESCONDE
@@ -499,12 +504,28 @@ type SectionId = ProfileScreenSectionId;
                                     <div
                                         class="grid grid-cols-1 gap-3 md:grid-cols-2"
                                     >
+                                        <!--
+                                            LA BASE GRAVABLE, no el régimen. Es
+                                            la pregunta que el operador sabe
+                                            contestar —«qué se grava»— y la
+                                            única que puede decir «el contrato
+                                            completo»: el régimen se DERIVA de
+                                            ella al guardar.
+
+                                            Cambiarla reproyecta la matriz de
+                                            tributos en el MISMO acto (ver
+                                            «reprojectTaxMatrix»). Escribir sólo
+                                            la base dejaba una contradicción por
+                                            porción que el servidor devuelve como
+                                            422 sobre una casilla que la persona
+                                            no tocó.
+                                        -->
                                         <app-selector
-                                            label="Régimen de IVA del contrato"
-                                            formControlName="regime"
-                                            [options]="regime_options"
+                                            label="Base gravable del contrato"
+                                            formControlName="taxable_basis"
+                                            [options]="taxable_basis_options"
                                             size="sm"
-                                            helpText="Decide qué componentes entran a la base gravable."
+                                            helpText="Qué porción del contrato lleva IVA. Al cambiarla, la matriz de tributos de abajo se reajusta sola para no contradecirla."
                                         ></app-selector>
                                         <app-textarea
                                             label="Objeto del contrato (valor por omisión)"
@@ -874,7 +895,45 @@ type SectionId = ProfileScreenSectionId;
                                                 >
                                             </div>
                                         }
-                                        @if (regimeMismatch(); as mismatch) {
+                                        @if (taxableBasis() === 'subtotal') {
+                                            <!--
+                                                Con esta base NO hay tratamiento
+                                                AIU: se grava el contrato entero
+                                                y el piso legal deja de aplicar.
+                                                Se avisa en la sección donde se
+                                                nota, porque las cuatro casillas
+                                                de arriba dejan de recortar la
+                                                base y sólo aportan el desglose.
+                                            -->
+                                            <app-alert-banner
+                                                variant="warning"
+                                                icon="alert-triangle"
+                                                tone="token"
+                                                heading="Esta base grava el contrato completo"
+                                            >
+                                                Con la base Subtotal se declina el
+                                                tratamiento AIU: el IVA se calcula
+                                                sobre el valor TOTAL del contrato
+                                                —costo reembolsable incluido— y el
+                                                piso del 10 % no aplica.
+                                            </app-alert-banner>
+                                        }
+                                        <!--
+                                            El costo reembolsable no tiene fila
+                                            en esta matriz bajo ninguna base: su
+                                            regla la escribe la base elegida, no
+                                            una persona. Pero SE GUARDA, así que
+                                            hay que decir qué se guardó: un dato
+                                            fiscal que se persiste y no se puede
+                                            leer en pantalla es peor que no
+                                            tenerlo.
+                                        -->
+                                        <p
+                                            class="text-[11px] italic leading-relaxed text-text-secondary"
+                                        >
+                                            {{ costRuleNote() }}
+                                        </p>
+                                        @if (taxMatrixMismatch(); as mismatch) {
                                             <app-alert-banner
                                                 variant="danger"
                                                 icon="alert-triangle"
@@ -883,7 +942,7 @@ type SectionId = ProfileScreenSectionId;
                                                 {{ mismatch }}
                                             </app-alert-banner>
                                         }
-                                        @if (taxRules.controls.length === 0) {
+                                        @if (visibleTaxRules().length === 0) {
                                             <p
                                                 class="text-xs italic text-text-secondary"
                                             >
@@ -892,14 +951,26 @@ type SectionId = ProfileScreenSectionId;
                                                 el botón de arriba.
                                             </p>
                                         }
+                                        <!--
+                                            Se recorre «visibleTaxRules()» y NO
+                                            «taxRules.controls»: la fila del costo
+                                            reembolsable sigue EXISTIENDO en el
+                                            formulario cuando la base la deja
+                                            fuera —es la constancia de que ese
+                                            costo estaba exento— pero no se
+                                            pinta. Cada fila lleva su índice REAL
+                                            en «row.index», que es el que el
+                                            «FormArray» y los mensajes del
+                                            validador usan.
+                                        -->
                                         <div class="space-y-2" formArrayName="taxes">
                                             @for (
-                                                rule of taxRules.controls;
-                                                track $index
+                                                row of visibleTaxRules();
+                                                track row.index
                                             ) {
                                                 <div
                                                     class="grid grid-cols-1 items-end gap-2 rounded-lg border border-border p-2 md:grid-cols-5"
-                                                    [formGroupName]="$index"
+                                                    [formGroupName]="row.index"
                                                 >
                                                     <app-selector
                                                         label="Impuesto"
@@ -910,7 +981,7 @@ type SectionId = ProfileScreenSectionId;
                                                     <app-selector
                                                         label="Base"
                                                         formControlName="bucket"
-                                                        [options]="bucket_options"
+                                                        [options]="bucket_options()"
                                                         size="sm"
                                                     ></app-selector>
                                                     <app-input
@@ -920,7 +991,7 @@ type SectionId = ProfileScreenSectionId;
                                                         [error]="
                                                             issueFor(
                                                                 'taxes.rules[' +
-                                                                    $index +
+                                                                    row.index +
                                                                     '].rate'
                                                             )
                                                         "
@@ -945,7 +1016,7 @@ type SectionId = ProfileScreenSectionId;
                                                         variant="outline-danger"
                                                         size="sm"
                                                         ariaLabel="Quitar esta regla de impuesto"
-                                                        (clicked)="removeTaxRule($index)"
+                                                        (clicked)="removeTaxRule(row.index)"
                                                     >
                                                         <app-icon
                                                             slot="icon"
@@ -1211,7 +1282,7 @@ type SectionId = ProfileScreenSectionId;
                                             <app-selector
                                                 label="Base"
                                                 formControlName="bucket"
-                                                [options]="bucket_options"
+                                                [options]="bucket_options()"
                                                 size="sm"
                                             ></app-selector>
                                             <app-input
@@ -1784,20 +1855,55 @@ export class InvoiceProfileEditorComponent {
         ([value, label]) => ({ value, label }),
     );
 
-    readonly regime_options = [
-        { value: 'et_462_1', label: 'Art. 462-1 E.T. — IVA sobre A+I+U' },
+    /**
+     * Las TRES bases gravables, en el orden en que la referencia de negocio las
+     * enumera: Subtotal / AIU / Utilidad.
+     *
+     * Reemplaza al selector de régimen. El régimen no viaja a la DIAN y nadie
+     * sabía contestarlo; la base sí es la pregunta del negocio —«qué se
+     * grava»— y es la única que puede decir «el contrato completo», que la
+     * matriz de dos regímenes no podía expresar. `regime` se deriva al guardar
+     * (ver `buildConfig`).
+     */
+    readonly taxable_basis_options = [
         {
-            value: 'decreto_1372_1992',
-            label: 'Decreto 1372/1992 — IVA sólo sobre la Utilidad',
+            value: 'subtotal',
+            label: 'Subtotal — IVA sobre el contrato completo (sin AIU)',
+        },
+        { value: 'aiu', label: 'AIU completo — IVA sobre A+I+U (art. 462-1 E.T.)' },
+        {
+            value: 'utilidad',
+            label: 'Utilidad — IVA sólo sobre la Utilidad (Decreto 1372/1992)',
         },
     ];
 
-    readonly bucket_options = [
-        { value: 'administracion', label: 'Administración' },
-        { value: 'imprevistos', label: 'Imprevistos' },
-        { value: 'utilidad', label: 'Utilidad' },
-        { value: 'costo', label: 'Costo reembolsable' },
-    ];
+    /**
+     * Bases que la matriz de tributos ofrece.
+     *
+     * En un perfil AIU «Costo reembolsable» NO se ofrece bajo NINGUNA de las
+     * tres bases, y su fila no la escribe una persona: la escribe
+     * `derivedCostTaxRule` desde la base elegida. La razón es que su valor
+     * correcto está completamente determinado —`AIU_TAXABLE_BUCKETS_BY_BASIS`
+     * dice si entra a la base, y el servidor rechaza cualquier otra
+     * combinación— así que una casilla ahí sólo podía ofrecer decisiones que se
+     * devuelven con 422: `TAX_COST_MUST_NOT_BE_TAXABLE` si se grava bajo `aiu` o
+     * `utilidad`, `TAX_MATRIX_CONTRADICTS_REGIME` si se deja exento bajo
+     * `subtotal`, y `TAX_RATE_ON_NON_TAXABLE` si conserva tarifa estando exento.
+     *
+     * En un perfil ESTÁNDAR sí se ofrece: ahí no hay base AIU que aplicar, las
+     * líneas nacen precisamente en `costo` y sin esa opción no habría porción
+     * alguna que gravar.
+     */
+    readonly bucket_options = computed<SelectorOption[]>(() => {
+        const base: SelectorOption[] = [
+            { value: 'administracion', label: 'Administración' },
+            { value: 'imprevistos', label: 'Imprevistos' },
+            { value: 'utilidad', label: 'Utilidad' },
+        ];
+        return this.isAiu()
+            ? base
+            : [...base, { value: 'costo', label: 'Costo reembolsable' }];
+    });
 
     /**
      * Sólo los tres componentes del AIU, sin «costo».
@@ -2075,7 +2181,11 @@ export class InvoiceProfileEditorComponent {
             internal_note: [''],
         }),
         aiu: this.fb.group({
-            regime: ['et_462_1'],
+            // La BASE GRAVABLE es el control; `regime` ya no lo es —se deriva
+            // de ella al construir el snapshot—. Tener los dos como controles
+            // habría dejado dos fuentes de verdad para la misma decisión, y la
+            // que el cálculo lee es la base.
+            taxable_basis: ['aiu' as AiuTaxableBasis],
             contract_object: [''],
             enforce_minimum_base: [true],
             minimum_base_percent: [formatPercentScaled(AIU_LEGAL_FLOOR_PERCENT_SCALED)],
@@ -2294,22 +2404,82 @@ export class InvoiceProfileEditorComponent {
 
     readonly taxSummary = computed<string>(() => {
         this.form_value();
-        const total = this.taxRules.controls.length;
-        const taxable = this.taxRules.controls.filter((control) =>
-            Boolean(control.get('taxable')?.value),
+        // Se cuentan las filas VISIBLES: una fila de costo conservada y no
+        // pintada haría que el resumen dijera «4 regla(s)» sobre una matriz de
+        // tres, y el operador buscaría la cuarta sin encontrarla.
+        const visible = this.visibleTaxRules();
+        const taxable = visible.filter((row) =>
+            Boolean(this.taxRules.at(row.index)?.get('taxable')?.value),
         ).length;
-        if (total === 0) return 'Sin reglas';
-        return total + ' regla(s) · ' + taxable + ' gravable(s)';
+        if (visible.length === 0) return 'Sin reglas';
+        return visible.length + ' regla(s) · ' + taxable + ' gravable(s)';
     });
+
+    /**
+     * Las filas de la matriz que se PINTAN, con su índice real en el `FormArray`.
+     *
+     * En un perfil AIU la fila del costo reembolsable NUNCA se pinta —bajo las
+     * tres bases— pero SIEMPRE se guarda: la escribe `derivedCostTaxRule` desde
+     * la base elegida. Sigue existiendo en el formulario porque es la constancia
+     * de qué hizo el perfil con ese costo, y es lo que hace que la
+     * previsualización lo liste entre las porciones omitidas.
+     *
+     * Cada fila lleva su índice REAL: es el que el `FormArray` usa y el que
+     * nombran los mensajes del validador (`taxes.rules[i].rate`).
+     */
+    readonly visibleTaxRules = computed<{ index: number; bucket: string }[]>(() => {
+        this.form_value();
+        const hideCost = this.isAiu();
+        return this.taxRules.controls
+            .map((control, index) => ({
+                index,
+                bucket: String(control.get('bucket')?.value ?? ''),
+            }))
+            .filter((row) => !hideCost || row.bucket !== 'costo');
+    });
+
+    /**
+     * Qué hace el perfil con el costo reembolsable, dicho en pantalla.
+     *
+     * Es obligatorio decirlo: la fila se guarda y no se ve, así que sin esta
+     * frase el perfil llevaría una decisión fiscal que nadie puede revisar. Y
+     * bajo «Subtotal» la tarifa que el costo lleva —la porción más grande del
+     * contrato— sale de las porciones de arriba, así que hay que nombrarla y
+     * decir de dónde viene.
+     */
+    costRuleNote(): string {
+        this.form_value();
+        const basis = this.taxableBasis();
+        if (basis === 'subtotal') {
+            return (
+                'El costo reembolsable también grava con esta base: el perfil lo guarda ' +
+                'al ' +
+                this.derivedCostTaxRule(basis).rate +
+                ' %, con el mismo tributo que las porciones de arriba. No tiene fila ' +
+                'propia porque con la base Subtotal no hay desglose AIU que configurar: ' +
+                'si ese porcentaje no es el correcto, corrígelo arriba y el costo lo sigue.'
+            );
+        }
+        return (
+            'El costo reembolsable no se configura acá: bajo ' +
+            this.taxableBasisLabel() +
+            ' queda fuera de la base gravable, y el perfil lo guarda exento con tarifa ' +
+            '0,00 %. Esa constancia es la que hace que la previsualización lo siga ' +
+            'listando entre las porciones omitidas.'
+        );
+    }
 
     readonly aiuSummary = computed<string>(() => {
         this.form_value();
-        const regime = this.aiuGroup.get('regime')?.value;
-        const label =
-            regime === 'decreto_1372_1992' ? 'Decreto 1372/1992' : 'Art. 462-1 E.T.';
         const basis =
             this.componentsBasis() === 'contract' ? ' del contrato' : ' del AIU';
-        return label + ' · componentes ' + this.componentsSumLabel() + ' %' + basis;
+        return (
+            this.taxableBasisShortLabel() +
+            ' · componentes ' +
+            this.componentsSumLabel() +
+            ' %' +
+            basis
+        );
     });
 
     /**
@@ -2476,6 +2646,17 @@ export class InvoiceProfileEditorComponent {
             .pipe(takeUntilDestroyed())
             .subscribe((concepts) => this.withholding_concepts.set(concepts));
 
+        // LA BASE GRAVABLE Y LA MATRIZ SE ESCRIBEN JUNTAS. Ver
+        // `reprojectTaxMatrix`: el control de base no puede escribir sólo la
+        // base, o el guardado responde 422 sobre una casilla que la persona no
+        // tocó. La hidratación pasa por `patchValue({ emitEvent: false })`, así
+        // que abrir un perfil viejo NO dispara esto: sólo lo dispara cambiar la
+        // base a mano, que es cuando hay algo que reproyectar.
+        this.aiuGroup
+            .get('taxable_basis')!
+            .valueChanges.pipe(takeUntilDestroyed())
+            .subscribe((value) => this.reprojectTaxMatrix(this.asTaxableBasis(value)));
+
         // Al entrar en modo edición, cargar el detalle. El listado sólo trae la
         // fila; el snapshot de configuración viene con el detalle.
         effect(() => {
@@ -2586,6 +2767,209 @@ export class InvoiceProfileEditorComponent {
         return bucket === 'costo' ? 'Costo reembolsable' : this.componentLabel(bucket);
     }
 
+    /**
+     * Base gravable efectiva del formulario.
+     *
+     * Se acota contra `AIU_TAXABLE_BASES` y no se confía en el valor crudo del
+     * control: un valor fuera de la lista tiene que caer en la base MÁS AMPLIA
+     * —`'aiu'`— porque declarar de más es recuperable con nota crédito y
+     * declarar de menos es sanción e intereses. Es la misma doctrina que
+     * `taxableBasisFromRegime` documenta en el contrato.
+     */
+    private asTaxableBasis(value: unknown): AiuTaxableBasis {
+        return AIU_TAXABLE_BASES.includes(value as AiuTaxableBasis)
+            ? (value as AiuTaxableBasis)
+            : 'aiu';
+    }
+
+    taxableBasis(): AiuTaxableBasis {
+        this.form_value();
+        return this.asTaxableBasis(this.aiuGroup.get('taxable_basis')?.value);
+    }
+
+    /**
+     * Nombre corto de la base para la cabecera colapsada de la sección.
+     *
+     * La versión larga cita la norma y arranca en minúscula porque se incrusta
+     * en una frase; un resumen de sección que empieza en minúscula se lee como
+     * un texto cortado.
+     */
+    taxableBasisShortLabel(): string {
+        switch (this.taxableBasis()) {
+            case 'subtotal':
+                return 'Base Subtotal';
+            case 'utilidad':
+                return 'Base Utilidad';
+            default:
+                return 'Base AIU';
+        }
+    }
+
+    /** Nombre de la base para avisos, incrustado en una frase. */
+    taxableBasisLabel(): string {
+        switch (this.taxableBasis()) {
+            case 'subtotal':
+                return 'la base Subtotal (contrato completo)';
+            case 'utilidad':
+                return 'la base sólo Utilidad (Decreto 1372/1992)';
+            default:
+                return 'la base AIU completo (art. 462-1 E.T.)';
+        }
+    }
+
+    /** ¿Existe ya una regla de impuesto para esta porción? */
+    private hasTaxRule(bucket: AiuBucket): boolean {
+        return this.taxRules.controls.some(
+            (control) => control.get('bucket')?.value === bucket,
+        );
+    }
+
+    /**
+     * Primer componente que la base elegida SÍ grava.
+     *
+     * `'costo'` nunca es respuesta: no es componente del AIU y la línea que lo
+     * lleva es exactamente la que el interruptor apaga.
+     */
+    private firstTaxableComponent(): AiuBucket {
+        return (
+            AIU_TAXABLE_BUCKETS_BY_BASIS[this.taxableBasis()].find(
+                (bucket) => bucket !== 'costo',
+            ) ?? 'administracion'
+        );
+    }
+
+    /**
+     * Tributo y tarifa de referencia: los de la primera porción gravada con
+     * tarifa real. Es lo que se copia a una fila que ENTRA a la base sin tarifa
+     * propia, para no sembrar un 0 % que valida y declara de menos.
+     */
+    private referenceTaxRate(): { tax_code: string; rate: string } {
+        for (const control of this.taxRules.controls) {
+            if (control.get('bucket')?.value === 'costo') continue;
+            const rate = parsePercentScaled(control.get('rate')?.value);
+            if (rate !== null && rate > 0) {
+                return {
+                    tax_code: String(control.get('tax_code')?.value ?? '01'),
+                    rate: formatPercentScaled(rate),
+                };
+            }
+        }
+        return { tax_code: '01', rate: '19.00' };
+    }
+
+    /**
+     * La regla de impuesto del costo reembolsable: DERIVADA, nunca editada.
+     *
+     * Su valor correcto está completamente determinado por la base, y las tres
+     * combinaciones equivocadas están medidas contra el servidor vivo:
+     * · falta la fila y la base es `subtotal` ⇒ 422 `TAX_RULE_MISSING`. Bajo las
+     *   otras dos bases la fila es opcional (201 sin ella), pero se emite igual:
+     *   una fila presente y coherente vale más que la ausencia, porque es la
+     *   constancia de que ese costo estaba exento.
+     * · gravada bajo `aiu` o `utilidad` ⇒ 422 `TAX_COST_MUST_NOT_BE_TAXABLE`.
+     * · exenta bajo `subtotal` ⇒ 422 `TAX_MATRIX_CONTRADICTS_REGIME`.
+     * · exenta conservando tarifa ⇒ 422 `TAX_RATE_ON_NON_TAXABLE` **además** del
+     *   anterior. Por eso la tarifa acompaña al interruptor y no se deja quieta.
+     *
+     * Gravada adopta el tributo y la tarifa de referencia —los de la primera
+     * porción gravada— porque bajo `subtotal` se grava un solo contrato con un
+     * solo tributo, y un costo al 0 % validaría declarando de menos.
+     */
+    private derivedCostTaxRule(basis: AiuTaxableBasis): ProfileTaxRule {
+        const taxable = AIU_TAXABLE_BUCKETS_BY_BASIS[basis].includes('costo');
+        const reference = this.referenceTaxRate();
+        const existing = this.taxRules.controls.find(
+            (control) => control.get('bucket')?.value === 'costo',
+        );
+        const existingCode = String(existing?.get('tax_code')?.value ?? '').trim();
+        return {
+            bucket: 'costo',
+            taxable,
+            tax_code: taxable ? reference.tax_code : existingCode || reference.tax_code,
+            rate: taxable ? reference.rate : '0.00',
+        };
+    }
+
+    /**
+     * Reproyecta las CUATRO porciones sobre la base elegida.
+     *
+     * ─── POR QUÉ NO BASTA CON ESCRIBIR `taxable_basis` ──────────────────────
+     *
+     * Porque el servidor compara CADA porción contra
+     * `AIU_TAXABLE_BUCKETS_BY_BASIS[base]` y devuelve 422 en cuanto una
+     * discrepa: `TAX_MATRIX_CONTRADICTS_REGIME` en `taxes.rules.<porción>.taxable`,
+     * o `TAX_COST_MUST_NOT_BE_TAXABLE` si la porción es el costo. Un perfil que
+     * traía el costo exento y pasa a base «Subtotal» queda contradiciéndose sin
+     * que nadie haya tocado esa casilla —y la pantalla no tendría forma de
+     * explicar de dónde salió el error—. Cambiar la base y reproyectar la matriz
+     * es UN SOLO acto, no dos.
+     *
+     * Qué hace, porción por porción:
+     * · sale de la base ⇒ `taxable:false` y tarifa `'0.00'`. La tarifa TIENE que
+     *   irse a cero: `TAX_RATE_ON_NON_TAXABLE` rechaza una porción no gravada
+     *   que conserva tarifa, que es el descuadre que la DIAN devuelve por FAU04.
+     * · entra a la base ⇒ `taxable:true`, conservando su tarifa si ya tenía una
+     *   real; si venía en cero, adopta la de referencia, porque un gravable al
+     *   0 % valida y declara de menos.
+     * · el costo NO se recorre con las demás: se sincroniza al final desde
+     *   `derivedCostTaxRule`, que es la única autoridad sobre esa fila, y se
+     *   CREA si no existía. Nunca se borra: bajo `subtotal` su ausencia es un
+     *   422 (`TAX_RULE_MISSING`) y bajo las otras dos su presencia es la
+     *   constancia de que ese costo quedó fuera de la base.
+     *
+     * Se escribe con `emitEvent` por omisión a propósito: en Zoneless la
+     * pantalla se redibuja por `form.valueChanges`, así que un `emitEvent:false`
+     * dejaría la matriz reproyectada en el modelo y sin reproyectar en pantalla.
+     */
+    private reprojectTaxMatrix(basis: AiuTaxableBasis): void {
+        if (!this.isAiu()) return;
+        const expected = AIU_TAXABLE_BUCKETS_BY_BASIS[basis];
+        const reference = this.referenceTaxRate();
+
+        for (const control of this.taxRules.controls) {
+            const bucket = control.get('bucket')?.value as AiuBucket;
+            if (!AIU_BUCKETS.includes(bucket) || bucket === 'costo') continue;
+            const shouldBeTaxable = expected.includes(bucket);
+            const taxableControl = control.get('taxable');
+            const rateControl = control.get('rate');
+            if (Boolean(taxableControl?.value) === shouldBeTaxable) continue;
+
+            taxableControl?.setValue(shouldBeTaxable);
+            if (!shouldBeTaxable) {
+                rateControl?.setValue('0.00');
+            } else if ((parsePercentScaled(rateControl?.value) ?? 0) === 0) {
+                control.get('tax_code')?.setValue(reference.tax_code);
+                rateControl?.setValue(reference.rate);
+            }
+            control.markAsDirty();
+        }
+
+        // El costo, al FINAL y no dentro del recorrido: su tarifa de referencia
+        // son las porciones que el recorrido acaba de reproyectar. Calculada
+        // antes, bajo «Subtotal» habría copiado el 0,00 % de una porción que en
+        // ese mismo acto pasaba a gravar.
+        const derived = this.derivedCostTaxRule(basis);
+        const costRow = this.taxRules.controls.find(
+            (control) => control.get('bucket')?.value === 'costo',
+        );
+        if (costRow) {
+            costRow.get('taxable')?.setValue(derived.taxable);
+            costRow.get('tax_code')?.setValue(derived.tax_code);
+            costRow.get('rate')?.setValue(derived.rate);
+            costRow.markAsDirty();
+        } else {
+            this.taxRules.push(
+                this.fb.group({
+                    bucket: ['costo'],
+                    taxable: [derived.taxable],
+                    tax_code: [derived.tax_code],
+                    rate: [derived.rate],
+                }),
+            );
+            this.taxRules.markAsDirty();
+        }
+    }
+
     contractObjectHelp(): string {
         return (
             'Se puede sobrescribir en cada factura. Vacío se permite guardar, pero la ' +
@@ -2595,9 +2979,17 @@ export class InvoiceProfileEditorComponent {
     }
 
     minimumBaseHelp(): string {
-        return this.aiuGroup.get('regime')?.value === 'decreto_1372_1992'
-            ? 'El Decreto 1372/1992 no fija piso; desactivar la exigencia es lo habitual.'
-            : 'El art. 462-1 E.T. fija el 10 % del valor del contrato como mínimo.';
+        switch (this.taxableBasis()) {
+            case 'utilidad':
+                return 'El Decreto 1372/1992 no fija piso; desactivar la exigencia es lo habitual.';
+            case 'subtotal':
+                // No es que el piso sea otro: es que no hay AIU que pisar. Se
+                // grava el contrato entero, así que la base gravable ya es el
+                // 100 % y compararla con un 10 % no dice nada.
+                return 'Con la base Subtotal no hay AIU que pisar: se grava el contrato completo y el piso no se aplica.';
+            default:
+                return 'El art. 462-1 E.T. fija el 10 % del valor del contrato como mínimo.';
+        }
     }
 
     // ── Suma de componentes, en centésimas ──────────────────────────────────
@@ -2648,7 +3040,7 @@ export class InvoiceProfileEditorComponent {
             this.aiuGroup.get('minimum_base_percent')?.value,
         );
         const enforced =
-            this.aiuGroup.get('regime')?.value === 'et_462_1' &&
+            this.taxableBasis() === 'aiu' &&
             this.aiuGroup.get('enforce_minimum_base')?.value === true;
         return !(enforced && floor !== null && sum < floor);
     }
@@ -2704,27 +3096,43 @@ export class InvoiceProfileEditorComponent {
     ];
 
     /**
-     * Aviso de contradicción entre el régimen y la matriz.
+     * Aviso de contradicción entre la BASE GRAVABLE y la matriz.
      *
-     * No sustituye al validador —que lo reporta como bloqueo— sino que lo
-     * explica en la sección donde se arregla, porque el mensaje del validador
-     * aparece al pie y no dice en qué fila mirar.
+     * No sustituye al validador —que lo reporta como bloqueo
+     * (`TAX_MATRIX_CONTRADICTS_REGIME` / `TAX_COST_MUST_NOT_BE_TAXABLE`)— sino
+     * que lo explica en la sección donde se arregla, porque el mensaje del
+     * validador aparece al pie y no dice en qué fila mirar.
+     *
+     * Antes sólo miraba el Decreto 1372/1992 y sólo el exceso —gravar lo que no
+     * entra—. Le faltaba el defecto simétrico: `administracion.taxable = false`
+     * bajo la base AIU pasaba muda acá y el servidor la rechaza igual. Ahora las
+     * dos direcciones se comparan contra `AIU_TAXABLE_BUCKETS_BY_BASIS`, que es
+     * la misma tabla que usa el validador.
      */
-    regimeMismatch(): string | null {
+    taxMatrixMismatch(): string | null {
         this.form_value();
         if (!this.isAiu()) return null;
-        const regime = this.aiuGroup.get('regime')?.value;
-        if (regime !== 'decreto_1372_1992') return null;
+        const expected = AIU_TAXABLE_BUCKETS_BY_BASIS[this.taxableBasis()];
         const offenders = this.taxRules.controls.filter((control) => {
             const bucket = control.get('bucket')?.value as AiuBucket;
-            const taxable = Boolean(control.get('taxable')?.value);
-            return taxable && bucket !== 'utilidad';
+            // El costo no puede ofender: lo escribe `derivedCostTaxRule` desde
+            // esta misma tabla. Contarlo acá señalaría una fila que la pantalla
+            // no muestra y que el snapshot guardado no contiene.
+            if (!AIU_BUCKETS.includes(bucket) || bucket === 'costo') return false;
+            return Boolean(control.get('taxable')?.value) !== expected.includes(bucket);
         });
         if (offenders.length === 0) return null;
         return (
-            'Bajo el Decreto 1372/1992 sólo la Utilidad lleva IVA. Hay ' +
+            'Bajo ' +
+            this.taxableBasisLabel() +
+            ' la base gravable es ' +
+            expected
+                .filter((bucket) => bucket !== 'costo')
+                .map((bucket) => this.bucketLabel(bucket))
+                .join(' + ') +
+            '. Hay ' +
             offenders.length +
-            ' regla(s) gravando otros componentes: el XML declararía una base que sus ' +
+            ' regla(s) que dicen lo contrario: el XML declararía una base que sus ' +
             'propias líneas no respaldan y la DIAN lo rechaza (FAU04).'
         );
     }
@@ -2840,11 +3248,11 @@ export class InvoiceProfileEditorComponent {
     /**
      * Enciende o apaga la base AIU de una línea modelo.
      *
-     * Al encender se propone el primer componente GRAVABLE del régimen elegido:
-     * bajo el Decreto 1372/1992 sólo la Utilidad lleva IVA, así que proponer
+     * Al encender se propone el primer componente GRAVABLE de la BASE elegida:
+     * bajo la base Utilidad sólo la Utilidad lleva IVA, así que proponer
      * «Administración» ahí sembraría en el perfil una línea que declara una base
-     * que su propio régimen no grava. Es la misma regla que aplica la vista de
-     * emisión, y está escrita dos veces a propósito: cada pantalla lee el régimen
+     * que el propio perfil no grava. Es la misma regla que aplica la vista de
+     * emisión, y está escrita dos veces a propósito: cada pantalla lee la base
      * de una fuente distinta —acá el formulario, allá los ajustes de la tienda—.
      */
     toggleLineAiu(index: number, on: boolean): void {
@@ -2856,10 +3264,7 @@ export class InvoiceProfileEditorComponent {
             return;
         }
         if (this.lineCarriesAiu(index)) return;
-        const regime = this.form.get('aiu.regime')?.value;
-        control.setValue(
-            regime === 'decreto_1372_1992' ? 'utilidad' : 'administracion',
-        );
+        control.setValue(this.firstTaxableComponent());
         control.markAsDirty();
     }
     /**
@@ -2998,7 +3403,11 @@ export class InvoiceProfileEditorComponent {
         if (config.aiu) {
             this.aiuGroup.patchValue(
                 {
-                    regime: config.aiu.regime,
+                    // Un snapshot anterior a `taxable_basis` no lo trae: se
+                    // DERIVA de `regime` sin reescribir nada. `resolveAiuTaxableBasis`
+                    // es el único punto de lectura, el mismo que usan el
+                    // validador y el calculador.
+                    taxable_basis: resolveAiuTaxableBasis(config.aiu),
                     contract_object: config.aiu.contract_object,
                     enforce_minimum_base: config.aiu.enforce_minimum_base,
                     minimum_base_percent: config.aiu.minimum_base_percent,
@@ -3114,12 +3523,33 @@ export class InvoiceProfileEditorComponent {
             if (account) revenue[bucket] = account;
         }
 
-        const rules: ProfileTaxRule[] = this.taxRules.controls.map((control) => ({
-            bucket: control.get('bucket')?.value as AiuBucket,
-            taxable: Boolean(control.get('taxable')?.value),
-            tax_code: String(control.get('tax_code')?.value ?? ''),
-            rate: String(control.get('rate')?.value ?? '0.00'),
-        }));
+        // LA FILA DEL COSTO SE EMITE SIEMPRE Y NO LA ESCRIBE NADIE.
+        //
+        // Se reemplaza EN SU SITIO —no se filtra y se añade al final— para que
+        // los índices que ve el validador sigan siendo los del `FormArray`: los
+        // mensajes vuelven como `taxes.rules[i].rate` y la pantalla los pinta en
+        // la fila `i`. Filtrar movería cada fila un puesto y el error aparecería
+        // en la línea de al lado.
+        //
+        // Si no había fila, se añade AL FINAL: ahí su índice queda más allá de
+        // toda fila visible, así que no le roba el sitio a ninguna.
+        const aiuProfile = this.isAiu();
+        const taxableBasisForRules = this.taxableBasis();
+        const rules: ProfileTaxRule[] = this.taxRules.controls.map((control) => {
+            const bucket = control.get('bucket')?.value as AiuBucket;
+            if (aiuProfile && bucket === 'costo') {
+                return this.derivedCostTaxRule(taxableBasisForRules);
+            }
+            return {
+                bucket,
+                taxable: Boolean(control.get('taxable')?.value),
+                tax_code: String(control.get('tax_code')?.value ?? ''),
+                rate: String(control.get('rate')?.value ?? '0.00'),
+            };
+        });
+        if (aiuProfile && !this.hasTaxRule('costo')) {
+            rules.push(this.derivedCostTaxRule(taxableBasisForRules));
+        }
 
         const model_lines: ProfileModelLine[] = this.modelLines.controls.map((control) => ({
             bucket: control.get('bucket')?.value as AiuBucket,
@@ -3162,7 +3592,23 @@ export class InvoiceProfileEditorComponent {
             // heredado en un perfil estándar reaparecería al cambiar el tipo.
             aiu: this.isAiu()
                 ? {
-                      regime: aiuRaw['regime'],
+                      // `regime` se DERIVA de la base y se sigue persistiendo
+                      // para los consumidores que todavía lo leen. Bajo
+                      // «subtotal» no hay régimen legal al que colapsar, así que
+                      // se escribe el MÁS AMPLIO —`et_462_1`—: un lector que
+                      // ignore `taxable_basis` declarará de más (recuperable con
+                      // nota crédito) y nunca de menos (sanción e intereses).
+                      // Escribir `decreto_1372_1992` ahí gravaría sólo la
+                      // utilidad de un contrato declarado gravado completo.
+                      regime:
+                          regimeFromTaxableBasis(
+                              this.asTaxableBasis(aiuRaw['taxable_basis']),
+                          ) ?? 'et_462_1',
+                      // Explícito y nunca ausente: es lo que gobierna el cálculo
+                      // y la matriz, y su ausencia obligaría al servidor a
+                      // deducirlo del régimen que este mismo objeto acaba de
+                      // derivar de él.
+                      taxable_basis: this.asTaxableBasis(aiuRaw['taxable_basis']),
                       contract_object: String(aiuRaw['contract_object'] ?? ''),
                       enforce_minimum_base: Boolean(aiuRaw['enforce_minimum_base']),
                       minimum_base_percent: String(aiuRaw['minimum_base_percent'] ?? '0.00'),
