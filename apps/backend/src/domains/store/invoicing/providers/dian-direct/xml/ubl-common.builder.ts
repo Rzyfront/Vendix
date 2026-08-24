@@ -21,6 +21,7 @@ import {
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { createHash } from 'crypto';
 import {
+  DianNumericInput,
   dianAmount,
   dianArithmetic,
   dianLineExtension,
@@ -349,6 +350,36 @@ const DIAN_WITHHOLDING_TAX_TYPES: ReadonlySet<string> = new Set([
   'reteica',
   'retecree',
 ]);
+
+/**
+ * Un cubo `(esquema, tarifa)` con los valores CRUDOS de sus filas.
+ *
+ * ## Por qué guarda LISTAS y no un acumulado
+ *
+ * `dianSum` trunca a dos decimales UNA VEZ POR LLAMADA. Acumular con
+ * `dianSum([acumulado, siguiente])` trunca en CADA paso, así que la deriva se
+ * multiplica por el número de filas del cubo. Guardando las filas se formatea
+ * una sola vez, al emitir, y el resultado no depende de en cuántos trozos llegó
+ * el importe.
+ *
+ * Es la trampa que aparece justo al agrupar: agrupar multiplica las llamadas a
+ * `dianSum`, y la Σ global puede separarse de la Σ de las Σ por grupo. Se cierra
+ * en el sitio donde nace, no en cada llamador.
+ */
+interface DianTaxRateBucket {
+  base: DianNumericInput[];
+  amount: DianNumericInput[];
+}
+
+/** Cómo se clasifica UNA fila de tributo o de retención para agruparla. */
+interface DianTaxGrouping {
+  /** Código de tributo de la tabla 13.2.2 (`cac:TaxScheme/cbc:ID`). */
+  code: string;
+  /** Tarifa YA FORMATEADA como va a salir en `cbc:Percent`. Es la clave. */
+  percent: string;
+  base: DianNumericInput;
+  amount: DianNumericInput;
+}
 
 /**
  * Shared UBL 2.1 element builders for Colombian electronic invoicing.
@@ -1366,6 +1397,107 @@ export class UblCommonBuilder {
   }
 
   /**
+   * Agrupa filas de tributo por `(esquema, tarifa)` — LA ÚNICA copia.
+   *
+   * ## Por qué el anexo exige las DOS claves, y no una
+   *
+   * Los dos ejes son reglas distintas y las dos son de rechazo:
+   *
+   * · **Por ESQUEMA** — «Un bloque para cada código de tributo» (FAX01 pág. 95
+   *   para la línea, FAT01 pág. 80 para las retenciones). Dos tributos distintos
+   *   NO caben en el mismo bloque.
+   * · **Por TARIFA dentro del esquema** — «si hay más de una tarifa del mismo
+   *   impuesto se deben informar en `TaxSubtotal` diferentes dentro del mismo
+   *   `TaxTotal`» (FAS01a pág. 428), «debe ser informado un grupo de estos para
+   *   cada tarifa» (FAS04 pág. 429, FAX04 pág. 96, FAT04 pág. 83). Fundir dos
+   *   tarifas en un subtotal publica la tarifa de UNA de ellas sobre la base de
+   *   las DOS, y entonces `base × tarifa` deja de dar el importe declarado — que
+   *   es literalmente el rechazo de FAS07 (pág. 78-79 / 430).
+   *
+   * ## Por qué está extraído
+   *
+   * Porque la misma agrupación la necesitan la cabecera (`buildTaxTotals`), la
+   * línea (`buildLineTaxTotal`) y las retenciones (`buildWithholdingTaxTotal`).
+   * Cuando sólo las retenciones la tenían, la cabecera agrupaba por esquema a
+   * secas y emitía un IVA 19 % + IVA 5 % como un subtotal al 19 % sobre la suma
+   * de las dos bases. La asimetría vivía DENTRO de un archivo, no entre
+   * archivos: una segunda copia es exactamente cómo vuelve.
+   *
+   * `resolve` devolviendo `null` DESCARTA la fila —lo usa la retención cuyo tipo
+   * no tiene código conocido: el documento sale sin ella, que es recuperable, en
+   * vez de salir con un esquema inventado, que es rechazo y consecutivo quemado.
+   *
+   * El orden de iteración de los `Map` es el de PRIMERA APARICIÓN, así que el
+   * XML conserva el orden en que el productor mandó los tributos, y las tarifas
+   * del mismo esquema salen contiguas.
+   */
+  private static groupTaxRowsBySchemeAndRate<T>(
+    rows: readonly T[],
+    resolve: (row: T) => DianTaxGrouping | null,
+  ): Map<string, Map<string, DianTaxRateBucket>> {
+    const by_scheme = new Map<string, Map<string, DianTaxRateBucket>>();
+
+    for (const row of rows) {
+      const grouping = resolve(row);
+      if (!grouping) continue;
+
+      const by_rate =
+        by_scheme.get(grouping.code) ?? new Map<string, DianTaxRateBucket>();
+      const bucket =
+        by_rate.get(grouping.percent) ??
+        ({ base: [], amount: [] } as DianTaxRateBucket);
+
+      bucket.base.push(grouping.base);
+      bucket.amount.push(grouping.amount);
+
+      by_rate.set(grouping.percent, bucket);
+      by_scheme.set(grouping.code, by_rate);
+    }
+
+    return by_scheme;
+  }
+
+  /** Todos los cubos de una agrupación, en orden de documento. */
+  private static flattenTaxBuckets(
+    by_scheme: Map<string, Map<string, DianTaxRateBucket>>,
+  ): DianTaxRateBucket[] {
+    return [...by_scheme.values()].flatMap((by_rate) => [...by_rate.values()]);
+  }
+
+  /**
+   * Emite UN `cac:TaxSubtotal` de un cubo `(esquema, tarifa)`.
+   *
+   * Comparte forma la cabecera, la línea y —salvo el nombre del elemento padre,
+   * que decide el llamador— la retención: el par `(ID, Name)` sale SIEMPRE de la
+   * tabla del repositorio, nunca del nombre libre que el comerciante escribió,
+   * porque FAS08/FAX07/FAT12-13 comparan contra la tabla 13.2.2.
+   */
+  private static emitTaxSubtotal(
+    parent: any,
+    code: string,
+    percent: string,
+    bucket: DianTaxRateBucket,
+    currency: string,
+  ): void {
+    const subtotal = parent.ele(UBL_NAMESPACES.CAC, 'TaxSubtotal');
+    subtotal
+      .ele(UBL_NAMESPACES.CBC, 'TaxableAmount')
+      .att('currencyID', currency)
+      .txt(dianSum(bucket.base));
+    subtotal
+      .ele(UBL_NAMESPACES.CBC, 'TaxAmount')
+      .att('currencyID', currency)
+      .txt(dianSum(bucket.amount));
+
+    const category = subtotal.ele(UBL_NAMESPACES.CAC, 'TaxCategory');
+    category.ele(UBL_NAMESPACES.CBC, 'Percent').txt(percent);
+
+    const scheme = category.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
+    scheme.ele(UBL_NAMESPACES.CBC, 'ID').txt(code);
+    scheme.ele(UBL_NAMESPACES.CBC, 'Name').txt(DIAN_TAX_NAMES[code] || code);
+  }
+
+  /**
    * Builds tax total elements from invoice taxes.
    *
    * ## Un documento SIN tributos no informa el grupo
@@ -1398,51 +1530,67 @@ export class UblCommonBuilder {
   ): void {
     if (!taxes?.length) return;
 
-    // Group taxes by DIAN scheme code (tax_type-aware): IVA→01, INC→04, ICA→03.
-    // This is the document-level TaxTotal DIAN validates, so IVA and INC must
-    // land in separate TaxSubtotal blocks with their own scheme.
-    const tax_groups = new Map<string, ProviderInvoiceTax[]>();
-    for (const tax of taxes) {
-      const code = UblCommonBuilder.resolveTaxCodeFromTax(tax);
-      if (!tax_groups.has(code)) {
-        tax_groups.set(code, []);
-      }
-      tax_groups.get(code)!.push(tax);
-    }
+    // UN `cac:TaxSubtotal` por (esquema, tarifa) — la MISMA agrupación que usan
+    // la línea y las retenciones, extraída para que no pueda haber dos criterios.
+    // Antes se agrupaba SÓLO por esquema y `cbc:Percent` salía de la PRIMERA fila
+    // del grupo: un IVA 19 % + IVA 5 % se emitía como un subtotal al 19,00 %
+    // sobre la suma de las dos bases (2.000,00) con el importe de las dos
+    // (240,00). `base × tarifa` daba 380,00 y el XML se contradecía a sí mismo,
+    // que es el rechazo de FAS07 (pág. 78-79 / 430) y lo que FAS04 (pág. 78 /
+    // 429) y FAS01a (pág. 428) prohíben.
+    //
+    // Lo que NO cambia acá: sigue emitiéndose UN solo `cac:TaxTotal` de cabecera
+    // aunque el documento traiga dos tributos. FAS01 pide un bloque por código y
+    // eso es una divergencia SEPARADA, con su propio caso `DIVERGE` fijándola.
+    const by_scheme = UblCommonBuilder.groupTaxRowsBySchemeAndRate(
+      taxes,
+      (tax) => {
+        // tax_type-aware: IVA→01, INC→04, ICA→03.
+        const code = UblCommonBuilder.resolveTaxCodeFromTax(tax);
+        return {
+          code,
+          // ICA rates are stored in "per mil" (‰) — convert to percentage for
+          // UBL. ICA keeps 4 decimals because a 7‰ rate is 0.7000 %, which 2
+          // decimals would flatten; every other scheme uses the DIAN 2-decimal
+          // contract. `resolveSchemePercent` es la única copia de esa regla, y la
+          // tarifa YA FORMATEADA es la clave del cubo: dos filas que van a
+          // publicar el mismo `cbc:Percent` son la misma tarifa.
+          percent: UblCommonBuilder.resolveSchemePercent(code, tax.tax_rate),
+          base: tax.taxable_amount,
+          amount: tax.tax_amount,
+        };
+      },
+    );
 
     const tax_total = parent.ele(UBL_NAMESPACES.CAC, 'TaxTotal');
+
+    // FAS02 (pág. 77 / 428) — el importe del grupo es la Σ DE SUS SUBTOTALES ya
+    // truncados, NO la Σ cruda de las filas. Con los subtotales partidos por
+    // tarifa las dos cifras pueden separarse un céntimo (`dianSum` trunca una vez
+    // por llamada, y agrupar multiplica las llamadas), y la que la DIAN ejecuta
+    // es la de los subtotales: se computa desde los cubos para que la identidad
+    // se cumpla POR CONSTRUCCIÓN y no por coincidencia.
     tax_total
       .ele(UBL_NAMESPACES.CBC, 'TaxAmount')
       .att('currencyID', currency)
-      .txt(dianSum(taxes.map((t) => t.tax_amount)));
-
-    for (const [code, group_taxes] of tax_groups) {
-      const subtotal = tax_total.ele(UBL_NAMESPACES.CAC, 'TaxSubtotal');
-      subtotal
-        .ele(UBL_NAMESPACES.CBC, 'TaxableAmount')
-        .att('currencyID', currency)
-        .txt(dianSum(group_taxes.map((t) => t.taxable_amount)));
-      subtotal
-        .ele(UBL_NAMESPACES.CBC, 'TaxAmount')
-        .att('currencyID', currency)
-        .txt(dianSum(group_taxes.map((t) => t.tax_amount)));
-
-      const tax_category = subtotal.ele(UBL_NAMESPACES.CAC, 'TaxCategory');
-
-      // ICA rates are stored in "per mil" (‰) — convert to percentage for UBL.
-      // ICA keeps 4 decimals because a 7‰ rate is 0.7000 %, which 2 decimals
-      // would flatten; every other scheme uses the DIAN 2-decimal contract.
-      // Extraído a `resolveSchemePercent` para que las líneas apliquen la misma
-      // regla; la expresión es la misma, no cambia un dígito.
-      const tax_percent = UblCommonBuilder.resolveSchemePercent(
-        code,
-        group_taxes[0].tax_rate,
+      .txt(
+        dianSum(
+          UblCommonBuilder.flattenTaxBuckets(by_scheme).map((bucket) =>
+            dianSum(bucket.amount),
+          ),
+        ),
       );
-      tax_category.ele(UBL_NAMESPACES.CBC, 'Percent').txt(tax_percent);
 
-      const scheme = tax_category.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
-      scheme.ele(UBL_NAMESPACES.CBC, 'ID').txt(code);
-      scheme.ele(UBL_NAMESPACES.CBC, 'Name').txt(DIAN_TAX_NAMES[code] || code);
+    for (const [code, by_rate] of by_scheme) {
+      for (const [percent, bucket] of by_rate) {
+        UblCommonBuilder.emitTaxSubtotal(
+          tax_total,
+          code,
+          percent,
+          bucket,
+          currency,
+        );
+      }
     }
   }
 
@@ -1502,60 +1650,55 @@ export class UblCommonBuilder {
   ): void {
     if (!withholdings?.length) return;
 
-    /** Base y monto acumulados de una tarifa dentro de un esquema. */
-    type WithholdingBucket = { base: string; amount: string };
-    /** esquema DIAN → (tarifa formateada → acumulado). */
-    const by_scheme = new Map<string, Map<string, WithholdingBucket>>();
+    // MISMA agrupación `(esquema, tarifa)` que la cabecera y la línea. Era la
+    // única función del archivo que la tenía bien, y ahora es la ÚNICA copia:
+    // vive en `groupTaxRowsBySchemeAndRate`, no acá.
+    const by_scheme = UblCommonBuilder.groupTaxRowsBySchemeAndRate(
+      withholdings,
+      (withholding) => {
+        const code =
+          DIAN_WITHHOLDING_SCHEME_BY_TYPE[withholding.withholding_type];
+        // Un tipo que no esté en el mapa no tiene código de tributo conocido, y
+        // adivinarlo sería declarar una figura tributaria que nadie verificó. Se
+        // descarta: el documento sale sin esa retención —recuperable— en vez de
+        // salir con un esquema inventado, que es rechazo y consecutivo quemado.
+        if (!code) return null;
+        // `dianRate` y NO `resolveSchemePercent`: la tarifa de la retención llega
+        // ya en porcentaje (ver la nota de arriba sobre el por-mil), así que el
+        // saneamiento del ICA la dividiría por diez.
+        return {
+          code,
+          percent: dianRate(withholding.rate),
+          base: withholding.base,
+          amount: withholding.amount,
+        };
+      },
+    );
 
-    for (const withholding of withholdings) {
-      const code = DIAN_WITHHOLDING_SCHEME_BY_TYPE[withholding.withholding_type];
-      // Un tipo que no esté en el mapa no tiene código de tributo conocido, y
-      // adivinarlo sería declarar una figura tributaria que nadie verificó. Se
-      // descarta: el documento sale sin esa retención —recuperable— en vez de
-      // salir con un esquema inventado, que es rechazo y consecutivo quemado.
-      if (!code) continue;
-
-      const percent = dianRate(withholding.rate);
-      const rates =
-        by_scheme.get(code) ?? new Map<string, WithholdingBucket>();
-      const accumulated = rates.get(percent);
-      rates.set(percent, {
-        base: dianSum([accumulated?.base ?? '0', withholding.base]),
-        amount: dianSum([accumulated?.amount ?? '0', withholding.amount]),
-      });
-      by_scheme.set(code, rates);
-    }
-
-    for (const [code, rates] of by_scheme) {
+    for (const [code, by_rate] of by_scheme) {
       const total = parent.ele(UBL_NAMESPACES.CAC, 'WithholdingTaxTotal');
 
       // FAT02 — el importe del grupo es la suma de sus subtotales, no el total
-      // retenido del documento: cada esquema publica el suyo.
+      // retenido del documento: cada esquema publica el suyo. Se computa desde
+      // los MISMOS cubos que emiten los subtotales, así que la identidad se
+      // cumple por construcción incluso cuando un cubo trunca un céntimo.
       total
         .ele(UBL_NAMESPACES.CBC, 'TaxAmount')
         .att('currencyID', currency)
-        .txt(dianSum([...rates.values()].map((row) => row.amount)));
+        .txt(dianSum([...by_rate.values()].map((row) => dianSum(row.amount))));
 
-      for (const [percent, row] of rates) {
-        const subtotal = total.ele(UBL_NAMESPACES.CAC, 'TaxSubtotal');
-        subtotal
-          .ele(UBL_NAMESPACES.CBC, 'TaxableAmount')
-          .att('currencyID', currency)
-          .txt(dianAmount(row.base));
-        subtotal
-          .ele(UBL_NAMESPACES.CBC, 'TaxAmount')
-          .att('currencyID', currency)
-          .txt(dianAmount(row.amount));
-
-        const category = subtotal.ele(UBL_NAMESPACES.CAC, 'TaxCategory');
-        category.ele(UBL_NAMESPACES.CBC, 'Percent').txt(percent);
-
-        // Mismo par (ID, Name) que exige FAT12/FAT13: el identificador y el
-        // nombre tienen que ser los de la tabla 13.2.2 de la DIAN, y los dos
-        // salen de la misma tabla del repositorio para que no puedan divergir.
-        const scheme = category.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
-        scheme.ele(UBL_NAMESPACES.CBC, 'ID').txt(code);
-        scheme.ele(UBL_NAMESPACES.CBC, 'Name').txt(DIAN_TAX_NAMES[code] || code);
+      // Mismo par (ID, Name) que exige FAT12/FAT13, y la misma emisión de
+      // subtotal que la cabecera: el identificador y el nombre tienen que ser los
+      // de la tabla 13.2.2 de la DIAN, y los dos salen de la misma tabla del
+      // repositorio para que no puedan divergir.
+      for (const [percent, bucket] of by_rate) {
+        UblCommonBuilder.emitTaxSubtotal(
+          total,
+          code,
+          percent,
+          bucket,
+          currency,
+        );
       }
     }
   }
@@ -2080,7 +2223,7 @@ export class UblCommonBuilder {
   /**
    * El grupo `cac:TaxTotal` de UNA línea, por sus dos caminos.
    *
-   * ## 1. Con desglose propio (`item.taxes`) — un `cac:TaxSubtotal` por tributo
+   * ## 1. Con desglose propio (`item.taxes`) — un `cac:TaxTotal` POR ESQUEMA
    *
    * Es lo que hace representable una cuenta mixta. Sin él, TODAS las líneas
    * heredan el esquema del PRIMER tributo de la cabecera y una cuenta de
@@ -2088,19 +2231,25 @@ export class UblCommonBuilder {
    * recompone los impuestos desde lo que recibe, así que el documento afirma un
    * reparto de tributos que no ocurrió.
    *
-   * El `cbc:TaxAmount` del grupo es la SUMA de sus subtotales, no el
-   * `item.tax_amount`: FAX02 (pág. 95) rechaza «si ../cac:TaxTotal/cbc:TaxAmount
-   * <> sumatoria de todas las ocurrencias de ../cac:TaxTotal/TaxSubtotal/
-   * cbc:TaxAmount». Quien produce el desglose ya verificó que esa suma coincide
-   * con el impuesto de la línea al centavo; si no coincidiera, no adjunta
-   * desglose y esta función cae al camino histórico.
+   * La cardinalidad es POR CÓDIGO DE TRIBUTO, no una por línea. FAX01 (pág. 95 /
+   * 448) pide «un bloque para cada código de tributo», y FAX02 (pág. 95-96 /
+   * 449) lo vuelve aritmético SELECCIONANDO el bloque por esquema: el
+   * `cbc:TaxAmount` de cada bloque tiene que ser la Σ de los subtotales DE ESE
+   * ESQUEMA. Con un único bloque que sumara los dos, una cuenta con IVA 190 +
+   * INC 80 declaraba 270,00 donde el predicado de IVA exige 190,00 — el rechazo
+   * está en la aritmética, no en la forma.
    *
-   * Se emite UN subtotal por fila de `item.taxes`, con la base y el importe de
-   * ESA fila —no la suma—: en una línea, IVA e INC gravan LA MISMA base, así que
-   * sumar bases del mismo grupo la duplicaría. FAX04 (pág. 95) pide «un grupo de
-   * estos para cada tarifa», que es exactamente una fila por tributo; y el
-   * rechazo por duplicados de FAX01 es sobre bloques `cac:TaxTotal` que compartan
-   * esquema, de los que la línea emite exactamente uno.
+   * Dentro del bloque, un `cac:TaxSubtotal` POR TARIFA (FAX04, pág. 96), cada uno
+   * con SU base: en una línea, IVA e INC gravan LA MISMA base, y como van a
+   * bloques distintos ninguna base se suma dos veces. Dos filas de la misma
+   * tarifa sí se funden —sumando bases—, que es exactamente lo que
+   * `lineTaxableContribution` suma para la base gravable de cabecera (FAU04), así
+   * que las dos caras siguen leyendo el mismo número.
+   *
+   * La otra mitad de FAX01 —«NO debe ser informado … ni para ítems cuyo concepto
+   * en contratos de AIU no haga parte de la base gravable»— la resuelve
+   * `UblDocumentLine.omit_tax_total`, que hace callar la línea entera antes de
+   * llegar acá.
    *
    * ## 2. Sin desglose — el camino histórico, byte por byte
    *
@@ -2142,9 +2291,8 @@ export class UblCommonBuilder {
       return;
     }
 
-    const line_tax_total = line.ele(UBL_NAMESPACES.CAC, 'TaxTotal');
-
     if (line_taxes.length === 0) {
+      const line_tax_total = line.ele(UBL_NAMESPACES.CAC, 'TaxTotal');
       line_tax_total
         .ele(UBL_NAMESPACES.CBC, 'TaxAmount')
         .att('currencyID', currency)
@@ -2153,8 +2301,16 @@ export class UblCommonBuilder {
       // Line-level tax code/rate. invoice_taxes is header-level (not persisted
       // per item), so a line inherits the invoice's primary tax. The code is
       // resolved tax_type-first for correctness on single-tax invoices (a pure
-      // INC restaurant bill emits scheme 04, not 01). Mixed IVA+INC invoices
-      // are reconciled at the authoritative document-level TaxTotal above.
+      // INC restaurant bill emits scheme 04, not 01).
+      //
+      // UNA CUENTA MIXTA NO LLEGA ACÁ, y no porque la cabecera la concilie. Esa
+      // era la afirmación anterior de este comentario y era falsa: FAX02 es una
+      // regla POR LÍNEA y el `cac:TaxTotal` de cabecera es otra (FAS02), así que
+      // conciliar arriba no exime a la línea de nada. Lo que hace correcto este
+      // camino es que un documento con ≥2 tributos SIEMPRE persiste el desglose
+      // por línea (`InvoicingService.needsPersistedLineTaxes`), de modo que acá
+      // sólo cae el documento de un tributo único — donde heredar el primero es
+      // heredar el único.
       const tax_rate = header_taxes[0].tax_rate;
       const tax_code = UblCommonBuilder.resolveTaxCodeFromTax(header_taxes[0]);
 
@@ -2185,35 +2341,68 @@ export class UblCommonBuilder {
       return;
     }
 
-    // FAX02 — el importe del grupo es la Σ de sus subtotales.
-    line_tax_total
-      .ele(UBL_NAMESPACES.CBC, 'TaxAmount')
-      .att('currencyID', currency)
-      .txt(dianSum(line_taxes.map((tax) => tax.tax_amount)));
+    // UN BLOQUE `cac:TaxTotal` POR ESQUEMA, cada uno con su propio importe.
+    //
+    // FAX01 (pág. 95 / 448): «Un bloque para cada código de tributo. Rechazo: Si
+    // existe más de un bloque con el mismo valor en el elemento de:TaxTotal/
+    // TaxSubtotal/cac:TaxCategory/cac:TaxScheme/cbc:ID».
+    //
+    // FAX02 (pág. 95-96 / 449) lo hace ARITMÉTICO, y por línea:
+    //   `every $i in //cac:InvoiceLine satisfies if (…cbc:ID='01') then
+    //    round($i/cac:TaxTotal[…cbc:ID='01']/cbc:TaxAmount) =
+    //    round(sum($i/…/cac:TaxSubtotal[…='01']/cbc:TaxAmount)) else true()`
+    // con la nota «01 representa un código, pero se deben considerar todos los
+    // tipos que apliquen a esta línea». El predicado SELECCIONA el bloque por
+    // esquema y lo compara contra los subtotales DE ESE ESQUEMA.
+    //
+    // Antes se abría UN bloque por línea con un subtotal por tributo y su
+    // `cbc:TaxAmount` era la suma de TODOS los esquemas: en una cuenta mixta con
+    // IVA 190 + INC 80 el bloque quedaba seleccionado por los dos esquemas y el
+    // lado izquierdo valía 270,00 donde el derecho valía 190,00 — rechazo
+    // aritmético. El comentario que lo justificaba decía que las cuentas mixtas
+    // «se conciliaban en el TaxTotal de cabecera»: la cabecera es OTRA regla
+    // (FAS02), y FAX02 no la mira. La conciliación de cabecera no exime a la
+    // línea.
+    const by_scheme = UblCommonBuilder.groupTaxRowsBySchemeAndRate(
+      line_taxes,
+      (tax) => {
+        const code = UblCommonBuilder.resolveTaxCodeFromTax(tax);
+        return {
+          code,
+          // MISMA regla de tarifa que la cabecera —incluido el por-mil del ICA—,
+          // porque FAS01b contrasta el porcentaje de la línea contra el suyo.
+          percent: UblCommonBuilder.resolveSchemePercent(code, tax.tax_rate),
+          base: tax.taxable_amount,
+          amount: tax.tax_amount,
+        };
+      },
+    );
 
-    for (const tax of line_taxes) {
-      const code = UblCommonBuilder.resolveTaxCodeFromTax(tax);
+    for (const [code, by_rate] of by_scheme) {
+      const line_tax_total = line.ele(UBL_NAMESPACES.CAC, 'TaxTotal');
 
-      const subtotal = line_tax_total.ele(UBL_NAMESPACES.CAC, 'TaxSubtotal');
-      subtotal
-        .ele(UBL_NAMESPACES.CBC, 'TaxableAmount')
-        .att('currencyID', currency)
-        .txt(dianAmount(tax.taxable_amount));
-      subtotal
+      // FAX02 — el importe del bloque es la Σ de LOS SUYOS, computada desde los
+      // mismos cubos que emiten los subtotales para que la igualdad no dependa
+      // de que dos truncados coincidan.
+      line_tax_total
         .ele(UBL_NAMESPACES.CBC, 'TaxAmount')
         .att('currencyID', currency)
-        .txt(dianAmount(tax.tax_amount));
+        .txt(dianSum([...by_rate.values()].map((row) => dianSum(row.amount))));
 
-      const category = subtotal.ele(UBL_NAMESPACES.CAC, 'TaxCategory');
-      // MISMA regla de tarifa que la cabecera —incluido el por-mil del ICA—,
-      // porque FAS01b contrasta el porcentaje de la línea contra el suyo.
-      category
-        .ele(UBL_NAMESPACES.CBC, 'Percent')
-        .txt(UblCommonBuilder.resolveSchemePercent(code, tax.tax_rate));
-
-      const scheme = category.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
-      scheme.ele(UBL_NAMESPACES.CBC, 'ID').txt(code);
-      scheme.ele(UBL_NAMESPACES.CBC, 'Name').txt(DIAN_TAX_NAMES[code] || code);
+      // FAX04 (pág. 96) — «un grupo de estos para cada tarifa». Dos tarifas del
+      // MISMO esquema abren dos subtotales dentro de ESTE bloque; dos filas de la
+      // misma tarifa se funden en uno, sumando sus bases, que es lo que
+      // `lineTaxableContribution` ya suma para la base de cabecera (FAU04): las
+      // dos caras siguen leyendo el mismo número.
+      for (const [percent, bucket] of by_rate) {
+        UblCommonBuilder.emitTaxSubtotal(
+          line_tax_total,
+          code,
+          percent,
+          bucket,
+          currency,
+        );
+      }
     }
   }
 

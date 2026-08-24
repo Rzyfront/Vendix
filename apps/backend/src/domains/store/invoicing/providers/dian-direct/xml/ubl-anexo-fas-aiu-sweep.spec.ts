@@ -1,3 +1,5 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { create } from 'xmlbuilder2';
 import {
   DIAN_AIU_NOTE_MAX_LENGTH,
@@ -24,13 +26,30 @@ import { DIAN_INVOICE_OPERATION_TYPES } from '../constants/dian-document-types';
  * Las páginas citadas son las IMPRESAS en el pie del PDF («Página N de 753»),
  * extraídas con `pdftotext -layout`, no las del visor.
  *
- * ## Dos divergencias quedan FIJADAS, no arregladas
+ * ## UNA divergencia sigue FIJADA; dos se arreglaron
  *
  * Los casos marcados «DIVERGE» afirman lo que el emisor hace HOY, con la regla
  * que incumple citada al lado. Se fijan a propósito: cambiarlos altera el XML de
- * todo documento con más de un tributo o más de una tarifa, así que el arreglo
- * es un paso de plan con su propia verificación, no un efecto colateral de una
- * spec. Si alguien corrige el emisor, ESTOS casos se caen y ahí está la señal.
+ * todo documento con más de un tributo, así que el arreglo es un paso de plan
+ * con su propia verificación, no un efecto colateral de una spec. Si alguien
+ * corrige el emisor, ESE caso se cae y ahí está la señal.
+ *
+ * Lo que YA se corrigió, y por eso los casos correspondientes exigen ahora la
+ * forma del anexo en vez de fijar la del emisor:
+ *
+ * · **FAS01a / FAS04 / FAS07** — la cabecera abre un `cac:TaxSubtotal` por
+ *   TARIFA, no uno por esquema. Antes un IVA 19 % + IVA 5 % salía como un
+ *   subtotal al 19,00 % sobre 2.000,00 declarando 240,00, y `base × tarifa` daba
+ *   380,00.
+ * · **FAX01 / FAX02** — la línea abre un `cac:TaxTotal` por CÓDIGO DE TRIBUTO,
+ *   cada uno con su propio importe. Antes un IVA 190 + INC 80 en la misma línea
+ *   salía en un bloque que declaraba 270,00 donde el predicado de FAX02 para el
+ *   esquema '01' exige 190,00.
+ *
+ * Lo que SIGUE divergiendo: **FAS01** pide un `cac:TaxTotal` de CABECERA por
+ * código de tributo y el emisor abre uno solo con un subtotal por código. Es una
+ * regla distinta de las dos anteriores —cardinalidad del grupo de CABECERA, no
+ * de sus subtotales ni de la línea— y su caso `DIVERGE` la mantiene fijada.
  */
 describe('Anexo 1.9 — barrido de los grupos FAS, FAV03 y FAD02', () => {
   function createInvoice(): any {
@@ -140,6 +159,48 @@ describe('Anexo 1.9 — barrido de los grupos FAS, FAV03 y FAD02', () => {
       });
     }
     return groups;
+  }
+
+  interface LineTaxBlock {
+    /** `cbc:TaxAmount` HIJO DIRECTO del bloque — el lado izquierdo de FAX02. */
+    amount: string;
+    schemes: string[];
+    percents: string[];
+    subtotal_bases: string[];
+    subtotal_amounts: string[];
+  }
+
+  /**
+   * Los bloques `cac:TaxTotal` de UNA línea, ya partidos. Es el `$i/cac:TaxTotal`
+   * de la fórmula de FAX02 sobre un solo `cac:InvoiceLine`: el importe del bloque
+   * a un lado, los subtotales que deberían respaldarlo al otro.
+   */
+  function lineTaxBlocks(line_chunk: string): LineTaxBlock[] {
+    // Cortar en el cierre de la línea: `xml.split('<cac:InvoiceLine>')` deja
+    // pegado todo lo que venga después, y sin este recorte una segunda línea
+    // contaminaría los bloques de la primera.
+    const body = line_chunk.split('</cac:InvoiceLine>')[0];
+    return [...body.matchAll(/<cac:TaxTotal>([\s\S]*?)<\/cac:TaxTotal>/g)].map(
+      (m) => {
+        const block = m[1];
+        const head = block.split('<cac:TaxSubtotal>')[0];
+        const subtotals = [
+          ...block.matchAll(/<cac:TaxSubtotal>([\s\S]*?)<\/cac:TaxSubtotal>/g),
+        ].map((s) => s[1]);
+        const pick = (sub: string, name: string): string => {
+          const found = new RegExp('<cbc:' + name + '[^>]*>([^<]*)<').exec(sub);
+          return found ? found[1] : '';
+        };
+        return {
+          amount:
+            /<cbc:TaxAmount currencyID="[^"]*">([^<]*)</.exec(head)?.[1] ?? '',
+          schemes: subtotals.map((sub) => pick(sub, 'ID')),
+          percents: subtotals.map((sub) => pick(sub, 'Percent')),
+          subtotal_bases: subtotals.map((sub) => pick(sub, 'TaxableAmount')),
+          subtotal_amounts: subtotals.map((sub) => pick(sub, 'TaxAmount')),
+        };
+      },
+    );
   }
 
   function sum(values: string[]): string {
@@ -312,16 +373,19 @@ describe('Anexo 1.9 — barrido de los grupos FAS, FAV03 y FAD02', () => {
      * FAS07 (rechazo): el importe del subtotal es el producto del porcentaje por
      * la base imponible.
      *
-     * DIVERGE — `buildTaxTotals` agrupa por CÓDIGO DE ESQUEMA, no por (código,
-     * tarifa): dos tarifas de IVA se funden en un subtotal que publica la tarifa
-     * de la PRIMERA fila y la suma de las dos bases. El importe deja de ser el
-     * producto de esa tarifa por esa base, que es exactamente el rechazo FAS07.
+     * ARREGLADO — `buildTaxTotals` agrupa por (esquema, tarifa) reusando el
+     * MISMO ayudante que la línea y las retenciones. Antes agrupaba sólo por
+     * código de esquema y publicaba la tarifa de la PRIMERA fila sobre la suma de
+     * las dos bases: un IVA 19 % + IVA 5 % de 1.000 cada uno salía como
+     * `Percent 19.00` / `TaxableAmount 2000.00` / `TaxAmount 240.00`, y
+     * `base × tarifa` daba 380,00 — el rechazo literal de FAS07.
      *
-     * La función hermana del mismo archivo, `buildWithholdingTaxTotal`, sí
-     * acumula por (esquema, tarifa) citando FAT04 — la asimetría está dentro de
-     * un archivo, no entre archivos.
+     * La función hermana del mismo archivo, `buildWithholdingTaxTotal`, ya
+     * acumulaba por (esquema, tarifa) citando FAT04: la asimetría estaba dentro
+     * de un archivo, no entre archivos, y se cerró extrayendo la agrupación a un
+     * único ayudante en vez de copiarla.
      */
-    it('DIVERGE: IVA 19 % + IVA 5 % se funden en un subtotal al 19 %, y base × tarifa ya no da el importe', () => {
+    it('IVA 19 % + IVA 5 % abren DOS subtotales, y en cada uno base × tarifa da su importe', () => {
       const xml = emit({
         discount_amount: '0.00',
         tax_amount: '240.00',
@@ -333,17 +397,124 @@ describe('Anexo 1.9 — barrido de los grupos FAS, FAV03 y FAD02', () => {
       });
 
       const [group] = headerTaxGroups(xml);
-      // Lo que la regla pide: dos subtotales, 19,00 sobre 1.000 y 5,00 sobre 1.000.
+      expect(group.subtotals).toHaveLength(2);
+      expect(
+        group.subtotals.map((s) => [s.percent, s.taxable, s.amount]),
+      ).toEqual([
+        ['19.00', '1000.00', '190.00'],
+        ['5.00', '1000.00', '50.00'],
+      ]);
+      // Las dos tarifas son del MISMO tributo, así que van en el MISMO TaxTotal:
+      // es lo que FAS01a distingue de FAS01 («dentro del mismo TaxTotal»).
+      expect(group.subtotals.map((s) => s.scheme_id)).toEqual(['01', '01']);
+
+      // FAS07 sobre lo emitido, subtotal por subtotal: ahora el importe SÍ es el
+      // producto de la tarifa por la base.
+      for (const subtotal of group.subtotals) {
+        expect(
+          Number(subtotal.taxable) * (Number(subtotal.percent) / 100),
+        ).toBeCloseTo(Number(subtotal.amount), 2);
+      }
+      // FAS02 sigue cuadrando: la cabecera es la Σ de los DOS subtotales.
+      expect(group.amount).toBe('240.00');
+      expect(sum(group.subtotals.map((s) => s.amount))).toBe(group.amount);
+    });
+
+    it('una sola tarifa sigue emitiendo UN solo subtotal — cero regresión', () => {
+      const xml = emit({
+        discount_amount: '0.00',
+        tax_amount: '380.00',
+        items: [line({ tax_amount: '380.00' })],
+        taxes: [
+          tax({ taxable_amount: '1000.00', tax_amount: '190.00' }),
+          tax({ taxable_amount: '1000.00', tax_amount: '190.00' }),
+        ],
+      });
+
+      const [group] = headerTaxGroups(xml);
       expect(group.subtotals).toHaveLength(1);
-      const [only] = group.subtotals;
-      expect(only.percent).toBe('19.00');
-      expect(only.taxable).toBe('2000.00');
-      expect(only.amount).toBe('240.00');
-      // FAS07 sobre lo emitido: 2.000,00 × 19 % = 380,00 <> 240,00 ⇒ rechazo.
-      expect(Number(only.taxable) * (Number(only.percent) / 100)).toBeCloseTo(
-        380,
-        2,
+      expect(group.subtotals[0].percent).toBe('19.00');
+      expect(group.subtotals[0].taxable).toBe('2000.00');
+      expect(group.subtotals[0].amount).toBe('380.00');
+      expect(group.amount).toBe('380.00');
+    });
+
+    it('el ICA conserva su saneamiento por-mil COMO CLAVE: 7 ‰ y 4 ‰ son dos tarifas', () => {
+      const xml = emit({
+        discount_amount: '0.00',
+        tax_amount: '11.00',
+        items: [line({ tax_amount: '11.00' })],
+        taxes: [
+          tax({
+            tax_name: 'ICA',
+            tax_type: 'ica',
+            tax_rate: '7.00',
+            taxable_amount: '1000.00',
+            tax_amount: '7.00',
+          }),
+          tax({
+            tax_name: 'ICA',
+            tax_type: 'ica',
+            tax_rate: '4.00',
+            taxable_amount: '1000.00',
+            tax_amount: '4.00',
+          }),
+        ],
+      });
+
+      const [group] = headerTaxGroups(xml);
+      expect(group.subtotals.map((s) => s.percent)).toEqual([
+        '0.7000',
+        '0.4000',
+      ]);
+      expect(group.subtotals.map((s) => s.scheme_id)).toEqual(['03', '03']);
+      expect(group.amount).toBe('11.00');
+    });
+
+    it('KG-17 — con dos tarifas la cabecera es la Σ DE LOS SUBTOTALES, no la Σ cruda', () => {
+      // `dianSum` trunca a 2 decimales UNA VEZ POR LLAMADA, y agrupar multiplica
+      // las llamadas. Con dos filas de 10,005 la Σ cruda trunca a 20,01 mientras
+      // cada subtotal trunca a 10,00 y suman 20,00: el céntimo de diferencia
+      // existe y es medible. FAS02 exige que la cabecera sea la de los
+      // SUBTOTALES, así que el emisor la computa desde ellos y la identidad se
+      // cumple por construcción.
+      //
+      // NOTA MEDIDA: por el camino real este caso NO puede ocurrir.
+      // `invoice_taxes.taxable_amount` y `.tax_amount` son `Decimal(12,2)`
+      // (schema.prisma), así que toda fila llega ya truncada y truncar dos veces
+      // es la identidad. El céntimo sólo aparece si un productor entrega más de
+      // dos decimales sin persistirlos.
+      const xml = emit({
+        discount_amount: '0.00',
+        tax_amount: '20.01',
+        items: [line({ tax_amount: '20.01' })],
+        taxes: [
+          tax({ taxable_amount: '100.00', tax_amount: '10.005' }),
+          tax({
+            tax_rate: '5.00',
+            taxable_amount: '100.00',
+            tax_amount: '10.005',
+          }),
+        ],
+      });
+
+      const [group] = headerTaxGroups(xml);
+      expect(group.subtotals.map((s) => s.amount)).toEqual(['10.00', '10.00']);
+      // La identidad que la DIAN ejecuta se cumple…
+      expect(group.amount).toBe('20.00');
+      expect(sum(group.subtotals.map((s) => s.amount))).toBe(group.amount);
+      // …y el céntimo queda EN EL ESCALAR del documento, que es otra entrada del
+      // mismo hecho y vive fuera de este builder: `TaxInclusiveAmount` se publica
+      // desde `data.tax_amount` (20,01) mientras los tributos de cabecera suman
+      // 20,00.
+      expect(xml).toContain(
+        '<cbc:TaxInclusiveAmount currencyID="COP">1020.01</cbc:TaxInclusiveAmount>',
       );
+      // Y NO es rechazo: FAU06 compara con `round()`, es decir A PESO ENTERO
+      // —`DianTotalsValidator.pesos` replica esa semántica—, así que un céntimo
+      // de residuo es invisible para la regla. Medido, no supuesto: la compuerta
+      // no encuentra nada que objetar.
+      expect(DianTotalsValidator.validate(xml).violations).toEqual([]);
     });
 
     it('FAT04 (pág. 83) — la función hermana de retenciones SÍ abre un subtotal por tarifa', () => {
@@ -399,14 +570,19 @@ describe('Anexo 1.9 — barrido de los grupos FAS, FAV03 y FAD02', () => {
      * informado que aplique a esta línea». El predicado selecciona el bloque POR
      * ESQUEMA y lo compara contra los subtotales DE ESE ESQUEMA.
      *
-     * DIVERGE — `buildLineTaxTotal` abre UN bloque por línea (:2145) y le cuelga
-     * un subtotal por fila de `item.taxes` (:2194-2197), cada uno con SU esquema.
-     * En la cuenta mixta IVA + INC —el caso para el que se construyó el desglose
-     * de línea— el bloque queda seleccionado por los dos esquemas y su
-     * `cbc:TaxAmount` es la suma de ambos, así que el lado izquierdo del
-     * predicado vale 270,00 donde el derecho vale 190,00.
+     * ARREGLADO — `buildLineTaxTotal` abre un bloque POR ESQUEMA y cada uno
+     * declara la Σ de SUS subtotales. Antes abría UN bloque por línea con un
+     * subtotal por fila de `item.taxes`: en la cuenta mixta IVA + INC —el caso
+     * para el que se construyó el desglose de línea— el bloque quedaba
+     * seleccionado por los DOS esquemas y su `cbc:TaxAmount` era la suma de
+     * ambos, así que el lado izquierdo del predicado valía 270,00 donde el
+     * derecho valía 190,00.
+     *
+     * El comentario que lo justificaba —«Mixed IVA+INC invoices are reconciled at
+     * the authoritative document-level TaxTotal above»— delegaba a la cabecera
+     * una regla que es POR LÍNEA. FAX02 no mira la cabecera.
      */
-    it('DIVERGE: IVA + INC en la MISMA línea salen en un bloque cuyo total no es el de ningún esquema', () => {
+    it('IVA + INC en la MISMA línea abren DOS bloques, y cada uno declara el total de SU esquema', () => {
       const xml = emit({
         discount_amount: '0.00',
         tax_amount: '270.00',
@@ -437,27 +613,101 @@ describe('Anexo 1.9 — barrido de los grupos FAS, FAV03 y FAD02', () => {
 
       const chunks = xml.split('<cac:InvoiceLine>').slice(1);
       expect(chunks).toHaveLength(1);
-      const blocks = [
-        ...chunks[0].matchAll(/<cac:TaxTotal>([\s\S]*?)<\/cac:TaxTotal>/g),
-      ];
-      // Lo que la regla pide: blocks.length === 2, uno por código.
-      expect(blocks).toHaveLength(1);
+      const blocks = lineTaxBlocks(chunks[0]);
+      // FAX01 — un bloque para cada código de tributo.
+      expect(blocks).toHaveLength(2);
+      expect(blocks.map((b) => b.schemes)).toEqual([['01'], ['04']]);
+      // Y ningún esquema repetido entre bloques, que es el rechazo literal de
+      // FAX01 («si existe más de un bloque con el mismo valor en … cbc:ID»).
+      const all_schemes = blocks.flatMap((b) => b.schemes);
+      expect(new Set(all_schemes).size).toBe(all_schemes.length);
 
-      const body = blocks[0][1];
-      const head = body.split('<cac:TaxSubtotal>')[0];
-      expect(/<cbc:TaxAmount currencyID="COP">([^<]*)</.exec(head)?.[1]).toBe(
-        '270.00',
+      // FAX02 evaluado esquema por esquema: el importe del bloque seleccionado ES
+      // la Σ de los subtotales de ESE esquema.
+      expect(blocks[0].amount).toBe('190.00');
+      expect(blocks[0].subtotal_amounts).toEqual(['190.00']);
+      expect(blocks[1].amount).toBe('80.00');
+      expect(blocks[1].subtotal_amounts).toEqual(['80.00']);
+      for (const block of blocks) {
+        expect(sum(block.subtotal_amounts)).toBe(block.amount);
+      }
+
+      // La base NO se duplica: IVA e INC gravan la misma base y van a bloques
+      // distintos, así que cada uno la declara una vez — que es lo que
+      // `lineTaxableContribution` suma para la base de cabecera (FAU04). La
+      // compuerta real lo confirma sobre el XML armado.
+      expect(blocks.flatMap((b) => b.subtotal_bases)).toEqual([
+        '1000.00',
+        '1000.00',
+      ]);
+      expect(xml).toContain(
+        '<cbc:TaxExclusiveAmount currencyID="COP">2000.00</cbc:TaxExclusiveAmount>',
       );
-      const schemes = [...body.matchAll(/<cbc:ID>([^<]*)</g)].map((m) => m[1]);
-      expect(schemes).toEqual(['01', '04']);
-      // FAX02 con el esquema '01': el bloque seleccionado declara 270,00 y sus
-      // subtotales de IVA suman 190,00 ⇒ rechazo.
-      const iva = [
-        ...body.matchAll(
-          /<cac:TaxSubtotal>[\s\S]*?<cbc:TaxAmount currencyID="COP">([^<]*)<[\s\S]*?<cbc:ID>01<\/cbc:ID>/g,
+      expect(DianTotalsValidator.validate(xml).violations).toEqual([]);
+    });
+
+    it('dos TARIFAS del mismo esquema en la línea: UN bloque, dos subtotales (FAX04)', () => {
+      const xml = emit({
+        discount_amount: '0.00',
+        tax_amount: '240.00',
+        items: [
+          line({
+            tax_amount: '240.00',
+            taxes: [
+              tax({ taxable_amount: '1000.00', tax_amount: '190.00' }),
+              tax({
+                tax_rate: '5.00',
+                taxable_amount: '1000.00',
+                tax_amount: '50.00',
+              }),
+            ],
+          }),
+        ],
+        taxes: [
+          tax({ taxable_amount: '1000.00', tax_amount: '190.00' }),
+          tax({
+            tax_rate: '5.00',
+            taxable_amount: '1000.00',
+            tax_amount: '50.00',
+          }),
+        ],
+      });
+
+      const blocks = lineTaxBlocks(xml.split('<cac:InvoiceLine>')[1]);
+      expect(blocks).toHaveLength(1);
+      expect(blocks[0].amount).toBe('240.00');
+      expect(blocks[0].percents).toEqual(['19.00', '5.00']);
+      expect(blocks[0].subtotal_amounts).toEqual(['190.00', '50.00']);
+      expect(sum(blocks[0].subtotal_amounts)).toBe(blocks[0].amount);
+      expect(DianTotalsValidator.validate(xml).violations).toEqual([]);
+    });
+
+    it('dos filas de la MISMA tarifa se funden en un subtotal, y la base de cabecera sigue cuadrando', () => {
+      const repeated = [
+        tax({ taxable_amount: '600.00', tax_amount: '114.00' }),
+        tax({ taxable_amount: '400.00', tax_amount: '76.00' }),
+      ];
+      const xml = emit({
+        discount_amount: '0.00',
+        tax_amount: '190.00',
+        items: [line({ tax_amount: '190.00', taxes: repeated })],
+        taxes: repeated,
+      });
+
+      const blocks = lineTaxBlocks(xml.split('<cac:InvoiceLine>')[1]);
+      expect(blocks).toHaveLength(1);
+      expect(blocks[0].subtotal_bases).toEqual(['1000.00']);
+      expect(blocks[0].subtotal_amounts).toEqual(['190.00']);
+      expect(blocks[0].amount).toBe('190.00');
+      // `lineTaxableContribution` suma las dos bases crudas (1.000,00) y el XML
+      // emite un subtotal de 1.000,00: las dos caras leen el mismo número.
+      expect(
+        UblCommonBuilder.lineTaxableContribution(
+          line({ tax_amount: '190.00', taxes: repeated }),
+          repeated,
         ),
-      ].map((m) => m[1]);
-      expect(iva).toEqual(['190.00']);
+      ).toBe('1000.00');
+      expect(DianTotalsValidator.validate(xml).violations).toEqual([]);
     });
 
     it('el camino heredado —una línea sin desglose— sí cumple: un bloque, un esquema, una tarifa', () => {
@@ -478,6 +728,69 @@ describe('Anexo 1.9 — barrido de los grupos FAS, FAV03 y FAD02', () => {
       ];
       expect(subtotals).toHaveLength(1);
       expect(blocks[0][1]).toContain('<cbc:Percent>19.00</cbc:Percent>');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Alcance de estallido: quién consume la agrupación, y que sea UNA sola
+  // ---------------------------------------------------------------------------
+
+  describe('la agrupación (esquema, tarifa) es ÚNICA y la comparten todos los emisores', () => {
+    const xml_dir = __dirname;
+    const builder = readFileSync(
+      join(xml_dir, 'ubl-common.builder.ts'),
+      'utf8',
+    );
+
+    /**
+     * El arreglo vive en `buildTaxTotals` / `buildLineTaxTotal`, que NO tienen
+     * una rama por tipo de documento: los seis puntos de llamada reciben el mismo
+     * XML. Este caso fija que sigan siendo puntos de llamada y no copias — una
+     * segunda copia es cómo la asimetría que se acaba de cerrar vuelve.
+     */
+    it('los SEIS puntos de llamada a buildTaxTotals siguen delegando, ninguno arma su propio TaxTotal de cabecera', () => {
+      const emitters = [
+        'ubl-invoice.builder.ts',
+        'ubl-credit-note.builder.ts',
+        'ubl-debit-note.builder.ts',
+        'ubl-equivalent-document.builder.ts',
+        'ubl-support-document.builder.ts',
+      ];
+
+      let calls = 0;
+      for (const file of emitters) {
+        const source = readFileSync(join(xml_dir, file), 'utf8');
+        const found = source.match(/UblCommonBuilder\.buildTaxTotals\(/g) ?? [];
+        expect(found.length).toBeGreaterThanOrEqual(1);
+        calls += found.length;
+        // Ninguno abre un `cac:TaxTotal` por su cuenta: si lo hiciera, el arreglo
+        // no lo alcanzaría y ese tipo de documento seguiría fundiendo tarifas.
+        expect(source).not.toMatch(/ele\([^)]*,\s*'TaxTotal'\)/);
+      }
+      // 6, no 5: el documento soporte llama dos veces —el soporte y su nota de
+      // ajuste son dos documentos del mismo archivo—.
+      expect(calls).toBe(6);
+    });
+
+    it('la lógica de agrupación existe UNA vez, y las tres emisiones la consumen', () => {
+      // Un solo sitio donde se decide el cubo…
+      expect(
+        builder.match(/private static groupTaxRowsBySchemeAndRate</g),
+      ).toHaveLength(1);
+      // …y exactamente tres consumidores: cabecera, retenciones y línea.
+      expect(builder.match(/groupTaxRowsBySchemeAndRate\(/g)).toHaveLength(3);
+      // Ningún `new Map<string, Map<` fuera del ayudante: ésa era la copia que
+      // vivía dentro de `buildWithholdingTaxTotal`.
+      expect(builder.match(/new Map<string, Map</g)).toHaveLength(1);
+      // DOS sitios emiten `cac:TaxSubtotal`, y el segundo es deliberado: el
+      // camino HEREDADO de la línea (sin desglose) publica su subtotal con
+      // `dianLineExtension` y `dianRate` SIN el saneamiento por-mil del ICA,
+      // porque es la forma con la que se emitieron las facturas ya aceptadas y
+      // ésas se reenvían tal cual. Los tres caminos nuevos comparten uno solo.
+      expect(builder.match(/'TaxSubtotal'/g)).toHaveLength(2);
+      expect(builder.match(/private static emitTaxSubtotal\(/g)).toHaveLength(
+        1,
+      );
     });
   });
 
