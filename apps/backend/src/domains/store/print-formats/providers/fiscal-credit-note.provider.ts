@@ -38,8 +38,9 @@ export class FiscalCreditNoteDataProvider implements IDocumentDataProvider {
       },
       document: {
         id: 999,
+        // Mismo motivo que en fiscal-invoice.provider.ts: con `prefix` poblado
+        // la muestra rendia `NC-SETP-#NC-SETP-0012`.
         number: 'NC-SETP-0012',
-        prefix: 'NC-SETP',
         date: new Date().toISOString(),
         date_formatted: new Date().toLocaleDateString('es-CO'),
         state: 'accepted',

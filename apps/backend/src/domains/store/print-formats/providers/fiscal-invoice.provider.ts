@@ -114,8 +114,25 @@ export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
       },
       document: {
         id: invoice.id,
-        number: invoice.invoice_number ? `${invoice.prefix || ''}${invoice.invoice_number}` : String(invoice.id),
-        prefix: invoice.prefix || undefined,
+        // `invoices` NO tiene columna `prefix`: comprobado contra el esquema vivo
+        // el 2026-08-24 (information_schema.columns devuelve 0 filas), y
+        // schema.prisma no la declara. Compilaba porque los getters de
+        // StorePrismaService devuelven `any` (`private scoped_client: any`), o
+        // sea que el acceso a campo no se typechequea: leer una columna
+        // inexistente da `undefined` en silencio.
+        //
+        // El prefijo YA viene dentro de `invoice_number`: InvoiceNumberGenerator
+        // concatena prefijo + consecutivo, y se verificó sobre las 12 facturas
+        // numeradas de dev que `invoice_number LIKE resolution.prefix || '%'` es
+        // verdadero en las 12 (p. ej. `QA107` con resolución de prefijo `QA`).
+        //
+        // Por eso `prefix` se deja fuera a propósito en vez de rellenarlo desde
+        // la resolución: el compositor imprime `doc.prefix ? doc.prefix + '-' : ''`
+        // antes del número, así que poblarlo daría `QA-#QA107` — el prefijo dos
+        // veces. La salida correcta es `#QA107`, que es la que produce esto.
+        number: invoice.invoice_number
+          ? String(invoice.invoice_number)
+          : String(invoice.id),
         date: invoice.issue_date ? new Date(invoice.issue_date).toISOString() : new Date().toISOString(),
         date_formatted: invoice.issue_date ? new Date(invoice.issue_date).toLocaleDateString('es-CO') : new Date().toLocaleDateString('es-CO'),
         state: invoice.dian_status || 'draft',
@@ -177,8 +194,12 @@ export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
       },
       document: {
         id: 888,
+        // Sin `prefix`: el compositor imprime `doc.prefix + '-'` ANTES del
+        // numero, asi que poblarlo con el prefijo que el numero ya lleva
+        // rendia `SETP-#SETP-990001` — el prefijo dos veces, en la pantalla
+        // de previsualizacion de formatos. La muestra imita ahora al camino
+        // real, que tampoco lo pobla.
         number: 'SETP-990001',
-        prefix: 'SETP',
         date: new Date().toISOString(),
         date_formatted: new Date().toLocaleDateString('es-CO'),
         time: '11:45',
