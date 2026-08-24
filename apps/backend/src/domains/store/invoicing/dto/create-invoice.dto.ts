@@ -29,6 +29,11 @@ import { DIAN_ID_TYPES } from '../providers/dian-direct/constants/dian-document-
 import { InvoiceAddressDto, liftInvoiceAddress } from './invoice-address.dto';
 import { IsWithinFiscalIssueDateWindow } from './invoice-issue-date-window.validator';
 import { InvoiceWithholdingInputDto } from './invoice-withholding-input.dto';
+import {
+  ENABLED_ACCOUNTING_MODELS,
+  accountingModelDisabledReason,
+} from '../profiles/invoice-profile-config.contract';
+import type { AccountingModel } from '../profiles/invoice-profile-config.contract';
 
 /**
  * Códigos DIAN del tipo de identificación del adquiriente (Anexo Técnico 1.9,
@@ -867,6 +872,35 @@ export class CreateInvoiceDto {
       'aiu_contract_object no puede superar 4900 caracteres: la regla FAV03 del Anexo Técnico DIAN 1.9 limita la nota completa a 5000 y el prefijo obligatorio «Contrato de servicios AIU por concepto de:» ya ocupa parte.',
   })
   aiu_contract_object?: string;
+
+  /**
+   * Modelo de contabilización del AIU de ESTA factura.
+   *
+   * Se declara acá **por obligación, no por comodidad**: el `ValidationPipe`
+   * global corre con `forbidNonWhitelisted: true` (`main.ts:206`), así que una
+   * clave no declarada en el DTO devuelve 400 antes de que ninguna lógica la
+   * mire. Sin esta propiedad, el campo que el perfil ya guarda sería
+   * inexpresable por documento y el 400 llegaría con un mensaje que no explica
+   * nada.
+   *
+   * Opcional, y **la ausencia significa `'sumada'`** —ver
+   * `resolveAccountingModel`—, que es lo que el calculador hace por
+   * construcción: un cliente que no manda el campo emite exactamente igual que
+   * antes de que existiera.
+   *
+   * La lista contra la que se valida es `ENABLED_ACCOUNTING_MODELS`, no
+   * `ACCOUNTING_MODELS`: es el mismo interruptor único que gobierna la
+   * escritura del perfil, así que `'no_sumada'` se rechaza en la puerta —con el
+   * motivo y su fecha— en vez de tomar consecutivo y que la DIAN devuelva el
+   * documento al firmar. Habilitarlo es añadir el valor a esa constante (paso
+   * D.7), y las dos superficies se levantan a la vez.
+   */
+  @IsOptional()
+  @Transform(blankToUndefined)
+  @IsIn(ENABLED_ACCOUNTING_MODELS as readonly string[], {
+    message: `aiu_accounting_model sólo admite ${ENABLED_ACCOUNTING_MODELS.join(', ')} por ahora. ${accountingModelDisabledReason('no_sumada') ?? ''}`.trim(),
+  })
+  aiu_accounting_model?: AccountingModel;
 
   /**
    * Divisa extranjera de la operación, ISO 4217. Acompaña a

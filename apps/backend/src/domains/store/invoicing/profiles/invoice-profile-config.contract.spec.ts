@@ -1,20 +1,28 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
+import { VendixHttpException } from 'src/common/errors';
+
 import {
+  ACCOUNTING_MODELS,
   AIU_LEGAL_FLOOR_PERCENT_SCALED,
   AIU_TAXABLE_BASES,
+  ENABLED_ACCOUNTING_MODELS,
   INVOICE_PROFILE_CONFIG_VERSION,
   InvoiceProfileConfig,
+  accountingModelDisabledReason,
   buildDefaultAiuProfileConfig,
   formatPercentScaled,
+  isAccountingModelEnabled,
   parsePercentScaled,
   regimeFromTaxableBasis,
+  resolveAccountingModel,
   resolveAiuComponentsBasis,
   resolveAiuTaxableBasis,
   taxableBasisFromRegime,
   validateInvoiceProfileConfig,
 } from './invoice-profile-config.contract';
+import { normalizeAndAssertProfileConfig } from './invoice-profile-config.validator';
 
 /** Códigos de los problemas devueltos, para afirmar sin acoplarse al texto. */
 function codes(config: InvoiceProfileConfig, operation_type = '09'): string[] {
@@ -1102,6 +1110,143 @@ describe('InvoiceProfileConfig — paridad del piso legal', () => {
     );
     expect(match).not.toBeNull();
     expect(Number(match![1]) * 100).toBe(AIU_LEGAL_FLOOR_PERCENT_SCALED);
+  });
+});
+
+/**
+ * El modelo de contabilización, probado POR LA PUERTA REAL.
+ *
+ * `normalizeAndAssertProfileConfig` es la única entrada a
+ * `invoice_profile_versions.config` —la usan las cuatro rutas de escritura de
+ * perfil: crear (`profiles.service.ts:420`), editar (`:502`, `:511`) y clonar
+ * (`:598`)— y normaliza ANTES de validar. `pickKnownKeys` proyecta sobre la
+ * allowlist y BORRA toda clave que no esté en ella, emitiendo un `UNKNOWN_KEY`
+ * bloqueante.
+ *
+ * Por eso estos casos no entran por `validateInvoiceProfileConfig`: eso es
+ * exactamente lo que dejó `taxable_basis` inerte al introducirlo —nueve specs
+ * verdes contra un objeto que las cuatro rutas rechazaban con 422 nombrando el
+ * campo recién creado—. Un campo del contrato sólo está probado si atravesó la
+ * puerta y salió con el valor puesto.
+ */
+describe('InvoiceProfileConfig — accounting_model por la puerta real', () => {
+  const opts = { operation_type: '09' };
+
+  // `any` a propósito: el punto de estos casos es mandar lo que un cliente
+  // manda de verdad —incluido un valor que el tipo prohíbe— y comprobar que la
+  // puerta lo rechaza en vez de que lo haga el compilador del test.
+  const configWith = (model?: unknown): unknown => {
+    const config: any = JSON.parse(
+      JSON.stringify(buildDefaultAiuProfileConfig('Vigilancia sede sur')),
+    );
+    if (model === undefined) {
+      delete config.aiu.accounting_model;
+    } else {
+      config.aiu.accounting_model = model;
+    }
+    return config;
+  };
+
+  it("'sumada' atraviesa la normalización y sale en el snapshot persistible", () => {
+    const saved = normalizeAndAssertProfileConfig(configWith('sumada'), opts);
+
+    // No basta con que no lance: si `accounting_model` faltara en `AIU_KEYS`, la
+    // clave se iría en silencio y el `UNKNOWN_KEY` bloquearía el guardado. Se
+    // afirma el valor DE SALIDA.
+    expect(saved.aiu?.accounting_model).toBe('sumada');
+    expect(resolveAccountingModel(saved.aiu)).toBe('sumada');
+  });
+
+  it('un snapshot SIN el campo pasa la puerta y se lee como sumada', () => {
+    // Es el caso de los perfiles ya guardados: el campo no existía. La ausencia
+    // no puede ser un error ni cambiar el comportamiento — `'sumada'` es lo que
+    // el calculador hace por construcción.
+    const saved = normalizeAndAssertProfileConfig(configWith(undefined), opts);
+
+    expect(saved.aiu?.accounting_model).toBeUndefined();
+    expect(resolveAccountingModel(saved.aiu)).toBe('sumada');
+  });
+
+  it("'no_sumada' se rechaza con 422 mientras la Fase D no lo habilite", () => {
+    let error: any;
+    try {
+      normalizeAndAssertProfileConfig(configWith('no_sumada'), opts);
+    } catch (e) {
+      error = e;
+    }
+
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.getStatus()).toBe(422);
+    expect(error.getResponse()).toEqual(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          issues: expect.arrayContaining([
+            expect.objectContaining({
+              field: 'aiu.accounting_model',
+              code: 'AIU_ACCOUNTING_MODEL_NOT_ENABLED',
+            }),
+          ]),
+        }),
+      }),
+    );
+    // El motivo viaja al operador y está FECHADO: una insignia «NO DISPONIBLE»
+    // sin fecha es el P1 que este campo cierra.
+    expect(error.getResponse().details.issues[0].message).toContain('Fase D');
+  });
+
+  it('un modelo inventado se distingue del que existe y todavía no se habilita', () => {
+    let error: any;
+    try {
+      normalizeAndAssertProfileConfig(configWith('mitad_y_mitad'), opts);
+    } catch (e) {
+      error = e;
+    }
+
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.getStatus()).toBe(422);
+    expect(error.getResponse()).toEqual(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          issues: expect.arrayContaining([
+            expect.objectContaining({
+              field: 'aiu.accounting_model',
+              code: 'AIU_ACCOUNTING_MODEL_UNKNOWN',
+            }),
+          ]),
+        }),
+      }),
+    );
+  });
+
+  it('la habilitación es UN interruptor, y hoy está en un solo valor', () => {
+    // Si alguien añade `'no_sumada'` acá sin cerrar la Fase D, este test cae y
+    // dice por qué. Es el candado del ADR-7.
+    expect([...ENABLED_ACCOUNTING_MODELS]).toEqual(['sumada']);
+    expect([...ACCOUNTING_MODELS]).toEqual(['sumada', 'no_sumada']);
+    expect(isAccountingModelEnabled('sumada')).toBe(true);
+    expect(isAccountingModelEnabled('no_sumada')).toBe(false);
+    expect(accountingModelDisabledReason('sumada')).toBeNull();
+    expect(accountingModelDisabledReason('no_sumada')).toContain('Fase D');
+  });
+
+  it('la ausencia se resuelve a sumada desde cualquier forma degradada', () => {
+    expect(resolveAccountingModel(null)).toBe('sumada');
+    expect(resolveAccountingModel(undefined)).toBe('sumada');
+    expect(resolveAccountingModel({ accounting_model: null })).toBe('sumada');
+    expect(
+      resolveAccountingModel({ accounting_model: 'basura' as never }),
+    ).toBe('sumada');
+    expect(resolveAccountingModel({ accounting_model: 'no_sumada' })).toBe(
+      'no_sumada',
+    );
+  });
+
+  it('el snapshot por omisión declara el modelo explícitamente', () => {
+    // Explícito y no ausente: un perfil recién creado no debe depender de un
+    // default implícito para decidir la forma del XML.
+    expect(
+      buildDefaultAiuProfileConfig('Aseo sede norte').aiu?.accounting_model,
+    ).toBe('sumada');
   });
 });
 

@@ -290,6 +290,90 @@ export const AIU_TAXABLE_BUCKETS_BY_BASIS: Readonly<
   subtotal: ['administracion', 'imprevistos', 'utilidad', 'costo'],
 };
 
+// ─── Modelo de contabilización del AIU ────────────────────────────────────
+
+/**
+ * Cómo entra el AIU al documento. **No es preferencia de presentación: cambia
+ * la forma del XML y, por lo tanto, los totales que la DIAN valida.**
+ *
+ * · `'sumada'` — Administración, Imprevistos y Utilidad son LÍNEAS del
+ *   documento. El valor del contrato es su suma y la base gravable la componen
+ *   sólo las líneas que la base declarada grava. Es lo que el calculador hace
+ *   hoy **por construcción**, así que un snapshot sin este campo se sigue
+ *   emitiendo exactamente igual.
+ * · `'no_sumada'` — el AIU deja de ser línea y pasa a ser sólo base de
+ *   impuestos: una línea por el valor del contrato con una base gravable MENOR
+ *   que su propio importe. Requiere el `taxable_amount` por línea que ADR-7
+ *   introduce y el visto bueno de `dian-totals.validator` sobre los dos
+ *   modelos.
+ *
+ * Ver {@link ENABLED_ACCOUNTING_MODELS}: hoy sólo uno de los dos se puede
+ * escribir, y ese es el interruptor único que lo decide.
+ */
+export type AccountingModel = 'sumada' | 'no_sumada';
+
+/** Los dos modelos que el tipo admite. Forma, no habilitación. */
+export const ACCOUNTING_MODELS: readonly AccountingModel[] = [
+  'sumada',
+  'no_sumada',
+];
+
+/**
+ * Los modelos que HOY se pueden persistir y emitir. **Interruptor único.**
+ *
+ * `'no_sumada'` está fuera a propósito: ofrecerlo antes de que el armado del
+ * XML esté verificado produce documentos cuyos totales monetarios (FAU02,
+ * FAU04, FAU06) no cuadran, y la DIAN los rechaza **al firmar** — o sea, con el
+ * consecutivo ya tomado y sin forma de que el operador sepa por qué.
+ *
+ * Añadir `'no_sumada'` a esta lista es el paso D.7 del plan y es lo ÚNICO que
+ * hace falta tocar para habilitarlo: la compuerta del perfil
+ * ({@link validateInvoiceProfileConfig} vía `AIU_ACCOUNTING_MODEL_NOT_ENABLED`),
+ * la del payload del documento (`CreateInvoiceDto.aiu_accounting_model`) y el
+ * motivo que la pantalla pinta ({@link accountingModelDisabledReason}) leen
+ * todas de acá. Dos listas habrían dejado la UI ofreciendo lo que la escritura
+ * rechaza, o al revés.
+ */
+export const ENABLED_ACCOUNTING_MODELS: readonly AccountingModel[] = ['sumada'];
+
+/** `true` si el modelo se puede escribir hoy. */
+export function isAccountingModelEnabled(value: unknown): boolean {
+  return ENABLED_ACCOUNTING_MODELS.includes(value as AccountingModel);
+}
+
+/**
+ * Modelo efectivo de una config AIU. **La ausencia significa `'sumada'`**, que
+ * es lo que el calculador ya hace: un perfil guardado antes de que este campo
+ * existiera no cambia de comportamiento al leerse, y no hay que reescribir
+ * ningún snapshot —que además son inmutables a propósito—.
+ *
+ * Único punto de lectura, igual que {@link resolveAiuTaxableBasis}: leer
+ * `aiu.accounting_model` a secas en otro sitio haría que el día que se habilite
+ * `'no_sumada'` un consumidor viera `undefined` donde el resto ve `'sumada'`.
+ */
+export function resolveAccountingModel(
+  aiu: Pick<ProfileAiuConfig, 'accounting_model'> | null | undefined,
+): AccountingModel {
+  const value = aiu?.accounting_model;
+  if (value && ACCOUNTING_MODELS.includes(value)) return value;
+  return 'sumada';
+}
+
+/**
+ * Por qué un modelo no se puede elegir todavía, en español y **fechado**.
+ *
+ * Vive acá y no en el template porque las DOS pantallas que capturan la sección
+ * AIU tienen que decir lo mismo, y porque una insignia «NO DISPONIBLE» sin
+ * motivo ni fecha es exactamente el P1 que este texto cierra. `null` cuando el
+ * modelo sí está habilitado.
+ */
+export function accountingModelDisabledReason(
+  model: AccountingModel,
+): string | null {
+  if (isAccountingModelEnabled(model)) return null;
+  return 'Cambia los totales monetarios del XML (FAU02, FAU04, FAU06). Se habilita en la Fase D del plan de facturación, cuando el armado del documento pase la compuerta de totales en los dos modelos; hasta entonces elegirlo produciría facturas rechazadas al firmar, con el consecutivo ya tomado.';
+}
+
 // ─── Las 7 secciones del editor ───────────────────────────────────────────
 
 /**
@@ -357,6 +441,13 @@ export interface ProfileAiuConfig {
    *   reembolsable queda fuera de este reparto.
    */
   components: Readonly<Record<AiuComponentLiteral, string>>;
+  /**
+   * Cómo entra el AIU al documento. Ver {@link AccountingModel}: OPCIONAL a
+   * propósito, porque **ausente significa `'sumada'`** —lo que el calculador ya
+   * hace por construcción— y así un snapshot anterior a este campo se emite sin
+   * cambio de comportamiento. Se lee con {@link resolveAccountingModel}.
+   */
+  accounting_model?: AccountingModel | null;
 }
 
 /**
@@ -1055,6 +1146,29 @@ function validateAiuSection(
     });
   }
 
+  // ── El modelo de contabilización ──
+  // Dos problemas distintos a propósito: «ese modelo no existe» es un cliente
+  // mal escrito, y «existe pero todavía no» es una compuerta con fecha. Pintar
+  // el mismo mensaje para los dos dejaría al operador sin saber si esperar.
+  if (aiu.accounting_model !== undefined && aiu.accounting_model !== null) {
+    if (!ACCOUNTING_MODELS.includes(aiu.accounting_model)) {
+      issues.push({
+        field: 'aiu.accounting_model',
+        code: 'AIU_ACCOUNTING_MODEL_UNKNOWN',
+        message: `El modelo de contabilización «${String(aiu.accounting_model)}» no existe. Elige base AIU sumada al total de la factura o no sumada.`,
+      });
+    } else if (!isAccountingModelEnabled(aiu.accounting_model)) {
+      // Bloqueante, no aviso: un perfil guardado con el modelo no habilitado
+      // emitiría documentos que la DIAN rechaza al firmar, con el consecutivo
+      // ya tomado. Ver `ENABLED_ACCOUNTING_MODELS`.
+      issues.push({
+        field: 'aiu.accounting_model',
+        code: 'AIU_ACCOUNTING_MODEL_NOT_ENABLED',
+        message: `El modelo «base AIU no sumada al total de la factura» todavía no se puede guardar. ${accountingModelDisabledReason(aiu.accounting_model) ?? ''}`.trim(),
+      });
+    }
+  }
+
   if (!aiu.contract_object || !aiu.contract_object.trim()) {
     issues.push({
       field: 'aiu.contract_object',
@@ -1535,6 +1649,10 @@ export function buildDefaultAiuProfileConfig(
         imprevistos: '2.00',
         utilidad: '3.00',
       },
+      // Explícito aunque la ausencia signifique lo mismo: un perfil recién
+      // creado no debe depender de un default implícito para decidir la forma
+      // del XML.
+      accounting_model: 'sumada',
     },
     accounting: {
       revenue_account_by_bucket: null,
@@ -1721,6 +1839,10 @@ const AIU_KEYS = [
   'minimum_base_percent',
   'components_basis',
   'components',
+  // Sin esta entrada, `pickKnownKeys` BORRA el campo y emite `UNKNOWN_KEY`, que
+  // es bloqueante: las cuatro rutas de escritura de perfil responderían 422
+  // nombrando un campo del propio contrato. Ya pasó con `taxable_basis`.
+  'accounting_model',
 ] as const;
 const ACCOUNTING_KEYS = [
   'revenue_account_by_bucket',

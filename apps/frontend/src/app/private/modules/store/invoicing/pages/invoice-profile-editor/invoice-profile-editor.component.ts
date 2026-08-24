@@ -44,11 +44,13 @@ import {
     isBlockingIssue,
     normalizeInvoiceProfileConfig,
     regimeFromTaxableBasis,
+    resolveAccountingModel,
     resolveAiuComponentsBasis,
     resolveAiuTaxableBasis,
     validateInvoiceProfileConfig,
 } from '../../../../../../core/utils/invoice-profile-config.contract';
 import type {
+    AccountingModel,
     AiuBucket,
     AiuComponentsBasis,
     AiuTaxableBasis,
@@ -1707,6 +1709,11 @@ export class InvoiceProfileEditorComponent {
             administracion: ['5.00'],
             imprevistos: ['2.00'],
             utilidad: ['3.00'],
+            // Modelo de contabilización. `'sumada'` por omisión porque es el
+            // ÚNICO habilitado (`ENABLED_ACCOUNTING_MODELS`) y porque es lo que
+            // el calculador hace por construcción: un perfil que abre con este
+            // valor no cambia de comportamiento ni nace `dirty`.
+            accounting_model: ['sumada' as AccountingModel],
         }),
         accounting: this.fb.group({
             revenue_administracion: [''],
@@ -1777,6 +1784,26 @@ export class InvoiceProfileEditorComponent {
             costo: 'accounting.revenue_costo',
         },
         vat_payable_account: 'accounting.vat_payable_account',
+        // FALTA `accounting_model: 'aiu.accounting_model'`.
+        //
+        // El control YA EXISTE en el formulario de arriba, se hidrata desde el
+        // snapshot y viaja en el payload; lo que falta es pintarlo. El bloque
+        // «Modelo de contabilización» son todavía dos `div` estáticos con
+        // insignias `ACTIVO` / `NO DISPONIBLE`, y vive en
+        // `components/invoice-sections/invoice-section-aiu.component.ts`, que es
+        // de otro paso del plan y no de éste. Añadir la ruta acá sin declarar
+        // primero la clave en `AiuSectionPaths` —que se declara en ese mismo
+        // archivo— no compila.
+        //
+        // Para cerrarlo hacen falta exactamente tres cosas, todas allá:
+        //   1. `AiuSectionPaths` gana `accounting_model: string`.
+        //   2. Los dos `div` pasan a ser un grupo de radio enlazado con
+        //      `[formControl]` a esa ruta, con el de `'no_sumada'` deshabilitado
+        //      por `isAccountingModelEnabled()`.
+        //   3. La insignia muda se reemplaza por
+        //      `accountingModelDisabledReason('no_sumada')`, que ya dice el
+        //      motivo y lo fecha a la Fase D.
+        // Y esta línea se descomenta.
     };
 
     /**
@@ -2598,6 +2625,11 @@ export class InvoiceProfileEditorComponent {
                     administracion: config.aiu.components.administracion,
                     imprevistos: config.aiu.components.imprevistos,
                     utilidad: config.aiu.components.utilidad,
+                    // Un perfil guardado antes de que existiera este campo no
+                    // lo trae, y la ausencia significa `'sumada'`. Se resuelve
+                    // por el único punto de lectura del contrato para que la
+                    // pantalla y el cálculo no puedan discrepar.
+                    accounting_model: resolveAccountingModel(config.aiu),
                 },
                 { emitEvent: false },
             );
@@ -2805,6 +2837,16 @@ export class InvoiceProfileEditorComponent {
                           imprevistos: String(aiuRaw['imprevistos'] ?? '0.00'),
                           utilidad: String(aiuRaw['utilidad'] ?? '0.00'),
                       },
+                      // Explícito y nunca ausente, igual que `components_basis`:
+                      // decide la FORMA del XML, así que un perfil recién
+                      // guardado no debe depender del default implícito. Se
+                      // resuelve por el contrato, de modo que un valor corrupto
+                      // en el formulario cae en `'sumada'` —el conservador— en
+                      // vez de viajar y hacer que el guardado responda 422.
+                      accounting_model: resolveAccountingModel({
+                          accounting_model:
+                              aiuRaw['accounting_model'] as AccountingModel | null,
+                      }),
                   }
                 : null,
             accounting: {
