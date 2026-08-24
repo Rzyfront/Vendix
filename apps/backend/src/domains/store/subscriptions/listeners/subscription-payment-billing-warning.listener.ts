@@ -128,16 +128,49 @@ export class SubscriptionPaymentBillingWarningListener {
         return;
       }
 
+      // Resolve latest issued invoice for details (amount & due date)
+      const latestInvoice = await this.prisma.subscription_invoices.findFirst({
+        where: {
+          store_id: storeId,
+          state: { in: ['issued', 'overdue'] },
+        },
+        orderBy: { id: 'desc' },
+      });
+
+      const amountFormatted = latestInvoice
+        ? new Intl.NumberFormat('es-CO', {
+            style: 'currency',
+            currency: latestInvoice.currency || 'COP',
+            maximumFractionDigits: 0,
+          }).format(Number(latestInvoice.total))
+        : null;
+
+      const dueText = latestInvoice?.due_at
+        ? ` Vence el ${new Date(latestInvoice.due_at).toLocaleDateString('es-CO', {
+            day: 'numeric',
+            month: 'short',
+          })}.`
+        : '.';
+
+      const notifTitle = amountFormatted
+        ? `Pago pendiente de ${amountFormatted}`
+        : 'Tu plan requiere pago manual';
+
+      const notifBody = amountFormatted
+        ? `Tu período de suscripción requiere pago de ${amountFormatted}.${dueText} Paga directamente para mantener tu tienda activa.`
+        : 'El medio de pago utilizado no admite renovación automática. Deberás pagar cada período manualmente.';
+
       // Bell + web push. notificationsService swallows internally; failures
       // here do NOT block the email enqueue.
       try {
         await this.notificationsService.createAndBroadcast(
           storeId,
           'auto_renew_disabled_no_credential',
-          'Tu autopago quedó en pausa',
-          'El autopago solo funciona con tarjeta: el medio con el que pagaste no permite cobros automáticos, así que pausamos la renovación para no cobrarte en silencio. Guarda una tarjeta y la reactivamos al instante.',
+          notifTitle,
+          notifBody,
           {
             subscriptionEventId,
+            invoiceId: latestInvoice?.id,
             route: '/admin/subscription/payment',
           },
         );
@@ -147,13 +180,17 @@ export class SubscriptionPaymentBillingWarningListener {
         );
       }
 
-      // Email enqueue. Mirrors the `commissionQueue.add` try/catch shape
-      // from subscription-payment.service.ts:1967-1976 — best-effort, the
-      // audit row is the source of truth.
+      // Email enqueue.
       try {
         await this.emailQueue.add(
           'subscription.billing.no-credential.email',
-          { storeId, subscriptionEventId },
+          {
+            storeId,
+            subscriptionEventId,
+            invoiceId: latestInvoice?.id,
+            amount: latestInvoice?.total ? Number(latestInvoice.total) : null,
+            dueAt: latestInvoice?.due_at ? latestInvoice.due_at.toISOString() : null,
+          },
           {
             attempts: 3,
             backoff: { type: 'exponential', delay: 5000 },

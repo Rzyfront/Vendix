@@ -4,9 +4,13 @@ import { Prisma } from '@prisma/client';
 describe('SubscriptionPaymentBillingWarningListener', () => {
   function buildListener() {
     const billingCreate = jest.fn();
+    const invoiceFindFirst = jest.fn().mockResolvedValue(null);
     const prismaMock = {
       billing_warning_logs: {
         create: billingCreate,
+      },
+      subscription_invoices: {
+        findFirst: invoiceFindFirst,
       },
     } as any;
 
@@ -27,6 +31,7 @@ describe('SubscriptionPaymentBillingWarningListener', () => {
     return {
       listener,
       billingCreate,
+      invoiceFindFirst,
       notificationsServiceMock,
       emailQueueMock,
     };
@@ -58,8 +63,8 @@ describe('SubscriptionPaymentBillingWarningListener', () => {
       notificationsServiceMock.createAndBroadcast.mock.calls[0];
     expect(storeId).toBe(42);
     expect(type).toBe('auto_renew_disabled_no_credential');
-    expect(title).toBe('Tu autopago no se pudo activar');
-    expect(body).toContain('renovación automática quedó desactivada');
+    expect(title).toBe('Tu plan requiere pago manual');
+    expect(body).toContain('Deberás pagar cada período manualmente');
     expect(data).toMatchObject({
       subscriptionEventId: 9991,
       route: '/admin/subscription/payment',
@@ -68,7 +73,59 @@ describe('SubscriptionPaymentBillingWarningListener', () => {
     expect(emailQueueMock.add).toHaveBeenCalledTimes(1);
     const [jobName, jobData] = emailQueueMock.add.mock.calls[0];
     expect(jobName).toBe('subscription.billing.no-credential.email');
-    expect(jobData).toEqual({ storeId: 42, subscriptionEventId: 9991 });
+    expect(jobData).toEqual({
+      storeId: 42,
+      subscriptionEventId: 9991,
+      invoiceId: undefined,
+      amount: null,
+      dueAt: null,
+    });
+  });
+
+  it('enriches notification and email with invoice details when present', async () => {
+    const {
+      listener,
+      billingCreate,
+      invoiceFindFirst,
+      notificationsServiceMock,
+      emailQueueMock,
+    } = buildListener();
+    billingCreate.mockResolvedValueOnce({ id: 1 });
+    invoiceFindFirst.mockResolvedValueOnce({
+      id: 19,
+      total: new Prisma.Decimal(69900),
+      currency: 'COP',
+      due_at: new Date('2026-08-27'),
+    });
+
+    await listener.onNoCredential({
+      subscriptionEventId: 9991,
+      storeId: 42,
+      paymentId: 77,
+      source: 'self',
+    });
+
+    expect(notificationsServiceMock.createAndBroadcast).toHaveBeenCalledTimes(1);
+    const [storeId, type, title, body, data] =
+      notificationsServiceMock.createAndBroadcast.mock.calls[0];
+    expect(title).toContain('69.900');
+    expect(body).toContain('69.900');
+    expect(data).toMatchObject({
+      subscriptionEventId: 9991,
+      invoiceId: 19,
+      route: '/admin/subscription/payment',
+    });
+
+    expect(emailQueueMock.add).toHaveBeenCalledWith(
+      'subscription.billing.no-credential.email',
+      expect.objectContaining({
+        storeId: 42,
+        subscriptionEventId: 9991,
+        invoiceId: 19,
+        amount: 69900,
+      }),
+      expect.any(Object),
+    );
   });
 
   it('skips bell + email on P2002 (dedupe already recorded)', async () => {

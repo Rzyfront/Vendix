@@ -28,6 +28,7 @@ import { UseGuards } from '@nestjs/common';
 import { CheckoutPreviewDto } from '../dto/checkout-preview.dto';
 import { CheckoutCommitDto } from '../dto/checkout-commit.dto';
 import { RetryPaymentDto } from '../dto/retry-payment.dto';
+import { PayDueDto } from '../dto/pay-due.dto';
 import { ValidateCouponDto } from '../dto/validate-coupon.dto';
 import { Prisma } from '@prisma/client';
 import {
@@ -1394,6 +1395,103 @@ export class SubscriptionCheckoutController {
         },
       },
       'Retry payment widget prepared',
+    );
+  }
+
+  /**
+   * Paga una factura pendiente (issued u overdue) de la suscripción actual
+   * mediante el widget de Wompi, en CUALQUIER estado de suscripción (active,
+   * grace_soft, grace_hard, suspended, etc.) SIN forzar una transición
+   * a pending_payment.
+   *
+   * - Authentication: JwtAuthGuard
+   * - Roles: OWNER, SUPER_ADMIN
+   * - Subscription gating: @SkipSubscriptionGate() heredado de la clase
+   * - Permission: subscriptions:write
+   */
+  @Permissions('subscriptions:write')
+  @Post('pay-due')
+  async payDue(@Body() dto: PayDueDto) {
+    const storeId = RequestContextService.getStoreId();
+    const context = RequestContextService.getContext();
+    if (!storeId) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    const sub = await this.prisma.store_subscriptions.findUnique({
+      where: { store_id: storeId },
+    });
+    if (!sub) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_001,
+        'No subscription found for store',
+      );
+    }
+
+    let invoice: any = null;
+    if (dto.invoiceId) {
+      invoice = await this.prisma.subscription_invoices.findFirst({
+        where: {
+          id: dto.invoiceId,
+          store_subscription_id: sub.id,
+        },
+      });
+      if (!invoice) {
+        throw new VendixHttpException(
+          ErrorCodes.SUBSCRIPTION_001,
+          'Invoice not found for this subscription',
+        );
+      }
+    } else {
+      // Find oldest unpaid payable invoice
+      invoice = await this.prisma.subscription_invoices.findFirst({
+        where: {
+          store_subscription_id: sub.id,
+          state: { in: ['issued', 'overdue'] },
+        },
+        orderBy: { id: 'asc' },
+      });
+    }
+
+    if (!invoice) {
+      throw new VendixHttpException(
+        ErrorCodes.DUNNING_001,
+        'No payable invoice available',
+      );
+    }
+
+    if (invoice.state === 'paid' || invoice.state === 'void') {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_010,
+        `Invoice is already ${invoice.state}`,
+      );
+    }
+
+    const customerEmail = await this.resolveCustomerEmail(
+      context?.user_id ?? null,
+    );
+    const { widget } = await this.payment.prepareWidgetCharge(invoice.id, {
+      customerEmail,
+      redirectUrl: dto.returnUrl ?? this.defaultReturnUrl(),
+    });
+
+    return this.responseService.success(
+      {
+        widget,
+        invoice: {
+          id: invoice.id,
+          total: invoice.total.toString(),
+          currency: invoice.currency,
+          due_at: invoice.due_at ? invoice.due_at.toISOString() : null,
+          period_start: invoice.period_start
+            ? invoice.period_start.toISOString()
+            : null,
+          period_end: invoice.period_end
+            ? invoice.period_end.toISOString()
+            : null,
+        },
+      },
+      'Payment widget prepared for due invoice',
     );
   }
 

@@ -300,20 +300,11 @@ export class DunningBoardComponent {
   }
 
   /**
-   * Destino único de pago del tablero de mora: la vista de pago del plan
-   * vigente. No ejecuta ningún cargo — solo navega.
+   * Destino único de pago del tablero de mora: la vista de pago directo
+   * `/admin/subscription/payment` para pagar la factura pendiente.
    */
   private navigateToPlanPayment(): void {
-    const sub = this.currentSubscription() as {
-      plan_id?: number | string | null;
-      paid_plan_id?: number | string | null;
-    } | null;
-    const planId = sub?.plan_id ?? sub?.paid_plan_id ?? null;
-    if (planId === null || planId === undefined || planId === '') {
-      this.toast.error('No se encontró un plan vigente para renovar');
-      return;
-    }
-    this.router.navigateByUrl(`/admin/subscription/checkout/${planId}`);
+    this.router.navigateByUrl('/admin/subscription/payment');
   }
 
   /**

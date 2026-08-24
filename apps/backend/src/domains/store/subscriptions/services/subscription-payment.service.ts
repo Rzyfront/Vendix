@@ -269,14 +269,58 @@ export class SubscriptionPaymentService {
       );
     }
 
+    const amountInCents = Math.round(total.toNumber() * 100);
+    const currency = invoice.currency || 'COP';
+
+    // Guard against orphan pending buildup: if there is an existing pending
+    // payment created within the last 30 minutes with a valid reference, reuse it.
+    const recentPending = await this.prisma.subscription_payments.findFirst({
+      where: {
+        invoice_id: invoiceId,
+        state: 'pending',
+        created_at: { gte: new Date(Date.now() - 30 * 60 * 1000) },
+      },
+      orderBy: { id: 'desc' },
+    });
+
+    if (
+      recentPending &&
+      recentPending.metadata &&
+      typeof (recentPending.metadata as any).reference === 'string'
+    ) {
+      const reference = (recentPending.metadata as any).reference;
+      const signatureIntegrity = this.computeIntegritySignature(
+        reference,
+        amountInCents,
+        currency,
+        wompiConfig.integrity_secret,
+      );
+
+      this.logger.log(
+        `prepareWidgetCharge: reusing recent pending payment ${recentPending.id} for invoice ${invoiceId} (ref=${reference})`,
+      );
+
+      return {
+        payment: recentPending,
+        widget: {
+          public_key: wompiConfig.public_key,
+          currency,
+          amount_in_cents: amountInCents,
+          reference,
+          signature_integrity: signatureIntegrity,
+          redirect_url: opts.redirectUrl ?? '',
+          customer_email:
+            opts.customerEmail ?? `saas-${invoice.store_id}@vendix.app`,
+        },
+      };
+    }
+
     const attemptCounter =
       (await this.prisma.subscription_payments.count({
         where: { invoice_id: invoiceId },
       })) + 1;
     const idempotencyKey = `sub_inv_${invoiceId}_att_${attemptCounter}`;
     const reference = `vendix_saas_${invoice.store_subscription_id}_${invoiceId}_${Date.now()}`;
-    const amountInCents = Math.round(total.toNumber() * 100);
-    const currency = invoice.currency || 'COP';
 
     const signatureIntegrity = this.computeIntegritySignature(
       reference,
