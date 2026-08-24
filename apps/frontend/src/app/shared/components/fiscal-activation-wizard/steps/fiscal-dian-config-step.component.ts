@@ -376,6 +376,30 @@ type SuccessInfo =
 
         @if (localError()) {
           <p class="step-error" role="alert">{{ localError() }}</p>
+        } @else if (!valid() && blockingReasons().length) {
+          <!--
+            Guía EN REPOSO, no un error: por eso role="note" y no
+            role="alert". El usuario no acaba de equivocarse, simplemente
+            todavía no ha llenado algo.
+
+            Sin este bloque el paso es un callejón sin salida: el shell apaga
+            su "Continuar" con !valid(), los mensajes por campo de app-input
+            solo se pintan cuando el control está touched, y lo único que
+            marca todo tocado es el markAllTouched() de un submit() que el
+            botón apagado impide disparar. Resultado: botón muerto y ninguna
+            pista. Acá el motivo se muestra sin depender de ningún clic.
+          -->
+          <div class="blocking-reasons" role="note">
+            <app-icon name="info" [size]="18"></app-icon>
+            <div class="blocking-reasons__body">
+              <p class="blocking-reasons__title">Para continuar falta:</p>
+              <ul class="blocking-reasons__list">
+                @for (reason of blockingReasons(); track reason) {
+                  <li>{{ reason }}</li>
+                }
+              </ul>
+            </div>
+          </div>
         }
       }
     </div>
@@ -630,8 +654,14 @@ type SuccessInfo =
        * Banner informativo azul que vive FUERA del grid de dropzones.
        * Span completo del ancho para que la copy no quede torcida dentro
        * de una de las 3 columnas de PC.
+       *
+       * El bloque "Para continuar falta" comparte esta misma caja —mismo
+       * borde, mismo relleno, mismos tokens— en vez de estrenar un sistema
+       * visual: es el mismo registro de voz (una nota informativa), y
+       * duplicar tokens es cómo se desalinean después.
        */
-      .identity-documents-banner {
+      .identity-documents-banner,
+      .blocking-reasons {
         display: flex;
         gap: 0.6rem;
         align-items: flex-start;
@@ -646,17 +676,30 @@ type SuccessInfo =
         line-height: 1.45;
         box-sizing: border-box;
       }
-      .identity-documents-banner app-icon {
+      .identity-documents-banner app-icon,
+      .blocking-reasons app-icon {
         flex: 0 0 auto;
         color: var(--color-info);
         margin-top: 0.1rem;
       }
-      .identity-documents-banner span {
+      .identity-documents-banner span,
+      .blocking-reasons__body {
         flex: 1 1 auto;
       }
       .identity-documents-banner strong {
         color: var(--color-text-primary, #0f172a);
         font-weight: 600;
+      }
+      .blocking-reasons__title {
+        margin: 0;
+        font-weight: 600;
+      }
+      .blocking-reasons__list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+        margin: 0.3rem 0 0;
+        padding-left: 1.1rem;
       }
 
       /*
@@ -733,6 +776,14 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
    * formulario deja de ser la única condición para avanzar.
    */
   private readonly formValid = signal(false);
+  /**
+   * Motivos, en español y legibles, por los que el "Continuar" del shell está
+   * apagado. Es una signal escrita a mano y no un `computed` por la misma
+   * razón que `valid`: el veredicto nace de `describeInvalidFields()`, que
+   * lee `FormControl`s —no reactivos bajo Zoneless—, así que hay que
+   * refrescarlo en los mismos puntos donde se recalcula la validez.
+   */
+  readonly blockingReasons = signal<string[]>([]);
   readonly submitting = signal(false);
   readonly localError = signal<string | null>(null);
   readonly initial = signal<Partial<DianConfigValue> | null>(null);
@@ -1113,6 +1164,10 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
    * en pantalla, el único camino de salida debe ser su botón.
    */
   private recomputeValid(): void {
+    // El motivo del bloqueo se recalcula DENTRO de este método, nunca en un
+    // call-site aparte: si se separaran, un punto que actualiza uno y olvida
+    // el otro deja la UI diciendo una cosa y el botón haciendo otra.
+    this.recomputeBlockingReasons();
     if (this.successInfo()) {
       this.valid.set(false);
       return;
@@ -1122,6 +1177,35 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
       return;
     }
     this.valid.set(this.formValid());
+  }
+
+  /**
+   * Traduce el veredicto del formulario —más la regla propia de este paso— a
+   * una lista que el usuario pueda leer y accionar.
+   *
+   * `describeInvalidFields()` ya respeta la relajación de
+   * `requireDianCredentials`, así que en la rama de identidad no nombra
+   * credenciales que la DIAN todavía no ha emitido. Lo que ese método no
+   * puede saber es la regla que vive acá: en esa rama el paso también exige
+   * un documento adjunto, y ese motivo se añade sin él.
+   */
+  private recomputeBlockingReasons(): void {
+    if (this.successInfo()) {
+      this.blockingReasons.set([]);
+      return;
+    }
+    const reasons: string[] = [];
+    try {
+      reasons.push(...this.form().describeInvalidFields());
+    } catch {
+      // `viewChild.required` lanza si el formulario todavía no está en el
+      // árbol (o si el banner ya lo reemplazó). Sin formulario no hay
+      // veredicto que traducir, y no tener motivos es la respuesta correcta.
+    }
+    if (this.identityBranchActive() && this.attachedDocumentCount() === 0) {
+      reasons.push('Adjunta al menos un documento de identidad');
+    }
+    this.blockingReasons.set(reasons);
   }
 
   /**
