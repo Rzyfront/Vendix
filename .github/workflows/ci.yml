@@ -216,6 +216,41 @@ jobs:
         working-directory: apps/frontend
         run: npm run build:prod
 
+  frontend-test:
+    name: Frontend Tests (karma zoneless)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    timeout-minutes: 20
+    # Este job NO existia: habia ~40 specs en apps/frontend y cero corridas en
+    # CI, asi que un spec roto llegaba a `dev` con todos los checks verdes. Es
+    # una compuerta de verdad -- sin `continue-on-error`: si un spec falla, el
+    # PR se pone rojo. Un job que no puede ponerse rojo no es una compuerta.
+    #
+    # `--watch=false` es obligatorio: el default del builder
+    # (@angular/build:karma) es `watch: true`, que nunca termina y colgaria el
+    # runner hasta el timeout.
+    #
+    # `--browsers=ChromeHeadlessNoSandbox` usa el customLauncher que el propio
+    # builder declara (--no-sandbox --headless --disable-gpu
+    # --disable-dev-shm-usage). Sin --no-sandbox Chrome no arranca dentro del
+    # runner, y sin --disable-dev-shm-usage se cae por /dev/shm pequeno. El
+    # binario lo autodetecta karma-chrome-launcher: la imagen ubuntu-latest
+    # trae google-chrome-stable preinstalado.
+    #
+    # El arnes corre SIN Zone.js (target `test` con "polyfills": []), igual que
+    # el build de produccion. Ver apps/frontend/src/test-init.ts.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: ng test (headless, sin watch, sin Zone.js)
+        working-directory: apps/frontend
+        run: npx ng test --watch=false --browsers=ChromeHeadlessNoSandbox --progress=false
+
   backend-build:
     name: Backend Build (prisma + nest)
     runs-on: ubuntu-latest
