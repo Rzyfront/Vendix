@@ -5564,6 +5564,16 @@ export const ErrorCodes = {
     devMessage:
       'El contenido de la landing no cumple la estructura esperada. Revisa las secciones e intenta de nuevo.',
   },
+
+  // CRM Landing (QUI-719): fallo al encolar el job en BullMQ.
+  // 500: Redis/caída del queue — la fila queda `failed` con mensaje y el
+  // usuario puede reintentar desde el panel.
+  CRM_LANDING_004: {
+    code: 'CRM_LANDING_004',
+    httpStatus: 500,
+    devMessage:
+      'No pudimos iniciar la generación de tu landing. Intenta de nuevo en unos segundos.',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {
