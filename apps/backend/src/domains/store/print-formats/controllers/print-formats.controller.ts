@@ -34,7 +34,13 @@ export class PrintFormatsController {
   ) {}
 
   @Get()
-  @Permissions('store:settings:read')
+  @Permissions('store:settings:read', 'invoicing:read')
+  // `invoicing:read` se suma el 2026-08-24: medido que un usuario con SOLO ese
+  // permiso (quien factura, no quien administra ajustes de tienda) recibía
+  // 403 al abrir el selector de formato en la pantalla de factura, que
+  // quedaba en blanco sin ninguna explicación (E.1). Es lectura pura —no
+  // cambia nada— así que ampliar a quien factura no abre superficie de
+  // escritura.
   @ApiOperation({ summary: 'List all print format types and their status for the store' })
   async listFormats() {
     const context = RequestContextService.getContext();
@@ -50,7 +56,9 @@ export class PrintFormatsController {
   }
 
   @Get(':formatType')
-  @Permissions('store:settings:read')
+  @Permissions('store:settings:read', 'invoicing:read')
+  // Misma razón que en `listFormats`: la factura precarga el detalle del
+  // formato elegido (E.1) y necesita alcanzarlo con `invoicing:read`.
   @ApiOperation({ summary: 'Get print format configuration and template detail' })
   async getFormatDetail(@Param('formatType') formatType: print_format_type_enum) {
     const context = RequestContextService.getContext();
@@ -104,7 +112,10 @@ export class PrintFormatsController {
   }
 
   @Post(':formatType/preview')
-  @Permissions('store:settings:read')
+  @Permissions('store:settings:read', 'invoicing:read')
+  // Ampliado para E.2: la previsualización «cómo saldrá» se abre desde la
+  // pantalla de creación de factura, que corre bajo `invoicing:read`. Sigue
+  // siendo de sólo lectura: no persiste ni toma consecutivo.
   @ApiOperation({ summary: 'Generate live preview of print format with draft overrides' })
   async previewFormat(
     @Param('formatType') formatType: print_format_type_enum,

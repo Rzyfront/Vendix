@@ -216,7 +216,28 @@ export class PrintFormatsService {
       where.format_type = formatType;
     }
 
-    return this.orgPrisma.print_templates.findMany({
+    // `withoutScope()` es deliberado, no un descuido de alcance.
+    //
+    // `this.orgPrisma.print_templates` (el getter por defecto) pasa por
+    // `OrganizationPrismaService.applyOrganizationScoping`, que para modelos
+    // sin `SCOPE_OVERRIDES` inyecta `organization_id: context.organization_id`
+    // como llave HERMANA del `where` del llamador (no dentro de un `AND`
+    // explícito) — ver `organization-prisma.service.ts`. Con un `OR` de primer
+    // nivel como el de arriba, Postgres exige AMBAS condiciones: el `OR` de
+    // esta consulta Y la igualdad inyectada. Las plantillas de sistema
+    // (`is_system = true`) tienen `organization_id = NULL` a propósito —son de
+    // TODAS las organizaciones—, así que la igualdad inyectada las descarta
+    // siempre. Medido en vivo el 2026-08-24: con 10 plantillas de sistema y 1
+    // de la organización 6, `GET /store/print-formats/library` devolvía **1**
+    // fila en vez de **11** — el catálogo entero desaparecía en silencio, sin
+    // error, y parecía que la biblioteca compartida no existía.
+    //
+    // El alcance real de esta consulta ya está impuesto A MANO en el `OR` de
+    // arriba con el `organizationId` recibido por parámetro (nunca del
+    // contexto de otro tenant), así que `withoutScope()` no abre nada: sólo
+    // evita que la capa de scoping genérica AND-ee una igualdad que este
+    // modelo, por diseño, no puede satisfacer para sus filas de sistema.
+    return this.orgPrisma.withoutScope().print_templates.findMany({
       where,
       include: {
         author: {
@@ -253,7 +274,12 @@ export class PrintFormatsService {
     organizationId: number,
     templateId: number,
   ) {
-    const template = await this.orgPrisma.print_templates.findFirst({
+    // Mismo motivo que en `listLibraryTemplates`: el `OR` que admite plantillas
+    // de sistema (`organization_id = NULL`) quedaría ANDado con la igualdad de
+    // alcance que `this.orgPrisma.print_templates` inyecta sola, y ninguna
+    // plantilla de sistema pasaría el filtro. `withoutScope()` con el `OR`
+    // manual de abajo (que ya acota a `organizationId`) es el filtro correcto.
+    const template = await this.orgPrisma.withoutScope().print_templates.findFirst({
       where: {
         id: templateId,
         OR: [{ is_system: true }, { organization_id: organizationId }],
