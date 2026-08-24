@@ -69,6 +69,7 @@ import * as ProfileActions from '../../state/actions/invoice-profile.actions';
 import { loadResolutions } from '../../state/actions/invoicing.actions';
 import { selectResolutions } from '../../state/selectors/invoicing.selectors';
 import type { InvoiceResolution } from '../../interfaces/invoice.interface';
+import { profileHelp } from '../../utils/invoice-section-help';
 import {
     compareResolutionsForSelection,
     hasRemainingRange,
@@ -211,7 +212,12 @@ type SectionId =
                     </div>
                 }
 
-                <form [formGroup]="form" class="space-y-4">
+                <!--
+                    space-y-6 y no space-y-4: con el borde sutil de cada
+                    sección, 16 px las hacía leer como una sola lista continua y
+                    costaba ver dónde acababa una configuración y empezaba otra.
+                -->
+                <form [formGroup]="form" class="space-y-6">
                     <!--
                         IDENTIDAD DEL PERFIL. Fuera de toda sección y siempre
                         visible: «name» y «operation_type» son COLUMNAS de la
@@ -253,6 +259,7 @@ type SectionId =
                          aquí se preconfigura. -->
                     <vendix-invoice-form-section
                         title="Documento"
+                        [help]="help('documento')"
                         icon="file-text"
                         summary="Resolución preferida, forma y medio de pago, y notas de cabecera"
                         [errorCount]="sectionErrors().documento"
@@ -386,6 +393,7 @@ type SectionId =
                     <!-- ══ LÍNEAS MODELO ══ espejo de «Líneas». -->
                     <vendix-invoice-form-section
                         title="Líneas modelo"
+                        [help]="help('lineas')"
                         icon="list"
                         [summary]="modelLinesSummary()"
                         [errorCount]="sectionErrors().lineas"
@@ -427,13 +435,27 @@ type SectionId =
                                         class="grid grid-cols-1 items-end gap-2 rounded-lg border border-border p-2 md:grid-cols-6"
                                         [formGroupName]="$index"
                                     >
-                                        <app-selector
-                                            label="Componente"
-                                            formControlName="bucket"
-                                            [options]="bucket_options"
-                                            size="sm"
-                                        ></app-selector>
-                                        <div class="md:col-span-2">
+                                        <!--
+                                            El COMPONENTE sólo existe en un
+                                            documento AIU: las cubetas son
+                                            porciones del AIU y en una venta
+                                            ordinaria no significan nada. Fuera
+                                            de AIU se oculta y la línea nace en
+                                            «costo», que es la única cubeta que
+                                            no es componente del régimen.
+                                        -->
+                                        @if (isAiu()) {
+                                            <app-selector
+                                                label="Componente"
+                                                formControlName="bucket"
+                                                [options]="bucket_options"
+                                                size="sm"
+                                            ></app-selector>
+                                        }
+                                        <div
+                                            [class.md:col-span-2]="isAiu()"
+                                            [class.md:col-span-3]="!isAiu()"
+                                        >
                                             <app-input
                                                 label="Descripción"
                                                 formControlName="description"
@@ -494,6 +516,7 @@ type SectionId =
                     @if (isAiu()) {
                         <vendix-invoice-form-section
                             title="Configuración AIU"
+                        [help]="help('aiu')"
                             icon="calculator"
                             [summary]="aiuSummary()"
                             [errorCount]="sectionErrors().aiu"
@@ -965,6 +988,7 @@ type SectionId =
                     @if (!isAiu()) {
                         <vendix-invoice-form-section
                             title="Impuestos"
+                        [help]="help('impuestos')"
                             icon="percent"
                             [summary]="taxSummary()"
                             [errorCount]="sectionErrors().impuestos"
@@ -1052,6 +1076,7 @@ type SectionId =
                          componente. -->
                     <vendix-invoice-form-section
                         title="Contabilidad"
+                        [help]="help('contabilidad')"
                         icon="book"
                         summary="Costo reembolsable e IVA por pagar"
                         [errorCount]="sectionErrors().contabilidad"
@@ -1093,6 +1118,7 @@ type SectionId =
                     <!-- ══ FORMATO DE IMPRESIÓN ══ -->
                     <vendix-invoice-form-section
                         title="Formato de impresión"
+                        [help]="help('formato')"
                         icon="printer"
                         [summary]="formatSummary()"
                         [errorCount]="sectionErrors().formato"
@@ -1183,6 +1209,7 @@ type SectionId =
                          deciden el XML por debajo del pliegue. -->
                     <vendix-invoice-form-section
                         title="Notas internas"
+                        [help]="help('notas_internas')"
                         icon="info"
                         summary="No viajan al XML"
                         [errorCount]="sectionErrors().general"
@@ -1211,6 +1238,7 @@ type SectionId =
                 @if (isEdit()) {
                     <vendix-invoice-form-section
                         title="Previsualización"
+                        [help]="help('previsualizacion')"
                         icon="eye"
                         summary="Cómo quedaría un documento con este perfil"
                         [errorCount]="0"
@@ -1226,6 +1254,7 @@ type SectionId =
 
                     <vendix-invoice-form-section
                         title="Historial de versiones"
+                        [help]="help('historial')"
                         icon="history"
                         [summary]="'Versión vigente: v' + currentVersionNumber()"
                         [errorCount]="0"
@@ -1402,6 +1431,13 @@ export class InvoiceProfileEditorComponent {
         { value: '07', label: 'ReteICA (07)' },
         { value: '05', label: 'ReteIVA (05)' },
     ];
+
+    /**
+     * La ayuda larga de una sección, leída desde el catálogo compartido con la
+     * vista de emisión. Es un método y no un mapa inline para que las dos
+     * pantallas no puedan divergir en cómo explican la misma regla fiscal.
+     */
+    readonly help = profileHelp;
 
     /** Mismas listas que la vista de emisión: un solo catálogo, dos pantallas. */
     readonly payment_form_options = PAYMENT_FORM_OPTIONS;
@@ -2178,7 +2214,12 @@ export class InvoiceProfileEditorComponent {
     addModelLine(): void {
         this.modelLines.push(
             this.fb.group({
-                bucket: ['administracion'],
+                // Fuera de AIU el selector de componente no se pinta, así que el
+                // valor por omisión es el único que la línea va a tener: tiene
+                // que ser el que NO es componente del régimen. Con
+                // «administracion» un perfil estándar habría precargado sus
+                // líneas como parte de un AIU que ese documento no declara.
+                bucket: [this.isAiu() ? 'administracion' : 'costo'],
                 description: [''],
                 unit_code: ['94'],
                 quantity: ['1'],

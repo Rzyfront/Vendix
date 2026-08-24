@@ -1,9 +1,11 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  HostListener,
   computed,
   input,
   model,
+  signal,
 } from '@angular/core';
 
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -45,6 +47,22 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
  * modal que dice "revisa el formulario" mientras el error vive tres secciones
  * más abajo, cerrado, es un callejón sin salida. El contador es lo que convierte
  * "algo está mal" en "está mal AHÍ".
+ *
+ * ─── POR QUÉ LA AYUDA NO ES UN `app-tooltip` ─────────────────────────────────
+ *
+ * `app-tooltip` está pensado para una frase: tope de 18rem y
+ * `pointer-events: none`. Lo segundo es lo que lo descarta — el texto no se
+ * puede seleccionar ni recorrer, y aquí la ayuda explica reglas fiscales de
+ * varios párrafos que el operador necesita leer con calma, a veces copiar.
+ *
+ * Así que la ayuda es un panel propio: se abre al pasar por encima, se FIJA al
+ * hacer clic, y sólo entonces se puede leer sin que se cierre al mover el ratón.
+ * Cierra con Escape y con un clic fuera. Es la diferencia entre una pista y una
+ * explicación, y estas secciones necesitan lo segundo.
+ *
+ * El botón de ayuda es HERMANO del botón de plegado, no hijo: un `<button>`
+ * dentro de otro es HTML inválido, y el clic de dentro además plegaría la
+ * sección que se acaba de intentar entender.
  */
 @Component({
   selector: 'vendix-invoice-form-section',
@@ -57,11 +75,16 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
       [class.border-error]="errorCount() > 0"
       [class.border-border]="errorCount() === 0"
     >
-      <button
-        type="button"
-        class="w-full flex items-center gap-3 px-3 py-2.5 text-left bg-[var(--color-surface-secondary)] hover:bg-[var(--color-surface-hover)] transition-colors min-h-[44px]"
+      <div
+        class="relative flex items-stretch bg-[var(--color-surface-secondary)] transition-colors"
         [class.rounded-t-lg]="expanded()"
         [class.rounded-lg]="!expanded()"
+      >
+      <button
+        type="button"
+        class="flex-1 min-w-0 flex items-center gap-3 px-3 py-2.5 text-left hover:bg-[var(--color-surface-hover)] transition-colors min-h-[44px]"
+        [class.rounded-tl-lg]="expanded()"
+        [class.rounded-l-lg]="!expanded()"
         [attr.aria-expanded]="expanded()"
         (click)="toggle()"
       >
@@ -121,6 +144,50 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
         <app-icon name="chevron-down" [size]="18" [class]="chevronClass()" />
       </button>
 
+      @if (help()) {
+        <!--
+          El envoltorio escucha el ratón y el botón escucha el clic: pasar por
+          encima ASOMA la ayuda, hacer clic la FIJA. Sin lo segundo, un texto de
+          varios párrafos se cierra en cuanto el ratón se mueve para leerlo.
+        -->
+        <div
+          class="relative flex items-center pl-1 pr-2"
+          (mouseenter)="helpHover.set(true)"
+          (mouseleave)="helpHover.set(false)"
+        >
+          <button
+            type="button"
+            class="rounded-md p-1.5 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-primary"
+            [class.text-primary]="helpPinned()"
+            [attr.aria-expanded]="helpVisible()"
+            [attr.aria-label]="helpLabel()"
+            (click)="toggleHelp($event)"
+          >
+            <app-icon name="help-circle" [size]="16" />
+          </button>
+
+          @if (helpVisible()) {
+            <!--
+              whitespace-pre-line es lo que permite que la ayuda venga en
+              párrafos: sin él los saltos del texto fuente se colapsan y una
+              explicación de reglas fiscales queda como un muro de una línea.
+
+              El clic de dentro se detiene para que no lo lea el cierre por clic
+              fuera: seleccionar una cuenta del PUC para copiarla cerraría el
+              panel a media selección.
+            -->
+            <div
+              role="note"
+              class="absolute right-0 top-full z-50 mt-1 w-80 max-w-[calc(100vw-2rem)] whitespace-pre-line rounded-lg border border-border bg-[var(--color-surface)] p-3 text-xs leading-relaxed text-[var(--color-text-secondary)] shadow-lg"
+              (click)="$event.stopPropagation()"
+            >
+              {{ help() }}
+            </div>
+          }
+        </div>
+      }
+      </div>
+
       <!--
         Oculto, no destruido. Ver la nota de arriba: desmontar el cuerpo borra la
         selección visible de impuestos de cada línea.
@@ -146,8 +213,52 @@ export class InvoiceFormSectionComponent {
   readonly optional = input<boolean>(false);
   /** Cuántos campos de esta sección están en error AHORA. */
   readonly errorCount = input<number>(0);
+  /**
+   * Explicación larga de para qué sirve la sección. Admite saltos de línea.
+   *
+   * Vacío = no se pinta el icono de ayuda. Es deliberado: un icono que abre un
+   * panel vacío enseña a no volver a pulsarlo.
+   */
+  readonly help = input<string>('');
 
   readonly expanded = model<boolean>(false);
+
+  /** Asomada por el ratón. Se va sola al salir. */
+  protected readonly helpHover = signal(false);
+  /** Fijada por clic. Sólo la cierra otro clic, Escape, o un clic fuera. */
+  protected readonly helpPinned = signal(false);
+
+  protected readonly helpVisible = computed(
+    () => this.helpPinned() || this.helpHover(),
+  );
+
+  protected readonly helpLabel = computed(
+    () => 'Qué hace la sección ' + this.title(),
+  );
+
+  protected toggleHelp(event: Event): void {
+    // Se detiene la propagación por dos razones distintas: el clic no debe
+    // llegar al cierre-por-clic-fuera de este mismo componente, y tampoco al
+    // botón de plegado si algún día el botón de ayuda quedara dentro de él.
+    event.stopPropagation();
+    this.helpPinned.update((pinned) => !pinned);
+  }
+
+  /**
+   * Cierra lo FIJADO, no lo asomado: lo asomado ya se va con `mouseleave`, y
+   * llamar a `helpHover.set(false)` desde aquí lo apagaría en mitad de un hover
+   * legítimo si el usuario hace clic en cualquier otra parte de la pantalla.
+   */
+  @HostListener('document:click')
+  protected closeHelpOnOutsideClick(): void {
+    if (this.helpPinned()) this.helpPinned.set(false);
+  }
+
+  @HostListener('document:keydown.escape')
+  protected closeHelpOnEscape(): void {
+    if (this.helpPinned()) this.helpPinned.set(false);
+    if (this.helpHover()) this.helpHover.set(false);
+  }
 
   readonly chevronClass = computed(
     () =>

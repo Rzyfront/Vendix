@@ -45,6 +45,7 @@ import {
   selectActiveResolutions,
   selectResolutions,
 } from '../../state/selectors/invoicing.selectors';
+import { invoiceHelp } from '../../utils/invoice-section-help';
 import {
   applyBackendValidationErrors,
   clearBackendError,
@@ -703,10 +704,16 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
             />
           </div>
 
-          <form [formGroup]="invoiceForm" class="space-y-4">
+          <!--
+            Mismo aire que el editor de perfiles: las dos pantallas son la misma
+            captura, una por documento y otra preconfigurada, y separarlas
+            distinto haría que la segunda no se leyera como espejo de la primera.
+          -->
+          <form [formGroup]="invoiceForm" class="space-y-6">
             <!-- ── 1. DOCUMENTO ─────────────────────────────────────── -->
             <vendix-invoice-form-section
               title="Documento"
+              [help]="help('documento')"
               icon="file-text"
               [summary]="documentSummary()"
               [errorCount]="sectionErrors().documento"
@@ -909,6 +916,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
             <!-- ── 2. ADQUIRIENTE ───────────────────────────────────── -->
             <vendix-invoice-form-section
               title="Adquiriente"
+              [help]="help('adquiriente')"
               icon="user-round"
               [summary]="customerSummary()"
               [errorCount]="sectionErrors().adquiriente"
@@ -1108,6 +1116,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
             <!-- ── 3. LÍNEAS ────────────────────────────────────────── -->
             <vendix-invoice-form-section
               title="Líneas"
+              [help]="help('lineas')"
               icon="list"
               [badge]="itemCount() + (itemCount() === 1 ? ' línea' : ' líneas')"
               [summary]="linesSummary()"
@@ -1359,6 +1368,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
             <vendix-invoice-form-section
               id="taxes_section"
               title="Impuestos"
+              [help]="help('impuestos')"
               icon="percent"
               [summary]="taxSummary()"
               [errorCount]="sectionErrors().impuestos"
@@ -1425,6 +1435,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
             <!-- ── 5. AIU ───────────────────────────────────────────── -->
             <vendix-invoice-form-section
               title="AIU"
+              [help]="help('aiu')"
               icon="calculator"
               [optional]="true"
               [summary]="aiuSummary()"
@@ -1797,6 +1808,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
             <!-- ── 6. RETENCIONES ───────────────────────────────────── -->
             <vendix-invoice-form-section
               title="Retenciones"
+              [help]="help('retenciones')"
               icon="hand-coins"
               [optional]="true"
               [summary]="withholdingSummary()"
@@ -1976,6 +1988,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
             <!-- ── 7. DIVISA ────────────────────────────────────────── -->
             <vendix-invoice-form-section
               title="Divisa"
+              [help]="help('divisa')"
               icon="globe"
               [optional]="true"
               [summary]="currencySummary()"
@@ -2113,6 +2126,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
             <!-- ── 8. CONTABILIDAD ──────────────────────────────────── -->
             <vendix-invoice-form-section
               title="Contabilidad"
+              [help]="help('contabilidad')"
               icon="book"
               [optional]="true"
               [summary]="accountingSummary()"
@@ -2359,6 +2373,13 @@ export class InvoiceCreatePageComponent implements OnInit {
   readonly taxRegimeOptions = TAX_REGIME_OPTIONS;
   readonly unitCodeOptions = UNIT_CODE_OPTIONS;
   readonly aiuComponentOptions = AIU_COMPONENT_OPTIONS;
+  /**
+   * La ayuda larga de cada sección, del catálogo compartido con el editor de
+   * perfiles. Método y no mapa inline: la misma regla fiscal explicada de dos
+   * maneras en dos pantallas acaba contradiciéndose.
+   */
+  readonly help = invoiceHelp;
+
   readonly foreignCurrencyOptions = FOREIGN_CURRENCY_OPTIONS;
   readonly fiscalResponsibilities = FISCAL_RESPONSIBILITIES;
   readonly responsibilityLabels = FISCAL_RESPONSIBILITY_LABELS;
@@ -4546,6 +4567,14 @@ export class InvoiceCreatePageComponent implements OnInit {
 
   private writeModelLines(config: InvoiceProfileConfig): void {
     const accounts = config.accounting.revenue_account_by_bucket ?? {};
+    // El componente AIU sólo se escribe si el documento ES AIU. `bucket` es un
+    // campo obligatorio de la línea modelo y su valor por omisión histórico es
+    // `'administracion'`, así que un perfil ESTÁNDAR guardado sin tocar ese
+    // selector traía sus líneas marcadas como Administración. Copiarlo tal cual
+    // mandaba `aiu_component` en un documento tipo 10, donde el backend no tiene
+    // régimen con que interpretarlo: la línea entraba a una base gravable que no
+    // existe para esa operación. Fuera de AIU el componente NO se precarga.
+    const isAiuProfile = this.isAiu();
     this.itemsArray.clear();
     for (const line of config.model_lines ?? []) {
       const group = this.appendItem();
@@ -4554,10 +4583,13 @@ export class InvoiceCreatePageComponent implements OnInit {
         description: line.description,
         quantity: Number(line.quantity ?? 1) || 1,
         unit_code: line.unit_code ?? UNIT_CODE_DEFAULT,
-        // `aiu_component` vacío para el costo reembolsable: es la única cubeta
-        // que NO es un componente del AIU, y mandarla como tal haría que el
-        // backend la sumara a la base gravable del régimen.
-        aiu_component: line.bucket === 'costo' ? '' : line.bucket,
+        // Vacío también para el costo reembolsable: es la única cubeta que NO es
+        // un componente del AIU, y mandarla como tal haría que el backend la
+        // sumara a la base gravable del régimen.
+        aiu_component:
+          isAiuProfile && line.bucket !== 'costo' ? line.bucket : '',
+        // La cuenta sí se copia siempre: un perfil estándar puede tener cuenta
+        // de ingreso configurada por cubeta y eso es contabilidad, no fiscalidad.
         account_code: accounts[line.bucket] ?? '',
       });
     }
