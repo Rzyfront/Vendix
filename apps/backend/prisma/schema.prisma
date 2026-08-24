@@ -10811,4 +10811,5 @@ enum aiu_component_enum {
   administracion
   imprevistos
   utilidad
+  contrato
 }
