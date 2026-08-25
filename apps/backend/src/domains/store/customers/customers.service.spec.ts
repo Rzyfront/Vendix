@@ -466,4 +466,84 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       expect(result.matched_by).toBe(null);
     });
   });
+
+  /**
+   * QUI-723 — coverage for every Colombian DIAN document type.
+   *
+   * Regression for the bug where `ResolveCustomerDto` only declared the
+   * basic identity fields, so the global `ValidationPipe` rejected
+   * `person_type`, `tax_regime`, `fiscal_responsibilities`, `ciiu_code`,
+   * `is_withholding_agent` with `"property X should not exist"`. After
+   * the DTO fix, every type must create with its full payload.
+   *
+   * Each test feeds the right shape for the type:
+   *   - NATURAL types (CC, CE, TI, RC, PA, PEP, PPT, DIE, NUIP) send
+   *     first_name + last_name, no persona-specific fields.
+   *   - NIT sends `person_type: JURIDICA` plus `tax_regime` and
+   *     `ciiu_code` so the post-create customer record is
+   *     DIAN-grade (required for electronic invoicing).
+   *
+   * Note: written as individual `it()` blocks instead of `it.each` —
+   * jest-each binds the per-iteration `done` callback into the trailing
+   * tuple slot for async handlers in some versions, which corrupted
+   * the payload shape during the first iteration.
+   */
+  describe('findOrCreateByEmailOrDocument — all DIAN document types', () => {
+    const now = Date.now();
+
+    const cases: Array<{
+      type: string;
+      number: string;
+      person: string;
+      taxRegime?: string;
+      ciiuCode?: string;
+    }> = [
+      { type: 'CC', number: '12345678', person: 'NATURAL' },
+      { type: 'CE', number: '87654321', person: 'NATURAL' },
+      { type: 'NIT', number: '900123456', person: 'JURIDICA', taxRegime: 'COMUN', ciiuCode: '4711' },
+      { type: 'TI', number: '12345678901', person: 'NATURAL' },
+      { type: 'RC', number: '12345678901', person: 'NATURAL' },
+      { type: 'PA', number: 'AB123456', person: 'NATURAL' },
+      { type: 'PEP', number: '123456789', person: 'NATURAL' },
+      { type: 'PPT', number: '123456789', person: 'NATURAL' },
+      { type: 'DIE', number: 'AB12345678', person: 'NATURAL' },
+      { type: 'NUIP', number: '12345678901', person: 'NATURAL' },
+    ];
+
+    for (const c of cases) {
+      it(`creates a customer for type=${c.type}`, async () => {
+        const payload: Record<string, unknown> = {
+          email: `create-${c.type.toLowerCase()}-${now}-${c.type}@x.com`,
+          first_name: `Test ${c.type}`,
+          last_name: 'AllTypes',
+          document_type: c.type,
+          document_number: c.number,
+          person_type: c.person,
+        };
+        if (c.taxRegime) payload.tax_regime = c.taxRegime;
+        if (c.ciiuCode) payload.ciiu_code = c.ciiuCode;
+
+        const result = await service.findOrCreateByEmailOrDocument(
+          1,
+          payload as any,
+        );
+
+        expect(result.was_created).toBe(true);
+        expect(result.was_updated).toBe(false);
+        expect(result.matched_by).toBe(null);
+        expect(result.customer.document_type).toBe(c.type);
+        expect(result.customer.document_number).toBe(c.number);
+        expect(result.customer.person_type).toBe(c.person);
+        if (c.taxRegime) expect(result.customer.tax_regime).toBe(c.taxRegime);
+        if (c.ciiuCode) expect(result.customer.ciiu_code).toBe(c.ciiuCode);
+        expect(mockPrismaService.users.create).toHaveBeenCalledTimes(1);
+        const createCall = mockPrismaService.users.create.mock.calls[0][0];
+        expect(createCall.data.document_type).toBe(c.type);
+        expect(createCall.data.document_number).toBe(c.number);
+        expect(createCall.data.person_type).toBe(c.person);
+        if (c.taxRegime) expect(createCall.data.tax_regime).toBe(c.taxRegime);
+        if (c.ciiuCode) expect(createCall.data.ciiu_code).toBe(c.ciiuCode);
+      });
+    }
+  });
 });
