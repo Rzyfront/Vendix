@@ -31,10 +31,52 @@ import { DeliverInvoiceDto } from './dto/deliver-invoice.dto';
  * esa clase tiene listeners `@OnEvent('invoice.accepted'|'invoice.sent')`, y
  * una segunda instancia en un módulo aparte los duplicaría. Este servicio lee
  * `pdf_url`/`xml_document` directamente y se degrada sin adjunto si faltan.
+ *
+ * ⚠ DIVERGENCIA DELIBERADA vs. Anexo Técnico 1.9, §9.1 (pág. 635/753 del PDF,
+ * medido con `pdftotext -layout`). La norma de ENTREGA AL ADQUIRIENTE exige:
+ * (a) un único `.zip` con un `AttachedDocument` —el `ApplicationResponse` de
+ * aprobación DIAN + el documento; el PDF de la representación gráfica es
+ * opcional y va DENTRO del mismo zip—, (b) un asunto con 6 campos separados
+ * por `;` (NIT; nombre del facturador; nº del documento electrónico `cbc:ID`;
+ * código del tipo de documento según tabla 0; nombre comercial; línea de
+ * negocio opcional), y (c) un tope de 2 MB por envío.
+ *
+ * Este endpoint NO implementa (a) ni (b): arma PDF + XML crudo en el zip (no
+ * un `AttachedDocument` — el builder ya existe, probado contra el XSD, en
+ * `providers/dian-direct/xml/ubl-attached-document.builder.ts`, F.12) y usa un
+ * asunto libre («Reenvío de factura ...»). Es a propósito, no un olvido: §9.1
+ * gobierna la entrega ORIGINAL al adquiriente registrado en la factura; este
+ * endpoint reenvía a un correo ARBITRARIO que el usuario escribe en el DTO,
+ * no necesariamente el del adquiriente — no es el mismo acto normativo, y
+ * forzarlo a la forma de §9.1 simularía un cumplimiento que no aplica al
+ * destinatario real. SÍ se aplica (c) — ver `MAX_ZIP_ATTACHMENT_BYTES` más
+ * abajo—, pero como salvaguarda operativa de tamaño de correo, no como
+ * cumplimiento DIAN.
+ *
+ * Hallazgo para quien lea esto: HOY no existe en el dominio un flujo de
+ * entrega automática al adquiriente en el momento de la emisión — este
+ * método es el único camino de correo con zip que existe en todo el dominio
+ * de facturación—. Si el negocio necesita la entrega §9.1 real, no vive
+ * aquí; hay que construirla aparte reusando `ubl-attached-document.builder.ts`
+ * y NO la nomenclatura `znnnnnnnnnnpppaadddddddd.zip` de
+ * `utils/dian-file-naming.util.ts` (esa es §6.5.8, del zip HACIA la DIAN, un
+ * flujo distinto).
+ *
+ * La degradación de este método (si el PDF/XML no se pueden traer, el correo
+ * sale sin adjunto en vez de abortar) es razonable para un reenvío de
+ * conveniencia. Sería un defecto grave si este método se reutilizara alguna
+ * vez como la entrega normativa §9.1: un correo de "entrega" vacío no debe
+ * contar como entregado. Si este método pasa a implementar (a)/(b), esa
+ * degradación tiene que cambiar de forma primero.
  */
 @Injectable()
 export class InvoiceDeliveryService {
   private readonly logger = new Logger(InvoiceDeliveryService.name);
+
+  // Salvaguarda operativa de §9.1(c) — 2 MB por envío. Aplicada aquí como
+  // límite práctico de correo (muchos relays/proveedores rechazan adjuntos
+  // grandes), NO como cumplimiento DIAN: ver el docblock de la clase.
+  private static readonly MAX_ZIP_ATTACHMENT_BYTES = 2 * 1024 * 1024;
 
   constructor(
     private readonly prisma: StorePrismaService,
@@ -193,12 +235,41 @@ export class InvoiceDeliveryService {
     let zip_name: string | null = null;
     const attachments: EmailAttachment[] = [];
     if (has_zip_content) {
-      zip_name = `Factura-${invoice.invoice_number}.zip`;
-      attachments.push({
-        filename: zip_name,
-        content: zip.toBuffer(),
-        contentType: 'application/zip',
-      });
+      let zip_buffer = zip.toBuffer();
+
+      // Tope de 2 MB (ver `MAX_ZIP_ATTACHMENT_BYTES`): si PDF+XML no caben, se
+      // descarta primero el PDF —ya es el adjunto degradable en este flujo—
+      // y se reintenta sólo con el XML; si ni así cabe (caso extremo), el
+      // correo sale sin adjunto en vez de fallar por peso sin que nadie sepa
+      // por qué.
+      if (zip_buffer.length > InvoiceDeliveryService.MAX_ZIP_ATTACHMENT_BYTES) {
+        this.logger.warn(
+          `El zip de la factura #${invoice.invoice_number} pesa ${zip_buffer.length} bytes (> 2 MB); se descarta el PDF y se reintenta sólo con el XML.`,
+        );
+        const pdf_entry_name = `Factura-${invoice.invoice_number}.pdf`;
+        if (zip.getEntry(pdf_entry_name)) {
+          zip.deleteFile(pdf_entry_name);
+          zip_buffer = zip.toBuffer();
+        }
+        if (
+          zip.getEntryCount() === 0 ||
+          zip_buffer.length > InvoiceDeliveryService.MAX_ZIP_ATTACHMENT_BYTES
+        ) {
+          this.logger.error(
+            `La factura #${invoice.invoice_number} no cabe en 2 MB ni sin el PDF; el reenvío sale sin adjunto.`,
+          );
+          has_zip_content = false;
+        }
+      }
+
+      if (has_zip_content) {
+        zip_name = `Factura-${invoice.invoice_number}.zip`;
+        attachments.push({
+          filename: zip_name,
+          content: zip_buffer,
+          contentType: 'application/zip',
+        });
+      }
     }
 
     // 6. Envío.

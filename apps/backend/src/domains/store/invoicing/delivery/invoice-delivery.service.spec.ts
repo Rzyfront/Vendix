@@ -179,4 +179,47 @@ describe('InvoiceDeliveryService', () => {
       }),
     });
   });
+
+  /**
+   * Salvaguarda operativa de 2 MB (NO es cumplimiento DIAN §9.1 — ver el
+   * docblock de `InvoiceDeliveryService`). Un PDF incompresible de 3 MB fuerza
+   * el descarte: el zip enviado debe pesar < 2 MB y conservar sólo el XML.
+   */
+  it('descarta el PDF cuando el zip supera 2 MB y reenvía sólo con el XML', async () => {
+    const big_pdf = require('crypto').randomBytes(3 * 1024 * 1024);
+    const { service, emailService, deliveryEventsCreate } = createService({
+      prisma: {
+        invoices: {
+          findFirst: jest.fn().mockResolvedValue({
+            ...acceptedInvoice,
+            pdf_url: 'invoices/fe100.pdf',
+            xml_document: '<xml>factura</xml>',
+          }),
+        },
+      },
+      s3Service: {
+        downloadFile: jest.fn().mockResolvedValue(big_pdf),
+      },
+    });
+
+    const result = await service.deliver(12, { email: 'cliente@test.com' } as any);
+
+    expect(result.zip_name).toBe('Factura-FE100.zip');
+    expect(emailService.sendEmailWithAttachments).toHaveBeenCalledTimes(1);
+
+    const [, , , attachments] = (emailService.sendEmailWithAttachments as jest.Mock).mock
+      .calls[0];
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0].content.length).toBeLessThan(2 * 1024 * 1024);
+
+    // El zip que efectivamente se envía NO trae el PDF —se descartó—, sólo el XML.
+    const AdmZip = require('adm-zip');
+    const sent_zip = new AdmZip(attachments[0].content);
+    const entry_names = sent_zip.getEntries().map((e: any) => e.entryName);
+    expect(entry_names).toEqual(['Factura-FE100.xml']);
+
+    expect(deliveryEventsCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ status: 'sent', zip_name: 'Factura-FE100.zip' }),
+    });
+  });
 });
