@@ -45,7 +45,10 @@ import { FooterCtaBlockComponent } from '../footer-cta-block.component';
         <app-features-block [props]="block().props" />
       }
       @case ('products_grid') {
-        <app-products-grid-block [props]="block().props" />
+        <app-products-grid-block
+          [props]="block().props"
+          [baseUrl]="baseUrl()"
+        />
       }
       @case ('about') {
         <app-about-block [props]="block().props" />
@@ -67,6 +70,8 @@ import { FooterCtaBlockComponent } from '../footer-cta-block.component';
 })
 export class BlockRendererComponent {
   readonly block = input.required<CrmBlock>();
+  /** Base del ecommerce para deep-links de productos (opcional). */
+  readonly baseUrl = input<string | null>(null);
   readonly ctaClick = output<void>();
 
   readonly label = computed(() => CRM_BLOCK_LABELS[this.block().type]);
