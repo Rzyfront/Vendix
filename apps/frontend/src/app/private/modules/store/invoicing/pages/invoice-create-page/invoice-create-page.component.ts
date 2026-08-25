@@ -178,6 +178,14 @@ import type {
   LineasRowErrors,
   LineasRowPaths,
 } from '../../components/invoice-sections/index';
+/**
+ * SECCIÓN IMPUESTOS COMPARTIDA con la matriz por porción del editor de
+ * perfiles (B.4). En contexto `invoice` sólo pinta el agregado de línea
+ * (`taxBreakdown()`) de solo lectura — la matriz por porción no tiene hoy
+ * fuente de datos propia en la factura, así que no se inventa acá. Ver el
+ * docblock del componente para la razón completa.
+ */
+import { InvoiceSectionImpuestosComponent } from '../../components/invoice-sections/index';
 import { InvoiceTaxCatalogService } from '../../components/invoice-create/invoice-tax-catalog.service';
 import {
   InvoiceAiuSettings,
@@ -708,6 +716,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     InvoiceSectionAiuComponent,
     InvoiceSectionDocumentoComponent,
     InvoiceSectionLineasComponent,
+    InvoiceSectionImpuestosComponent,
   ],
   template: `
     <div class="w-full max-w-[1400px] mx-auto">
@@ -1727,61 +1736,12 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               [expanded]="isSectionOpen('impuestos')"
               (expandedChange)="setSection('impuestos', $event)"
             >
-              <p class="text-xs text-[var(--color-text-secondary)] mb-2">
-                Los impuestos se declaran POR LÍNEA, en la sección Líneas. Aquí
-                se ve el agregado que el servidor va a recomputar: el importe
-                que se envía es siempre cero y la DIAN recibe el que calcula el
-                motor fiscal, no el que se escriba en pantalla.
-              </p>
-
-              @if (taxBreakdown().length === 0) {
-                <p class="text-sm text-[var(--color-text-secondary)]">
-                  Ninguna línea declara impuesto. Sólo es correcto si la
-                  operación es realmente excluida o exenta.
-                </p>
-              } @else {
-                <div class="overflow-x-auto">
-                  <table class="w-full text-xs">
-                    <thead>
-                      <tr
-                        class="text-left text-[var(--color-text-secondary)] border-b border-border"
-                      >
-                        <th class="py-1 pr-2">Impuesto</th>
-                        <th class="py-1 pr-2">Tarifa</th>
-                        <th class="py-1 pr-2">Aplicación</th>
-                        <th class="py-1 pr-2 text-right">Base</th>
-                        <th class="py-1 text-right">Importe</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @for (row of taxBreakdown(); track row.key) {
-                        <tr class="border-b border-border last:border-0">
-                          <td class="py-1 pr-2 text-text-primary">
-                            {{ row.name }}
-                          </td>
-                          <td class="py-1 pr-2">{{ row.rate }}%</td>
-                          <td class="py-1 pr-2">
-                            {{ row.isInclusive ? 'Incluido' : 'Adicional' }}
-                          </td>
-                          <td class="py-1 pr-2 text-right">
-                            {{ formatCurrency(row.base) }}
-                          </td>
-                          <td class="py-1 text-right font-medium">
-                            {{ formatCurrency(row.amount) }}
-                          </td>
-                        </tr>
-                      }
-                    </tbody>
-                  </table>
-                </div>
-              }
-
-              @if (availableTaxes().length === 0) {
-                <p class="mt-2 text-xs text-warning">
-                  El catálogo de impuestos de la tienda está vacío o no se pudo
-                  cargar. Configúralo en Ajustes → Impuestos.
-                </p>
-              }
+              <vendix-invoice-section-impuestos
+                context="invoice"
+                [breakdown]="taxBreakdown()"
+                [formatCurrency]="formatCurrencyBound"
+                [availableTaxesCount]="availableTaxes().length"
+              ></vendix-invoice-section-impuestos>
             </vendix-invoice-form-section>
 
             <!-- ── RETENCIONES ───────────────────────────────────── -->
@@ -3820,6 +3780,15 @@ export class InvoiceCreatePageComponent implements OnInit {
     _index: number,
     on: boolean,
   ): void => this.toggleLineAiu(row, on);
+
+  /**
+   * Envoltorio de `formatCurrency` para `vendix-invoice-section-impuestos`
+   * (B.4): el método usa `this.currencyService`, así que pasarlo desnudo
+   * como referencia perdería el `this` al invocarse dentro del componente
+   * compartido. Mismo criterio que los envoltorios de arriba.
+   */
+  readonly formatCurrencyBound = (value: number): string =>
+    this.formatCurrency(value);
 
   /**
    * LO QUE ESTE DOCUMENTO NO PUEDE LLEVAR — medido, no supuesto.

@@ -110,6 +110,13 @@ import type {
     LineasRowErrors,
     LineasRowPaths,
 } from '../../components/invoice-sections/index';
+/**
+ * SECCIÓN IMPUESTOS COMPARTIDA con el agregado de línea de la factura (B.4).
+ * El editor le pasa `context="profile"`: el componente pinta la matriz
+ * editable por porción (`taxes` FormArray) y el editor sigue dueño de
+ * `addTaxRule()`/`removeTaxRule()`. Ver el docblock del componente.
+ */
+import { InvoiceSectionImpuestosComponent } from '../../components/invoice-sections/index';
 import {
     FOREIGN_CURRENCY_OPTIONS,
     INVOICE_TYPE_OPTIONS,
@@ -250,6 +257,7 @@ type SectionId = ProfileScreenSectionId;
         InvoiceSectionAiuComponent,
         InvoiceSectionDocumentoComponent,
         InvoiceSectionLineasComponent,
+        InvoiceSectionImpuestosComponent,
         InvoiceProfilePreviewPanelComponent,
         InvoiceProfileVersionsPanelComponent,
     ],
@@ -517,86 +525,15 @@ type SectionId = ProfileScreenSectionId;
                             [expanded]="isSectionOpen('impuestos')"
                             (expandedChange)="setSection('impuestos', $event)"
                         >
-                            <div class="space-y-2">
-                                <div
-                                    class="flex flex-wrap items-center justify-between gap-2"
-                                >
-                                    <p class="text-xs text-text-secondary">
-                                        Qué impuesto grava qué base.
-                                    </p>
-                                    <app-button
-                                        variant="secondary"
-                                        size="sm"
-                                        (clicked)="addTaxRule()"
-                                    >
-                                        <app-icon
-                                            slot="icon"
-                                            name="plus"
-                                            [size]="14"
-                                        ></app-icon>
-                                        Agregar impuesto
-                                    </app-button>
-                                </div>
-                                <div class="space-y-2" formArrayName="taxes">
-                                    @for (rule of taxRules.controls; track $index) {
-                                        <div
-                                            class="grid grid-cols-1 items-end gap-2 rounded-lg border border-border p-2 md:grid-cols-5"
-                                            [formGroupName]="$index"
-                                        >
-                                            <app-selector
-                                                label="Impuesto"
-                                                formControlName="tax_code"
-                                                [options]="tax_code_options"
-                                                size="sm"
-                                            ></app-selector>
-                                            <app-selector
-                                                label="Base"
-                                                formControlName="bucket"
-                                                [options]="bucket_options()"
-                                                size="sm"
-                                            ></app-selector>
-                                            <app-input
-                                                label="Tarifa (%)"
-                                                formControlName="rate"
-                                                size="sm"
-                                                [error]="
-                                                    issueFor(
-                                                        'taxes.rules[' +
-                                                            $index +
-                                                            '].rate'
-                                                    )
-                                                "
-                                            ></app-input>
-                                            <div class="flex items-center pb-2">
-                                                <app-toggle
-                                                    formControlName="taxable"
-                                                    label="Gravable"
-                                                ></app-toggle>
-                                            </div>
-                                            <!--
-                                                SÓLO EL ICONO. La palabra «Quitar» repetida en cada fila de
-                                                cada matriz no aporta nada que el bote de basura no diga, y
-                                                ensancha el botón hasta empujar los campos de la fila. El
-                                                nombre accesible viaja en «ariaLabel», que app-button pone en
-                                                el <button> interno junto con el «title»: sin él, un botón de
-                                                sólo icono se anuncia sin nombre.
-                                            -->
-                                            <app-button
-                                                variant="outline-danger"
-                                                size="sm"
-                                                ariaLabel="Quitar esta regla de impuesto"
-                                                (clicked)="removeTaxRule($index)"
-                                            >
-                                                <app-icon
-                                                    slot="icon"
-                                                    name="trash-2"
-                                                    [size]="15"
-                                                ></app-icon>
-                                            </app-button>
-                                        </div>
-                                    }
-                                </div>
-                            </div>
+                            <vendix-invoice-section-impuestos
+                                context="profile"
+                                [rows]="taxRules.controls"
+                                [bucketOptions]="bucket_options()"
+                                [taxCodeOptions]="tax_code_options"
+                                [rateErrors]="taxRateErrors()"
+                                (addRule)="addTaxRule()"
+                                (removeRule)="removeTaxRule($event)"
+                            ></vendix-invoice-section-impuestos>
                         </vendix-invoice-form-section>
                     }
 
@@ -1666,6 +1603,14 @@ export class InvoiceProfileEditorComponent {
         index: number,
         on: boolean,
     ): void => this.toggleLineAiu(index, on);
+
+    /** Error de `rate` por fila de la matriz de impuestos (B.4). */
+    readonly taxRateErrors = computed<readonly string[]>(() => {
+        this.form_value();
+        return this.taxRules.controls.map((_, i) =>
+            this.issueFor('taxes.rules[' + i + '].rate'),
+        );
+    });
 
     readonly saving = toSignal(this.store.select(selectProfileSaving), {
         initialValue: false,
