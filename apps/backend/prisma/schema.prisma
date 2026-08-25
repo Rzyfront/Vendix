@@ -580,6 +580,7 @@ model organizations {
   payroll_novelties             payroll_novelties[]
   dian_configurations           dian_configurations[]
   dian_document_events          dian_document_events[]
+  invoice_delivery_events invoice_delivery_events[]
   fiscal_transmissions          fiscal_transmissions[]
   fiscal_evidences              fiscal_evidences[]
   fiscal_obligations            fiscal_obligations[]
@@ -842,6 +843,7 @@ model stores {
   payroll_novelties           payroll_novelties[]
   dian_configurations         dian_configurations[]
   dian_document_events        dian_document_events[]
+  invoice_delivery_events invoice_delivery_events[]
   fiscal_transmissions        fiscal_transmissions[]
   fiscal_evidences            fiscal_evidences[]
   fiscal_obligations          fiscal_obligations[]
@@ -5620,6 +5622,7 @@ model invoices {
   withholding_calculations withholding_calculations[]
   invoice_retry_queue      invoice_retry_queue[]
   dian_document_events     dian_document_events[]
+  invoice_delivery_events  invoice_delivery_events[]
   dispatch_notes           dispatch_notes[]
 
   @@unique([accounting_entity_id, invoice_type, invoice_number])
@@ -6682,6 +6685,36 @@ model dian_document_events {
   @@index([invoice_id, event_code])
   @@index([status, created_at])
   @@index([organization_id, store_id])
+}
+
+/// Traza de reenvíos/entregas de una factura ya emitida (E.6, POST /:id/deliver).
+/// Deliberadamente NO reutiliza `dian_document_events`: `event_code` ahí es el
+/// vocabulario normativo RADIAN (Res. 000085/2022: 030/031/032/033/034) y mezclar
+/// una entrega por correo en esa tabla contaminaría el histórico fiscal que el
+/// panel RADIAN lee tal cual. `invoice_id` usa `onDelete: Cascade` a propósito:
+/// `invoices.remove()` sólo permite borrar facturas en `draft`, y esta tabla sólo
+/// se escribe para facturas fuera de `draft` (`INVOICING_DELIVERY_002` bloquea el
+/// reenvío de un borrador) — los dos estados son mutuamente excluyentes, así que
+/// el CASCADE nunca se dispara sobre una fila con historial de entrega real.
+model invoice_delivery_events {
+  id              Int       @id @default(autoincrement())
+  invoice_id      Int
+  organization_id Int
+  store_id        Int?
+  channel         String    @db.VarChar(20)
+  recipient       String    @db.VarChar(320)
+  zip_name        String?   @db.VarChar(255)
+  status          String    @default("sent") @db.VarChar(20)
+  provider_error  String?
+  created_by      Int?
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+
+  invoice      invoices      @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store        stores?       @relation(fields: [store_id], references: [id], onDelete: SetNull)
+
+  @@index([invoice_id, created_at])
+  @@index([status, created_at])
 }
 
 model fiscal_transmissions {

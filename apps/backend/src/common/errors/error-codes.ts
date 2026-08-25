@@ -2783,6 +2783,38 @@ export const ErrorCodes = {
       'Invoice data request has already been submitted or completed; the link accepts data only once',
   },
   /**
+   * REENVÍO DE FACTURA (E.6, `POST /store/invoicing/:id/deliver`).
+   *
+   * Los tres códigos cubren el ciclo del reenvío a un correo distinto del
+   * capturado en la factura. Deliberadamente NO se usa `@IsEmail()` en el DTO:
+   * eso haría que Nest respondiera 400 `SYS_VALIDATION_001` antes de llegar al
+   * servicio, y el contrato de esta feature pide un 422 de dominio con código
+   * propio. La validación de formato vive en el servicio con `isEmail()` de
+   * `class-validator` en modo standalone.
+   */
+  INVOICING_DELIVERY_001: {
+    code: 'INVOICING_DELIVERY_001',
+    httpStatus: 422,
+    devMessage: 'Destination email is missing or has an invalid format',
+  },
+  /** Una factura en `draft` no se puede reenviar: todavía no es un documento emitido. */
+  INVOICING_DELIVERY_002: {
+    code: 'INVOICING_DELIVERY_002',
+    httpStatus: 409,
+    devMessage: 'Cannot deliver a draft invoice; it has not been issued yet',
+  },
+  /**
+   * El proveedor de correo (`EmailService`) devolvió `success: false`. La traza
+   * en `invoice_delivery_events` ya quedó escrita con `status: 'error'` y
+   * `provider_error` ANTES de lanzar esta excepción, para que el fallo del
+   * proveedor no borre la evidencia de que se intentó.
+   */
+  INVOICING_DELIVERY_003: {
+    code: 'INVOICING_DELIVERY_003',
+    httpStatus: 502,
+    devMessage: 'Email provider failed to send the invoice delivery',
+  },
+  /**
    * IDENTIDAD FISCAL DEL EMISOR INCOMPLETA — lo lanza el resolvedor estricto
    * (`resolveTenantFiscalIdentity`) cuando falta `legal_name`,
    * `municipality_code` o `department`.
