@@ -1,4 +1,4 @@
-import { findDocumentType } from '../../../../../../shared/constants/document-types';
+import { findDocumentType } from '../../../../../shared/constants/document-types';
 
 /**
  * QUI-723 — Real-time hint for the document-number input shown under
