@@ -474,6 +474,17 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.invoice_items;
   }
 
+  // Escritura de entrega de factura (E.10) — usada por los DOS caminos de
+  // correo con adjunto: el reenvío de conveniencia (E.6, alcance de tienda,
+  // vía StorePrismaService.withoutScope()) y la entrega primaria disparada
+  // por evento interno en notifications-events.listener.ts. Getter
+  // deliberadamente sin scope, igual que el resto de esta clase: los IDs que
+  // se escriben salen de una fila de `invoices` ya cargada por el llamador,
+  // nunca de un parámetro de petición sin verificar.
+  get invoice_delivery_events() {
+    return this.baseClient.invoice_delivery_events;
+  }
+
   get fiscal_transmissions() {
     return this.baseClient.fiscal_transmissions;
   }

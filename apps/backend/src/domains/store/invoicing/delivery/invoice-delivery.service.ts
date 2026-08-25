@@ -13,6 +13,7 @@ import {
 } from '../../../../email/templates/invoice-email.template';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { DeliverInvoiceDto } from './dto/deliver-invoice.dto';
+import { writeInvoiceDeliveryEvent } from './invoice-delivery-events.writer';
 
 /**
  * E.6 — Reenviar una factura ya emitida a otro correo (`POST /:id/deliver`).
@@ -53,21 +54,39 @@ import { DeliverInvoiceDto } from './dto/deliver-invoice.dto';
  * abajo—, pero como salvaguarda operativa de tamaño de correo, no como
  * cumplimiento DIAN.
  *
- * Hallazgo para quien lea esto: HOY no existe en el dominio un flujo de
- * entrega automática al adquiriente en el momento de la emisión — este
- * método es el único camino de correo con zip que existe en todo el dominio
- * de facturación—. Si el negocio necesita la entrega §9.1 real, no vive
- * aquí; hay que construirla aparte reusando `ubl-attached-document.builder.ts`
- * y NO la nomenclatura `znnnnnnnnnnpppaadddddddd.zip` de
- * `utils/dian-file-naming.util.ts` (esa es §6.5.8, del zip HACIA la DIAN, un
- * flujo distinto).
+ * CORRECCIÓN (E.10, 2026-08-25): este docblock afirmaba que «HOY no existe
+ * en el dominio un flujo de entrega automática al adquiriente». Era falso —
+ * y lo comprobamos DOS veces con el mismo error de método: un `grep` de
+ * `sendEmail|EmailService` acotado a este dominio (`invoicing/`) nunca iba a
+ * encontrar lo que otro dominio hace con el mismo asunto. La entrega
+ * primaria SÍ existe, vive en `domains/store/notifications/
+ * notifications-events.listener.ts` (`@OnEvent('invoice.pdf.generated')`),
+ * la dispara `invoice-pdf.service.ts` sobre facturas YA ACEPTADAS por la
+ * DIAN, y lleva corriendo desde antes de este archivo: **16 de 95** facturas
+ * tienen `email_sent_at`. Es ESE método, no éste, el que ejecuta el acto que
+ * rige el Anexo Técnico 1.9 §9.1 — la decisión (a)/(b) de más arriba sigue
+ * aplicando sólo a ESTE endpoint (reenvío a un correo arbitrario que teclea
+ * el usuario), no se cae, se estrecha: el que decide si cumple §9.1 de
+ * verdad es el listener, no el reenvío de conveniencia.
  *
- * La degradación de este método (si el PDF/XML no se pueden traer, el correo
- * sale sin adjunto en vez de abortar) es razonable para un reenvío de
- * conveniencia. Sería un defecto grave si este método se reutilizara alguna
- * vez como la entrega normativa §9.1: un correo de "entrega" vacío no debe
- * contar como entregado. Si este método pasa a implementar (a)/(b), esa
- * degradación tiene que cambiar de forma primero.
+ * Y el listener tenía, en producción, EXACTAMENTE el defecto que el párrafo
+ * de abajo describía como hipotético: descargaba el PDF y, si fallaba,
+ * registraba el error y seguía enviando; si además faltaba `xml_document`,
+ * el correo salía sin ningún adjunto; y aun así estampaba `email_sent_at`.
+ * Una factura fiscal aceptada por la DIAN podía quedar marcada como
+ * enviada al cliente sin que el cliente hubiera recibido la factura, y sin
+ * ninguna fila en `invoice_delivery_events` para auditarlo (las 16 tenían
+ * cero). Corregido en el propio listener como parte de E.10: `email_sent_at`
+ * sólo se estampa si de verdad viajó algún adjunto, y cada intento —
+ * entregado o no— deja una fila aquí, con `writeInvoiceDeliveryEvent`
+ * (`invoice-delivery-events.writer.ts`), el mismo escritor que usa este
+ * método.
+ *
+ * La degradación de ESTE método (si el PDF/XML no se pueden traer, el correo
+ * sale sin adjunto en vez de abortar) se mantiene: es razonable para un
+ * reenvío de conveniencia donde ya existe una copia entregada por el canal
+ * primario. Lo que ya no es correcto en NINGÚN camino —y quedó corregido
+ * en ambos— es que esa degradación además cuente como entrega.
  */
 @Injectable()
 export class InvoiceDeliveryService {
@@ -306,10 +325,13 @@ export class InvoiceDeliveryService {
     // 7. Traza — EXACTAMENTE una fila por intento, éxito o error, ANTES de
     // decidir si esto lanza. `withoutScope()` porque `invoice_delivery_events`
     // no está en el whitelist de alcance de `StorePrismaService` (fuera de mi
-    // territorio); los IDs vienen de la fila ya verificada arriba.
+    // territorio); los IDs vienen de la fila ya verificada arriba. Escritor
+    // compartido con la entrega primaria (E.10) — ver
+    // `invoice-delivery-events.writer.ts`.
     const created_by = RequestContextService.getUserId() ?? null;
-    await this.prisma.withoutScope().invoice_delivery_events.create({
-      data: {
+    await writeInvoiceDeliveryEvent(
+      this.prisma.withoutScope().invoice_delivery_events,
+      {
         invoice_id: invoice.id,
         organization_id: invoice.organization_id,
         store_id: invoice.store_id,
@@ -320,7 +342,7 @@ export class InvoiceDeliveryService {
         provider_error: result.success ? null : result.error || 'unknown error',
         created_by,
       },
-    });
+    );
 
     // 8. El fallo del proveedor se lanza DESPUÉS de persistir la traza, para
     // que el 502 nunca borre la evidencia de que el reenvío se intentó.

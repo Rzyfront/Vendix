@@ -24,6 +24,7 @@ import {
 } from '../invoicing/utils/dian-email-subject.util';
 import { tryResolveTenantFiscalIdentity } from '../../../common/helpers/fiscal-identity.helper';
 import { AppointmentQueueService } from '../reservations/appointment-queue/appointment-queue.service';
+import { writeInvoiceDeliveryEvent } from '../invoicing/delivery/invoice-delivery-events.writer';
 
 @Injectable()
 export class NotificationsEventsListener {
@@ -853,8 +854,23 @@ export class NotificationsEventsListener {
               text,
             );
 
-      if (result.success) {
-        // 9. Update invoice: mark email as sent
+      // 9. E.10: "enviado" ya no es sólo "el proveedor aceptó el correo" —
+      // un correo sin PDF ni XML (fallo de S3 + factura sin xml_document, o
+      // cualquier combinación que deje `attachments` vacío) NO es una
+      // entrega, aunque el proveedor de correo lo acepte con 200. Antes de
+      // este cambio se estampaba `email_sent_at` con sólo `result.success`,
+      // lo que dejaba facturas fiscales marcadas "entregadas" sin que el
+      // cliente recibiera ningún documento — el hallazgo que motivó E.10.
+      const delivered = attachments.length > 0 && result.success;
+      const provider_error = !result.success
+        ? result.error || 'unknown error'
+        : attachments.length === 0
+          ? 'sin adjuntos: PDF no descargado de S3 y XML ausente'
+          : null;
+
+      if (delivered) {
+        // 10. Update invoice: mark email as sent (sólo si de verdad viajó
+        // algún adjunto).
         await this.global_prisma.invoices.update({
           where: { id: payload.invoice_id },
           data: { email_sent_at: new Date() },
@@ -863,11 +879,36 @@ export class NotificationsEventsListener {
         this.logger.log(
           `Invoice email sent successfully for #${invoice.invoice_number} to ${customer_email}`,
         );
-      } else {
+      } else if (!result.success) {
         this.logger.error(
           `Failed to send invoice email for #${invoice.invoice_number}: ${result.error}`,
         );
+      } else {
+        this.logger.error(
+          `Invoice email for #${invoice.invoice_number} "sent" by provider with ZERO attachments — not counted as delivered`,
+        );
       }
+
+      // 11. Traza de entrega (E.10): cada intento de la entrega PRIMARIA deja
+      // fila en `invoice_delivery_events`, igual que ya hace el reenvío de
+      // conveniencia (E.6) vía el mismo escritor compartido. Antes de esto,
+      // 16 de 95 facturas con `email_sent_at` no tenían ninguna fila aquí —
+      // la entrega normativa §9.1 no era auditable. `store_id` sale de la
+      // propia `invoice` ya cargada arriba por `id`, desde un evento interno
+      // que el propio backend emite — no de un parámetro de petición sin
+      // verificar — por eso el bypass de alcance (`GlobalPrismaService`, sin
+      // scoping) es seguro aquí, igual que en `InvoiceDeliveryService.deliver`.
+      await writeInvoiceDeliveryEvent(this.global_prisma.invoice_delivery_events, {
+        invoice_id: invoice.id,
+        organization_id: invoice.organization_id,
+        store_id: invoice.store_id,
+        channel: 'email',
+        recipient: customer_email,
+        zip_name: null,
+        status: delivered ? 'sent' : 'error',
+        provider_error,
+        created_by: null,
+      });
     } catch (error) {
       // Never throw - email failures should not break any flow
       this.logger.error(
