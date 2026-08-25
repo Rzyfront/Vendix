@@ -6755,6 +6755,20 @@ export class InvoiceCreatePageComponent implements OnInit {
    * desplazarse hasta un nodo que está dentro de un acordeón cerrado no
    * enseña nada. El acceso al DOM va en el siguiente frame porque el nodo no
    * existe hasta que Angular repinta la sección recién abierta.
+   *
+   * Regresión de B.3 (2026-08-25, orquestador): `formControlName` y
+   * `formArrayName` SÍ son atributos estáticos que llegan al DOM en
+   * minúsculas — pero eso vale para `formControlName="x"` escrito literal en
+   * la plantilla. Los campos de línea de `invoice-section-lineas.component.ts`
+   * ligan con `[formControl]="rowControl(...)"` (binding de propiedad, sin
+   * atributo DOM alguno) desde que B.3 extrajo la sección compartida, así
+   * que para `items.<i>.<campo>` la consulta de abajo no encontraba NADA.
+   * `invoice-section-lineas.component.ts` marca ahora sus 4 campos
+   * requeribles (`description`, `quantity`, `unit_code`, `discount_amount`,
+   * los mismos de `INVOICE_EMIT_REQUIREMENTS_MAP`) con `[attr.data-control-name]`,
+   * un atributo propio — nunca `[attr.formcontrolname]`, que suplantaría uno
+   * que Angular reserva. Los campos de cabecera se siguen resolviendo por
+   * `formcontrolname` real y no se tocaron.
    */
   private revealFormTarget(target: string): void {
     const line = /^items\.(\d+)\.(.+)$/.exec(target);
@@ -6767,16 +6781,28 @@ export class InvoiceCreatePageComponent implements OnInit {
       return;
     }
     window.requestAnimationFrame(() => {
-      // `formControlName` y `formArrayName` son atributos estáticos de la
-      // plantilla, así que llegan al DOM en minúsculas y se pueden consultar.
       const nodes = document.querySelectorAll<HTMLElement>(
-        `[formcontrolname="${controlName}"], [formarrayname="${controlName}"], #${controlName}`,
+        `[formcontrolname="${controlName}"], [formarrayname="${controlName}"], [data-control-name="${controlName}"], #${controlName}`,
       );
-      // Los campos de línea repiten el mismo `formControlName` en cada fila: el
+      // Los campos de línea repiten el mismo control name en cada fila: el
       // índice del hallazgo es lo que distingue la línea 3 de la primera.
       const node = nodes[line ? lineIndex : 0] ?? nodes[0];
       node?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      node?.focus?.();
+      // `[data-control-name]` (y, en cabecera, `formcontrolname`) caen sobre
+      // el elemento HOST del componente compartido (`<app-input>`,
+      // `<app-selector>`), no sobre el `<input>`/`<select>` nativo de
+      // adentro: Angular no reenvía un atributo desconocido al hijo. Sin
+      // descender, `.focus()` es un no-op silencioso porque el host no es
+      // enfocable. Se busca primero el control real dentro del nodo; si el
+      // nodo mismo ya lo es (el fallback `#id`), se usa tal cual.
+      const focusable = node?.matches(
+        'input, select, textarea, button, [tabindex]',
+      )
+        ? node
+        : node?.querySelector<HTMLElement>(
+            'input, select, textarea, button, [tabindex]',
+          );
+      (focusable ?? node)?.focus?.();
     });
   }
 

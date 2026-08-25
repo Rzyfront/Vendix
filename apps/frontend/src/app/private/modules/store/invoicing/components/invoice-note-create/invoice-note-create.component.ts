@@ -29,6 +29,7 @@ import {
 import { extractValidationMessages } from '../../utils/invoicing-errors.util';
 import { findNoteConcept, noteConcepts } from './dian-note-concepts';
 import {
+  NOTE_REASON_LIMIT,
   NOTE_TEXT_LIMIT,
   NoteLineSelection,
   buildNotePayload,
@@ -266,6 +267,21 @@ import { remainingChars, showCharCounter } from '../../utils/char-limit.util';
               [required]="true"
               placeholder="Explica qué pasó: qué se devolvió, qué se ajustó, por qué."
             ></app-textarea>
+            <!--
+              Orquestador, 2026-08-25: este mismo texto alimenta DOS campos
+              del documento (ver «buildNotePayload»), y quien escribe aquí no
+              tiene forma de saberlo sin este aviso: el motivo declarado ante
+              la DIAN (corto, 500) y las notas completas de la nota (largo,
+              5.000). El tope de abajo es el del campo CORTO porque es el que
+              de verdad limita lo que se puede escribir — el largo nunca
+              recorta más de lo que el corto ya permitió.
+            -->
+            <p class="mt-1 text-[11px] leading-snug text-text-secondary">
+              Este texto queda como el motivo declarado ante la DIAN (máx. 500
+              caracteres) y, sin recortarse más, también como las notas
+              completas de la nota. No hay un campo aparte para un motivo más
+              largo.
+            </p>
             <!--
               «app-textarea» no reenvía «maxlength» al «textarea» nativo, así
               que este contador es la única señal en pantalla del tope real
@@ -532,12 +548,23 @@ export class InvoiceNoteCreateComponent {
     conceptCode: ['', Validators.required],
     reason: [
       '',
-      [Validators.required, Validators.minLength(5), Validators.maxLength(NOTE_TEXT_LIMIT)],
+      [Validators.required, Validators.minLength(5), Validators.maxLength(NOTE_REASON_LIMIT)],
     ],
   });
 
-  /** F.3/defecto 2: contador de caracteres, contra el tope de `notes` (5.000). */
-  readonly reasonLimit = NOTE_TEXT_LIMIT;
+  /**
+   * Orquestador, 2026-08-25 (corrección sobre F.3/defecto 2): este control
+   * es el ÚNICO textarea que alimenta a la vez `reason` (500,
+   * `cac:DiscrepancyResponse/cbc:Description`) y `notes` (5.000,
+   * `cbc:Note` del documento) vía `buildNotePayload`. El contador y el
+   * `Validators.maxLength` de arriba tienen que medir contra el más CORTO
+   * de los dos: si se midiera contra `NOTE_TEXT_LIMIT` (5.000), el usuario
+   * ve «quedan 4.200» y escribe tranquilo, y `buildNoteReason` recorta su
+   * motivo a 500 en silencio al guardar — exactamente el defecto que esto
+   * reemplaza. Con el tope en 500, un texto más largo queda el formulario
+   * inválido, no aceptado-y-luego-cortado.
+   */
+  readonly reasonLimit = NOTE_REASON_LIMIT;
   readonly remainingChars = remainingChars;
   readonly showCharCounter = showCharCounter;
 

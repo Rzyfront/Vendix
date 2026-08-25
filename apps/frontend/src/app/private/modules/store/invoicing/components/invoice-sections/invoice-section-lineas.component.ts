@@ -109,6 +109,7 @@ export interface LineasRowErrors {
               <div class="col-span-12 md:col-span-4">
                 <app-input
                   label="Descripción"
+                  [attr.data-control-name]="'description'"
                   [formControl]="rowControl(row, rowPaths().description)"
                   [control]="rowControl(row, rowPaths().description)"
                   [error]="errorsFor(i).description"
@@ -141,6 +142,7 @@ export interface LineasRowErrors {
               <div class="col-span-6 md:col-span-2">
                 <app-input
                   label="Cantidad"
+                  [attr.data-control-name]="'quantity'"
                   type="number"
                   [formControl]="rowControl(row, rowPaths().quantity)"
                   [control]="rowControl(row, rowPaths().quantity)"
@@ -154,6 +156,7 @@ export interface LineasRowErrors {
               <div class="col-span-6 md:col-span-2">
                 <app-selector
                   label="Unidad"
+                  [attr.data-control-name]="'unit_code'"
                   [formControl]="rowControl(row, rowPaths().unit_code)"
                   [options]="unitCodeOptions() ?? []"
                   [errorText]="errorsFor(i).unit_code ?? ''"
@@ -174,6 +177,7 @@ export interface LineasRowErrors {
               <div class="col-span-6 md:col-span-2">
                 <app-input
                   label="Descuento"
+                  [attr.data-control-name]="'discount_amount'"
                   [currency]="true"
                   [formControl]="rowControl(row, rowPaths().discount_amount!)"
                   [control]="rowControl(row, rowPaths().discount_amount!)"
@@ -312,6 +316,7 @@ export interface LineasRowErrors {
             >
               <app-input
                 label="Descripción"
+                [attr.data-control-name]="'description'"
                 [formControl]="rowControl(row, rowPaths().description)"
                 [control]="rowControl(row, rowPaths().description)"
                 [maxlength]="descriptionLimit()"
@@ -342,12 +347,14 @@ export interface LineasRowErrors {
             </div>
             <app-input
               label="Cantidad"
+              [attr.data-control-name]="'quantity'"
               [formControl]="rowControl(row, rowPaths().quantity)"
               [control]="rowControl(row, rowPaths().quantity)"
               size="sm"
             ></app-input>
             <app-input
               label="Unidad"
+              [attr.data-control-name]="'unit_code'"
               [formControl]="rowControl(row, rowPaths().unit_code)"
               [control]="rowControl(row, rowPaths().unit_code)"
               [maxlength]="4"

@@ -243,6 +243,28 @@ function buildNotePrefixedText(
   return `${prefix} ${text}`.trim();
 }
 
+/**
+ * Por qué estos dos topes son literales locales y NO viven en `CONFIG_LIMITS`
+ * (`core/utils/invoice-profile-config.contract.ts`), pese a que el orquestador
+ * pidió medir si la fuente única los admite (2026-08-25):
+ *
+ * `CONFIG_LIMITS` es el contrato de configuración de UN PERFIL de
+ * facturación — sus 17 campos (`account_code`, `mapping_key`, `header_note`,
+ * …) acotan cómo se ARMA un perfil, no cómo se crea un documento. `reason` y
+ * `notes` de nota crédito/débito no configuran nada: son texto libre de
+ * `CreateCreditNoteDto`/`CreateDebitNoteDto`, un DTO de creación de
+ * documento sin relación de dominio con el de perfiles. Que `header_note`
+ * (tope de `CreateInvoiceDto.notes`, FAD13) también valga 500 es
+ * COINCIDENCIA de cifra, no de origen: son dos `@MaxLength` distintos en dos
+ * clases distintas, que hoy comparten número porque ambos heredan del mismo
+ * ancho de columna, no porque uno derive del otro. Importar
+ * `CONFIG_LIMITS.header_note` aquí ataría el tope de `reason` al día en que
+ * alguien cambie el de las notas de FACTURA sin querer tocar el de nota
+ * crédito/débito — el acoplamiento que se busca evitar, no el que se busca
+ * crear. Se quedan como constantes propias de este archivo, con su fuente
+ * (el DTO real) citada en cada docblock.
+ */
+
 /** Tope de `reason` en el DTO (`@MaxLength(500)`, `create-credit-note.dto.ts`). */
 export const NOTE_REASON_LIMIT = 500;
 
