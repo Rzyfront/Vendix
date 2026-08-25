@@ -2566,6 +2566,55 @@ export const ErrorCodes = {
   },
 
   /**
+   * Compuerta de cuentas PUC del perfil contra `chart_of_accounts` (F.13, paso
+   * dueño de DB-07).
+   *
+   * ## Qué rechaza
+   *
+   * Guardar un perfil cuya sección `accounting` trae un código que NO existe en
+   * el plan de cuentas que gobierna ese perfil, o que existe pero es de
+   * AGRUPACIÓN (`accepts_entries = false`) y por tanto no admite asientos. Son
+   * las dos mitades del invariante de DB-07; la segunda es la que faltaba: una
+   * cuenta de agrupación guardada produce un asiento imposible en la emisión,
+   * cuando el fallo ya es tarde y el documento está emitido.
+   *
+   * ## Por qué 422 y no aviso
+   *
+   * Decisión de negocio escrita el 2026-08-25 (rzy): RECHAZAR desde ya. La
+   * consecuencia aceptada es que editar por un motivo ajeno uno de los perfiles
+   * vivos con códigos inválidos exige corregir primero la cuenta; los perfiles
+   * afectados quedan identificables por la consulta de DB-07 y su corrección
+   * ocurre por edición normal, que crea versión nueva append-only — nunca un
+   * UPDATE sobre versiones existentes, que son inmutables por diseño.
+   *
+   * ## Por qué su propio código y no INVOICING_PROFILE_005
+   *
+   * El 005 significa «la forma/fiscalidad interna del snapshot es inválida» y
+   * lo calcula un contrato puro espejado al frontend; esta compuerta es de
+   * EXISTENCIA contra una tabla de la base, no puede vivir ahí ni debe
+   * confundirse con ella. La FORMA de la respuesta sí se copia del editor:
+   * `details.issues[]` con `{field, code, message}` y la ruta con puntos
+   * (`accounting.revenue_account_by_bucket.costo`,
+   * `accounting.vat_payable_account`), para que el mismo pintado de campo del
+   * editor sirva sin cambios.
+   *
+   * ## Alcance del PUC contra el que se valida
+   *
+   * Lo decide `organizations.fiscal_scope`, con el mismo resolutor que usa el
+   * módulo de contabilidad (FiscalScopeService): ORGANIZATION ⇒ PUC de nivel
+   * organización; STORE ⇒ PUC de la entidad contable de la tienda del perfil.
+   * Validar contra otro PUC aceptaría un código que no existe donde el asiento
+   * va a caer, que es exactamente el defecto que esta compuerta adelanta al
+   * guardado.
+   */
+  INVOICING_PROFILE_010: {
+    code: 'INVOICING_PROFILE_010',
+    httpStatus: 422,
+    devMessage:
+      'A billing profile account code does not exist in the chart of accounts that governs it, or exists as a grouping account with accepts_entries=false. Resolved by organizations.fiscal_scope via FiscalScopeService (ORGANIZATION => org-level PUC, STORE => the profile store entity PUC); all offending fields are returned in details.issues with their dotted path',
+  },
+
+  /**
    * Nombre de perfil ya usado en la misma tienda.
    *
    * ## Por qué esto ES la idempotencia de la creación

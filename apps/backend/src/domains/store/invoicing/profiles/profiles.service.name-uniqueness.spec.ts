@@ -117,7 +117,9 @@ describe('ProfilesService — unicidad del nombre por tienda', () => {
     const audit = { log: jest.fn().mockResolvedValue(undefined) } as any;
 
     return {
-      service: new ProfilesService(prisma, cache, audit),
+      service: new ProfilesService(prisma, cache, audit, {
+        assertAccountsUsable: jest.fn().mockResolvedValue(undefined),
+      } as any),
       tx,
       transaction,
       findManyCalls,

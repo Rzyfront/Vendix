@@ -122,7 +122,9 @@ describe('ProfilesService — clonado contra el contrato vigente', () => {
       invalidate: jest.fn().mockResolvedValue(undefined),
     } as any;
     const audit = { log: jest.fn().mockResolvedValue(undefined) } as any;
-    const service = new ProfilesService(prisma, cache, audit);
+    const service = new ProfilesService(prisma, cache, audit, {
+      assertAccountsUsable: jest.fn().mockResolvedValue(undefined),
+    } as any);
     return { service, tx, scoped, withoutScope, versionReads };
   }
 
