@@ -9,10 +9,22 @@ import {
   withInterceptors,
 } from '@angular/common/http';
 import { of, throwError as rxjsThrowError } from 'rxjs';
-import { authInterceptorFn } from './auth.interceptor';
+import {
+  __resetAuthInterceptorForTests,
+  authInterceptorFn,
+} from './auth.interceptor';
 import { AuthService } from '../services/auth.service';
 import { SessionService } from '../services/session.service';
+import { environment } from '../../../environments/environment';
 import { PLATFORM_ID, signal } from '@angular/core';
+
+/**
+ * Base URL the interceptor's URL guard checks against. All API specs
+ * build their request URLs from this constant so they match the guard;
+ * the one non-API spec uses a URL that does NOT start with it on
+ * purpose (the guard must skip it).
+ */
+const API = environment.apiUrl;
 
 describe('authInterceptorFn', () => {
   let httpMock: HttpTestingController;
@@ -55,6 +67,10 @@ describe('authInterceptorFn', () => {
   });
 
   afterEach(() => {
+    // Clear the seeded refresh token and drain the interceptor's
+    // module-scoped refresh state so the next test starts fresh.
+    localStorage.removeItem('vendix_auth_state');
+    __resetAuthInterceptorForTests();
     httpMock.verify();
   });
 
@@ -62,9 +78,9 @@ describe('authInterceptorFn', () => {
     it('should add Authorization header for API requests when token exists', () => {
       authServiceSpy.getToken.and.returnValue('test-token');
 
-      httpClient.get('/api/test').subscribe();
+      httpClient.get(`${API}/test`).subscribe();
 
-      const req = httpMock.expectOne('/api/test');
+      const req = httpMock.expectOne(`${API}/test`);
       expect(req.request.headers.get('Authorization')).toBe(
         'Bearer test-token',
       );
@@ -73,18 +89,20 @@ describe('authInterceptorFn', () => {
     it('should not add Authorization header for non-API requests', () => {
       authServiceSpy.getToken.and.returnValue('test-token');
 
-      httpClient.get('/external-api/test').subscribe();
+      // CDN-style URL must not start with environment.apiUrl so the
+      // interceptor's URL guard correctly skips the token attachment.
+      httpClient.get('https://cdn.example.com/test').subscribe();
 
-      const req = httpMock.expectOne('/external-api/test');
+      const req = httpMock.expectOne('https://cdn.example.com/test');
       expect(req.request.headers.get('Authorization')).toBeNull();
     });
 
     it('should not add Authorization header when no token exists', () => {
       authServiceSpy.getToken.and.returnValue(null);
 
-      httpClient.get('/api/test').subscribe();
+      httpClient.get(`${API}/test`).subscribe();
 
-      const req = httpMock.expectOne('/api/test');
+      const req = httpMock.expectOne(`${API}/test`);
       expect(req.request.headers.get('Authorization')).toBeNull();
     });
   });
@@ -92,6 +110,18 @@ describe('authInterceptorFn', () => {
   describe('401 error handling', () => {
     beforeEach(() => {
       authServiceSpy.getToken.and.returnValue('test-token');
+      // Seed the refresh token the interceptor reads from localStorage.
+      // Without it, getRefreshToken() returns null and the interceptor
+      // terminates the session instead of retrying.
+      localStorage.setItem(
+        'vendix_auth_state',
+        JSON.stringify({
+          tokens: {
+            access_token: 'test-token',
+            refresh_token: 'test-refresh',
+          },
+        }),
+      );
     });
 
     it('should handle 401 errors for API requests', () => {
@@ -101,9 +131,9 @@ describe('authInterceptorFn', () => {
         }) as any,
       );
 
-      httpClient.get('/api/test').subscribe();
+      httpClient.get(`${API}/test`).subscribe();
 
-      const req = httpMock.expectOne('/api/test');
+      const req = httpMock.expectOne(`${API}/test`);
       req.flush({}, { status: 401, statusText: 'Unauthorized' });
 
       // Should attempt token refresh
@@ -111,14 +141,14 @@ describe('authInterceptorFn', () => {
     });
 
     it('should not handle 401 errors for non-API requests', () => {
-      httpClient.get('/external/test').subscribe(
+      httpClient.get('https://cdn.example.com/test').subscribe(
         () => fail('Should have thrown error'),
         (error) => {
           expect(error.status).toBe(401);
         },
       );
 
-      const req = httpMock.expectOne('/external/test');
+      const req = httpMock.expectOne('https://cdn.example.com/test');
       req.flush({}, { status: 401, statusText: 'Unauthorized' });
 
       // Should not attempt token refresh
@@ -132,14 +162,14 @@ describe('authInterceptorFn', () => {
         }) as any,
       );
 
-      httpClient.get('/api/test').subscribe();
+      httpClient.get(`${API}/test`).subscribe();
 
       // First request fails with 401
-      const firstReq = httpMock.expectOne('/api/test');
+      const firstReq = httpMock.expectOne(`${API}/test`);
       firstReq.flush({}, { status: 401, statusText: 'Unauthorized' });
 
       // Second request should have new token
-      const secondReq = httpMock.expectOne('/api/test');
+      const secondReq = httpMock.expectOne(`${API}/test`);
       expect(secondReq.request.headers.get('Authorization')).toBe(
         'Bearer new-token',
       );
@@ -151,16 +181,20 @@ describe('authInterceptorFn', () => {
         rxjsThrowError(() => new Error('Refresh failed')) as any,
       );
 
-      httpClient.get('/api/test').subscribe({
+      let captured: unknown = null;
+      httpClient.get(`${API}/test`).subscribe({
         next: () => {
-          // EMPTY completes without next — this branch is fine
+          // EMPTY completes without next — this branch is fine.
         },
-        error: () => fail('Interceptor should swallow via EMPTY'),
+        error: (err: unknown) => (captured = err),
       });
 
-      const req = httpMock.expectOne('/api/test');
+      const req = httpMock.expectOne(`${API}/test`);
       req.flush({}, { status: 401, statusText: 'Unauthorized' });
 
+      // The interceptor surfaces the error via terminateSession +
+      // EMPTY — verify both.
+      expect(captured).toBeNull(); // EMPTY swallows the upstream error
       expect(sessionServiceSpy.terminateSession).toHaveBeenCalledWith(
         'token_refresh_failed',
       );
@@ -174,12 +208,12 @@ describe('authInterceptorFn', () => {
       );
 
       // Make two concurrent requests
-      httpClient.get('/api/test1').subscribe();
-      httpClient.get('/api/test2').subscribe();
+      httpClient.get(`${API}/test1`).subscribe();
+      httpClient.get(`${API}/test2`).subscribe();
 
       // Both should fail with 401
-      const req1 = httpMock.expectOne('/api/test1');
-      const req2 = httpMock.expectOne('/api/test2');
+      const req1 = httpMock.expectOne(`${API}/test1`);
+      const req2 = httpMock.expectOne(`${API}/test2`);
       req1.flush({}, { status: 401, statusText: 'Unauthorized' });
       req2.flush({}, { status: 401, statusText: 'Unauthorized' });
 
@@ -187,8 +221,8 @@ describe('authInterceptorFn', () => {
       expect(authServiceSpy.refreshToken).toHaveBeenCalledTimes(1);
 
       // Both should retry with new token
-      const retryReq1 = httpMock.expectOne('/api/test1');
-      const retryReq2 = httpMock.expectOne('/api/test2');
+      const retryReq1 = httpMock.expectOne(`${API}/test1`);
+      const retryReq2 = httpMock.expectOne(`${API}/test2`);
       expect(retryReq1.request.headers.get('Authorization')).toBe(
         'Bearer new-token',
       );
@@ -202,6 +236,20 @@ describe('authInterceptorFn', () => {
   });
 
   describe('token refresh with rotation', () => {
+    beforeEach(() => {
+      // Seed both tokens so the rotation path can persist the new
+      // refresh_token back to localStorage.
+      localStorage.setItem(
+        'vendix_auth_state',
+        JSON.stringify({
+          tokens: {
+            access_token: 'test-token',
+            refresh_token: 'test-refresh',
+          },
+        }),
+      );
+    });
+
     it('should update both access and refresh tokens when provided', () => {
       authServiceSpy.getToken.and.returnValue('test-token');
       authServiceSpy.refreshToken.and.returnValue(
@@ -213,13 +261,13 @@ describe('authInterceptorFn', () => {
         }) as any,
       );
 
-      httpClient.get('/api/test').subscribe();
+      httpClient.get(`${API}/test`).subscribe();
 
-      const req = httpMock.expectOne('/api/test');
+      const req = httpMock.expectOne(`${API}/test`);
       req.flush({}, { status: 401, statusText: 'Unauthorized' });
 
       // Should retry with new access token
-      const retryReq = httpMock.expectOne('/api/test');
+      const retryReq = httpMock.expectOne(`${API}/test`);
       expect(retryReq.request.headers.get('Authorization')).toBe(
         'Bearer new-access-token',
       );

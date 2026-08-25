@@ -24,7 +24,17 @@ import { SessionService } from '../services/session.service';
  * ("Subject con composición RxJS" — legitimate use case).
  */
 let isRefreshing = false;
-const refreshToken$ = new Subject<string>();
+let refreshToken$ = new Subject<string>();
+
+/**
+ * QUI-723 PR unblock — drains module-scoped refresh state between tests
+ * so the karma suite can exercise concurrent 401 paths deterministically.
+ * No-op in production (never called outside `*.spec.ts`).
+ */
+export function __resetAuthInterceptorForTests(): void {
+  isRefreshing = false;
+  refreshToken$ = new Subject<string>();
+}
 
 export const authInterceptorFn: HttpInterceptorFn = (
   req: HttpRequest<unknown>,
