@@ -117,6 +117,14 @@ import type {
  * `addTaxRule()`/`removeTaxRule()`. Ver el docblock del componente.
  */
 import { InvoiceSectionImpuestosComponent } from '../../components/invoice-sections/index';
+/**
+ * SECCIÓN RETENCIONES COMPARTIDA con la factura (B.5). El editor no tiene
+ * importe manual ni base gravable —la base es del documento, no del
+ * perfil—, así que sólo le pasa concepto, lado y tarifa. Ver el docblock
+ * del componente.
+ */
+import { InvoiceSectionRetencionesComponent } from '../../components/invoice-sections/index';
+import type { RetencionesRowErrors } from '../../components/invoice-sections/index';
 import {
     FOREIGN_CURRENCY_OPTIONS,
     INVOICE_TYPE_OPTIONS,
@@ -258,6 +266,7 @@ type SectionId = ProfileScreenSectionId;
         InvoiceSectionDocumentoComponent,
         InvoiceSectionLineasComponent,
         InvoiceSectionImpuestosComponent,
+        InvoiceSectionRetencionesComponent,
         InvoiceProfilePreviewPanelComponent,
         InvoiceProfileVersionsPanelComponent,
     ],
@@ -556,138 +565,22 @@ type SectionId = ProfileScreenSectionId;
                             [expanded]="isSectionOpen('retenciones')"
                             (expandedChange)="setSection('retenciones', $event)"
                         >
-                            <div class="space-y-3">
-                                <div
-                                    class="flex flex-wrap items-center justify-between gap-2"
-                                >
-                                    <p class="text-xs text-text-secondary">
-                                        Conceptos que se precargarán en la
-                                        factura. La BASE no se guarda: es el
-                                        importe de cada documento y se calcula al
-                                        emitir.
-                                    </p>
-                                    <app-button
-                                        variant="secondary"
-                                        size="sm"
-                                        (clicked)="addWithholding()"
-                                    >
-                                        <app-icon
-                                            slot="icon"
-                                            name="plus"
-                                            [size]="14"
-                                        ></app-icon>
-                                        Retención
-                                    </app-button>
-                                </div>
-
-                                @if (isExport() && withholdingRules.length > 0) {
-                                    <p
-                                        class="text-xs text-warning flex items-start gap-1.5"
-                                    >
-                                        <app-icon
-                                            name="alert-triangle"
-                                            [size]="14"
-                                            class="mt-0.5 shrink-0"
-                                        ></app-icon>
-                                        <span
-                                            >El tipo de documento es exportación y
-                                            una exportación no está sujeta a
-                                            retención en Colombia. Estas filas se
-                                            seguirán precargando: quítalas si no
-                                            corresponden.</span
-                                        >
-                                    </p>
-                                }
-
-                                @if (withholdingRules.controls.length === 0) {
-                                    <p class="text-xs text-text-secondary italic">
-                                        Sin retenciones. La factura abrirá sin
-                                        ninguna fila, y se pueden añadir al
-                                        emitir.
-                                    </p>
-                                }
-
-                                <div
-                                    class="space-y-2"
-                                    formArrayName="withholdings"
-                                >
-                                    @for (
-                                        rule of withholdingRules.controls;
-                                        track $index
-                                    ) {
-                                        <div
-                                            class="grid grid-cols-1 items-end gap-2 rounded-lg border border-border p-2 md:grid-cols-6"
-                                            [formGroupName]="$index"
-                                        >
-                                            <div class="md:col-span-3">
-                                                <app-selector
-                                                    label="Concepto"
-                                                    formControlName="concept_id"
-                                                    [options]="
-                                                        withholding_concept_options()
-                                                    "
-                                                    size="sm"
-                                                    placeholder="Elige el concepto"
-                                                    [errorText]="
-                                                        issueFor(
-                                                            'withholdings.rules[' +
-                                                                $index +
-                                                                '].concept_id'
-                                                        )
-                                                    "
-                                                ></app-selector>
-                                            </div>
-                                            <app-selector
-                                                label="Lado"
-                                                formControlName="role"
-                                                [options]="
-                                                    withholding_role_options
-                                                "
-                                                size="sm"
-                                            ></app-selector>
-                                            <app-input
-                                                label="Tarifa %"
-                                                formControlName="rate"
-                                                size="sm"
-                                                [helperText]="
-                                                    catalogRateFor($index)
-                                                        ? 'Catálogo: ' +
-                                                          catalogRateFor($index) +
-                                                          ' %'
-                                                        : ''
-                                                "
-                                                [error]="
-                                                    issueFor(
-                                                        'withholdings.rules[' +
-                                                            $index +
-                                                            '].rate'
-                                                    )
-                                                "
-                                            ></app-input>
-                                            <!--
-                                                SÓLO EL ICONO. La palabra «Quitar» repetida en cada fila de
-                                                cada matriz no aporta nada que el bote de basura no diga, y
-                                                ensancha el botón hasta empujar los campos de la fila. El
-                                                nombre accesible viaja en «ariaLabel», que app-button pone en
-                                                el <button> interno junto con el «title»: sin él, un botón de
-                                                sólo icono se anuncia sin nombre.
-                                            -->
-                                            <app-button
-                                                variant="outline-danger"
-                                                size="sm"
-                                                ariaLabel="Quitar este concepto de retención"
-                                                (clicked)="removeWithholding($index)"
-                                            >
-                                                <app-icon
-                                                    slot="icon"
-                                                    name="trash-2"
-                                                    [size]="15"
-                                                ></app-icon>
-                                            </app-button>
-                                        </div>
-                                    }
-                                </div>
-                            </div>
+                            <vendix-invoice-section-retenciones
+                                context="profile"
+                                [rows]="withholdingRules.controls"
+                                [conceptOptions]="withholding_concept_options()"
+                                [roleOptions]="withholding_role_options"
+                                [rowErrors]="retencionesRowErrors()"
+                                [catalogRateFor]="catalogRateForBound"
+                                emptyStateText="Sin retenciones. La factura abrirá sin ninguna fila, y se pueden añadir al emitir."
+                                [exportWarningText]="
+                                    isExport() && withholdingRules.length > 0
+                                        ? 'El tipo de documento es exportación y una exportación no está sujeta a retención en Colombia. Estas filas se seguirán precargando: quítalas si no corresponden.'
+                                        : null
+                                "
+                                (addWithholding)="addWithholding()"
+                                (removeWithholding)="removeWithholding($event)"
+                            ></vendix-invoice-section-retenciones>
                         </vendix-invoice-form-section>
                     }
 
@@ -1611,6 +1504,23 @@ export class InvoiceProfileEditorComponent {
             this.issueFor('taxes.rules[' + i + '].rate'),
         );
     });
+
+    /** Errores por fila de «Retenciones» (B.5): concepto y tarifa. */
+    readonly retencionesRowErrors = computed<readonly RetencionesRowErrors[]>(() => {
+        this.form_value();
+        return this.withholdingRules.controls.map((_, i) => ({
+            concept_id: this.issueFor('withholdings.rules[' + i + '].concept_id'),
+            rate: this.issueFor('withholdings.rules[' + i + '].rate'),
+        }));
+    });
+
+    /**
+     * Envoltorio de `catalogRateFor` para el componente compartido: el método
+     * usa `this.withholdingRules`/`this.withholding_concepts()`, así que
+     * pasarlo desnudo perdería el `this`. Mismo criterio que en la factura.
+     */
+    readonly catalogRateForBound = (index: number): string | null =>
+        this.catalogRateFor(index);
 
     readonly saving = toSignal(this.store.select(selectProfileSaving), {
         initialValue: false,

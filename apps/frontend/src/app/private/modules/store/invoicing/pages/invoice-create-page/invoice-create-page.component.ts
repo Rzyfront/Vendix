@@ -186,6 +186,15 @@ import type {
  * docblock del componente para la razón completa.
  */
 import { InvoiceSectionImpuestosComponent } from '../../components/invoice-sections/index';
+/**
+ * SECCIÓN RETENCIONES COMPARTIDA con el editor de perfiles (B.5). El
+ * interruptor de importe manual y su input de monto total NO tienen
+ * equivalente en el perfil —un perfil no emite, sólo precarga conceptos—,
+ * así que se quedan en la página y el componente sólo se monta en la rama
+ * `@else` (sin importe manual). Ver el docblock del componente.
+ */
+import { InvoiceSectionRetencionesComponent } from '../../components/invoice-sections/index';
+import type { RetencionesRowPaths } from '../../components/invoice-sections/index';
 import { InvoiceTaxCatalogService } from '../../components/invoice-create/invoice-tax-catalog.service';
 import {
   InvoiceAiuSettings,
@@ -717,6 +726,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     InvoiceSectionDocumentoComponent,
     InvoiceSectionLineasComponent,
     InvoiceSectionImpuestosComponent,
+    InvoiceSectionRetencionesComponent,
   ],
   template: `
     <div class="w-full max-w-[1400px] mx-auto">
@@ -1814,141 +1824,21 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   size="sm"
                 ></app-input>
               } @else {
-                @if (withholdingConcepts().length === 0) {
-                  <app-alert-banner
-                    class="mb-3"
-                    variant="warning"
-                    icon="alert-triangle"
-                    tone="token"
-                  >
-                    No hay conceptos de retención configurados. Créalos en
-                    <span class="font-medium">Contabilidad › Retenciones</span> o
-                    activa el importe manual de arriba: sin concepto, el desglose
-                    no se puede guardar.
-                  </app-alert-banner>
-                }
-
-                <div formArrayName="withholdings" class="space-y-2">
-                  @for (
-                    row of withholdingControls();
-                    track withholdingUid(row);
-                    let i = $index
-                  ) {
-                    <div
-                      [formGroupName]="i"
-                      class="rounded-lg border border-border bg-[var(--color-surface)] p-3"
-                    >
-                      <div class="grid grid-cols-12 gap-2.5">
-                        <div class="col-span-12 md:col-span-7">
-                          <app-selector
-                            label="Concepto"
-                            formControlName="concept_id"
-                            [options]="withholdingConceptOptions()"
-                            [searchable]="true"
-                            placeholder="Busca el concepto de retención…"
-                            size="sm"
-                            (valueChange)="onWithholdingConceptChange(i)"
-                          ></app-selector>
-                        </div>
-                        <div class="col-span-12 md:col-span-5">
-                          <app-selector
-                            label="Lado de la operación"
-                            formControlName="role"
-                            [options]="withholdingRoleOptions"
-                            size="sm"
-                          ></app-selector>
-                        </div>
-                        <div class="col-span-5 md:col-span-3">
-                          <app-input
-                            label="Tarifa %"
-                            type="number"
-                            formControlName="rate"
-                            [control]="row.get('rate')"
-                            min="0"
-                            max="100"
-                            step="any"
-                            size="sm"
-                          ></app-input>
-                        </div>
-                        <div class="col-span-7 md:col-span-5">
-                          <app-input
-                            label="Base gravable"
-                            [currency]="true"
-                            formControlName="base"
-                            [control]="row.get('base')"
-                            size="sm"
-                          ></app-input>
-                        </div>
-                        <div
-                          class="col-span-12 md:col-span-4 flex items-end justify-between gap-2 pb-0.5"
-                        >
-                          <div class="min-w-0">
-                            <span
-                              class="block text-[10px] uppercase tracking-wide text-[var(--color-text-secondary)]"
-                            >
-                              Retenido
-                            </span>
-                            <span
-                              class="block text-sm font-semibold text-text-primary truncate"
-                            >
-                              {{ formatCurrency(withholdingRowAmount(i)) }}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            class="shrink-0 rounded-md p-1.5 text-[var(--color-text-secondary)] transition-colors hover:bg-error-light hover:text-error focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
-                            aria-label="Quitar este concepto de retención"
-                            title="Quitar este concepto de retención"
-                            (click)="removeWithholding(i)"
-                          >
-                            <app-icon name="trash-2" [size]="15" />
-                          </button>
-                        </div>
-                      </div>
-
-                      @if (incompleteWithholdingRow() === i + 1) {
-                        <p
-                          class="mt-3 flex items-center gap-1.5 text-[11px] text-warning"
-                        >
-                          <app-icon name="alert-circle" [size]="12" />
-                          Falta concepto, tarifa o base. La factura no se envía
-                          con una retención a medias.
-                        </p>
-                      }
-                    </div>
-                  } @empty {
-                    <p
-                      class="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-[var(--color-text-secondary)]"
-                    >
-                      Sin retenciones. Agrega una si el documento las lleva.
-                    </p>
-                  }
-                </div>
-
-                <div
-                  class="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <app-button
-                    variant="outline"
-                    size="sm"
-                    type="button"
-                    (clicked)="addWithholding()"
-                  >
-                    <app-icon slot="icon" name="plus" [size]="14" />
-                    Agregar retención
-                  </app-button>
-                  <div
-                    class="flex items-baseline justify-between gap-2 rounded-lg bg-[var(--color-surface-hover)] px-3 py-2 sm:justify-end"
-                  >
-                    <span
-                      class="text-xs text-[var(--color-text-secondary)]"
-                      >Total retenido</span
-                    >
-                    <span class="text-sm font-semibold text-text-primary">
-                      {{ formatCurrency(effectiveWithholding()) }}
-                    </span>
-                  </div>
-                </div>
+                <vendix-invoice-section-retenciones
+                  context="invoice"
+                  [rows]="withholdingControls()"
+                  [rowPaths]="retencionesRowPaths"
+                  [conceptOptions]="withholdingConceptOptions()"
+                  [roleOptions]="withholdingRoleOptions"
+                  [incompleteRowNumber]="incompleteWithholdingRow()"
+                  [rowAmounts]="retencionesRowAmounts()"
+                  [totalWithheld]="effectiveWithholding()"
+                  [formatCurrency]="formatCurrencyBound"
+                  emptyStateText="Sin retenciones. Agrega una si el documento las lleva."
+                  (addWithholding)="addWithholding()"
+                  (removeWithholding)="removeWithholding($event)"
+                  (conceptChange)="onWithholdingConceptChange($event)"
+                ></vendix-invoice-section-retenciones>
               }
             </vendix-invoice-form-section>
 
@@ -3789,6 +3679,19 @@ export class InvoiceCreatePageComponent implements OnInit {
    */
   readonly formatCurrencyBound = (value: number): string =>
     this.formatCurrency(value);
+
+  /** Mapa de rutas de «Retenciones» (B.5): la factura sí guarda `base`. */
+  readonly retencionesRowPaths: RetencionesRowPaths = {
+    concept_id: 'concept_id',
+    role: 'role',
+    rate: 'rate',
+    base: 'base',
+  };
+
+  /** «Retenido» por fila, ya calculado — la sección compartida sólo lo pinta. */
+  readonly retencionesRowAmounts = computed<readonly number[]>(() =>
+    this.withholdingControls().map((_, i) => this.withholdingRowAmount(i)),
+  );
 
   /**
    * LO QUE ESTE DOCUMENTO NO PUEDE LLEVAR — medido, no supuesto.
@@ -5727,9 +5630,9 @@ export class InvoiceCreatePageComponent implements OnInit {
     return (item.get('row_uid')?.value as string) ?? '';
   }
 
-  withholdingUid(row: AbstractControl): string {
-    return (row.get('row_uid')?.value as string) ?? '';
-  }
+  // `withholdingUid` se retiró (B.5): `vendix-invoice-section-retenciones`
+  // rastrea cada fila por identidad de control (`track row`), no por su
+  // `row_uid`, mismo criterio que «Líneas» (B.3).
 
   /** El control de cuenta de una línea, para enlazarlo fuera de `items`. */
   accountControl(item: AbstractControl): FormControl {
