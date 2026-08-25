@@ -30,9 +30,9 @@ import {
 } from '../../../../../../shared/components';
 import {
   DOCUMENT_TYPES,
-  findDocumentType,
   isValidDocumentType,
 } from '../../../../../../shared/constants/document-types';
+import { computeDocumentFormatHint } from '../../utils/document-format-hint.util';
 import { PosCustomerService } from '../../services/pos-customer.service';
 import {
   CreatePosCustomerRequest,
@@ -149,72 +149,16 @@ export class PosCustomerSelectorComponent {
    * Format-tolerant backend (ResolveCustomerDto) still accepts the input
    * even when it sits outside the standard range — the hint is purely a
    * cashier-side aid, matching the lead's "un mismo paso" intent.
+   *
+   * The pure logic lives in `utils/document-format-hint.util.ts` so it
+   * can be unit-tested without TestBed.
    */
-  readonly documentFormatHint = computed<{
-    tone: 'info' | 'ok' | 'warn';
-    text: string;
-  } | null>(() => {
-    const type = this.form.get('documentType')?.value as string | null;
-    const number = (this.form.get('documentNumber')?.value as string | null)
-      ?.trim()
-      .toUpperCase();
-    if (!number) return null;
-    const rule = findDocumentType(type);
-    if (!rule) {
-      return {
-        tone: 'info',
-        text: `${number.length} caracteres — sin tipo de documento seleccionado.`,
-      };
-    }
-
-    const len = number.length;
-    const matchesRegex = rule.regex.test(number);
-
-    if (matchesRegex && len <= rule.maxLength) {
-      return {
-        tone: 'ok',
-        text: `✓ ${len} caracteres — entre ${this.ruleMin(rule.regex)} y ${rule.maxLength}.`,
-      };
-    }
-
-    if (len > rule.maxLength) {
-      const over = len - rule.maxLength;
-      return {
-        tone: 'warn',
-        text: `${over} ${over === 1 ? 'carácter de más' : 'caracteres de más'} (máximo ${rule.maxLength} para ${rule.label}). Se va a guardar igual.`,
-      };
-    }
-
-    // Below max-length but regex failed (e.g. wrong chars). We can still
-    // surface the min/max so the cashier knows the target range.
-    const min = this.ruleMin(rule.regex);
-    if (len < min) {
-      const missing = min - len;
-      return {
-        tone: 'info',
-        text: `Faltan ${missing} ${missing === 1 ? 'carácter' : 'caracteres'} (mínimo ${min} para ${rule.label}).`,
-      };
-    }
-    return {
-      tone: 'warn',
-      text: `${len} caracteres para ${rule.label} — formato no estándar. Se va a guardar igual.`,
-    };
+  readonly documentFormatHint = computed(() => {
+    return computeDocumentFormatHint(
+      this.form.get('documentType')?.value as string | null,
+      this.form.get('documentNumber')?.value as string | null,
+    );
   });
-
-  /**
-   * Extract the minimum length from a digit-only regex like /^\d{6,10}$/
-   * or /^\d{8,10}-?\d?$/ (the trailing group is optional). Falls back to
-   * 1 if the regex shape doesn't carry a quantifier.
-   */
-  private ruleMin(regex: RegExp): number {
-    // Look for the first explicit "{n}" or "{n,}" or "{n,m}" quantifier.
-    const source = regex.source;
-    const digitOnly = source.match(/\\d\s*\{\s*(\d+)(?:\s*,)?/);
-    if (digitOnly && digitOnly[1]) {
-      return parseInt(digitOnly[1], 10);
-    }
-    return 1;
-  }
 
   // ── Form ────────────────────────────────────────────────────────────
   // QUI-723 — All fields are optional: the cashier may submit the form with
