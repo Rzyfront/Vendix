@@ -52,6 +52,13 @@ export interface InvoiceProductOption {
   basePrice: number;
   productType: 'physical' | 'service' | 'prepared';
   isSellable: boolean;
+  /**
+   * Escala del precio publicado (`products.price_unit_quantity`, QUI-648).
+   * D.10: la previsión de línea divide por él IGUAL QUE EL SERVIDOR; viaja
+   * como dato del catálogo y NUNCA como campo editable ni en el payload.
+   * Ausente ⇒ divisor 1 (fallback idéntico a `priceUnitDivisor`).
+   */
+  priceUnitQuantity?: number | null;
 }
 
 /** Página corta: es un autocompletar, no un listado. */
@@ -94,5 +101,6 @@ function toOption(product: Product): InvoiceProductOption {
     // `is_sellable` es del módulo de restaurante y no viene en toda tienda;
     // ausente ⇒ vendible, que es el default del backend.
     isSellable: product.is_sellable !== false,
+    priceUnitQuantity: product.price_unit_quantity ?? null,
   };
 }

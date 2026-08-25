@@ -19,7 +19,13 @@ import type { TaxSelection } from '../../../../../shared/components/tax-selector
  */
 
 export interface InvoiceLineMath {
-  /** `cantidad × precio − descuento`, tal como lo teclea el usuario. */
+  /**
+   * Bruto NETO de la línea: `(cantidad × precio) ÷ price_unit_quantity −
+   * descuento`, recortado a cero. Es el espejo exacto de
+   * `lineExtensionDecimal` (`dian-money.util.ts`): primero se escala el precio,
+   * DESPUÉS se resta el descuento — el descuento es un importe absoluto de la
+   * línea y no se divide.
+   */
   gross: number;
   /** Base gravable (`cbc:LineExtensionAmount`): el bruto sin impuesto incluido. */
   base: number;
@@ -37,6 +43,24 @@ export interface InvoiceLineMathInput {
   quantity?: number | string | null;
   unit_price?: number | string | null;
   discount_amount?: number | string | null;
+  /**
+   * Escala del precio publicado (`products.price_unit_quantity`, QUI-648): a
+   * cuántas unidades de la cantidad declarada corresponde `unit_price`. Un
+   * producto a $18.000 la docena con escala 12 y cantidad 1 vale **$1.500**,
+   * no $18.000 — sin el divisor la pantalla enseña N veces el importe que el
+   * servidor declara en `cbc:LineExtensionAmount`.
+   *
+   * NO se captura por formulario: el backend ni siquiera lo acepta del request
+   * (`invoicing.service.ts` lo resuelve del producto a propósito, porque
+   * permitirlo por el cuerpo dejaría facturar un producto a $28.000 el kilo
+   * como $28.000 el gramo). Llega aquí como DATO DEL CATÁLIGO adjunto al ítem,
+   * igual que `product_name`.
+   *
+   * Fallback idéntico al del backend (`priceUnitDivisor`, `dian-money.util.ts`):
+   * ausente, 0, 1, negativo o no numérico ⇒ divisor 1, la aritmética histórica
+   * de todo el catálogo por pieza.
+   */
+  price_unit_quantity?: number | string | null;
   taxes?: TaxSelection[] | null;
 }
 
@@ -76,21 +100,45 @@ export function computeLineMath(line: InvoiceLineMathInput): InvoiceLineMath {
 }
 
 /**
- * Bruto de la línea, RECORTADO A CERO.
+ * Bruto NETO de la línea, RECORTADO A CERO.
+ *
+ * Espejo de `lineExtensionDecimal` (`dian-money.util.ts`): el precio se escala
+ * por la *price unit* ANTES de restar el descuento. Invertir el orden —dividir
+ * `(cantidad × precio − descuento)`— declararía un importe que el servidor no
+ * calcula y el usuario volvería a ver una cifra en pantalla y otra en la
+ * factura.
  *
  * El recorte es la razón por la que existe `lineDiscountExceedsSubtotal`: un
- * descuento mayor que `cantidad × precio` no produce ni un error ni un número
+ * descuento mayor que el bruto escalado no produce ni un error ni un número
  * negativo — produce una línea de cero que la DIAN acepta y que nadie cobra.
  */
 export function lineGross(line: InvoiceLineMathInput): number {
   const quantity = Number(line?.quantity) || 0;
   const price = Number(line?.unit_price) || 0;
   const discount = Number(line?.discount_amount) || 0;
-  return Math.max(quantity * price - discount, 0);
+  return Math.max((quantity * price) / priceUnitDivisor(line?.price_unit_quantity) - discount, 0);
+}
+
+/**
+ * Divisor de la *price unit*: un número > 1, o 1.
+ *
+ * ESPEJO EXACTO de `priceUnitDivisor` (`dian-money.util.ts`) — idéntico, no
+ * parecido: ausente, 0, 1, negativo o no numérico ⇒ 1. Se sanea aquí y no en
+ * los llamadores para que ningún camino pueda dividir por cero ni por un
+ * negativo y convertir una previsión en basura.
+ */
+function priceUnitDivisor(value: number | string | null | undefined): number {
+  const n = Number(value);
+  return n > 1 ? n : 1;
 }
 
 /**
  * `true` cuando el descuento se come la línea entera o más.
+ *
+ * Decide sobre el BRUTO YA ESCALADO — `(cantidad × precio) ÷
+ * price_unit_quantity` — porque es contra ese importe contra el que el servidor
+ * compara: un descuento que con el bruto inflado parece holgado tumba la línea
+ * con `LINE_AMOUNT_NEGATIVE` en cuanto la escala entra a la fórmula.
  *
  * Se pregunta explícitamente porque `computeLineMath` ya no lo puede delatar:
  * después del recorte, «descuento igual al subtotal» y «descuento del triple
@@ -100,6 +148,6 @@ export function lineDiscountExceedsSubtotal(line: InvoiceLineMathInput): boolean
   const quantity = Number(line?.quantity) || 0;
   const price = Number(line?.unit_price) || 0;
   const discount = Number(line?.discount_amount) || 0;
-  const subtotal = quantity * price;
+  const subtotal = (quantity * price) / priceUnitDivisor(line?.price_unit_quantity);
   return discount > 0 && subtotal > 0 && discount >= subtotal;
 }

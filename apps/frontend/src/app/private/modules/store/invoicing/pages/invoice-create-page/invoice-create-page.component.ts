@@ -540,6 +540,12 @@ interface InvoiceItemFormValue {
   taxes: TaxSelection[];
   account_code: string;
   aiu_component: string;
+  /**
+   * D.10 — escala del precio publicado del producto resuelto. Dato del
+   * CATÁLOGO adjunto a la fila (nunca editable, nunca en el payload:
+   * `buildPayload` mapea los items campo a campo y este control no viaja).
+   */
+  price_unit_quantity?: number | string | null;
 }
 
 /** Una retención declarada en la sección de retenciones (sólo UI). */
@@ -5833,6 +5839,7 @@ export class InvoiceCreatePageComponent implements OnInit {
       taxes: [[] as TaxSelection[]],
       account_code: [''],
       aiu_component: [''],
+      price_unit_quantity: [null as number | null],
     });
     this.itemsArray.push(group);
     return group;
@@ -6085,6 +6092,10 @@ export class InvoiceCreatePageComponent implements OnInit {
     if (!Number(group.get('unit_price')?.value)) {
       patch['unit_price'] = product.basePrice;
     }
+    // D.10: la escala viaja del catálogo a la fila para que la previsión
+    // divida igual que el servidor. Se repisa en cada elección: cambiar de
+    // producto sobre la misma fila cambia la escala, no la hereda.
+    patch['price_unit_quantity'] = product.priceUnitQuantity ?? null;
     group.patchValue(patch);
   }
 
@@ -6128,6 +6139,7 @@ export class InvoiceCreatePageComponent implements OnInit {
       taxes: Array.isArray(value.taxes) ? [...value.taxes] : [],
       account_code: value.account_code ?? '',
       aiu_component: value.aiu_component ?? '',
+      price_unit_quantity: (value as InvoiceItemFormValue).price_unit_quantity ?? null,
     });
     this.customItemOpen.set(true);
   }
@@ -6157,6 +6169,7 @@ export class InvoiceCreatePageComponent implements OnInit {
       taxes: draft.taxes,
       account_code: draft.account_code,
       aiu_component: draft.aiu_component,
+      price_unit_quantity: draft.price_unit_quantity ?? null,
     });
     this.setSection('lineas', true);
   }
