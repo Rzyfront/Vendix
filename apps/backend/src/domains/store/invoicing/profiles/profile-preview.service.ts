@@ -48,6 +48,7 @@ import { dianAmount, toDecimal } from '../utils/dian-money.util';
 
 import {
   AiuBucket,
+  AiuComponentLiteral,
   AiuVatRegimeLiteral,
   InvoiceProfileConfig,
   ProfileTaxRule,
@@ -209,7 +210,7 @@ const BUCKET_DEFAULT_DESCRIPTION: Readonly<Record<AiuBucket, string>> = {
  * céntimo residual (ver {@link AIU_RESIDUE_PRIORITY}), así que tomarlo del dato
  * haría que la misma entrada produjera dos muestras distintas.
  */
-const AIU_EMISSION_ORDER: readonly AiuComponent[] = [
+const AIU_EMISSION_ORDER: readonly AiuComponentLiteral[] = [
   'administracion',
   'imprevistos',
   'utilidad',
@@ -238,7 +239,7 @@ const AIU_EMISSION_ORDER: readonly AiuComponent[] = [
  * (`invoice-create-page.component.ts`, `aiuApplyPlan`), y escribirla igual acá
  * es lo que hace que la muestra prediga el documento en vez de aproximarlo.
  */
-const AIU_RESIDUE_PRIORITY: readonly AiuComponent[] = [
+const AIU_RESIDUE_PRIORITY: readonly AiuComponentLiteral[] = [
   'utilidad',
   'administracion',
   'imprevistos',
@@ -769,7 +770,7 @@ export class ProfilePreviewService {
   private splitAiuByComponents(
     aiu_value: ReturnType<typeof toDecimal>,
     config: InvoiceProfileConfig,
-  ): Map<AiuComponent, ReturnType<typeof toDecimal>> {
+  ): Map<AiuComponentLiteral, ReturnType<typeof toDecimal>> {
     const parts = AIU_EMISSION_ORDER.map((component) => {
       const share = toDecimal(config.aiu?.components?.[component]);
       const exact = aiu_value.times(share).dividedBy(100);
