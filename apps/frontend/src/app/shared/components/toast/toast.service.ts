@@ -29,7 +29,7 @@ export class ToastService {
       title: input.title,
       description: input.description,
       variant: input.variant ?? 'default',
-      duration: input.duration ?? 4000,
+      duration: input.duration ?? 1750,
       leaving: false,
     };
     this.toastsSig.update((arr) => [toast, ...arr]);
@@ -64,21 +64,17 @@ export class ToastService {
     this.toastsSig.set([]);
   }
 
-  // helpers — durations tuned for the cashier-at-POS flow: long enough
-  // to read on a tablet between taps, short enough not to pile up.
-  // Errors stay longer because the cashier usually needs to read the full
-  // message and decide what to do next (fix the input, call the manager,
-  // etc.) before tapping again.
-  success(msg: string, title?: string, duration = 4000) {
+  // helpers (durations reduced 50% for snappier UX)
+  success(msg: string, title?: string, duration = 1500) {
     this.show({ title, description: msg, variant: 'success', duration });
   }
-  error(msg: string, title?: string, duration = 6000) {
+  error(msg: string, title?: string, duration = 2000) {
     this.show({ title, description: msg, variant: 'error', duration });
   }
-  warning(msg: string, title?: string, duration = 5000) {
+  warning(msg: string, title?: string, duration = 1750) {
     this.show({ title, description: msg, variant: 'warning', duration });
   }
-  info(msg: string, title?: string, duration = 4000) {
+  info(msg: string, title?: string, duration = 1500) {
     this.show({ title, description: msg, variant: 'info', duration });
   }
 }
