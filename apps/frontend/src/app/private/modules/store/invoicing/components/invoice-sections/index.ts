@@ -20,3 +20,4 @@ export * from './invoice-section-controls';
 export * from './invoice-section-aiu.logic';
 export * from './invoice-section-aiu.component';
 export * from './invoice-section-documento.component';
+export * from './invoice-section-lineas.component';

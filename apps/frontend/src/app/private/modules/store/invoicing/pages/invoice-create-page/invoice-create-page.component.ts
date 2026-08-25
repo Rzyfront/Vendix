@@ -166,6 +166,18 @@ import type {
   DocumentoSectionNotice,
   DocumentoSectionPaths,
 } from '../../components/invoice-sections/index';
+/**
+ * SECCIÓN LÍNEAS COMPARTIDA con «Líneas modelo» del editor de perfiles (B.3).
+ * Es la sección con más asimetría de las dos pantallas —picker de producto,
+ * impuestos por línea y descuento sólo existen acá—, así que el componente
+ * tiene dos plantillas internas por contexto en vez de una sola con banderas
+ * de campo. Ver su docblock.
+ */
+import { InvoiceSectionLineasComponent } from '../../components/invoice-sections/index';
+import type {
+  LineasRowErrors,
+  LineasRowPaths,
+} from '../../components/invoice-sections/index';
 import { InvoiceTaxCatalogService } from '../../components/invoice-create/invoice-tax-catalog.service';
 import {
   InvoiceAiuSettings,
@@ -695,6 +707,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     InvoiceOrderSelectComponent,
     InvoiceSectionAiuComponent,
     InvoiceSectionDocumentoComponent,
+    InvoiceSectionLineasComponent,
   ],
   template: `
     <div class="w-full max-w-[1400px] mx-auto">
@@ -1666,235 +1679,34 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               [expanded]="isSectionOpen('lineas')"
               (expandedChange)="setSection('lineas', $event)"
             >
-              <div formArrayName="items" class="space-y-2">
-                @for (item of itemControls(); track rowUid(item); let i = $index) {
-                  <div
-                    [formGroupName]="i"
-                    class="rounded-lg border border-border bg-[var(--color-surface-secondary)] p-2 space-y-2"
-                  >
-                    <div class="grid grid-cols-12 gap-2 items-end">
-                      <div class="col-span-12 md:col-span-4">
-                        <app-input
-                          label="Descripción"
-                          formControlName="description"
-                          [control]="item.get('description')"
-                          [error]="itemError(i, 'description')"
-                          [required]="true"
-                          size="sm"
-                        ></app-input>
-                      </div>
-                      <div class="col-span-6 md:col-span-2">
-                        <app-input
-                          label="Cantidad"
-                          type="number"
-                          formControlName="quantity"
-                          [control]="item.get('quantity')"
-                          [error]="itemError(i, 'quantity')"
-                          [required]="true"
-                          min="0.0001"
-                          step="any"
-                          size="sm"
-                        ></app-input>
-                      </div>
-                      <div class="col-span-6 md:col-span-2">
-                        <app-selector
-                          label="Unidad"
-                          formControlName="unit_code"
-                          [options]="unitCodeOptions"
-                          [errorText]="itemError(i, 'unit_code') ?? ''"
-                          size="sm"
-                        ></app-selector>
-                      </div>
-                      <div class="col-span-6 md:col-span-2">
-                        <app-input
-                          label="Precio unitario"
-                          [currency]="true"
-                          formControlName="unit_price"
-                          [control]="item.get('unit_price')"
-                          [error]="itemError(i, 'unit_price')"
-                          [required]="true"
-                          size="sm"
-                        ></app-input>
-                      </div>
-                      <div class="col-span-6 md:col-span-2">
-                        <app-input
-                          label="Descuento"
-                          [currency]="true"
-                          formControlName="discount_amount"
-                          [control]="item.get('discount_amount')"
-                          [error]="itemError(i, 'discount_amount')"
-                          size="sm"
-                        ></app-input>
-                      </div>
-                    </div>
-
-                    <div class="grid grid-cols-12 gap-2 items-center">
-                      <div class="col-span-12 md:col-span-5">
-                        <button
-                          type="button"
-                          class="w-full flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-md border border-border hover:border-primary-600 transition-colors text-left"
-                          (click)="openProductPicker(item)"
-                        >
-                          <app-icon name="package" [size]="14" />
-                          <span class="flex-1 min-w-0 truncate">
-                            {{ productLabel(item) }}
-                          </span>
-                        </button>
-                      </div>
-
-                      @if (isAiu()) {
-                        <!--
-                          INTERRUPTOR DE BASE AIU POR LÍNEA. Decide si este
-                          renglón entra a la base gravable del régimen o si es
-                          costo reembolsable. Es la misma decisión que antes se
-                          tomaba dejando el selector en blanco — sólo que ahora
-                          se ve que es una decisión.
-                        -->
-                        <div
-                          class="col-span-8 md:col-span-5 flex items-center gap-2"
-                        >
-                          <!--
-                            «app-toggle» y no un «<input type="checkbox">»: es el
-                            control on/off del sistema, con el color del tenant,
-                            foco visible y área táctil. Mismo control que en el
-                            editor de perfiles, para que la decisión fiscal se
-                            vea igual donde se preconfigura y donde se emite.
-                          -->
-                          <div
-                            class="flex shrink-0 items-center"
-                            [title]="
-                              lineCarriesAiu(item)
-                                ? 'Esta línea lleva la base AIU configurada'
-                                : 'Costo reembolsable: no entra a la base AIU'
-                            "
-                          >
-                            <app-toggle
-                              label="AIU"
-                              ariaLabel="Aplicar la base AIU a esta línea"
-                              [checked]="lineCarriesAiu(item)"
-                              (changed)="toggleLineAiu(item, $event)"
-                            ></app-toggle>
-                          </div>
-                          @if (lineCarriesAiu(item)) {
-                            <div class="min-w-0 flex-1">
-                              <app-selector
-                                formControlName="aiu_component"
-                                [options]="aiuComponentOptions"
-                                [errorText]="itemError(i, 'aiu_component') ?? ''"
-                                placeholder="Componente AIU"
-                                size="sm"
-                              ></app-selector>
-                            </div>
-                          } @else {
-                            <span
-                              class="min-w-0 flex-1 truncate text-[11px] text-[var(--color-text-secondary)]"
-                            >
-                              Costo reembolsable — fuera de la base AIU
-                            </span>
-                          }
-                        </div>
-                      } @else {
-                        <div class="col-span-8 md:col-span-5">
-                          <span
-                            class="text-xs text-[var(--color-text-secondary)]"
-                          >
-                            {{ lineSummary(i) }}
-                          </span>
-                        </div>
-                      }
-
-                      <div class="col-span-4 md:col-span-2 flex justify-end gap-1">
-                        <!--
-                          Configuración avanzada de ESTA línea. La tira de la
-                          tabla no da para todo lo que una línea puede declarar
-                          (unidad, varios impuestos, cuenta PUC, componente AIU)
-                          y, sobre todo, no cabe la previsión de la aritmética.
-                        -->
-                        <button
-                          type="button"
-                          (click)="openAdvancedItem(item)"
-                          class="text-[var(--color-text-secondary)] hover:text-primary transition-colors p-1"
-                          title="Configuración avanzada de la línea"
-                          aria-label="Configuración avanzada de la línea"
-                        >
-                          <app-icon name="sliders-horizontal" [size]="16" />
-                        </button>
-                        <button
-                          type="button"
-                          (click)="removeItem(i)"
-                          class="text-[var(--color-text-secondary)] hover:text-error transition-colors p-1"
-                          title="Eliminar línea"
-                          aria-label="Eliminar línea"
-                        >
-                          <app-icon name="x" [size]="16" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <!--
-                      LOS IMPUESTOS OCUPAN SU PROPIA FILA, a ancho completo.
-                      Compartían celda con el selector de producto en cuatro de
-                      doce columnas, y con dos o tres impuestos declarados las
-                      píldoras empujaban el disparador a otro renglón. No es un
-                      adorno al lado del producto: es la afirmación fiscal de la
-                      línea, y necesita el sitio de un campo.
-                    -->
-                    <vendix-invoice-line-taxes
-                      formControlName="taxes"
-                      [taxes]="availableTaxes()"
-                    />
-                  </div>
-                }
-              </div>
-
-              @if (itemCount() === 0) {
-                <p
-                  class="text-center py-4 text-sm text-[var(--color-text-secondary)]"
-                >
-                  Una factura sin líneas no es una factura: quemaría un
-                  consecutivo autorizado para declarar un total de cero.
-                </p>
-              }
-
               <!--
-                TRES caminos a una línea, no uno. El comerciante pidió
-                explícitamente poder «tanto buscar los productos de mi
-                inventario (productos y servicios) como crear un producto
-                personalizado»; la línea en blanco se conserva para quien sólo
-                quiere teclear.
+                B.3: sección compartida con el editor de perfiles
+                («InvoiceSectionLineasComponent»). El «FormArray» de «items»
+                sigue siendo de esta página —el componente sólo LEE sus
+                filas—, así que abrir el picker, el modal de línea avanzada y
+                las tres formas de crear una línea siguen abriendo los mismos
+                modales de siempre; el componente sólo emite la intención.
               -->
-              <div class="flex flex-wrap justify-end gap-2 mt-4">
-                <app-button
-                  variant="outline"
-                  size="sm"
-                  type="button"
-                  (clicked)="openProductPickerForNewLine()"
-                  [disabled]="itemCount() >= 100"
-                >
-                  <app-icon slot="icon" name="search" [size]="14" />
-                  Buscar en inventario
-                </app-button>
-                <app-button
-                  variant="outline"
-                  size="sm"
-                  type="button"
-                  (clicked)="openCustomItemForNewLine()"
-                  [disabled]="itemCount() >= 100"
-                >
-                  <app-icon slot="icon" name="sparkles" [size]="14" />
-                  Ítem personalizado
-                </app-button>
-                <app-button
-                  variant="ghost"
-                  size="sm"
-                  type="button"
-                  (clicked)="addItem()"
-                  [disabled]="itemCount() >= 100"
-                >
-                  <app-icon slot="icon" name="plus" [size]="14" />
-                  Línea en blanco
-                </app-button>
-              </div>
+              <vendix-invoice-section-lineas
+                context="invoice"
+                [rows]="itemControls()"
+                [rowPaths]="lineasRowPaths"
+                [isAiu]="isAiu()"
+                [aiuComponentOptions]="aiuComponentOptions"
+                [unitCodeOptions]="unitCodeOptions"
+                [rowErrors]="lineasRowErrors()"
+                [rowSummaries]="lineasRowSummaries()"
+                [carriesAiu]="lineCarriesAiuBound"
+                [toggleAiu]="toggleLineAiuBound"
+                [availableTaxes]="availableTaxes()"
+                emptyStateText="Una factura sin líneas no es una factura: quemaría un consecutivo autorizado para declarar un total de cero."
+                (openProductPicker)="openProductPicker($event)"
+                (openAdvancedItem)="openAdvancedItem($event)"
+                (addFromPicker)="openProductPickerForNewLine()"
+                (addCustomItem)="openCustomItemForNewLine()"
+                (addBlankLine)="addItem()"
+                (removeLine)="removeItem($event)"
+              ></vendix-invoice-section-lineas>
             </vendix-invoice-form-section>
 
             <!-- ── IMPUESTOS ─────────────────────────────────────── -->
@@ -3962,6 +3774,54 @@ export class InvoiceCreatePageComponent implements OnInit {
   }));
 
   /**
+   * SECCIÓN LÍNEAS COMPARTIDA (B.3). `aiu_field` apunta a `aiu_component`
+   * —así se llama el control en esta pantalla (ADR-2: el nombre que
+   * sobrevive es el del DTO de cada destino)—; el editor de perfiles apunta
+   * el mismo campo canónico a `bucket`, su propio nombre.
+   */
+  readonly lineasRowPaths: LineasRowPaths = {
+    description: 'description',
+    quantity: 'quantity',
+    unit_code: 'unit_code',
+    unit_price: 'unit_price',
+    discount_amount: 'discount_amount',
+    aiu_field: 'aiu_component',
+    taxes: 'taxes',
+  };
+
+  /** Un objeto de errores por línea, en el vocabulario del componente. */
+  readonly lineasRowErrors = computed<readonly LineasRowErrors[]>(() =>
+    this.itemControls().map((_, i) => ({
+      description: this.itemError(i, 'description'),
+      quantity: this.itemError(i, 'quantity'),
+      unit_code: this.itemError(i, 'unit_code'),
+      unit_price: this.itemError(i, 'unit_price'),
+      discount_amount: this.itemError(i, 'discount_amount'),
+      aiu_field: this.itemError(i, 'aiu_component'),
+    })),
+  );
+
+  /** El total de línea que se pinta cuando la línea NO lleva AIU. */
+  readonly lineasRowSummaries = computed<readonly string[]>(() =>
+    this.itemControls().map((_, i) => this.lineSummary(i)),
+  );
+
+  /**
+   * Envoltorios de `lineCarriesAiu`/`toggleLineAiu` con la firma que espera
+   * el componente compartido —`(row, index[, on])`—: esta pantalla identifica
+   * la línea por su CONTROL, no por su índice, así que el índice se ignora.
+   * Son campos de flecha, no métodos, para que `this` quede fijo sin
+   * `.bind()` en la plantilla.
+   */
+  readonly lineCarriesAiuBound = (row: AbstractControl, _index: number): boolean =>
+    this.lineCarriesAiu(row);
+  readonly toggleLineAiuBound = (
+    row: AbstractControl,
+    _index: number,
+    on: boolean,
+  ): void => this.toggleLineAiu(row, on);
+
+  /**
    * LO QUE ESTE DOCUMENTO NO PUEDE LLEVAR — medido, no supuesto.
    *
    * `CreateInvoiceDto` declara del AIU exactamente dos cosas:
@@ -6004,10 +5864,9 @@ export class InvoiceCreatePageComponent implements OnInit {
       : 'bg-[var(--color-surface)] text-text-primary border-border';
   }
 
-  productLabel(item: AbstractControl): string {
-    const name = item.get('product_name')?.value as string;
-    return name || 'Vincular producto';
-  }
+  // `productLabel` se retiró de aquí: ahora vive DENTRO de
+  // `InvoiceSectionLineasComponent` (B.3), que lee `product_name` de la
+  // misma fila sin necesitar esta página como intermediaria.
 
   lineLabel(index: number): string {
     const item = this.itemsValue()[index];

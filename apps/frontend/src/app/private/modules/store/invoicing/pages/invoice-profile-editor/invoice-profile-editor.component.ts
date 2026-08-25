@@ -8,6 +8,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import {
+    AbstractControl,
     FormBuilder,
     FormArray,
     FormControl,
@@ -97,6 +98,17 @@ import type {
     DocumentoSectionErrors,
     DocumentoSectionNotice,
     DocumentoSectionPaths,
+} from '../../components/invoice-sections/index';
+/**
+ * SECCIÓN LÍNEAS COMPARTIDA con «Líneas» de la factura (B.3). El componente
+ * tiene dos plantillas internas por contexto —acá no hay picker de producto
+ * ni impuestos por línea—, así que el editor sólo le pasa `context="profile"`
+ * y su propio mapa de rutas. Ver el docblock del componente.
+ */
+import { InvoiceSectionLineasComponent } from '../../components/invoice-sections/index';
+import type {
+    LineasRowErrors,
+    LineasRowPaths,
 } from '../../components/invoice-sections/index';
 import {
     FOREIGN_CURRENCY_OPTIONS,
@@ -237,6 +249,7 @@ type SectionId = ProfileScreenSectionId;
         AccountCodeSelectComponent,
         InvoiceSectionAiuComponent,
         InvoiceSectionDocumentoComponent,
+        InvoiceSectionLineasComponent,
         InvoiceProfilePreviewPanelComponent,
         InvoiceProfileVersionsPanelComponent,
     ],
@@ -457,18 +470,6 @@ type SectionId = ProfileScreenSectionId;
                                     factura: son un punto de partida, no un
                                     candado.
                                 </p>
-                                <app-button
-                                    variant="secondary"
-                                    size="sm"
-                                    (clicked)="addModelLine()"
-                                >
-                                    <app-icon
-                                        slot="icon"
-                                        name="plus"
-                                        [size]="14"
-                                    ></app-icon>
-                                    Línea
-                                </app-button>
                             </div>
                             @if (modelLines.controls.length === 0) {
                                 <p class="text-xs text-text-secondary italic">
@@ -476,162 +477,27 @@ type SectionId = ProfileScreenSectionId;
                                     línea vacía, como en el flujo manual.
                                 </p>
                             }
-                            <div class="space-y-2" formArrayName="model_lines">
-                                @for (line of modelLines.controls; track $index) {
-                                    <div
-                                        class="grid grid-cols-1 items-end gap-2 rounded-lg border border-border p-2 md:grid-cols-7"
-                                        [formGroupName]="$index"
-                                    >
-                                        <!--
-                                            El COMPONENTE sólo existe en un
-                                            documento AIU: las cubetas son
-                                            porciones del AIU y en una venta
-                                            ordinaria no significan nada. Fuera
-                                            de AIU se oculta y la línea nace en
-                                            «costo», que es la única cubeta que
-                                            no es componente del régimen.
-
-                                            El INTERRUPTOR es el mismo que la
-                                            vista de emisión pone en cada línea:
-                                            «lleva la base AIU» no es un campo
-                                            nuevo, es bucket distinto de
-                                            «costo». Sin él la decisión fiscal
-                                            queda escondida en elegir una opción
-                                            de un selector de cuatro, y nadie lee
-                                            eso como encender o apagar el AIU de
-                                            la línea.
-                                        -->
-                                        @if (isAiu()) {
-                                            <div class="space-y-1">
-                                                <!--
-                                                    «app-toggle» y no un
-                                                    «<input type="checkbox">»
-                                                    suelto: es el control de
-                                                    encendido/apagado del sistema,
-                                                    así que hereda el color del
-                                                    tenant, el foco visible y el
-                                                    área táctil. Un checkbox de
-                                                    16 px pintado con «accent-»
-                                                    no tenía ninguna de las tres.
-                                                    No se le pasa «styleVariant».
-                                                -->
-                                                <div
-                                                    class="flex items-center"
-                                                    [title]="
-                                                        lineCarriesAiu($index)
-                                                            ? 'Esta línea lleva la base AIU configurada'
-                                                            : 'Costo reembolsable: no entra a la base AIU'
-                                                    "
-                                                >
-                                                    <app-toggle
-                                                        label="AIU"
-                                                        ariaLabel="Aplicar la base AIU a esta línea"
-                                                        [checked]="
-                                                            lineCarriesAiu($index)
-                                                        "
-                                                        (changed)="
-                                                            toggleLineAiu(
-                                                                $index,
-                                                                $event
-                                                            )
-                                                        "
-                                                    ></app-toggle>
-                                                </div>
-                                                @if (lineCarriesAiu($index)) {
-                                                    <app-selector
-                                                        formControlName="bucket"
-                                                        [options]="component_options"
-                                                        size="sm"
-                                                    ></app-selector>
-                                                } @else {
-                                                    <span
-                                                        class="block truncate text-[11px] text-text-secondary"
-                                                        >Costo reembolsable</span
-                                                    >
-                                                }
-                                            </div>
-                                        }
-                                        <div
-                                            [class.md:col-span-2]="isAiu()"
-                                            [class.md:col-span-3]="!isAiu()"
-                                        >
-                                            <app-input
-                                                label="Descripción"
-                                                formControlName="description"
-                                                [maxlength]="line_description_limit"
-                                                size="sm"
-                                                [error]="
-                                                    issueFor(
-                                                        'model_lines[' +
-                                                            $index +
-                                                            '].description'
-                                                    )
-                                                "
-                                            ></app-input>
-                                        </div>
-                                        <app-input
-                                            label="Cantidad"
-                                            formControlName="quantity"
-                                            size="sm"
-                                        ></app-input>
-                                        <app-input
-                                            label="Unidad"
-                                            formControlName="unit_code"
-                                            [maxlength]="4"
-                                            size="sm"
-                                            [error]="
-                                                issueFor(
-                                                    'model_lines[' +
-                                                        $index +
-                                                        '].unit_code'
-                                                )
-                                            "
-                                        ></app-input>
-                                        <!--
-                                            Precio en BLANCO = se teclea en cada
-                                            factura. No es un campo de dinero con
-                                            formato: es la cadena que viaja al
-                                            snapshot, y darle formato de moneda
-                                            acá la redondearía a dos decimales
-                                            cuando el anexo admite seis en el
-                                            precio unitario.
-                                        -->
-                                        <app-input
-                                            label="Precio"
-                                            formControlName="unit_price"
-                                            size="sm"
-                                            placeholder="Se teclea"
-                                            [error]="
-                                                issueFor(
-                                                    'model_lines[' +
-                                                        $index +
-                                                        '].unit_price'
-                                                )
-                                            "
-                                        ></app-input>
-                                        <!--
-                                            SÓLO EL ICONO. La palabra «Quitar» repetida en cada fila de
-                                            cada matriz no aporta nada que el bote de basura no diga, y
-                                            ensancha el botón hasta empujar los campos de la fila. El
-                                            nombre accesible viaja en «ariaLabel», que app-button pone en
-                                            el <button> interno junto con el «title»: sin él, un botón de
-                                            sólo icono se anuncia sin nombre.
-                                        -->
-                                        <app-button
-                                            variant="outline-danger"
-                                            size="sm"
-                                            ariaLabel="Quitar esta línea modelo"
-                                            (clicked)="removeModelLine($index)"
-                                        >
-                                            <app-icon
-                                                slot="icon"
-                                                name="trash-2"
-                                                [size]="15"
-                                            ></app-icon>
-                                        </app-button>
-                                    </div>
-                                }
-                            </div>
+                            <!--
+                                B.3: sección compartida con «Líneas» de la
+                                factura («InvoiceSectionLineasComponent»). El
+                                botón «Línea» del pie lo pinta el propio
+                                componente en su rama de contexto «profile».
+                            -->
+                            <vendix-invoice-section-lineas
+                                context="profile"
+                                [rows]="modelLines.controls"
+                                [rowPaths]="lineasRowPaths"
+                                [isAiu]="isAiu()"
+                                [aiuComponentOptions]="component_options"
+                                [descriptionLimit]="line_description_limit"
+                                [rowErrors]="lineasRowErrors()"
+                                [carriesAiu]="lineCarriesAiuBound"
+                                [toggleAiu]="toggleLineAiuBound"
+                                [maxLines]="999"
+                                emptyStateText="Sin líneas modelo. La factura abrirá con una línea vacía, como en el flujo manual."
+                                (addBlankLine)="addModelLine()"
+                                (removeLine)="removeModelLine($event)"
+                            ></vendix-invoice-section-lineas>
                         </div>
                     </vendix-invoice-form-section>
 
@@ -1758,6 +1624,48 @@ export class InvoiceProfileEditorComponent {
             this.issueFor('dian.header_notes[' + index + ']'),
         );
     });
+
+    /**
+     * SECCIÓN LÍNEAS COMPARTIDA (B.3). `aiu_field` apunta a `bucket` —así se
+     * llama el control acá—; la factura apunta el mismo campo canónico a
+     * `aiu_component`, el suyo (ADR-2). `discount_amount` y `taxes` quedan en
+     * `null`: un perfil no descuenta por línea modelo ni declara impuestos
+     * por línea —los declara por PORCIÓN, en la sección Impuestos (B.4)—.
+     */
+    readonly lineasRowPaths: LineasRowPaths = {
+        description: 'description',
+        quantity: 'quantity',
+        unit_code: 'unit_code',
+        unit_price: 'unit_price',
+        discount_amount: null,
+        aiu_field: 'bucket',
+        taxes: null,
+    };
+
+    /** Un objeto de errores por línea modelo, en el vocabulario del componente. */
+    readonly lineasRowErrors = computed<readonly LineasRowErrors[]>(() => {
+        this.form_value();
+        return this.modelLines.controls.map((_, i) => ({
+            description: this.issueFor('model_lines[' + i + '].description'),
+            unit_code: this.issueFor('model_lines[' + i + '].unit_code'),
+            unit_price: this.issueFor('model_lines[' + i + '].unit_price'),
+        }));
+    });
+
+    /**
+     * Envoltorios de `lineCarriesAiu`/`toggleLineAiu` con la firma que espera
+     * el componente compartido —`(row, index[, on])`—: esta pantalla
+     * identifica la línea modelo por su ÍNDICE, no por su control, así que la
+     * fila se ignora. Son campos de flecha, no métodos, para que `this` quede
+     * fijo sin `.bind()` en la plantilla.
+     */
+    readonly lineCarriesAiuBound = (_row: AbstractControl, index: number): boolean =>
+        this.lineCarriesAiu(index);
+    readonly toggleLineAiuBound = (
+        _row: AbstractControl,
+        index: number,
+        on: boolean,
+    ): void => this.toggleLineAiu(index, on);
 
     readonly saving = toSignal(this.store.select(selectProfileSaving), {
         initialValue: false,
