@@ -934,13 +934,14 @@ describe('CreateInvoiceDto — las 7 llaves foráneas tienen piso', () => {
 
   /**
    * Cuántas propiedades `@IsNumber` tiene cada clase HOY. Medido, no estimado:
-   * 8 + 6 + 4 = 18. Existe para que la compuerta no pueda pasar en vacío — si
-   * la lectura de metadatos se rompe y devuelve cero propiedades, esto falla
-   * antes de que el «no hay ninguna sin piso» mienta. Y si nace un campo
-   * numérico, obliga a actualizar el número a conciencia.
+   * 9 + 6 + 4 = 19 (C.7 sumó `aiu_minimum_base_percent` a `CreateInvoiceDto`,
+   * con su propio `@Min`/`@Max`). Existe para que la compuerta no pueda pasar
+   * en vacío — si la lectura de metadatos se rompe y devuelve cero
+   * propiedades, esto falla antes de que el «no hay ninguna sin piso» mienta.
+   * Y si nace un campo numérico, obliga a actualizar el número a conciencia.
    */
   const NUMERIC_PROPERTY_COUNT: Record<string, number> = {
-    CreateInvoiceDto: 8,
+    CreateInvoiceDto: 9,
     CreateInvoiceItemDto: 6,
     CreateInvoiceTaxDto: 4,
   };
@@ -1089,5 +1090,112 @@ describe('CreateFacturaInvoiceItemDto — description: cota FAZ02 (cac:InvoiceLi
     // emitir, con el consecutivo ya gastado.
     const errors = await validateAsPipe(itemWith({ description: chars(450) }));
     expect(failedPaths(errors)).toContain('items.0.description');
+  });
+});
+
+/**
+ * C.7 — DESCONGELAR LOS TRES CONTROLES AIU DEL DOCUMENTO.
+ *
+ * Antes de este paso el DTO no declaraba `aiu_taxable_basis`,
+ * `aiu_enforce_minimum_base` ni `aiu_minimum_base_percent`: con
+ * `forbidNonWhitelisted: true` (`main.ts:206`), el frontend no podía siquiera
+ * ENVIAR un apartamiento del perfil sin recibir 400. Este bloque cubre sólo el
+ * FORMATO — la legalidad de negocio (base↔matriz, piso vs. legal) se prueba en
+ * `invoicing.service.aiu-document-overrides.spec.ts`, contra la escritura real
+ * del documento.
+ */
+describe('CreateInvoiceDto — C.7: controles AIU apartables por documento', () => {
+  it('acepta los tres controles juntos', async () => {
+    const errors = await validateAsPipe({
+      ...baseInvoice(),
+      operation_type: '09',
+      aiu_taxable_basis: 'subtotal',
+      aiu_enforce_minimum_base: false,
+      aiu_minimum_base_percent: 12.5,
+    });
+    expect(failedPaths(errors)).toEqual([]);
+  });
+
+  it('ausentes los tres, el documento valida igual que antes de C.7', async () => {
+    const errors = await validateAsPipe({
+      ...baseInvoice(),
+      operation_type: '09',
+    });
+    expect(failedPaths(errors)).toEqual([]);
+  });
+
+  it.each([['aiu'], ['utilidad'], ['subtotal']])(
+    'acepta aiu_taxable_basis %s',
+    async (basis) => {
+      const errors = await validateAsPipe({
+        ...baseInvoice(),
+        aiu_taxable_basis: basis,
+      });
+      expect(failedPaths(errors)).toEqual([]);
+    },
+  );
+
+  it('rechaza un aiu_taxable_basis fuera de aiu/utilidad/subtotal', async () => {
+    const errors = await validateAsPipe({
+      ...baseInvoice(),
+      aiu_taxable_basis: 'total',
+    });
+    expect(failedPaths(errors)).toContain('aiu_taxable_basis');
+  });
+
+  it('trata aiu_taxable_basis vacío como "sin valor", no como valor inválido', async () => {
+    const errors = await validateAsPipe({
+      ...baseInvoice(),
+      aiu_taxable_basis: '',
+    });
+    expect(failedPaths(errors)).toEqual([]);
+  });
+
+  it.each([[true], [false]])(
+    'acepta aiu_enforce_minimum_base %s',
+    async (value) => {
+      const errors = await validateAsPipe({
+        ...baseInvoice(),
+        aiu_enforce_minimum_base: value,
+      });
+      expect(failedPaths(errors)).toEqual([]);
+    },
+  );
+
+  it('rechaza aiu_enforce_minimum_base que no es booleano', async () => {
+    // Un string u objeto escalar NO sirve como contraejemplo: con
+    // `enableImplicitConversion: true` (el pipe global), class-transformer
+    // convierte cualquier escalar truthy a `true` ANTES de que `@IsBoolean()`
+    // corra — 'sí', 42 y {} los tres llegan como `true`. Un arreglo es lo
+    // único que sobrevive la conversión implícita sin volverse booleano.
+    const errors = await validateAsPipe({
+      ...baseInvoice(),
+      aiu_enforce_minimum_base: [],
+    });
+    expect(failedPaths(errors)).toContain('aiu_enforce_minimum_base');
+  });
+
+  it('acepta aiu_minimum_base_percent dentro de 0-100', async () => {
+    const errors = await validateAsPipe({
+      ...baseInvoice(),
+      aiu_minimum_base_percent: 10,
+    });
+    expect(failedPaths(errors)).toEqual([]);
+  });
+
+  it('rechaza aiu_minimum_base_percent negativo', async () => {
+    const errors = await validateAsPipe({
+      ...baseInvoice(),
+      aiu_minimum_base_percent: -1,
+    });
+    expect(failedPaths(errors)).toContain('aiu_minimum_base_percent');
+  });
+
+  it('rechaza aiu_minimum_base_percent por encima de 100', async () => {
+    const errors = await validateAsPipe({
+      ...baseInvoice(),
+      aiu_minimum_base_percent: 100.01,
+    });
+    expect(failedPaths(errors)).toContain('aiu_minimum_base_percent');
   });
 });

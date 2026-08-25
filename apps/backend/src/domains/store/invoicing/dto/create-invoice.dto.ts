@@ -31,10 +31,14 @@ import { InvoiceAddressDto, liftInvoiceAddress } from './invoice-address.dto';
 import { IsWithinFiscalIssueDateWindow } from './invoice-issue-date-window.validator';
 import { InvoiceWithholdingInputDto } from './invoice-withholding-input.dto';
 import {
+  AIU_TAXABLE_BASES,
   ENABLED_ACCOUNTING_MODELS,
   accountingModelDisabledReason,
 } from '../profiles/invoice-profile-config.contract';
-import type { AccountingModel } from '../profiles/invoice-profile-config.contract';
+import type {
+  AccountingModel,
+  AiuTaxableBasis,
+} from '../profiles/invoice-profile-config.contract';
 
 /**
  * Códigos DIAN del tipo de identificación del adquiriente (Anexo Técnico 1.9,
@@ -1008,6 +1012,80 @@ export class CreateInvoiceDto {
     message: `aiu_accounting_model sólo admite ${ENABLED_ACCOUNTING_MODELS.join(', ')} por ahora. ${accountingModelDisabledReason('no_sumada') ?? ''}`.trim(),
   })
   aiu_accounting_model?: AccountingModel;
+
+  /**
+   * Base gravable AIU de ESTA factura (C.7). Es la excepción, no la regla: la
+   * congela el perfil (`profile_aiu.taxable_basis`) o, sin perfil, la tienda
+   * (`store_settings.invoicing.aiu`) — este campo existe para el contrato que
+   * SÍ se aparta de esa configuración, no para repetirla en cada documento.
+   *
+   * Se declara acá por la misma obligación que `aiu_accounting_model`: con
+   * `forbidNonWhitelisted: true` (`main.ts:206`) una clave no declarada
+   * devuelve 400 antes de que ninguna lógica la mire.
+   *
+   * Opcional, y **la ausencia significa "usa lo que diga el perfil o la
+   * tienda"** — NUNCA `'aiu'` a secas. `resolveAiuContext` resuelve la
+   * ausencia con la MISMA función que usa el perfil,
+   * `resolveAiuTaxableBasis` (`invoice-profile-config.contract.ts:268`), para
+   * no repetir un cuarto punto de decisión: ese archivo ya tiene la regla de
+   * qué hacer si falta (derivar de `regime`, por defecto hacia la base MÁS
+   * ANCHA, nunca `'utilidad'`).
+   *
+   * Los tres valores son iguales de legítimos: `'aiu'` (A+I+U completo, con
+   * piso), `'utilidad'` (sólo Utilidad, sin piso) y `'subtotal'` (se declina
+   * el tratamiento AIU, grava todo el contrato). La columna donde esto se
+   * persiste se llama `aiu_regime` pero NO guarda un régimen legal: guarda
+   * esta base — `'subtotal'` es un valor legítimo ahí sin que exista ningún
+   * régimen al que corresponda. No lo confundas con `AiuVatRegimeLiteral`.
+   */
+  @IsOptional()
+  @Transform(blankToUndefined)
+  @IsIn(AIU_TAXABLE_BASES as readonly string[], {
+    message: `aiu_taxable_basis sólo admite ${AIU_TAXABLE_BASES.join(', ')}.`,
+  })
+  aiu_taxable_basis?: AiuTaxableBasis;
+
+  /**
+   * Exigir el piso legal del 10% (E.T. art. 462-1) en ESTA factura (C.7).
+   * Sólo tiene efecto bajo `taxable_basis` efectivo `'aiu'` — ver
+   * `resolveAiuMinimumPercent`; el Decreto 1372/1992 no fija piso y
+   * `'subtotal'` no tiene AIU que pisar.
+   *
+   * Opcional, y la ausencia significa "lo que diga el perfil o la tienda":
+   * NO se sustituye el respaldo, se le da precedencia. Un documento que no
+   * manda este campo se comporta exactamente igual que uno emitido antes de
+   * que existiera.
+   */
+  @IsOptional()
+  @IsBoolean({
+    message: 'aiu_enforce_minimum_base debe ser verdadero o falso.',
+  })
+  aiu_enforce_minimum_base?: boolean;
+
+  /**
+   * Porcentaje del piso legal AIU de ESTA factura (C.7). Ausente ⇒ el del
+   * perfil o la tienda; ninguno de los dos ⇒ 10 (`DEFAULT_AIU_MINIMUM_PERCENT`).
+   *
+   * Sólo se valida el FORMATO acá (número entre 0 y 100). La legalidad del
+   * valor —que el piso DECLARADO efectivamente cubra la AIU calculada— la
+   * exige `INVOICING_AIU_001` (`checkAiuDivergences`), exactamente igual que
+   * hoy: threading este campo a través de `aiu_context.aiu.minimum_base_percent`
+   * hace que esa puerta ya existente evalúe el piso EFECTIVO en vez del
+   * heredado, sin código nuevo. Lo que este DTO NO cierra —y queda fuera de
+   * C.7, reportado aparte— es que nada impide que ESTE valor, por sí mismo,
+   * se declare por debajo del 10% legal del E.T. art. 462-1: esa compuerta
+   * (`AIU_FLOOR_BELOW_LEGAL`) hoy sólo corre al guardar el PERFIL.
+   */
+  @IsOptional()
+  @IsNumber({}, { message: 'aiu_minimum_base_percent debe ser un número.' })
+  @Type(() => Number)
+  @Min(0, {
+    message: 'aiu_minimum_base_percent no puede ser negativo.',
+  })
+  @Max(100, {
+    message: 'aiu_minimum_base_percent no puede superar 100.',
+  })
+  aiu_minimum_base_percent?: number;
 
   /**
    * Divisa extranjera de la operación, ISO 4217. Acompaña a

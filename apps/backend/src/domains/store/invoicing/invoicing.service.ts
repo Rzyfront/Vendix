@@ -59,13 +59,16 @@ import { DIAN_INVOICE_OPERATION_TYPES } from './providers/dian-direct/constants/
 import {
   regimeFromTaxableBasis,
   resolveAiuTaxableBasis,
+  validateInvoiceProfileConfig,
 } from './profiles/invoice-profile-config.contract';
 import type {
   AiuComponentsBasis,
   AiuTaxableBasis,
+  AiuVatRegimeLiteral,
   InvoiceProfileConfig,
   ProfileAiuConfig,
 } from './profiles/invoice-profile-config.contract';
+import { buildProfileConfigException } from './profiles/invoice-profile-config.validator';
 import { profileNotFound } from './profiles/profile-errors';
 import { WithholdingFlowService } from '../withholding-tax/withholding-flow.service';
 import {
@@ -919,6 +922,22 @@ export class InvoicingService {
       // Con perfil, el régimen sale de la versión congelada y `store_settings`
       // no se consulta. Sin perfil, `undefined` y el flujo manual queda igual.
       profile_snapshot?.config.aiu,
+      // C.7 — los tres controles que ESTA factura puede apartar del perfil.
+      {
+        taxable_basis: dto.aiu_taxable_basis,
+        enforce_minimum_base: dto.aiu_enforce_minimum_base,
+        minimum_base_percent: dto.aiu_minimum_base_percent,
+      },
+    );
+    // C.7 — la MISMA compuerta que corre al guardar el perfil
+    // (`TAX_MATRIX_CONTRADICTS_REGIME`), reusada acá porque el documento
+    // pudo apartarse de la base que el perfil declaró. Ver
+    // `assertAiuBaseMatchesProfileMatrix`.
+    this.assertAiuBaseMatchesProfileMatrix(
+      profile_snapshot?.config,
+      aiu_context.aiu,
+      dto.operation_type,
+      profile_snapshot?.profile_id,
     );
     const calculated = this.recalculateDocument(
       dto.items,
@@ -2024,10 +2043,16 @@ export class InvoicingService {
       // `profile_id` a propósito. Quien quiera otro perfil descarta el borrador
       // y lo crea de nuevo, que es la única forma de que los importes y la
       // procedencia se recalculen juntos.
-      const frozen_profile_aiu = await this.loadFrozenProfileAiu(
+      // C.7 — se necesita la CONFIG completa (no sólo `.aiu`) para poder
+      // reusar la compuerta base↔matriz del perfil; `loadFrozenProfileAiu`
+      // sólo devolvía la sección AIU porque antes de C.7 nadie más la
+      // necesitaba. Una sola consulta: `frozen_profile_aiu` se deriva de
+      // `frozen_profile_config`, no se vuelve a leer la tabla.
+      const frozen_profile_config = await this.loadFrozenProfileConfig(
         invoice.profile_id,
         invoice.profile_version,
       );
+      const frozen_profile_aiu = frozen_profile_config?.aiu ?? null;
       const aiu_context = await this.resolveAiuContext(
         dto.operation_type ?? invoice.operation_type,
         dto.items,
@@ -2036,6 +2061,44 @@ export class InvoicingService {
         // objeto del contrato con el que se validó la nota CAV03.
         dto.aiu_contract_object ?? invoice.aiu_contract_object,
         frozen_profile_aiu,
+        // C.7 — mismo criterio: el del PATCH si lo trae, el persistido si no.
+        // Editar un borrador no puede borrar por omisión un control que la
+        // factura ya tenía apartado del perfil.
+        //
+        // `invoice.aiu_regime` NO es una `AiuTaxableBasis`: es lo que
+        // `regimeStringFromTaxableBasis` escribió al crear (un régimen legal
+        // —'et_462_1'/'decreto_1372_1992'— o, si la base fue 'subtotal', esa
+        // misma palabra porque no tiene régimen). Invertirlo a mano sería el
+        // 4º sitio que decide lo mismo. En vez de eso se reusa
+        // `resolveAiuTaxableBasis` pasándole el string crudo en LAS DOS
+        // posiciones que acepta: si es una base válida ('subtotal') gana esa
+        // rama; si no, la función la interpreta como régimen y la traduce
+        // igual que en la creación. `enforce_minimum_base` no tiene columna
+        // propia —nunca la tuvo, ni antes de C.7— así que su ausencia en el
+        // PATCH siempre cae en `source` dentro de `resolveAiuContext`.
+        {
+          taxable_basis:
+            dto.aiu_taxable_basis ??
+            (invoice.aiu_regime
+              ? resolveAiuTaxableBasis({
+                  regime: invoice.aiu_regime as AiuVatRegimeLiteral,
+                  taxable_basis: invoice.aiu_regime as AiuTaxableBasis,
+                })
+              : undefined),
+          enforce_minimum_base: dto.aiu_enforce_minimum_base,
+          minimum_base_percent:
+            dto.aiu_minimum_base_percent ??
+            (invoice.aiu_minimum_percent != null
+              ? Number(invoice.aiu_minimum_percent)
+              : undefined),
+        },
+      );
+      // C.7 — la MISMA compuerta que corre al guardar el perfil, reusada acá.
+      this.assertAiuBaseMatchesProfileMatrix(
+        frozen_profile_config,
+        aiu_context.aiu,
+        dto.operation_type ?? invoice.operation_type,
+        invoice.profile_id,
       );
       const calculated = this.recalculateDocument(
         dto.items,
@@ -3199,7 +3262,7 @@ export class InvoicingService {
    * enumeración.
    */
   /**
-   * Configuración AIU de una versión YA congelada en una factura.
+   * Configuración COMPLETA de una versión YA congelada en una factura.
    *
    * Distinta de `resolveProfileSnapshot` en lo único que importa: aquí NO se
    * consulta el estado del perfil ni su `current_version`. La versión ya está
@@ -3216,11 +3279,17 @@ export class InvoicingService {
    * la factura inservible para siempre. Se devuelve `null` y el documento cae al
    * flujo manual, que es degradación visible en las columnas `aiu_*` y no
    * pérdida de acceso al documento.
+   *
+   * C.7 — devuelve la config ENTERA, no sólo `.aiu` (que es todo lo que hacía
+   * falta antes de este paso): `assertAiuBaseMatchesProfileMatrix` necesita
+   * también `taxes.rules`, congelado en la misma fila. `.aiu` se sigue
+   * derivando en el call site con `frozen_profile_config?.aiu ?? null` — una
+   * sola consulta, un solo sitio que lee `invoice_profile_versions`.
    */
-  private async loadFrozenProfileAiu(
+  private async loadFrozenProfileConfig(
     profile_id: number | null | undefined,
     profile_version: number | null | undefined,
-  ): Promise<ProfileAiuConfig | null> {
+  ): Promise<InvoiceProfileConfig | null> {
     if (profile_id == null || profile_version == null) return null;
 
     const row = await this.prisma.invoice_profile_versions.findFirst({
@@ -3229,8 +3298,80 @@ export class InvoicingService {
     });
     if (!row) return null;
 
-    const config = row.config as unknown as InvoiceProfileConfig;
-    return config?.aiu ?? null;
+    return row.config as unknown as InvoiceProfileConfig;
+  }
+
+  /**
+   * C.7 — compuerta base↔matriz en la ESCRITURA del documento, con el MISMO
+   * código que usa el perfil.
+   *
+   * ## Por qué existe
+   *
+   * Antes de C.7 la base gravable (`taxable_basis`) de un documento AIU era
+   * EXACTAMENTE la que declaraba el perfil o la tienda que lo emite —
+   * `resolveAiuContext` la copiaba, nunca la recibía del documento—. La tabla
+   * de tributos por bucket del perfil (`config.taxes.rules`) se valida
+   * CONTRA esa base al guardar el perfil (`TAX_MATRIX_CONTRADICTS_REGIME`,
+   * en `validateTaxSection`), así que mientras el documento no podía
+   * apartarse de la base, esa validación de guardado bastaba: la base del
+   * documento y la de la matriz SIEMPRE coincidían por construcción.
+   *
+   * C.7 rompe esa garantía: el documento ahora puede declarar una base
+   * distinta de la que el perfil congeló. Si lo hace, la matriz del perfil
+   * —pensada para OTRA base— puede quedar contradiciendo la base real de
+   * ESTE documento sin que nada lo note; es la misma contradicción que
+   * `TAX_MATRIX_CONTRADICTS_REGIME` existe para atajar, sólo que en el
+   * momento equivocado (guardado del perfil, no emisión del documento).
+   *
+   * ## Por qué se reusa `validateInvoiceProfileConfig` entero, filtrado
+   *
+   * No se escribe una segunda regla que decida lo mismo. Se arma un
+   * `InvoiceProfileConfig` idéntico al congelado salvo por `aiu.taxable_basis`
+   * —que pasa a ser la base EFECTIVA de este documento, ya resuelta por
+   * `resolveAiuContext`— y se corre el validador COMPLETO del perfil sobre
+   * él. El resultado trae issues de OTRAS secciones (formato, DIAN, retención,
+   * moneda…) que no describen nada de este documento —haber estado bien al
+   * congelar el perfil no cambia con la base—, así que se descartan: sólo
+   * `TAX_MATRIX_CONTRADICTS_REGIME` importa acá. Filtrar es más seguro que
+   * exportar y llamar sólo `validateTaxSection`: esa función NO está
+   * exportada porque el archivo se espeja byte a byte al frontend
+   * (`invoice-profile-config.contract.spec.ts`), y exportarla obligaría a
+   * copiar el archivo mirror en este mismo commit. `validateInvoiceProfileConfig`
+   * ya está exportada para el editor del perfil — no hace falta tocar el
+   * archivo espejado en absoluto.
+   *
+   * `undefined`/sin perfil/perfil sin `taxes.rules`: no hay matriz que pueda
+   * contradecir nada, y el flujo manual (o un perfil sin tributos declarados)
+   * queda idéntico a como estaba antes de C.7 — la puerta 4 del checklist.
+   */
+  private assertAiuBaseMatchesProfileMatrix(
+    profile_config: InvoiceProfileConfig | null | undefined,
+    effective_aiu: InvoiceCalculatorAiuInput | undefined,
+    operation_type: string | null | undefined,
+    profile_id: number | null | undefined,
+  ): void {
+    if (!profile_config?.aiu || !profile_config.taxes?.rules?.length) return;
+    if (!effective_aiu) return;
+
+    const merged_config: InvoiceProfileConfig = {
+      ...profile_config,
+      aiu: {
+        ...profile_config.aiu,
+        taxable_basis: effective_aiu.taxable_basis,
+      },
+    };
+    const issues = validateInvoiceProfileConfig(merged_config, {
+      operation_type: operation_type ?? '',
+    });
+    const matrix_issues = issues.filter(
+      (issue) => issue.code === 'TAX_MATRIX_CONTRADICTS_REGIME',
+    );
+    if (matrix_issues.length === 0) return;
+
+    throw buildProfileConfigException(matrix_issues, {
+      profile_id,
+      operation_type: operation_type ?? '',
+    });
   }
 
   private async resolveProfileSnapshot(
@@ -3329,6 +3470,20 @@ export class InvoicingService {
      * viva. Ausente ⇒ flujo manual, idéntico a antes de los perfiles.
      */
     profile_aiu?: ProfileAiuConfig | null,
+    /**
+     * C.7 — los TRES controles que el perfil/tienda congelan pero que ESTE
+     * documento puede apartar: base gravable, exigencia del piso y su
+     * porcentaje. MISMA precedencia que `invoice_contract_object`: ganan
+     * sobre `profile_aiu`/`store_settings`, que pasan a ser el default.
+     * Ausencia de cualquiera de los tres ⇒ lo que diga la fuente, NUNCA un
+     * valor fijo — ver `resolveAiuTaxableBasis`, la única función que decide
+     * la ausencia de `taxable_basis` en todo el archivo.
+     */
+    invoice_aiu_overrides?: {
+      taxable_basis?: AiuTaxableBasis | null;
+      enforce_minimum_base?: boolean | null;
+      minimum_base_percent?: number | null;
+    },
   ): Promise<{
     aiu?: InvoiceCalculatorAiuInput;
     note?: string;
@@ -3394,9 +3549,16 @@ export class InvoicingService {
     // tienda — ver el docblock de `getAiuSettingsView`. Con perfil, si éste no
     // trae `taxable_basis` (snapshot de antes de este campo), se deriva de su
     // `regime` sin reescribir nada.
+    // Precedencia documento → perfil/tienda, MISMA regla que `contract_object`
+    // dos líneas más abajo. `resolveAiuTaxableBasis` es la MISMA función que
+    // usa el perfil para resolver su propia ausencia — no se escribe un
+    // cuarto punto de decisión: si el documento no manda `taxable_basis`, se
+    // le pasa `undefined` y la función cae en `source.taxable_basis` tal como
+    // hacía antes de C.7.
     const taxable_basis = resolveAiuTaxableBasis({
       regime: source.regime ?? 'et_462_1',
-      taxable_basis: source.taxable_basis,
+      taxable_basis:
+        invoice_aiu_overrides?.taxable_basis ?? source.taxable_basis,
     });
 
     // Precedencia documento → perfil/tienda. El objeto de la fuente no
@@ -3453,13 +3615,23 @@ export class InvoicingService {
         // completo. Una tienda que no configuró nada declara de más, no de
         // menos.
         taxable_basis,
-        enforce_minimum_base: source.enforce_minimum_base,
+        // Precedencia, no sustitución: `?? ` sólo entra si el documento NO
+        // mandó el campo. Un `false` explícito del documento SÍ tiene que
+        // ganar, por eso se compara contra `null`/`undefined`, no con
+        // falsy — ver el tipo de `invoice_aiu_overrides` arriba.
+        enforce_minimum_base:
+          invoice_aiu_overrides?.enforce_minimum_base ??
+          source.enforce_minimum_base,
         // Se pasa TAL CUAL, sin convertir a `number`. El calculador acepta
         // `DianNumericInput`, así que el porcentaje del perfil —un `string`
         // decimal exacto, por diseño del contrato— llega intacto. Convertirlo a
         // float acá reintroduciría el error binario que el contrato evita
-        // guardando los porcentajes como cadena.
-        minimum_base_percent: source.minimum_base_percent,
+        // guardando los porcentajes como cadena. El del documento SÍ es
+        // `number` (el DTO lo valida como tal, ver `create-invoice.dto.ts`);
+        // el calculador acepta ambos por `DianNumericInput`.
+        minimum_base_percent:
+          invoice_aiu_overrides?.minimum_base_percent ??
+          source.minimum_base_percent,
         // D.4 — sólo presentes con perfil (ver el comentario de `source`
         // arriba). El calculador ya sabe leerlos ausentes.
         components: source.components,
