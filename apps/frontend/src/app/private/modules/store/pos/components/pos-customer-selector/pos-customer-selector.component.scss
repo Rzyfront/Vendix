@@ -281,6 +281,18 @@
   line-height: 1.4;
 }
 
+// QUI-723 — In-range counter (cashier typed a valid number).
+.document-format-hint--ok {
+  background: rgba(76, 183, 130, 0.1);
+  color: var(--color-success, #2c8a4a);
+}
+
+// QUI-723 — Out-of-range / non-standard format (overflow or bad chars).
+.document-format-hint--warn {
+  background: rgba(235, 87, 87, 0.1);
+  color: var(--color-error, #c2362f);
+}
+
 .form-actions {
   display: flex;
   gap: 8px;

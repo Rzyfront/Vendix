@@ -193,14 +193,21 @@
             type="text"
             [size]="'md'"
           ></app-input>
-          <!-- QUI-723 — Format hint when the typed number does not match the
-               canonical regex for the selected document type. The system still
-               accepts the input (ResolveCustomerDto is format-tolerant); this
-               is a soft warning so the cashier notices before submit. -->
+          <!-- QUI-723 — Real-time counter for the document number. Shows the
+               cashier how many digits they have, how many are missing, and the
+               min/max range for the selected document type. Three tones:
+               info (in progress), ok (within range), warn (overflow / bad format).
+               Pure info — does NOT block submit (backend is format-tolerant). -->
           @if (documentFormatHint(); as hint) {
-            <span class="document-format-hint" role="status">
+            <span
+              class="document-format-hint"
+              [class.document-format-hint--ok]="hint.tone === 'ok'"
+              [class.document-format-hint--warn]="hint.tone === 'warn'"
+              role="status"
+              aria-live="polite"
+            >
               <app-icon name="info" [size]="14"></app-icon>
-              {{ hint }}
+              {{ hint.text }}
             </span>
           }
         </div>

@@ -133,26 +133,88 @@ export class PosCustomerSelectorComponent {
   );
 
   /**
-   * QUI-723 — Format hint for the document number input. Returns a short
-   * message when the typed number does NOT match the canonical format for the
-   * selected document type (e.g. 11-digit CC). The system still accepts the
-   * input (ResolveCustomerDto is format-tolerant on the backend); the hint
-   * is purely informational so the cashier notices before submit.
+   * QUI-723 — Real-time hint for the document number input.
    *
-   * Returns `null` when no warning is needed (no number, no type, or number
-   * matches the type's regex + maxLength).
+   * Surfaces three things as the cashier types (dev lead's audio):
+   *   1. How many digits they've entered.
+   *   2. How many are still missing (or how many are over the max).
+   *   3. The full min–max range for the selected document type.
+   *
+   * Three visual states:
+   *   - Empty input            → null (no hint).
+   *   - Below min or above max → "info" tone with shortfall / overflow.
+   *   - Inside the range       → "ok" tone confirming the count is valid.
+   *
+   * Pure info: the submit gate `canResolve()` does NOT block on this.
+   * Format-tolerant backend (ResolveCustomerDto) still accepts the input
+   * even when it sits outside the standard range — the hint is purely a
+   * cashier-side aid, matching the lead's "un mismo paso" intent.
    */
-  readonly documentFormatHint = computed<string | null>(() => {
+  readonly documentFormatHint = computed<{
+    tone: 'info' | 'ok' | 'warn';
+    text: string;
+  } | null>(() => {
     const type = this.form.get('documentType')?.value as string | null;
     const number = (this.form.get('documentNumber')?.value as string | null)
       ?.trim()
       .toUpperCase();
     if (!number) return null;
     const rule = findDocumentType(type);
-    if (!rule) return null;
-    if (rule.regex.test(number) && number.length <= rule.maxLength) return null;
-    return `El número no encaja con el formato de ${rule.label} (máx ${rule.maxLength} caracteres). Se va a guardar igual, pero va a ser difícil de buscar después.`;
+    if (!rule) {
+      return {
+        tone: 'info',
+        text: `${number.length} caracteres — sin tipo de documento seleccionado.`,
+      };
+    }
+
+    const len = number.length;
+    const matchesRegex = rule.regex.test(number);
+
+    if (matchesRegex && len <= rule.maxLength) {
+      return {
+        tone: 'ok',
+        text: `✓ ${len} caracteres — entre ${this.ruleMin(rule.regex)} y ${rule.maxLength}.`,
+      };
+    }
+
+    if (len > rule.maxLength) {
+      const over = len - rule.maxLength;
+      return {
+        tone: 'warn',
+        text: `${over} ${over === 1 ? 'carácter de más' : 'caracteres de más'} (máximo ${rule.maxLength} para ${rule.label}). Se va a guardar igual.`,
+      };
+    }
+
+    // Below max-length but regex failed (e.g. wrong chars). We can still
+    // surface the min/max so the cashier knows the target range.
+    const min = this.ruleMin(rule.regex);
+    if (len < min) {
+      const missing = min - len;
+      return {
+        tone: 'info',
+        text: `Faltan ${missing} ${missing === 1 ? 'carácter' : 'caracteres'} (mínimo ${min} para ${rule.label}).`,
+      };
+    }
+    return {
+      tone: 'warn',
+      text: `${len} caracteres para ${rule.label} — formato no estándar. Se va a guardar igual.`,
+    };
   });
+
+  /**
+   * Extract the minimum length from a digit-only regex like /^\d{6,10}$/
+   * or /^\d{8,10}-?\d?$/ (the trailing group is optional). Falls back to
+   * 1 if the regex shape doesn't carry a quantifier.
+   */
+  private ruleMin(regex: RegExp): number {
+    // Look for the first explicit "{n}" or "{n,}" or "{n,m}" quantifier.
+    const source = regex.source;
+    const digitOnly = source.match(/\\d\s*\{\s*(\d+)(?:\s*,)?/);
+    if (digitOnly && digitOnly[1]) {
+      return parseInt(digitOnly[1], 10);
+    }
+    return 1;
+  }
 
   // ── Form ────────────────────────────────────────────────────────────
   // QUI-723 — All fields are optional: the cashier may submit the form with

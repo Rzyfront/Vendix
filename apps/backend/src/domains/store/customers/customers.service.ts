@@ -532,6 +532,11 @@ export class CustomersService {
         this.eventEmitter.emit('customer.updated', {
           store_id: store.id,
           customer_id: existing.id,
+          email: existing.email,
+          first_name: existing.first_name,
+          // The fields the conservative update just filled — what the email
+          // should highlight as "ahora sabemos esto de vos".
+          updated_fields: Object.keys(updateData),
         });
       }
 
