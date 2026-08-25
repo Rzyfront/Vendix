@@ -1,6 +1,7 @@
 import { NgTemplateOutlet } from '@angular/common';
 import {
     Component,
+    DestroyRef,
     ElementRef,
     computed,
     effect,
@@ -75,6 +76,21 @@ const TEMPLATE_BY_INDUSTRY: Readonly<Record<string, string>> = {
 const FALLBACK_TEMPLATE_KEY = 'dian-standard';
 
 /**
+ * Mismo criterio de focuseables que `ModalComponent`, copiado a propósito:
+ * dos definiciones de «qué se puede tabular» harían que la trampa del borrado
+ * duro y la de los modales compartidos se comportaran distinto para el mismo
+ * usuario en la misma pantalla.
+ */
+const DELETE_DIALOG_FOCUSABLE_SELECTOR = [
+    'a[href]',
+    'button:not([disabled])',
+    'input:not([disabled])',
+    'select:not([disabled])',
+    'textarea:not([disabled])',
+    '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
+/**
  * Perfiles de facturación — listado.
  *
  * Un perfil es la configuración fiscal con la que se timbra: régimen AIU,
@@ -108,6 +124,17 @@ const FALLBACK_TEMPLATE_KEY = 'dian-standard';
     ],
     template: `
         <div class="w-full">
+            <!--
+              A.6(b): fondo del diálogo de borrado. Mientras el diálogo vive,
+              este wrapper recibe el atributo inert: el contenido queda fuera
+              del árbol de accesibilidad y no acepta foco ni clic, que es lo
+              que su aria-modal="true" promete y lo que la trampa de Tab por sí
+              sola no garantiza (un lector en modo exploración, o un punto de
+              foco que empiece fuera, alcanzaría la página atenuada).
+              Los tres diálogos viven FUERA de este wrapper a propósito:
+              inertizarlos a ellos mismos los haría inoperables.
+            -->
+            <div [attr.inert]="pending_delete() ? '' : null">
             <!-- Stats: sticky en móvil, estáticas en escritorio -->
             <div
                 class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
@@ -360,7 +387,7 @@ const FALLBACK_TEMPLATE_KEY = 'dian-standard';
                     }
                 </div>
             </app-card>
-
+            </div>
 
             <!-- Confirmación de activar / desactivar -->
             @if (pending_toggle(); as row) {
@@ -392,9 +419,22 @@ const FALLBACK_TEMPLATE_KEY = 'dian-standard';
                 ></app-confirmation-modal>
             }
 
-            <!-- Borrado con confirmación DURA: hay que escribir el nombre -->
+            <!-- Borrado con confirmación DURA: hay que escribir el nombre.
+                 A.6(b): decisión escrita — NO se migra a app-modal ni a
+                 app-confirmation-modal; se le añade trampa de foco
+                 (Tab/Shift+Tab vía listener de documento, réplica de la
+                 convención probada de ModalComponent) + inertización del fondo.
+                 Razón: ConfirmationModalComponent no proyecta contenido — sólo
+                 acepta message string— así que la salvaguarda «escribe el
+                 nombre» no cabe ahí sin tocar un componente compartido fuera
+                 del alcance del paso; y migrar a app-modal reconstruiría el
+                 marcado de la ÚNICA salvaguarda contra un borrado duro
+                 accidental justo cuando la verificación de navegador queda
+                 para el orquestador (blast radius del propio plan). El marcado
+                 del diálogo queda intacto salvo la referencia deleteDialogRoot. -->
             @if (pending_delete(); as row) {
                 <div
+                    #deleteDialogRoot
                     class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
                     role="dialog"
                     aria-modal="true"
@@ -856,6 +896,19 @@ export class InvoiceProfilesPageComponent {
     private readonly delete_confirm_input =
         viewChild<ElementRef<HTMLInputElement>>('deleteConfirmInput');
 
+    // Contenedor del diálogo de borrado: la trampa de foco necesita la RAÍZ
+    // (no sólo el input) para calcular el primer/último focuseable del diálogo
+    // completo — botones Cancelar/Eliminar incluidos.
+    private readonly delete_dialog_root =
+        viewChild<ElementRef<HTMLDivElement>>('deleteDialogRoot');
+
+    // Listener de Tab de la trampa. Vive mientras el diálogo vive: el efecto
+    // lo instala al aparecer `#deleteDialogRoot` y lo desinstala al desaparecer,
+    // y DestroyRef lo recoge si el componente se destruye con el diálogo abierto.
+    private delete_tab_listener: ((event: KeyboardEvent) => void) | null = null;
+
+    private readonly destroy_ref = inject(DestroyRef);
+
     // El elemento que abrió el diálogo, para devolverle el foco al cerrarlo.
     // Sin esto, cerrar con Escape deja el foco en `<body>` y la siguiente
     // tabulación reinicia el recorrido desde el principio de la página.
@@ -884,6 +937,46 @@ export class InvoiceProfilesPageComponent {
             const input = this.delete_confirm_input();
             if (input) input.nativeElement.focus();
         });
+
+        // A.6(b) — Trampa de foco: mientras el diálogo vive, Tab y Shift+Tab
+        // ciclan dentro de él. Antes sólo había escape, autofoco y restauración:
+        // tabular pasado el último control soltaba el foco en la página de
+        // fondo, atenuada pero operable, con un borrado duro a un Enter de
+        // distancia. Réplica literal del keydown-listener de ModalComponent.
+        effect(() => {
+            const root = this.delete_dialog_root()?.nativeElement ?? null;
+            this.detachDeleteTabListener();
+            if (!root) return;
+            const listener = (event: KeyboardEvent) => {
+                if (event.key !== 'Tab') return;
+                const focusables = Array.from(
+                    root.querySelectorAll<HTMLElement>(
+                        DELETE_DIALOG_FOCUSABLE_SELECTOR,
+                    ),
+                ).filter((el) => !el.hasAttribute('disabled') && el.tabIndex !== -1);
+                if (focusables.length === 0) {
+                    event.preventDefault();
+                    return;
+                }
+                const first = focusables[0];
+                const last = focusables[focusables.length - 1];
+                const active = document.activeElement as HTMLElement | null;
+                const inside = active !== null && root.contains(active);
+                if (event.shiftKey) {
+                    if (active === first || !inside) {
+                        event.preventDefault();
+                        last.focus();
+                    }
+                } else if (active === last || !inside) {
+                    event.preventDefault();
+                    first.focus();
+                }
+            };
+            this.delete_tab_listener = listener;
+            document.addEventListener('keydown', listener);
+        });
+
+        this.destroy_ref.onDestroy(() => this.detachDeleteTabListener());
     }
 
     onSearch(term: string): void {
@@ -993,6 +1086,14 @@ export class InvoiceProfilesPageComponent {
     cancelDelete(): void {
         this.pending_delete.set(null);
         this.restoreDeleteFocus();
+    }
+
+    /** Desinstala el listener de Tab de la trampa, si está instalado. */
+    private detachDeleteTabListener(): void {
+        if (this.delete_tab_listener) {
+            document.removeEventListener('keydown', this.delete_tab_listener);
+            this.delete_tab_listener = null;
+        }
     }
 
     /**

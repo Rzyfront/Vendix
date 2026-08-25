@@ -631,11 +631,11 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                   <table class="w-full min-w-[520px] text-xs">
                     <thead>
                       <tr class="border-b border-border text-left text-text-secondary">
-                        <th class="py-1.5 pr-3 font-medium">Componente</th>
-                        <th class="py-1.5 pr-3 font-medium">En la base</th>
-                        <th class="py-1.5 pr-3 text-right font-medium">Base</th>
-                        <th class="py-1.5 pr-3 text-right font-medium">Impuesto</th>
-                        <th class="py-1.5 font-medium">Tarifas</th>
+                        <th scope="col" class="py-1.5 pr-3 font-medium">Componente</th>
+                        <th scope="col" class="py-1.5 pr-3 font-medium">En la base</th>
+                        <th scope="col" class="py-1.5 pr-3 text-right font-medium">Base</th>
+                        <th scope="col" class="py-1.5 pr-3 text-right font-medium">Impuesto</th>
+                        <th scope="col" class="py-1.5 font-medium">Tarifas</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -688,16 +688,16 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
               <table class="w-full text-sm">
                 <thead>
                   <tr class="border-b border-border">
-                    <th class="text-left py-2 px-2 text-text-secondary font-medium">Producto</th>
-                    <th class="text-center py-2 px-2 text-text-secondary font-medium">Cant.</th>
-                    <th class="text-right py-2 px-2 text-text-secondary font-medium">Precio</th>
-                    <th class="text-right py-2 px-2 text-text-secondary font-medium">Desc.</th>
+                    <th scope="col" class="text-left py-2 px-2 text-text-secondary font-medium">Producto</th>
+                    <th scope="col" class="text-center py-2 px-2 text-text-secondary font-medium">Cant.</th>
+                    <th scope="col" class="text-right py-2 px-2 text-text-secondary font-medium">Precio</th>
+                    <th scope="col" class="text-right py-2 px-2 text-text-secondary font-medium">Desc.</th>
                     <!-- «Impuestos», no «IVA»: la columna suma TODO lo que grava
                          la línea. Rotularla IVA sobre una línea con INC o ICA
                          hace que el número no cuadre con nada y que nadie sepa
                          qué impuesto está mirando. -->
-                    <th class="text-right py-2 px-2 text-text-secondary font-medium">Impuestos</th>
-                    <th class="text-right py-2 px-2 text-text-secondary font-medium">Total</th>
+                    <th scope="col" class="text-right py-2 px-2 text-text-secondary font-medium">Impuestos</th>
+                    <th scope="col" class="text-right py-2 px-2 text-text-secondary font-medium">Total</th>
                   </tr>
                 </thead>
                 <tbody>
