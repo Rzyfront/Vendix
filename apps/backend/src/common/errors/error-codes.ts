@@ -2332,6 +2332,26 @@ export const ErrorCodes = {
     devMessage:
       'A per-line tax contradicts the AIU taxable base for that component: the base is determined by the regime, never by what the line declares. Two sites raise it. At CAPTURE, the declared tax disagrees with the tax matrix frozen in the billing profile version (different rate, or a tax on a component the regime does not tax). At EMISSION, a line whose component the regime does not tax carries a tax PERSISTED under a different regime: the XML would drop that line cac:TaxTotal while the amount stays in the header total and cbc:PayableAmount, and FAU04 contrasts one against the sum of the other',
   },
+  /**
+   * D.4 (ADR-6) — `aiu_component: 'contrato'` (Modelo 1 / `no_sumada`) declara
+   * que la línea ES el AIU completo del contrato, en vez de venir partido en
+   * tres renglones (Modelo 2 / `'sumada'`). Las dos formas no pueden convivir
+   * en el mismo documento, ni puede haber dos líneas `'contrato'`: cualquiera
+   * de las dos cosas deja sin definir cuánto vale el AIU que el piso legal del
+   * 10 % (E.T. art. 462-1) necesita comparar contra el contrato. No se elige
+   * una de las dos declaraciones por precedencia — sería adivinar cuál de las
+   * dos miente — se rechaza antes de gastar numeración.
+   *
+   * No confundir con `INVOICING_AIU_001` (AIU por debajo del piso legal): ese
+   * código asume un ÚNICO AIU bien formado y sólo cuestiona si alcanza el 10 %;
+   * éste dispara ANTES, cuando el documento ni siquiera declara un AIU único.
+   */
+  INVOICING_AIU_007: {
+    code: 'INVOICING_AIU_007',
+    httpStatus: 422,
+    devMessage:
+      "Document mixes Modelo 1 (aiu_component: 'contrato') with Modelo 2 component lines (administracion/imprevistos/utilidad), or declares more than one 'contrato' line; a 'contrato' line already IS the whole contract AIU, so either combination leaves the AIU value the art. 462-1 floor compares against undefined",
+  },
 
   /**
    * Configuración de un perfil de facturación que no se puede guardar.
