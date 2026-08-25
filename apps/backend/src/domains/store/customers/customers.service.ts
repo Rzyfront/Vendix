@@ -579,10 +579,10 @@ export class CustomersService {
   /**
    * QUI-723 — Build the partial-update payload for `findOrCreateByEmailOrDocument`.
    *
-   * The dev lead's spec was unambiguous on this: when the customer already
-   * exists we must NOT overwrite fields that were previously confirmed.
-   * We only fill NULL or EMPTY fields on the existing row using values from
-   * the incoming DTO.
+   * Conservative: only fills NULL or EMPTY fields on the existing row
+   * with values from the incoming DTO. Already-confirmed data on the
+   * existing customer is never overwritten — matches the dev lead's
+   * "no hay que cambiarle nada" spec.
    *
    * Email is intentionally excluded: if the existing customer matched the
    * incoming email, the strings already coincide (the lookup was
