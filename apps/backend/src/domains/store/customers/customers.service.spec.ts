@@ -420,5 +420,25 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       expect(result.customer.id).toBe(42); // from the create() mock
       expect(mockPrismaService.users.create).toHaveBeenCalledTimes(1);
     });
+
+    it('accepts non-canonical document_number on the resolve path (no DocumentNumberMatchesType)', async () => {
+      // Regression — the cashier typed `33001521212` (11 digits) for CC,
+      // which the strict `@DocumentNumberMatchesType()` on CreateCustomerDto
+      // rejected (CC regex is `^\d{6,10}$`). ResolveCustomerDto intentionally
+      // skips that decorator so the lookup can still proceed.
+      mockPrismaService.users.findFirst.mockResolvedValue(null);
+
+      // 11-digit number that fails CC strict validation but is a valid lookup key.
+      const result = await service.findOrCreateByEmailOrDocument(1, {
+        email: 'largo@x.com',
+        first_name: 'C',
+        last_name: 'L',
+        document_type: 'CC',
+        document_number: '33001521212',
+      } as any);
+
+      expect(result.was_created).toBe(true);
+      expect(result.matched_by).toBe(null);
+    });
   });
 });

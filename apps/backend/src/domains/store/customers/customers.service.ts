@@ -3,6 +3,7 @@ import { randomBytes } from 'crypto';
 import { user_state_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
+import { ResolveCustomerDto } from './dto/resolve-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { AuditResource } from '../../../common/audit/audit.service';
 import * as bcrypt from 'bcrypt';
@@ -465,7 +466,7 @@ export class CustomersService {
    */
   async findOrCreateByEmailOrDocument(
     storeId: number,
-    dto: CreateCustomerDto,
+    dto: ResolveCustomerDto,
   ): Promise<{
     customer: any;
     was_created: boolean;
