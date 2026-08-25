@@ -1,8 +1,12 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { FormArray, FormBuilder, FormGroup } from '@angular/forms';
 import { provideHttpClient } from '@angular/common/http';
-import { provideHttpClientTesting } from '@angular/common/http/testing';
+import {
+  HttpTestingController,
+  provideHttpClientTesting,
+} from '@angular/common/http/testing';
 import { TenantFacade } from '../../../../../../core/store/tenant/tenant.facade';
+import { environment } from '../../../../../../../environments/environment';
 
 import {
   AiuSectionPaths,
@@ -375,6 +379,155 @@ describe('InvoiceSectionAiuComponent · sugerencia de tributos (DOM)', () => {
           .toBe(false);
       }
       expect(form.dirty).toBe(false);
+    });
+  });
+
+  describe('precarga híbrida de cuentas (C.9)', () => {
+    let httpMock: HttpTestingController;
+
+    /** Las cinco rutas de cuenta de la FACTURA (la del costo es la raíz). */
+    const accountPaths = [
+      'aiu.revenue_administracion',
+      'aiu.revenue_imprevistos',
+      'aiu.revenue_utilidad',
+      'default_account_code',
+      'aiu.vat_payable_account',
+    ];
+
+    const mappingsUrl = `${environment.apiUrl}/store/accounting/account-mappings`;
+
+    /**
+     * Los chips «heredado» EXACTOS: un `<span>` cuyo único texto es la palabra.
+     *
+     * No puede ser un `toContain('heredado')` sobre `text()`: la ayuda del
+     * bloque de cuentas cita la palabra («Lo marcado «heredado» es lo que
+     * aplica hoy…») en cada render, así que una aserción de presencia sería
+     * trivialmente cierta y una de ausencia falsamente negativa.
+     */
+    function inheritedChips(): HTMLElement[] {
+      return Array.from(
+        (fixture.nativeElement as HTMLElement).querySelectorAll('span'),
+      ).filter((el) => (el.textContent ?? '').trim() === 'heredado');
+    }
+
+    function flushMappings(rows: unknown[]): void {
+      const req = httpMock.expectOne(mappingsUrl);
+      expect(req.request.method).toBe('GET');
+      req.flush({ success: true, data: rows });
+    }
+
+    beforeEach(() => {
+      httpMock = TestBed.inject(HttpTestingController);
+    });
+
+    afterEach(() => {
+      httpMock.verify();
+    });
+
+    it('pinta el heredado y la precarga NUNCA escribe un control', () => {
+      mount('profile', []);
+      flushMappings([
+        {
+          mapping_key: 'invoice.validated.revenue',
+          account_code: '413510',
+          description: 'Ingresos por Actividad Financiera',
+          source: 'default',
+        },
+        {
+          mapping_key: 'invoice.validated.iva_payable',
+          account_code: '240802',
+          description: 'IVA Generado por Ventas',
+          source: 'default',
+        },
+      ]);
+      fixture.detectChanges();
+
+      // El valor efectivo se MUESTRA con su marca en los CINCO selectores: la
+      // clave de ingreso cubre los cuatro buckets y la de IVA el quinto.
+      expect(inheritedChips().length).withContext('5 chips heredados').toBe(5);
+      expect(text()).toContain('413510');
+      expect(text()).toContain('240802');
+
+      // Y no se ESCRIBIÓ nada: valores vacíos y pristine. Es lo que hace que
+      // `buildConfig` → `nullIfEmpty` produzca el MISMO config.accounting de
+      // siempre al guardar sin tocar — null preservado byte a byte.
+      for (const path of accountPaths) {
+        const control = form.get(path)!;
+        expect(control.value).withContext(path + ' fue escrito').toBeFalsy();
+        expect(control.dirty).withContext(path + ' nació dirty').toBe(false);
+      }
+      expect(form.dirty).toBe(false);
+    });
+
+    it('un bucket sin clave en el mapeo queda honestamente vacío', () => {
+      mount('profile', []);
+      flushMappings([
+        {
+          mapping_key: 'payment.received.cash',
+          account_code: '1105',
+          description: 'Caja',
+          source: 'default',
+        },
+      ]);
+      fixture.detectChanges();
+
+      // Sin clave para el ingreso ni para el IVA ⇒ placeholder de toda la
+      // vida, sin «heredado» inventado.
+      expect(text()).toContain('Mapeo contable de la tienda');
+      expect(inheritedChips().length)
+        .withContext('chips heredados inventados')
+        .toBe(0);
+      for (const path of accountPaths) {
+        expect(form.get(path)!.value).toBeFalsy();
+      }
+    });
+
+    it('el override es del usuario y «volver al valor del sistema» restaura el heredado', () => {
+      mount('profile', []);
+      flushMappings([
+        {
+          mapping_key: 'invoice.validated.revenue',
+          account_code: '413510',
+          description: 'Ingresos por Actividad Financiera',
+          source: 'default',
+        },
+      ]);
+      fixture.detectChanges();
+
+      // La clave de ingreso cubre los CUATRO buckets (no hay clave de IVA).
+      expect(inheritedChips().length).withContext('4 chips iniciales').toBe(4);
+
+      // OVERRIDE: el usuario elige otra cuenta. Se simula por el control, que
+      // es exactamente lo que dispara la elección real del selector.
+      form.get('aiu.revenue_administracion')!.setValue('413595');
+      const lookup = httpMock.expectOne(
+        (req) =>
+          req.url.includes('/chart-of-accounts') &&
+          req.params.get('search') === '413595',
+      );
+      lookup.flush({
+        data: [{ id: 7, code: '413595', name: 'Comercio al por mayor', accepts_entries: true }],
+      });
+      fixture.detectChanges();
+      // Sólo el bucket editado deja de ser «heredado»; los otros tres siguen
+      // mostrando el suyo — el override es de ESE bucket, no de la sección.
+      expect(inheritedChips().length)
+        .withContext('chips tras el override')
+        .toBe(3);
+      expect(text()).toContain('413595');
+
+      // VOLVER AL SISTEMA: el control vuelve a null — el bucket deja de viajar
+      // como override y el guardado vuelve a omitirlo.
+      const restore = buttonWithLabel('Volver al valor del sistema');
+      expect(restore).toBeDefined();
+      restore!.click();
+      fixture.detectChanges();
+
+      expect(form.get('aiu.revenue_administracion')!.value).toBeNull();
+      expect(inheritedChips().length)
+        .withContext('chips tras volver al sistema')
+        .toBe(4);
+      expect(text()).toContain('413510');
     });
   });
 });

@@ -8,6 +8,7 @@ import {
   signal,
   effect,
 } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import {
   FormArray,
   FormBuilder,
@@ -39,8 +40,13 @@ import type {
   ProfileConfigIssue,
 } from '../../../../../../core/utils/invoice-profile-config.contract';
 import type { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
+import type { InheritedAccountHint } from '../../../../../../shared/components/account-select/account-select.component';
 import type { InvoiceSectionContext } from './invoice-section-context';
 import { optionalControl, requireControl } from './invoice-section-controls';
+import {
+  AiuAccountDefaultsResolver,
+  EMPTY_AIU_INHERITED_DEFAULTS,
+} from './account-defaults.resolver';
 import {
   AIU_COMPONENTS_BASIS_OPTIONS,
   AIU_COMPONENT_LABELS,
@@ -259,9 +265,24 @@ const SECTION = 'AIU';
       }
 
       <!-- ── BLOQUE 1 · Modelo de contabilización ── -->
-      <div class="rounded-lg border border-border overflow-hidden">
+      <!--
+        LOS CUATRO BLOQUES NO LLEVAN overflow-hidden (A.7).
+
+        Lo llevaban para que el fondo de la cabecera respetara las esquinas, y
+        era el CULPABLE medido del reporte visual del dueño: cada bloque es el
+        ancestro directo de los selectores que contiene, y overflow:hidden
+        recorta todo desplegable absoluto justo en el borde del bloque — el de
+        cuentas (BLOQUE 2) moría en su propio contenedor aunque su panel traiga
+        z-[10000], porque z-index no vence a overflow. Los demás bloques
+        recortaban igual los desplegables de sus app-selector.
+
+        El redondeo se devuelve por partes, como ya hizo el componente
+        vendix-invoice-form-section con la misma enfermedad: la cabecera lleva
+        rounded-t-lg y el borde inferior no tiene fondo propio que desbordar.
+      -->
+      <div class="rounded-lg border border-border">
         <div
-          class="flex items-center gap-2 bg-[var(--color-surface-secondary)] px-3 py-2"
+          class="flex items-center gap-2 rounded-t-lg bg-[var(--color-surface-secondary)] px-3 py-2"
         >
           <app-icon
             name="git-branch"
@@ -370,9 +391,9 @@ const SECTION = 'AIU';
       </div>
 
       <!-- ── BLOQUE 2 · Cuentas para contabilización AIU ── -->
-      <div class="rounded-lg border border-border overflow-hidden">
+      <div class="rounded-lg border border-border">
         <div
-          class="flex items-center gap-2 bg-[var(--color-surface-secondary)] px-3 py-2"
+          class="flex items-center gap-2 rounded-t-lg bg-[var(--color-surface-secondary)] px-3 py-2"
         >
           <app-icon
             name="book-open"
@@ -388,7 +409,10 @@ const SECTION = 'AIU';
         <div class="p-3 space-y-2">
           <p class="text-xs text-text-secondary">
             Cuenta del PUC contra la que se reconoce el ingreso de cada porción,
-            más el IVA generado. Vacío = se usa el mapeo contable de la tienda.
+            más el IVA generado. Lo marcado «heredado» es lo que aplica hoy el
+            mapeo contable de la tienda: se muestra, no se guarda — elegir otra
+            cuenta lo convierte en override de este documento/perfil, y «volver
+            al valor del sistema» restaura la herencia.
           </p>
           <div class="grid grid-cols-1 gap-2 md:grid-cols-3">
             @for (component of components; track component) {
@@ -396,6 +420,7 @@ const SECTION = 'AIU';
                 [label]="componentLabel(component)"
                 [formControl]="revenueAccountControl(component)"
                 placeholder="Mapeo contable de la tienda"
+                [inheritedAccount]="inheritedForBucket(component)"
                 [error]="
                   issueFor('accounting.revenue_account_by_bucket.' + component)
                 "
@@ -407,6 +432,7 @@ const SECTION = 'AIU';
               label="Ingreso · Costo reembolsable"
               [formControl]="revenueAccountControl('costo')"
               placeholder="Mapeo contable de la tienda"
+              [inheritedAccount]="inheritedForBucket('costo')"
               [error]="issueFor('accounting.revenue_account_by_bucket.costo')"
             ></app-account-code-select>
             @if (vatPayableAccountControl(); as vatControl) {
@@ -414,6 +440,7 @@ const SECTION = 'AIU';
                 label="Cuenta de IVA por pagar"
                 [formControl]="vatControl"
                 placeholder="Mapeo contable de la tienda"
+                [inheritedAccount]="inheritedVat()"
                 [error]="issueFor('accounting.vat_payable_account')"
               ></app-account-code-select>
             }
@@ -428,9 +455,9 @@ const SECTION = 'AIU';
       </div>
 
       <!-- ── BLOQUE 3 · Base AIU ── -->
-      <div class="rounded-lg border border-border overflow-hidden">
+      <div class="rounded-lg border border-border">
         <div
-          class="flex items-center gap-2 bg-[var(--color-surface-secondary)] px-3 py-2"
+          class="flex items-center gap-2 rounded-t-lg bg-[var(--color-surface-secondary)] px-3 py-2"
         >
           <app-icon
             name="percent"
@@ -518,9 +545,9 @@ const SECTION = 'AIU';
       </div>
 
       <!-- ── BLOQUE 4 · Base impuestos ── -->
-      <div class="rounded-lg border border-border overflow-hidden">
+      <div class="rounded-lg border border-border">
         <div
-          class="flex items-center justify-between gap-2 bg-[var(--color-surface-secondary)] px-3 py-2"
+          class="flex items-center justify-between gap-2 rounded-t-lg bg-[var(--color-surface-secondary)] px-3 py-2"
         >
           <div class="flex items-center gap-2">
             <app-icon
@@ -791,6 +818,18 @@ const SECTION = 'AIU';
 export class InvoiceSectionAiuComponent {
   private readonly fb = inject(FormBuilder);
 
+  /**
+   * Los defaults vigentes del mapeo contable de la tienda (C.9, híbrido).
+   *
+   * `toSignal` con `initialValue`: la primera renderización sale honesta
+   * («sin heredados» ⇒ placeholders) y el GET de mappings llega cuando llegue.
+   */
+  private readonly accountDefaultsResolver = inject(AiuAccountDefaultsResolver);
+  private readonly inheritedDefaults = toSignal(
+    this.accountDefaultsResolver.defaults(),
+    { initialValue: EMPTY_AIU_INHERITED_DEFAULTS },
+  );
+
   /** En qué pantalla se pinta. Decide la ayuda y la sugerencia de tributos. */
   readonly context = input.required<InvoiceSectionContext>();
 
@@ -1031,6 +1070,19 @@ export class InvoiceSectionAiuComponent {
 
   componentLabel(component: AiuComponentLiteral): string {
     return AIU_COMPONENT_LABELS[component];
+  }
+
+  /**
+   * El heredado que se PINTA en un selector de ingreso mientras su control está
+   * vacío. Sólo lectura de señales: nunca escribe el control (C.9).
+   */
+  inheritedForBucket(bucket: AiuBucket): InheritedAccountHint | null {
+    return this.inheritedDefaults().revenue[bucket];
+  }
+
+  /** Idem para la quinta cuenta, el IVA por pagar del AIU (C.8). */
+  inheritedVat(): InheritedAccountHint | null {
+    return this.inheritedDefaults().vat;
   }
 
   taxableBasis(): AiuTaxableBasis {
