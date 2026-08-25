@@ -2,6 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { FormArray, FormBuilder, FormGroup } from '@angular/forms';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { TenantFacade } from '../../../../../../core/store/tenant/tenant.facade';
 
 import {
   AiuSectionPaths,
@@ -135,7 +136,24 @@ describe('InvoiceSectionAiuComponent · sugerencia de tributos (DOM)', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({
       imports: [InvoiceSectionAiuComponent],
-      providers: [provideHttpClient(), provideHttpClientTesting()],
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        // Sin este doble el spec no arranca: la sección pinta `<app-input>`,
+        // que inyecta `CurrencyFormatService`, que inyecta `TenantFacade`, que
+        // inyecta el `Store` de NgRx — y `TestBed.createComponent` muere con
+        // `NG0201: No provider found for _Store` ANTES de correr cualquier
+        // expectativa. Se doblan sus dos únicos miembros usados, igual que en
+        // `currency.pipe.spec.ts`, y no el `Store` entero: doblar NgRx
+        // declararía sobre este spec una dependencia que no tiene.
+        {
+          provide: TenantFacade,
+          useValue: {
+            getCurrentDomainConfig: () => null,
+            getCurrentStoreId: () => null,
+          },
+        },
+      ],
     });
     const fb = TestBed.inject(FormBuilder);
     form = buildForm(fb);

@@ -868,28 +868,11 @@ export class NotificationsEventsListener {
           ? 'sin adjuntos: PDF no descargado de S3 y XML ausente'
           : null;
 
-      if (delivered) {
-        // 10. Update invoice: mark email as sent (sólo si de verdad viajó
-        // algún adjunto).
-        await this.global_prisma.invoices.update({
-          where: { id: payload.invoice_id },
-          data: { email_sent_at: new Date() },
-        });
-
-        this.logger.log(
-          `Invoice email sent successfully for #${invoice.invoice_number} to ${customer_email}`,
-        );
-      } else if (!result.success) {
-        this.logger.error(
-          `Failed to send invoice email for #${invoice.invoice_number}: ${result.error}`,
-        );
-      } else {
-        this.logger.error(
-          `Invoice email for #${invoice.invoice_number} "sent" by provider with ZERO attachments — not counted as delivered`,
-        );
-      }
-
-      // 11. Traza de entrega (E.10): cada intento de la entrega PRIMARIA deja
+      // 10. Traza de entrega (E.10) — va ANTES de la estampa a propósito: si
+      // esta escritura falla, la factura queda SIN `email_sent_at` y el guardia
+      // de idempotencia de arriba deja reintentar; al revés se reintroduciría
+      // exactamente el defecto que E.10 arregla —una entrega estampada que
+      // ninguna fila audita—, y esa sí es irrecuperable. Cada intento deja
       // fila en `invoice_delivery_events`, igual que ya hace el reenvío de
       // conveniencia (E.6) vía el mismo escritor compartido. Antes de esto,
       // 16 de 95 facturas con `email_sent_at` no tenían ninguna fila aquí —
@@ -909,6 +892,27 @@ export class NotificationsEventsListener {
         provider_error,
         created_by: null,
       });
+
+      if (delivered) {
+        // 11. Update invoice: mark email as sent (sólo si de verdad viajó
+        // algún adjunto).
+        await this.global_prisma.invoices.update({
+          where: { id: payload.invoice_id },
+          data: { email_sent_at: new Date() },
+        });
+
+        this.logger.log(
+          `Invoice email sent successfully for #${invoice.invoice_number} to ${customer_email}`,
+        );
+      } else if (!result.success) {
+        this.logger.error(
+          `Failed to send invoice email for #${invoice.invoice_number}: ${result.error}`,
+        );
+      } else {
+        this.logger.error(
+          `Invoice email for #${invoice.invoice_number} "sent" by provider with ZERO attachments — not counted as delivered`,
+        );
+      }
     } catch (error) {
       // Never throw - email failures should not break any flow
       this.logger.error(
