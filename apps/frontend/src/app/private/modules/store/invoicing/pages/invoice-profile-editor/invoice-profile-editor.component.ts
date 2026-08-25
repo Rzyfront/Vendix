@@ -125,6 +125,14 @@ import { InvoiceSectionImpuestosComponent } from '../../components/invoice-secti
  */
 import { InvoiceSectionRetencionesComponent } from '../../components/invoice-sections/index';
 import type { RetencionesRowErrors } from '../../components/invoice-sections/index';
+/**
+ * SECCIÓN DIVISA COMPARTIDA con la factura (B.6). El perfil no consulta
+ * ninguna TRM —eso es del día de cada factura, no algo que un perfil pueda
+ * congelar—, así que sólo le pasa el interruptor y la divisa. Ver el
+ * docblock del componente.
+ */
+import { InvoiceSectionDivisaComponent } from '../../components/invoice-sections/index';
+import type { DivisaSectionPaths } from '../../components/invoice-sections/index';
 import {
     FOREIGN_CURRENCY_OPTIONS,
     INVOICE_TYPE_OPTIONS,
@@ -267,6 +275,7 @@ type SectionId = ProfileScreenSectionId;
         InvoiceSectionLineasComponent,
         InvoiceSectionImpuestosComponent,
         InvoiceSectionRetencionesComponent,
+        InvoiceSectionDivisaComponent,
         InvoiceProfilePreviewPanelComponent,
         InvoiceProfileVersionsPanelComponent,
     ],
@@ -601,23 +610,13 @@ type SectionId = ProfileScreenSectionId;
                         [expanded]="isSectionOpen('divisa')"
                         (expandedChange)="setSection('divisa', $event)"
                     >
-                        <div class="space-y-3" formGroupName="currency">
-                            <app-toggle
-                                label="Declarar conversión a divisa extranjera"
-                                formControlName="declare_foreign"
-                                helpText="La factura se emite SIEMPRE en pesos. Esto sólo añade la conversión al XML (Res. DIAN 000042/2020, art. 73)."
-                            ></app-toggle>
-
-                            <app-selector
-                                label="Divisa"
-                                formControlName="code"
-                                [options]="currency_options"
-                                size="sm"
-                                placeholder="Sin divisa"
-                                helpText="Se guarda la divisa, no la tasa: la tasa es del día de cada factura."
-                                [errorText]="issueFor('currency.code')"
-                            ></app-selector>
-                        </div>
+                        <vendix-invoice-section-divisa
+                            context="profile"
+                            [form]="form"
+                            [paths]="divisaSectionPaths"
+                            [currencyOptions]="currency_options"
+                            [errors]="divisaErrors()"
+                        ></vendix-invoice-section-divisa>
                     </vendix-invoice-form-section>
 
                     <!-- ══ CONTABILIDAD ══ espejo de la sección homónima.
@@ -629,7 +628,17 @@ type SectionId = ProfileScreenSectionId;
                          mantendrían sincronizados, pero el operador no sabría
                          cuál es la que manda y buscaría la diferencia. Aquí
                          quedan sólo cuando el perfil NO es AIU, donde no hay
-                         sección AIU que las aloje. -->
+                         sección AIU que las aloje.
+
+                         B.6 evaluó extraer TAMBIÉN esta rama (no-AIU) a un
+                         componente compartido con la factura y concluyó que
+                         no hay campo en común: aquí son dos cuentas FIJAS
+                         por bucket («revenue_costo», «vat_payable_account»);
+                         la factura fuerza una cuenta por defecto MÁS un mapa
+                         de overrides por línea, porque una factura tiene
+                         líneas que un perfil no tiene. Cero controles
+                         compartibles — ver el comentario espejo en
+                         «invoice-create-page.component.ts». -->
                     <vendix-invoice-form-section
                         title="Contabilidad"
                         [help]="help('contabilidad')"
@@ -1521,6 +1530,22 @@ export class InvoiceProfileEditorComponent {
      */
     readonly catalogRateForBound = (index: number): string | null =>
         this.catalogRateFor(index);
+
+    /**
+     * Rutas de «Divisa» (B.6). `exchange_rate`/`exchange_rate_date` quedan
+     * en `null`: el perfil no guarda ninguna TRM, es del día de cada
+     * factura.
+     */
+    readonly divisaSectionPaths: DivisaSectionPaths = {
+        declare_foreign: 'currency.declare_foreign',
+        currency_code: 'currency.code',
+        exchange_rate: null,
+        exchange_rate_date: null,
+    };
+
+    readonly divisaErrors = computed<{ currency_code?: string }>(() => ({
+        currency_code: this.issueFor('currency.code'),
+    }));
 
     readonly saving = toSignal(this.store.select(selectProfileSaving), {
         initialValue: false,

@@ -195,6 +195,14 @@ import { InvoiceSectionImpuestosComponent } from '../../components/invoice-secti
  */
 import { InvoiceSectionRetencionesComponent } from '../../components/invoice-sections/index';
 import type { RetencionesRowPaths } from '../../components/invoice-sections/index';
+/**
+ * SECCIÓN DIVISA COMPARTIDA con el editor de perfiles (B.6). Toda la
+ * consulta a la TRM oficial (`ExchangeRateQuote`, carga, sobre-escritura,
+ * equivalente declarado) es sólo de `invoice`: un perfil no emite, así que
+ * no dispara ninguna consulta. Ver el docblock del componente.
+ */
+import { InvoiceSectionDivisaComponent } from '../../components/invoice-sections/index';
+import type { DivisaSectionPaths } from '../../components/invoice-sections/index';
 import { InvoiceTaxCatalogService } from '../../components/invoice-create/invoice-tax-catalog.service';
 import {
   InvoiceAiuSettings,
@@ -727,6 +735,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     InvoiceSectionLineasComponent,
     InvoiceSectionImpuestosComponent,
     InvoiceSectionRetencionesComponent,
+    InvoiceSectionDivisaComponent,
   ],
   template: `
     <div class="w-full max-w-[1400px] mx-auto">
@@ -1860,135 +1869,42 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               [expanded]="isSectionOpen('divisa')"
               (expandedChange)="setSection('divisa', $event)"
             >
-              <div
-                class="rounded-lg border border-border bg-[var(--color-surface-secondary)] p-2 mb-3 flex items-start gap-2"
-              >
-                <app-icon
-                  name="info"
-                  [size]="14"
-                  class="text-primary shrink-0 mt-0.5"
-                />
-                <p class="text-xs text-text-primary">
-                  <strong>La factura se emite siempre en pesos colombianos.</strong>
-                  La divisa extranjera sólo DECLARA la conversión
-                  (<code>cac:PaymentAlternativeExchangeRate</code>) y no cambia
-                  el importe legal: el valor exigible sigue siendo el total en
-                  COP. Res. DIAN 000042/2020, art. 73.
-                </p>
-              </div>
-
-              <div class="mb-3">
-                <app-toggle
-                  formControlName="use_foreign_currency"
-                  label="Declarar la conversión a una divisa extranjera"
-                  ariaLabel="Declarar la conversión a una divisa extranjera"
-                />
-              </div>
-
-              @if (usesForeignCurrency()) {
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <app-selector
-                    label="Divisa"
-                    formControlName="foreign_currency"
-                    [options]="foreignCurrencyOptions"
-                    [errorText]="fieldError('foreign_currency') ?? ''"
-                    [required]="true"
-                    size="sm"
-                    (valueChange)="onExchangeRateInputsChanged()"
-                  ></app-selector>
-                  <app-input
-                    label="Tasa del día (COP por unidad)"
-                    type="number"
-                    formControlName="exchange_rate"
-                    [control]="control('exchange_rate')"
-                    [error]="fieldError('exchange_rate')"
-                    [required]="true"
-                    min="0"
-                    step="any"
-                    size="sm"
-                  ></app-input>
-                  <app-input
-                    label="Fecha de la TRM"
-                    type="date"
-                    formControlName="exchange_rate_date"
-                    [control]="control('exchange_rate_date')"
-                    [error]="fieldError('exchange_rate_date')"
-                    size="sm"
-                    (inputChange)="onExchangeRateInputsChanged()"
-                  ></app-input>
-                </div>
-
-                <!--
-                  Estado de la consulta a la TRM oficial. Se pinta SIEMPRE que
-                  haya divisa: el silencio sobre de donde salio la tasa es lo
-                  que hacia que un valor tecleado a ojo pareciera verificado.
-                -->
-                <div class="mt-2 min-h-[20px]">
-                  @if (loadingExchangeRate()) {
-                    <p
-                      class="flex items-center gap-1.5 text-[11px] text-[var(--color-text-secondary)]"
-                    >
-                      <app-icon name="loader" [size]="12" class="animate-spin" />
-                      Consultando la TRM oficial…
-                    </p>
-                  } @else if (exchangeRateQuote(); as quote) {
-                    @if (quote.rate) {
-                      <p
-                        class="flex flex-wrap items-center gap-1.5 text-[11px] text-success"
-                      >
-                        <app-icon name="check-circle" [size]="12" />
-                        TRM oficial del {{ quote.date }}:
-                        <span class="font-semibold">{{
-                          formatCurrency(+quote.rate)
-                        }}</span>
-                        @if (quote.trm) {
-                          <span class="text-[var(--color-text-secondary)]">
-                            (rige del {{ quote.trm.valid_from }} al
-                            {{ quote.trm.valid_to }})
-                          </span>
-                        }
-                        @if (exchangeRateOverridden()) {
-                          <button
-                            type="button"
-                            class="underline underline-offset-2 hover:no-underline"
-                            (click)="applyOfficialExchangeRate()"
-                          >
-                            Usar la oficial
-                          </button>
-                        }
-                      </p>
-                    } @else {
-                      <p
-                        class="flex items-start gap-1.5 text-[11px] text-warning"
-                      >
-                        <app-icon
-                          name="alert-circle"
-                          [size]="12"
-                          class="mt-0.5 shrink-0"
-                        />
-                        {{ exchangeRateUnavailableReason() }}
-                      </p>
-                    }
-                  }
-                </div>
-
-                <div
-                  class="mt-3 rounded-lg border border-border p-2 flex items-center justify-between"
-                >
-                  <span class="text-xs text-[var(--color-text-secondary)]">
-                    Equivalente declarado ({{ foreignCurrencyCode() }})
-                  </span>
-                  <span class="text-sm font-semibold text-text-primary">
-                    {{ foreignTotalLabel() }}
-                  </span>
-                </div>
-                @if (fieldError('foreign_total_amount'); as err) {
-                  <p class="mt-1 text-xs text-error">{{ err }}</p>
-                }
-              }
+              <vendix-invoice-section-divisa
+                context="invoice"
+                [form]="invoiceForm"
+                [paths]="divisaSectionPaths"
+                [currencyOptions]="foreignCurrencyOptions"
+                [errors]="divisaErrors()"
+                [usesForeignCurrency]="usesForeignCurrency()"
+                [exchangeRateLoading]="loadingExchangeRate()"
+                [exchangeRateQuote]="exchangeRateQuote()"
+                [exchangeRateOverridden]="exchangeRateOverridden()"
+                [exchangeRateUnavailableReason]="exchangeRateUnavailableReason()"
+                [foreignCurrencyCode]="foreignCurrencyCode()"
+                [foreignTotalLabel]="foreignTotalLabel()"
+                [formatCurrency]="formatCurrencyBound"
+                (exchangeRateInputsChanged)="onExchangeRateInputsChanged()"
+                (applyOfficialExchangeRate)="applyOfficialExchangeRate()"
+              ></vendix-invoice-section-divisa>
             </vendix-invoice-form-section>
 
-            <!-- ── CONTABILIDAD ──────────────────────────────────── -->
+            <!--
+              ── CONTABILIDAD ────────────────────────────────────
+              B.6 evaluó extraer esta sección a un componente compartido y
+              concluyó que NO hay campo en común que extraer: esta pantalla
+              fuerza una cuenta POR DEFECTO más un mapa de overrides POR
+              LÍNEA (porque una factura tiene líneas reales que contabilizar
+              hoy); el perfil (no-AIU) fuerza dos cuentas fijas por BUCKET
+              (porque un perfil no tiene líneas, sólo precarga el mapeo que
+              usará la próxima factura). Cero controles del mismo nombre o
+              forma entre las dos. Lo único genuinamente compartido —las
+              CINCO cuentas AIU— ya vive en «InvoiceSectionAiuComponent»
+              desde una fase anterior al plan, no es trabajo nuevo de B.6.
+              Envolver esto en un componente con dos plantillas habría sido
+              reubicar código, no eliminar duplicación (no hay duplicación
+              que eliminar). Ver el mismo razonamiento en el comentario
+              espejo de «invoice-profile-editor.component.ts».
+            -->
             <vendix-invoice-form-section
               title="Contabilidad"
               [help]="help('contabilidad')"
@@ -3692,6 +3608,21 @@ export class InvoiceCreatePageComponent implements OnInit {
   readonly retencionesRowAmounts = computed<readonly number[]>(() =>
     this.withholdingControls().map((_, i) => this.withholdingRowAmount(i)),
   );
+
+  /** Mapa de rutas de «Divisa» (B.6): la factura sí guarda tasa y fecha. */
+  readonly divisaSectionPaths: DivisaSectionPaths = {
+    declare_foreign: 'use_foreign_currency',
+    currency_code: 'foreign_currency',
+    exchange_rate: 'exchange_rate',
+    exchange_rate_date: 'exchange_rate_date',
+  };
+
+  readonly divisaErrors = computed(() => ({
+    currency_code: this.fieldError('foreign_currency'),
+    exchange_rate: this.fieldError('exchange_rate'),
+    exchange_rate_date: this.fieldError('exchange_rate_date'),
+    foreign_total_amount: this.fieldError('foreign_total_amount'),
+  }));
 
   /**
    * LO QUE ESTE DOCUMENTO NO PUEDE LLEVAR — medido, no supuesto.

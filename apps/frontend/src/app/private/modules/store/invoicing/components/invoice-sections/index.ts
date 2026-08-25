@@ -23,3 +23,4 @@ export * from './invoice-section-documento.component';
 export * from './invoice-section-lineas.component';
 export * from './invoice-section-impuestos.component';
 export * from './invoice-section-retenciones.component';
+export * from './invoice-section-divisa.component';
