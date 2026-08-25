@@ -2407,7 +2407,14 @@ export class InvoiceProfileEditorComponent {
 
         this.headerNotes.clear({ emitEvent: false });
         for (const note of config.dian.header_notes ?? []) {
-            this.headerNotes.push(this.fb.control(note), { emitEvent: false });
+            // F.3: la misma cota (header_note_limit) que el `maxlength` nativo
+            // del `app-input` en pantalla — sin esto, una nota hidratada que ya
+            // venía larga (dato antiguo, o escrita antes de que este tope
+            // existiera) se mostraría válida hasta el próximo guardado.
+            this.headerNotes.push(
+                this.fb.control(note, Validators.maxLength(this.header_note_limit)),
+                { emitEvent: false },
+            );
         }
 
         this.loaded_config.set(JSON.stringify(config));

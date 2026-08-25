@@ -235,6 +235,7 @@ import {
   AIU_COMPONENTS,
   AIU_LEGAL_FLOOR_PERCENT_SCALED,
   AIU_TAXABLE_BUCKETS_BY_BASIS,
+  CONFIG_LIMITS,
   formatPercentScaled,
   parsePercentScaled,
   regimeFromTaxableBasis,
@@ -1722,6 +1723,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                 [isAiu]="isAiu()"
                 [aiuComponentOptions]="aiuComponentOptions"
                 [unitCodeOptions]="unitCodeOptions"
+                [descriptionLimit]="itemDescriptionLimit"
                 [rowErrors]="lineasRowErrors()"
                 [rowSummaries]="lineasRowSummaries()"
                 [carriesAiu]="lineCarriesAiuBound"
@@ -2190,6 +2192,15 @@ export class InvoiceCreatePageComponent implements OnInit {
    */
   readonly help = invoiceHelp;
 
+  /**
+   * F.3: tope de `description` por LÍNEA de factura — FAZ02 (`1-300`), el
+   * mismo que ya aplica `CreateFacturaInvoiceItemDto` en el backend. No es
+   * el mismo tope que el de una nota crédito/débito (500): esa cota vive en
+   * `credit-note-create.component.ts`/`invoice-note-create.component.ts`,
+   * que no comparten esta sección.
+   */
+  readonly itemDescriptionLimit = CONFIG_LIMITS.line_description;
+
   readonly foreignCurrencyOptions = FOREIGN_CURRENCY_OPTIONS;
   readonly fiscalResponsibilities = FISCAL_RESPONSIBILITIES;
   readonly responsibilityLabels = FISCAL_RESPONSIBILITY_LABELS;
@@ -2282,7 +2293,9 @@ export class InvoiceCreatePageComponent implements OnInit {
      * nunca creó uno.
      */
     profile_id: [PROFILE_NONE],
-    notes: [''],
+    // F.3: 500 es FAD13 (`/Invoice/cbc:Note`, `E A 1-500`) — el mismo tope que
+    // `CreateInvoiceDto.notes` en el backend (create-invoice.dto.ts:1101).
+    notes: ['', Validators.maxLength(CONFIG_LIMITS.header_note)],
 
     // AIU. Vacío ⇒ hereda el objeto del contrato de la tienda. Es un campo por
     // documento y no sólo de configuración porque una constructora factura
@@ -3525,7 +3538,29 @@ export class InvoiceCreatePageComponent implements OnInit {
     if (habilitation) notices.push({ variant: 'danger', text: habilitation });
     const technicalKey = this.technicalKeyWarning();
     if (technicalKey) notices.push({ variant: 'warning', text: technicalKey });
+    const notesOverflow = this.notesOverflowWarning();
+    if (notesOverflow) notices.push({ variant: 'danger', text: notesOverflow });
     return notices;
+  });
+
+  /**
+   * Defecto 3 (orquestador, 2026-08-25): `applyProfilePrefill` une las
+   * `header_notes` del perfil con `\n` sin medir la unión. Cada nota mide
+   * hasta 500 (`CONFIG_LIMITS.header_note`) y puede haber hasta 10
+   * (`CONFIG_LIMITS.header_notes_count`) — un perfil perfectamente válido
+   * puede producir una unión mucho más larga que el tope real de `notes` en
+   * ESTE documento (500, FAD13). Sin este aviso, quien nunca escribió una
+   * nota ve un 400 que no puede explicarse.
+   *
+   * Se avisa, no se recorta: recortar en silencio es exactamente el defecto
+   * que este mismo encargo corrigió en `buildNoteText` — perder texto sin que
+   * nadie lo note es peor que un formulario inválido que dice por qué.
+   */
+  readonly notesOverflowWarning = computed<string | null>(() => {
+    const notes = String(this.rawValue()['notes'] ?? '');
+    const max = CONFIG_LIMITS.header_note;
+    if (notes.length <= max) return null;
+    return `Las notas de cabecera precargadas de este perfil miden ${notes.length} caracteres; el máximo que admite la factura es ${max} (Anexo Técnico DIAN 1.9, regla FAD13). Recórtalas en el campo Notas antes de emitir, o la DIAN rechaza el documento después de tomar consecutivo.`;
   });
 
   /** Errores de campo ya resueltos, para el componente compartido. */

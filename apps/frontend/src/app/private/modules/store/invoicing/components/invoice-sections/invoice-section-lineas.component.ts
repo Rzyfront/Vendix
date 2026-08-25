@@ -15,6 +15,7 @@ import type { SelectorOption } from '../../../../../../shared/components/selecto
 import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
 import type { TaxOption } from '../../../../../../shared/components/tax-selector';
 import { InvoiceLineTaxesComponent } from '../invoice-create/invoice-line-taxes.component';
+import { remainingChars, showCharCounter } from '../../utils/char-limit.util';
 import type { InvoiceSectionContext } from './invoice-section-context';
 import { isInvoiceContext, isProfileContext } from './invoice-section-context';
 
@@ -112,8 +113,30 @@ export interface LineasRowErrors {
                   [control]="rowControl(row, rowPaths().description)"
                   [error]="errorsFor(i).description"
                   [required]="true"
+                  [maxlength]="descriptionLimit()"
                   size="sm"
                 ></app-input>
+                @if (
+                  descriptionLimit();
+                  as limit
+                ) {
+                  @if (
+                    showCharCounter(rowControl(row, rowPaths().description).value, limit)
+                  ) {
+                    <p
+                      class="text-[10px] text-right leading-tight"
+                      [class.text-destructive]="
+                        remainingChars(rowControl(row, rowPaths().description).value, limit) <= 0
+                      "
+                      [class.text-text-secondary]="
+                        remainingChars(rowControl(row, rowPaths().description).value, limit) > 0
+                      "
+                    >
+                      {{ remainingChars(rowControl(row, rowPaths().description).value, limit) }}
+                      caracteres restantes
+                    </p>
+                  }
+                }
               </div>
               <div class="col-span-6 md:col-span-2">
                 <app-input
@@ -295,6 +318,27 @@ export interface LineasRowErrors {
                 size="sm"
                 [error]="errorsFor(i).description"
               ></app-input>
+              @if (
+                descriptionLimit();
+                as limit
+              ) {
+                @if (
+                  showCharCounter(rowControl(row, rowPaths().description).value, limit)
+                ) {
+                  <p
+                    class="text-[10px] text-right leading-tight"
+                    [class.text-destructive]="
+                      remainingChars(rowControl(row, rowPaths().description).value, limit) <= 0
+                    "
+                    [class.text-text-secondary]="
+                      remainingChars(rowControl(row, rowPaths().description).value, limit) > 0
+                    "
+                  >
+                    {{ remainingChars(rowControl(row, rowPaths().description).value, limit) }}
+                    caracteres restantes
+                  </p>
+                }
+              }
             </div>
             <app-input
               label="Cantidad"
@@ -441,6 +485,10 @@ export class InvoiceSectionLineasComponent {
 
   readonly isInvoice = computed(() => isInvoiceContext(this.context()));
   readonly isProfile = computed(() => isProfileContext(this.context()));
+
+  /** F.3: contador de caracteres, expuesto para la plantilla. */
+  readonly remainingChars = remainingChars;
+  readonly showCharCounter = showCharCounter;
 
   rowControl(row: AbstractControl, path: string): FormControl {
     return row.get(path) as FormControl;

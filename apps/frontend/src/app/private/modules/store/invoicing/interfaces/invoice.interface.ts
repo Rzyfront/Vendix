@@ -739,8 +739,27 @@ export interface InvoiceItem {
   is_inclusive?: boolean | null;
 }
 
-/** Los tres componentes de un contrato AIU. */
-export type AiuComponent = 'administracion' | 'imprevistos' | 'utilidad';
+/**
+ * Los componentes de un contrato AIU, en los DOS modelos de contabilización.
+ *
+ * `'administracion' | 'imprevistos' | 'utilidad'` son el Modelo 2 (`sumada`):
+ * tres líneas del documento, una por componente. `'contrato'` es el Modelo 1
+ * (`no_sumada`, ADR-6): una sola línea por el contrato completo — el
+ * calculador la explota en A/I/U por los porcentajes configurados, pero eso
+ * pasa puertas adentro, nunca como líneas nuevas del XML. Backend desde
+ * `e7a7fffea`/`aaa5366af`; enum de Postgres con los 4 valores.
+ *
+ * OJO — no es `AiuComponentLiteral` (`core/utils/invoice-profile-config.contract.ts`):
+ * ese tipo es de la MATRIZ de configuración (tres valores, sin `'contrato'`,
+ * porque un reparto en porcentajes no tiene sentido para una línea que ya ES
+ * el contrato entero). Confundir los dos fue justamente el defecto que el
+ * commit `b033f1de0` corrigió en el preview de Modelo 2.
+ */
+export type AiuComponent =
+  | 'administracion'
+  | 'imprevistos'
+  | 'utilidad'
+  | 'contrato';
 
 export interface InvoiceTax {
   id: number;

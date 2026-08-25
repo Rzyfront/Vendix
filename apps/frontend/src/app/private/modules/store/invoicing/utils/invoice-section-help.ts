@@ -92,10 +92,12 @@ La BASE GRAVABLE decide qué entra al impuesto, y son tres, incompatibles entre 
 
 Elegir la base equivocada no da error: produce una factura que declara de menos o de más, y sólo se corrige con nota crédito.
 
-El OBJETO DEL CONTRATO es obligatorio para emitir: sin él el documento se rechaza antes de tomar consecutivo.`,
+El OBJETO DEL CONTRATO es obligatorio para emitir: sin él el documento se rechaza antes de tomar consecutivo.
+
+El MODELO DE CONTABILIZACIÓN decide cuántas líneas ve la DIAN. «Líneas por componente» declara TRES líneas del documento —Administración, Imprevistos y Utilidad, cada una con su propia base gravable—, y el contrato es la suma de las tres. «Contrato entero» declara UNA sola línea por el valor total; el reparto en A/I/U no sale al XML como líneas adicionales, se usa sólo puertas adentro para calcular cuánto de esa línea única entra al impuesto. No es una preferencia de pantalla: cambia cuántos nodos de línea firma la factura, y una vez emitida la elección no se deshace —sólo con nota crédito.`,
     `La configuración AIU por omisión de este perfil, en cuatro bloques que se preconfiguran una vez y se aplican después a las líneas de cada factura.
 
-MODELO DE CONTABILIZACIÓN — si el AIU son líneas del documento (y el contrato es su suma) o si es sólo base de impuestos sobre una línea única.
+MODELO DE CONTABILIZACIÓN — si el AIU son líneas del documento (y el contrato es su suma) o si es sólo base de impuestos sobre una línea única. La diferencia no es cosmética: «líneas por componente» hace que la DIAN reciba TRES líneas (Administración, Imprevistos, Utilidad), cada una con su propia base gravable; «contrato entero» hace que reciba UNA sola línea por el valor total, con el reparto en A/I/U usado sólo para calcular qué porción de esa línea única queda gravada —nunca como líneas nuevas en el XML.
 
 CUENTAS — la cuenta del PUC contra la que se reconoce el ingreso de cada componente. Vacío = el mapeo contable de la tienda.
 

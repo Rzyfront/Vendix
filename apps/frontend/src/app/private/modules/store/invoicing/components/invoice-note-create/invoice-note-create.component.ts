@@ -29,6 +29,7 @@ import {
 import { extractValidationMessages } from '../../utils/invoicing-errors.util';
 import { findNoteConcept, noteConcepts } from './dian-note-concepts';
 import {
+  NOTE_TEXT_LIMIT,
   NoteLineSelection,
   buildNotePayload,
   buildNoteReason,
@@ -47,6 +48,16 @@ import {
   SelectorOption,
 } from '../../../../../../shared/components/selector/selector.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import { remainingChars, showCharCounter } from '../../utils/char-limit.util';
+
+/**
+ * F.6/defecto 2 (orquestador, 2026-08-25): este campo alimenta DOS DTO —
+ * `reason` (500, resumen estructurado) Y `notes` (5.000, texto completo,
+ * `buildNotePayload` en `invoice-note-payload.util.ts`). El tope que el
+ * USUARIO ve tiene que ser el de `notes`: es el que preserva lo que escribe.
+ * `reason` se sigue recortando puertas adentro, en silencio, como siempre —
+ * eso es un resumen, no una pérdida.
+ */
 
 /**
  * CORREGIR UNA FACTURA YA ACEPTADA POR LA DIAN.
@@ -247,13 +258,35 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
             [helpText]="conceptHelp()"
           ></app-selector>
 
-          <app-textarea
-            label="Motivo"
-            formControlName="reason"
-            [rows]="3"
-            [required]="true"
-            placeholder="Explica qué pasó: qué se devolvió, qué se ajustó, por qué."
-          ></app-textarea>
+          <div>
+            <app-textarea
+              label="Motivo"
+              formControlName="reason"
+              [rows]="3"
+              [required]="true"
+              placeholder="Explica qué pasó: qué se devolvió, qué se ajustó, por qué."
+            ></app-textarea>
+            <!--
+              «app-textarea» no reenvía «maxlength» al «textarea» nativo, así
+              que este contador es la única señal en pantalla del tope real
+              (500) — lo hace cumplir «Validators.maxLength» en el formulario,
+              no el navegador cortando el tecleo.
+            -->
+            @if (showCharCounter(noteForm.get('reason')!.value, reasonLimit)) {
+              <p
+                class="text-[10px] text-right leading-tight"
+                [class.text-destructive]="
+                  remainingChars(noteForm.get('reason')!.value, reasonLimit) <= 0
+                "
+                [class.text-text-secondary]="
+                  remainingChars(noteForm.get('reason')!.value, reasonLimit) > 0
+                "
+              >
+                {{ remainingChars(noteForm.get('reason')!.value, reasonLimit) }}
+                caracteres restantes
+              </p>
+            }
+          </div>
 
           @if (reasonPreview(); as preview) {
             <div class="rounded-lg border border-border bg-surface-secondary/40 px-3 py-2">
@@ -497,8 +530,16 @@ export class InvoiceNoteCreateComponent {
 
   readonly noteForm = this.fb.group({
     conceptCode: ['', Validators.required],
-    reason: ['', [Validators.required, Validators.minLength(5)]],
+    reason: [
+      '',
+      [Validators.required, Validators.minLength(5), Validators.maxLength(NOTE_TEXT_LIMIT)],
+    ],
   });
+
+  /** F.3/defecto 2: contador de caracteres, contra el tope de `notes` (5.000). */
+  readonly reasonLimit = NOTE_TEXT_LIMIT;
+  readonly remainingChars = remainingChars;
+  readonly showCharCounter = showCharCounter;
 
   /**
    * `noteForm.value` y `.status` son propiedades planas: leerlas dentro de un

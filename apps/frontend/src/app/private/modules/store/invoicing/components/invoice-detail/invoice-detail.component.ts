@@ -1985,6 +1985,15 @@ export class InvoiceDetailComponent {
           label: 'AIU · Utilidad',
           hint: 'Componente de Utilidad. Es la única porción que es base gravable en las TRES bases: AIU completo, sólo utilidad, y contrato completo.',
         };
+      case 'contrato':
+        // Modelo 1 (`no_sumada`, ADR-6): esta línea ES el contrato completo,
+        // no un componente entre otros tres — sin este `case` caía al
+        // `default` y se pintaba sin marca alguna, indistinguible de una
+        // línea de costo reembolsable.
+        return {
+          label: 'AIU · Contrato completo',
+          hint: 'Modelo 1: esta línea declara el contrato AIU completo en un solo renglón. Administración, Imprevistos y Utilidad se reparten puertas adentro por los porcentajes configurados — no como líneas separadas del documento.',
+        };
       default:
         return null;
     }

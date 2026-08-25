@@ -5,7 +5,13 @@ import {
   input,
   output,
 } from '@angular/core';
-import { FormArray, FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
+import {
+  FormArray,
+  FormControl,
+  FormGroup,
+  ReactiveFormsModule,
+  Validators,
+} from '@angular/forms';
 
 import { AlertBannerComponent } from '../../../../../../shared/components/alert-banner/alert-banner.component';
 import type { AlertBannerVariant } from '../../../../../../shared/components/alert-banner/alert-banner.component';
@@ -19,6 +25,7 @@ import type {
 } from '../../../../../../shared/components/selector/selector.component';
 import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
 import { CONFIG_LIMITS } from '../../../../../../core/utils/invoice-profile-config.contract';
+import { remainingChars, showCharCounter } from '../../utils/char-limit.util';
 import { InvoiceResolutionBannerComponent } from '../invoice-create/invoice-resolution-banner.component';
 import type { InvoiceResolution } from '../../interfaces/invoice.interface';
 import type { InvoiceSectionContext } from './invoice-section-context';
@@ -217,13 +224,36 @@ export interface DocumentoSectionErrors {
       </div>
 
       @if (isInvoice()) {
-        <app-textarea
-          label="Notas"
-          [formControl]="notesControl()!"
-          [error]="errors().notes"
-          placeholder="Observaciones que se imprimen en el documento..."
-          [rows]="2"
-        ></app-textarea>
+        <div>
+          <app-textarea
+            label="Notas"
+            [formControl]="notesControl()!"
+            [error]="errors().notes"
+            placeholder="Observaciones que se imprimen en el documento..."
+            [rows]="2"
+          ></app-textarea>
+          <!--
+            «app-textarea» (shared/components/textarea) no reenvía
+            «maxlength» al «textarea» nativo —a diferencia de «app-input»—,
+            así que este contador es hoy la única defensa en pantalla: el
+            tope real (500, FAD13) lo hace cumplir «Validators.maxLength» en
+            la página, no el navegador cortando el tecleo.
+          -->
+          @if (showCharCounter(notesControl()!.value, headerNoteLimit())) {
+            <p
+              class="text-[10px] text-right leading-tight"
+              [class.text-destructive]="
+                remainingChars(notesControl()!.value, headerNoteLimit()) <= 0
+              "
+              [class.text-text-secondary]="
+                remainingChars(notesControl()!.value, headerNoteLimit()) > 0
+              "
+            >
+              {{ remainingChars(notesControl()!.value, headerNoteLimit()) }}
+              caracteres restantes
+            </p>
+          }
+        </div>
       } @else {
         <div class="rounded-lg border border-border p-3 space-y-2">
           <div class="flex flex-wrap items-center justify-between gap-2">
@@ -252,6 +282,20 @@ export interface DocumentoSectionErrors {
                     size="sm"
                     [error]="headerNoteErrors()[$index] ?? ''"
                   ></app-input>
+                  @if (showCharCounter(asFormControl(note).value, headerNoteLimit())) {
+                    <p
+                      class="text-[10px] text-right leading-tight"
+                      [class.text-destructive]="
+                        remainingChars(asFormControl(note).value, headerNoteLimit()) <= 0
+                      "
+                      [class.text-text-secondary]="
+                        remainingChars(asFormControl(note).value, headerNoteLimit()) > 0
+                      "
+                    >
+                      {{ remainingChars(asFormControl(note).value, headerNoteLimit()) }}
+                      caracteres restantes
+                    </p>
+                  }
                 </div>
                 <app-button
                   variant="outline-danger"
@@ -320,6 +364,10 @@ export class InvoiceSectionDocumentoComponent {
   readonly isInvoice = computed(() => isInvoiceContext(this.context()));
   readonly isProfile = computed(() => isProfileContext(this.context()));
 
+  /** F.3: contador de caracteres, expuesto para la plantilla. */
+  readonly remainingChars = remainingChars;
+  readonly showCharCounter = showCharCounter;
+
   readonly invoiceTypeControl = computed<FormControl>(
     () => requireControl(this.form(), this.paths().invoice_type, SECTION) as FormControl,
   );
@@ -358,7 +406,12 @@ export class InvoiceSectionDocumentoComponent {
   }
 
   addHeaderNote(): void {
-    this.headerNotesArray()?.push(new FormControl(''));
+    // F.3: la misma cota (FAD13, 500) que ya declara `headerNoteLimit()` como
+    // `maxlength` nativo del `app-input` — el validador es lo que además hace
+    // inválido el formulario si algo la sobrepasa (pegado, no sólo tecleado).
+    this.headerNotesArray()?.push(
+      new FormControl('', Validators.maxLength(this.headerNoteLimit())),
+    );
   }
 
   removeHeaderNote(index: number): void {

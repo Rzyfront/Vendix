@@ -40,6 +40,15 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
 import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import { remainingChars, showCharCounter } from '../../utils/char-limit.util';
+
+/**
+ * F.3: tope de `reason` — `CreateCreditNoteDto`/`CreateDebitNoteDto.reason`
+ * llevan `@MaxLength(500)` en el backend (create-credit-note.dto.ts:59/139).
+ * No es el mismo campo que `notes` (5000, CAD11/DAD11): este modal no
+ * captura `notes` hoy, así que ese tope no tiene control de UI que acotar.
+ */
+const REASON_LIMIT = 500;
 
 /**
  * Nota crédito / débito sobre una factura existente.
@@ -144,15 +153,37 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
         }
 
         <form [formGroup]="noteForm" (ngSubmit)="onSubmit()" class="space-y-4">
-          <app-textarea
-            label="Razón / Motivo"
-            formControlName="reason"
-            [control]="noteForm.get('reason')"
-            [error]="fieldError('reason')"
-            placeholder="Explique el motivo de la nota..."
-            [rows]="3"
-            [required]="true"
-          ></app-textarea>
+          <div>
+            <app-textarea
+              label="Razón / Motivo"
+              formControlName="reason"
+              [control]="noteForm.get('reason')"
+              [error]="fieldError('reason')"
+              placeholder="Explique el motivo de la nota..."
+              [rows]="3"
+              [required]="true"
+            ></app-textarea>
+            <!--
+              «app-textarea» no reenvía «maxlength» al «textarea» nativo, así
+              que este contador es la única señal en pantalla del tope real
+              (500) — lo hace cumplir «Validators.maxLength» en el formulario,
+              no el navegador cortando el tecleo.
+            -->
+            @if (showCharCounter(noteForm.get('reason')!.value, reasonLimit)) {
+              <p
+                class="text-[10px] text-right leading-tight"
+                [class.text-destructive]="
+                  remainingChars(noteForm.get('reason')!.value, reasonLimit) <= 0
+                "
+                [class.text-text-secondary]="
+                  remainingChars(noteForm.get('reason')!.value, reasonLimit) > 0
+                "
+              >
+                {{ remainingChars(noteForm.get('reason')!.value, reasonLimit) }}
+                caracteres restantes
+              </p>
+            }
+          </div>
         </form>
       </div>
 
@@ -203,8 +234,16 @@ export class CreditNoteCreateComponent {
   private currencyService = inject(CurrencyFormatService);
 
   readonly noteForm: FormGroup = this.fb.group({
-    reason: ['', [Validators.required, Validators.minLength(5)]],
+    reason: [
+      '',
+      [Validators.required, Validators.minLength(5), Validators.maxLength(REASON_LIMIT)],
+    ],
   });
+
+  /** F.3: contador de caracteres, expuesto para la plantilla. */
+  readonly reasonLimit = REASON_LIMIT;
+  readonly remainingChars = remainingChars;
+  readonly showCharCounter = showCharCounter;
 
   /**
    * `noteForm.invalid` es una propiedad plana: leerla dentro de un `computed`
