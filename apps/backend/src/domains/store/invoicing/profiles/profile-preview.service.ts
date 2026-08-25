@@ -53,6 +53,7 @@ import {
   InvoiceProfileConfig,
   ProfileTaxRule,
   regimeFromTaxableBasis,
+  resolveAiuComponentsBasis,
   resolveAiuTaxableBasis,
 } from './invoice-profile-config.contract';
 import {
@@ -235,9 +236,12 @@ const AIU_EMISSION_ORDER: readonly AiuComponentLiteral[] = [
  *   mientras dárselo a un componente no gravable declararía de menos, que ante
  *   la DIAN es sanción e intereses.
  *
- * Es la misma regla que ya aplica la captura de la factura real
- * (`invoice-create-page.component.ts`, `aiuApplyPlan`), y escribirla igual acá
- * es lo que hace que la muestra prediga el documento en vez de aproximarlo.
+ * NO es la misma regla que aplica la captura de la factura real
+ * (`invoice-create-page.component.ts`, `aiuApplyPlan`): esa pantalla le da el
+ * 100 % del residuo a Utilidad sin desempate por resto mayor, mientras que
+ * aquí se reparte céntimo a céntimo por resto mayor y sólo el empate cae en
+ * esta prioridad. El algoritmo de este archivo es el correcto — no cambiarlo
+ * para "alinearlo" con `aiuApplyPlan`; si algo se alinea, es al revés.
  */
 const AIU_RESIDUE_PRIORITY: readonly AiuComponentLiteral[] = [
   'utilidad',
@@ -685,7 +689,11 @@ export class ProfilePreviewService {
       );
     }
 
-    const portions = this.splitAiuByComponents(aiu_value, config);
+    const portions = this.splitAiuByComponents(
+      aiu_value,
+      contract_value,
+      config,
+    );
     const lines: SampleLine[] = [];
 
     // Los tres componentes, en el orden del anexo: Administración primero,
@@ -756,24 +764,44 @@ export class ProfilePreviewService {
    * protege el piso legal: la base sube como máximo dos céntimos respecto del
    * truncado puro, y jamás baja.
    *
-   * ## Qué NO hace: no fuerza el total al AIU declarado
+   * ## Sobre qué se reparte: `components_basis` decide la base, no un defecto
    *
-   * El objetivo del paso 2 es la suma de las porciones, no `aiu_value`. Con
-   * porcentajes que suman 100 son el mismo número. Con porcentajes que no suman
-   * 100 —un perfil mal configurado, o un snapshot cuya unidad es `'contract'`—
-   * son distintos, y la diferencia se queda fuera del AIU a propósito: es
-   * exactamente el defecto del perfil que la previsualización existe para
-   * delatar (ver el docblock de {@link derivePreviewLines}). Forzar el total a
-   * `aiu_value` lo taparía, y la muestra pasaría el piso legal mientras toda
-   * factura emitida con ese perfil nacería sub-declarada.
+   * `ProfileAiuConfig.components` mide sus tres porcentajes contra el AIU
+   * (`'aiu'`, deben sumar 100 — `AIU_PERCENT_SUM`) o contra el CONTRATO
+   * (`'contract'`, su suma ES el AIU: entre 0,01 % y 100 % —
+   * `AIU_PERCENT_SUM_OF_CONTRACT`, ambas en `invoice-profile-config.contract.ts`).
+   * Las dos unidades son legales y están validadas; `'contract'` no es un perfil
+   * mal configurado — de hecho es el que siembra `buildDefaultAiuProfileConfig`
+   * para todo perfil AIU nuevo (5/2/3, suma 10 = el piso legal). Una versión
+   * anterior de este método ignoraba `components_basis` y repartía siempre
+   * sobre `aiu_value`, así que bajo `'contract'` una suma de 10 se leía como
+   * "10 % de `aiu_value`" en vez de "10 % del contrato": el AIU emitido salía
+   * diez veces menor que el real, `checkAiuDivergences` lo comparaba contra el
+   * piso legal y CUALQUIER perfil recién creado, sin tocar un campo, se
+   * reportaba con `INVOICING_AIU_001` estando exactamente EN el piso. Por eso
+   * el reparto se hace sobre `contract_value` cuando `resolveAiuComponentsBasis`
+   * resuelve `'contract'`, y sobre `aiu_value` cuando resuelve `'aiu'` (su valor
+   * también para ausencia o dato corrupto — la unidad heredada, conservadora).
+   *
+   * ## Qué SÍ sigue sin hacer: no fuerza el total al AIU declarado
+   *
+   * El objetivo del paso 2 es la suma de las porciones sobre la base que le
+   * toca, no `aiu_value` a la fuerza. Bajo `'aiu'` con porcentajes que no sumen
+   * 100 —eso sí es un perfil mal configurado— la suma diverge de `aiu_value` y
+   * la diferencia se queda fuera a propósito: es el defecto que la
+   * previsualización existe para delatar (ver el docblock de
+   * {@link derivePreviewLines}). Forzarla a `aiu_value` lo taparía.
    */
   private splitAiuByComponents(
     aiu_value: ReturnType<typeof toDecimal>,
+    contract_value: ReturnType<typeof toDecimal>,
     config: InvoiceProfileConfig,
   ): Map<AiuComponentLiteral, ReturnType<typeof toDecimal>> {
+    const basis = resolveAiuComponentsBasis(config.aiu);
+    const base = basis === 'contract' ? contract_value : aiu_value;
     const parts = AIU_EMISSION_ORDER.map((component) => {
       const share = toDecimal(config.aiu?.components?.[component]);
-      const exact = aiu_value.times(share).dividedBy(100);
+      const exact = base.times(share).dividedBy(100);
       const truncated = toDecimal(dianAmount(exact));
       return {
         component,

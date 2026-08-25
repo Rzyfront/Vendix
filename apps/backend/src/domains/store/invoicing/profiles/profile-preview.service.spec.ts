@@ -272,6 +272,90 @@ describe('ProfilePreviewService', () => {
   });
 
   /**
+   * REGRESIÓN — `splitAiuByComponents` ignoraba `components_basis` y repartía
+   * siempre sobre `aiu_value`. Bajo `'contract'` (el default de
+   * `buildDefaultAiuProfileConfig`: 5/2/3, suma 10 = el piso legal) eso
+   * declaraba un AIU DIEZ VECES menor que el real, y la primera vez que
+   * cualquier usuario abría la previsualización de cualquier perfil AIU
+   * recién creado —sin tocar un solo campo— el panel reportaba
+   * `INVOICING_AIU_001` sobre un perfil que estaba exactamente EN el piso.
+   */
+  describe('components_basis: reparto sobre CONTRATO vs. sobre AIU', () => {
+    it('perfil por omisión ("contract", 5/2/3): las tres porciones suman el AIU del contrato, sin blocker de piso', async () => {
+      const { service } = build({}, {
+        aiu: {
+          components_basis: 'contract',
+          minimum_base_percent: '10.00',
+          components: {
+            administracion: '5.00',
+            imprevistos: '2.00',
+            utilidad: '3.00',
+          },
+        },
+      });
+      const result = await service.preview(8, CONTRACT as any);
+
+      const admin = result.breakdown.lines.find((l) => l.bucket === 'administracion');
+      const imprevistos = result.breakdown.lines.find((l) => l.bucket === 'imprevistos');
+      const utilidad = result.breakdown.lines.find((l) => l.bucket === 'utilidad');
+      expect(admin?.line_extension_amount).toBe('5000000.00');
+      expect(imprevistos?.line_extension_amount).toBe('2000000.00');
+      expect(utilidad?.line_extension_amount).toBe('3000000.00');
+
+      expect(result.aiu_summary?.aiu_value).toBe('10000000.00');
+      const floor = result.validations.find((v) => v.rule === 'AIU-PISO-LEGAL');
+      expect(floor?.passed).toBe(true);
+      expect(floor?.code).toBeNull();
+    });
+
+    it('perfil "aiu" (50/20/30): reparte sobre aiu_value, comportamiento previo intacto', async () => {
+      const { service } = build({}, {
+        aiu: {
+          components_basis: 'aiu',
+          minimum_base_percent: '10.00',
+          components: {
+            administracion: '50.00',
+            imprevistos: '20.00',
+            utilidad: '30.00',
+          },
+        },
+      });
+      // aiu_value por omisión = 10 % del contrato = 10.000.000.
+      const result = await service.preview(8, CONTRACT as any);
+
+      const admin = result.breakdown.lines.find((l) => l.bucket === 'administracion');
+      const imprevistos = result.breakdown.lines.find((l) => l.bucket === 'imprevistos');
+      const utilidad = result.breakdown.lines.find((l) => l.bucket === 'utilidad');
+      expect(admin?.line_extension_amount).toBe('5000000.00');
+      expect(imprevistos?.line_extension_amount).toBe('2000000.00');
+      expect(utilidad?.line_extension_amount).toBe('3000000.00');
+      expect(result.aiu_summary?.aiu_value).toBe('10000000.00');
+    });
+
+    it('components_basis ausente: cae en "aiu" (unidad heredada), como un snapshot de antes del campo', async () => {
+      const { service } = build({}, {
+        aiu: {
+          // Sin `components_basis` — snapshot congelado antes de que existiera
+          // el campo. `resolveAiuComponentsBasis` debe leerlo como `'aiu'`.
+          minimum_base_percent: '10.00',
+          components: {
+            administracion: '10.00',
+            imprevistos: '5.00',
+            utilidad: '85.00',
+          },
+        },
+      });
+      const result = await service.preview(8, CONTRACT as any);
+
+      // Con components_basis='aiu' (heredado) sobre aiu_value=10.000.000:
+      // 10 % / 5 % / 85 % ⇒ 1.000.000 / 500.000 / 8.500.000.
+      expect(result.aiu_summary?.aiu_value).toBe('10000000.00');
+      const admin = result.breakdown.lines.find((l) => l.bucket === 'administracion');
+      expect(admin?.line_extension_amount).toBe('1000000.00');
+    });
+  });
+
+  /**
    * REGRESIÓN — el reparto A/I/U truncaba cada porción por separado y NO
    * repartía el residuo, así que la muestra perdía céntimos y el piso legal se
    * medía contra un contrato que el operador nunca escribió.
