@@ -874,8 +874,21 @@ export class PosCheckoutShellComponent {
             .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe((resolved) => {
               if (!resolved) return; // toast ya emitido por el selector.
-              // Volvemos a evaluar la rama con `cartState().customer` ya set.
-              this.attemptNextStep();
+              // IMPORTANT — DO NOT recurse into `attemptNextStep()` here:
+              // the parent's `cartService.setCustomer()` is async (HTTP), so
+              // `cartState().customer` is still null when this subscribe
+              // fires, and the recursion would re-enter the resolve branch
+              // with an empty form (silent failure, no advance). The
+              // shell's `onSelectCustomerAndAdvance` already moved the
+              // sub-step synchronously (to 2 for delivery, kept at 1 for
+              // pickup), so we can advance based on `clienteSubStep()` here.
+              if (this.requiresAddress()) {
+                // Delivery: stay at sub-step 2 (Dirección). User must fill
+                // the address before clicking Siguiente again.
+                return;
+              }
+              // Pickup (no delivery): sub stayed at 1. Advance to Cobro.
+              this.nextStep();
             });
           return;
         }
