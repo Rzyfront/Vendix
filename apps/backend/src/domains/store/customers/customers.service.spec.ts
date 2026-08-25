@@ -385,16 +385,14 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       expect(result.matched_by).toBe('document');
       expect(result.customer.id).toBe(11);
       // Overwrite semantics: every non-empty DTO field lands in the
-      // update payload. The typed phone + the typed document pair all
-      // get written — even the ones that match the existing values, to
-      // keep the implementation simple and predictable for the cashier.
+      // Per lead's clarified spec: the document pair is one of the
+      // unique IDs that drove the match — it is NOT overwritten. Only
+      // the "other fields" (first_name, last_name, phone) get
+      // written back. The cashier typed phone, so phone lands in the
+      // payload; the typed document pair is ignored on purpose.
       expect(result.was_updated).toBe(true);
       const updateData = mockPrismaService.users.update.mock.calls[0][0].data;
-      expect(updateData).toEqual({
-        document_type: 'CC',
-        document_number: '99999999',
-        phone: '+573109999999',
-      });
+      expect(updateData).toEqual({ phone: '+573109999999' });
     });
 
     it('does NOT match by document when document_type differs (CC 123 ≠ NIT 123)', async () => {

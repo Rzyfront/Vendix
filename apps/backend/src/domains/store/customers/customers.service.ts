@@ -519,8 +519,17 @@ export class CustomersService {
 
     if (existing) {
       // Overwrite update — see `buildUpdatePayload`. Per dev lead's
-      // clarified spec: matching unique identifier → edit with typed values.
-      const updateData = this.buildUpdatePayload(existing, dto);
+      // clarified spec: matching unique identifier → edit OTHER fields
+      // (first_name, last_name, phone). Email and document pair are
+      // excluded because they're the IDs that drove the match.
+      const updateData = this.buildUpdatePayload(
+        {
+          first_name: existing.first_name,
+          last_name: existing.last_name,
+          phone: existing.phone,
+        },
+        dto,
+      );
 
       let was_updated = false;
       if (Object.keys(updateData).length > 0) {
@@ -580,59 +589,51 @@ export class CustomersService {
   /**
    * QUI-723 — Build the update payload for `findOrCreateByEmailOrDocument`.
    *
-   * OVERWRITE semantics: any non-empty value in the incoming DTO replaces
-   * the existing field on the matched customer. The dev lead's clarified
-   * spec (later audio): "cédula y correo son como un identificador único;
-   * cualquier cliente que tenga el mismo identificador único se edita".
-   * So when the cashier types data for an existing customer, those
-   * values become the new truth on that row.
+   * Overwrite semantics, scoped to the NON-ID fields. Per the dev lead's
+   * clarified spec: "con el email y documentos van hacer los id unicos; si
+   * encuentras un cliente con esos dos, sobreescribes los demás campos".
+   * Translation: email + (document_type, document_number) ARE the unique
+   * identifiers — they're how the lookup matched the row. The "other
+   * fields" (first_name, last_name, phone) get overwritten with whatever
+   * the cashier typed.
    *
-   * Email is intentionally excluded: if the existing customer matched the
-   * incoming email, the strings already coincide (the lookup was
-   * case-insensitive). Including it would also force an unnecessary
-   * unique-constraint check.
+   * Email and the document pair are intentionally NOT written back:
+   *   - email: the lookup matched by email (case-insensitive), so the
+   *     strings already coincide. Re-writing would also force a useless
+   *     unique-constraint check.
+   *   - document_type / document_number: these are the OTHER identifier
+   *     the lookup might have matched against. Changing them post-match
+   *     would create a second unique-key collision (the cashier might
+   *     have typed a slightly different number than what's stored, and
+   *     that diff is the "second customer" — not a typo to silently fix).
    *
-   * Document fields get the same canonicalization as `normalizeDocument()`
-   * so a `cc 123.456` request writes `123456` (matches the canonicalized
-   * stored value).
-   *
-   * `existing` is kept in the signature for symmetry with the read
-   * fields even though it isn't read in overwrite mode — keeps the
-   * call site unchanged if the policy flips back to conservative.
+   * `existing` is unused; kept in the signature for symmetry with the
+   * field declaration block.
    */
   private buildUpdatePayload(
     existing: {
       first_name: string | null;
       last_name: string | null;
       phone: string | null;
-      document_type: string | null;
-      document_number: string | null;
     },
     incoming: CreateCustomerDto,
   ): Record<string, unknown> {
-    void existing; // overwrite mode doesn't compare — see jsdoc above
+    void existing;
     const data: Record<string, unknown> = {};
 
     const write = (
       incomingValue: string | null | undefined,
       field: string,
-      transform?: (s: string) => string,
     ) => {
       if (!incomingValue) return;
       const trimmed = incomingValue.trim();
       if (!trimmed) return;
-      data[field] = transform ? transform(trimmed) : trimmed;
+      data[field] = trimmed;
     };
 
     write(incoming.first_name, 'first_name');
     write(incoming.last_name, 'last_name');
     write(incoming.phone, 'phone');
-    write(incoming.document_type, 'document_type', (s) => s.toUpperCase());
-    write(
-      incoming.document_number,
-      'document_number',
-      (s) => s.toUpperCase().replace(/[\s\-.]/g, ''),
-    );
 
     return data;
   }
