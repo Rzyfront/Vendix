@@ -5,6 +5,7 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { FiscalGateService } from '../../../../common/services/fiscal-gate.service';
 import { TechnicalKeyVaultService } from '../../../../common/services/technical-key-vault.service';
+import { RESOLUTION_PUBLIC_SELECT } from '../utils/technical-key.util';
 import {
   VendixHttpException,
   ErrorCodes,
@@ -408,28 +409,18 @@ const LINE_TAX_MAX_CANDIDATES = 6;
 const ONE_CENT = '0.01';
 
 /**
- * LA RESOLUCIÓN SIN SU CLAVE TÉCNICA.
- *
- * Gemela de la de `invoicing.service.ts` — la misma lista, a propósito: las dos
- * alimentan las mismas pantallas y una que se quede corta reabriría la fuga por
- * el otro lado. Si se añade una columna pública a `invoice_resolutions`, va en
- * las dos.
- *
- * `resolution: true` publicaba la fila entera en toda respuesta de este
- * servicio (`PATCH :id/validate`, `PATCH :id/send`, `accept`, `void`,
- * contingencia, rechazo…), y con ella las TRES columnas de clave técnica:
- * `technical_key` (la ClTec en claro, 14.ª entrada del hash del CUFE),
- * `technical_key_encrypted` (ciphertext atacable fuera de línea) y
- * `technical_key_fingerprint` (SHA-256 sin llave — índice ciego que correlaciona
- * resoluciones entre tenants).
- *
- * Es lista BLANCA, no exclusión: lo que se añada mañana a la tabla no se
- * publica solo.
+ * `RESOLUTION_PUBLIC_SELECT` se importa de `../utils/technical-key.util` (E.9,
+ * 2026-08-25) en vez de declararse aquí: era la TERCERA copia idéntica —junto
+ * a la canónica y a la que tenía `invoicing.service.ts` antes de este mismo
+ * cambio—, las 16 claves y el mismo orden en las tres, sin nada que lo
+ * garantizara. La razón de la lista blanca (y qué tres columnas de clave
+ * técnica excluye y por qué) está documentada una sola vez allá.
  *
  * A DIFERENCIA DE `invoicing.service.ts`, ESTE SERVICIO SÍ NECESITA LA ClTec —
- * sin ella no hay CUFE—. No viaja acá: se lee aparte, por su id y sólo con las
- * dos columnas del vault, en `revealResolutionTechnicalKey()`, que es el único
- * punto del archivo donde el secreto entra en memoria.
+ * sin ella no hay CUFE—. No viaja en `RESOLUTION_PUBLIC_SELECT`: se lee aparte,
+ * por su id y sólo con las dos columnas del vault, en
+ * `revealResolutionTechnicalKey()`, que es el único punto de este archivo donde
+ * el secreto entra en memoria.
  *
  * Lo que el emisor SÍ resuelve desde estos campos públicos es el bloque
  * `sts:InvoiceControl` (`resolveInvoiceControl`, que consume `resolution_number`,
@@ -438,24 +429,6 @@ const ONE_CENT = '0.01';
  * silencioso en cualquiera de ellos vuelve a producir el bloque de autorización
  * vacío del 14/08/2026, que quemó un consecutivo autorizado irrecuperable.
  */
-const RESOLUTION_PUBLIC_SELECT = {
-  id: true,
-  organization_id: true,
-  store_id: true,
-  accounting_entity_id: true,
-  document_type: true,
-  resolution_number: true,
-  resolution_date: true,
-  prefix: true,
-  range_from: true,
-  range_to: true,
-  current_number: true,
-  valid_from: true,
-  valid_to: true,
-  is_active: true,
-  created_at: true,
-  updated_at: true,
-} as const;
 
 const INVOICE_INCLUDE = {
   invoice_items: true,
