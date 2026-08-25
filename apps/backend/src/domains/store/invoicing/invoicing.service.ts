@@ -32,6 +32,7 @@ import { CreateCustomerDto } from '../customers/dto/create-customer.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { QueryInvoiceDto } from './dto/query-invoice.dto';
 import { InvoiceNumberGenerator } from './utils/invoice-number-generator';
+import { RESOLUTION_PUBLIC_SELECT } from './utils/technical-key.util';
 import { InvoiceRetryQueueService } from './services/invoice-retry-queue.service';
 import {
   CalculatedLine,
@@ -98,56 +99,14 @@ const RETRY_ELIGIBLE_TRANSMISSION_STATUSES = [
   'error',
 ];
 
-/**
- * LA RESOLUCIÓN SIN SU CLAVE TÉCNICA.
- *
- * `resolution: true` arrastraba la fila `invoice_resolutions` COMPLETA hasta el
- * navegador en toda respuesta de facturación —`GET /store/invoicing`,
- * `GET :id`, y todo lo que devuelva una factura—, y esa fila lleva tres
- * columnas que no pueden salir del servidor:
- *
- *   · `technical_key` — la ClTec en claro. Es la 14.ª entrada del hash del CUFE
- *     (`cufe-calculator.ts`): quien la tiene puede recomputar el CUFE de
- *     cualquier documento emitido bajo esa resolución, que es exactamente la
- *     prueba de integridad que la DIAN confronta.
- *   · `technical_key_encrypted` — la misma clave sellada. Sin la llave maestra
- *     no se abre, pero publicar el ciphertext regala el material para atacarlo
- *     fuera de línea sin límite de intentos.
- *   · `technical_key_fingerprint` — SHA-256 pelado, SIN llave a propósito (ver
- *     su nota en `schema.prisma`). Es un índice ciego: publicarlo permite
- *     correlacionar qué resoluciones de qué tenants comparten ClTec, que es
- *     justo lo que `findResolutionsSharingTechnicalKey` detecta como
- *     contaminación, y además admite ataque por diccionario contra un valor de
- *     formato conocido.
- *
- * Se enumeran las columnas PÚBLICAS en vez de excluir las tres sensibles porque
- * `select` es una lista blanca: una columna secreta que se añada mañana a
- * `invoice_resolutions` no se publica sola. El precedente correcto ya estaba en
- * el repo — `domains/organization/invoicing/invoicing.service.ts` — y esto lo
- * generaliza a la ruta de tienda, que es la que sirve el panel.
- *
- * ESTE SERVICIO NO NECESITA LA ClTec: no calcula CUFE ni arma XML. Quien sí la
- * necesita es el emisor, y la carga aparte y en el punto de uso —ver
- * `revealResolutionTechnicalKey` en `invoice-flow.service.ts`—.
- */
-const RESOLUTION_PUBLIC_SELECT = {
-  id: true,
-  organization_id: true,
-  store_id: true,
-  accounting_entity_id: true,
-  document_type: true,
-  resolution_number: true,
-  resolution_date: true,
-  prefix: true,
-  range_from: true,
-  range_to: true,
-  current_number: true,
-  valid_from: true,
-  valid_to: true,
-  is_active: true,
-  created_at: true,
-  updated_at: true,
-} as const;
+// `RESOLUTION_PUBLIC_SELECT` (proyección pública de `invoice_resolutions`,
+// SIN `technical_key`/`technical_key_encrypted`/`technical_key_fingerprint`)
+// se importa de `./utils/technical-key.util` en vez de declararse aquí (E.9,
+// 2026-08-25). Estaba declarada dos veces —ésta y la de `technical-key.util.ts:60`,
+// que ya la exporta y ya documenta el porqué de cada columna excluida—,
+// idénticas hoy campo por campo pero sin nada que lo garantizara: el mismo
+// patrón de espejo a mano que este plan corrige en otros lados. Un solo
+// sitio, un solo criterio.
 
 const INVOICE_INCLUDE = {
   invoice_items: true,

@@ -16,21 +16,70 @@ import { amountToSpanishWords } from '@common/utils/amount-in-words.util';
  * implementaciones del mismo contrato, que es exactamente el patrón que ya
  * produjo divergencias medidas en este dominio.
  */
+/**
+ * Los campos de cada relación abajo son EXACTAMENTE los que el mapeador lee
+ * más abajo — no una lista adivinada. Medido leyendo el `return` completo de
+ * `mapFiscalDocumentToPrintData` (E.9, 2026-08-25): antes, `organization` y
+ * `store` entraban con `include` completo (36 y 23 columnas para leer 7 y 6)
+ * y `customer` era `true` — la relación es `customer users?` (comprobado en
+ * `schema.prisma`), o sea las **31 columnas de `users`, incluidas `password`
+ * y `two_factor_secret`**, en cada render fiscal, para leer 4. Hoy no era una
+ * fuga (`StandardPrintDataModel` es una proyección explícita de 4 campos y no
+ * hay `console.`/`logger.`/`JSON.stringify` del objeto crudo en estos
+ * proveedores — comprobado con `grep`), pero el hash quedaba en el montón de
+ * un proceso que compone HTML, a un `logger.debug(invoice)` futuro de
+ * convertirse en fuga real. `resolution` ya usaba `select` con
+ * `RESOLUTION_PUBLIC_SELECT` — el idioma correcto ya vivía en este mismo
+ * archivo, sólo en dos de las cuatro relaciones.
+ *
+ * Verificado contra los TRES consumidores de este `include`
+ * (`fiscal-invoice.provider.ts`, `credit-note.provider.ts`,
+ * `fiscal-credit-note.provider.ts`): ninguno toca `organization`/`store`/
+ * `customer` por su cuenta, todos pasan el `invoice`/`note` completo a este
+ * mapeador. Angostar aquí no les rompe nada; si alguno empieza a leer un
+ * campo nuevo de estas relaciones, el `select` de abajo es lo primero que hay
+ * que tocar, no lo último.
+ */
 export const FISCAL_DOCUMENT_PRINT_INCLUDE = {
   invoice_items: true,
   invoice_taxes: true,
   resolution: { select: RESOLUTION_PUBLIC_SELECT },
   organization: {
-    include: {
-      addresses: { take: 1 },
+    select: {
+      name: true,
+      legal_name: true,
+      tax_id: true,
+      phone: true,
+      email: true,
+      logo_url: true,
+      addresses: { take: 1, select: { address_line1: true, city: true } },
     },
   },
+  // `stores` NO tiene columnas `phone` ni `email` — comprobado contra
+  // `schema.prisma` (el modelo no las declara) tras un 500
+  // (`PrismaClientValidationError`) al pedirlas en `select`. Con el `include`
+  // completo anterior ya salían `undefined` en silencio por la misma razón
+  // (Prisma sólo devuelve columnas que existen); el mapeador ya asume esa
+  // ausencia con `store.phone || org.phone` y `store.email || org.email`, así
+  // que el `select` no cambia ningún dato mostrado — sólo hace explícito lo
+  // que ya era cierto.
   store: {
-    include: {
-      addresses: { take: 1 },
+    select: {
+      name: true,
+      legal_name: true,
+      logo_url: true,
+      addresses: { take: 1, select: { address_line1: true, city: true } },
     },
   },
-  customer: true,
+  customer: {
+    select: {
+      first_name: true,
+      last_name: true,
+      document_number: true,
+      phone: true,
+      email: true,
+    },
+  },
 } as const;
 
 export interface FiscalDocumentPrintOptions {

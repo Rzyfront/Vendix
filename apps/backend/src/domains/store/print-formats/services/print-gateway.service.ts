@@ -233,6 +233,20 @@ export class PrintGatewayService {
    * columnas del perfil, así que no hay nada que resolver para ellas; devolver
    * `null` las deja en la plantilla activa de la tienda, que es lo que hacían
    * antes de este cambio.
+   *
+   * DECISIÓN (E.9) — esta lectura y la de `fiscal-invoice.provider.ts:33`
+   * (`FISCAL_DOCUMENT_PRINT_INCLUDE`) leen la MISMA fila de `invoices` en la
+   * misma petición (esta antes, para resolver la plantilla; la del proveedor
+   * después, dentro de `fetchDocumentData`), y NO se fusionan. Medido: ésta es
+   * una sonda de UNA columna (`profile_snapshot.config`) sobre un `id` que ya
+   * es la PK — el costo real es un `findFirst` extra indexado por PK, no un
+   * N+1 sobre una colección. Fusionarlas exigiría que este servicio —genérico,
+   * usado por TODOS los `formatType` (`kitchen_ticket`, `dispatch_note`,
+   * `quotation`, etc., ninguno de los cuales usa `FISCAL_DOCUMENT_PRINT_INCLUDE`)—
+   * importe una proyección que pertenece a un proveedor concreto de un dominio
+   * fiscal, invirtiendo la dirección de dependencia correcta (gateway →
+   * provider, nunca al revés) a cambio de ahorrar una consulta de una columna
+   * por PK. No vale la pena: se deja separada.
    */
   private async resolveProfileTemplateId(
     storeId: number,

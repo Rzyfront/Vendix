@@ -86,6 +86,25 @@ export class InvoiceDeliveryService {
 
   async deliver(invoice_id: number, dto: DeliverInvoiceDto) {
     // 1. Lectura alcanzada por tienda — IDOR-safe por construcción.
+    //
+    // DECISIÓN (E.9): los escalares de `invoices` se leen con `include`
+    // (todos los ~68 que declara el modelo), NO con `select` nombrando los
+    // ~18 que este método usa (`id`, `organization_id`, `store_id`, `status`,
+    // `invoice_number`, `pdf_url`, `xml_document`, `cufe`, `notes`,
+    // `subtotal_amount`, `discount_amount`, `tax_amount`,
+    // `withholding_amount`, `total_amount`, `currency`, `issue_date`,
+    // `due_date`, `invoice_type`). Se deja así A PROPÓSITO, no por simetría
+    // con el resto del archivo: leer la fila para decidir su estado (`:130`,
+    // 41 líneas más abajo en `fiscal-invoice.provider.ts`, la misma
+    // distancia) es inevitable de cualquier forma, así que angostar aquí
+    // ahorra memoria de una sola fila una vez por reenvío — no en cada
+    // render fiscal, que es donde `FISCAL_DOCUMENT_PRINT_INCLUDE` sí se
+    // angostó (ver `fiscal-document-print.mapper.ts`) porque ahí sí abría
+    // relaciones completas (`customer: true` = `users` con `password` y
+    // `two_factor_secret`). El defecto de impresión era la RELACIÓN abierta,
+    // no el nivel de `invoices`; aquí ambas relaciones (`customer`,
+    // `organization`) YA están angostas — el problema que E.9 corrige en el
+    // mapeador nunca existió en este archivo.
     const invoice = await this.prisma.invoices.findFirst({
       where: { id: invoice_id },
       include: {
