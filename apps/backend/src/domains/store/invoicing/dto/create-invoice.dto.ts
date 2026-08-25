@@ -7,6 +7,7 @@ import {
   IsEmail,
   IsEnum,
   IsIn,
+  IsInt,
   IsISO4217CurrencyCode,
   IsNotEmpty,
   IsNotIn,
@@ -138,6 +139,10 @@ export class CreateInvoiceItemDto {
   /** Piso: ver `foreignKeyFloorMessage`. */
   @IsOptional()
   @IsNumber()
+  @IsInt({
+    message:
+      'product_id debe ser un número entero: los ids de producto no tienen fracciones.',
+  })
   @Type(() => Number)
   @Min(1, {
     message: foreignKeyFloorMessage(
@@ -150,6 +155,10 @@ export class CreateInvoiceItemDto {
   /** Piso: ver `foreignKeyFloorMessage`. */
   @IsOptional()
   @IsNumber()
+  @IsInt({
+    message:
+      'product_variant_id debe ser un número entero: los ids de variante no tienen fracciones.',
+  })
   @Type(() => Number)
   @Min(1, {
     message: foreignKeyFloorMessage(
@@ -173,6 +182,29 @@ export class CreateInvoiceItemDto {
   // El trim es lo que le da dientes al `@IsNotEmpty`: `isNotEmpty` solo compara
   // contra `''`, así que sin recortar antes, una descripción de puros espacios
   // pasaría la validación y saldría en blanco en el `cbc:Description` del XML.
+  //
+  // F.6 — el Anexo Técnico 1.9 fija un tope DISTINTO para `cbc:Description`
+  // según el documento padre: factura (regla FAZ02) 1..300, nota crédito
+  // (CAZ02) 1..600, nota débito (DAZ02) sin confirmar por PDF —ver el
+  // `@MaxLength` de `CreateFacturaInvoiceItemDto`—. Esta clase la comparten
+  // los TRES DTOs (`CreateInvoiceDto`, `CreateCreditNoteDto`,
+  // `CreateDebitNoteDto`), así que el `@MaxLength` de acá es el techo COMÚN,
+  // no el de ninguno de los tres en particular: 500 es la anchura real de
+  // `invoice_items.description` en la base (`VARCHAR(500)`), que es MENOR que
+  // el legal de nota crédito (600) y MAYOR que el de factura (300). Subir este
+  // campo a 600 para que nota crédito alcance su techo legal completo
+  // requeriría ensanchar esa columna —una migración de `schema.prisma`, fuera
+  // de este alcance—; mientras tanto, 500 es seguro para los tres: nunca deja
+  // pasar más de lo que la columna admite.
+  //
+  // Factura SÍ necesita ser más estricta que el DB —300, no 500— porque el
+  // Anexo la rechaza por encima de eso aunque la columna tenga espacio de
+  // sobra: `CreateInvoiceDto.items` usa `CreateFacturaInvoiceItemDto`, que
+  // redeclara `@IsString`/`@IsNotEmpty`/`@MaxLength(300)` completos (no sólo
+  // el `@MaxLength`: ver su propio docblock — class-validator dedupea por
+  // `(propertyName, type)` y las tres comparten `type: 'customValidation'`,
+  // así que redeclarar una sola borraba las otras dos heredadas en
+  // silencio). El `@Transform` de recorte de acá SÍ se hereda intacto.
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString({ message: 'La descripción de la línea debe ser texto.' })
   @IsNotEmpty({
@@ -180,7 +212,8 @@ export class CreateInvoiceItemDto {
       'Cada línea necesita una descripción: es lo que la DIAN publica en `cbc:Description` y lo único que el adquiriente lee en el documento.',
   })
   @MaxLength(500, {
-    message: 'La descripción de la línea no puede superar 500 caracteres.',
+    message:
+      'La descripción de la línea no puede superar 500 caracteres: es el ancho de la columna invoice_items.description en base de datos.',
   })
   description: string;
 
@@ -304,20 +337,78 @@ export class CreateInvoiceItemDto {
    * Las líneas que quedan fuera de la base gravable se emiten SIN
    * `cac:TaxTotal` de línea (Anexo Técnico 1.9 §CAX01), que no es lo mismo que
    * un impuesto exento al 0 % —ese sí se emite—.
+   *
+   * `'contrato'` (D.2/D.4, ADR-6) es distinto de los otros tres: declara que
+   * ESTA línea es el AIU **completo** del contrato (Modelo 1 /
+   * `accounting_model: 'no_sumada'`), en vez de venir partido en tres
+   * renglones (Modelo 2 / `'sumada'`). Es mutuamente excluyente con las otras
+   * tres marcas y con una segunda línea `'contrato'` en el mismo documento —
+   * ver `INVOICING_AIU_007`—. `InvoiceCalculatorService` la explota
+   * internamente en A/I/U según el reparto configurado del perfil.
    */
   @IsOptional()
   @Transform(blankToUndefined)
-  @IsIn(['administracion', 'imprevistos', 'utilidad'], {
+  @IsIn(['administracion', 'imprevistos', 'utilidad', 'contrato'], {
     message:
-      'aiu_component debe ser "administracion", "imprevistos" o "utilidad". Solo aplica en facturas con operation_type="09" (AIU); si no es una factura AIU, omite el campo.',
+      'aiu_component debe ser "administracion", "imprevistos", "utilidad" o "contrato". Solo aplica en facturas con operation_type="09" (AIU); si no es una factura AIU, omite el campo.',
   })
-  aiu_component?: 'administracion' | 'imprevistos' | 'utilidad';
+  aiu_component?: 'administracion' | 'imprevistos' | 'utilidad' | 'contrato';
+}
+
+/**
+ * F.6 — línea de una FACTURA (`CreateInvoiceDto.items`), nunca de una nota.
+ *
+ * Acota `description` de 500 (el techo común de `CreateInvoiceItemDto`, ver su
+ * docblock) a 300, que es el legal para `cac:InvoiceLine/cbc:Description` bajo
+ * el Anexo Técnico 1.9 regla FAZ02.
+ *
+ * OJO — esto NO es «sobreescribe sólo `@MaxLength`, el resto se hereda».
+ * `class-validator` no distingue `IsString`/`IsNotEmpty`/`MaxLength` entre sí:
+ * las tres comparten el mismo `ValidationTypes.CUSTOM_VALIDATION`
+ * (`'customValidation'`), y `MetadataStorage.getTargetValidationMetadatas`
+ * dedupea por el PAR `(propertyName, type)` — no por qué constraint es. En
+ * cuanto la subclase declara CUALQUIER decorador de validación sobre
+ * `description`, las tres metadatas heredadas del padre para esa propiedad
+ * —las tres comparten `type: 'customValidation'`— quedan filtradas por
+ * completo, no sólo la que se redeclaró. Verificado con
+ * `getMetadataStorage().getTargetValidationMetadatas(CreateFacturaInvoiceItemDto, …)`:
+ * declarar sólo `@MaxLength(300)` dejaba UNA metadata para `description` (la
+ * propia), cero heredadas — `@IsString`/`@IsNotEmpty` del padre desaparecían
+ * en silencio, y una descripción vacía o no-string pasaba la validación de
+ * una FACTURA. Por eso las tres viajan explícitas acá, no dos.
+ *
+ * El `@Transform` de recorte SÍ se hereda intacto: class-transformer resuelve
+ * sus propias metadatas por clase+propiedad con `getAncestors()` y concatena
+ * (padre + hijo), sin el dedupe destructivo de class-validator — confirmado
+ * con el mismo repro (`description` llega ya recortado al validador aunque la
+ * subclase no redeclare el `@Transform`).
+ *
+ * Nota crédito y nota débito NO usan esta subclase: sus techos legales
+ * (CAZ02 600, DAZ02 sin confirmar) son mayores o iguales al de factura, así
+ * que el techo común de 500 —limitado por la columna, no por la ley— ya las
+ * cubre sin necesitar una subclase propia.
+ */
+export class CreateFacturaInvoiceItemDto extends CreateInvoiceItemDto {
+  @IsString({ message: 'La descripción de la línea debe ser texto.' })
+  @IsNotEmpty({
+    message:
+      'Cada línea necesita una descripción: es lo que la DIAN publica en `cbc:Description` y lo único que el adquiriente lee en el documento.',
+  })
+  @MaxLength(300, {
+    message:
+      'La descripción de la línea de una factura no puede superar 300 caracteres (Anexo Técnico DIAN 1.9, regla FAZ02 para cac:InvoiceLine/cbc:Description). Acorta el texto: una descripción más larga hace que la DIAN rechace el documento DESPUÉS de haber consumido el consecutivo autorizado.',
+  })
+  description: string;
 }
 
 export class CreateInvoiceTaxDto {
   /** Piso: ver `foreignKeyFloorMessage`. */
   @IsOptional()
   @IsNumber()
+  @IsInt({
+    message:
+      'tax_rate_id debe ser un número entero: los ids del catálogo de tarifas no tienen fracciones.',
+  })
   @Type(() => Number)
   @Min(1, {
     message: foreignKeyFloorMessage(
@@ -428,6 +519,10 @@ export class CreateInvoiceDto {
   /** Piso: ver `foreignKeyFloorMessage`. */
   @IsOptional()
   @IsNumber()
+  @IsInt({
+    message:
+      'customer_id debe ser un número entero: los ids de cliente no tienen fracciones.',
+  })
   @Type(() => Number)
   @Min(1, {
     message: foreignKeyFloorMessage(
@@ -452,6 +547,10 @@ export class CreateInvoiceDto {
   /** Piso: ver `foreignKeyFloorMessage`. */
   @IsOptional()
   @IsNumber()
+  @IsInt({
+    message:
+      'supplier_id debe ser un número entero: los ids de proveedor no tienen fracciones.',
+  })
   @Type(() => Number)
   @Min(1, {
     message: foreignKeyFloorMessage(
@@ -464,6 +563,10 @@ export class CreateInvoiceDto {
   /** Piso: ver `foreignKeyFloorMessage`. */
   @IsOptional()
   @IsNumber()
+  @IsInt({
+    message:
+      'related_invoice_id debe ser un número entero: los ids de factura no tienen fracciones.',
+  })
   @Type(() => Number)
   @Min(1, {
     message: foreignKeyFloorMessage(
@@ -677,6 +780,10 @@ export class CreateInvoiceDto {
    */
   @IsOptional()
   @IsNumber()
+  @IsInt({
+    message:
+      'resolution_id debe ser un número entero: los ids de resolución DIAN no tienen fracciones.',
+  })
   @Type(() => Number)
   @Min(1, {
     message: foreignKeyFloorMessage(
@@ -1016,8 +1123,11 @@ export class CreateInvoiceDto {
     message: 'La factura admite máximo 100 líneas.',
   })
   @ValidateNested({ each: true })
-  @Type(() => CreateInvoiceItemDto)
-  items: CreateInvoiceItemDto[];
+  // F.6 — `CreateFacturaInvoiceItemDto`, no la base: acota `description` a
+  // los 300 caracteres de la regla FAZ02, no a los 500 del techo común de
+  // `CreateInvoiceItemDto` (pensado para nota crédito/débito).
+  @Type(() => CreateFacturaInvoiceItemDto)
+  items: CreateFacturaInvoiceItemDto[];
 
   /**
    * Header-aggregated tax rows (one per `(tax_name, rate, type)`). Kept for

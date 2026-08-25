@@ -899,6 +899,16 @@ describe('CreateInvoiceDto — las 7 llaves foráneas tienen piso', () => {
         expect(failedPaths(errors)).toEqual([]);
       });
 
+      // F.5 — decimal ≥ 1: @Min(1) por sí solo lo APRUEBA (1.5 ≥ 1), así que
+      // sólo @IsInt lo detiene. Si alguien borra el @IsInt de este campo, este
+      // caso —y sólo este— empieza a pasar donde antes fallaba: es la prueba
+      // de mutación que demuestra que el decorador hace algo.
+      it('rechaza el id decimal 1.5 (F.5 — @IsInt, @Min por sí solo lo aprueba)', async () => {
+        const errors = await validateAsPipe(testCase.build(1.5));
+        expect(failedPaths(errors)).toContain(testCase.path);
+        expect(messagesAt(errors, testCase.path)).toContain('entero');
+      });
+
       it('el mensaje nombra el campo y su límite', async () => {
         const errors = await validateAsPipe(testCase.build(0));
         const message = messagesAt(errors, testCase.path);
@@ -1037,5 +1047,47 @@ describe('CreateInvoiceItemDto — unit_code: cota FAV05 (@unitCode, 1-5)', () =
     expect(message).toContain('unit_code');
     expect(message).toContain('5');
     expect(message).toContain('FAV05');
+  });
+});
+
+/**
+ * F.6 — el Anexo Técnico 1.9 fija DOS topes distintos para
+ * `cac:InvoiceLine/cbc:Description` según el documento padre: factura
+ * (FAZ02) 1-300, nota crédito (CAZ02) 1-600. `CreateInvoiceItemDto.description`
+ * tenía un único `@MaxLength(500)` que no era correcto para NINGUNO de los
+ * dos: dejaba pasar 301-500 en factura (que la DIAN rechaza al emitir, ya con
+ * el consecutivo gastado) y no alcanzaba los 600 legales de nota crédito.
+ *
+ * `CreateInvoiceDto.items` usa ahora `CreateFacturaInvoiceItemDto`
+ * (`@Type(() => CreateFacturaInvoiceItemDto)`), que sobreescribe SÓLO
+ * `@MaxLength` a 300. Nota crédito/débito siguen en `CreateInvoiceItemDto`
+ * —techo común de 500, limitado por la columna `invoice_items.description`,
+ * no por la ley— porque su legal (600) excede esa columna y ensancharla es
+ * una migración de `schema.prisma` fuera de este alcance.
+ */
+describe('CreateFacturaInvoiceItemDto — description: cota FAZ02 (cac:InvoiceLine/cbc:Description, 1-300)', () => {
+  it('acepta exactamente 300 caracteres', async () => {
+    const errors = await validateAsPipe(itemWith({ description: chars(300) }));
+    expect(failedPaths(errors)).toEqual([]);
+  });
+
+  it('rechaza 301 caracteres con 400 (vía ValidationPipe)', async () => {
+    const errors = await validateAsPipe(itemWith({ description: chars(301) }));
+    expect(failedPaths(errors)).toContain('items.0.description');
+  });
+
+  it('el mensaje nombra el campo, el tope y la regla FAZ02', async () => {
+    const errors = await validateAsPipe(itemWith({ description: chars(301) }));
+    const message = messagesAt(errors, 'items.0.description');
+    expect(message).toContain('300');
+    expect(message).toContain('FAZ02');
+  });
+
+  it('301-500 caracteres, que el techo COMÚN (500) aprobaría, sigue rechazado en factura', async () => {
+    // Es exactamente el hueco que F.6 cierra: antes de la subclase, 301-500
+    // pasaba `CreateInvoiceItemDto.description` (500) y sólo se descubría al
+    // emitir, con el consecutivo ya gastado.
+    const errors = await validateAsPipe(itemWith({ description: chars(450) }));
+    expect(failedPaths(errors)).toContain('items.0.description');
   });
 });
