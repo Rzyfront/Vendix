@@ -176,9 +176,12 @@ export class PosCustomerSelectorComponent {
 
   /**
    * Submit gate: form is submittable when the cashier provided at least one
-   * identifier — a valid email OR (document_type + document_number).
-   * Format-only validation runs; required-ness is decided here, not in
-   * Validators.required, so the same form handles empty/partial inputs.
+   * identifier — a valid email OR (document_type + document_number). Format
+   * validation is intentionally non-blocking: the dev lead's spec was
+   * "un mismo paso se va todo" (one step, don't add friction), so even a
+   * non-canonical document number is submitted — the lookup may still find
+   * a legacy customer, and the format-hint chip already warns the cashier
+   * before they hit Siguiente.
    */
   readonly canResolve = computed(() => {
     if (this.resolving()) return false;
