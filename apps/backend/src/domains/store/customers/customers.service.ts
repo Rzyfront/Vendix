@@ -518,8 +518,9 @@ export class CustomersService {
     }
 
     if (existing) {
-      // Conservative partial update — see `buildConservativeUpdatePayload`.
-      const updateData = this.buildConservativeUpdatePayload(existing, dto);
+      // Overwrite update — see `buildUpdatePayload`. Per dev lead's
+      // clarified spec: matching unique identifier → edit with typed values.
+      const updateData = this.buildUpdatePayload(existing, dto);
 
       let was_updated = false;
       if (Object.keys(updateData).length > 0) {
@@ -577,12 +578,14 @@ export class CustomersService {
   }
 
   /**
-   * QUI-723 — Build the partial-update payload for `findOrCreateByEmailOrDocument`.
+   * QUI-723 — Build the update payload for `findOrCreateByEmailOrDocument`.
    *
-   * Conservative: only fills NULL or EMPTY fields on the existing row
-   * with values from the incoming DTO. Already-confirmed data on the
-   * existing customer is never overwritten — matches the dev lead's
-   * "no hay que cambiarle nada" spec.
+   * OVERWRITE semantics: any non-empty value in the incoming DTO replaces
+   * the existing field on the matched customer. The dev lead's clarified
+   * spec (later audio): "cédula y correo son como un identificador único;
+   * cualquier cliente que tenga el mismo identificador único se edita".
+   * So when the cashier types data for an existing customer, those
+   * values become the new truth on that row.
    *
    * Email is intentionally excluded: if the existing customer matched the
    * incoming email, the strings already coincide (the lookup was
@@ -590,10 +593,14 @@ export class CustomersService {
    * unique-constraint check.
    *
    * Document fields get the same canonicalization as `normalizeDocument()`
-   * so a `cc 123.456` request matches an existing `CC123456` row and we
-   * write it back in the same form.
+   * so a `cc 123.456` request writes `123456` (matches the canonicalized
+   * stored value).
+   *
+   * `existing` is kept in the signature for symmetry with the read
+   * fields even though it isn't read in overwrite mode — keeps the
+   * call site unchanged if the policy flips back to conservative.
    */
-  private buildConservativeUpdatePayload(
+  private buildUpdatePayload(
     existing: {
       first_name: string | null;
       last_name: string | null;
@@ -603,32 +610,25 @@ export class CustomersService {
     },
     incoming: CreateCustomerDto,
   ): Record<string, unknown> {
+    void existing; // overwrite mode doesn't compare — see jsdoc above
     const data: Record<string, unknown> = {};
 
-    const fillIfEmpty = (
-      existingValue: string | null,
+    const write = (
       incomingValue: string | null | undefined,
       field: string,
       transform?: (s: string) => string,
     ) => {
-      if (existingValue) return; // protect confirmed data
       if (!incomingValue) return;
       const trimmed = incomingValue.trim();
       if (!trimmed) return;
       data[field] = transform ? transform(trimmed) : trimmed;
     };
 
-    fillIfEmpty(existing.first_name, incoming.first_name, 'first_name');
-    fillIfEmpty(existing.last_name, incoming.last_name, 'last_name');
-    fillIfEmpty(existing.phone, incoming.phone, 'phone');
-    fillIfEmpty(
-      existing.document_type,
-      incoming.document_type,
-      'document_type',
-      (s) => s.toUpperCase(),
-    );
-    fillIfEmpty(
-      existing.document_number,
+    write(incoming.first_name, 'first_name');
+    write(incoming.last_name, 'last_name');
+    write(incoming.phone, 'phone');
+    write(incoming.document_type, 'document_type', (s) => s.toUpperCase());
+    write(
       incoming.document_number,
       'document_number',
       (s) => s.toUpperCase().replace(/[\s\-.]/g, ''),

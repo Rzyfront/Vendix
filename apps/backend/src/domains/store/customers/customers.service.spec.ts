@@ -351,7 +351,10 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       expect(updateData).toEqual({ phone: '+573001234567' });
     });
 
-    it('does NOT overwrite a confirmed first_name even when the request carries a different one', async () => {
+    it('OVERWRITES a confirmed first_name when the request carries a different one', async () => {
+      // Per dev lead's clarified spec: matching unique identifier → edit
+      // (overwrite) with the typed values. The cashier's typed name
+      // becomes the new truth on the existing row.
       mockPrismaService.users.findFirst.mockResolvedValueOnce(existingByEmail);
 
       const result = await service.findOrCreateByEmailOrDocument(1, {
@@ -360,9 +363,11 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       } as any);
 
       expect(result.was_created).toBe(false);
-      expect(result.was_updated).toBe(false);
+      expect(result.was_updated).toBe(true);
       expect(result.matched_by).toBe('email');
-      expect(mockPrismaService.users.update).not.toHaveBeenCalled();
+      expect(mockPrismaService.users.update).toHaveBeenCalledTimes(1);
+      const updateData = mockPrismaService.users.update.mock.calls[0][0].data;
+      expect(updateData).toEqual({ first_name: 'OTRO NOMBRE' });
     });
 
     it('matches by exact (document_type, document_number) when no email matches', async () => {
@@ -379,8 +384,17 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       expect(result.was_created).toBe(false);
       expect(result.matched_by).toBe('document');
       expect(result.customer.id).toBe(11);
-      // Phone is already filled in existingByDocument → conservative, no update.
-      expect(result.was_updated).toBe(false);
+      // Overwrite semantics: every non-empty DTO field lands in the
+      // update payload. The typed phone + the typed document pair all
+      // get written — even the ones that match the existing values, to
+      // keep the implementation simple and predictable for the cashier.
+      expect(result.was_updated).toBe(true);
+      const updateData = mockPrismaService.users.update.mock.calls[0][0].data;
+      expect(updateData).toEqual({
+        document_type: 'CC',
+        document_number: '99999999',
+        phone: '+573109999999',
+      });
     });
 
     it('does NOT match by document when document_type differs (CC 123 ≠ NIT 123)', async () => {
