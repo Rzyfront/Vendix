@@ -19,3 +19,4 @@ export * from './invoice-section-field-map';
 export * from './invoice-section-controls';
 export * from './invoice-section-aiu.logic';
 export * from './invoice-section-aiu.component';
+export * from './invoice-section-documento.component';

@@ -87,6 +87,17 @@ import type {
     AiuSectionPaths,
     AiuTaxRuleValue,
 } from '../../components/invoice-sections/index';
+/**
+ * SECCIÓN DOCUMENTO COMPARTIDA con «Nueva factura» (B.2). Mismo componente,
+ * mismos controles: resolución, tipo de documento, forma y medio de pago, y
+ * notas de cabecera. Las fechas se ocultan en este contexto («profile»).
+ */
+import { InvoiceSectionDocumentoComponent } from '../../components/invoice-sections/index';
+import type {
+    DocumentoSectionErrors,
+    DocumentoSectionNotice,
+    DocumentoSectionPaths,
+} from '../../components/invoice-sections/index';
 import {
     FOREIGN_CURRENCY_OPTIONS,
     INVOICE_TYPE_OPTIONS,
@@ -225,6 +236,7 @@ type SectionId = ProfileScreenSectionId;
         ToggleComponent,
         AccountCodeSelectComponent,
         InvoiceSectionAiuComponent,
+        InvoiceSectionDocumentoComponent,
         InvoiceProfilePreviewPanelComponent,
         InvoiceProfileVersionsPanelComponent,
     ],
@@ -313,175 +325,52 @@ type SectionId = ProfileScreenSectionId;
                         [expanded]="isSectionOpen('documento')"
                         (expandedChange)="setSection('documento', $event)"
                     >
-                        <div class="space-y-3" formGroupName="dian">
-                            <!--
-                                El TIPO va primero porque decide qué secciones
-                                tienen sentido más abajo: una exportación no está
-                                sujeta a retención en Colombia, y verlo después de
-                                haber llenado retenciones es verlo tarde.
-                            -->
-                            <app-selector
-                                label="Tipo de documento"
-                                formControlName="document_type"
-                                [options]="document_type_options"
-                                size="sm"
-                                helpText="Se precarga en la factura. Una exportación es un documento DIAN distinto de una venta nacional."
-                            ></app-selector>
-
-                            @if (inapplicableWithholdings(); as count) {
-                                <!--
-                                    «app-alert-banner» y no un párrafo teñido: un
-                                    texto «text-warning» sobre fondo claro no
-                                    llega al contraste AA, y el aviso es
-                                    justamente el que evita emitir una
-                                    exportación con retención colombiana.
-                                -->
-                                <app-alert-banner
-                                    variant="warning"
-                                    icon="alert-triangle"
-                                >
-                                    Este perfil tiene {{ count }}
-                                    {{
-                                        count === 1
-                                            ? 'retención configurada'
-                                            : 'retenciones configuradas'
-                                    }}
-                                    y una factura de exportación no está sujeta a
-                                    retención en Colombia. Quítalas o cambia el
-                                    tipo de documento: se seguirán precargando tal
-                                    como están.
-                                </app-alert-banner>
-                            }
-
-                            <div
-                                class="rounded-lg border border-border p-3 space-y-2"
+                        <!--
+                            B.2: sección compartida con «Nueva factura»
+                            («InvoiceSectionDocumentoComponent», contexto
+                            «profile»). El aviso de retenciones inaplicables
+                            se queda en la PÁGINA, no en el componente
+                            compartido: depende de «withholdingRules», que es
+                            ajeno a esta sección —la decisión de negocio
+                            («¿aplica retención a una exportación?») sigue
+                            siendo de la pantalla; el componente sólo pinta el
+                            marcado compartido de resolución, tipo de
+                            documento, forma/medio de pago y notas—.
+                        -->
+                        @if (inapplicableWithholdings(); as count) {
+                            <app-alert-banner
+                                variant="warning"
+                                icon="alert-triangle"
                             >
-                                <app-selector
-                                    label="Resolución de numeración preferida"
-                                    [formControl]="resolutionControl"
-                                    [options]="resolution_options()"
-                                    [placeholder]="
-                                        'Sin preferencia — la factura elige la vigente más antigua'
-                                    "
-                                    size="sm"
-                                    helpText="Para cuando la tienda tiene varios rangos autorizados vivos a la vez. Es una preferencia: si el rango no puede numerar el día de la emisión, la factura usa la vigente más antigua y lo avisa."
-                                ></app-selector>
-                                @if (resolution_options().length === 0) {
-                                    <p class="text-xs text-text-secondary">
-                                        No hay resoluciones de factura de venta
-                                        registradas. Regístralas en Facturación →
-                                        Resoluciones; sin rango autorizado la
-                                        emisión no tiene de dónde tomar el
-                                        consecutivo.
-                                    </p>
-                                }
-                                @if (resolutionWarning(); as warning) {
-                                    <p
-                                        class="text-xs text-warning flex items-start gap-1.5"
-                                    >
-                                        <app-icon
-                                            name="alert-triangle"
-                                            [size]="14"
-                                            class="mt-0.5 shrink-0"
-                                        ></app-icon>
-                                        <span>{{ warning }}</span>
-                                    </p>
-                                }
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-                                <app-selector
-                                    label="Forma de pago"
-                                    formControlName="payment_method_code"
-                                    [options]="payment_form_options"
-                                    size="sm"
-                                    helpText="Se precarga en la factura. Contado o crédito."
-                                ></app-selector>
-                                <app-selector
-                                    label="Medio de pago"
-                                    formControlName="payment_means_code"
-                                    [options]="payment_means_options"
-                                    size="sm"
-                                    helpText="Código del anexo (efectivo, transferencia, tarjeta…)."
-                                ></app-selector>
-                            </div>
-
-                            <div
-                                class="rounded-lg border border-border p-3 space-y-2"
-                            >
-                                <div
-                                    class="flex flex-wrap items-center justify-between gap-2"
-                                >
-                                    <p class="text-xs text-text-secondary">
-                                        Notas de cabecera. Se precargan en la
-                                        factura y viajan como
-                                        <code>cbc:Note</code> del documento.
-                                    </p>
-                                    <app-button
-                                        variant="secondary"
-                                        size="sm"
-                                        (clicked)="addHeaderNote()"
-                                    >
-                                        <app-icon
-                                            slot="icon"
-                                            name="plus"
-                                            [size]="14"
-                                        ></app-icon>
-                                        Nota
-                                    </app-button>
-                                </div>
-                                @if (headerNotes.controls.length === 0) {
-                                    <p class="text-xs text-text-secondary italic">
-                                        Sin notas. La factura no llevará ninguna
-                                        precargada.
-                                    </p>
-                                }
-                                <div class="space-y-2" formArrayName="header_notes">
-                                    @for (
-                                        note of headerNotes.controls;
-                                        track $index
-                                    ) {
-                                        <div class="flex items-end gap-2">
-                                            <div class="flex-1">
-                                                <app-input
-                                                    [label]="'Nota ' + ($index + 1)"
-                                                    [formControlName]="$index"
-                                                    [maxlength]="header_note_limit"
-                                                    size="sm"
-                                                    [error]="
-                                                        issueFor(
-                                                            'dian.header_notes[' +
-                                                                $index +
-                                                                ']'
-                                                        )
-                                                    "
-                                                ></app-input>
-                                            </div>
-                                            <!--
-                                                SÓLO EL ICONO. La palabra «Quitar» repetida en cada fila de
-                                                cada matriz no aporta nada que el bote de basura no diga, y
-                                                ensancha el botón hasta empujar los campos de la fila. El
-                                                nombre accesible viaja en «ariaLabel», que app-button pone en
-                                                el <button> interno junto con el «title»: sin él, un botón de
-                                                sólo icono se anuncia sin nombre.
-                                            -->
-                                            <app-button
-                                                variant="outline-danger"
-                                                size="sm"
-                                                ariaLabel="Quitar esta nota de cabecera"
-                                                (clicked)="removeHeaderNote($index)"
-                                            >
-                                                <app-icon
-                                                    slot="icon"
-                                                    name="trash-2"
-                                                    [size]="15"
-                                                ></app-icon>
-                                            </app-button>
-                                        </div>
-                                    }
-                                </div>
-                            </div>
-                        </div>
+                                Este perfil tiene {{ count }}
+                                {{
+                                    count === 1
+                                        ? 'retención configurada'
+                                        : 'retenciones configuradas'
+                                }}
+                                y una factura de exportación no está sujeta a
+                                retención en Colombia. Quítalas o cambia el
+                                tipo de documento: se seguirán precargando tal
+                                como están.
+                            </app-alert-banner>
+                        }
+                        <vendix-invoice-section-documento
+                            context="profile"
+                            [form]="form"
+                            [paths]="documentoSectionPaths"
+                            [invoiceTypeOptions]="document_type_options"
+                            [paymentFormOptions]="payment_form_options"
+                            [paymentMeansOptions]="payment_means_options"
+                            [resolutionControl]="resolutionControl"
+                            [resolutionOptions]="resolution_options()"
+                            resolutionPlaceholder="Sin preferencia — la factura elige la vigente más antigua"
+                            resolutionHelpText="Para cuando la tienda tiene varios rangos autorizados vivos a la vez. Es una preferencia: si el rango no puede numerar el día de la emisión, la factura usa la vigente más antigua y lo avisa."
+                            [resolutionHint]="documentoResolutionHint()"
+                            [notices]="documentoNotices()"
+                            [errors]="documentoErrors()"
+                            [headerNoteErrors]="headerNoteErrors()"
+                            [headerNoteLimit]="header_note_limit"
+                        ></vendix-invoice-section-documento>
                     </vendix-invoice-form-section>
 
                     <!-- ══ AIU ══ los CUATRO BLOQUES.
@@ -1803,6 +1692,73 @@ export class InvoiceProfileEditorComponent {
         initialValue: this.form.getRawValue(),
     });
 
+    /**
+     * SECCIÓN DOCUMENTO COMPARTIDA (B.2). El componente no usa
+     * `formControlName`: recibe el `FormGroup` raíz y este mapa de rutas.
+     * `issue_date`/`due_date`/`notes` quedan en `null` a propósito —un
+     * perfil no tiene fecha de emisión propia y guarda sus notas en un
+     * `FormArray` (`header_notes`), no en un control de texto único—.
+     */
+    readonly documentoSectionPaths: DocumentoSectionPaths = {
+        invoice_type: 'dian.document_type',
+        payment_form: 'dian.payment_method_code',
+        payment_means_code: 'dian.payment_means_code',
+        issue_date: null,
+        due_date: null,
+        notes: null,
+        header_notes: 'dian.header_notes',
+    };
+
+    /**
+     * Texto plano para el estado «sin resoluciones registradas». Sólo el
+     * perfil lo pinta así: la factura ya tiene su propio aviso de peligro
+     * dentro de `notices` (ver `resolutionEmptyReason` en «Nueva factura»).
+     */
+    readonly documentoResolutionHint = computed<string | null>(() =>
+        this.resolution_options().length === 0
+            ? 'No hay resoluciones de factura de venta registradas. Regístralas en Facturación → Resoluciones; sin rango autorizado la emisión no tiene de dónde tomar el consecutivo.'
+            : null,
+    );
+
+    /**
+     * `resolutionWarning()` pasa de párrafo suelto a `app-alert-banner`: es
+     * la MISMA regla de accesibilidad que ya se aplicó en «Nueva factura»
+     * —un aviso que un lector de pantalla no anuncia no es un aviso—, y de
+     * paso queda dentro del vocabulario `notices` que ya entiende la
+     * sección compartida.
+     */
+    readonly documentoNotices = computed<readonly DocumentoSectionNotice[]>(() => {
+        const notices: DocumentoSectionNotice[] = [];
+        const warning = this.resolutionWarning();
+        if (warning) {
+            notices.push({ variant: 'warning', text: warning });
+        }
+        return notices;
+    });
+
+    /**
+     * Antes de este mapa, «Documento» era la única sección del editor que no
+     * marcaba ninguno de sus cuatro campos con el error del validador del
+     * contrato: la resolución, el tipo de documento y las dos formas de pago
+     * se guardaban sin decir nada cuando estaban mal. `issueFor` ya resolvía
+     * la ruta correcta —la usan las demás secciones—; sólo faltaba pintarla
+     * aquí.
+     */
+    readonly documentoErrors = computed<DocumentoSectionErrors>(() => ({
+        resolution: this.issueFor('dian.resolution_id'),
+        invoice_type: this.issueFor('dian.document_type'),
+        payment_form: this.issueFor('dian.payment_method_code'),
+        payment_means_code: this.issueFor('dian.payment_means_code'),
+    }));
+
+    /** Un mensaje por índice de nota de cabecera, reactivo al `FormArray`. */
+    readonly headerNoteErrors = computed<readonly string[]>(() => {
+        this.form_value();
+        return this.headerNotes.controls.map((_, index) =>
+            this.issueFor('dian.header_notes[' + index + ']'),
+        );
+    });
+
     readonly saving = toSignal(this.store.select(selectProfileSaving), {
         initialValue: false,
     });
@@ -2527,12 +2483,11 @@ export class InvoiceProfileEditorComponent {
         return concept ? concept.ratePercent.toFixed(2) : null;
     }
 
-    addHeaderNote(): void {
-        this.headerNotes.push(this.fb.control(''));
-    }
-    removeHeaderNote(index: number): void {
-        this.headerNotes.removeAt(index);
-    }
+    // Añadir/quitar una nota de cabecera ahora vive DENTRO de
+    // `InvoiceSectionDocumentoComponent` (B.2): opera sobre
+    // `headerNotesArray()`, resuelto vía `documentoSectionPaths.header_notes`
+    // contra este mismo `this.form`. El getter `headerNotes` de abajo sigue
+    // vivo porque lo usan `hydrate()` y el armado del payload.
 
     // ── Hidratación ─────────────────────────────────────────────────────────
     private hydrate(profile: InvoiceProfileDetail, config: InvoiceProfileConfig): void {

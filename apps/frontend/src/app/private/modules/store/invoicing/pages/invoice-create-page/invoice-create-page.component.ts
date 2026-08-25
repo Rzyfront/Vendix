@@ -132,7 +132,6 @@ import { InvoiceProductOption } from '../../services/invoice-product-lookup.serv
 // siguen viviendo en `components/invoice-create/`: son piezas del formulario,
 // no de la página, y el POS u otra superficie podría montarlas sin esta vista.
 import { InvoiceFormSectionComponent } from '../../components/invoice-create/invoice-form-section.component';
-import { InvoiceResolutionBannerComponent } from '../../components/invoice-create/invoice-resolution-banner.component';
 import { InvoiceLineTaxesComponent } from '../../components/invoice-create/invoice-line-taxes.component';
 import { InvoiceItemPickerModalComponent } from '../../components/invoice-create/invoice-item-picker-modal.component';
 import {
@@ -155,6 +154,17 @@ import type {
   AiuDepartureField,
   AiuSectionPaths,
   AiuTaxRuleValue,
+} from '../../components/invoice-sections/index';
+/**
+ * SECCIÓN DOCUMENTO COMPARTIDA con el editor de perfiles (B.2). Mismo
+ * componente y mismos controles —resolución, tipo de documento, forma y
+ * medio de pago, fechas y notas de cabecera— en las dos pantallas.
+ */
+import { InvoiceSectionDocumentoComponent } from '../../components/invoice-sections/index';
+import type {
+  DocumentoSectionErrors,
+  DocumentoSectionNotice,
+  DocumentoSectionPaths,
 } from '../../components/invoice-sections/index';
 import { InvoiceTaxCatalogService } from '../../components/invoice-create/invoice-tax-catalog.service';
 import {
@@ -679,12 +689,12 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     ConfirmationModalComponent,
     SaveRequirementsModalComponent,
     InvoiceFormSectionComponent,
-    InvoiceResolutionBannerComponent,
     InvoiceLineTaxesComponent,
     InvoiceItemPickerModalComponent,
     InvoiceCustomItemModalComponent,
     InvoiceOrderSelectComponent,
     InvoiceSectionAiuComponent,
+    InvoiceSectionDocumentoComponent,
   ],
   template: `
     <div class="w-full max-w-[1400px] mx-auto">
@@ -904,34 +914,33 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               }
 
               @if (profileConfigFailed()) {
-                <div
-                  class="mt-3 flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning-light px-3 py-2.5"
+                <!--
+                  Migrado a «app-alert-banner» (encargo del orquestador,
+                  2026-08-24): el div a mano nunca llevó role=alert, así que un
+                  lector de pantalla no lo anunciaba. El componente compartido
+                  lo trae fijo en su plantilla.
+                -->
+                <app-alert-banner
+                  class="mt-3"
+                  variant="warning"
+                  icon="alert-triangle"
+                  tone="token"
+                  heading="No se pudieron leer las reglas del perfil"
                 >
-                  <app-icon
-                    name="alert-triangle"
-                    [size]="15"
-                    class="mt-0.5 flex-shrink-0 text-warning"
-                  />
-                  <div class="min-w-0">
-                    <p class="text-xs font-semibold text-warning">
-                      No se pudieron leer las reglas del perfil
-                    </p>
-                    <p class="mt-0.5 text-xs leading-relaxed text-warning">
-                      La factura se puede emitir igual: el servidor la timbra
-                      con la versión vigente del perfil, no con lo que muestre
-                      esta pantalla. Lo que falta es el instructivo del AIU —y
-                      no se sustituye por el de la tienda, porque instruiría
-                      sobre otra base gravable—.
-                    </p>
-                    <button
-                      type="button"
-                      class="mt-1.5 text-xs font-semibold text-warning underline underline-offset-2"
-                      (click)="retryProfileConfig()"
-                    >
-                      Reintentar
-                    </button>
-                  </div>
-                </div>
+                  La factura se puede emitir igual: el servidor la timbra con
+                  la versión vigente del perfil, no con lo que muestre esta
+                  pantalla. Lo que falta es el instructivo del AIU —y no se
+                  sustituye por el de la tienda, porque instruiría sobre otra
+                  base gravable—.
+                  <button
+                    bannerActions
+                    type="button"
+                    class="mt-1.5 text-xs font-semibold text-warning underline underline-offset-2"
+                    (click)="retryProfileConfig()"
+                  >
+                    Reintentar
+                  </button>
+                </app-alert-banner>
               }
             } @else {
               <!--
@@ -986,125 +995,12 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               (expandedChange)="setSection('documento', $event)"
             >
               <!--
-                LA RESOLUCIÓN, DENTRO DE «DOCUMENTO» Y SOBRE FONDO PROPIO.
-
-                Vivía suelta entre la cabecera de la página y el formulario, sin
-                tarjeta detrás y a tamaño «sm». Ahí era el único control de toda
-                la pantalla sin superficie propia, y por eso «casi no se veía»:
-                el problema no era el color del control, era que flotaba.
-
-                Va dentro de la sección Documento porque es un dato de cabecera
-                del documento, y va en un bloque con fondo «--color-background» y
-                no directamente sobre la tarjeta: el control se pinta sobre
-                «--color-surface», así que sobre la propia superficie de la
-                tarjeta sólo lo separaría el borde. Con el fondo de la página
-                debajo, el control queda claro sobre oscuro y se lee de un
-                vistazo.
-
-                Tamaño «md», no «sm»: es el campo que gasta numeración
-                autorizada, y cada número que se toma de un rango se consume
-                aunque la DIAN rechace el documento.
-
-                Sigue enlazado con «[formControl]» y no con «formControlName»
-                aunque ahora esté DENTRO del «form». «resolution_id» tiene un
-                único escritor —«preselectEligibleResolution»— y el enlace
-                directo al control es lo que deja ese hecho a la vista.
+                TIPO DE OPERACIÓN. No vive en «vendix-invoice-section-documento»
+                (B.2): el editor de perfiles lo tiene FUERA de su sección
+                «Documento» porque decide qué secciones aplican, no es un dato
+                del documento en sí. Ver el docblock del componente compartido.
               -->
-              <div
-                class="mb-4 space-y-3 rounded-lg border border-border p-3"
-                [style.background]="'var(--color-background)'"
-              >
-                <app-selector
-                  label="Resolución de numeración"
-                  [formControl]="resolutionControl"
-                  [options]="resolutionOptions()"
-                  [errorText]="fieldError('resolution_id') ?? ''"
-                  [disabled]="resolutionOptions().length === 0"
-                  placeholder="Elige el rango autorizado"
-                  size="md"
-                ></app-selector>
-
-                @if (profileResolutionNotice(); as notice) {
-                  <!--
-                    El perfil pidió un rango y se usó otro. Callarlo dejaría al
-                    operador con una factura numerada distinto de lo que configuró y
-                    sin nada en pantalla que lo relacione con el perfil.
-                  -->
-                  <app-alert-banner
-                    variant="warning"
-                    icon="alert-triangle"
-                    tone="token"
-                  >
-                    {{ notice }}
-                  </app-alert-banner>
-                }
-
-                @if (resolutionEmptyReason(); as reason) {
-                  <!--
-                    Una lista vacía y muda en la pantalla que gasta numeración
-                    autorizada es un callejón sin salida: hay que decir si están
-                    vencidas, agotadas o si no hay ninguna.
-                  -->
-                  <app-alert-banner
-                    variant="danger"
-                    icon="alert-triangle"
-                    tone="token"
-                  >
-                    {{ reason }}
-                  </app-alert-banner>
-                }
-
-                @if (habilitationWarning(); as warning) {
-                  <!--
-                    Va ANTES del aviso de clave técnica: el aviso de clave es una
-                    sospecha sobre un dato ambiguo, y este es un hecho. Una factura
-                    emitida contra el rango de habilitación no es una factura.
-                  -->
-                  <app-alert-banner
-                    variant="danger"
-                    icon="alert-triangle"
-                    tone="token"
-                  >
-                    {{ warning }}
-                  </app-alert-banner>
-                }
-
-                @if (technicalKeyWarning(); as warning) {
-                  <app-alert-banner
-                    variant="warning"
-                    icon="alert-triangle"
-                    tone="token"
-                  >
-                    {{ warning }}
-                  </app-alert-banner>
-                }
-
-                <!-- El selector elige; el banner sigue informando qué se eligió. -->
-                <vendix-invoice-resolution-banner
-                  [resolution]="activeResolution()"
-                  [documentLabel]="documentLabel()"
-                />
-              </div>
-
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <app-selector
-                  label="Tipo de documento"
-                  formControlName="invoice_type"
-                  [options]="invoiceTypeOptions"
-                  [errorText]="fieldError('invoice_type') ?? ''"
-                  size="sm"
-                  (valueChange)="onInvoiceTypeChange()"
-                ></app-selector>
-                <app-input
-                  label="Fecha de emisión"
-                  type="date"
-                  formControlName="issue_date"
-                  [control]="control('issue_date')"
-                  [error]="fieldError('issue_date')"
-                  [required]="true"
-                  size="sm"
-                  (inputChange)="syncDueDate()"
-                ></app-input>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
                 <app-selector
                   label="Tipo de operación"
                   formControlName="operation_type"
@@ -1115,43 +1011,35 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                 ></app-selector>
               </div>
 
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-                <app-selector
-                  label="Forma de pago"
-                  formControlName="payment_form"
-                  [options]="paymentFormOptions"
-                  [errorText]="fieldError('payment_form') ?? ''"
-                  size="sm"
-                  (valueChange)="onPaymentFormChange()"
-                ></app-selector>
-                <app-selector
-                  label="Medio de pago"
-                  formControlName="payment_means_code"
-                  [options]="paymentMeansOptions"
-                  [errorText]="fieldError('payment_means_code') ?? ''"
-                  size="sm"
-                ></app-selector>
-                <app-input
-                  label="Vencimiento"
-                  type="date"
-                  formControlName="due_date"
-                  [control]="control('due_date')"
-                  [error]="dueDateError()"
-                  [required]="isCredit()"
-                  [helperText]="dueDateHelp()"
-                  size="sm"
-                ></app-input>
-              </div>
-
-              <app-textarea
-                class="block mt-3"
-                label="Notas"
-                formControlName="notes"
-                [control]="control('notes')"
-                [error]="fieldError('notes')"
-                placeholder="Observaciones que se imprimen en el documento..."
-                [rows]="2"
-              ></app-textarea>
+              <!--
+                SECCIÓN DOCUMENTO COMPARTIDA CON EL EDITOR DE PERFILES (B.2). Es
+                el mismo componente y los mismos controles en las dos pantallas
+                —resolución, tipo de documento, forma y medio de pago, fechas y
+                notas de cabecera—; lo que cambia es qué significa dejar uno
+                vacío y qué campos no tienen sentido siquiera (las fechas, aquí;
+                ver «invoice-section-documento.component.ts»).
+              -->
+              <vendix-invoice-section-documento
+                context="invoice"
+                [form]="invoiceForm"
+                [paths]="documentoSectionPaths"
+                [invoiceTypeOptions]="invoiceTypeOptions"
+                [paymentFormOptions]="paymentFormOptions"
+                [paymentMeansOptions]="paymentMeansOptions"
+                [resolutionControl]="resolutionControl"
+                [resolutionOptions]="resolutionOptions()"
+                resolutionPlaceholder="Elige el rango autorizado"
+                resolutionSize="md"
+                [activeResolution]="activeResolution()"
+                [documentLabel]="documentLabel()"
+                [notices]="documentoNotices()"
+                [errors]="documentoErrors()"
+                [dueDateRequired]="isCredit()"
+                [dueDateHelp]="dueDateHelp()"
+                (invoiceTypeChanged)="onInvoiceTypeChange()"
+                (paymentFormChanged)="onPaymentFormChange()"
+                (issueDateChanged)="syncDueDate()"
+              ></vendix-invoice-section-documento>
             </vendix-invoice-form-section>
 
             <!-- ── ADQUIRIENTE ───────────────────────────────────── -->
@@ -1734,36 +1622,33 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
 
               @if (aiuEffectiveNote(); as note) {
                 @if (!note.valid) {
-                  <div
-                    class="mt-3 flex items-start gap-2.5 rounded-lg border border-error/30 bg-error/5 px-3 py-2.5"
+                  <!--
+                    Migrado a «app-alert-banner» (encargo del orquestador,
+                    2026-08-24): el div a mano nunca llevó role=alert.
+                    Variante «danger», tono «token» — mismo par que ya usan
+                    «aiuUnassigned»/«aiuTaxableWithoutTax» un poco más arriba.
+                  -->
+                  <app-alert-banner
+                    class="mt-3"
+                    variant="danger"
+                    icon="alert-triangle"
+                    tone="token"
+                    [heading]="
+                      note.length > note.max
+                        ? 'El objeto del contrato AIU es demasiado largo'
+                        : 'Falta el objeto del contrato AIU'
+                    "
                   >
-                    <app-icon
-                      name="alert-triangle"
-                      [size]="15"
-                      class="mt-0.5 flex-shrink-0 text-error"
-                    />
-                    <div class="min-w-0">
-                      <p class="text-xs font-semibold text-error">
-                        @if (note.length > note.max) {
-                          El objeto del contrato AIU es demasiado largo
-                        } @else {
-                          Falta el objeto del contrato AIU
-                        }
-                      </p>
-                      <p class="mt-0.5 text-xs leading-relaxed text-error">
-                        La regla CAV03 exige que la línea de Administración
-                        lleve una nota que empiece por «{{
-                          effectiveAiu()?.note_prefix
-                        }}» y mida entre {{ note.min }} y
-                        {{ note.max }} caracteres; la actual mide
-                        {{ note.length }}. Descríbelo arriba, en
-                        <strong>Objeto del contrato</strong>, o —si es siempre
-                        el mismo— en Ajustes → Facturación → AIU. Sin eso la
-                        emisión se rechaza y el documento no llega a tomar
-                        consecutivo.
-                      </p>
-                    </div>
-                  </div>
+                    La regla CAV03 exige que la línea de Administración lleve
+                    una nota que empiece por «{{
+                      effectiveAiu()?.note_prefix
+                    }}» y mida entre {{ note.min }} y {{ note.max }}
+                    caracteres; la actual mide {{ note.length }}. Descríbelo
+                    arriba, en <strong>Objeto del contrato</strong>, o —si es
+                    siempre el mismo— en Ajustes → Facturación → AIU. Sin eso
+                    la emisión se rechaza y el documento no llega a tomar
+                    consecutivo.
+                  </app-alert-banner>
                 }
               }
             </vendix-invoice-form-section>
@@ -4028,6 +3913,53 @@ export class InvoiceCreatePageComponent implements OnInit {
     // `div` estáticos y pinte un radio real.
     accounting_model: 'aiu.accounting_model',
   };
+
+  // ── La sección Documento compartida (B.2) ───────────────────
+  //
+  // El formulario de la factura es PLANO: `invoice_type`, `payment_form`,
+  // `payment_means_code`, `issue_date`, `due_date`, `notes` viven en la raíz.
+  // El perfil los anida bajo `dian`. Ver el docblock de
+  // `invoice-section-documento.component.ts` y el ADR-2 del plan.
+  readonly documentoSectionPaths: DocumentoSectionPaths = {
+    invoice_type: 'invoice_type',
+    payment_form: 'payment_form',
+    payment_means_code: 'payment_means_code',
+    issue_date: 'issue_date',
+    due_date: 'due_date',
+    notes: 'notes',
+    header_notes: null,
+  };
+
+  /**
+   * Los avisos de resolución, ya resueltos como lista para el componente
+   * compartido. La LÓGICA de cuándo aparece cada uno sigue siendo de esta
+   * página —depende del perfil activo, el catálogo de resoluciones y el
+   * estado de habilitación DIAN—; el componente sólo pinta el `app-alert-banner`
+   * por entrada, en vez de que cada aviso repita su propio marcado.
+   */
+  readonly documentoNotices = computed<readonly DocumentoSectionNotice[]>(() => {
+    const notices: DocumentoSectionNotice[] = [];
+    const profileNotice = this.profileResolutionNotice();
+    if (profileNotice) notices.push({ variant: 'warning', text: profileNotice });
+    const emptyReason = this.resolutionEmptyReason();
+    if (emptyReason) notices.push({ variant: 'danger', text: emptyReason });
+    const habilitation = this.habilitationWarning();
+    if (habilitation) notices.push({ variant: 'danger', text: habilitation });
+    const technicalKey = this.technicalKeyWarning();
+    if (technicalKey) notices.push({ variant: 'warning', text: technicalKey });
+    return notices;
+  });
+
+  /** Errores de campo ya resueltos, para el componente compartido. */
+  readonly documentoErrors = computed<DocumentoSectionErrors>(() => ({
+    resolution: this.fieldError('resolution_id'),
+    invoice_type: this.fieldError('invoice_type'),
+    issue_date: this.fieldError('issue_date'),
+    payment_form: this.fieldError('payment_form'),
+    payment_means_code: this.fieldError('payment_means_code'),
+    due_date: this.dueDateError(),
+    notes: this.fieldError('notes'),
+  }));
 
   /**
    * LO QUE ESTE DOCUMENTO NO PUEDE LLEVAR — medido, no supuesto.
