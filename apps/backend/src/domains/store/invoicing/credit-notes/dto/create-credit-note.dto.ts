@@ -97,8 +97,18 @@ export class CreateCreditNoteDto {
   @MaxLength(10)
   currency?: string;
 
+  // F.6 — «el mismo análisis» que `description` en `create-invoice.dto.ts`:
+  // este campo viajaba SIN techo. El Anexo Técnico 1.9 sí le pone uno a
+  // `cbc:Note` de nota crédito/débito —reglas CAD11/DAD11— en 5000
+  // caracteres, y `invoice_items`/`invoices` no tienen una columna que lo
+  // limite antes: sin este `@MaxLength` un texto más largo llega tal cual al
+  // XML y la DIAN lo rechaza DESPUÉS de consumir el consecutivo.
   @IsOptional()
   @IsString()
+  @MaxLength(5000, {
+    message:
+      'notes no puede superar 5000 caracteres (Anexo Técnico DIAN 1.9, reglas CAD11/DAD11 para cbc:Note de nota crédito/débito).',
+  })
   notes?: string;
 
   /**
@@ -164,8 +174,18 @@ export class CreateDebitNoteDto {
   @MaxLength(10)
   currency?: string;
 
+  // F.6 — «el mismo análisis» que `description` en `create-invoice.dto.ts`:
+  // este campo viajaba SIN techo. El Anexo Técnico 1.9 sí le pone uno a
+  // `cbc:Note` de nota crédito/débito —reglas CAD11/DAD11— en 5000
+  // caracteres, y `invoice_items`/`invoices` no tienen una columna que lo
+  // limite antes: sin este `@MaxLength` un texto más largo llega tal cual al
+  // XML y la DIAN lo rechaza DESPUÉS de consumir el consecutivo.
   @IsOptional()
   @IsString()
+  @MaxLength(5000, {
+    message:
+      'notes no puede superar 5000 caracteres (Anexo Técnico DIAN 1.9, reglas CAD11/DAD11 para cbc:Note de nota crédito/débito).',
+  })
   notes?: string;
 
   /**
