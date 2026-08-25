@@ -6756,19 +6756,39 @@ export class InvoiceCreatePageComponent implements OnInit {
    * enseña nada. El acceso al DOM va en el siguiente frame porque el nodo no
    * existe hasta que Angular repinta la sección recién abierta.
    *
-   * Regresión de B.3 (2026-08-25, orquestador): `formControlName` y
-   * `formArrayName` SÍ son atributos estáticos que llegan al DOM en
-   * minúsculas — pero eso vale para `formControlName="x"` escrito literal en
-   * la plantilla. Los campos de línea de `invoice-section-lineas.component.ts`
-   * ligan con `[formControl]="rowControl(...)"` (binding de propiedad, sin
-   * atributo DOM alguno) desde que B.3 extrajo la sección compartida, así
-   * que para `items.<i>.<campo>` la consulta de abajo no encontraba NADA.
-   * `invoice-section-lineas.component.ts` marca ahora sus 4 campos
-   * requeribles (`description`, `quantity`, `unit_code`, `discount_amount`,
-   * los mismos de `INVOICE_EMIT_REQUIREMENTS_MAP`) con `[attr.data-control-name]`,
-   * un atributo propio — nunca `[attr.formcontrolname]`, que suplantaría uno
-   * que Angular reserva. Los campos de cabecera se siguen resolviendo por
-   * `formcontrolname` real y no se tocaron.
+   * DOS DEFECTOS DISTINTOS, CON FECHAS DE NACIMIENTO DISTINTAS (medido por
+   * el orquestador, 2026-08-25, con un parser de etiquetas multilínea sobre
+   * todo `modules/store/invoicing` cruzado contra
+   * `INVOICE_EMIT_REQUIREMENTS_MAP`). No confundir uno con otro ni atribuir
+   * los dos a B.3: si algún día se revierte B.3, el Bug B NO se va con él.
+   *
+   * **Bug A (localización) — lo introdujo B.3 (`517953a4f`), sólo 4 campos
+   * de línea.** `formControlName`/`formArrayName` SÍ son atributos estáticos
+   * que llegan al DOM en minúsculas, pero eso vale para
+   * `formControlName="x"` escrito literal en la plantilla. Los campos de
+   * línea de `invoice-section-lineas.component.ts` ligan con
+   * `[formControl]="rowControl(...)"` (binding de propiedad, sin atributo
+   * DOM alguno) desde que B.3 extrajo la sección compartida, así que para
+   * `items.<i>.<campo>` la consulta de abajo no encontraba NADA — ni un nodo
+   * equivocado, cero nodos. `invoice-section-lineas.component.ts` marca
+   * ahora sus 4 campos requeribles (`description`, `quantity`, `unit_code`,
+   * `discount_amount`) con `[attr.data-control-name]`, un atributo propio —
+   * nunca `[attr.formcontrolname]`, que suplantaría uno que Angular reserva.
+   *
+   * **Bug B (foco) — PRECEDE a B.3, los 10 campos requeribles (6 de
+   * cabecera + los 4 de línea).** Nació cuando estos campos pasaron a
+   * componentes compartidos (`<app-input>`, `<app-selector>`), no cuando se
+   * extrajo la sección de líneas. Medido: los 6 campos de cabecera
+   * requeribles (`customer_email`, `customer_name`, `customer_tax_id`,
+   * `issue_date`, `customer_document_type`, `operation_type`) ligan
+   * `formControlName` sobre el HOST `<app-input>`/`<app-selector>`, no
+   * sobre un `<input>`/`<select>` nativo — y lo mismo, ahora, con
+   * `[data-control-name]` en los 4 de línea. Angular sí refleja el
+   * atributo al host en ambos casos, así que la consulta SÍ encontraba el
+   * nodo y el `scrollIntoView` SÍ funcionaba, pero `node.focus()` sobre un
+   * host no enfocable es un no-op silencioso. Por eso el paso de descender
+   * al control focuseable real, más abajo, no es exclusivo de los campos de
+   * línea: corrige el foco de los 10.
    */
   private revealFormTarget(target: string): void {
     const line = /^items\.(\d+)\.(.+)$/.exec(target);
