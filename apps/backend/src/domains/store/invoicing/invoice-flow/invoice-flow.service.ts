@@ -44,6 +44,14 @@ import type {
   AiuSettings,
   AiuVatRegime,
 } from '../../settings/interfaces/store-settings.interface';
+import {
+  isAiuLineTaxable,
+  taxableBasisFromRegime,
+} from '../profiles/invoice-profile-config.contract';
+import type {
+  AiuLineComponent,
+  AiuTaxableBasis,
+} from '../profiles/invoice-profile-config.contract';
 import { InvoiceProviderResolver } from '../providers/invoice-provider-resolver.service';
 import { InvoiceRetryQueueService } from '../services/invoice-retry-queue.service';
 import { FiscalTransmissionLedgerService } from '../services/fiscal-transmission-ledger.service';
@@ -2222,26 +2230,29 @@ export class InvoiceFlowService {
   /**
    * ¿La línea entra a la base gravable del IVA bajo el régimen declarado?
    *
-   * Espeja `InvoiceCalculatorService.isAiuTaxable`, que es el que produjo los
-   * importes persistidos. Las TRES respuestas son legales y la diferencia es
-   * toda la base gravable: `et_462_1` grava el AIU completo,
-   * `decreto_1372_1992` grava sólo la Utilidad, y `subtotal` declina el
-   * tratamiento AIU y grava el contrato entero.
+   * D.9 — deja de tener lógica propia: convierte `regime` a
+   * `AiuTaxableBasis` (`taxableBasisFromRegime`, o `'subtotal'` directo,
+   * que no es un régimen) y delega en `isAiuLineTaxable`
+   * (`invoice-profile-config.contract.ts`), la MISMA función que usa
+   * `InvoiceCalculatorService.isAiuTaxable` —el que produjo los importes
+   * persistidos que este método verifica al emitir.
    *
-   * Una línea SIN componente —la porción de COSTO reembolsable— no grava bajo
-   * los dos primeros, pero **sí bajo `subtotal`**, y ahí está toda la diferencia
-   * entre gravar el 10 % del contrato y gravar el 100 %.
+   * Este docblock decía «espeja» al calculador cuando en realidad era una
+   * segunda implementación escrita a mano: D.4 corrigió el calculador para
+   * `component === 'contrato'` bajo `'utilidad'` y esta función se quedó
+   * atrás, devolviendo `false` para el mismo caso. La factura entraba
+   * correctamente gravada (impuesto persistido) y este método, en la última
+   * compuerta antes de firmar, la rechazaba con `INVOICING_AIU_005` — un
+   * ciclo irrompible porque el defecto estaba en la LECTURA, no en el dato.
+   * Con una sola función no hay una segunda lectura que pueda quedarse atrás.
    */
   private isAiuComponentTaxable(
     component: string | null,
     regime: AiuRegimeSnapshot,
   ): boolean {
-    // Bajo «subtotal» se declina el tratamiento AIU: TODAS las porciones
-    // gravan, incluida la de costo reembolsable (component === null) — es
-    // exactamente lo que distingue esta base de las otras dos.
-    if (regime === 'subtotal') return true;
-    if (!component) return false;
-    return regime === 'et_462_1' ? true : component === 'utilidad';
+    const basis: AiuTaxableBasis =
+      regime === 'subtotal' ? 'subtotal' : taxableBasisFromRegime(regime);
+    return isAiuLineTaxable(component as AiuLineComponent | null, basis);
   }
 
   /**

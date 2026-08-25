@@ -290,6 +290,53 @@ export const AIU_TAXABLE_BUCKETS_BY_BASIS: Readonly<
   subtotal: ['administracion', 'imprevistos', 'utilidad', 'costo'],
 };
 
+/**
+ * Componente AIU de una línea, para efectos de gravabilidad. `'contrato'`
+ * (D.2/D.4, ADR-6, Modelo 1) no es un bucket físico: es la declaración de que
+ * la línea ES el AIU completo en un solo renglón, en vez de venir partido en
+ * tres (Modelo 2). Se distingue de {@link AiuBucket} —que sólo describe
+ * PORCIONES— porque `isAiuLineTaxable` necesita poder recibirlo.
+ */
+export type AiuLineComponent = AiuComponentLiteral | 'contrato';
+
+/**
+ * ¿Esta línea entra a la base gravable del IVA bajo la base declarada? Único
+ * punto de decisión — antes de esta función existían DOS implementaciones de
+ * la misma pregunta (`InvoiceCalculatorService.isAiuTaxable` e
+ * `InvoiceFlowService.isAiuComponentTaxable`), escritas a mano y no derivadas
+ * de {@link AIU_TAXABLE_BUCKETS_BY_BASIS}, que divergieron: la del calculador
+ * se corrigió para `'contrato'` bajo `'utilidad'` (D.4) y la del flujo de
+ * emisión no, porque nada las obligaba a moverse juntas. Esa divergencia
+ * producía un ciclo irrompible: el calculador capturaba la línea como
+ * correctamente gravada (`omit_tax_total: false`, con impuesto persistido) y
+ * el flujo de emisión, con su propia respuesta —equivocada— para el mismo
+ * caso, rechazaba con `INVOICING_AIU_005` una factura que nunca podría
+ * corregirse porque el defecto estaba en la lectura, no en el dato.
+ *
+ * Las dos reglas que no se leen directo de la tabla:
+ *
+ * · `component === null` (la porción de COSTO reembolsable) se traduce al
+ *   bucket `'costo'` — no está en {@link AiuComponentLiteral} porque no es
+ *   una porción declarada del AIU, es su ausencia.
+ * · `component === 'contrato'` no es un bucket: es el AIU completo en una
+ *   sola línea, así que grava si CUALQUIERA de sus tres porciones
+ *   (Administración, Imprevistos o Utilidad) grava bajo la base declarada.
+ *   Devolver `false` aquí excluiría la línea ENTERA de la base binario
+ *   0/completo en vez de dejarla entrar con la fracción correcta —el mismo
+ *   razonamiento de D.4, ahora en el único lugar donde vive.
+ */
+export function isAiuLineTaxable(
+  component: AiuLineComponent | null,
+  basis: AiuTaxableBasis,
+): boolean {
+  const taxable_buckets = AIU_TAXABLE_BUCKETS_BY_BASIS[basis];
+  if (component === null) return taxable_buckets.includes('costo');
+  if (component === 'contrato') {
+    return AIU_COMPONENTS.some((bucket) => taxable_buckets.includes(bucket));
+  }
+  return taxable_buckets.includes(component);
+}
+
 // ─── Modelo de contabilización del AIU ────────────────────────────────────
 
 /**

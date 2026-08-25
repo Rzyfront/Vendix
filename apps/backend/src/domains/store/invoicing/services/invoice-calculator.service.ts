@@ -14,6 +14,7 @@ import {
 } from '../providers/dian-direct/constants/dian-tax-codes';
 import { UblCommonBuilder } from '../providers/dian-direct/xml/ubl-common.builder';
 import type { ProviderInvoiceTax } from '../providers/invoice-provider.interface';
+import { isAiuLineTaxable } from '../profiles/invoice-profile-config.contract';
 import type {
   AiuComponentLiteral,
   AiuComponentsBasis,
@@ -1028,42 +1029,23 @@ export class InvoiceCalculatorService {
   /**
    * ¿La línea entra a la base gravable del IVA bajo la base declarada?
    *
-   * Las TRES respuestas son legales y la diferencia es toda la base gravable:
-   *
-   * · `'aiu'` (espejo de `et_462_1`, E.T. art. 462-1 — aseo y cafetería,
-   *   vigilancia autorizada, servicios temporales de empleo, CTA): grava el
-   *   AIU **completo**, o sea las tres componentes.
-   * · `'utilidad'` (espejo de `decreto_1372_1992`, art. 3 — contratos de
-   *   construcción de bien inmueble): grava **sólo la Utilidad**.
-   * · `'subtotal'`: se declina el tratamiento AIU y grava el contrato
-   *   **completo**, costo reembolsable incluido — no tiene régimen legal
-   *   asociado porque es, precisamente, la ausencia de uno.
-   *
-   * Una línea SIN componente nunca grava bajo `'aiu'` ni `'utilidad'`: es la
-   * porción de COSTO reembolsable del contrato. En un contrato de aseo de
-   * $100M con AIU de $10M, esos $90M de nómina e insumos son justamente esas
-   * líneas, y gravarlos multiplicaría por diez el IVA de la operación. Bajo
-   * `'subtotal'` esa protección no aplica a propósito: ahí no hay AIU que
-   * proteger, el contrato entero es la base.
+   * D.9 — deja de tener lógica propia: delega en
+   * `isAiuLineTaxable` (`invoice-profile-config.contract.ts`), la única
+   * derivación de {@link AIU_TAXABLE_BUCKETS_BY_BASIS}. Antes de este cambio
+   * esta era una de DOS implementaciones manuales de la misma pregunta —la
+   * otra en `InvoiceFlowService.isAiuComponentTaxable`— y divergieron: D.4
+   * corrigió acá el caso `component === 'contrato'` bajo `'utilidad'` sin
+   * tocar la del flujo de emisión, produciendo un ciclo irrompible
+   * (`INVOICING_AIU_005` sobre una línea que este método ya capturaba como
+   * correctamente gravada). Ver `isAiuLineTaxable` para las tres bases y las
+   * dos reglas que no se leen directo de la tabla (`component === null` y
+   * `component === 'contrato'`).
    */
   private isAiuTaxable(
     component: AiuComponent | null,
     aiu: InvoiceCalculatorAiuInput,
   ): boolean {
-    // Bajo «subtotal» se declina el tratamiento AIU: TODA línea graba,
-    // incluida la de costo reembolsable (`component === null`) — es
-    // exactamente lo que distingue esta base de las otras dos.
-    if (aiu.taxable_basis === 'subtotal') return true;
-    if (component === null) return false;
-    // D.4 — 'contrato' (Modelo 1) declara el AIU completo en un solo renglón,
-    // así que bajo 'utilidad' tributa IGUAL que la línea de Utilidad del
-    // Modelo 2: `calculateLine` es quien recorta su base gravable a la
-    // fracción Utilidad vía `explodeAiuContratoLine`. Devolver `false` aquí
-    // excluiría la línea ENTERA de la base —el binario 0/completo que D.4
-    // existe para romper— en vez de dejarla entrar con la fracción correcta.
-    return aiu.taxable_basis === 'aiu'
-      ? true
-      : component === 'utilidad' || component === 'contrato';
+    return isAiuLineTaxable(component, aiu.taxable_basis);
   }
 
   /**
