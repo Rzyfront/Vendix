@@ -5574,6 +5574,15 @@ export const ErrorCodes = {
     devMessage:
       'No pudimos iniciar la generación de tu landing. Intenta de nuevo en unos segundos.',
   },
+
+  // CRM Landing (QUI-719): publicar sin draft.
+  // 400: la fila existe pero content_json es null (nunca se generó/editó).
+  CRM_LANDING_005: {
+    code: 'CRM_LANDING_005',
+    httpStatus: 400,
+    devMessage:
+      'Aún no hay contenido en el borrador. Genera o edita tu landing antes de publicar.',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {

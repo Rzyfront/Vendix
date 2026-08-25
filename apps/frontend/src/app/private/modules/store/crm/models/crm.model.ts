@@ -12,6 +12,7 @@ export interface CrmLandingState {
   published_json: unknown;
   published_at: string | null;
   version: number;
+  last_job_id: string | null;
 }
 
 export interface CrmApiResponse<T> {

@@ -15,76 +15,157 @@
       <span>Cargando…</span>
     </div>
   } @else if (landing(); as state) {
-    <section class="crm-card">
-      <div class="crm-card-row">
-        <div class="crm-status-block">
-          <span class="crm-status-label">Estado</span>
-          <span
-            class="crm-status-pill"
-            [class.crm-status-on]="state.enabled"
-            [class.crm-status-off]="!state.enabled"
-          >
-            {{ state.enabled ? 'Activado' : 'Desactivado' }}
-          </span>
-        </div>
+    <nav class="crm-tabs">
+      <button
+        type="button"
+        class="crm-tab"
+        [class.crm-tab-active]="tab() === 'estado'"
+        (click)="setTab('estado')"
+      >
+        Estado
+      </button>
+      <button
+        type="button"
+        class="crm-tab"
+        [class.crm-tab-active]="tab() === 'diseno'"
+        [disabled]="!state.enabled"
+        (click)="setTab('diseno')"
+      >
+        Diseño
+      </button>
+    </nav>
 
-        <div class="crm-status-block">
-          <span class="crm-status-label">Landing</span>
-          <span class="crm-generation">{{ statusLabel() }}</span>
-        </div>
+    @switch (tab()) {
+      @case ('estado') {
+        <section class="crm-card">
+          <div class="crm-card-row">
+            <div class="crm-status-block">
+              <span class="crm-status-label">Estado</span>
+              <span
+                class="crm-status-pill"
+                [class.crm-status-on]="state.enabled"
+                [class.crm-status-off]="!state.enabled"
+              >
+                {{ state.enabled ? 'Activado' : 'Desactivado' }}
+              </span>
+            </div>
 
-        @if (state.enabled) {
-          <button
-            app-button
-            variant="outline"
-            [disabled]="busy()"
-            (click)="deactivate()"
-          >
-            Desactivar
-          </button>
-        } @else {
-          <button
-            app-button
-            variant="primary"
-            [disabled]="busy()"
-            (click)="activate()"
-          >
-            Activar CRM
-          </button>
-        }
-      </div>
+            <div class="crm-status-block">
+              <span class="crm-status-label">Landing</span>
+              <span class="crm-generation">{{ statusLabel() }}</span>
+            </div>
 
-      @if (!state.enabled) {
-        <p class="crm-hint">
-          Al activar el CRM generamos automáticamente una landing page con la
-          información de tu negocio: tipo de tienda, industria, ubicación,
-          datos fiscales y tus productos más vendidos. Después podrás editarla
-          sección por sección.
-        </p>
-      } @else {
-        <ul class="crm-facts">
-          <li>
-            <span class="crm-fact-label">Versión del borrador</span>
-            <span class="crm-fact-value">{{ state.version }}</span>
-          </li>
-          <li>
-            <span class="crm-fact-label">Borrador</span>
-            <span class="crm-fact-value">
-              {{ hasDraft() ? 'Con contenido' : 'Vacío' }}
-            </span>
-          </li>
-          <li>
-            <span class="crm-fact-label">Publicado</span>
-            <span class="crm-fact-value">
-              {{ state.published_at ? 'Sí' : 'Aún no' }}
-            </span>
-          </li>
-        </ul>
-        <p class="crm-hint crm-hint-muted">
-          La generación con IA y el editor visual llegan en las siguientes
-          fases del desarrollo.
-        </p>
+            @if (state.enabled) {
+              <button
+                app-button
+                variant="outline"
+                [disabled]="busy()"
+                (click)="deactivate()"
+              >
+                Desactivar
+              </button>
+            } @else {
+              <button
+                app-button
+                variant="primary"
+                [disabled]="busy()"
+                (click)="activate()"
+              >
+                Activar CRM
+              </button>
+            }
+          </div>
+
+          @if (!state.enabled) {
+            <p class="crm-hint">
+              Al activar el CRM generamos automáticamente una landing page con
+              la información de tu negocio: tipo de tienda, industria,
+              ubicación, datos fiscales y tus productos más vendidos. Después
+              podrás editarla sección por sección en la pestaña Diseño.
+            </p>
+          } @else {
+            <ul class="crm-facts">
+              <li>
+                <span class="crm-fact-label">Versión del borrador</span>
+                <span class="crm-fact-value">{{ state.version }}</span>
+              </li>
+              <li>
+                <span class="crm-fact-label">Borrador</span>
+                <span class="crm-fact-value">
+                  {{ hasDraft() ? 'Con contenido' : 'Vacío' }}
+                </span>
+              </li>
+              <li>
+                <span class="crm-fact-label">Publicado</span>
+                <span class="crm-fact-value">
+                  {{ state.published_at ? 'Sí' : 'Aún no' }}
+                </span>
+              </li>
+            </ul>
+            <div class="crm-actions">
+              <button
+                app-button
+                variant="outline"
+                [disabled]="busy()"
+                (click)="regenerate()"
+              >
+                Regenerar con IA
+              </button>
+              @if (state.generation_status === 'ready' || hasDraft()) {
+                <button
+                  app-button
+                  variant="primary"
+                  [disabled]="busy()"
+                  (click)="setTab('diseno')"
+                >
+                  Editar mi landing
+                </button>
+              }
+            </div>
+          }
+        </section>
       }
-    </section>
+      @case ('diseno') {
+        <section class="crm-design">
+          <div class="crm-design-bar">
+            <span class="crm-dirty-note">
+              @if (pendingDocument()) {
+                Cambios sin guardar
+              }
+            </span>
+            <div class="crm-design-actions">
+              <button
+                app-button
+                variant="outline"
+                [disabled]="busy() || !pendingDocument()"
+                (click)="loadLanding()"
+              >
+                Descartar
+              </button>
+              <button
+                app-button
+                variant="outline"
+                [disabled]="busy()"
+                (click)="saveDraft()"
+              >
+                Guardar borrador
+              </button>
+              <button
+                app-button
+                variant="primary"
+                [disabled]="busy()"
+                (click)="publish()"
+              >
+                Publicar
+              </button>
+            </div>
+          </div>
+          <app-crm-editor
+            [document]="editorDocument()"
+            (documentChange)="onDocumentChange($event)"
+          />
+        </section>
+      }
+    }
   }
 </div>
