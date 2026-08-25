@@ -28,7 +28,11 @@ import {
   SelectorOption,
   ToastService,
 } from '../../../../../../shared/components';
-import { DOCUMENT_TYPES } from '../../../../../../shared/constants/document-types';
+import {
+  DOCUMENT_TYPES,
+  findDocumentType,
+  isValidDocumentType,
+} from '../../../../../../shared/constants/document-types';
 import { PosCustomerService } from '../../services/pos-customer.service';
 import {
   CreatePosCustomerRequest,
@@ -127,6 +131,28 @@ export class PosCustomerSelectorComponent {
   readonly documentTypeOptions: SelectorOption[] = DOCUMENT_TYPES.map(
     (opt) => ({ value: opt.code, label: opt.label }),
   );
+
+  /**
+   * QUI-723 — Format hint for the document number input. Returns a short
+   * message when the typed number does NOT match the canonical format for the
+   * selected document type (e.g. 11-digit CC). The system still accepts the
+   * input (ResolveCustomerDto is format-tolerant on the backend); the hint
+   * is purely informational so the cashier notices before submit.
+   *
+   * Returns `null` when no warning is needed (no number, no type, or number
+   * matches the type's regex + maxLength).
+   */
+  readonly documentFormatHint = computed<string | null>(() => {
+    const type = this.form.get('documentType')?.value as string | null;
+    const number = (this.form.get('documentNumber')?.value as string | null)
+      ?.trim()
+      .toUpperCase();
+    if (!number) return null;
+    const rule = findDocumentType(type);
+    if (!rule) return null;
+    if (rule.regex.test(number) && number.length <= rule.maxLength) return null;
+    return `El número no encaja con el formato de ${rule.label} (máx ${rule.maxLength} caracteres). Se va a guardar igual, pero va a ser difícil de buscar después.`;
+  });
 
   // ── Form ────────────────────────────────────────────────────────────
   // QUI-723 — All fields are optional: the cashier may submit the form with
@@ -330,6 +356,16 @@ export class PosCustomerSelectorComponent {
             this.toastService.success('Cliente creado correctamente');
           } else if (was_updated) {
             this.toastService.success('Cliente actualizado con los nuevos datos');
+          } else {
+            // Match found but nothing to update — close the feedback loop so
+            // the cashier sees confirmation that the existing customer was
+            // reused (otherwise the wizard advances silently).
+            const name =
+              [customer.first_name, customer.last_name]
+                .filter(Boolean)
+                .join(' ')
+                .trim() || customer.email || 'seleccionado';
+            this.toastService.success(`Cliente encontrado: ${name}`);
           }
           return true;
         },

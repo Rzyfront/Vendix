@@ -185,13 +185,25 @@
           [size]="'md'"
           [placeholder]="'Seleccionar'"
         ></app-selector>
-        <app-input
-          formControlName="documentNumber"
-          label="Número"
-          placeholder="1023456789"
-          type="text"
-          [size]="'md'"
-        ></app-input>
+        <div class="document-number-field">
+          <app-input
+            formControlName="documentNumber"
+            label="Número"
+            placeholder="1023456789"
+            type="text"
+            [size]="'md'"
+          ></app-input>
+          <!-- QUI-723 — Format hint when the typed number does not match the
+               canonical regex for the selected document type. The system still
+               accepts the input (ResolveCustomerDto is format-tolerant); this
+               is a soft warning so the cashier notices before submit. -->
+          @if (documentFormatHint(); as hint) {
+            <span class="document-format-hint" role="status">
+              <app-icon name="info" [size]="14"></app-icon>
+              {{ hint }}
+            </span>
+          }
+        </div>
       </div>
     </form>
   }

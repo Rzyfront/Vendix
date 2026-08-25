@@ -259,6 +259,28 @@
   gap: 8px;
 }
 
+// QUI-723 — Soft format hint under the document-number input. The wrapper
+// sits in column 2 of the form-row grid; the hint appears below the input
+// without breaking the two-column layout.
+.document-number-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.document-format-hint {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(242, 153, 74, 0.1);
+  color: var(--color-warning, #c8761d);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .form-actions {
   display: flex;
   gap: 8px;
