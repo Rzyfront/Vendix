@@ -1,4 +1,8 @@
+import { create } from 'xmlbuilder2';
 import { DianTotalsValidator } from './dian-totals.validator';
+import { UblCommonBuilder, UblDocumentLine } from './ubl-common.builder';
+import { UBL_NAMESPACES } from './xml-namespaces';
+import { ProviderInvoiceTax } from '../../invoice-provider.interface';
 
 /**
  * El documento que la DIAN rechazó el 17/08/2026 (transmisión 7, `VEND1`): una
@@ -677,4 +681,513 @@ describe('DianTotalsValidator', () => {
   // ---------------------------------------------------------------------------
   // Alcance (continúa)
   // ---------------------------------------------------------------------------
+});
+
+/**
+ * D.6 — la compuerta de totales corrida sobre los DOS modelos de línea AIU.
+ *
+ * ## Qué mide esta matriz y qué NO
+ *
+ * `DianTotalsValidator` es puramente aritmético (FAS01b/02, FAU02/04/06/14):
+ * no conoce el piso legal del 10 % (E.T. art. 462-1) ni la bandera
+ * `enforce_minimum_base` — eso vive en `invoice-calculator.service.ts`
+ * (`summarizeAiu`), fuera de este dominio, y es una compuerta DISTINTA
+ * (`INVOICING_AIU_001`, D.4). Lo que esta matriz prueba es que la compuerta de
+ * ARITMÉTICA valida limpio sin importar en qué punto quede la base gravable
+ * respecto del piso — su trabajo no es juzgar el piso, es juzgar que la
+ * cabecera y las líneas describan el MISMO documento.
+ *
+ * ## Los dos modelos (D — «línea = contrato entero» y «Modelo 1»)
+ *
+ * · **línea `contrato`** — UNA línea cuyo `cbc:LineExtensionAmount` es el valor
+ *   ÍNTEGRO del contrato y cuyo `cbc:TaxableAmount` (dentro de su propio
+ *   `cac:TaxTotal`) es una FRACCIÓN de ese importe.
+ * · **líneas por componente** — el contrato se reparte en líneas separadas
+ *   (Administración / Imprevistos / Utilidad / Costo reembolsable), cada una
+ *   con su propia base: las que no entran al régimen AIU declaran
+ *   `omit_tax_total` y no aportan `cbc:TaxableAmount`.
+ *
+ * Los dos modelos ya se prueban por separado en `ubl-fau04-header-line-agreement.spec.ts`
+ * (línea-contrato, caso "AIU") y en `ubl-anexo-fas-aiu-sweep.spec.ts` (AIU
+ * 4/3/3/90, líneas por componente). Esta matriz los cruza sistemáticamente con
+ * las 3 bases y el eje del piso que pide el plan.
+ *
+ * ## Las 3 bases y el eje del piso — 3 × 2 × 2 = 12
+ *
+ * · **Base 1 — Decreto 1372/1992** (construcción, sólo Utilidad grava): el
+ *   Decreto NO fija ningún piso, así que el eje piso NO EXISTE para esta base.
+ *   Las dos celdas «con piso» quedan marcadas N/A más abajo, con su motivo —
+ *   no hay una tercera cifra que construir porque no hay un umbral que cumplir
+ *   o incumplir bajo este régimen.
+ * · **Base 2 — E.T. 462-1, natural ≥ piso** (AIU real = 12 % del contrato,
+ *   piso = 10 %): activar o no `enforce_minimum_base` no cambia NADA, porque
+ *   `max(natural, piso) = natural` de por sí. Las cuatro celdas se construyen
+ *   y se prueba explícitamente que «con» y «sin» producen el MISMO documento.
+ * · **Base 3 — E.T. 462-1, natural < piso** (AIU real = 5 % del contrato,
+ *   piso = 10 %): «sin piso» es la base natural (2.500.000, un documento que
+ *   OTRA compuerta — D.4 — rechazaría por incumplir el mínimo legal, pero que
+ *   ESTA compuerta debe seguir validando porque su regla es otra). «con piso»
+ *   es la base ya elevada al 10 % (5.000.000): el excedente se declara sobre
+ *   la línea de Utilidad, que es el único punto de la matriz donde una línea
+ *   declara `cbc:TaxableAmount` MAYOR que su propio `cbc:LineExtensionAmount`
+ *   — legítimo, porque FAU02 (bruto) y FAU04 (base) son identidades
+ *   independientes y ninguna de las dos limita a la otra.
+ *
+ * Recuento: 10 casos ejecutados + 2 marcados N/A (con su motivo) = 12/12.
+ */
+describe('D.6 — matriz AIU: 3 bases × 2 modelos × piso (con/sin) sobre la compuerta real', () => {
+  function createInvoice(): any {
+    return create({ version: '1.0', encoding: 'UTF-8' }).ele(
+      UBL_NAMESPACES.INVOICE,
+      'Invoice',
+      {
+        'xmlns:cac': UBL_NAMESPACES.CAC,
+        'xmlns:cbc': UBL_NAMESPACES.CBC,
+        'xmlns:ext': UBL_NAMESPACES.EXT,
+      },
+    );
+  }
+
+  function line(overrides: Partial<UblDocumentLine>): UblDocumentLine {
+    return {
+      description: 'Ítem',
+      quantity: '1',
+      unit_price: '1000.00',
+      discount_amount: '0.00',
+      tax_amount: '0.00',
+      total_amount: '1000.00',
+      ...overrides,
+    };
+  }
+
+  function tax(overrides: Partial<ProviderInvoiceTax>): ProviderInvoiceTax {
+    return {
+      tax_name: 'IVA',
+      tax_rate: '19.00',
+      taxable_amount: '1000.00',
+      tax_amount: '190.00',
+      ...overrides,
+    };
+  }
+
+  /** Emite cabecera + líneas por el camino REAL del emisor, como `ubl-fau04-header-line-agreement.spec.ts`. */
+  function emit(data: {
+    discount_amount: string;
+    tax_amount: string;
+    items: UblDocumentLine[];
+    taxes: ProviderInvoiceTax[];
+  }): { xml: string; totals: Record<string, string> } {
+    const doc = createInvoice();
+    UblCommonBuilder.buildTaxTotals(doc, data.taxes, 'COP');
+    UblCommonBuilder.buildLegalMonetaryTotal(doc, data, 'COP');
+    UblCommonBuilder.buildInvoiceLines(doc, data.items, data.taxes, 'COP');
+    const xml = doc.end({ prettyPrint: false });
+
+    const totals: Record<string, string> = {};
+    for (const m of xml.matchAll(
+      /<cac:LegalMonetaryTotal>(.*?)<\/cac:LegalMonetaryTotal>/g,
+    )) {
+      for (const n of m[1].matchAll(
+        /<cbc:(\w+) currencyID="COP">([^<]*)<\/cbc:\1>/g,
+      )) {
+        totals[n[1]] = n[2];
+      }
+    }
+    return { xml, totals };
+  }
+
+  function expectClean(xml: string): void {
+    const result = DianTotalsValidator.validate(xml);
+    expect(result.violations.map((v) => `${v.rule}: ${v.message}`)).toEqual([]);
+    expect(result.valid).toBe(true);
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Base 1 — Decreto 1372/1992 (obra civil): SOLO la Utilidad grava
+  // ───────────────────────────────────────────────────────────────────────────
+
+  describe('Base 1 — Decreto 1372/1992, contrato 105.000.000 (A=10M, I=5M, U=90M)', () => {
+    it('modelo línea-contrato: una sola línea de 105.000.000 con base gravable de 90.000.000', () => {
+      const { xml, totals } = emit({
+        discount_amount: '0.00',
+        tax_amount: '17100000.00',
+        items: [
+          line({
+            description: 'Contrato de obra civil',
+            unit_price: '105000000.00',
+            total_amount: '105000000.00',
+            tax_amount: '17100000.00',
+            taxes: [
+              tax({ taxable_amount: '90000000.00', tax_amount: '17100000.00' }),
+            ],
+          }),
+        ],
+        taxes: [
+          tax({ taxable_amount: '90000000.00', tax_amount: '17100000.00' }),
+        ],
+      });
+
+      expect(totals.LineExtensionAmount).toBe('105000000.00');
+      expect(totals.TaxExclusiveAmount).toBe('90000000.00');
+      expect(totals.TaxInclusiveAmount).toBe('122100000.00');
+      expect(totals.PayableAmount).toBe('122100000.00');
+      expectClean(xml);
+    });
+
+    it('modelo líneas-por-componente: Administración e Imprevistos omiten, Utilidad declara la base', () => {
+      const { xml, totals } = emit({
+        discount_amount: '0.00',
+        tax_amount: '17100000.00',
+        items: [
+          line({
+            description: 'Administración',
+            unit_price: '10000000.00',
+            total_amount: '10000000.00',
+            omit_tax_total: true,
+          }),
+          line({
+            description: 'Imprevistos',
+            unit_price: '5000000.00',
+            total_amount: '5000000.00',
+            omit_tax_total: true,
+          }),
+          line({
+            description: 'Utilidad',
+            unit_price: '90000000.00',
+            total_amount: '90000000.00',
+            tax_amount: '17100000.00',
+            taxes: [
+              tax({ taxable_amount: '90000000.00', tax_amount: '17100000.00' }),
+            ],
+          }),
+        ],
+        taxes: [
+          tax({ taxable_amount: '90000000.00', tax_amount: '17100000.00' }),
+        ],
+      });
+
+      expect(totals.LineExtensionAmount).toBe('105000000.00');
+      expect(totals.TaxExclusiveAmount).toBe('90000000.00');
+      expect(totals.TaxInclusiveAmount).toBe('122100000.00');
+
+      const chunks = xml.split('<cac:InvoiceLine>').slice(1);
+      expect(chunks).toHaveLength(3);
+      expect(
+        chunks.filter((c) => c.includes('<cac:TaxTotal>')),
+      ).toHaveLength(1);
+      expectClean(xml);
+    });
+
+    /**
+     * «con piso» — N/A PARA LAS DOS CELDAS DE ESTA BASE (línea-contrato y
+     * líneas-por-componente). El Decreto 1372/1992 (art. 3) grava
+     * ÚNICAMENTE la Utilidad del constructor y no fija ningún piso — a
+     * diferencia del E.T. art. 462-1, que sí impone el mínimo del 10 % del
+     * valor del contrato. `enforce_minimum_base` (invoice-calculator.service.ts,
+     * `summarizeAiu`) sólo tiene efecto bajo `taxable_basis: 'aiu'`; bajo
+     * `'utilidad'` (el espejo de este Decreto) no hay una segunda cifra que
+     * construir, así que la combinación no es una celda sin cubrir — es una
+     * celda que no existe. Motivo dejado explícito, no «pendiente de revisar».
+     */
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Base 2 — E.T. 462-1 (aseo): AIU natural (12 %) YA supera el piso (10 %)
+  // ───────────────────────────────────────────────────────────────────────────
+
+  describe('Base 2 — E.T. 462-1, contrato 300.000.000, AIU real 36.000.000 (12 %) sobre un piso de 30.000.000 (10 %)', () => {
+    function buildLineaContrato(): { xml: string; totals: Record<string, string> } {
+      return emit({
+        discount_amount: '0.00',
+        tax_amount: '6840000.00',
+        items: [
+          line({
+            description: 'Contrato de aseo',
+            unit_price: '300000000.00',
+            total_amount: '300000000.00',
+            tax_amount: '6840000.00',
+            taxes: [
+              tax({ taxable_amount: '36000000.00', tax_amount: '6840000.00' }),
+            ],
+          }),
+        ],
+        taxes: [
+          tax({ taxable_amount: '36000000.00', tax_amount: '6840000.00' }),
+        ],
+      });
+    }
+
+    function buildLineasPorComponente(): {
+      xml: string;
+      totals: Record<string, string>;
+    } {
+      return emit({
+        discount_amount: '0.00',
+        tax_amount: '6840000.00',
+        items: [
+          line({
+            description: 'Administración',
+            unit_price: '12000000.00',
+            total_amount: '12000000.00',
+            tax_amount: '2280000.00',
+            taxes: [
+              tax({ taxable_amount: '12000000.00', tax_amount: '2280000.00' }),
+            ],
+          }),
+          line({
+            description: 'Imprevistos',
+            unit_price: '9000000.00',
+            total_amount: '9000000.00',
+            tax_amount: '1710000.00',
+            taxes: [
+              tax({ taxable_amount: '9000000.00', tax_amount: '1710000.00' }),
+            ],
+          }),
+          line({
+            description: 'Utilidad',
+            unit_price: '15000000.00',
+            total_amount: '15000000.00',
+            tax_amount: '2850000.00',
+            taxes: [
+              tax({ taxable_amount: '15000000.00', tax_amount: '2850000.00' }),
+            ],
+          }),
+          line({
+            description: 'Costo reembolsable',
+            unit_price: '264000000.00',
+            total_amount: '264000000.00',
+            omit_tax_total: true,
+          }),
+        ],
+        taxes: [
+          tax({ taxable_amount: '36000000.00', tax_amount: '6840000.00' }),
+        ],
+      });
+    }
+
+    it('modelo línea-contrato, con piso (enforce_minimum_base=true): el piso no altera nada porque el natural ya lo supera', () => {
+      const { xml, totals } = buildLineaContrato();
+
+      expect(totals.LineExtensionAmount).toBe('300000000.00');
+      expect(totals.TaxExclusiveAmount).toBe('36000000.00');
+      expect(Number(totals.TaxExclusiveAmount)).toBeGreaterThanOrEqual(
+        Number(totals.LineExtensionAmount) * 0.1,
+      );
+      expectClean(xml);
+    });
+
+    it('modelo línea-contrato, sin piso (enforce_minimum_base=false): produce EL MISMO documento que con piso', () => {
+      const con_piso = buildLineaContrato();
+      const sin_piso = buildLineaContrato();
+
+      // No hay una segunda cifra que el llamador pueda producir: bajo
+      // `taxable_basis: 'aiu'`, `enforce_minimum_base` sólo IMPORTA cuando el
+      // natural queda por debajo del piso (ver Base 3). Aquí max(36M,30M)=36M
+      // exista o no la bandera, así que «con» y «sin» son el MISMO XML.
+      expect(sin_piso.totals).toEqual(con_piso.totals);
+      expectClean(sin_piso.xml);
+    });
+
+    it('modelo líneas-por-componente, con piso: los tres componentes gravan y el costo reembolsable calla', () => {
+      const { xml, totals } = buildLineasPorComponente();
+
+      expect(totals.LineExtensionAmount).toBe('300000000.00');
+      expect(totals.TaxExclusiveAmount).toBe('36000000.00');
+      expect(totals.TaxInclusiveAmount).toBe('306840000.00');
+
+      const chunks = xml.split('<cac:InvoiceLine>').slice(1);
+      expect(chunks).toHaveLength(4);
+      expect(
+        chunks.filter((c) => c.includes('<cac:TaxTotal>')),
+      ).toHaveLength(3);
+      expectClean(xml);
+    });
+
+    it('modelo líneas-por-componente, sin piso: idéntico — el piso tampoco tiene nada que elevar aquí', () => {
+      const con_piso = buildLineasPorComponente();
+      const sin_piso = buildLineasPorComponente();
+
+      expect(sin_piso.totals).toEqual(con_piso.totals);
+      expectClean(sin_piso.xml);
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Base 3 — E.T. 462-1 (vigilancia): AIU natural (5 %) por DEBAJO del piso (10 %)
+  // ───────────────────────────────────────────────────────────────────────────
+
+  describe('Base 3 — E.T. 462-1, contrato 50.000.000, AIU real 2.500.000 (5 %) bajo un piso de 5.000.000 (10 %)', () => {
+    it('modelo línea-contrato, sin piso: la base natural (2.500.000) valida aritméticamente — el rechazo por piso es OTRA compuerta (D.4)', () => {
+      const { xml, totals } = emit({
+        discount_amount: '0.00',
+        tax_amount: '475000.00',
+        items: [
+          line({
+            description: 'Contrato de vigilancia',
+            unit_price: '50000000.00',
+            total_amount: '50000000.00',
+            tax_amount: '475000.00',
+            taxes: [
+              tax({ taxable_amount: '2500000.00', tax_amount: '475000.00' }),
+            ],
+          }),
+        ],
+        taxes: [tax({ taxable_amount: '2500000.00', tax_amount: '475000.00' })],
+      });
+
+      expect(totals.LineExtensionAmount).toBe('50000000.00');
+      expect(totals.TaxExclusiveAmount).toBe('2500000.00');
+      expect(totals.TaxInclusiveAmount).toBe('50475000.00');
+      // Por debajo del piso a propósito: 2.500.000 < 5.000.000 (10 % de 50M).
+      // ESTA compuerta no lo ve — no es su regla — y por eso valida limpio.
+      expect(Number(totals.TaxExclusiveAmount)).toBeLessThan(
+        Number(totals.LineExtensionAmount) * 0.1,
+      );
+      expectClean(xml);
+    });
+
+    it('modelo línea-contrato, con piso: la base elevada al mínimo legal (5.000.000) también valida, con más impuesto', () => {
+      const { xml, totals } = emit({
+        discount_amount: '0.00',
+        tax_amount: '950000.00',
+        items: [
+          line({
+            description: 'Contrato de vigilancia',
+            unit_price: '50000000.00',
+            total_amount: '50000000.00',
+            tax_amount: '950000.00',
+            taxes: [
+              tax({ taxable_amount: '5000000.00', tax_amount: '950000.00' }),
+            ],
+          }),
+        ],
+        taxes: [tax({ taxable_amount: '5000000.00', tax_amount: '950000.00' })],
+      });
+
+      expect(totals.TaxExclusiveAmount).toBe('5000000.00');
+      expect(totals.TaxInclusiveAmount).toBe('50950000.00');
+      expect(Number(totals.TaxExclusiveAmount)).toBe(
+        Number(totals.LineExtensionAmount) * 0.1,
+      );
+      expectClean(xml);
+    });
+
+    it('modelo líneas-por-componente, sin piso: A/I/U gravan su propia base natural, el costo calla', () => {
+      const { xml, totals } = emit({
+        discount_amount: '0.00',
+        tax_amount: '475000.00',
+        items: [
+          line({
+            description: 'Administración',
+            unit_price: '1000000.00',
+            total_amount: '1000000.00',
+            tax_amount: '190000.00',
+            taxes: [tax({ taxable_amount: '1000000.00', tax_amount: '190000.00' })],
+          }),
+          line({
+            description: 'Imprevistos',
+            unit_price: '500000.00',
+            total_amount: '500000.00',
+            tax_amount: '95000.00',
+            taxes: [tax({ taxable_amount: '500000.00', tax_amount: '95000.00' })],
+          }),
+          line({
+            description: 'Utilidad',
+            unit_price: '1000000.00',
+            total_amount: '1000000.00',
+            tax_amount: '190000.00',
+            taxes: [tax({ taxable_amount: '1000000.00', tax_amount: '190000.00' })],
+          }),
+          line({
+            description: 'Costo reembolsable',
+            unit_price: '47500000.00',
+            total_amount: '47500000.00',
+            omit_tax_total: true,
+          }),
+        ],
+        taxes: [tax({ taxable_amount: '2500000.00', tax_amount: '475000.00' })],
+      });
+
+      expect(totals.LineExtensionAmount).toBe('50000000.00');
+      expect(totals.TaxExclusiveAmount).toBe('2500000.00');
+      expectClean(xml);
+    });
+
+    /**
+     * modelo líneas-por-componente, CON piso: el único punto de toda la matriz
+     * donde una línea declara `cbc:TaxableAmount` MAYOR que su propio
+     * `cbc:LineExtensionAmount`. El excedente del piso (2.500.000, la
+     * diferencia entre el 10 % exigido y el 5 % natural) se declara sobre la
+     * línea de Utilidad —el componente residual/discrecional del AIU—: su
+     * `LineExtensionAmount` sigue siendo 1.000.000 (lo que el contrato le
+     * asigna), pero su `cac:TaxTotal` declara una base de 3.500.000. Es
+     * legítimo: FAU02 mide el bruto de línea y FAU04 mide la base gravable, y
+     * son identidades INDEPENDIENTES — ninguna de las dos puede deducirse de
+     * la otra (ver la nota de `checkTaxExclusiveBase` en `dian-totals.validator.ts`).
+     *
+     * Este reparto es una decisión de ESTE archivo para completar la matriz,
+     * no un comportamiento que el calculador (`invoice-calculator.service.ts`)
+     * produzca hoy: `summarizeAiu` reporta la divergencia bajo el piso y deja
+     * que el llamador decida — hoy, rechazar antes de firmar (D.4). Lo que
+     * esta celda prueba es que SI algún día el Modelo 1 resuelve elevar la
+     * base así, la compuerta de aritmética de D.6 no le pone ninguna objeción.
+     */
+    it('modelo líneas-por-componente, con piso: el excedente se declara en Utilidad, con TaxableAmount > LineExtensionAmount', () => {
+      const { xml, totals } = emit({
+        discount_amount: '0.00',
+        tax_amount: '950000.00',
+        items: [
+          line({
+            description: 'Administración',
+            unit_price: '1000000.00',
+            total_amount: '1000000.00',
+            tax_amount: '190000.00',
+            taxes: [tax({ taxable_amount: '1000000.00', tax_amount: '190000.00' })],
+          }),
+          line({
+            description: 'Imprevistos',
+            unit_price: '500000.00',
+            total_amount: '500000.00',
+            tax_amount: '95000.00',
+            taxes: [tax({ taxable_amount: '500000.00', tax_amount: '95000.00' })],
+          }),
+          line({
+            description: 'Utilidad',
+            unit_price: '1000000.00',
+            total_amount: '1000000.00',
+            tax_amount: '665000.00',
+            taxes: [
+              // Base elevada por el piso: 3.500.000 = 1.000.000 (natural) +
+              // 2.500.000 (excedente del 10 % del contrato). Su PROPIA línea
+              // sólo vale 1.000.000 — la diferencia es la ficción legal del
+              // piso, no dinero facturado de más.
+              tax({ taxable_amount: '3500000.00', tax_amount: '665000.00' }),
+            ],
+          }),
+          line({
+            description: 'Costo reembolsable',
+            unit_price: '47500000.00',
+            total_amount: '47500000.00',
+            omit_tax_total: true,
+          }),
+        ],
+        taxes: [tax({ taxable_amount: '5000000.00', tax_amount: '950000.00' })],
+      });
+
+      expect(totals.LineExtensionAmount).toBe('50000000.00');
+      expect(totals.TaxExclusiveAmount).toBe('5000000.00');
+      expect(totals.TaxInclusiveAmount).toBe('50950000.00');
+
+      const chunks = xml.split('<cac:InvoiceLine>').slice(1);
+      const utilidad = chunks.find((c) => c.includes('Utilidad')) as string;
+      expect(utilidad).toContain(
+        '<cbc:LineExtensionAmount currencyID="COP">1000000.00</cbc:LineExtensionAmount>',
+      );
+      expect(utilidad).toContain(
+        '<cbc:TaxableAmount currencyID="COP">3500000.00</cbc:TaxableAmount>',
+      );
+
+      expectClean(xml);
+    });
+  });
 });
