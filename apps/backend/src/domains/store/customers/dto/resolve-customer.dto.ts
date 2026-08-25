@@ -1,5 +1,18 @@
-import { IsEmail, IsEnum, IsOptional, IsString } from 'class-validator';
-import { identification_type_enum } from '@prisma/client';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsBoolean,
+  IsEmail,
+  IsEnum,
+  IsOptional,
+  IsString,
+} from 'class-validator';
+import { Transform } from 'class-transformer';
+import {
+  identification_type_enum,
+  persona_type_enum,
+  tax_regime_enum,
+} from '@prisma/client';
 
 /**
  * QUI-723 — Input for `POST /store/customers/resolve`.
@@ -15,6 +28,13 @@ import { identification_type_enum } from '@prisma/client';
  * digit, or with a separator, or in a format that doesn't match the
  * strict CC/CE/NIT regex.
  *
+ * Every other field mirrors `CreateCustomerDto` but with **looser**
+ * validation — no `@DocumentNumberMatchesType`, no `@NitDvMatches`,
+ * no `@JuridicaNameRule`, no `@FiscalResponsibilityInCatalogRule`.
+ * The resolve endpoint is a quick POS lookup-and-save flow: the
+ * cashier may not have every DIAN-grade field at hand. Strict
+ * validation belongs to the dedicated create endpoint.
+ *
  * When the lookup finds no match, the request is delegated to `create()`
  * which still goes through `CreateCustomerDto` validation on its own
  * route — so garbage in a "new customer" path is still rejected, just at
@@ -26,31 +46,34 @@ import { identification_type_enum } from '@prisma/client';
  * `findOrCreateByEmailOrDocument` returns 422.
  */
 export class ResolveCustomerDto {
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() === '' ? undefined : value,
+  )
   @IsOptional()
   @IsEmail({}, { message: 'Ingresa un correo válido' })
-  email?: string;
+  email?: string | null;
 
   @IsOptional()
   @IsString()
-  first_name?: string;
+  first_name?: string | null;
 
   @IsOptional()
   @IsString()
-  last_name?: string;
+  last_name?: string | null;
 
   @IsOptional()
   @IsString()
-  legal_name?: string;
+  legal_name?: string | null;
 
   @IsOptional()
   @IsString()
-  phone?: string;
+  phone?: string | null;
 
   @IsOptional()
   @IsEnum(identification_type_enum, {
     message: 'document_type debe ser uno de los códigos DIAN válidos',
   })
-  document_type?: identification_type_enum;
+  document_type?: (typeof identification_type_enum)[keyof typeof identification_type_enum] | null;
 
   /**
    * Permissive: any non-empty string is accepted. The lookup normalizes
@@ -59,9 +82,35 @@ export class ResolveCustomerDto {
    */
   @IsOptional()
   @IsString()
-  document_number?: string;
+  document_number?: string | null;
 
   @IsOptional()
   @IsString()
-  verification_digit?: string;
+  verification_digit?: string | null;
+
+  @IsOptional()
+  @IsEnum(tax_regime_enum, {
+    message: 'tax_regime debe ser uno de los regímenes tributarios válidos',
+  })
+  tax_regime?: (typeof tax_regime_enum)[keyof typeof tax_regime_enum] | null;
+
+  @IsOptional()
+  @IsEnum(persona_type_enum, {
+    message: "person_type debe ser 'NATURAL' o 'JURIDICA'",
+  })
+  person_type?: (typeof persona_type_enum)[keyof typeof persona_type_enum] | null;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  fiscal_responsibilities?: string[];
+
+  @IsOptional()
+  @IsString()
+  ciiu_code?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  is_withholding_agent?: boolean;
 }

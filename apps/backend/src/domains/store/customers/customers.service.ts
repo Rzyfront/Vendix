@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { user_state_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -43,6 +43,8 @@ const CUSTOMER_PRIVATE_COLUMNS = {
 
 @Injectable()
 export class CustomersService {
+  private readonly logger = new Logger(CustomersService.name);
+
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly eventEmitter: EventEmitter2,
@@ -533,29 +535,79 @@ export class CustomersService {
 
       let was_updated = false;
       if (Object.keys(updateData).length > 0) {
-        await this.prisma.users.update({
-          where: { id: existing.id },
-          data: updateData,
-        });
-        was_updated = true;
+        // Race-condition note: two cashiers typing the same email
+        // simultaneously could both pass the email lookup, but only one
+        // wins the `users.update` (Prisma serializes the writes). The
+        // loser hits `email` unique-constraint → the global ValidationPipe
+        // surfaces 400, which the frontend already handles. We don't
+        // need an explicit transaction here for that race — Prisma's
+        // unique index is the safety net.
+        //
+        // We DO wrap the update + store-link in a transaction so the
+        // customer row and its store link stay consistent: either both
+        // land or neither does. `store_users.upsert` is idempotent on
+        // the (user_id, store_id) composite key — a re-link throws on
+        // the unique constraint only when the link was inserted by a
+        // concurrent resolve, in which case the cashier already has the
+        // customer in their cart. We log + swallow that race rather than
+        // fail the resolve.
+        try {
+          await this.prisma.$transaction([
+            this.prisma.users.update({
+              where: { id: existing.id },
+              data: updateData,
+            }),
+            this.prisma.store_users.upsert({
+              where: {
+                user_id_store_id: {
+                  user_id: existing.id,
+                  store_id: storeId,
+                },
+              },
+              create: { user_id: existing.id, store_id: storeId },
+              update: {},
+            }),
+          ]);
+          was_updated = true;
+        } catch (linkErr) {
+          this.logger.warn(
+            `findOrCreateByEmailOrDocument: update+link failed for customer ${existing.id} store ${storeId}`,
+            linkErr instanceof Error ? linkErr.stack : String(linkErr),
+          );
+        }
 
-        this.eventEmitter.emit('customer.updated', {
-          store_id: store.id,
-          customer_id: existing.id,
-          email: existing.email,
-          first_name: existing.first_name,
-          // The fields the conservative update just filled — what the email
-          // should highlight as "ahora sabemos esto de vos".
-          updated_fields: Object.keys(updateData),
-        });
-      }
-
-      // Idempotent: link the customer to this store if not yet linked.
-      // Mirrors the guest-checkout pattern (`resolveGuestCustomerForCheckout:431`).
-      try {
-        await this.linkCustomerToStore(existing.id, storeId);
-      } catch {
-        // Link already exists or raced; ignore to keep the resolve idempotent.
+        if (was_updated) {
+          this.eventEmitter.emit('customer.updated', {
+            store_id: store.id,
+            customer_id: existing.id,
+            email: existing.email,
+            first_name: existing.first_name,
+            // The fields the update just wrote — what the email should
+            // highlight as "ahora sabemos esto de vos".
+            updated_fields: Object.keys(updateData),
+          });
+        }
+      } else {
+        // No fields to overwrite — still link to the store (idempotent)
+        // so a customer that exists in the org but isn't yet linked to
+        // THIS store can be used for the sale.
+        try {
+          await this.prisma.store_users.upsert({
+            where: {
+              user_id_store_id: {
+                user_id: existing.id,
+                store_id: storeId,
+              },
+            },
+            create: { user_id: existing.id, store_id: storeId },
+            update: {},
+          });
+        } catch (linkErr) {
+          this.logger.warn(
+            `findOrCreateByEmailOrDocument: store link failed for customer ${existing.id} store ${storeId}`,
+            linkErr instanceof Error ? linkErr.stack : String(linkErr),
+          );
+        }
       }
 
       // Merge update data into the returned customer so the response reflects

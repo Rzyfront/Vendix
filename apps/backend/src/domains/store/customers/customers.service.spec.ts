@@ -40,6 +40,19 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       create: jest.fn(),
       update: jest.fn(),
     },
+    store_users: {
+      upsert: jest.fn(),
+    },
+    // `$transaction([...ops])` runs the ops in order; each is awaited.
+    // For tests we want the underlying `users.update` and `store_users.upsert`
+    // mocks to capture the calls, so we evaluate them eagerly.
+    $transaction: jest.fn(async (ops: unknown[]) => {
+      const results: unknown[] = [];
+      for (const op of ops) {
+        results.push(await (op as Promise<unknown>));
+      }
+      return results;
+    }),
     roles: {
       findFirst: jest.fn(),
     },
