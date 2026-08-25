@@ -1,12 +1,14 @@
 import {
   IsString,
   IsNumber,
+  IsInt,
   IsOptional,
   IsIn,
   IsArray,
   ValidateNested,
   IsDateString,
   MaxLength,
+  Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import {
@@ -49,9 +51,38 @@ function conceptListMessage(
   );
 }
 
+/**
+ * Mensaje del piso de `related_invoice_id` (M, auditoría post-F.5).
+ *
+ * F.5 (`e7a7fffea`) blindó las siete FK numéricas de `create-invoice.dto.ts`
+ * con `@IsInt`+`@Min(1)` vía `foreignKeyFloorMessage`, pero ese helper asume
+ * un campo OPCIONAL («omite el campo si no aplica») y aquí no lo es: una nota
+ * crédito/débito siempre ajusta una factura existente, así que
+ * `related_invoice_id` es obligatorio en ambos DTOs de este archivo. Antes de
+ * este fix sólo llevaba `@IsNumber()`, así que un `1.5` no daba el 400 en
+ * español de las otras siete FK sino el genérico `SYS_INVALID_FIELD_VALUE_001`
+ * del filtro global — sin daño de dato, porque `credit-notes.service.ts`
+ * resuelve la fila con `findFirst` antes de gastar el consecutivo y usa
+ * `related_invoice.id`, nunca el crudo del DTO — pero sí una asimetría de
+ * mensaje frente a las siete FK que sí reciben el error específico.
+ */
+const relatedInvoiceFloorMessage = (document_label: string): string =>
+  `related_invoice_id debe ser un número entero: los ids de factura no tienen ` +
+  `fracciones. El mínimo es 1 porque es el id de la factura que esta ${document_label} ` +
+  `ajusta — un 0 o un negativo no identifica ninguna factura, y sin ese vínculo el ` +
+  'documento no es válido ante la DIAN.';
+
 export class CreateCreditNoteDto {
+  /** Piso: ver `relatedInvoiceFloorMessage`. */
   @IsNumber()
+  @IsInt({
+    message:
+      'related_invoice_id debe ser un número entero: los ids de factura no tienen fracciones.',
+  })
   @Type(() => Number)
+  @Min(1, {
+    message: relatedInvoiceFloorMessage('nota crédito'),
+  })
   related_invoice_id: number;
 
   @IsOptional()
@@ -130,8 +161,16 @@ export class CreateCreditNoteDto {
 }
 
 export class CreateDebitNoteDto {
+  /** Piso: ver `relatedInvoiceFloorMessage`. */
   @IsNumber()
+  @IsInt({
+    message:
+      'related_invoice_id debe ser un número entero: los ids de factura no tienen fracciones.',
+  })
   @Type(() => Number)
+  @Min(1, {
+    message: relatedInvoiceFloorMessage('nota débito'),
+  })
   related_invoice_id: number;
 
   @IsOptional()

@@ -130,3 +130,41 @@ describe.each([
     expect(failedPaths(errors)).toEqual([]);
   });
 });
+
+/**
+ * M — auditoría post-F.5: `related_invoice_id` quedó fuera de las siete FK
+ * que F.5 (`e7a7fffea`) blindó con `@IsInt`+`@Min(1)` en
+ * `create-invoice.dto.ts`, porque es un campo distinto en un DTO hermano.
+ * Antes de este fix sólo llevaba `@IsNumber()`, así que un `1.5` no daba el
+ * 400 en español de las otras siete FK.
+ */
+describe.each([
+  ['CreateCreditNoteDto', CreateCreditNoteDto],
+  ['CreateDebitNoteDto', CreateDebitNoteDto],
+])('%s — related_invoice_id: FK entera con piso 1', (_name, cls) => {
+  it('acepta un entero positivo', async () => {
+    const errors = await validateAsPipe(cls, { related_invoice_id: 42 });
+    expect(failedPaths(errors)).toEqual([]);
+  });
+
+  it('rechaza un decimal', async () => {
+    const errors = await validateAsPipe(cls, { related_invoice_id: 1.5 });
+    expect(failedPaths(errors)).toContain('related_invoice_id');
+    expect(messagesAt(errors, 'related_invoice_id')).toContain('entero');
+  });
+
+  it('rechaza 0', async () => {
+    const errors = await validateAsPipe(cls, { related_invoice_id: 0 });
+    expect(failedPaths(errors)).toContain('related_invoice_id');
+  });
+
+  it('rechaza un negativo', async () => {
+    const errors = await validateAsPipe(cls, { related_invoice_id: -5 });
+    expect(failedPaths(errors)).toContain('related_invoice_id');
+  });
+
+  it('sigue siendo obligatorio: ausente falla', async () => {
+    const errors = await validateAsPipe(cls, {});
+    expect(failedPaths(errors)).toContain('related_invoice_id');
+  });
+});
