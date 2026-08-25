@@ -33,6 +33,7 @@ import {
   isValidDocumentType,
 } from '../../../../../../shared/constants/document-types';
 import { computeDocumentFormatHint } from '../../utils/document-format-hint.util';
+import { computePhoneFormatHint } from '../../utils/phone-format-hint.util';
 import { PosCustomerService } from '../../services/pos-customer.service';
 import {
   CreatePosCustomerRequest,
@@ -157,6 +158,20 @@ export class PosCustomerSelectorComponent {
     return computeDocumentFormatHint(
       this.form.get('documentType')?.value as string | null,
       this.form.get('documentNumber')?.value as string | null,
+    );
+  });
+
+  /**
+   * QUI-723 — Live counter for the phone input. Dev lead's spec:
+   * "el número de teléfono son 10" — Colombian mobile numbers are
+   * exactly 10 digits, no country prefix. Pure info — does NOT block
+   * submit. Backend `CreateCustomerDto.phone` enforces exactly 10
+   * digits on creation; the resolve endpoint stays lenient so the
+   * cashier can find legacy customers with any format.
+   */
+  readonly phoneFormatHint = computed(() => {
+    return computePhoneFormatHint(
+      this.form.get('phone')?.value as string | null,
     );
   });
 

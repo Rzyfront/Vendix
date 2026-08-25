@@ -169,13 +169,30 @@
         ></app-input>
       </div>
 
-      <app-input
-        formControlName="phone"
-        label="Teléfono"
-        placeholder="+57 300 123 4567"
-        type="tel"
-        [size]="'md'"
-      ></app-input>
+      <div class="phone-field">
+        <app-input
+          formControlName="phone"
+          label="Teléfono"
+          placeholder="+57 300 123 4567"
+          type="tel"
+          [size]="'md'"
+        ></app-input>
+        <!-- QUI-723 — Live counter for the phone input. Dev lead's spec:
+             "el número de teléfono son 10" — exactly 10 Colombian digits,
+             no country prefix. Pure info — does NOT block submit. -->
+        @if (phoneFormatHint(); as hint) {
+          <span
+            class="document-format-hint"
+            [class.document-format-hint--ok]="hint.tone === 'ok'"
+            [class.document-format-hint--warn]="hint.tone === 'warn'"
+            role="status"
+            aria-live="polite"
+          >
+            <app-icon name="info" [size]="14"></app-icon>
+            {{ hint.text }}
+          </span>
+        }
+      </div>
 
       <div class="form-row">
         <app-selector

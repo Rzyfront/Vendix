@@ -262,7 +262,8 @@
 // QUI-723 — Soft format hint under the document-number input. The wrapper
 // sits in column 2 of the form-row grid; the hint appears below the input
 // without breaking the two-column layout.
-.document-number-field {
+.document-number-field,
+.phone-field {
   display: flex;
   flex-direction: column;
   gap: 4px;
