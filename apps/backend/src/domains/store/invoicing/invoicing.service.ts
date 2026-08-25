@@ -61,6 +61,7 @@ import {
   resolveAiuTaxableBasis,
 } from './profiles/invoice-profile-config.contract';
 import type {
+  AiuComponentsBasis,
   AiuTaxableBasis,
   InvoiceProfileConfig,
   ProfileAiuConfig,
@@ -3373,6 +3374,19 @@ export class InvoicingService {
       contract_object?: string;
       enforce_minimum_base?: boolean;
       minimum_base_percent?: number | string;
+      /**
+       * D.4 — sólo `ProfileAiuConfig` los declara. `AiuSettings` (el ajuste de
+       * tienda, sin perfil) sigue siendo de 2 valores —ver el comentario de
+       * arriba— y no tiene sección de reparto A/I/U: no se le puede añadir acá
+       * sin tocar `store-settings.interface.ts`, fuera de mi territorio esta
+       * sesión. Por eso `components`/`components_basis` sólo llegan al motor
+       * cuando el documento se emite bajo un perfil (`profile_aiu` presente);
+       * sin perfil, `explodeAiuContratoLine` cae en su fallback conservador
+       * (todo Utilidad) y una línea 'contrato' manual sigue tributando de más,
+       * nunca de menos.
+       */
+      components?: ProfileAiuConfig['components'];
+      components_basis?: AiuComponentsBasis | null;
     } = profile_aiu ?? (await this.loadAiuSettings(context.store_id));
 
     // `loadAiuSettings` (ajuste de tienda) es de 2 valores y nunca declara
@@ -3446,6 +3460,10 @@ export class InvoicingService {
         // float acá reintroduciría el error binario que el contrato evita
         // guardando los porcentajes como cadena.
         minimum_base_percent: source.minimum_base_percent,
+        // D.4 — sólo presentes con perfil (ver el comentario de `source`
+        // arriba). El calculador ya sabe leerlos ausentes.
+        components: source.components,
+        components_basis: source.components_basis,
       },
     };
   }
@@ -3919,6 +3937,27 @@ export class InvoicingService {
           orphan.line_description ? ` («${orphan.line_description}»)` : ''
         } declara un impuesto de ${orphan.received} pero no declara ninguna tarifa. Agrega el impuesto con su tarifa (por ejemplo IVA 19%) o deja el importe en cero: sin tarifa la DIAN no puede validar el documento.`,
         { line_index: orphan.line_index, received: orphan.received },
+      );
+    }
+
+    // D.4 — Modelo 1 (`'contrato'`) mezclado con Modelo 2 (líneas por
+    // componente), o dos líneas `'contrato'` en el mismo documento ⇒
+    // **bloquea**, ANTES del piso legal: ese chequeo necesita un AIU único y
+    // bien formado, y esta divergencia dice precisamente que no lo hay.
+    const contrato_conflict = result.divergences.find(
+      (divergence) => divergence.scope === 'aiu_contrato_mutually_exclusive',
+    );
+    if (contrato_conflict) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_AIU_007,
+        `La línea ${contrato_conflict.line_index + 1} mezcla el Modelo 1 (componente «contrato», que ` +
+          `declara el AIU completo del contrato) con el Modelo 2 (líneas por componente ` +
+          `administración/imprevistos/utilidad), o el documento declara más de una línea «contrato». ` +
+          `Las dos formas son mutuamente excluyentes: una línea «contrato» YA ES el AIU completo, así que ` +
+          `cualquiera de las dos combinaciones deja sin definir cuánto vale el AIU que el piso legal del ` +
+          `10% necesita comparar contra el contrato. Usa una sola línea «contrato» sola, o las tres líneas ` +
+          `por componente sin ninguna «contrato».`,
+        { line_index: contrato_conflict.line_index },
       );
     }
 
