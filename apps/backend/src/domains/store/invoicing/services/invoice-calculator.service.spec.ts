@@ -38,6 +38,10 @@ describe('InvoiceCalculatorService', () => {
       expect(line.line_extension_amount).toBe('100000.00');
       expect(line.tax_amount).toBe('19000.00');
       expect(line.total_amount).toBe('119000.00');
+      // D.3 / ADR-7: fuera de un documento AIU toda línea grava por su importe
+      // entero — `taxable_amount` coincide con `line_extension_amount`.
+      expect(line.taxable_amount).toBe('100000.00');
+      expect(line.omit_tax_total).toBe(false);
 
       expect(result.totals.total_before_tax).toBe('100000.00');
       expect(result.totals.tax_iva).toBe('19000.00');
@@ -1206,6 +1210,63 @@ describe('InvoiceCalculatorService', () => {
         ).toHaveLength(0);
       },
     );
+
+    /**
+     * D.3 / ADR-7 — `taxable_amount` explícito por línea.
+     *
+     * `CalculatedLine.taxable_amount` es de donde el armado UBL leerá
+     * `cbc:TaxableAmount` (D.5, fuera del alcance de este servicio). Bajo el
+     * modelo `'sumada'` —el único habilitado hoy— tiene que coincidir EXACTO
+     * con `omit_tax_total`: base propia cuando la línea grava, cero cuando no.
+     * Las tres bases declaradas se prueban porque cada una decide un patrón
+     * distinto de qué línea grava (ver el describe padre).
+     */
+    it('base «aiu»: taxable_amount = importe propio en A/I/U, cero en costo', () => {
+      const result = service.calculate(aiuContract({ taxable_basis: 'aiu' }));
+
+      expect(result.lines[0].taxable_amount).toBe('0.00'); // costo
+      expect(result.lines[1].taxable_amount).toBe('6000000.00'); // administración
+      expect(result.lines[2].taxable_amount).toBe('1000000.00'); // imprevistos
+      expect(result.lines[3].taxable_amount).toBe('3000000.00'); // utilidad
+
+      // Suma de bases de línea = base de cabecera (checklist D.3).
+      const sum_lines = result.lines.reduce(
+        (acc, line) => acc + Number(line.taxable_amount),
+        0,
+      );
+      expect(sum_lines).toBe(Number(result.aiu?.taxable_base));
+    });
+
+    it('base «utilidad»: sólo la línea de utilidad aporta base gravable', () => {
+      const result = service.calculate(
+        aiuContract({ taxable_basis: 'utilidad' }),
+      );
+
+      expect(result.lines[0].taxable_amount).toBe('0.00'); // costo
+      expect(result.lines[1].taxable_amount).toBe('0.00'); // administración
+      expect(result.lines[2].taxable_amount).toBe('0.00'); // imprevistos
+      expect(result.lines[3].taxable_amount).toBe('3000000.00'); // utilidad
+    });
+
+    it('base «subtotal»: las CUATRO líneas aportan su importe completo', () => {
+      const result = service.calculate(
+        aiuContract({ taxable_basis: 'subtotal' }),
+      );
+
+      expect(result.lines[0].taxable_amount).toBe('90000000.00'); // costo
+      expect(result.lines[1].taxable_amount).toBe('6000000.00');
+      expect(result.lines[2].taxable_amount).toBe('1000000.00');
+      expect(result.lines[3].taxable_amount).toBe('3000000.00');
+    });
+
+    it('taxable_amount es siempre el caso omit_tax_total = true ⇒ 0', () => {
+      for (const basis of ['aiu', 'utilidad', 'subtotal'] as const) {
+        const result = service.calculate(aiuContract({ taxable_basis: basis }));
+        for (const line of result.lines) {
+          expect(line.omit_tax_total).toBe(line.taxable_amount === '0.00');
+        }
+      }
+    });
 
     it('reporta —sin inflar— el AIU que no llega al 10 % del contrato', () => {
       const result = service.calculate({

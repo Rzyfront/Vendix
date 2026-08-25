@@ -331,8 +331,31 @@ export interface CalculatedLine {
    * `cac:TaxTotal` con `cbc:Percent` en 0,00 —exento no es excluido—. Colapsar
    * los dos casos en «no tiene impuestos» borraría la diferencia justo donde
    * cambia el resultado.
+   *
+   * **Derivado de `taxable_amount`, no un dato independiente**: es
+   * exactamente el caso `taxable_amount === '0.00'`. Se conserva como campo
+   * propio — y no como getter — porque los consumidores existentes ya leen
+   * `omit_tax_total` y no tienen por qué cambiar (ADR-7, D.3).
    */
   omit_tax_total: boolean;
+  /**
+   * **Base gravable declarada de ESTA línea** — de donde sale
+   * `cbc:TaxableAmount` en el armado UBL (ADR-7). Ausente hasta D.3; con este
+   * campo, `omit_tax_total` deja de ser la única fuente de la gravabilidad de
+   * línea.
+   *
+   * Hoy (modelo `'sumada'`, el único habilitado — ver `ENABLED_ACCOUNTING_
+   * MODELS`) coincide siempre con `line_extension_amount` cuando la línea
+   * grava, y es `'0.00'` cuando `omit_tax_total` es `true`: el AIU sigue
+   * siendo LÍNEAS del documento, así que la base de cada línea es su propio
+   * importe entero o nada.
+   *
+   * El Modelo 1 (`'no_sumada'`, D.4-D.7) es lo que vuelve este campo capaz de
+   * declarar una base MENOR que `line_extension_amount` — una línea que ES el
+   * contrato entero pero cuya base gravable es sólo la fracción AIU —, sin que
+   * `omit_tax_total` deje de significar lo mismo que siempre significó.
+   */
+  taxable_amount: string;
 }
 
 /** Agregado por esquema DIAN — exactamente los `ValImp` del CUFE. */
@@ -847,6 +870,17 @@ export class InvoiceCalculatorService {
 
     const tax_amount = dianSum(taxes.map((tax) => tax.tax_amount));
 
+    // ADR-7 / D.3: la base gravable de la línea es su propio importe entero
+    // cuando grava, y cero cuando `omit_tax_total` la excluye — el mismo
+    // predicado que ya decide si la línea emite `cac:TaxTotal`. Bajo el modelo
+    // `'sumada'` (el único habilitado hoy) no hay tercer valor posible: una
+    // línea AIU es o toda base, o nada de base. El Modelo 1 (D.4-D.7) es lo
+    // que introduce una fracción entre esos dos extremos, y lo hace en el
+    // llamador de este servicio, no acá.
+    const taxable_amount = omit_tax_total
+      ? dianAmount(0)
+      : line_extension_amount;
+
     return {
       index,
       description: item.description,
@@ -860,6 +894,7 @@ export class InvoiceCalculatorService {
       is_inclusive: line_is_inclusive,
       aiu_component,
       omit_tax_total,
+      taxable_amount,
     };
   }
 
