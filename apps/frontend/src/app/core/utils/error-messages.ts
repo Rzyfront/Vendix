@@ -891,8 +891,18 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Una línea del AIU entra a la base gravable y no declara impuesto, y no hay perfil de facturación que aporte la tarifa de ese componente. Declara el impuesto en la línea o elige un perfil que defina la tarifa: si se emitiera así, el IVA quedaría por debajo del que corresponde y eso sólo se corrige después con nota crédito.',
   INVOICING_AIU_005:
     'El impuesto de una línea contradice el régimen AIU del documento. La base gravable la determina el régimen —artículo 462-1 grava Administración, Imprevistos y Utilidad; Decreto 1372/1992 grava sólo la Utilidad—, no lo que la línea declare. Revisa el impuesto de la línea o el régimen del perfil: como está, el documento declararía un IVA que sus líneas no respaldan.',
+  // Las bases son TRES, no dos. El texto anterior nombraba sólo las dos
+  // primeras, y ese olvido no era cosmético: este mensaje se muestra justo
+  // cuando el comerciante tiene que elegir una base, así que esconderle
+  // `subtotal` lo empuja a marcar 462-1 o Decreto 1372/1992 para un contrato
+  // que correspondía a subtotal — o sea a declarar el IVA mal, que es
+  // exactamente el daño que este código existe para evitar. El backend ya
+  // nombra las tres (`error-codes.ts`, INVOICING_AIU_006: «none of the THREE
+  // known taxable bases») y el formulario ya ofrece `subtotal`
+  // (`invoice-section-aiu.component.ts`), así que el copy era el único sitio
+  // que seguía contando dos.
   INVOICING_AIU_006:
-    'El documento declara un régimen de AIU que no existe. Los dos válidos son el del artículo 462-1 del Estatuto Tributario y el del Decreto 1372/1992, y no son intercambiables: gravan bases distintas. Elige uno en el perfil de facturación.',
+    'El documento declara una base gravable de AIU que no existe. Las tres válidas son el artículo 462-1 del Estatuto Tributario (grava Administración, Imprevistos y Utilidad, con piso legal del 10 %), el Decreto 1372/1992 (grava sólo la Utilidad, sin piso) y subtotal (renuncia al tratamiento AIU y grava el contrato completo, incluido el costo reembolsable). No son intercambiables: gravan bases distintas. Elige una en el perfil de facturación.',
 
   /**
    * XSD_002 — el descuadre de totales. Lo PRIMERO que hay que decir es lo mismo
