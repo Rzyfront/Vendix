@@ -272,4 +272,153 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       expect(messages.some((m) => /catálogo RUT/.test(m))).toBe(true);
     });
   });
+
+  /**
+   * QUI-723 — POS finalize-sale find-or-create flow.
+   *
+   * The contract under test:
+   *   - Match priority: email first, then exact (document_type, document_number).
+   *   - Update strategy: CONSERVATIVE — only null/empty fields on the existing
+   *     row get filled; never overwrite already-confirmed data.
+   *   - No match: delegate to `create()` so we inherit username uniqueness,
+   *     NIT/DV split, password hashing, and `customer.created` event.
+   *   - `linkCustomerToStore` is called idempotently on every match.
+   */
+  describe('findOrCreateByEmailOrDocument — QUI-723', () => {
+    const existingByEmail = {
+      id: 7,
+      first_name: 'Juan',
+      last_name: 'Pérez',
+      phone: null,
+      document_type: 'CC',
+      document_number: '12345678',
+      email: 'juan@x.com',
+      state: 'active',
+      user_roles: [],
+      store_users: [{ store_id: 1 }],
+      addresses: [],
+    };
+
+    const existingByDocument = {
+      id: 11,
+      first_name: 'María',
+      last_name: 'Gómez',
+      phone: '+573101234567',
+      document_type: 'CC',
+      document_number: '99999999',
+      email: 'maria@x.com',
+      state: 'active',
+      user_roles: [],
+      store_users: [{ store_id: 1 }],
+      addresses: [],
+    };
+
+    beforeEach(() => {
+      // Common happy path: store exists; no email/document match unless a test
+      // overrides with `mockResolvedValueOnce`.
+      mockPrismaService.stores.findUnique.mockResolvedValue(mockStore);
+      mockPrismaService.users.findFirst.mockResolvedValue(null);
+    });
+
+    it('matches by email and returns was_updated=false when nothing new arrives', async () => {
+      mockPrismaService.users.findFirst.mockResolvedValueOnce(existingByEmail);
+
+      const result = await service.findOrCreateByEmailOrDocument(1, {
+        email: 'juan@x.com',
+      } as any);
+
+      expect(result.was_created).toBe(false);
+      expect(result.was_updated).toBe(false);
+      expect(result.matched_by).toBe('email');
+      expect(result.customer.id).toBe(7);
+      expect(mockPrismaService.users.update).not.toHaveBeenCalled();
+      expect(mockPrismaService.users.create).not.toHaveBeenCalled();
+    });
+
+    it('matches by email and fills a null phone (conservative update)', async () => {
+      mockPrismaService.users.findFirst.mockResolvedValueOnce(existingByEmail);
+
+      const result = await service.findOrCreateByEmailOrDocument(1, {
+        email: 'juan@x.com',
+        phone: '+573001234567',
+      } as any);
+
+      expect(result.was_created).toBe(false);
+      expect(result.was_updated).toBe(true);
+      expect(result.matched_by).toBe('email');
+      expect(mockPrismaService.users.update).toHaveBeenCalledTimes(1);
+      const updateData = mockPrismaService.users.update.mock.calls[0][0].data;
+      expect(updateData).toEqual({ phone: '+573001234567' });
+    });
+
+    it('does NOT overwrite a confirmed first_name even when the request carries a different one', async () => {
+      mockPrismaService.users.findFirst.mockResolvedValueOnce(existingByEmail);
+
+      const result = await service.findOrCreateByEmailOrDocument(1, {
+        email: 'juan@x.com',
+        first_name: 'OTRO NOMBRE',
+      } as any);
+
+      expect(result.was_created).toBe(false);
+      expect(result.was_updated).toBe(false);
+      expect(result.matched_by).toBe('email');
+      expect(mockPrismaService.users.update).not.toHaveBeenCalled();
+    });
+
+    it('matches by exact (document_type, document_number) when no email matches', async () => {
+      // DTO has no email → email-lookup branch is skipped. The only
+      // `findFirst` call comes from `findByDocumentInOrganization`.
+      mockPrismaService.users.findFirst.mockResolvedValueOnce(existingByDocument);
+
+      const result = await service.findOrCreateByEmailOrDocument(1, {
+        document_type: 'CC',
+        document_number: '99999999',
+        phone: '+573109999999',
+      } as any);
+
+      expect(result.was_created).toBe(false);
+      expect(result.matched_by).toBe('document');
+      expect(result.customer.id).toBe(11);
+      // Phone is already filled in existingByDocument → conservative, no update.
+      expect(result.was_updated).toBe(false);
+    });
+
+    it('does NOT match by document when document_type differs (CC 123 ≠ NIT 123)', async () => {
+      // Both lookups return null → falls through to `create()`.
+      mockPrismaService.users.findFirst.mockResolvedValue(null);
+
+      const result = await service.findOrCreateByEmailOrDocument(1, {
+        document_type: 'NIT',
+        document_number: '123',
+        first_name: 'Acme',
+        last_name: 'SAS',
+        person_type: 'JURIDICA',
+      } as any);
+
+      expect(result.was_created).toBe(true);
+      expect(result.was_updated).toBe(false);
+      expect(result.matched_by).toBe(null);
+      // create() is invoked with the original storeId.
+      expect(mockPrismaService.users.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('delegates to create() when nothing matches and returns was_created=true', async () => {
+      mockPrismaService.users.findFirst.mockResolvedValue(null);
+
+      const result = await service.findOrCreateByEmailOrDocument(1, {
+        email: 'nuevo@x.com',
+        first_name: 'Nuevo',
+        last_name: 'Cliente',
+        document_type: 'CC',
+        document_number: '88888888',
+        person_type: 'NATURAL',
+      } as any);
+
+      expect(result.was_created).toBe(true);
+      expect(result.was_updated).toBe(false);
+      expect(result.matched_by).toBe(null);
+      expect(result.customer.id).toBe(42); // from the create() mock
+      expect(mockPrismaService.users.create).toHaveBeenCalledTimes(1);
+    });
+  });
 });

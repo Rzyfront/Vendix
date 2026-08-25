@@ -16,7 +16,8 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
-import { startWith } from 'rxjs';
+import { Observable, of, startWith } from 'rxjs';
+import { catchError, map } from 'rxjs/operators';
 
 import {
   ButtonComponent,
@@ -34,16 +35,20 @@ import {
   PosCustomer,
 } from '../../models/customer.model';
 
-/** Vistas internas del selector con navegación drill-in (vista enfocada). */
-export type CustomerSelectorView = 'overview' | 'search' | 'create';
+/**
+ * Vistas internas del selector. QUI-723 eliminated the 'create' drill-in:
+ * search + create became a single unified flow where the cashier types data
+ * and the host's "Siguiente" calls `resolveIfNeeded()` to find-or-create.
+ */
+export type CustomerSelectorView = 'overview' | 'search';
 
 /**
  * Selector de cliente reutilizable para flujos POS (pago, crear-orden, envío).
  *
- * Encapsula buscar + crear cliente con navegación drill-in: cada acción abre
- * una vista enfocada ('search' / 'create') con botón "Volver" que regresa
- * siempre a 'overview'. NO renderiza su propio modal; vive como panel inline
- * dentro del cuerpo de un modal anfitrión.
+ * QUI-723 — Vista unificada: ya no hay drill-in separado para "Crear cliente".
+ * El cajero tipea email / cédula / nombre en el formulario del sub-step
+ * "BUSCAR CLIENTE" y el botón "Siguiente" del anfitrión dispara
+ * `resolveIfNeeded()`, que hace find-or-create en backend en un solo paso.
  *
  * Zoneless + Signals: todo el estado leído por el template es signal-based.
  */
@@ -92,10 +97,11 @@ export class PosCustomerSelectorComponent {
   readonly results = signal<PosCustomer[]>([]);
   readonly isSearching = signal(false);
   readonly searchPerformed = signal(false);
-  readonly creating = signal(false);
+  /** QUI-723: in-flight flag while the unified resolveCustomer call runs. */
+  readonly resolving = signal(false);
   /** Texto tipeado actual (para que Enter dispare búsqueda inmediata). */
   private readonly query = signal('');
-  /** Última consulta efectiva, usada como prefill al crear desde búsqueda. */
+  /** Última consulta efectiva (reservada para futuros prefill heurísticos). */
   readonly lastQuery = signal('');
 
   // ── Top-suggestions (clientes más frecuentes) ───────────────────────
@@ -122,14 +128,18 @@ export class PosCustomerSelectorComponent {
     (opt) => ({ value: opt.code, label: opt.label }),
   );
 
-  // ── Form (misma forma que el bloque duplicado del payment interface) ──
+  // ── Form ────────────────────────────────────────────────────────────
+  // QUI-723 — All fields are optional: the cashier may submit the form with
+  // just an email, just a document, or both. The backend resolves the match
+  // priority (email first, then exact document) and creates a new row only
+  // when no match is found. `canResolve` enforces "at least one identifier".
   readonly form: FormGroup = this.fb.group({
     email: ['', [Validators.email]],
-    firstName: ['', [Validators.required, Validators.minLength(2)]],
-    lastName: ['', [Validators.required, Validators.minLength(2)]],
+    firstName: [''],
+    lastName: [''],
     phone: [''],
     documentType: [''],
-    documentNumber: ['', [Validators.required]],
+    documentNumber: [''],
   });
 
   /** Estado de validez del form como signal (Zoneless-safe). */
@@ -138,9 +148,23 @@ export class PosCustomerSelectorComponent {
     { initialValue: this.form.status },
   );
 
-  readonly canCreate = computed(
-    () => this.formStatus() === 'VALID' && !this.creating(),
-  );
+  /**
+   * Submit gate: form is submittable when the cashier provided at least one
+   * identifier — a valid email OR (document_type + document_number).
+   * Format-only validation runs; required-ness is decided here, not in
+   * Validators.required, so the same form handles empty/partial inputs.
+   */
+  readonly canResolve = computed(() => {
+    if (this.resolving()) return false;
+    const v = this.form.value as {
+      email?: string | null;
+      documentType?: string | null;
+      documentNumber?: string | null;
+    };
+    const hasEmail = !!v.email?.trim() && this.formStatus() === 'VALID';
+    const hasDocument = !!v.documentType && !!v.documentNumber?.trim();
+    return hasEmail || hasDocument;
+  });
 
   constructor() {
     // One-shot: aplica la vista inicial e (si corresponde) arranca directo en
@@ -184,20 +208,9 @@ export class PosCustomerSelectorComponent {
       });
   }
 
-  // ── Navegación drill-in ─────────────────────────────────────────────
+  // ── Navegación ──────────────────────────────────────────────────────
   goToSearch(): void {
     this.view.set('search');
-  }
-
-  goToCreate(prefillName?: string): void {
-    if (prefillName && prefillName.trim()) {
-      // Prefill heurístico: primer token → nombre, resto → apellido.
-      const parts = prefillName.trim().split(/\s+/);
-      const firstName = parts.shift() ?? '';
-      const lastName = parts.join(' ');
-      this.form.patchValue({ firstName, lastName });
-    }
-    this.view.set('create');
   }
 
   back(): void {
@@ -262,44 +275,80 @@ export class PosCustomerSelectorComponent {
     this.view.set('overview');
   }
 
-  // ── Creación ────────────────────────────────────────────────────────
-  onCreate(): void {
-    if (!this.form.valid) {
+  // ── Resolución unificada (QUI-723) ──────────────────────────────────
+  /**
+   * Public entry point used by the host's "Siguiente" button. Returns
+   * `true` when the customer was resolved (existing or freshly created)
+   * and emitted through `customerSelected`; `false` when the cashier has
+   * not provided enough data to resolve (no email AND no document).
+   *
+   * - If a customer was already selected on the cart, this returns `true`
+   *   without re-running the lookup — the cashier's edits to the form are
+   *   ignored, matching the previous "no-op when already chosen" semantics.
+   * - Otherwise, it calls `resolveCustomer` (find-or-create on the backend)
+   *   and emits the resulting customer via `customerSelected`.
+   *
+   * The Observable completes synchronously in both paths so the host can
+   * `await` (or subscribe-and-flag) without juggling timers.
+   */
+  resolveIfNeeded(): Observable<boolean> {
+    if (this.selectedCustomer()) {
+      return of(true);
+    }
+    if (!this.canResolve()) {
       this.markFormTouched();
-      this.toastService.info('Por favor completa los campos requeridos');
-      return;
+      this.toastService.info(
+        'Ingresa al menos un email o un documento para continuar',
+      );
+      return of(false);
     }
 
     const value = this.form.value;
     const request: CreatePosCustomerRequest = {
-      email: value.email,
-      first_name: value.firstName,
-      last_name: value.lastName || undefined,
-      phone: value.phone || undefined,
+      email: value.email?.trim() || undefined,
+      first_name: value.firstName?.trim() || undefined,
+      last_name: value.lastName?.trim() || undefined,
+      phone: value.phone?.trim() || undefined,
       document_type: value.documentType || undefined,
-      document_number: value.documentNumber || undefined,
+      document_number: value.documentNumber?.trim() || undefined,
     };
 
-    this.creating.set(true);
+    this.resolving.set(true);
 
-    // createQuickCustomer auto-selecciona el cliente en el service;
-    // emitimos para que el anfitrión sincronice su propio estado.
-    this.customerService
-      .createQuickCustomer(request)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (created) => {
-          this.creating.set(false);
-          this.customerSelected.emit(created);
+    return this.customerService.resolveCustomer(request).pipe(
+      map(
+        ({
+          customer,
+          was_created,
+          was_updated,
+        }): boolean => {
+          this.customerSelected.emit(customer);
           this.view.set('overview');
           this.form.reset();
-          this.toastService.success('Cliente creado correctamente');
+          this.resolving.set(false);
+          if (was_created) {
+            this.toastService.success('Cliente creado correctamente');
+          } else if (was_updated) {
+            this.toastService.success('Cliente actualizado con los nuevos datos');
+          }
+          return true;
         },
-        error: (error: unknown) => {
-          this.creating.set(false);
-          this.toastService.error(this.resolveErrorMessage(error));
-        },
-      });
+      ),
+      catchError((error: unknown) => {
+        this.resolving.set(false);
+        this.toastService.error(this.resolveErrorMessage(error));
+        return of(false);
+      }),
+    );
+  }
+
+  /**
+   * Backward-compatible alias used by any hosts that still pass through the
+   * form's `(ngSubmit)` event. New hosts should call `resolveIfNeeded()`
+   * from their "Siguiente" handler.
+   */
+  onResolve(): void {
+    this.resolveIfNeeded().subscribe();
   }
 
   private markFormTouched(): void {
@@ -312,7 +361,7 @@ export class PosCustomerSelectorComponent {
     const err = error as
       | { error?: { message?: string }; message?: string }
       | undefined;
-    return err?.error?.message || err?.message || 'Error al crear cliente';
+    return err?.error?.message || err?.message || 'Error al resolver cliente';
   }
 
   /** Limpia el form, resultados y vuelve a 'overview'. Los anfitriones lo llaman al cerrar el modal. */
@@ -321,7 +370,7 @@ export class PosCustomerSelectorComponent {
     this.results.set([]);
     this.isSearching.set(false);
     this.searchPerformed.set(false);
-    this.creating.set(false);
+    this.resolving.set(false);
     this.query.set('');
     this.lastQuery.set('');
     this.view.set('overview');

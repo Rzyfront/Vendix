@@ -856,24 +856,38 @@ export class PosCheckoutShellComponent {
       }
       // Cliente → en delivery exige cliente antes de la Dirección.
       if (sub === 1) {
-        if (this.requiresAddress()) {
-          if (!this.cartState()?.customer) {
+        // QUI-723 — Sub-step unificado: si no hay cliente seleccionado, el
+        // botón "Siguiente" dispara find-or-create desde el formulario del
+        // sub-step. Solo avanzamos cuando `resolveIfNeeded()` confirma éxito;
+        // si el form está vacío o el backend rechaza, el selector muestra un
+        // toast y el sub-step queda visible para que el cajero corrija.
+        if (!this.cartState()?.customer) {
+          const selector = this.customerSelector();
+          if (!selector) {
+            // Sin referencia al selector (¿modal cerrado a mitad del flujo?):
+            // caemos al fallback legacy para no dejar al cajero trabado.
             this.flagMissingCustomer();
             return;
           }
+          selector
+            .resolveIfNeeded()
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe((resolved) => {
+              if (!resolved) return; // toast ya emitido por el selector.
+              // Volvemos a evaluar la rama con `cartState().customer` ya set.
+              this.attemptNextStep();
+            });
+          return;
+        }
+
+        if (this.requiresAddress()) {
           this.goToClienteSubStep(2);
           return;
         }
-        // Pickup con-cliente: Cliente es el sub-paso terminal.
-        // QUI-561: con cliente OBLIGATORIO salir de aquí sin uno dejaría al
-        // collector bloqueado en silencio (requireCustomer ⇒ canSubmit()=false),
-        // que es justo el atasco que se está corrigiendo. Avisamos en vez de
-        // avanzar. Con ventas anónimas permitidas el paso sigue libre y el
-        // collector valida el resto.
-        if (this.customerRequired() && !this.cartState()?.customer) {
-          this.flagMissingCustomer();
-          return;
-        }
+        // Pickup con-cliente: Cliente es el sub-paso terminal. Si llegamos
+        // acá con cliente cargado, el resolve ya surtió efecto — avanzamos.
+        // (La rama customerRequired+!customer ya quedó cubierta arriba con el
+        // resolveIfNeeded.)
         this.nextStep();
         return;
       }

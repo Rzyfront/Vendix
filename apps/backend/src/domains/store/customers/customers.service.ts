@@ -441,6 +441,197 @@ export class CustomersService {
   }
 
   /**
+   * QUI-723 — POS finalize-sale "resolver cliente" flow.
+   *
+   * Find an existing customer by email (priority) or by exact
+   * (document_type, document_number), and create one only if neither matches.
+   *
+   * Distinct from `resolveGuestCustomerForCheckout`:
+   *   1. Match priority is email-first, then document — NOT email/phone.
+   *      Email wins because it's globally unique per org; document is the
+   *      fallback when the cashier doesn't capture an email.
+   *   2. The match is ORGANIZATION-scoped (mirrors `findByDocumentInOrganization`)
+   *      so customers from sister stores don't collide.
+   *   3. When the customer exists, updates are CONSERVATIVE: only null/empty
+   *      fields on the existing row get filled. We never overwrite data the
+   *      cashier previously confirmed ("si el cliente ya existe simplemente
+   *      no hay que cambiarle nada" — dev lead spec).
+   *   4. When no match is found, we delegate to `create()` so we inherit the
+   *      username-uniqueness retry loop, NIT/DV split, password hashing, and
+   *      the `customer.created` event.
+   *
+   * Returns the customer plus audit flags so the frontend can surface a
+   * "cliente actualizado / creado" toast.
+   */
+  async findOrCreateByEmailOrDocument(
+    storeId: number,
+    dto: CreateCustomerDto,
+  ): Promise<{
+    customer: any;
+    was_created: boolean;
+    was_updated: boolean;
+    matched_by: 'email' | 'document' | null;
+  }> {
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+      select: { id: true, organization_id: true },
+    });
+
+    if (!store) {
+      throw new VendixHttpException(ErrorCodes.STORE_FIND_001);
+    }
+
+    const effectiveEmail = this.resolveCustomerEmail(dto.email);
+    const normalizedDoc = this.normalizeDocument({
+      type: dto.document_type ?? null,
+      number: dto.document_number ?? null,
+    });
+
+    // Match 1 — email first (case-insensitive, org-scoped, archived excluded).
+    let existing: any = null;
+    let matched_by: 'email' | 'document' | null = null;
+
+    if (effectiveEmail) {
+      existing = await this.prisma.users.findFirst({
+        where: {
+          email: { equals: effectiveEmail, mode: 'insensitive' },
+          organization_id: store.organization_id,
+          user_roles: { some: { roles: { name: 'customer' } } },
+          state: { not: user_state_enum.archived },
+        },
+        omit: CUSTOMER_PRIVATE_COLUMNS,
+      });
+      if (existing) matched_by = 'email';
+    }
+
+    // Match 2 — exact (document_type, document_number) only if no email match.
+    // The type must match exactly: CC 123 ≠ NIT 123 even when the number
+    // string is identical (DIAN fiscal identity).
+    if (!existing && normalizedDoc.number && normalizedDoc.type) {
+      existing = await this.findByDocumentInOrganization(
+        store.organization_id,
+        normalizedDoc.number,
+        normalizedDoc.type,
+      );
+      if (existing) matched_by = 'document';
+    }
+
+    if (existing) {
+      // Conservative partial update — see `buildConservativeUpdatePayload`.
+      const updateData = this.buildConservativeUpdatePayload(existing, dto);
+
+      let was_updated = false;
+      if (Object.keys(updateData).length > 0) {
+        await this.prisma.users.update({
+          where: { id: existing.id },
+          data: updateData,
+        });
+        was_updated = true;
+
+        this.eventEmitter.emit('customer.updated', {
+          store_id: store.id,
+          customer_id: existing.id,
+        });
+      }
+
+      // Idempotent: link the customer to this store if not yet linked.
+      // Mirrors the guest-checkout pattern (`resolveGuestCustomerForCheckout:431`).
+      try {
+        await this.linkCustomerToStore(existing.id, storeId);
+      } catch {
+        // Link already exists or raced; ignore to keep the resolve idempotent.
+      }
+
+      // Merge update data into the returned customer so the response reflects
+      // the POST-resolve state. Without this, the frontend would see a stale
+      // `customer` when `was_updated: true` (the `existing` snapshot was
+      // captured before the update ran).
+      const resolved = was_updated
+        ? ({ ...existing, ...updateData } as any)
+        : existing;
+
+      return {
+        customer: resolved,
+        was_created: false,
+        was_updated,
+        matched_by,
+      };
+    }
+
+    // No match — delegate to `create()` so we inherit all its guards
+    // (username uniqueness, NIT/DV split, password hashing, customer.created event).
+    const created = await this.create(storeId, dto);
+
+    return {
+      customer: created,
+      was_created: true,
+      was_updated: false,
+      matched_by: null,
+    };
+  }
+
+  /**
+   * QUI-723 — Build the partial-update payload for `findOrCreateByEmailOrDocument`.
+   *
+   * The dev lead's spec was unambiguous on this: when the customer already
+   * exists we must NOT overwrite fields that were previously confirmed.
+   * We only fill NULL or EMPTY fields on the existing row using values from
+   * the incoming DTO.
+   *
+   * Email is intentionally excluded: if the existing customer matched the
+   * incoming email, the strings already coincide (the lookup was
+   * case-insensitive). Including it would also force an unnecessary
+   * unique-constraint check.
+   *
+   * Document fields get the same canonicalization as `normalizeDocument()`
+   * so a `cc 123.456` request matches an existing `CC123456` row and we
+   * write it back in the same form.
+   */
+  private buildConservativeUpdatePayload(
+    existing: {
+      first_name: string | null;
+      last_name: string | null;
+      phone: string | null;
+      document_type: string | null;
+      document_number: string | null;
+    },
+    incoming: CreateCustomerDto,
+  ): Record<string, unknown> {
+    const data: Record<string, unknown> = {};
+
+    const fillIfEmpty = (
+      existingValue: string | null,
+      incomingValue: string | null | undefined,
+      field: string,
+      transform?: (s: string) => string,
+    ) => {
+      if (existingValue) return; // protect confirmed data
+      if (!incomingValue) return;
+      const trimmed = incomingValue.trim();
+      if (!trimmed) return;
+      data[field] = transform ? transform(trimmed) : trimmed;
+    };
+
+    fillIfEmpty(existing.first_name, incoming.first_name, 'first_name');
+    fillIfEmpty(existing.last_name, incoming.last_name, 'last_name');
+    fillIfEmpty(existing.phone, incoming.phone, 'phone');
+    fillIfEmpty(
+      existing.document_type,
+      incoming.document_type,
+      'document_type',
+      (s) => s.toUpperCase(),
+    );
+    fillIfEmpty(
+      existing.document_number,
+      incoming.document_number,
+      'document_number',
+      (s) => s.toUpperCase().replace(/[\s\-.]/g, ''),
+    );
+
+    return data;
+  }
+
+  /**
    * Resolve (or create) a guest `users` row (rol `customer`) for a diner who
    * identifies at a restaurant table (QR dine-in "cliente presentado").
    *

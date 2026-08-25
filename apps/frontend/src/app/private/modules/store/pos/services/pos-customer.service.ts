@@ -84,6 +84,57 @@ export class PosCustomerService {
   }
 
   /**
+   * QUI-723 — POS finalize-sale "resolver cliente" in a single step.
+   *
+   * Backend `POST /store/customers/resolve` returns either an existing customer
+   * (matched by email OR exact (document_type, document_number)) with optional
+   * partial-update of empty fields, OR a freshly-created customer. The response
+   * is wrapped via `ResponseService.success` so we unwrap `data` first.
+   *
+   * Errors propagate through `catchError` so the caller can surface a toast
+   * and keep the wizard in the Cliente sub-step without advancing.
+   */
+  resolveCustomer(
+    request: CreatePosCustomerRequest,
+  ): Observable<{
+    customer: PosCustomer;
+    was_created: boolean;
+    was_updated: boolean;
+    matched_by: 'email' | 'document' | null;
+  }> {
+    this.loading.set(true);
+
+    return this.http.post<any>(`${this.apiUrl}/resolve`, request).pipe(
+      map((response) => {
+        // ResponseService wraps the payload as `{ success, data, message }`.
+        const payload = response?.data ?? response;
+        return {
+          customer: this.mapApiCustomerToPosCustomer(payload.customer),
+          was_created: !!payload.was_created,
+          was_updated: !!payload.was_updated,
+          matched_by: (payload.matched_by ?? null) as
+            | 'email'
+            | 'document'
+            | null,
+        };
+      }),
+      tap(({ customer }) => {
+        // Mirror `createQuickCustomer`: prepend to the local list + auto-select.
+        const currentCustomers = this.customers();
+        if (!currentCustomers.some((c) => c.id === customer.id)) {
+          this.customers.set([customer, ...currentCustomers]);
+        }
+        this.selectCustomer(customer);
+        this.loading.set(false);
+      }),
+      catchError((error) => {
+        this.loading.set(false);
+        return throwError(() => error);
+      }),
+    );
+  }
+
+  /**
    * Search customers by query (email, name, phone, document)
    */
   searchCustomers(

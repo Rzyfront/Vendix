@@ -40,6 +40,39 @@ export class CustomersController {
     return this.customersService.create(req.user.store_id, createCustomerDto);
   }
 
+  /**
+   * QUI-723 — POS finalize-sale "resolver cliente" flow.
+   *
+   * Finds an existing customer by email (priority) or exact document pair, or
+   * creates a new one if neither matches. The response includes audit flags
+   * so the frontend can surface a "cliente creado/actualizado" toast.
+   *
+   * Permissions: write (create + update) because the operation may do either
+   * — mirrors the AI write-tool precedent on the same domain.
+   */
+  @Post('resolve')
+  @Permissions('store:customers:create', 'store:customers:update')
+  async resolve(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: CreateCustomerDto,
+  ) {
+    if (!req.user.store_id) throw new Error('Store context required');
+    if (!req.user.organization_id)
+      throw new Error('Organization context required');
+    const result = await this.customersService.findOrCreateByEmailOrDocument(
+      req.user.store_id,
+      dto,
+    );
+    return this.responseService.success(
+      result,
+      result.was_created
+        ? 'Cliente creado exitosamente'
+        : result.was_updated
+          ? 'Cliente actualizado exitosamente'
+          : 'Cliente encontrado',
+    );
+  }
+
   @Get()
   @Permissions('store:customers:read')
   findAll(
