@@ -3707,6 +3707,135 @@ export class InvoiceCreatePageComponent implements OnInit {
     foreign_total_amount: this.fieldError('foreign_total_amount'),
   }));
 
+  // ── Formato de impresión y «Ver como saldrá» (B.7 / E.1 / E.2) ──
+
+  /**
+   * Formulario LOCAL del selector de plantilla. NO vive en `invoiceForm` a
+   * propósito: `CreateInvoiceDto` no declara `template_id`, y con
+   * «forbidNonWhitelisted» activo un campo extra del formulario raíz sería un
+   * campo esperando equivocarse y colarse al payload. Un FormGroup propio lo
+   * vuelve estructuralmente imposible.
+   */
+  readonly printFormatForm = this.fb.group({ template_id: [''] });
+
+  /** Rutas del componente compartido: sólo el selector existe en la factura. */
+  readonly formatoSectionPaths: FormatoSectionPaths = {
+    template_id: 'template_id',
+    template_key: null,
+    show_aiu_breakdown: null,
+    display_decimals: null,
+  };
+
+  /**
+   * Estado plegable PROPIO de la sección. No entra en `openSections` porque
+   * ese registro se deriva del orden canónico (`invoice-section-order.ts`),
+   * donde «formato» sigue clasificado como sección de perfil hasta que el
+   * espejo la suba formalmente a las dos pantallas.
+   */
+  readonly formatoSectionOpen = signal(false);
+
+  /** Biblioteca de plantillas de la ORGANIZACIÓN (FB-31). */
+  readonly printTemplates = signal<
+    { id: number; name: string; is_system: boolean }[]
+  >([]);
+  readonly printLibraryFailed = signal(false);
+
+  /** Config activa de la TIENDA para el formato fiscal (GET /:formatType). */
+  private readonly storeFormatDetail = signal<StorePrintFormatDetail | null>(
+    null,
+  );
+  readonly storeTemplateSaving = signal(false);
+
+  readonly printTemplateOptions = computed(() => [
+    { value: '', label: 'Plantilla activa de la tienda' },
+    ...this.printTemplates().map((t) => ({
+      value: String(t.id),
+      label: t.is_system ? `${t.name} (del sistema)` : t.name,
+    })),
+  ]);
+
+  /** Plantilla que congeló el perfil elegido, si opina sobre el diseño. */
+  private readonly profileTemplateId = computed<number | null>(() => {
+    const id = this.profileConfig()?.format?.template_id;
+    return typeof id === 'number' && Number.isInteger(id) && id > 0 ? id : null;
+  });
+
+  /**
+   * La PRECEDENCIA REAL del gateway al imprimir (`resolveProfileTemplateId`):
+   * plantilla congelada por el perfil → plantilla activa de la tienda →
+   * defecto del sistema. El selector y su etiqueta se precargan de aquí.
+   */
+  private readonly effectiveTemplateId = computed<number | null>(
+    () =>
+      this.profileTemplateId() ??
+      this.storeFormatDetail()?.template_id ??
+      null,
+  );
+
+  readonly effectivePrintLabel = computed<string>(() => {
+    const nameFor = (id: number): string => {
+      const found = this.printTemplates().find((template) => template.id === id);
+      return found ? `«${found.name}»` : `#${id}`;
+    };
+    const fromProfile = this.profileTemplateId();
+    if (fromProfile !== null) {
+      const profileName = this.selectedProfile()?.name ?? 'perfil';
+      return `la plantilla ${nameFor(fromProfile)}, congelada por el perfil «${profileName}»`;
+    }
+    const store = this.storeFormatDetail();
+    const fromStore = store?.template_id ?? null;
+    if (fromStore !== null) {
+      return store?.template_name
+        ? `«${store.template_name}» (plantilla activa de la tienda)`
+        : `la plantilla ${nameFor(fromStore)} (activa de la tienda)`;
+    }
+    return 'el defecto del sistema';
+  });
+
+  readonly formatoSummary = computed(() => this.effectivePrintLabel());
+
+  /**
+   * Precarga del selector. Corre como efecto para que cambiar el perfil (o la
+   * config de tienda) reprecargue el valor; se detiene ante lo escrito a mano
+   * (`dirty`), igual que la semilla del resto del formulario.
+   */
+  private readonly syncPrintTemplateControl = effect(() => {
+    const id = this.effectiveTemplateId();
+    const control = this.printFormatForm.get('template_id');
+    if (!control || control.dirty) return;
+    control.setValue(id == null ? '' : String(id), { emitEvent: false });
+  });
+
+  // ── «Ver como saldrá» antes de emitir (E.2) ─────────────────
+
+  readonly printPreviewOpen = signal(false);
+  readonly printPreviewLoading = signal(false);
+  readonly printPreviewHtml = signal('');
+  readonly printPreviewWidthMm = signal(0);
+  readonly printPreviewIsRoll = signal(false);
+  readonly printPreviewError = signal('');
+
+  /**
+   * Marcador que ve el iframe mientras llega el HTML. Vive como campo y no en
+   * el binding: los literales de plantilla no admiten escapar la comilla que
+   * abriría otro string dentro de la expresión.
+   */
+  private readonly printPreviewPlaceholder =
+    '<div style="font-family:sans-serif;padding:24px;color:#888;text-align:center;">Generando vista previa…</div>';
+
+  readonly printPreviewSrcdoc = computed(
+    () => this.printPreviewHtml() || this.printPreviewPlaceholder,
+  );
+
+  /** Ancho del papel renderizado: rollo a escala real, hoja fija. */
+  readonly printPreviewPaperWidth = computed(() => {
+    if (this.printPreviewIsRoll()) {
+      const mm = this.printPreviewWidthMm();
+      return `${Math.max(mm * 3.78, 300)}px`;
+    }
+    return '600px';
+  });
+
   /**
    * LO QUE ESTE DOCUMENTO NO PUEDE LLEVAR — medido, no supuesto.
    *
