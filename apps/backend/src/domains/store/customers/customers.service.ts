@@ -642,7 +642,7 @@ export class CustomersService {
    * QUI-723 — Build the update payload for `findOrCreateByEmailOrDocument`.
    *
    * Overwrite semantics, scoped to the NON-ID fields. Per the dev lead's
-   * clarified spec: "con el email y documentos van hacer los id unicos; si
+   * clarified spec: "cédula y correo son como un identificador único; si
    * encuentras un cliente con esos dos, sobreescribes los demás campos".
    * Translation: email + (document_type, document_number) ARE the unique
    * identifiers — they're how the lookup matched the row. The "other
@@ -659,8 +659,14 @@ export class CustomersService {
    *     have typed a slightly different number than what's stored, and
    *     that diff is the "second customer" — not a typo to silently fix).
    *
-   * `existing` is unused; kept in the signature for symmetry with the
-   * field declaration block.
+   * DIFF semantics: each incoming value is compared (post-transform for
+   * first_name/last_name) against the stored value. If the post-normalize
+   * result is identical, the field is OMITTED from the payload. This is
+   * critical: `customer.updated` is emitted when the resulting payload is
+   * non-empty, which triggers the email listener. Without the diff, a
+   * cashier retyping the same data in a future sale would fire a
+   * "Actualizamos tus datos" email to a customer whose data didn't
+   * actually change.
    */
   private buildUpdatePayload(
     existing: {
@@ -670,22 +676,29 @@ export class CustomersService {
     },
     incoming: CreateCustomerDto,
   ): Record<string, unknown> {
-    void existing;
     const data: Record<string, unknown> = {};
 
-    const write = (
+    const maybeWrite = (
       incomingValue: string | null | undefined,
-      field: string,
+      field: 'first_name' | 'last_name' | 'phone',
+      transform: ((s: string) => string) | undefined,
+      currentValue: string | null,
     ) => {
       if (!incomingValue) return;
       const trimmed = incomingValue.trim();
       if (!trimmed) return;
-      data[field] = trimmed;
+      const candidate = transform ? transform(trimmed) : trimmed;
+      // Skip writes that wouldn't change the stored value. Treat null as
+      // empty so a previously-unset field gets written on first submit
+      // (candidate !== '') but a previously-set same value does not
+      // (candidate === currentValue).
+      if (candidate === (currentValue ?? '')) return;
+      data[field] = candidate;
     };
 
-    write(incoming.first_name, 'first_name');
-    write(incoming.last_name, 'last_name');
-    write(incoming.phone, 'phone');
+    maybeWrite(incoming.first_name, 'first_name', toTitleCase, existing.first_name);
+    maybeWrite(incoming.last_name, 'last_name', toTitleCase, existing.last_name);
+    maybeWrite(incoming.phone, 'phone', undefined, existing.phone);
 
     return data;
   }

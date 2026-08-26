@@ -103,9 +103,9 @@ export class CreateCustomerDto {
   @ApiPropertyOptional({ example: '3001234567' })
   @IsString()
   @IsOptional()
-  @Matches(/^\d{10}$/, {
+  @Matches(/^[\d+#*\s()-]*$/, {
     message:
-      'El teléfono debe tener exactamente 10 dígitos (sin prefijo de país)',
+      'El teléfono solo puede contener números y los símbolos + # * ( ) -',
   })
   phone?: string | null;
 

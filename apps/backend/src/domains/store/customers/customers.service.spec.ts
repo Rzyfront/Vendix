@@ -364,10 +364,12 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       expect(updateData).toEqual({ phone: '+573001234567' });
     });
 
-    it('OVERWRITES a confirmed first_name when the request carries a different one', async () => {
+    it('OVERWRITES a confirmed first_name when the request carries a different one (normalizes via toTitleCase)', async () => {
       // Per dev lead's clarified spec: matching unique identifier → edit
       // (overwrite) with the typed values. The cashier's typed name
       // becomes the new truth on the existing row.
+      // buildUpdatePayload now applies the same `toTitleCase` normalization
+      // that the create() path uses, so "OTRO NOMBRE" lands as "Otro Nombre".
       mockPrismaService.users.findFirst.mockResolvedValueOnce(existingByEmail);
 
       const result = await service.findOrCreateByEmailOrDocument(1, {
@@ -380,7 +382,28 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       expect(result.matched_by).toBe('email');
       expect(mockPrismaService.users.update).toHaveBeenCalledTimes(1);
       const updateData = mockPrismaService.users.update.mock.calls[0][0].data;
-      expect(updateData).toEqual({ first_name: 'OTRO NOMBRE' });
+      expect(updateData).toEqual({ first_name: 'Otro Nombre' });
+    });
+
+    it('skips update + email when the cashier re-tipes the same values (diff is empty)', async () => {
+      // Regression for the bug where the form reset between sales caused
+      // a re-resolve with the same data to fire customer.updated and email
+      // the customer with "Actualizamos tus datos" even though nothing
+      // changed. With the diff-aware buildUpdatePayload, no field changes
+      // → empty payload → no update → no event → no email.
+      mockPrismaService.users.findFirst.mockResolvedValueOnce(existingByEmail);
+
+      // existingByEmail.first_name = 'Juan', .last_name = 'Pérez'
+      const result = await service.findOrCreateByEmailOrDocument(1, {
+        email: 'juan@x.com',
+        first_name: 'juan',       // normalizes to 'Juan' — matches existing
+        last_name: 'pérez',      // normalizes to 'Pérez' — matches existing
+      } as any);
+
+      expect(result.was_created).toBe(false);
+      expect(result.was_updated).toBe(false);
+      expect(result.matched_by).toBe('email');
+      expect(mockPrismaService.users.update).not.toHaveBeenCalled();
     });
 
     it('matches by exact (document_type, document_number) when no email matches', async () => {
