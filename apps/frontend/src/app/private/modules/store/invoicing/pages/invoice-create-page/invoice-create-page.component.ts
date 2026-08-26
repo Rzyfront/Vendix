@@ -239,6 +239,7 @@ import {
   formatPercentScaled,
   parsePercentScaled,
   regimeFromTaxableBasis,
+  resolveAccountingModel,
   resolveAiuComponentsBasis,
   resolveAiuTaxableBasis,
 } from '../../../../../../core/utils/invoice-profile-config.contract';
@@ -392,6 +393,7 @@ const PROFILE_PREFILL_LABELS: ReadonlyArray<readonly [string, string]> = [
   // así que nunca pueden estar `dirty`. Advertir de perderlas sería avisar de
   // una pérdida que no ocurre.
   ['aiu.components_basis', 'la unidad de los porcentajes del AIU'],
+  ['aiu.accounting_model', 'el modelo de contabilización del AIU'],
   ['aiu.administracion', 'el reparto de la base AIU'],
   ['aiu.imprevistos', 'el reparto de la base AIU'],
   ['aiu.utilidad', 'el reparto de la base AIU'],
@@ -475,6 +477,20 @@ interface InvoiceCreatePayload {
    * un override y rompe la herencia.
    */
   aiu_contract_object?: string;
+  /**
+   * MODELO DE CONTABILIZACIÓN de este documento (D.7).
+   *
+   * `CreateInvoiceDto.aiu_accounting_model` lo valida contra
+   * `ENABLED_ACCOUNTING_MODELS`, así que mandarlo explícito es seguro en los
+   * dos estados de la compuerta: hoy sólo `'sumada'` pasa el `@IsIn`, y el día
+   * que se habilite `'no_sumada'` el valor que eligió el operador en el radio
+   * viaja sin tocar esta pantalla. Omitirlo dejaría la elección en manos del
+   * default del servidor justo cuando el documento tiene una elegida.
+   *
+   * Sólo viaja en operación AIU: fuera de ella el campo no significa nada y un
+   * valor huérfano sería ruido en el payload fiscal.
+   */
+  aiu_accounting_model?: AccountingModel;
   /**
    * Perfil de facturación con el que se timbra ESTE documento.
    *
@@ -3856,6 +3872,11 @@ export class InvoiceCreatePageComponent implements OnInit {
     };
 
     put('components_basis', resolveAiuComponentsBasis(aiu));
+    // D.7 — el radio de modelo nace con lo que el perfil congeló, no siempre
+    // en «sumada»: `resolveAccountingModel` es el único punto de lectura y
+    // devuelve `'sumada'` cuando el perfil no opina (perfiles anteriores al
+    // campo), así que ningún snapshot viejo cambia de comportamiento al leerse.
+    put('accounting_model', resolveAccountingModel(aiu));
     for (const component of AIU_COMPONENTS) {
       put(component, aiu.components?.[component] ?? '');
     }
@@ -6544,6 +6565,19 @@ export class InvoiceCreatePageComponent implements OnInit {
     const aiuContractObject = this.aiuContractObject();
     if (this.isAiu() && aiuContractObject) {
       payload.aiu_contract_object = aiuContractObject;
+    }
+    // D.7 — el modelo elegido en el radio de la sección AIU viaja EXPLÍCITO.
+    // `resolveAccountingModel` es el único punto de lectura del contrato: un
+    // control vacío o corrupto cae en `'sumada'`, que es lo que el calculador
+    // hace por construcción, en vez de viajar un valor que el servidor no
+    // entiende. Mientras `ENABLED_ACCOUNTING_MODELS` no incluya
+    // `'no_sumada'`, el radio lo mantiene en `'sumada'` y este envío pasa el
+    // mismo `@IsIn` de siempre; el día que se habilite, la elección del
+    // operador sale sola por aquí.
+    if (this.isAiu()) {
+      payload.aiu_accounting_model = resolveAccountingModel(
+        (raw['aiu'] ?? {}) as { accounting_model?: AccountingModel },
+      );
     }
     const notes = String(raw['notes'] ?? '').trim();
     if (notes) payload.notes = notes;
