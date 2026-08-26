@@ -26,6 +26,8 @@ import {
   ValidateNested,
 } from 'class-validator';
 import type { Response } from 'express';
+
+import { enrichAcquirerForStandard } from './acquirer-standard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { ResponseService } from '../../../../common/responses/response.service';
@@ -326,7 +328,19 @@ export class PlatformInvoicingController {
       q: query.q ?? null,
     });
     return this.responseService.success(
-      { data, meta: { q: query.q ?? null, kind: query.kind ?? null } },
+      {
+        // F.4: enriquecer cada resultado con el estandar de identidad fiscal
+        // para que el picker muestre DV/label/municipio sin llamada extra
+        // por fila (N+1 muerto). Mantiene el shape del envelope.
+        // Cast a `any`: TenantSearchResult es estructuralmente compatible con
+        // RawAcquirer (mismo tax_id/tax_id_dv, address opcional con codigos),
+        // pero sus campos no declaran document_type/person_type — `any`
+        // evita el casteo fila-a-fila y deja la validacion al enricher.
+        data: (data as any[]).map((row: any) =>
+          enrichAcquirerForStandard(row),
+        ),
+        meta: { q: query.q ?? null, kind: query.kind ?? null },
+      },
       'Tenants listados',
     );
   }
@@ -356,7 +370,16 @@ export class PlatformInvoicingController {
         `Tenant ${kind}:${id} no encontrado en esta plataforma`,
       );
     }
-    return this.responseService.success(data, 'Tenant retornado');
+    // F.4: enriquecer con el estandar de identidad fiscal del adquiriente
+    // (DV Modulo 11, label dinamico, persona resuelta, municipio DANE).
+    // Cast a `RawAcquirer`: TenantSearchResult es estructuralmente compatible
+    // (mismo tax_id/tax_id_dv, address opcional con codigos), pero sus campos
+    // no declaran document_type/person_type — la validacion corre dentro del
+    // enricher con su propio index signature.
+    return this.responseService.success(
+      enrichAcquirerForStandard(data as any),
+      'Tenant retornado',
+    );
   }
 
   /**
