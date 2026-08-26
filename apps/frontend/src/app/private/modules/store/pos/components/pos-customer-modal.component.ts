@@ -344,10 +344,11 @@ import { StoreContextService } from '../../../../../core/services/store-context.
               <!-- Email -->
               <app-input
                 formControlName="email"
-                label="Email *"
+                label="Email"
                 placeholder="cliente@ejemplo.com"
                 type="email"
                 [size]="'md'"
+                [required]="true"
                 [error]="getFieldError('email')"
                 (blur)="onFieldBlur('email')"
                 >
@@ -356,10 +357,11 @@ import { StoreContextService } from '../../../../../core/services/store-context.
               <div class="grid grid-cols-2 gap-4">
                 <app-input
                   formControlName="firstName"
-                  label="Nombre *"
+                  label="Nombre"
                   placeholder="Juan"
                   type="text"
                   [size]="'md'"
+                  [required]="true"
                   [error]="getFieldError('firstName')"
                   (blur)="onFieldBlur('firstName')"
                   >
@@ -370,6 +372,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                   placeholder="Pérez"
                   type="text"
                   [size]="'md'"
+                  [required]="true"
                   [error]="getFieldError('lastName')"
                   (blur)="onFieldBlur('lastName')"
                   >
@@ -378,7 +381,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
               <!-- Phone -->
               <app-input
                 formControlName="phone"
-                label="Teléfono *"
+                label="Teléfono"
                 placeholder="+54 9 11 1234-5678"
                 type="tel"
                 [size]="'md'"
@@ -394,15 +397,17 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                   label="Tipo Doc."
                   [options]="documentTypeOptions"
                   [size]="'md'"
+                  [required]="true"
                   [placeholder]="'Seleccionar'"
                   >
                 </app-selector>
                 <app-input
                   formControlName="documentNumber"
-                  label="Número *"
+                  label="Número"
                   [placeholder]="documentNumberPlaceholder()"
                   type="text"
                   [size]="'md'"
+                  [required]="true"
                   [error]="getFieldError('documentNumber')"
                   (blur)="onFieldBlur('documentNumber')"
                   customWrapperClass="mt-0"
@@ -420,6 +425,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                     label="Régimen tributario"
                     [options]="taxRegimeOptions"
                     [size]="'md'"
+                    [required]="true"
                     [placeholder]="'Seleccionar'"
                     >
                   </app-selector>
@@ -428,6 +434,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                     label="Tipo de persona"
                     [options]="personTypeOptions"
                     [size]="'md'"
+                    [required]="true"
                     [placeholder]="'Seleccionar'"
                     >
                   </app-selector>
