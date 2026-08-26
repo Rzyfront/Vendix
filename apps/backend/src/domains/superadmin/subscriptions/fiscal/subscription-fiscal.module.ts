@@ -52,6 +52,8 @@ import { PlatformTenantsService } from './platform-tenants.service';
 import { PlatformInvoicingPersistenceService } from './platform-invoicing-persistence.service';
 import { PlatformInvoicingService } from './platform-invoicing.service';
 import { PlatformInvoicingController } from './platform-invoicing.controller';
+import { PlatformProfilesService } from './platform-profiles.service';
+import { PlatformProfilesController } from './platform-profiles.controller';
 
 @Module({
   imports: [
@@ -69,6 +71,11 @@ import { PlatformInvoicingController } from './platform-invoicing.controller';
     // PlatformInvoicingController expone los nuevos paths MvpV1.
     // Aisla las rutas V1 del legacy para minimizar conflictos.
     PlatformInvoicingController,
+    // PlatformProfilesController expone los 14 endpoints del sistema de
+    // perfiles plataforma (B.2 del CP-platform-invoicing-parity).
+    // Rutas estáticas ANTES de :id, mismo orden de declaración que el
+    // controller de tienda para evitar colisión con ParseIntPipe.
+    PlatformProfilesController,
   ],
   providers: [
     ManualCertificateIssuerAdapter,
@@ -94,6 +101,10 @@ import { PlatformInvoicingController } from './platform-invoicing.controller';
     // Se declara como provider normal (no useFactory) para que Nest resuelva
     // via constructor y no requiera el truco del deps object.
     PlatformInvoicingService,
+    // B.2: motor de perfiles plataforma (ADR-1 fachada, ADR-2 nullable,
+    // ADR-4 ámbito). Reutiliza ProfileCatalogCacheService, ProfileAccountingValidator
+    // y AuditService del riel tienda vía DI (ya provistos por InvoicingModule).
+    PlatformProfilesService,
   ],
   exports: [SubscriptionFiscalService],
 })

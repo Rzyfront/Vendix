@@ -5442,6 +5442,46 @@ export const ErrorCodes = {
     devMessage:
       'Invalid date range: history_from must be less than or equal to history_to',
   },
+
+  /**
+   * `platform_settings.platform_organization_id` ausente al operar perfiles
+   * (u otra operación fiscal del riel plataforma).
+   *
+   * ## Por qué 500 con código y no fallback silencioso
+   *
+   * El resto del módulo superadmin cae a `PLATFORM_ORGANIZATION_ID_FALLBACK = 1`
+   * cuando el setting falta, para no romper pantallas de UI no-fiscales
+   * (chart-of-accounts, journal-entries). Eso es razonable para esas
+   * superficies: leer o listar sin settings no corrompe estado fiscal.
+   *
+   * Acá NO: emitir un perfil contra una organización equivocada es el modo
+   * silencioso de firmar documentos bajo el NIT equivocado. La ausencia del
+   * setting debe gritar con código para que un operador lo arregle antes de
+   * continuar. 500 con `code` es lo correcto: el filtro global degrada
+   * `Error` pelado a 500 sin código, pero un `VendixHttpException` con
+   * `httpStatus: 500` viaja tal cual.
+   */
+  PLATFORM_FISCAL_SCOPE_MISSING: {
+    code: 'PLATFORM_FISCAL_SCOPE_MISSING',
+    httpStatus: 500,
+    devMessage:
+      'platform_settings.platform_organization_id is missing: refusing to operate billing profiles against an implicit organization, since emission with the wrong NIT is unrecoverable',
+  },
+
+  /**
+   * `operation_type` del documento y del perfil plataforma no coinciden.
+   *
+   * Mismo invariante que `INVOICING_PROFILE_008` (riel tienda), expuesto con
+   * prefijo PLATFORM para que el frontend pueda distinguir el origen del
+   * rechazo y enrutar el mensaje al banner de la tarjeta de perfil del
+   * wizard plataforma sin tener que mapear códigos.
+   */
+  PLATFORM_PROFILE_008: {
+    code: 'PLATFORM_PROFILE_008',
+    httpStatus: 409,
+    devMessage:
+      "Platform invoice operation_type does not match the profile's: freezing (profile_id, profile_version) from a profile of another type would make the stamped provenance false, and the aiu_* columns would stay NULL with no error",
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {
