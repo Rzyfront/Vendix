@@ -263,6 +263,18 @@ export class PrintLayoutComposerService {
               <td class="total-label">Impuestos (IVA):</td>
               <td class="total-val">${this.compiler.escapeHtml(totals.tax_total_formatted || `$${Number(totals.tax_total).toLocaleString('es-CO')}`)}</td>
             </tr>` : ''}
+            ${
+              // E.11 casilla 1 — la retención ya llega en el modelo (antes el
+              // mapeador la ignoraba y desaparecía del papel, mientras el PDF
+              // legal sí imprime «Retencion:»). Fila INFORMATIVA con signo
+              // negativo de presentación: NO descuenta del total, igual que
+              // `invoice-pdf.builder.ts` drawTotals.
+              Number(totals.withholding_total) > 0 ? `
+            <tr>
+              <td class="total-label">Retención:</td>
+              <td class="total-val">-${this.compiler.escapeHtml(totals.withholding_total_formatted || `$${Number(totals.withholding_total).toLocaleString('es-CO')}`)}</td>
+            </tr>` : ''
+            }
             ${Number(totals.shipping_total) > 0 ? `
             <tr>
               <td class="total-label">Envío:</td>

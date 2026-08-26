@@ -2,6 +2,7 @@ import { Module, OnModuleInit } from '@nestjs/common';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { ResponseService } from '@common/responses/response.service';
 import { QrService } from '../../../common/services/qr.service';
+import { S3Module } from '../../../common/services/s3.module';
 
 // Controllers
 import { PrintFormatsController } from './controllers/print-formats.controller';
@@ -13,6 +14,8 @@ import { PrintGatewayService } from './services/print-gateway.service';
 import { PrintTemplateCompilerService } from './services/print-template-compiler.service';
 import { PrintLayoutComposerService } from './services/print-layout-composer.service';
 import { PrintFiscalValidatorService } from './services/print-fiscal-validator.service';
+// E.11 casilla 4 — motor PDF bajo demanda del gateway (builder pdfkit, sin S3).
+import { FiscalInvoicePdfRenderService } from './services/fiscal-invoice-pdf-render.service';
 
 // Providers & Registry
 import { DocumentDataProviderRegistry } from './providers/document-data-provider.registry';
@@ -28,7 +31,12 @@ import { FiscalCreditNoteDataProvider } from './providers/fiscal-credit-note.pro
 import { KitchenTicketDataProvider } from './providers/kitchen-ticket.provider';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [
+    PrismaModule,
+    // E.11 casilla 4 — el render PDF bajo demanda descarga el logo del emisor
+    // desde S3 (best-effort), igual que hace `generatePdf` en invoicing.
+    S3Module,
+  ],
   // ORDEN DELIBERADO. `PrintTemplatesLibraryController` sirve
   // `store/print-formats/library`; `PrintFormatsController` sirve
   // `store/print-formats/:formatType`. Nest resuelve por orden de registro, así
@@ -45,6 +53,7 @@ import { KitchenTicketDataProvider } from './providers/kitchen-ticket.provider';
     PrintTemplateCompilerService,
     PrintLayoutComposerService,
     PrintFiscalValidatorService,
+    FiscalInvoicePdfRenderService,
     DocumentDataProviderRegistry,
     PosSaleTicketDataProvider,
     SalesOrderInvoiceDataProvider,

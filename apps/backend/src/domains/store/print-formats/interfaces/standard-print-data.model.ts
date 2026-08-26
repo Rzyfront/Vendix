@@ -102,6 +102,24 @@ export interface StandardPrintDataModel {
     shipping_total_formatted: string;
     tax_total: number;
     tax_total_formatted: string;
+    /**
+     * Retención en la fuente del documento (`invoices.withholding_amount`).
+     *
+     * E.11 casilla 1 — antes de este campo el mapeador fiscal lo ignoraba y la
+     * retención desaparecería del papel: el PDF legal sí la imprime
+     * (`invoice-pdf.builder.ts` «Retencion:» cuando > 0), así que un HTML sin
+     * ella discrepaba del XML firmado sobre el mismo consecutivo.
+     *
+     * INFORMATIVA, igual que en el PDF: las retenciones NO restan del total
+     * (`invoice-calculator.service.ts`: «Retenciones ... NUNCA restan del
+     * total»). El compositor la pinta como fila propia sólo cuando > 0, con
+     * signo negativo de presentación como hace el builder.
+     *
+     * OPCIONAL a propósito: los otros nueve documentos del dominio no la
+     * declaran y el compositor no cambia su papel.
+     */
+    withholding_total?: number;
+    withholding_total_formatted?: string;
     grand_total: number;
     grand_total_formatted: string;
     /**

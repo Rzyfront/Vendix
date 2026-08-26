@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrintGatewayService } from './print-gateway.service';
+import { FiscalInvoicePdfRenderService } from './fiscal-invoice-pdf-render.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { DocumentDataProviderRegistry } from '../providers/document-data-provider.registry';
 import { PrintLayoutComposerService } from './print-layout-composer.service';
@@ -82,6 +83,9 @@ describe('PrintGatewayService — plantilla congelada por el perfil', () => {
         { provide: DocumentDataProviderRegistry, useValue: { getProvider: jest.fn() } },
         { provide: PrintLayoutComposerService, useValue: { compose: jest.fn() } },
         { provide: PrintFiscalValidatorService, useValue: { assertFiscalCompliance: jest.fn() } },
+        // E.11 — el motor PDF bajo demanda es dependencia del gateway; estos
+        // casos no lo ejercitan (ver print-gateway.engine-pdf.spec.ts).
+        { provide: FiscalInvoicePdfRenderService, useValue: { renderBuffer: jest.fn() } },
       ],
     }).compile();
     return module.get(PrintGatewayService);
@@ -234,6 +238,8 @@ describe('PrintGatewayService — plantilla congelada por el perfil', () => {
           { provide: DocumentDataProviderRegistry, useValue: { getProvider: getProviderSpy } },
           { provide: PrintLayoutComposerService, useValue: { compose: composeSpy } },
           { provide: PrintFiscalValidatorService, useValue: { assertFiscalCompliance: jest.fn() } },
+          // E.11 — motor PDF bajo demanda, no ejercitado en este archivo.
+          { provide: FiscalInvoicePdfRenderService, useValue: { renderBuffer: jest.fn() } },
         ],
       }).compile();
 

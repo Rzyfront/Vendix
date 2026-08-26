@@ -5,17 +5,36 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { DocumentDataProviderRegistry } from '../providers/document-data-provider.registry';
 import { PrintLayoutComposerService } from './print-layout-composer.service';
 import { PrintFiscalValidatorService } from './print-fiscal-validator.service';
+import { FiscalInvoicePdfRenderService } from './fiscal-invoice-pdf-render.service';
 import { PrintFormatDefinition } from '../interfaces/print-format.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 
 export interface RenderResult {
   format_type: print_format_type_enum;
   html?: string;
+  /**
+   * PDF bajo demanda — E.11 casilla 4, slice 1. Declarado desde el día uno y
+   * JAMÁS lleno hasta ahora: `engine:'pdf'` se aceptaba en el DTO y el cuerpo
+   * lo ignoraba.
+   *
+   * Hoy se llena SÓLO para `fiscal_electronic_invoice`, llamando al builder
+   * pdfkit existente como MOTOR (`FiscalInvoicePdfRenderService` →
+   * `InvoicePdfBuilder`) sobre el ensamblador propio del builder — NUNCA sobre
+   * el `StandardPrintDataModel`, que medido pierde la retención y puede
+   * imprimir un NIT que discrepe del XML. SIN persistencia: sin S3, sin
+   * `pdf_url`, sin eventos — eso sigue siendo carril exclusivo de
+   * `generatePdf`. El Buffer es de render, no un artefacto archivado.
+   */
   pdf_buffer?: Buffer;
   copies: number;
   is_roll: boolean;
   width_mm: number;
 }
+
+/** Formatos que hoy tienen motor PDF detrás del gateway. */
+const PDF_ENGINE_SUPPORTED_FORMATS: print_format_type_enum[] = [
+  'fiscal_electronic_invoice',
+];
 
 @Injectable()
 export class PrintGatewayService {
@@ -26,6 +45,7 @@ export class PrintGatewayService {
     private readonly registry: DocumentDataProviderRegistry,
     private readonly composer: PrintLayoutComposerService,
     private readonly fiscalValidator: PrintFiscalValidatorService,
+    private readonly pdfRenderer: FiscalInvoicePdfRenderService,
   ) {}
 
   /**
@@ -136,6 +156,30 @@ export class PrintGatewayService {
 
   /**
    * Renderiza un documento completo a través del Gateway
+   *
+   * La plantilla NO llega del cliente: se lee del perfil que la factura
+   * congeló al emitirse. Que el cliente la pudiera elegir significaría que dos
+   * impresiones del MISMO documento fiscal pueden verse distintas, y una
+   * reimpresión debe ser idéntica a la primera.
+   *
+   * E.11 casilla 4 (slice 1) — `engine` ya no es decoración:
+   *
+   * - `'html'` (default): el HTML compuesto con la plantilla congelada del
+   *   perfil, como siempre.
+   * - `'pdf'`: además del HTML, llena `RenderResult.pdf_buffer` llamando al
+   *   builder pdfkit existente como MOTOR (`FiscalInvoicePdfRenderService`),
+   *   SIN persistir en S3 — el carril de S3 sigue siendo `generatePdf`. Sólo
+   *   para `fiscal_electronic_invoice`: pedirlo para otro formato es un 422,
+   *   no un HTML que hace pasar por PDF.
+   *
+   * Reparto plantilla/motor (decisión E.11): en HTML la plantilla manda sobre
+   * el contenido; en PDF el builder manda POR FIDELIDAD — rollo medido, sello
+   * QR §11.7 por página y tipografía escalada no tienen equivalente CSS fiel.
+   * El acople fino template→pdfkit es el slice 2; hoy el PDF sale del mismo
+   * ensamblador que produce el artefacto legal, así que los importes, el CUFE
+   * y las letras cuadran con el XML por construcción (paridad verificada en
+   * spec). El HTML sigue componiéndose también en el carril pdf: viaja junto
+   * al Buffer como evidencia de la plantilla elegida y soporte de la paridad.
    */
   async renderDocument(
     storeId: number,
@@ -144,10 +188,17 @@ export class PrintGatewayService {
     engine: 'html' | 'pdf' = 'html',
   ): Promise<RenderResult> {
     const start = Date.now();
-    // La plantilla NO llega del cliente: se lee del perfil que la factura
-    // congeló al emitirse. Que el cliente la pudiera elegir significaría que dos
-    // impresiones del MISMO documento fiscal pueden verse distintas, y una
-    // reimpresión debe ser idéntica a la primera.
+    if (
+      engine === 'pdf' &&
+      !PDF_ENGINE_SUPPORTED_FORMATS.includes(formatType)
+    ) {
+      // Dejar de mentir incluye negarse: devolver HTML cuando pidieron PDF fue
+      // exactamente el defecto de origen («aceptado e ignorado»).
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        `El motor 'pdf' no está disponible para el formato ${formatType}; formatos con motor PDF: ${PDF_ENGINE_SUPPORTED_FORMATS.join(', ')}.`,
+      );
+    }
     const profileTemplateId = await this.resolveProfileTemplateId(
       storeId,
       formatType,
@@ -169,6 +220,22 @@ export class PrintGatewayService {
     // Validar conformidad fiscal si aplica
     this.fiscalValidator.assertFiscalCompliance(formatType, effective.definition);
 
+    let pdf_buffer: Buffer | undefined;
+    if (engine === 'pdf') {
+      try {
+        pdf_buffer = await this.pdfRenderer.renderBuffer(storeId, documentId);
+      } catch (error) {
+        // Los errores de dominio ya tipados (documento ausente, identidad
+        // fiscal incompleta) conservan su código y su HTTP status; lo que se
+        // degrada es el fallo anónimo del motor.
+        if (error instanceof VendixHttpException) throw error;
+        throw new VendixHttpException(
+          ErrorCodes.PRINT_GATEWAY_RENDER_FAILED_001,
+          `Falló el render PDF del documento ${documentId}: ${(error as Error)?.message}`,
+        );
+      }
+    }
+
     // Obtener datos del provider
     const provider = this.registry.getProvider(formatType);
     const data = await provider.fetchDocumentData(storeId, documentId);
@@ -178,12 +245,13 @@ export class PrintGatewayService {
 
     const elapsed = Date.now() - start;
     this.logger.log(
-      `PrintGateway rendered ${formatType} for doc ${documentId} (store ${storeId}) in ${elapsed}ms`,
+      `PrintGateway rendered ${formatType} for doc ${documentId} (store ${storeId}, engine ${engine}) in ${elapsed}ms`,
     );
 
     return {
       format_type: formatType,
       html,
+      pdf_buffer,
       copies: effective.definition.paper.copies || 1,
       is_roll: effective.definition.paper.is_roll,
       width_mm: effective.definition.paper.width_mm,

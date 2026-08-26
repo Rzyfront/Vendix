@@ -109,6 +109,13 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
 });
 
 describe('mapeador compartido invoices → modelo de impresión', () => {
+  /**
+   * Fila fiscalmente COMPLETA a propósito: con E.11 el emisor pasa por el
+   * resolvedor único (`resolveFiscalIssuerForPrint`) y un documento electrónico
+   * (`dian_status !== 'not_applicable'`) es ESTRICTO — identidad incompleta
+   * lanza `FISCAL_IDENTITY_INCOMPLETE`, igual que `generatePdf`. La fila trae
+   * su `fiscal_data` de tienda para poder ejercitar el camino feliz.
+   */
   const filaViva = {
     id: 41,
     invoice_number: 'NC107',
@@ -117,6 +124,7 @@ describe('mapeador compartido invoices → modelo de impresión', () => {
     subtotal_amount: 100000,
     discount_amount: 0,
     tax_amount: 19000,
+    withholding_amount: 5000,
     total_amount: 119000,
     cufe: 'cufe-real-de-la-fila',
     qr_code: 'contenido-qr',
@@ -124,8 +132,34 @@ describe('mapeador compartido invoices → modelo de impresión', () => {
     invoice_items: [{ name: 'Servicio', quantity: 1, price: 100000, total: 100000 }],
     invoice_taxes: [{ tax_name: 'IVA', tax_rate: 19, taxable_amount: 100000, tax_amount: 19000 }],
     resolution: { resolution_number: '18760000001', prefix: 'NC' },
-    store: { name: 'Tienda Real', addresses: [{ address_line1: 'Calle 1', city: 'Bogotá D.C.' }] },
-    organization: { name: 'Org Real', tax_id: '900000000-1', addresses: [] },
+    store: {
+      name: 'Tienda Real',
+      addresses: [
+        {
+          address_line1: 'Calle 1',
+          city: 'Bogotá D.C.',
+          state_province: 'Cundinamarca',
+          municipality_code: '11001',
+        },
+      ],
+      store_settings: {
+        settings: {
+          fiscal_data: {
+            nit: '901555333',
+            legal_name: 'Tienda Real Ltda.',
+            municipality_code: '11001',
+            department: 'Cundinamarca',
+          },
+        },
+      },
+    },
+    organization: {
+      name: 'Org Real',
+      legal_name: 'Org Real S.A.S.',
+      tax_id: '900000000-1',
+      fiscal_scope: 'STORE',
+      addresses: [],
+    },
     customer: { first_name: 'Ana', last_name: 'Gómez', document_number: '1020304050' },
   };
 
@@ -193,5 +227,85 @@ describe('mapeador compartido invoices → modelo de impresión', () => {
     });
 
     expect(d.totals?.grand_total).toBe(119000);
+  });
+
+  /**
+   * E.11 casilla 1 — las dos brechas fiscales medidas en la medición del
+   * builder (§0): retención ausente del modelo y NIT crudo sin resolvedor.
+   */
+
+  it('la retención llega a totals: el papel ya no puede perderla', () => {
+    const d = mapFiscalDocumentToPrintData(filaViva);
+
+    expect(d.totals?.withholding_total).toBe(5000);
+    expect(d.totals?.withholding_total_formatted).toBe('$5.000');
+    // Informativa: NO descuenta del total — igual que el builder PDF.
+    expect(d.totals?.grand_total).toBe(119000);
+  });
+
+  it('una fila sin retención reporta cero, no undefined', () => {
+    const d = mapFiscalDocumentToPrintData({
+      ...filaViva,
+      withholding_amount: null,
+    });
+
+    expect(d.totals?.withholding_total).toBe(0);
+  });
+
+  it('el NIT del emisor sale del RESOLVEDOR (fiscal_data de tienda gana al tax_id crudo de la organización) con DV derivado', () => {
+    const d = mapFiscalDocumentToPrintData(filaViva);
+
+    // Antes: `org.tax_id` crudo → «900000000-1». Ahora: `fiscal_data.nit` de la
+    // tienda bajo `fiscal_scope='STORE'`, con DV calculado por módulo 11
+    // (DV(901555333) = 8) y nunca el dígito almacenado.
+    expect(d.store.tax_id).toBe('901555333-8');
+    expect(d.store.tax_id).not.toBe('900000000-1');
+    expect(d.store.legal_name).toBe('Tienda Real Ltda.');
+    expect(d.store.name).toBe('Tienda Real'); // nombre comercial intacto
+    expect(d.store.address).toBe('Calle 1');
+    expect(d.store.city).toBe('Bogotá D.C.');
+  });
+
+  it('documento electrónico con identidad incompleta LANZA FISCAL_IDENTITY_INCOMPLETE — igual que generatePdf', async () => {
+    const sinDepartamento = {
+      ...filaViva,
+      // Sin dirección que respalde: `buildFiscalIdentity` toma
+      // `department` de `fiscal_data` O de `address.state_province`; aquí
+      // ninguno existe → el resolvedor estricto corta.
+      store: {
+        name: filaViva.store.name,
+        addresses: [],
+        store_settings: {
+          settings: {
+            fiscal_data: {
+              nit: '901555333',
+              legal_name: 'Tienda Real Ltda.',
+              municipality_code: '11001',
+            },
+          },
+        },
+      },
+    };
+
+    await expect(
+      Promise.resolve().then(() => mapFiscalDocumentToPrintData(sinDepartamento)),
+    ).rejects.toMatchObject({ errorCode: 'FISCAL_IDENTITY_INCOMPLETE' });
+  });
+
+  it('recibo interno (not_applicable) SIN identidad completa se imprime permisivo — no hay XML con qué cuadrar', () => {
+    const recibo = {
+      ...filaViva,
+      dian_status: 'not_applicable',
+      store: {
+        ...filaViva.store,
+        store_settings: { settings: {} }, // sin fiscal_data
+      },
+    };
+
+    const d = mapFiscalDocumentToPrintData(recibo);
+
+    // Respaldo por columnas, normalizado y con DV derivado — nunca crudo.
+    expect(d.store.tax_id).toBe('900000000-5');
+    expect(d.document.state).toBe('not_applicable');
   });
 });
