@@ -31,6 +31,7 @@ import type { Response } from 'express';
 import { enrichAcquirerForStandard } from './acquirer-standard';
 import { PlatformCreditNotesService } from './platform-credit-notes.service';
 import { PlatformDeliveryService } from './platform-delivery.service';
+import { PlatformDianEventsService } from './platform-dian-events.service';
 import {
   PlatformCreateCreditNoteDto,
   PlatformCreateDebitNoteDto,
@@ -146,6 +147,7 @@ export class PlatformInvoicingController {
     private readonly subscriptionFiscalService: SubscriptionFiscalService,
     private readonly creditNotes: PlatformCreditNotesService,
     private readonly delivery: PlatformDeliveryService,
+    private readonly dianEvents: PlatformDianEventsService,
   ) {}
 
   /**
@@ -589,6 +591,46 @@ export class PlatformInvoicingController {
     return this.responseService.success(
       result,
       'Reenvío plataforma encolado',
+    );
+  }
+
+  // ─── Eventos RADIAN plataforma (C.4 del CP-platform-invoicing-parity) ─
+
+  /**
+   * Lista los eventos RADIAN de una factura plataforma, ordenados por id
+   * descendente (más nuevo primero — mismo orden que el riel tienda).
+   */
+  @Get('sales-invoices/:id/events')
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({
+    summary: 'Listar eventos RADIAN de una factura plataforma',
+  })
+  async listDianEvents(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<any> {
+    const events = await this.dianEvents.listEvents(id);
+    return this.responseService.success(events, 'Eventos RADIAN listados');
+  }
+
+  /**
+   * Registra un evento RADIAN contra una factura plataforma. Persiste la
+   * fila con `status='pending'`; la pieza C.4.5 transmite al proveedor
+   * DIAN via SOAP y actualiza el estado (mismo patrón que el riel tienda).
+   */
+  @Post('sales-invoices/:id/events')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({
+    summary: 'Registrar evento RADIAN contra una factura plataforma',
+  })
+  async registerDianEvent(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: any,
+  ): Promise<any> {
+    const result = await this.dianEvents.registerEvent(id, body);
+    return this.responseService.success(
+      result,
+      'Evento RADIAN registrado (pending transmission)',
     );
   }
 }

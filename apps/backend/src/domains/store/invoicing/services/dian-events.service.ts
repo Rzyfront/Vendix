@@ -50,9 +50,29 @@ const CUSTOMER_GENERATED_EVENTS: readonly string[] = [
   DIAN_EVENT_CODES.ECONOMIC_RIGHTS_TRANSFER_PAYMENT,
 ];
 
-const SUPPORTED_EVENT_CODES: readonly string[] = Object.values(
+export const SUPPORTED_EVENT_CODES: readonly string[] = Object.values(
   DIAN_EVENT_CODES,
 );
+
+/**
+ * Valida y normaliza el código de evento RADIAN contra el catálogo
+ * compartido. Exportada para que `PlatformDianEventsService` (C.4 del
+ * CP-platform-invoicing-parity) use el mismo gate de ERR-08 sin
+ * duplicar la lista de códigos ni el mensaje.
+ */
+export function assertSupportedEventCode(
+  event_code: string,
+): DianEventCode {
+  const normalized = String(event_code ?? '').trim();
+  if (!SUPPORTED_EVENT_CODES.includes(normalized)) {
+    throw new VendixHttpException(
+      ErrorCodes.DIAN_EVENT_002,
+      `Código de evento RADIAN no soportado: '${normalized}'. Soportados: ${SUPPORTED_EVENT_CODES.join(', ')}.`,
+      { event_code: normalized, supported: SUPPORTED_EVENT_CODES },
+    );
+  }
+  return normalized as DianEventCode;
+}
 
 export interface RegisterDianEventInput {
   event_code: string;
@@ -379,15 +399,7 @@ export class DianEventsService {
   }
 
   private assertSupportedCode(event_code: string): DianEventCode {
-    const normalized = String(event_code ?? '').trim();
-    if (!SUPPORTED_EVENT_CODES.includes(normalized)) {
-      throw new VendixHttpException(
-        ErrorCodes.DIAN_EVENT_002,
-        `Código de evento RADIAN no soportado: '${normalized}'. Soportados: ${SUPPORTED_EVENT_CODES.join(', ')}.`,
-        { event_code: normalized, supported: SUPPORTED_EVENT_CODES },
-      );
-    }
-    return normalized as DianEventCode;
+    return assertSupportedEventCode(event_code);
   }
 
   private async loadInvoiceOrThrow(invoice_id: number) {

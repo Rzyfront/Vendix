@@ -56,6 +56,7 @@ import { PlatformProfilesService } from './platform-profiles.service';
 import { PlatformProfilesController } from './platform-profiles.controller';
 import { PlatformCreditNotesService } from './platform-credit-notes.service';
 import { PlatformDeliveryService } from './platform-delivery.service';
+import { PlatformDianEventsService } from './platform-dian-events.service';
 
 @Module({
   imports: [
@@ -114,6 +115,9 @@ import { PlatformDeliveryService } from './platform-delivery.service';
     // C.3: reenvío por correo plataforma (H2 invoice_delivery_events.store_id
     // ya nullable). C.3.5 pendiente: armado de ZIP + SMTP (siguiente slice).
     PlatformDeliveryService,
+    // C.4: eventos RADIAN plataforma (H2 dian_document_events.store_id nullable).
+    // C.4.5 pendiente: transmisión SOAP al provider DIAN (siguiente slice).
+    PlatformDianEventsService,
   ],
   exports: [SubscriptionFiscalService],
 })
