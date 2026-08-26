@@ -589,7 +589,7 @@ const BILLING_ADDRESS_SOURCE_COPY: Partial<Record<BillingAddressSource, string>>
                       </select>
                     </label>
 
-                    <label class="flex flex-col gap-1">
+                    <label class="flex flex-col gap-1" [class.sm:col-span-2]="!billingDocumentIsNit()">
                       <span class="text-xs font-medium text-text-secondary">Número</span>
                       <input
                         type="text"
@@ -601,23 +601,23 @@ const BILLING_ADDRESS_SOURCE_COPY: Partial<Record<BillingAddressSource, string>>
                       />
                     </label>
 
-                    <!-- DV: se CALCULA del número, nunca se pide. Va deshabilitado
-                         a propósito — es un checksum, así que un valor tecleado
-                         solo puede coincidir con el NIT o estar mal. Se muestra
-                         porque el cliente necesita ver el NIT completo tal como
-                         saldrá en la factura electrónica. -->
-                    <label class="flex flex-col gap-1">
-                      <span class="text-xs font-medium text-text-secondary">
-                        Dígito de verificación
-                      </span>
-                      <input
-                        type="text"
-                        [value]="billingDvDisplay()"
-                        disabled
-                        aria-readonly="true"
-                        class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-gray-50 text-text-secondary cursor-not-allowed"
-                      />
-                    </label>
+                    <!-- DV: se CALCULA del número, solo para NIT.
+                         Para documentos que no son NIT (Cédula, Pasaporte, etc.)
+                         el campo NO se muestra. -->
+                    @if (billingDocumentIsNit()) {
+                      <label class="flex flex-col gap-1">
+                        <span class="text-xs font-medium text-text-secondary">
+                          Dígito de verificación
+                        </span>
+                        <input
+                          type="text"
+                          [value]="billingDvDisplay()"
+                          disabled
+                          aria-readonly="true"
+                          class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-gray-50 text-text-secondary cursor-not-allowed"
+                        />
+                      </label>
+                    }
 
                     <label class="flex flex-col gap-1 sm:col-span-2">
                       <span class="text-xs font-medium text-text-secondary">
@@ -1028,7 +1028,7 @@ export class CheckoutComponent implements OnInit {
   readonly billingTaxIdDisplay = computed(() => {
     const number = this.documentNumber();
     if (!number) return '—';
-    const dv = this.billingVerificationDigit();
+    const dv = this.billingDocumentIsNit() ? this.billingVerificationDigit() : null;
     return dv ? `${number}-${dv}` : number;
   });
 

@@ -93,12 +93,23 @@ import {
 import {
   ConfirmationModalComponent,
   DialogService,
+  ModalComponent,
   SaveRequirement,
   SaveRequirementsModalComponent,
   StickyHeaderActionButton,
   StickyHeaderComponent,
 } from '../../../../../../shared/components/index';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+/**
+ * CLIENTE DEL GATEWAY DE IMPRESIÓN (E.2/E.1). El mismo servicio que usa el
+ * Hub de formatos y el editor de perfiles: la previsualización FB-29
+ * (`POST /store/print-formats/:formatType/preview`) devuelve HTML —no un
+ * binario— y no pasa por la compuerta fiscal, así que funciona sin
+ * habilitación DIAN y NO toma consecutivo (medido: `current_number` 107 →
+ * 107 tras tres previews).
+ */
+import { PrintGatewayClientService } from '../../../../../../shared/services/print/print-gateway-client.service';
+import type { StorePrintFormatDetail } from '../../../../../../core/models/print-formats.model';
 /**
  * SELECTOR DE CUENTA PUC CON BÚSQUEDA (5 resultados por página, el resto se
  * alcanza escribiendo). Vive bajo `products` porque nació allí y se importa en
@@ -203,6 +214,18 @@ import type { RetencionesRowPaths } from '../../components/invoice-sections/inde
  */
 import { InvoiceSectionDivisaComponent } from '../../components/invoice-sections/index';
 import type { DivisaSectionPaths } from '../../components/invoice-sections/index';
+/**
+ * SECCIÓN FORMATO COMPARTIDA con el editor de perfiles (B.7/E.1). En la
+ * factura no hay controles de plantilla que el DTO declare: lo que se pinta
+ * es CON QUÉ se imprime este documento y el mantenimiento de la plantilla
+ * ACTIVA DE TIENDA contra la biblioteca de la organización. Ver el docblock
+ * del componente.
+ */
+import {
+  FISCAL_INVOICE_FORMAT_TYPE,
+  InvoiceSectionFormatoComponent,
+} from '../../components/invoice-sections/index';
+import type { FormatoSectionPaths } from '../../components/invoice-sections/index';
 import { InvoiceTaxCatalogService } from '../../components/invoice-create/invoice-tax-catalog.service';
 import {
   InvoiceAiuSettings,
@@ -759,6 +782,8 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     InvoiceSectionImpuestosComponent,
     InvoiceSectionRetencionesComponent,
     InvoiceSectionDivisaComponent,
+    InvoiceSectionFormatoComponent,
+    ModalComponent,
   ],
   template: `
     <div class="w-full max-w-[1400px] mx-auto">
@@ -2197,6 +2222,7 @@ export class InvoiceCreatePageComponent implements OnInit {
   private readonly exchangeRateService = inject(ExchangeRateService);
   private readonly emitReadinessService = inject(InvoiceEmitReadinessService);
   private readonly profileService = inject(InvoiceProfileService);
+  private readonly printGateway = inject(PrintGatewayClientService);
 
   // ── Catálogos estáticos ─────────────────────────────────────
   readonly invoiceTypeOptions = INVOICE_TYPE_OPTIONS;

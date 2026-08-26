@@ -1802,11 +1802,14 @@ export class SubscriptionFiscalService {
       : { number: undefined, dv: undefined };
     const address = this.buildCustomerAddress(org);
 
+    const documentType = org?.document_type ?? (org?.tax_id ? '31' : '13');
+    const isNit = documentType === '31' || documentType === 'NIT';
+
     return {
       identification_mode: 'nominative',
-      document_type: org?.document_type ?? (org?.tax_id ? '31' : '13'),
+      document_type: documentType,
       document_number: number ?? null,
-      verification_digit: dv ?? null,
+      verification_digit: isNit ? (dv ?? null) : null,
       // `organizations.person_type` guarda el CÓDIGO DIAN (`'1'`/`'2'`), no el
       // enum del validador. Sin traducir, cada factura de suscripción levantaba
       // un `PERSON_TYPE_UNKNOWN` sobre un dato correcto, y una advertencia que
@@ -4497,9 +4500,10 @@ export class SubscriptionFiscalService {
       // field is genuinely absent keeps old rows transmitting as before.
       customer_document_type:
         org?.document_type ?? (org?.tax_id ? '31' : '13'),
-      customer_verification_digit: org
-        ? this.splitCustomerNit(org).dv
-        : undefined,
+      customer_verification_digit:
+        (org?.document_type === '31' || org?.document_type === 'NIT') && org
+          ? this.splitCustomerNit(org).dv
+          : undefined,
       customer_person_type: org?.person_type ?? undefined,
       // `customer_regime` NO declara el régimen de IVA del adquiriente, pese al
       // nombre. Alimenta `normalizePartyAccountType`, que produce '1' o '2' para

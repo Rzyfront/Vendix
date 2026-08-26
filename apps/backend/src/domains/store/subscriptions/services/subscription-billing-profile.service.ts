@@ -613,16 +613,19 @@ export class SubscriptionBillingProfileService {
       store_address: null,
     });
 
+    const documentType = org.document_type ?? (org.tax_id ? '31' : '13');
+    const isNit = documentType === '31' || documentType === 'NIT';
+
     return {
       identification_mode: 'nominative',
       // Sin `document_type` en columna, la presencia de un NIT es la única
       // señal disponible — la misma inferencia que hace el emisor.
-      document_type: org.document_type ?? (org.tax_id ? '31' : '13'),
+      document_type: documentType,
       // `normalizeNit` devuelve cadena VACÍA, no `undefined`, cuando no hay
       // NIT. Con `??` esa cadena pasaría el filtro y el validador juzgaría un
       // número presente-pero-vacío en vez de reportar que falta.
       document_number: parsed.number || null,
-      verification_digit: parsed.dv || null,
+      verification_digit: isNit ? (parsed.dv || null) : null,
       person_type: normalizePersonType(org.person_type),
       legal_name: org.legal_name ?? org.name ?? null,
       tax_regime: normalizeAcquirerTaxRegime(org.tax_regime),

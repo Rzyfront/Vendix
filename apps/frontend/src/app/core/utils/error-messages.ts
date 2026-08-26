@@ -513,6 +513,14 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La pasarela aun no fue probada. Pidele al administrador que ejecute una prueba de conexion.',
   SUBSCRIPTION_GATEWAY_003:
     'Pagos no disponibles temporalmente. La pasarela de Vendix no esta activa; contacta al soporte.',
+  SUBSCRIPTION_FISCAL_001:
+    'Por favor ingresa los datos de facturación de tu empresa para continuar con la suscripción.',
+  SUBSCRIPTION_FISCAL_002:
+    'Los datos de facturación ingresados presentan inconsistencias. Por favor revísalos antes de continuar con el pago.',
+  VERIFICATION_DIGIT_NOT_APPLICABLE:
+    'El tipo de documento seleccionado no requiere dígito de verificación.',
+  VERIFICATION_DIGIT_MISMATCH:
+    'El dígito de verificación no coincide con el número de NIT ingresado.',
   PROMO_NOT_ELIGIBLE:
     'El cupon no aplica para esta tienda. Verifica el codigo o las condiciones del cupon.',
 
