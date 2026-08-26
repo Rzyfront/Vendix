@@ -1,5 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { FormBuilder, FormGroup, ReactiveFormsModule } from '@angular/forms';
+import { FormBuilder, FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 
 import {
   FormatoSectionPaths,
@@ -67,13 +67,14 @@ describe('InvoiceSectionFormatoComponent', () => {
     fixture.componentRef.setInput('form', form);
     fixture.componentRef.setInput('paths', profilePaths);
 
-    expect(component.templateIdControl()).toBe(form.get('format.template_id'));
-    expect(component.legacyKeyControl()).toBe(form.get('format.template_key'));
+    const control = (path: string) => form.get(path) as FormControl | null;
+    expect(component.templateIdControl()).toBe(control('format.template_id'));
+    expect(component.legacyKeyControl()).toBe(control('format.template_key'));
     expect(component.aiuBreakdownControl()).toBe(
-      form.get('format.show_aiu_breakdown'),
+      control('format.show_aiu_breakdown'),
     );
     expect(component.displayDecimalsControl()).toBe(
-      form.get('format.display_decimals'),
+      control('format.display_decimals'),
     );
   });
 
@@ -83,8 +84,9 @@ describe('InvoiceSectionFormatoComponent', () => {
     fixture.componentRef.setInput('form', form);
     fixture.componentRef.setInput('paths', invoicePaths);
 
-    expect(component.templateIdControl()).toBe(form.get('template_id'));
-    expect(component.legacyKeyControl()).toBeNull();
+    expect(component.templateIdControl()).toBe(
+      form.get('template_id') as FormControl | null,
+    );    expect(component.legacyKeyControl()).toBeNull();
     expect(component.aiuBreakdownControl()).toBeNull();
     expect(component.displayDecimalsControl()).toBeNull();
   });

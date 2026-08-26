@@ -59,7 +59,7 @@ export interface NotasSectionPaths {
       <!--
         La factura no lleva nota interna POR CONTRATO, no por olvido: el DTO de
         creación no declara el campo y el backend corre con
-        `forbidNonWhitelisted`, así que mandarlo devolvería 400. Lo que sí
+        «forbidNonWhitelisted», así que mandarlo devolvería 400. Lo que sí
         viaja al XML son las notas de cabecera, y esas se capturan en
         «Documento».
       -->

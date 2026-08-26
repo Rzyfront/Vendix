@@ -118,7 +118,7 @@ export interface FormatoSectionPaths {
             : 'La factura se imprime con la plantilla que el perfil tenía al emitirse, no con la que la tienda tenga activa después.'
         "
         [disabled]="storeTemplateSaving()"
-        (valueChange)="templateSelectionChange.emit(String($event ?? ''))"
+        (valueChange)="onTemplateSelection($event)"
       ></app-selector>
 
       @if (libraryFailed()) {
@@ -219,8 +219,18 @@ export class InvoiceSectionFormatoComponent {
   /** Valor crudo del selector ('' = plantilla activa de la tienda). */
   readonly templateSelectionChange = output<string>();
 
-  readonly templateIdControl = computed(() =>
-    optionalControl(this.form(), this.paths().template_id),
+  /**
+   * Puente del selector al output. Existe porque la plantilla no puede llamar
+   * a `String()` —los globales no están en el scope de expresiones de
+   * Angular— y porque `valueChange` emite `null` al volver a «tienda activa»,
+   * que aquí significa cadena vacía, el valor que las opciones entienden.
+   */
+  onTemplateSelection(value: string | number | null): void {
+    this.templateSelectionChange.emit(value == null ? '' : `${value}`);
+  }
+
+  readonly templateIdControl = computed(
+    () => optionalControl(this.form(), this.paths().template_id) as FormControl | null,
   );
   readonly legacyKeyControl = computed(
     () => optionalControl(this.form(), this.paths().template_key) as FormControl | null,

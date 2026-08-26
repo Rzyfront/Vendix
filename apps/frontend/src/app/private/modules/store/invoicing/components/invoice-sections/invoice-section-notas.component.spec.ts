@@ -1,5 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { FormBuilder, FormGroup, ReactiveFormsModule } from '@angular/forms';
+import { FormBuilder, FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 
 import {
   InvoiceSectionNotasComponent,
@@ -47,9 +47,11 @@ describe('InvoiceSectionNotasComponent', () => {
     fixture.componentRef.setInput('form', form);
     fixture.componentRef.setInput('paths', profilePaths);
 
-    expect(component.descriptionControl()).toBe(form.get('general.description'));
+    expect(component.descriptionControl()).toBe(
+      form.get('general.description') as FormControl | null,
+    );
     expect(component.internalNoteControl()).toBe(
-      form.get('general.internal_note'),
+      form.get('general.internal_note') as FormControl | null,
     );
   });
 
