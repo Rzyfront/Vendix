@@ -46,6 +46,7 @@ import { SubscriptionFiscalService } from './subscription-fiscal.service';
  * DI de Nest y seria mas dificil de probar.
  */
 import { InvoicingModule } from '../../../store/invoicing/invoicing.module';
+import { ProfilesModule } from '../../../store/invoicing/profiles/profiles.module';
 import { InvoicingService } from '../../../store/invoicing/invoicing.service';
 import { InvoiceFlowService } from '../../../store/invoicing/invoice-flow/invoice-flow.service';
 import { PlatformTenantsService } from './platform-tenants.service';
@@ -69,6 +70,14 @@ import { PlatformInvoicePdfService } from './platform-invoice-pdf.service';
     // InvoicingModule provee los servicios de aritmetica/validator/UBL
     // del riel tienda. La facade los consume sin copiarlos.
     InvoicingModule,
+    // ProfilesModule provee ProfileCatalogCacheService y
+    // ProfileAccountingValidator que PlatformProfilesService necesita.
+    // InvoicingModule ya lo importa transitivamente, pero Nest exige que
+    // los providers importados via transitivity sean accesibles desde el
+    // módulo que los declara directamente — SubscriptionFiscalModule NO ve
+    // los exports de un módulo dos niveles abajo. Importar ProfilesModule
+    // explícitamente lo resuelve sin abrir el grafo a más ciclos.
+    ProfilesModule,
   ],
   controllers: [
     SubscriptionFiscalController,
