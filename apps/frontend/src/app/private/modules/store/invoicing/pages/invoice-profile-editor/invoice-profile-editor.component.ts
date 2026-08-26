@@ -16,7 +16,7 @@ import {
     ReactiveFormsModule,
     Validators,
 } from '@angular/forms';
-import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { map } from 'rxjs/operators';
 
@@ -28,8 +28,6 @@ import {
     SelectorComponent,
     StickyHeaderActionButton,
     StickyHeaderComponent,
-    TextareaComponent,
-    ToggleComponent,
 } from '../../../../../../shared/components/index';
 import type { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
@@ -133,6 +131,20 @@ import type { RetencionesRowErrors } from '../../components/invoice-sections/ind
  */
 import { InvoiceSectionDivisaComponent } from '../../components/invoice-sections/index';
 import type { DivisaSectionPaths } from '../../components/invoice-sections/index';
+/**
+ * SECCIONES FORMATO Y NOTAS INTERNAS COMPARTIDAS con «Nueva factura» (B.7 —
+ * cierre del re-cableado del editor). Mismo componente, mismos controles: el
+ * editor le pasa `context="profile"` y sus rutas `format.*` / `general.*`.
+ * Ver el docblock de cada componente.
+ */
+import {
+    InvoiceSectionFormatoComponent,
+    InvoiceSectionNotasComponent,
+} from '../../components/invoice-sections/index';
+import type {
+    FormatoSectionPaths,
+    NotasSectionPaths,
+} from '../../components/invoice-sections/index';
 import {
     FOREIGN_CURRENCY_OPTIONS,
     INVOICE_TYPE_OPTIONS,
@@ -259,16 +271,13 @@ type SectionId = ProfileScreenSectionId;
     standalone: true,
     imports: [
         ReactiveFormsModule,
-        RouterLink,
         StickyHeaderComponent,
         InvoiceFormSectionComponent,
         AlertBannerComponent,
         ButtonComponent,
         IconComponent,
         InputComponent,
-        TextareaComponent,
         SelectorComponent,
-        ToggleComponent,
         AccountCodeSelectComponent,
         InvoiceSectionAiuComponent,
         InvoiceSectionDocumentoComponent,
@@ -276,6 +285,8 @@ type SectionId = ProfileScreenSectionId;
         InvoiceSectionImpuestosComponent,
         InvoiceSectionRetencionesComponent,
         InvoiceSectionDivisaComponent,
+        InvoiceSectionFormatoComponent,
+        InvoiceSectionNotasComponent,
         InvoiceProfilePreviewPanelComponent,
         InvoiceProfileVersionsPanelComponent,
     ],
@@ -698,83 +709,24 @@ type SectionId = ProfileScreenSectionId;
                         [expanded]="isSectionOpen('formato')"
                         (expandedChange)="setSection('formato', $event)"
                     >
-                        <div class="space-y-3" formGroupName="format">
-                            <div
-                                class="flex items-start gap-2.5 rounded-lg border border-border bg-[var(--color-surface-muted)] px-3 py-2.5"
-                            >
-                                <app-icon
-                                    name="info"
-                                    [size]="15"
-                                    class="mt-0.5 shrink-0 text-[var(--color-text-secondary)]"
-                                ></app-icon>
-                                <p
-                                    class="text-xs leading-relaxed text-text-secondary"
-                                >
-                                    El diseño del documento —papel, secciones,
-                                    columnas y estilos— se edita en el
-                                    <a
-                                        routerLink="/admin/settings/print-formats"
-                                        class="font-semibold text-[var(--color-primary)] underline underline-offset-2"
-                                        >Hub de formatos de impresión</a
-                                    >, sobre el formato
-                                    <strong>Factura Electrónica (DIAN)</strong>.
-                                    Aquí sólo se elige la plantilla con que este
-                                    perfil imprime y qué se muestra en ella.
-                                </p>
-                            </div>
-
-                            <app-selector
-                                label="Plantilla de impresión"
-                                formControlName="template_id"
-                                [options]="print_template_options()"
-                                size="sm"
-                                [errorText]="issueFor('format.template_id') ?? ''"
-                                helpText="La factura se imprime con la plantilla que el perfil tenía al emitirse, no con la que la tienda tenga activa después."
-                            ></app-selector>
-
-                            @if (print_templates_failed()) {
-                                <p
-                                    class="text-[11px] text-[var(--color-warning)]"
-                                >
-                                    No se pudo leer la biblioteca del Hub. El
-                                    perfil se guarda igual y la factura se
-                                    imprimirá con la plantilla activa de la
-                                    tienda.
-                                </p>
-                            }
-
-                            <!--
-                              LEGADO. Sólo se muestra si el perfil guardado ya
-                              trae una clave de «default_templates». No se borra
-                              en silencio: hay perfiles con este dato y borrarlo
-                              al guardar cambiaría la impresión sin que nadie lo
-                              haya pedido.
-                            -->
-                            @if (hasLegacyTemplateKey()) {
-                                <app-input
-                                    label="Clave de plantilla (legado)"
-                                    formControlName="template_key"
-                                    [maxlength]="template_key_limit"
-                                    size="sm"
-                                    helperText="Catálogo anterior. Si eliges una plantilla del Hub arriba, manda esa."
-                                ></app-input>
-                            }
-
-                            <app-toggle
-                                formControlName="show_aiu_breakdown"
-                                label="Mostrar el desglose AIU en la impresión"
-                            ></app-toggle>
-
-                            <app-input
-                                label="Decimales a mostrar"
-                                formControlName="display_decimals"
-                                type="number"
-                                min="0"
-                                max="6"
-                                size="sm"
-                                [error]="issueFor('format.display_decimals')"
-                            ></app-input>
-                        </div>
+                        <!--
+                            B.7: sección compartida con «Nueva factura»
+                            («InvoiceSectionFormatoComponent», contexto
+                            «profile»). El aviso del Hub, el selector de
+                            plantilla, la clave legada, el desglose AIU y los
+                            decimales viven en el componente; esta página sólo
+                            aporta su FormGroup, las rutas y la biblioteca ya
+                            cargada del Hub.
+                        -->
+                        <vendix-invoice-section-formato
+                            context="profile"
+                            [form]="form"
+                            [paths]="formatoSectionPaths()"
+                            [templateOptions]="print_template_options()"
+                            [libraryFailed]="print_templates_failed()"
+                            [templateKeyLimit]="template_key_limit"
+                            [errors]="formatoErrors()"
+                        ></vendix-invoice-section-formato>
                     </vendix-invoice-form-section>
 
                     <!-- ══ GENERAL ══ va al FINAL: es documentación interna, no
@@ -789,20 +741,13 @@ type SectionId = ProfileScreenSectionId;
                         [expanded]="isSectionOpen('notas_internas')"
                         (expandedChange)="setSection('notas_internas', $event)"
                     >
-                        <div class="space-y-2" formGroupName="general">
-                            <app-textarea
-                                label="Descripción"
-                                formControlName="description"
-                                [rows]="2"
-                                helperText="Para el operador. No viaja al XML."
-                            ></app-textarea>
-                            <app-textarea
-                                label="Nota interna"
-                                formControlName="internal_note"
-                                [rows]="3"
-                                helperText="Por qué existe este perfil. Queda en el historial de versiones."
-                            ></app-textarea>
-                        </div>
+                        <!-- B.7: misma sustitución — el par Descripción/Nota
+                             interna vive ahora en el componente compartido. -->
+                        <vendix-invoice-section-notas
+                            context="profile"
+                            [form]="form"
+                            [paths]="notasSectionPaths"
+                        ></vendix-invoice-section-notas>
                     </vendix-invoice-form-section>
                 </form>
 
@@ -1546,6 +1491,41 @@ export class InvoiceProfileEditorComponent {
     readonly divisaErrors = computed<{ currency_code?: string }>(() => ({
         currency_code: this.issueFor('currency.code'),
     }));
+
+    /**
+     * Rutas de «Formato» (B.7). Las cuatro existen en el formulario; la clave
+     * legada sólo se EXPONE cuando el perfil guardado ya la trae —igual que
+     * hacía el bloque inline—: enseñar siempre un input vacío del catálogo
+     * anterior invitaría a escribir donde el Hub ya decidió. Es un `computed`
+     * y no una constante por eso: el mapa respira con `hasLegacyTemplateKey`.
+     */
+    readonly formatoSectionPaths = computed<FormatoSectionPaths>(() => ({
+        template_id: 'format.template_id',
+        template_key: this.hasLegacyTemplateKey()
+            ? 'format.template_key'
+            : null,
+        show_aiu_breakdown: 'format.show_aiu_breakdown',
+        display_decimals: 'format.display_decimals',
+    }));
+
+    /** Errores del validador del contrato, en el vocabulario del componente. */
+    readonly formatoErrors = computed<{
+        template_id?: string;
+        display_decimals?: string;
+    }>(() => ({
+        template_id: this.issueFor('format.template_id'),
+        display_decimals: this.issueFor('format.display_decimals'),
+    }));
+
+    /**
+     * Rutas de «Notas internas» (B.7). Los dos controles son del perfil y
+     * viajan en el snapshot (`general`); no hay campo en `null` porque no
+     * existe ninguno que este contexto legítimamente omita.
+     */
+    readonly notasSectionPaths: NotasSectionPaths = {
+        description: 'general.description',
+        internal_note: 'general.internal_note',
+    };
 
     readonly saving = toSignal(this.store.select(selectProfileSaving), {
         initialValue: false,

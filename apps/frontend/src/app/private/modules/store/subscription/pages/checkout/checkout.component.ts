@@ -567,7 +567,7 @@ const BILLING_ADDRESS_SOURCE_COPY: Partial<Record<BillingAddressSource, string>>
                       <span class="text-xs font-medium text-text-secondary">Tipo de documento</span>
                       <select
                         [value]="billingDocumentType()"
-                        (change)="setBillingField(billingDocumentType, $event)"
+                        (change)="onBillingDocumentTypeChange($event)"
                         class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
                       >
                         <option value="31">NIT</option>
@@ -578,14 +578,17 @@ const BILLING_ADDRESS_SOURCE_COPY: Partial<Record<BillingAddressSource, string>>
                     </label>
 
                     <label class="flex flex-col gap-1">
-                      <span class="text-xs font-medium text-text-secondary">Régimen de IVA</span>
+                      <span class="text-xs font-medium text-text-secondary">Tipo de persona</span>
                       <select
-                        [value]="billingTaxRegime()"
-                        (change)="setBillingField(billingTaxRegime, $event)"
+                        [value]="billingPersonType()"
+                        (change)="setBillingField(billingPersonType, $event)"
+                        [disabled]="!billingDocumentIsNit()"
+                        [class.bg-gray-50]="!billingDocumentIsNit()"
+                        [class.cursor-not-allowed]="!billingDocumentIsNit()"
                         class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
                       >
-                        <option value="49">No responsable de IVA</option>
-                        <option value="48">Responsable de IVA</option>
+                        <option value="1">Persona Jurídica (Empresa)</option>
+                        <option value="2">Persona Natural</option>
                       </select>
                     </label>
 
@@ -885,7 +888,7 @@ export class CheckoutComponent implements OnInit {
   readonly billingLegalName = signal('');
   readonly billingTaxId = signal('');
   readonly billingDocumentType = signal('31');
-  readonly billingTaxRegime = signal('49');
+  readonly billingPersonType = signal('1');
   readonly billingEmail = signal('');
   readonly billingAddressLine = signal('');
   readonly billingAddressLine2 = signal('');
@@ -1284,7 +1287,9 @@ export class CheckoutComponent implements OnInit {
     this.billingLegalName.set(p?.legal_name ?? '');
     this.billingTaxId.set(p?.tax_id ?? '');
     this.billingDocumentType.set(p?.document_type ?? BILLING_DOCUMENT_TYPE_NIT);
-    this.billingTaxRegime.set(p?.tax_regime ?? '49');
+    this.billingPersonType.set(
+      p?.person_type ?? (p?.document_type === BILLING_DOCUMENT_TYPE_NIT ? '1' : '2'),
+    );
     this.billingEmail.set(p?.email ?? '');
     this.billingVerificationDigit.set(p?.verification_digit ?? '');
 
@@ -1357,6 +1362,14 @@ export class CheckoutComponent implements OnInit {
     target.set((event.target as HTMLInputElement | HTMLSelectElement).value);
   }
 
+  onBillingDocumentTypeChange(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value;
+    this.billingDocumentType.set(value);
+    if (value !== BILLING_DOCUMENT_TYPE_NIT) {
+      this.billingPersonType.set('2');
+    }
+  }
+
   /**
    * Payload for the commit, or undefined when there is nothing new to send.
    * Un perfil bloqueado nunca viaja: lo edita el módulo fiscal, no el checkout.
@@ -1368,7 +1381,8 @@ export class CheckoutComponent implements OnInit {
       legal_name: this.billingLegalName().trim(),
       tax_id: this.documentNumber(),
       document_type: this.billingDocumentType(),
-      tax_regime: this.billingTaxRegime(),
+      person_type: this.billingDocumentIsNit() ? this.billingPersonType() : '2',
+      tax_regime: '49',
       email: this.billingEmail().trim() || undefined,
       // La dirección viaja ENTERA. `postal_code` y `address_line2` los captura
       // el componente compartido y el DTO los acepta; dejarlos fuera hacía que
