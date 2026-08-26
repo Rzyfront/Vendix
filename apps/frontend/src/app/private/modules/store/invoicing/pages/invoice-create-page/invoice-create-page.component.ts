@@ -2033,6 +2033,33 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
             </vendix-invoice-form-section>
           </form>
 
+          <!-- ── FORMATO DE IMPRESIÓN (B.7/E.1) ─────────────────
+               Fuera del «form» a propósito, igual que la sección
+               Previsualización del editor de perfiles: el selector escribe en
+               su FormGroup local y no enlaza ningún control del payload
+               fiscal. La precedencia real (perfil congelado → tienda →
+               sistema) viaja como etiqueta, no como suposición. -->
+          <vendix-invoice-form-section
+            title="Formato de impresión"
+            [help]="help('formato')"
+            icon="printer"
+            [optional]="true"
+            [summary]="formatoSummary()"
+            [expanded]="formatoSectionOpen()"
+            (expandedChange)="formatoSectionOpen.set($event)"
+          >
+            <vendix-invoice-section-formato
+              context="invoice"
+              [form]="printFormatForm"
+              [paths]="formatoSectionPaths"
+              [templateOptions]="printTemplateOptions()"
+              [libraryFailed]="printLibraryFailed()"
+              [effectivePrintLabel]="effectivePrintLabel()"
+              [storeTemplateSaving]="storeTemplateSaving()"
+              (templateSelectionChange)="onStoreTemplateSelected($event)"
+            ></vendix-invoice-section-formato>
+          </vendix-invoice-form-section>
+
           <!-- Totales: siempre visibles, nunca dentro de una sección plegada -->
           <div
             class="rounded-lg border border-border p-3 bg-[var(--color-surface-muted)]"
@@ -5009,6 +5036,10 @@ export class InvoiceCreatePageComponent implements OnInit {
   // ── Ciclo de vida de la página ──────────────────────────────
 
   ngOnInit(): void {
+    // E.1 — biblioteca de la organización y config activa de la tienda para
+    // la sección Formato. Lecturas de otro dominio, pedidas una sola vez.
+    this.loadPrintFormats();
+
     // LAS RESOLUCIONES SE PIDEN AQUÍ. En el modal las traía el contenedor del
     // listado, que vive bajo el shell del módulo; esta vista cuelga FUERA de ese
     // shell, así que nadie más las despacha y el selector llegaría vacío — con
@@ -7224,8 +7255,138 @@ export class InvoiceCreatePageComponent implements OnInit {
       this.cancel();
       return;
     }
+    if (actionId === 'preview') {
+      this.openPrintPreview();
+      return;
+    }
     if (actionId === 'save') {
       this.onSubmit();
+    }
+  }
+
+  // ── Formato de impresión y previsualización (E.1 / E.2) ─────
+
+  /**
+   * Lee la biblioteca de la organización (FB-31) y la config activa de la
+   * tienda. Falla en silencio DEGREDADO: sin biblioteca el selector queda
+   * con la opción de tienda y la sección avisa; nunca bloquea la emisión.
+   */
+  loadPrintFormats(): void {
+    this.printGateway
+      .listLibraryTemplates(FISCAL_INVOICE_FORMAT_TYPE)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (templates) =>
+          this.printTemplates.set(
+            templates.map((template) => ({
+              id: template.id,
+              name: template.name,
+              is_system: template.is_system,
+            })),
+          ),
+        error: () => this.printLibraryFailed.set(true),
+      });
+
+    this.refreshStoreFormatDetail();
+  }
+
+  private refreshStoreFormatDetail(): void {
+    this.printGateway
+      .getFormatDetail(FISCAL_INVOICE_FORMAT_TYPE)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (detail) => this.storeFormatDetail.set(detail),
+        error: () => this.printLibraryFailed.set(true),
+      });
+  }
+
+  /**
+   * El selector cambió: persiste la plantilla ACTIVA DE TIENDA
+   * (`PUT /store/print-formats/:formatType`), que es la única superficie de
+   * escritura real —el DTO de creación no lleva `template_id` y el gateway
+   * imprime cada documento con la plantilla que su perfil congeló cuando la
+   * tiene—. '' vuelve a «plantilla activa de la tienda» (null).
+   */
+  onStoreTemplateSelected(value: string): void {
+    if (this.storeTemplateSaving()) return;
+    const trimmed = String(value ?? '').trim();
+    const templateId = trimmed === '' ? null : Number(trimmed);
+    if (
+      trimmed !== '' &&
+      (!Number.isFinite(templateId) || (templateId as number) <= 0)
+    ) {
+      return;
+    }
+
+    this.storeTemplateSaving.set(true);
+    this.printGateway
+      .updateFormat(FISCAL_INVOICE_FORMAT_TYPE, { template_id: templateId })
+      .subscribe({
+        next: () => {
+          this.storeTemplateSaving.set(false);
+          this.toastService.success(
+            'Formato de impresión actualizado para toda la tienda.',
+          );
+        },
+        error: () => {
+          this.storeTemplateSaving.set(false);
+          this.toastService.error(
+            'No se pudo guardar la plantilla de impresión.',
+          );
+          // La pantalla no puede quedar enseñando una elección que el
+          // servidor rechazó: se devuelve al valor efectivo.
+          const control = this.printFormatForm.get('template_id');
+          control?.markAsPristine();
+          control?.setValue(
+            this.effectiveTemplateId() == null
+              ? ''
+              : String(this.effectiveTemplateId()),
+            { emitEvent: false },
+          );
+        },
+      });
+  }
+
+  /**
+   * E.2 — abre «Ver como saldrá» SIN persistir ni numerar. FB-29 compone con
+   * DATOS DE MUESTRA del formato fiscal: no pasa por la compuerta DIAN (201
+   * sin habilitación, medido) ni llama a `InvoiceNumberGenerator`, así que el
+   * consecutivo autorizado no se toca. Lo que NO refleja es lo tecleado:
+   * componer desde un cuerpo sin guardar exige piezas de backend que el plan
+   * dejó como decisión abierta, y la pantalla LO DICE en vez de dejarlo
+   * parecer.
+   */
+  openPrintPreview(): void {
+    if (this.printPreviewLoading()) return;
+    this.printPreviewError.set('');
+    this.printPreviewHtml.set('');
+    this.printPreviewOpen.set(true);
+    this.printPreviewLoading.set(true);
+
+    this.printGateway
+      .previewFormat(FISCAL_INVOICE_FORMAT_TYPE)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (preview) => {
+          this.printPreviewHtml.set(preview.html ?? '');
+          this.printPreviewWidthMm.set(preview.width_mm ?? 0);
+          this.printPreviewIsRoll.set(preview.is_roll === true);
+          this.printPreviewLoading.set(false);
+        },
+        error: () => {
+          this.printPreviewLoading.set(false);
+          this.printPreviewError.set(
+            'No se pudo generar la previsualización. Inténtalo otra vez.',
+          );
+        },
+      });
+  }
+
+  closePrintPreview(open: boolean): void {
+    this.printPreviewOpen.set(open);
+    if (!open) {
+      this.printPreviewHtml.set('');
+      this.printPreviewError.set('');
     }
   }
 
