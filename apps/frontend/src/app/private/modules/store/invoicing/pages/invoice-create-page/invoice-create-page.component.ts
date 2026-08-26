@@ -93,6 +93,7 @@ import {
 import {
   ConfirmationModalComponent,
   DialogService,
+  DianMunicipalitySelectComponent,
   ModalComponent,
   SaveRequirement,
   SaveRequirementsModalComponent,
@@ -123,10 +124,8 @@ import {
   formatDateOnlyUTC,
   toLocalDateString,
 } from '../../../../../../shared/utils/date.util';
-import {
-  computeNitDv,
-  isValidNitDv,
-} from '../../../../../../shared/utils/nit.util';
+import { computeNitDv } from '../../../../../../shared/utils/nit.util';
+import type { DianMunicipalityOption } from '../../../../../../shared/services/dian-municipality-lookup.service';
 import {
   FISCAL_RESPONSIBILITIES,
   FISCAL_RESPONSIBILITY_LABELS,
@@ -446,6 +445,29 @@ function escapeHtmlText(value: string): string {
 // ─────────────────────────────────────────────────────────────
 
 /**
+ * Dirección fiscal ESTRUCTURADA del adquiriente (A.8).
+ *
+ * Espejo fiel de `InvoiceAddressDto` (backend,
+ * `invoicing/dto/invoice-address.dto.ts`): el DTO declara `customer_address`
+ * con `@Transform(liftInvoiceAddress)`, así que acepta el string plano que
+ * siempre envió esta pantalla O este objeto desglosado. Los nombres de campo
+ * NO son inventados: son exactamente los que `normalizeAddress()` del provider
+ * DIAN lee para `cac:PhysicalLocation`, y lo que hace que el código DANE de
+ * ciudad —rechazo clásico de la DIAN— por fin viaje en cada factura con
+ * dirección.
+ */
+interface CustomerInvoiceAddressPayload {
+  /** Único obligatorio cuando se envía el objeto (`@IsNotEmpty`). */
+  address_line: string;
+  /** Código DANE de municipio, 5 dígitos (ej. "05001" = Medellín). */
+  city_code?: string;
+  city_name?: string;
+  /** Código DANE de departamento, 2 dígitos: los dos primeros del city_code. */
+  department_code?: string;
+  department_name?: string;
+}
+
+/**
  * Payload REAL que acepta `CreateInvoiceDto` del backend.
  *
  * Se declara aquí y no en `interfaces/invoice.interface.ts` porque ese espejo
@@ -478,7 +500,12 @@ interface InvoiceCreatePayload {
   customer_verification_digit?: string;
   customer_tax_regime?: string;
   customer_fiscal_responsibilities?: string[];
-  customer_address?: string;
+  /**
+   * String plano (sólo la línea de dirección) u objeto desglosado con los
+   * códigos DANE. El backend eleva ambas formas a `InvoiceAddressDto`; ver
+   * {@link CustomerInvoiceAddressPayload}.
+   */
+  customer_address?: string | CustomerInvoiceAddressPayload;
   inline_customer?: CreateCustomerRequest;
   issue_date: string;
   due_date?: string;
@@ -769,6 +796,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     IconComponent,
     AccountCodeSelectComponent,
     CustomerModalComponent,
+    DianMunicipalitySelectComponent,
     ConfirmationModalComponent,
     SaveRequirementsModalComponent,
     InvoiceFormSectionComponent,
@@ -1215,7 +1243,8 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
 
               <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <app-input
-                  label="Nombre / Razón social"
+                  [label]="customerNameLabel()"
+                  [placeholder]="customerNamePlaceholder()"
                   formControlName="customer_name"
                   [control]="control('customer_name')"
                   [error]="fieldError('customer_name')"
@@ -1247,19 +1276,33 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   formControlName="customer_tax_id"
                   [control]="control('customer_tax_id')"
                   [error]="fieldError('customer_tax_id')"
-                  placeholder="900123456"
+                  [placeholder]="customerTaxIdPlaceholder()"
                   size="sm"
                 ></app-input>
-                <app-input
-                  label="DV"
-                  formControlName="customer_verification_digit"
-                  [control]="control('customer_verification_digit')"
-                  [error]="verificationDigitError()"
-                  [disabled]="!isNitCustomer()"
-                  [maxlength]="1"
-                  helperText="Si lo omites, el servidor lo calcula."
-                  size="sm"
-                ></app-input>
+                <!--
+                  A.8 — el DV NUNCA se digita. Se deriva del número con el
+                  mismo módulo 11 que aplica el backend, en vivo mientras se
+                  teclea, y sólo existe cuando el documento es NIT: una
+                  cédula o un pasaporte no llevan checksum, así que el campo
+                  desaparece por completo (antes estorbaba deshabilitado).
+                  Misma conducta que el checkout de suscripciones.
+                -->
+                @if (isNitCustomer()) {
+                  <label class="flex flex-col gap-1">
+                    <span class="text-xs font-medium text-[var(--color-text-secondary)]">
+                      DV
+                    </span>
+                    <input
+                      type="text"
+                      [value]="computedCustomerDv()"
+                      disabled
+                      aria-readonly="true"
+                      aria-label="Dígito de verificación calculado automáticamente"
+                      title="Calculado con el módulo 11 de la DIAN; no se digita."
+                      class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-[var(--color-surface-secondary)] text-text-secondary cursor-not-allowed"
+                    />
+                  </label>
+                }
                 <app-input
                   label="Teléfono"
                   formControlName="customer_phone"
@@ -1278,6 +1321,24 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   placeholder="Sin declarar"
                   size="sm"
                 ></app-selector>
+                <!--
+                  A.8 - tipo de persona. Solo se pregunta con NIT: una cedula
+                  ES una persona natural y fijarla a mano seria un paso que el
+                  formulario puede dar solo (buildPayload manda NATURAL en
+                  cuanto el documento deja de ser NIT).
+                -->
+                @if (isNitCustomer()) {
+                  <app-selector
+                    label="Tipo de persona"
+                    formControlName="customer_person_type"
+                    [options]="customerPersonTypeOptions"
+                    helpText="Natural con NIT (independiente) o Jurídica (empresa)."
+                    size="sm"
+                  ></app-selector>
+                }
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
                 <app-input
                   label="Dirección fiscal"
                   formControlName="customer_address"
@@ -1285,6 +1346,27 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   [error]="fieldError('customer_address')"
                   size="sm"
                 ></app-input>
+                <!--
+                  A.8 — municipio DANE por NOMBRE. El código de ciudad era el
+                  otro rechazo clásico de la DIAN: aquí ya no se teclea ni se
+                  adivina, se busca contra el catálogo Divipola y el valor del
+                  control es el código de 5 dígitos exacto que exige el XML.
+                -->
+                <div>
+                  <label
+                    class="block text-xs font-medium text-[var(--color-text-secondary)] mb-1"
+                  >
+                    Municipio (DANE)
+                  </label>
+                  <app-dian-municipality-select
+                    formControlName="customer_municipality_code"
+                    placeholder="Busca por nombre o código DANE..."
+                    (municipalitySelected)="onCustomerMunicipality($event)"
+                  />
+                  @if (customerMunicipalityError(); as municipalityErr) {
+                    <p class="mt-1 text-xs text-error">{{ municipalityErr }}</p>
+                  }
+                </div>
               </div>
 
               <!--
@@ -2500,11 +2582,29 @@ export class InvoiceCreatePageComponent implements OnInit {
     customer_document_type: [DOCUMENT_TYPE_NIT_CODE],
     customer_tax_id: [''],
     customer_verification_digit: [''],
+    /**
+     * A.8 — tipo de persona del adquiriente NIT. Sólo se PINTA con NIT
+     * (una cédula ES una persona natural, no hay nada que elegir) y el
+     * payload lo fija a `'NATURAL'` por su cuenta cuando el documento no es
+     * NIT. Los valores son los de `CreateCustomerDto.person_type`, porque su
+     * único consumidor real hoy es el `inline_customer` que materializa la
+     * fila del cliente al emitir.
+     */
+    customer_person_type: ['JURIDICA' as 'NATURAL' | 'JURIDICA'],
     customer_tax_regime: [''],
     customer_fiscal_responsibilities: [[] as string[]],
     customer_email: ['', [Validators.email]],
     customer_phone: [''],
     customer_address: [''],
+    /**
+     * A.8 — municipio DANE del adquiriente (Divipola). El control guarda el
+     * CÓDIGO de 5 dígitos vía CVA (`app-dian-municipality-select`) y el
+     * nombre legible viaja aparte para `city_name`; `buildPayload` los sube
+     * dentro de `customer_address` estructurada. Sin este código la DIAN
+     * rechaza el `cbc:ID` de `cac:CityName` DESPUÉS de consumir consecutivo.
+     */
+    customer_municipality_code: [''],
+    customer_city_name: [''],
 
     // Retenciones (los tres primeros son SÓLO UI)
     manual_withholding: [false],
@@ -2663,6 +2763,77 @@ export class InvoiceCreatePageComponent implements OnInit {
   readonly isNitCustomer = computed(
     () => this.rawValue()['customer_document_type'] === DOCUMENT_TYPE_NIT_CODE,
   );
+
+  /**
+   * Número del documento del adquiriente SIN el DV pegado.
+   *
+   * Igual criterio que el checkout: `900123456-8` ya trae el DV, y quitar
+   * todo lo no numérico sin recortar el sufijo daría un «NIT» de diez dígitos
+   * que no es de nadie. Es la base de la que se deriva todo lo demás abajo.
+   */
+  readonly customerTaxIdBase = computed(() => {
+    const rawTaxId = String(this.rawValue()['customer_tax_id'] ?? '').trim();
+    const head = rawTaxId.includes('-') ? rawTaxId.split('-')[0] : rawTaxId;
+    return head.replace(/\D/g, '');
+  });
+
+  /**
+   * A.8 — DV calculado en vivo con el MÓDULO 11 de la DIAN.
+   *
+   * Misma util compartida que consume el checkout (`shared/utils/nit.util`):
+   * nunca se digita, porque un checksum tecleado sólo puede coincidir con el
+   * NIT o estar mal — y estar mal es un rechazo DIAN con consecutivo ya
+   * quemado. Vacío si el documento no es NIT (no hay nada que mostrar ni que
+   * enviar).
+   */
+  readonly computedCustomerDv = computed(() => {
+    if (!this.isNitCustomer()) return '';
+    return computeNitDv(this.customerTaxIdBase()) ?? '';
+  });
+
+  /** Label dinámico: empresa ⇒ razón social; cédula/pasaporte ⇒ nombre. */
+  readonly customerNameLabel = computed(() =>
+    this.isNitCustomer() ? 'Razón social' : 'Nombre completo',
+  );
+
+  readonly customerNamePlaceholder = computed(() =>
+    this.isNitCustomer()
+      ? 'Nombre de la empresa registrado ante la DIAN'
+      : 'Nombre y apellido (ej. Keilin Luz Sierra Toro)',
+  );
+
+  readonly customerTaxIdPlaceholder = computed(() =>
+    this.isNitCustomer() ? '900123456' : '1118860902',
+  );
+
+  /**
+   * A.8 — opciones del tipo de persona. Valores del contrato
+   * `CreateCustomerDto.person_type`; etiquetas según la tabla del dueño.
+   */
+  readonly customerPersonTypeOptions: SelectorOption[] = [
+    { value: 'JURIDICA', label: 'Persona Jurídica' },
+    { value: 'NATURAL', label: 'Persona Natural' },
+  ];
+
+  /**
+   * A.8 — el código DANE es obligatorio cuando hay dirección fiscal.
+   *
+   * No es `Validators.required` del control porque la regla NO es «siempre»:
+   * una venta a consumidor final no declara dirección, y una exportación es
+   * justo el caso donde un catálogo colombiano sobra. Con dirección escrita
+   * y municipio ausente se avisa junto al campo Y en los bloqueadores, antes
+   * de que el rechazo lo descubra con el consecutivo ya consumido.
+   */
+  readonly customerMunicipalityError = computed<string>(() => {
+    if (this.isExportInvoice()) return '';
+    const raw = this.rawValue();
+    const addressLine = String(raw['customer_address'] ?? '').trim();
+    const cityCode = String(raw['customer_municipality_code'] ?? '').trim();
+    if (addressLine && !cityCode) {
+      return 'Con dirección fiscal hace falta el municipio DANE: búscalo por nombre y selecciónalo.';
+    }
+    return '';
+  });
 
   readonly isManualWithholding = computed(
     () => this.rawValue()['manual_withholding'] === true,
@@ -5927,24 +6098,6 @@ export class InvoiceCreatePageComponent implements OnInit {
     return undefined;
   }
 
-  /**
-   * Igual que `dueDateError()`: el backend también lo rechaza, pero decirlo
-   * junto al campo evita el viaje y, sobre todo, evita que el usuario lo
-   * descubra cuando la DIAN ya se comió el consecutivo.
-   */
-  verificationDigitError(): string | undefined {
-    const backend = this.fieldError('customer_verification_digit');
-    if (backend) return backend;
-    if (!this.isNitCustomer()) return undefined;
-    const raw = this.rawValue();
-    const taxId = String(raw['customer_tax_id'] ?? '')
-      .trim()
-      .split('-')[0];
-    const dv = String(raw['customer_verification_digit'] ?? '').trim();
-    if (!taxId || !dv || isValidNitDv(taxId, dv)) return undefined;
-    return `No corresponde al NIT ${taxId} (debería ser ${computeNitDv(taxId)})`;
-  }
-
   dueDateHelp(): string {
     return this.isCredit()
       ? 'Obligatorio en venta a crédito.'
@@ -6261,11 +6414,28 @@ export class InvoiceCreatePageComponent implements OnInit {
             .filter(Boolean)
             .join(', ')
         : '',
+      // A.8 — el código DANE guardado en la dirección primaria del cliente
+      // hidrata el buscador (el componente resuelve el chip por su cuenta);
+      // si el cliente no lo tiene, queda vacío y la regla de bloqueo avisa.
+      customer_municipality_code: address?.municipality_code ?? '',
+      customer_city_name: address?.city ?? '',
     });
     this.inlineCustomer.set(null);
     this.linkedCustomerLabel.set(this.customerDisplayName(customer));
     this.customerResults.set([]);
     this.customerQuery.set('');
+  }
+
+  /**
+   * A.8 — el buscador DANE publica el municipio completo; el control ya quedó
+   * escrito por el CVA con el código, aquí se conserva el nombre legible para
+   * `city_name` del XML. Se escribe SIN silenciar eventos: `rawValue` deriva
+   * de `valueChanges`, y un patch mudo dejaría el payload con nombres viejos.
+   */
+  onCustomerMunicipality(municipality: DianMunicipalityOption | null): void {
+    this.invoiceForm.patchValue({
+      customer_city_name: municipality?.name ?? '',
+    });
   }
 
   unlinkCustomer(): void {
@@ -6526,19 +6696,25 @@ export class InvoiceCreatePageComponent implements OnInit {
     if (!raw['customer_name']) {
       blockers.push('El adquiriente necesita nombre o razón social.');
     }
-    // El DV es un checksum, no un dato: si no cuadra con el NIT, la DIAN
-    // rechaza la identificación del adquiriente DESPUÉS de haber consumido el
-    // consecutivo autorizado, que no se recupera. Se verifica acá con el mismo
-    // módulo-11 que aplica `@NitDvMatches()` en el backend.
-    if (this.isNitCustomer()) {
-      // `900123456-7` ya trae el DV pegado: recortarlo evita un error falso.
-      const taxId = String(raw['customer_tax_id'] ?? '')
-        .trim()
-        .split('-')[0];
-      const dv = String(raw['customer_verification_digit'] ?? '').trim();
-      if (taxId && dv && !isValidNitDv(taxId, dv)) {
+    // A.8 — el DV ya no se verifica aquí porque ya no se DIGITA: la pantalla
+    // lo deriva del NIT con el mismo módulo 11 que `@NitDvMatches()` en el
+    // backend (ver `computedCustomerDv` y `buildPayload`), así que una
+    // incoherencia NIT↔DV es inalcanzable desde este formulario. Verificar el
+    // valor guardado de un cliente vinculado sería un falso bloqueo: el
+    // payload viaja con el derivado, que es el correcto por construcción.
+    //
+    // Lo que SÍ se puede dejar a medias es el código DANE del municipio: es
+    // el otro rechazo clásico y aquí se descubre antes del viaje.
+    if (!this.isExportInvoice()) {
+      const addressLine = String(raw['customer_address'] ?? '').trim();
+      const cityCode = String(raw['customer_municipality_code'] ?? '').trim();
+      if (addressLine && !cityCode) {
         blockers.push(
-          `El dígito de verificación ${dv} no corresponde al NIT ${taxId}: el módulo-11 da ${computeNitDv(taxId)}. Corrígelo antes de emitir.`,
+          'La dirección fiscal necesita su municipio DANE: búscalo por nombre en «Municipio (DANE)» y selecciónalo. Sin ese código la DIAN rechaza el documento.',
+        );
+      } else if (!addressLine && cityCode) {
+        blockers.push(
+          'Hay un municipio DANE elegido pero la dirección fiscal está vacía: escribe la dirección o quita el municipio.',
         );
       }
     }
@@ -6838,7 +7014,17 @@ export class InvoiceCreatePageComponent implements OnInit {
     if (!raw['customer_id'] && inline) {
       // `inline_customer` sólo se manda cuando NO hay `customer_id`: el backend
       // lo ignora si ambos vienen, y mandar los dos esconde cuál mandó.
-      payload.inline_customer = inline;
+      //
+      // A.8 — el tipo de persona que el usuario vio y eligió en la pantalla
+      // manda sobre el que trajera el modal: el selector es la última palabra
+      // visible antes de emitir. Con documento no-NIT se fija NATURAL sin
+      // preguntar (una cédula ES una persona natural).
+      payload.inline_customer = {
+        ...inline,
+        person_type: this.isNitCustomer()
+          ? String(raw['customer_person_type'] || 'JURIDICA')
+          : 'NATURAL',
+      };
     }
     const name = String(raw['customer_name'] ?? '').trim();
     if (name) payload.customer_name = name;
@@ -6851,18 +7037,46 @@ export class InvoiceCreatePageComponent implements OnInit {
     if (raw['customer_document_type']) {
       payload.customer_document_type = String(raw['customer_document_type']);
     }
-    // El DV sólo tiene sentido en NIT; en cualquier otro tipo es un dígito
-    // suelto que el backend valida igual y que no significa nada.
-    const dv = String(raw['customer_verification_digit'] ?? '').trim();
-    if (dv && this.isNitCustomer()) payload.customer_verification_digit = dv;
+    // A.8 — el DV NUNCA viaja tecleado: se deriva del NIT con el módulo 11
+    // (misma util compartida del checkout) y SÓLO en NIT. En cédula o
+    // pasaporte el campo no existe en el payload — condición ya garantizada
+    // por esta rama, que el backend complementa calculándolo si faltara.
+    if (this.isNitCustomer() && taxId) {
+      const dv = computeNitDv(this.customerTaxIdBase());
+      if (dv) payload.customer_verification_digit = dv;
+    }
     const regime = String(raw['customer_tax_regime'] ?? '').trim();
     if (regime) payload.customer_tax_regime = regime;
     const responsibilities = this.responsibilitiesValue();
     if (responsibilities.length > 0) {
       payload.customer_fiscal_responsibilities = responsibilities;
     }
-    const address = String(raw['customer_address'] ?? '').trim();
-    if (address) payload.customer_address = address;
+    // A.8 — dirección fiscal ESTRUCTURADA cuando hay municipio DANE: el
+    // backend eleva este objeto a `InvoiceAddressDto` tal cual (`liftInvoiceAddress`)
+    // y `normalizeAddress()` lo convierte en el `cac:PhysicalLocation` del XML.
+    // Sin municipio se conserva el comportamiento histórico de siempre: el
+    // string plano, que el backend desglosa en `address_line`.
+    const addressLine = String(raw['customer_address'] ?? '').trim();
+    const cityCode = String(raw['customer_municipality_code'] ?? '').trim();
+    const cityName = String(raw['customer_city_name'] ?? '').trim();
+    if (addressLine) {
+      const structuredAddress: CustomerInvoiceAddressPayload = {
+        address_line: addressLine,
+      };
+      if (cityCode) {
+        structuredAddress.city_code = cityCode;
+        // El DTO de dirección define el código de departamento como los DOS
+        // primeros dígitos del de municipio; no hay control aparte a propósito.
+        structuredAddress.department_code = cityCode.slice(0, 2);
+      }
+      if (cityName) structuredAddress.city_name = cityName;
+      payload.customer_address = structuredAddress;
+    } else if (cityCode) {
+      // Alcanzado sólo si el bloqueo correspondiente fue ignorado (no debería
+      // ocurrir): un objeto sin address_line sería un 400 garantizado, así que
+      // se degrada a omitir la dirección antes que enviar basura fiscal.
+      payload.customer_address = undefined;
+    }
 
     // ── Retenciones
     const withholding = round2(this.effectiveWithholding());
@@ -6926,7 +7140,12 @@ export class InvoiceCreatePageComponent implements OnInit {
       if (rateDate) payload.exchange_rate_date = rateDate;
     }
 
-    return payload;
+    // A.8 — el espejo `CreateInvoiceDto` de interfaces/ todavía tipa
+    // customer_address como string; ampliarlo es trabajo de otro dueño (la
+    // misma razón por la que este payload vive en un tipo local). En el cable
+    // viaja el objeto desglosado, que el backend eleva a InvoiceAddressDto con
+    // liftInvoiceAddress — ver CustomerInvoiceAddressPayload.
+    return payload as CreateInvoiceDto;
   }
 
   /**
@@ -7273,11 +7492,14 @@ export class InvoiceCreatePageComponent implements OnInit {
       customer_document_type: DOCUMENT_TYPE_NIT_CODE,
       customer_tax_id: '',
       customer_verification_digit: '',
+      customer_person_type: 'JURIDICA' as 'NATURAL' | 'JURIDICA',
       customer_tax_regime: '',
       customer_fiscal_responsibilities: [],
       customer_email: '',
       customer_phone: '',
       customer_address: '',
+      customer_municipality_code: '',
+      customer_city_name: '',
       manual_withholding: false,
       withholding_amount: 0,
       use_foreign_currency: false,
