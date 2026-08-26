@@ -44,8 +44,8 @@ describe('computeDocumentFormatHint', () => {
     expect(hint?.text).toContain('Faltan 3');
     expect(hint?.text).toContain('mínimo 6');
     expect(hint?.text).toContain('Cédula de Ciudadanía');
-    // Singular form
-    expect(hint?.text).toContain('carácter');
+    // Plural form (3 missing → "caracteres", not singular "carácter")
+    expect(hint?.text).toContain('caracteres');
   });
 
   it('shows "✓ N caracteres — entre X y Y" when input is in range', () => {
@@ -82,24 +82,28 @@ describe('computeDocumentFormatHint', () => {
   });
 
   describe('per document type', () => {
+    // overflow inputs MUST actually exceed the max so the util says 'warn'.
+    // Earlier versions used inputs that were still in-range (e.g. NIT
+    // '9001234567' = 10 digits = exactly at maxLength 12; PA 'AB...34' = 16
+    // chars = at maxLength 16) and silently passed the warn assertion.
     const cases: Array<{
       type: string;
       valid: string;
       invalid: string; // one char too short
-      overflow: string; // one char too long
+      overflow: string; // strictly over the max
       label: string;
-      minHint?: string; // the "entre X" token we expect to see
+      minHint?: string;
     }> = [
-      { type: 'CC', valid: '1234567', invalid: '123', overflow: '12345678901', label: 'Cédula de Ciudadanía', minHint: 'entre 6 y 10' },
-      { type: 'CE', valid: '1234567', invalid: '123', overflow: '12345678901', label: 'Cédula de Extranjería', minHint: 'entre 6 y 10' },
-      { type: 'NIT', valid: '900123456', invalid: '1234', overflow: '9001234567', label: 'NIT', minHint: 'entre 8 y 12' },
-      { type: 'TI', valid: '12345678901', invalid: '123', overflow: '123456789011', label: 'Tarjeta de Identidad', minHint: 'entre 8 y 11' },
-      { type: 'RC', valid: '12345678901', invalid: '123', overflow: '123456789011', label: 'Registro Civil', minHint: 'entre 8 y 11' },
-      { type: 'PA', valid: 'AB12345', invalid: 'AB', overflow: 'AB12345678901234', label: 'Pasaporte', minHint: 'entre 5 y 16' },
-      { type: 'PEP', valid: '123456789', invalid: '123', overflow: '12345678901234', label: 'Permiso Especial', minHint: 'entre 9 y 15' },
-      { type: 'PPT', valid: '123456789', invalid: '123', overflow: '12345678901234', label: 'Permiso por Protección', minHint: 'entre 9 y 15' },
-      { type: 'DIE', valid: 'AB12345', invalid: 'AB', overflow: 'AB12345678901234567', label: 'Documento de Identificación', minHint: 'entre 5 y 20' },
-      { type: 'NUIP', valid: '12345678901', invalid: '123', overflow: '123456789011', label: 'Número Único', minHint: 'entre 8 y 11' },
+      { type: 'CC', valid: '1234567', invalid: '123', overflow: '1234567890123', label: 'Cédula de Ciudadanía', minHint: 'entre 6 y 10' },
+      { type: 'CE', valid: '1234567', invalid: '123', overflow: '1234567890123', label: 'Cédula de Extranjería', minHint: 'entre 6 y 10' },
+      { type: 'NIT', valid: '900123456', invalid: '1234', overflow: '9001234567890', label: 'NIT', minHint: 'entre 8 y 12' },
+      { type: 'TI', valid: '12345678901', invalid: '123', overflow: '1234567890123', label: 'Tarjeta de Identidad', minHint: 'entre 8 y 11' },
+      { type: 'RC', valid: '12345678901', invalid: '123', overflow: '1234567890123', label: 'Registro Civil', minHint: 'entre 8 y 11' },
+      { type: 'PA', valid: 'AB12345', invalid: 'AB', overflow: 'AB1234567890123456', label: 'Pasaporte', minHint: 'entre 5 y 16' },
+      { type: 'PEP', valid: '123456789', invalid: '123', overflow: '12345678901234567', label: 'Permiso Especial', minHint: 'entre 9 y 15' },
+      { type: 'PPT', valid: '123456789', invalid: '123', overflow: '12345678901234567', label: 'Permiso por Protección', minHint: 'entre 9 y 15' },
+      { type: 'DIE', valid: 'AB12345', invalid: 'AB', overflow: 'AB12345678901234567890', label: 'Documento de Identificación', minHint: 'entre 5 y 20' },
+      { type: 'NUIP', valid: '12345678901', invalid: '123', overflow: '1234567890123', label: 'Número Único', minHint: 'entre 8 y 11' },
     ];
 
     for (const c of cases) {
@@ -109,12 +113,13 @@ describe('computeDocumentFormatHint', () => {
         expect(ok?.tone).toBe('ok');
         expect(ok?.text).toContain(c.minHint!);
 
-        // Below min
+        // Below min — the text uses "caracteres" (or "carácter" for missing=1),
+        // so the regex matches the first 7 chars of "caracter" or "caracté".
         const below = computeDocumentFormatHint(c.type, c.invalid);
         expect(below?.tone).toBe('info');
         expect(below?.text).toMatch(/Faltan \d+ caráct/);
 
-        // Overflow
+        // Overflow — input must EXCEED the max (no match for exactly-at-max).
         const over = computeDocumentFormatHint(c.type, c.overflow);
         expect(over?.tone).toBe('warn');
         expect(over?.text).toContain('de más');

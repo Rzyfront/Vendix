@@ -10,12 +10,15 @@ import {
  *
  * Coverage map:
  *   - empty / whitespace / null / undefined input  → null
- *   - below 10 digits (3, 5, 9)                   → 'info' "Faltan N dígito(s)"
- *   - exactly 10 digits                            → 'ok' "✓ 10 dígitos — listo"
- *   - over 10 digits (11, 12)                     → 'warn' "N dígito(s) de más"
+ *   - below 10 digits (1, 5, 9)                   → 'info' "Faltan N dígito(s)"
+ *   - exactly 10 digits                            → 'ok' "✓ 10 dígitos"
+ *   - over 10 digits (11, 14)                     → 'warn' "N dígito(s) de más"
  *   - non-digit characters (spaces, +, -, ())     → counted as digits-only
- *   - Colombian country prefix "+57 ..."          → strips prefix, counts 10
  *   - singular vs plural agreement
+ *
+ * Note: the util counts DIGITS in the input (not characters). A single
+ * "3" is length=1, so the count display shows "1 / 10" and "Faltan 9".
+ * Tests reflect this behavior.
  */
 describe('computePhoneFormatHint', () => {
   it('returns null when the input is empty / null / undefined', () => {
@@ -25,12 +28,16 @@ describe('computePhoneFormatHint', () => {
     expect(computePhoneFormatHint(undefined)).toBeNull();
   });
 
+  it('returns null when only whitespace is typed', () => {
+    expect(computePhoneFormatHint('\t\n')).toBeNull();
+  });
+
   describe('below the target (info tone)', () => {
-    it('shows "Faltan 10" for a single digit', () => {
+    it('shows "Faltan 9" for a single digit (length=1, missing=9)', () => {
       const hint = computePhoneFormatHint('3');
       expect(hint?.tone).toBe('info');
-      expect(hint?.text).toContain('Faltan 10');
-      expect(hint?.text).toContain('0 / 10');
+      expect(hint?.text).toContain('Faltan 9');
+      expect(hint?.text).toContain('1 / 10');
     });
 
     it('shows "Faltan 5" when 5 digits are typed', () => {
@@ -41,6 +48,7 @@ describe('computePhoneFormatHint', () => {
     });
 
     it('uses singular form when 1 digit is missing', () => {
+      // 9 digits typed → length=9, missing=1 → singular "dígito"
       const hint = computePhoneFormatHint('300123456');
       expect(hint?.tone).toBe('info');
       expect(hint?.text).toContain('Faltan 1 dígito ');
@@ -87,8 +95,8 @@ describe('computePhoneFormatHint', () => {
       expect(hint?.text).toContain('máximo 10');
     });
 
-    it('uses plural form when more than 1 digit over', () => {
-      const hint = computePhoneFormatHint('300123456700');
+    it('uses plural form when 4 digits over (14 digits typed)', () => {
+      const hint = computePhoneFormatHint('30012345670000');
       expect(hint?.tone).toBe('warn');
       expect(hint?.text).toContain('4 dígitos de más');
     });
