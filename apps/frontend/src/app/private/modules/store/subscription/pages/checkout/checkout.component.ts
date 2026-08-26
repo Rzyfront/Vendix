@@ -553,12 +553,12 @@ const BILLING_ADDRESS_SOURCE_COPY: Partial<Record<BillingAddressSource, string>>
                   @if (billingFormVisible()) {
                   <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <label class="flex flex-col gap-1 sm:col-span-2">
-                      <span class="text-xs font-medium text-text-secondary">Razón social</span>
+                      <span class="text-xs font-medium text-text-secondary">{{ billingLegalNameLabel() }}</span>
                       <input
                         type="text"
                         [value]="billingLegalName()"
                         (input)="setBillingField(billingLegalName, $event)"
-                        placeholder="Nombre legal registrado ante la DIAN"
+                        [placeholder]="billingLegalNamePlaceholder()"
                         class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
                       />
                     </label>
@@ -577,20 +577,19 @@ const BILLING_ADDRESS_SOURCE_COPY: Partial<Record<BillingAddressSource, string>>
                       </select>
                     </label>
 
-                    <label class="flex flex-col gap-1">
-                      <span class="text-xs font-medium text-text-secondary">Tipo de persona</span>
-                      <select
-                        [value]="billingPersonType()"
-                        (change)="setBillingField(billingPersonType, $event)"
-                        [disabled]="!billingDocumentIsNit()"
-                        [class.bg-gray-50]="!billingDocumentIsNit()"
-                        [class.cursor-not-allowed]="!billingDocumentIsNit()"
-                        class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
-                      >
-                        <option value="1">Persona Jurídica (Empresa)</option>
-                        <option value="2">Persona Natural</option>
-                      </select>
-                    </label>
+                    @if (billingDocumentIsNit()) {
+                      <label class="flex flex-col gap-1">
+                        <span class="text-xs font-medium text-text-secondary">Tipo de persona</span>
+                        <select
+                          [value]="billingPersonType()"
+                          (change)="setBillingField(billingPersonType, $event)"
+                          class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
+                        >
+                          <option value="1">Persona Jurídica (Empresa)</option>
+                          <option value="2">Persona Natural (Independiente con NIT)</option>
+                        </select>
+                      </label>
+                    }
 
                     <label class="flex flex-col gap-1" [class.sm:col-span-2]="!billingDocumentIsNit()">
                       <span class="text-xs font-medium text-text-secondary">Número</span>
@@ -599,7 +598,7 @@ const BILLING_ADDRESS_SOURCE_COPY: Partial<Record<BillingAddressSource, string>>
                         inputmode="numeric"
                         [value]="billingTaxId()"
                         (input)="setBillingField(billingTaxId, $event)"
-                        placeholder="900123456"
+                        [placeholder]="billingTaxIdPlaceholder()"
                         class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
                       />
                     </label>
@@ -987,6 +986,20 @@ export class CheckoutComponent implements OnInit {
   /** Solo el NIT lleva DV; una cédula no tiene checksum que mostrar. */
   readonly billingDocumentIsNit = computed(
     () => this.billingDocumentType() === BILLING_DOCUMENT_TYPE_NIT,
+  );
+
+  readonly billingLegalNameLabel = computed(() =>
+    this.billingDocumentIsNit() ? 'Razón social' : 'Nombre completo',
+  );
+
+  readonly billingLegalNamePlaceholder = computed(() =>
+    this.billingDocumentIsNit()
+      ? 'Nombre de la empresa registrado ante la DIAN'
+      : 'Nombre y apellido (ej. Keilin Luz Sierra Toro)',
+  );
+
+  readonly billingTaxIdPlaceholder = computed(() =>
+    this.billingDocumentIsNit() ? '900123456' : '1118860902',
   );
 
   /**
