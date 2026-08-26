@@ -54,6 +54,7 @@ import { PlatformInvoicingService } from './platform-invoicing.service';
 import { PlatformInvoicingController } from './platform-invoicing.controller';
 import { PlatformProfilesService } from './platform-profiles.service';
 import { PlatformProfilesController } from './platform-profiles.controller';
+import { PlatformCreditNotesService } from './platform-credit-notes.service';
 
 @Module({
   imports: [
@@ -105,6 +106,10 @@ import { PlatformProfilesController } from './platform-profiles.controller';
     // ADR-4 ámbito). Reutiliza ProfileCatalogCacheService, ProfileAccountingValidator
     // y AuditService del riel tienda vía DI (ya provistos por InvoicingModule).
     PlatformProfilesService,
+    // C.2: notas crédito/débito plataforma (ADR-7). Persiste vía
+    // InvoicingService.create() del riel tienda con RequestContext sintetizado;
+    // NO toca el servicio tienda — compuerta dura verificada por su spec.
+    PlatformCreditNotesService,
   ],
   exports: [SubscriptionFiscalService],
 })

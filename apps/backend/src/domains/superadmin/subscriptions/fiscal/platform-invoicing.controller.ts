@@ -8,6 +8,7 @@ import {
   ParseIntPipe,
   Post,
   Query,
+  Req,
   Res,
   UseGuards,
 } from '@nestjs/common';
@@ -28,6 +29,11 @@ import {
 import type { Response } from 'express';
 
 import { enrichAcquirerForStandard } from './acquirer-standard';
+import { PlatformCreditNotesService } from './platform-credit-notes.service';
+import {
+  PlatformCreateCreditNoteDto,
+  PlatformCreateDebitNoteDto,
+} from './dto/platform-credit-note.dto';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { ResponseService } from '../../../../common/responses/response.service';
@@ -137,6 +143,7 @@ export class PlatformInvoicingController {
     private readonly platformInvoicing: PlatformInvoicingService,
     private readonly tenants: PlatformTenantsService,
     private readonly subscriptionFiscalService: SubscriptionFiscalService,
+    private readonly creditNotes: PlatformCreditNotesService,
   ) {}
 
   /**
@@ -496,6 +503,57 @@ export class PlatformInvoicingController {
     throw new VendixHttpException(
       { code: 'PDF_NOT_READY', httpStatus: 503 } as any,
       `Regeneracion PDF para transmision #${id} no disponible — pendiente B.5`,
+    );
+  }
+
+  // ─── Notas crédito/débito plataforma (C.2 del CP-platform-invoicing-parity) ─
+
+  /**
+   * Crea una `credit_note` del rail plataforma contra una factura plataforma.
+   *
+   * El body exige `related_invoice_id` (la factura que corrige) y
+   * `note_concept_code` (concepto DIAN — ver ERR-09 del plan: bloqueante
+   * si falta). El destinatario se hereda del documento relacionado; el
+   * caller puede override vía `customer` opcional.
+   *
+   * Persistencia delega en `InvoicingService.create()` del riel tienda
+   * dentro de un RequestContext sintetizado org-plataforma, sin tocar el
+   * servicio tienda. El spec tienda SIN modificaciones sigue verde
+   * (compuerta dura de ADR-7).
+   */
+  @Post('credit-notes')
+  @HttpCode(HttpStatus.CREATED)
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({
+    summary: 'Crear nota crédito del rail super-admin contra una factura plataforma',
+  })
+  async createCreditNote(
+    @Body() dto: PlatformCreateCreditNoteDto,
+    @Req() req: Request,
+  ): Promise<any> {
+    const user_id = (req as any).user?.id ?? 0;
+    const result = await this.creditNotes.createCreditNote(dto, user_id);
+    return this.responseService.created(
+      result,
+      'Nota crédito plataforma creada',
+    );
+  }
+
+  @Post('debit-notes')
+  @HttpCode(HttpStatus.CREATED)
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({
+    summary: 'Crear nota débito del rail super-admin contra una factura plataforma',
+  })
+  async createDebitNote(
+    @Body() dto: PlatformCreateDebitNoteDto,
+    @Req() req: Request,
+  ): Promise<any> {
+    const user_id = (req as any).user?.id ?? 0;
+    const result = await this.creditNotes.createDebitNote(dto, user_id);
+    return this.responseService.created(
+      result,
+      'Nota débito plataforma creada',
     );
   }
 }
