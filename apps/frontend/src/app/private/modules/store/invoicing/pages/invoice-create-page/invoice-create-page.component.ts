@@ -4897,6 +4897,14 @@ export class InvoiceCreatePageComponent implements OnInit {
       icon: 'x',
     },
     {
+      id: 'preview',
+      label: 'Ver como saldrá',
+      variant: 'outline',
+      icon: 'eye',
+      title:
+        'Previsualización del formato de impresión: no emite ni toma consecutivo.',
+    },
+    {
       id: 'save',
       label:
         this.mode() === 'from_order' ? 'Crear desde pedido' : 'Crear factura',
