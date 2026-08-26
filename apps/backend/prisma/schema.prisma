@@ -5850,16 +5850,24 @@ model invoice_resolutions {
 model invoice_profiles {
   id              Int @id @default(autoincrement())
   organization_id Int
-  /// NO nullable, a diferencia de `invoice_resolutions.store_id`.
+  /// Nullable desde la migración 20260826120000, replicando el patrón vivo de
+  /// `dian_configurations` (migración 20260511160000) y de
+  /// `invoice_resolutions.store_id`. Permite perfiles de ámbito organización
+  /// (raíl plataforma VENDIX_ADMIN con su propio NIT) anclados únicamente a
+  /// `organization_id`, sin fragmentar el invariante del módulo.
   ///
-  /// El invariante del módulo es «exactamente un predeterminado por
-  /// (`store_id`, `operation_type`)», y en Postgres dos NULL son DISTINTOS: con
-  /// la columna nullable el índice único parcial admitiría dos perfiles de
-  /// ámbito organización marcados como predeterminados del mismo tipo de
-  /// operación, y el wizard elegiría uno al azar. La sección vive en el menú de
-  /// tienda (`admin/invoicing/profiles`), así que el ámbito de tienda es además
-  /// el que corresponde.
-  store_id        Int
+  /// El invariante «exactamente un predeterminado por ámbito y operation_type»
+  /// lo sostiene la BASE con DOS índices únicos parciales:
+  ///   · `invoice_profiles_store_scope_default_uq` ON (store_id, operation_type)
+  ///     WHERE is_default AND store_id IS NOT NULL  (ámbito tienda)
+  ///   · `invoice_profiles_org_scope_default_uq` ON (organization_id, operation_type)
+  ///     WHERE is_default AND store_id IS NULL       (ámbito organización)
+  /// Postgres trata NULLs como distintos, así que UN solo parcial no cubre
+  /// ambos casos: el ORG-scope es el segundo parcial. Prisma no puede
+  /// representar parciales: viven únicamente en la migración de SQL.
+  /// `store_id` no se queda NULL por capricho — su nulabilidad es gobernada por
+  /// `organizations.fiscal_scope` (STORE ⇒ tienda; ORGANIZATION ⇒ plataforma).
+  store_id        Int?
 
   name String @db.VarChar(150)
   /// Código DIAN de tipo de operación (`09` = AIU, `10` = estándar).
@@ -5879,10 +5887,18 @@ model invoice_profiles {
   /// de Prisma la exigiría por `ALTER TYPE`. La validación vive en el DTO.
   state          String @db.VarChar(20) @default("active")
 
-  /// Predeterminado para su `operation_type`. El único parcial se garantiza con
-  /// un índice `UNIQUE ... WHERE is_default` que Prisma NO puede representar:
-  /// vive únicamente en el SQL de la migración. No lo borres de ahí creyendo que
-  /// el esquema lo cubre.
+  /// Predeterminado para su `operation_type` en su ámbito (STORE u ORG). El
+  /// invariante «un predeterminado por ámbito y operation_type» lo sostienen
+  /// DOS índices únicos parciales en la base (Prisma no puede representar
+  /// parciales): `invoice_profiles_store_scope_default_uq` y
+  /// `invoice_profiles_org_scope_default_uq`, creados en la migración
+  /// 20260826120000_invoice_profiles_relax_store_id_for_org_scope. No los
+  /// borres de ahí creyendo que el esquema los cubre.
+  ///
+  /// El índice de unicidad de nombre por ámbito es simétrico:
+  /// `invoice_profiles_unique_name_per_store` (tienda) y
+  /// `invoice_profiles_unique_name_per_org` (organización, store_id IS NULL),
+  /// este último en la migración 20260826121000.
   is_default Boolean @default(false)
 
   /// Número de la última versión COMPROMETIDA. Arranca en 0, no en 1.
@@ -5910,8 +5926,11 @@ model invoice_profiles {
   /// al perfil y el RESTRICT de las versiones lo bloquearía igual. La cadena
   /// entera es `Restrict` para que la base diga lo que de verdad hace, y para no
   /// añadir un `ON DELETE CASCADE` sobre una tabla padre con datos de negocio.
+  ///
+  /// `store` es opcional (nullable) desde la migración 20260826120000: cuando
+  /// `store_id IS NULL` el perfil vive en el ámbito organización (raíl plataforma).
   organization organizations @relation(fields: [organization_id], references: [id], onDelete: Restrict)
-  store        stores        @relation(fields: [store_id], references: [id], onDelete: Restrict)
+  store        stores?       @relation(fields: [store_id], references: [id], onDelete: Restrict)
   creator      users?        @relation("invoice_profiles_created_by", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: NoAction)
   cloned_from  invoice_profiles?  @relation("invoice_profile_clones", fields: [cloned_from_profile_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   clones       invoice_profiles[] @relation("invoice_profile_clones")
@@ -5919,6 +5938,7 @@ model invoice_profiles {
 
   @@index([store_id, state, operation_type])
   @@index([organization_id])
+  @@index([organization_id, state, operation_type])
   @@index([cloned_from_profile_id])
 }
 
