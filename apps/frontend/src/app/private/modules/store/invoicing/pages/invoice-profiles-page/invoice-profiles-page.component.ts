@@ -28,8 +28,10 @@ import {
 import type { InvoiceProfile } from '../../interfaces/invoice-profile.interface';
 import { operationTypeLabel } from '../../interfaces/invoice-profile.interface';
 import type { InvoiceProfileTemplate } from '../../services/invoice-profile.service';
+import { InvoiceProfileService } from '../../services/invoice-profile.service';
+import type { InvoiceProfileAccountHealthRow } from '../../services/invoice-profile.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import * as ProfileActions from '../../state/actions/invoice-profile.actions';
 import {
     selectProfiles,
@@ -76,6 +78,21 @@ const TEMPLATE_BY_INDUSTRY: Readonly<Record<string, string>> = {
 const FALLBACK_TEMPLATE_KEY = 'dian-standard';
 
 /**
+ * Código de issue del panel de salud → frase para el operador.
+ *
+ * Son los DOS valores estables que manda `account-health` —los mismos del 422
+ * `INVOICING_PROFILE_010`—, y se arreglan distinto: el primero pide elegir una
+ * cuenta que exista en el PUC; el segundo pide una cuenta de MOVIMIENTO y no
+ * una agrupación. Un código que el backend traiga mañana cae al literal y el
+ * panel no se rompe.
+ */
+const ACCOUNT_HEALTH_ISSUE_LABELS: Readonly<Record<string, string>> = {
+    ACCOUNT_NOT_IN_CHART: 'la cuenta no existe en el plan de cuentas',
+    ACCOUNT_DOES_NOT_ACCEPT_ENTRIES:
+        'la cuenta es de agrupación y no acepta movimientos',
+};
+
+/**
  * Mismo criterio de focuseables que `ModalComponent`, copiado a propósito:
  * dos definiciones de «qué se puede tabular» harían que la trampa del borrado
  * duro y la de los modales compartidos se comportaran distinto para el mismo
@@ -114,6 +131,7 @@ const DELETE_DIALOG_FOCUSABLE_SELECTOR = [
     standalone: true,
     imports: [
         NgTemplateOutlet,
+        RouterLink,
         CardComponent,
         ConfirmationModalComponent,
         StatsComponent,
@@ -279,6 +297,110 @@ const DELETE_DIALOG_FOCUSABLE_SELECTOR = [
                 </div>
 
                 <div class="relative p-2 md:p-4">
+                    <!--
+                      PANEL DE SALUD F.13 — GET /store/invoicing/profiles/account-health.
+                      Lista los perfiles cuya versión VIGENTE lleva cuentas PUC
+                      inválidas: la compuerta del backend rechaza con 422 todo
+                      guardado de esos perfiles —aunque se editen por otro
+                      motivo—, así que sin este aviso el usuario descubriría el
+                      bloqueo a mitad de un cambio ajeno. La corrección es la vía
+                      normal: editar y guardar, que crea versión nueva. El fallo
+                      de la consulta NO bloquea la página; sólo avisa.
+                    -->
+                    @if (!account_health_loading()) {
+                        @if (account_health_failed()) {
+                            <div
+                                class="mb-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2 text-xs text-warning md:text-sm"
+                                role="alert"
+                                data-testid="account-health-error"
+                            >
+                                No se pudo consultar la salud contable de los
+                                perfiles (cuentas PUC). El listado sigue
+                                disponible; recarga la página para reintentar.
+                            </div>
+                        } @else if (account_health().length > 0) {
+                            <div
+                                class="mb-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2.5 text-warning"
+                                role="alert"
+                                data-testid="account-health-banner"
+                            >
+                                <p class="text-xs font-semibold md:text-sm">
+                                    {{ account_health().length }}
+                                    {{
+                                        account_health().length === 1
+                                            ? 'perfil tiene cuentas contables que el plan de cuentas no puede asentar'
+                                            : 'perfiles tienen cuentas contables que el plan de cuentas no puede asentar'
+                                    }}. Guardar cualquiera de ellos será
+                                    rechazado hasta corregir la cuenta.
+                                </p>
+                                <ul class="mt-2 space-y-2">
+                                    @for (
+                                        row of account_health();
+                                        track row.profile_id
+                                    ) {
+                                        <li data-testid="account-health-row">
+                                            <div
+                                                class="flex flex-wrap items-center gap-x-2 gap-y-1"
+                                            >
+                                                <strong
+                                                    class="text-text-primary"
+                                                    >{{ row.name }}</strong
+                                                >
+                                                <span
+                                                    class="rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide"
+                                                >
+                                                    v{{ row.version }} ·
+                                                    {{
+                                                        row.state === 'active'
+                                                            ? 'Activo'
+                                                            : 'Inactivo'
+                                                    }}
+                                                </span>
+                                            </div>
+                                            <ul class="mt-1 space-y-0.5 pl-4">
+                                                @for (
+                                                    issue of row.issues;
+                                                    track issue.field
+                                                ) {
+                                                    <li class="list-disc">
+                                                        <code
+                                                            class="rounded bg-warning/10 px-1 text-[11px]"
+                                                            >{{
+                                                                issue.field
+                                                            }}</code
+                                                        >
+                                                        —
+                                                        {{
+                                                            accountHealthIssueLabel(
+                                                                issue.code
+                                                            )
+                                                        }}
+                                                        <span
+                                                            class="text-[10px] opacity-70"
+                                                            >({{
+                                                                issue.code
+                                                            }})</span
+                                                        >
+                                                    </li>
+                                                }
+                                            </ul>
+                                            <a
+                                                [routerLink]="[
+                                                    '/admin/invoicing/profiles',
+                                                    row.profile_id,
+                                                    'edit',
+                                                ]"
+                                                class="mt-1 inline-block text-xs font-semibold underline underline-offset-2 hover:opacity-80 md:text-[13px]"
+                                            >
+                                                Corregir en el editor →
+                                            </a>
+                                        </li>
+                                    }
+                                </ul>
+                            </div>
+                        }
+                    }
+
                     <!-- El error se pinta ARRIBA de la tabla y no sustituye a
                          los datos: dejar la lista anterior visible con el aviso
                          es más honesto que un «no hay perfiles», que sería una
@@ -686,6 +808,17 @@ export class InvoiceProfilesPageComponent {
         { initialValue: null as string | null },
     );
 
+    private readonly profile_service = inject(InvoiceProfileService);
+
+    // ── Panel de salud F.13 (`GET …/profiles/account-health`).
+    // Estado local a propósito y NO store: el panel es un aviso de esta
+    // página, no estado compartido — ningún otro consumidor lo lee.
+    readonly account_health = signal<InvoiceProfileAccountHealthRow[]>([]);
+    readonly account_health_failed = signal(false);
+    readonly account_health_loading = signal(true);
+    /** Firma de la última consulta: lista+versiones+estados, para reconsultar cuando algo cambió. */
+    private readonly health_fetched_key = signal<string | null>(null);
+
     /** El selector de plantillas está desplegado. */
     readonly template_picker = signal(false);
 
@@ -919,6 +1052,33 @@ export class InvoiceProfilesPageComponent {
         // standalone y lazy, así que se instancia cuando la ruta se activa.
         this.store.dispatch(ProfileActions.loadProfiles({}));
 
+        // PANEL DE SALUD F.13 — primera consulta y reconsultas.
+        // El disparador es la FIRMA del listado (id:versión:estado por perfil):
+        // activar, borrar o volver de una edición cambia la versión vigente o
+        // la existencia de filas, y el aviso que nombra perfiles «por corregir»
+        // no puede sobrevivir stale a ninguna de las tres. Con el listado vacío
+        // no hay nada que enfermar: se vacía sin llamar. La primera pasada
+        // espera (`loading`): pedir salud sobre un store aún vacío sería
+        // preguntar dos veces lo mismo.
+        effect(() => {
+            const profiles = this.profiles();
+            if (this.loading()) return;
+            const key = profiles.length
+                ? profiles
+                      .map((p) => `${p.id}:${p.current_version}:${p.state}`)
+                      .join('|')
+                : '<empty>';
+            if (key === this.health_fetched_key()) return;
+            this.health_fetched_key.set(key);
+            if (profiles.length === 0) {
+                this.account_health.set([]);
+                this.account_health_failed.set(false);
+                this.account_health_loading.set(false);
+                return;
+            }
+            this.fetchAccountHealth();
+        });
+
         // El texto de confirmación se limpia al cerrar el modal, no al abrirlo:
         // si se limpiara al abrir, un `pending_delete` que cambia de fila
         // dejaría escrito el nombre del anterior y el botón quedaría habilitado
@@ -977,6 +1137,35 @@ export class InvoiceProfilesPageComponent {
         });
 
         this.destroy_ref.onDestroy(() => this.detachDeleteTabListener());
+    }
+
+    /**
+     * Consulta el panel de salud. El fallo nunca bloquea la página: es un
+     * aviso, no una puerta — la tabla vive con o sin él.
+     */
+    private fetchAccountHealth(): void {
+        this.account_health_loading.set(true);
+        this.account_health_failed.set(false);
+        this.profile_service.accountHealth().subscribe({
+            next: (response) => {
+                this.account_health.set(response.data ?? []);
+                this.account_health_loading.set(false);
+            },
+            error: () => {
+                this.account_health.set([]);
+                this.account_health_failed.set(true);
+                this.account_health_loading.set(false);
+            },
+        });
+    }
+
+    /**
+     * Frase del issue para el operador, con caída al código crudo si el
+     * backend trajera mañana un valor que este archivo no conoce: mostrar
+     * «código X» sigue siendo más útil que un hueco en la lista.
+     */
+    accountHealthIssueLabel(code: string): string {
+        return ACCOUNT_HEALTH_ISSUE_LABELS[code] ?? `problema de cuenta (${code})`;
     }
 
     onSearch(term: string): void {

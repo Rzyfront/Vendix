@@ -48,6 +48,27 @@ export interface InvoiceProfileTemplate {
     config: InvoiceProfileConfig;
 }
 
+/** Un problema de una fila del panel: la MISMA forma que manda el 422 `INVOICING_PROFILE_010` en `details.issues[]`. */
+export interface InvoiceProfileAccountHealthIssue {
+    field: string;
+    code: string;
+}
+
+/**
+ * Fila del panel de salud de cuentas PUC (`GET …/profiles/account-health`, F.13).
+ *
+ * Sólo llegan los perfiles cuya versión VIGENTE lleva códigos que el plan de
+ * cuentas no puede asentar; los sanos no aparecen. La corrección no ocurre
+ * aquí: es la vía normal de edición, que crea versión nueva append-only.
+ */
+export interface InvoiceProfileAccountHealthRow {
+    profile_id: number;
+    name: string;
+    state: string;
+    version: number;
+    issues: InvoiceProfileAccountHealthIssue[];
+}
+
 /** Entrada del catálogo de perfiles activos que consume el wizard de factura. */
 export interface InvoiceProfileCatalogEntry {
     id: number;
@@ -123,6 +144,21 @@ export class InvoiceProfileService {
      */
     catalog(): Observable<ApiResponse<InvoiceProfileCatalogEntry[]>> {
         return this.http.get<ApiResponse<InvoiceProfileCatalogEntry[]>>(this.url('catalog'));
+    }
+
+    /**
+     * Panel de salud de cuentas PUC (F.13): qué perfiles arrastran, en su
+     * versión VIGENTE, códigos contables que el PUC no puede asentar (no
+     * existen o son de agrupación).
+     *
+     * Sin paginación a propósito: la respuesta ya viene filtrada a las filas
+     * con problemas y el panel necesita el conjunto completo para su contador.
+     * Lectura pura — no marca nada en base; el marcador ES esta respuesta.
+     */
+    accountHealth(): Observable<ApiResponse<InvoiceProfileAccountHealthRow[]>> {
+        return this.http.get<ApiResponse<InvoiceProfileAccountHealthRow[]>>(
+            this.url('account-health'),
+        );
     }
 
     /** Historial de versiones (sin snapshots: la tabla no los necesita). */
