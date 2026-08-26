@@ -1199,3 +1199,34 @@ describe('CreateInvoiceDto — C.7: controles AIU apartables por documento', () 
     expect(failedPaths(errors)).toContain('aiu_minimum_base_percent');
   });
 });
+
+describe('CreateInvoiceDto — D.7: la compuerta del Modelo 1 está abierta', () => {
+  /**
+   * `aiu_accounting_model` valida contra `ENABLED_ACCOUNTING_MODELS`, el mismo
+   * interruptor único que gobierna la escritura del perfil. La apertura del
+   * Modelo 1 (2026-08-25, autorización explícita del dueño) añadió
+   * `'no_sumada'` a esa lista y ESTE spec es el que fija que la puerta del
+   * documento se levantó con ella — no sólo la del perfil.
+   */
+  it.each([['sumada'], ['no_sumada']])(
+    'acepta aiu_accounting_model %s',
+    async (model) => {
+      const errors = await validateAsPipe({
+        ...baseInvoice(),
+        aiu_accounting_model: model,
+      });
+      expect(failedPaths(errors)).toEqual([]);
+    },
+  );
+
+  it('rechaza un modelo que no existe, nombrando los dos admitidos', async () => {
+    const errors = await validateAsPipe({
+      ...baseInvoice(),
+      aiu_accounting_model: 'mitad_y_mitad',
+    });
+    expect(failedPaths(errors)).toContain('aiu_accounting_model');
+    expect(messagesAt(errors, 'aiu_accounting_model')).toContain(
+      'sumada, no_sumada',
+    );
+  });
+});

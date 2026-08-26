@@ -1167,31 +1167,21 @@ describe('InvoiceProfileConfig — accounting_model por la puerta real', () => {
     expect(resolveAccountingModel(saved.aiu)).toBe('sumada');
   });
 
-  it("'no_sumada' se rechaza con 422 mientras la Fase D no lo habilite", () => {
-    let error: any;
-    try {
-      normalizeAndAssertProfileConfig(configWith('no_sumada'), opts);
-    } catch (e) {
-      error = e;
-    }
+  it("'no_sumada' atraviesa la compuerta tras la apertura del Modelo 1 (D.7)", () => {
+    // La compuerta humana se levantó el 2026-08-25 con autorización explícita
+    // del dueño, con D.6 verde sobre los dos modelos. Por la puerta real: el
+    // valor entra, se normaliza y sale en el snapshot persistible.
+    const saved = normalizeAndAssertProfileConfig(configWith('no_sumada'), opts);
 
-    expect(error).toBeInstanceOf(VendixHttpException);
-    expect(error.getStatus()).toBe(422);
-    expect(error.getResponse()).toEqual(
-      expect.objectContaining({
-        details: expect.objectContaining({
-          issues: expect.arrayContaining([
-            expect.objectContaining({
-              field: 'aiu.accounting_model',
-              code: 'AIU_ACCOUNTING_MODEL_NOT_ENABLED',
-            }),
-          ]),
-        }),
-      }),
-    );
-    // El motivo viaja al operador y está FECHADO: una insignia «NO DISPONIBLE»
-    // sin fecha es el P1 que este campo cierra.
-    expect(error.getResponse().details.issues[0].message).toContain('Fase D');
+    expect(saved.aiu?.accounting_model).toBe('no_sumada');
+    expect(resolveAccountingModel(saved.aiu)).toBe('no_sumada');
+  });
+
+  it('la apertura deja a `no_sumada` SIN razón de deshabilitado', () => {
+    // El motivo fechado de la Fase D murió con la compuerta que describía:
+    // `accountingModelDisabledReason` devuelve null para todo modelo habilitado,
+    // y tras la apertura lo son los dos.
+    expect(accountingModelDisabledReason('no_sumada')).toBeNull();
   });
 
   it('un modelo inventado se distingue del que existe y todavía no se habilita', () => {
@@ -1218,15 +1208,17 @@ describe('InvoiceProfileConfig — accounting_model por la puerta real', () => {
     );
   });
 
-  it('la habilitación es UN interruptor, y hoy está en un solo valor', () => {
-    // Si alguien añade `'no_sumada'` acá sin cerrar la Fase D, este test cae y
-    // dice por qué. Es el candado del ADR-7.
-    expect([...ENABLED_ACCOUNTING_MODELS]).toEqual(['sumada']);
+  it('la habilitación sigue siendo UN interruptor, y la apertura (D.7) lo abrió completo', () => {
+    // El candado del ADR-7, ahora en su estado abierto: la lista habilitada
+    // cubre TODOS los valores del tipo, y ningún modelo tiene razón de
+    // deshabilitado. Si alguien vuelve a cerrar el Modelo 1, este test cae y
+    // dice por qué.
+    expect([...ENABLED_ACCOUNTING_MODELS]).toEqual(['sumada', 'no_sumada']);
     expect([...ACCOUNTING_MODELS]).toEqual(['sumada', 'no_sumada']);
     expect(isAccountingModelEnabled('sumada')).toBe(true);
-    expect(isAccountingModelEnabled('no_sumada')).toBe(false);
+    expect(isAccountingModelEnabled('no_sumada')).toBe(true);
     expect(accountingModelDisabledReason('sumada')).toBeNull();
-    expect(accountingModelDisabledReason('no_sumada')).toContain('Fase D');
+    expect(accountingModelDisabledReason('no_sumada')).toBeNull();
   });
 
   it('la ausencia se resuelve a sumada desde cualquier forma degradada', () => {

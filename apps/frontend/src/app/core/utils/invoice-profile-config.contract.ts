@@ -354,8 +354,8 @@ export function isAiuLineTaxable(
  *   introduce y el visto bueno de `dian-totals.validator` sobre los dos
  *   modelos.
  *
- * Ver {@link ENABLED_ACCOUNTING_MODELS}: hoy sólo uno de los dos se puede
- * escribir, y ese es el interruptor único que lo decide.
+ * Ver {@link ENABLED_ACCOUNTING_MODELS}: el interruptor único que decide qué
+ * modelos se pueden escribir. Desde el 2026-08-25 admite los dos.
  */
 export type AccountingModel = 'sumada' | 'no_sumada';
 
@@ -368,20 +368,25 @@ export const ACCOUNTING_MODELS: readonly AccountingModel[] = [
 /**
  * Los modelos que HOY se pueden persistir y emitir. **Interruptor único.**
  *
- * `'no_sumada'` está fuera a propósito: ofrecerlo antes de que el armado del
- * XML esté verificado produce documentos cuyos totales monetarios (FAU02,
- * FAU04, FAU06) no cuadran, y la DIAN los rechaza **al firmar** — o sea, con el
- * consecutivo ya tomado y sin forma de que el operador sepa por qué.
+ * `'no_sumada'` estuvo fuera mientras el armado del XML se verificaba: un
+ * documento cuyos totales monetarios (FAU02, FAU04, FAU06) no cuadran, la DIAN
+ * los rechaza **al firmar** — con el consecutivo ya tomado y sin forma de que
+ * el operador sepa por qué. Esa compuerta humana se levantó el 2026-08-25 con
+ * autorización explícita del dueño («cierra todas las brechas»), con el backend
+ * del Modelo 1 completo y `dian-totals.validator` verde sobre los dos modelos
+ * (D.6).
  *
- * Añadir `'no_sumada'` a esta lista es el paso D.7 del plan y es lo ÚNICO que
- * hace falta tocar para habilitarlo: la compuerta del perfil
+ * La apertura vive SÓLO en esta lista — paso D.7 del plan — porque las tres
+ * superficies leen de acá: la compuerta del perfil
  * ({@link validateInvoiceProfileConfig} vía `AIU_ACCOUNTING_MODEL_NOT_ENABLED`),
  * la del payload del documento (`CreateInvoiceDto.aiu_accounting_model`) y el
- * motivo que la pantalla pinta ({@link accountingModelDisabledReason}) leen
- * todas de acá. Dos listas habrían dejado la UI ofreciendo lo que la escritura
- * rechaza, o al revés.
+ * motivo que la pantalla pinta ({@link accountingModelDisabledReason}). Dos
+ * listas habrían dejado la UI ofreciendo lo que la escritura rechaza, o al revés.
  */
-export const ENABLED_ACCOUNTING_MODELS: readonly AccountingModel[] = ['sumada'];
+export const ENABLED_ACCOUNTING_MODELS: readonly AccountingModel[] = [
+  'sumada',
+  'no_sumada',
+];
 
 /** `true` si el modelo se puede escribir hoy. */
 export function isAccountingModelEnabled(value: unknown): boolean {
@@ -407,18 +412,23 @@ export function resolveAccountingModel(
 }
 
 /**
- * Por qué un modelo no se puede elegir todavía, en español y **fechado**.
+ * Por qué un modelo no se puede elegir, en español. `null` cuando el modelo sí
+ * está habilitado.
  *
  * Vive acá y no en el template porque las DOS pantallas que capturan la sección
  * AIU tienen que decir lo mismo, y porque una insignia «NO DISPONIBLE» sin
- * motivo ni fecha es exactamente el P1 que este texto cierra. `null` cuando el
- * modelo sí está habilitado.
+ * motivo es exactamente el P1 que este texto cierra.
+ *
+ * Desde la apertura del Modelo 1 (D.7, 2026-08-25) los dos valores de
+ * `AccountingModel` están habilitados y la función devuelve `null` SIEMPRE: no
+ * hay razón de deshabilitado que dar. Se conserva como la única costura por la
+ * que una compuerta futura volvería a fecharse sin tocar pantallas ni DTO.
  */
 export function accountingModelDisabledReason(
   model: AccountingModel,
 ): string | null {
   if (isAccountingModelEnabled(model)) return null;
-  return 'Cambia los totales monetarios del XML (FAU02, FAU04, FAU06). Se habilita en la Fase D del plan de facturación, cuando el armado del documento pase la compuerta de totales en los dos modelos; hasta entonces elegirlo produciría facturas rechazadas al firmar, con el consecutivo ya tomado.';
+  return 'Este modelo no está habilitado para escritura.';
 }
 
 // ─── Las 7 secciones del editor ───────────────────────────────────────────
@@ -1211,7 +1221,7 @@ function validateAiuSection(
       issues.push({
         field: 'aiu.accounting_model',
         code: 'AIU_ACCOUNTING_MODEL_NOT_ENABLED',
-        message: `El modelo «base AIU no sumada al total de la factura» todavía no se puede guardar. ${accountingModelDisabledReason(aiu.accounting_model) ?? ''}`.trim(),
+        message: `El modelo «${String(aiu.accounting_model)}» no está habilitado para guardarse. ${accountingModelDisabledReason(aiu.accounting_model) ?? ''}`.trim(),
       });
     }
   }

@@ -1000,16 +1000,16 @@ export class CreateInvoiceDto {
    * antes de que existiera.
    *
    * La lista contra la que se valida es `ENABLED_ACCOUNTING_MODELS`, no
-   * `ACCOUNTING_MODELS`: es el mismo interruptor único que gobierna la
-   * escritura del perfil, así que `'no_sumada'` se rechaza en la puerta —con el
-   * motivo y su fecha— en vez de tomar consecutivo y que la DIAN devuelva el
-   * documento al firmar. Habilitarlo es añadir el valor a esa constante (paso
-   * D.7), y las dos superficies se levantan a la vez.
+   * `ACCOUNTING_MODELS`: es el mismo interruptor único que gobierna la escritura
+   * del perfil. Mientras `'no_sumada'` estuvo fuera, se rechazaba en la puerta
+   * —con el motivo y su fecha— en vez de tomar consecutivo y que la DIAN devolviera
+   * el documento al firmar; la apertura del Modelo 1 (D.7, 2026-08-25) añadió el
+   * valor a esa constante y las dos superficies se levantaron juntas.
    */
   @IsOptional()
   @Transform(blankToUndefined)
   @IsIn(ENABLED_ACCOUNTING_MODELS as readonly string[], {
-    message: `aiu_accounting_model sólo admite ${ENABLED_ACCOUNTING_MODELS.join(', ')} por ahora. ${accountingModelDisabledReason('no_sumada') ?? ''}`.trim(),
+    message: `aiu_accounting_model sólo admite ${ENABLED_ACCOUNTING_MODELS.join(', ')}. ${accountingModelDisabledReason('no_sumada') ?? ''}`.trim(),
   })
   aiu_accounting_model?: AccountingModel;
 
