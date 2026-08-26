@@ -57,6 +57,7 @@ import { PlatformProfilesController } from './platform-profiles.controller';
 import { PlatformCreditNotesService } from './platform-credit-notes.service';
 import { PlatformDeliveryService } from './platform-delivery.service';
 import { PlatformDianEventsService } from './platform-dian-events.service';
+import { PlatformInvoicePdfService } from './platform-invoice-pdf.service';
 
 @Module({
   imports: [
@@ -118,6 +119,10 @@ import { PlatformDianEventsService } from './platform-dian-events.service';
     // C.4: eventos RADIAN plataforma (H2 dian_document_events.store_id nullable).
     // C.4.5 pendiente: transmisión SOAP al provider DIAN (siguiente slice).
     PlatformDianEventsService,
+    // C.5: pipeline PDF plataforma. Stub honesto PLATFORM_PDF_NOT_CONFIGURED
+    // hasta C.5.5 (wrapper org-scoped sobre InvoicePdfBuilder del riel
+    // tienda, con S3 key prefix 'platform/' en vez de 'stores/'). Ver ADR-8.
+    PlatformInvoicePdfService,
   ],
   exports: [SubscriptionFiscalService],
 })

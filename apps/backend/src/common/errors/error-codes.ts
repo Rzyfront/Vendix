@@ -5482,6 +5482,21 @@ export const ErrorCodes = {
     devMessage:
       "Platform invoice operation_type does not match the profile's: freezing (profile_id, profile_version) from a profile of another type would make the stamped provenance false, and the aiu_* columns would stay NULL with no error",
   },
+
+  /**
+   * Generación de PDF plataforma no configurada. Stub honesto para C.5.5 del
+   * CP-platform-invoicing-parity: el pipeline PDF del riel tienda tiene tres
+   * acoplamientos al store (llave S3 `stores/${store_id}`, formato desde
+   * `store_settings.receipts`, emisor desde `invoice.store`) que requieren
+   * wrapper org-scoped. Hasta que C.5.5 exista, el endpoint responde 503 con
+   * este código — el mismo patrón de honestidad que `PLATFORM_PROFILE_PREVIEW_PENDING`.
+   */
+  PLATFORM_PDF_NOT_CONFIGURED: {
+    code: 'PLATFORM_PDF_NOT_CONFIGURED',
+    httpStatus: 503,
+    devMessage:
+      'Platform PDF pipeline not yet configured: the store PDF service is store-scoped (S3 key prefix, format from store_settings, issuer from invoice.store). The C.5.5 wrapper must run those three steps org-scoped.',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {

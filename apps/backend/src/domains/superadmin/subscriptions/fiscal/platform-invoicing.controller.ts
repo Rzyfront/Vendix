@@ -32,6 +32,7 @@ import { enrichAcquirerForStandard } from './acquirer-standard';
 import { PlatformCreditNotesService } from './platform-credit-notes.service';
 import { PlatformDeliveryService } from './platform-delivery.service';
 import { PlatformDianEventsService } from './platform-dian-events.service';
+import { PlatformInvoicePdfService } from './platform-invoice-pdf.service';
 import {
   PlatformCreateCreditNoteDto,
   PlatformCreateDebitNoteDto,
@@ -148,6 +149,7 @@ export class PlatformInvoicingController {
     private readonly creditNotes: PlatformCreditNotesService,
     private readonly delivery: PlatformDeliveryService,
     private readonly dianEvents: PlatformDianEventsService,
+    private readonly invoicePdf: PlatformInvoicePdfService,
   ) {}
 
   /**
@@ -464,16 +466,9 @@ export class PlatformInvoicingController {
     @Param('id', ParseIntPipe) id: number,
     @Res() res: Response,
   ): Promise<void> {
-    // Phase B.5: invocar invoicePdfService.previewPdf(transmissionId)
-    // Por ahora respondemos 404 con un shape consistente hasta que
-    // B.5 conecte el provider PDF del riel tienda.
-    throw new VendixHttpException(
-      {
-        code: 'PDF_NOT_READY',
-        httpStatus: 503,
-      } as any,
-      `PDF preview para transmision #${id} no disponible todavia — pendiente B.5`,
-    );
+    // C.5: delega en PlatformInvoicePdfService (stub honesto con código
+    // PLATFORM_PDF_NOT_CONFIGURED hasta que C.5.5 exista). Ver ADR-8 del plan.
+    await this.invoicePdf.previewPdf(id);
   }
 
   /**
@@ -488,10 +483,8 @@ export class PlatformInvoicingController {
     @Param('id', ParseIntPipe) id: number,
     @Res() res: Response,
   ): Promise<void> {
-    throw new VendixHttpException(
-      { code: 'PDF_NOT_READY', httpStatus: 503 } as any,
-      `PDF persistido para transmision #${id} no disponible todavia — pendiente B.5`,
-    );
+    // C.5: stub honesto PLATFORM_PDF_NOT_CONFIGURED hasta C.5.5.
+    await this.invoicePdf.generatePdf(id);
   }
 
   /**
@@ -504,10 +497,8 @@ export class PlatformInvoicingController {
   @Permissions('superadmin:fiscal:invoicing')
   @ApiOperation({ summary: 'Regenera el PDF sin reemitir a la DIAN' })
   async regeneratePdf(@Param('id', ParseIntPipe) id: number): Promise<any> {
-    throw new VendixHttpException(
-      { code: 'PDF_NOT_READY', httpStatus: 503 } as any,
-      `Regeneracion PDF para transmision #${id} no disponible — pendiente B.5`,
-    );
+    // C.5: stub honesto PLATFORM_PDF_NOT_CONFIGURED hasta C.5.5.
+    await this.invoicePdf.regeneratePdf(id);
   }
 
   // ─── Notas crédito/débito plataforma (C.2 del CP-platform-invoicing-parity) ─
