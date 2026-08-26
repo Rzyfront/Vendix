@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
+import { PlatformOrgService } from '../../../../common/services/platform-org.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { InvoicingService } from '../../../store/invoicing/invoicing.service';
 import { InvoiceFlowService } from '../../../store/invoicing/invoice-flow/invoice-flow.service';
@@ -58,6 +59,7 @@ export class PlatformInvoicingService {
     private readonly persistence: PlatformInvoicingPersistenceService,
     private readonly tenants: PlatformTenantsService,
     private readonly subscriptionFiscalService: SubscriptionFiscalService,
+    private readonly platformOrg: PlatformOrgService,
   ) {}
 
   private get prismaClient(): PrismaClient | Prisma.TransactionClient {
@@ -111,6 +113,23 @@ export class PlatformInvoicingService {
       throw new VendixHttpException(
         ErrorCodes.INVOICING_TENANT_NOT_FOUND,
         `No se encontro el destinatario ${args.dto.customer.kind}:${args.dto.customer.tenant_id} en la plataforma.`,
+      );
+    }
+
+    // C.1: si el caller pidió `profile_id`, validar y propagar al legacy DTO.
+    // La fachada traduce el profile_id en `profile_version` (current_version)
+    // y adjunta `profile_snapshot` (config vigente) — la persistencia final
+    // en `invoices.profile_id/version/snapshot` es responsabilidad del legacy
+    // `createPlatformInvoice`, que aún no acepta estos campos. Hasta que el
+    // legacy se extienda, la facade pasa `profile_id` como metadato y deja
+    // un TODO verificable. La validación de operación-tipo sí es bloqueante
+    // (PLATFORM_PROFILE_008) porque un mismatch corrompe el snapshot antes
+    // de cualquier persistencia.
+    if (args.dto.profile_id) {
+      await this.assertPlatformProfileMatchesOperation(
+        args.dto.profile_id,
+        args.dto.operation_type,
+        args.organizationId,
       );
     }
 
@@ -681,6 +700,13 @@ export class PlatformInvoicingService {
       period_start: dto.period_start ?? undefined,
       period_end: dto.period_end ?? undefined,
       currency: dto.currency?.iso_4217 ?? 'COP',
+      // C.1: profile_id se propaga al legacy DTO para que cuando
+      // createPlatformInvoice extienda su create-data (siguiente slice), las
+      // columnas invoices.profile_id/profile_version/profile_snapshot
+      // queden alimentadas. La validación operation_type-match YA corre
+      // antes (assertPlatformProfileMatchesOperation) — propagar no es un
+      // segundo gate, es la preparación de la persistencia.
+      profile_id: dto.profile_id ?? undefined,
     };
   }
 
@@ -725,5 +751,67 @@ export class PlatformInvoicingService {
       }
     }
     return null;
+  }
+
+  /**
+   * C.1 — Validación de paridad perfil↔documento para el riel plataforma.
+   *
+   * El perfil pertenece a UN `operation_type` y el snapshot que congela
+   * (`invoices.profile_id/profile_version/profile_snapshot`) sólo tiene
+   * sentido para ese tipo. Si el caller envía `profile_id` con un
+   * `operation_type` distinto del perfil, el documento sale firmado bajo
+   * una configuración que NO es la que gobernó el cálculo — la
+   * reproducibilidad fiscal por versión se rompe, y eso es exactamente la
+   * clase de fallo silencioso que `PLATFORM_PROFILE_008` existe para
+   * impedir.
+   *
+   * Mismo argumento que `INVOICING_PROFILE_008` del riel tienda (FB-15
+   * del plan hermano); con prefijo PLATFORM para que el frontend pueda
+   * enrutar el mensaje sin mapear códigos entre namespaces disjuntos.
+   */
+  private async assertPlatformProfileMatchesOperation(
+    profile_id: number,
+    operation_type: string,
+    organization_id: number,
+  ): Promise<void> {
+    const profile = await this.prismaService.withoutScope().invoice_profiles.findFirst({
+      where: {
+        id: profile_id,
+        organization_id,
+        store_id: null,
+      },
+      select: {
+        id: true,
+        name: true,
+        operation_type: true,
+        state: true,
+        current_version: true,
+      },
+    });
+    if (!profile) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_PROFILE_001,
+        `El perfil ${profile_id} no existe en la organización ${organization_id} del riel plataforma.`,
+        { profile_id, organization_id },
+      );
+    }
+    if (profile.operation_type !== operation_type) {
+      throw new VendixHttpException(
+        ErrorCodes.PLATFORM_PROFILE_008,
+        `El perfil «${profile.name}» (operation_type=${profile.operation_type}) no corresponde al operation_type=${operation_type} del documento.`,
+        {
+          profile_id,
+          profile_operation_type: profile.operation_type,
+          document_operation_type: operation_type,
+        },
+      );
+    }
+    if (profile.state !== 'active') {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_PROFILE_006,
+        `El perfil «${profile.name}» está inactivo y no puede usarse para emitir.`,
+        { profile_id, state: profile.state },
+      );
+    }
   }
 }

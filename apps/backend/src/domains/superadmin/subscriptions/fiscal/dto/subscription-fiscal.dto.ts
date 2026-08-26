@@ -684,6 +684,37 @@ export class CreatePlatformSalesInvoiceDto {
   @IsString()
   @MaxLength(5000)
   notes?: string;
+
+  /**
+   * Perfil de facturación a aplicar como punto de partida editable.
+   *
+   * ## Por qué en ESTE DTO y no en el legacy CreatePlatformInvoiceDto
+   *
+   * El DTO MvpV1 es la superficie que el frontend del wizard plataforma
+   * construye y la que el controller V1 acepta. El legacy
+   * `CreatePlatformInvoiceDto` es la capa interna de `subscription-fiscal.service`
+   * a la que la fachada traduce (CP-platform-invoicing-parity C.1). Si
+   * añadiéramos `profile_id` sólo al legacy, el frontend nunca podría
+   * pasarlo. Si lo añadimos sólo al MvpV1 sin propagarlo a legacy, queda
+   * muerto en la frontera de la fachada.
+   *
+   * Mismo patrón que el resto del MvpV1: el campo entra por aquí, se valida
+   * (operation_type match con `PLATFORM_PROFILE_008` 409 si difiere), y la
+   * fachada lo propaga al DTO legacy con `profile_version = profile.current_version`
+   * y `profile_snapshot = profile.current_config`. La persistencia final
+   * (`invoices.profile_id`/`profile_version`/`profile_snapshot`) la hace la
+   * `createPlatformInvoice` legacy al reescribirla (TODO C.1 — el servicio
+   * legacy necesita aceptar esos tres campos y la FK compuesta los respeta;
+   * ver H1 del plan).
+   *
+   * Sin `profile_id`, comportamiento byte-idéntico al actual — la migración
+   * de A.1 no cambia filas existentes y el DTO es `IsOptional`.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'profile_id debe ser un entero positivo.' })
+  @Min(1, { message: 'profile_id debe ser un entero positivo.' })
+  profile_id?: number;
 }
 
 // ── V1: CreatePlatformSupportDocumentDto ────────────────────────────────────
@@ -744,5 +775,22 @@ export class CreatePlatformSupportDocumentDto {
   @IsString()
   @MaxLength(5000)
   notes?: string;
+
+  /**
+   * Perfil de facturación a aplicar como punto de partida editable (mismo
+   * contrato que `CreatePlatformSalesInvoiceDto.profile_id`).
+   *
+   * El DSA raramente lleva AIU ni perfiles exóticos —el `operation_type` del
+   * DSA siempre será uno de los códigos de soporte, y los perfiles plataforma
+   * se crean con cualquier operation_type— pero se admite el campo para que
+   * el frontend tenga UNA firma de DTO consistente entre `sales_invoice` y
+   * `support_document`. La validación de operation_type-match vive en el
+   * servicio de la fachada (C.1).
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'profile_id debe ser un entero positivo.' })
+  @Min(1, { message: 'profile_id debe ser un entero positivo.' })
+  profile_id?: number;
 }
 
