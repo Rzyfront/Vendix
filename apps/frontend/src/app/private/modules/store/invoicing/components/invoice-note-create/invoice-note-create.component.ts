@@ -302,6 +302,18 @@ import { remainingChars, showCharCounter } from '../../utils/char-limit.util';
                 caracteres restantes
               </p>
             }
+            <!--
+              F.3 reabierta: contador en rojo y botón apagado no explican NADA.
+              Cuando el control viola el tope, este aviso nombra el campo y la
+              cifra exacta, para que el recorte se entienda escribiendo y no
+              como un formulario que «no hace nada» al pedir Crear.
+            -->
+            @if (reasonExceeded()) {
+              <p class="text-[11px] text-error" role="alert">
+                El campo Motivo supera su tope de {{ reasonLimit }} caracteres
+                (tope DIAN del reason declarado). Recórtalo para crear la nota.
+              </p>
+            }
           </div>
 
           @if (reasonPreview(); as preview) {
@@ -565,6 +577,23 @@ export class InvoiceNoteCreateComponent {
    * inválido, no aceptado-y-luego-cortado.
    */
   readonly reasonLimit = NOTE_REASON_LIMIT;
+
+  /**
+   * F.3 reabierta (2026-08-25): con el contador ya medido contra el tope real
+   * (500), quedaba la otra mitad del defecto — pasarse de largo sólo producía
+   * un contador en rojo y un botón «Crear» deshabilitado sin explicación.
+   * Este computed alimenta el aviso que nombra el campo y la cifra.
+   *
+   * Se lee desde `formValue()` —el toSignal de `valueChanges`— y NO desde
+   * `noteForm.value`: la propiedad plana se congela en el estado inicial
+   * dentro de un `computed` y el aviso nunca aparecería (mismo defecto que
+   * el docblock de `formValue` documenta para el botón).
+   */
+  readonly reasonExceeded = computed(() => {
+    const value = this.formValue().reason ?? '';
+    return value.length > NOTE_REASON_LIMIT;
+  });
+
   readonly remainingChars = remainingChars;
   readonly showCharCounter = showCharCounter;
 
