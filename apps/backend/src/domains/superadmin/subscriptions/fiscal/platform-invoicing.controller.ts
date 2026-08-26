@@ -30,6 +30,7 @@ import type { Response } from 'express';
 
 import { enrichAcquirerForStandard } from './acquirer-standard';
 import { PlatformCreditNotesService } from './platform-credit-notes.service';
+import { PlatformDeliveryService } from './platform-delivery.service';
 import {
   PlatformCreateCreditNoteDto,
   PlatformCreateDebitNoteDto,
@@ -144,6 +145,7 @@ export class PlatformInvoicingController {
     private readonly tenants: PlatformTenantsService,
     private readonly subscriptionFiscalService: SubscriptionFiscalService,
     private readonly creditNotes: PlatformCreditNotesService,
+    private readonly delivery: PlatformDeliveryService,
   ) {}
 
   /**
@@ -554,6 +556,39 @@ export class PlatformInvoicingController {
     return this.responseService.created(
       result,
       'Nota débito plataforma creada',
+    );
+  }
+
+  // ─── Reenvío por correo (C.3 del CP-platform-invoicing-parity) ─────────
+
+  /**
+   * Reenvía una factura plataforma a un correo arbitrario. Body:
+   * `{ email: string }`.
+   *
+   * Slice C.3 mínimo viable: valida email + pertenencia + escribe fila
+   * `invoice_delivery_events` con `status='queued'` (store_id NULL).
+   * La pieza de armado del ZIP + envío S3/SMTP es C.3.5 — siguiente slice.
+   */
+  @Post('sales-invoices/:id/deliver')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({
+    summary: 'Reenviar factura plataforma a un correo arbitrario',
+  })
+  async deliverInvoice(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { email: string },
+    @Req() req: Request,
+  ): Promise<any> {
+    const user_id = (req as any).user?.id ?? 0;
+    const result = await this.delivery.deliverInvoice(
+      id,
+      body.email,
+      user_id,
+    );
+    return this.responseService.success(
+      result,
+      'Reenvío plataforma encolado',
     );
   }
 }

@@ -50,7 +50,7 @@ export interface InvoiceDeliveryEventInput {
    * campo va `null` a propósito, no es un dato que falte.
    */
   zip_name?: string | null;
-  status: 'sent' | 'error';
+  status: 'sent' | 'error' | 'queued';
   provider_error?: string | null;
   /** `null` cuando el intento lo dispara un evento interno, no un usuario. */
   created_by?: number | null;
