@@ -26,6 +26,7 @@ import {
 import { PreviewProfileDto } from './dto/preview-profile.dto';
 import { UpdateInvoiceProfileDto } from './dto/update-invoice-profile.dto';
 import { DIAN_PROFILE_TEMPLATES } from './dian-profile-templates';
+import { ProfileAccountHealthService } from './profile-account-health.service';
 import { ProfileVersionsService } from './profile-versions.service';
 import { ProfilePreviewService } from './profile-preview.service';
 import { ProfilesService } from './profiles.service';
@@ -60,6 +61,7 @@ export class ProfilesController {
     private readonly profiles_service: ProfilesService,
     private readonly versions_service: ProfileVersionsService,
     private readonly preview_service: ProfilePreviewService,
+    private readonly health_service: ProfileAccountHealthService,
     private readonly response_service: ResponseService,
   ) {}
 
@@ -100,6 +102,41 @@ export class ProfilesController {
   @Permissions('invoicing:profiles:read')
   async catalog() {
     const result = await this.profiles_service.catalog();
+    return this.response_service.success(result);
+  }
+
+  /**
+   * PANEL DE SALUD F.13 — perfiles cuya versión VIGENTE lleva códigos PUC
+   * inválidos (no existen en el chart resuelto por fiscal scope, o son de
+   * agrupación sin `accepts_entries`).
+   *
+   * ## Contrato vivo
+   *
+   * `{ data: [{ profile_id, name, state, version, issues: [{ field, code }] }] }`
+   * — sólo filas con problemas; los sanos no aparecen. `field` usa la MISMA
+   * ruta con puntos que el 422 de la compuerta (`INVOICING_PROFILE_010`)
+   * nombra en `details.issues[]`, así que el editor y este panel marcan con un
+   * solo vocabulario. El criterio de juicio es el de la compuerta, prestado —
+   * no copiado: vive en `ProfileAccountingValidator.describeAccountsUsability`.
+   *
+   * ## Lectura pura
+   *
+   * No escribe NADA: ni marcador en base —el marcador ES esta respuesta—, ni
+   * versión nueva, ni auditoría. Las versiones legadas siguen intactas y su
+   * corrección ocurre por edición normal, que crea versión nueva append-only.
+   *
+   * ## Permiso y forma de la respuesta
+   *
+   * `invoicing:profiles:read`, como sus hermanas de lectura: quien puede
+   * listar perfiles puede saber cuáles están enfermos — es información para
+   * corregirlos, no una operación de escritura. Sin paginación a propósito:
+   * el volumen son los perfiles problemáticos de UNA tienda y el panel necesita
+   * el conjunto completo para su contador; el servicio lo documenta.
+   */
+  @Get('account-health')
+  @Permissions('invoicing:profiles:read')
+  async accountHealth() {
+    const result = await this.health_service.health();
     return this.response_service.success(result);
   }
 

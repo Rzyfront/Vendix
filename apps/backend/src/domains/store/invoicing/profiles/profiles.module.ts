@@ -7,6 +7,7 @@ import { InvoiceCalculatorService } from '../services/invoice-calculator.service
 import { InvoiceNumberGenerator } from '../utils/invoice-number-generator';
 
 import { ProfileCatalogCacheService } from './profile-catalog-cache.service';
+import { ProfileAccountHealthService } from './profile-account-health.service';
 import { ProfileAccountingValidator } from './profile-accounting.validator';
 import { ProfilePreviewService } from './profile-preview.service';
 import { ProfileVersionsService } from './profile-versions.service';
@@ -70,6 +71,7 @@ import { ProfilesService } from './profiles.service';
     ProfileVersionsService,
     ProfileCatalogCacheService,
     ProfileAccountingValidator,
+    ProfileAccountHealthService,
     ProfilePreviewService,
     InvoiceCalculatorService,
     { provide: InvoiceNumberGenerator, useClass: PreviewNumberingGuard },
@@ -79,6 +81,7 @@ import { ProfilesService } from './profiles.service';
     ProfileVersionsService,
     ProfileCatalogCacheService,
     ProfileAccountingValidator,
+    ProfileAccountHealthService,
     ProfilePreviewService,
   ],
 })
