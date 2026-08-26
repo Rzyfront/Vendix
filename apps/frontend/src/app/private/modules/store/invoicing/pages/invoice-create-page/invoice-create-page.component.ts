@@ -2231,6 +2231,62 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
       (confirm)="confirmProfileApply()"
       (cancel)="cancelProfileApply()"
     />
+
+    <!--
+      «VER COMO SALDRÁ» ANTES DE EMITIR (E.2).
+
+      La previsualización es HTML de FB-29 pintado en un iframe con sandbox: no
+      descarga nada, no persiste nada y NO toma consecutivo — cada vista previa
+      que quemara numeración autorizada sería exactamente el defecto que este
+      modal existe para evitar. Lo que muestra son DATOS DE MUESTRA del formato
+      fiscal, y la pantalla lo dice dos veces: en el aviso de arriba y en la
+      nota del pie. El número que se ve es un marcador.
+    -->
+    <app-modal
+      [isOpen]="printPreviewOpen()"
+      (isOpenChange)="closePrintPreview($event)"
+      title="Ver como saldrá"
+      subtitle="Previsualización del formato Factura Electrónica (DIAN)"
+      size="xl"
+      [fullScreenOnMobile]="true"
+    >
+      <app-alert-banner
+        variant="warning"
+        icon="alert-triangle"
+        tone="token"
+        class="mb-3 block"
+      >
+        <strong>Número de muestra.</strong> Esta previsualización no emite la
+        factura ni toma consecutivo, y usa datos de muestra: no refleja las
+        líneas ni los importes que acabas de capturar.
+      </app-alert-banner>
+
+      @if (printPreviewLoading()) {
+        <div class="flex items-center justify-center gap-2 py-10">
+          <app-icon name="loader" [size]="18" class="animate-spin"></app-icon>
+          <span class="text-sm text-[var(--color-text-secondary)]">
+            Generando la previsualización…
+          </span>
+        </div>
+      } @else if (printPreviewError(); as previewError) {
+        <p class="py-6 text-center text-sm text-error">{{ previewError }}</p>
+      } @else {
+        <div class="flex justify-center overflow-auto bg-slate-950/50 p-3">
+          <iframe
+            [srcdoc]="printPreviewSrcdoc()"
+            class="block min-h-[520px] w-full border-0 bg-white"
+            [style.width]="printPreviewPaperWidth()"
+            sandbox="allow-same-origin allow-scripts"
+            title="Previsualización del formato de impresión"
+          ></iframe>
+        </div>
+        <p class="mt-2 text-right text-[11px] text-[var(--color-text-secondary)]">
+          Ancho: <strong>{{ printPreviewWidthMm() }}mm</strong> ·
+          {{ printPreviewIsRoll() ? 'Rollo continuo' : 'Hoja suelta' }} ·
+          El XML viaja siempre igual: el formato no cambia importes.
+        </p>
+      }
+    </app-modal>
   `,
 })
 export class InvoiceCreatePageComponent implements OnInit {
