@@ -138,6 +138,11 @@ describe('authInterceptorFn', () => {
 
       // Should attempt token refresh
       expect(authServiceSpy.refreshToken).toHaveBeenCalled();
+
+      // Drain the retry request the interceptor creates — without
+      // this, httpMock.verify() in afterEach trips on the dangling
+      // request.
+      httpMock.expectOne(`${API}/test`).flush({});
     });
 
     it('should not handle 401 errors for non-API requests', () => {
