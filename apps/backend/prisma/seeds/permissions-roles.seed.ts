@@ -3624,6 +3624,43 @@ export async function seedPermissionsAndRoles(
       path: '/api/super-admin/fiscal/invoicing/*',
       method: 'GET',
     },
+    // ── Perfiles de facturación de la PLATAFORMA (CP-platform-invoicing-parity B.2)
+    //
+    // Mismo espejo que los `invoicing:profiles:*` del riel tienda, pero con el
+    // prefijo superadmin y rutas centinelas no enrutables. El motivo del
+    // centinela es el mismo que `superadmin:tenants:read` arriba: sembrar
+    // `/api/superadmin/subscriptions/fiscal/profiles/*` regalaría TODO el
+    // namespace (incluidos endpoints legacy) a un rol con sólo :read. Cuatro
+    // permisos en lugar de uno para que `set_default` quede separado de
+    // `write` — mismo argumento que el controller de tienda documenta.
+    {
+      name: 'superadmin:fiscal:invoicing:profiles:read',
+      description:
+        'Ver el catálogo y el detalle de perfiles de facturación del riel plataforma (VENDIX_ADMIN)',
+      path: '/api/superadmin/subscriptions/fiscal/profiles/unique-read',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:fiscal:invoicing:profiles:write',
+      description:
+        'Crear, editar, clonar, activar y desactivar perfiles de facturación del riel plataforma',
+      path: '/api/superadmin/subscriptions/fiscal/profiles/unique-write',
+      method: 'POST',
+    },
+    {
+      name: 'superadmin:fiscal:invoicing:profiles:set_default',
+      description:
+        'Marcar un perfil plataforma como predeterminado para su operation_type (transición, no creación)',
+      path: '/api/superadmin/subscriptions/fiscal/profiles/unique-set-default',
+      method: 'POST',
+    },
+    {
+      name: 'superadmin:fiscal:invoicing:profiles:delete',
+      description:
+        'Eliminar perfiles plataforma sin versiones comprometidas (los referenciados se desactivan)',
+      path: '/api/superadmin/subscriptions/fiscal/profiles/unique-delete',
+      method: 'DELETE',
+    },
     // ── Consola de tenants del super admin ────────────────────────────────
     //
     // Los `path` son CENTINELAS NO ENRUTABLES (`.../unique-*`), no las rutas
