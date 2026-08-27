@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 
-import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
+import { TextareaComponent } from '../textarea/textarea.component';
 import { optionalControl } from './invoice-section-controls';
 import type { InvoiceSectionContext } from './invoice-section-context';
 import { isInvoiceContext, isProfileContext } from './invoice-section-context';

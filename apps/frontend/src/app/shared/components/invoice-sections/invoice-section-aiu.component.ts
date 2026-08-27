@@ -17,30 +17,30 @@ import {
   ReactiveFormsModule,
 } from '@angular/forms';
 
-import { AlertBannerComponent } from '../../../../../../shared/components/alert-banner/alert-banner.component';
-import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
-import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { InputComponent } from '../../../../../../shared/components/input/input.component';
-import { SelectorComponent } from '../../../../../../shared/components/selector/selector.component';
-import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
-import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
-import { AccountCodeSelectComponent } from '../../../products/components/account-code-select.component';
+import { AlertBannerComponent } from '../alert-banner/alert-banner.component';
+import { ButtonComponent } from '../button/button.component';
+import { IconComponent } from '../icon/icon.component';
+import { InputComponent } from '../input/input.component';
+import { SelectorComponent } from '../selector/selector.component';
+import { TextareaComponent } from '../textarea/textarea.component';
+import { ToggleComponent } from '../toggle/toggle.component';
+import { AccountCodeSelectComponent } from '../../../private/modules/store/products/components/account-code-select.component';
 import {
   AIU_COMPONENTS,
   accountingModelDisabledReason,
   formatPercentScaled,
   isAccountingModelEnabled,
   parsePercentScaled,
-} from '../../../../../../core/utils/invoice-profile-config.contract';
+} from '../../../core/utils/invoice-profile-config.contract';
 import type {
   AiuBucket,
   AiuComponentLiteral,
   AiuComponentsBasis,
   AiuTaxableBasis,
   ProfileConfigIssue,
-} from '../../../../../../core/utils/invoice-profile-config.contract';
-import type { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
-import type { InheritedAccountHint } from '../../../../../../shared/components/account-select/account-select.component';
+} from '../../../core/utils/invoice-profile-config.contract';
+import type { SelectorOption } from '../selector/selector.component';
+import type { InheritedAccountHint } from '../../../shared/components/account-select/account-select.component';
 import type { InvoiceSectionContext } from './invoice-section-context';
 import { optionalControl, requireControl } from './invoice-section-controls';
 import {

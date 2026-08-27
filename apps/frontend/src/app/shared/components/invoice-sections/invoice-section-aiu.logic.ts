@@ -34,16 +34,16 @@ import {
   AIU_TAXABLE_BUCKETS_BY_BASIS,
   formatPercentScaled,
   parsePercentScaled,
-} from '../../../../../../core/utils/invoice-profile-config.contract';
+} from '../../../core/utils/invoice-profile-config.contract';
 import type {
   AiuBucket,
   AiuComponentLiteral,
   AiuComponentsBasis,
   AiuTaxableBasis,
   ProfileTaxRule,
-} from '../../../../../../core/utils/invoice-profile-config.contract';
-import { getFiscalResponsibilityLabel } from '../../../../../../shared/constants/fiscal-responsibilities.constants';
-import type { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
+} from '../../../core/utils/invoice-profile-config.contract';
+import { getFiscalResponsibilityLabel } from '../../constants/fiscal-responsibilities.constants';
+import type { SelectorOption } from '../selector/selector.component';
 
 /**
  * Una fila de la matriz, tal como la lleva el formulario de cualquiera de las

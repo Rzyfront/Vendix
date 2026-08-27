@@ -81,56 +81,56 @@ import {
     aiuComponentsSumScaled,
     aiuTaxableBasisShortLabel,
     firstTaxableAiuComponent,
-} from '../../../../shared/components/invoice-sections/index';
+} from '../../../../../../shared/components/invoice-sections/index';
 import type {
     AiuSectionPaths,
     AiuTaxRuleValue,
-} from '../../../../shared/components/invoice-sections/index';
+} from '../../../../../../shared/components/invoice-sections/index';
 /**
  * SECCIÓN DOCUMENTO COMPARTIDA con «Nueva factura» (B.2). Mismo componente,
  * mismos controles: resolución, tipo de documento, forma y medio de pago, y
  * notas de cabecera. Las fechas se ocultan en este contexto («profile»).
  */
-import { InvoiceSectionDocumentoComponent } from '../../../../shared/components/invoice-sections/index';
+import { InvoiceSectionDocumentoComponent } from '../../../../../../shared/components/invoice-sections/index';
 import type {
     DocumentoSectionErrors,
     DocumentoSectionNotice,
     DocumentoSectionPaths,
-} from '../../../../shared/components/invoice-sections/index';
+} from '../../../../../../shared/components/invoice-sections/index';
 /**
  * SECCIÓN LÍNEAS COMPARTIDA con «Líneas» de la factura (B.3). El componente
  * tiene dos plantillas internas por contexto —acá no hay picker de producto
  * ni impuestos por línea—, así que el editor sólo le pasa `context="profile"`
  * y su propio mapa de rutas. Ver el docblock del componente.
  */
-import { InvoiceSectionLineasComponent } from '../../../../shared/components/invoice-sections/index';
+import { InvoiceSectionLineasComponent } from '../../../../../../shared/components/invoice-sections/index';
 import type {
     LineasRowErrors,
     LineasRowPaths,
-} from '../../../../shared/components/invoice-sections/index';
+} from '../../../../../../shared/components/invoice-sections/index';
 /**
  * SECCIÓN IMPUESTOS COMPARTIDA con el agregado de línea de la factura (B.4).
  * El editor le pasa `context="profile"`: el componente pinta la matriz
  * editable por porción (`taxes` FormArray) y el editor sigue dueño de
  * `addTaxRule()`/`removeTaxRule()`. Ver el docblock del componente.
  */
-import { InvoiceSectionImpuestosComponent } from '../../../../shared/components/invoice-sections/index';
+import { InvoiceSectionImpuestosComponent } from '../../../../../../shared/components/invoice-sections/index';
 /**
  * SECCIÓN RETENCIONES COMPARTIDA con la factura (B.5). El editor no tiene
  * importe manual ni base gravable —la base es del documento, no del
  * perfil—, así que sólo le pasa concepto, lado y tarifa. Ver el docblock
  * del componente.
  */
-import { InvoiceSectionRetencionesComponent } from '../../../../shared/components/invoice-sections/index';
-import type { RetencionesRowErrors } from '../../../../shared/components/invoice-sections/index';
+import { InvoiceSectionRetencionesComponent } from '../../../../../../shared/components/invoice-sections/index';
+import type { RetencionesRowErrors } from '../../../../../../shared/components/invoice-sections/index';
 /**
  * SECCIÓN DIVISA COMPARTIDA con la factura (B.6). El perfil no consulta
  * ninguna TRM —eso es del día de cada factura, no algo que un perfil pueda
  * congelar—, así que sólo le pasa el interruptor y la divisa. Ver el
  * docblock del componente.
  */
-import { InvoiceSectionDivisaComponent } from '../../../../shared/components/invoice-sections/index';
-import type { DivisaSectionPaths } from '../../../../shared/components/invoice-sections/index';
+import { InvoiceSectionDivisaComponent } from '../../../../../../shared/components/invoice-sections/index';
+import type { DivisaSectionPaths } from '../../../../../../shared/components/invoice-sections/index';
 /**
  * SECCIONES FORMATO Y NOTAS INTERNAS COMPARTIDAS con «Nueva factura» (B.7 —
  * cierre del re-cableado del editor). Mismo componente, mismos controles: el
@@ -140,11 +140,11 @@ import type { DivisaSectionPaths } from '../../../../shared/components/invoice-s
 import {
     InvoiceSectionFormatoComponent,
     InvoiceSectionNotasComponent,
-} from '../../../../shared/components/invoice-sections/index';
+} from '../../../../../../shared/components/invoice-sections/index';
 import type {
     FormatoSectionPaths,
     NotasSectionPaths,
-} from '../../../../shared/components/invoice-sections/index';
+} from '../../../../../../shared/components/invoice-sections/index';
 import {
     FOREIGN_CURRENCY_OPTIONS,
     INVOICE_TYPE_OPTIONS,

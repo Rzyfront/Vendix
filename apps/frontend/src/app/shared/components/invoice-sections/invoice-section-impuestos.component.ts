@@ -7,12 +7,12 @@ import {
 } from '@angular/core';
 import { AbstractControl, FormControl, ReactiveFormsModule } from '@angular/forms';
 
-import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
-import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { InputComponent } from '../../../../../../shared/components/input/input.component';
-import { SelectorComponent } from '../../../../../../shared/components/selector/selector.component';
-import type { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
-import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
+import { ButtonComponent } from '../button/button.component';
+import { IconComponent } from '../icon/icon.component';
+import { InputComponent } from '../input/input.component';
+import { SelectorComponent } from '../selector/selector.component';
+import type { SelectorOption } from '../selector/selector.component';
+import { ToggleComponent } from '../toggle/toggle.component';
 import type { InvoiceSectionContext } from './invoice-section-context';
 import { isInvoiceContext, isProfileContext } from './invoice-section-context';
 

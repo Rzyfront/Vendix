@@ -1,9 +1,9 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable, catchError, map, of, shareReplay } from 'rxjs';
 
-import { AccountingService } from '../../../accounting/services/accounting.service';
-import type { AccountMapping } from '../../../accounting/interfaces/accounting.interface';
-import type { InheritedAccountHint } from '../../../../../../shared/components/account-select/account-select.component';
+import { AccountingService } from '../../../private/modules/store/accounting/services/accounting.service';
+import type { AccountMapping } from '../../../private/modules/store/accounting/interfaces/accounting.interface';
+import type { InheritedAccountHint } from '../../../shared/components/account-select/account-select.component';
 
 /**
  * Las claves del mapeo contable de la tienda que la emisión AIU aplica HOY,

@@ -20,7 +20,7 @@
  * componente de sección que arme payload según el contexto acabaría con la
  * lógica de dos DTO dentro de un control de UI.
  */
-export type InvoiceSectionContext = 'invoice' | 'profile';
+export type InvoiceSectionContext = 'invoice' | 'profile' | 'platform';
 
 /** Se está capturando un documento real, no una preconfiguración. */
 export function isInvoiceContext(context: InvoiceSectionContext): boolean {
@@ -30,4 +30,17 @@ export function isInvoiceContext(context: InvoiceSectionContext): boolean {
 /** Se está preconfigurando un perfil, no emitiendo. */
 export function isProfileContext(context: InvoiceSectionContext): boolean {
   return context === 'profile';
+}
+
+/** Se está emitiendo desde la consola de la plataforma (VENDIX_ADMIN), no desde una tienda. */
+export function isPlatformContext(context: InvoiceSectionContext): boolean {
+  return context === 'platform';
+}
+
+/**
+ * Exhaustivo: si una pantalla añade otro contexto, el switch de abajo falla
+ * en `tsc --noEmit` con `never`. Misma estrategia que `invoice-section-controls.ts`.
+ */
+export function assertNeverContext(context: never): never {
+  throw new Error(`InvoiceSectionContext no soportado: ${context as string}`);
 }

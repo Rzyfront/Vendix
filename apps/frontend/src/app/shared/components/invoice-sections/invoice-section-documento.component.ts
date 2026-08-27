@@ -13,21 +13,21 @@ import {
   Validators,
 } from '@angular/forms';
 
-import { AlertBannerComponent } from '../../../../../../shared/components/alert-banner/alert-banner.component';
-import type { AlertBannerVariant } from '../../../../../../shared/components/alert-banner/alert-banner.component';
-import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
-import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { InputComponent } from '../../../../../../shared/components/input/input.component';
-import { SelectorComponent } from '../../../../../../shared/components/selector/selector.component';
+import { AlertBannerComponent } from '../alert-banner/alert-banner.component';
+import type { AlertBannerVariant } from '../alert-banner/alert-banner.component';
+import { ButtonComponent } from '../button/button.component';
+import { IconComponent } from '../icon/icon.component';
+import { InputComponent } from '../input/input.component';
+import { SelectorComponent } from '../selector/selector.component';
 import type {
   SelectorOption,
   SelectorSize,
-} from '../../../../../../shared/components/selector/selector.component';
-import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
-import { CONFIG_LIMITS } from '../../../../../../core/utils/invoice-profile-config.contract';
-import { remainingChars, showCharCounter } from '../../utils/char-limit.util';
-import { InvoiceResolutionBannerComponent } from '../invoice-create/invoice-resolution-banner.component';
-import type { InvoiceResolution } from '../../interfaces/invoice.interface';
+} from '../selector/selector.component';
+import { TextareaComponent } from '../textarea/textarea.component';
+import { CONFIG_LIMITS } from '../../../core/utils/invoice-profile-config.contract';
+import { remainingChars, showCharCounter } from '../../../private/modules/store/invoicing/utils/char-limit.util';
+import { InvoiceResolutionBannerComponent } from '../../../private/modules/store/invoicing/components/invoice-create/invoice-resolution-banner.component';
+import type { InvoiceResolution } from '../../../private/modules/store/invoicing/interfaces/invoice.interface';
 import type { InvoiceSectionContext } from './invoice-section-context';
 import { optionalControl, requireControl } from './invoice-section-controls';
 import { isInvoiceContext, isProfileContext } from './invoice-section-context';

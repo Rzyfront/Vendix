@@ -5,8 +5,8 @@ import {
   HttpTestingController,
   provideHttpClientTesting,
 } from '@angular/common/http/testing';
-import { TenantFacade } from '../../../../../../core/store/tenant/tenant.facade';
-import { environment } from '../../../../../../../environments/environment';
+import { TenantFacade } from '../../../core/store/tenant/tenant.facade';
+import { environment } from '../../../../environments/environment';
 
 import {
   AiuSectionPaths,

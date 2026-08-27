@@ -1,12 +1,12 @@
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 
-import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { InputComponent } from '../../../../../../shared/components/input/input.component';
-import { SelectorComponent } from '../../../../../../shared/components/selector/selector.component';
-import type { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
-import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
-import type { ExchangeRateQuote } from '../../services/exchange-rate.service';
+import { IconComponent } from '../icon/icon.component';
+import { InputComponent } from '../input/input.component';
+import { SelectorComponent } from '../selector/selector.component';
+import type { SelectorOption } from '../selector/selector.component';
+import { ToggleComponent } from '../toggle/toggle.component';
+import type { ExchangeRateQuote } from '../../../private/modules/store/invoicing/services/exchange-rate.service';
 import { optionalControl, requireControl } from './invoice-section-controls';
 import type { InvoiceSectionContext } from './invoice-section-context';
 import { isInvoiceContext, isProfileContext } from './invoice-section-context';
