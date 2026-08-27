@@ -238,6 +238,41 @@ describe('authInterceptorFn', () => {
       retryReq1.flush({ data: 'success1' });
       retryReq2.flush({ data: 'success2' });
     });
+
+    it('triggers a fresh refresh after the previous one completes (cache cleared)', () => {
+      // Regression for the shareReplay-based dedup: the cached refresh
+      // Observable is cleared via finalize() when refCount drops to 0.
+      // A subsequent 401 (after the retry completed) must trigger a new
+      // refresh call, not serve a stale cached value.
+      authServiceSpy.refreshToken.and.returnValue(
+        of({ data: { access_token: 'first-token' } }) as any,
+      );
+
+      // First cycle: 401 + retry succeeds.
+      httpClient.get(`${API}/test1`).subscribe();
+      const firstReq = httpMock.expectOne(`${API}/test1`);
+      firstReq.flush({}, { status: 401, statusText: 'Unauthorized' });
+      const firstRetry = httpMock.expectOne(`${API}/test1`);
+      firstRetry.flush({ data: 'ok' });
+      expect(authServiceSpy.refreshToken).toHaveBeenCalledTimes(1);
+
+      // Second cycle: refreshToken now returns a different value. The
+      // shareReplay cache should have cleared when both subscribers
+      // detached, so a fresh refresh() call must happen.
+      authServiceSpy.refreshToken.and.returnValue(
+        of({ data: { access_token: 'second-token' } }) as any,
+      );
+      httpClient.get(`${API}/test2`).subscribe();
+      const secondReq = httpMock.expectOne(`${API}/test2`);
+      secondReq.flush({}, { status: 401, statusText: 'Unauthorized' });
+      const secondRetry = httpMock.expectOne(`${API}/test2`);
+      expect(secondRetry.request.headers.get('Authorization')).toBe(
+        'Bearer second-token',
+      );
+      secondRetry.flush({ data: 'ok' });
+
+      expect(authServiceSpy.refreshToken).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('token refresh with rotation', () => {
