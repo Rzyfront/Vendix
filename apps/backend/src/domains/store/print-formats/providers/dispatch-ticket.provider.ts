@@ -159,8 +159,14 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
         grand_total_formatted: '',
       },
       custom_variables: {
+        // [print-editor-dsk P1.5] Antes P1.5 el sample publicaba dos mapas por
+        // SKU (`ordered_qty_by_sku` y `dispatched_qty_by_sku`) aquí para que
+        // el compositor los resolviera. Pero las columnas del seed (P1.5)
+        // apuntan directamente a `items[].variant_sku`, `items[].quantity` y
+        // `items[].dispatched_qty` — los campos reales del StandardPrintItem
+        // que el propio sample ya rellena. Mantener los mapas en paralelo era
+        // dos copias de la misma verdad que se desincronizan fácil.
         ordered_qty_by_sku: { 'SKU-001': 2, 'SKU-002': 1, 'SKU-003': 3 },
-        dispatched_qty_by_sku: { 'SKU-001': 2, 'SKU-002': 1, 'SKU-003': 2 },
       },
     } as unknown as StandardPrintDataModel;
   }
@@ -173,7 +179,7 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
       { token: '{{ items.sku }}', path: 'items[].variant_sku', description: 'SKU del producto despachado', example: 'SKU-001' },
       { token: '{{ items.product_name }}', path: 'items[].product_name', description: 'Nombre del producto despachado', example: 'Camiseta Polo Azul' },
       { token: '{{ items.ordered_qty }}', path: 'items[].quantity', description: 'Cantidad pedida (de la orden)', example: '3' },
-      { token: '{{ items.dispatched_qty }}', path: 'custom_variables.dispatched_qty_by_sku', description: 'Cantidad despachada (del último despacho)', example: '2' },
+      { token: '{{ items.dispatched_qty }}', path: 'items[].dispatched_qty', description: 'Cantidad despachada (del último despacho)', example: '2' },
       { token: '{{ store.name }}', path: 'store.name', description: 'Nombre comercial de la tienda', example: 'Tienda Principal' },
     ];
   }
@@ -287,12 +293,15 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
         grand_total_formatted: '',
       },
       custom_variables: {
+        // [print-editor-dsk P1.5] Antes P1.5 publicábamos también
+        // `dispatched_qty_by_sku` aquí — un mapa paralelo por SKU duplicando
+        // `items[].dispatched_qty`. Tras alinear las claves de las columnas
+        // (`variant_sku`, `quantity`, `dispatched_qty`) con los campos reales
+        // del StandardPrintItem, el mapa paralelo se vuelve redundante y
+        // peligroso: cualquier divergencia entre el mapa y `items[]` rompe el
+        // tiquete en silencio. Se elimina; la única fuente es `items[]`.
         ordered_qty_by_sku: items.reduce<Record<string, number>>((acc, it) => {
           if (it.variant_sku) acc[it.variant_sku] = it.quantity;
-          return acc;
-        }, {}),
-        dispatched_qty_by_sku: items.reduce<Record<string, number>>((acc, it) => {
-          if (it.variant_sku) acc[it.variant_sku] = it.dispatched_qty || 0;
           return acc;
         }, {}),
       },

@@ -4,6 +4,11 @@ import { FormsModule } from '@angular/forms';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { PrintFormatsFacade } from '../../services/print-formats.facade';
 import { PrintPaperFormat } from '../../../../../../../core/models/print-formats.model';
+// [print-editor-dsk P1.6] Antes P1.6 este componente declaraba su propio
+// `widthMap` local con `half_letter.width=140` — divergía del valor canónico
+// (216) que el resto del Hub asume. Ahora se delega al shim local de
+// `page-geometry` que re-exporta la geometría compartida con backend/mobile.
+import { PAPER_GEOMETRY } from '../../../../../../../core/lib/page-geometry';
 
 @Component({
   selector: 'app-print-styles-editor',
@@ -129,15 +134,13 @@ export class PrintStylesEditorComponent {
   });
 
   updatePaperFormat(format: PrintPaperFormat): void {
-    const widthMap: Record<PrintPaperFormat, { width: number; is_roll: boolean }> = {
-      thermal_80: { width: 80, is_roll: true },
-      thermal_58: { width: 58, is_roll: true },
-      letter: { width: 216, is_roll: false },
-      half_letter: { width: 140, is_roll: false },
-      a4: { width: 210, is_roll: false },
-    };
-
-    const target = widthMap[format] || { width: 80, is_roll: true };
+    // [print-editor-dsk P1.6] Lee del shim compartido para mantener un solo
+    // `width_mm`/`is_roll` por formato en los 3 apps. Antes P1.6
+    // `half_letter.width=140` local divergía del valor canónico (216 mm).
+    const geo = PAPER_GEOMETRY[format as keyof typeof PAPER_GEOMETRY];
+    const target = geo
+      ? { width: geo.width_mm, is_roll: geo.is_roll }
+      : { width: 80, is_roll: true };
 
     this.facade.updateDraftDefinition((def) => {
       def.paper.format = format;

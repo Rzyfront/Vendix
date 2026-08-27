@@ -1,0 +1,33 @@
+{
+  "_about": "[print-editor-dsk P1.6] Single source of truth for paper geometry across backend, frontend and mobile. NOT a workspace package — just a static JSON. scripts/sync-print-geometry.ts copies this file byte-for-byte into each app's local lib/ directory. NO @vendix/* import is used anywhere. Each app imports its LOCAL copy of this file.",
+  "thermal_80": {
+    "width_mm": 80,
+    "is_roll": true,
+    "css_page_size": "80mm auto",
+    "height_mm": null
+  },
+  "thermal_58": {
+    "width_mm": 58,
+    "is_roll": true,
+    "css_page_size": "58mm auto",
+    "height_mm": null
+  },
+  "a4": {
+    "width_mm": 210,
+    "is_roll": false,
+    "css_page_size": "A4 portrait",
+    "height_mm": 297
+  },
+  "letter": {
+    "width_mm": 216,
+    "is_roll": false,
+    "css_page_size": "letter portrait",
+    "height_mm": 279
+  },
+  "half_letter": {
+    "width_mm": 216,
+    "is_roll": false,
+    "css_page_size": "216mm 140mm",
+    "height_mm": 140
+  }
+}

@@ -14,6 +14,12 @@
     "mobile:android": "npm run android -w apps/mobile",
     "mobile:web": "npm run web -w apps/mobile",
     "// ----- BUILD -----": "",
+    "// [print-editor-dsk P1.6] Copia `libs/print-formats/schemas/page-geometry.json`
+    // byte-a-byte a las 3 copias locales (backend/frontend/mobile). Se ejecuta
+    // via `prebuild` antes de cualquier build; los shims de cada app importan
+    // su copia local, sin este sync los 3 apps divergen silenciosamente.",
+    "sync:geometry": "ts-node scripts/sync-print-geometry.ts",
+    "prebuild": "npm run sync:geometry",
     "build": "npm run build -w apps/backend && npm run build:prod -w apps/frontend",
     "// ----- BUILDCHECK (compila y muere: sin servidores, sin huérfanos) -----": "",
     "buildcheck": "bash scripts/buildcheck.sh",

@@ -13,6 +13,23 @@ import {
   CreatePrintTemplateDto,
   UpdatePrintTemplateDto,
 } from '../dto/print-template.dto';
+// [print-editor-dsk P1.1] — AJV runtime validation against definition-v2.schema.json.
+// Skips v1 overrides (no `v` field) to preserve backward compatibility; only
+// validates payloads that opt into v2 with `v: 2` at the top level.
+import { validatePrintFormatDefinition } from '../schemas/ajv-instance';
+
+/**
+ * [print-editor-dsk P1.1] — Decide whether a payload should go through AJV
+ * validation. v1 payloads (no `v` field, or `v: 1`) skip the validator and
+ * continue through the legacy fiscal path. v2 payloads (`v: 2`) go through
+ * `validatePrintFormatDefinition`; an empty `overrides` is also treated as a
+ * no-op (clear-customization) and skips validation.
+ */
+function shouldValidateV2Payload(payload: unknown): boolean {
+  if (!payload || typeof payload !== 'object') return false;
+  const v = (payload as Record<string, unknown>).v;
+  return v === 2;
+}
 
 export const ALL_FORMAT_TYPES: print_format_type_enum[] = [
   'pos_sale_ticket',
@@ -137,6 +154,22 @@ export class PrintFormatsService {
     formatType: print_format_type_enum,
     dto: UpdatePrintFormatConfigDto,
   ) {
+    // [print-editor-dsk P1.1] — AJV v2 schema validation BEFORE the fiscal pass.
+    // Only fires for v2 payloads (`dto.overrides.v === 2`); v1 overrides keep
+    // their legacy path. The schema includes per-side margins, height_mm,
+    // logo and company_block constraints, plus custom-keyword checks for
+    // column-width sums and Handlebars balance.
+    if (shouldValidateV2Payload(dto.overrides)) {
+      const result = validatePrintFormatDefinition(dto.overrides);
+      if (!result.valid) {
+        throw new VendixHttpException(
+          ErrorCodes.PRINT_CONFIG_VALIDATION_001,
+          'v2 schema validation failed for store format overrides',
+          { errors: result.errors },
+        );
+      }
+    }
+
     // Si se están enviando overrides con definición estructurada o custom, validar fiscalmente
     if (dto.overrides) {
       const current = await this.gateway.resolveEffectiveConfig(storeId, formatType);
@@ -266,6 +299,22 @@ export class PrintFormatsService {
     userId: number,
     dto: CreatePrintTemplateDto,
   ) {
+    // [print-editor-dsk P1.1] — AJV v2 schema validation BEFORE fiscal pass.
+    // Library templates are whole `definition` objects (not partial
+    // overrides), so the schema check applies whenever the creator opts
+    // into v2 with `dto.definition.v === 2`. v1 templates still flow
+    // through the legacy fiscal path.
+    if (shouldValidateV2Payload(dto.definition)) {
+      const result = validatePrintFormatDefinition(dto.definition);
+      if (!result.valid) {
+        throw new VendixHttpException(
+          ErrorCodes.PRINT_CONFIG_VALIDATION_001,
+          'v2 schema validation failed for library template definition',
+          { errors: result.errors },
+        );
+      }
+    }
+
     // CP-DTLP-20260827: PrintFormatTypeEnum (TS) incluye dispatch_ticket; el
     // validador fiscal espera el tipo Prisma. Cast explícito en la frontera
     // para que tsc acepte el undécimo valor hasta que `prisma generate`

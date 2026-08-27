@@ -22,6 +22,13 @@ import { PrintFiscalValidatorService } from './services/print-fiscal-validator.s
 // E.11 casilla 4 — motor PDF bajo demanda del gateway (builder pdfkit, sin S3).
 import { FiscalInvoicePdfRenderService } from './services/fiscal-invoice-pdf-render.service';
 
+// [print-editor-dsk P1.1] — AJV runtime singleton. The bare import triggers
+// the module-load side effect (AJV.compile + custom keyword registration),
+// so the validator is ready before `PrintFormatsService` consumes it. No
+// provider entry needed: the compiled validator is a module-level singleton
+// keyed in the ajv-instance closure.
+import './schemas/ajv-instance';
+
 // Providers & Registry
 import { DocumentDataProviderRegistry } from './providers/document-data-provider.registry';
 import { PosSaleTicketDataProvider } from './providers/pos-sale-ticket.provider';

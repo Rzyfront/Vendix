@@ -505,10 +505,16 @@ export const SYSTEM_PRINT_TEMPLATES: Array<{
         { id: 'sec_footer', type: 'footer', title: 'Despachado por', enabled: true, order: 5 },
       ],
       columns: [
+        // [print-editor-dsk P1.5] Las claves deben coincidir con los campos del
+        // StandardPrintItem que `dispatch-ticket.provider.ts` rellena:
+        //   - `variant_sku` (no `sku` — el compositor despacha items[].variant_sku)
+        //   - `quantity`   (cant. pedida — items[].quantity, ya rellenado por el provider)
+        //   - `dispatched_qty` (cant. despachada — items[].dispatched_qty, directo)
+        // Antes P1.5 estas claves leían undefined y la tabla salía vacía.
         { id: 'col_idx', key: 'index', label: '#', enabled: true, width_percent: 8, align: 'center', format: 'number' },
-        { id: 'col_sku', key: 'sku', label: 'SKU / Código', enabled: true, width_percent: 30, align: 'left', format: 'text' },
+        { id: 'col_sku', key: 'variant_sku', label: 'SKU / Código', enabled: true, width_percent: 30, align: 'left', format: 'text' },
         { id: 'col_desc', key: 'product_name', label: 'Descripción', enabled: true, width_percent: 32, align: 'left', format: 'text' },
-        { id: 'col_qty', key: 'ordered_qty', label: 'Cant. Pedida', enabled: true, width_percent: 15, align: 'center', format: 'number' },
+        { id: 'col_qty', key: 'quantity', label: 'Cant. Pedida', enabled: true, width_percent: 15, align: 'center', format: 'number' },
         { id: 'col_disp', key: 'dispatched_qty', label: 'Cant. Despachada', enabled: true, width_percent: 15, align: 'center', format: 'number' },
       ],
     },

@@ -20,7 +20,13 @@
     "noImplicitAny": false,
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false,
-    "useDefineForClassFields": false
+    "useDefineForClassFields": false,
+    // [print-editor-dsk P1.6] Necesario para que el shim
+    // `domains/store/print-formats/lib/page-geometry.ts` importe su JSON
+    // hermano (`page-geometry.json`) bajo `module: commonjs`. Mobile ya
+    // hereda esta flag de expo/tsconfig.base; frontend la activa en
+    // `tsconfig.app.json`.
+    "resolveJsonModule": true
   },
   "watchOptions": {
     "watchFile": "dynamicPriorityPolling",
