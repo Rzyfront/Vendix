@@ -1,6 +1,7 @@
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
+import { apiPost } from '@/core/api/http';
 import { useAuthStore } from '@/core/store/auth.store';
 import type { ReceiptsSettings } from '@/features/store/types/settings.types';
 
@@ -117,6 +118,35 @@ export interface ShareResult extends PrintResult {
   shared: boolean;
   /** Local URI of the generated PDF, or `null` when nothing was rendered. */
   uri: string | null;
+}
+
+/**
+ * What the backend `/store/print-formats/render` endpoint hands back: the
+ * rendered HTML and the paper geometry the caller should hand back to
+ * expo-print. The renderer already resolved copies and width_mm against
+ * the store configuration, so the mobile side does not consult `receipts`
+ * for documents that came back this way.
+ */
+export interface RenderDocumentResult {
+  /** Fully-rendered HTML document, including the `<html>`/`<head>` envelope. */
+  html: string;
+  /** `true` when the page box is a continuous roll. */
+  is_roll: boolean;
+  /** Printable width in millimetres. */
+  width_mm: number;
+  /** Copies the merchant configured for this format. 0 = silent no-op. */
+  copies: number;
+}
+
+/**
+ * Options for `printHtml`: handed the rendered document the caller already
+ * has (e.g. from `renderDocument`) so the same pipe produces the actual
+ * sheet without the service knowing the source.
+ */
+export interface PrintHtmlOptions {
+  widthMm: number;
+  isRoll: boolean;
+  copies?: number;
 }
 
 /**
@@ -352,6 +382,58 @@ const EMPTY_RESULT = (format: PrintFormat): PrintResult => ({
 export const DocumentPrintService = {
   resolveConfig: resolvePrintConfig,
   buildDocumentHtml,
+
+  /**
+   * Asks the backend to render a document for `formatType` (e.g. a dispatch
+   * ticket) and returns the body HTML plus the paper geometry the backend
+   * resolved against the store's print configuration. The mobile then hands
+   * that exact HTML to `printHtml` so a ticket printed from the phone lands
+   * on the same paper as one printed from the desktop.
+   *
+   * Lives on the service rather than on the calling feature so the
+   * dispatch/print-dispatch-ticket flow does not have to know the URL.
+   */
+  async renderDocument(opts: {
+    formatType: string;
+    documentId: number | string;
+    engine?: 'html' | 'pdf';
+  }): Promise<RenderDocumentResult> {
+    return apiPost<RenderDocumentResult>('/store/print-formats/render', {
+      format_type: opts.formatType,
+      document_id: opts.documentId,
+      engine: opts.engine ?? 'html',
+    });
+  },
+
+  /**
+   * Prints HTML the caller already has, sized to the paper the backend
+   * resolved. The `copies` from the caller win over `opts.copies` because
+   * `renderDocument` already validated the configured value.
+   */
+  async printHtml(
+    html: string,
+    opts: PrintHtmlOptions,
+  ): Promise<void> {
+    const pageBox: { width: number; height?: number } = {
+      width: mmToPoints(opts.widthMm),
+    };
+    if (!opts.isRoll) {
+      /*
+       * A fixed sheet (A4, half letter) needs a height too. The backend's
+       * render endpoint returns width_mm and a roll flag, never height_mm
+       * — fall back to the format's own height from the local
+       * PRINT_PAGE_GEOMETRY lookup.
+       */
+      const formatKey = (
+        Object.keys(PRINT_PAGE_GEOMETRY) as Array<keyof typeof PRINT_PAGE_GEOMETRY>
+      ).find((k) => PRINT_PAGE_GEOMETRY[k].width_mm === opts.widthMm);
+      const geometry = formatKey ? PRINT_PAGE_GEOMETRY[formatKey] : undefined;
+      if (geometry && geometry.height_mm !== null) {
+        pageBox.height = mmToPoints(geometry.height_mm);
+      }
+    }
+    await Print.printAsync({ html, ...pageBox });
+  },
 
   /** Resolves the paper, lays the bodies out and opens the print dialog. */
   async print(request: PrintRequest): Promise<PrintResult> {
