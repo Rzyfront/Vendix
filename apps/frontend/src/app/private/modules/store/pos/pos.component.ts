@@ -84,6 +84,8 @@ import { PosOrderCreateResult } from './models/order.model';
 import { StoreSettingsService } from '../settings/general/services/store-settings.service';
 import { HttpClient } from '@angular/common/http';
 import { StoreSettingsFacade } from '../../../../core/store/store-settings/store-settings.facade';
+import { DispatchTicketPrintService } from '../dispatch-ticket/services/dispatch-ticket-print.service';
+import type { DispatchTicketData } from '../dispatch-ticket/models/dispatch-ticket-data.model';
 import { PaymentMethodsCatalogService } from '../../../../shared/services/payment-methods-catalog.service';
 import { OrderPaymentModalComponent } from '../orders/components/order-payment-modal/order-payment-modal.component';
 import type { Order } from '../orders/interfaces/order.interface';
@@ -1218,6 +1220,9 @@ export class PosComponent {
   private readonly paymentMethodsCatalogService = inject(
     PaymentMethodsCatalogService,
   );
+  // CP-DTLP Phase E.2 — disparador POS del tiquete de despacho (cadena
+  // explícita al cierre de venta, defense-in-depth del `maybeAutoPrint`).
+  private readonly dispatchTicketPrint = inject(DispatchTicketPrintService);
 
   readonly canCreateCustomItems = computed(() =>
     this.hasPermission('store:pos:custom_items:create'),
@@ -2507,6 +2512,13 @@ export class PosComponent {
       this.mode.set('create-draft');
       this.checkoutIntent.set('pickup');
     }
+
+    // CP-DTLP Phase E.2 — encadenar tiquete de despacho (`'explicit'`)
+    // al cierre de venta con envío. Defense-in-depth del
+    // `maybeAutoPrint` interno: corre aún si el modal de confirmación
+    // no abre por guard (draft / modal cerrado) o si el auto con POS
+    // está desactivado.
+    void this.printDispatchTicketIfNeededForOrder(paymentData.order);
   }
 
   onOrderConfirmationClosed(): void {
@@ -3440,6 +3452,12 @@ export class PosComponent {
       this.paymentFulfillment.set(null);
       this.paymentTableId.set(null);
     }
+
+    // CP-DTLP Phase E.2 — encadenar tiquete de despacho (`'explicit'`)
+    // al crear la orden con envío. La guard interna exige `isShippingSale`,
+    // así que `onShippingCompleted` solo imprime cuando el flujo fue de
+    // envío (no para `pickup`/`direct_delivery`).
+    void this.printDispatchTicketIfNeededForOrder(shippingData.order);
   }
 
   private checkEditMode(): void {
@@ -4323,4 +4341,81 @@ export class PosComponent {
     this.loading.set(false);
   }
 
+  // ── CP-DTLP Phase E.2 — disparador POS del tiquete de despacho ────
+  //
+  // Cadena explícita (`trigger: 'explicit'`) al cierre de la venta con envío.
+  // Defense-in-depth: `pos-order-confirmation` ya encadena su propio
+  // `'automatic'` cuando `maybeAutoPrint` dispara, pero esta cadena aquí cubre
+  // escenarios donde el modal aún no abre (`isOpen()` false) o la venta no es
+  // `derivedIsPaid` (draft) — casos que `maybeAutoPrint` se salta por guard.
+
+  /**
+   * Helper único para los hooks `onPaymentCompleted` y `onShippingCompleted`.
+   * Misma guard que E.2 manual: enabled + envío + NO `direct_delivery`.
+   * El `'automatic'` (que además exige `print_dispatch_ticket_auto_with_pos`)
+   * vive en `pos-order-confirmation.maybeAutoPrint`.
+   */
+  private async printDispatchTicketIfNeededForOrder(
+    order: any,
+  ): Promise<void> {
+    if (!order) return;
+    const enabled =
+      this.settingsFacade.receipts()?.print_dispatch_ticket_enabled ?? true;
+    if (!enabled) return;
+    if (order.delivery_type === 'direct_delivery') return;
+    const hasShipping =
+      order.delivery_type === 'home_delivery' || !!order.isShippingSale;
+    if (!hasShipping) return;
+
+    const items = (order.items || order.order_items || []).map(
+      (item: any) => ({
+        sku:
+          item.sku ||
+          item.product_sku ||
+          item.variant_sku ||
+          item.products?.sku ||
+          item.product_variants?.sku ||
+          '',
+        productName: item.product_name || item.name || 'Producto',
+        orderedQty: Number(item.quantity || 0),
+        dispatchedQty: Number(item.quantity || 0),
+      }),
+    );
+    const address =
+      order.addresses_orders_shipping_address_idToaddresses ||
+      order.shipping_address_snapshot ||
+      null;
+    const storeName =
+      this.authFacade.getCurrentUser()?.store?.name || 'Vendix';
+    const customerName =
+      order.customer_name ||
+      (order.customer
+        ? `${order.customer.first_name || ''} ${order.customer.last_name || ''}`.trim() ||
+          order.customer.name ||
+          order.customer.business_name ||
+          'Consumidor Final'
+        : 'Consumidor Final');
+
+    const data: DispatchTicketData = {
+      orderId: order.id,
+      orderNumber: order.order_number || order.number || 'N/A',
+      dateFormatted: order.created_at
+        ? new Date(order.created_at).toLocaleString('es-AR')
+        : new Date().toLocaleString('es-AR'),
+      storeName,
+      customer: {
+        name: customerName,
+        addressLine1: address?.address_line1 || '',
+        addressLine2: address?.address_line2,
+        city: address?.city,
+      },
+      items,
+    };
+
+    try {
+      await this.dispatchTicketPrint.printDispatchTicket(data, 'explicit');
+    } catch (err) {
+      console.error('[CP-DTLP] Error al imprimir tiquete de despacho:', err);
+    }
+  }
 }
