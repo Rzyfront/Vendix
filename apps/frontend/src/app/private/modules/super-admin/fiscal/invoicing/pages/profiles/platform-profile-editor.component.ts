@@ -782,16 +782,19 @@ export class PlatformProfileEditorComponent {
 
   private loadProfile(id: number): void {
     this.loading.set(true);
-    this.fiscal.getProfile(id).subscribe({
-      next: (profile) => {
-        this.hydrateForm(profile);
-        this.loading.set(false);
-      },
-      error: () => {
-        this.server_error.set('No se pudo cargar el perfil.');
-        this.loading.set(false);
-      },
-    });
+    this.fiscal
+      .getProfile(id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (profile) => {
+          this.hydrateForm(profile);
+          this.loading.set(false);
+        },
+        error: () => {
+          this.server_error.set('No se pudo cargar el perfil.');
+          this.loading.set(false);
+        },
+      });
   }
 
   private hydrateForm(profile: PlatformInvoiceProfileDetail): void {
