@@ -131,6 +131,12 @@ describe('authInterceptorFn', () => {
 
       // Should attempt token refresh
       expect(authServiceSpy.refreshToken).toHaveBeenCalled();
+
+      // Con `vendix_auth_state` sembrado en beforeEach, el refresh exitoso
+      // dispara un retry que hay que flushar para que httpMock.verify()
+      // en afterEach no proteste por el request pendiente.
+      const retryReq = httpMock.expectOne(API_URL);
+      retryReq.flush({ data: 'success' });
     });
 
     it('should not handle 401 errors for non-API requests', () => {
