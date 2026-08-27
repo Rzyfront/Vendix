@@ -154,28 +154,28 @@ import { InvoiceOrderSelectComponent } from '../../components/invoice-create/inv
  * los mismos controles en las dos pantallas: lo que cambia es qué significa
  * dejar uno vacío, no qué campos hay. Ver su docblock.
  */
-import { InvoiceSectionAiuComponent } from '../../components/invoice-sections/index';
+import { InvoiceSectionAiuComponent } from '../../../../shared/components/invoice-sections/index';
 import {
   asAiuComponentsBasis,
   asAiuTaxableBasis,
   reprojectAiuTaxRules,
-} from '../../components/invoice-sections/index';
+} from '../../../../shared/components/invoice-sections/index';
 import type {
   AiuDepartureField,
   AiuSectionPaths,
   AiuTaxRuleValue,
-} from '../../components/invoice-sections/index';
+} from '../../../../shared/components/invoice-sections/index';
 /**
  * SECCIÓN DOCUMENTO COMPARTIDA con el editor de perfiles (B.2). Mismo
  * componente y mismos controles —resolución, tipo de documento, forma y
  * medio de pago, fechas y notas de cabecera— en las dos pantallas.
  */
-import { InvoiceSectionDocumentoComponent } from '../../components/invoice-sections/index';
+import { InvoiceSectionDocumentoComponent } from '../../../../shared/components/invoice-sections/index';
 import type {
   DocumentoSectionErrors,
   DocumentoSectionNotice,
   DocumentoSectionPaths,
-} from '../../components/invoice-sections/index';
+} from '../../../../shared/components/invoice-sections/index';
 /**
  * SECCIÓN LÍNEAS COMPARTIDA con «Líneas modelo» del editor de perfiles (B.3).
  * Es la sección con más asimetría de las dos pantallas —picker de producto,
@@ -183,11 +183,11 @@ import type {
  * tiene dos plantillas internas por contexto en vez de una sola con banderas
  * de campo. Ver su docblock.
  */
-import { InvoiceSectionLineasComponent } from '../../components/invoice-sections/index';
+import { InvoiceSectionLineasComponent } from '../../../../shared/components/invoice-sections/index';
 import type {
   LineasRowErrors,
   LineasRowPaths,
-} from '../../components/invoice-sections/index';
+} from '../../../../shared/components/invoice-sections/index';
 /**
  * SECCIÓN IMPUESTOS COMPARTIDA con la matriz por porción del editor de
  * perfiles (B.4). En contexto `invoice` sólo pinta el agregado de línea
@@ -195,7 +195,7 @@ import type {
  * fuente de datos propia en la factura, así que no se inventa acá. Ver el
  * docblock del componente para la razón completa.
  */
-import { InvoiceSectionImpuestosComponent } from '../../components/invoice-sections/index';
+import { InvoiceSectionImpuestosComponent } from '../../../../shared/components/invoice-sections/index';
 /**
  * SECCIÓN RETENCIONES COMPARTIDA con el editor de perfiles (B.5). El
  * interruptor de importe manual y su input de monto total NO tienen
@@ -203,16 +203,16 @@ import { InvoiceSectionImpuestosComponent } from '../../components/invoice-secti
  * así que se quedan en la página y el componente sólo se monta en la rama
  * `@else` (sin importe manual). Ver el docblock del componente.
  */
-import { InvoiceSectionRetencionesComponent } from '../../components/invoice-sections/index';
-import type { RetencionesRowPaths } from '../../components/invoice-sections/index';
+import { InvoiceSectionRetencionesComponent } from '../../../../shared/components/invoice-sections/index';
+import type { RetencionesRowPaths } from '../../../../shared/components/invoice-sections/index';
 /**
  * SECCIÓN DIVISA COMPARTIDA con el editor de perfiles (B.6). Toda la
  * consulta a la TRM oficial (`ExchangeRateQuote`, carga, sobre-escritura,
  * equivalente declarado) es sólo de `invoice`: un perfil no emite, así que
  * no dispara ninguna consulta. Ver el docblock del componente.
  */
-import { InvoiceSectionDivisaComponent } from '../../components/invoice-sections/index';
-import type { DivisaSectionPaths } from '../../components/invoice-sections/index';
+import { InvoiceSectionDivisaComponent } from '../../../../shared/components/invoice-sections/index';
+import type { DivisaSectionPaths } from '../../../../shared/components/invoice-sections/index';
 /**
  * SECCIÓN FORMATO COMPARTIDA con el editor de perfiles (B.7/E.1). En la
  * factura no hay controles de plantilla que el DTO declare: lo que se pinta
@@ -223,8 +223,8 @@ import type { DivisaSectionPaths } from '../../components/invoice-sections/index
 import {
   FISCAL_INVOICE_FORMAT_TYPE,
   InvoiceSectionFormatoComponent,
-} from '../../components/invoice-sections/index';
-import type { FormatoSectionPaths } from '../../components/invoice-sections/index';
+} from '../../../../shared/components/invoice-sections/index';
+import type { FormatoSectionPaths } from '../../../../shared/components/invoice-sections/index';
 import { InvoiceTaxCatalogService } from '../../components/invoice-create/invoice-tax-catalog.service';
 import {
   InvoiceAiuSettings,
