@@ -25,6 +25,14 @@ import { FiscalInvoicePdfRenderService } from './services/fiscal-invoice-pdf-ren
 // double-render srcdoc+doc.write pattern from `document-print.service.ts`).
 import { PrintDocumentRendererService } from './services/print-document-renderer.service';
 
+// [print-editor-dsk P9] — Prometheus instrumentation for the gateway.
+// Pure `prom-client` adapter, no DI deps; registered as a plain provider
+// so the gateway can inject it without a side-effect import. The service
+// does NOT register with the global `@willsoto/nestjs-prometheus` registry
+// here on purpose: it is a leaf metric owned by this module, and any
+// cross-module collector would be wired in `app.module.ts` instead.
+import { PrintGatewayMetricsService } from './services/print-gateway.metrics';
+
 // [print-editor-dsk P1.1] — AJV validator is loaded LAZILY by services that
 // need it (`print-formats.service.ts` calls `validatePrintFormatDefinition`
 // at request time). NO side-effect import here: an eager AJV compile at
@@ -92,6 +100,9 @@ import { WithholdingEmployeeCertificateDataProvider } from './providers/withhold
     PrintLayoutComposerService,
     PrintFiscalValidatorService,
     FiscalInvoicePdfRenderService,
+    // [print-editor-dsk P9] — Prometheus service. No DI dependencies; the
+    // gateway injects it via constructor (see `print-gateway.service.ts`).
+    PrintGatewayMetricsService,
     // [print-editor-dsk P2.2] — wired into `preview()` so the HTML the
     // Hub/control-panel renders carries explicit pixel dimensions and a
     // single, consistent `.vendix-print-page` container.

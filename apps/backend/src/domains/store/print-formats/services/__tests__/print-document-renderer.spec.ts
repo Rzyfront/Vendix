@@ -111,4 +111,44 @@ describe('PrintDocumentRendererService — single render path (P2.2)', () => {
     expect(html.match(/<section>one sheet<\/section>/g)).toHaveLength(1);
     expect(html).not.toContain('page-break-after: always');
   });
+
+  // [print-editor-dsk P9] — Edge cases pinned here.
+  it('copies=0 does not crash and emits no page-break separators', () => {
+    // `repeatForCopies` short-circuits when `copies <= 1`, returning the
+    // body once. For `copies=0` that means: wrapper present, body present,
+    // NO `break-after: page` separators (the loop never executed).
+    const html = service.render({
+      html: '<p>still here</p>',
+      paper: { width_mm: 80, is_roll: true, height_mm: null },
+      copies: 0,
+    });
+    expect(html).toContain('vendix-print-page');
+    expect(html).toContain('<p>still here</p>');
+    expect(html).not.toContain('page-break-after: always');
+    expect(html).not.toContain('break-after: page');
+  });
+
+  it('paper without explicit height_mm on a SHEET defaults to A4 height (297mm)', () => {
+    // A sheet without `height_mm` would otherwise produce a `height: auto`
+    // CSS rule, which collapses the preview iframe to a flat 0px box.
+    // The renderer MUST emit a sensible numeric fallback. `paperToContainerPx`
+    // uses 297mm as the safe default (= A4 height) so the preview never
+    // renders an empty box.
+    const html = service.render({
+      html: '<div>fits</div>',
+      paper: { width_mm: 80, is_roll: false /* height_mm omitted */ },
+    });
+    // The style block declares a height for sheets, NOT `auto`/`null`/empty.
+    const heightMatch = html.match(/height:\s*([^;]+);/);
+    expect(heightMatch).not.toBeNull();
+    const heightValue = heightMatch![1].trim();
+    expect(heightValue).not.toBe('auto');
+    expect(heightValue).not.toBe('null');
+    expect(heightValue).not.toBe('');
+    // The default falls back to 297mm (≈ 1122.5px at 96dpi), so we expect
+    // a px value in the ~1100-1130 range, well within the `1131` cap.
+    const px = parseFloat(heightValue);
+    expect(px).toBeGreaterThan(1100);
+    expect(px).toBeLessThanOrEqual(1131);
+  });
 });

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -10,6 +10,12 @@ import { FiscalInvoicePdfRenderService } from './fiscal-invoice-pdf-render.servi
 // composer's HTML with explicit pixel dimensions so the preview no longer
 // relies on `srcdoc` + `doc.write` double-render or magic `3.78` math.
 import { PrintDocumentRendererService } from './print-document-renderer.service';
+// [print-editor-dsk P9] — Prometheus instrumentation: histogram of render
+// duration, labeled by `format_type` / `engine` / `organization_id`. The
+// service is a thin adapter (see `print-gateway.metrics.ts`); the gateway
+// owns the timer and the `organization_id` resolution so the metric line
+// and the existing logger line stay co-located.
+import { PrintGatewayMetricsService } from './print-gateway.metrics';
 import {
   PrintColumnDefinition,
   PrintFormatDefinition,
@@ -65,6 +71,13 @@ export class PrintGatewayService {
     private readonly composer: PrintLayoutComposerService,
     private readonly fiscalValidator: PrintFiscalValidatorService,
     private readonly pdfRenderer: FiscalInvoicePdfRenderService,
+    // [print-editor-dsk P9] — Injected via constructor; `print-formats.module.ts`
+    // provides it. Marked `@Optional()` so existing unit tests that build the
+    // gateway manually (engine-pdf, profile-template, merge-definition specs)
+    // do not need to wire a Prometheus stub. Production deployments always
+    // register the provider via the module.
+    @Optional()
+    private readonly metrics?: PrintGatewayMetricsService,
   ) {}
 
   /**
@@ -286,6 +299,32 @@ export class PrintGatewayService {
     this.logger.log(
       `PrintGateway rendered ${formatType} for doc ${documentId} (store ${storeId}, engine ${engine}) in ${elapsed}ms`,
     );
+
+    // [print-editor-dsk P9] — Prometheus observation. We resolve the
+    // `organization_id` here (best-effort) so the histogram carries the
+    // tenant label. The lookup is a single-row findFirst on the PK of
+    // `stores` (the same row the gateway already loaded indirectly via the
+    // provider's `fetchDocumentData`); it does not introduce a new join.
+    // On failure (deleted store, AsyncLocalStorage drift) we emit under a
+    // sentinel label so the metric is never silently dropped.
+    let organizationId = 'unknown';
+    try {
+      const storeRow = await this.prisma.stores.findFirst({
+        where: { id: storeId },
+        select: { organization_id: true },
+      });
+      if (storeRow?.organization_id != null) {
+        organizationId = String(storeRow.organization_id);
+      }
+    } catch {
+      // Swallow — Prometheus must NEVER break a render.
+    }
+    this.metrics?.observe({
+      format_type: formatType,
+      engine,
+      organization_id: organizationId,
+      duration_seconds: elapsed / 1000,
+    });
 
     return {
       format_type: formatType,
