@@ -225,3 +225,18 @@ export interface RenderPrintDocumentResponse {
   is_roll: boolean;
   width_mm: number;
 }
+
+/**
+ * [print-editor-dsk P3.3] — Lightweight record returned by
+ * `GET /store/print-formats/:formatType/documents` for the sample picker.
+ * Intentionally minimal (id + a few human-readable fields) so the picker can
+ * list up to 20 documents without dragging every line item into the editor.
+ */
+export interface PrintRecentDocument {
+  id: number;
+  number?: string | null;
+  date?: string | null;
+  total?: number | null;
+  customer_name?: string | null;
+  status?: string | null;
+}
