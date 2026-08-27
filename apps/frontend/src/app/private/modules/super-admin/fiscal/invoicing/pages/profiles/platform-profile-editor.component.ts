@@ -155,7 +155,7 @@ type SectionId =
                 formControlName="name"
                 [maxlength]="120"
                 [control]="form.get('name')!"
-                [error]="controlError('name')"
+                [error]="controlError('name') ?? undefined"
                 helperText="Único por organización y tipo de operación."
                 size="sm"
               ></app-input>
