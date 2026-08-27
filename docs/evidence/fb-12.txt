@@ -1,0 +1,55 @@
+# FB-12: POST /store/print-formats/library
+# Plan section: A.3 + Phase D (clone dispatch_ticket template from org)
+# Source: apps/backend/src/domains/store/print-formats/controllers/print-templates-library.controller.ts:52
+#          apps/backend/src/domains/store/print-formats/dto/print-template.dto.ts:4
+# Permission: organization:settings:update, store:settings:update
+
+COMMAND:
+curl -sk -X POST 'https://api.vendix.com/api/store/print-formats/library' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "format_type": "dispatch_ticket",
+    "name": "Tiquete Despacho Bodega Sur",
+    "description": "Plantilla customizada para bodega sur, courier mono 9pt",
+    "definition": {
+      "v": 2,
+      "paper": { "format": "thermal_80", "width_mm": 80, "is_roll": true, "copies": 1 },
+      "styles": { "font_family": "Courier New", "font_size_base_pt": 9, "primary_color": "#000000" }
+    },
+    "is_shared": true
+  }'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESPONSE SHAPE:
+{
+  "success": true,
+  "message": "Plantilla creada exitosamente en la biblioteca.",
+  "data": {
+    "id": int,
+    "organization_id": int,
+    "format_type": "dispatch_ticket",
+    "name": "Tiquete Despacho Bodega Sur",
+    "definition": { ... },
+    "is_system": false,
+    "is_shared": true,
+    "created_at": ISO
+  }
+}
+
+VERIFICATION:
+# Happy path (post-B.3 con format_type=dispatch_ticket válido)
+curl .../library -d '{...}' | jq '.data.format_type' debe ser 'dispatch_ticket'
+curl .../library -d '{...}' | jq '.data.is_system' debe ser false
+curl .../library -d '{...}' | jq '.data.is_shared' debe ser true
+
+# Pre-B.3: format_type=dispatch_ticket falla con 422
+curl .../library -d '{"format_type":"dispatch_ticket",...}' (pre-B.3) | jq '.error.code' debe ser SYS_VALIDATION_001 (422)
+
+# Fiscal violation (crear fiscal con custom_template sin CUFE)
+curl .../library -d '{"format_type":"fiscal_electronic_invoice","name":"x","definition":{"custom_template":"no cufe"}}' | jq '.error.code' debe ser 'PRINT_FISCAL_STRUCTURE_VIOLATION_001' (422)
+
+# name vacío
+curl .../library -d '{"format_type":"dispatch_ticket","name":""}' | jq '.error.code' debe ser SYS_VALIDATION_001 (422)

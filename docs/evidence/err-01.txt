@@ -1,0 +1,30 @@
+# ERR-01: PRINT_FORMAT_NOT_FOUND_001
+# HTTP: 404
+# Source: apps/backend/src/common/errors/error-codes.ts:214-218
+# Emitido cuando: print_templates sin is_system ni override para formatType solicitado
+
+COMMAND:
+curl -sk -X GET 'https://api.vendix.com/api/store/print-formats/unknown_format' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -w '\nHTTP_CODE: %{http_code}\n'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+EXPECTED HTTP: 404
+
+EXPECTED RESPONSE BODY:
+{
+  "success": false,
+  "error": {
+    "code": "PRINT_FORMAT_NOT_FOUND_001",
+    "message": "Formato de impresión no encontrado"
+  }
+}
+
+VERIFICATION:
+curl .../unknown_format | jq '.error.code' debe ser 'PRINT_FORMAT_NOT_FOUND_001'
+curl .../unknown_format | jq '.success' debe ser false
+curl .../unknown_format -w '%{http_code}' | grep -q '404' (HTTP status check)
+
+# Frontend behavior esperado: toast error "Formato no encontrado"
+# Logout path: invalidar cache de /store/print-formats tras 404

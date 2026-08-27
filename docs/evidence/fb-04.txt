@@ -1,0 +1,41 @@
+# FB-04: POST /store/print-formats/:formatType/preview
+# Plan section: A.3 + Phase B + Phase D (preview dispatch_ticket)
+# Source: apps/backend/src/domains/store/print-formats/controllers/print-formats.controller.ts:114
+#          apps/backend/src/domains/store/print-formats/dto/print-format-config.dto.ts:23
+# Permission: store:settings:read, invoicing:read
+
+COMMAND:
+curl -sk -X POST 'https://api.vendix.com/api/store/print-formats/dispatch_ticket/preview' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "overrides": { "v": 2, "paper": { "format": "thermal_80", "width_mm": 80, "is_roll": true } },
+    "sample_document_id": 1
+  }'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESPONSE SHAPE:
+{
+  "success": true,
+  "data": {
+    "html": "<!DOCTYPE html>...<header>...<table><th>Cant. despachada</th>...</table>...",
+    "width_mm": 80,
+    "is_roll": true,
+    "copies": 1,
+    "tokens_used": ["document.number", "customer.name", "items.product_name", ...]
+  }
+}
+
+VERIFICATION:
+# Pre-B.4 (no provider): debe fallar con 500 o 404
+curl .../dispatch_ticket/preview | jq '.success' debe ser false (pre-B.4)
+
+# Post-B.4 (provider registered):
+curl .../dispatch_ticket/preview | jq '.data.html | contains("Cant. despachada")' debe ser true
+curl .../dispatch_ticket/preview | jq '.data.width_mm' debe ser 80
+curl .../dispatch_ticket/preview | jq '.data.is_roll' debe ser true
+
+# Token syntax error
+curl .../pos_sale_ticket/preview -d '{"overrides":{"custom_template":"{{ #if x }"}' | jq '.error.code' debe ser 'PRINT_TOKEN_SYNTAX_001' (422)

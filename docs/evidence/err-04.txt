@@ -1,0 +1,42 @@
+# ERR-04: PRINT_DOCUMENT_READER_MISSING_001
+# HTTP: 501
+# Source: apps/backend/src/common/errors/error-codes.ts:254-259
+# Emitido cuando: provider registrado pero sin fetchDocumentData real (transfer_note, kitchen_ticket)
+#             501 y no 404/500 a propósito: format SÍ existe, documento SÍ puede existir, falta el reader.
+#             Sustituye a devolver muestra fabricada (200 con datos de un tercero).
+
+COMMAND (pre-B.5, transfer_note sin reader real):
+curl -sk -X POST 'https://api.vendix.com/api/store/print-formats/render' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "format_type": "transfer_note",
+    "document_id": 100
+  }' \
+  -w '\nHTTP_CODE: %{http_code}\n'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+EXPECTED HTTP pre-B.5: 501
+EXPECTED HTTP post-B.5: 200
+
+EXPECTED RESPONSE BODY pre-B.5:
+{
+  "success": false,
+  "error": {
+    "code": "PRINT_DOCUMENT_READER_MISSING_001",
+    "message": "Print format is registered but has no real document reader yet"
+  }
+}
+
+VERIFICATION:
+# Pre-B.5
+curl .../render -d '{"format_type":"transfer_note","document_id":100}' (pre-B.5) | jq '.error.code' debe ser 'PRINT_DOCUMENT_READER_MISSING_001'
+curl .../render -d '{"format_type":"transfer_note","document_id":100}' (pre-B.5) -w '%{http_code}' | grep -q '501'
+
+# Post-B.5: reader real implementado
+curl .../render -d '{"format_type":"transfer_note","document_id":100}' (post-B.5) | jq '.success' debe ser true
+
+# Mismo para kitchen_ticket:
+curl .../render -d '{"format_type":"kitchen_ticket","document_id":200}' (pre-B.5) | jq '.error.code' debe ser 'PRINT_DOCUMENT_READER_MISSING_001'
+curl .../render -d '{"format_type":"kitchen_ticket","document_id":200}' (post-B.5) | jq '.success' debe ser true

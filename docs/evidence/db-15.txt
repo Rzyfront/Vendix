@@ -1,0 +1,29 @@
+# DB-15: invoice_profile_versions (config.format.template_id)
+# Plan section: A.3 + Phase B.5 (fiscal_electronic_invoice template resolution)
+# Source: apps/backend/prisma/schema.prisma (invoice_profile_versions model)
+# Scoping: store_id scoped via invoice
+# Invariant: frozen at emission (snapshot inmutable)
+
+COMMAND (psql):
+psql "$DATABASE_URL" -c "SELECT invoice_id, profile_id, version, config->'format'->>'template_id' AS template_id, config->'format'->>'engine' AS engine, created_at FROM invoice_profile_versions WHERE invoice_id=789 ORDER BY version DESC LIMIT 3;"
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESULT:
+| invoice_id | profile_id | version | template_id | engine | created_at |
+|------------|------------|---------|-------------|--------|------------|
+| 789 | 5 | 1 | 15 | html | 2026-08-27 14:00:00 |
+
+VERIFICATION:
+# PrintGatewayService.resolveProfileTemplateId debe leer este template_id para fiscal:
+curl .../render -d '{"format_type":"fiscal_electronic_invoice","document_id":789}' | jq '.success' debe ser true
+
+# Sin template_id (sin profile snapshot):
+# → fallback a store_print_format_configs activo + warn (ADR-3)
+curl .../render -d '{"format_type":"fiscal_electronic_invoice","document_id":<sin_profile>}' | jq '.success' debe ser true (con warn en log)
+
+# Immutabilidad del snapshot: una vez creada la versión, no debe modificarse
+psql -c "UPDATE invoice_profile_versions SET config = '{}' WHERE invoice_id=789 AND version=1;" (intento) debe fallar por CHECK constraint o por convención app
+
+# Latest version por invoice:
+psql -c "SELECT invoice_id, MAX(version) FROM invoice_profile_versions GROUP BY invoice_id;" debe tener 1 row por invoice con version >= 1

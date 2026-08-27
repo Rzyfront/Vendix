@@ -1,0 +1,38 @@
+# DB-07: order_items (sku, product_name, ordered_qty, dispatched_qty, variant_attributes)
+# Plan section: A.3 + Phase B.4 (DispatchTicketDataProvider)
+# Source: apps/backend/prisma/schema.prisma (order_items model)
+# Scoping: store_id scoped via order
+# Invariant: dispatched_qty ≤ ordered_qty
+
+COMMAND (psql):
+psql "$DATABASE_URL" -c "SELECT oi.sku, oi.product_name, oi.ordered_qty, oi.dispatched_qty, oi.variant_attributes FROM order_items oi WHERE oi.order_id=123 ORDER BY oi.id;"
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESULT:
+| sku | product_name | ordered_qty | dispatched_qty | variant_attributes |
+|-----|--------------|-------------|----------------|---------------------|
+| SKU-001 | Arroz Diana 1kg | 2 | 2 | null |
+| SKU-002 | Aceite Girasol 1L | 1 | 0 | {"size":"1L"} |
+
+VERIFICATION:
+# Invariante dispatched ≤ ordered (validación app-level):
+psql -c "SELECT COUNT(*) FROM order_items WHERE dispatched_qty > ordered_qty;" debe ser 0
+
+# Orders con dispatch parcial (dispatched_qty > 0 AND < ordered_qty):
+psql -c "SELECT COUNT(*) FROM order_items WHERE dispatched_qty > 0 AND dispatched_qty < ordered_qty;" debe ser >= 0 (casos reales)
+
+# DispatchTicketDataProvider debe leer estos campos:
+- sku: string (product.sku o variant.sku)
+- product_name: string (denormalized en order_items)
+- ordered_qty: numeric
+- dispatched_qty: numeric
+- variant_attributes: JSON | null
+
+# Output esperado del provider (transformado para HTML):
+{
+  "items": [
+    { "sku": "SKU-001", "name": "Arroz Diana 1kg", "ordered_qty": 2, "dispatched_qty": 2 },
+    { "sku": "SKU-002", "name": "Aceite Girasol 1L", "ordered_qty": 1, "dispatched_qty": 0, "variant": "1L" }
+  ]
+}

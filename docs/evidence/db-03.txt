@@ -1,0 +1,30 @@
+# DB-03: print_templates seed dispatch_ticket (B.2 NEW)
+# Plan section: A.3 + Phase B.2
+# Source: apps/backend/prisma/seeds/print-templates.seed.ts (B.2 to be modified)
+# Scoping: withoutScope() (system)
+# Invariant: definition.paper.format='thermal_80'
+
+COMMAND (psql — verification post-seed):
+psql "$DATABASE_URL" -c "SELECT format_type, name, is_system, definition->'paper'->>'format' AS paper_format FROM print_templates WHERE format_type='dispatch_ticket' AND is_system=true;"
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+EXPECTED: 1 row after Phase B.2 seed run
+
+EXPECTED RESULT:
+| format_type | name | is_system | paper_format |
+|-------------|------|-----------|--------------|
+| dispatch_ticket | Tiquete de Despacho (default) | true | thermal_80 |
+
+VERIFICATION:
+# Pre-B.2: NO debe existir
+psql -c "SELECT COUNT(*) FROM print_templates WHERE format_type='dispatch_ticket' AND is_system=true;" debe ser 0 (pre-B.2)
+
+# Post-B.2:
+psql -c "SELECT COUNT(*) FROM print_templates WHERE format_type='dispatch_ticket' AND is_system=true;" debe ser 1 (post-seed)
+
+# Definition shape:
+psql -c "SELECT definition->'paper'->>'format' FROM print_templates WHERE format_type='dispatch_ticket' AND is_system=true;" debe ser 'thermal_80'
+
+# Re-seed idempotente:
+npm run seed (segunda vez) debe exit 0 sin duplicates (upsert)
+psql -c "SELECT COUNT(*) FROM print_templates WHERE format_type='dispatch_ticket' AND is_system=true;" debe seguir siendo 1

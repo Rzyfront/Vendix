@@ -1,0 +1,26 @@
+# DB-13: stock_transfers (source/target store, items)
+# Plan section: A.3 + Phase B.5 (transfer_note provider — eliminar 501 ERR-04)
+# Source: apps/backend/prisma/schema.prisma (stock_transfers model)
+# Scoping: source_store_id scoped
+# Invariant: idempotent (no duplicate items per transfer)
+
+COMMAND (psql):
+psql "$DATABASE_URL" -c "SELECT id, source_store_id, target_store_id, status, transfer_number FROM stock_transfers WHERE source_store_id=5 ORDER BY created_at DESC LIMIT 5;"
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESULT:
+| id | source_store_id | target_store_id | status | transfer_number |
+|----|-----------------|-----------------|--------|-----------------|
+| 100 | 5 | 8 | completed | TRF-2026-0001 |
+
+VERIFICATION:
+# Erradicar ERR-04 (501 PRINT_DOCUMENT_READER_MISSING_001) post-B.5:
+curl .../render -d '{"format_type":"transfer_note","document_id":100}' (post-B.5) | jq '.success' debe ser true
+curl .../render -d '{"format_type":"transfer_note","document_id":100}' (pre-B.5) | jq '.error.code' debe ser 'PRINT_DOCUMENT_READER_MISSING_001' (501)
+
+# Items en transfer:
+psql -c "SELECT COUNT(*) FROM stock_transfer_items WHERE transfer_id=100;" debe ser >= 1
+
+# Cross-store transfer permitido solo en inventory_mode='unified':
+psql -c "SELECT COUNT(*) FROM stock_transfers WHERE source_store_id != target_store_id;" debe ser >= 0 (depende de mode)

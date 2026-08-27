@@ -1,0 +1,30 @@
+# DB-16: invoices (fiscal + credit_note) — fiscal.*, customer_address, items
+# Plan section: A.3 + Phase B.5 (fiscal-invoice.provider, fiscal-credit-note.provider)
+# Source: apps/backend/prisma/schema.prisma (invoices model)
+# Scoping: store_id scoped
+# Invariant: cufe 96 hex (fiscal_electronic_invoice), cude válido (fiscal_credit_note)
+
+COMMAND (psql):
+psql "$DATABASE_URL" -c "SELECT id, type, fiscal->>'cufe' AS cufe, fiscal->>'cude' AS cude, fiscal->>'qr' AS qr_url, customer_address FROM invoices WHERE id=789;"
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESULT:
+| id | type | cufe | cude | qr_url | customer_address |
+|----|------|------|------|--------|------------------|
+| 789 | fiscal_electronic_invoice | a1b2c3d4...96 hex chars | null | data:image/png;base64,... | {...} |
+
+VERIFICATION:
+# Invariante CUFE: exactamente 96 caracteres hex
+psql -c "SELECT LENGTH(fiscal->>'cufe') FROM invoices WHERE type='fiscal_electronic_invoice' AND fiscal->>'cufe' IS NOT NULL;" debe ser 96 para todos
+
+# Invariante CUDE (nota crédito): formato DIAN válido
+psql -c "SELECT LENGTH(fiscal->>'cude') FROM invoices WHERE type='fiscal_credit_note' AND fiscal->>'cude' IS NOT NULL;" debe ser 96 (DIAN estándar)
+
+# QR presente en facturas fiscales:
+psql -c "SELECT COUNT(*) FROM invoices WHERE type='fiscal_electronic_invoice' AND fiscal->>'qr' IS NULL;" debe ser 0 (todas tienen QR)
+
+# fiscal_credit_note debe referenciar invoice original:
+psql -c "SELECT referenced_invoice_id FROM invoices WHERE type='fiscal_credit_note';" debe ser NOT NULL
+
+# Reimpresión fiscal: usa profile_snapshot (DB-15) NO la config activa

@@ -1,0 +1,27 @@
+# DB-12: organization_settings (fiscal_data)
+# Plan section: A.3 + Phase B.4 (issuer identity for fiscal fields, even though dispatch_ticket NO es fiscal)
+# Source: apps/backend/prisma/schema.prisma (organization_settings model)
+# Scoping: organization_id scoped
+# Invariant: non-null when strict mode
+
+COMMAND (psql):
+psql "$DATABASE_URL" -c "SELECT organization_id, settings->'fiscal_data' FROM organization_settings WHERE organization_id=1;"
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESULT:
+| organization_id | fiscal_data |
+|-----------------|-------------|
+| 1 | {"trade_name": "...", "tax_id": "...", "regimen": "...", ...} |
+
+VERIFICATION:
+# Cardinalidad: 1 row por organization
+psql -c "SELECT organization_id, COUNT(*) FROM organization_settings GROUP BY organization_id HAVING COUNT(*) > 1;" debe ser 0
+
+# dispatch_ticket NO usa fiscal_data (no es fiscal), pero el PrintGatewayService carga issuer siempre:
+# Verificar que la carga NO falle si fiscal_data es null (modo no-strict):
+psql -c "SELECT COUNT(*) FROM organization_settings WHERE settings->'fiscal_data' IS NULL;" debe ser >= 0
+
+# Issuer identity resolution:
+# - is_strict_fiscal=true: requiere fiscal_data no-null → throw si falta
+# - is_strict_fiscal=false: fallback a organization.name + settings.trade_name

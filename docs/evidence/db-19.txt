@@ -1,0 +1,31 @@
+# DB-19: store_settings printing.dispatch_ticket (legacy fallback)
+# Plan section: A.3 + Phase D (legacy DocumentPrintService.print({document:'dispatch_ticket'}) fallback)
+# Source: apps/backend/src/domains/store/settings/interfaces/store-settings.interface.ts:792
+# Scoping: store_id scoped
+# Invariant: PRINT_DEFAULTS fallback si no presente
+
+COMMAND (psql):
+psql "$DATABASE_URL" -c "SELECT settings->'receipts'->'printing'->'dispatch_ticket' FROM store_settings WHERE store_id=5;"
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESULT:
+| printing.dispatch_ticket |
+|--------------------------|
+| {"format":"thermal_80","copies":1,"margin_mm":0} |
+
+VERIFICATION:
+# Si presente, DocumentPrintService lo usa:
+# Si null, fallback a PRINT_DEFAULTS (legacy hardcoded en document-print.service.ts)
+
+# Legacy call site:
+grep "document: 'dispatch_ticket'" apps/frontend/src/ --include="*.ts" -r
+# expected: 0 results (no callers frontend — se crea en Phase D.9)
+# Pero el `PRINT_DEFAULTS['dispatch_ticket']` debe existir en document-print.service.ts:
+grep "PRINT_DEFAULTS\['dispatch_ticket'\]" apps/frontend/src/app/shared/services/print/document-print.service.ts
+# expected: 1 match (legacy fallback por compat)
+
+# Conflicto legacy vs nuevo:
+# - legacy (DB-19): PRINT_DEFAULTS hardcoded → solo emite HTML genérico
+# - nuevo (post-D.9): gateway → PrintFormatDefinition v2 → B.5 composer
+# Decisión: legacy sigue funcionando si gateway_enabled=false, nuevo si gateway_enabled=true (default post-B.5)

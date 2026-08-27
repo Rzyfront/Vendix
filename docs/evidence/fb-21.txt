@@ -1,0 +1,45 @@
+# FB-21: POST /store/pos/complete
+# Plan section: A.3 + Phase E (POS auto dispatch trigger)
+# Source: apps/backend/src/domains/store/pos/pos.controller.ts (extracted)
+# Permission: store:pos:access
+
+COMMAND:
+curl -sk -X POST 'https://api.vendix.com/api/store/pos/complete' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "orderId": 123,
+    "payments": [{ "method": "cash", "amount": 50000 }],
+    "shipping_method": "delivery"
+  }'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESPONSE SHAPE:
+{
+  "success": true,
+  "data": {
+    "order": { /* Order completed */ },
+    "receipts": {
+      "ticket": { "url": "..." },
+      "dispatch_ticket": { "url": "...", "trigger": "automatic" } // post-E.5
+    }
+  }
+}
+
+VERIFICATION:
+# Happy path (POS sin shipping)
+curl .../pos/complete -d '{...}' (sin shipping) | jq '.success' debe ser true
+
+# POS con shipping_method='delivery' (post-E.5)
+curl .../pos/complete -d '{...,"shipping_method":"delivery"}' (post-E.5) | jq '.data.receipts.dispatch_ticket != null' debe ser true (si print_dispatch_ticket_auto_with_pos=true)
+
+# POS con shipping_method='direct_delivery' (ADR-6: NO debe emitir dispatch_ticket)
+curl .../pos/complete -d '{...,"shipping_method":"direct_delivery"}' (post-E.5) | jq '.data.receipts.dispatch_ticket' debe ser null
+
+# Stock insuficiente
+curl .../pos/complete -d '{...,"items":[{"product_id":1,"quantity":99999}]}' | jq '.error.code' debe ser INV_STOCK_001 (400) o POS_STOCK_INSUFFICIENT_001 (409)
+
+# Cliente requerido (settings.checkout.require_customer_data=true)
+curl .../pos/complete -d '{"orderId":<anonymous_order>}' (post-E.5) | jq '.error.code' debe ser POS_CUSTOMER_REQUIRED_001 (422)

@@ -1,0 +1,27 @@
+# DB-04: print_templates columns indices
+# Plan section: A.3 + Phase D (library performance)
+# Source: apps/backend/prisma/schema.prisma:9410+ (model print_templates)
+# Scoping: no specific scope (queries always filter)
+# Invariant: is_system=true OR organization_id=$orgId (multi-tenant safe)
+
+COMMAND (psql — check indexes):
+psql "$DATABASE_URL" -c "\d print_templates"
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESULT:
+- Index on (is_system, format_type) for library queries
+- Index on (organization_id, format_type) for tenant scoping
+
+VERIFICATION:
+# EXPLAIN query del library endpoint:
+psql "$DATABASE_URL" -c "EXPLAIN SELECT * FROM print_templates WHERE format_type='dispatch_ticket' AND (is_system=true OR organization_id=5) ORDER BY is_system DESC, created_at DESC;"
+
+# Sin índices óptimos → Seq Scan (lento con 1000+ templates)
+# Con índices → Index Scan usando print_templates_format_type_idx o compuesto
+
+# Confirmar cardinalidad:
+psql -c "SELECT COUNT(*) FROM print_templates WHERE is_system=true;" debe ser 10 (10 system templates, post-B.2: 11)
+psql -c "SELECT COUNT(*) FROM print_templates WHERE is_system=false;" debe ser >= N (org templates)
+
+# Sin dispatch_ticket en indices (pre-B.1): ningún row matching format_type='dispatch_ticket' usa el índice

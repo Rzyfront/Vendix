@@ -1,0 +1,40 @@
+# ERR-03: PRINT_DATA_PROVIDER_MISSING_001
+# HTTP: 500
+# Source: apps/backend/src/common/errors/error-codes.ts:260-264
+# Emitido cuando: formatType sin provider registrado en DocumentDataProviderRegistry
+
+COMMAND (pre-B.4, dispatch_ticket sin provider):
+curl -sk -X POST 'https://api.vendix.com/api/store/print-formats/render' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "format_type": "dispatch_ticket",
+    "document_id": 123
+  }' \
+  -w '\nHTTP_CODE: %{http_code}\n'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+EXPECTED HTTP pre-B.4: 500
+EXPECTED HTTP post-B.4: 200
+
+EXPECTED RESPONSE BODY pre-B.4:
+{
+  "success": false,
+  "error": {
+    "code": "PRINT_DATA_PROVIDER_MISSING_001",
+    "message": "No hay provider registrado para el formato solicitado"
+  }
+}
+
+VERIFICATION:
+# Pre-B.4
+curl .../render -d '{"format_type":"dispatch_ticket","document_id":123}' (pre-B.4) | jq '.error.code' debe ser 'PRINT_DATA_PROVIDER_MISSING_001'
+curl .../render -d '{"format_type":"dispatch_ticket","document_id":123}' (pre-B.4) -w '%{http_code}' | grep -q '500'
+
+# Post-B.4: provider registered
+curl .../render -d '{"format_type":"dispatch_ticket","document_id":123}' (post-B.4) | jq '.success' debe ser true
+curl .../render -d '{"format_type":"dispatch_ticket","document_id":123}' (post-B.4) -w '%{http_code}' | grep -q '200'
+
+# Log esperado: "[PrintFormatsModule] No provider registered for format_type=dispatch_ticket" (pre-B.4)
+# O: "[DispatchTicketDataProvider] Fetched document 123" (post-B.4)

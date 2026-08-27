@@ -1,0 +1,41 @@
+# FB-20: GET /store/orders/:id
+# Plan section: A.3 + Phase E (order detail debe incluir shipping_method)
+# Source: apps/backend/src/domains/store/orders/orders.controller.ts (extracted)
+# Permission: store:orders:read
+
+COMMAND:
+curl -sk -X GET 'https://api.vendix.com/api/store/orders/123' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESPONSE SHAPE:
+{
+  "success": true,
+  "data": {
+    "id": 123,
+    "order_number": string,
+    "customer_id": int | null,
+    "shipping_method": "pickup" | "delivery" | "direct_delivery" | "shipping_agency" | ...,
+    "requires_shipping": bool,
+    "customer_address": { /* JSON snapshot */ } | null,
+    "items": [ /* order_items */ ],
+    ... otros campos
+  }
+}
+
+VERIFICATION:
+# Happy path
+curl .../orders/123 | jq '.data.shipping_method' debe estar en el enum shipping_method
+curl .../orders/123 | jq '.data.requires_shipping' debe ser bool
+
+# Si requires_shipping=true, customer_address debe estar presente
+curl .../orders/123 | jq '.data.requires_shipping and (.data.customer_address != null)' debe ser true
+
+# Order no encontrada
+curl .../orders/9999999 | jq '.error.code' debe ser ORD_FIND_001 (404)
+
+# Cross-tenant
+curl .../orders/<other_store_order_id> | jq '.error.code' debe ser ORD_PERM_001 (403) o 404

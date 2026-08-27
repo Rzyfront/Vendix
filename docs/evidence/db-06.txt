@@ -1,0 +1,28 @@
+# DB-06: orders.shipping_method + requires_shipping
+# Plan section: A.3 + Phase E.3/E.5 (guards de disparadores)
+# Source: apps/backend/prisma/schema.prisma (orders model)
+# Scoping: store_id scoped
+# Invariant: shipping_method ∈ enum (pickup, delivery, direct_delivery, shipping_agency, etc.)
+
+COMMAND (psql):
+psql "$DATABASE_URL" -c "\d orders" | grep -E "shipping_method|requires_shipping"
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESULT:
+- Column shipping_method: enum type, nullable
+- Column requires_shipping: bool, default false
+
+VERIFICATION:
+# Cardinalidad por método (para entender distribución):
+psql -c "SELECT shipping_method, COUNT(*) FROM orders WHERE store_id=5 GROUP BY shipping_method ORDER BY COUNT(*) DESC;"
+
+# Orders con requires_shipping=true deben tener shipping_method NO NULL:
+psql -c "SELECT COUNT(*) FROM orders WHERE requires_shipping=true AND shipping_method IS NULL;" debe ser 0
+
+# Orders con shipping_method='direct_delivery' (caso especial ADR-6):
+psql -c "SELECT COUNT(*) FROM orders WHERE shipping_method='direct_delivery';" debe ser >= 0
+
+# dispatch_ticket provider NO debe leer orders con shipping_method='direct_delivery':
+# (esto es lógica de aplicación, no constraint DB)
+# Verificación via log: grep "dispatch_ticket.*direct_delivery.*skipped" /var/log/vendix/backend.log

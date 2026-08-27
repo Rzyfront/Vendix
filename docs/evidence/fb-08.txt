@@ -1,0 +1,35 @@
+# FB-08: POST /store/print-formats/:formatType/activate
+# Plan section: A.3 + Phase B (gateway default true) + Phase C
+# Source: apps/backend/src/domains/store/print-formats/controllers/print-formats.controller.ts:140
+# Permission: store:settings:update
+
+COMMAND:
+curl -sk -X POST 'https://api.vendix.com/api/store/print-formats/dispatch_ticket/activate' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESPONSE SHAPE:
+{
+  "success": true,
+  "message": "Print Gateway activado para este formato.",
+  "data": { "format_type": "dispatch_ticket", "gateway_enabled": true }
+}
+
+VERIFICATION:
+# Happy path
+curl .../dispatch_ticket/activate | jq '.data.gateway_enabled' debe ser true
+curl .../dispatch_ticket/activate | jq '.data.format_type' debe ser 'dispatch_ticket'
+
+# Idempotencia
+curl .../dispatch_ticket/activate (segunda vez) | jq '.success' debe ser true (idempotente, update sobre row existente)
+
+# Format inválido (pre-B.3)
+curl .../invalid/activate | jq '.error.code' debe ser 404
+# Format inválido (post-B.3 con enum ampliado): validation rechaza con 422
+curl .../invalid/activate (post-B.3) | jq '.error.code' debe ser SYS_VALIDATION_001 (422)
+
+# Sin permisos
+curl .../dispatch_ticket/activate (sin store:settings:update) | jq '.error.code' debe ser SYS_FORBIDDEN_001 (403)

@@ -1,0 +1,45 @@
+# ERR-09: SYS_VALIDATION_001
+# HTTP: 422
+# Source: apps/backend/src/common/errors/error-codes.ts:14-18
+# Emitido cuando: DTO validation failed (engine=pdf con format no soportado, formato enum inválido, etc.)
+
+COMMAND (engine=pdf para formato que no soporta PDF):
+curl -sk -X POST 'https://api.vendix.com/api/store/print-formats/render' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "format_type": "sales_order_invoice",
+    "document_id": 1,
+    "engine": "pdf"
+  }' \
+  -w '\nHTTP_CODE: %{http_code}\n'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+EXPECTED HTTP: 422
+
+EXPECTED RESPONSE BODY:
+{
+  "success": false,
+  "error": {
+    "code": "SYS_VALIDATION_001",
+    "message": "PDF no soportado para formato sales_order_invoice (solo fiscal usa PDF)"
+  }
+}
+
+VERIFICATION:
+# engine=pdf para non-fiscal
+curl .../render -d '{"format_type":"sales_order_invoice","document_id":1,"engine":"pdf"}' | jq '.error.code' debe ser 'SYS_VALIDATION_001' (con message específico de PDF no soportado)
+curl .../render -d '{"format_type":"sales_order_invoice","document_id":1,"engine":"pdf"}' -w '%{http_code}' | grep -q '422'
+
+# Engine inválido string
+curl .../render -d '{"format_type":"pos_sale_ticket","engine":"svg"}' | jq '.error.code' debe ser 'SYS_VALIDATION_001'
+
+# Format inválido string
+curl .../render -d '{"format_type":"invalid_format","document_id":1}' | jq '.error.code' debe ser 'SYS_VALIDATION_001'
+
+# document_id faltante
+curl .../render -d '{"format_type":"pos_sale_ticket"}' | jq '.error.code' debe ser 'SYS_VALIDATION_001'
+
+# Pre-B.1: format_type='dispatch_ticket' (no en enum) debe ser SYS_VALIDATION_001
+curl .../render -d '{"format_type":"dispatch_ticket","document_id":1}' (pre-B.1) | jq '.error.code' debe ser 'SYS_VALIDATION_001'

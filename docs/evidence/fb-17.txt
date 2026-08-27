@@ -1,0 +1,43 @@
+# FB-17: POST /store/print-formats/bulk/render
+# Plan section: A.3 + Phase E (bulk POS + dispatch_ticket)
+# Source: GAP — endpoint NO EXISTE aún. Spec A.5 propone DTO con ArrayMaxSize(100).
+#          Pendiente para Phase A.5 (diseño) + Phase E (implementación).
+
+COMMAND:
+curl -sk -X POST 'https://api.vendix.com/api/store/print-formats/bulk/render' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "requests": [
+      { "format_type": "pos_sale_ticket", "document_id": 1 },
+      { "format_type": "dispatch_ticket", "document_id": 1 },
+      { "format_type": "dispatch_ticket", "document_id": 2 }
+    ]
+  }'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+EXPECTED HTTP: 404 Not Found (until A.5/E implements this endpoint)
+
+EXPECTED RESPONSE SHAPE (post-A.5):
+{
+  "success": true,
+  "data": [
+    { "format_type": "pos_sale_ticket", "html": "..." },
+    { "format_type": "dispatch_ticket", "html": "...", "is_roll": true },
+    { "format_type": "dispatch_ticket", "html": "...", "is_roll": true }
+  ]
+}
+
+VERIFICATION:
+# Pre-A.5 (current): endpoint no existe
+curl .../bulk/render -d '{...}' | jq '.error.code' debe ser SYS_NOT_FOUND_001 (404)
+
+# Post-A.5:
+curl .../bulk/render -d '{"requests":[]}' | jq '.error.code' debe ser SYS_VALIDATION_001 (422, min 1)
+
+# ArrayMaxSize(100): 101 requests debe rechazar
+curl .../bulk/render -d "{\"requests\":[$(printf '{\"format_type\":\"pos_sale_ticket\",\"document_id\":1},%.0s' {1..101})]}" | jq '.error.code' debe ser SYS_VALIDATION_001 (422)
+
+# Tolerante a fallos parciales (algunos documentos inválidos)
+curl .../bulk/render -d '{"requests":[{"format_type":"pos_sale_ticket","document_id":99999},{"format_type":"pos_sale_ticket","document_id":1}]}' | jq '.data | length == 2' debe ser true (con error_code en el item fallido)

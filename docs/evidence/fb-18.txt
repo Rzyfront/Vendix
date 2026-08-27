@@ -1,0 +1,40 @@
+# FB-18: POST /store/print-formats/:formatType/preview con engine=pdf
+# Plan section: A.3 + Phase D (preview dispatch_ticket as PDF)
+# Source: apps/backend/src/domains/store/print-formats/controllers/print-formats.controller.ts:114
+#          apps/backend/src/domains/store/print-formats/services/print-gateway.service.ts
+
+COMMAND:
+curl -sk -X POST 'https://api.vendix.com/api/store/print-formats/fiscal_electronic_invoice/preview' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "overrides": {},
+    "sample_document_id": 1,
+    "engine": "pdf"
+  }'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESPONSE SHAPE:
+{
+  "success": true,
+  "data": {
+    "html": "<html>...</html>", // fallback HTML para preview
+    "pdf_buffer": "<base64 string>" | null,
+    "format_type": "fiscal_electronic_invoice"
+  }
+}
+
+VERIFICATION:
+# Engine soportado para fiscal: pdf OK
+curl .../fiscal_electronic_invoice/preview -d '{"engine":"pdf",...}' | jq '.success' debe ser true
+
+# Engine NO soportado para pos_sale_ticket: ERR-09 (SYS_VALIDATION_001)
+curl .../pos_sale_ticket/preview -d '{"engine":"pdf",...}' | jq '.error.code' debe ser SYS_VALIDATION_001 (422)
+
+# Engine inválido string
+curl .../pos_sale_ticket/preview -d '{"engine":"svg"}' | jq '.error.code' debe ser SYS_VALIDATION_001 (422)
+
+# dispatch_ticket con engine=pdf: debe rechazar (roll, no aplica)
+curl .../dispatch_ticket/preview -d '{"engine":"pdf",...}' (post-B.5) | jq '.error.code' debe ser SYS_VALIDATION_001 (422)

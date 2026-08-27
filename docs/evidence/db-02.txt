@@ -1,0 +1,37 @@
+# DB-02: store_print_format_configs (overrides, template_id, gateway_enabled)
+# Plan section: A.3 + Phase B (migration gateway default true + backfill) + Phase C
+# Source: apps/backend/prisma/schema.prisma:9420-9440
+# Scoping: store_id scoped
+# Invariant: @@unique([store_id,format_type]); gateway_enabled default true (post-migration)
+
+COMMAND (psql):
+psql "$DATABASE_URL" -c "\d store_print_format_configs"
+
+COMMAND (verificación pre/post migración):
+psql "$DATABASE_URL" -c "SELECT format_type, COUNT(*) AS rows, SUM(CASE WHEN gateway_enabled THEN 1 ELSE 0 END) AS gateway_on FROM store_print_format_configs GROUP BY format_type ORDER BY format_type;"
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESULT:
+- Columns: id, store_id, organization_id, format_type, is_active, gateway_enabled, template_id (nullable), overrides (Json, nullable), timestamps
+- Index: @@unique([store_id, format_type])
+
+VERIFICATION:
+# Pre-B.1 (sin dispatch_ticket):
+psql -c "SELECT COUNT(*) FROM store_print_format_configs WHERE format_type='dispatch_ticket';" debe ser 0
+
+# Post-B.1 + post-migration (B.1 backfill inserts dispatch_ticket row per store):
+psql -c "SELECT COUNT(*) FROM store_print_format_configs WHERE format_type='dispatch_ticket';" debe ser = SELECT COUNT(*) FROM stores
+
+# Pre-migración B.5: gateway_enabled=false (default legacy)
+psql -c "SELECT COUNT(*) FROM store_print_format_configs WHERE gateway_enabled=false;" debe ser = 10 × stores (pre-backfill)
+
+# Post-migración B.5: gateway_enabled=true (default + backfill)
+psql -c "SELECT COUNT(*) FROM store_print_format_configs WHERE gateway_enabled=false;" debe ser 0 (post-backfill total)
+# O N si algunas tiendas desactivaron explícitamente
+
+# Invariante unique constraint:
+psql -c "SELECT store_id, format_type, COUNT(*) FROM store_print_format_configs GROUP BY store_id, format_type HAVING COUNT(*) > 1;" debe devolver 0 filas
+
+# Cross-tenant scoping:
+psql -c "SELECT COUNT(*) FROM store_print_format_configs spc JOIN stores s ON s.id=spc.store_id WHERE spc.organization_id != s.organization_id;" debe ser 0

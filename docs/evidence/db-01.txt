@@ -1,0 +1,33 @@
+# DB-01: print_templates.definition Json column
+# Plan section: A.3 + Phase B (seed dispatch_ticket) + Phase D (templates)
+# Source: apps/backend/prisma/schema.prisma:9410-9420
+# Scoping: withoutScope() (system templates bypass org scope)
+# Invariant: is_system=true → organization_id IS NULL
+
+COMMAND (psql):
+psql "$DATABASE_URL" -c "SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name='print_templates' AND column_name='definition';"
+
+COMMAND (prisma):
+cd apps/backend && npx prisma db execute --stdin <<EOF
+SELECT enumlabel FROM pg_enum WHERE enumtypid='print_format_type_enum'::regtype ORDER BY enumsortorder;
+EOF
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESULT:
+- Column: definition, type: jsonb, nullable: NO (NOT NULL by default after seed)
+- Enum values (pre-B.1): 10 (no dispatch_ticket)
+- Enum values (post-B.1): 11 (includes dispatch_ticket)
+
+VERIFICATION:
+# Pre-B.1
+psql -c "SELECT enumlabel FROM pg_enum WHERE enumtypid='print_format_type_enum'::regtype;" | wc -l debe ser 10
+psql -c "SELECT enumlabel FROM pg_enum WHERE enumtypid='print_format_type_enum'::regtype AND enumlabel='dispatch_ticket';" | wc -l debe ser 0
+
+# Post-B.1 (post-migration ADD VALUE IF NOT EXISTS)
+psql -c "SELECT enumlabel FROM pg_enum WHERE enumtypid='print_format_type_enum'::regtype AND enumlabel='dispatch_ticket';" | wc -l debe ser 1
+
+# Invariante sistema:
+psql -c "SELECT COUNT(*) FROM print_templates WHERE is_system=true AND organization_id IS NOT NULL;" debe ser 0
+psql -c "SELECT COUNT(*) FROM print_templates WHERE is_system=false AND organization_id IS NULL;" debe ser 0
+psql -c "SELECT COUNT(*) FROM print_templates WHERE format_type='dispatch_ticket' AND is_system=true;" (post-B.2) debe ser 1

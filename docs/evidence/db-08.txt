@@ -1,0 +1,35 @@
+# DB-08: orders.customer_address JSON snapshot
+# Plan section: A.3 + Phase B.4 (DispatchTicketDataProvider necesita dirección)
+# Source: apps/backend/prisma/schema.prisma (orders.customer_address Json column)
+# Scoping: store_id scoped
+# Invariant: non-null cuando requires_shipping=true
+
+COMMAND (psql):
+psql "$DATABASE_URL" -c "SELECT id, requires_shipping, shipping_method, customer_address FROM orders WHERE id=123;"
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESULT:
+| id | requires_shipping | shipping_method | customer_address |
+|----|-------------------|-----------------|-------------------|
+| 123 | true | delivery | {"line1":"...", "line2":"...", "city":"...", "department":"...", "country":"CO", "phone":"..."} |
+
+VERIFICATION:
+# Invariante: requires_shipping=true implica customer_address NOT NULL
+psql -c "SELECT COUNT(*) FROM orders WHERE requires_shipping=true AND customer_address IS NULL;" debe ser 0
+
+# dispatch_ticket provider REQUIERE customer_address:
+# Si null con requires_shipping=true → bug en seed/migration. Reportar como data integrity alert.
+
+# Estructura JSON esperada:
+{
+  "line1": "Calle 123 #45-67",
+  "line2": "Apto 301",
+  "city": "Bogotá",
+  "department": "Cundinamarca",
+  "country": "CO",
+  "phone": "+57 300 123 4567",
+  "recipient_name": "Juan Pérez"
+}
+
+# dispatch_ticket imprime: recipient_name + line1 + line2 + city/department (sin country/phone explícito)

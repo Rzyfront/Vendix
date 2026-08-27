@@ -1,0 +1,48 @@
+# ERR-07: PRINT_CONFIG_VALIDATION_001
+# HTTP: 422
+# Source: apps/backend/src/common/errors/error-codes.ts:234-238
+# Emitido cuando: AJV schema violation en overrides (dispatch_ticket width_mm:0, margin>50, format inválido)
+
+COMMAND (post-A.4, AJV schema enforces constraints):
+curl -sk -X PUT 'https://api.vendix.com/api/store/print-formats/dispatch_ticket' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "overrides": {
+      "v": 2,
+      "paper": { "format": "thermal_80", "width_mm": 0 }
+    }
+  }' \
+  -w '\nHTTP_CODE: %{http_code}\n'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+EXPECTED HTTP: 422
+
+EXPECTED RESPONSE BODY:
+{
+  "success": false,
+  "error": {
+    "code": "PRINT_CONFIG_VALIDATION_001",
+    "message": "Print format definition or overrides schema validation failed",
+    "details": [
+      { "path": "paper.width_mm", "message": "must be >= 58" }
+    ]
+  }
+}
+
+VERIFICATION:
+# width_mm < 58
+curl .../dispatch_ticket -d '{"overrides":{"v":2,"paper":{"width_mm":0}}}' (post-A.4) | jq '.error.code' debe ser 'PRINT_CONFIG_VALIDATION_001'
+curl .../dispatch_ticket -d '{"overrides":{"v":2,"paper":{"width_mm":0}}}' -w '%{http_code}' | grep -q '422'
+
+# margin_top_mm > 50
+curl .../dispatch_ticket -d '{"overrides":{"v":2,"paper":{"margin_top_mm":100}}}' (post-A.4) | jq '.error.code' debe ser 'PRINT_CONFIG_VALIDATION_001'
+
+# format enum inválido
+curl .../dispatch_ticket -d '{"overrides":{"v":2,"paper":{"format":"invalid"}}}' (post-A.4) | jq '.error.code' debe ser 'PRINT_CONFIG_VALIDATION_001'
+
+# pre-A.4 (sin AJV): estos pasan silenciosamente, schema solo en código
+curl .../dispatch_ticket -d '{"overrides":{"v":2,"paper":{"width_mm":0}}}' (pre-A.4) | jq '.success' debe ser true (validation gap)
+
+# Frontend behavior: toast + inline error en field específico (mostrar path + message)

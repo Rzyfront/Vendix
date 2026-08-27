@@ -1,0 +1,42 @@
+# FB-19: POST /store/orders/:id/print-dispatch-ticket
+# Plan section: A.3 + Phase E.3 (manual trigger from order details)
+# Source: GAP — endpoint NO EXISTE. Pendiente para Phase E.3.
+#          Decisión arquitectónica pendiente: ¿server-side proxy o solo frontend?
+#          Owner dijo "manual desde el detalle de la orden sección Envío (botón e-ticket de envío)".
+
+COMMAND:
+curl -sk -X POST 'https://api.vendix.com/api/store/orders/123/print-dispatch-ticket' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{ "trigger": "explicit", "copies": 1 }'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+EXPECTED HTTP: 404 Not Found (until E.3 implements this endpoint)
+
+EXPECTED RESPONSE SHAPE (post-E.3):
+{
+  "success": true,
+  "data": {
+    "html": "<!DOCTYPE html>...dispatch-ticket...",
+    "copies": 1,
+    "is_roll": true,
+    "width_mm": 80
+  }
+}
+
+VERIFICATION:
+# Pre-E.3 (current): endpoint no existe
+curl .../orders/123/print-dispatch-ticket -d '{...}' | jq '.error.code' debe ser SYS_NOT_FOUND_001 (404)
+
+# Post-E.3:
+curl .../orders/123/print-dispatch-ticket -d '{"trigger":"explicit"}' | jq '.data.html | contains("Cant. despachada")' debe ser true
+
+# Trigger inválido
+curl .../orders/123/print-dispatch-ticket -d '{"trigger":"invalid"}' | jq '.error.code' debe ser SYS_VALIDATION_001 (422)
+
+# Order con shipping_method='direct_delivery' debe rechazar (ADR-6)
+curl .../orders/<direct_delivery_id>/print-dispatch-ticket -d '{"trigger":"explicit"}' (post-E.3) | jq '.error.code' debe ser ORD_SHIP_REQUIRED_001 o similar (400/422)
+
+# Order no encontrada
+curl .../orders/9999999/print-dispatch-ticket -d '{"trigger":"explicit"}' (post-E.3) | jq '.error.code' debe ser ORD_FIND_001 (404)

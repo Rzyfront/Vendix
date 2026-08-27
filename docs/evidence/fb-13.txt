@@ -1,0 +1,36 @@
+# FB-13: POST /store/print-formats/library/:id/clone
+# Plan section: A.3 + Phase D (clone template to store)
+# Source: apps/backend/src/domains/store/print-formats/controllers/print-templates-library.controller.ts:72
+# Permission: store:settings:update
+
+COMMAND:
+curl -sk -X POST 'https://api.vendix.com/api/store/print-formats/library/1/clone' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESPONSE SHAPE:
+{
+  "success": true,
+  "message": "Plantilla clonada y aplicada a la tienda.",
+  "data": { /* same as FB-02 StorePrintFormatDetail */ }
+}
+
+VERIFICATION:
+# Happy path (clonar system template de dispatch_ticket)
+curl .../library/1/clone | jq '.data.format_type' debe ser 'dispatch_ticket' (post-B.2)
+curl .../library/1/clone | jq '.data.template_id' debe ser 1
+curl .../library/1/clone | jq '.data.gateway_enabled' debe ser true
+curl .../library/1/clone | jq '.data.is_active' debe ser true
+
+# Cross-tenant: template id de otra org
+curl .../library/999/clone (template de otra org) | jq '.error.code' debe ser 'PRINT_TEMPLATE_NOT_FOUND_001' (404)
+
+# Clone conflict (FB-14)
+curl .../library/1/clone (mismo template 2 veces seguidas) | jq '.error.code' debe ser 'PRINT_CLONE_FAILED_001' (409)
+# O idempotente: jq '.success' debe ser true (depende de implementación)
+
+# Template id inválido
+curl .../library/abc/clone | jq '.error.code' debe ser SYS_VALUE_OUT_OF_RANGE_001 (400)

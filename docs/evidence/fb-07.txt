@@ -1,0 +1,37 @@
+# FB-07: GET /store/settings
+# Plan section: A.3 + Phase C + Phase E (receipts shape)
+# Source: apps/backend/src/domains/store/settings/controllers/store-settings.controller.ts
+# Permission: store:settings:read
+
+COMMAND:
+curl -sk -X GET 'https://api.vendix.com/api/store/settings' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESPONSE SHAPE:
+{
+  "success": true,
+  "data": {
+    "settings": {
+      "receipts": {
+        "print_dispatch_ticket_enabled": true,    // default post-C.1
+        "print_dispatch_ticket_auto_with_pos": false, // default post-C.1
+        "printing": { /* formatos */ }
+      }
+    }
+  }
+}
+
+VERIFICATION:
+# Post-C.1: defaults deben estar presentes
+curl .../settings | jq '.data.settings.receipts | keys' debe incluir 'print_dispatch_ticket_enabled' y 'print_dispatch_ticket_auto_with_pos'
+curl .../settings | jq '.data.settings.receipts.print_dispatch_ticket_enabled' debe ser true (default)
+curl .../settings | jq '.data.settings.receipts.print_dispatch_ticket_auto_with_pos' debe ser false (default)
+
+# Pre-C.1: estos campos NO existen en la respuesta (defaults aplicados en runtime)
+
+# Sin autenticación
+curl .../settings | jq '.success' debe ser false (401)

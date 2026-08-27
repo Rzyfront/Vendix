@@ -1,0 +1,55 @@
+# FB-23: POST /store/print-formats/render {dispatch_ticket, document_id, engine:html}
+# Plan section: A.3 + Phase D.9 + E (DispatchTicketPrintService core contract)
+# Source: apps/backend/src/domains/store/print-formats/controllers/print-formats.controller.ts:172
+#          apps/backend/src/domains/store/print-formats/dto/print-render.dto.ts:4
+#          apps/backend/src/domains/store/print-formats/providers/dispatch-ticket.provider.ts (B.4 NEW)
+# Permission: store:pos:access, store:orders:read, store:settings:read
+
+COMMAND:
+curl -sk -X POST 'https://api.vendix.com/api/store/print-formats/render' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "format_type": "dispatch_ticket",
+    "document_id": 123,
+    "engine": "html"
+  }'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+EXPECTED HTTP pre-B.4: 500 PRINT_DATA_PROVIDER_MISSING_001
+EXPECTED HTTP post-B.4: 200 con HTML de tiquete
+
+EXPECTED RESPONSE SHAPE (post-B.4):
+{
+  "success": true,
+  "data": {
+    "html": "<!DOCTYPE html>...<div class='dispatch-ticket'><header>...</header><table><thead><tr><th>#</th><th>SKU/Descripción</th><th>Cant.pedida</th><th>Cant.despachada</th></tr></thead>...</table>...",
+    "copies": 1,
+    "is_roll": true,
+    "width_mm": 80,
+    "format_type": "dispatch_ticket",
+    "render_ms": int
+  }
+}
+
+VERIFICATION:
+# Pre-B.4 (provider no registrado): debe fallar con código específico
+curl .../render -d '{"format_type":"dispatch_ticket","document_id":123}' (pre-B.4) | jq '.error.code' debe ser 'PRINT_DATA_PROVIDER_MISSING_001' (500)
+# O alternativamente: PRINT_DOCUMENT_NOT_FOUND_001 (404) si el format no está en enum (pre-B.1)
+
+# Post-B.1+B.3+B.4 (provider registrado, format en enum):
+curl .../render -d '{"format_type":"dispatch_ticket","document_id":123}' (post-B.4) | jq '.success' debe ser true
+curl .../render -d '{"format_type":"dispatch_ticket","document_id":123}' (post-B.4) | jq '.data.html | contains("Cant. despachada")' debe ser true
+curl .../render -d '{"format_type":"dispatch_ticket","document_id":123}' (post-B.4) | jq '.data.is_roll' debe ser true
+curl .../render -d '{"format_type":"dispatch_ticket","document_id":123}' (post-B.4) | jq '.data.width_mm' debe ser 80
+curl .../render -d '{"format_type":"dispatch_ticket","document_id":123}' (post-B.4) | jq '.data.copies' debe ser 1
+
+# Order con shipping_method='direct_delivery' (ADR-6): provider debe rechazar
+curl .../render -d '{"format_type":"dispatch_ticket","document_id":<direct_delivery_order_id>}' (post-B.4) | jq '.error.code' debe ser ORD_SHIP_REQUIRED_001 o similar
+
+# Document no encontrado
+curl .../render -d '{"format_type":"dispatch_ticket","document_id":9999999}' (post-B.4) | jq '.error.code' debe ser ORD_FIND_001 (404) o 'PRINT_DOCUMENT_NOT_FOUND_001' (404)
+
+# Engine=pdf para dispatch_ticket (no aplica, roll)
+curl .../render -d '{"format_type":"dispatch_ticket","document_id":123,"engine":"pdf"}' (post-B.4) | jq '.error.code' debe ser SYS_VALIDATION_001 (422)

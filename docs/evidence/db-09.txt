@@ -1,0 +1,25 @@
+# DB-09: users (customer) — name, phone, tax_id
+# Plan section: A.3 + Phase B.4 (DispatchTicketDataProvider customer info)
+# Source: apps/backend/prisma/schema.prisma (users model)
+# Scoping: store_id scoped via join
+# Invariant: nullable for guest customers
+
+COMMAND (psql):
+psql "$DATABASE_URL" -c "SELECT u.id, u.first_name, u.last_name, u.phone, u.tax_id, u.is_guest FROM users u JOIN orders o ON o.customer_id=u.id WHERE o.id=123;"
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESULT:
+| id | first_name | last_name | phone | tax_id | is_guest |
+|----|------------|-----------|-------|--------|----------|
+| 456 | Juan | Pérez | +57 300 123 4567 | 1234567890 | false |
+
+VERIFICATION:
+# dispatch_ticket debe tolerar is_guest=true (sin tax_id, sin last_name):
+psql -c "SELECT COUNT(*) FROM users WHERE is_guest=true AND store_id=5;" debe ser >= 0
+
+# Cardinalidad: users por store
+psql -c "SELECT store_id, COUNT(*) FROM users WHERE is_guest=false GROUP BY store_id ORDER BY COUNT(*) DESC LIMIT 5;"
+
+# Provider concatena: ${first_name} ${last_name} → "Juan Pérez"
+# Si is_guest=true: solo mostrar "Cliente (invitado)" o similar

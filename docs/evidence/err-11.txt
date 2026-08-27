@@ -1,0 +1,39 @@
+# ERR-11: PRINT_TEMPLATE_ACCESS_DENIED_001
+# HTTP: 403
+# Source: apps/backend/src/common/errors/error-codes.ts:229-233
+# Emitido cuando: cross-tenant access a library template de otra organización
+
+COMMAND (cross-tenant attempt):
+# Asumiendo JWT de org=1, intentando acceder a template de org=2
+curl -sk -X POST 'https://api.vendix.com/api/store/print-formats/library/100/clone' \
+  -H "Authorization: Bearer $ORG1_TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -w '\nHTTP_CODE: %{http_code}\n'
+
+# Donde id=100 es template de organization_id=2 (NO system)
+# Y el caller tiene JWT con organization_id=1
+
+EXPECTED HTTP: 403 o 404
+
+EXPECTED RESPONSE BODY:
+{
+  "success": false,
+  "error": {
+    "code": "PRINT_TEMPLATE_ACCESS_DENIED_001",
+    "message": "Access denied to organization print template"
+  }
+}
+
+VERIFICATION:
+# Cross-tenant: org1 trying to access org2's template
+curl .../library/<org2_template_id>/clone -X POST | jq '.error.code' debe ser 'PRINT_TEMPLATE_ACCESS_DENIED_001' (403) o 'PRINT_TEMPLATE_NOT_FOUND_001' (404)
+# (puede variar: hay implementaciones que retornan 404 para no leak existence)
+
+# Same tenant: exit 0
+curl .../library/<org1_template_id>/clone -X POST | jq '.success' debe ser true
+
+# Frontend behavior: toast "Acceso denegado" + redirect a library listing
+
+# Verificación defensiva: el endpoint NUNCA debe devolver 200 con datos de otra org
+# Log esperado: "[PrintFormatsService] Cross-tenant template access attempt: org=1 → template=100 (org=2)"

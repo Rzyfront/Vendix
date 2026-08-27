@@ -1,0 +1,43 @@
+# ERR-16: PRINT_DOCUMENT_NOT_FOUND_001
+# HTTP: 404
+# Source: apps/backend/src/common/errors/error-codes.ts:244-248
+# Emitido cuando: documento fuente a renderizar no existe en el dominio
+# Pre-B.4: dispatch_ticket sin provider → 500 ERR-03
+# Post-B.4: dispatch_ticket con provider pero document_id inválido → 404 ERR-16
+
+COMMAND (post-B.4, document_id que no existe):
+curl -sk -X POST 'https://api.vendix.com/api/store/print-formats/render' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "format_type": "dispatch_ticket",
+    "document_id": 99999999
+  }' \
+  -w '\nHTTP_CODE: %{http_code}\n'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+EXPECTED HTTP pre-B.4: 500 (PRINT_DATA_PROVIDER_MISSING_001)
+EXPECTED HTTP post-B.4: 404 (PRINT_DOCUMENT_NOT_FOUND_001)
+
+EXPECTED RESPONSE BODY post-B.4:
+{
+  "success": false,
+  "error": {
+    "code": "PRINT_DOCUMENT_NOT_FOUND_001",
+    "message": "Source document to render was not found in domain"
+  }
+}
+
+VERIFICATION:
+# Pre-B.4: provider no registrado, retorna ERR-03 (500)
+curl .../render -d '{"format_type":"dispatch_ticket","document_id":99999999}' (pre-B.4) | jq '.error.code' debe ser 'PRINT_DATA_PROVIDER_MISSING_001'
+
+# Post-B.4: provider registrado, documento no existe, retorna ERR-16 (404)
+curl .../render -d '{"format_type":"dispatch_ticket","document_id":99999999}' (post-B.4) | jq '.error.code' debe ser 'PRINT_DOCUMENT_NOT_FOUND_001'
+curl .../render -d '{"format_type":"dispatch_ticket","document_id":99999999}' (post-B.4) -w '%{http_code}' | grep -q '404'
+
+# document_id string no parseable a int:
+curl .../render -d '{"format_type":"dispatch_ticket","document_id":"abc"}' (post-B.4) | jq '.error.code' debe ser SYS_VALUE_OUT_OF_RANGE_001 o SYS_INVALID_FIELD_VALUE_001
+
+# Frontend behavior: toast "Documento no encontrado" + revisar ID
