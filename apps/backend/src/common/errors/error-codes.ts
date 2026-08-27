@@ -5497,6 +5497,21 @@ export const ErrorCodes = {
     devMessage:
       'Platform PDF pipeline not yet configured: the store PDF service is store-scoped (S3 key prefix, format from store_settings, issuer from invoice.store). The C.5.5 wrapper must run those three steps org-scoped.',
   },
+
+  /**
+   * `POST /profiles/:id/preview` (B.4 del CP-platform-invoicing-parity) stub
+   * honesto: devuelve 501 hasta que `PlatformProfilePreviewService` exista.
+   * 501 Not Implemented — el método existe y la ruta está cableada, sólo
+   * falta el motor de cálculo paralelo a `ProfilePreviewService` del riel
+   * tienda (1.850 líneas probadas que se reutilizan vía fachada, no se
+   * copian).
+   */
+  PLATFORM_PROFILE_PREVIEW_PENDING: {
+    code: 'PLATFORM_PROFILE_PREVIEW_PENDING',
+    httpStatus: 501,
+    devMessage:
+      'Platform profile preview pending (B.4): the calculator + UBL preview path must be wrapped org-scoped, reusing ProfilePreviewService from the store rail rather than copying it.',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {

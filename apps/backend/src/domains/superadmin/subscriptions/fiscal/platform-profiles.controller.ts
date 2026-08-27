@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 
 import { ResponseService } from '../../../../common/responses/response.service';
+import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 
@@ -198,15 +199,21 @@ export class PlatformProfilesController {
    * Preview endpoint: lee del TODO en B.4. Por ahora responde 501 con código
    * `PLATFORM_PROFILE_PREVIEW_PENDING` para no mentir con un shape falso.
    * Se elimina en B.4 cuando el PlatformProfilePreviewService exista.
+   *
+   * Se lanza `VendixHttpException` (no `response_service.error`) para que
+   * el HTTP status real sea 501. El `error()` del ResponseService pone el
+   * statusCode en el body pero Nest lo serializa con el status default
+   * del verbo HTTP (201 para POST), y el interceptor solo aplica
+   * `statusCode` cuando detecta success=false — la mezcla producía 201
+   * en este endpoint (verificado en live curl). Lanzar la excepción es
+   * la única vía para que Nest propague el 501 al cliente.
    */
   @Post(':id/preview')
   @Permissions('superadmin:fiscal:invoicing:profiles:read')
-  async preview() {
-    return this.response_service.error(
-      'Previsualización de perfil plataforma pendiente (B.4)',
-      'PLATFORM_PROFILE_PREVIEW_PENDING',
-      HttpStatus.NOT_IMPLEMENTED,
-      'PLATFORM_PROFILE_PREVIEW_PENDING',
+  async preview(): Promise<never> {
+    throw new VendixHttpException(
+      ErrorCodes.PLATFORM_PROFILE_PREVIEW_PENDING,
+      'Previsualización de perfil plataforma pendiente (B.4).',
     );
   }
 
