@@ -3,6 +3,22 @@ import { print_format_type_enum } from '@prisma/client';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { PrintFormatDefinition } from '../interfaces/print-format.interface';
 
+/**
+ * CP-DTLP-20260827 (Phase B.6) — La lista de formatos FISCALES es explícita y
+ * vive en una constante exportada. Cualquier formato que NO esté en este set
+ * corta la validación inmediatamente, sin tocar la definición.
+ *
+ * ¿Por qué un `Set<string>` y no un array? El `print_format_type_enum` del
+ * cliente Prisma todavía no conoce `dispatch_ticket` (lo agregará el próximo
+ * `prisma generate` tras la migración `20260827120000_add_dispatch_ticket_to_enum`).
+ * Un set de strings acepta el literal sin que tsc se queje, y el `.has(...)`
+ * sigue siendo O(1).
+ */
+export const FISCAL_FORMATS: ReadonlySet<string> = new Set([
+  'fiscal_electronic_invoice',
+  'fiscal_credit_note',
+]);
+
 @Injectable()
 export class PrintFiscalValidatorService {
   private readonly logger = new Logger(PrintFiscalValidatorService.name);
@@ -15,11 +31,13 @@ export class PrintFiscalValidatorService {
     formatType: print_format_type_enum,
     definition: PrintFormatDefinition,
   ): void {
-    if (
-      formatType !== 'fiscal_electronic_invoice' &&
-      formatType !== 'fiscal_credit_note'
-    ) {
-      return; // Los formatos no fiscales no tienen restricciones DIAN obligatorias
+    if (!FISCAL_FORMATS.has(formatType as string)) {
+      // Los formatos no fiscales no tienen restricciones DIAN obligatorias.
+      // Antes de B.6 había dos comparaciones explícitas
+      // (`formatType !== 'fiscal_electronic_invoice' && ... !== 'fiscal_credit_note'`);
+      // ahora la guarda es declarativa para que añadir el undécimo formato
+      // (dispatch_ticket) no requiera tocar este archivo.
+      return;
     }
 
     if (!definition) {
