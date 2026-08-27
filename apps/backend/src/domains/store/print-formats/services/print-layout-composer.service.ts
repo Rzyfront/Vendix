@@ -1,7 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { PrintFormatDefinition } from '../interfaces/print-format.interface';
+import {
+  PrintFormatDefinition,
+  PrintCompanyField,
+} from '../interfaces/print-format.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTemplateCompilerService } from './print-template-compiler.service';
+import { getPaperGeometry, PaperFormat } from '../lib/page-geometry';
+import { FISCAL_FORMATS } from './print-fiscal-validator.service';
 
 @Injectable()
 export class PrintLayoutComposerService {
@@ -55,7 +60,7 @@ export class PrintLayoutComposerService {
     switch (section.type) {
       case 'header':
       case 'fiscal_header':
-        return this.renderHeaderSection(section, data);
+        return this.renderHeaderSection(section, definition, data);
       case 'document_info':
         return this.renderDocumentInfoSection(section, data);
       case 'customer_info':
@@ -89,15 +94,56 @@ export class PrintLayoutComposerService {
     }
   }
 
-  private renderHeaderSection(section: any, data: StandardPrintDataModel): string {
+  private renderHeaderSection(
+    section: any,
+    definition: PrintFormatDefinition,
+    data: StandardPrintDataModel,
+  ): string {
     const store = data.store || ({} as any);
-    const logo = store.logo_url ? `<div class="store-logo"><img src="${this.compiler.escapeHtml(store.logo_url)}" alt="Logo" style="max-height: 48px; max-width: 140px;" /></div>` : '';
+    // [print-editor-dsk P1.3] v2: `definition.logo` es el fallback estático
+    // cuando la tienda no ha subido un logo propio. Si `data.store.logo_url`
+    // está presente, gana el runtime (igual que antes); sólo cuando el
+    // runtime está vacío recurrimos al `definition.logo.url` firmado por el
+    // controller. Honra `position` y `size_mm`/`opacity`.
+    const runtimeLogo = store.logo_url as string | undefined;
+    const defLogoBlock = definition.logo;
+    const fallbackLogoUrl = !runtimeLogo && defLogoBlock?.url ? defLogoBlock.url : undefined;
+
+    const logoUrl = runtimeLogo || fallbackLogoUrl;
+    let logo = '';
+    if (logoUrl) {
+      const pos = defLogoBlock?.position || 'left';
+      const sizeMm = typeof defLogoBlock?.size_mm === 'number' ? defLogoBlock.size_mm : 12;
+      const opacity = typeof defLogoBlock?.opacity === 'number' ? defLogoBlock.opacity : 100;
+      // `size_mm` para imágenes de logo: convertimos a px (1mm ≈ 3.78px @96dpi)
+      // y aplicamos max-height/max-width razonables. `position: full` ignora el
+      // tamaño y estira el logo al ancho del contenedor.
+      const maxPx = pos === 'full' ? '100%' : `${Math.max(8, Math.min(48, Math.round(sizeMm * 3.78)))}px`;
+      const heightPx = pos === 'full' ? 'auto' : `${Math.max(8, Math.min(48, Math.round(sizeMm * 3.78)))}px`;
+      const styleParts = [
+        `max-height: ${heightPx}`,
+        `max-width: ${maxPx}`,
+        `opacity: ${Math.max(0, Math.min(100, opacity)) / 100}`,
+      ];
+      const alignStyle =
+        pos === 'center' ? 'text-align: center;' : pos === 'right' ? 'text-align: right;' : 'text-align: left;';
+      logo = `<div class="store-logo" style="${alignStyle}"><img src="${this.compiler.escapeHtml(logoUrl)}" alt="Logo" style="${styleParts.join('; ')};" /></div>`;
+    }
     const name = store.name ? `<h1 class="store-name">${this.compiler.escapeHtml(store.name)}</h1>` : '';
     const legalName = store.legal_name && store.legal_name !== store.name ? `<div class="store-legal">${this.compiler.escapeHtml(store.legal_name)}</div>` : '';
     const nit = store.tax_id ? `<div class="store-nit">NIT: ${this.compiler.escapeHtml(store.tax_id)}</div>` : '';
     const regime = store.tax_regime ? `<div class="store-regime">${this.compiler.escapeHtml(store.tax_regime)}</div>` : '';
     const addr = store.address ? `<div class="store-address">${this.compiler.escapeHtml(store.address)}${store.city ? ', ' + this.compiler.escapeHtml(store.city) : ''}</div>` : '';
     const phone = store.phone ? `<div class="store-phone">Tel: ${this.compiler.escapeHtml(store.phone)}</div>` : '';
+
+    // [print-editor-dsk P1.3] v2: el `company_block` se renderiza después del
+    // header SOLO cuando la definición es fiscal. Detectamos fiscal por la
+    // presencia de secciones tipo `fiscal_*` (única señal que el composer
+    // tiene: el `formatType` no se le pasa). El bloque respeta `enabled` por
+    // campo y aplica `custom_label` sobre el label por defecto.
+    const companyBlock = this.isFiscalDefinition(definition)
+      ? this.renderCompanyBlock(definition, data)
+      : '';
 
     return `
       <div class="print-section section-header">
@@ -108,8 +154,94 @@ export class PrintLayoutComposerService {
         ${regime}
         ${addr}
         ${phone}
+        ${companyBlock}
       </div>
     `;
+  }
+
+  /**
+   * [print-editor-dsk P1.3] v2 NEW — bloque de empresa (NIT, dirección, etc.)
+   * tipado. Sólo se invoca cuando `definition.company_block?.fields` está
+   * presente Y la definición es fiscal. Los campos se emiten en el orden
+   * declarado, respetando `enabled` y `custom_label`. La fuente de cada valor
+   * es `data.store` (los StandardPrintParty tienen todos los campos que el
+   * PrintCompanyFieldKey enum declara).
+   */
+  private renderCompanyBlock(
+    definition: PrintFormatDefinition,
+    data: StandardPrintDataModel,
+  ): string {
+    const fields = definition.company_block?.fields || [];
+    if (fields.length === 0) return '';
+    const store = (data.store || {}) as any;
+
+    const rows = fields
+      .filter((f: PrintCompanyField) => f && f.enabled)
+      .map((f: PrintCompanyField) => {
+        const value = this.lookupCompanyFieldValue(f.key, store);
+        if (value === undefined || value === null || value === '') return '';
+        const label = f.custom_label ? f.custom_label : f.key;
+        return `<div class="company-field"><span class="label">${this.compiler.escapeHtml(label)}:</span> <span class="value">${this.compiler.escapeHtml(value)}</span></div>`;
+      })
+      .filter((s) => s.length > 0)
+      .join('');
+
+    if (rows.length === 0) return '';
+    return `<div class="company-block">${rows}</div>`;
+  }
+
+  /**
+   * Resolución del valor de un PrintCompanyFieldKey contra el `data.store`.
+   * Sólo fiscales pueden llevar este bloque, así que la fuente es siempre
+   * `data.store` (StandardPrintParty) — el emisor del documento.
+   */
+  private lookupCompanyFieldValue(
+    key: PrintCompanyField['key'],
+    store: any,
+  ): string | undefined {
+    switch (key) {
+      case 'NIT':
+        return store.tax_id;
+      case 'DV':
+        return store.tax_id_dv || store.verification_digit;
+      case 'regimen':
+        return store.tax_regime;
+      case 'address':
+        return store.address;
+      case 'phone':
+        return store.phone;
+      case 'email':
+        return store.email;
+      case 'website':
+        return store.website || store.web || store.url;
+      default:
+        return undefined;
+    }
+  }
+
+  /**
+   * [print-editor-dsk P1.3] v2 — Inferencia de "definición fiscal" para el
+   * composer. El `compose()` no recibe `formatType`; lo único que sabe es
+   * la `definition`. Cualquier sección de tipo `fiscal_*` (header, buyer,
+   * cufe/cude, tax breakdown, qr) identifica inequívocamente un formato
+   * del set `FISCAL_FORMATS` (fiscal_electronic_invoice, fiscal_credit_note).
+   * Usamos la presencia de esas secciones como proxy declarativo — es la
+   * MISMA guarda que `PrintFiscalValidatorService.assertFiscalCompliance`
+   * aplica antes de validar el contenido, así que el bloque se renderiza
+   * exactamente para los mismos formatos que el validador exige.
+   */
+  private isFiscalDefinition(definition: PrintFormatDefinition): boolean {
+    const sections = definition.sections || [];
+    return sections.some((s) => {
+      const t = (s && s.type) || '';
+      return (
+        t === 'fiscal_header' ||
+        t === 'fiscal_cufe_box' ||
+        t === 'fiscal_qr_section' ||
+        t === 'fiscal_buyer_info' ||
+        t === 'fiscal_tax_breakdown'
+      );
+    });
   }
 
   private renderDocumentInfoSection(section: any, data: StandardPrintDataModel): string {
@@ -512,8 +644,44 @@ export class PrintLayoutComposerService {
     const primaryColor = styles.primary_color || '#111827';
     const font = styles.font_family || "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
     const fontSize = styles.font_size_base_pt || (paper.is_roll ? 9 : 10);
-    const pageSize = paper.is_roll ? `${paper.width_mm}mm auto` : paper.format;
-    const margin = paper.margin_mm > 0 ? `${paper.margin_mm}mm` : '0';
+
+    // [print-editor-dsk P1.3] v2: márgenes por lado. La precedencia es:
+    //   1) per-side (`margin_top_mm`, etc.) si están definidos;
+    //   2) `margin_mm` legacy (uniforme en los 4 lados);
+    //   3) fallback por tipo de papel: 0 en rollo, 10 mm en hoja.
+    // CSS `@page margin` sólo acepta un valor único, así que pasamos el
+    // MÁXIMO de los 4 lados (fidelidad de impresión: ningún lado se sale del
+    // cuadro). Los 4 lados reales se aplican en `body { padding }` para que
+    // el contenido respete cada margen (sobre todo en hojas A4/letter, donde
+    // el binding izquierdo suele necesitar más margen que el derecho).
+    const defaultMm = paper.is_roll ? 0 : 10;
+    const mTop = paper.margin_top_mm ?? paper.margin_mm ?? defaultMm;
+    const mRight = paper.margin_right_mm ?? paper.margin_mm ?? defaultMm;
+    const mBottom = paper.margin_bottom_mm ?? paper.margin_mm ?? defaultMm;
+    const mLeft = paper.margin_left_mm ?? paper.margin_mm ?? defaultMm;
+    const maxMargin = Math.max(mTop, mRight, mBottom, mLeft);
+
+    // [print-editor-dsk P1.3] v2: `@page size` se resuelve desde PAPER_DEFINITIONS
+    // (vía `page-geometry.ts`). El fallback legacy era `paper.format` crudo,
+    // que sólo funciona para los formatos CSS nativos (`A4`, `letter`) pero
+    // falla para `thermal_80` (que necesita `80mm auto`). El lookup nos da
+    // siempre el `css_page_size` canónico. Para `custom` caemos a la
+    // expresión `${width_mm}mm ${height_mm}mm` del pliego declarado.
+    let pageSize: string;
+    if (paper.format === 'custom') {
+      const w = Number(paper.width_mm) || 80;
+      const h = Number(paper.height_mm) || w;
+      pageSize = `${w}mm ${h}mm`;
+    } else {
+      try {
+        pageSize = getPaperGeometry(paper.format as PaperFormat).css_page_size;
+      } catch {
+        // PAPER_DEFINITIONS no conoce el formato (p.ej. `custom` ya filtrado).
+        // Roll-paper fallback: emite `${width_mm}mm auto`.
+        pageSize = paper.is_roll ? `${paper.width_mm}mm auto` : paper.format;
+      }
+    }
+    const margin = maxMargin > 0 ? `${maxMargin}mm` : '0';
 
     return `<!DOCTYPE html>
 <html lang="es">
@@ -534,7 +702,10 @@ export class PrintLayoutComposerService {
       font-size: ${fontSize}pt;
       color: #111827;
       margin: 0;
-      padding: 0;
+      /* [print-editor-dsk P1.3] v2: padding per-side refleja los 4 márgenes
+         reales (top/right/bottom/left). El @page margin usa el máximo para
+         que ningún lado se salga del cuadro físico. */
+      padding: ${mTop}mm ${mRight}mm ${mBottom}mm ${mLeft}mm;
       background: #fff;
       line-height: 1.35;
     }
@@ -543,6 +714,29 @@ export class PrintLayoutComposerService {
       max-width: ${paper.is_roll ? `${paper.width_mm}mm` : '100%'};
       margin: 0 auto;
       padding: ${paper.is_roll ? '4px' : '8px'};
+    }
+    /* [print-editor-dsk P1.3] v2 — company-block styling. Las clases
+       .company-field / .label / .value se aplican por cada campo del
+       PrintCompanyBlock (NIT, telefono, direccion, etc.). Tipografia menor
+       que el header principal para no competir con el nombre del emisor.
+       Sin acentos graves: viven DENTRO de un template literal, y una
+       comilla invertida cerraria la plantilla — el error que tsc reporta
+       entonces es "'; expected" en una linea de CSS intacta. */
+    .company-block {
+      margin-top: 4px;
+      font-size: ${fontSize - 1}pt;
+      line-height: 1.3;
+    }
+    .company-block .company-field {
+      display: block;
+    }
+    .company-block .label {
+      font-weight: 600;
+      color: ${primaryColor};
+      margin-right: 4px;
+    }
+    .company-block .value {
+      color: #111827;
     }
     .print-section {
       margin-bottom: 8px;
