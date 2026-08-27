@@ -386,6 +386,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                 type="tel"
                 [size]="'md'"
                 [required]="true"
+                helperText="El número de teléfono debe tener 10 dígitos (sin prefijo de país)."
                 [error]="getFieldError('phone')"
                 (blur)="onFieldBlur('phone')"
                 >
