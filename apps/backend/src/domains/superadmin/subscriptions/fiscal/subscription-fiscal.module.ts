@@ -55,6 +55,8 @@ import { PlatformInvoicingService } from './platform-invoicing.service';
 import { PlatformInvoicingController } from './platform-invoicing.controller';
 import { PlatformProfilesService } from './platform-profiles.service';
 import { PlatformProfilesController } from './platform-profiles.controller';
+import { PlatformProfilePreviewService } from './platform-profile-preview.service';
+import { InvoiceCalculatorService } from '../../../store/invoicing/services/invoice-calculator.service';
 import { PlatformCreditNotesService } from './platform-credit-notes.service';
 import { PlatformDeliveryService } from './platform-delivery.service';
 import { PlatformDianEventsService } from './platform-dian-events.service';
@@ -118,6 +120,14 @@ import { PlatformInvoicePdfService } from './platform-invoice-pdf.service';
     // ADR-4 ámbito). Reutiliza ProfileCatalogCacheService, ProfileAccountingValidator
     // y AuditService del riel tienda vía DI (ya provistos por InvoicingModule).
     PlatformProfilesService,
+    // B.4: preview plataforma org-scoped (P1.1). Reutiliza InvoiceCalculatorService
+    // y ProfilePreviewService logic del riel tienda sin copiar numeración. No
+    // consume `invoice_resolutions.current_number` — emite PREVIEW fijo (PreviewNumberingGuard).
+    // Inyecta PlatformProfilesService.findOne (org-scoped) + InvoiceCalculatorService
+    // + GlobalPrismaService, llama a calculator.calculate y devuelve mismo shape
+    // que tienda con not_performed:true. Compuerta dura: store service untouched.
+    InvoiceCalculatorService,
+    PlatformProfilePreviewService,
     // C.2: notas crédito/débito plataforma (ADR-7). Persiste vía
     // InvoicingService.create() del riel tienda con RequestContext sintetizado;
     // NO toca el servicio tienda — compuerta dura verificada por su spec.

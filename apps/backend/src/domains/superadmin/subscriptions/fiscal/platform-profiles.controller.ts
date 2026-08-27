@@ -14,7 +14,6 @@ import {
 } from '@nestjs/common';
 
 import { ResponseService } from '../../../../common/responses/response.service';
-import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 
@@ -26,7 +25,9 @@ import {
   QueryProfileVersionsDto,
 } from '../../../store/invoicing/profiles/dto/query-invoice-profiles.dto';
 import { UpdateInvoiceProfileDto } from '../../../store/invoicing/profiles/dto/update-invoice-profile.dto';
+import { PreviewProfileDto } from '../../../store/invoicing/profiles/dto/preview-profile.dto';
 import { PlatformProfilesService } from './platform-profiles.service';
+import { PlatformProfilePreviewService } from './platform-profile-preview.service';
 
 /**
  * Perfiles de facturación del riel plataforma (VENDIX_ADMIN).
@@ -52,6 +53,7 @@ import { PlatformProfilesService } from './platform-profiles.service';
 export class PlatformProfilesController {
   constructor(
     private readonly profiles_service: PlatformProfilesService,
+    private readonly preview_service: PlatformProfilePreviewService,
     private readonly response_service: ResponseService,
   ) {}
 
@@ -196,24 +198,27 @@ export class PlatformProfilesController {
   }
 
   /**
-   * Preview endpoint: lee del TODO en B.4. Por ahora responde 501 con código
-   * `PLATFORM_PROFILE_PREVIEW_PENDING` para no mentir con un shape falso.
-   * Se elimina en B.4 cuando el PlatformProfilePreviewService exista.
+   * Preview endpoint — B.4 real (ya no stub 501).
    *
-   * Se lanza `VendixHttpException` (no `response_service.error`) para que
-   * el HTTP status real sea 501. El `error()` del ResponseService pone el
-   * statusCode en el body pero Nest lo serializa con el status default
-   * del verbo HTTP (201 para POST), y el interceptor solo aplica
-   * `statusCode` cuando detecta success=false — la mezcla producía 201
-   * en este endpoint (verificado en live curl). Lanzar la excepción es
-   * la única vía para que Nest propague el 501 al cliente.
+   * Delega a `PlatformProfilePreviewService` que carga el perfil vía
+   * `PlatformProfilesService.findOne(id)` (org-scoped) y construye el XML con
+   * `InvoiceCalculatorService.calculate` sin tocar `invoice_resolutions`.
+   * Devuelve 200 con `not_performed: { numbering_reserved: false, ... }` para
+   * que el cliente pueda afirmar por `curl` que no se consumió consecutivo.
+   * Usa `PreviewNumberingGuard` logic: emite `PREVIEW_INVOICE_NUMBER` fijo y
+   * nunca mueve `current_number`.
    */
   @Post(':id/preview')
   @Permissions('superadmin:fiscal:invoicing:profiles:read')
-  async preview(): Promise<never> {
-    throw new VendixHttpException(
-      ErrorCodes.PLATFORM_PROFILE_PREVIEW_PENDING,
-      'Previsualización de perfil plataforma pendiente (B.4).',
+  @HttpCode(HttpStatus.OK)
+  async preview(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() preview_dto: PreviewProfileDto,
+  ) {
+    const result = await this.preview_service.preview(id, preview_dto);
+    return this.response_service.success(
+      result,
+      'Previsualización plataforma generada (no se reservó numeración ni se transmitió)',
     );
   }
 
