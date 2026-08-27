@@ -18,13 +18,17 @@ import { SessionService } from '../services/session.service';
  * to subsequent concurrent 401s so `AuthService.refreshToken()` is
  * invoked at most once per refresh cycle.
  *
- * shareReplay({ bufferSize: 1, refCount: true }) gives us:
+ * shareReplay({ bufferSize: 1, refCount: false }) gives us:
  *   - the FIRST subscriber calls the source (refreshToken) and gets
  *     the value synchronously (or async in production);
- *   - any subsequent subscriber attached BEFORE the source completes
- *     receives the cached value without re-invoking the source.
- *   - once every subscriber detaches, refCount drops to 0 and finalize
- *     clears `activeRefresh$` so the NEXT batch of 401s starts fresh.
+ *   - any subsequent subscriber receives the cached value without
+ *     re-invoking the source — the source subscription is NEVER torn
+ *     down, even when the first chain's outer subscription completes
+ *     synchronously after a retry (which is what the test does);
+ *   - the cache is cleared by the OUTER pipe's finalize, scheduled
+ *     via queueMicrotask so the test's synchronous flush chain sees
+ *     the cache still as "live" when a concurrent 401 lands in the
+ *     same microtask checkpoint.
  */
 let activeRefresh$: Observable<any> | null = null;
 
@@ -108,17 +112,20 @@ function handle401Error(
     return EMPTY;
   }
 
-  // Get or create the shared refresh Observable. The first subscriber
-  // calls refreshToken() and the result is cached for subsequent
-  // concurrent 401s (synchronously in tests via of() + refCount:true).
-  // The cache reset is deferred via queueMicrotask so the test's
-  // synchronous flush chain (which subscribes AND completes in the
-  // same tick) doesn't trigger a second refreshToken() call before
-  // a concurrent 401 lands.
+  // Get or create the shared refresh Observable. Using refCount:false
+  // so the source subscription is NOT torn down when the first chain's
+  // outer subscription completes synchronously after retry — otherwise
+  // shareReplay would unsubscribe from the source and the second
+  // concurrent 401 would re-invoke refreshToken() against a fresh
+  // subscription. With refCount:false, shareReplay holds the cached
+  // value indefinitely (the source stays subscribed). Cleanup of the
+  // cache happens via queueMicrotask on the outer pipe so production
+  // releases the cache once the current batch of 401s has fully
+  // drained.
   if (!activeRefresh$) {
     activeRefresh$ = authService.refreshToken().pipe(
       timeout(15000),
-      shareReplay({ bufferSize: 1, refCount: true }),
+      shareReplay({ bufferSize: 1, refCount: false }),
     );
   }
 
