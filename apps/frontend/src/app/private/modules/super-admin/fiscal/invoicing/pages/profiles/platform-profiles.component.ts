@@ -17,6 +17,7 @@ import {
   CardComponent,
   IconComponent,
   InputsearchComponent,
+  ItemListCardConfig,
   ResponsiveDataViewComponent,
   TableAction,
   TableColumn,
@@ -89,7 +90,7 @@ interface PaginatedProfiles {
           <div class="flex items-center gap-3">
             <app-inputsearch
               [placeholder]="'Buscar por nombre…'"
-              (valueChange)="onSearch($event)"
+              (searchChange)="onSearch($event)"
             ></app-inputsearch>
             <a routerLink="new">
               <app-button variant="primary" icon="plus">
@@ -100,28 +101,28 @@ interface PaginatedProfiles {
 
           <app-responsive-data-view
             [columns]="columns"
-            [items]="(filteredProfiles() || [])"
+            [data]="(filteredProfiles() || [])"
+            [cardConfig]="cardConfig"
             [loading]="loading()"
             [emptyMessage]="'No hay perfiles plataforma creados todavía.'"
-            (action)="onAction($event)"
+            (actionClick)="onAction($event)"
           ></app-responsive-data-view>
         </div>
       </app-card>
     </div>
 
     <app-confirmation-modal
-      [open]="confirmDeleteOpen()"
+      [isOpen]="confirmDeleteOpen()"
       title="Eliminar perfil"
       [message]="
         'Esta acción borra el perfil ' +
         (profileToDelete()?.name || '') +
         ' (versión ' +
         (profileToDelete()?.current_version ?? 0) +
-        '). Para confirmar, escribe exactamente: ELIMINAR'
+        '). Para confirmar, presiona Aceptar.'
       "
-      [expectedText]="'ELIMINAR'"
-      (confirmed)="onConfirmDelete($event)"
-      (cancelled)="confirmDeleteOpen.set(false)"
+      (confirm)="onConfirmDelete()"
+      (cancel)="confirmDeleteOpen.set(false)"
     ></app-confirmation-modal>
   `,
 })
@@ -166,6 +167,28 @@ export class PlatformProfilesComponent {
     },
   ];
 
+  readonly cardConfig: ItemListCardConfig = {
+    titleKey: 'name',
+    subtitleKey: 'operation_type',
+    avatarFallbackIcon: 'file-stack',
+    avatarShape: 'square',
+    badgeKey: 'state',
+    badgeConfig: {
+      type: 'status',
+      colorMap: { active: 'success', inactive: 'warn' },
+    },
+    badgeTransform: (v) => (v === 'active' ? 'Activo' : 'Inactivo'),
+    detailKeys: [
+      { key: 'current_version', label: 'Versión', icon: 'git-branch' },
+      {
+        key: 'is_default',
+        label: 'Predeterminado',
+        icon: 'star',
+        transform: (v) => (v ? '★' : '—'),
+      },
+    ],
+  };
+
   readonly actions: TableAction[] = [
     {
       label: 'Editar',
@@ -197,10 +220,10 @@ export class PlatformProfilesComponent {
     event.action.action(event.item);
   }
 
-  onConfirmDelete(confirmed: boolean) {
+  onConfirmDelete() {
     const p = this.profileToDelete();
     this.confirmDeleteOpen.set(false);
-    if (!confirmed || !p) return;
+    if (!p) return;
     this.http
       .delete<{ success: boolean }>(
         `${environment.apiUrl}/superadmin/subscriptions/fiscal/profiles/${p.id}`,

@@ -400,7 +400,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                   [size]="'md'"
                   [required]="true"
                   [placeholder]="'Seleccionar'"
-                  [errorText]="getFieldError('documentType')"
+                  [errorText]="getFieldError('documentType') ?? ''"
                   >
                 </app-selector>
                 <app-input
@@ -430,7 +430,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                     [size]="'md'"
                     [required]="true"
                     [placeholder]="'Seleccionar'"
-                    [errorText]="getFieldError('taxRegime')"
+                    [errorText]="getFieldError('taxRegime') ?? ''"
                     >
                   </app-selector>
                   <app-selector
@@ -440,7 +440,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                     [size]="'md'"
                     [required]="true"
                     [placeholder]="'Seleccionar'"
-                    [errorText]="getFieldError('personType')"
+                    [errorText]="getFieldError('personType') ?? ''"
                     >
                   </app-selector>
                 </div>

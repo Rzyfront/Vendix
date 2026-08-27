@@ -234,7 +234,7 @@ interface ResolutionListItem {
                       </div>
                     }
                   }
-                  @if (profileCatalog().filter(p => p.operation_type === operationType()).length === 0) {
+                  @if (profilesForOpType().length === 0) {
                     <p class="text-sm text-gray-500">
                       Sin perfiles para op_type {{ operationType() }}. Cree uno en
                       <a routerLink="../profiles/new" class="text-blue-600 underline">Perfiles</a>.
@@ -628,6 +628,11 @@ export class PlatformInvoiceCreateComponent {
   readonly profileSelectedId = signal<number | null>(null);
   readonly profileAppliedName = signal<string | null>(null);
   readonly profileCardCollapsed = signal(false);
+  /** Perfiles del catálogo que coinciden con el operationType actual. */
+  readonly profilesForOpType = computed(() => {
+    const op = this.operationType();
+    return this.profileCatalog().filter((p) => p.operation_type === op);
+  });
 
   // ── Items state (signals para zoneless) ────────────────────────────────
 
