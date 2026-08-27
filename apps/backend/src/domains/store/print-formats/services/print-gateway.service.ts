@@ -6,7 +6,12 @@ import { DocumentDataProviderRegistry } from '../providers/document-data-provide
 import { PrintLayoutComposerService } from './print-layout-composer.service';
 import { PrintFiscalValidatorService } from './print-fiscal-validator.service';
 import { FiscalInvoicePdfRenderService } from './fiscal-invoice-pdf-render.service';
-import { PrintFormatDefinition } from '../interfaces/print-format.interface';
+import {
+  PrintColumnDefinition,
+  PrintFormatDefinition,
+  PrintSectionDefinition,
+  PrintTokenDefinition,
+} from '../interfaces/print-format.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 
 export interface RenderResult {
@@ -392,7 +397,18 @@ export class PrintGatewayService {
   }
 
   /**
-   * Realiza un merge profundo y seguro entre la definición base y los overrides
+   * Realiza un merge profundo y seguro entre la definición base y los overrides.
+   *
+   * Reglas (P1.4):
+   * - `paper` se mezcla campo a campo; si llegan márgenes per-side (`v2`) se
+   *   descarta el `margin_mm` legado para que el composer no aplique dos veces.
+   * - `styles` se mezcla superficialmente.
+   * - `sections`, `columns` y `tokens` se mezclan POR IDENTIDAD (id / path):
+   *   si el override trae el mismo id, reemplaza la entrada; si trae un id
+   *   nuevo, se conserva el resto y el nuevo se añade al final.
+   * - `logo`, `company_block` y `custom_template` sólo se sustituyen si la
+   *   clave aparece EXPLÍCITAMENTE en el override (no se pisan con `null`/
+   *   `undefined` accidentales del Hub).
    */
   private mergeDefinition(
     base: PrintFormatDefinition,
@@ -402,19 +418,71 @@ export class PrintGatewayService {
       return base;
     }
 
-    return {
+    const v = (overrides.v ?? base.v ?? 2) as PrintFormatDefinition['v'];
+
+    const merged: PrintFormatDefinition = {
       ...base,
-      paper: {
-        ...base.paper,
-        ...(overrides.paper || {}),
-      },
-      styles: {
-        ...base.styles,
-        ...(overrides.styles || {}),
-      },
-      sections: overrides.sections ? overrides.sections : base.sections,
-      columns: overrides.columns ? overrides.columns : base.columns,
-      custom_template: overrides.custom_template !== undefined ? overrides.custom_template : base.custom_template,
+      v,
+      paper: overrides.paper
+        ? {
+            ...base.paper,
+            ...overrides.paper,
+            // Si llegan márgenes v2 per-side, el legado `margin_mm` ya no debe
+            // ganar: el composer prefiere los per-side y el legado caería a
+            // piso uniforme, anulando la asimetría del override.
+            margin_mm:
+              overrides.paper.margin_top_mm !== undefined ||
+              overrides.paper.margin_right_mm !== undefined ||
+              overrides.paper.margin_bottom_mm !== undefined ||
+              overrides.paper.margin_left_mm !== undefined
+                ? undefined
+                : overrides.paper.margin_mm ?? base.paper.margin_mm,
+          }
+        : base.paper,
+      styles: overrides.styles
+        ? { ...(base.styles ?? {}), ...overrides.styles }
+        : base.styles,
     };
+
+    // Sections: deep merge por id (mismo id → reemplaza, id nuevo → append).
+    if (overrides.sections) {
+      const baseSections = base.sections ?? [];
+      const overrideSections = overrides.sections as PrintSectionDefinition[];
+      const overrideIds = new Set(overrideSections.map((s) => s.id));
+      const unchanged = baseSections.filter((s) => !overrideIds.has(s.id));
+      merged.sections = [...unchanged, ...overrideSections];
+    }
+
+    // Columns: deep merge por id (mismo id → reemplaza, id nuevo → append).
+    if (overrides.columns) {
+      const baseColumns = base.columns ?? [];
+      const overrideColumns = overrides.columns as PrintColumnDefinition[];
+      const overrideIds = new Set(overrideColumns.map((c) => c.id));
+      const unchanged = baseColumns.filter((c) => !overrideIds.has(c.id));
+      merged.columns = [...unchanged, ...overrideColumns];
+    }
+
+    // Tokens: unión por `path` (mismo path → gana override, path nuevo → append).
+    if (overrides.tokens) {
+      const baseTokens = base.tokens ?? [];
+      const overrideTokens = overrides.tokens as PrintTokenDefinition[];
+      const overridePaths = new Set(overrideTokens.map((t) => t.path));
+      const unchanged = baseTokens.filter((t) => !overridePaths.has(t.path));
+      merged.tokens = [...unchanged, ...overrideTokens];
+    }
+
+    // `logo` y `company_block` sólo se sustituyen si la clave aparece
+    // EXPLÍCITAMENTE en el override (no se pisan con `undefined` accidentales).
+    if ('logo' in overrides) {
+      merged.logo = overrides.logo as PrintFormatDefinition['logo'];
+    }
+    if ('company_block' in overrides) {
+      merged.company_block = overrides.company_block as PrintFormatDefinition['company_block'];
+    }
+    if ('custom_template' in overrides) {
+      merged.custom_template = overrides.custom_template as string | undefined;
+    }
+
+    return merged;
   }
 }
