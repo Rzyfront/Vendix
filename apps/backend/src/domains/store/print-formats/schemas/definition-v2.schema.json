@@ -1,0 +1,395 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://vendix.com/schemas/print-formats/definition-v2.schema.json",
+  "title": "PrintFormatDefinition v2",
+  "description": "Shape estable para `print_templates.definition` y `store_print_format_configs.overrides` (Print Format Hub, Phase A.4 del plan CP-DTLP-20260827). v=2 añade márgenes por lado, logo con opacidad, bloque de empresa tipado, estilos refinados y custom_template con límite 100KB. ADR-2 del plan. La validación custom de `sum(columns[?enabled].width_percent) === 100` se aplica en código AJV (`addKeyword`) o en `PrintFiscalValidatorService`, NO aquí.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["v", "paper"],
+  "properties": {
+    "v": {
+      "type": "integer",
+      "enum": [2],
+      "description": "Versión del schema. Hardcodeado a 2 para esta iteración; v1 legacy se mantiene sin validación AJV."
+    },
+    "paper": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format"],
+      "properties": {
+        "format": {
+          "type": "string",
+          "enum": ["thermal_80", "thermal_58", "a4", "letter", "half_letter", "custom"],
+          "description": "Tamaño físico del papel. Rollos (`thermal_80`/`thermal_58`) y hojas (`a4`/`letter`/`half_letter`). `custom` permite dimensiones arbitrarias (>=58mm ancho, <=216mm)."
+        },
+        "width_mm": {
+          "type": "number",
+          "minimum": 58,
+          "maximum": 600,
+          "description": "Ancho útil del papel en mm. Rango térmico [58..108], hojas [210..216], custom hasta 600 (plotter)."
+        },
+        "height_mm": {
+          "type": "number",
+          "minimum": 50,
+          "maximum": 2000,
+          "description": "Alto en mm. REQUERIDO si format=custom. Opcional para rollos (alto continuo) y hojas (puede omitirse y resolverse por format)."
+        },
+        "margin_top_mm": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50,
+          "description": "Margen superior en mm. Rango [0..50]. Default 0 para rollos, 10 para hojas."
+        },
+        "margin_right_mm": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50,
+          "description": "Margen derecho en mm. Rango [0..50]."
+        },
+        "margin_bottom_mm": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50,
+          "description": "Margen inferior en mm. Rango [0..50]. Default 0 para rollos, 10 para hojas."
+        },
+        "margin_left_mm": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50,
+          "description": "Margen izquierdo en mm. Rango [0..50]."
+        },
+        "copies": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Número de copias a imprimir. 0 usa el default del sistema (1 para la mayoría). Máx 10 por protección anti-DoS."
+        },
+        "orientation": {
+          "type": "string",
+          "enum": ["portrait", "landscape"],
+          "description": "Orientación de hoja. Solo aplica a formatos A4/letter/half_letter. Rollos ignoran."
+        },
+        "is_roll": {
+          "type": "boolean",
+          "description": "True para rollos continuos (no paginación). False para hojas con saltos."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "format": { "const": "custom" } },
+            "required": ["format"]
+          },
+          "then": {
+            "required": ["width_mm", "height_mm"],
+            "properties": {
+              "width_mm": { "minimum": 58, "maximum": 600 },
+              "height_mm": { "minimum": 50, "maximum": 2000 }
+            }
+          }
+        }
+      ]
+    },
+    "logo": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Logo opcional de la tienda (S3 key). Si presente, se renderiza en el header.",
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL firmada del logo en S3 (signed-on-read). Para validación en runtime, el controller firma antes de pasar al renderer."
+        },
+        "position": {
+          "type": "string",
+          "enum": ["left", "center", "right", "full"],
+          "default": "left",
+          "description": "Posición del logo en el header. `full` = imagen a ancho completo (modo banner)."
+        },
+        "size_mm": {
+          "type": "number",
+          "minimum": 5,
+          "maximum": 100,
+          "description": "Tamaño del logo en mm. Rango [5..100] — fuera de esto el renderer ignora o falla."
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Opacidad 0-100. 0 = invisible, 100 = opaco. Default 100."
+        }
+      }
+    },
+    "company_block": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Bloque de información de la empresa (NIT, dirección, etc.) que aparece debajo del logo.",
+      "properties": {
+        "fields": {
+          "type": "array",
+          "description": "Lista de campos a incluir. Cada uno se renderiza en una línea del bloque.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "enabled"],
+            "properties": {
+              "key": {
+                "type": "string",
+                "enum": ["NIT", "DV", "regimen", "address", "phone", "email", "website"],
+                "description": "Tipo de dato. `NIT` = tax_id, `DV` = verification digit, `regimen` = fiscal regimen."
+              },
+              "enabled": {
+                "type": "boolean",
+                "description": "Si false, el campo se omite del bloque."
+              },
+              "custom_label": {
+                "type": "string",
+                "description": "Etiqueta personalizada opcional (override del default `NIT:` → custom)."
+              },
+              "format": {
+                "type": "string",
+                "enum": ["text", "number", "currency", "date", "percent"],
+                "description": "Tipo de formato de display. Default `text`."
+              }
+            }
+          }
+        }
+      }
+    },
+    "sections": {
+      "type": "array",
+      "description": "Lista ordenada de secciones que componen el documento.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "type", "title", "enabled", "order"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Identificador único de la sección dentro del documento. Slug-friendly (kebab-case)."
+          },
+          "type": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32,
+            "description": "Tipo de sección (`header`, `customer_info`, `items_table`, `totals`, `footer`, `qr_block`, `fiscal_block`, etc.). Compositor dispatcha según type."
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "Título visible de la sección. Vacío = sección sin título."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Si false, la sección se omite del render."
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Orden relativo (ascendente). Empates se resuelven por `id` alfabético."
+          },
+          "fields": {
+            "type": "array",
+            "description": "Campos internos de la sección. Cada sección define su shape según type.",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "custom_content": {
+            "type": "string",
+            "maxLength": 50000,
+            "description": "HTML personalizado opcional (inline en la sección). Validación sanitization a nivel código (no schema)."
+          }
+        }
+      }
+    },
+    "columns": {
+      "type": "array",
+      "description": "Definición de columnas para tablas (sections de tipo `items_table`).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["width_percent"],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Path al dato (`items.product_name`, `items.ordered_qty`, etc.). Si ausente, la columna es label-only."
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Header visible de la columna."
+          },
+          "width_percent": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 100,
+            "description": "Ancho relativo de la columna como % del total. La suma de width_percent de columnas enabled DEBE ser 100 (validación custom en código)."
+          },
+          "align": {
+            "type": "string",
+            "enum": ["left", "center", "right"],
+            "default": "left",
+            "description": "Alineación del contenido."
+          },
+          "format": {
+            "type": "string",
+            "enum": ["text", "number", "currency", "date", "percent"],
+            "description": "Tipo de formato de display."
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Si false, la columna no se renderiza (excluida del cómputo de width_percent total)."
+          }
+        }
+      }
+    },
+    "styles": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Estilos visuales globales.",
+      "properties": {
+        "font_family": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Familia tipográfica (`Courier New`, `Inter`, `Roboto`, etc.). Default `monospace` para rollos."
+        },
+        "font_size_base_pt": {
+          "type": "number",
+          "minimum": 6,
+          "maximum": 24,
+          "description": "Tamaño base en puntos. Rango [6..24]. Default 9 para rollos, 10 para hojas."
+        },
+        "primary_color": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "description": "Color principal en hex 6 dígitos. Default `#000000`."
+        },
+        "header_alignment": {
+          "type": "string",
+          "enum": ["left", "center", "right"],
+          "default": "left",
+          "description": "Alineación del header."
+        },
+        "show_borders": {
+          "type": "boolean",
+          "description": "Mostrar bordes en tablas."
+        },
+        "compact_mode": {
+          "type": "boolean",
+          "description": "Modo compacto: reduce paddings y márgenes internos."
+        }
+      }
+    },
+    "tokens": {
+      "type": "array",
+      "description": "Tokens disponibles para `custom_template` (Handlebars-style `{{ path }}`).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["token", "path"],
+        "properties": {
+          "token": {
+            "type": "string",
+            "pattern": "^[a-z_][a-z0-9_.]*$",
+            "description": "Nombre público del token (`document.number`)."
+          },
+          "path": {
+            "type": "string",
+            "description": "Path al dato en el documento (`order.number`, `customer.name`)."
+          },
+          "description": {
+            "type": "string",
+            "description": "Descripción humana del token para el editor."
+          },
+          "example": {
+            "type": "string",
+            "description": "Valor de ejemplo para preview en el editor."
+          }
+        }
+      }
+    },
+    "custom_template": {
+      "type": "string",
+      "maxLength": 100000,
+      "description": "Plantilla Handlebars opcional. Máximo 100KB (~10K tokens). Se compila en runtime. Validación de balance de `{{` y `}}` se aplica en código (no schema)."
+    }
+  },
+  "examples": [
+    {
+      "v": 2,
+      "paper": {
+        "format": "thermal_80",
+        "width_mm": 80,
+        "is_roll": true,
+        "margin_top_mm": 0,
+        "margin_right_mm": 0,
+        "margin_bottom_mm": 0,
+        "margin_left_mm": 0,
+        "copies": 1
+      },
+      "logo": {
+        "url": "https://vendix-s3.s3.amazonaws.com/stores/5/logo.png?X-Amz-Signature=abc",
+        "position": "left",
+        "size_mm": 25,
+        "opacity": 100
+      },
+      "company_block": {
+        "fields": [
+          { "key": "NIT", "enabled": true, "format": "text" },
+          { "key": "address", "enabled": true, "format": "text" },
+          { "key": "phone", "enabled": true, "format": "text" }
+        ]
+      },
+      "sections": [
+        {
+          "id": "header",
+          "type": "header",
+          "title": "",
+          "enabled": true,
+          "order": 0
+        },
+        {
+          "id": "customer_info",
+          "type": "customer_info",
+          "title": "Destinatario",
+          "enabled": true,
+          "order": 1
+        },
+        {
+          "id": "items_table",
+          "type": "items_table",
+          "title": "Productos",
+          "enabled": true,
+          "order": 2,
+          "fields": []
+        },
+        {
+          "id": "footer",
+          "type": "footer",
+          "title": "",
+          "enabled": true,
+          "order": 3
+        }
+      ],
+      "columns": [
+        { "key": "items.sku", "label": "#", "width_percent": 10, "align": "left", "format": "text", "enabled": true },
+        { "key": "items.product_name", "label": "SKU/Descripción", "width_percent": 50, "align": "left", "format": "text", "enabled": true },
+        { "key": "items.ordered_qty", "label": "Cant.pedida", "width_percent": 20, "align": "right", "format": "number", "enabled": true },
+        { "key": "items.dispatched_qty", "label": "Cant.despachada", "width_percent": 20, "align": "right", "format": "number", "enabled": true }
+      ],
+      "styles": {
+        "font_family": "Courier New",
+        "font_size_base_pt": 9,
+        "primary_color": "#000000",
+        "header_alignment": "center",
+        "show_borders": true,
+        "compact_mode": true
+      }
+    }
+  ]
+}
