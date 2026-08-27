@@ -9405,6 +9405,7 @@ enum print_format_type_enum {
   fiscal_electronic_invoice
   fiscal_credit_note
   kitchen_ticket
+  dispatch_ticket
 }
 
 model print_templates {
