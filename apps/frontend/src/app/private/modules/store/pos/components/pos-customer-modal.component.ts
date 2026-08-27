@@ -683,7 +683,7 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
       email: ['', [Validators.required, Validators.email]],
       firstName: ['', [Validators.required, Validators.minLength(2)]],
       lastName: ['', [Validators.required, Validators.minLength(2)]],
-      phone: ['', [Validators.required, Validators.minLength(7)]],
+      phone: ['', [Validators.required, Validators.pattern(/^\d{10}$/)]],
       documentType: [''],
       documentNumber: ['', [Validators.required]],
       taxRegime: [''],
