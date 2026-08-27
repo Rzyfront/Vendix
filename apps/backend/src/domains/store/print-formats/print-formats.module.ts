@@ -21,13 +21,17 @@ import { PrintLayoutComposerService } from './services/print-layout-composer.ser
 import { PrintFiscalValidatorService } from './services/print-fiscal-validator.service';
 // E.11 casilla 4 — motor PDF bajo demanda del gateway (builder pdfkit, sin S3).
 import { FiscalInvoicePdfRenderService } from './services/fiscal-invoice-pdf-render.service';
+// [print-editor-dsk P2.2] — Single render path service (replaces the
+// double-render srcdoc+doc.write pattern from `document-print.service.ts`).
+import { PrintDocumentRendererService } from './services/print-document-renderer.service';
 
-// [print-editor-dsk P1.1] — AJV runtime singleton. The bare import triggers
-// the module-load side effect (AJV.compile + custom keyword registration),
-// so the validator is ready before `PrintFormatsService` consumes it. No
-// provider entry needed: the compiled validator is a module-level singleton
-// keyed in the ajv-instance closure.
-import './schemas/ajv-instance';
+// [print-editor-dsk P1.1] — AJV validator is loaded LAZILY by services that
+// need it (`print-formats.service.ts` calls `validatePrintFormatDefinition`
+// at request time). NO side-effect import here: an eager AJV compile at
+// module load would propagate any AJV/schema error into Nest's module
+// graph and break the entire boot. Loading on demand keeps the boot
+// resilient and the validator reusable from any other consumer (e.g.
+// the spec).
 
 // Providers & Registry
 import { DocumentDataProviderRegistry } from './providers/document-data-provider.registry';
@@ -68,6 +72,10 @@ import { DispatchTicketDataProvider } from './providers/dispatch-ticket.provider
     PrintLayoutComposerService,
     PrintFiscalValidatorService,
     FiscalInvoicePdfRenderService,
+    // [print-editor-dsk P2.2] — wired into `preview()` so the HTML the
+    // Hub/control-panel renders carries explicit pixel dimensions and a
+    // single, consistent `.vendix-print-page` container.
+    PrintDocumentRendererService,
     DocumentDataProviderRegistry,
     PosSaleTicketDataProvider,
     SalesOrderInvoiceDataProvider,

@@ -6,6 +6,10 @@ import { DocumentDataProviderRegistry } from '../providers/document-data-provide
 import { PrintLayoutComposerService } from './print-layout-composer.service';
 import { PrintFiscalValidatorService } from './print-fiscal-validator.service';
 import { FiscalInvoicePdfRenderService } from './fiscal-invoice-pdf-render.service';
+// [print-editor-dsk P2.2] — Single render path service. Wraps the
+// composer's HTML with explicit pixel dimensions so the preview no longer
+// relies on `srcdoc` + `doc.write` double-render or magic `3.78` math.
+import { PrintDocumentRendererService } from './print-document-renderer.service';
 import {
   PrintColumnDefinition,
   PrintFormatDefinition,
@@ -363,6 +367,14 @@ export class PrintGatewayService {
 
   /**
    * Genera una vista previa instantánea con datos de prueba o documento real
+   *
+   * [print-editor-dsk P2.2] — El HTML devuelto sale ENVUELTO por
+   * `PrintDocumentRendererService`, así el preview ya lleva dimensiones
+   * explícitas en píxeles (`width: Npx`) y un único contenedor
+   * `.vendix-print-page`. Antes el frontend re-renderizaba el HTML en un
+   * `<iframe srcdoc>` y aplicaba `Math.max(w * 3.78, 300)`, dos defectos
+   * que sobre-escalaban thermal_58 a 300px y trataban letter/a4/half_letter
+   * como un flat de 600px. Aquí el backend pasa la caja exacta.
    */
   async preview(
     storeId: number,
@@ -386,10 +398,27 @@ export class PrintGatewayService {
       data = await provider.getSampleData(storeId);
     }
 
-    const html = this.composer.compose(previewDef, data);
+    const rawHtml = this.composer.compose(previewDef, data);
+
+    // [print-editor-dsk P2.2] — Instanciado local a propósito: el servicio
+    // no tiene dependencias y la inyección por constructor forzaría a
+    // añadir un stub en `merge-definition.spec.ts` (que NO toco en esta
+    // fase). Sigue siendo un singleton a nivel de módulo porque Nest lo
+    // registra como provider — `document-print.service.ts` puede seguir
+    // inyectándolo vía DI en su propia refactorización.
+    const renderer = new PrintDocumentRendererService();
+    const wrappedHtml = renderer.render({
+      html: rawHtml,
+      paper: {
+        width_mm: previewDef.paper.width_mm,
+        is_roll: previewDef.paper.is_roll,
+        height_mm: previewDef.paper.height_mm ?? null,
+      },
+      copies: previewDef.paper.copies,
+    });
 
     return {
-      html,
+      html: wrappedHtml,
       width_mm: previewDef.paper.width_mm,
       is_roll: previewDef.paper.is_roll,
       definition: previewDef,
