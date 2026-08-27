@@ -177,6 +177,73 @@ interface ResolutionListItem {
           <app-platform-tenant-picker
             (tenantPicked)="onTenantPicked($event)"
           ></app-platform-tenant-picker>
+
+          <!-- Tarjeta de perfil colapsable (P3.5) -->
+          <div class="bg-white rounded-lg shadow p-4 space-y-3">
+            <button
+              type="button"
+              (click)="profileCardCollapsed.set(!profileCardCollapsed())"
+              class="flex items-center justify-between w-full text-left"
+            >
+              <span class="font-semibold text-gray-900">
+                Perfil de facturación
+                @if (profileAppliedName()) {
+                  <span class="ml-2 text-xs text-green-700">✓ {{ profileAppliedName() }}</span>
+                }
+              </span>
+              <span class="text-gray-400">{{ profileCardCollapsed() ? '▶' : '▼' }}</span>
+            </button>
+
+            @if (!profileCardCollapsed()) {
+              @if (profileCatalog().length === 0) {
+                <p class="text-sm text-gray-500">
+                  No hay perfiles plataforma para op_type {{ operationType() }}. Cree uno en
+                  <a routerLink="../profiles/new" class="text-blue-600 underline">Perfiles</a>.
+                </p>
+              } @else {
+                <div class="space-y-2">
+                  @for (p of profileCatalog(); track p.id) {
+                    @if (p.operation_type === operationType()) {
+                      <div
+                        class="flex items-center justify-between p-2 border rounded"
+                        [class.border-blue-500]="profileSelectedId() === p.id"
+                        [class.bg-blue-50]="profileSelectedId() === p.id"
+                      >
+                        <div>
+                          <p class="font-medium text-sm">{{ p.name }}</p>
+                          <p class="text-xs text-gray-500">
+                            op {{ p.operation_type }} · v{{ p.current_version }}
+                            @if (p.is_default) { · predeterminado }
+                          </p>
+                        </div>
+                        <div class="flex gap-2">
+                          @if (profileSelectedId() === p.id) {
+                            <button
+                              type="button"
+                              (click)="clearAppliedProfile()"
+                              class="text-xs text-red-600 underline"
+                            >Quitar</button>
+                          } @else {
+                            <button
+                              type="button"
+                              (click)="applyProfile(p.id, p.name)"
+                              class="text-xs text-blue-600 underline"
+                            >Aplicar</button>
+                          }
+                        </div>
+                      </div>
+                    }
+                  }
+                  @if (profileCatalog().filter(p => p.operation_type === operationType()).length === 0) {
+                    <p class="text-sm text-gray-500">
+                      Sin perfiles para op_type {{ operationType() }}. Cree uno en
+                      <a routerLink="../profiles/new" class="text-blue-600 underline">Perfiles</a>.
+                    </p>
+                  }
+                </div>
+              }
+            }
+          </div>
         </fieldset>
 
         <!-- Items -->
@@ -556,6 +623,12 @@ export class PlatformInvoiceCreateComponent {
 
   readonly acquirer = signal<PlatformAcquirer | null>(null);
 
+  // ── Profile catalog (P3.5: tarjeta colapsable) ─────────────────────────
+  readonly profileCatalog = signal<any[]>([]);
+  readonly profileSelectedId = signal<number | null>(null);
+  readonly profileAppliedName = signal<string | null>(null);
+  readonly profileCardCollapsed = signal(false);
+
   // ── Items state (signals para zoneless) ────────────────────────────────
 
   readonly lines = signal<FormLine[]>([]);
@@ -651,6 +724,7 @@ export class PlatformInvoiceCreateComponent {
 
   ngOnInit(): void {
     this.loadResolutions();
+    this.loadProfileCatalog();
   }
 
   async loadResolutions(): Promise<void> {
@@ -665,6 +739,36 @@ export class PlatformInvoiceCreateComponent {
     } catch {
       this.resolutions.set([]);
     }
+  }
+
+  async loadProfileCatalog(): Promise<void> {
+    try {
+      const res = await firstValueFrom(
+        this.http.get<{ success: boolean; data: any[] }>(
+          `${this.base}/profiles/catalog`,
+        ),
+      );
+      this.profileCatalog.set(res.data ?? []);
+    } catch {
+      this.profileCatalog.set([]);
+    }
+  }
+
+  /**
+   * Aplica un perfil al wizard. El backend acepta `profile_id` en el DTO y
+   * persiste el snapshot. Por ahora sólo guardamos el `profile_id` para
+   * enviarlo en submit; un slice futuro precarga secciones desde el profile
+   * (config.aiu, config.taxes, etc.).
+   */
+  applyProfile(profileId: number, profileName: string): void {
+    this.profileSelectedId.set(profileId);
+    this.profileAppliedName.set(profileName);
+    this.toast.info(`Perfil aplicado: ${profileName}`, '');
+  }
+
+  clearAppliedProfile(): void {
+    this.profileSelectedId.set(null);
+    this.profileAppliedName.set(null);
   }
 
   onDocumentTypeChange(value: string): void {
@@ -854,6 +958,7 @@ export class PlatformInvoiceCreateComponent {
                 : undefined,
             global_discount_amount: this.globalDiscountAmount() || undefined,
             resolution_id: this.resolutionId(),
+            profile_id: this.profileSelectedId() ?? undefined,
           }
         : {
             supplier: customer,
@@ -875,6 +980,7 @@ export class PlatformInvoiceCreateComponent {
             },
             global_discount_amount: this.globalDiscountAmount() || undefined,
             resolution_id: this.resolutionId(),
+            profile_id: this.profileSelectedId() ?? undefined,
           };
 
     const url =

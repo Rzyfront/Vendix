@@ -54,6 +54,12 @@ export const PLATFORM_INVOICING_ROUTES: Routes = [
           icon: 'file-input',
           route: '/super-admin/fiscal/invoicing/support-document',
         },
+        {
+          id: 'profiles',
+          label: 'Perfiles',
+          icon: 'file-stack',
+          route: '/super-admin/fiscal/invoicing/profiles',
+        },
       ],
     },
     // `providePlatformDianApi()` reapunta `DIAN_API_CONTEXT` a

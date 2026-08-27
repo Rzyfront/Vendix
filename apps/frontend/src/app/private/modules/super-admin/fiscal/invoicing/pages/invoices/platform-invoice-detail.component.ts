@@ -467,6 +467,49 @@ interface SubscriptionInvoiceDetail {
           </section>
         }
 
+        <!-- Acciones fiscales (P3.6: delivery, RADIAN, PDF) -->
+        <section class="mt-6 bg-white rounded-lg shadow p-4">
+          <h2 class="font-semibold text-gray-900 mb-2">Acciones fiscales</h2>
+          <div class="flex flex-wrap gap-2">
+            <button
+              app-button
+              type="button"
+              variant="primary"
+              (click)="openDeliverDialog(d.invoice.id)"
+              [disabled]="actionLoading()"
+            >
+              Reenviar correo
+            </button>
+            <button
+              app-button
+              type="button"
+              variant="secondary"
+              (click)="openRadianDialog(d.invoice.id)"
+              [disabled]="actionLoading()"
+            >
+              Registrar evento RADIAN
+            </button>
+            <button
+              app-button
+              type="button"
+              variant="ghost"
+              (click)="previewPdf(d.invoice.id)"
+              [disabled]="actionLoading()"
+            >
+              Preview PDF
+            </button>
+            <button
+              app-button
+              type="button"
+              variant="ghost"
+              (click)="regeneratePdf(d.invoice.id)"
+              [disabled]="actionLoading()"
+            >
+              Regenerar PDF
+            </button>
+          </div>
+        </section>
+
         <!-- Evidencias -->
         @if (d.evidences.length > 0) {
           <section class="mt-6 bg-white rounded-lg shadow p-4">
@@ -500,6 +543,7 @@ export class PlatformInvoiceDetailComponent {
   readonly issuing = signal(false);
   readonly retrying = signal<number | null>(null);
   readonly cancelling = signal(false);
+  readonly actionLoading = signal(false);
   readonly issueError = signal<string | null>(null);
   readonly readinessBlockers = signal<
     Array<{ code: string; problem: string; fix?: string }>
@@ -740,6 +784,112 @@ export class PlatformInvoiceDetailComponent {
       this.toast.error(msg);
     } finally {
       this.cancelling.set(false);
+    }
+  }
+
+  /**
+   * P3.6 — Acciones fiscales plataforma:
+   * - deliver: reenvío por correo (C.3.5 ya real en P1.2)
+   * - radian: registro de evento RADIAN (C.4.5 ya real en P1.3)
+   * - preview-pdf / regenerate: PDF pipeline (C.5.5 ya real en P1.4)
+   *
+   * El path de la plataforma es /sales-invoices/:id/{deliver,events} y
+   * /invoices/:id/{preview-pdf,pdf,pdf/regenerate} — el backend mantiene
+   * discriminadores por tipo de transmision.
+   */
+  async openDeliverDialog(invoiceId: number): Promise<void> {
+    const email = window.prompt('Correo destino para reenvío:');
+    if (!email) return;
+    this.actionLoading.set(true);
+    try {
+      const res = await firstValueFrom(
+        this.http.post<{ success: boolean; data: any }>(
+          `${this.base}/sales-invoices/${invoiceId}/deliver`,
+          { email },
+        ),
+      );
+      if (res.success) {
+        this.toast.success(`Reenvío a ${email} (zip: ${res.data?.zip_name || '—'})`);
+      } else {
+        this.toast.error('Reenvío no completado');
+      }
+    } catch (err) {
+      this.toast.error(
+        `Reenvío: ${(err instanceof HttpErrorResponse && err.error?.message) || 'Error'}`,
+      );
+    } finally {
+      this.actionLoading.set(false);
+    }
+  }
+
+  async openRadianDialog(invoiceId: number): Promise<void> {
+    const code = window.prompt(
+      'Código de evento RADIAN (030 acuse | 031 reclamo | 032 recibo | 033 aceptación | 034 tácita):',
+      '030',
+    );
+    if (!code) return;
+    this.actionLoading.set(true);
+    try {
+      const res = await firstValueFrom(
+        this.http.post<{ success: boolean; data: any }>(
+          `${this.base}/sales-invoices/${invoiceId}/events`,
+          { event_code: code },
+        ),
+      );
+      if (res.success) {
+        this.toast.success(`Evento ${code} registrado (id=${res.data?.id}, status=${res.data?.status})`);
+      } else {
+        this.toast.error('RADIAN no registrado');
+      }
+    } catch (err) {
+      this.toast.error(
+        `RADIAN: ${(err instanceof HttpErrorResponse && err.error?.message) || 'Error'}`,
+      );
+    } finally {
+      this.actionLoading.set(false);
+    }
+  }
+
+  async previewPdf(invoiceId: number): Promise<void> {
+    this.actionLoading.set(true);
+    try {
+      const res = await firstValueFrom(
+        this.http.post<{ success: boolean; data: any }>(
+          `${this.base}/invoices/${invoiceId}/preview-pdf`,
+          {},
+          { responseType: 'blob' as 'json' },
+        ),
+      );
+      if (res.success) {
+        this.toast.success('Preview PDF solicitado (ver logs backend para blob URL)');
+      }
+    } catch (err) {
+      const msg =
+        (err instanceof HttpErrorResponse && err.error?.message) || 'Preview PDF no disponible';
+      this.toast.warning(msg);
+    } finally {
+      this.actionLoading.set(false);
+    }
+  }
+
+  async regeneratePdf(invoiceId: number): Promise<void> {
+    this.actionLoading.set(true);
+    try {
+      const res = await firstValueFrom(
+        this.http.post<{ success: boolean; data: { key: string; url?: string } }>(
+          `${this.base}/invoices/${invoiceId}/pdf/regenerate`,
+          {},
+        ),
+      );
+      if (res.success) {
+        this.toast.success(`PDF regenerado: ${res.data?.key}`);
+      }
+    } catch (err) {
+      const msg =
+        (err instanceof HttpErrorResponse && err.error?.message) || 'PDF no regenerado';
+      this.toast.error(msg);
+    } finally {
+      this.actionLoading.set(false);
     }
   }
 
