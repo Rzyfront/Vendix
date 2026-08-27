@@ -35,6 +35,12 @@ const DEFAULTS: Record<string, PaperFormat> = Object.freeze({
   fiscal_electronic_invoice: 'letter',
   fiscal_credit_note: 'letter',
   kitchen_ticket: 'thermal_80',
+  // [print-editor-dsk P8] — Lote 12–15: planilla de ruta DSD (carta, igual
+  // que `dispatch_note`) + tres certificados de retención (carta).
+  dispatch_route: 'letter',
+  withholding_practiced: 'letter',
+  withholding_suffered: 'letter',
+  withholding_employee_certificate: 'letter',
 });
 
 /**

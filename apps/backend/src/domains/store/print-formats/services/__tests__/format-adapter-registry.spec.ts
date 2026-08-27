@@ -18,7 +18,7 @@
 import { FormatAdapterRegistryService } from '../format-adapter-registry.service';
 import { POS_SALE_TICKET_ADAPTER } from '../../lib/adapters';
 
-describe('FormatAdapterRegistryService (P7 — DI lookup over the 11 adapters)', () => {
+describe('FormatAdapterRegistryService (P7 — DI lookup over the 11 adapters, [print-editor-dsk P8] +4 to 15)', () => {
   const registry = new FormatAdapterRegistryService();
 
   it('1. get("pos_sale_ticket") returns the POS adapter', () => {
@@ -29,12 +29,13 @@ describe('FormatAdapterRegistryService (P7 — DI lookup over the 11 adapters)',
     expect(adapter?.defaultPaper).toBe('thermal_80');
   });
 
-  it('2. byCategory("Logística") returns [dispatch_note, dispatch_ticket] in declaration order', () => {
+  it('2. byCategory("Logística") returns [dispatch_note, dispatch_ticket, dispatch_route] in declaration order', () => {
     const logistics = registry.byCategory('Logística');
-    expect(logistics).toHaveLength(2);
+    expect(logistics).toHaveLength(3);
     expect(logistics.map((a) => a.formatType)).toEqual([
       'dispatch_note',
       'dispatch_ticket',
+      'dispatch_route',
     ]);
   });
 
@@ -57,6 +58,11 @@ describe('FormatAdapterRegistryService (P7 — DI lookup over the 11 adapters)',
       'fiscal_electronic_invoice',
       'fiscal_credit_note',
       'kitchen_ticket',
+      // [print-editor-dsk P8]
+      'dispatch_route',
+      'withholding_practiced',
+      'withholding_suffered',
+      'withholding_employee_certificate',
     ];
     for (const format of known) {
       expect(registry.has(format)).toBe(true);
@@ -71,13 +77,13 @@ describe('FormatAdapterRegistryService (P7 — DI lookup over the 11 adapters)',
     expect(registry.get('not_a_real_format')).toBeUndefined();
   });
 
-  it('5. list() returns 11 entries and a fresh array (mutating it does not affect the registry)', () => {
+  it('5. list() returns 15 entries and a fresh array (mutating it does not affect the registry)', () => {
     const before = registry.list();
-    expect(before).toHaveLength(11);
+    expect(before).toHaveLength(15);
 
     // Caller mutates the returned array — registry must remain pristine.
     (before as unknown as { length: number }).length = 0;
-    expect(registry.list()).toHaveLength(11);
+    expect(registry.list()).toHaveLength(15);
   });
 
   it('6. defaultPaper("pos_sale_ticket") === "thermal_80" (and falls back for unknowns)', () => {

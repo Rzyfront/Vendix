@@ -57,6 +57,15 @@ import { FiscalInvoiceDataProvider } from './providers/fiscal-invoice.provider';
 import { FiscalCreditNoteDataProvider } from './providers/fiscal-credit-note.provider';
 import { KitchenTicketDataProvider } from './providers/kitchen-ticket.provider';
 import { DispatchTicketDataProvider } from './providers/dispatch-ticket.provider';
+// [print-editor-dsk P8] — Cuatro providers nuevos: planilla de ruta DSD +
+// tres certificados de retención. El cast `as unknown as print_format_type_enum`
+// en sus `formatType` los mantiene en verde mientras `prisma generate` no haya
+// regenerado `@prisma/client` con los cuatro valores recién agregados al enum
+// de Postgres.
+import { DispatchRouteDataProvider } from './providers/dispatch-route.provider';
+import { WithholdingPracticedDataProvider } from './providers/withholding-practiced.provider';
+import { WithholdingSufferedDataProvider } from './providers/withholding-suffered.provider';
+import { WithholdingEmployeeCertificateDataProvider } from './providers/withholding-employee.provider';
 
 @Module({
   imports: [
@@ -112,6 +121,11 @@ import { DispatchTicketDataProvider } from './providers/dispatch-ticket.provider
     // (`/store/print-formats/render` con dispatch_ticket) devolvería
     // PRINT_DATA_PROVIDER_MISSING_001 (ERR-03) en vez de 200.
     DispatchTicketDataProvider,
+    // [print-editor-dsk P8] — Providers 12–15: dispatch_route + 3 retenciones.
+    DispatchRouteDataProvider,
+    WithholdingPracticedDataProvider,
+    WithholdingSufferedDataProvider,
+    WithholdingEmployeeCertificateDataProvider,
   ],
   // BE-E5 (E.5): exportar `FiscalInvoicePdfRenderService` para que
   // `InvoiceDeliveryModule` (reenvío de facturas, `POST /:id/deliver`) pueda
@@ -144,6 +158,11 @@ export class PrintFormatsModule implements OnModuleInit {
     // (lo de arriba viene de commits previos; este queda al final
     // porque es el último en sumarse al Hub).
     private readonly dispatchTicketProvider: DispatchTicketDataProvider,
+    // [print-editor-dsk P8] — Cuatro providers más para onModuleInit.
+    private readonly dispatchRouteProvider: DispatchRouteDataProvider,
+    private readonly withholdingPracticedProvider: WithholdingPracticedDataProvider,
+    private readonly withholdingSufferedProvider: WithholdingSufferedDataProvider,
+    private readonly withholdingEmployeeCertificateProvider: WithholdingEmployeeCertificateDataProvider,
   ) {}
 
   onModuleInit() {
@@ -161,5 +180,10 @@ export class PrintFormatsModule implements OnModuleInit {
     // gateway devuelve 500 (PRINT_DATA_PROVIDER_MISSING_001) al pedir
     // `format_type: 'dispatch_ticket'`.
     this.registry.register(this.dispatchTicketProvider);
+    // [print-editor-dsk P8] — Providers 12–15 del Hub.
+    this.registry.register(this.dispatchRouteProvider);
+    this.registry.register(this.withholdingPracticedProvider);
+    this.registry.register(this.withholdingSufferedProvider);
+    this.registry.register(this.withholdingEmployeeCertificateProvider);
   }
 }

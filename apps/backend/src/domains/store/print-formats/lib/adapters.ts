@@ -258,6 +258,99 @@ export const KITCHEN_TICKET_ADAPTER = freezeAdapter({
   requiredFields: [],
 } as FormatAdapter);
 
+/**
+ * [print-editor-dsk P8] — Planilla de ruta DSD. Carta vertical, logística
+ * operativa. Necesita la info del cliente (paradas) por lo que incluye
+ * customer-info, pero NO lleva totales fiscales porque una planilla no
+ * factura — el recaudo es un agregado del del settlement.
+ */
+export const DISPATCH_ROUTE_ADAPTER = freezeAdapter({
+  formatType: 'dispatch_route',
+  label: 'Planilla de Ruta (DSD)',
+  category: 'Logística',
+  defaultPaper: 'letter',
+  availableRegions: [
+    'header',
+    'logo',
+    'company-block',
+    'customer-info',
+    'items-table',
+    'totals',
+    'footer',
+  ],
+  fiscal: false,
+  requiredFields: [],
+} as FormatAdapter);
+
+/**
+ * [print-editor-dsk P8] — Certificado de retención PRACTICADA.
+ * Tributario, NO fiscal (no es DIAN), pero lleva los mismos campos
+ * fiscales mínimos (NIT del tercero, base y monto retenido). El CUFE no
+ * aplica: la retención no se timbra en XML.
+ */
+export const WITHHOLDING_PRACTICED_ADAPTER = freezeAdapter({
+  formatType: 'withholding_practiced',
+  label: 'Certificado Retención Practicada',
+  category: 'Tributario',
+  defaultPaper: 'letter',
+  availableRegions: [
+    'header',
+    'logo',
+    'company-block',
+    'customer-info',
+    'items-table',
+    'totals',
+    'footer',
+  ],
+  fiscal: false,
+  requiredFields: [],
+} as FormatAdapter);
+
+/**
+ * [print-editor-dsk P8] — Certificado de retención SUFRIDA. Misma forma
+ * que el practicada: el documento no factura, sólo acredita el saldo a
+ * favor del cliente.
+ */
+export const WITHHOLDING_SUFFERED_ADAPTER = freezeAdapter({
+  formatType: 'withholding_suffered',
+  label: 'Certificado Retención Sufrida',
+  category: 'Tributario',
+  defaultPaper: 'letter',
+  availableRegions: [
+    'header',
+    'logo',
+    'company-block',
+    'customer-info',
+    'items-table',
+    'totals',
+    'footer',
+  ],
+  fiscal: false,
+  requiredFields: [],
+} as FormatAdapter);
+
+/**
+ * [print-editor-dsk P8] — Certificado laboral al empleado. Misma forma
+ * que los otros dos retenciones, distinta categoría funcional.
+ */
+export const WITHHOLDING_EMPLOYEE_CERTIFICATE_ADAPTER = freezeAdapter({
+  formatType: 'withholding_employee_certificate',
+  label: 'Certificado Laboral Empleado',
+  category: 'Tributario',
+  defaultPaper: 'letter',
+  availableRegions: [
+    'header',
+    'logo',
+    'company-block',
+    'customer-info',
+    'items-table',
+    'totals',
+    'footer',
+  ],
+  fiscal: false,
+  requiredFields: [],
+} as FormatAdapter);
+
 /** Frozen tuple — the registry consumes this order directly. */
 export const ALL_ADAPTERS: ReadonlyArray<Readonly<FormatAdapter>> = Object.freeze([
   POS_SALE_TICKET_ADAPTER,
@@ -271,4 +364,9 @@ export const ALL_ADAPTERS: ReadonlyArray<Readonly<FormatAdapter>> = Object.freez
   FISCAL_ELECTRONIC_INVOICE_ADAPTER,
   FISCAL_CREDIT_NOTE_ADAPTER,
   KITCHEN_TICKET_ADAPTER,
+  // [print-editor-dsk P8] — Adaptadores 12–15 del Hub.
+  DISPATCH_ROUTE_ADAPTER,
+  WITHHOLDING_PRACTICED_ADAPTER,
+  WITHHOLDING_SUFFERED_ADAPTER,
+  WITHHOLDING_EMPLOYEE_CERTIFICATE_ADAPTER,
 ]);

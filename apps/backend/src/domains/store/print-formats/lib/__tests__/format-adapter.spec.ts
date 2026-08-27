@@ -2,8 +2,10 @@
  * [print-editor-dsk P7] — Unit tests for the FormatAdapter shape and
  * its 11 known adapter records.
  *
+ * [print-editor-dsk P8] — Subió a 15: dispatch_route + 3 retenciones.
+ *
  * The contract this file pins:
- *   1. Exactly 11 adapters exist (matches the print_format_type_enum
+ *   1. Exactly 15 adapters exist (matches the print_format_type_enum
  *      shape; adding a new enum value requires adding an adapter here).
  *   2. `defaultPaperFor(formatType)` returns the matching `defaultPaper`
  *      field on the same adapter record — so the registry and the bare
@@ -18,14 +20,14 @@ import { ALL_ADAPTERS } from '../adapters';
 import { defaultPaperFor } from '../default-paper';
 
 describe('FormatAdapter (P7 — adapter contract)', () => {
-  it('1. exposes exactly 11 adapter records (one per print_format_type_enum value)', () => {
-    expect(ALL_ADAPTERS).toHaveLength(11);
+  it('1. exposes exactly 15 adapter records (one per print_format_type_enum value)', () => {
+    expect(ALL_ADAPTERS).toHaveLength(15);
     // Sanity: every enum value should be accounted for, and only for
     // those enum values. The registry's Map size matches by construction.
     const adapterFormatTypes = new Set(
       ALL_ADAPTERS.map((a) => a.formatType),
     );
-    expect(adapterFormatTypes.size).toBe(11);
+    expect(adapterFormatTypes.size).toBe(15);
     for (const t of PRINT_FORMAT_TYPES) {
       expect(adapterFormatTypes.has(t)).toBe(true);
     }

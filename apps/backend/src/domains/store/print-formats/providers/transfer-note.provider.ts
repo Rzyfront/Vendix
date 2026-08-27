@@ -14,32 +14,121 @@ export class TransferNoteDataProvider implements IDocumentDataProvider {
   constructor(private readonly prisma: StorePrismaService) {}
 
   /**
-   * Este formato NO tiene lector real todavía, y por eso falla en vez de
-   * devolver la muestra.
+   * [print-editor-dsk P8] — `transfer_note` ahora LEE.
    *
-   * Antes del 2026-08-24 hacía `return this.getSampleData(storeId)` e ignoraba
-   * el `documentId`. Como `print-gateway.service.ts:174` alcanza esto por el
-   * carril de impresión REAL, el resultado era un 200 con datos inventados:
-   * una remisión de traslado que enumera mercancía que no es la del traslado viaja con la carga y la recepción se firma contra ella.
+   * Origen real: `stock_transfers` (cabecera) + `stock_transfer_items`
+   * (líneas) + `inventory_locations` (origen/destino). La columna
+   * `store_id` no existe en `stock_transfers` (la transferencia es a nivel
+   * de organización), por lo que el filtro de alcance es por
+   * `organization_id` derivado de la tienda — al imprimir un traslado
+   * intra-organización cualquiera de las dos tiendas origen/destino lo ve.
    *
-   * La decisión de fallar y no leer se tomó con dato, no por comodidad: el
-   * origen real vive en `stock_transfers` (`schema.prisma:2882`), en otro dominio, y proyectarlo bien es
-   * trabajo propio con su propia verificación. Mientras eso no exista, negarse
-   * es la única respuesta honesta — un documento operativo falso se firma y se
-   * archiva como si fuera cierto.
-   *
-   * No rompe la previsualización del hub: `print-gateway.service.ts:280`
-   * envuelve esta llamada en un `try/catch` y cae a `getSampleData`, que es
-   * exactamente para lo que la muestra existe.
+   * El picker reciente sigue filtrando por `organization_id` (no
+   * `store_id`), porque una transferencia entre tiendas de la misma
+   * organización debe listarse en AMBAS.
    */
   async fetchDocumentData(
     storeId: number,
     documentId: number | string,
   ): Promise<StandardPrintDataModel> {
-    throw new VendixHttpException(
-      ErrorCodes.PRINT_DOCUMENT_READER_MISSING_001,
-      `El formato ${this.formatType} todavía no lee su documento real (origen: stock_transfers); no se imprime una muestra en su lugar.`,
-    );
+    const id = Number(documentId);
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new VendixHttpException(
+        ErrorCodes.PRINT_DOCUMENT_NOT_FOUND_001,
+        `Invalid transfer id: ${documentId}`,
+      );
+    }
+
+    const store = await this.prisma.stores.findFirst({
+      where: { id: storeId },
+      select: { organization_id: true, name: true },
+    });
+    if (!store?.organization_id) {
+      throw new VendixHttpException(
+        ErrorCodes.PRINT_DOCUMENT_NOT_FOUND_001,
+        `Store ${storeId} not found`,
+      );
+    }
+
+    const transfer = await this.prisma.stock_transfers.findFirst({
+      where: { id, organization_id: store.organization_id },
+      include: {
+        stock_transfer_items: {
+          include: {
+            products: {
+              select: { id: true, name: true, sku: true, unit: true },
+            },
+            product_variants: {
+              select: { id: true, sku: true, name: true },
+            },
+          },
+        },
+        from_location: { select: { id: true, name: true, code: true } },
+        to_location: { select: { id: true, name: true, code: true } },
+      },
+    });
+
+    if (!transfer) {
+      throw new VendixHttpException(
+        ErrorCodes.PRINT_DOCUMENT_NOT_FOUND_001,
+        `Stock transfer ${id} not found for store ${storeId}`,
+      );
+    }
+
+    return {
+      store: { name: store.name || '', tax_id: '' },
+      document: {
+        id: transfer.id,
+        number: transfer.transfer_number
+          ? String(transfer.transfer_number)
+          : `TRANSFER-${transfer.id}`,
+        date: transfer.transfer_date
+          ? new Date(transfer.transfer_date).toISOString()
+          : transfer.created_at
+          ? new Date(transfer.created_at).toISOString()
+          : new Date().toISOString(),
+        date_formatted: (transfer.transfer_date || transfer.created_at)
+          ? new Date(transfer.transfer_date || transfer.created_at!).toLocaleDateString('es-CO')
+          : new Date().toLocaleDateString('es-CO'),
+        state: transfer.status,
+        state_label: transfer.status,
+        origin_location: transfer.from_location?.name || '',
+        destination_location: transfer.to_location?.name || '',
+        notes: transfer.notes || undefined,
+      },
+      items: (transfer.stock_transfer_items || []).map((it: any, idx: number) => ({
+        index: idx + 1,
+        product_name: it.products?.name || '',
+        variant_sku: it.product_variants?.sku || it.products?.sku || '',
+        quantity: Number(it.quantity || 0),
+        unit_price: 0,
+        total_price: 0,
+        notes: it.notes || undefined,
+      })),
+      taxes: [],
+      totals: {
+        subtotal: 0,
+        subtotal_formatted: '$0',
+        discount_total: 0,
+        discount_total_formatted: '$0',
+        shipping_total: 0,
+        shipping_total_formatted: '$0',
+        tax_total: 0,
+        tax_total_formatted: '$0',
+        grand_total: 0,
+        grand_total_formatted: '$0',
+      },
+      custom_variables: {
+        origin_location_id: transfer.from_location?.id,
+        destination_location_id: transfer.to_location?.id,
+        origin_location_code: transfer.from_location?.code || '',
+        destination_location_code: transfer.to_location?.code || '',
+        completed_date: transfer.completed_date
+          ? new Date(transfer.completed_date).toISOString()
+          : '',
+        approval_status: transfer.approved_at ? 'Aprobado' : 'Pendiente',
+      },
+    };
   }
 
   async getSampleData(storeId?: number): Promise<StandardPrintDataModel> {
@@ -106,16 +195,44 @@ export class TransferNoteDataProvider implements IDocumentDataProvider {
   }
 
   /**
-   * [print-editor-dsk P3.1] — `transfer_note` aún no tiene lector real
-   * (`fetchDocumentData` lanza 501). El picker del Hub degrada a `[]`
-   * para que el editor use `getSampleData` en lugar de un 500. La
-   * implementación real contra `stock_transfers` llega en Fase 8 con
-   * el lector del documento.
+   * [print-editor-dsk P8] — `transfer_note` picker: filtra por
+   * `organization_id` (derivado de la tienda) porque el documento vive a
+   * nivel de organización, no de tienda. Ordena por `transfer_date desc`
+   * (fecha operativa, no `created_at`).
    */
   async listRecent(
-    _storeId: number,
-    _limit: number,
+    storeId: number,
+    limit: number,
   ): Promise<RecentDocumentSummary[]> {
-    return [];
+    const store = await this.prisma.stores.findFirst({
+      where: { id: storeId },
+      select: { organization_id: true },
+    });
+    if (!store?.organization_id) return [];
+
+    const rows = await this.prisma.stock_transfers.findMany({
+      where: { organization_id: store.organization_id },
+      orderBy: { transfer_date: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        transfer_number: true,
+        transfer_date: true,
+        created_at: true,
+      },
+    });
+    const fmt = new Intl.DateTimeFormat('es-CO', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      number: String(r.transfer_number),
+      date_formatted: r.transfer_date
+        ? fmt.format(new Date(r.transfer_date))
+        : r.created_at
+        ? fmt.format(new Date(r.created_at))
+        : '',
+    }));
   }
 }

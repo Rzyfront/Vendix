@@ -9406,6 +9406,15 @@ enum print_format_type_enum {
   fiscal_credit_note
   kitchen_ticket
   dispatch_ticket
+  // [print-editor-dsk P8] — Cuarto lote de formatos para el Hub de impresión:
+  // planilla de ruta DSD + tres certificados de retención (practicada, sufrida,
+  // laboral). La migración 20260827_add_print_format_enum_values los agrega a
+  // Postgres con ADD VALUE IF NOT EXISTS, y `prisma generate` los materializa
+  // en @prisma/client al regenerar.
+  dispatch_route
+  withholding_practiced
+  withholding_suffered
+  withholding_employee_certificate
 }
 
 model print_templates {

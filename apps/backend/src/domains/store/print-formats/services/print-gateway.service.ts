@@ -40,9 +40,19 @@ export interface RenderResult {
   width_mm: number;
 }
 
-/** Formatos que hoy tienen motor PDF detrás del gateway. */
+/** Formatos que hoy tienen motor PDF detrás del gateway.
+ *
+ * [print-editor-dsk P8] — `fiscal_credit_note` entra al motor PDF. La nota
+ * crédito electrónica comparte el mismo builder pdfkit que la factura
+ * (`InvoicePdfBuilder.generate`) y el mismo resolvedor de identidad fiscal
+ * (`resolveFiscalIssuerForPrint`) — la única diferencia es el texto del
+ * sello y el del CUDE/CUFE; el resto del layout (papel, doble pasada de
+ * rollo, QR §11.7) es idéntico. El render distingue el documento por la
+ * fila `invoices.invoice_type`, no por el `format_type`.
+ */
 const PDF_ENGINE_SUPPORTED_FORMATS: print_format_type_enum[] = [
   'fiscal_electronic_invoice',
+  'fiscal_credit_note',
 ];
 
 @Injectable()
@@ -232,7 +242,13 @@ export class PrintGatewayService {
     let pdf_buffer: Buffer | undefined;
     if (engine === 'pdf') {
       try {
-        pdf_buffer = await this.pdfRenderer.renderBuffer(storeId, documentId);
+        // [print-editor-dsk P8] — Pasamos `formatType` para que el motor
+        // distinga `fiscal_electronic_invoice` de `fiscal_credit_note` por
+        // la columna `invoices.invoice_type`, evitando que un id de factura
+        // renderice con la etiqueta de nota (o viceversa). El resto del
+        // render es idéntico: mismo builder pdfkit, misma resolución de
+        // papel, misma identidad fiscal.
+        pdf_buffer = await this.pdfRenderer.renderBuffer(storeId, documentId, formatType);
         // TODO(integration-slice-4): thread `paper_definition` from caller
         //   - Cuando `RenderPrintDocumentDto` extienda `paper_format`
         //     (opción B del plan E.11), pasarlo aquí a `renderBuffer` por

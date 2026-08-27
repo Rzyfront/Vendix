@@ -46,7 +46,15 @@ export type PrintFormatType =
   | 'transfer_note'
   | 'fiscal_electronic_invoice'
   | 'fiscal_credit_note'
-  | 'kitchen_ticket';
+  | 'kitchen_ticket'
+  // [print-editor-dsk P8] — Lote 12–15: planilla de ruta DSD + tres
+  // certificados de retención. El cast en los providers mantiene tsc verde
+  // mientras @prisma/client no haya regenerado el enum; esta unión ya los
+  // conoce de antemano.
+  | 'dispatch_route'
+  | 'withholding_practiced'
+  | 'withholding_suffered'
+  | 'withholding_employee_certificate';
 
 // Compile-time drift guard — if a value is added/removed in the enum
 // without updating the union above, this assignment fails.
@@ -62,6 +70,11 @@ const _DRIFT_CHECK: Record<PrintFormatTypeEnum, true> = {
   fiscal_electronic_invoice: true,
   fiscal_credit_note: true,
   kitchen_ticket: true,
+  // [print-editor-dsk P8] — Drift guard para los 4 valores nuevos.
+  dispatch_route: true,
+  withholding_practiced: true,
+  withholding_suffered: true,
+  withholding_employee_certificate: true,
 };
 void _DRIFT_CHECK;
 
@@ -98,7 +111,10 @@ export type AdapterCategory =
   | 'Compras'
   | 'Inventario'
   | 'Facturación'
-  | 'Restaurante';
+  | 'Restaurante'
+  // [print-editor-dsk P8] — Los certificados de retención (practicada,
+  // sufrida, laboral) comparten categoría tributaria.
+  | 'Tributario';
 
 export interface FormatAdapter {
   /** Discriminator. Must be a valid `PrintFormatTypeEnum` value. */

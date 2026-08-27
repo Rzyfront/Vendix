@@ -262,22 +262,46 @@ export class FiscalInvoicePdfRenderService {
   /**
    * Devuelve el Buffer del PDF fiscal para este documento, sin persistir.
    *
+   * [print-editor-dsk P8] — Acepta `formatType` opcional. Cuando el caller
+   * lo pasa (`fiscal_electronic_invoice` o `fiscal_credit_note`), la consulta
+     * filtra también por `invoice_type` para que un id de factura nunca
+   * renderice como nota crédito y viceversa — un documento fiscal con
+   * etiqueta equivocada es peor que uno que falla. Sin `formatType`, la
+   * búsqueda es libre (compatibilidad con tests previos que sólo pasan el
+   * id).
+   *
    * @throws VendixHttpException `PRINT_DOCUMENT_NOT_FOUND_001` si el documento
-   *   no existe EN ESTA tienda, o `FISCAL_IDENTITY_INCOMPLETE` si es documento
-   *   electrónico y la identidad fiscal del emisor quedó incompleta — el mismo
-   *   contrato que `GET /store/invoicing/:id/pdf`.
+   *   no existe EN ESTA tienda (o no coincide con el `formatType` cuando se
+   *   pasa), o `FISCAL_IDENTITY_INCOMPLETE` si es documento electrónico y la
+   *   identidad fiscal del emisor quedó incompleta — el mismo contrato que
+   *   `GET /store/invoicing/:id/pdf`.
    */
   async renderBuffer(
     storeId: number,
     documentId: number | string,
+    formatType?: string,
   ): Promise<Buffer> {
     const id = Number(documentId);
     if (!Number.isInteger(id) || id <= 0) {
       throw new VendixHttpException(ErrorCodes.PRINT_DOCUMENT_NOT_FOUND_001);
     }
 
+    const where: { id: number; store_id: number; invoice_type?: any } = {
+      id,
+      store_id: storeId,
+    };
+    if (formatType === 'fiscal_electronic_invoice') {
+      // Cualquier tipo de factura de venta (no nota crédito/débito). El
+      // builder pdfkit imprime la etiqueta a partir de `data.invoice_type`
+      // (`invoice-pdf.builder.ts:702`), así que dejamos que el driver nativo
+      // decida — sólo acotamos a "no es nota".
+      where.invoice_type = { in: ['sales_invoice', 'export_invoice', 'support_document', 'pos_equivalent_document'] };
+    } else if (formatType === 'fiscal_credit_note') {
+      where.invoice_type = 'credit_note';
+    }
+
     const invoice = await this.prisma.invoices.findFirst({
-      where: { id, store_id: storeId },
+      where,
       include: FISCAL_INVOICE_PDF_RENDER_INCLUDE,
     });
 
