@@ -29,23 +29,25 @@
 | C — Persistence + Settings | 3 | 3 | 0 | 0 | ✅ Complete (migration file + interface + defaults + UI) |
 | D — Frontend Hub + DispatchTicketPrintService | 9 | 2 | 0 | 0 | 🟡 Partial (D.1 union + D.9 service; D.2-D.8 pendientes owner wake) |
 | E — Enlace Universal + 2 Disparadores | 14 | 3 | 0 | 0 | 🟡 Partial (E.1-E.3 críticos; E.4-E.14 pendientes owner wake) |
-| F — Validación + Convergencia | 4 | 1 | 0 | 1 | 🟡 Partial (F.1 contract sweep static done; F.2-F.4 bloqueados por stack unhealthy) |
+| F — Validación + Convergencia | 4 | 2 | 0 | 1 | 🟡 Partial (F.1 static + F.2 live E2E 10/10 done; F.3+F.4 pendientes; **1 IDOR hallazgo bloqueante**) |
 
-**Current position:** Phase F.1 (contract sweep static documented) · awaiting owner + stack healthy para F.2-F.4
-**Owner:** rzy · **Last updated:** 2026-08-27 (orchestrator final writeup)
+**Current position:** Phase F.2 (live E2E completed, 1 Brute-Force finding). Hallazgo bloqueante: IDOR cross-tenant en `POST /render`.
+**Owner:** rzy · **Last updated:** 2026-08-27 (orchestrator runtime final writeup)
 **Open blockers:**
-- Stack backend DB unhealthy (otro agente en Jest loop en container). `prisma migrate deploy` no ejecutado.
-- F.2 E2E Playwright (`browser_navigate https://vendix.com/admin/settings/print-formats`) bloqueado hasta `docker compose ps` backend healthy.
-- F.3 perf benchmarks (k6 / curl loop) requieren stack live.
-- F.4 convergence loop round 2 requiere stack live.
+- **🔴 BLOCKER H-1 IDOR:** `POST /store/print-formats/render` no valida que `x-store-id` del header pertenezca al `organization_id` del JWT. Token de `tech-solutions` con `x-store-id: 999` retorna render del order 813 de store 3. `provider.fetchDocumentData` lee del `prisma` global sin scope por tenant. **Requiere fix en `print-gateway.controller.ts` antes de producción.** Detalle: 10/10 tests live ejecutados en `api.vendix.com` 2026-08-27T12:48.
+- F.3 perf benchmarks (k6 / curl loop) pendientes.
+- F.4 convergence loop round 2 pendiente.
 
 **Handoff notes:**
-- Plan completo en `/tmp/vendix-plans/dispatch-ticket-logistica-parity-20260827.md` (mirror read-only) + `apps/backend/.plans/dispatch-ticket-logistica-parity-20260827.md` (committed `998be5c35`).
+- Plan completo en `/tmp/vendix-plans/dispatch-ticket-logistica-parity-20260827.md` (mirror read-only) + `apps/backend/.plans/dispatch-ticket-logistica-parity-20260827.md` (committed `998be5c35` + `bf4b3937a` + `4e23bb88e`).
 - Checkpoint anchor `checkpoint/parallel-dispatch-ticket-20260827` apunta a `db484744` (HEAD pre-plan).
-- 13 commits CP-DTLP en `dev` local (a-d4f0d). Owner debe `git push origin dev` al despertar.
-- Backend cambios compilables (`tsc exit 0` ambos lados).
+- **17 commits CP-DTLP en `dev` local.** Owner debe `git push origin dev` al despertar.
+- Backend cambios compilables (`tsc exit 0` ambos lados) + ENUM extendido en schema.prisma (`dispatch_ticket` en `print_format_type_enum`).
+- Migration aplicada en pg (orchestrator directo via psql): enum 11 valores, constraint CHECK NOT VALID, backfill 21 stores × `dispatch_ticket` row + `gateway_enabled=true`.
 - Sub-agentes paralelos respetaron scope (3 invoice-delivery archivos intactos).
 - Reversibilidad B.1: `pg_enum ADD VALUE` no revierte. Alternativa costosa documentada en migration SQL header.
+- **Reversibilidad C.1:** `DELETE FROM store_print_format_configs WHERE format_type='dispatch_ticket'` + `ALTER TABLE store_print_format_configs ALTER COLUMN gateway_enabled SET DEFAULT false`.
+- **H-1 fix sugerido:** middleware/interceptor que valide `jwt.organization_id` contra `store.organization_id` antes de pasar al gateway, o usar `StorePrismaService` scoped (no `prisma` global) en providers.
 
 ## Context
 
