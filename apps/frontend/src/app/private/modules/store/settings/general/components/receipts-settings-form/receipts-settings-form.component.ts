@@ -42,6 +42,9 @@ export interface ReceiptsSettings {
   invoice_format?: PrintFormat;
   pos_ticket_format?: PrintFormat;
   pos_ticket_copies?: number;
+  /** ADR-7 / CP-DTLP-20260827 — Tiquete de despacho encadenado. */
+  print_dispatch_ticket_enabled?: boolean;
+  print_dispatch_ticket_auto_with_pos?: boolean;
 }
 
 /**
@@ -220,6 +223,8 @@ export class ReceiptsSettingsForm {
     send_invoice_email: new FormControl(true),
     print_pos_ticket: new FormControl(false),
     deliver_printed: new FormControl(false),
+    print_dispatch_ticket_enabled: new FormControl(true),
+    print_dispatch_ticket_auto_with_pos: new FormControl(false),
   });
 
   /** Label of the format each preview will render, for the section hint. */
@@ -311,6 +316,12 @@ export class ReceiptsSettingsForm {
   }
   get deliverPrintedControl() {
     return this.form.get('deliver_printed') as FormControl;
+  }
+  get printDispatchTicketEnabledControl() {
+    return this.form.get('print_dispatch_ticket_enabled') as FormControl;
+  }
+  get printDispatchTicketAutoWithPosControl() {
+    return this.form.get('print_dispatch_ticket_auto_with_pos') as FormControl;
   }
 
   constructor() {

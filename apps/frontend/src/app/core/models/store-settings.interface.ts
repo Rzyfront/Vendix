@@ -747,6 +747,19 @@ export interface ReceiptsSettings {
    * answering 200, so a new section would look saved and never persist.
    */
   printing?: PrintingSettings;
+  /**
+   * Habilita la impresión del tiquete de despacho (dispatch_ticket).
+   * Si false, los 2 disparadores (POS auto + orden manual) NO imprimen.
+   * ADR-7: flat bajo `receipts` raíz (no en `printing.dispatch_ticket`) para
+   * evitar drop por KNOWN_SECTIONS.
+   */
+  print_dispatch_ticket_enabled?: boolean;
+  /**
+   * Si true y print_dispatch_ticket_enabled=true, el POS encadena auto el
+   * tiquete de despacho junto con ticket POS/factura cuando la venta tiene envío.
+   * Default false (opt-in por admin).
+   */
+  print_dispatch_ticket_auto_with_pos?: boolean;
 }
 
 export interface BusinessHoursBlock {

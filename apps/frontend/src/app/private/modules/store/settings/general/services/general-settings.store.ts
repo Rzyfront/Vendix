@@ -207,6 +207,24 @@ export class GeneralSettingsStore {
     );
   });
 
+  /**
+   * ADR-7: Habilitar tiquete de despacho globalmente. Default true para que
+   * las tiendas nuevas puedan imprimirlo manual sin tocar settings. Phase E.1/E.2
+   * consumen este signal como guard del POS auto y del botón manual.
+   */
+  readonly printDispatchTicketEnabled = computed(
+    () => this.settings().receipts?.print_dispatch_ticket_enabled ?? true,
+  );
+
+  /**
+   * ADR-7: Auto-imprimir tiquete de despacho junto con POS/factura cuando la
+   * venta incluye envío y `shipping_method !== 'direct_delivery'`. Default
+   * false (opt-in por admin).
+   */
+  readonly printDispatchTicketAutoWithPos = computed(
+    () => this.settings().receipts?.print_dispatch_ticket_auto_with_pos ?? false,
+  );
+
   // ─── Cabecera sticky ────────────────────────────────────
 
   readonly badgeText = computed(() =>

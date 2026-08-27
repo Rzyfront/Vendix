@@ -455,6 +455,76 @@
         </div>
       </div>
     </div>
+
+    <!-- Impresión encadenada — CP-DTLP-20260827 / ADR-7.
+         dispatch_ticket (tiquete de despacho) se imprime con el formato y las
+         copias configuradas en "Formatos de Impresión". Acá se gobiernan los
+         DOS disparadores:
+           - Habilitar tiquete de despacho: master switch (default on).
+           - Auto-imprimir con POS/factura: encadena el tiquete cuando la venta
+             incluye envío (default off, opt-in por admin).
+         Planos bajo `receipts` raíz para que `KNOWN_SECTIONS` no los drope. -->
+    <div>
+      <div class="block-head">
+        <h4 class="block-title">Impresión encadenada</h4>
+        <p class="block-subtitle">
+          Disparadores del tiquete de despacho (cliente + dirección + productos
+          por línea + cantidades). El formato y las copias se editan en
+          <strong>Formatos de Impresión</strong>.
+        </p>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="setting-cell">
+          <app-setting-toggle
+            [formControl]="printDispatchTicketEnabledControl"
+            label="Habilitar tiquete de despacho"
+            description="Master switch: apagado, ni el POS ni el botón manual imprimen el tiquete"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+          <div class="setting-cell__meta">
+            <app-badge variant="primary" size="xsm" badgeStyle="outline">
+              Logistica
+            </app-badge>
+            <app-tooltip
+              content="El tiquete de despacho lista el cliente, la dirección de envío, las líneas pedidas y las despachadas. Sin totales fiscales ni QR. Apagado, ni el POS auto ni el botón del detalle de orden lo emiten."
+              position="top"
+              size="sm"
+              color="default"
+            >
+              <span class="help-chip">
+                <app-icon name="help-circle" size="12"></app-icon>
+                Qué hace
+              </span>
+            </app-tooltip>
+          </div>
+        </div>
+
+        <div class="setting-cell">
+          <app-setting-toggle
+            [formControl]="printDispatchTicketAutoWithPosControl"
+            label="Auto-imprimir con POS o factura"
+            description="Cuando la venta incluye envío, encadena el tiquete de despacho junto con el ticket POS o la factura"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+          <div class="setting-cell__meta">
+            <app-badge variant="info" size="xsm" badgeStyle="outline">
+              Disparador POS
+            </app-badge>
+            <app-tooltip
+              content="Solo aplica a ventas con envío (no a mostrador) y nunca cuando el método de envío es direct_delivery (el operador marca ship_status=sent sin imprimir). El botón manual del detalle de la orden sigue funcionando aunque esto esté apagado."
+              position="top"
+              size="sm"
+              color="default"
+            >
+              <span class="help-chip">
+                <app-icon name="alert-triangle" size="12"></app-icon>
+                Cuándo aplica
+              </span>
+            </app-tooltip>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 

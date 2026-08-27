@@ -2,6 +2,7 @@ export type PrintFormatType =
   | 'pos_sale_ticket'
   | 'sales_order_invoice'
   | 'dispatch_note'
+  | 'dispatch_ticket'
   | 'quotation'
   | 'credit_note'
   | 'purchase_order'
