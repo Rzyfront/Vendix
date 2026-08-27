@@ -281,10 +281,25 @@ export class PlatformInvoicingStore {
     return this.mutateProfile(() => this.fiscal.setDefaultProfile(id));
   }
 
-  deleteProfile(id: number): Observable<PlatformInvoiceProfileDetail> {
-    return this.mutateProfile(() =>
-      this.fiscal.deleteProfile(id) as Observable<PlatformInvoiceProfileDetail>,
-    );
+  deleteProfile(id: number): Observable<{ id: number; deleted: boolean }> {
+    return new Observable<{ id: number; deleted: boolean }>((observer) => {
+      this.fiscal
+        .deleteProfile(id)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (result) => {
+            // Invalida la caché de la lista tras borrar.
+            this._profiles.set([]);
+            // Si el perfil eliminado estaba seleccionado, limpia la selección.
+            if (this._selectedProfile()?.id === id) {
+              this._selectedProfile.set(null);
+            }
+            observer.next(result);
+            observer.complete();
+          },
+          error: (err) => observer.error(err),
+        });
+    });
   }
 
   /** Previsualizar perfil. No modifica estado; retorna el resultado directamente. */
