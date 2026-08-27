@@ -3,6 +3,7 @@ import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
+import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 
@@ -102,5 +103,19 @@ export class TransferNoteDataProvider implements IDocumentDataProvider {
       { token: '{{document.origin_location}}', path: 'document.origin_location', description: 'Ubicación o bodega de origen', example: 'Bodega Central' },
       { token: '{{document.destination_location}}', path: 'document.destination_location', description: 'Ubicación o tienda de destino', example: 'Tienda Norte' },
     ];
+  }
+
+  /**
+   * [print-editor-dsk P3.1] — `transfer_note` aún no tiene lector real
+   * (`fetchDocumentData` lanza 501). El picker del Hub degrada a `[]`
+   * para que el editor use `getSampleData` en lugar de un 500. La
+   * implementación real contra `stock_transfers` llega en Fase 8 con
+   * el lector del documento.
+   */
+  async listRecent(
+    _storeId: number,
+    _limit: number,
+  ): Promise<RecentDocumentSummary[]> {
+    return [];
   }
 }

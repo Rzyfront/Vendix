@@ -34,6 +34,10 @@ import { PrintDocumentRendererService } from './services/print-document-renderer
 // the spec).
 
 // Providers & Registry
+// [print-editor-dsk P3.1] — Servicio que sirve el picker de documentos
+// recientes del editor (endpoint `GET /:formatType/documents`). Sin
+// registro, el provider del controller lanzaría DI al primer hit.
+import { DocumentIndexService } from './services/document-index.service';
 import { DocumentDataProviderRegistry } from './providers/document-data-provider.registry';
 import { PosSaleTicketDataProvider } from './providers/pos-sale-ticket.provider';
 import { SalesOrderInvoiceDataProvider } from './providers/sales-order-invoice.provider';
@@ -77,6 +81,11 @@ import { DispatchTicketDataProvider } from './providers/dispatch-ticket.provider
     // single, consistent `.vendix-print-page` container.
     PrintDocumentRendererService,
     DocumentDataProviderRegistry,
+    // [print-editor-dsk P3.1] — Servicio del picker de documentos
+    // recientes. Sólo depende del registry (no de providers concretos),
+    // así que basta con registrarlo una vez y los once providers pasan
+    // a tener su `listRecent` disponible a través del servicio.
+    DocumentIndexService,
     PosSaleTicketDataProvider,
     SalesOrderInvoiceDataProvider,
     DispatchNoteDataProvider,

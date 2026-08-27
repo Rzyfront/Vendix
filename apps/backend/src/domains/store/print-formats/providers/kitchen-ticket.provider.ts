@@ -3,6 +3,7 @@ import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
+import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 
@@ -104,5 +105,18 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
       { token: '{{document.time}}', path: 'document.time', description: 'Hora de envío de la comanda', example: '14:25' },
       { token: '{{document.notes}}', path: 'document.notes', description: 'Observaciones generales de cocina', example: 'Sin sal' },
     ];
+  }
+
+  /**
+   * [print-editor-dsk P3.1] — `kitchen_ticket` aún no tiene lector real
+   * (`fetchDocumentData` lanza 501). El picker del Hub degrada a `[]` y
+   * el editor usa `getSampleData`. La implementación real contra
+   * `kitchen_tickets` llega en Fase 8 con el lector del documento.
+   */
+  async listRecent(
+    _storeId: number,
+    _limit: number,
+  ): Promise<RecentDocumentSummary[]> {
+    return [];
   }
 }

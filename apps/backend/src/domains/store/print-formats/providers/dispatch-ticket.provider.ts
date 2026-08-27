@@ -3,6 +3,7 @@ import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
+import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import {
   StandardPrintDataModel,
   StandardPrintItem,
@@ -182,6 +183,37 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
       { token: '{{ items.dispatched_qty }}', path: 'items[].dispatched_qty', description: 'Cantidad despachada (del último despacho)', example: '2' },
       { token: '{{ store.name }}', path: 'store.name', description: 'Nombre comercial de la tienda', example: 'Tienda Principal' },
     ];
+  }
+
+  /**
+   * [print-editor-dsk P3.1] — Tiquete de despacho sin totales (es logística,
+   * no factura): el picker sólo necesita el número de orden y la fecha. Sin
+   * `total_formatted` a propósito para no inducir al usuario a esperar un
+   * cobro en la comanda.
+   */
+  async listRecent(
+    storeId: number,
+    limit: number,
+  ): Promise<RecentDocumentSummary[]> {
+    const rows = await this.prisma.orders.findMany({
+      where: { store_id: storeId },
+      orderBy: { created_at: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        order_number: true,
+        created_at: true,
+      },
+    });
+    const fmt = new Intl.DateTimeFormat('es-CO', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      number: String(r.order_number),
+      date_formatted: r.created_at ? fmt.format(new Date(r.created_at)) : '',
+    }));
   }
 
   // ============================================================

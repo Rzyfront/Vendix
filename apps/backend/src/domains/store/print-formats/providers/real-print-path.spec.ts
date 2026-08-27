@@ -3,6 +3,7 @@ import { FiscalCreditNoteDataProvider } from './fiscal-credit-note.provider';
 import { CreditNoteDataProvider } from './credit-note.provider';
 import { KitchenTicketDataProvider } from './kitchen-ticket.provider';
 import { TransferNoteDataProvider } from './transfer-note.provider';
+import { PosSaleTicketDataProvider } from './pos-sale-ticket.provider';
 import { mapFiscalDocumentToPrintData } from './fiscal-document-print.mapper';
 
 /**
@@ -105,6 +106,69 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
       expect(muestra.document.number).toBeTruthy();
       expect(muestra.store.name).toBeTruthy();
     }
+  });
+});
+
+describe('[print-editor-dsk P3.1] — picker de documentos recientes (listRecent)', () => {
+  /**
+   * El picker del editor del Hub se alimenta de `provider.listRecent(storeId, limit)`.
+   * Aquí se verifica que el POS (el caso más común y de mayor volumen) hace la
+   * consulta barata correcta: `select` mínimo + `orderBy created_at desc` +
+   * `take = limit`. Si la proyección cambia, el picker podría leer miles de
+   * filas y romper la previsualización.
+   */
+  it('pos_sale_ticket: ordena por created_at desc, take=limit, select mínimo', async () => {
+    const findMany = jest.fn().mockResolvedValue([
+      {
+        id: 8,
+        order_number: 'POS-0008',
+        created_at: new Date('2026-08-27T10:30:00.000Z'),
+        grand_total: 87500,
+      },
+      {
+        id: 7,
+        order_number: 'POS-0007',
+        created_at: new Date('2026-08-27T09:15:00.000Z'),
+        grand_total: 12000,
+      },
+    ]);
+    const prisma = { orders: { findMany } } as any;
+    const p = new PosSaleTicketDataProvider(prisma);
+
+    const data = await p.listRecent(42, 20);
+
+    // La consulta correcta:
+    const call = findMany.mock.calls[0][0];
+    expect(call.where).toEqual({ store_id: 42 });
+    expect(call.orderBy).toEqual({ created_at: 'desc' });
+    expect(call.take).toBe(20);
+    // Sin `include` — debe ser una consulta barata.
+    expect(call.include).toBeUndefined();
+    // `select` mínimo: id + número + fecha + total.
+    expect(call.select).toEqual({
+      id: true,
+      order_number: true,
+      created_at: true,
+      grand_total: true,
+    });
+
+    // Y la salida formateada:
+    expect(data).toHaveLength(2);
+    expect(data[0].id).toBe(8);
+    expect(data[0].number).toBe('POS-0008');
+    expect(data[0].date_formatted).toMatch(/\d/);
+    expect(data[0].total_formatted).toMatch(/\$/);
+  });
+
+  it('pos_sale_ticket: respeta el take pasado por el servicio (caller controla el cap)', async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const p = new PosSaleTicketDataProvider({ orders: { findMany } } as any);
+
+    await p.listRecent(1, 5);
+    expect(findMany.mock.calls[0][0].take).toBe(5);
+
+    await p.listRecent(1, 50);
+    expect(findMany.mock.calls[1][0].take).toBe(50);
   });
 });
 
