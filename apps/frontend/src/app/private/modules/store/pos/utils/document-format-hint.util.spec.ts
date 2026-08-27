@@ -117,7 +117,7 @@ describe('computeDocumentFormatHint', () => {
         // Regex matches either form by allowing optional plural suffix.
         const below = computeDocumentFormatHint(c.type, c.invalid);
         expect(below?.tone).toBe('info');
-        expect(below?.text).toMatch(/Faltan \d+ caracter(es)?/);
+        expect(below?.text).toMatch(/Faltan \d+ caracter(?:es)?/);
 
         // Overflow — input must EXCEED the max (no match for exactly-at-max).
         const over = computeDocumentFormatHint(c.type, c.overflow);
