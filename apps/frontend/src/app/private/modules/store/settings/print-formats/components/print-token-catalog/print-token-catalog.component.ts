@@ -13,7 +13,14 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
 import { PrintTokenCatalogService, TokenGroup } from '../../../../../../../shared/services/print/print-token-catalog.service';
 
 /**
- * [print-editor-dsk P3.2] — Token catalog panel.
+ * MIME type shared with the canvas drop target. The dropped value is the
+ * token's path (not the rendered `{{ path }}`); the canvas maps it to a
+ * new section in P4.6.
+ */
+const TOKEN_DND_MIME = 'application/x-vendix-token';
+
+/**
+ * [print-editor-dsk P3.2 + P5.9] — Token catalog panel.
  *
  * Renders the `available_tokens` for the current print format grouped by
  * their first path segment (`store.*`, `customer.*`, `items.*`, …). A search
@@ -24,8 +31,10 @@ import { PrintTokenCatalogService, TokenGroup } from '../../../../../../../share
  * caller can decide where to splice the token (composer field, custom
  * template textarea, etc.).
  *
- * Drag-and-drop wiring is intentionally deferred to P3.5 — the buttons
- * already carry `cdkDrag` data so wiring is a one-line parent change.
+ * [print-editor-dsk P5.9] — Each chip is also `draggable="true"`. On
+ * `dragstart` we publish the token path under
+ * `application/x-vendix-token` so the canvas can drop it as a new
+ * section. This completes the drag-and-drop loop with P4.6.
  */
 @Component({
   selector: 'app-print-token-catalog',
@@ -86,9 +95,11 @@ import { PrintTokenCatalogService, TokenGroup } from '../../../../../../../share
                 @for (t of group.tokens; track t.token) {
                   <button
                     type="button"
-                    class="text-left w-full px-2 py-1.5 rounded-md bg-surface hover:bg-surface-hover border border-transparent hover:border-primary-500/40 transition group/token"
+                    draggable="true"
+                    class="text-left w-full px-2 py-1.5 rounded-md bg-surface hover:bg-surface-hover border border-transparent hover:border-primary-500/40 transition group/token cursor-grab active:cursor-grabbing"
                     [title]="t.description || t.token"
                     (click)="select(t.token, t.path)"
+                    (dragstart)="onDragStart($event, t.token, t.path)"
                   >
                     <div class="flex items-center justify-between gap-2">
                       <code class="text-[11px] font-mono text-primary-500 group-hover/token:text-primary-400 truncate">
@@ -167,5 +178,27 @@ export class PrintTokenCatalogComponent {
 
   select(token: string, path: string): void {
     this.tokenSelected.emit({ token, path });
+  }
+
+  /**
+   * [print-editor-dsk P5.9] — Drag start for the chip. We push a JSON
+   * envelope under our private MIME so the canvas drop target can
+   * recover both `token` (rendered as `{{ token }}`) and `path` (the
+   * dotted address used by the renderer). The canvas previously
+   * expected just `path`; we send both for forward compatibility.
+   */
+  onDragStart(event: DragEvent, token: string, path: string): void {
+    if (!event.dataTransfer) return;
+    try {
+      event.dataTransfer.setData(
+        TOKEN_DND_MIME,
+        JSON.stringify({ token, path }),
+      );
+      // Plain-text fallback for hosts that strip custom MIME types.
+      event.dataTransfer.setData('text/plain', `{{ ${path} }}`);
+    } catch {
+      // Some browsers throw on setData for protected types; swallow.
+    }
+    event.dataTransfer.effectAllowed = 'copy';
   }
 }

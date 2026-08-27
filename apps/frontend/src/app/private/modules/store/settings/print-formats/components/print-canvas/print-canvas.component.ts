@@ -24,12 +24,13 @@ import { PrintCanvasDragDirective } from './print-canvas-drag.directive';
 import { MmToPxService } from '../../../../../../../shared/services/print/mm-to-px.service';
 import { PrintCanvasHistoryService } from '../../services/print-canvas-history.service';
 import { PrintCanvasToolbarComponent } from './print-canvas-toolbar.component';
+import { PrintPropertiesPanelComponent } from '../print-properties-panel/print-properties-panel.component';
 
 /** MIME type used to shuttle the dropped token's path on drag-and-drop. */
 const TOKEN_DND_MIME = 'application/x-vendix-token';
 
 /**
- * [print-editor-dsk P4.1 + P4.3 + P4.4 + P4.5 + P4.6 + P4.7] — WYSIWYG
+ * [print-editor-dsk P4.1 + P4.3 + P4.4 + P4.5 + P4.6 + P4.7 + P5] — WYSIWYG
  * canvas container for the print-format editor.
  *
  *  - P4.1: lays out `CanvasRegion`s over a paper-shaped area; emits
@@ -46,6 +47,10 @@ const TOKEN_DND_MIME = 'application/x-vendix-token';
  *    region's order anchors the new section instead.
  *  - P4.7: embeds the toolbar (zoom 60..160, snap-to-grid, ruler,
  *    fit-to-screen) and applies `transform: scale()` to the paper.
+ *  - P5: embeds the `PrintPropertiesPanel` on the right side and
+ *    routes its `(definitionChanged)` events through the history
+ *    service so panel edits are undoable. Also decodes the new
+ *    JSON-shaped drop payload from `print-token-catalog` (P5.9).
  */
 @Component({
   selector: 'app-print-canvas',
@@ -54,6 +59,7 @@ const TOKEN_DND_MIME = 'application/x-vendix-token';
     PrintRegionHandleComponent,
     PrintCanvasDragDirective,
     PrintCanvasToolbarComponent,
+    PrintPropertiesPanelComponent,
   ],
   providers: [PrintCanvasHistoryService],
   template: `
@@ -70,45 +76,55 @@ const TOKEN_DND_MIME = 'application/x-vendix-token';
         (fitToScreen)="onFitToScreen()"
       ></app-print-canvas-toolbar>
 
-      <div
-        #paper
-        class="vendix-paper"
-        [class.show-rulers]="rulerVisible()"
-        [style.transform]="'scale(' + (zoomPct() / 100) + ')'"
-        [style.width.mm]="paperWidthMm()"
-        [style.min-height.mm]="paperHeightMm()"
-        (click)="onCanvasClick($event)"
-        (dragover)="onDragOver($event)"
-        (drop)="onDrop($event)"
-      >
-        @for (r of regions(); track r.id) {
-          <div
-            class="canvas-region"
-            [class.selected]="r.id === selectedRegionId()"
-            [class.dragging]="isDragging(r.id)"
-            [style.left.mm]="liveRegions()[r.id]?.x_mm ?? r.x_mm"
-            [style.top.mm]="liveRegions()[r.id]?.y_mm ?? r.y_mm"
-            [style.width.mm]="liveRegions()[r.id]?.width_mm ?? r.width_mm"
-            [style.height.mm]="liveRegions()[r.id]?.height_mm ?? r.height_mm"
-            [style.z-index]="r.zIndex"
-            [style.cursor]="r.id === selectedRegionId() ? 'move' : 'pointer'"
-            appCanvasDrag
-            [handle]="r.id === activeResizeRegion() ? activeResizeHandle() : 'body'"
-            (dragStart)="onDragStart($event, r)"
-            (dragMove)="onDragMove($event, r)"
-            (dragEnd)="onDragEnd(r)"
-            (click)="onRegionClick($event, r.id)"
-          >
-            <span class="region-label">{{ r.label }}</span>
-            @if (r.id === selectedRegionId()) {
-              <app-print-region-handle
-                [visible]="true"
-                [handleSize]="8"
-                (handlePressed)="onHandlePressed($event, r)"
-              ></app-print-region-handle>
-            }
-          </div>
-        }
+      <div class="vendix-canvas-split">
+        <div
+          #paper
+          class="vendix-paper"
+          [class.show-rulers]="rulerVisible()"
+          [style.transform]="'scale(' + (zoomPct() / 100) + ')'"
+          [style.width.mm]="paperWidthMm()"
+          [style.min-height.mm]="paperHeightMm()"
+          (click)="onCanvasClick($event)"
+          (dragover)="onDragOver($event)"
+          (drop)="onDrop($event)"
+        >
+          @for (r of regions(); track r.id) {
+            <div
+              class="canvas-region"
+              [class.selected]="r.id === selectedRegionId()"
+              [class.dragging]="isDragging(r.id)"
+              [style.left.mm]="liveRegions()[r.id]?.x_mm ?? r.x_mm"
+              [style.top.mm]="liveRegions()[r.id]?.y_mm ?? r.y_mm"
+              [style.width.mm]="liveRegions()[r.id]?.width_mm ?? r.width_mm"
+              [style.height.mm]="liveRegions()[r.id]?.height_mm ?? r.height_mm"
+              [style.z-index]="r.zIndex"
+              [style.cursor]="r.id === selectedRegionId() ? 'move' : 'pointer'"
+              appCanvasDrag
+              [handle]="r.id === activeResizeRegion() ? activeResizeHandle() : 'body'"
+              (dragStart)="onDragStart($event, r)"
+              (dragMove)="onDragMove($event, r)"
+              (dragEnd)="onDragEnd(r)"
+              (click)="onRegionClick($event, r.id)"
+            >
+              <span class="region-label">{{ r.label }}</span>
+              @if (r.id === selectedRegionId()) {
+                <app-print-region-handle
+                  [visible]="true"
+                  [handleSize]="8"
+                  (handlePressed)="onHandlePressed($event, r)"
+                ></app-print-region-handle>
+              }
+            </div>
+          }
+        </div>
+
+        <!-- [print-editor-dsk P5] — Per-element property panel. -->
+        <app-print-properties-panel
+          class="vendix-canvas-properties"
+          [definition]="definition()"
+          [selectedRegion]="selectedRegion()"
+          (definitionChanged)="onPropertiesPanelChanged($event)"
+        ></app-print-properties-panel>
       </div>
     </div>
   `,
@@ -122,6 +138,23 @@ const TOKEN_DND_MIME = 'application/x-vendix-token';
         display: flex;
         flex-direction: column;
         gap: 0.5rem;
+      }
+      .vendix-canvas-split {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        gap: 0.75rem;
+        align-items: start;
+      }
+      @media (max-width: 1024px) {
+        .vendix-canvas-split {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+      .vendix-canvas-properties {
+        height: calc(100vh - 200px);
+        min-height: 360px;
+        position: sticky;
+        top: 1rem;
       }
       .vendix-paper {
         position: relative;
@@ -201,6 +234,18 @@ export class PrintCanvasComponent {
   readonly regions = computed<CanvasRegion[]>(() =>
     definitionToRegions(this.definition()),
   );
+
+  /**
+   * [print-editor-dsk P5] — Translate the selected region id (input)
+   * into the full `CanvasRegion` object so the property panel can
+   * render the matching subpanel. Returns `null` for the empty
+   * selection (which falls through to the global paper view).
+   */
+  readonly selectedRegion = computed<CanvasRegion | null>(() => {
+    const id = this.selectedRegionId();
+    if (!id) return null;
+    return this.regions().find((r) => r.id === id) ?? null;
+  });
 
   readonly paperWidthMm = computed<number>(() => {
     const d = this.definition();
@@ -324,8 +369,24 @@ export class PrintCanvasComponent {
   }
 
   protected onDrop(event: DragEvent): void {
-    const path = event.dataTransfer?.getData(TOKEN_DND_MIME);
-    if (!path) return;
+    // [print-editor-dsk P5.9] — Token catalog now publishes a JSON
+    // envelope `{ token, path }` under our private MIME. Fall back to
+    // the legacy plain-string payload (older callers) and to the
+    // text/plain fallback so the loop remains backwards compatible.
+    const raw = event.dataTransfer?.getData(TOKEN_DND_MIME) ?? '';
+    let tokenPath = raw;
+    if (raw && raw.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(raw) as { token?: string; path?: string };
+        if (parsed?.path) tokenPath = parsed.path;
+      } catch {
+        // Leave `tokenPath` as-is so callers still get something.
+      }
+    }
+    if (!tokenPath) {
+      tokenPath = event.dataTransfer?.getData('text/plain') ?? '';
+    }
+    if (!tokenPath) return;
     event.preventDefault();
 
     const dropXmm = this.clientXToMm(event.clientX);
@@ -334,9 +395,20 @@ export class PrintCanvasComponent {
     const def = this.definition();
     if (!def) return;
 
-    const updated = this.appendDroppedSection(def, path, dropXmm, dropYmm);
+    const updated = this.appendDroppedSection(def, tokenPath, dropXmm, dropYmm);
     this.history.push(updated);
     this.definitionChanged.emit(updated);
+  }
+
+  /**
+   * [print-editor-dsk P5] — Route a definition mutation coming from
+   * the right-side property panel through the undo/redo history and
+   * the debounced output. The history service coalesces bursts within
+   * 250 ms so typing in a text field does not flood the stack.
+   */
+  protected onPropertiesPanelChanged(def: PrintFormatDefinition): void {
+    this.history.push(def);
+    this.notifyDefinitionChanged(def);
   }
 
   /**
