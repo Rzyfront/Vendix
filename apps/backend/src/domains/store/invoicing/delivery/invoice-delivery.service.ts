@@ -12,6 +12,21 @@ import {
   InvoiceEmailData,
 } from '../../../../email/templates/invoice-email.template';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+// BE-E5 (E.5, casillas 3 + 5) — el constructor
+// `UblAttachedDocumentBuilder.build()` (Anexo Técnico 1.9 §9.1) vivía probado
+// contra el XSD en su spec desde F.12 y nunca se llamaba desde un envío de
+// producción. Aquí se cablea al ZIP de reenvío.
+import { UblAttachedDocumentBuilder } from '../providers/dian-direct/xml/ubl-attached-document.builder';
+import { DianEventParty } from '../providers/dian-direct/xml/ubl-application-response.builder';
+import { DIAN_DOCUMENT_TYPES } from '../providers/dian-direct/constants/dian-document-types';
+// BE-E5 (E.5, casilla 4) — motor PDF bajo demanda del gateway, mismo servicio
+// que ya usa `print-gateway.service.ts` para `engine: 'pdf'`. Slice 1
+// (`d4141e00c`). Aquí se invoca para que el PDF del ZIP sea el del formato
+// configurado de la tienda (`store_settings.settings.receipts.invoice_format`,
+// que `resolveFiscalInvoicePaperFormat` resuelve dentro del servicio), no el
+// PDF persistido en S3 al momento de emitir (que pudo haber quedado en un
+// formato anterior si la tienda cambió su configuración).
+import { FiscalInvoicePdfRenderService } from '../../print-formats/services/fiscal-invoice-pdf-render.service';
 import { DeliverInvoiceDto } from './dto/deliver-invoice.dto';
 import { writeInvoiceDeliveryEvent } from './invoice-delivery-events.writer';
 
@@ -87,6 +102,48 @@ import { writeInvoiceDeliveryEvent } from './invoice-delivery-events.writer';
  * reenvío de conveniencia donde ya existe una copia entregada por el canal
  * primario. Lo que ya no es correcto en NINGÚN camino —y quedó corregido
  * en ambos— es que esa degradación además cuente como entrega.
+ *
+ * ────────────────────────────────────────────────────────────────────────
+ * E.5 (2026-08-26) — cierra casillas 3, 4 y 5 del audit que dejó FE-X sobre
+ * `a2658ef8b`. Esta sección se concentra en el ZIP; el listener primario no
+ * se toca (territorio ajeno, ver `notifications-events.listener.ts`).
+ *
+ *   · Casilla 3 + 5: el XML se entregaba CRUDO. Ahora se ENVUELVE en un
+ *     `AttachedDocument` validable (mismo `UblAttachedDocumentBuilder` que
+ *     `F.12` validó contra el XSD). El sobre lleva dentro el documento
+ *     firmado en base64 (`cac:Attachment/cbc:EmbeddedDocumentBinaryObject`,
+ *     `@mimeCode="text/xml"`), la representación gráfica cuando está
+ *     disponible (`cbc:Note`), y el `cbc:UUID` con el CUFE/CUDE del
+ *     documento envuelto y su `@schemeName` (CUFE-SHA384 para
+ *     `sales_invoice`; CUDE-SHA384 para notas y documentos equivalentes).
+ *     El ambiente (`cbc:ProfileExecutionID`, 1=producción / 2=habilitación)
+ *     sale de `dian_configurations.environment` de la organización, con
+ *     `findFirst` ordenado por `is_default` desc — el mismo selector que
+ *     `InvoiceEmissionGateService.assertElectronicEmissionLive` usa para
+ *     identificar la habilitación dueña del NIT, así NO se introduce un
+ *     segundo criterio paralelo para la misma pregunta.
+ *   · Casilla 4: el PDF adjunto era el persistido en S3 al emitir. Ahora
+ *     se prefiere el render fresco de `FiscalInvoicePdfRenderService
+ *     .renderBuffer(store_id, invoice_id)` — el motor pdfkit bajo demanda
+ *     que `print-gateway` ya usa para `engine:'pdf'`, mismo criterio de
+ *     formato (`store_settings.settings.receipts.invoice_format` vía
+ *     `resolveFiscalInvoicePaperFormat`). Si el render falla (identidad
+ *     fiscal incompleta, S3 sin logo, etc.) cae al PDF persistido, y si
+ *     ninguno de los dos existe, sigue la degradación histórica: ZIP sin
+ *     PDF. Esto resuelve el caso «la tienda cambió `invoice_format`
+ *     después de emitida la factura»: el PDF que el cliente recibe ahora
+ *     coincide con el formato activo, no con el formato del momento de
+ *     emisión.
+ *
+ * El ZIP sigue siendo UN único adjunto (no se duplica con un AttachedDocument
+ * suelto); los nombres de archivo son:
+ *   · `Factura-{number}.xml` — el XML firmado CRUDO (igual que antes;
+ *     legible y útil para auditorías).
+ *   · `Factura-{number}.pdf` — el PDF en el formato actual de la tienda
+ *     (re-render preferido; cae al persistido si el render falla).
+ *   · `Factura-{number}-attached-document.xml` — el sobre
+ *     `AttachedDocument` que exige §9.1, con el XML firmado embebido y la
+ *     representación gráfica cuando hay PDF.
  */
 @Injectable()
 export class InvoiceDeliveryService {
@@ -101,6 +158,11 @@ export class InvoiceDeliveryService {
     private readonly prisma: StorePrismaService,
     private readonly s3_service: S3Service,
     private readonly email_service: EmailService,
+    // BE-E5 (E.5, casilla 4) — inyectado para re-renderizar el PDF en el
+    // formato configurado de la tienda. La firma `(storeId, documentId)` no
+    // se modifica (slice-1 cerrado en `d4141e00c`); el servicio resuelve
+    // `invoice_format` desde `store_settings` internamente.
+    private readonly fiscal_pdf_render_service: FiscalInvoicePdfRenderService,
   ) {}
 
   async deliver(invoice_id: number, dto: DeliverInvoiceDto) {
@@ -136,6 +198,17 @@ export class InvoiceDeliveryService {
             name: true,
             legal_name: true,
             tax_id: true,
+            // BE-E5 (E.5, casillas 3 + 5) — `document_type` y
+            // `verification_digit` se añaden al `select` del emisor para
+            // construir la `cac:SenderParty` del `AttachedDocument`
+            // (`DianEventParty.document_type`/`document_dv`). Son dos
+            // columnas de la fila ya cargada; no abren relación nueva. El
+            // resto del include sigue idéntico — la docblock de E.9 deja
+            // explícito que los escalares de `invoices` viajan con `include`,
+            // no con `select`, así que no se añade ningún `select` nuevo
+            // sobre la tabla raíz.
+            document_type: true,
+            verification_digit: true,
             phone: true,
             email: true,
             addresses: { take: 1 },
@@ -238,24 +311,55 @@ export class InvoiceDeliveryService {
     const text = generateInvoiceEmailText(email_data);
     const subject = `Reenvío de factura ${invoice.invoice_number} - ${store_name}`;
 
-    // 5. PDF (S3) + XML (columna inline) empaquetados en un único .zip — con
-    // degradación: si algo falla al traer el adjunto, el correo sale sin él en
-    // vez de abortar el reenvío completo.
+    // 5. PDF + XML + `AttachedDocument` empaquetados en un único .zip — con
+    // degradación: si algo falla al traer un adjunto, el correo sale sin esa
+    // pieza en vez de abortar el reenvío completo.
+    //
+    // BE-E5 (E.5, casillas 3 + 4 + 5). El orden importa para el builder del
+    // sobre: primero se trae el PDF (porque el `cbc:Note` de representación
+    // gráfica lo lleva embebido en base64), luego el XML crudo, luego se
+    // construye el `AttachedDocument` con ambos.
     const zip = new AdmZip();
     let has_zip_content = false;
 
-    if (invoice.pdf_url) {
-      try {
-        const pdf_buffer = await this.s3_service.downloadFile(invoice.pdf_url);
-        zip.addFile(`Factura-${invoice.invoice_number}.pdf`, pdf_buffer);
-        has_zip_content = true;
-      } catch (error) {
-        this.logger.error(
-          `No se pudo descargar el PDF de la factura #${invoice.invoice_number} para el reenvío: ${error.message}`,
-        );
+    // 5.a — PDF. Preferir el render fresco de la tienda actual (casilla 4);
+    // caer al PDF persistido en S3 si el render falla; caer a «sin PDF» si
+    // AMBOS fallan.
+    let pdf_buffer: Buffer | undefined;
+    try {
+      pdf_buffer = await this.fiscal_pdf_render_service.renderBuffer(
+        invoice.store_id,
+        invoice.id,
+      );
+      this.logger.log(
+        `Reenvío #${invoice.invoice_number}: PDF re-renderizado en el formato actual de la tienda (${invoice.store_id}).`,
+      );
+    } catch (render_error) {
+      this.logger.warn(
+        `Reenvío #${invoice.invoice_number}: render PDF bajo demanda falló (${(render_error as Error)?.message ?? render_error}); cae al PDF persistido en S3.`,
+      );
+      if (invoice.pdf_url) {
+        try {
+          pdf_buffer = await this.s3_service.downloadFile(invoice.pdf_url);
+        } catch (s3_error) {
+          this.logger.error(
+            `No se pudo descargar el PDF persistido de la factura #${invoice.invoice_number} para el reenvío: ${(s3_error as Error)?.message ?? s3_error}`,
+          );
+        }
       }
     }
+    if (pdf_buffer) {
+      zip.addFile(`Factura-${invoice.invoice_number}.pdf`, pdf_buffer);
+      has_zip_content = true;
+    }
 
+    // 5.b — XML crudo. Se conserva el archivo original `Factura-X.xml` —
+    // legible y útil para auditorías que ya esperan ese nombre —, AUNQUE
+    // el sobre AttachedDocument de abajo ya lo embeba en base64. La
+    // duplicación es deliberada: un cliente que abre el ZIP puede revisar
+    // el XML firmado sin tener que decodificar base64, y eso no afecta el
+    // cumplimiento §9.1, que pide que el sobre VAYA DENTRO del zip, no que
+    // sea el único archivo.
     if (invoice.xml_document) {
       try {
         zip.addFile(
@@ -266,6 +370,121 @@ export class InvoiceDeliveryService {
       } catch (error) {
         this.logger.warn(
           `No se pudo adjuntar el XML de la factura #${invoice.invoice_number}: ${error.message}`,
+        );
+      }
+    }
+
+    // 5.c — `AttachedDocument` (casillas 3 + 5). El sobre exige identificar
+    // al emisor y al adquiriente; los dos se construyen desde la fila ya
+    // cargada — sin una segunda consulta a `users` ni a `organizations`. El
+    // ambiente sale de la MISMA `dian_configurations` dueña del NIT que ya
+    // usa `InvoiceEmissionGateService.assertElectronicEmissionLive` para
+    // decidir si la tienda está en producción: una sola pregunta, una sola
+    // fuente. Si la organización no tiene DIAN configurada (la mayoría, ver
+    // la medición del 2026-08-24: 1 de 21 tiendas con fila), el reenvío
+    // cae a `'test'` — el sobre sigue siendo XML UBL estructuralmente válido
+    // (la spec lo cubre), sólo declara `ProfileExecutionID=2`. En ese caso
+    // el sobre NO es un documento normativo (no hay DIAN que lo reciba);
+    // queda como sobre de registro para el cliente.
+    if (invoice.xml_document) {
+      try {
+        const org_record = invoice.organization as unknown as {
+          tax_id: string | null;
+          legal_name: string | null;
+          name: string | null;
+          document_type: string | null;
+          verification_digit: string | null;
+        } | null;
+        const dian_env_config = await this.prisma.withoutScope()
+          .dian_configurations.findFirst({
+            where: {
+              organization_id: invoice.organization_id,
+              configuration_type: 'invoicing',
+            },
+            orderBy: [{ is_default: 'desc' }, { id: 'asc' }],
+            select: { environment: true },
+          });
+        const environment: 'test' | 'production' =
+          dian_env_config?.environment === 'production' ? 'production' : 'test';
+
+        const sender: DianEventParty = {
+          document_type:
+            org_record?.document_type ||
+            (org_record?.tax_id ? '31' : '13'),
+          document_number: (org_record?.tax_id || '').replace(/\D/g, ''),
+          document_dv: org_record?.verification_digit || undefined,
+          legal_name:
+            org_record?.legal_name || org_record?.name || 'Sin razón social',
+        };
+        const receiver: DianEventParty = {
+          document_type:
+            invoice.customer_document_type ||
+            (invoice.customer_tax_id ? '31' : '13'),
+          document_number: (invoice.customer_tax_id || '').replace(/\D/g, ''),
+          legal_name: customer_name,
+        };
+
+        // `parent_document_type_code` mapea `invoice_type_enum` al catálogo
+        // `DIAN_DOCUMENT_TYPES`. Hoy solo `sales_invoice` recorre este
+        // endpoint (ver `InvoiceFlowService.createFromOrder`), pero el
+        // helper está escrito para tolerar los otros tipos sin inventar
+        // códigos — las notas (credit_note/debit_note) son CUDE-SHA384
+        // y tipo `91`/`92`; el resto cae a `INVOICE` con un warning que
+        // ya existía antes de este cambio (defensa contra tipos nuevos).
+        const parent_document_type_code =
+          invoice.invoice_type === 'sales_invoice' ||
+          invoice.invoice_type === 'invoice'
+            ? DIAN_DOCUMENT_TYPES.INVOICE
+            : invoice.invoice_type === 'credit_note'
+              ? DIAN_DOCUMENT_TYPES.CREDIT_NOTE
+              : invoice.invoice_type === 'debit_note'
+                ? DIAN_DOCUMENT_TYPES.DEBIT_NOTE
+                : DIAN_DOCUMENT_TYPES.INVOICE;
+        const parent_document_key_scheme =
+          parent_document_type_code === DIAN_DOCUMENT_TYPES.INVOICE
+            ? 'CUFE-SHA384'
+            : 'CUDE-SHA384';
+
+        const issue_date_iso = new Date(invoice.issue_date)
+          .toISOString()
+          .slice(0, 10);
+
+        const attached_document_xml = UblAttachedDocumentBuilder.build({
+          id: invoice.invoice_number,
+          issue_date: issue_date_iso,
+          parent_document_key: invoice.cufe || '',
+          parent_document_key_scheme,
+          parent_document_id: invoice.invoice_number,
+          parent_document_type_code,
+          sender,
+          receiver,
+          attachment: {
+            content_base64: Buffer.from(invoice.xml_document, 'utf-8').toString(
+              'base64',
+            ),
+            mime_code: 'text/xml',
+            filename: `Factura-${invoice.invoice_number}.xml`,
+          },
+          ...(pdf_buffer
+            ? {
+                graphic_representation_base64: pdf_buffer.toString('base64'),
+              }
+            : {}),
+          environment,
+        });
+
+        zip.addFile(
+          `Factura-${invoice.invoice_number}-attached-document.xml`,
+          Buffer.from(attached_document_xml, 'utf-8'),
+        );
+        has_zip_content = true;
+      } catch (error) {
+        // Fallar al construir el sobre NO debe abortar el reenvío: el XML
+        // crudo ya está dentro del ZIP (paso 5.b), y la degradación
+        // histórica del servicio era «sin adjunto en vez de abortar».
+        // Mismo criterio que el `catch` del PDF.
+        this.logger.warn(
+          `No se pudo envolver el XML de la factura #${invoice.invoice_number} en AttachedDocument: ${(error as Error)?.message ?? error}`,
         );
       }
     }

@@ -4,6 +4,14 @@ import { PrismaModule } from '../../../../prisma/prisma.module';
 import { S3Module } from '../../../../common/services/s3.module';
 import { EmailModule } from '../../../../email/email.module';
 import { ModuleFlowGuard } from '../../../../common/guards/module-flow.guard';
+// BE-E5 (E.5): `FiscalInvoicePdfRenderService` se importa desde el módulo
+// print-formats para que el ZIP de reenvío lleve el PDF re-renderizado en el
+// formato configurado de la tienda — ver `InvoiceDeliveryService.deliver`,
+// paso 5.b. La dependencia con `print-formats.module.ts` no introduce ciclo:
+// este módulo importa `PrismaModule`/`S3Module`/`EmailModule` y `print-formats`
+// depende sólo de `PrismaModule`/`S3Module` + `QrService` (transversal). El
+// servicio aquí consumido ya está exportado por `PrintFormatsModule`.
+import { PrintFormatsModule } from '../../print-formats/print-formats.module';
 import { InvoiceDeliveryController } from './invoice-delivery.controller';
 import { InvoiceDeliveryService } from './invoice-delivery.service';
 
@@ -20,7 +28,13 @@ import { InvoiceDeliveryService } from './invoice-delivery.service';
  * `FiscalGateService` para `ModuleFlowGuard`) llega de módulos independientes.
  */
 @Module({
-  imports: [ResponseModule, PrismaModule, S3Module, EmailModule],
+  imports: [
+    ResponseModule,
+    PrismaModule,
+    S3Module,
+    EmailModule,
+    PrintFormatsModule,
+  ],
   controllers: [InvoiceDeliveryController],
   providers: [InvoiceDeliveryService, ModuleFlowGuard],
 })
