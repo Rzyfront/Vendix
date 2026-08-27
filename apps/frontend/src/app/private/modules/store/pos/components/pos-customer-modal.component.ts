@@ -400,6 +400,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                   [size]="'md'"
                   [required]="true"
                   [placeholder]="'Seleccionar'"
+                  [errorText]="getFieldError('documentType')"
                   >
                 </app-selector>
                 <app-input
@@ -409,6 +410,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                   type="text"
                   [size]="'md'"
                   [required]="true"
+                  [helperText]="documentNumberHint()"
                   [error]="getFieldError('documentNumber')"
                   (blur)="onFieldBlur('documentNumber')"
                   customWrapperClass="mt-0"
@@ -428,6 +430,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                     [size]="'md'"
                     [required]="true"
                     [placeholder]="'Seleccionar'"
+                    [errorText]="getFieldError('taxRegime')"
                     >
                   </app-selector>
                   <app-selector
@@ -437,6 +440,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                     [size]="'md'"
                     [required]="true"
                     [placeholder]="'Seleccionar'"
+                    [errorText]="getFieldError('personType')"
                     >
                   </app-selector>
                 </div>
@@ -559,7 +563,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
             size="md"
             (clicked)="onSave()"
             [loading]="loading()"
-            [disabled]="!customerForm.valid || loading()"
+            [disabled]="loading()"
             >
             <app-icon name="save" [size]="16" slot="icon" ></app-icon>
             Crear Cliente
@@ -619,6 +623,44 @@ export class PosCustomerModalComponent {
     return type?.placeholder ?? '12345678';
   });
 
+  /**
+   * QUI-724 — helper text para el campo de número de documento.
+   * Muestra el rango esperado del tipo seleccionado (p. ej. "CC: 6-10 dígitos")
+   * y un contador en vivo "X / Y" para que el cashier sepa cuándo está completo.
+   * Si no hay tipo seleccionado, muestra un texto genérico.
+   */
+  readonly documentNumberMin = signal<number | null>(null);
+  readonly documentNumberMax = signal<number | null>(null);
+  readonly documentNumberIsAlphanumeric = signal<boolean>(false);
+  readonly documentNumberLength = signal<number>(0);
+  readonly documentNumberHint = computed(() => {
+    const type = this.selectedDocumentType();
+    if (!type) {
+      return 'Selecciona primero el tipo de documento';
+    }
+    const min = this.documentNumberMin() ?? 0;
+    const max = this.documentNumberMax() ?? 0;
+    const len = this.documentNumberLength();
+    const remaining = Math.max(0, min - len);
+    const isAlphanumeric = this.documentNumberIsAlphanumeric();
+
+    if (min === max) {
+      return `${type.label}: exactamente ${min} caracteres${isAlphanumeric ? ' alfanuméricos' : ' (solo dígitos)'} (${len} / ${min})`;
+    }
+
+    if (min > 0 && len < min) {
+      const charWord = isAlphanumeric ? 'caracteres alfanuméricos' : 'dígitos';
+      const verb = remaining === 1 ? 'falta' : 'faltan';
+      return `${type.label}: ${verb} ${remaining} ${charWord} (llevas ${len} / ${min}–${max})`;
+    }
+
+    if (min > 0) {
+      return `${type.label}: ${len} caracteres en el rango válido (${min}–${max})`;
+    }
+
+    return `${type.label}: hasta ${max} caracteres (${len} digitados)`;
+  });
+
   // Document lookup
   documentLookupQuery = '';
   readonly lookupResult = signal<PosCustomer | null>(null);
@@ -657,11 +699,26 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
           Validators.pattern(type.regex),
           Validators.maxLength(type.maxLength),
         ]);
+        // Mirror catalog min/max so the helper text can show "X / Y" live.
+        const min = extractDocTypeMin(type.regex);
+        this.documentNumberMin.set(min);
+        this.documentNumberMax.set(type.maxLength);
+        this.documentNumberIsAlphanumeric.set(isAlphanumericRegex(type.regex));
       } else {
         ctrl.setValidators([Validators.required]);
+        this.documentNumberMin.set(null);
+        this.documentNumberMax.set(null);
+        this.documentNumberIsAlphanumeric.set(false);
       }
       ctrl.updateValueAndValidity({ emitEvent: false });
     });
+
+    // Live counter for the helper text — updates as the cashier types.
+    this.customerForm.controls['documentNumber'].valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((v: string | null) => {
+        this.documentNumberLength.set((v ?? '').length);
+      });
 
     // If customer is provided, populate form for editing
     effect(() => {
@@ -684,10 +741,10 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
       firstName: ['', [Validators.required, Validators.minLength(2)]],
       lastName: ['', [Validators.required, Validators.minLength(2)]],
       phone: ['', [Validators.required, Validators.pattern(/^\d{10}$/)]],
-      documentType: [''],
+      documentType: ['', [Validators.required]],
       documentNumber: ['', [Validators.required]],
-      taxRegime: [''],
-      personType: [''],
+      taxRegime: ['', [Validators.required]],
+      personType: ['', [Validators.required]],
       isWithholdingAgent: [false] });
   }
 
@@ -802,6 +859,14 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
             return 'El nombre es requerido';
           case 'lastName':
             return 'El apellido es requerido';
+          case 'documentType':
+            return 'Selecciona un tipo de documento';
+          case 'documentNumber':
+            return 'El número de documento es requerido';
+          case 'taxRegime':
+            return 'Selecciona un régimen tributario';
+          case 'personType':
+            return 'Selecciona un tipo de persona';
           default:
             return 'Este campo es requerido';
         }
@@ -811,6 +876,16 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
       }
       if (field.errors['minlength']) {
         return `Mínimo ${field.errors['minlength'].requiredLength} caracteres`;
+      }
+      if (field.errors['pattern']) {
+        switch (fieldName) {
+          case 'phone':
+            return 'El teléfono debe tener 10 dígitos';
+          case 'documentNumber':
+            return 'El formato del documento no es válido';
+          default:
+            return 'Formato inválido';
+        }
       }
     }
     return undefined;
@@ -988,4 +1063,23 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
     this.queueQrData.set(null);
     this.closed.emit();
   }
+}
+
+/**
+ * QUI-724 — extrae el mínimo de caracteres de un regex de tipo de documento.
+ * Soporta patrones como /^\d{6,10}$/, /^\d{8,10}-?\d?$/ y /^[A-Z0-9]{5,16}$/.
+ * Devuelve 0 si no puede parsear (caso defensivo).
+ */
+function extractDocTypeMin(regex: RegExp): number {
+  const match = regex.source.match(/\{(\d+)(?:,(\d*))?\}/);
+  if (!match) return 0;
+  return parseInt(match[1], 10);
+}
+
+/**
+ * QUI-724 — devuelve true si el regex exige caracteres alfabéticos (alfanumérico).
+ * Heurística: la fuente del regex contiene letras en una clase de caracteres.
+ */
+function isAlphanumericRegex(regex: RegExp): boolean {
+  return /[A-Za-z]/.test(regex.source);
 }
