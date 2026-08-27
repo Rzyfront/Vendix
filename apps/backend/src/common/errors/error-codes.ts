@@ -292,6 +292,18 @@ export const ErrorCodes = {
     httpStatus: 504,
     devMessage: 'Print preview compilation timed out',
   },
+  // CP-DTLP-20260827 — IDOR fix (H-1 finding). The print gateway must not
+  // accept a render request whose `x-store-id` header resolves to a store that
+  // belongs to a DIFFERENT organization than the one on the JWT. Without this
+  // gate a token from `tech-solutions` (org=2) with `x-store-id: 999` would
+  // render the order hosted by `org=3`. 403 because identity/auth are fine —
+  // the failure is scope/tenant isolation, the same family as `ROLE_SCOPE_001`.
+  PRINT_RENDER_TENANT_MISMATCH_001: {
+    code: 'PRINT_RENDER_TENANT_MISMATCH_001',
+    httpStatus: 403,
+    devMessage:
+      'x-store-id does not belong to the JWT organization_id. Cross-tenant render blocked.',
+  },
 
   // Payments
   PAY_INVALID_ORDER_001: {

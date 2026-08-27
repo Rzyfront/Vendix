@@ -3,6 +3,11 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 import { ResponseService } from '@common/responses/response.service';
 import { QrService } from '../../../common/services/qr.service';
 import { S3Module } from '../../../common/services/s3.module';
+// CP-DTLP-20260827 — IDOR fix (H-1). Registered at controller scope on
+// `PrintFormatsController` so only the write-surface that reads `x-store-id`
+// pays the extra lookup. Library/CRUD endpoints don't carry the header and
+// stay unguarded.
+import { StoreTenantInterceptor } from '@common/middleware/store-tenant.interceptor';
 
 // Controllers
 import { PrintFormatsController } from './controllers/print-formats.controller';
@@ -49,6 +54,7 @@ import { DispatchTicketDataProvider } from './providers/dispatch-ticket.provider
   providers: [
     ResponseService,
     QrService,
+    StoreTenantInterceptor,
     PrintFormatsService,
     PrintGatewayService,
     PrintTemplateCompilerService,
