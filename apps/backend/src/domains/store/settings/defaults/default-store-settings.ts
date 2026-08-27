@@ -174,6 +174,13 @@ export function getDefaultStoreSettings(): StoreSettings {
       // 80 mm mirrors the previous hardcoded POS ticket width.
       pos_ticket_format: 'thermal_80' as const,
       pos_ticket_copies: 1,
+      // ADR-7 / CP-DTLP-20260827 — Tiquete de despacho (dispatch_ticket).
+      // Flat bajo `receipts` raíz (no en `printing.dispatch_ticket`) para que
+      // `KNOWN_SECTIONS` no lo drope silenciosamente. Defaults opt-in para el
+      // POS auto: enabled sí para que la tienda nueva pueda imprimirlo manual,
+      // pero auto_with_pos=false para que el POS no encadene por sorpresa.
+      print_dispatch_ticket_enabled: true,
+      print_dispatch_ticket_auto_with_pos: false,
     },
 
     // Panel UI - Control de módulos disponibles a nivel de tienda

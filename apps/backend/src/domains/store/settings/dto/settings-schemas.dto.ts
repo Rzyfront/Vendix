@@ -736,6 +736,38 @@ export class ReceiptsSettingsDto {
   @ValidateNested()
   @Type(() => PrintingSettingsDto)
   printing?: PrintingSettingsDto;
+
+  /**
+   * ADR-7: Habilita la impresión del tiquete de despacho (dispatch_ticket).
+   * Plano bajo `receipts` raíz para no ser dropeado por `KNOWN_SECTIONS`.
+   */
+  @ApiProperty({
+    example: true,
+    required: false,
+    description:
+      'Habilita la impresión del tiquete de despacho (dispatch_ticket). ' +
+      'Si false, los 2 disparadores (POS auto + orden manual) NO imprimen.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  print_dispatch_ticket_enabled?: boolean;
+
+  /**
+   * ADR-7: Si true y print_dispatch_ticket_enabled=true, el POS encadena auto
+   * el tiquete de despacho junto con ticket POS/factura cuando la venta tiene
+   * envío y `shipping_method !== 'direct_delivery'`. Default false (opt-in).
+   */
+  @ApiProperty({
+    example: false,
+    required: false,
+    description:
+      'Si true, el POS encadena auto el tiquete de despacho junto con el ' +
+      'ticket POS o factura cuando la venta tiene envío y el método de envío ' +
+      'no es direct_delivery. Default false (opt-in por admin).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  print_dispatch_ticket_auto_with_pos?: boolean;
 }
 
 export class AppSettingsDto {
