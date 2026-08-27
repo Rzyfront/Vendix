@@ -10,6 +10,12 @@ import { ProfileCatalogCacheService } from './profile-catalog-cache.service';
 import { ProfileAccountHealthService } from './profile-account-health.service';
 import { ProfileAccountingValidator } from './profile-accounting.validator';
 import { ProfilePreviewService, PROFILE_READER } from './profile-preview.service';
+
+// Re-export so the symbol survives `import { PROFILE_READER } from './profiles.module'`
+// in other modules. Without `export`, the symbol is module-private and TS
+// callers receive `undefined`, which NestJS interprets as a class provider with
+// `metatype = {provide: undefined, useExisting: ...}` → `metatype is not a constructor`.
+export { PROFILE_READER };
 import { ProfileVersionsService } from './profile-versions.service';
 import { PreviewNumberingGuard } from './preview-numbering.guard';
 import { ProfilesService } from './profiles.service';
