@@ -466,6 +466,53 @@ export const SYSTEM_PRINT_TEMPLATES: Array<{
       ],
     },
   },
+  // CP-DTLP-20260827 (Phase B.2) — Tiquete de Despacho. Logística térmica 80mm
+  // courier mono 9pt; cliente, dirección, productos por línea con cantidades
+  // pedida/despachada. Sin totales fiscales, sin QR, sin firma (la firma de
+  // recibido se reserva al despacho remisión que ya existe). ADR-1 Enlace
+  // Universal: este es el undécimo formato del Hub enriquecido y debe reusar
+  // el mismo motor HTML que el resto.
+  // El cast es necesario porque schema.prisma todavía no lista
+  // `dispatch_ticket`; el valor entra a Postgres con la migración
+  // 20260827120000_add_dispatch_ticket_to_enum y `prisma generate` lo
+  // materializará en @prisma/client más adelante.
+  {
+    format_type: 'dispatch_ticket' as unknown as print_format_type_enum,
+    name: 'Tiquete de Despacho Térmico (80mm)',
+    description: 'Ticket logístico con cliente, dirección y cantidades pedida/despachada por línea; rollo 80mm courier mono',
+    definition: {
+      paper: {
+        format: 'thermal_80',
+        width_mm: 80,
+        is_roll: true,
+        margin_mm: 0,
+        copies: 1,
+        orientation: 'portrait',
+      },
+      styles: {
+        font_family: "'Courier New', Courier, monospace",
+        font_size_base_pt: 9,
+        primary_color: '#000000',
+        header_alignment: 'center',
+        show_borders: true,
+        compact_mode: true,
+      },
+      sections: [
+        { id: 'sec_header', type: 'header', title: 'Encabezado Despacho', enabled: true, order: 1 },
+        { id: 'sec_doc_info', type: 'document_info', title: 'Datos de la Orden', enabled: true, order: 2 },
+        { id: 'sec_customer', type: 'customer_info', title: 'Cliente y Dirección de Entrega', enabled: true, order: 3 },
+        { id: 'sec_items', type: 'items_table', title: 'Productos a Despachar', enabled: true, order: 4 },
+        { id: 'sec_footer', type: 'footer', title: 'Despachado por', enabled: true, order: 5 },
+      ],
+      columns: [
+        { id: 'col_idx', key: 'index', label: '#', enabled: true, width_percent: 8, align: 'center', format: 'number' },
+        { id: 'col_sku', key: 'sku', label: 'SKU / Código', enabled: true, width_percent: 30, align: 'left', format: 'text' },
+        { id: 'col_desc', key: 'product_name', label: 'Descripción', enabled: true, width_percent: 32, align: 'left', format: 'text' },
+        { id: 'col_qty', key: 'ordered_qty', label: 'Cant. Pedida', enabled: true, width_percent: 15, align: 'center', format: 'number' },
+        { id: 'col_disp', key: 'dispatched_qty', label: 'Cant. Despachada', enabled: true, width_percent: 15, align: 'center', format: 'number' },
+      ],
+    },
+  },
 ];
 
 export async function seedPrintTemplates(prisma?: PrismaClient) {

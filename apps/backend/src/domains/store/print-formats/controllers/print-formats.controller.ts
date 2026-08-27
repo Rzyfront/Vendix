@@ -182,7 +182,11 @@ export class PrintFormatsController {
 
     const result = await this.gatewayService.renderDocument(
       storeId,
-      dto.format_type,
+      // CP-DTLP-20260827 (Phase B.4): PrintFormatTypeEnum (TS) incluye
+      // dispatch_ticket, pero @prisma/client todavía no (se regenera tras
+      // la migración + `prisma generate`). Cast explícito en la frontera
+      // para que el undécimo formato atraviese el gateway sin romper tsc.
+      dto.format_type as unknown as print_format_type_enum,
       dto.document_id,
       dto.engine,
     );

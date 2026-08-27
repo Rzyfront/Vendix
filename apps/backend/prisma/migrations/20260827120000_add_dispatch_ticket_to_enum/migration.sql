@@ -1,0 +1,24 @@
+-- DATA IMPACT:
+-- Tables affected: pg_type (print_format_type_enum)
+-- Expected row changes: 0 rows migrated; pg_enum values 10 -> 11.
+-- Destructive operations: none
+-- FK/cascade risk: none
+-- Idempotency: guarded by ADD VALUE IF NOT EXISTS (safe on re-run).
+-- Approval: documented in CP-DTLP-20260827 (Phase B.1).
+--
+-- ADR-1 (CP-DTLP-20260827) — Enlace Universal: dispatch_ticket is the
+-- logistics format that the enriched Print Hub must serve alongside
+-- fiscal_electronic_invoice / pos_sale_ticket. Adding the missing enum
+-- value at the DB level (without touching schema.prisma on this branch)
+-- is the minimum-blast-radius seam.
+--
+-- The schema.prisma `print_format_type_enum` still lists only the original
+-- 10 values; it will be regenerated when `prisma generate` runs against
+-- a DB that contains this 11th value. Until then, the backend code casts
+-- the literal to `print_format_type_enum` (see DispatchTicketDataProvider
+-- and PrintFiscalValidatorService) so tsc still passes.
+--
+-- Reversibility: pg_enum ADD VALUE cannot be removed; reverting means
+-- creating a new enum and migrating every print_format_type_enum column
+-- (costly, documented as a knowledge gap in the plan).
+ALTER TYPE "print_format_type_enum" ADD VALUE IF NOT EXISTS 'dispatch_ticket';
