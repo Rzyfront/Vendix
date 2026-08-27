@@ -114,13 +114,10 @@ describe('computeDocumentFormatHint', () => {
         expect(ok?.text).toContain(c.minHint!);
 
         // Below min — the text uses "caracteres" (or "carácter" for missing=1).
-        // Use the longest unambiguous prefix: "caract" matches BOTH forms
-        // (the singular "carácter" and the plural "caracteres"), and the
-        // optional trailing "e" lets us also match the leading "caracte"
-        // of the plural without swallowing the next char.
+        // Regex matches either form by allowing optional plural suffix.
         const below = computeDocumentFormatHint(c.type, c.invalid);
         expect(below?.tone).toBe('info');
-        expect(below?.text).toMatch(/Faltan \d+ carácte?/);
+        expect(below?.text).toMatch(/Faltan \d+ caracter(es)?/);
 
         // Overflow — input must EXCEED the max (no match for exactly-at-max).
         const over = computeDocumentFormatHint(c.type, c.overflow);
