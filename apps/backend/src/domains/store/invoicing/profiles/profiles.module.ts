@@ -9,7 +9,7 @@ import { InvoiceNumberGenerator } from '../utils/invoice-number-generator';
 import { ProfileCatalogCacheService } from './profile-catalog-cache.service';
 import { ProfileAccountHealthService } from './profile-account-health.service';
 import { ProfileAccountingValidator } from './profile-accounting.validator';
-import { ProfilePreviewService } from './profile-preview.service';
+import { ProfilePreviewService, PROFILE_READER } from './profile-preview.service';
 import { ProfileVersionsService } from './profile-versions.service';
 import { PreviewNumberingGuard } from './preview-numbering.guard';
 import { ProfilesService } from './profiles.service';
@@ -75,6 +75,9 @@ import { ProfilesService } from './profiles.service';
     ProfilePreviewService,
     InvoiceCalculatorService,
     { provide: InvoiceNumberGenerator, useClass: PreviewNumberingGuard },
+    // Token para el lector de perfiles del preview — resuelto a ProfilesService
+    // (store-scoped) en el riel tienda, a PlatformProfilesService en el de plataforma.
+    { provide: PROFILE_READER, useExisting: ProfilesService },
   ],
   exports: [
     ProfilesService,
@@ -83,6 +86,7 @@ import { ProfilesService } from './profiles.service';
     ProfileAccountingValidator,
     ProfileAccountHealthService,
     ProfilePreviewService,
+    PROFILE_READER,
   ],
 })
 export class ProfilesModule {}

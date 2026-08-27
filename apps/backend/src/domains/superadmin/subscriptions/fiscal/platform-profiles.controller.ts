@@ -27,7 +27,7 @@ import {
 import { UpdateInvoiceProfileDto } from '../../../store/invoicing/profiles/dto/update-invoice-profile.dto';
 import { PreviewProfileDto } from '../../../store/invoicing/profiles/dto/preview-profile.dto';
 import { PlatformProfilesService } from './platform-profiles.service';
-import { PlatformProfilePreviewService } from './platform-profile-preview.service';
+import { ProfilePreviewService } from '../../../store/invoicing/profiles/profile-preview.service';
 
 /**
  * Perfiles de facturación del riel plataforma (VENDIX_ADMIN).
@@ -53,7 +53,7 @@ import { PlatformProfilePreviewService } from './platform-profile-preview.servic
 export class PlatformProfilesController {
   constructor(
     private readonly profiles_service: PlatformProfilesService,
-    private readonly preview_service: PlatformProfilePreviewService,
+    private readonly preview_service: ProfilePreviewService,
     private readonly response_service: ResponseService,
   ) {}
 
