@@ -5107,6 +5107,17 @@ export const ErrorCodes = {
     devMessage:
       'El número de comensales excede la capacidad de la mesa',
   },
+  // QUI-704 — second charge attempt on the same table session recalculates
+  // the order total (including already-paid items) when applyPosPaymentToTableSession
+  // is called twice because the session is no longer auto-closed on payment.
+  // Block the second attempt with 409 so the operator can't accidentally
+  // double-bill the customer.
+  POS_TABLE_SESSION_ALREADY_CHARGED: {
+    code: 'POS_TABLE_SESSION_ALREADY_CHARGED',
+    httpStatus: 409,
+    devMessage:
+      'La sesión de mesa ya fue cobrada; no se puede cobrar dos veces',
+  },
   // ── Split Order (Restaurant Suite Fase E) ────────────────────
   SPLIT_ORDER_NOT_FOUND: {
     code: 'SPLIT_ORDER_NOT_FOUND',

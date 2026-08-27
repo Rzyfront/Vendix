@@ -324,7 +324,7 @@ export class TableSessionPageComponent implements OnInit {
         disabled: this.isClosed() || this.items().length === 0,
         title: this.isClosed()
           ? 'La mesa ya está cerrada'
-          : 'Cobrar y cerrar la mesa',
+          : 'Cobrar (la mesa queda ocupada — ciérrala desde "Cerrar mesa")',
       });
     }
     actions.push({
@@ -1206,7 +1206,13 @@ export class TableSessionPageComponent implements OnInit {
         next: () => {
           this.isPaying.set(false);
           this.isPayOpen.set(false);
-          this.toastService.success('Cobro realizado. Mesa cerrada.');
+          // QUI-704: the table is no longer auto-closed by the POS sale
+          // confirmation — it stays `occupied` until staff explicitly
+          // calls "Cerrar mesa". The toast reflects that the session
+          // is still open after a successful charge.
+          this.toastService.success(
+            'Cobro realizado. La mesa sigue ocupada — ciérrala desde "Cerrar mesa".',
+          );
           this.router.navigate(['/admin/restaurant-ops/tables']);
         },
         error: (err: unknown) => {
@@ -1323,7 +1329,7 @@ export class TableSessionPageComponent implements OnInit {
               this.isClosing.set(false);
               this.session.set(s);
               this.seedKitchenStateFromOrder(s);
-              this.toastService.success('Mesa cerrada');
+              this.toastService.success('Mesa cerrada correctamente');
             },
             error: (err: unknown) => {
               this.isClosing.set(false);

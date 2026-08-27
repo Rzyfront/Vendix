@@ -2886,6 +2886,30 @@ export class PaymentsService {
       );
     }
 
+    // QUI-704 — second-charge guard. Now that the session is no
+    // longer auto-closed on payment, a second applyPosPaymentToTableSession
+    // call (e.g., operator double-clicks "Cobrar" or the POS retries
+    // after a network blip) would re-merge items into a fresh order
+    // total and double-bill the customer. Block the second attempt
+    // by checking for a previously-succeeded payment on the same
+    // order — the canonical close path stays the canonical close
+    // path; the only thing that changed is that this branch no
+    // longer closes the session, so we must guard against re-entry
+    // here.
+    const existingPaid = await tx.payments.findFirst({
+      where: {
+        order_id: session.order_id,
+        state: 'succeeded',
+      },
+      select: { id: true, transaction_id: true, amount: true },
+    });
+    if (existingPaid) {
+      throw new VendixHttpException(
+        ErrorCodes.POS_TABLE_SESSION_ALREADY_CHARGED,
+        `La sesión de mesa ya fue cobrada (payment #${existingPaid.id} / ${existingPaid.transaction_id} por ${existingPaid.amount})`,
+      );
+    }
+
     // Same multi-tarifa validation as the regular path. `dto.items`
     // is optional when a table session is being closed out — the items
     // already live on the draft order. We only validate tiers when the
