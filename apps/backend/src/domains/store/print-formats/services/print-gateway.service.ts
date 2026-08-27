@@ -224,6 +224,20 @@ export class PrintGatewayService {
     if (engine === 'pdf') {
       try {
         pdf_buffer = await this.pdfRenderer.renderBuffer(storeId, documentId);
+        // TODO(integration-slice-4): thread `paper_definition` from caller
+        //   - Cuando `RenderPrintDocumentDto` extienda `paper_format`
+        //     (opción B del plan E.11), pasarlo aquí a `renderBuffer` por
+        //     una segunda sobrecarga o por un tercer argumento opcional.
+        //   - El fallback natural es `effective.definition.paper.format`
+        //     (la plantilla congelada del perfil), NO el setting de tienda
+        //     (`receipts.invoice_format`) que hoy manda dentro del render —
+        //     eso es lo que ata el PDF al MISMO formato que eligió el
+        //     perfil, y es lo que hace que dos reimpresiones del mismo
+        //     documento sean idénticas.
+        //   - Slice 3 ya cablea `resolvePaperDefinition` en
+        //     `FiscalInvoicePdfRenderService` (territorio del propio
+        //     render), así que este TODO es PURO para slice 4: traer el
+        //     override desde el gateway, no añadirlo aquí.
       } catch (error) {
         // Los errores de dominio ya tipados (documento ausente, identidad
         // fiscal incompleta) conservan su código y su HTTP status; lo que se

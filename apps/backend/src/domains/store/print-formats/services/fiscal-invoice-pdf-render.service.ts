@@ -16,6 +16,8 @@ import {
   resolveFiscalIssuerForPrint,
   FiscalIssuerPrintIdentity,
 } from './fiscal-issuer-identity';
+import { PaperDefinition } from '../print-templates/paper-definitions';
+import { resolvePaperDefinition } from '../print-templates/paper-defaults';
 
 /**
  * Ensamblador del PDF fiscal — ESPEJO DEL CONTRATO `INVOICE_PDF_INCLUDE`
@@ -314,8 +316,56 @@ export class FiscalInvoicePdfRenderService {
       }
     }
 
-    return InvoicePdfBuilder.generate(
-      buildFiscalInvoicePdfData(invoice, issuer, { logo_buffer, qr_buffer }),
+    const data = buildFiscalInvoicePdfData(invoice, issuer, {
+      logo_buffer,
+      qr_buffer,
+    });
+
+    // E.11 slice 3 — el consumer del render consulta `paper-defaults` para
+    // resolver la `PaperDefinition` del papel configurado por la tienda, ANTES
+    // de invocar al builder pdfkit. La función (`InvoicePdfBuilder.generate`)
+    // sigue leyendo su `GEOMETRY` interno desde `data.format`, así que el
+    // Buffer que producimos es BIT-A-BIT el mismo que producía antes — esta
+    // resolución es, en este slice, OBSERVABILIDAD + INTEGRACIÓN CON LA TABLA
+    // SEMILLA (`print-templates/paper-definitions.ts`). El cableado fino de
+    // la `PaperDefinition` hacia dentro del builder (para que `bottom_reserve`
+    // y `double_pass` salgan del registry en vez del `QR_STAMP_BAND` interno)
+    // es slice 4 — está marcado con TODO en este mismo método.
+    const paper: PaperDefinition = resolvePaperDefinition(data.format);
+    this.logger.debug(
+      `[E.11 slice 3] paper_definition_resolved code=${paper.code} ` +
+        `is_roll=${paper.is_roll} ` +
+        `double_pass_required=${paper.double_pass_required} ` +
+        `requires_multipage_qr_band=${paper.requires_multipage_qr_band} ` +
+        `width_mm=${paper.width_mm} ` +
+        `height_mm=${paper.height_mm ?? 'measured'}`,
     );
+
+    // TODO(integration-slice-4): thread `paper` into `InvoicePdfBuilder.generate`.
+    //   - Hoy el builder pdfkit compila su `GEOMETRY` (invoice-pdf.builder.ts:178)
+    //     desde `data.format`, lectura interna, idéntica a `PAPER_DEFINITIONS`
+    //     por construcción (ver `paper-defaults.spec.ts`). Pasarle la
+    //     `PaperDefinition` completa permite que decisiones que ahora viven en
+    //     constantes del builder (`QR_STAMP_BAND`, `QR_MIN_SIDE`,
+    //     `ROLL_PROBE_HEIGHT`) salgan del registry de `paper-definitions.ts`,
+    //     y deja el slice 4 con una sola fuente de verdad para los 5 papeles.
+    //   - Acción concreta en slice 4:
+    //       1. Extender `InvoicePdfData` con `paper?: PaperDefinition` (opt-in,
+    //          no rompe consumidores actuales — `generatePdf` lo sigue armando).
+    //       2. En `InvoicePdfBuilder.generate`, si llega `paper`, derivar
+    //          `bottom_reserve = paper.requires_multipage_qr_band
+    //            ? paper.qr_stamp_band_mm * PT_PER_MM
+    //            : 0` y el flag de doble pasada de
+    //          `paper.double_pass_required` en vez de `layout.roll`.
+    //       3. Pasar `paper` desde aquí: `data.paper = paper;` antes del
+    //          `InvoicePdfBuilder.generate(...)`. El servicio seguirá
+    //          resolviendo desde `data.format` como fallback para los
+    //          consumidores que ya arman `data` sin pasar por este service.
+    //   - Por qué no se hace en slice 3: tocar el builder pdfkit invierte la
+    //     dependencia builder→plantillas (decisión E.11: «builder pdfkit como
+    //     motor, no como esclavo»), y el territorio del builder pertenece a
+    //     otro agente — slice 3 sólo cierra el cableado del consumer.
+
+    return InvoicePdfBuilder.generate(data);
   }
 }
