@@ -78,6 +78,12 @@ export class PrintLayoutComposerService {
         return this.renderSignaturesSection();
       case 'footer':
         return this.renderFooterSection(section, data);
+      case 'dispatch_ticket':
+        // CP-DTLP-20260827 (Phase B.5): el undécimo formato del Hub usa una
+        // composición dedicada (no reutiliza header/items_table del resto
+        // porque el contenido es logístico, no fiscal: cliente + dirección +
+        // cant.pedida/cant.despachada). Ver dispatchTicketStyles abajo.
+        return this.renderDispatchTicketSection(section, data);
       default:
         return this.renderGenericFieldsSection(section, data);
     }
@@ -385,6 +391,103 @@ export class PrintLayoutComposerService {
     `;
   }
 
+  /**
+   * CP-DTLP-20260827 (Phase B.5) — Renderiza la sección de tipo
+   * `dispatch_ticket`. Estructura:
+   *  1. Header: logo (si existe) + nombre tienda + número de orden + fecha
+   *  2. Customer block: nombre + dirección (líneas 1 y 2) + ciudad
+   *  3. Items table: 4 cols (#, SKU/Descripción, Cant.pedida, Cant.despachada)
+   *  4. Footer: línea de firma "Despachado por: ___________"
+   *
+   * Sin totales fiscales (no es formato fiscal). Sin QR (la firma del
+   * recibido se reserva al formato `dispatch_note` que ya existe).
+   *
+   * El HTML producido se inyecta dentro de wrapInHtmlDocument, que añade
+   * el @page { size: 80mm auto; margin: 0 } y los estilos base. Los
+   * estilos específicos del tiquete viven en `dispatchTicketStyles`
+   * (exportados aparte como DISPATCH_TICKET_PRINT_STYLES por si un caller
+   * externo — p.ej. un endpoint de descarga PDF — quiere usarlos solos).
+   */
+  private renderDispatchTicketSection(
+    _section: any,
+    data: StandardPrintDataModel,
+  ): string {
+    const store = data.store || ({} as any);
+    const customer = data.customer || ({} as any);
+    const doc = data.document || ({} as any);
+    const items = data.items || [];
+
+    const logo = store.logo_url
+      ? `<div class="dt-logo"><img src="${this.compiler.escapeHtml(store.logo_url)}" alt="Logo" /></div>`
+      : '';
+    const header = `
+      <div class="dt-header">
+        ${logo}
+        <div class="dt-store-name">${this.compiler.escapeHtml(store.name || 'Vendix')}</div>
+        <div class="dt-doc-number">Tiquete #${this.compiler.escapeHtml(String(doc.number || ''))}</div>
+        <div class="dt-doc-date">${this.compiler.escapeHtml(doc.date_formatted || doc.date || '')}${doc.time ? ' ' + this.compiler.escapeHtml(doc.time) : ''}</div>
+      </div>
+    `;
+
+    const customerBlock = `
+      <div class="dt-customer">
+        <div class="dt-section-label">CLIENTE</div>
+        <div class="dt-customer-name">${this.compiler.escapeHtml(customer.name || 'Cliente')}</div>
+        ${customer.address_line1 ? `<div class="dt-addr-line">${this.compiler.escapeHtml(customer.address_line1)}</div>` : ''}
+        ${customer.address_line2 ? `<div class="dt-addr-line">${this.compiler.escapeHtml(customer.address_line2)}</div>` : ''}
+        ${customer.city ? `<div class="dt-addr-city">${this.compiler.escapeHtml(customer.city)}</div>` : ''}
+      </div>
+    `;
+
+    const itemsTable = items.length === 0
+      ? '<div class="dt-empty">Sin productos registrados</div>'
+      : `
+        <table class="dt-items">
+          <thead>
+            <tr>
+              <th class="col-idx">#</th>
+              <th class="col-desc">SKU / Descripción</th>
+              <th class="col-qty">Cant. Pedida</th>
+              <th class="col-qty">Cant. Despachada</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items
+              .map(
+                (it) => `
+              <tr>
+                <td class="col-idx">${this.compiler.escapeHtml(String(it.index ?? ''))}</td>
+                <td class="col-desc">
+                  ${it.variant_sku ? `<div class="dt-sku">${this.compiler.escapeHtml(it.variant_sku)}</div>` : ''}
+                  <div>${this.compiler.escapeHtml(it.product_name || '')}</div>
+                </td>
+                <td class="col-qty">${this.compiler.escapeHtml(String(it.quantity ?? 0))}</td>
+                <td class="col-qty">${this.compiler.escapeHtml(String(it.dispatched_qty ?? 0))}</td>
+              </tr>`,
+              )
+              .join('')}
+          </tbody>
+        </table>
+      `;
+
+    const footer = `
+      <div class="dt-footer">
+        <div class="dt-dispatched-by">Despachado por:</div>
+        <div class="dt-signature"></div>
+        <div class="dt-powered">Generado por Vendix</div>
+      </div>
+    `;
+
+    return `
+      <div class="print-section section-dispatch-ticket">
+        ${header}
+        ${customerBlock}
+        ${itemsTable}
+        ${footer}
+      </div>
+    `;
+  }
+
   private renderGenericFieldsSection(section: any, data: StandardPrintDataModel): string {
     const fields = (section.fields || []).filter((f: any) => f.enabled);
     if (fields.length === 0) return '';
@@ -530,6 +633,104 @@ export class PrintLayoutComposerService {
     }
     .party-col { flex: 1; }
     .party-title { font-weight: bold; color: ${primaryColor}; font-size: ${fontSize - 1}pt; margin-bottom: 3px; }
+    /*
+     * CP-DTLP-20260827 (Phase B.5.b) — estilos específicos del Tiquete de
+     * Despacho. Se inyectan siempre que el wrapInHtmlDocument se llame con
+     * un definition que tenga al menos una sección tipo dispatch_ticket,
+     * pero como no son intrusivos (clases con prefijo dt-), conviven con
+     * los otros 10 formatos sin pisar nada.
+     */
+    .section-dispatch-ticket .dt-header {
+      text-align: center;
+      border-bottom: 1px dashed #000;
+      padding-bottom: 4px;
+      margin-bottom: 6px;
+    }
+    .section-dispatch-ticket .dt-logo img {
+      max-height: 30mm;
+      max-width: 70mm;
+      display: block;
+      margin: 0 auto 2px;
+    }
+    .section-dispatch-ticket .dt-store-name {
+      font-size: 11pt;
+      font-weight: bold;
+    }
+    .section-dispatch-ticket .dt-doc-number,
+    .section-dispatch-ticket .dt-doc-date {
+      font-size: 8pt;
+    }
+    .section-dispatch-ticket .dt-customer {
+      margin: 6px 0;
+      font-size: 8pt;
+    }
+    .section-dispatch-ticket .dt-section-label {
+      font-weight: bold;
+      font-size: 7pt;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid #000;
+      margin-bottom: 2px;
+    }
+    .section-dispatch-ticket .dt-customer-name {
+      font-weight: bold;
+      font-size: 9pt;
+    }
+    .section-dispatch-ticket .dt-addr-line,
+    .section-dispatch-ticket .dt-addr-city {
+      font-size: 8pt;
+    }
+    .section-dispatch-ticket table.dt-items {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 4px;
+    }
+    .section-dispatch-ticket table.dt-items th,
+    .section-dispatch-ticket table.dt-items td {
+      border: 1px solid #000;
+      padding: 1px 3px;
+      font-size: 7.5pt;
+      vertical-align: top;
+    }
+    .section-dispatch-ticket table.dt-items th {
+      background: #f0f0f0;
+      font-weight: bold;
+      text-align: center;
+    }
+    .section-dispatch-ticket .col-idx { width: 8%; text-align: center; }
+    .section-dispatch-ticket .col-desc { width: 54%; text-align: left; }
+    .section-dispatch-ticket .col-qty { width: 19%; text-align: center; }
+    .section-dispatch-ticket .dt-sku {
+      font-size: 7pt;
+      color: #444;
+    }
+    .section-dispatch-ticket .dt-footer {
+      margin-top: 10px;
+      padding-top: 6px;
+      border-top: 1px dashed #000;
+      font-size: 7.5pt;
+    }
+    .section-dispatch-ticket .dt-dispatched-by {
+      font-weight: bold;
+      margin-bottom: 18px;
+    }
+    .section-dispatch-ticket .dt-signature {
+      display: inline-block;
+      width: 90%;
+      border-top: 1px solid #000;
+      margin-top: 16px;
+    }
+    .section-dispatch-ticket .dt-powered {
+      text-align: center;
+      font-size: 7pt;
+      color: #6b7280;
+      margin-top: 6px;
+    }
+    .section-dispatch-ticket .dt-empty {
+      text-align: center;
+      font-size: 8pt;
+      color: #6b7280;
+      margin: 6px 0;
+    }
   </style>
 </head>
 <body>

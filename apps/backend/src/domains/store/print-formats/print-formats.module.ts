@@ -29,6 +29,7 @@ import { TransferNoteDataProvider } from './providers/transfer-note.provider';
 import { FiscalInvoiceDataProvider } from './providers/fiscal-invoice.provider';
 import { FiscalCreditNoteDataProvider } from './providers/fiscal-credit-note.provider';
 import { KitchenTicketDataProvider } from './providers/kitchen-ticket.provider';
+import { DispatchTicketDataProvider } from './providers/dispatch-ticket.provider';
 
 @Module({
   imports: [
@@ -65,8 +66,25 @@ import { KitchenTicketDataProvider } from './providers/kitchen-ticket.provider';
     FiscalInvoiceDataProvider,
     FiscalCreditNoteDataProvider,
     KitchenTicketDataProvider,
+    // CP-DTLP-20260827 (Phase B.4.b): 11th provider, registrado contra el
+    // registry para que `print-gateway.service.ts` lo encuentre en
+    // `formatType === 'dispatch_ticket'`. Sin este registro, FB-23
+    // (`/store/print-formats/render` con dispatch_ticket) devolvería
+    // PRINT_DATA_PROVIDER_MISSING_001 (ERR-03) en vez de 200.
+    DispatchTicketDataProvider,
   ],
-  exports: [PrintGatewayService, PrintFormatsService],
+  // BE-E5 (E.5): exportar `FiscalInvoicePdfRenderService` para que
+  // `InvoiceDeliveryModule` (reenvío de facturas, `POST /:id/deliver`) pueda
+  // inyectarlo y entregar el ZIP con el PDF re-renderizado en el formato
+  // configurado de la tienda — `store_settings.settings.receipts.invoice_format`,
+  // misma fuente que ya consume `buildFiscalInvoicePdfData` vía
+  // `resolveFiscalInvoicePaperFormat`. Slice-1 del motor (commit `d4141e00c`)
+  // ya corre dentro del gateway; este export abre el mismo camino al reenvío.
+  exports: [
+    PrintGatewayService,
+    PrintFormatsService,
+    FiscalInvoicePdfRenderService,
+  ],
 })
 export class PrintFormatsModule implements OnModuleInit {
   constructor(
@@ -81,6 +99,11 @@ export class PrintFormatsModule implements OnModuleInit {
     private readonly fiscalInvoiceProvider: FiscalInvoiceDataProvider,
     private readonly fiscalCreditNoteProvider: FiscalCreditNoteDataProvider,
     private readonly kitchenTicketProvider: KitchenTicketDataProvider,
+    // CP-DTLP-20260827 (Phase B.4.b): inyectado para registrar en
+    // onModuleInit. Mantener el orden alfabético-ish de los providers
+    // (lo de arriba viene de commits previos; este queda al final
+    // porque es el último en sumarse al Hub).
+    private readonly dispatchTicketProvider: DispatchTicketDataProvider,
   ) {}
 
   onModuleInit() {
@@ -94,5 +117,9 @@ export class PrintFormatsModule implements OnModuleInit {
     this.registry.register(this.fiscalInvoiceProvider);
     this.registry.register(this.fiscalCreditNoteProvider);
     this.registry.register(this.kitchenTicketProvider);
+    // CP-DTLP-20260827 (Phase B.4.b): undécimo provider. Sin esta línea, el
+    // gateway devuelve 500 (PRINT_DATA_PROVIDER_MISSING_001) al pedir
+    // `format_type: 'dispatch_ticket'`.
+    this.registry.register(this.dispatchTicketProvider);
   }
 }

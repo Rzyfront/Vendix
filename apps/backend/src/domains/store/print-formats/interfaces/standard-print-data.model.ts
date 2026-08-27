@@ -5,6 +5,15 @@ export interface StandardPrintParty {
   phone?: string;
   email?: string;
   address?: string;
+  /**
+   * CP-DTLP-20260827 (Phase B.4): dirección estructurada opcional. La usan los
+   * formatos logísticos (dispatch_ticket, dispatch_note) que necesitan pintar
+   * la dirección en líneas separadas. Cuando esté presente, el compositor la
+   * prefiere sobre `address` (que es un string combinado). OPCIONAL para no
+   * romper los nueve formatos pre-existentes que solo llevan `address`.
+   */
+  address_line1?: string;
+  address_line2?: string;
   city?: string;
   state_province?: string;
   country?: string;
@@ -29,6 +38,13 @@ export interface StandardPrintItem {
   total_price_formatted?: string;
   notes?: string;
   modifiers?: string[];
+  /**
+   * CP-DTLP-20260827 (Phase B.4): cantidad despachada del ítem (logística).
+   * Solo `dispatch_ticket` la usa hoy; los formatos comerciales siguen con
+   * `quantity` como cant. pedida. OPCIONAL para no romper los otros nueve
+   * formatos que no la declaran.
+   */
+  dispatched_qty?: number;
 }
 
 export interface StandardPrintTaxRow {
