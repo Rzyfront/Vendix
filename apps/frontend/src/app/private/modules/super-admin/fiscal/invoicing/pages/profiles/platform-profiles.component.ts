@@ -2,7 +2,6 @@ import {
   Component,
   DestroyRef,
   computed,
-  effect,
   inject,
   signal,
 } from '@angular/core';
@@ -10,13 +9,13 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Router, RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
-import { inject as ngInject } from '@angular/core';
 
 import {
   ButtonComponent,
   CardComponent,
   IconComponent,
   InputsearchComponent,
+  ItemListCardConfig,
   ResponsiveDataViewComponent,
   TableAction,
   TableColumn,
@@ -89,7 +88,7 @@ interface PaginatedProfiles {
           <div class="flex items-center gap-3">
             <app-inputsearch
               [placeholder]="'Buscar por nombre…'"
-              (valueChange)="onSearch($event)"
+              (searchChange)="onSearch($event)"
             ></app-inputsearch>
             <a routerLink="new">
               <app-button variant="primary" icon="plus">
@@ -100,28 +99,31 @@ interface PaginatedProfiles {
 
           <app-responsive-data-view
             [columns]="columns"
-            [items]="(filteredProfiles() || [])"
+            [data]="filteredProfiles()"
+            [cardConfig]="cardConfig"
+            [actions]="actions"
             [loading]="loading()"
             [emptyMessage]="'No hay perfiles plataforma creados todavía.'"
-            (action)="onAction($event)"
+            (actionClick)="onAction($event)"
           ></app-responsive-data-view>
         </div>
       </app-card>
     </div>
 
     <app-confirmation-modal
-      [open]="confirmDeleteOpen()"
+      [(isOpen)]="confirmDeleteOpen"
       title="Eliminar perfil"
+      confirmText="Eliminar"
+      confirmVariant="danger"
       [message]="
         'Esta acción borra el perfil ' +
         (profileToDelete()?.name || '') +
         ' (versión ' +
         (profileToDelete()?.current_version ?? 0) +
-        '). Para confirmar, escribe exactamente: ELIMINAR'
+        ').'
       "
-      [expectedText]="'ELIMINAR'"
-      (confirmed)="onConfirmDelete($event)"
-      (cancelled)="confirmDeleteOpen.set(false)"
+      (confirm)="onConfirmDelete()"
+      (cancel)="onCancelDelete()"
     ></app-confirmation-modal>
   `,
 })
@@ -129,7 +131,7 @@ export class PlatformProfilesComponent {
   private readonly http = inject(HttpClient);
   private readonly destroyRef = inject(DestroyRef);
   private readonly toast = inject(ToastService);
-  private readonly router = ngInject(Router);
+  private readonly router = inject(Router);
 
   readonly profiles = signal<PlatformProfileDetail[]>([]);
   readonly loading = signal(true);
@@ -166,6 +168,17 @@ export class PlatformProfilesComponent {
     },
   ];
 
+  /**
+   * Configuración de la tarjeta que `ResponsiveDataView` exige para la vista
+   * móvil. Es un input requerido: sin ella el componente no compila y la
+   * lista no tiene representación fuera del escritorio.
+   */
+  readonly cardConfig: ItemListCardConfig = {
+    titleKey: 'name',
+    subtitleTransform: (p: PlatformProfileDetail) =>
+      `Tipo ${p.operation_type} · v${p.current_version}`,
+  };
+
   readonly actions: TableAction[] = [
     {
       label: 'Editar',
@@ -184,23 +197,25 @@ export class PlatformProfilesComponent {
 
   constructor() {
     this.load();
-    effect(() => {
-      // re-render when searchTerm changes
-    });
   }
 
   onSearch(term: string) {
     this.searchTerm.set(term);
   }
 
-  onAction(event: { action: TableAction; item: PlatformProfileDetail }) {
-    event.action.action(event.item);
+  onAction(event: { action: TableAction; item: any }) {
+    event.action.action?.(event.item);
   }
 
-  onConfirmDelete(confirmed: boolean) {
+  onCancelDelete() {
+    this.confirmDeleteOpen.set(false);
+    this.profileToDelete.set(null);
+  }
+
+  onConfirmDelete() {
     const p = this.profileToDelete();
     this.confirmDeleteOpen.set(false);
-    if (!confirmed || !p) return;
+    if (!p) return;
     this.http
       .delete<{ success: boolean }>(
         `${environment.apiUrl}/superadmin/subscriptions/fiscal/profiles/${p.id}`,

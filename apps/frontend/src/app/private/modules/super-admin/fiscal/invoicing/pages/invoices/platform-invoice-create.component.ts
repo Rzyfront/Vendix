@@ -234,7 +234,7 @@ interface ResolutionListItem {
                       </div>
                     }
                   }
-                  @if (profileCatalog().filter(p => p.operation_type === operationType()).length === 0) {
+                  @if (profilesForOperationType().length === 0) {
                     <p class="text-sm text-gray-500">
                       Sin perfiles para op_type {{ operationType() }}. Cree uno en
                       <a routerLink="../profiles/new" class="text-blue-600 underline">Perfiles</a>.
@@ -625,6 +625,16 @@ export class PlatformInvoiceCreateComponent {
 
   // ── Profile catalog (P3.5: tarjeta colapsable) ─────────────────────────
   readonly profileCatalog = signal<any[]>([]);
+  /**
+   * Catálogo acotado al `operation_type` del documento en curso. Vive aquí y
+   * no en la plantilla porque Angular no admite funciones flecha en los
+   * bindings: expresarlo inline rompe la compilación con NG5002.
+   */
+  readonly profilesForOperationType = computed(() =>
+    this.profileCatalog().filter(
+      (p) => p.operation_type === this.operationType(),
+    ),
+  );
   readonly profileSelectedId = signal<number | null>(null);
   readonly profileAppliedName = signal<string | null>(null);
   readonly profileCardCollapsed = signal(false);
