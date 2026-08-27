@@ -240,3 +240,35 @@ export interface PrintRecentDocument {
   customer_name?: string | null;
   status?: string | null;
 }
+
+/**
+ * [print-editor-dsk P4.1] — CanvasRegion contract for the WYSIWYG canvas
+ * editor. Frontend-only — the backend never sees CanvasRegion: the editor
+ * derives these from `PrintFormatDefinition` and writes back column width
+ * deltas through `regionsToDelta`. Coordinates are in millimeters with
+ * origin at top-left of the paper; the consumer maps mm→px at render time.
+ */
+export type CanvasRegionKind =
+  | 'section'
+  | 'column'
+  | 'logo'
+  | 'company-field'
+  | 'header'
+  | 'footer';
+
+export interface CanvasRegion {
+  /** Unique within the editor session (e.g. `sec-${secId}`, `col-${colId}`). */
+  id: string;
+  kind: CanvasRegionKind;
+  /** Stable identifier of the underlying entity in PrintFormatDefinition. */
+  anchorId: string;
+  label: string;
+  /** Position in mm from top-left of the paper. */
+  x_mm: number;
+  y_mm: number;
+  width_mm: number;
+  height_mm: number;
+  zIndex: number;
+  /** Optional anchor for sorting (column regions point at their parent section). */
+  parentId?: string;
+}
