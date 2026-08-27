@@ -76,6 +76,39 @@ export class PrintFormatsFacade {
     return ['all', ...Array.from(set)];
   });
 
+  /**
+   * [print-editor-dsk P6] — Formats grouped by category for the redesigned
+   * Hub. Iterates `formats()` and partitions by `category`, preserving the
+   * canonical category order (Logística, Ventas POS, Ventas, Comercial,
+   * Compras, Inventario, Facturación, Restaurante) when known so the Hub
+   * renders top-down in the same order as the dashboard.
+   */
+  readonly formatsByCategory = computed(() => {
+    const list = this.formats();
+    const groups = new Map<string, StorePrintFormatSummary[]>();
+    for (const fmt of list) {
+      const cat = fmt.category || 'Otros';
+      const bucket = groups.get(cat) ?? [];
+      bucket.push(fmt);
+      groups.set(cat, bucket);
+    }
+    return Array.from(groups.entries()).map(([category, formats]) => ({
+      category,
+      formats,
+    }));
+  });
+
+  /**
+   * [print-editor-dsk P6] — Formats that have a non-default template
+   * assigned (i.e. the merchant cloned a library template or wrote custom
+   * overrides). Used by the Hub's header stats banner.
+   */
+  readonly customizedFormatCount = computed(() => {
+    return this.formats().filter(
+      (f) => f.template_name && f.template_name !== 'Por defecto del sistema',
+    ).length;
+  });
+
   async loadFormats(): Promise<void> {
     this.isLoading.set(true);
     try {
@@ -252,6 +285,55 @@ export class PrintFormatsFacade {
     } catch (err: any) {
       this.toast.error(err?.error?.message || 'Error al cambiar estado del Print Gateway.');
     }
+  }
+
+  /**
+   * [print-editor-dsk P6] — Bulk activate/deactivate for every format in a
+   * category. Used by the Hub's per-category "Activar todos" / "Desactivar
+   * todos" buttons. Processes the calls sequentially so the backend is not
+   * flooded with parallel POSTs and so the toast surfaces a single
+   * completion message.
+   */
+  async bulkToggleCategoryGateway(
+    category: string,
+    targetStatus: boolean,
+  ): Promise<void> {
+    const targets = this.formats().filter(
+      (f) => f.category === category && f.gateway_enabled !== targetStatus,
+    );
+    if (targets.length === 0) {
+      this.toast.info(
+        targetStatus
+          ? `Todos los formatos de "${category}" ya tienen el gateway activo.`
+          : `Todos los formatos de "${category}" ya tienen el gateway inactivo.`,
+      );
+      return;
+    }
+
+    let succeeded = 0;
+    for (const fmt of targets) {
+      try {
+        if (targetStatus) {
+          await firstValueFrom(this.client.activateGateway(fmt.format_type));
+        } else {
+          await firstValueFrom(this.client.deactivateGateway(fmt.format_type));
+        }
+        succeeded += 1;
+      } catch (err: any) {
+        this.toast.error(
+          err?.error?.message ||
+            `Error al cambiar estado del gateway para ${fmt.format_type}.`,
+        );
+      }
+    }
+    if (succeeded > 0) {
+      this.toast.success(
+        targetStatus
+          ? `${succeeded} formato(s) activados en "${category}".`
+          : `${succeeded} formato(s) desactivados en "${category}".`,
+      );
+    }
+    await this.loadFormats();
   }
 
   async resetCurrentFormat(): Promise<void> {
