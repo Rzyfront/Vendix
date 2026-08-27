@@ -9,8 +9,10 @@ import {
   AlertBannerComponent,
   ButtonComponent,
   ConfirmationModalComponent,
+  InputComponent,
   ModalComponent,
   ResponsiveDataViewComponent,
+  SelectorComponent,
   TableColumn,
 } from '../../../../../../../shared/components';
 import { CurrencyPipe as VendixCurrencyPipe } from '../../../../../../../shared/pipes/currency';
@@ -159,8 +161,10 @@ interface SubscriptionInvoiceDetail {
     AlertBannerComponent,
     ButtonComponent,
     ConfirmationModalComponent,
+    InputComponent,
     ModalComponent,
     ResponsiveDataViewComponent,
+    SelectorComponent,
   ],
   template: `
     <div class="p-6 max-w-5xl mx-auto">
@@ -523,11 +527,16 @@ interface SubscriptionInvoiceDetail {
       size="sm"
     >
       <div class="space-y-4">
-        <app-input
-          label="Correo electrónico destino"
+        <label class="block text-xs font-medium text-text-primary" for="deliver-email-input">
+          Correo electrónico destino
+        </label>
+        <input
+          id="deliver-email-input"
           type="email"
-          [formControl]="deliverEmailControl"
+          [value]="deliverEmail()"
+          (input)="onDeliverEmailInput($event)"
           placeholder="destinatario@ejemplo.com"
+          class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
         />
         @if (deliverEmailError()) {
           <p class="text-xs text-error">{{ deliverEmailError() }}</p>
@@ -820,6 +829,10 @@ export class PlatformInvoiceDetailComponent {
     this.deliverEmail.set('');
     this.deliverEmailError.set('');
     this.deliverModalOpen.set(true);
+  }
+
+  onDeliverEmailInput(event: Event): void {
+    this.deliverEmail.set((event.target as HTMLInputElement).value);
   }
 
   onDeliverSubmit(): void {

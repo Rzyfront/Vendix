@@ -30,17 +30,34 @@ import {
 } from '../../../../../../../shared/components/index';
 import type { SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
 import {
+  AIU_LEGAL_FLOOR_PERCENT_SCALED,
   CONFIG_LIMITS,
-  INVOICE_PROFILE_OPERATION_LABELS,
   validateInvoiceProfileConfig,
   normalizeInvoiceProfileConfig,
   blockingIssues,
   isBlockingIssue,
   formatPercentScaled,
-} from '../../../../../core/utils/invoice-profile-config.contract';
-import type { ProfileConfigIssue, AiuTaxableBasis, AiuComponentsBasis, AccountingModel } from '../../../../../core/utils/invoice-profile-config.contract';
+} from '../../../../../../../core/utils/invoice-profile-config.contract';
+import type { ProfileConfigIssue, AiuTaxableBasis, AiuComponentsBasis, AccountingModel } from '../../../../../../../core/utils/invoice-profile-config.contract';
 import { PlatformInvoicingStore } from '../../platform-invoicing.store';
-import type { PlatformInvoiceProfileDetail } from '../../subscriptions/interfaces/fiscal-billing.interface';
+
+/**
+ * Etiquetas legibles por código de tipo de operación (`10`, `09`, `11`, `12`).
+ *
+ * Mismo shape que el riel tienda (`INVOICE_PROFILE_OPERATION_LABELS`) pero
+ * declarado localmente porque ese vive en `store/invoicing/interfaces/` y
+ * moverlo al `core/utils/` requiere un commit bisectable que ya no cabe en
+ * este paso. La duplicación es deliberada y se justifica por scope:
+ * plataforma solo emite `10` y `09` en producción hoy.
+ */
+const PLATFORM_OPERATION_LABELS: Readonly<Record<string, string>> = {
+  '10': 'Estándar',
+  '09': 'AIU',
+  '11': 'Mandato',
+  '12': 'Consorcio',
+};
+import { FiscalBillingAdminService } from '../../../../subscriptions/services/fiscal-billing-admin.service';
+import type { PlatformInvoiceProfileDetail } from '../../../../subscriptions/interfaces/fiscal-billing.interface';
 import { PlatformProfilePreviewPanelComponent } from '../../components/platform-profile-preview-panel/platform-profile-preview-panel.component';
 import { PlatformProfileVersionsPanelComponent } from '../../components/platform-profile-versions-panel/platform-profile-versions-panel.component';
 import { ProfileSectionWrapperComponent } from './profile-section-wrapper.component';
@@ -53,7 +70,7 @@ import {
   InvoiceSectionDivisaComponent,
   InvoiceSectionFormatoComponent,
   InvoiceSectionNotasComponent,
-} from '../../../../../shared/components/invoice-sections/index';
+} from '../../../../../../../shared/components/invoice-sections/index';
 import type {
   AiuSectionPaths,
   DocumentoSectionPaths,
@@ -65,7 +82,7 @@ import type {
   DivisaSectionPaths,
   FormatoSectionPaths,
   NotasSectionPaths,
-} from '../../../../../shared/components/invoice-sections/index';
+} from '../../../../../../../shared/components/invoice-sections/index';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 
 type SectionId =
@@ -412,6 +429,7 @@ type SectionId =
 })
 export class PlatformProfileEditorComponent {
   private readonly store = inject(PlatformInvoicingStore);
+  private readonly fiscal = inject(FiscalBillingAdminService);
   private readonly fb = inject(FormBuilder);
   private readonly destroyRef = inject(DestroyRef);
   private readonly route = inject(ActivatedRoute);
@@ -440,7 +458,7 @@ export class PlatformProfileEditorComponent {
   readonly saving = signal(false);
   readonly loading = signal(false);
 
-  readonly operation_options = Object.entries(INVOICE_PROFILE_OPERATION_LABELS).map(
+  readonly operation_options: SelectorOption[] = (Object.entries(PLATFORM_OPERATION_LABELS) as [string, string][]).map(
     ([value, label]) => ({ value, label }),
   );
 
@@ -467,10 +485,10 @@ export class PlatformProfileEditorComponent {
   readonly documentoNotices = computed<DocumentoSectionNotice[]>(() => []);
 
   readonly documentoErrors = computed<DocumentoSectionErrors>(() => ({
-    resolution: this.issueFor('dian.resolution_id'),
-    invoice_type: this.issueFor('dian.document_type'),
-    payment_form: this.issueFor('dian.payment_method_code'),
-    payment_means_code: this.issueFor('dian.payment_means_code'),
+    resolution: this.issueFor('dian.resolution_id') ?? undefined,
+    invoice_type: this.issueFor('dian.document_type') ?? undefined,
+    payment_form: this.issueFor('dian.payment_method_code') ?? undefined,
+    payment_means_code: this.issueFor('dian.payment_means_code') ?? undefined,
   }));
 
   readonly documentoSectionPaths: DocumentoSectionPaths = {
@@ -764,7 +782,7 @@ export class PlatformProfileEditorComponent {
 
   private loadProfile(id: number): void {
     this.loading.set(true);
-    this.store.fiscal.getProfile(id).subscribe({
+    this.fiscal.getProfile(id).subscribe({
       next: (profile) => {
         this.hydrateForm(profile);
         this.loading.set(false);
@@ -979,9 +997,9 @@ export class PlatformProfileEditorComponent {
   }
 
   // ─── Actions ────────────────────────────────────────────────
-  onHeaderAction(action: StickyHeaderActionButton): void {
-    if (action.id === 'cancel') this.cancel();
-    if (action.id === 'save') this.save();
+  onHeaderAction(actionId: string): void {
+    if (actionId === 'cancel') this.cancel();
+    if (actionId === 'save') this.save();
   }
 
   save(): void {
