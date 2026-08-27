@@ -40,6 +40,7 @@ import {
   AssignShippingMethodDto,
   ReactivateOrderDto,
   OrderInvoiceSnapshot,
+  Address,
 } from '../../interfaces/order.interface';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { PosShippingService } from '../../../pos/services/pos-shipping.service';
@@ -68,6 +69,9 @@ import { PosTicketService } from '../../../pos/services/pos-ticket.service';
 import { OrderTicketService } from '../../services/order-ticket.service';
 import { TicketData } from '../../../pos/models/ticket.model';
 import { InvoicingService } from '../../../invoicing/services/invoicing.service';
+import { DispatchTicketPrintService } from '../../../dispatch-ticket/services/dispatch-ticket-print.service';
+import type { DispatchTicketData } from '../../../dispatch-ticket/models/dispatch-ticket-data.model';
+import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import { parseVariantAttributes, VariantAttribute } from '../../../../../../shared/utils';
 import { DispatchNotesService } from '../../../dispatch-notes/services/dispatch-notes.service';
 import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
@@ -1082,6 +1086,16 @@ export class OrderDetailsPageComponent {
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
     { id: 'print', label: 'Imprimir', variant: 'outline', icon: 'printer' },
+    // CP-DTLP Phase E.3 — disparador 2 manual del tiquete de despacho desde
+    // la pantalla de la orden. `direct_delivery` (mostrador) NO imprime — la
+    // entrega es inmediata, no hay envío que Despachar.
+    {
+      id: 'print-dispatch-ticket',
+      label: 'e-ticket de envío',
+      variant: 'outline',
+      icon: 'package',
+      disabled: this.order()?.delivery_type === 'direct_delivery',
+    },
   ]);
 
   readonly paymentReceiptSubtitle = computed(() => {
@@ -1123,6 +1137,13 @@ export class OrderDetailsPageComponent {
   private dispatchNotesService = inject(DispatchNotesService);
   // Fase F8 — publicar la orden al pool de reparto (Vendix Repartos).
   private repartosService = inject(RepartosService);
+  // CP-DTLP Phase E.3 — disparador 2 manual desde la pantalla de la orden.
+  // El POS tiene su propio disparador (E.1/E.2) en `pos-order-confirmation`:
+  // desde acá sólo lanzamos el manual al pulsar el botón del header o de
+  // la card "Gestión de Envío".
+  private readonly dispatchTicketPrint = inject(DispatchTicketPrintService);
+  // CP-DTLP Phase E.3 — guard del disparador manual (default true ADR-7).
+  private readonly settingsFacade = inject(StoreSettingsFacade);
 
   constructor() {
     this.currencySymbol = this.currencyService.currencySymbol;
@@ -2347,6 +2368,9 @@ export class OrderDetailsPageComponent {
       this.printOrder();
     } else if (actionId === 'credit-payment') {
       this.openPayModal();
+    } else if (actionId === 'print-dispatch-ticket') {
+      // CP-DTLP Phase E.3 — disparador manual desde header.
+      void this.printDispatchTicket();
     }
   }
 
@@ -2432,6 +2456,82 @@ export class OrderDetailsPageComponent {
       console.error('Error generating ticket:', err);
       this.toastService.error('Error al generar el ticket');
     }
+  }
+
+  /**
+   * CP-DTLP Phase E.3 — disparador 2 manual del tiquete de despacho desde
+   * la pantalla de la orden. Lo invocan el botón del headerActions
+   * (`e-ticket de envío`) y el botón secundario de la card "Gestión de Envío".
+   *
+   * Guard: enabled (default true ADR-7) + `direct_delivery` skip (la
+   * entrega es en mostrador, no hay envío que Despachar). La copia se
+   * resuelve en `DispatchTicketPrintService` desde
+   * `receipts.printing.dispatch_ticket` (config del gateway); con
+   * `trigger: 'explicit'` y `copies: 0` el servicio imprime 0 copias y
+   * devuelve silenciosamente.
+   */
+  async printDispatchTicket(): Promise<void> {
+    const order = this.order();
+    if (!order) return;
+    if (order.delivery_type === 'direct_delivery') return;
+
+    const enabled =
+      this.settingsFacade.receipts()?.print_dispatch_ticket_enabled ?? true;
+    if (!enabled) return;
+
+    try {
+      await this.dispatchTicketPrint.printDispatchTicket(
+        this.buildDispatchTicketData(order),
+        'explicit',
+      );
+    } catch (err) {
+      console.error('[CP-DTLP] Error al imprimir tiquete de despacho:', err);
+      this.toastService.error('No se pudo imprimir el tiquete de despacho');
+    }
+  }
+
+  /**
+   * CP-DTLP Phase E.3 — mapea `Order → DispatchTicketData`. Mapea SKU y
+   * nombre del producto desde `products.sku`/`product_variants.sku` cuando
+   * la línea del order no los trae planos. `orderedQty` y `dispatchedQty`
+   * salen iguales de `quantity` (el tiquete resume la orden a despachar;
+   * las cantidades reales se ajustan en la remisión).
+   */
+  private buildDispatchTicketData(order: Order): DispatchTicketData {
+    const items = (order.order_items || []).map((item) => ({
+      sku:
+        item.products?.sku ||
+        item.product_variants?.sku ||
+        item.variant_sku ||
+        '',
+      productName: item.product_name,
+      orderedQty: Number(item.quantity || 0),
+      dispatchedQty: Number(item.quantity || 0),
+    }));
+
+    const address: Address | null =
+      order.addresses_orders_shipping_address_idToaddresses ||
+      null;
+    const storeName = order.stores?.name || 'Vendix';
+
+    const customerName =
+      order.users
+        ? `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim()
+        : 'Consumidor Final';
+
+    return {
+      orderId: order.id,
+      orderNumber: order.order_number,
+      dateFormatted: this.formatDate(order.created_at),
+      storeName,
+      customer: {
+        name: customerName,
+        addressLine1: address?.address_line1 || '',
+        addressLine2: address?.address_line2,
+        city: address?.city,
+      },
+      items,
+    };
   }
 
   /**
