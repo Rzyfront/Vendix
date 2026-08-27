@@ -65,18 +65,19 @@ interface PlatformProfileTemplate {
             formControlName="name"
           ></app-input>
 
-          <app-selectoror
+          <app-selector
             label="Tipo de operación DIAN"
             formControlName="operation_type"
             [options]="operationTypeOptions"
           ></app-selector>
 
-          <app-selectoror
-            *ngIf="templates().length > 0"
-            label="Plantilla DIAN inicial"
-            formControlName="template_key"
-            [options]="templateOptions()"
-          ></app-selector>
+          @if (templates().length > 0) {
+            <app-selector
+              label="Plantilla DIAN inicial"
+              formControlName="template_key"
+              [options]="templateOptions()"
+            ></app-selector>
+          }
 
           <app-toggle
             label="Marcar como predeterminado"
