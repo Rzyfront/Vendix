@@ -33,6 +33,13 @@ import { PrintDocumentRendererService } from './services/print-document-renderer
 // resilient and the validator reusable from any other consumer (e.g.
 // the spec).
 
+// [print-editor-dsk P7] — Adapter registry: 11 frozen `FormatAdapter`
+// records keyed by `format_type`. Used by `print-formats.service.ts` to
+// reject `sections` that name regions a format doesn't allow (e.g.
+// `qr-block` on a non-fiscal `pos_sale_ticket`). Pure in-memory, no
+// DI dependencies, so a plain class registration is enough.
+import { FormatAdapterRegistryService } from './services/format-adapter-registry.service';
+
 // Providers & Registry
 // [print-editor-dsk P3.1] — Servicio que sirve el picker de documentos
 // recientes del editor (endpoint `GET /:formatType/documents`). Sin
@@ -80,6 +87,9 @@ import { DispatchTicketDataProvider } from './providers/dispatch-ticket.provider
     // Hub/control-panel renders carries explicit pixel dimensions and a
     // single, consistent `.vendix-print-page` container.
     PrintDocumentRendererService,
+    // [print-editor-dsk P7] — Registry used by `print-formats.service.ts`
+    // for region-allowlist validation on overrides / template definitions.
+    FormatAdapterRegistryService,
     DocumentDataProviderRegistry,
     // [print-editor-dsk P3.1] — Servicio del picker de documentos
     // recientes. Sólo depende del registry (no de providers concretos),

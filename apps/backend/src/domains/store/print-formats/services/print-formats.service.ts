@@ -6,6 +6,13 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { PrintGatewayService } from './print-gateway.service';
 import { PrintFiscalValidatorService } from './print-fiscal-validator.service';
 import { DocumentDataProviderRegistry } from '../providers/document-data-provider.registry';
+// [print-editor-dsk P7] — Adapter registry: 11 FormatAdapter records keyed by
+// `format_type`. Used here to enforce that `sections` referenced by an
+// override or a library template live inside the adapter's
+// `availableRegions` allowlist. Keeps AJV (structural) and the adapter
+// (per-format capability) as separate concerns.
+import { FormatAdapterRegistryService } from './format-adapter-registry.service';
+import { sectionTypeToRegionKind } from '../lib/format-adapter';
 import {
   UpdatePrintFormatConfigDto,
 } from '../dto/print-format-config.dto';
@@ -29,6 +36,57 @@ function shouldValidateV2Payload(payload: unknown): boolean {
   if (!payload || typeof payload !== 'object') return false;
   const v = (payload as Record<string, unknown>).v;
   return v === 2;
+}
+
+/**
+ * [print-editor-dsk P7] — Validate that every `section.type` referenced by
+ * a v2 payload lives inside the adapter's `availableRegions` allowlist.
+ *
+ * Called AFTER the AJV shape check (so `sections` is already a valid array)
+ * and BEFORE persisting overrides or templates. A section that names a
+ * region the format doesn't expose (e.g. `qr_block` on `pos_sale_ticket`,
+ * `fiscal_block` on `dispatch_note`) is rejected with
+ * `PRINT_CONFIG_VALIDATION_001` — same HTTP shape as a failed AJV
+ * validation, so the editor surfaces a single coherent error channel.
+ *
+ * `sectionType` values that don't map to any known `RegionKind` (forward
+ * compatibility with future compositor types) are NOT rejected — the
+ * adapter table is a superset of what the canvas exposes, not the wire
+ * format. We deliberately err on the side of allowing unknown types: a
+ * newer compositor may add a section kind the adapter hasn't been taught
+ * about yet, and persisting it should not block.
+ */
+function assertSectionsWithinAdapterRegions(
+  formatType: print_format_type_enum,
+  payload: Record<string, any> | null | undefined,
+  adapters: FormatAdapterRegistryService,
+  context: 'store override' | 'library template',
+): void {
+  if (!payload || !Array.isArray(payload.sections)) return;
+  const allowed = new Set(adapters.availableRegions(formatType as string));
+
+  const offending: Array<{ sectionId: string; type: string }> = [];
+  for (const section of payload.sections as Array<Record<string, any>>) {
+    if (!section || typeof section !== 'object') continue;
+    const sectionId =
+      typeof section.id === 'string' ? section.id : '(missing-id)';
+    const sectionType =
+      typeof section.type === 'string' ? section.type : '';
+    const regionKind = sectionTypeToRegionKind(sectionType);
+    // Unknown section.type — leave it alone; see function header comment.
+    if (regionKind === null) continue;
+    if (!allowed.has(regionKind)) {
+      offending.push({ sectionId, type: sectionType });
+    }
+  }
+
+  if (offending.length > 0) {
+    throw new VendixHttpException(
+      ErrorCodes.PRINT_CONFIG_VALIDATION_001,
+      `v2 ${context} for "${formatType as string}" references sections outside the adapter's availableRegions`,
+      { offending, allowedRegions: [...allowed] },
+    );
+  }
 }
 
 export const ALL_FORMAT_TYPES: print_format_type_enum[] = [
@@ -83,6 +141,9 @@ export class PrintFormatsService {
     private readonly gateway: PrintGatewayService,
     private readonly fiscalValidator: PrintFiscalValidatorService,
     private readonly registry: DocumentDataProviderRegistry,
+    // [print-editor-dsk P7] — DI for the adapter registry, used to enforce
+    // `availableRegions` allowlist on overrides / template definitions.
+    private readonly adapterRegistry: FormatAdapterRegistryService,
   ) {}
 
   /**
@@ -168,6 +229,15 @@ export class PrintFormatsService {
           { errors: result.errors },
         );
       }
+
+      // [print-editor-dsk P7] — Per-format region allowlist (runs after AJV
+      // shape validation so `sections` is already a valid array).
+      assertSectionsWithinAdapterRegions(
+        formatType,
+        dto.overrides,
+        this.adapterRegistry,
+        'store override',
+      );
     }
 
     // Si se están enviando overrides con definición estructurada o custom, validar fiscalmente
@@ -313,6 +383,18 @@ export class PrintFormatsService {
           { errors: result.errors },
         );
       }
+
+      // [print-editor-dsk P7] — Per-format region allowlist, same gate as
+      // `updateStoreFormat`. Templates are scoped to a single
+      // `format_type`, so a wrong region means a future render will fall
+      // back to the default for that region (silent regression). Better
+      // to reject at create time.
+      assertSectionsWithinAdapterRegions(
+        dto.format_type as unknown as print_format_type_enum,
+        dto.definition,
+        this.adapterRegistry,
+        'library template',
+      );
     }
 
     // CP-DTLP-20260827: PrintFormatTypeEnum (TS) incluye dispatch_ticket; el
