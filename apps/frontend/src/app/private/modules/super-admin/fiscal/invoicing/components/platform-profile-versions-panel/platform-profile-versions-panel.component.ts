@@ -5,11 +5,11 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { inject as injectSvc } from '@angular/core';
 
 import { IconComponent } from '../../../../../../../shared/components/index';
-import { FiscalBillingAdminService } from '../../../subscriptions/services/fiscal-billing-admin.service';
+import { FiscalBillingAdminService } from '../../../../subscriptions/services/fiscal-billing-admin.service';
 import type {
   PlatformInvoiceProfileVersion,
   PlatformInvoiceProfileVersionSummary,
-} from '../../../subscriptions/interfaces/fiscal-billing.interface';
+} from '../../../../subscriptions/interfaces/fiscal-billing.interface';
 
 /**
  * Historial de versiones con diff campo a campo para el perfil de plataforma.

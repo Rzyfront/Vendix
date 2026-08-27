@@ -9,8 +9,8 @@ import {
   InputComponent,
 } from '../../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/index';
-import { PlatformInvoicingStore } from '../../invoicing.store';
-import type { PlatformProfilePreviewResult } from '../../../subscriptions/interfaces/fiscal-billing.interface';
+import { PlatformInvoicingStore } from '../../platform-invoicing.store';
+import type { PlatformProfilePreviewResult } from '../../../../subscriptions/interfaces/fiscal-billing.interface';
 
 /**
  * Panel de previsualización del perfil de plataforma.

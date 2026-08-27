@@ -51,7 +51,7 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
         </div>
         <div class="flex items-center gap-2">
           @if (errorCount() > 0) {
-            <app-badge variant="danger" size="sm">{{ errorCount() }}</app-badge>
+            <app-badge variant="error" size="sm">{{ errorCount() }}</app-badge>
           }
           <app-icon
             name="chevron-down"

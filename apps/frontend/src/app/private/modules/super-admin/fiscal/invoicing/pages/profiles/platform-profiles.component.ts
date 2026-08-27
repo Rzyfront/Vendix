@@ -11,6 +11,7 @@ import { Router, RouterLink } from '@angular/router';
 import {
   ButtonComponent,
   CardComponent,
+  ConfirmationModalComponent,
   IconComponent,
   InputsearchComponent,
   ResponsiveDataViewComponent,
@@ -23,8 +24,8 @@ import { ToastService } from '../../../../../../../shared/components/toast/toast
 import {
   PlatformInvoiceProfile,
   PlatformInvoiceProfileDetail,
-} from '../../../subscriptions/interfaces/fiscal-billing.interface';
-import { PlatformInvoicingStore } from '../../invoicing.store';
+} from '../../../../subscriptions/interfaces/fiscal-billing.interface';
+import { PlatformInvoicingStore } from '../../platform-invoicing.store';
 
 /**
  * Perfiles de facturación del riel plataforma (VENDIX_ADMIN).
@@ -41,6 +42,7 @@ import { PlatformInvoicingStore } from '../../invoicing.store';
     RouterLink,
     CardComponent,
     ButtonComponent,
+    ConfirmationModalComponent,
     IconComponent,
     InputsearchComponent,
     ResponsiveDataViewComponent,
@@ -315,7 +317,7 @@ export class PlatformProfilesComponent {
       badge: true,
       badgeConfig: {
         type: 'status',
-        map: { active: { label: 'Activo', variant: 'success' }, inactive: { label: 'Inactivo', variant: 'muted' } },
+        colorMap: { active: 'success', inactive: 'neutral' },
       },
     },
     {
@@ -344,7 +346,7 @@ export class PlatformProfilesComponent {
     badgeKey: 'state',
     badgeConfig: {
       type: 'status',
-      map: { active: { label: 'Activo', variant: 'success' }, inactive: { label: 'Inactivo', variant: 'muted' } },
+      colorMap: { active: 'success', inactive: 'neutral' },
     },
   };
 
