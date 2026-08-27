@@ -6,15 +6,19 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { FormsModule } from '@angular/forms';
+import { FormControl, FormGroup, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../../../../../../environments/environment';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import {
+  AlertBannerComponent,
   ButtonComponent,
+  ResponsiveDataViewComponent,
   SelectorComponent,
+  TableAction,
+  TableColumn,
 } from '../../../../../../../shared/components';
 import { CurrencyPipe as VendixCurrencyPipe } from '../../../../../../../shared/pipes/currency';
 import { TenantPickerComponent } from '../../components/tenant-picker/tenant-picker.component';
@@ -101,8 +105,11 @@ interface ResolutionListItem {
   imports: [
     CommonModule,
     FormsModule,
+    ReactiveFormsModule,
     RouterLink,
+    AlertBannerComponent,
     ButtonComponent,
+    ResponsiveDataViewComponent,
     VendixCurrencyPipe,
     SelectorComponent,
     TenantPickerComponent,
@@ -115,7 +122,7 @@ interface ResolutionListItem {
       >← Volver al listado</a>
 
       <h2 class="mt-4 text-2xl font-semibold text-gray-900">
-        Nueva factura de plataforma (V1)
+        Nueva factura de plataforma
       </h2>
       <p class="text-sm text-gray-500 mt-1">
         Emisión contra un tenant (ADR-7). Cubre sales_invoice y support_document.
@@ -250,58 +257,33 @@ interface ResolutionListItem {
         <fieldset class="bg-white rounded-lg shadow p-4 space-y-3">
           <legend class="font-semibold text-gray-900 px-2">Líneas</legend>
 
-          @if (lines().length === 0) {
-            <p class="text-sm text-gray-500">Sin líneas. Agregue al menos una.</p>
-          } @else {
-            <table class="w-full text-sm">
-              <thead>
-                <tr class="text-left text-xs text-gray-500 border-b">
-                  <th>Descripción</th>
-                  <th class="w-20 text-right">Cant</th>
-                  <th class="w-28 text-right">Precio</th>
-                  <th class="w-24 text-right">Desc</th>
-                  <th class="w-20">UD</th>
-                  <th class="w-32">Impuestos</th>
-                  <th class="w-24">AIU</th>
-                  <th class="w-12"></th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (line of lines(); track line.id; let i = $index) {
-                  <tr class="border-b">
-                    <td class="py-2">{{ line.description }}</td>
-                    <td class="text-right">{{ line.quantity }}</td>
-                    <td class="text-right">{{ line.unit_price | currency }}</td>
-                    <td class="text-right">
-                      @if (line.discount_amount) { {{ line.discount_amount | currency }} }
-                    </td>
-                    <td>{{ line.unit_code }}</td>
-                    <td class="text-xs">{{ line.taxes.length }} imp</td>
-                    <td class="text-xs">{{ line.aiu_component ?? '—' }}</td>
-                    <td>
-                      <button type="button" (click)="removeLine(i)" class="text-red-600">×</button>
-                    </td>
-                  </tr>
-                }
-              </tbody>
-              <tfoot class="text-sm border-t">
-                <tr>
-                  <td colspan="2" class="py-2 text-right font-semibold">Subtotal</td>
-                  <td class="text-right">{{ subtotal() | currency }}</td>
-                  <td></td>
-                </tr>
-                <tr>
-                  <td colspan="2" class="text-right">Impuestos</td>
-                  <td class="text-right">{{ taxesTotal() | currency }}</td>
-                  <td></td>
-                </tr>
-                <tr class="border-t">
-                  <td colspan="2" class="py-2 text-right font-semibold">Total</td>
-                  <td class="text-right font-semibold">{{ total() | currency }}</td>
-                  <td></td>
-                </tr>
-              </tfoot>
-            </table>
+          <app-responsive-data-view
+            [data]="lines()"
+            [columns]="linesColumns()"
+            [cardConfig]="linesCardConfig()"
+            [actions]="linesActions"
+            [loading]="false"
+            emptyTitle="Sin líneas"
+            emptyDescription="Agregue al menos una línea al documento."
+            emptyIcon="file-plus"
+            (actionClick)="onLinesAction($event)"
+          />
+
+          @if (lines().length > 0) {
+            <dl class="flex gap-6 text-sm justify-end mt-4">
+              <div class="text-right">
+                <dt class="text-gray-500">Subtotal</dt>
+                <dd class="font-medium">{{ subtotal() | currency }}</dd>
+              </div>
+              <div class="text-right">
+                <dt class="text-gray-500">Impuestos</dt>
+                <dd class="font-medium">{{ taxesTotal() | currency }}</dd>
+              </div>
+              <div class="text-right">
+                <dt class="font-semibold">Total</dt>
+                <dd class="font-semibold text-lg">{{ total() | currency }}</dd>
+              </div>
+            </dl>
           }
 
           <!-- Modal inline para linea (C.3 — CustomItemModal) -->
@@ -569,7 +551,7 @@ interface ResolutionListItem {
         </fieldset>
 
         @if (errorMessage(); as err) {
-          <p class="text-sm text-red-600">{{ err }}</p>
+          <app-alert-banner variant="danger">{{ err }}</app-alert-banner>
         }
 
         <div class="flex justify-end gap-2">
@@ -667,6 +649,69 @@ export class PlatformInvoiceCreateComponent {
   readonly total = computed(
     () => this.subtotal() + this.taxesTotal() - (this.globalDiscountAmount() ?? 0),
   );
+
+  // ── Lines table (ResponsiveDataView) ───────────────────────────────────
+  readonly linesColumns = computed<TableColumn[]>(() => [
+    { key: 'description', label: 'Descripción' },
+    { key: 'quantity', label: 'Cant', align: 'right', transform: (v) => String(v) },
+    {
+      key: 'unit_price',
+      label: 'Precio',
+      align: 'right',
+      transform: (v) => this.formatCurrency(v),
+    },
+    {
+      key: 'discount_amount',
+      label: 'Desc',
+      align: 'right',
+      transform: (v) => (v ? this.formatCurrency(v) : '—'),
+    },
+    { key: 'unit_code', label: 'UD' },
+    {
+      key: 'taxes',
+      label: 'Imp.',
+      transform: (v) => `${((v as unknown[]) ?? []).length}`,
+    },
+    {
+      key: 'aiu_component',
+      label: 'AIU',
+      transform: (v) => (v ? String(v) : '—'),
+    },
+  ]);
+
+  readonly linesCardConfig = computed(() => ({
+    titleKey: 'description',
+    subtitleKey: 'quantity',
+    footerKey: 'unit_price',
+    footerLabel: 'Precio',
+    footerStyle: 'prominent' as const,
+  }));
+
+  readonly linesActions: TableAction[] = [
+    {
+      label: 'remove',
+      icon: 'trash-2',
+      action: (item: FormLine) => this.removeLineById(item.id),
+      variant: 'danger',
+    },
+  ];
+
+  removeLineById(id: string): void {
+    this.lines.update((arr) => arr.filter((l) => l.id !== id));
+  }
+
+  onLinesAction(event: { action: TableAction; item: FormLine }): void {
+    event.action.action(event.item);
+  }
+
+  private formatCurrency(value: number | string | undefined): string {
+    if (value === undefined || value === null || value === '') return '—';
+    return new Intl.NumberFormat('es-CO', {
+      style: 'currency',
+      currency: 'COP',
+      minimumFractionDigits: 2,
+    }).format(Number(value));
+  }
 
   // ── Withholdings ──────────────────────────────────────────────────────
 
