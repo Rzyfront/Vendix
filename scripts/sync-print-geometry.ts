@@ -4,18 +4,23 @@
 /**
  * [print-editor-dsk P1.6] scripts/sync-print-geometry.ts
  *
- * Copia el JSON canónico `libs/print-formats/schemas/page-geometry.json`
+ * Copia el módulo TS canónico `libs/print-formats/schemas/geometry-data.ts`
  * byte-a-byte a las 3 copias locales de los apps:
  *
- *   apps/backend/src/domains/store/print-formats/lib/page-geometry.json
- *   apps/frontend/src/app/core/lib/page-geometry.json
- *   apps/mobile/src/shared/print/lib/page-geometry.json
+ *   apps/backend/src/domains/store/print-formats/lib/geometry-data.ts
+ *   apps/frontend/src/app/core/lib/geometry-data.ts
+ *   apps/mobile/src/shared/print/lib/geometry-data.ts
  *
  * No es un paquete de workspaces. Cada app importa su copia LOCAL desde un
  * shim TS (`lib/page-geometry.ts`) que vive dentro del propio app. Esto evita
  * el patrón `@vendix/print-formats` que en una iteración anterior rompió el
  * boot de Nest (MODULE_NOT_FOUND) porque el paquete no estaba instalado en
  * el contenedor.
+ *
+ * TS en lugar de JSON: SWC no copia `.json` a dist, por lo que un
+ * `require('./x.json')` o `import x from './x.json'` falla en runtime.
+ * Un módulo `.ts` con `export default { ... }` se compila junto con el resto
+ * del código y no requiere copia de assets en build.
  *
  * Uso:
  *   ts-node scripts/sync-print-geometry.ts
@@ -27,20 +32,19 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const ROOT = process.cwd();
-const CANONICAL = path.join(ROOT, 'libs/print-formats/schemas/page-geometry.json');
+const CANONICAL = path.join(ROOT, 'libs/print-formats/schemas/geometry-data.ts');
 
 const TARGETS = [
-  path.join(ROOT, 'apps/backend/src/domains/store/print-formats/lib/page-geometry.json'),
-  path.join(ROOT, 'apps/frontend/src/app/core/lib/page-geometry.json'),
-  path.join(ROOT, 'apps/mobile/src/shared/print/lib/page-geometry.json'),
+  path.join(ROOT, 'apps/backend/src/domains/store/print-formats/lib/geometry-data.ts'),
+  path.join(ROOT, 'apps/frontend/src/app/core/lib/geometry-data.ts'),
+  path.join(ROOT, 'apps/mobile/src/shared/print/lib/geometry-data.ts'),
 ];
 
 function readCanonical(): string {
   if (!fs.existsSync(CANONICAL)) {
-    console.error(`[sync-print-geometry] FATAL: canonical JSON missing at ${CANONICAL}`);
+    console.error(`[sync-print-geometry] FATAL: canonical TS missing at ${CANONICAL}`);
     process.exit(1);
   }
-  // Read as utf-8 text so we can copy byte-for-byte (preserves the `_about` field).
   return fs.readFileSync(CANONICAL, 'utf8');
 }
 
@@ -49,8 +53,6 @@ function writeTarget(target: string, content: string): void {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  // Write EXACTLY the same bytes — no JSON re-serialisation (would re-order
-  // keys and add platform-specific formatting that prettier would diff).
   fs.writeFileSync(target, content, 'utf8');
 }
 
@@ -72,7 +74,6 @@ function main(): void {
     writeTarget(t, content);
     console.log(`[sync-print-geometry] wrote ${path.relative(ROOT, t)}`);
   }
-  // Self-check: re-read every target and assert byte-equal to canonical.
   const ok = verifyAllMatch(TARGETS, content);
   if (!ok) {
     console.error('[sync-print-geometry] FATAL: drift detected post-sync.');

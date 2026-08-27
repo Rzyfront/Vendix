@@ -15,7 +15,9 @@
  * `css_page_size`) so nothing else in the app has to change.
  */
 
-import pageGeometryJson from './page-geometry.json';
+import pageGeometryJson from './geometry-data';
+
+const raw: Record<string, PaperGeometry> = pageGeometryJson as Record<string, PaperGeometry>;
 
 /** Wire shape of the canonical JSON. */
 export interface PaperGeometry {
@@ -35,7 +37,13 @@ export type PaperFormat =
   | 'half_letter';
 
 const CANONICAL: Readonly<Record<PaperFormat, PaperGeometry>> =
-  pageGeometryJson as Readonly<Record<PaperFormat, PaperGeometry>>;
+  Object.freeze(
+    Object.fromEntries(
+      Object.entries(raw)
+        .filter(([k]) => k !== '_about')
+        .map(([k, v]) => [k, v as PaperGeometry]),
+    ) as Record<PaperFormat, PaperGeometry>,
+  );
 
 /** Canonical shape — exported as `PAPER_GEOMETRY` for new code paths. */
 export const PAPER_GEOMETRY: Readonly<Record<PaperFormat, PaperGeometry>> =
