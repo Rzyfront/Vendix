@@ -223,8 +223,9 @@ import type { DivisaSectionPaths } from '../../../../../../shared/components/inv
 import {
   FISCAL_INVOICE_FORMAT_TYPE,
   InvoiceSectionFormatoComponent,
+  InvoiceSectionNotasComponent,
 } from '../../../../../../shared/components/invoice-sections/index';
-import type { FormatoSectionPaths } from '../../../../../../shared/components/invoice-sections/index';
+import type { FormatoSectionPaths, NotasSectionPaths } from '../../../../../../shared/components/invoice-sections/index';
 import { InvoiceTaxCatalogService } from '../../components/invoice-create/invoice-tax-catalog.service';
 import {
   InvoiceAiuSettings,
@@ -811,6 +812,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     InvoiceSectionRetencionesComponent,
     InvoiceSectionDivisaComponent,
     InvoiceSectionFormatoComponent,
+    InvoiceSectionNotasComponent,
     ModalComponent,
   ],
   template: `
@@ -2073,6 +2075,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   variant="outline"
                   size="sm"
                   type="button"
+                  aria-label="Aplicar cuenta contable a todas las líneas"
                   (clicked)="applyDefaultAccountCode()"
                 >
                   Aplicar a todas
@@ -2140,6 +2143,24 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               [storeTemplateSaving]="storeTemplateSaving()"
               (templateSelectionChange)="onStoreTemplateSelected($event)"
             ></vendix-invoice-section-formato>
+          </vendix-invoice-form-section>
+
+          <!-- ── NOTAS INTERNAS ────────────────────────────────── -->
+          <!-- B.7: misma sustitución — el par Descripción/Nota
+               interna vive ahora en el componente compartido. -->
+          <vendix-invoice-form-section
+            title="Notas internas"
+            [help]="help('notas_internas')"
+            icon="sticky-note"
+            [optional]="true"
+            [expanded]="isSectionOpen('notas_internas')"
+            (expandedChange)="setSection('notas_internas', $event)"
+          >
+            <vendix-invoice-section-notas
+              context="invoice"
+              [form]="invoiceForm"
+              [paths]="notasSectionPaths"
+            ></vendix-invoice-section-notas>
           </vendix-invoice-form-section>
 
           <!-- Totales: siempre visibles, nunca dentro de una sección plegada -->
@@ -3821,6 +3842,17 @@ export class InvoiceCreatePageComponent implements OnInit {
     due_date: 'due_date',
     notes: 'notes',
     header_notes: null,
+  };
+
+  // ── La sección Notas internas compartida (B.7) ─────────────────
+  //
+  // En la factura los controles son `null`: el DTO de creación no declara
+  // `internal_note` ni `description`, así que el componente compartido pinta
+  // el párrafo informativo en lugar de los campos. Ver el docblock de
+  // `invoice-section-notas.component.ts`.
+  readonly notasSectionPaths: NotasSectionPaths = {
+    description: null,
+    internal_note: null,
   };
 
   /**
