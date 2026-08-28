@@ -6,6 +6,7 @@ import {
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTemplateCompilerService } from './print-template-compiler.service';
 import { getPaperGeometry, PaperFormat } from '../lib/page-geometry';
+import { resolvePaperDefinition } from '../print-templates/paper-defaults';
 import { FISCAL_FORMATS } from './print-fiscal-validator.service';
 
 @Injectable()
@@ -667,6 +668,14 @@ export class PrintLayoutComposerService {
     // falla para `thermal_80` (que necesita `80mm auto`). El lookup nos da
     // siempre el `css_page_size` canónico. Para `custom` caemos a la
     // expresión `${width_mm}mm ${height_mm}mm` del pliego declarado.
+    //
+    // E.11 slice 2 — paso 8 del plan de cierre: el composer lee PAPER_DEFINITIONS
+    // (vía `resolvePaperDefinition`), no `page-geometry.ts`. PAPER_DEFINITIONS es la
+    // fuente única: el renderBuffer ya consume de aquí (`fiscal-invoice-pdf-render.
+    // service.ts:358`); los `width_mm` del composer pasan a coincidir bit a bit con
+    // los del PDF (216 vs 215.9 mm en letter — ver `paper-definitions.ts`, tabla
+    // de divergencias conocidas). `getPaperGeometry` queda como DEPRECATED para
+    // consumidores que ya no lean de aquí.
     let pageSize: string;
     if (paper.format === 'custom') {
       const w = Number(paper.width_mm) || 80;
@@ -674,11 +683,18 @@ export class PrintLayoutComposerService {
       pageSize = `${w}mm ${h}mm`;
     } else {
       try {
-        pageSize = getPaperGeometry(paper.format as PaperFormat).css_page_size;
+        pageSize = resolvePaperDefinition(paper.format).css_page_size;
       } catch {
         // PAPER_DEFINITIONS no conoce el formato (p.ej. `custom` ya filtrado).
-        // Roll-paper fallback: emite `${width_mm}mm auto`.
-        pageSize = paper.is_roll ? `${paper.width_mm}mm auto` : paper.format;
+        // Roll-paper fallback: emite `${width_mm}mm auto`. Si el formato
+        // existe en `page-geometry.ts` pero NO en PAPER_DEFINITIONS, lo
+        // aceptamos para no romper consumidores legacy — pero el log de
+        // arriba deja la divergencia visible.
+        try {
+          pageSize = getPaperGeometry(paper.format as PaperFormat).css_page_size;
+        } catch {
+          pageSize = paper.is_roll ? `${paper.width_mm}mm auto` : paper.format;
+        }
       }
     }
     const margin = maxMargin > 0 ? `${maxMargin}mm` : '0';
