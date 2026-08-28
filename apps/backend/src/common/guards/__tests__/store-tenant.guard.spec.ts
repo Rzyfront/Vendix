@@ -1,22 +1,29 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ExecutionContext, CallHandler } from '@nestjs/common';
-import { of } from 'rxjs';
+import { ExecutionContext } from '@nestjs/common';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
-import { StoreTenantInterceptor } from '../store-tenant.interceptor';
+import { StoreTenantGuard } from '../store-tenant.guard';
 import { VendixHttpException } from '../../errors';
 
 /**
  * CP-DTLP-20260827 — IDOR fix (H-1) regression coverage.
  *
- * The interceptor MUST refuse any `x-store-id` whose owning `organization_id`
+ * The guard MUST refuse any `x-store-id` whose owning `organization_id`
  * differs from the JWT's `organization_id`, and MUST let everything else
- * through. These four cases are the minimal matrix that proves the gate.
+ * through. These five cases are the minimal matrix that proves the gate.
+ *
+ * Note: this was originally an Interceptor (`StoreTenantInterceptor`). On
+ * 2026-08-28 it was discovered that wrapping `next.handle()` in
+ * `switchMap` over a Prisma promise breaks the AsyncLocalStorage scope set
+ * up by `RequestContextInterceptor` — `ROLE_SCOPE_003` was thrown for
+ * every request hitting the print-formats controller. The fix is to make
+ * this a Guard with async `canActivate` so the Prisma lookup happens in
+ * the guard's own Promise context, never inside the interceptor chain.
  */
-describe('StoreTenantInterceptor (CP-DTLP H-1 IDOR gate)', () => {
+describe('StoreTenantGuard (CP-DTLP H-1 IDOR gate)', () => {
   const JWT_ORG_ID = 42;
   const OTHER_ORG_ID = 99;
 
-  let interceptor: StoreTenantInterceptor;
+  let guard: StoreTenantGuard;
   let prisma: {
     stores: { findUnique: jest.Mock };
   };
@@ -24,7 +31,7 @@ describe('StoreTenantInterceptor (CP-DTLP H-1 IDOR gate)', () => {
   /**
    * Build a minimal Nest ExecutionContext stub. We only need
    * `switchToHttp().getRequest()` to return our fake request, which is what
-   * the interceptor actually reads.
+   * the guard actually reads.
    */
   function makeContext(req: any): ExecutionContext {
     return {
@@ -43,11 +50,6 @@ describe('StoreTenantInterceptor (CP-DTLP H-1 IDOR gate)', () => {
     } as unknown as ExecutionContext;
   }
 
-  function makeNext(): CallHandler & { handle: jest.Mock } {
-    const handle = jest.fn(() => of('downstream-ok')) as any;
-    return { handle } as any;
-  }
-
   beforeEach(async () => {
     prisma = {
       stores: { findUnique: jest.fn() },
@@ -55,52 +57,38 @@ describe('StoreTenantInterceptor (CP-DTLP H-1 IDOR gate)', () => {
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
-        StoreTenantInterceptor,
+        StoreTenantGuard,
         { provide: GlobalPrismaService, useValue: prisma },
       ],
     }).compile();
 
-    interceptor = moduleRef.get(StoreTenantInterceptor);
+    guard = moduleRef.get(StoreTenantGuard);
   });
 
-  it('passes through when x-store-id is missing (DTO/ValidationPipe owns shape errors)', async () => {
-    const next = makeNext();
+  it('returns true when x-store-id is missing (DTO/ValidationPipe owns shape errors)', async () => {
     const ctx = makeContext({
       headers: {},
       user: { id: 7, organization_id: JWT_ORG_ID },
     });
 
-    const result = await new Promise((resolve, reject) => {
-      interceptor.intercept(ctx, next).subscribe({
-        next: resolve,
-        error: reject,
-      });
-    });
+    const result = await guard.canActivate(ctx);
 
-    expect(result).toBe('downstream-ok');
-    expect(next.handle).toHaveBeenCalledTimes(1);
+    expect(result).toBe(true);
     expect(prisma.stores.findUnique).not.toHaveBeenCalled();
   });
 
-  it('passes through when x-store-id matches the JWT organization', async () => {
+  it('returns true when x-store-id matches the JWT organization', async () => {
     prisma.stores.findUnique.mockResolvedValue({
       organization_id: JWT_ORG_ID,
     });
-    const next = makeNext();
     const ctx = makeContext({
       headers: { 'x-store-id': '5' },
       user: { id: 7, organization_id: JWT_ORG_ID },
     });
 
-    const result = await new Promise((resolve, reject) => {
-      interceptor.intercept(ctx, next).subscribe({
-        next: resolve,
-        error: reject,
-      });
-    });
+    const result = await guard.canActivate(ctx);
 
-    expect(result).toBe('downstream-ok');
-    expect(next.handle).toHaveBeenCalledTimes(1);
+    expect(result).toBe(true);
     expect(prisma.stores.findUnique).toHaveBeenCalledWith({
       where: { id: 5 },
       select: { organization_id: true },
@@ -111,74 +99,50 @@ describe('StoreTenantInterceptor (CP-DTLP H-1 IDOR gate)', () => {
     prisma.stores.findUnique.mockResolvedValue({
       organization_id: OTHER_ORG_ID,
     });
-    const next = makeNext();
     const ctx = makeContext({
       headers: { 'x-store-id': '5' },
       user: { id: 7, organization_id: JWT_ORG_ID },
     });
 
-    let caught: unknown;
+    await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(
+      VendixHttpException,
+    );
     try {
-      await new Promise((resolve, reject) => {
-        interceptor.intercept(ctx, next).subscribe({
-          next: resolve,
-          error: reject,
-        });
-      });
+      await guard.canActivate(ctx);
+      fail('expected throw');
     } catch (e) {
-      caught = e;
+      const ex = e as VendixHttpException;
+      expect(ex.errorCode).toBe('PRINT_RENDER_TENANT_MISMATCH_001');
+      expect(ex.getStatus()).toBe(403);
     }
-
-    expect(caught).toBeInstanceOf(VendixHttpException);
-    const ex = caught as VendixHttpException;
-    expect(ex.errorCode).toBe('PRINT_RENDER_TENANT_MISMATCH_001');
-    expect(ex.getStatus()).toBe(403);
-    expect(next.handle).not.toHaveBeenCalled();
   });
 
   it('throws STORE_FIND_001 when the store does not exist', async () => {
     prisma.stores.findUnique.mockResolvedValue(null);
-    const next = makeNext();
     const ctx = makeContext({
       headers: { 'x-store-id': '5' },
       user: { id: 7, organization_id: JWT_ORG_ID },
     });
 
-    let caught: unknown;
     try {
-      await new Promise((resolve, reject) => {
-        interceptor.intercept(ctx, next).subscribe({
-          next: resolve,
-          error: reject,
-        });
-      });
+      await guard.canActivate(ctx);
+      fail('expected throw');
     } catch (e) {
-      caught = e;
+      const ex = e as VendixHttpException;
+      expect(ex.errorCode).toBe('STORE_FIND_001');
+      expect(ex.getStatus()).toBe(404);
     }
-
-    expect(caught).toBeInstanceOf(VendixHttpException);
-    const ex = caught as VendixHttpException;
-    expect(ex.errorCode).toBe('STORE_FIND_001');
-    expect(ex.getStatus()).toBe(404);
-    expect(next.handle).not.toHaveBeenCalled();
   });
 
   it('does NOT query the DB when x-store-id is a non-numeric string (shape error is DTO/ValidationPipe concern)', async () => {
-    const next = makeNext();
     const ctx = makeContext({
       headers: { 'x-store-id': 'not-a-number' },
       user: { id: 7, organization_id: JWT_ORG_ID },
     });
 
-    const result = await new Promise((resolve, reject) => {
-      interceptor.intercept(ctx, next).subscribe({
-        next: resolve,
-        error: reject,
-      });
-    });
+    const result = await guard.canActivate(ctx);
 
-    expect(result).toBe('downstream-ok');
-    expect(next.handle).toHaveBeenCalledTimes(1);
+    expect(result).toBe(true);
     expect(prisma.stores.findUnique).not.toHaveBeenCalled();
   });
 });

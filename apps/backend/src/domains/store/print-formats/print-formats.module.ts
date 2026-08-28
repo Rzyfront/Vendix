@@ -7,7 +7,7 @@ import { S3Module } from '../../../common/services/s3.module';
 // `PrintFormatsController` so only the write-surface that reads `x-store-id`
 // pays the extra lookup. Library/CRUD endpoints don't carry the header and
 // stay unguarded.
-import { StoreTenantInterceptor } from '@common/middleware/store-tenant.interceptor';
+import { StoreTenantGuard } from '@common/guards/store-tenant.guard';
 
 // Controllers
 import { PrintFormatsController } from './controllers/print-formats.controller';
@@ -93,7 +93,7 @@ import { WithholdingEmployeeCertificateDataProvider } from './providers/withhold
   providers: [
     ResponseService,
     QrService,
-    StoreTenantInterceptor,
+    StoreTenantGuard,
     PrintFormatsService,
     PrintGatewayService,
     PrintTemplateCompilerService,

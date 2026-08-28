@@ -21,7 +21,7 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 // whose `x-store-id` belongs to a different organization than the JWT.
 // Mounted at controller scope so the library/CRUD endpoints that do NOT
 // read `x-store-id` keep their original behaviour.
-import { StoreTenantInterceptor } from '@common/middleware/store-tenant.interceptor';
+import { StoreTenantGuard } from '@common/guards/store-tenant.guard';
 import { PrintFormatsService } from '../services/print-formats.service';
 import { PrintGatewayService } from '../services/print-gateway.service';
 // [print-editor-dsk P3.1] — Servicio que alimenta el picker de
@@ -35,8 +35,7 @@ import { RenderPrintDocumentDto } from '../dto/print-render.dto';
 
 @ApiTags('Store Print Formats Hub')
 @Controller('store/print-formats')
-@UseGuards(PermissionsGuard)
-@UseInterceptors(StoreTenantInterceptor)
+@UseGuards(PermissionsGuard, StoreTenantGuard)
 export class PrintFormatsController {
   constructor(
     private readonly printFormatsService: PrintFormatsService,
