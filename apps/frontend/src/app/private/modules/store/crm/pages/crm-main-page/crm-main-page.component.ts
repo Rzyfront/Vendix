@@ -1,4 +1,6 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal, DestroyRef } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { interval, switchMap, take, takeWhile } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { CrmService } from '../../services/crm.service';
 import {
@@ -32,6 +34,7 @@ type CrmTab = 'estado' | 'diseno';
 export class CrmMainPageComponent {
   private readonly crmService = inject(CrmService);
   private readonly toast = inject(ToastService);
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly landing = signal<CrmLandingState | null>(null);
   readonly loading = signal(false);
@@ -50,10 +53,8 @@ export class CrmMainPageComponent {
 
   readonly hasDraft = computed(() => !!this.landing()?.content_json);
 
-  /** Documento que alimenta el editor: pendiente local o draft del backend. */
-  readonly editorDocument = computed<CrmLandingDocument | null>(() => {
-    const pending = this.pendingDocument();
-    if (pending) return pending;
+  /** Documento que alimenta el editor: proviene exclusivamente del backend tras cargar/guardar/publicar. */
+  readonly serverDocument = computed<CrmLandingDocument | null>(() => {
     const content = this.landing()?.content_json;
     if (content && typeof content === 'object') {
       return content as CrmLandingDocument;
@@ -89,7 +90,7 @@ export class CrmMainPageComponent {
   }
 
   saveDraft(): void {
-    const doc = this.pendingDocument() ?? this.editorDocument();
+    const doc = this.pendingDocument() ?? this.serverDocument();
     if (!doc) return;
     this.busy.set(true);
     this.crmService.saveDraft(doc).subscribe({
@@ -107,9 +108,11 @@ export class CrmMainPageComponent {
   }
 
   publish(): void {
-    if (this.pendingDocument()) {
+    this.busy.set(true);
+    const pending = this.pendingDocument();
+    if (pending) {
       // Guardar y publicar en dos pasos explícitos: primero persistir.
-      this.crmService.saveDraft(this.pendingDocument()!).subscribe({
+      this.crmService.saveDraft(pending).subscribe({
         next: (res) => {
           this.landing.set(res.data);
           this.pendingDocument.set(null);
@@ -173,16 +176,25 @@ export class CrmMainPageComponent {
 
   /**
    * Poll ligero del job de generación mientras la página está abierta:
-   * termina cuando el estado deja de ser pending/generating o tras ~2 min
-   * (presupuesto mayor al retry del backend).
+   * termina cuando el estado deja de ser pending/generating, tras ~2 min
+   * (presupuesto mayor al retry del backend), o al desmontar el componente.
    */
-  private pollGeneration(jobId?: string | null, attempts = 0): void {
-    if (!jobId || attempts > 40) {
+  private pollGeneration(jobId?: string | null): void {
+    if (!jobId) {
       this.loadLanding();
       return;
     }
-    setTimeout(() => {
-      this.crmService.getGenerationJobStatus(jobId).subscribe({
+    interval(3000)
+      .pipe(
+        take(40),
+        takeUntilDestroyed(this.destroyRef),
+        switchMap(() => this.crmService.getGenerationJobStatus(jobId)),
+        takeWhile((res) => {
+          const status = res.data?.status;
+          return status !== 'completed' && status !== 'failed';
+        }, true),
+      )
+      .subscribe({
         next: (res) => {
           const status = res.data?.status;
           if (status === 'completed' || status === 'failed') {
@@ -195,13 +207,10 @@ export class CrmMainPageComponent {
                 res.data?.error || 'La generación terminó con error',
               );
             }
-          } else {
-            this.pollGeneration(jobId, attempts + 1);
           }
         },
         error: () => this.loadLanding(),
       });
-    }, 3000);
   }
 
   regenerate(): void {

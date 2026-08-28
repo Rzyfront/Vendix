@@ -65,8 +65,12 @@ export class CrmEditorComponent {
 
   private resetFromDocument(document: CrmLandingDocument | null): void {
     const source = document ?? emptyCrmLandingDocument();
-    this.blocks.set(source.blocks.map((b) => ({ ...b, props: { ...b.props } })));
-    this.selectedIndex.set(null);
+    const newBlocks = source.blocks.map((b) => ({ ...b, props: { ...b.props } }));
+    this.blocks.set(newBlocks);
+    const currentIndex = this.selectedIndex();
+    if (currentIndex != null && currentIndex >= newBlocks.length) {
+      this.selectedIndex.set(null);
+    }
   }
 
   private emitDocument(): void {
