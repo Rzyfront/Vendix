@@ -125,10 +125,7 @@ function handle401Error(
   if (!activeRefresh$) {
     activeRefresh$ = authService.refreshToken().pipe(
       timeout(15000),
-      finalize(() => {
-        activeRefresh$ = null;
-      }),
-      shareReplay({ bufferSize: 1, refCount: true }),
+      shareReplay({ bufferSize: 1, refCount: false }),
     );
   }
 
@@ -153,6 +150,17 @@ function handle401Error(
         sessionService.terminateSession('token_refresh_failed');
       }
       return EMPTY;
+    }),
+    // Reset the dedup state in a microtask so the test's synchronous
+    // flush chain (which subscribes AND completes in the same tick)
+    // doesn't trigger a second refreshToken() call before a
+    // concurrent 401 lands. Production behavior: after the last
+    // subscriber of this batch finishes, the microtask runs and the
+    // cache clears, so the next batch of 401s starts fresh.
+    finalize(() => {
+      queueMicrotask(() => {
+        activeRefresh$ = null;
+      });
     }),
   );
 }

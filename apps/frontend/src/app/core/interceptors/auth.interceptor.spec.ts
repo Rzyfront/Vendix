@@ -239,7 +239,7 @@ describe('authInterceptorFn', () => {
       retryReq2.flush({ data: 'success2' });
     });
 
-    it('triggers a fresh refresh after the previous one completes (cache cleared)', () => {
+    it('triggers a fresh refresh after the previous one completes (cache cleared)', async () => {
       // Regression for the shareReplay-based dedup: the cached refresh
       // Observable is cleared via finalize() when refCount drops to 0.
       // A subsequent 401 (after the retry completed) must trigger a new
@@ -255,6 +255,9 @@ describe('authInterceptorFn', () => {
       const firstRetry = httpMock.expectOne(`${API}/test1`);
       firstRetry.flush({ data: 'ok' });
       expect(authServiceSpy.refreshToken).toHaveBeenCalledTimes(1);
+
+      // Wait for queueMicrotask in finalize to clear activeRefresh$
+      await Promise.resolve();
 
       // Second cycle: refreshToken now returns a different value. The
       // shareReplay cache should have cleared when both subscribers
