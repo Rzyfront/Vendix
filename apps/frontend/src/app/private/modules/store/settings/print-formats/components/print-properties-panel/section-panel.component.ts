@@ -124,7 +124,7 @@ const SECTION_TYPES: ReadonlyArray<string> = [
                 [ngModel]="s.custom_content ?? ''"
                 (ngModelChange)="updateCustomContent($event)"
                 class="w-full px-2 py-1 bg-surface-secondary border border-border rounded text-xs font-mono text-text-primary focus:border-primary-500 focus:outline-none"
-                placeholder="{{ path.to.field }}"
+                placeholder="path.to.field"
               ></textarea>
             </div>
           }

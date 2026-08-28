@@ -100,7 +100,7 @@ const TOKEN_DND_MIME = 'application/x-vendix-token';
               [style.z-index]="r.zIndex"
               [style.cursor]="r.id === selectedRegionId() ? 'move' : 'pointer'"
               appCanvasDrag
-              [handle]="r.id === activeResizeRegion() ? activeResizeHandle() : 'body'"
+              [handle]="getHandleFor(r.id)"
               (dragStart)="onDragStart($event, r)"
               (dragMove)="onDragMove($event, r)"
               (dragEnd)="onDragEnd(r)"
@@ -294,6 +294,19 @@ export class PrintCanvasComponent {
   readonly activeResizeRegion = (): string | null => this._activeResizeRegion();
   readonly activeResizeHandle = (): 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | null =>
     this._activeResizeHandle();
+
+  /**
+   * Compute the `handle` input for the drag directive on a given region.
+   * - 'body' for normal drag/move.
+   * - The active resize handle (nw/n/ne/...) when this region is being resized.
+   * Falls back to 'body' when no active resize is in progress.
+   */
+  readonly getHandleFor = (
+    regionId: string,
+  ): 'body' | 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' => {
+    if (this._activeResizeRegion() !== regionId) return 'body';
+    return this._activeResizeHandle() ?? 'body';
+  };
 
   constructor() {
     this._definitionSubject

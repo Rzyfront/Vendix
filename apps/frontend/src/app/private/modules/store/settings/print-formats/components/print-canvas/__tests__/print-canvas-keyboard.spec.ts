@@ -56,7 +56,7 @@ import { IconComponent } from '../../../../../../../../shared/components/icon/ic
   template: `
     <app-print-canvas
       [definition]="definition"
-      [selectedRegion]="region"
+      [selectedRegionId]="selectedRegionId"
       (regionSelected)="onRegionSelected($event)"
       (definitionChanged)="onDefinitionChanged($event)"
     ></app-print-canvas>
@@ -73,15 +73,15 @@ class HostComponent {
       { id: 'c2', key: 'qty', label: 'Cant.', enabled: true, width_percent: 40, align: 'right' },
     ],
   };
-  region: CanvasRegion | null = null;
-  lastEmittedRegion: CanvasRegion | null | undefined = undefined;
+  selectedRegionId: string | null = null;
+  lastEmittedRegion: string | null | undefined = undefined;
   lastDefinition: PrintFormatDefinition | null = null;
 
   @ViewChild(PrintCanvasComponent) canvas!: PrintCanvasComponent;
 
-  onRegionSelected(r: CanvasRegion | null): void {
-    this.lastEmittedRegion = r;
-    this.region = r;
+  onRegionSelected(id: string | null): void {
+    this.lastEmittedRegion = id;
+    this.selectedRegionId = id;
   }
   onDefinitionChanged(d: PrintFormatDefinition): void {
     this.lastDefinition = d;
@@ -104,9 +104,9 @@ describe('PrintCanvasComponent — keyboard handlers [print-editor-dsk P9]', () 
     canvas = host.canvas;
   });
 
-  /** Helper: set the host's `region` and propagate to the canvas input. */
+  /** Helper: set the host's `selectedRegionId` (input to canvas) from a region shape. */
   function setRegion(r: CanvasRegion | null): void {
-    host.region = r;
+    host.selectedRegionId = r ? r.id : null;
     fixture.detectChanges();
   }
 
