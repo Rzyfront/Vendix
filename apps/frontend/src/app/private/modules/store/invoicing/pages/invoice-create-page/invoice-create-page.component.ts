@@ -7843,8 +7843,16 @@ export class InvoiceCreatePageComponent implements OnInit {
       0,
     );
 
+    // Los dos modos del preview son EXCLUYENTES (ver `profile-preview.service.ts`
+    // y el docblock de `PreviewProfileDto`): si mando `lines` Y
+    // `contract_value`, el backend responde `422 INVOICING_PREVIEW_002`. La
+    // pantalla captura líneas explícitas → mando sólo `lines` (y `aiu_value`
+    // cuando AIU). Dejo `contract_value` calculado como diagnóstico local,
+    // pero no en el payload.
+    const lines_explicit = lines.length > 0;
+
     let aiu_value: number | undefined;
-    if (this.isAiu()) {
+    if (lines_explicit && this.isAiu()) {
       const admin = Number(aiu['administracion']) || 0;
       const imp = Number(aiu['imprevistos']) || 0;
       const ut = Number(aiu['utilidad']) || 0;
@@ -7859,10 +7867,14 @@ export class InvoiceCreatePageComponent implements OnInit {
     const customer_doc_type = (raw['customer_document_type'] as string | undefined)?.trim();
 
     return {
-      ...(contract_value > 0 ? { contract_value } : {}),
+      ...(lines_explicit
+        ? {}
+        : contract_value > 0
+        ? { contract_value }
+        : {}),
       ...(typeof aiu_value === 'number' ? { aiu_value } : {}),
       ...(contract_object ? { contract_object } : {}),
-      lines,
+      ...(lines_explicit ? { lines } : {}),
       ...(customer_name || customer_doc || customer_doc_type
         ? {
             customer: {
