@@ -17,6 +17,7 @@ export * from './invoice-section-field-map';
  * nombraran sus controles igual, que es justo lo que no ocurre—.
  */
 export * from './invoice-section-controls';
+export * from './account-defaults.resolver';
 export * from './invoice-section-aiu.logic';
 export * from './invoice-section-aiu.component';
 export * from './invoice-section-documento.component';

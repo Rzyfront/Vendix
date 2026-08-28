@@ -700,6 +700,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     'foreign_total_amount',
   ],
   contabilidad: [],
+  notas_internas: [],
 };
 
 /**
