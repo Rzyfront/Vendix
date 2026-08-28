@@ -2353,11 +2353,11 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
       que decide si la DIAN acepta o rechaza.
 
       No descarga nada, no persiste nada y NO toma consecutivo
-      (`PreviewNumberingGuard` lo protege). El número visible es «PREVIEW». El
+      ('PreviewNumberingGuard' lo protege). El número visible es «PREVIEW». El
       cuerpo del POST es el de la factura tal como está en el formulario: líneas
       capturadas, adquiriente, base AIU, componentes, objeto del contrato. Si
       el perfil está fijado, el preview refleja el snapshot VIVO del perfil
-      (`current_config`); si no, refleja el snapshot MANUAL del formulario.
+      ('current_config'); si no, refleja el snapshot MANUAL del formulario.
     -->
     <app-modal
       [isOpen]="printPreviewOpen()"
