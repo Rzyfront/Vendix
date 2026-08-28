@@ -3,12 +3,26 @@ import { DateRangeFilter } from './analytics.interface';
 // Sales Summary
 export interface SalesSummary {
   total_revenue: number;
+  /**
+   * IVA + consumption tax collected. Excluded from `total_revenue` (it's a
+   * liability, not income). Surfaced separately so the panel can show the tax
+   * collected this period while keeping the operating-revenue number clean.
+   */
+  total_taxes?: number;
+  /** Tips collected this period, surfaced for the same reason as taxes. */
+  total_tips?: number;
   total_orders: number;
   average_order_value: number;
   total_units_sold: number;
   total_customers: number;
-  revenue_growth?: number;
-  orders_growth?: number;
+  /**
+   * Growth as a percentage. `null` (NOT `0`) when the previous period is `0`,
+   * which means there is no comparable base. Frontends must render `null` as
+   * "—" or "sin base", never as "+0%". The `computeGrowth` helper in
+   * `analytics-metrics.contract.ts` enforces this convention server-side.
+   */
+  revenue_growth?: number | null;
+  orders_growth?: number | null;
 }
 
 // Sales by Product
