@@ -5593,6 +5593,14 @@ export const ErrorCodes = {
     devMessage:
       'Déjanos tu correo o tu teléfono para poder responderte.',
   },
+
+  // CRM Landing (QUI-719): intento de contacto sobre landing no publicada o desactivada.
+  CRM_LANDING_007: {
+    code: 'CRM_LANDING_007',
+    httpStatus: 404,
+    devMessage:
+      'La landing de esta tienda no está disponible para recibir mensajes de contacto.',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {

@@ -226,6 +226,29 @@ export class CrmPublicService {
     const storeId = context?.store_id;
     if (!storeId) throw new VendixHttpException(ErrorCodes.SYS_FORBIDDEN_001);
 
+    const landing = await this.prisma.crm_landing_pages.findFirst({
+      where: { store_id: storeId },
+      select: {
+        enabled: true,
+        published_json: true,
+      },
+    });
+
+    if (!landing?.enabled || !landing.published_json) {
+      throw new VendixHttpException(ErrorCodes.CRM_LANDING_007);
+    }
+
+    let publication: Record<string, unknown> | undefined;
+    try {
+      const settings = await this.settingsService.getSettings();
+      publication = settings?.publication as Record<string, unknown> | undefined;
+    } catch {
+      publication = undefined;
+    }
+    if (publication && publication.landing_enabled === false) {
+      throw new VendixHttpException(ErrorCodes.CRM_LANDING_007);
+    }
+
     const hasEmail = !!dto.email?.trim();
     const hasPhone = !!dto.phone?.trim();
     if (!hasEmail && !hasPhone) {
