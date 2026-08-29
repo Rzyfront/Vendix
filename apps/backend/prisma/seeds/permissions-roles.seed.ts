@@ -5049,6 +5049,13 @@ export async function seedPermissionsAndRoles(
     // (payments.controller.ts:245). ADR-2 declara "mesero SÍ cobra y parte
     // cuenta"; sin este permiso el mesero no puede cerrar el cobro de una mesa.
     'store:pos:access',
+    // CP-POLLO-ARABE-727 F.1 Round 3 (M-1) — el payment-collector carga el
+    // catálogo de métodos con `GET /store/payments/payment-methods`, que exige
+    // `store:settings:read` (payments.controller.ts:453). Sin él el mesero cae
+    // a métodos genéricos (sin custom_config.accounts) y la cuenta bancaria
+    // nunca se puebla en el cobro por transferencia — el fix del puente queda
+    // sin efecto real. El cashier ya tiene este permiso (2x en el seed).
+    'store:settings:read',
     // Disparar a cocina — `read` es necesario para `POST /kitchen-fire/preview`
     // (previewFire, kitchen-fire.controller.ts:82 exige `kitchen_fire:read`),
     // que el mesero llama ANTES de `fireOrderItems` (`kitchen_fire:create`) al
