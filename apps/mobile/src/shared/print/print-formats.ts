@@ -111,42 +111,13 @@ export const PRINT_DEFAULTS: Record<PrintDocument, PrintDocumentConfig> = {
  * POINTS rather than reading `@page`, so the millimetres have to be converted
  * (`mmToPoints`) and handed over explicitly. `null` marks a continuous roll —
  * the sheet grows with the content, so no height is imposed.
+ *
+ * [print-editor-dsk P1.6] Re-exportado del shim local `./lib/page-geometry`
+ * para mantener sincronía byte-a-byte con backend y frontend. La fuente única
+ * es `libs/print-formats/schemas/page-geometry.json` y el script
+ * `scripts/sync-print-geometry.ts` la copia a cada app.
  */
-export const PRINT_PAGE_GEOMETRY: Record<
-  PrintFormat,
-  {
-    page_size: string;
-    width_mm: number;
-    height_mm: number | null;
-    is_roll: boolean;
-  }
-> = {
-  letter: {
-    page_size: 'letter',
-    width_mm: 216,
-    height_mm: 279,
-    is_roll: false,
-  },
-  half_letter: {
-    page_size: '216mm 140mm',
-    width_mm: 216,
-    height_mm: 140,
-    is_roll: false,
-  },
-  a4: { page_size: 'A4', width_mm: 210, height_mm: 297, is_roll: false },
-  thermal_80: {
-    page_size: '80mm auto',
-    width_mm: 80,
-    height_mm: null,
-    is_roll: true,
-  },
-  thermal_58: {
-    page_size: '58mm auto',
-    width_mm: 58,
-    height_mm: null,
-    is_roll: true,
-  },
-};
+export { PRINT_PAGE_GEOMETRY } from './lib/page-geometry';
 
 /** PostScript points per millimetre (72 pt per inch, 25.4 mm per inch). */
 const POINTS_PER_MM = 72 / 25.4;

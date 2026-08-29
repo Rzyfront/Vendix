@@ -3,6 +3,11 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 import { ResponseService } from '@common/responses/response.service';
 import { QrService } from '../../../common/services/qr.service';
 import { S3Module } from '../../../common/services/s3.module';
+// CP-DTLP-20260827 — IDOR fix (H-1). Registered at controller scope on
+// `PrintFormatsController` so only the write-surface that reads `x-store-id`
+// pays the extra lookup. Library/CRUD endpoints don't carry the header and
+// stay unguarded.
+import { StoreTenantGuard } from '@common/guards/store-tenant.guard';
 
 // Controllers
 import { PrintFormatsController } from './controllers/print-formats.controller';
@@ -16,8 +21,38 @@ import { PrintLayoutComposerService } from './services/print-layout-composer.ser
 import { PrintFiscalValidatorService } from './services/print-fiscal-validator.service';
 // E.11 casilla 4 — motor PDF bajo demanda del gateway (builder pdfkit, sin S3).
 import { FiscalInvoicePdfRenderService } from './services/fiscal-invoice-pdf-render.service';
+// [print-editor-dsk P2.2] — Single render path service (replaces the
+// double-render srcdoc+doc.write pattern from `document-print.service.ts`).
+import { PrintDocumentRendererService } from './services/print-document-renderer.service';
+
+// [print-editor-dsk P9] — Prometheus instrumentation for the gateway.
+// Pure `prom-client` adapter, no DI deps; registered as a plain provider
+// so the gateway can inject it without a side-effect import. The service
+// does NOT register with the global `@willsoto/nestjs-prometheus` registry
+// here on purpose: it is a leaf metric owned by this module, and any
+// cross-module collector would be wired in `app.module.ts` instead.
+import { PrintGatewayMetricsService } from './services/print-gateway.metrics';
+
+// [print-editor-dsk P1.1] — AJV validator is loaded LAZILY by services that
+// need it (`print-formats.service.ts` calls `validatePrintFormatDefinition`
+// at request time). NO side-effect import here: an eager AJV compile at
+// module load would propagate any AJV/schema error into Nest's module
+// graph and break the entire boot. Loading on demand keeps the boot
+// resilient and the validator reusable from any other consumer (e.g.
+// the spec).
+
+// [print-editor-dsk P7] — Adapter registry: 11 frozen `FormatAdapter`
+// records keyed by `format_type`. Used by `print-formats.service.ts` to
+// reject `sections` that name regions a format doesn't allow (e.g.
+// `qr-block` on a non-fiscal `pos_sale_ticket`). Pure in-memory, no
+// DI dependencies, so a plain class registration is enough.
+import { FormatAdapterRegistryService } from './services/format-adapter-registry.service';
 
 // Providers & Registry
+// [print-editor-dsk P3.1] — Servicio que sirve el picker de documentos
+// recientes del editor (endpoint `GET /:formatType/documents`). Sin
+// registro, el provider del controller lanzaría DI al primer hit.
+import { DocumentIndexService } from './services/document-index.service';
 import { DocumentDataProviderRegistry } from './providers/document-data-provider.registry';
 import { PosSaleTicketDataProvider } from './providers/pos-sale-ticket.provider';
 import { SalesOrderInvoiceDataProvider } from './providers/sales-order-invoice.provider';
@@ -30,6 +65,15 @@ import { FiscalInvoiceDataProvider } from './providers/fiscal-invoice.provider';
 import { FiscalCreditNoteDataProvider } from './providers/fiscal-credit-note.provider';
 import { KitchenTicketDataProvider } from './providers/kitchen-ticket.provider';
 import { DispatchTicketDataProvider } from './providers/dispatch-ticket.provider';
+// [print-editor-dsk P8] — Cuatro providers nuevos: planilla de ruta DSD +
+// tres certificados de retención. El cast `as unknown as print_format_type_enum`
+// en sus `formatType` los mantiene en verde mientras `prisma generate` no haya
+// regenerado `@prisma/client` con los cuatro valores recién agregados al enum
+// de Postgres.
+import { DispatchRouteDataProvider } from './providers/dispatch-route.provider';
+import { WithholdingPracticedDataProvider } from './providers/withholding-practiced.provider';
+import { WithholdingSufferedDataProvider } from './providers/withholding-suffered.provider';
+import { WithholdingEmployeeCertificateDataProvider } from './providers/withholding-employee.provider';
 
 @Module({
   imports: [
@@ -49,13 +93,29 @@ import { DispatchTicketDataProvider } from './providers/dispatch-ticket.provider
   providers: [
     ResponseService,
     QrService,
+    StoreTenantGuard,
     PrintFormatsService,
     PrintGatewayService,
     PrintTemplateCompilerService,
     PrintLayoutComposerService,
     PrintFiscalValidatorService,
     FiscalInvoicePdfRenderService,
+    // [print-editor-dsk P9] — Prometheus service. No DI dependencies; the
+    // gateway injects it via constructor (see `print-gateway.service.ts`).
+    PrintGatewayMetricsService,
+    // [print-editor-dsk P2.2] — wired into `preview()` so the HTML the
+    // Hub/control-panel renders carries explicit pixel dimensions and a
+    // single, consistent `.vendix-print-page` container.
+    PrintDocumentRendererService,
+    // [print-editor-dsk P7] — Registry used by `print-formats.service.ts`
+    // for region-allowlist validation on overrides / template definitions.
+    FormatAdapterRegistryService,
     DocumentDataProviderRegistry,
+    // [print-editor-dsk P3.1] — Servicio del picker de documentos
+    // recientes. Sólo depende del registry (no de providers concretos),
+    // así que basta con registrarlo una vez y los once providers pasan
+    // a tener su `listRecent` disponible a través del servicio.
+    DocumentIndexService,
     PosSaleTicketDataProvider,
     SalesOrderInvoiceDataProvider,
     DispatchNoteDataProvider,
@@ -72,6 +132,11 @@ import { DispatchTicketDataProvider } from './providers/dispatch-ticket.provider
     // (`/store/print-formats/render` con dispatch_ticket) devolvería
     // PRINT_DATA_PROVIDER_MISSING_001 (ERR-03) en vez de 200.
     DispatchTicketDataProvider,
+    // [print-editor-dsk P8] — Providers 12–15: dispatch_route + 3 retenciones.
+    DispatchRouteDataProvider,
+    WithholdingPracticedDataProvider,
+    WithholdingSufferedDataProvider,
+    WithholdingEmployeeCertificateDataProvider,
   ],
   // BE-E5 (E.5): exportar `FiscalInvoicePdfRenderService` para que
   // `InvoiceDeliveryModule` (reenvío de facturas, `POST /:id/deliver`) pueda
@@ -104,6 +169,11 @@ export class PrintFormatsModule implements OnModuleInit {
     // (lo de arriba viene de commits previos; este queda al final
     // porque es el último en sumarse al Hub).
     private readonly dispatchTicketProvider: DispatchTicketDataProvider,
+    // [print-editor-dsk P8] — Cuatro providers más para onModuleInit.
+    private readonly dispatchRouteProvider: DispatchRouteDataProvider,
+    private readonly withholdingPracticedProvider: WithholdingPracticedDataProvider,
+    private readonly withholdingSufferedProvider: WithholdingSufferedDataProvider,
+    private readonly withholdingEmployeeCertificateProvider: WithholdingEmployeeCertificateDataProvider,
   ) {}
 
   onModuleInit() {
@@ -121,5 +191,10 @@ export class PrintFormatsModule implements OnModuleInit {
     // gateway devuelve 500 (PRINT_DATA_PROVIDER_MISSING_001) al pedir
     // `format_type: 'dispatch_ticket'`.
     this.registry.register(this.dispatchTicketProvider);
+    // [print-editor-dsk P8] — Providers 12–15 del Hub.
+    this.registry.register(this.dispatchRouteProvider);
+    this.registry.register(this.withholdingPracticedProvider);
+    this.registry.register(this.withholdingSufferedProvider);
+    this.registry.register(this.withholdingEmployeeCertificateProvider);
   }
 }

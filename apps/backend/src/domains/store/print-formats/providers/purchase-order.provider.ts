@@ -3,6 +3,7 @@ import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
+import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 
@@ -170,5 +171,42 @@ export class PurchaseOrderDataProvider implements IDocumentDataProvider {
       { token: '{{supplier.tax_id}}', path: 'supplier.tax_id', description: 'NIT del proveedor', example: '890.100.200-5' },
       { token: '{{totals.grand_total}}', path: 'totals.grand_total_formatted', description: 'Monto total de la compra', example: '$5.400.000' },
     ];
+  }
+
+  /**
+   * [print-editor-dsk P3.1] — Órdenes de compra. La columna `order_number`
+   * es la visible al usuario; el id interno es el que recibe `fetchDocumentData`.
+   * Orden por `created_at desc` para mantener el orden temporal esperado.
+   */
+  async listRecent(
+    storeId: number,
+    limit: number,
+  ): Promise<RecentDocumentSummary[]> {
+    const rows = await this.prisma.purchase_orders.findMany({
+      where: { store_id: storeId },
+      orderBy: { created_at: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        order_number: true,
+        created_at: true,
+        total_amount: true,
+      },
+    });
+    const fmt = new Intl.DateTimeFormat('es-CO', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
+    const cop = new Intl.NumberFormat('es-CO', {
+      style: 'currency',
+      currency: 'COP',
+      maximumFractionDigits: 0,
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      number: String(r.order_number),
+      date_formatted: r.created_at ? fmt.format(new Date(r.created_at)) : '',
+      total_formatted: cop.format(Number(r.total_amount || 0)),
+    }));
   }
 }

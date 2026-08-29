@@ -46,6 +46,62 @@ import { PrintFormat } from '../../settings/interfaces/store-settings.interface'
  * que es la decisión E.11 («builder pdfkit como motor, no como esclavo»).
  */
 
+/**
+ * TABLA DE CORRESPONDENCIA builder↔registry (E.11 slice 2 — paso 7).
+ *
+ * El motor de dibujo (`InvoicePdfBuilder` en `apps/backend/src/domains/store/
+ * invoicing/services/invoice-pdf.builder.ts`) decide su composición a partir
+ * de campos que ESTA tabla expone con nombre distinto. La tabla documenta
+ * cada equivalencia para que la paridad numérica del paso 9 sea legible sin
+ * tener que abrir el builder: cada cifra de `PAPER_DEFINITIONS` es lo mismo
+ * que una constante del builder, traducida a mm.
+ *
+ * | Sección del PDF         | Campo del builder              | Campo en PAPER_DEFINITIONS  |
+ * |-------------------------|--------------------------------|-----------------------------|
+ * | Cabecera (emisor, NIT)  | `InvoicePdfBuilder.head()`     | `margin_mm`                 |
+ * | Adquiriente             | `InvoicePdfBuilder.body()`     | `margin_mm`                 |
+ * | Líneas / items          | `InvoicePdfBuilder.lineTable()`| `font_scale` (× pt base)    |
+ * | Totales                 | `InvoicePdfBuilder.totals()`   | `margin_mm`                 |
+ * | Retenciones             | `InvoicePdfBuilder.ret()`      | `margin_mm`                 |
+ * | QR §11.7                | `InvoicePdfBuilder.qrStamp()`  | `qr_min_side_mm`, `qr_stamp_band_mm` |
+ * | CUFE                    | `InvoicePdfBuilder.cufe()`     | `margin_mm`                 |
+ * | Pie / firma             | `InvoicePdfBuilder.footer()`   | `margin_mm`, `requires_multipage_qr_band` |
+ *
+ * ## Decisiones geométricas por papel
+ *
+ * Cada papel tiene un comportamiento de builder DISTINTO:
+ *
+ * | `code`           | `width_mm` | `is_roll` | `double_pass` | `multipage_qr_band` | Builder path                       |
+ * |------------------|-----------:|-----------|---------------|---------------------|------------------------------------|
+ * | `letter`         | 215.9      | false     | false         | true                | single-pass, reserva pie 25.64 mm  |
+ * | `a4`             | 210.0      | false     | false         | true                | single-pass, reserva pie 25.64 mm  |
+ * | `half_letter`    | 215.9      | false     | false         | true                | single-pass, reserva pie 25.64 mm  |
+ * | `thermal_80`     | 80         | true      | true          | false               | sonda 20000pt → corte              |
+ * | `thermal_58`     | 58         | true      | true          | false               | sonda 20000pt → corte              |
+ *
+ * ## Divergencias conocidas entre el registry y `page-geometry.json`
+ *
+ * `lib/page-geometry.ts` (sincronizado de `libs/print-formats/schemas/
+ * page-geometry.json`) tiene copias de `width_mm` y `css_page_size` para
+ * los 5 papeles. Las dos son consistentes en `is_roll` y `css_page_size`
+ * básico pero DIFIEREN en `width_mm`:
+ *
+ * - `letter`: registry 215.9 mm · page-geometry 216 mm (0.1 mm de
+ *   redondeo; el registry usa el valor físico real — un pliego carta mide
+ *   exactamente 215.9 mm).
+ * - `half_letter`: registry 215.9 mm · page-geometry 216 mm (igual).
+ * - `css_page_size`: registry «letter» / «A4» / «216mm 140mm», page-geometry
+ *   «letter portrait» / «A4 portrait» / «216mm 140mm». La forma corta y la
+ *   larga son equivalentes para `@page` CSS; el registry elige la corta para
+ *   evitar el sufijo redundante.
+ *
+ * El paso 8 del plan cierra esto: el CONSUMER (`print-layout-composer`)
+ * deja de leer `page-geometry.ts` y pasa por `getPaperDefinition` /
+ * `resolvePaperDefinition` de este archivo, que es el valor canónico. La
+ * copia sincronizada queda como DEPRECATED para consumidores que ya no lean
+ * de aquí — pero no se borra todavía porque la consumen frontend y mobile.
+ */
+
 /** Anexo Técnico 1.9 §11.7 — lado mínimo del QR en la impresión. */
 export const QR_MIN_SIDE_MM = 20;
 

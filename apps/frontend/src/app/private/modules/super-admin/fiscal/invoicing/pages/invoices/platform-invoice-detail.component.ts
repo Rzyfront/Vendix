@@ -6,7 +6,14 @@ import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../../../../../../environments/environment';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import {
+  AlertBannerComponent,
   ButtonComponent,
+  ConfirmationModalComponent,
+  InputComponent,
+  ModalComponent,
+  ResponsiveDataViewComponent,
+  SelectorComponent,
+  TableColumn,
 } from '../../../../../../../shared/components';
 import { CurrencyPipe as VendixCurrencyPipe } from '../../../../../../../shared/pipes/currency';
 import {
@@ -151,7 +158,13 @@ interface SubscriptionInvoiceDetail {
     RouterLink,
     VendixCurrencyPipe,
     DatePipe,
+    AlertBannerComponent,
     ButtonComponent,
+    ConfirmationModalComponent,
+    InputComponent,
+    ModalComponent,
+    ResponsiveDataViewComponent,
+    SelectorComponent,
   ],
   template: `
     <div class="p-6 max-w-5xl mx-auto">
@@ -163,7 +176,7 @@ interface SubscriptionInvoiceDetail {
       @if (loading()) {
         <p class="mt-4 text-sm text-gray-500">Cargando factura…</p>
       } @else if (errorMessage(); as msg) {
-        <p class="mt-4 text-sm text-red-600">{{ msg }}</p>
+        <app-alert-banner variant="danger" class="mt-4">{{ msg }}</app-alert-banner>
       } @else if (data(); as d) {
         <h2 class="mt-4 text-2xl font-semibold text-gray-900">
           Factura {{ d.invoice.invoice_number }}
@@ -266,42 +279,15 @@ interface SubscriptionInvoiceDetail {
         @if (invoiceSnapshot()?.items && invoiceSnapshot()!.items!.length > 0) {
           <section class="mt-6 bg-white rounded-lg shadow p-4">
             <h2 class="font-semibold text-gray-900 mb-3">Líneas</h2>
-            <table class="w-full text-sm">
-              <thead>
-                <tr class="text-left text-xs text-gray-500 border-b">
-                  <th>Descripción</th>
-                  <th class="text-right">Cant</th>
-                  <th class="text-right">Precio</th>
-                  <th class="text-right">Desc</th>
-                  <th>Impuestos</th>
-                  <th>AIU</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (line of invoiceSnapshot()!.items!; track $index) {
-                  <tr class="border-b">
-                    <td class="py-2">{{ line.description }}</td>
-                    <td class="text-right">{{ line.quantity }}</td>
-                    <td class="text-right">{{ line.unit_price }}</td>
-                    <td class="text-right">
-                      @if (line.discount_amount) { {{ line.discount_amount }} }
-                    </td>
-                    <td class="text-xs">
-                      @if (line.taxes && line.taxes.length > 0) {
-                        @for (t of line.taxes; track $index) {
-                          <div>
-                            {{ t.tax_type }} {{ (+t.rate * 100).toFixed(2) }}%
-                            @if (t.is_inclusive) { (i) }
-                            @if (t.tax_amount !== undefined) { = {{ t.tax_amount }} }
-                          </div>
-                        }
-                      } @else { — }
-                    </td>
-                    <td class="text-xs">{{ line.aiu_component ?? '—' }}</td>
-                  </tr>
-                }
-              </tbody>
-            </table>
+            <app-responsive-data-view
+              [data]="invoiceSnapshot()!.items!"
+              [columns]="lineColumns"
+              [cardConfig]="lineCardConfig"
+              [actions]="[]"
+              [loading]="false"
+              emptyTitle="Sin líneas"
+              emptyIcon="file-x"
+            />
           </section>
         }
 
@@ -322,28 +308,15 @@ interface SubscriptionInvoiceDetail {
         @if (invoiceSnapshot()?.withholdings && invoiceSnapshot()!.withholdings!.length > 0) {
           <section class="mt-6 bg-white rounded-lg shadow p-4">
             <h2 class="font-semibold text-gray-900 mb-3">Retenciones</h2>
-            <table class="w-full text-sm">
-              <thead>
-                <tr class="text-left text-xs text-gray-500 border-b">
-                  <th>Rol</th>
-                  <th>Concepto</th>
-                  <th class="text-right">Base</th>
-                  <th class="text-right">Tasa</th>
-                  <th class="text-right">Monto</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (wh of invoiceSnapshot()!.withholdings!; track $index) {
-                  <tr class="border-b">
-                    <td>{{ wh.role }}</td>
-                    <td>{{ wh.concept_id }}</td>
-                    <td class="text-right">{{ wh.base_amount }}</td>
-                    <td class="text-right">{{ whWithholdingRatePct(wh) }}</td>
-                    <td class="text-right">{{ whWithholdingAmount(wh) }}</td>
-                  </tr>
-                }
-              </tbody>
-            </table>
+            <app-responsive-data-view
+              [data]="invoiceSnapshot()!.withholdings!"
+              [columns]="withholdingColumns"
+              [cardConfig]="withholdingCardConfig"
+              [actions]="[]"
+              [loading]="false"
+              emptyTitle="Sin retenciones"
+              emptyIcon="minus-circle"
+            />
           </section>
         }
 
@@ -401,6 +374,7 @@ interface SubscriptionInvoiceDetail {
                       class="mt-2"
                       (click)="retryTransmission(t.id)"
                       [disabled]="retrying() === t.id"
+                      aria-label="Reintentar transmisión"
                     >
                       {{ retrying() === t.id ? 'Reintentando…' : 'Reintentar' }}
                     </button>
@@ -458,7 +432,7 @@ interface SubscriptionInvoiceDetail {
                 app-button
                 type="button"
                 variant="secondary"
-                (click)="cancelInvoice(d.invoice.id)"
+                (click)="openCancelModal(d.invoice.id)"
                 [disabled]="cancelling()"
               >
                 {{ cancelling() ? 'Cancelando…' : 'Cancelar documento' }}
@@ -475,7 +449,7 @@ interface SubscriptionInvoiceDetail {
               app-button
               type="button"
               variant="primary"
-              (click)="openDeliverDialog(d.invoice.id)"
+              (click)="openDeliverModal(d.invoice.id)"
               [disabled]="actionLoading()"
             >
               Reenviar correo
@@ -484,7 +458,7 @@ interface SubscriptionInvoiceDetail {
               app-button
               type="button"
               variant="secondary"
-              (click)="openRadianDialog(d.invoice.id)"
+              (click)="openRadianModal(d.invoice.id)"
               [disabled]="actionLoading()"
             >
               Registrar evento RADIAN
@@ -530,6 +504,72 @@ interface SubscriptionInvoiceDetail {
         }
       }
     </div>
+
+    <!-- PASO 11: Cancelar documento — ConfirmationModal -->
+    @if (cancelModalOpen()) {
+      <app-confirmation-modal
+        [(isOpen)]="cancelModalOpen"
+        title="Cancelar documento"
+        message="¿Cancelar este documento? La acción no se puede deshacer."
+        confirmText="Cancelar documento"
+        cancelText="Cerrar"
+        confirmVariant="danger"
+        (confirm)="onCancelConfirm()"
+        (cancel)="cancelModalOpen.set(false)"
+      />
+    }
+
+    <!-- PASO 11: Reenvío por correo — Modal con campo email -->
+    <app-modal
+      [(isOpen)]="deliverModalOpen"
+      title="Reenviar documento por correo"
+      subtitle="Envío de documento electrónico"
+      size="sm"
+    >
+      <div class="space-y-4">
+        <label class="block text-xs font-medium text-text-primary" for="deliver-email-input">
+          Correo electrónico destino
+        </label>
+        <input
+          id="deliver-email-input"
+          type="email"
+          [value]="deliverEmail()"
+          (input)="onDeliverEmailInput($event)"
+          placeholder="destinatario@ejemplo.com"
+          class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+        />
+        @if (deliverEmailError()) {
+          <p class="text-xs text-error">{{ deliverEmailError() }}</p>
+        }
+      </div>
+      <div slot="footer" class="flex justify-end gap-2">
+        <app-button variant="secondary" (clicked)="deliverModalOpen.set(false)">Cancelar</app-button>
+        <app-button variant="primary" (clicked)="onDeliverSubmit()">Enviar</app-button>
+      </div>
+    </app-modal>
+
+    <!-- PASO 11: Registro evento RADIAN — Modal con selector de códigos -->
+    <app-modal
+      [(isOpen)]="radianModalOpen"
+      title="Registrar evento RADIAN"
+      subtitle="Evento sobre documento electrónico"
+      size="sm"
+    >
+      <div class="space-y-4">
+        <app-selector
+          label="Código de evento"
+          [options]="radianEventOptions"
+          (valueChange)="radianSelectedCode.set(($event ?? '').toString())"
+        />
+        <p class="text-xs text-text-secondary">
+          Seleccione el evento según la normativa DIAN. Los códigos soportados son 030–051.
+        </p>
+      </div>
+      <div slot="footer" class="flex justify-end gap-2">
+        <app-button variant="secondary" (clicked)="radianModalOpen.set(false)">Cancelar</app-button>
+        <app-button variant="primary" (clicked)="onRadianSubmit()">Registrar</app-button>
+      </div>
+    </app-modal>
   `,
 })
 export class PlatformInvoiceDetailComponent {
@@ -669,6 +709,161 @@ export class PlatformInvoiceDetailComponent {
     return (r * 100).toFixed(4) + '%';
   }
 
+  // ── Lines table (ResponsiveDataView) ───────────────────────────────────
+  readonly lineColumns: TableColumn[] = [
+    { key: 'description', label: 'Descripción' },
+    { key: 'quantity', label: 'Cant', align: 'right', transform: (v) => String(v) },
+    { key: 'unit_price', label: 'Precio', align: 'right', transform: (v) => String(v) },
+    {
+      key: 'discount_amount',
+      label: 'Desc',
+      align: 'right',
+      transform: (v) => (v ? String(v) : '—'),
+    },
+    {
+      key: 'taxes',
+      label: 'Imp.',
+      transform: (v) => `${((v as unknown[]) ?? []).length}`,
+    },
+    {
+      key: 'aiu_component',
+      label: 'AIU',
+      transform: (v) => (v ? String(v) : '—'),
+    },
+  ];
+
+  readonly lineCardConfig = {
+    titleKey: 'description',
+    subtitleKey: 'quantity',
+    footerKey: 'unit_price',
+    footerLabel: 'Precio',
+    footerStyle: 'prominent' as const,
+  };
+
+  // ── Withholdings table (ResponsiveDataView) ─────────────────────────────
+  readonly withholdingColumns: TableColumn[] = [
+    { key: 'role', label: 'Rol' },
+    { key: 'concept_id', label: 'Concepto' },
+    {
+      key: 'base_amount',
+      label: 'Base',
+      align: 'right',
+      transform: (v) => String(v),
+    },
+    {
+      key: 'rate',
+      label: 'Tasa',
+      align: 'right',
+      transform: (v) => this.whWithholdingRatePct({ rate: v }),
+    },
+    {
+      key: 'amount',
+      label: 'Monto',
+      align: 'right',
+      transform: (v, item) =>
+        this.whWithholdingAmount(item as Parameters<typeof this.whWithholdingAmount>[0]) as string,
+    },
+  ];
+
+  readonly withholdingCardConfig = {
+    titleKey: 'role',
+    subtitleKey: 'concept_id',
+    detailKeys: [
+      { key: 'base_amount', label: 'Base' },
+      { key: 'rate', label: 'Tasa' },
+    ],
+  };
+
+  // ── Modal state (Paso 11) ─────────────────────────────────────────────
+  readonly cancelModalOpen = signal(false);
+  readonly cancelInvoiceId = signal<number | null>(null);
+  readonly deliverModalOpen = signal(false);
+  readonly deliverEmail = signal('');
+  readonly deliverEmailError = signal('');
+  readonly radianModalOpen = signal(false);
+  readonly radianSelectedCode = signal<string | null>(null);
+  readonly pendingInvoiceId = signal<number | null>(null);
+  readonly deliverEmailControl = signal('');
+
+  readonly radianEventOptions = [
+    { value: '030', label: '030 — Acuse de recibo' },
+    { value: '031', label: '031 — Reclamo' },
+    { value: '032', label: '032 — Recibo del bien o servicio' },
+    { value: '033', label: '033 — Aceptación expresa' },
+    { value: '034', label: '034 — Aceptación tácita' },
+    { value: '035', label: '035 — Aval' },
+    { value: '036', label: '036 — Inscripción RADIAN' },
+    { value: '037', label: '037 — Endoso en propiedad' },
+    { value: '038', label: '038 — Endoso en garantía' },
+    { value: '039', label: '039 — Endoso en procuración' },
+    { value: '040', label: '040 — Cancelación de endoso' },
+    { value: '041', label: '041 — Limitación circulación' },
+    { value: '042', label: '042 — Terminación limitación' },
+    { value: '043', label: '043 — Mandato' },
+    { value: '044', label: '044 — Terminación mandato' },
+    { value: '045', label: '045 — Pago' },
+    { value: '046', label: '046 — Informe para el pago' },
+    { value: '047', label: '047 — Endoso con cesión ordinaria' },
+    { value: '048', label: '048 — Protesto' },
+    { value: '049', label: '049 — Transferencia derechos económicos' },
+    { value: '050', label: '050 — Notificación transferencia' },
+    { value: '051', label: '051 — Pago transferencia' },
+  ];
+
+  openCancelModal(invoiceId: number): void {
+    this.cancelInvoiceId.set(invoiceId);
+    this.cancelModalOpen.set(true);
+  }
+
+  onCancelConfirm(): void {
+    const id = this.cancelInvoiceId();
+    if (id !== null) {
+      this.cancelInvoice(id);
+    }
+    this.cancelModalOpen.set(false);
+    this.cancelInvoiceId.set(null);
+  }
+
+  openDeliverModal(invoiceId: number): void {
+    this.pendingInvoiceId.set(invoiceId);
+    this.deliverEmail.set('');
+    this.deliverEmailError.set('');
+    this.deliverModalOpen.set(true);
+  }
+
+  onDeliverEmailInput(event: Event): void {
+    this.deliverEmail.set((event.target as HTMLInputElement).value);
+  }
+
+  onDeliverSubmit(): void {
+    const email = this.deliverEmail().trim();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      this.deliverEmailError.set('Correo electrónico inválido.');
+      return;
+    }
+    this.deliverModalOpen.set(false);
+    const id = this.pendingInvoiceId();
+    if (id !== null) {
+      this.doDeliverEmail(id, email);
+    }
+  }
+
+  openRadianModal(invoiceId: number): void {
+    this.pendingInvoiceId.set(invoiceId);
+    this.radianSelectedCode.set(null);
+    this.radianModalOpen.set(true);
+  }
+
+  onRadianSubmit(): void {
+    const code = this.radianSelectedCode();
+    this.radianModalOpen.set(false);
+    const id = this.pendingInvoiceId();
+    if (id !== null && code) {
+      this.doRegisterRadianEvent(id, code);
+    }
+  }
+
   whWithholdingAmount(wh: { amount?: number | string; base_amount: number | string; rate: number | string }): number | string {
     if (wh.amount !== undefined && wh.amount !== null) return wh.amount;
     return Number(wh.base_amount) * Number(wh.rate);
@@ -766,7 +961,6 @@ export class PlatformInvoiceDetailComponent {
   }
 
   async cancelInvoice(invoiceId: number): Promise<void> {
-    if (!confirm('Cancelar este documento? La acción no se puede deshacer.')) return;
     this.cancelling.set(true);
     try {
       await firstValueFrom(
@@ -797,9 +991,7 @@ export class PlatformInvoiceDetailComponent {
    * /invoices/:id/{preview-pdf,pdf,pdf/regenerate} — el backend mantiene
    * discriminadores por tipo de transmision.
    */
-  async openDeliverDialog(invoiceId: number): Promise<void> {
-    const email = window.prompt('Correo destino para reenvío:');
-    if (!email) return;
+  async doDeliverEmail(invoiceId: number, email: string): Promise<void> {
     this.actionLoading.set(true);
     try {
       const res = await firstValueFrom(
@@ -822,22 +1014,17 @@ export class PlatformInvoiceDetailComponent {
     }
   }
 
-  async openRadianDialog(invoiceId: number): Promise<void> {
-    const code = window.prompt(
-      'Código de evento RADIAN (030 acuse | 031 reclamo | 032 recibo | 033 aceptación | 034 tácita):',
-      '030',
-    );
-    if (!code) return;
+  async doRegisterRadianEvent(invoiceId: number, eventCode: string): Promise<void> {
     this.actionLoading.set(true);
     try {
       const res = await firstValueFrom(
         this.http.post<{ success: boolean; data: any }>(
           `${this.base}/sales-invoices/${invoiceId}/events`,
-          { event_code: code },
+          { event_code: eventCode },
         ),
       );
       if (res.success) {
-        this.toast.success(`Evento ${code} registrado (id=${res.data?.id}, status=${res.data?.status})`);
+        this.toast.success(`Evento ${eventCode} registrado (id=${res.data?.id}, status=${res.data?.status})`);
       } else {
         this.toast.error('RADIAN no registrado');
       }

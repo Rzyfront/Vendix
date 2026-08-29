@@ -10,6 +10,7 @@ import {
   PrintPreviewResponse,
   RenderPrintDocumentResponse,
   PrintTemplate,
+  PrintRecentDocument,
 } from '../../../core/models/print-formats.model';
 
 @Injectable({
@@ -54,6 +55,25 @@ export class PrintGatewayClientService {
     return this.http
       .delete<{ success: boolean; data: { success: boolean; message: string } }>(
         `${this.baseUrl}/${formatType}`,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /**
+   * [print-editor-dsk P3.3] — Recent documents picker.
+   * Returns up to `limit` most recent real documents for the format so the
+   * merchant can preview the layout against real data instead of fabricated
+   * sample data. Backed by `GET /store/print-formats/:formatType/documents`.
+   */
+  getRecentDocuments(
+    formatType: PrintFormatType,
+    limit: number = 20,
+  ): Observable<PrintRecentDocument[]> {
+    const params = new HttpParams().set('limit', String(limit));
+    return this.http
+      .get<{ success: boolean; data: PrintRecentDocument[] }>(
+        `${this.baseUrl}/${formatType}/documents`,
+        { params },
       )
       .pipe(map((res) => res.data));
   }

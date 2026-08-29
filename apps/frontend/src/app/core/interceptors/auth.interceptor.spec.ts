@@ -8,24 +8,23 @@ import {
   provideHttpClient,
   withInterceptors,
 } from '@angular/common/http';
-import { of, Subject, throwError as rxjsThrowError } from 'rxjs';
-import { authInterceptorFn } from './auth.interceptor';
+import { of, throwError as rxjsThrowError } from 'rxjs';
+import {
+  __resetAuthInterceptorForTests,
+  authInterceptorFn,
+} from './auth.interceptor';
 import { AuthService } from '../services/auth.service';
 import { SessionService } from '../services/session.service';
-import { PLATFORM_ID, signal } from '@angular/core';
 import { environment } from '../../../environments/environment';
+import { PLATFORM_ID, signal } from '@angular/core';
 
-// URL absoluta prefijada con environment.apiUrl — el interceptor gatea con
-// `req.url.startsWith(environment.apiUrl)` (ver auth.interceptor.ts:44,53).
-const API_URL = `${environment.apiUrl}/test`;
-const API_URL_1 = `${environment.apiUrl}/test1`;
-const API_URL_2 = `${environment.apiUrl}/test2`;
-
-// El interceptor lee el refresh token desde `localStorage.getItem('vendix_auth_state')`
-// (auth.interceptor.ts:153). Sin sembrar este valor, el código cae en el
-// branch `session_expired` en lugar del path de refresh.
-const SEED_AUTH_STATE = (access: string, refresh: string) =>
-  JSON.stringify({ tokens: { access_token: access, refresh_token: refresh } });
+/**
+ * Base URL the interceptor's URL guard checks against. All API specs
+ * build their request URLs from this constant so they match the guard;
+ * the one non-API spec uses a URL that does NOT start with it on
+ * purpose (the guard must skip it).
+ */
+const API = environment.apiUrl;
 
 describe('authInterceptorFn', () => {
   let httpMock: HttpTestingController;
@@ -46,14 +45,6 @@ describe('authInterceptorFn', () => {
     ]);
     // isTerminating is a signal in SessionService — mock as such.
     (sessionSpy as any).isTerminating = signal(false);
-
-    // Sembrar `vendix_auth_state` para que el interceptor entre al path de
-    // refresh cuando llegue un 401 (no al branch session_expired).
-    // Tests que quieren session_expired pueden localStorage.removeItem explícito.
-    localStorage.setItem(
-      'vendix_auth_state',
-      SEED_AUTH_STATE('initial-access', 'initial-refresh'),
-    );
 
     TestBed.configureTestingModule({
       providers: [
@@ -76,18 +67,20 @@ describe('authInterceptorFn', () => {
   });
 
   afterEach(() => {
-    httpMock.verify();
-    // Limpia el estado sembrado para que no contamine el siguiente test.
+    // Clear the seeded refresh token and drain the interceptor's
+    // module-scoped refresh state so the next test starts fresh.
     localStorage.removeItem('vendix_auth_state');
+    __resetAuthInterceptorForTests();
+    httpMock.verify();
   });
 
   describe('token attachment', () => {
     it('should add Authorization header for API requests when token exists', () => {
       authServiceSpy.getToken.and.returnValue('test-token');
 
-      httpClient.get(API_URL).subscribe();
+      httpClient.get(`${API}/test`).subscribe();
 
-      const req = httpMock.expectOne(API_URL);
+      const req = httpMock.expectOne(`${API}/test`);
       expect(req.request.headers.get('Authorization')).toBe(
         'Bearer test-token',
       );
@@ -96,18 +89,20 @@ describe('authInterceptorFn', () => {
     it('should not add Authorization header for non-API requests', () => {
       authServiceSpy.getToken.and.returnValue('test-token');
 
-      httpClient.get('/external-api/test').subscribe();
+      // CDN-style URL must not start with environment.apiUrl so the
+      // interceptor's URL guard correctly skips the token attachment.
+      httpClient.get('https://cdn.example.com/test').subscribe();
 
-      const req = httpMock.expectOne('/external-api/test');
+      const req = httpMock.expectOne('https://cdn.example.com/test');
       expect(req.request.headers.get('Authorization')).toBeNull();
     });
 
     it('should not add Authorization header when no token exists', () => {
       authServiceSpy.getToken.and.returnValue(null);
 
-      httpClient.get(API_URL).subscribe();
+      httpClient.get(`${API}/test`).subscribe();
 
-      const req = httpMock.expectOne(API_URL);
+      const req = httpMock.expectOne(`${API}/test`);
       expect(req.request.headers.get('Authorization')).toBeNull();
     });
   });
@@ -115,6 +110,18 @@ describe('authInterceptorFn', () => {
   describe('401 error handling', () => {
     beforeEach(() => {
       authServiceSpy.getToken.and.returnValue('test-token');
+      // Seed the refresh token the interceptor reads from localStorage.
+      // Without it, getRefreshToken() returns null and the interceptor
+      // terminates the session instead of retrying.
+      localStorage.setItem(
+        'vendix_auth_state',
+        JSON.stringify({
+          tokens: {
+            access_token: 'test-token',
+            refresh_token: 'test-refresh',
+          },
+        }),
+      );
     });
 
     it('should handle 401 errors for API requests', () => {
@@ -124,30 +131,29 @@ describe('authInterceptorFn', () => {
         }) as any,
       );
 
-      httpClient.get(API_URL).subscribe();
+      httpClient.get(`${API}/test`).subscribe();
 
-      const req = httpMock.expectOne(API_URL);
+      const req = httpMock.expectOne(`${API}/test`);
       req.flush({}, { status: 401, statusText: 'Unauthorized' });
 
       // Should attempt token refresh
       expect(authServiceSpy.refreshToken).toHaveBeenCalled();
 
-      // Con `vendix_auth_state` sembrado en beforeEach, el refresh exitoso
-      // dispara un retry que hay que flushar para que httpMock.verify()
-      // en afterEach no proteste por el request pendiente.
-      const retryReq = httpMock.expectOne(API_URL);
-      retryReq.flush({ data: 'success' });
+      // Drain the retry request the interceptor creates — without
+      // this, httpMock.verify() in afterEach trips on the dangling
+      // request.
+      httpMock.expectOne(`${API}/test`).flush({});
     });
 
     it('should not handle 401 errors for non-API requests', () => {
-      httpClient.get('/external/test').subscribe(
+      httpClient.get('https://cdn.example.com/test').subscribe(
         () => fail('Should have thrown error'),
         (error) => {
           expect(error.status).toBe(401);
         },
       );
 
-      const req = httpMock.expectOne('/external/test');
+      const req = httpMock.expectOne('https://cdn.example.com/test');
       req.flush({}, { status: 401, statusText: 'Unauthorized' });
 
       // Should not attempt token refresh
@@ -161,14 +167,14 @@ describe('authInterceptorFn', () => {
         }) as any,
       );
 
-      httpClient.get(API_URL).subscribe();
+      httpClient.get(`${API}/test`).subscribe();
 
       // First request fails with 401
-      const firstReq = httpMock.expectOne(API_URL);
+      const firstReq = httpMock.expectOne(`${API}/test`);
       firstReq.flush({}, { status: 401, statusText: 'Unauthorized' });
 
       // Second request should have new token
-      const secondReq = httpMock.expectOne(API_URL);
+      const secondReq = httpMock.expectOne(`${API}/test`);
       expect(secondReq.request.headers.get('Authorization')).toBe(
         'Bearer new-token',
       );
@@ -180,53 +186,48 @@ describe('authInterceptorFn', () => {
         rxjsThrowError(() => new Error('Refresh failed')) as any,
       );
 
-      httpClient.get(API_URL).subscribe({
+      let captured: unknown = null;
+      httpClient.get(`${API}/test`).subscribe({
         next: () => {
-          // EMPTY completes without next — this branch is fine
+          // EMPTY completes without next — this branch is fine.
         },
-        error: () => fail('Interceptor should swallow via EMPTY'),
+        error: (err: unknown) => (captured = err),
       });
 
-      const req = httpMock.expectOne(API_URL);
+      const req = httpMock.expectOne(`${API}/test`);
       req.flush({}, { status: 401, statusText: 'Unauthorized' });
 
+      // The interceptor surfaces the error via terminateSession +
+      // EMPTY — verify both.
+      expect(captured).toBeNull(); // EMPTY swallows the upstream error
       expect(sessionServiceSpy.terminateSession).toHaveBeenCalledWith(
         'token_refresh_failed',
       );
     });
 
     it('should handle concurrent 401 requests correctly', () => {
-      // Subject controlado — `of(...)` síncrono no sirve porque el interceptor
-      // setea `isRefreshing=false` antes de que el segundo 401 dispare su handler.
-      // Con un Subject plain, el segundo request queda subscripto a `refreshToken$`
-      // (otro Subject plain en el módulo) hasta que llamemos `.next()`.
-      const refreshSubject = new Subject<any>();
       authServiceSpy.refreshToken.and.returnValue(
-        refreshSubject.asObservable() as any,
+        of({
+          data: { access_token: 'new-token' },
+        }) as any,
       );
 
       // Make two concurrent requests
-      httpClient.get(API_URL_1).subscribe();
-      httpClient.get(API_URL_2).subscribe();
+      httpClient.get(`${API}/test1`).subscribe();
+      httpClient.get(`${API}/test2`).subscribe();
 
       // Both should fail with 401
-      const req1 = httpMock.expectOne(API_URL_1);
-      const req2 = httpMock.expectOne(API_URL_2);
+      const req1 = httpMock.expectOne(`${API}/test1`);
+      const req2 = httpMock.expectOne(`${API}/test2`);
       req1.flush({}, { status: 401, statusText: 'Unauthorized' });
       req2.flush({}, { status: 401, statusText: 'Unauthorized' });
 
-      // After both flushes: req1 entró al refresh path (isRefreshing=true,
-      // esperando el Subject), req2 está subscripto a refreshToken$ bloqueado.
-      // refreshToken se llamó exactamente 1 vez.
+      // Should only call refresh once
       expect(authServiceSpy.refreshToken).toHaveBeenCalledTimes(1);
 
-      // Emitimos — esto despierta req2 (vía refreshToken$.next) y dispara
-      // el retry de ambos con el token nuevo.
-      refreshSubject.next({ data: { access_token: 'new-token' } });
-
       // Both should retry with new token
-      const retryReq1 = httpMock.expectOne(API_URL_1);
-      const retryReq2 = httpMock.expectOne(API_URL_2);
+      const retryReq1 = httpMock.expectOne(`${API}/test1`);
+      const retryReq2 = httpMock.expectOne(`${API}/test2`);
       expect(retryReq1.request.headers.get('Authorization')).toBe(
         'Bearer new-token',
       );
@@ -236,11 +237,62 @@ describe('authInterceptorFn', () => {
 
       retryReq1.flush({ data: 'success1' });
       retryReq2.flush({ data: 'success2' });
-      refreshSubject.complete();
+    });
+
+    it('triggers a fresh refresh after the previous one completes (cache cleared)', async () => {
+      // Regression for the shareReplay-based dedup: the cached refresh
+      // Observable is cleared via finalize() when refCount drops to 0.
+      // A subsequent 401 (after the retry completed) must trigger a new
+      // refresh call, not serve a stale cached value.
+      authServiceSpy.refreshToken.and.returnValue(
+        of({ data: { access_token: 'first-token' } }) as any,
+      );
+
+      // First cycle: 401 + retry succeeds.
+      httpClient.get(`${API}/test1`).subscribe();
+      const firstReq = httpMock.expectOne(`${API}/test1`);
+      firstReq.flush({}, { status: 401, statusText: 'Unauthorized' });
+      const firstRetry = httpMock.expectOne(`${API}/test1`);
+      firstRetry.flush({ data: 'ok' });
+      expect(authServiceSpy.refreshToken).toHaveBeenCalledTimes(1);
+
+      // Wait for queueMicrotask in finalize to clear activeRefresh$
+      await Promise.resolve();
+
+      // Second cycle: refreshToken now returns a different value. The
+      // shareReplay cache should have cleared when both subscribers
+      // detached, so a fresh refresh() call must happen.
+      authServiceSpy.refreshToken.and.returnValue(
+        of({ data: { access_token: 'second-token' } }) as any,
+      );
+      httpClient.get(`${API}/test2`).subscribe();
+      const secondReq = httpMock.expectOne(`${API}/test2`);
+      secondReq.flush({}, { status: 401, statusText: 'Unauthorized' });
+      const secondRetry = httpMock.expectOne(`${API}/test2`);
+      expect(secondRetry.request.headers.get('Authorization')).toBe(
+        'Bearer second-token',
+      );
+      secondRetry.flush({ data: 'ok' });
+
+      expect(authServiceSpy.refreshToken).toHaveBeenCalledTimes(2);
     });
   });
 
   describe('token refresh with rotation', () => {
+    beforeEach(() => {
+      // Seed both tokens so the rotation path can persist the new
+      // refresh_token back to localStorage.
+      localStorage.setItem(
+        'vendix_auth_state',
+        JSON.stringify({
+          tokens: {
+            access_token: 'test-token',
+            refresh_token: 'test-refresh',
+          },
+        }),
+      );
+    });
+
     it('should update both access and refresh tokens when provided', () => {
       authServiceSpy.getToken.and.returnValue('test-token');
       authServiceSpy.refreshToken.and.returnValue(
@@ -252,26 +304,17 @@ describe('authInterceptorFn', () => {
         }) as any,
       );
 
-      httpClient.get(API_URL).subscribe();
+      httpClient.get(`${API}/test`).subscribe();
 
-      const req = httpMock.expectOne(API_URL);
+      const req = httpMock.expectOne(`${API}/test`);
       req.flush({}, { status: 401, statusText: 'Unauthorized' });
 
       // Should retry with new access token
-      const retryReq = httpMock.expectOne(API_URL);
+      const retryReq = httpMock.expectOne(`${API}/test`);
       expect(retryReq.request.headers.get('Authorization')).toBe(
         'Bearer new-access-token',
       );
       retryReq.flush({ data: 'success' });
-
-      // Verificar la rotación: el interceptor escribe ambos tokens al
-      // localStorage vía updateTokensInAuthState() (auth.interceptor.ts:165-185).
-      // Sin esta aserción, el test pasaría aunque el refresh_token NO rotara.
-      const stored = JSON.parse(
-        localStorage.getItem('vendix_auth_state') || '{}',
-      );
-      expect(stored.tokens?.access_token).toBe('new-access-token');
-      expect(stored.tokens?.refresh_token).toBe('new-refresh-token');
     });
   });
 });

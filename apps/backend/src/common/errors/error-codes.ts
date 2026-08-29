@@ -292,6 +292,18 @@ export const ErrorCodes = {
     httpStatus: 504,
     devMessage: 'Print preview compilation timed out',
   },
+  // CP-DTLP-20260827 — IDOR fix (H-1 finding). The print gateway must not
+  // accept a render request whose `x-store-id` header resolves to a store that
+  // belongs to a DIFFERENT organization than the one on the JWT. Without this
+  // gate a token from `tech-solutions` (org=2) with `x-store-id: 999` would
+  // render the order hosted by `org=3`. 403 because identity/auth are fine —
+  // the failure is scope/tenant isolation, the same family as `ROLE_SCOPE_001`.
+  PRINT_RENDER_TENANT_MISMATCH_001: {
+    code: 'PRINT_RENDER_TENANT_MISMATCH_001',
+    httpStatus: 403,
+    devMessage:
+      'x-store-id does not belong to the JWT organization_id. Cross-tenant render blocked.',
+  },
 
   // Payments
   PAY_INVALID_ORDER_001: {
@@ -5208,6 +5220,17 @@ export const ErrorCodes = {
     devMessage:
       'El número de comensales excede la capacidad de la mesa',
   },
+  // QUI-704 — second charge attempt on the same table session recalculates
+  // the order total (including already-paid items) when applyPosPaymentToTableSession
+  // is called twice because the session is no longer auto-closed on payment.
+  // Block the second attempt with 409 so the operator can't accidentally
+  // double-bill the customer.
+  POS_TABLE_SESSION_ALREADY_CHARGED: {
+    code: 'POS_TABLE_SESSION_ALREADY_CHARGED',
+    httpStatus: 409,
+    devMessage:
+      'La sesión de mesa ya fue cobrada; no se puede cobrar dos veces',
+  },
   // ── Split Order (Restaurant Suite Fase E) ────────────────────
   SPLIT_ORDER_NOT_FOUND: {
     code: 'SPLIT_ORDER_NOT_FOUND',
@@ -5511,6 +5534,35 @@ export const ErrorCodes = {
     httpStatus: 501,
     devMessage:
       'Platform profile preview pending (B.4): the calculator + UBL preview path must be wrapped org-scoped, reusing ProfilePreviewService from the store rail rather than copying it.',
+  },
+
+  // CRM Landing (QUI-719): la tienda aún no tiene fila de landing.
+  // 404: GET/PUT antes de activar el módulo, o store_id sin landing creada.
+  CRM_LANDING_001: {
+    code: 'CRM_LANDING_001',
+    httpStatus: 404,
+    devMessage:
+      'Aún no existe una landing para esta tienda. Activa el módulo CRM primero.',
+  },
+
+  // CRM Landing (QUI-719): operación que requiere el módulo activado.
+  // 409: editar/guardar draft con enabled=false. El estado inerte es
+  // explícito en el producto: sin activación no hay edición.
+  CRM_LANDING_002: {
+    code: 'CRM_LANDING_002',
+    httpStatus: 409,
+    devMessage:
+      'El módulo CRM está desactivado. Actívalo para editar tu landing.',
+  },
+
+  // CRM Landing (QUI-719): el JSON de bloques no cumple el contrato v1.
+  // 422: el validador del schema rechazó content_json (versión desconocida,
+  // bloque con tipo fuera del catálogo o props faltantes).
+  CRM_LANDING_003: {
+    code: 'CRM_LANDING_003',
+    httpStatus: 422,
+    devMessage:
+      'El contenido de la landing no cumple la estructura esperada. Revisa las secciones e intenta de nuevo.',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 

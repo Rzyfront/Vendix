@@ -122,6 +122,9 @@ export class StorePrismaService extends BasePrismaService {
     'membership_access_logs',
     'membership_access_occupancy',
     'store_print_format_configs',
+    // ===== CRM Landing (QUI-719) =====
+    // 1:1 con la tienda (store_id @unique) → scoping directo por tienda.
+    'crm_landing_pages',
   ];
 
   private readonly fiscal_entity_scoped_models = [
@@ -1779,6 +1782,11 @@ export class StorePrismaService extends BasePrismaService {
 
   get print_templates() {
     return this.baseClient.print_templates;
+  }
+
+  // ===== CRM Landing (QUI-719) — scoped getter =====
+  get crm_landing_pages() {
+    return this.scoped_client.crm_landing_pages;
   }
 
   /**

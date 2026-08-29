@@ -33,6 +33,9 @@ import {
 import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invoicing-not-configured/invoicing-not-configured.component';
 import { PosFiscalStatusComponent } from './pos-fiscal-status.component';
 import { PosFiscalStatus } from '../services/pos-fiscal.service';
+import { DispatchTicketPrintService } from '../../dispatch-ticket/services/dispatch-ticket-print.service';
+import { DispatchTicketData } from '../../dispatch-ticket/models/dispatch-ticket-data.model';
+import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 
 @Component({
   selector: 'app-pos-order-confirmation',
@@ -608,6 +611,10 @@ private authFacade = inject(AuthFacade);
   private repartosService = inject(RepartosService);
   private currencyService = inject(CurrencyFormatService);
   private store = inject(Store);
+  // CP-DTLP Phase E.1/E.2 — disparador POS del tiquete de despacho.
+  private readonly dispatchTicketPrint = inject(DispatchTicketPrintService);
+  // CP-DTLP Phase E.1/E.2 — guard del disparador.
+  private readonly settingsFacade = inject(StoreSettingsFacade);
 
   /**
    * Mismo predicado que el papel (`PosTicketService.shouldShowTaxes`): la
@@ -616,6 +623,22 @@ private authFacade = inject(AuthFacade);
    * el comercio no sea no responsable de IVA.
    */
   readonly printsVatBreakdown = this.authFacade.printsVatBreakdown;
+
+  // ── CP-DTLP Phase E.1/E.2 — disparador POS del tiquete de despacho ─────
+  //
+  // Defaults copiados del `GeneralSettingsStore` (route-scoped, no inyectable
+  // desde acá). Default true/false para que tiendas nuevas puedan imprimirlo
+  // manual sin tocar settings, y auto-with-POS opt-in por admin.
+
+  /** Habilita el tiquete de despacho globalmente. Default true (ADR-7). */
+  readonly printDispatchTicketEnabled = computed<boolean>(
+    () => this.settingsFacade.receipts()?.print_dispatch_ticket_enabled ?? true,
+  );
+
+  /** Auto-imprime el tiquete junto con POS/factura cuando hay envío. Default false. */
+  readonly printDispatchTicketAutoWithPos = computed<boolean>(
+    () => this.settingsFacade.receipts()?.print_dispatch_ticket_auto_with_pos ?? false,
+  );
 
   /**
    * Espejo de `showSubtotal` en `PosTicketService`: sin desglose de IVA un
@@ -783,6 +806,13 @@ private authFacade = inject(AuthFacade);
 
     this.autoPrintedOrderId = this.orderId;
     this.printReceipt();
+    // CP-DTLP Phase E.1 — encadenar tiquete de despacho con trigger
+    // `'automatic'` junto al POS auto. La guard (incluye
+    // `print_dispatch_ticket_auto_with_pos` + envío + `direct_delivery`)
+    // vive en `printDispatchTicketIfNeeded`. `printReceipt` ya encadena
+    // su propio `'explicit'`, pero lo salta cuando `autoPrintedOrderId`
+    // coincide con `orderId` para no imprimir el despacho dos veces.
+    void this.printDispatchTicketIfNeeded('automatic');
   }
 
 
@@ -859,11 +889,22 @@ private authFacade = inject(AuthFacade);
         } else {
           this.toastService.error('Error al imprimir ticket');
         }
+        // CP-DTLP Phase E.2 — encadenar tiquete de despacho manual con
+        // `'explicit'`. Se salta cuando `maybeAutoPrint` nos invocó
+        // (autoPrintedOrderId ya seteado): en ese caso E.1 encadena el
+        // `'automatic'` por su lado y no queremos imprimir dos veces.
+        if (this.autoPrintedOrderId !== this.orderId) {
+          void this.printDispatchTicketIfNeeded('explicit');
+        }
       },
       error: (error: any) => {
         this.printing = false;
         console.error('Error al imprimir ticket:', error);
         this.toastService.error('Error al imprimir ticket');
+        // Misma lógica en el path de error — no perdemos el intento.
+        if (this.autoPrintedOrderId !== this.orderId) {
+          void this.printDispatchTicketIfNeeded('explicit');
+        }
       } });
   }
 
@@ -1047,5 +1088,102 @@ private authFacade = inject(AuthFacade);
 
   formatCurrency(amount: number): string {
     return this.currencyService.format(amount);
+  }
+
+  // ── CP-DTLP Phase E.1/E.2 — Helpers del disparador POS del tiquete de despacho ─
+
+  /**
+   * `direct_delivery` NO emite tiquete de despacho (ADR-6): la entrega es en
+   * mostrador, no hay envío que Despachar.
+   */
+  private isDirectDeliveryOrder(): boolean {
+    return this.orderData()?.delivery_type === 'direct_delivery';
+  }
+
+  /**
+   * El tiquete de despacho solo aplica a ventas con envío a domicilio
+   * (`home_delivery`) o con la marca explícita del POS (`isShippingSale`).
+   * `pickup` (retiro en tienda) y `direct_delivery` (mostrador) NO imprimen.
+   */
+  private hasShippingOrder(): boolean {
+    const d = this.orderData();
+    if (!d) return false;
+    if (d.delivery_type === 'home_delivery') return true;
+    return !!d.isShippingSale;
+  }
+
+  /**
+   * Construye el `DispatchTicketData` desde el `orderData` actual. La dirección
+   * puede venir incompleta desde el POS (el endpoint del POS puede no devolver
+   * `addresses_orders_shipping_address_idToaddresses`); cuando falta, el
+   * tiquete se imprime con campos vacíos — no bloqueamos la venta por eso.
+   */
+  private buildDispatchTicketData(order: any): DispatchTicketData {
+    const items = (order?.items || order?.order_items || []).map(
+      (item: any) => ({
+        sku:
+          item.sku ||
+          item.product_sku ||
+          item.variant_sku ||
+          item.products?.sku ||
+          item.product_variants?.sku ||
+          '',
+        productName: item.product_name || item.name || 'Producto',
+        orderedQty: Number(item.quantity || 0),
+        dispatchedQty: Number(item.quantity || 0),
+      }),
+    );
+
+    const address =
+      order?.addresses_orders_shipping_address_idToaddresses ||
+      order?.shipping_address_snapshot ||
+      null;
+    const user = this.authFacade.getCurrentUser();
+    const storeName = user?.store?.name || 'Vendix';
+
+    return {
+      orderId: order?.id,
+      orderNumber: this.derivedOrderNumber(),
+      dateFormatted: this.derivedCurrentDate(),
+      storeName,
+      customer: {
+        name: this.derivedCustomerName(),
+        addressLine1: address?.address_line1 || '',
+        addressLine2: address?.address_line2,
+        city: address?.city,
+      },
+      items,
+    };
+  }
+
+  /**
+   * Encadena el tiquete de despacho si la guard pasa. Disparador único del
+   * POS: lo invocan `maybeAutoPrint()` (E.1, trigger `'automatic'`) y
+   * `printReceipt()` (E.2, trigger `'explicit'`), más los hooks de
+   * `pos.component.ts`.
+   *
+   * Con `trigger === 'automatic'`, exige además `print_dispatch_ticket_auto_with_pos`
+   * (opt-in por admin). Con `trigger === 'explicit'`, sólo exige el switch
+   * global. `direct_delivery` se salta siempre. Sin envío no hay a quién
+   * despachar.
+   */
+  private async printDispatchTicketIfNeeded(
+    trigger: 'automatic' | 'explicit',
+  ): Promise<void> {
+    const order = this.orderData();
+    if (!order) return;
+    if (!this.printDispatchTicketEnabled()) return;
+    if (trigger === 'automatic' && !this.printDispatchTicketAutoWithPos()) return;
+    if (this.isDirectDeliveryOrder()) return;
+    if (!this.hasShippingOrder()) return;
+
+    try {
+      await this.dispatchTicketPrint.printDispatchTicket(
+        this.buildDispatchTicketData(order),
+        trigger,
+      );
+    } catch (err) {
+      console.error('[CP-DTLP] Error al imprimir tiquete de despacho:', err);
+    }
   }
 }
