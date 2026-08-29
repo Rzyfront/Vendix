@@ -5583,6 +5583,24 @@ export const ErrorCodes = {
     devMessage:
       'Aún no hay contenido en el borrador. Genera o edita tu landing antes de publicar.',
   },
+
+  // CRM Landing (QUI-719): contacto público sin medio de respuesta.
+  // 422: el formulario exige nombre + mensaje y al menos un canal
+  // (correo o teléfono) para que la tienda pueda responder.
+  CRM_LANDING_006: {
+    code: 'CRM_LANDING_006',
+    httpStatus: 422,
+    devMessage:
+      'Déjanos tu correo o tu teléfono para poder responderte.',
+  },
+
+  // CRM Landing (QUI-719): intento de contacto sobre landing no publicada o desactivada.
+  CRM_LANDING_007: {
+    code: 'CRM_LANDING_007',
+    httpStatus: 404,
+    devMessage:
+      'La landing de esta tienda no está disponible para recibir mensajes de contacto.',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {

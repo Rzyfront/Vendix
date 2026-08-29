@@ -3540,6 +3540,8 @@ enum notification_type_enum {
   table_payment_pending
   table_payment_confirmed
   qr_table_scan
+  /// QUI-719 — contacto desde la landing pública del módulo CRM.
+  crm_contact_request
   order_awaiting_carrier
   appointment_upcoming
   appointment_checked_in

@@ -236,7 +236,7 @@ export class CrmGenerationService {
     if (!store) throw new VendixHttpException(ErrorCodes.CRM_LANDING_001);
 
     const settings = await this.settingsService.getSettings();
-    const general = settings?.general as
+    const general = settings?.general as unknown as
       | Record<string, unknown>
       | undefined;
 
