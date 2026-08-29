@@ -72,6 +72,10 @@ import { InvoicingService } from '../../../invoicing/services/invoicing.service'
 import { DispatchTicketPrintService } from '../../../dispatch-ticket/services/dispatch-ticket-print.service';
 import type { DispatchTicketData } from '../../../dispatch-ticket/models/dispatch-ticket-data.model';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import {
+  shouldAutoPrintDispatchTicket,
+  type ShouldAutoPrintDispatchTicketContext,
+} from '../../../../../../shared/services/print/dispatch-ticket-autoprint';
 import { parseVariantAttributes, VariantAttribute } from '../../../../../../shared/utils';
 import { DispatchNotesService } from '../../../dispatch-notes/services/dispatch-notes.service';
 import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
@@ -2012,9 +2016,16 @@ export class OrderDetailsPageComponent {
           .pipe(takeUntilDestroyed(this.destroyRef))
           .subscribe({
             next: () => {
+              const order = this.order();
               this.isProcessingAction.set(false);
               this.toastService.success('Pago confirmado exitosamente');
               this.loadData();
+              // QUI-731 (D.2): auto-imprimir tiquete de despacho tras confirmar
+              // el pago. Se desacopla de `isProcessingAction` para no congelar
+              // el resto de acciones mientras el print (hasta 18 s) corre; la
+              // cola FIFO de `DispatchTicketPrintService` serializa y el toast
+              // de éxito/error informa al operador del resultado de cada una.
+              if (order) void this.autoPrintDispatchTicket(order);
             },
             error: (err) => {
               this.isProcessingAction.set(false);
@@ -2044,9 +2055,14 @@ export class OrderDetailsPageComponent {
           .pipe(takeUntilDestroyed(this.destroyRef))
           .subscribe({
             next: () => {
+              const order = this.order();
               this.isProcessingAction.set(false);
               this.toastService.success('Orden finalizada exitosamente');
               this.loadData();
+              // QUI-731 (D.2): auto-imprimir tiquete de despacho tras finalizar
+              // la entrega. Mismo desacople de `isProcessingAction` (ver
+              // `confirmPayment`): la cola FIFO + toasts informan el resultado.
+              if (order) void this.autoPrintDispatchTicket(order);
             },
             error: (err) => {
               this.isProcessingAction.set(false);
@@ -2487,6 +2503,44 @@ export class OrderDetailsPageComponent {
     } catch (err) {
       console.error('[CP-DTLP] Error al imprimir tiquete de despacho:', err);
       this.toastService.error('No se pudo imprimir el tiquete de despacho');
+    }
+  }
+
+  /**
+   * QUI-731 (D.2) — Auto-imprimir el tiquete de despacho al confirmar un envío
+   * en postventa. Disparador único con trigger `'automatic'`; encapsula la
+   * cadena de guards compartida `shouldAutoPrintDispatchTicket` (settings +
+   * delivery_type + formato) para no duplicarla y dejar el cableado listo para
+   * el segundo origen vía ruta (D.3).
+   *
+   * Guard heredada tal cual del POS (no se abre `direct_delivery`): solo
+   * `home_delivery` (envío a domicilio — que en Pollo Árabe es lo que se llama
+   * "entrega directa al domicilio") o `isShippingSale` imprimen; `pickup` y
+   * `direct_delivery` (mostrador) no aplican.
+   *
+   * El feedback (toast de éxito / error persistente) y el logger durable los
+   * resuelve `DispatchTicketPrintService.autoPrintDispatchTicket`. Aquí solo
+   * dejamos rastro por si el servicio re-lanza.
+   */
+  private async autoPrintDispatchTicket(order: Order): Promise<void> {
+    const context: ShouldAutoPrintDispatchTicketContext = {
+      printDispatchTicketEnabled:
+        this.settingsFacade.receipts()?.print_dispatch_ticket_enabled ?? true,
+      printDispatchTicketAuto:
+        this.settingsFacade.receipts()?.print_dispatch_ticket_auto_on_postventa ?? false,
+      deliveryType: order.delivery_type,
+      isShippingSale: (order as any)?.isShippingSale,
+    };
+
+    if (!shouldAutoPrintDispatchTicket('automatic', context)) return;
+
+    try {
+      await this.dispatchTicketPrint.autoPrintDispatchTicket(
+        this.buildDispatchTicketData(order),
+      );
+    } catch (err) {
+      // El servicio ya mostró el toast persistente; aquí sólo dejamos rastro.
+      console.error('[QUI-731] Auto-print del tiquete de despacho no completó:', err);
     }
   }
 
@@ -3175,8 +3229,13 @@ export class OrderDetailsPageComponent {
     if (!this.orderId) return;
     this.ordersService.flowShipOrder(this.orderId, {} as any).subscribe({
       next: () => {
+        const order = this.order();
         this.toastService.success('Orden despachada');
         this.loadData();
+        // QUI-731 (D.2): al despachar (enviar a domicilio) el tiquete
+        // acompaña la entrega. La guard compartida (`shouldAutoPrintDispatchTicket`)
+        // decide; la cola FIFO + toasts informan el resultado.
+        if (order) void this.autoPrintDispatchTicket(order);
       },
       error: (err: any) => {
         this.toastService.error(err?.message || 'No se pudo despachar la orden');
