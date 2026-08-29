@@ -32,12 +32,20 @@ export class HighConversionService {
       .subscribe({
         next: (response) => {
           const flag = response?.data?.promotions?.enable_high_conversion_ui;
+          // eslint-disable-next-line no-console
+          console.log(
+            '[HCS-DEBUG] settings.promotions.enable_high_conversion_ui:',
+            flag,
+            '→ set signal to:',
+            flag,
+          );
           if (flag !== undefined) {
             this.enabled.set(flag);
           }
         },
-        error: () => {
-          // Default true ya está seteado
+        error: (err) => {
+          // eslint-disable-next-line no-console
+          console.warn('[HCS-DEBUG] error loading settings:', err);
         },
       });
   }
