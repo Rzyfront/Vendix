@@ -13,6 +13,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { NgClass, NgSwitch, NgSwitchCase, NgSwitchDefault } from '@angular/common';
+import { HighConversionService } from '../../services/high-conversion.service';
 
 import {
   BadgeComponent,
@@ -96,6 +97,7 @@ export interface PromotionStackItem {
 export class PromotionStackComponent {
   private readonly destroyRef = inject(DestroyRef);
   private readonly currencyFormat = inject(CurrencyFormatService);
+  protected readonly highConversionService = inject(HighConversionService);
 
   // ── Inputs (signal-input API) ─────────────────────────────────────────
   readonly items = input<PromotionStackItem[]>([]);

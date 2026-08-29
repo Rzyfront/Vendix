@@ -2,8 +2,9 @@
   `app-promotion-stack` — shared component for CP-ECOM-PROMO-UX-001.
   Three modes: compact-pills, scroll-batch, expanded-cards.
   Empty state: renderiza null (no wrapper) cuando items está vacío.
+  Gate: respeta toggle "Experiencia de Alta Conversión" del admin.
 -->
-@if (hasItems()) {
+@if (hasItems() && highConversionService.enabled()) {
   <div
     class="promotion-stack"
     [attr.aria-label]="ariaLabel()"

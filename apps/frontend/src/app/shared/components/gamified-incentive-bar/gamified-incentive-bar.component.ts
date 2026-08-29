@@ -1,6 +1,7 @@
-import { Component, ChangeDetectionStrategy, input, computed } from '@angular/core';
+import { Component, ChangeDetectionStrategy, inject, input, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../icon/icon.component';
+import { HighConversionService } from '../../services/high-conversion.service';
 
 export interface IncentiveProgressData {
   title?: string;
@@ -20,6 +21,7 @@ export interface IncentiveProgressData {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (data(); as d) {
+      @if (highConversionService.enabled()) {
       <div
         class="gamified-bar rounded-xl p-3 border transition-all duration-300 shadow-xs"
         [ngClass]="
@@ -95,6 +97,7 @@ export interface IncentiveProgressData {
           </div>
         </div>
       </div>
+      }
     }
   `,
   styles: [
@@ -112,6 +115,7 @@ export interface IncentiveProgressData {
 })
 export class GamifiedIncentiveBarComponent {
   readonly data = input<IncentiveProgressData | null>(null);
+  protected readonly highConversionService = inject(HighConversionService);
 
   readonly effectiveProgress = computed(() => {
     const d = this.data();
