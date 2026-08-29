@@ -5040,8 +5040,18 @@ export async function seedPermissionsAndRoles(
     'store:tables:read',
     'store:table_sessions:read',
     'store:table_sessions:update',
-    // Disparar a cocina
+    // Disparar a cocina — `read` es necesario para `POST /kitchen-fire/preview`
+    // (previewFire, kitchen-fire.controller.ts:82 exige `kitchen_fire:read`),
+    // que el mesero llama ANTES de `fireOrderItems` (`kitchen_fire:create`) al
+    // disparar un plato preparado. Sin `read`, el mesero recibe 403 en el
+    // preview y no puede disparar (GAP-1 detectado en C.2/QUI-730).
+    'store:kitchen_fire:read',
     'store:kitchen_fire:create',
+    // Lectura de recetas — necesaria para el picker de exclusiones del mesero
+    // (`add-items-modal openRecipePicker` → `GET /recipes/by-product/:id`,
+    // recipes.controller.ts:82 exige `recipes:read`). Sin ella, el picker
+    // falla en silencio y el mesero no puede marcar "sin papas" (GAP-2, C.2).
+    'store:recipes:read',
     // Lectura de productos (mismo subset read que cashier)
     'store:products:read',
     'store:products:read:one',
