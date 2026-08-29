@@ -6,6 +6,7 @@ import { ErrorCodes } from '@common/errors/error-codes';
 import { UpdateCrmLandingDto } from '../dto/crm.dto';
 import { CrmGenerationService } from './crm-generation.service';
 import { validateCrmLandingDocument } from '../crm-blocks.contract';
+import { SettingsService } from '../../settings/settings.service';
 
 export interface CrmLandingState {
   enabled: boolean;
@@ -24,6 +25,7 @@ export class CrmService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly crmGenerationService: CrmGenerationService,
+    private readonly settingsService: SettingsService,
   ) {}
 
   async getLanding(): Promise<CrmLandingState> {
@@ -132,6 +134,55 @@ export class CrmService {
         }),
       },
     });
+
+    return this.getLanding();
+  }
+
+  /**
+   * Publica el draft: copia inmutable `content_json` → `published_json`
+   * (el draft sigue editable sin tocar lo vivo) y asegura el gate
+   * `publication.landing_enabled` en store_settings. El published_json
+   * es lo único que el render público servirá.
+   */
+  async publish(): Promise<CrmLandingState> {
+    const storeId = this.requireStoreId();
+    const existing = await this.prisma.crm_landing_pages.findFirst({
+      where: { store_id: storeId },
+    });
+
+    if (!existing) {
+      throw new VendixHttpException(ErrorCodes.CRM_LANDING_001);
+    }
+    if (!existing.enabled) {
+      throw new VendixHttpException(ErrorCodes.CRM_LANDING_002);
+    }
+    if (!existing.content_json) {
+      throw new VendixHttpException(ErrorCodes.CRM_LANDING_005);
+    }
+
+    await this.prisma.crm_landing_pages.updateMany({
+      where: { id: existing.id, store_id: storeId },
+      data: {
+        published_json: existing.content_json as object,
+        published_at: new Date(),
+      },
+    });
+
+    try {
+      const settings = await this.settingsService.getSettings();
+      await this.settingsService.updateSettings({
+        publication: {
+          ...(settings?.publication ?? {}),
+          landing_enabled: true,
+        },
+      });
+    } catch (err: any) {
+      // Publicar no debe fallar completo si el gate ya estaba encendido
+      // o la escritura de settings tropieza: el contenido quedó publicado.
+      this.logger.warn(
+        `[Crm] No se pudo asegurar publication.landing_enabled: ${err?.message}`,
+      );
+    }
 
     return this.getLanding();
   }

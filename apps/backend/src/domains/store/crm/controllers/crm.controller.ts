@@ -49,6 +49,13 @@ export class CrmController {
     return this.responseService.success(result, 'Landing guardada');
   }
 
+  @Permissions('store:crm:manage')
+  @Post('publish')
+  async publish() {
+    const result = await this.crmService.publish();
+    return this.responseService.success(result, 'Landing publicada');
+  }
+
   @Permissions('store:crm:read')
   @Get('generation/:jobId')
   async getGenerationStatus(@Param('jobId') jobId: string) {

@@ -39,4 +39,19 @@ export class CrmService {
       { content_json },
     );
   }
+
+  publish(): Observable<CrmApiResponse<CrmLandingState>> {
+    return this.http.post<CrmApiResponse<CrmLandingState>>(
+      `${this.apiUrl}/publish`,
+      {},
+    );
+  }
+
+  getGenerationJobStatus(
+    jobId: string,
+  ): Observable<CrmApiResponse<{ status: string; error?: string }>> {
+    return this.http.get<
+      CrmApiResponse<{ status: string; error?: string }>
+    >(`${this.apiUrl}/generation/${jobId}`);
+  }
 }
