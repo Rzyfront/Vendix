@@ -60,13 +60,32 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
           select: {
             id: true,
             order_number: true,
-            // Una orden puede tener muchas sesiones; la primera (más antigua)
-            // suele ser la activa — `findFirst` por orden ascendente.
+            // Una orden puede tener muchas sesiones a lo largo del tiempo;
+            // al imprimir solo interesa la ABIERTA (closed_at IS NULL), la
+            // más reciente. Antes se tomaba la más vieja (opened_at asc), lo
+            // que contaminaba el ticket tras cerrar y reabrir una mesa.
             table_sessions: {
-              orderBy: { opened_at: 'asc' },
+              // A.5 — tomar la sesión ABIERTA (closed_at IS NULL), la más
+              // reciente. El índice `table_sessions_one_open_per_table`
+              // (A.3) garantiza una sola abierta; el take:1 es defensivo.
+              where: { closed_at: null },
+              orderBy: { opened_at: 'desc' },
               take: 1,
               include: {
-                table: { select: { id: true, name: true, zone: true } },
+                table: {
+                  select: {
+                    id: true,
+                    name: true,
+                    zone: true,
+                    // C.3 — meseros asignados a la mesa (table_waiters).
+                    // Al resolver el mesero tienen prioridad sobre el opener.
+                    table_waiters: {
+                      select: {
+                        user: { select: { first_name: true, last_name: true } },
+                      },
+                    },
+                  },
+                },
                 opener: { select: { first_name: true, last_name: true } },
               },
             },
@@ -85,10 +104,15 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
     const session = ticket.order?.table_sessions?.[0];
     const opener = session?.opener;
     const table = session?.table;
+    // C.3 — el mesero asignado (table_waiters) manda sobre el opener.
+    const assignedWaiter = table?.table_waiters?.[0]?.user;
 
-    const waiterName = opener
-      ? `${opener.first_name || ''} ${opener.last_name || ''}`.trim()
-      : '';
+    const waiterName =
+      assignedWaiter && (assignedWaiter.first_name || assignedWaiter.last_name)
+        ? `${assignedWaiter.first_name || ''} ${assignedWaiter.last_name || ''}`.trim()
+        : opener
+        ? `${opener.first_name || ''} ${opener.last_name || ''}`.trim()
+        : '';
     const tableName = table?.name
       ? `Mesa ${table.name}`
       : '';

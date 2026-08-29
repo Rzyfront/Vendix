@@ -86,6 +86,13 @@ export interface PreExplodedFireContext {
   order: {
     id: number;
     order_number: string;
+    /**
+     * C.3 QUI-733 — id de la mesa de la sesión ABIERTA del pedido, si la hay.
+     * Se resuelve ANTES de la transacción y se estampa en
+     * `kitchen_tickets.table_id` al crear el ticket. Null para pedidos sin
+     * mesa (mostrador / delivery) — el ticket no se rompe, solo pierde el dato.
+     */
+    table_id?: number | null;
   };
   firedItemIds: number[];
   skippedItemIds: number[];
@@ -249,6 +256,16 @@ export class KitchenFireService {
         id: true,
         store_id: true,
         order_number: true,
+        // C.3 QUI-733 — la sesión de mesa ABIERTA (closed_at IS NULL) del pedido,
+        // para estampar `kitchen_tickets.table_id` al fire. `orders` no tiene
+        // `table_session_id`: la relación vive al revés (table_sessions.order_id).
+        // La más reciente; el índice one_open_per_table (A.3) garantiza una sola.
+        table_sessions: {
+          where: { closed_at: null },
+          orderBy: { opened_at: 'desc' },
+          take: 1,
+          select: { id: true, table_id: true },
+        },
         order_items: {
           where: { id: { in: effectiveItemIds } },
           include: {
@@ -394,7 +411,11 @@ export class KitchenFireService {
     // (recipes, BOM, default locations, business date) so this method
     // executes only the tx-bound work; it never opens a new $transaction.
     const preComputed: PreExplodedFireContext = {
-      order: { id: order.id, order_number: order.order_number },
+      order: {
+        id: order.id,
+        order_number: order.order_number,
+        table_id: order.table_sessions?.[0]?.table_id ?? null,
+      },
       firedItemIds,
       skippedItemIds,
       preparedItems,
@@ -804,6 +825,10 @@ export class KitchenFireService {
         data: {
           store_id,
           order_id: order.id,
+          // C.3 QUI-733 — estampar la mesa del pedido (vía su sesión ABIERTA,
+          // resuelta aguas arriba en el preComputed). NULL para pedidos sin mesa
+          // (mostrador / delivery); el ticket no se rompe, solo pierde el dato.
+          table_id: order.table_id ?? null,
           kds_id: kdsId,
           status: 'pending',
           daily_number: sameDayCount + 1,
@@ -1187,6 +1212,16 @@ export class KitchenFireService {
         id: true,
         store_id: true,
         order_number: true,
+        // C.3 QUI-733 — la sesión de mesa ABIERTA (closed_at IS NULL) del pedido,
+        // para estampar `kitchen_tickets.table_id` al fire. `orders` no tiene
+        // `table_session_id`: la relación vive al revés (table_sessions.order_id).
+        // La más reciente; el índice one_open_per_table (A.3) garantiza una sola.
+        table_sessions: {
+          where: { closed_at: null },
+          orderBy: { opened_at: 'desc' },
+          take: 1,
+          select: { id: true, table_id: true },
+        },
         order_items: {
           where: { id: { in: candidateOrderItemIds } },
           include: {
@@ -1296,7 +1331,11 @@ export class KitchenFireService {
     const businessDate = await this.getBusinessDate(store_id);
 
     return {
-      order: { id: order.id, order_number: order.order_number },
+      order: {
+        id: order.id,
+        order_number: order.order_number,
+        table_id: order.table_sessions?.[0]?.table_id ?? null,
+      },
       firedItemIds,
       skippedItemIds,
       preparedItems,

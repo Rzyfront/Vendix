@@ -88,6 +88,25 @@ export class PrintLayoutComposerService {
         return this.renderFooterSection(section, data, mode);
       case 'dispatch_ticket':
         return this.renderDispatchTicketSection(section, data, mode);
+      // C.3 QUI-733 — la sección `table_info` ("Mesa, Mesero y Turno") se
+      // declara en la plantilla SIN `fields`; sin este caso caía al
+      // `default: renderGenericFieldsSection`, que devuelve '' cuando no hay
+      // campos, y el papel salía sin mesa ni mesero aunque los providers ya
+      // llenaran `document.table_number`/`document.waiter_name`.
+      case 'table_info':
+        return this.renderTableInfoSection(section, data, mode);
+      // Los siguientes 5 tipos no tienen un layout propio en ninguna
+      // plantilla sembrada hoy — se listan explícitamente (en vez de dejarlos
+      // caer al `default`) para que el switch documente el universo cerrado
+      // de `section.type` (ver `PrintSectionTypeEnum` en
+      // `enums/print-format.enum.ts`). Un tipo que el compositor ignora en
+      // silencio es pérdida de datos, no tolerancia.
+      case 'custom_notes':
+      case 'document_reference':
+      case 'locations_info':
+      case 'shipping_info':
+      case 'validity_banner':
+        return this.renderGenericFieldsSection(section, data, mode);
       default:
         return this.renderGenericFieldsSection(section, data, mode);
     }
@@ -748,6 +767,44 @@ export class PrintLayoutComposerService {
         ${footer}
       </div>
     `;
+  }
+
+  /**
+   * C.3 QUI-733 — render propio de la sección `table_info` ("Mesa, Mesero y
+   * Turno"). Lee `document.table_number` / `document.waiter_name` del modelo
+   * de impresión (los providers ya los pueblan) y los muestra como bloque de
+   * texto legible. No depende de `section.fields` — la plantilla la declara
+   * sin ninguna key, así que el `default` (renderGenericFieldsSection) la
+   * renderizaba como cadena vacía. Maneja campos ausentes: si no hay mesa ni
+   * mesero, la sección no emite nada (misma degradación que la genérica).
+   */
+  private renderTableInfoSection(section: any, data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {
+    const doc = data.document || ({} as any);
+    const tableNumber = doc.table_number;
+    const waiterName = doc.waiter_name;
+
+    if (mode !== 'tokenized' && !tableNumber && !waiterName) return '';
+
+    const tableVal = mode === 'tokenized'
+      ? '<span class="vendix-token-pill" data-token="document.table_number">&#123;&#123; document.table_number &#125;&#125;</span>'
+      : this.compiler.escapeHtml(tableNumber || '');
+    const waiterVal = mode === 'tokenized'
+      ? '<span class="vendix-token-pill" data-token="document.waiter_name">&#123;&#123; document.waiter_name &#125;&#125;</span>'
+      : this.compiler.escapeHtml(waiterName || '');
+
+    const rows = [
+      tableNumber || mode === 'tokenized'
+        ? `<div class="field-row" data-element-id="f_table" data-section-id="${section.id || section.type}" data-token="document.table_number"><span class="field-label">Mesa:</span> <span class="field-val">${tableVal}</span></div>`
+        : '',
+      waiterName || mode === 'tokenized'
+        ? `<div class="field-row" data-element-id="f_waiter" data-section-id="${section.id || section.type}" data-token="document.waiter_name"><span class="field-label">Mesero:</span> <span class="field-val">${waiterVal}</span></div>`
+        : '',
+    ]
+      .filter((s) => s.length > 0)
+      .join('');
+
+    if (rows.length === 0) return '';
+    return `<div class="print-section section-table-info" data-section-id="${section.id || section.type}">${rows}</div>`;
   }
 
   private renderGenericFieldsSection(section: any, data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {

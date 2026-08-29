@@ -237,6 +237,136 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
     expect(data.items[0].quantity).toBe(2);
     expect(data.custom_variables?.kds_name).toBe('Cocina Caliente');
     expect(data.custom_variables?.order_number).toBe('ORD-2026-0012');
+
+    // A.5 — la consulta pide la sesión ABIERTA (closed_at IS NULL) y la más
+    // reciente, no la más vieja como antes (opened_at asc).
+    const sessionInclude = findFirstTicket.mock.calls[0][0].include.order.select.table_sessions;
+    expect(sessionInclude.where).toEqual({ closed_at: null });
+    expect(sessionInclude.orderBy).toEqual({ opened_at: 'desc' });
+    expect(sessionInclude.take).toBe(1);
+  });
+
+  it('kitchen_ticket: el mesero asignado (table_waiters) manda sobre el opener', async () => {
+    const findFirstTicket = jest.fn().mockResolvedValue({
+      id: 43,
+      fired_at: new Date('2026-08-22T15:00:00.000Z'),
+      status: 'fired',
+      daily_number: 8,
+      business_date: new Date('2026-08-22'),
+      ready_at: null,
+      kds: { id: 1, name: 'Cocina Caliente', station_type: 'kitchen' },
+      items: [
+        {
+          id: 2,
+          quantity: 1,
+          notes: null,
+          product: { id: 11, name: 'Pollo Asado', sku: 'POL-AS' },
+          exclusions: [],
+        },
+      ],
+      order: {
+        id: 101,
+        order_number: 'ORD-2026-0013',
+        table_sessions: [
+          {
+            id: 6,
+            guest_count: 2,
+            table: {
+              id: 5,
+              name: '05',
+              zone: 'Salón principal',
+              table_waiters: [{ user: { first_name: 'Lucía', last_name: 'Ramírez' } }],
+            },
+            opener: { first_name: 'Mateo', last_name: 'Sánchez' },
+          },
+        ],
+      },
+    });
+    const prisma = { kitchen_tickets: { findFirst: findFirstTicket } } as any;
+    const p = new KitchenTicketDataProvider(prisma);
+
+    const data = await p.fetchDocumentData(10, 43);
+
+    // C.3 — el mesero asignado (table_waiters) gana al opener.
+    expect(data.document.waiter_name).toBe('Lucía Ramírez');
+    expect(data.document.table_number).toBe('Mesa 05');
+  });
+
+  it('kitchen_ticket: orden sin mesa (sin sesión abierta) → sin mesa ni mesero, no rompe', async () => {
+    const findFirstTicket = jest.fn().mockResolvedValue({
+      id: 44,
+      fired_at: new Date('2026-08-22T16:00:00.000Z'),
+      status: 'fired',
+      daily_number: 9,
+      business_date: new Date('2026-08-22'),
+      ready_at: null,
+      kds: { id: 1, name: 'Cocina Caliente', station_type: 'kitchen' },
+      items: [
+        {
+          id: 3,
+          quantity: 1,
+          notes: null,
+          product: { id: 12, name: 'Malta', sku: 'MAL' },
+          exclusions: [],
+        },
+      ],
+      order: { id: 102, order_number: 'ORD-2026-0014', table_sessions: [] },
+    });
+    const prisma = { kitchen_tickets: { findFirst: findFirstTicket } } as any;
+    const p = new KitchenTicketDataProvider(prisma);
+
+    const data = await p.fetchDocumentData(10, 44);
+
+    // Regresión (A.5/C.3): un ticket sin mesa no debe romper ni inventar datos.
+    expect(data.document.table_number).toBe('');
+    expect(data.document.waiter_name).toBe('');
+    expect(data.items).toHaveLength(1);
+  });
+
+  it('pos_sale_ticket: venta en mesa — incluye la sesión ABIERTA y mapea mesa + mesero', async () => {
+    const findFirst = jest.fn().mockResolvedValue({
+      id: 7,
+      order_number: 'POS-0007',
+      created_at: new Date('2026-08-27T09:15:00.000Z'),
+      state: 'finished',
+      subtotal_amount: 100000,
+      discount_amount: 0,
+      tax_amount: 19000,
+      grand_total: 119000,
+      order_items: [],
+      order_taxes: [],
+      users: null,
+      stores: {
+        name: 'Tienda Test',
+        organizations: { tax_id: '900.000.000-1' },
+        addresses: [],
+      },
+      table_sessions: [
+        {
+          id: 9,
+          guest_count: 3,
+          table: {
+            id: 7,
+            name: '07',
+            zone: 'Terraza',
+            table_waiters: [{ user: { first_name: 'Lucía', last_name: 'Ramírez' } }],
+          },
+          opener: { first_name: 'Mateo', last_name: 'Sánchez' },
+        },
+      ],
+    });
+    const prisma = { orders: { findFirst } } as any;
+    const p = new PosSaleTicketDataProvider(prisma);
+
+    const data = await p.fetchDocumentData(10, 7);
+
+    // C.3 — la consulta pide la sesión ABIERTA (closed_at IS NULL) y la más
+    // reciente; el recibo mapea mesa + mesero (asignado, prioridad sobre opener).
+    const tableSessions = findFirst.mock.calls[0][0].include.table_sessions;
+    expect(tableSessions.where).toEqual({ closed_at: null });
+    expect(tableSessions.orderBy).toEqual({ opened_at: 'desc' });
+    expect(data.document.table_number).toBe('Mesa 07');
+    expect(data.document.waiter_name).toBe('Lucía Ramírez');
   });
 
   /**

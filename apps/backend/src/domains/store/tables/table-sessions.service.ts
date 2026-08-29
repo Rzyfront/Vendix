@@ -90,6 +90,13 @@ export interface TableSessionView {
     name: string;
     zone: string | null;
     status: string;
+    // C.3 QUI-733 — mesero asignado vía `table_waiters`, proyectado como
+    // `table.waiter` para la UI de mesa. Null cuando no hay asignación.
+    waiter?: {
+      id: number;
+      first_name: string;
+      last_name: string;
+    } | null;
   };
 }
 
@@ -1200,6 +1207,15 @@ export class TableSessionsService {
             name: true,
             zone: true,
             status: true,
+            // C.3 QUI-733 — mesero asignado a la mesa (table_waiters), para que
+            // la UI de mesa proyecte `table.waiter` sin re-consultar.
+            table_waiters: {
+              select: {
+                user: {
+                  select: { id: true, first_name: true, last_name: true },
+                },
+              },
+            },
           },
         },
       },
@@ -1210,9 +1226,27 @@ export class TableSessionsService {
 
     // Remap the Prisma `users` relation to `customer` so the consumer
     // reads a stable field name (orders' customer relation is `users`).
+    // C.3 QUI-733 — remap del mesero asignado (table_waiters.user) a un campo
+    // `table.waiter` estable para la UI de mesa.
     const { order, ...rest } = session;
+    const assignedWaiter = session.table?.table_waiters?.[0]?.user ?? null;
     return {
       ...rest,
+      table: session.table
+        ? {
+            id: session.table.id,
+            name: session.table.name,
+            zone: session.table.zone,
+            status: session.table.status,
+            waiter: assignedWaiter
+              ? {
+                  id: assignedWaiter.id,
+                  first_name: assignedWaiter.first_name,
+                  last_name: assignedWaiter.last_name,
+                }
+              : null,
+          }
+        : undefined,
       order: order
         ? {
             id: order.id,

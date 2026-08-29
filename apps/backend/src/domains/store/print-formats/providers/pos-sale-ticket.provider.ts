@@ -34,6 +34,32 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
             organizations: true,
           },
         },
+        // C.3 QUI-733 — mesa + mesero en el recibo POS. Se une la sesión
+        // ABIERTA (closed_at IS NULL, la más reciente) para derivar
+        // `document.table_number` / `document.waiter_name` igual que el
+        // proveedor de ticket de cocina. Sin sesión (venta de mostrador)
+        // el array queda vacío y el recibo sale sin mesa/mesero.
+        table_sessions: {
+          where: { closed_at: null },
+          orderBy: { opened_at: 'desc' },
+          take: 1,
+          include: {
+            table: {
+              select: {
+                id: true,
+                name: true,
+                zone: true,
+                // mesero asignado vía table_waiters, prioridad sobre opener
+                table_waiters: {
+                  select: {
+                    user: { select: { first_name: true, last_name: true } },
+                  },
+                },
+              },
+            },
+            opener: { select: { first_name: true, last_name: true } },
+          },
+        },
       },
     });
 
@@ -187,6 +213,21 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     const addr = store.addresses?.[0] || {};
     const user = order.users || {};
 
+    // C.3 QUI-733 — mesa + mesero derivados de la sesión ABIERTA. El mesero
+    // asignado (table_waiters) manda sobre el opener. Sin sesión (venta de
+    // mostrador) ambos quedan vacíos y el recibo no muestra bloque de mesa.
+    const session = (order.table_sessions || [])[0];
+    const table = session?.table;
+    const opener = session?.opener;
+    const assignedWaiter = table?.table_waiters?.[0]?.user;
+    const waiterName =
+      assignedWaiter && (assignedWaiter.first_name || assignedWaiter.last_name)
+        ? `${assignedWaiter.first_name || ''} ${assignedWaiter.last_name || ''}`.trim()
+        : opener
+        ? `${opener.first_name || ''} ${opener.last_name || ''}`.trim()
+        : '';
+    const tableName = table?.name ? `Mesa ${table.name}` : '';
+
     const items = (order.order_items || []).map((it: any, i: number) => ({
       index: i + 1,
       product_name: it.product_name,
@@ -245,6 +286,9 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         channel: order.channel,
         notes: order.notes,
         internal_notes: order.internal_notes,
+        // C.3 QUI-733 — mesa + mesero en el recibo POS.
+        table_number: tableName,
+        waiter_name: waiterName,
       },
       items,
       taxes,
