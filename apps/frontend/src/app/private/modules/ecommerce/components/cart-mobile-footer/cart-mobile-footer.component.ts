@@ -399,7 +399,9 @@ import { Cart } from '../../services/cart.service';
         z-index: 51;
         display: flex;
         flex-direction: column;
-        max-height: 92vh;
+        // Altura adaptativa: crece con el contenido (0 promos = pequeño,
+        // 5 promos = alto) hasta un cap para no tapar el resto del viewport.
+        max-height: min(95vh, calc(100vh - 80px));
         background: var(--color-surface);
         border-radius: 20px 20px 0 0;
         box-shadow: 0 -12px 40px -12px rgba(15, 23, 42, 0.35);
