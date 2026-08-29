@@ -399,7 +399,7 @@ import { Cart } from '../../services/cart.service';
         z-index: 51;
         display: flex;
         flex-direction: column;
-        max-height: 85vh;
+        max-height: 92vh;
         background: var(--color-surface);
         border-radius: 20px 20px 0 0;
         box-shadow: 0 -12px 40px -12px rgba(15, 23, 42, 0.35);
