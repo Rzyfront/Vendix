@@ -72,8 +72,8 @@ import {
       </div>
     }
 
-    <!-- High-Conversion Gamified Incentive Bar (toggle enable_high_conversion_ui) -->
-    @if (highConversionEnabled() && incentiveData().length > 0) {
+    <!-- High-Conversion Gamified Incentive Bar (gated por HighConversionService dentro del shared component) -->
+    @if (incentiveData().length > 0) {
       @for (data of incentiveData(); track $index) {
         <app-gamified-incentive-bar
           [data]="data"
@@ -85,7 +85,7 @@ import {
     @if (inline()) {
       <!-- Modo inline: SOLO el nudge de próximo tramo, como pill compacto
            (para el bannersito del carrito). -->
-      @if (highConversionEnabled() && showTier() && tierProgressItems().length > 0) {
+      @if (showTier() && tierProgressItems().length > 0) {
         <app-promotion-stack
           mode="compact-pills"
           [items]="tierProgressItems()"
@@ -97,7 +97,7 @@ import {
       }
     } @else if (
       (showApplied() && appliedPromotionItems().length > 0) ||
-      (highConversionEnabled() && showTier() && tierProgressItems().length > 0)
+      (showTier() && tierProgressItems().length > 0)
     ) {
       <div
         class="flex flex-col"
@@ -116,8 +116,8 @@ import {
           />
         }
 
-        <!-- Próximo tramo (nudge) — gated por enable_high_conversion_ui -->
-        @if (highConversionEnabled() && showTier() && tierProgressItems().length > 0) {
+        <!-- Próximo tramo (nudge) — gated por HighConversionService dentro del shared -->
+        @if (showTier() && tierProgressItems().length > 0) {
           <div
             class="border-t border-border/30 pt-2"
             [class.mt-1]="appliedPromotionItems().length > 0"
@@ -147,16 +147,6 @@ export class CartPromotionsComponent {
   readonly showTier = input<boolean>(true);
   /** Inline layout: render ONLY the tier nudge as compact pill(s) — banner use. */
   readonly inline = input<boolean>(false);
-  /**
-   * Respetar el toggle "Experiencia de Alta Conversión (Visualización
-   * Promocional)" del admin. Cuando es false, NO renderizamos las barras
-   * gamificadas (celebraciones + tier nudges) — los montos por promo en
-   * el expanded-cards siguen visibles porque son info esencial.
-   *
-   * Default `true` para no romper consumidores existentes que aún no
-   * pasan el flag explícitamente.
-   */
-  readonly highConversionEnabled = input<boolean>(true);
 
   private readonly currencyFormat = inject(CurrencyFormatService);
   /** Sink for `<app-promotion-stack>` outputs (CP-ECOM-PROMO-UX-001 G.1). */

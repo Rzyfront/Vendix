@@ -33,7 +33,6 @@
             class="banner-nudge"
             [cart]="cart"
             [inline]="true"
-            [highConversionEnabled]="highConversionEnabled()"
           />
         </div>
 
@@ -61,7 +60,7 @@
             <span>{{ cart.subtotal | currency }}</span>
           </div>
 
-          <app-cart-promotions [cart]="cart" [showTier]="false" [highConversionEnabled]="highConversionEnabled()" />
+          <app-cart-promotions [cart]="cart" [showTier]="false" />
 
           <div class="summary-row">
             <span>Envío</span>
