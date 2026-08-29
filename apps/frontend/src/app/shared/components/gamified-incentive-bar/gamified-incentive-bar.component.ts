@@ -23,7 +23,7 @@ export interface IncentiveProgressData {
     @if (data(); as d) {
       @if (highConversionService.enabled()) {
       <div
-        class="gamified-bar rounded-xl p-3 border transition-all duration-300 shadow-xs"
+        class="gamified-bar rounded-lg px-3 py-2 border transition-all duration-300 shadow-xs"
         [ngClass]="
           d.unlocked
             ? 'bg-emerald-50/90 border-emerald-300 text-emerald-950 dark:bg-emerald-950/30 dark:border-emerald-700/50 dark:text-emerald-200'
@@ -31,10 +31,10 @@ export interface IncentiveProgressData {
         "
         data-testid="gamified-incentive-bar"
       >
-        <div class="flex items-center justify-between gap-2 mb-2">
-          <div class="flex items-center gap-2 min-w-0">
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2 min-w-0 flex-1">
             <span
-              class="w-6 h-6 rounded-full flex items-center justify-center text-xs shrink-0"
+              class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] shrink-0"
               [ngClass]="
                 d.unlocked
                   ? 'bg-emerald-500 text-white'
@@ -73,7 +73,7 @@ export interface IncentiveProgressData {
 
         <!-- Animated Progress Track -->
         <div
-          class="h-2 w-full rounded-full bg-surface-hover/80 overflow-hidden relative shadow-inner"
+          class="h-1.5 w-full rounded-full bg-surface-hover/80 overflow-hidden relative"
           role="progressbar"
           [attr.aria-valuenow]="effectiveProgress()"
           aria-valuemin="0"
