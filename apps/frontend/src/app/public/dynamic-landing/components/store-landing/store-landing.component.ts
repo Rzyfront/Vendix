@@ -1,6 +1,7 @@
 import {
   Component,
   computed,
+  effect,
   inject,
   signal,
 } from '@angular/core';
@@ -358,8 +359,21 @@ export class StoreLandingComponent {
   );
 
   constructor() {
-    this.loadBranding();
     this.loadDocument();
+
+    // Reactividad del branding (regression fix): getCurrentConfig() inicia en
+    // null (signal async). El efecto re-dispara loadBranding() cuando la
+    // config del dominio llega, restaurando la reactividad que el effect
+    // original de este componente tenía antes de este PR. allowSignalWrites
+    // porque loadBranding setea signals (storeName, heroSlides, ...).
+    effect(
+      () => {
+        if (this.configFacade.getCurrentConfig()) {
+          this.loadBranding();
+        }
+      },
+      { allowSignalWrites: true },
+    );
   }
 
   private loadBranding(): void {
