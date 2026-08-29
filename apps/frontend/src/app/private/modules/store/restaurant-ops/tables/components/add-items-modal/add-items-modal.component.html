@@ -69,6 +69,30 @@
                 {{ +(row.base_price ?? 0) | currency }}
               </span>
             </div>
+            <!--
+              CP-POLLO-ARABE-727 C.4 (QUI-736) — picker de variante para platos
+              variantizados. La base de un producto con variantes no es vendible:
+              hay que elegir una antes de agregar a la cuenta.
+            -->
+            @if (hasVariants(row)) {
+              <div class="variant-picker">
+                <span class="variant-picker__label">Variante</span>
+                <div class="variant-picker__options">
+                  @for (variant of (row.product_variants ?? []); track variant.id) {
+                    <button
+                      type="button"
+                      class="variant-option"
+                      [class.is-on]="selectedVariantOf(row.id) === variant.id"
+                      [attr.aria-pressed]="selectedVariantOf(row.id) === variant.id"
+                      [attr.title]="variantLabel(variant)"
+                      (click)="selectVariant(row, variant.id)"
+                    >
+                      {{ variantLabel(variant) }}
+                    </button>
+                  }
+                </div>
+              </div>
+            }
           </div>
           <div class="qty-controls">
             <app-button
@@ -151,7 +175,7 @@
       <app-button
         variant="primary"
         [loading]="loading()"
-        [disabled]="!hasItems()"
+        [disabled]="!hasItems() || hasMissingVariant()"
         (clicked)="onSubmit()"
       >
         Agregar a la cuenta

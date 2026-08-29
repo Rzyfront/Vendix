@@ -277,6 +277,15 @@ export class OrdersService {
                         where: { id: item.product_variant_id },
                         include: { product_images: true },
                       });
+                    // CP-POLLO-ARABE-727 C.4 — ERR-15: la variante declarada debe
+                    // pertenecer al producto de la línea. Reusa la MISMA consulta
+                    // (no añade roundtrip, solo valida lo que ya se trajo).
+                    if (!variant || variant.product_id !== item.product_id) {
+                      throw new VendixHttpException(
+                        ErrorCodes.PRODUCT_VARIANT_MISMATCH,
+                        `La variante #${item.product_variant_id} no pertenece al producto #${item.product_id}`,
+                      );
+                    }
                     variant_image_url =
                       variant?.product_images?.image_url ?? null;
                   }
@@ -1953,6 +1962,25 @@ export class OrdersService {
         });
         for (const v of variants) {
           variantImageById.set(v.id, v.product_images?.image_url ?? null);
+        }
+        // CP-POLLO-ARABE-727 C.4 — validación de pertenencia variante↔producto
+        // (ERR-15). Un `product_variant_id` ajeno al `product_id` de la línea
+        // dejaría el inventario descuadrado y el ticket de cocina mostrando algo
+        // que no se vendió. Se valida en memoria sobre el MISMO batch (un solo
+        // findMany, sin roundtrips por ítem).
+        const variantProductById = new Map<number, number>(
+          variants.map((v) => [v.id, v.product_id]),
+        );
+        for (const item of dto.items) {
+          if (item.product_id && item.product_variant_id != null) {
+            const variantProductId = variantProductById.get(item.product_variant_id);
+            if (variantProductId === undefined || variantProductId !== item.product_id) {
+              throw new VendixHttpException(
+                ErrorCodes.PRODUCT_VARIANT_MISMATCH,
+                `La variante #${item.product_variant_id} no pertenece al producto #${item.product_id}`,
+              );
+            }
+          }
         }
       }
 

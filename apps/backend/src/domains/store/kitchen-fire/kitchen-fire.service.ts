@@ -1085,6 +1085,8 @@ export class KitchenFireService {
         ...ctx.preparedItems.map((it) => ({
           order_item_id: it.orderItem.id,
           product_id: it.orderItem.product_id,
+          product_variant_id: it.orderItem.product_variant_id ?? null,
+          variant_attributes: it.orderItem.variant_attributes ?? null,
           product_name: it.orderItem.product_name,
           quantity: Number(it.orderItem.quantity || 0),
           notes: notesById.get(it.orderItem.id) ?? null,
@@ -1108,6 +1110,8 @@ export class KitchenFireService {
         ...ctx.recipeLessItems.map((it) => ({
           order_item_id: it.id,
           product_id: it.product_id,
+          product_variant_id: it.product_variant_id ?? null,
+          variant_attributes: it.variant_attributes ?? null,
           product_name: it.product_name,
           quantity: Number(it.quantity || 0),
           notes: notesById.get(it.id) ?? null,
@@ -1207,6 +1211,8 @@ export class KitchenFireService {
       items.push({
         order_item_id: item.order_item_id,
         product_id: item.product_id,
+        product_variant_id: item.product_variant_id ?? null,
+        variant_attributes: item.variant_label ?? null,
         product_name: item.product?.name ?? `#${item.product_id}`,
         quantity: qty,
         notes: notesById.get(item.order_item_id) ?? item.notes ?? null,

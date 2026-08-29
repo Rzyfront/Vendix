@@ -150,6 +150,11 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
           index: idx + 1,
           product_name: it.product?.name || '',
           variant_sku: it.product?.sku || undefined,
+          // CP-POLLO-ARABE-727 ADR-7: la variante impresa viaja por
+          // `StandardPrintItem.variant_attributes`, NO por un campo nuevo.
+          // `it` es un `kitchen_ticket_item` (include sin select → trae todos
+          // los campos), cuyo `variant_label` es el snapshot inmutable al fire.
+          variant_attributes: it.variant_label || undefined,
           quantity: Number(it.quantity || 0),
           unit_price: 0,
           total_price: 0,
@@ -211,6 +216,7 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
         {
           index: 1,
           product_name: 'Hamburguesa Artesanal Doble Carne',
+          variant_attributes: 'Término: 3/4',
           quantity: 2,
           unit_price: 34000,
           total_price: 68000,

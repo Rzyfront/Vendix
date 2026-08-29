@@ -29,6 +29,18 @@
             </span>
           </header>
 
+          <!--
+            CP-POLLO-ARABE-727 C.4 (QUI-736) — la variante vendida, como sub-línea
+            del plato. Se lee de `order_item.variant_attributes` (pre-fire, el
+            `variant_label` del ticket todavía no existe). sr-only para que el
+            lector de pantalla oiga "Variante: Picante", no "Pollo… Picante".
+          -->
+          @if (item.variant_attributes) {
+            <p class="kc-variant">
+              <span class="sr-only">Variante: </span>{{ item.variant_attributes }}
+            </p>
+          }
+
           <!-- La nota del pedido va ARRIBA del árbol: es lo que el cocinero tiene
                que leer para saber qué desmarcar. Enterrarla abajo la vuelve
                decorativa. -->

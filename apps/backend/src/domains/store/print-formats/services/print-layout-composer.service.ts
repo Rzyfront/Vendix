@@ -965,6 +965,16 @@ export class PrintLayoutComposerService {
       font-size: 7.5pt;
       word-break: break-all;
     }
+    /* CP-POLLO-ARABE-727 ADR-7 — la sub-línea de variante que emite la tabla de
+       ítems (small.item-sub.item-variants). Sin esta regla cae al default de
+       <small> (~83%) sobre una base de 9pt en rollo ≈ 7.5pt, el mismo tamaño
+       que la letra menuda DIAN. Se la hace legible en el tamaño de la base del
+       documento con peso medio. */
+    .item-variants {
+      font-size: ${fontSize}pt;
+      font-weight: 600;
+      color: ${primaryColor};
+    }
     .section-footer {
       text-align: center;
       font-size: ${fontSize - 1.5}pt;

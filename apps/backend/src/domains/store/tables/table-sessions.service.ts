@@ -617,6 +617,33 @@ export class TableSessionsService {
 
     // 2. Persist lines + re-derive totals in a single transaction.
     await this.prisma.$transaction(async (tx) => {
+      // CP-POLLO-ARABE-727 C.4 — validación ERR-15 ANTES del bucle, en UN solo
+      // `findMany` (no un findFirst por ítem — presión de pool, ver A.7). Una
+      // variante ajena al `product_id` de la línea descuadra inventario/coste.
+      const variantIds = dto.items
+        .map((i) => (i.product_id ? i.product_variant_id : null))
+        .filter((v): v is number => typeof v === 'number');
+      if (variantIds.length > 0) {
+        const variants = await tx.product_variants.findMany({
+          where: { id: { in: Array.from(new Set(variantIds)) } },
+          select: { id: true, product_id: true },
+        });
+        const variantProductById = new Map<number, number>(
+          variants.map((v) => [v.id, v.product_id]),
+        );
+        for (const item of dto.items) {
+          if (item.product_id && item.product_variant_id != null) {
+            const variantProductId = variantProductById.get(item.product_variant_id);
+            if (variantProductId === undefined || variantProductId !== item.product_id) {
+              throw new VendixHttpException(
+                ErrorCodes.PRODUCT_VARIANT_MISMATCH,
+                `La variante #${item.product_variant_id} no pertenece al producto #${item.product_id}`,
+              );
+            }
+          }
+        }
+      }
+
       for (const item of dto.items) {
         const product = productMap.get(item.product_id)!;
         const unitPrice = Number(product.base_price ?? 0);

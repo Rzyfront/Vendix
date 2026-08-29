@@ -232,6 +232,10 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       index: i + 1,
       product_name: it.product_name,
       variant_sku: it.variant_sku || undefined,
+      // CP-POLLO-ARABE-727 ADR-7: la variante del recibo POS viaja por
+      // `StandardPrintItem.variant_attributes` (column `order_items.variant_attributes`,
+      // snapshot al crear la línea), no por un campo nuevo del modelo.
+      variant_attributes: it.variant_attributes || undefined,
       quantity: Number(it.quantity || 1),
       unit_price: Number(it.unit_price || 0),
       unit_price_formatted: `$${Number(it.unit_price || 0).toLocaleString('es-CO')}`,

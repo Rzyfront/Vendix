@@ -153,3 +153,52 @@
     color: var(--color-warning-700, #b45309);
   }
 }
+
+/* CP-POLLO-ARABE-727 C.4 (QUI-736) — picker de variante de un plato.
+   Botones de pastilla (no un <select>) porque el rango es corto y un toque
+   directo gana a abrir un desplegable con las manos ocupadas en la mesa. */
+.variant-picker {
+  margin-top: 0.4rem;
+
+  .variant-picker__label {
+    display: block;
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    color: var(--color-text-secondary, #6b7280);
+    margin-bottom: 0.25rem;
+  }
+
+  .variant-picker__options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+}
+
+.variant-option {
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 0.75rem;
+  background: transparent;
+  color: var(--color-text-secondary, #6b7280);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+
+  &:hover {
+    border-color: var(--color-primary, #3b82f6);
+    color: var(--color-primary, #3b82f6);
+  }
+
+  &.is-on {
+    background-color: var(--color-primary-50, #eff6ff);
+    border-color: var(--color-primary, #3b82f6);
+    color: var(--color-primary, #3b82f6);
+  }
+}

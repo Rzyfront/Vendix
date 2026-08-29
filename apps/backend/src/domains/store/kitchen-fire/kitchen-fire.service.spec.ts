@@ -581,6 +581,102 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     expect(remapped).toEqual({ order_item_id: 20, component_product_ids: [99] });
   });
 
+  // --------------------------------------------------------------------------
+  // CP-POLLO-ARABE-727 C.5 — regresión cruzada QUI-655 (exclusiones/split) ×
+  // QUI-736 (variantes). Matriz conceptual 2×2×2: {con variante, sin variante}
+  // × {con exclusión, sin exclusión} × {línea partida, línea entera}. Se
+  // colapsa a 6 casos reales porque la línea SOLO se parte cuando la exclusión
+  // es PARCIAL (`applies_to_units < quantity`): total o ausente ⇒ línea entera.
+  // La invariante del cruce: cada fragmento hereda SIEMPRE la misma variante
+  // (o su NULL) que la línea madre — jamás la pierde ni inventa una.
+  // --------------------------------------------------------------------------
+  it.each([
+    // label                                                | variantId | variantName | variantCount | appliesTo | expectSplit
+    ['con variante · sin exclusión · línea entera',          5,     'Picante', 2,   null, false],
+    ['con variante · con exclusión total · línea entera',    5,     'Picante', 2,   3,    false],
+    ['con variante · con exclusión parcial · línea partida', 5,     'Picante', 2,   1,    true],
+    ['sin variante · sin exclusión · línea entera',          null,  null,      0,   null, false],
+    ['sin variante · con exclusión total · línea entera',    null,  null,      0,   3,    false],
+    ['sin variante · con exclusión parcial · línea partida', null,  null,      0,   1,    true],
+  ])(
+    'C.5 — %s preserva la variante de la línea madre',
+    async (
+      _label,
+      variantId,
+      variantName,
+      variantCount,
+      appliesTo,
+      expectSplit,
+    ) => {
+      const original = {
+        ...makeVariantOrderItem(10, 50, {
+          variantId,
+          variantName,
+          quantity: 3,
+          variantCount,
+        }),
+        unit_price: 20,
+        total_price: 60,
+        item_type: 'physical',
+        cost_price: 10,
+        is_price_overridden: false,
+        inventory_committed: false,
+        is_takeaway: false,
+        notes: null,
+        skip_kds: false,
+        split_from_order_item_id: null,
+      };
+      prismaMock.order_items.findMany.mockResolvedValue([original]);
+      const splitCreate = jest.fn().mockResolvedValue({ id: 20 });
+      const splitUpdate = jest.fn().mockResolvedValue({});
+      prismaMock.$transaction.mockImplementation(async (cb: any) =>
+        cb({ order_items: { update: splitUpdate, create: splitCreate } }),
+      );
+
+      const exclusions =
+        appliesTo != null
+          ? [
+              {
+                order_item_id: 10,
+                component_product_ids: [99],
+                applies_to_units: appliesTo,
+              },
+            ]
+          : [];
+
+      const res = await (service as any).splitLinesForExclusions({
+        order_id: 100,
+        order_item_ids: [10],
+        exclusions,
+      });
+
+      if (expectSplit) {
+        // La línea se partió: el fragmento NUEVO (lleva la exclusión) hereda la
+        // variante de la madre. `variant_label` se deriva al fire; aquí solo se
+        // garantiza que `product_variant_id` sobrevive al split.
+        expect(splitCreate).toHaveBeenCalledTimes(1);
+        expect(splitCreate.mock.calls[0][0].data.product_variant_id).toBe(
+          variantId ?? null,
+        );
+        expect(splitCreate.mock.calls[0][0].data.quantity).toBe(appliesTo);
+        // El fragmento ORIGINAL se redujo y conserva su variante (el update no
+        // la toca), así que AMBOS fragmentos la llevan.
+        expect(splitUpdate).toHaveBeenCalledTimes(1);
+        expect(splitUpdate.mock.calls[0][0].where.id).toBe(10);
+        expect(
+          (res.exclusions as any[]).find((e: any) => e.order_item_id === 20),
+        ).toEqual({
+          order_item_id: 20,
+          component_product_ids: [99],
+        });
+      } else {
+        // Línea entera: no se parte, no se crea fragmento nuevo.
+        expect(splitCreate).not.toHaveBeenCalled();
+        expect(splitUpdate).not.toHaveBeenCalled();
+      }
+    },
+  );
+
   it('throws PRODUCT_VARIANT_MISMATCH when the variant does not belong to the product', async () => {
     prismaMock.orders.findFirst.mockResolvedValue({
       id: 100,
