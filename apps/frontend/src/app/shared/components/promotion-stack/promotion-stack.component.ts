@@ -99,6 +99,19 @@ export class PromotionStackComponent {
   private readonly currencyFormat = inject(CurrencyFormatService);
   protected readonly highConversionService = inject(HighConversionService);
 
+  constructor() {
+    // DEBUG: rastrear el valor del toggle cada vez que cambia
+    effect(() => {
+      // eslint-disable-next-line no-console
+      console.log(
+        '[PS-DEBUG] promotion-stack leyendo highConversionService.enabled =',
+        this.highConversionService.enabled(),
+        'items.length =',
+        this.items().length,
+      );
+    });
+  }
+
   // ── Inputs (signal-input API) ─────────────────────────────────────────
   readonly items = input<PromotionStackItem[]>([]);
   readonly mode = input<PromotionStackMode>('compact-pills');
