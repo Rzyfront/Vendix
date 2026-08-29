@@ -81,7 +81,10 @@ import {
     aiuComponentsSumScaled,
     aiuTaxableBasisShortLabel,
     firstTaxableAiuComponent,
+    AiuAccountDefaultsResolver,
+    EMPTY_AIU_INHERITED_DEFAULTS,
 } from '../../../../../../shared/components/invoice-sections/index';
+import type { InheritedAccountHint } from '../../../../../../shared/components/account-select/account-select.component';
 import type {
     AiuSectionPaths,
     AiuTaxRuleValue,
@@ -682,6 +685,7 @@ type SectionId = ProfileScreenSectionId;
                                         label="Ingreso · Costo reembolsable"
                                         formControlName="revenue_costo"
                                         placeholder="Mapeo contable de la tienda"
+                                        [inheritedAccount]="inheritedRevenueCosto()"
                                         [error]="
                                             issueFor(
                                                 'accounting.revenue_account_by_bucket.costo'
@@ -692,6 +696,7 @@ type SectionId = ProfileScreenSectionId;
                                         label="Cuenta de IVA por pagar"
                                         formControlName="vat_payable_account"
                                         placeholder="Mapeo contable de la tienda"
+                                        [inheritedAccount]="inheritedVatPayable()"
                                         [error]="issueFor('accounting.vat_payable_account')"
                                     ></app-account-code-select>
                                 </div>
@@ -874,6 +879,13 @@ export class InvoiceProfileEditorComponent {
     private readonly route = inject(ActivatedRoute);
     private readonly router = inject(Router);
     private readonly printGateway = inject(PrintGatewayClientService);
+
+    /** Resolver de defaults heredados para los selectores NO-AIU del bloque contable (C.9). */
+    private readonly accountDefaultsResolver = inject(AiuAccountDefaultsResolver);
+    private readonly inheritedAccountDefaults = toSignal(
+        this.accountDefaultsResolver.defaults(),
+        { initialValue: EMPTY_AIU_INHERITED_DEFAULTS },
+    );
 
     /**
      * Id del perfil, leído de la RUTA.
@@ -1732,6 +1744,20 @@ export class InvoiceProfileEditorComponent {
             ? 'Las cuentas AIU se editan en Configuración AIU'
             : 'Costo reembolsable e IVA por pagar';
     });
+
+    /**
+     * El heredado para el selector «Ingreso · Costo reembolsable» del bloque NO-AIU.
+     * Todas las porciones de ingreso reciben la misma cuenta resuelta por
+     * `invoice.validated.revenue` en el backend.
+     */
+    inheritedRevenueCosto(): InheritedAccountHint | null {
+        return this.inheritedAccountDefaults().revenue.costo;
+    }
+
+    /** El heredado para el selector «Cuenta de IVA por pagar» del bloque NO-AIU. */
+    inheritedVatPayable(): InheritedAccountHint | null {
+        return this.inheritedAccountDefaults().vat;
+    }
 
     readonly aiuSummary = computed<string>(() => {
         this.form_value();

@@ -3,6 +3,7 @@ import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
+import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 
@@ -178,5 +179,43 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
       { token: '{{document.shipping_tracking_number}}', path: 'document.shipping_tracking_number', description: 'Número de guía de tracking', example: '77221144' },
       { token: '{{customer.address}}', path: 'customer.address', description: 'Dirección de destino de entrega', example: 'Calle 10 # 5-20' },
     ];
+  }
+
+  /**
+   * [print-editor-dsk P3.1] — Remisiones: ordenamos por `emission_date`
+   * (no `created_at`) porque la columna de emisión es la fecha operativa
+   * que el usuario ve en la remisión; `created_at` puede divergir por
+   * correcciones posteriores a la emisión.
+   */
+  async listRecent(
+    storeId: number,
+    limit: number,
+  ): Promise<RecentDocumentSummary[]> {
+    const rows = await this.prisma.dispatch_notes.findMany({
+      where: { store_id: storeId },
+      orderBy: { emission_date: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        dispatch_number: true,
+        emission_date: true,
+        grand_total: true,
+      },
+    });
+    const fmt = new Intl.DateTimeFormat('es-CO', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
+    const cop = new Intl.NumberFormat('es-CO', {
+      style: 'currency',
+      currency: 'COP',
+      maximumFractionDigits: 0,
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      number: String(r.dispatch_number),
+      date_formatted: r.emission_date ? fmt.format(new Date(r.emission_date)) : '',
+      total_formatted: cop.format(Number(r.grand_total || 0)),
+    }));
   }
 }

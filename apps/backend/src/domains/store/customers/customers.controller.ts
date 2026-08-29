@@ -14,6 +14,7 @@ import {
 import { CustomersService } from './customers.service';
 import { CustomerLookupService } from './customer-lookup.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
+import { ResolveCustomerDto } from './dto/resolve-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
@@ -38,6 +39,44 @@ export class CustomersController {
   ) {
     if (!req.user.store_id) throw new Error('Store context required');
     return this.customersService.create(req.user.store_id, createCustomerDto);
+  }
+
+  /**
+   * QUI-723 — POS finalize-sale "resolver cliente" flow.
+   *
+   * Finds an existing customer by email (priority) or exact document pair, or
+   * creates a new one if neither matches. The response includes audit flags
+   * so the frontend can surface a "cliente creado/actualizado" toast.
+   *
+   * Permissions: write (create + update) because the operation may do either
+   * — mirrors the AI write-tool precedent on the same domain.
+   *
+   * Validation: uses `ResolveCustomerDto` (NOT `CreateCustomerDto`) so the
+   * strict `document_number` regex doesn't block the lookup phase. The
+   * service delegates to `create()` if a new row is needed, which goes
+   * through its own strict validation at the create endpoint.
+   */
+  @Post('resolve')
+  @Permissions('store:customers:create', 'store:customers:update')
+  async resolve(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: ResolveCustomerDto,
+  ) {
+    if (!req.user.store_id) throw new Error('Store context required');
+    if (!req.user.organization_id)
+      throw new Error('Organization context required');
+    const result = await this.customersService.findOrCreateByEmailOrDocument(
+      req.user.store_id,
+      dto,
+    );
+    return this.responseService.success(
+      result,
+      result.was_created
+        ? 'Cliente creado exitosamente'
+        : result.was_updated
+          ? 'Cliente actualizado exitosamente'
+          : 'Cliente encontrado',
+    );
   }
 
   @Get()

@@ -223,8 +223,9 @@ import type { DivisaSectionPaths } from '../../../../../../shared/components/inv
 import {
   FISCAL_INVOICE_FORMAT_TYPE,
   InvoiceSectionFormatoComponent,
+  InvoiceSectionNotasComponent,
 } from '../../../../../../shared/components/invoice-sections/index';
-import type { FormatoSectionPaths } from '../../../../../../shared/components/invoice-sections/index';
+import type { FormatoSectionPaths, NotasSectionPaths } from '../../../../../../shared/components/invoice-sections/index';
 import { InvoiceTaxCatalogService } from '../../components/invoice-create/invoice-tax-catalog.service';
 import {
   InvoiceAiuSettings,
@@ -242,6 +243,11 @@ import {
   InvoiceProfileCatalogEntry,
   InvoiceProfileService,
 } from '../../services/invoice-profile.service';
+import type {
+  PreviewProfileLinePayload,
+  PreviewProfilePayload,
+  ProfilePreviewResult,
+} from '../../interfaces/invoice-profile.interface';
 import type {
   AccountingModel,
   AiuBucket,
@@ -699,6 +705,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     'foreign_total_amount',
   ],
   contabilidad: [],
+  notas_internas: [],
 };
 
 /**
@@ -811,6 +818,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     InvoiceSectionRetencionesComponent,
     InvoiceSectionDivisaComponent,
     InvoiceSectionFormatoComponent,
+    InvoiceSectionNotasComponent,
     ModalComponent,
   ],
   template: `
@@ -2073,6 +2081,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   variant="outline"
                   size="sm"
                   type="button"
+                  aria-label="Aplicar cuenta contable a todas las líneas"
                   (clicked)="applyDefaultAccountCode()"
                 >
                   Aplicar a todas
@@ -2140,6 +2149,24 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               [storeTemplateSaving]="storeTemplateSaving()"
               (templateSelectionChange)="onStoreTemplateSelected($event)"
             ></vendix-invoice-section-formato>
+          </vendix-invoice-form-section>
+
+          <!-- ── NOTAS INTERNAS ────────────────────────────────── -->
+          <!-- B.7: misma sustitución — el par Descripción/Nota
+               interna vive ahora en el componente compartido. -->
+          <vendix-invoice-form-section
+            title="Notas internas"
+            [help]="help('notas_internas')"
+            icon="sticky-note"
+            [optional]="true"
+            [expanded]="isSectionOpen('notas_internas')"
+            (expandedChange)="setSection('notas_internas', $event)"
+          >
+            <vendix-invoice-section-notas
+              context="invoice"
+              [form]="invoiceForm"
+              [paths]="notasSectionPaths"
+            ></vendix-invoice-section-notas>
           </vendix-invoice-form-section>
 
           <!-- Totales: siempre visibles, nunca dentro de una sección plegada -->
@@ -2315,20 +2342,33 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     />
 
     <!--
-      «VER COMO SALDRÁ» ANTES DE EMITIR (E.2).
+      «VER COMO SALDRÁ» ANTES DE EMITIR (E.2 — paso 6 del plan de cierre).
 
-      La previsualización es HTML de FB-29 pintado en un iframe con sandbox: no
-      descarga nada, no persiste nada y NO toma consecutivo — cada vista previa
-      que quemara numeración autorizada sería exactamente el defecto que este
-      modal existe para evitar. Lo que muestra son DATOS DE MUESTRA del formato
-      fiscal, y la pantalla lo dice dos veces: en el aviso de arriba y en la
-      nota del pie. El número que se ve es un marcador.
+      La previsualización muestra el XML que la factura produciría y las reglas
+      del Anexo Técnico evaluadas sobre él, no el formato de impresión. El
+      acoplamiento entre datos y formato vive en el editor de plantillas (FB-29
+      tiene su propio botón de previsualización con un documento de muestra);
+      acá lo que se valida es el CONTENIDO —la base gravable segregada, la nota
+      CAV03, las identidades de totales, los códigos de tributo— porque es lo
+      que decide si la DIAN acepta o rechaza.
+
+      No descarga nada, no persiste nada y NO toma consecutivo
+      ('PreviewNumberingGuard' lo protege). El número visible es «PREVIEW». El
+      cuerpo del POST es el de la factura tal como está en el formulario: líneas
+      capturadas, adquiriente, base AIU, componentes, objeto del contrato. Si
+      el perfil está fijado, el preview refleja el snapshot VIVO del perfil
+      ('current_config'); si no, refleja el snapshot MANUAL del formulario.
     -->
     <app-modal
       [isOpen]="printPreviewOpen()"
       (isOpenChange)="closePrintPreview($event)"
       title="Ver como saldrá"
-      subtitle="Previsualización del formato Factura Electrónica (DIAN)"
+      [subtitle]="
+        'Previsualización del XML — ' +
+        (printPreviewProfileId() !== null
+          ? 'perfil #' + printPreviewProfileId()
+          : 'modo manual')
+      "
       size="xl"
       [fullScreenOnMobile]="true"
     >
@@ -2339,8 +2379,8 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
         class="mb-3 block"
       >
         <strong>Número de muestra.</strong> Esta previsualización no emite la
-        factura ni toma consecutivo, y usa datos de muestra: no refleja las
-        líneas ni los importes que acabas de capturar.
+        factura ni toma consecutivo: usa el marcador «PREVIEW». Lo que SÍ
+        refleja es lo que acabas de capturar — líneas, adquiriente, base AIU.
       </app-alert-banner>
 
       @if (printPreviewLoading()) {
@@ -2352,20 +2392,84 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
         </div>
       } @else if (printPreviewError(); as previewError) {
         <p class="py-6 text-center text-sm text-error">{{ previewError }}</p>
-      } @else {
-        <div class="flex justify-center overflow-auto bg-slate-950/50 p-3">
-          <iframe
-            [srcdoc]="printPreviewSrcdoc()"
-            class="block min-h-[520px] w-full border-0 bg-white"
-            [style.width]="printPreviewPaperWidth()"
-            sandbox="allow-same-origin allow-scripts"
-            title="Previsualización del formato de impresión"
-          ></iframe>
+      } @else if (printPreviewResult(); as result) {
+        <!--
+          Reglas del anexo evaluadas sobre el XML. Salen ANTES del XML para
+          que el operador lea el veredicto (FAU04, FAX01, AIU-piso) y no
+          tenga que abrirlo para saber si puede emitir.
+        -->
+        <div
+          class="mb-3 max-h-[180px] overflow-auto rounded-lg border border-border bg-surface-secondary p-2 text-xs"
+          role="region"
+          aria-label="Reglas del Anexo Técnico evaluadas"
+        >
+          <p class="mb-1 text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+            Reglas del anexo ({{ result.validations.length }})
+          </p>
+          <ul class="space-y-1">
+            @for (rule of result.validations; track rule.rule) {
+              <li class="flex items-start gap-2">
+                <app-icon
+                  [name]="rule.passed ? 'check-circle' : (rule.severity === 'blocker' ? 'x-circle' : 'alert-circle')"
+                  [size]="12"
+                  class="shrink-0 mt-0.5"
+                  [class.text-success]="rule.passed"
+                  [class.text-error]="!rule.passed && rule.severity === 'blocker'"
+                  [class.text-warning]="!rule.passed && rule.severity !== 'blocker'"
+                ></app-icon>
+                <span class="flex-1 min-w-0">
+                  <strong class="font-mono">{{ rule.rule }}</strong>
+                  <span class="text-text-secondary"> — {{ rule.message }}</span>
+                </span>
+              </li>
+            }
+          </ul>
         </div>
+
+        <!--
+          Totales del XML proyectado. Sirven de puente entre las reglas
+          (veredicto) y el XML (evidencia): ver las cifras evita tener que
+          parsear el documento a ojo.
+        -->
+        <div
+          class="mb-3 grid grid-cols-2 gap-2 rounded-lg border border-border bg-surface-secondary p-2 text-[11px] sm:grid-cols-5"
+          role="region"
+          aria-label="Totales del XML"
+        >
+          <div>
+            <p class="text-text-secondary">Valor del contrato</p>
+            <p class="font-mono font-semibold">{{ result.breakdown.totals.line_extension_amount }}</p>
+          </div>
+          <div>
+            <p class="text-text-secondary">Base gravable</p>
+            <p class="font-mono font-semibold">{{ result.breakdown.totals.tax_exclusive_amount }}</p>
+          </div>
+          <div>
+            <p class="text-text-secondary">Tributos</p>
+            <p class="font-mono font-semibold">{{ result.breakdown.totals.tax_amount }}</p>
+          </div>
+          <div>
+            <p class="text-text-secondary">Total con tributos</p>
+            <p class="font-mono font-semibold">{{ result.breakdown.totals.tax_inclusive_amount }}</p>
+          </div>
+          <div>
+            <p class="text-text-secondary">A pagar</p>
+            <p class="font-mono font-semibold">{{ result.breakdown.totals.payable_amount }}</p>
+          </div>
+        </div>
+
+        <!--
+          XML crudo. Se pinta en monoespaciado y con scroll horizontal porque
+          el Anexo exige líneas largas; envolverlas deformaría la jerarquía.
+        -->
+        <pre
+          class="max-h-[420px] overflow-auto rounded-lg border border-border bg-slate-950 p-3 text-[11px] leading-tight text-slate-100"
+          role="region"
+          aria-label="XML proyectado"
+        ><code>{{ result.xml }}</code></pre>
+
         <p class="mt-2 text-right text-[11px] text-[var(--color-text-secondary)]">
-          Ancho: <strong>{{ printPreviewWidthMm() }}mm</strong> ·
-          {{ printPreviewIsRoll() ? 'Rollo continuo' : 'Hoja suelta' }} ·
-          El XML viaja siempre igual: el formato no cambia importes.
+          El XML viaja siempre igual a la DIAN; el formato de impresión se previsualiza en su editor.
         </p>
       }
     </app-modal>
@@ -3823,6 +3927,17 @@ export class InvoiceCreatePageComponent implements OnInit {
     header_notes: null,
   };
 
+  // ── La sección Notas internas compartida (B.7) ─────────────────
+  //
+  // En la factura los controles son `null`: el DTO de creación no declara
+  // `internal_note` ni `description`, así que el componente compartido pinta
+  // el párrafo informativo en lugar de los campos. Ver el docblock de
+  // `invoice-section-notas.component.ts`.
+  readonly notasSectionPaths: NotasSectionPaths = {
+    description: null,
+    internal_note: null,
+  };
+
   /**
    * Los avisos de resolución, ya resueltos como lista para el componente
    * compartido. La LÓGICA de cuándo aparece cada uno sigue siendo de esta
@@ -4068,6 +4183,10 @@ export class InvoiceCreatePageComponent implements OnInit {
   readonly printPreviewWidthMm = signal(0);
   readonly printPreviewIsRoll = signal(false);
   readonly printPreviewError = signal('');
+  /** Resultado del preview con cuerpo, en lugar del HTML del formato. */
+  readonly printPreviewResult = signal<ProfilePreviewResult | null>(null);
+  /** `profile_id` con el que se pidió el preview (o `null` si modo manual). */
+  readonly printPreviewProfileId = signal<number | null>(null);
 
   /**
    * Marcador que ve el iframe mientras llega el HTML. Vive como campo y no en
@@ -7629,35 +7748,143 @@ export class InvoiceCreatePageComponent implements OnInit {
    * E.2 — abre «Ver como saldrá» SIN persistir ni numerar. FB-29 compone con
    * DATOS DE MUESTRA del formato fiscal: no pasa por la compuerta DIAN (201
    * sin habilitación, medido) ni llama a `InvoiceNumberGenerator`, así que el
-   * consecutivo autorizado no se toca. Lo que NO refleja es lo tecleado:
-   * componer desde un cuerpo sin guardar exige piezas de backend que el plan
-   * dejó como decisión abierta, y la pantalla LO DICE en vez de dejarlo
-   * parecer.
+   * consecutivo autorizado no se toca. Lo que muestra es el XML que la factura
+   * produciría bajo la configuración del perfil seleccionado (o el reparto
+   * manual si no hay perfil), evaluado por las mismas compuertas del Anexo que
+   * firman la emisión. La pantalla lo declara en el aviso: el número es
+   * «PREVIEW» y los importes sí son los capturados.
    */
   openPrintPreview(): void {
     if (this.printPreviewLoading()) return;
     this.printPreviewError.set('');
     this.printPreviewHtml.set('');
+    this.printPreviewResult.set(null);
+
+    const profileId = this.selectedProfileId();
+    if (profileId === PROFILE_NONE) {
+      // Modo manual: sin perfil, no hay endpoint de previsualización que acepte
+      // el cuerpo del documento. La pantalla lo dice en vez de fingir.
+      this.printPreviewError.set(
+        'Selecciona un perfil de facturación para previsualizar el XML. La previsualización refleja la configuración del perfil, no una muestra genérica.',
+      );
+      this.printPreviewOpen.set(true);
+      this.printPreviewProfileId.set(null);
+      return;
+    }
+
+    const payload = this.buildInvoicePreviewBody();
+    if (!payload.lines || payload.lines.length === 0) {
+      this.printPreviewError.set(
+        'La factura no tiene líneas capturadas. Añade al menos una para previsualizar.',
+      );
+      this.printPreviewOpen.set(true);
+      this.printPreviewProfileId.set(profileId);
+      return;
+    }
+
     this.printPreviewOpen.set(true);
     this.printPreviewLoading.set(true);
+    this.printPreviewProfileId.set(profileId);
 
-    this.printGateway
-      .previewFormat(FISCAL_INVOICE_FORMAT_TYPE)
+    this.profileService
+      .preview(profileId, payload)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (preview) => {
-          this.printPreviewHtml.set(preview.html ?? '');
-          this.printPreviewWidthMm.set(preview.width_mm ?? 0);
-          this.printPreviewIsRoll.set(preview.is_roll === true);
+        next: (response) => {
+          this.printPreviewResult.set(response.data);
           this.printPreviewLoading.set(false);
         },
         error: () => {
           this.printPreviewLoading.set(false);
           this.printPreviewError.set(
-            'No se pudo generar la previsualización. Inténtalo otra vez.',
+            'No se pudo generar la previsualización. Revisa que las líneas tengan descripción, cantidad y precio.',
           );
         },
       });
+  }
+
+  /**
+   * Traduce el formulario al `PreviewProfilePayload` que `POST /profiles/:id/preview`
+   * espera. La línea sin `aiu_component` se mapea a `bucket: 'costo'` (no es AIU);
+   * una con `aiu_component` se mapea al bucket del componente. Los importes se
+   * copian TAL CUAL: el calculador y el builder truncan hoja por hoja al
+   * centavo, y un redondeo acá movería el piso legal sobre un perfil
+   * recién creado sin tocar un campo (ver ADR-5).
+   */
+  private buildInvoicePreviewBody(): PreviewProfilePayload {
+    const raw = this.rawValue() ?? {};
+    const aiu = (raw['aiu'] as Record<string, unknown>) ?? {};
+    const items = this.itemsArray.controls
+      .map((control) => control.value as InvoiceItemFormValue)
+      .filter((item) => (item.description ?? '').trim().length > 0);
+
+    const lines: PreviewProfileLinePayload[] = items.map((item) => {
+      const component = (item.aiu_component ?? '').toString().trim();
+      const bucket: AiuBucket = (
+        component === 'administracion' ||
+        component === 'imprevistos' ||
+        component === 'utilidad'
+          ? component
+          : 'costo'
+      ) as AiuBucket;
+      return {
+        bucket,
+        description: item.description,
+        quantity: Number(item.quantity) || 0,
+        unit_price: Number(item.unit_price) || 0,
+        discount_amount: Number(item.discount_amount) || 0,
+        unit_code: item.unit_code || undefined,
+      };
+    });
+
+    const contract_value = lines.reduce(
+      (acc, line) =>
+        acc + line.quantity * line.unit_price - (line.discount_amount ?? 0),
+      0,
+    );
+
+    // Los dos modos del preview son EXCLUYENTES (ver `profile-preview.service.ts`
+    // y el docblock de `PreviewProfileDto`): si mando `lines` Y
+    // `contract_value`, el backend responde `422 INVOICING_PREVIEW_002`. La
+    // pantalla captura líneas explícitas → mando sólo `lines` (y `aiu_value`
+    // cuando AIU). Dejo `contract_value` calculado como diagnóstico local,
+    // pero no en el payload.
+    const lines_explicit = lines.length > 0;
+
+    let aiu_value: number | undefined;
+    if (lines_explicit && this.isAiu()) {
+      const admin = Number(aiu['administracion']) || 0;
+      const imp = Number(aiu['imprevistos']) || 0;
+      const ut = Number(aiu['utilidad']) || 0;
+      aiu_value = admin + imp + ut;
+    }
+
+    const contract_object =
+      (raw['contract_object'] as string | undefined)?.trim() || undefined;
+
+    const customer_name = (raw['customer_name'] as string | undefined)?.trim();
+    const customer_doc = (raw['customer_tax_id'] as string | undefined)?.trim();
+    const customer_doc_type = (raw['customer_document_type'] as string | undefined)?.trim();
+
+    return {
+      ...(lines_explicit
+        ? {}
+        : contract_value > 0
+        ? { contract_value }
+        : {}),
+      ...(typeof aiu_value === 'number' ? { aiu_value } : {}),
+      ...(contract_object ? { contract_object } : {}),
+      ...(lines_explicit ? { lines } : {}),
+      ...(customer_name || customer_doc || customer_doc_type
+        ? {
+            customer: {
+              ...(customer_doc_type ? { document_type: customer_doc_type } : {}),
+              ...(customer_doc ? { document_number: customer_doc } : {}),
+              ...(customer_name ? { legal_name: customer_name } : {}),
+            },
+          }
+        : {}),
+    };
   }
 
   closePrintPreview(open: boolean): void {
@@ -7665,6 +7892,8 @@ export class InvoiceCreatePageComponent implements OnInit {
     if (!open) {
       this.printPreviewHtml.set('');
       this.printPreviewError.set('');
+      this.printPreviewResult.set(null);
+      this.printPreviewProfileId.set(null);
     }
   }
 

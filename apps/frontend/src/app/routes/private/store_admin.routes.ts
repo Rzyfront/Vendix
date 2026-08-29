@@ -442,6 +442,14 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.ReviewsComponent,
               ),
           },
+          // CRM Landing (QUI-719)
+          {
+            path: 'crm',
+            loadChildren: () =>
+              import(
+                '../../private/modules/store/crm/crm.routes'
+              ).then((m) => m.crmRoutes),
+          },
           {
             path: ':id',
             loadComponent: () =>

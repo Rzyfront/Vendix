@@ -24,6 +24,12 @@ import {
   formatQuantityInSaleUnit,
   resolveSaleUnitCodes,
 } from '../../products/services/sale-unit-display.util';
+import {
+  COMPLETED_SALE_STATES,
+  computeOperatingRevenue,
+  computeGrowth,
+  round2,
+} from '../analytics-metrics.contract';
 
 // Aggregated sales summary tolerates 1-2 min of staleness → short TTL (ms).
 const SALES_SUMMARY_CACHE_TTL_MS = 120_000;
@@ -114,8 +120,11 @@ export class SalesAnalyticsService {
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
-  // States that count as completed sales
-  private readonly COMPLETED_STATES = ['delivered', 'finished'];
+  // States that count as completed sales — sourced from the metrics contract
+  // (single owner of "what counts as a sale"). Hard-coding here is the
+  // regression: a service adding a new consummated state to the contract
+  // would silently NOT pick it up at this call site.
+  private readonly COMPLETED_STATES = COMPLETED_SALE_STATES;
 
   /**
    * Resolves the current request's store timezone (single source of truth).
@@ -136,10 +145,14 @@ export class SalesAnalyticsService {
     // Only cache when a tenant is in scope; a store-less key could leak data
     // across tenants. store_id isolates the tenant; the date-range inputs plus
     // the channel filter capture the period/filter.
+    //
+    // v2: switched from grand_total to operating-revenue derivation. Old v1
+    // cache entries are stale (would under-report when tax > 0) — bump the
+    // version segment to invalidate during deploy.
     if (!storeId) {
       return this.computeSalesSummary(query);
     }
-    const cacheKey = `analytics:sales:summary:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}:${query.channel ?? '_'}`;
+    const cacheKey = `analytics:sales:summary:v2:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}:${query.channel ?? '_'}`;
     const cached =
       await this.cache.get<
         Awaited<ReturnType<SalesAnalyticsService['computeSalesSummary']>>
@@ -171,7 +184,11 @@ export class SalesAnalyticsService {
             },
           },
           _sum: {
-            grand_total: true,
+            subtotal_amount: true,
+            discount_amount: true,
+            shipping_cost: true,
+            tax_amount: true,
+            tip_amount: true,
           },
           _count: {
             id: true,
@@ -187,7 +204,11 @@ export class SalesAnalyticsService {
             },
           },
           _sum: {
-            grand_total: true,
+            subtotal_amount: true,
+            discount_amount: true,
+            shipping_cost: true,
+            tax_amount: true,
+            tip_amount: true,
           },
           _count: {
             id: true,
@@ -218,30 +239,41 @@ export class SalesAnalyticsService {
               lte: endDate,
             },
             customer_id: {
-              not: undefined,
+              not: null,
             },
           },
         }),
       ]);
 
-    const totalRevenue = Number(currentPeriod._sum.grand_total || 0);
+    const totalRevenue = computeOperatingRevenue({
+      subtotal: Number(currentPeriod._sum.subtotal_amount || 0),
+      discounts: Number(currentPeriod._sum.discount_amount || 0),
+      shipping: Number(currentPeriod._sum.shipping_cost || 0),
+      tax: Number(currentPeriod._sum.tax_amount || 0),
+    });
+    const totalTaxes = Number(currentPeriod._sum.tax_amount || 0);
+    const totalTips = Number(currentPeriod._sum.tip_amount || 0);
     const totalOrders = currentPeriod._count.id || 0;
-    const previousRevenue = Number(previousPeriod._sum.grand_total || 0);
+    const previousRevenue = computeOperatingRevenue({
+      subtotal: Number(previousPeriod._sum.subtotal_amount || 0),
+      discounts: Number(previousPeriod._sum.discount_amount || 0),
+      shipping: Number(previousPeriod._sum.shipping_cost || 0),
+      tax: Number(previousPeriod._sum.tax_amount || 0),
+    });
     const previousOrders = previousPeriod._count.id || 0;
 
-    const revenueGrowth =
-      previousRevenue > 0
-        ? ((totalRevenue - previousRevenue) / previousRevenue) * 100
-        : 0;
-    const ordersGrowth =
-      previousOrders > 0
-        ? ((totalOrders - previousOrders) / previousOrders) * 100
-        : 0;
+    // null convention: previous=0 → null (not 0%), which is what `computeGrowth`
+    // returns and what the panel renders as "—" instead of a fake "sin cambio".
+    const revenueGrowth = computeGrowth(totalRevenue, previousRevenue);
+    const ordersGrowth = computeGrowth(totalOrders, previousOrders);
 
     return {
       total_revenue: totalRevenue,
+      total_taxes: totalTaxes,
+      total_tips: totalTips,
       total_orders: totalOrders,
-      average_order_value: totalOrders > 0 ? totalRevenue / totalOrders : 0,
+      average_order_value:
+        totalOrders > 0 ? round2(totalRevenue / totalOrders) : 0,
       total_units_sold: Number(unitsSold._sum.quantity || 0),
       total_customers: customers.length,
       revenue_growth: revenueGrowth,
@@ -1095,7 +1127,8 @@ export class SalesAnalyticsService {
     const { startDate, endDate } = parseDateRange(query, tz);
 
     const states: order_state_enum[] =
-      options?.states ?? (this.COMPLETED_STATES as order_state_enum[]);
+      options?.states ??
+      ([...this.COMPLETED_STATES] as unknown as order_state_enum[]);
 
     // Product-level filter reused for both the order membership predicate and
     // the item-include narrowing.

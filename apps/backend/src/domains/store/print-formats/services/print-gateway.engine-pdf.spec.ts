@@ -84,7 +84,10 @@ describe('PrintGatewayService — engine pdf llena RenderResult.pdf_buffer', () 
     );
 
     expect(renderBuffer).toHaveBeenCalledTimes(1);
-    expect(renderBuffer).toHaveBeenCalledWith(10, 168);
+    // [print-editor-dsk P8] — `renderBuffer` ahora recibe `formatType` para
+    // distinguir `fiscal_electronic_invoice` de `fiscal_credit_note` por la
+    // columna `invoices.invoice_type`.
+    expect(renderBuffer).toHaveBeenCalledWith(10, 168, 'fiscal_electronic_invoice');
     expect(Buffer.isBuffer(result.pdf_buffer)).toBe(true);
     expect(result.pdf_buffer!.length).toBeGreaterThan(0);
     expect(result.pdf_buffer!.toString('latin1').startsWith('%PDF')).toBe(true);

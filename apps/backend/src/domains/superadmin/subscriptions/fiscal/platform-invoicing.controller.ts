@@ -466,9 +466,10 @@ export class PlatformInvoicingController {
     @Param('id', ParseIntPipe) id: number,
     @Res() res: Response,
   ): Promise<void> {
-    // C.5: delega en PlatformInvoicePdfService (stub honesto con código
-    // PLATFORM_PDF_NOT_CONFIGURED hasta que C.5.5 exista). Ver ADR-8 del plan.
-    await this.invoicePdf.previewPdf(id);
+    const buffer = await this.invoicePdf.previewPdf(id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="preview-${id}.pdf"`);
+    res.send(buffer);
   }
 
   /**
@@ -477,14 +478,12 @@ export class PlatformInvoicingController {
    * pega a esta ruta.
    */
   @Get('invoices/:id/pdf')
+  @HttpCode(HttpStatus.OK)
   @Permissions('superadmin:fiscal:invoicing')
   @ApiOperation({ summary: 'Descarga PDF persistido en S3' })
-  async getPdf(
-    @Param('id', ParseIntPipe) id: number,
-    @Res() res: Response,
-  ): Promise<void> {
-    // C.5: stub honesto PLATFORM_PDF_NOT_CONFIGURED hasta C.5.5.
-    await this.invoicePdf.generatePdf(id);
+  async getPdf(@Param('id', ParseIntPipe) id: number): Promise<any> {
+    const result = await this.invoicePdf.getPdf(id);
+    return this.responseService.success(result);
   }
 
   /**
@@ -497,8 +496,8 @@ export class PlatformInvoicingController {
   @Permissions('superadmin:fiscal:invoicing')
   @ApiOperation({ summary: 'Regenera el PDF sin reemitir a la DIAN' })
   async regeneratePdf(@Param('id', ParseIntPipe) id: number): Promise<any> {
-    // C.5: stub honesto PLATFORM_PDF_NOT_CONFIGURED hasta C.5.5.
-    await this.invoicePdf.regeneratePdf(id);
+    const result = await this.invoicePdf.regeneratePdf(id);
+    return this.responseService.success(result, 'PDF regenerado');
   }
 
   // ─── Notas crédito/débito plataforma (C.2 del CP-platform-invoicing-parity) ─

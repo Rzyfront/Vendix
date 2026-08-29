@@ -939,6 +939,21 @@
                     }
                   </div>
                 </div>
+
+                <!-- CP-DTLP Phase E.3 — botón secundario en la card de envío,
+                     gemelo del headerActions. Se imprime `trigger: 'explicit'`,
+                     guard interna exige `enabled` y NO `direct_delivery`. -->
+                @if (order()?.delivery_type !== 'direct_delivery') {
+                  <button
+                    type="button"
+                    (click)="printDispatchTicket()"
+                    title="Imprime el tiquete de despacho en formato térmico"
+                    class="mt-3 w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-primary-700 bg-primary-50 hover:bg-primary-100 border border-primary-200 rounded-lg transition-colors"
+                  >
+                    <app-icon name="package" size="14"></app-icon>
+                    e-ticket de envío
+                  </button>
+                }
               }
 
               <!-- Subseccion: Tracking -->

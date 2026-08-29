@@ -81,6 +81,7 @@ export const MODULE_ROUTES: Record<string, string> = {
   customers_all: '/admin/customers/all',
   customers_reviews: '/admin/customers/reviews',
   customers_data_collection: '/admin/data-collection',
+  customers_crm: '/admin/customers/crm',
 
   // Marketing
   marketing: '/admin/marketing/promotions',

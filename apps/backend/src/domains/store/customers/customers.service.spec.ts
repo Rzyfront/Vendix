@@ -40,6 +40,19 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       create: jest.fn(),
       update: jest.fn(),
     },
+    store_users: {
+      upsert: jest.fn(),
+    },
+    // `$transaction([...ops])` runs the ops in order; each is awaited.
+    // For tests we want the underlying `users.update` and `store_users.upsert`
+    // mocks to capture the calls, so we evaluate them eagerly.
+    $transaction: jest.fn(async (ops: unknown[]) => {
+      const results: unknown[] = [];
+      for (const op of ops) {
+        results.push(await (op as Promise<unknown>));
+      }
+      return results;
+    }),
     roles: {
       findFirst: jest.fn(),
     },
@@ -271,5 +284,289 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       const messages = errors.flatMap((e) => Object.values(e.constraints ?? {}));
       expect(messages.some((m) => /catálogo RUT/.test(m))).toBe(true);
     });
+  });
+
+  /**
+   * QUI-723 — POS finalize-sale find-or-create flow.
+   *
+   * The contract under test:
+   *   - Match priority: email first, then exact (document_type, document_number).
+   *   - Update strategy: CONSERVATIVE — only null/empty fields on the existing
+   *     row get filled; never overwrite already-confirmed data.
+   *   - No match: delegate to `create()` so we inherit username uniqueness,
+   *     NIT/DV split, password hashing, and `customer.created` event.
+   *   - `linkCustomerToStore` is called idempotently on every match.
+   */
+  describe('findOrCreateByEmailOrDocument — QUI-723', () => {
+    const existingByEmail = {
+      id: 7,
+      first_name: 'Juan',
+      last_name: 'Pérez',
+      phone: null,
+      document_type: 'CC',
+      document_number: '12345678',
+      email: 'juan@x.com',
+      state: 'active',
+      user_roles: [],
+      store_users: [{ store_id: 1 }],
+      addresses: [],
+    };
+
+    const existingByDocument = {
+      id: 11,
+      first_name: 'María',
+      last_name: 'Gómez',
+      phone: '+573101234567',
+      document_type: 'CC',
+      document_number: '99999999',
+      email: 'maria@x.com',
+      state: 'active',
+      user_roles: [],
+      store_users: [{ store_id: 1 }],
+      addresses: [],
+    };
+
+    beforeEach(() => {
+      // Common happy path: store exists; no email/document match unless a test
+      // overrides with `mockResolvedValueOnce`.
+      mockPrismaService.stores.findUnique.mockResolvedValue(mockStore);
+      mockPrismaService.users.findFirst.mockResolvedValue(null);
+    });
+
+    it('matches by email and returns was_updated=false when nothing new arrives', async () => {
+      mockPrismaService.users.findFirst.mockResolvedValueOnce(existingByEmail);
+
+      const result = await service.findOrCreateByEmailOrDocument(1, {
+        email: 'juan@x.com',
+      } as any);
+
+      expect(result.was_created).toBe(false);
+      expect(result.was_updated).toBe(false);
+      expect(result.matched_by).toBe('email');
+      expect(result.customer.id).toBe(7);
+      expect(mockPrismaService.users.update).not.toHaveBeenCalled();
+      expect(mockPrismaService.users.create).not.toHaveBeenCalled();
+    });
+
+    it('matches by email and fills a null phone (conservative update)', async () => {
+      mockPrismaService.users.findFirst.mockResolvedValueOnce(existingByEmail);
+
+      const result = await service.findOrCreateByEmailOrDocument(1, {
+        email: 'juan@x.com',
+        phone: '+573001234567',
+      } as any);
+
+      expect(result.was_created).toBe(false);
+      expect(result.was_updated).toBe(true);
+      expect(result.matched_by).toBe('email');
+      expect(mockPrismaService.users.update).toHaveBeenCalledTimes(1);
+      const updateData = mockPrismaService.users.update.mock.calls[0][0].data;
+      expect(updateData).toEqual({ phone: '+573001234567' });
+    });
+
+    it('OVERWRITES a confirmed first_name when the request carries a different one (normalizes via toTitleCase)', async () => {
+      // Per dev lead's clarified spec: matching unique identifier → edit
+      // (overwrite) with the typed values. The cashier's typed name
+      // becomes the new truth on the existing row.
+      // buildUpdatePayload now applies the same `toTitleCase` normalization
+      // that the create() path uses, so "OTRO NOMBRE" lands as "Otro Nombre".
+      mockPrismaService.users.findFirst.mockResolvedValueOnce(existingByEmail);
+
+      const result = await service.findOrCreateByEmailOrDocument(1, {
+        email: 'juan@x.com',
+        first_name: 'OTRO NOMBRE',
+      } as any);
+
+      expect(result.was_created).toBe(false);
+      expect(result.was_updated).toBe(true);
+      expect(result.matched_by).toBe('email');
+      expect(mockPrismaService.users.update).toHaveBeenCalledTimes(1);
+      const updateData = mockPrismaService.users.update.mock.calls[0][0].data;
+      expect(updateData).toEqual({ first_name: 'Otro Nombre' });
+    });
+
+    it('skips update + email when the cashier re-tipes the same values (diff is empty)', async () => {
+      // Regression for the bug where the form reset between sales caused
+      // a re-resolve with the same data to fire customer.updated and email
+      // the customer with "Actualizamos tus datos" even though nothing
+      // changed. With the diff-aware buildUpdatePayload, no field changes
+      // → empty payload → no update → no event → no email.
+      mockPrismaService.users.findFirst.mockResolvedValueOnce(existingByEmail);
+
+      // existingByEmail.first_name = 'Juan', .last_name = 'Pérez'
+      const result = await service.findOrCreateByEmailOrDocument(1, {
+        email: 'juan@x.com',
+        first_name: 'juan',       // normalizes to 'Juan' — matches existing
+        last_name: 'pérez',      // normalizes to 'Pérez' — matches existing
+      } as any);
+
+      expect(result.was_created).toBe(false);
+      expect(result.was_updated).toBe(false);
+      expect(result.matched_by).toBe('email');
+      expect(mockPrismaService.users.update).not.toHaveBeenCalled();
+    });
+
+    it('matches by exact (document_type, document_number) when no email matches', async () => {
+      // DTO has no email → email-lookup branch is skipped. The only
+      // `findFirst` call comes from `findByDocumentInOrganization`.
+      mockPrismaService.users.findFirst.mockResolvedValueOnce(existingByDocument);
+
+      const result = await service.findOrCreateByEmailOrDocument(1, {
+        document_type: 'CC',
+        document_number: '99999999',
+        phone: '+573109999999',
+      } as any);
+
+      expect(result.was_created).toBe(false);
+      expect(result.matched_by).toBe('document');
+      expect(result.customer.id).toBe(11);
+      // Overwrite semantics: every non-empty DTO field lands in the
+      // Per lead's clarified spec: the document pair is one of the
+      // unique IDs that drove the match — it is NOT overwritten. Only
+      // the "other fields" (first_name, last_name, phone) get
+      // written back. The cashier typed phone, so phone lands in the
+      // payload; the typed document pair is ignored on purpose.
+      expect(result.was_updated).toBe(true);
+      const updateData = mockPrismaService.users.update.mock.calls[0][0].data;
+      expect(updateData).toEqual({ phone: '+573109999999' });
+    });
+
+    it('does NOT match by document when document_type differs (CC 123 ≠ NIT 123)', async () => {
+      // Both lookups return null → falls through to `create()`.
+      mockPrismaService.users.findFirst.mockResolvedValue(null);
+
+      const result = await service.findOrCreateByEmailOrDocument(1, {
+        document_type: 'NIT',
+        document_number: '123',
+        first_name: 'Acme',
+        last_name: 'SAS',
+        person_type: 'JURIDICA',
+      } as any);
+
+      expect(result.was_created).toBe(true);
+      expect(result.was_updated).toBe(false);
+      expect(result.matched_by).toBe(null);
+      // create() is invoked with the original storeId.
+      expect(mockPrismaService.users.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('delegates to create() when nothing matches and returns was_created=true', async () => {
+      mockPrismaService.users.findFirst.mockResolvedValue(null);
+
+      const result = await service.findOrCreateByEmailOrDocument(1, {
+        email: 'nuevo@x.com',
+        first_name: 'Nuevo',
+        last_name: 'Cliente',
+        document_type: 'CC',
+        document_number: '88888888',
+        person_type: 'NATURAL',
+      } as any);
+
+      expect(result.was_created).toBe(true);
+      expect(result.was_updated).toBe(false);
+      expect(result.matched_by).toBe(null);
+      expect(result.customer.id).toBe(42); // from the create() mock
+      expect(mockPrismaService.users.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('accepts non-canonical document_number on the resolve path (no DocumentNumberMatchesType)', async () => {
+      // Regression — the cashier typed `33001521212` (11 digits) for CC,
+      // which the strict `@DocumentNumberMatchesType()` on CreateCustomerDto
+      // rejected (CC regex is `^\d{6,10}$`). ResolveCustomerDto intentionally
+      // skips that decorator so the lookup can still proceed.
+      mockPrismaService.users.findFirst.mockResolvedValue(null);
+
+      // 11-digit number that fails CC strict validation but is a valid lookup key.
+      const result = await service.findOrCreateByEmailOrDocument(1, {
+        email: 'largo@x.com',
+        first_name: 'C',
+        last_name: 'L',
+        document_type: 'CC',
+        document_number: '33001521212',
+      } as any);
+
+      expect(result.was_created).toBe(true);
+      expect(result.matched_by).toBe(null);
+    });
+  });
+
+  /**
+   * QUI-723 — coverage for every Colombian DIAN document type.
+   *
+   * Regression for the bug where `ResolveCustomerDto` only declared the
+   * basic identity fields, so the global `ValidationPipe` rejected
+   * `person_type`, `tax_regime`, `fiscal_responsibilities`, `ciiu_code`,
+   * `is_withholding_agent` with `"property X should not exist"`. After
+   * the DTO fix, every type must create with its full payload.
+   *
+   * Each test feeds the right shape for the type:
+   *   - NATURAL types (CC, CE, TI, RC, PA, PEP, PPT, DIE, NUIP) send
+   *     first_name + last_name, no persona-specific fields.
+   *   - NIT sends `person_type: JURIDICA` plus `tax_regime` and
+   *     `ciiu_code` so the post-create customer record is
+   *     DIAN-grade (required for electronic invoicing).
+   *
+   * Note: written as individual `it()` blocks instead of `it.each` —
+   * jest-each binds the per-iteration `done` callback into the trailing
+   * tuple slot for async handlers in some versions, which corrupted
+   * the payload shape during the first iteration.
+   */
+  describe('findOrCreateByEmailOrDocument — all DIAN document types', () => {
+    const now = Date.now();
+
+    const cases: Array<{
+      type: string;
+      number: string;
+      person: string;
+      taxRegime?: string;
+      ciiuCode?: string;
+    }> = [
+      { type: 'CC', number: '12345678', person: 'NATURAL' },
+      { type: 'CE', number: '87654321', person: 'NATURAL' },
+      { type: 'NIT', number: '900123456', person: 'JURIDICA', taxRegime: 'COMUN', ciiuCode: '4711' },
+      { type: 'TI', number: '12345678901', person: 'NATURAL' },
+      { type: 'RC', number: '12345678901', person: 'NATURAL' },
+      { type: 'PA', number: 'AB123456', person: 'NATURAL' },
+      { type: 'PEP', number: '123456789', person: 'NATURAL' },
+      { type: 'PPT', number: '123456789', person: 'NATURAL' },
+      { type: 'DIE', number: 'AB12345678', person: 'NATURAL' },
+      { type: 'NUIP', number: '12345678901', person: 'NATURAL' },
+    ];
+
+    for (const c of cases) {
+      it(`creates a customer for type=${c.type}`, async () => {
+        const payload: Record<string, unknown> = {
+          email: `create-${c.type.toLowerCase()}-${now}-${c.type}@x.com`,
+          first_name: `Test ${c.type}`,
+          last_name: 'AllTypes',
+          document_type: c.type,
+          document_number: c.number,
+          person_type: c.person,
+        };
+        if (c.taxRegime) payload.tax_regime = c.taxRegime;
+        if (c.ciiuCode) payload.ciiu_code = c.ciiuCode;
+
+        const result = await service.findOrCreateByEmailOrDocument(
+          1,
+          payload as any,
+        );
+
+        expect(result.was_created).toBe(true);
+        expect(result.was_updated).toBe(false);
+        expect(result.matched_by).toBe(null);
+        expect(result.customer.document_type).toBe(c.type);
+        expect(result.customer.document_number).toBe(c.number);
+        expect(result.customer.person_type).toBe(c.person);
+        if (c.taxRegime) expect(result.customer.tax_regime).toBe(c.taxRegime);
+        if (c.ciiuCode) expect(result.customer.ciiu_code).toBe(c.ciiuCode);
+        expect(mockPrismaService.users.create).toHaveBeenCalledTimes(1);
+        const createCall = mockPrismaService.users.create.mock.calls[0][0];
+        expect(createCall.data.document_type).toBe(c.type);
+        expect(createCall.data.document_number).toBe(c.number);
+        expect(createCall.data.person_type).toBe(c.person);
+        if (c.taxRegime) expect(createCall.data.tax_regime).toBe(c.taxRegime);
+        if (c.ciiuCode) expect(createCall.data.ciiu_code).toBe(c.ciiuCode);
+      });
+    }
   });
 });

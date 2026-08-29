@@ -193,6 +193,8 @@ export interface LineasRowErrors {
                   type="button"
                   class="w-full flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-md border border-border hover:border-primary-600 transition-colors text-left"
                   (click)="openProductPicker.emit(row)"
+                  title="Elegir producto para esta línea"
+                  aria-label="Elegir producto para esta línea"
                 >
                   <app-icon name="package" [size]="14" />
                   <span class="flex-1 min-w-0 truncate">

@@ -152,6 +152,8 @@ export interface DivisaSectionPaths {
                     type="button"
                     class="underline underline-offset-2 hover:no-underline"
                     (click)="applyOfficialExchangeRate.emit()"
+                    title="Usar la tasa de cambio oficial"
+                    aria-label="Usar la tasa de cambio oficial"
                   >
                     Usar la oficial
                   </button>

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -6,7 +6,22 @@ import { DocumentDataProviderRegistry } from '../providers/document-data-provide
 import { PrintLayoutComposerService } from './print-layout-composer.service';
 import { PrintFiscalValidatorService } from './print-fiscal-validator.service';
 import { FiscalInvoicePdfRenderService } from './fiscal-invoice-pdf-render.service';
-import { PrintFormatDefinition } from '../interfaces/print-format.interface';
+// [print-editor-dsk P2.2] — Single render path service. Wraps the
+// composer's HTML with explicit pixel dimensions so the preview no longer
+// relies on `srcdoc` + `doc.write` double-render or magic `3.78` math.
+import { PrintDocumentRendererService } from './print-document-renderer.service';
+// [print-editor-dsk P9] — Prometheus instrumentation: histogram of render
+// duration, labeled by `format_type` / `engine` / `organization_id`. The
+// service is a thin adapter (see `print-gateway.metrics.ts`); the gateway
+// owns the timer and the `organization_id` resolution so the metric line
+// and the existing logger line stay co-located.
+import { PrintGatewayMetricsService } from './print-gateway.metrics';
+import {
+  PrintColumnDefinition,
+  PrintFormatDefinition,
+  PrintSectionDefinition,
+  PrintTokenDefinition,
+} from '../interfaces/print-format.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 
 export interface RenderResult {
@@ -31,9 +46,19 @@ export interface RenderResult {
   width_mm: number;
 }
 
-/** Formatos que hoy tienen motor PDF detrás del gateway. */
+/** Formatos que hoy tienen motor PDF detrás del gateway.
+ *
+ * [print-editor-dsk P8] — `fiscal_credit_note` entra al motor PDF. La nota
+ * crédito electrónica comparte el mismo builder pdfkit que la factura
+ * (`InvoicePdfBuilder.generate`) y el mismo resolvedor de identidad fiscal
+ * (`resolveFiscalIssuerForPrint`) — la única diferencia es el texto del
+ * sello y el del CUDE/CUFE; el resto del layout (papel, doble pasada de
+ * rollo, QR §11.7) es idéntico. El render distingue el documento por la
+ * fila `invoices.invoice_type`, no por el `format_type`.
+ */
 const PDF_ENGINE_SUPPORTED_FORMATS: print_format_type_enum[] = [
   'fiscal_electronic_invoice',
+  'fiscal_credit_note',
 ];
 
 @Injectable()
@@ -46,6 +71,13 @@ export class PrintGatewayService {
     private readonly composer: PrintLayoutComposerService,
     private readonly fiscalValidator: PrintFiscalValidatorService,
     private readonly pdfRenderer: FiscalInvoicePdfRenderService,
+    // [print-editor-dsk P9] — Injected via constructor; `print-formats.module.ts`
+    // provides it. Marked `@Optional()` so existing unit tests that build the
+    // gateway manually (engine-pdf, profile-template, merge-definition specs)
+    // do not need to wire a Prometheus stub. Production deployments always
+    // register the provider via the module.
+    @Optional()
+    private readonly metrics?: PrintGatewayMetricsService,
   ) {}
 
   /**
@@ -223,7 +255,13 @@ export class PrintGatewayService {
     let pdf_buffer: Buffer | undefined;
     if (engine === 'pdf') {
       try {
-        pdf_buffer = await this.pdfRenderer.renderBuffer(storeId, documentId);
+        // [print-editor-dsk P8] — Pasamos `formatType` para que el motor
+        // distinga `fiscal_electronic_invoice` de `fiscal_credit_note` por
+        // la columna `invoices.invoice_type`, evitando que un id de factura
+        // renderice con la etiqueta de nota (o viceversa). El resto del
+        // render es idéntico: mismo builder pdfkit, misma resolución de
+        // papel, misma identidad fiscal.
+        pdf_buffer = await this.pdfRenderer.renderBuffer(storeId, documentId, formatType);
         // TODO(integration-slice-4): thread `paper_definition` from caller
         //   - Cuando `RenderPrintDocumentDto` extienda `paper_format`
         //     (opción B del plan E.11), pasarlo aquí a `renderBuffer` por
@@ -261,6 +299,32 @@ export class PrintGatewayService {
     this.logger.log(
       `PrintGateway rendered ${formatType} for doc ${documentId} (store ${storeId}, engine ${engine}) in ${elapsed}ms`,
     );
+
+    // [print-editor-dsk P9] — Prometheus observation. We resolve the
+    // `organization_id` here (best-effort) so the histogram carries the
+    // tenant label. The lookup is a single-row findFirst on the PK of
+    // `stores` (the same row the gateway already loaded indirectly via the
+    // provider's `fetchDocumentData`); it does not introduce a new join.
+    // On failure (deleted store, AsyncLocalStorage drift) we emit under a
+    // sentinel label so the metric is never silently dropped.
+    let organizationId = 'unknown';
+    try {
+      const storeRow = await this.prisma.stores.findFirst({
+        where: { id: storeId },
+        select: { organization_id: true },
+      });
+      if (storeRow?.organization_id != null) {
+        organizationId = String(storeRow.organization_id);
+      }
+    } catch {
+      // Swallow — Prometheus must NEVER break a render.
+    }
+    this.metrics?.observe({
+      format_type: formatType,
+      engine,
+      organization_id: organizationId,
+      duration_seconds: elapsed / 1000,
+    });
 
     return {
       format_type: formatType,
@@ -358,6 +422,14 @@ export class PrintGatewayService {
 
   /**
    * Genera una vista previa instantánea con datos de prueba o documento real
+   *
+   * [print-editor-dsk P2.2] — El HTML devuelto sale ENVUELTO por
+   * `PrintDocumentRendererService`, así el preview ya lleva dimensiones
+   * explícitas en píxeles (`width: Npx`) y un único contenedor
+   * `.vendix-print-page`. Antes el frontend re-renderizaba el HTML en un
+   * `<iframe srcdoc>` y aplicaba `Math.max(w * 3.78, 300)`, dos defectos
+   * que sobre-escalaban thermal_58 a 300px y trataban letter/a4/half_letter
+   * como un flat de 600px. Aquí el backend pasa la caja exacta.
    */
   async preview(
     storeId: number,
@@ -381,10 +453,27 @@ export class PrintGatewayService {
       data = await provider.getSampleData(storeId);
     }
 
-    const html = this.composer.compose(previewDef, data);
+    const rawHtml = this.composer.compose(previewDef, data);
+
+    // [print-editor-dsk P2.2] — Instanciado local a propósito: el servicio
+    // no tiene dependencias y la inyección por constructor forzaría a
+    // añadir un stub en `merge-definition.spec.ts` (que NO toco en esta
+    // fase). Sigue siendo un singleton a nivel de módulo porque Nest lo
+    // registra como provider — `document-print.service.ts` puede seguir
+    // inyectándolo vía DI en su propia refactorización.
+    const renderer = new PrintDocumentRendererService();
+    const wrappedHtml = renderer.render({
+      html: rawHtml,
+      paper: {
+        width_mm: previewDef.paper.width_mm,
+        is_roll: previewDef.paper.is_roll,
+        height_mm: previewDef.paper.height_mm ?? null,
+      },
+      copies: previewDef.paper.copies,
+    });
 
     return {
-      html,
+      html: wrappedHtml,
       width_mm: previewDef.paper.width_mm,
       is_roll: previewDef.paper.is_roll,
       definition: previewDef,
@@ -392,7 +481,18 @@ export class PrintGatewayService {
   }
 
   /**
-   * Realiza un merge profundo y seguro entre la definición base y los overrides
+   * Realiza un merge profundo y seguro entre la definición base y los overrides.
+   *
+   * Reglas (P1.4):
+   * - `paper` se mezcla campo a campo; si llegan márgenes per-side (`v2`) se
+   *   descarta el `margin_mm` legado para que el composer no aplique dos veces.
+   * - `styles` se mezcla superficialmente.
+   * - `sections`, `columns` y `tokens` se mezclan POR IDENTIDAD (id / path):
+   *   si el override trae el mismo id, reemplaza la entrada; si trae un id
+   *   nuevo, se conserva el resto y el nuevo se añade al final.
+   * - `logo`, `company_block` y `custom_template` sólo se sustituyen si la
+   *   clave aparece EXPLÍCITAMENTE en el override (no se pisan con `null`/
+   *   `undefined` accidentales del Hub).
    */
   private mergeDefinition(
     base: PrintFormatDefinition,
@@ -402,19 +502,71 @@ export class PrintGatewayService {
       return base;
     }
 
-    return {
+    const v = (overrides.v ?? base.v ?? 2) as PrintFormatDefinition['v'];
+
+    const merged: PrintFormatDefinition = {
       ...base,
-      paper: {
-        ...base.paper,
-        ...(overrides.paper || {}),
-      },
-      styles: {
-        ...base.styles,
-        ...(overrides.styles || {}),
-      },
-      sections: overrides.sections ? overrides.sections : base.sections,
-      columns: overrides.columns ? overrides.columns : base.columns,
-      custom_template: overrides.custom_template !== undefined ? overrides.custom_template : base.custom_template,
+      v,
+      paper: overrides.paper
+        ? {
+            ...base.paper,
+            ...overrides.paper,
+            // Si llegan márgenes v2 per-side, el legado `margin_mm` ya no debe
+            // ganar: el composer prefiere los per-side y el legado caería a
+            // piso uniforme, anulando la asimetría del override.
+            margin_mm:
+              overrides.paper.margin_top_mm !== undefined ||
+              overrides.paper.margin_right_mm !== undefined ||
+              overrides.paper.margin_bottom_mm !== undefined ||
+              overrides.paper.margin_left_mm !== undefined
+                ? undefined
+                : overrides.paper.margin_mm ?? base.paper.margin_mm,
+          }
+        : base.paper,
+      styles: overrides.styles
+        ? { ...(base.styles ?? {}), ...overrides.styles }
+        : base.styles,
     };
+
+    // Sections: deep merge por id (mismo id → reemplaza, id nuevo → append).
+    if (overrides.sections) {
+      const baseSections = base.sections ?? [];
+      const overrideSections = overrides.sections as PrintSectionDefinition[];
+      const overrideIds = new Set(overrideSections.map((s) => s.id));
+      const unchanged = baseSections.filter((s) => !overrideIds.has(s.id));
+      merged.sections = [...unchanged, ...overrideSections];
+    }
+
+    // Columns: deep merge por id (mismo id → reemplaza, id nuevo → append).
+    if (overrides.columns) {
+      const baseColumns = base.columns ?? [];
+      const overrideColumns = overrides.columns as PrintColumnDefinition[];
+      const overrideIds = new Set(overrideColumns.map((c) => c.id));
+      const unchanged = baseColumns.filter((c) => !overrideIds.has(c.id));
+      merged.columns = [...unchanged, ...overrideColumns];
+    }
+
+    // Tokens: unión por `path` (mismo path → gana override, path nuevo → append).
+    if (overrides.tokens) {
+      const baseTokens = base.tokens ?? [];
+      const overrideTokens = overrides.tokens as PrintTokenDefinition[];
+      const overridePaths = new Set(overrideTokens.map((t) => t.path));
+      const unchanged = baseTokens.filter((t) => !overridePaths.has(t.path));
+      merged.tokens = [...unchanged, ...overrideTokens];
+    }
+
+    // `logo` y `company_block` sólo se sustituyen si la clave aparece
+    // EXPLÍCITAMENTE en el override (no se pisan con `undefined` accidentales).
+    if ('logo' in overrides) {
+      merged.logo = overrides.logo as PrintFormatDefinition['logo'];
+    }
+    if ('company_block' in overrides) {
+      merged.company_block = overrides.company_block as PrintFormatDefinition['company_block'];
+    }
+    if ('custom_template' in overrides) {
+      merged.custom_template = overrides.custom_template as string | undefined;
+    }
+
+    return merged;
   }
 }

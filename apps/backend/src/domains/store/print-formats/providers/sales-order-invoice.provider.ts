@@ -3,6 +3,7 @@ import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
+import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 
@@ -211,5 +212,45 @@ export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
       { token: '{{order.order_number}}', path: 'document.number', description: 'Número de orden de venta', example: 'ORD-1002' },
       { token: '{{totals.grand_total}}', path: 'totals.grand_total_formatted', description: 'Monto total de la orden', example: '$835.000' },
     ];
+  }
+
+  /**
+   * [print-editor-dsk P3.1] — Factura de orden de venta: comparte tabla
+   * `orders` con POS pero como previsualización de factura normalmente
+   * se monta sobre órdenes `state IN ('completed','invoiced','shipped')`;
+   * por ahora el picker devuelve las últimas N órdenes sin filtrar y el
+   * filtrado por estado se queda para cuando el editor pida estado, no
+   * documento.
+   */
+  async listRecent(
+    storeId: number,
+    limit: number,
+  ): Promise<RecentDocumentSummary[]> {
+    const rows = await this.prisma.orders.findMany({
+      where: { store_id: storeId },
+      orderBy: { created_at: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        order_number: true,
+        created_at: true,
+        grand_total: true,
+      },
+    });
+    const fmt = new Intl.DateTimeFormat('es-CO', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
+    const cop = new Intl.NumberFormat('es-CO', {
+      style: 'currency',
+      currency: 'COP',
+      maximumFractionDigits: 0,
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      number: String(r.order_number),
+      date_formatted: r.created_at ? fmt.format(new Date(r.created_at)) : '',
+      total_formatted: cop.format(Number(r.grand_total || 0)),
+    }));
   }
 }

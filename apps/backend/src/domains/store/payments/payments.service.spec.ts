@@ -50,6 +50,7 @@ describe('PaymentsService', () => {
   let promotionEngine: PromotionEngineService;
   let couponsService: CouponsService;
   let fiscalThreshold: FiscalInvoiceThresholdService;
+  let kitchenFire: KitchenFireService;
 
   const mockUser = {
     id: 1,
@@ -232,6 +233,7 @@ describe('PaymentsService', () => {
     fiscalThreshold = module.get<FiscalInvoiceThresholdService>(
       FiscalInvoiceThresholdService,
     );
+    kitchenFire = module.get<KitchenFireService>(KitchenFireService);
   });
 
   it('should be defined', () => {
@@ -1034,6 +1036,151 @@ describe('PaymentsService', () => {
       // `coupon_uses` / `coupons.current_uses` sólo se tocan dentro de la
       // transacción de cobro; el draft no llega allí y no registra uso.
       expect((couponsService as any).registerUse).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Table lifecycle contract: a POS sale (deferred or not) MUST NOT close the
+  // table session or flip `tables.status` to 'cleaning'. Only the canonical
+  // `TableSessionsService.closeSession` owns those transitions. If someone
+  // re-introduces the auto-close here, this test fails before the regression
+  // reaches production. See PR #698 review note.
+  // ---------------------------------------------------------------------------
+  describe('applyPosPaymentToTableSession — table lifecycle contract', () => {
+    const CONTEXT_STORE_ID = 1;
+    let contextSpy: jest.SpyInstance;
+
+    /**
+     * Bare `tx` shim. Every Prisma call the private method makes is replaced
+     * with a `jest.fn()` so we can assert exactly which writes the path emits
+     * and which it never does. Default returns are "empty / ok" so the chain
+     * doesn't throw on its way to the close-out block.
+     */
+    const buildTx = (session: any) => {
+      const tx: any = {
+        table_sessions: {
+          findUnique: jest.fn().mockResolvedValue(session),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        tables: {
+          update: jest.fn().mockResolvedValue({}),
+        },
+        order_items: {
+          findMany: jest.fn().mockResolvedValue([]), // existing draft items
+          findFirst: jest.fn().mockResolvedValue(null), // KDS candidate scan (line ~3033)
+        },
+        orders: {
+          update: jest.fn().mockImplementation((args: any) =>
+            Promise.resolve({
+              id: args.where.id,
+              order_items: [],
+              stores: { id: CONTEXT_STORE_ID, organization_id: 1 },
+            }),
+          ),
+        },
+      };
+      return tx;
+    };
+
+    const arrangeCashSale = () => {
+      contextSpy = jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({
+          store_id: CONTEXT_STORE_ID,
+          organization_id: 1,
+        } as any);
+
+      const posUser: any = {
+        id: 7,
+        email: 'cajero@example.com',
+        organization_id: 1,
+        roles: ['super_admin'],
+      };
+
+      const session = {
+        id: 99,
+        store_id: CONTEXT_STORE_ID,
+        table_id: 5,
+        order_id: 1001,
+        closed_at: null,
+        order: { id: 1001, store_id: CONTEXT_STORE_ID },
+      };
+
+      const tx = buildTx(session);
+
+      // Promotion/coupon re-evaluation helpers are stubs because the contract
+      // we are locking here is the table lifecycle, not the discount engine.
+      jest
+        .spyOn(service as any, 'calculatePosPromotionQuote')
+        .mockResolvedValue({ total_discount: 0, applied: [] });
+      jest
+        .spyOn(service as any, 'calculatePosCouponDiscount')
+        .mockResolvedValue({
+          coupon_id: null,
+          coupon_code: null,
+          discount_amount: 0,
+        });
+
+      // The private method pokes `prepareFireContext` and `fireOrderItemsInTx`;
+      // their side-effects are out of scope. Returning `null`/`{ firedItemIds: [] }`
+      // makes the fire branch a no-op so execution reaches the close-out block.
+      (kitchenFire as any).prepareFireContext = jest.fn().mockResolvedValue(null);
+      (kitchenFire as any).fireOrderItemsInTx = jest.fn().mockResolvedValue(null);
+
+      return { tx, session, posUser };
+    };
+
+    const buildDto = (overrides: any = {}): any => ({
+      table_session_id: 99,
+      store_id: CONTEXT_STORE_ID,
+      currency: 'COP',
+      items: [],
+      payments: [
+        { method: 'cash', amount: 10000, status: 'completed' },
+      ],
+      ...overrides,
+    });
+
+    afterEach(() => {
+      contextSpy?.mockRestore();
+      jest.restoreAllMocks();
+    });
+
+    it('POS cash sale keeps the table session OPEN and the table `occupied`', async () => {
+      const { tx, posUser } = arrangeCashSale();
+
+      const result = await (
+        service as any
+      ).applyPosPaymentToTableSession(
+        tx,
+        buildDto(),
+        posUser,
+        CONTEXT_STORE_ID,
+      );
+
+      // Contract — locked by review on PR #698:
+      //   1. `tx.table_sessions.update` MUST NEVER close the session here;
+      //      the canonical `TableSessionsService.closeSession` owns that
+      //      transition. Using `not.toHaveBeenCalledWith(...)` instead of
+      //      a flat `not.toHaveBeenCalled()` so the test only breaks if a
+      //      future change reintroduces the forbidden mutation, not for
+      //      legitimate (e.g. `updated_at`) writes.
+      //   2. `tx.tables.update` MUST NEVER flip the table to `cleaning`
+      //      here; that flip belongs to `closeSession` too.
+      //   3. `result.closedSessionId` MUST be null so the post-commit
+      //      `session_closed` SSE emission stays gated on the canonical
+      //      close path.
+      expect(tx.table_sessions.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ closed_at: expect.anything() }),
+        }),
+      );
+      expect(tx.tables.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: 'cleaning' }),
+        }),
+      );
+      expect(result.closedSessionId).toBeNull();
     });
   });
 });
