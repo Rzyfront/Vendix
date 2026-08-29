@@ -296,6 +296,11 @@ export class PrintLayoutComposerService {
     const termVal = mode === 'tokenized'
       ? `${terminalLabel}: <span class="vendix-token-pill" data-token="order.pos_terminal">&#123;&#123; order.pos_terminal &#125;&#125;</span>`
       : (doc.pos_terminal ? `${terminalLabel}: ${this.compiler.escapeHtml(doc.pos_terminal)}` : '');
+    // QUI-737 (B.4) — alias de venta rápida, en la CABECERA junto al número de
+    // orden. No pertenece al bloque "Datos del Cliente": no es un cliente formal.
+    const aliasVal = mode === 'tokenized'
+      ? '<span class="vendix-token-pill" data-token="document.customer_alias">&#123;&#123; document.customer_alias &#125;&#125;</span>'
+      : this.compiler.escapeHtml(doc.customer_alias || '');
 
     return `
       <div class="print-section section-doc-info" data-section-id="sec_doc_info">
@@ -305,6 +310,7 @@ export class PrintLayoutComposerService {
         </div>
         ${isCashierActive && cashierVal ? `<div class="doc-cashier" data-element-id="f_cashier" data-section-id="sec_doc_info" data-token="order.cashier_name">${cashierVal}</div>` : ''}
         ${isTerminalActive && termVal ? `<div class="doc-terminal" data-element-id="f_terminal" data-section-id="sec_doc_info" data-token="order.pos_terminal">${termVal}</div>` : ''}
+        ${mode === 'tokenized' || doc.customer_alias ? `<div class="doc-customer-alias" data-element-id="f_customer_alias" data-section-id="sec_doc_info" data-token="document.customer_alias">${aliasVal}</div>` : ''}
       </div>
     `;
   }

@@ -322,14 +322,19 @@ export class PosRestaurantIntegrationService {
     customerId: number,
     lines: CounterOrderLine[],
     notes?: string,
+    customerAlias?: string,
   ): Observable<CounterOrderResult> {
     const subtotal = lines.reduce((sum, l) => sum + (l.total_price || 0), 0);
     // `customer_id` is optional on the backend (Bug 4 / Fase K): POS
     // counter flows can omit it for an anonymous Consumidor Final sale.
     // We only include it when the caller actually provided a positive id.
+    // QUI-737 (B.4) — el alias es una tercera identidad ("sin cliente formal"),
+    // mutuamente excluyente con customer_id; nunca ''.
+    const effectiveAlias = (customerAlias ?? '').trim() || undefined;
     const body: Record<string, any> = {
       state: 'created',
       ...(customerId && customerId > 0 ? { customer_id: customerId } : {}),
+      ...(effectiveAlias && !(customerId > 0) ? { customer_alias: effectiveAlias } : {}),
       subtotal: Number(subtotal.toFixed(2)),
       total_amount: Number(subtotal.toFixed(2)),
       internal_notes: notes,

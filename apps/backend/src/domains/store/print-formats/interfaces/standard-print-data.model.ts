@@ -91,6 +91,12 @@ export interface StandardPrintDataModel {
     table_number?: string;
     waiter_name?: string;
     guests_count?: number;
+    /**
+     * QUI-737 (B.4) — alias de venta rápida ("Mesa 5"). Se imprime en la
+     * cabecera del ticket junto al número de orden; NO pertenece al bloque
+     * "Datos del Cliente" (`customer`), porque no es un cliente formal.
+     */
+    customer_alias?: string;
   };
   fiscal?: {
     cufe?: string;

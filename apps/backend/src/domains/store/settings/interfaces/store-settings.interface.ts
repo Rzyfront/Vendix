@@ -672,6 +672,9 @@ export interface BarcodeScannerSettings {
 export interface PosSettings {
   allow_anonymous_sales: boolean;
   anonymous_sales_as_default: boolean;
+  /** QUI-727 (B.4) — ventas por alias (nombre/mesa) sin cliente formal. */
+  allow_alias_sales?: boolean;
+  alias_sales_as_default?: boolean;
   business_hours: Record<string, BusinessHours>;
   schedule_mode?: 'continuous' | 'custom';
   enable_schedule_validation: boolean;

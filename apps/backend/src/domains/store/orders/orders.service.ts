@@ -1336,7 +1336,13 @@ export class OrdersService {
       });
       const pos = (settings?.settings as any)?.pos ?? {};
       const allowAnonymous = pos?.allow_anonymous_sales === true;
-      if (!allowAnonymous) {
+      // QUI-737 (B.4) — el modo alias es otra salida legítima de "sin cliente":
+      // falta que `customer_alias` viaje en el PATCH. Sin esto, un editor con
+      // `{customer_id:null, customer_alias:'Mesa 5'}` seguiría lanzando
+      // POS_CUSTOMER_REQUIRED_001 aunque la tienda tenga `allow_alias_sales`.
+      const allowAlias = pos?.allow_alias_sales === true;
+      const hasAlias = !!dto.customer_alias;
+      if (!allowAnonymous && !(allowAlias && hasAlias)) {
         throw new VendixHttpException(
           ErrorCodes.POS_CUSTOMER_REQUIRED_001,
         );
@@ -2446,18 +2452,21 @@ export class OrdersService {
       await tx.orders.update({
         where: { id: orderId },
         data: {
-          // ADR-9 (CP-POLLO-ARABE-727 A.3): alias↔cliente mutuamente excluyentes
-          // (CHECK orders_customer_xor_alias). UpdateOrderEditorDto todavía no
-          // expone customer_alias; al fijar un customer_id (o al limpiarlo
-          // explícitamente) garantizamos que el alias quede NULL. El CHECK
-          // respondería 500 si ambos se poblaran en la misma fila — este guard
-          // es la 1ª defensa. Preserva el comportamiento previo: `undefined`
-          // (no enviado) no toca customer_id; solo null/número lo modifican.
+          // ADR-9 (CP-POLLO-ARABE-727): alias↔cliente mutuamente excluyentes
+          // (CHECK orders_customer_xor_alias). A.3 escribió este guard cuando el
+          // DTO aún no exponía customer_alias; B.4 lo habilita, así que el guard
+          // debe persistir el alias cuando se envía. El CHECK respondería 500 si
+          // ambos se poblaran en la misma fila — este guard es la 1ª defensa.
+          // Preserva el comportamiento previo: `undefined` (no enviado) no toca
+          // customer_id; solo null/número lo modifican; el alias solo se escribe
+          // cuando se envía (y fuerza customer_id null).
           ...(dto.customer_id != null
             ? { customer_id: dto.customer_id, customer_alias: null }
-            : dto.customer_id === null
-              ? { customer_id: null, customer_alias: null }
-              : {}),
+            : dto.customer_alias != null
+              ? { customer_id: null, customer_alias: dto.customer_alias }
+              : dto.customer_id === null
+                ? { customer_id: null, customer_alias: null }
+                : {}),
           notes: dto.notes ?? existingOrder.notes,
           internal_notes: dto.internal_notes ?? existingOrder.internal_notes,
           delivery_type: dto.delivery_type ?? existingOrder.delivery_type,

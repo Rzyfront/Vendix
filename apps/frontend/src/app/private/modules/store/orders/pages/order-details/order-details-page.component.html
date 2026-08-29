@@ -1919,6 +1919,20 @@
                         {{ getPaymentStateLabel(payment.state) }}
                       </span>
                     </div>
+                    <!-- QUI-732 (B.5) — método de pago. Fallback chain
+                         display_name → system.display_name → system.name → '—'.
+                         El último eslabón cubre pagos huérfanos
+                         (store_payment_method_id nulo o método eliminado). -->
+                    <p class="text-[11px] font-medium text-text-secondary mt-1">
+                      {{
+                        $any(payment).store_payment_method?.display_name ||
+                          $any(payment).store_payment_method?.system_payment_method
+                            ?.display_name ||
+                          $any(payment).store_payment_method?.system_payment_method
+                            ?.name ||
+                          '—'
+                      }}
+                    </p>
                     <p class="text-[10px] text-gray-400 mt-1">
                       {{ formatDate(payment.created_at) }}
                     </p>

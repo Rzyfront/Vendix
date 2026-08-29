@@ -60,6 +60,7 @@
               [cartState]="cartState()"
               [tableId]="tableId()"
               (advanceRequested)="attemptNextStep()"
+              (back)="onConsumoBack()"
             ></app-pos-consumo-step>
           </div>
         }
@@ -77,6 +78,8 @@
               [fulfillment]="consumoStep()?.fulfillment() ?? 'entrega'"
               [sessionId]="checkoutSessionId()"
               [isAnonymous]="isAnonymousSale()"
+              [isAlias]="saleMode() === 'alias'"
+              [customerAlias]="customerAlias()"
               [paymentMethods]="paymentMethods()"
               [isProcessing]="isProcessing()"
               [editingOrderId]="editingOrderId()"
@@ -107,15 +110,22 @@
                     <h2 class="section-title">Tipo de venta</h2>
                   </div>
 
-                  <div class="sale-type-options">
+                  <div
+                    class="sale-type-options"
+                    role="radiogroup"
+                    aria-label="Tipo de venta"
+                  >
                     @if (canBeAnonymous()) {
                       <button
                         type="button"
+                        role="radio"
+                        [attr.aria-checked]="isAnonymousSale()"
+                        [attr.tabindex]="isAnonymousSale() ? 0 : -1"
                         class="sale-type-btn"
                         [class.selected]="isAnonymousSale()"
                         [class.is-disabled]="anonymousBlockedByDelivery()"
                         [disabled]="anonymousBlockedByDelivery()"
-                        (click)="onSelectSaleType(true)"
+                        (click)="onSelectSaleMode('anonymous')"
                       >
                         <div class="radio-indicator">
                           @if (isAnonymousSale()) {
@@ -139,14 +149,56 @@
                       }
                     }
 
+                    @if (canBeAlias()) {
+                      <button
+                        type="button"
+                        role="radio"
+                        [attr.aria-checked]="saleMode() === 'alias'"
+                        [attr.tabindex]="saleMode() === 'alias' ? 0 : -1"
+                        class="sale-type-btn"
+                        [class.selected]="saleMode() === 'alias'"
+                        [class.is-disabled]="aliasBlockedByDelivery()"
+                        [disabled]="aliasBlockedByDelivery()"
+                        (click)="onSelectSaleMode('alias')"
+                      >
+                        <div class="radio-indicator">
+                          @if (saleMode() === 'alias') {
+                            <div class="radio-dot"></div>
+                          }
+                        </div>
+                        <app-icon name="tag" [size]="20"></app-icon>
+                        <div class="sale-type-info">
+                          <span class="sale-type-name"
+                            >Venta con nombre o referencia</span
+                          >
+                          <span class="sale-type-desc"
+                            >Identifica la venta sin registrar un cliente completo
+                            (ej.: «Mesa 5», «Juan del taller»)</span
+                          >
+                        </div>
+                      </button>
+                      @if (aliasBlockedByDelivery()) {
+                        <p class="sale-type-hint">
+                          <app-icon name="info" [size]="14"></app-icon>
+                          <span
+                            >No disponible para ventas con envío: se requiere un
+                            cliente con dirección.</span
+                          >
+                        </p>
+                      }
+                    }
+
                     <button
                       type="button"
+                      role="radio"
+                      [attr.aria-checked]="saleMode() === 'customer'"
+                      [attr.tabindex]="saleMode() === 'customer' ? 0 : -1"
                       class="sale-type-btn"
-                      [class.selected]="!isAnonymousSale()"
-                      (click)="onSelectSaleType(false)"
+                      [class.selected]="saleMode() === 'customer'"
+                      (click)="onSelectSaleMode('customer')"
                     >
                       <div class="radio-indicator">
-                        @if (!isAnonymousSale()) {
+                        @if (saleMode() === 'customer') {
                           <div class="radio-dot"></div>
                         }
                       </div>
@@ -168,59 +220,97 @@
                 >
                   <span class="sw-check"><app-icon name="check" [size]="16"></app-icon></span>
                   <span class="sw-label">{{
-                    isAnonymousSale()
-                      ? 'Venta Anónima'
-                      : 'Con Cliente: ' +
-                        (cartState()?.customer ? customerDisplayName : 'Seleccionar')
+                    saleMode() === 'alias'
+                      ? 'Alias: ' + (customerAlias() || 'Ingresar alias')
+                      : isAnonymousSale()
+                        ? 'Venta Anónima'
+                        : 'Con Cliente: ' +
+                          (cartState()?.customer ? customerDisplayName : 'Seleccionar')
                   }}</span>
                   <span class="sw-edit"><app-icon name="pencil" [size]="16"></app-icon></span>
                 </button>
               }
 
-              <!-- SUB-STEP 1 · Cliente (selector inline). Solo con-cliente. -->
+              <!-- SUB-STEP 1 · Cliente (selector inline) / Alias (input). -->
               @if (!isAnonymousSale()) {
-                @if (clienteSubStep() === 1) {
-                  <section class="cliente-section">
-                    <div class="section-header">
-                      <app-icon name="user" [size]="16" class="section-icon"></app-icon>
-                      <h2 class="section-title">Cliente</h2>
-                      <!-- Obligatorio por envío O porque la tienda prohíbe ventas
-                           anónimas (QUI-561): un solo predicado, un solo badge. -->
-                      @if (customerMandatory() && !cartState()?.customer) {
-                        <span
-                          class="addr-required-badge"
-                          [class.addr-required-badge--error]="showCustomerError()"
-                          >Obligatorio</span
-                        >
-                      }
-                    </div>
-                    <app-pos-customer-selector
-                      [selectedCustomer]="cartState()?.customer ?? null"
-                      [allowAnonymous]="canBeAnonymous()"
-                      [showTopSuggestions]="true"
-                      (customerSelected)="onSelectCustomerAndAdvance($event)"
-                      (customerCleared)="onCustomerCleared()"
-                    ></app-pos-customer-selector>
-                    <!-- Aviso inline ÚNICO para las dos razones de obligatoriedad
-                         (envío / cliente obligatorio). El markup es el mismo; solo
-                         cambia el copy, que lo resuelve customerErrorMessage(). -->
-                    @if (showCustomerError() && !cartState()?.customer) {
-                      <p class="sale-type-hint sale-type-hint--error">
+                @if (saleMode() === 'alias') {
+                  @if (clienteSubStep() === 1) {
+                    <section class="cliente-section">
+                      <div class="section-header">
+                        <app-icon name="tag" [size]="16" class="section-icon"></app-icon>
+                        <h2 class="section-title">Alias de venta</h2>
+                      </div>
+                      <p class="sale-type-hint">
                         <app-icon name="info" [size]="14"></app-icon>
-                        <span>{{ customerErrorMessage() }}</span>
+                        <span
+                          >Identifica la venta sin registrar un cliente completo
+                          (ej.: «Mesa 5», «Juan del taller»).</span
+                        >
                       </p>
-                    }
-                  </section>
-                } @else if (clienteSubStep() > 1 && cartState()?.customer) {
-                  <button
-                    type="button"
-                    class="cliente-collapsed"
-                    (click)="goToClienteSubStep(1)"
-                  >
-                    <span class="sw-check"><app-icon name="check" [size]="16"></app-icon></span>
-                    <span class="sw-label">Cliente: {{ customerDisplayName }}</span>
-                    <span class="sw-edit"><app-icon name="pencil" [size]="16"></app-icon></span>
-                  </button>
+                      <input
+                        type="text"
+                        maxlength="100"
+                        [value]="customerAlias()"
+                        (input)="onAliasInput($event)"
+                        placeholder="Ej.: Mesa 5, Juan del taller"
+                        aria-label="Nombre o referencia de la venta"
+                        class="w-full rounded-lg border border-border bg-[var(--color-surface)] px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary focus:border-[var(--color-primary)] focus:outline-none"
+                      />
+                      @if (showCustomerError() && !customerAlias().trim()) {
+                        <p class="sale-type-hint sale-type-hint--error">
+                          <app-icon name="info" [size]="14"></app-icon>
+                          <span
+                            >Ingresa un nombre o referencia para identificar la
+                            venta.</span
+                          >
+                        </p>
+                      }
+                    </section>
+                  }
+                } @else {
+                  @if (clienteSubStep() === 1) {
+                    <section class="cliente-section">
+                      <div class="section-header">
+                        <app-icon name="user" [size]="16" class="section-icon"></app-icon>
+                        <h2 class="section-title">Cliente</h2>
+                        <!-- Obligatorio por envío O porque la tienda prohíbe ventas
+                             anónimas (QUI-561): un solo predicado, un solo badge. -->
+                        @if (customerMandatory() && !cartState()?.customer) {
+                          <span
+                            class="addr-required-badge"
+                            [class.addr-required-badge--error]="showCustomerError()"
+                            >Obligatorio</span
+                          >
+                        }
+                      </div>
+                      <app-pos-customer-selector
+                        [selectedCustomer]="cartState()?.customer ?? null"
+                        [allowAnonymous]="canBeAnonymous()"
+                        [showTopSuggestions]="true"
+                        (customerSelected)="onSelectCustomerAndAdvance($event)"
+                        (customerCleared)="onCustomerCleared()"
+                      ></app-pos-customer-selector>
+                      <!-- Aviso inline ÚNICO para las dos razones de obligatoriedad
+                           (envío / cliente obligatorio). El markup es el mismo; solo
+                           cambia el copy, que lo resuelve customerErrorMessage(). -->
+                      @if (showCustomerError() && !cartState()?.customer) {
+                        <p class="sale-type-hint sale-type-hint--error">
+                          <app-icon name="info" [size]="14"></app-icon>
+                          <span>{{ customerErrorMessage() }}</span>
+                        </p>
+                      }
+                    </section>
+                  } @else if (clienteSubStep() > 1 && cartState()?.customer) {
+                    <button
+                      type="button"
+                      class="cliente-collapsed"
+                      (click)="goToClienteSubStep(1)"
+                    >
+                      <span class="sw-check"><app-icon name="check" [size]="16"></app-icon></span>
+                      <span class="sw-label">Cliente: {{ customerDisplayName }}</span>
+                      <span class="sw-edit"><app-icon name="pencil" [size]="16"></app-icon></span>
+                    </button>
+                  }
                 }
               }
 

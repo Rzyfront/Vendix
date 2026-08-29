@@ -155,9 +155,13 @@ export class PosCustomerSelectorComponent {
    * can be unit-tested without TestBed.
    */
   readonly documentFormatHint = computed(() => {
+    const v = this.formValues() as {
+      documentType?: string | null;
+      documentNumber?: string | null;
+    };
     return computeDocumentFormatHint(
-      this.form.get('documentType')?.value as string | null,
-      this.form.get('documentNumber')?.value as string | null,
+      v?.documentType ?? null,
+      v?.documentNumber ?? null,
     );
   });
 
@@ -170,9 +174,8 @@ export class PosCustomerSelectorComponent {
    * cashier can find legacy customers with any format.
    */
   readonly phoneFormatHint = computed(() => {
-    return computePhoneFormatHint(
-      this.form.get('phone')?.value as string | null,
-    );
+    const v = this.formValues() as { phone?: string | null };
+    return computePhoneFormatHint(v?.phone ?? null);
   });
 
   // ── Form ────────────────────────────────────────────────────────────
@@ -196,24 +199,39 @@ export class PosCustomerSelectorComponent {
   );
 
   /**
+   * QUI-737/734 (B.4) — bridge reactivo del `form.value`. Leer `form.value`
+   * directo dentro de un `computed()` lo congela (no es una señal): los hints
+   * `documentFormatHint`/`phoneFormatHint` y `canResolve` se recalculaban solo
+   * con el estado inicial. Este `valueChanges` bridged hace que cualquier
+   * tecleo re-renderice el computed.
+   */
+  private readonly formValues = toSignal(
+    this.form.valueChanges.pipe(startWith(this.form.value)),
+    { initialValue: this.form.value },
+  );
+
+  /**
    * Submit gate: form is submittable when the cashier provided at least one
-   * identifier — a valid email OR (document_type + document_number). Format
-   * validation is intentionally non-blocking: the dev lead's spec was
-   * "un mismo paso se va todo" (one step, don't add friction), so even a
-   * non-canonical document number is submitted — the lookup may still find
-   * a legacy customer, and the format-hint chip already warns the cashier
-   * before they hit Siguiente.
+   * identifier — a valid email OR (document_type + document_number) OR a name
+   * (QUI-734, B.4 quick-sale por nombre). Format validation is intentionally
+   * non-blocking: the dev lead's spec was "un mismo paso se va todo" (one step,
+   * don't add friction), so even a non-canonical document number is submitted —
+   * the lookup may still find a legacy customer, and the format-hint chip
+   * already warns the cashier before they hit Siguiente.
    */
   readonly canResolve = computed(() => {
     if (this.resolving()) return false;
-    const v = this.form.value as {
+    const v = this.formValues() as {
       email?: string | null;
       documentType?: string | null;
       documentNumber?: string | null;
+      firstName?: string | null;
+      lastName?: string | null;
     };
     const hasEmail = !!v.email?.trim() && this.formStatus() === 'VALID';
     const hasDocument = !!v.documentType && !!v.documentNumber?.trim();
-    return hasEmail || hasDocument;
+    const hasName = !!v.firstName?.trim();
+    return hasEmail || hasDocument || hasName;
   });
 
   constructor() {
@@ -348,12 +366,14 @@ export class PosCustomerSelectorComponent {
     if (!this.canResolve()) {
       this.markFormTouched();
       this.toastService.info(
-        'Ingresa al menos un email o un documento para continuar',
+        'Ingresa un email, un documento o un nombre para continuar',
       );
       return of(false);
     }
 
     const value = this.form.value;
+    const hasEmail = !!value.email?.trim();
+    const hasDocument = !!(value.documentType && value.documentNumber?.trim());
     const request: CreatePosCustomerRequest = {
       email: value.email?.trim() || undefined,
       first_name: value.firstName?.trim() || undefined,
@@ -361,6 +381,9 @@ export class PosCustomerSelectorComponent {
       phone: value.phone?.trim() || undefined,
       document_type: value.documentType || undefined,
       document_number: value.documentNumber?.trim() || undefined,
+      // QUI-734 (B.4) — quick-sale por nombre: solo cuando NO hay email ni
+      // documento (la prioridad de match es email → documento → nombre).
+      name_only: !hasEmail && !hasDocument ? true : undefined,
     };
 
     this.resolving.set(true);

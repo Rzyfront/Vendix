@@ -780,11 +780,19 @@ export class PaymentsService {
         checkoutSettings?.require_customer_data !== false;
 
       const posSettings = (settings as any)?.pos as
-        | { allow_anonymous_sales?: boolean }
+        | { allow_anonymous_sales?: boolean; allow_alias_sales?: boolean }
         | undefined;
       const allowAnonymousSales = posSettings?.allow_anonymous_sales === true;
+      // QUI-737 (B.4) — el alias es otra vía legítima de "sin cliente formal":
+      // requiere el flag POS y un alias no vacío.
+      const allowAliasSales = posSettings?.allow_alias_sales === true;
+      const hasAlias = !!createPosPaymentDto.customer_alias;
 
-      if (requireCustomerData && !allowAnonymousSales) {
+      if (
+        requireCustomerData &&
+        !allowAnonymousSales &&
+        !(allowAliasSales && hasAlias)
+      ) {
         const customerId = createPosPaymentDto.customer_id;
         const customerIdInvalid =
           customerId === undefined ||
@@ -3015,12 +3023,17 @@ export class PaymentsService {
     const updated = await tx.orders.update({
       where: { id: session.order_id },
       data: {
-        // ADR-9 (CP-POLLO-ARABE-727 A.3): alias↔cliente mutuamente excluyentes
+        // ADR-9 (CP-POLLO-ARABE-727): alias↔cliente mutuamente excluyentes
         // (CHECK orders_customer_xor_alias). El alias también aplica a mesas
-        // (FB-21 cerrado); al fijar customer_id garantizamos customer_alias NULL.
+        // (FB-21 cerrado): al fijar customer_id garantizamos customer_alias NULL,
+        // y si el cierre trae `customer_alias` lo PERSISTIMOS (limpiando
+        // customer_id). A.3 dejó este guard manejando solo customer_id; B.4 lo
+        // extiende a la rama alias.
         ...(dto.customer_id != null
           ? { customer_id: dto.customer_id, customer_alias: null }
-          : {}),
+          : dto.customer_alias != null
+            ? { customer_id: null, customer_alias: dto.customer_alias }
+            : {}),
         ...(newItems.length > 0
           ? { order_items: { create: newItems } }
           : {}),
@@ -3480,6 +3493,15 @@ export class PaymentsService {
         // Only include customer_id if provided (for anonymous sales, this will be undefined/null)
         if (dto.customer_id !== undefined && dto.customer_id !== null) {
           orderData.customer_id = dto.customer_id;
+        }
+
+        // QUI-737 (B.4) — el alias es una tercera identidad ("sin cliente
+        // formal"). Mutuamente excluyente con customer_id (CHECK
+        // orders_customer_xor_alias): si vino un alias, el cliente formal no
+        // aplica y forzamos customer_id null.
+        if (dto.customer_alias) {
+          orderData.customer_alias = dto.customer_alias;
+          orderData.customer_id = null;
         }
 
         // Create the order

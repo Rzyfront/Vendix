@@ -4,10 +4,12 @@ import {
   IsBoolean,
   IsInt,
   IsOptional,
+  IsString,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 
 /**
  * DTO to open a new table session.
@@ -39,6 +41,19 @@ export class OpenTableSessionDto {
   @Type(() => Number)
   @Min(1)
   customer_id?: number;
+
+  /**
+   * QUI-737 (B.4) — Alias de venta con mesa (FB-21 aprobado): el alias aplica
+   * también a mesas. Mutuamente excluyente con `customer_id`. `@Transform`
+   * colapsa string en blanco a `undefined`.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() === '' ? undefined : value,
+  )
+  customer_alias?: string;
 }
 
 /**

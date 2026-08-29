@@ -473,7 +473,7 @@ export class CustomersService {
     customer: any;
     was_created: boolean;
     was_updated: boolean;
-    matched_by: 'email' | 'document' | null;
+    matched_by: 'email' | 'document' | 'name' | null;
   }> {
     const store = await this.prisma.stores.findUnique({
       where: { id: storeId },
@@ -492,7 +492,7 @@ export class CustomersService {
 
     // Match 1 — email first (case-insensitive, org-scoped, archived excluded).
     let existing: any = null;
-    let matched_by: 'email' | 'document' | null = null;
+    let matched_by: 'email' | 'document' | 'name' | null = null;
 
     if (effectiveEmail) {
       existing = await this.prisma.users.findFirst({
@@ -517,6 +517,43 @@ export class CustomersService {
         normalizedDoc.type,
       );
       if (existing) matched_by = 'document';
+    }
+
+    // Match 3 (QUI-734, B.4) — name-only quick-sale. Only when the cashier
+    // asks for it (`name_only`) and no email/document matched. Priority is
+    // email → document → name. >1 same-name matches is ambiguous → ERR-03 (409).
+    if (
+      !existing &&
+      dto.name_only === true &&
+      (dto.first_name?.trim() || dto.last_name?.trim())
+    ) {
+      const nameMatches = await this.prisma.users.findMany({
+        where: {
+          organization_id: store.organization_id,
+          user_roles: { some: { roles: { name: 'customer' } } },
+          state: { not: user_state_enum.archived },
+          // Coincidencia case-insensitive por nombre (ILIKE en PG).
+          ...(dto.first_name?.trim()
+            ? { first_name: { contains: dto.first_name.trim(), mode: 'insensitive' as const } }
+            : {}),
+          ...(dto.last_name?.trim()
+            ? { last_name: { contains: dto.last_name.trim(), mode: 'insensitive' as const } }
+            : {}),
+        },
+        omit: CUSTOMER_PRIVATE_COLUMNS,
+        take: 2,
+      });
+      if (nameMatches.length === 1) {
+        existing = nameMatches[0];
+        matched_by = 'name';
+      } else if (nameMatches.length > 1) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_CONFLICT_001,
+          'Existen varios clientes con ese nombre; usa el email o el documento para identificarlo',
+          { kind: 'name' },
+        );
+      }
+      // 0 matches → fall through to create() with first/last name only.
     }
 
     if (existing) {

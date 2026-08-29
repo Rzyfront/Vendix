@@ -61,6 +61,21 @@
     </button>
   </div>
 
+  <!-- QUI-739 (B.2) — "Cambiar tipo de servicio". Control DISTINTO del
+       "Anterior"/"← Atrás" del footer (que conserva la semántica de QUI-482):
+       éste borra fulfillment + mesa a propósito antes de volver a "Tipo", y su
+       rótulo lo anuncia antes de tocarlo. Botón nativo → teclado + screen
+       reader funcionan sin JS extra. -->
+  <button
+    type="button"
+    class="flex items-center gap-2 self-start mt-2 text-sm font-semibold text-[var(--color-primary)] cursor-pointer"
+    (click)="onChangeServiceType()"
+    aria-label="Cambiar tipo de servicio"
+  >
+    <app-icon name="arrow-left" [size]="16"></app-icon>
+    <span>Cambiar tipo de servicio</span>
+  </button>
+
   @if (fulfillment() === 'consumo') {
     <button
       type="button"

@@ -293,6 +293,15 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         // C.3 QUI-733 — mesa + mesero en el recibo POS.
         table_number: tableName,
         waiter_name: waiterName,
+        // QUI-737 (B.4) — alias de venta rápida ("Mesa 5"). Va en la CABECERA
+        // junto al número de orden, NO bajo el bloque "Datos del Cliente"
+        // (`customer`): el alias no es un cliente formal y no debe leerse como
+        // identificación fiscal. Se expone sin tocar `customer` (que sigue
+        // gateado por `user.id`). Spread condicional para no romper el tipo
+        // estricto de `StandardPrintDataModel['document']`.
+        ...(order.customer_alias
+          ? { customer_alias: order.customer_alias }
+          : {}),
       },
       items,
       taxes,

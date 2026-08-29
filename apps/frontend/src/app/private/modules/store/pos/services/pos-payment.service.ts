@@ -374,9 +374,11 @@ export class PosPaymentService {
 
     // Check if anonymous sale is allowed
     const isAnonymousSale = paymentRequest.isAnonymousSale === true;
+    // QUI-737 (B.4) — el alias es otra vía legítima de "sin cliente formal".
+    const customerAlias = (paymentRequest as any).customer_alias;
 
-    // For non-anonymous sales, customer is required
-    if (!isAnonymousSale && !cartState.customer) {
+    // For non-anonymous sales, customer is required (salvo alias).
+    if (!isAnonymousSale && !customerAlias && !cartState.customer) {
       return throwError(
         () => new Error('Debe seleccionar un cliente para procesar la venta.'),
       );
@@ -442,6 +444,8 @@ export class PosPaymentService {
 
     // For anonymous sales, use "Consumidor Final" as customer name
     // For regular sales, include customer fields
+    // For alias (QUI-737 B.4): customer_id queda null y se manda customer_alias
+    // (mutuamente excluyentes — CHECK orders_customer_xor_alias).
     if (isAnonymousSale) {
       sale_data.customer_name = 'Consumidor Final';
     } else if (cartState.customer) {
@@ -449,6 +453,8 @@ export class PosPaymentService {
       sale_data.customer_name = `${cartState.customer.first_name} ${cartState.customer.last_name}`;
       sale_data.customer_email = cartState.customer.email;
       sale_data.customer_phone = cartState.customer.phone;
+    } else if (customerAlias) {
+      sale_data.customer_alias = customerAlias;
     }
 
     return this.http.post<any>(this.apiUrl, sale_data).pipe(
@@ -804,7 +810,11 @@ export class PosPaymentService {
   /**
    * Guardar borrador de orden
    */
-  saveDraft(cartState: CartState, createdBy: string): Observable<any> {
+  saveDraft(
+    cartState: CartState,
+    createdBy: string,
+    customerAlias?: string,
+  ): Observable<any> {
     // Drafts are NOT transactional — no cash register session required.
     const user_id = this.storeContextService.getUserId();
     if (!user_id) {
@@ -818,12 +828,16 @@ export class PosPaymentService {
     // `customer` is optional — POS drafts can be anonymous (Consumidor
     // Final). When present, link to the customer row; when missing, the
     // backend stores the order with `customer_id = null`.
+    // QUI-737 (B.4) — el alias es una tercera identidad ("sin cliente formal"):
+    // mutuamente excluyente con customer_id; nunca ''.
     const customer = cartState.customer;
+    const effectiveAlias = (customerAlias ?? '').trim() || undefined;
     const draft_data: Record<string, any> = {
       ...(customer?.id ? { customer_id: customer.id } : {}),
+      ...(effectiveAlias && !customer?.id ? { customer_alias: effectiveAlias } : {}),
       customer_name: customer
         ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim()
-        : 'Consumidor Final',
+        : (effectiveAlias ? undefined : 'Consumidor Final'),
       ...(customer?.email ? { customer_email: customer.email } : {}),
       ...(customer?.phone ? { customer_phone: customer.phone } : {}),
       store_id: this.getStoreId(),

@@ -639,7 +639,12 @@ export class OrderFlowService {
       });
       const pos = (settings?.settings as any)?.pos ?? {};
       const allowAnonymous = pos?.allow_anonymous_sales === true;
-      if (!allowAnonymous) {
+      // QUI-737 (B.4) — una orden por alias (customer_id null + customer_alias
+      // poblado) es otra venta legítima de "sin cliente formal": avanzar cuando
+      // el flag POS `allow_alias_sales` está activo y la orden trae alias.
+      const allowAlias = pos?.allow_alias_sales === true;
+      const hasAlias = !!(order as any).customer_alias;
+      if (!allowAnonymous && !(allowAlias && hasAlias)) {
         // Roll back the state claim we just did so the order returns to its
         // pre-attempt state and the cashier can fix the customer field.
         try {

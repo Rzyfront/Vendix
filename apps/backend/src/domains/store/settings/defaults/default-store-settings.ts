@@ -109,6 +109,11 @@ export function getDefaultStoreSettings(): StoreSettings {
     pos: {
       allow_anonymous_sales: true,
       anonymous_sales_as_default: true,
+      // QUI-737 (B.4) — alias de venta rápida, opt-in (default false). El par
+      // `alias_sales_as_default` queda false por defecto y la regla cruzada del
+      // DTO garantiza que nunca se guarde true con allow_alias_sales=false.
+      allow_alias_sales: false,
+      alias_sales_as_default: false,
       business_hours: getDefaultBusinessHours(),
       schedule_mode: 'continuous',
       enable_schedule_validation: false,

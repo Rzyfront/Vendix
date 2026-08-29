@@ -16,6 +16,7 @@ import {
   IsNotEmpty,
   MaxLength,
   ValidateIf,
+  Equals,
   ArrayMinSize,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
@@ -410,6 +411,32 @@ export class PosSettingsDto {
   @IsOptional()
   @IsBoolean()
   anonymous_sales_as_default?: boolean;
+
+  /**
+   * QUI-737 (B.4) — Alias de venta rápida (opt-in, default false).
+   */
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
+  @IsBoolean()
+  allow_alias_sales?: boolean;
+
+  /**
+   * QUI-737 (B.4) — Alias como default al abrir el POS. Dependencia DB-10 del
+   * plan: solo tiene sentido si {@link allow_alias_sales} es true. Regla
+   * cruzada: cuando `allow_alias_sales === false`, el campo debe ser `false`
+   * (o estar ausente) — guardar `{allow:false, as_default:true}` se rechaza.
+   *
+   * El `@ValidateIf` gatea a `@IsOptional()+@Equals(false)`: ausente o `false`
+   * pasan; `true` con alias desvinculado falla. El gemelo legacy
+   * `anonymous_sales_as_default` NO tiene esta regla (deuda registrada).
+   */
+  @ValidateIf((o) => o.allow_alias_sales === false)
+  @IsOptional()
+  @Equals(false, {
+    message:
+      'alias_sales_as_default solo puede ser true cuando allow_alias_sales es true',
+  })
+  alias_sales_as_default?: boolean;
 
   @ApiProperty({
     example: {
