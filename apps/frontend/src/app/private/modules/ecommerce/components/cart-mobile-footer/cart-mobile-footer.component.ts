@@ -17,6 +17,7 @@ import {
   CurrencyFormatService,
 } from '../../../../../shared/pipes/currency';
 import { Cart } from '../../services/cart.service';
+import { HighConversionService } from '../../../../../shared/services/high-conversion.service';
 
 /**
  * POS-style fixed mobile footer for the ecommerce cart.
@@ -136,6 +137,16 @@ import { Cart } from '../../services/cart.service';
           >
             <app-icon name="x" [size]="20" />
           </button>
+        </div>
+
+        <!-- DEBUG: indicador visible del estado del toggle. Se remueve
+             una vez confirmado el fix. -->
+        <div
+          style="background:#fef3c7;border:2px solid #f59e0b;padding:8px;margin:8px;border-radius:6px;font-size:12px;font-family:monospace;"
+          data-testid="debug-toggle-state"
+        >
+          <strong>DEBUG toggle:</strong>
+          highConversionUi = {{ debugToggle() }}
         </div>
 
         <div class="sheet-body">
@@ -623,6 +634,9 @@ export class CartMobileFooterComponent {
    * `| currency` pipe from getting stuck on its fallback formatting.
    */
   protected readonly currencyCode = this.currencyFormat.currencyCode;
+  /** DEBUG: expone el estado del toggle para verificación visual. */
+  protected readonly highConversionService = inject(HighConversionService);
+  protected readonly debugToggle = computed(() => this.highConversionService.enabled());
 
   /** Payable total: promotional subtotal when a discount applies, else subtotal. */
   readonly total = computed<number>(() => {
