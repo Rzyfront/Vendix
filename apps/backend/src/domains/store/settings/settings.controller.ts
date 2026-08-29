@@ -70,7 +70,8 @@ export class SettingsController {
   })
   async getPublicFlags() {
     // TODO multi-store: read from x-store-id header or ?store_id query
-    const store = await this.storePrisma.store.findFirst({
+    const client = (this.storePrisma as any).baseClient ?? (this.storePrisma as any).prisma;
+    const store = await client.stores.findFirst({
       where: { is_active: true, deleted_at: null },
       orderBy: { id: 'asc' },
     });
@@ -81,7 +82,7 @@ export class SettingsController {
     }
     // Read the raw settings row to avoid the store-context requirement
     // in SettingsService.getSettings(). This endpoint is public.
-    const row = await this.storePrisma.store_settings.findFirst({
+    const row = await client.store_settings.findFirst({
       where: { store_id: store.id },
       select: { settings: true },
     });
