@@ -378,19 +378,31 @@ export class KitchenFireService {
     // CP-POS-SVC-PERF-001 / A.2 — cache explodeBom per recipeId locally so
     // multiple cart lines sharing the same recipe cost 1 explosion (not N).
     const bomCache = new Map<number, BomExplosionLine[]>();
+    // CP-POLLO-ARABE-727 A.7 — un único `findMany` en vez de un `findFirst` por
+    // línea (N+1). Los items que comparten receta cuestan 1 explosión (bomCache).
+    const firedProductIds = firedItemIds.map((itemId) => {
+      const item = order.order_items.find((oi) => oi.id === itemId)!;
+      return item.product_id!;
+    });
+    const activeRecipes =
+      firedProductIds.length > 0
+        ? await this.prisma.recipes.findMany({
+            where: {
+              product_id: { in: [...new Set(firedProductIds)] },
+              is_active: true,
+            },
+            select: { id: true, product_id: true, is_active: true },
+          })
+        : [];
+    const recipeByProduct = new Map<
+      number,
+      { id: number; product_id: number | null; is_active: boolean }
+    >(activeRecipes.map((r) => [r.product_id, r]));
     for (const itemId of firedItemIds) {
       const item = order.order_items.find((oi) => oi.id === itemId)!;
-      const recipe = await this.prisma.recipes.findFirst({
-        where: { product_id: item.product_id!, is_active: true },
-        select: { id: true, product_id: true, is_active: true },
-      });
-      if (!recipe) {
-        // No recipe at all → cooked by hand, no inventory consume.
-        recipeLessItems.push(item);
-        continue;
-      }
-      if (!recipe.is_active) {
-        // Inactive recipe → treat like no recipe (no consume).
+      const recipe = recipeByProduct.get(item.product_id!);
+      if (!recipe || !recipe.is_active) {
+        // No active recipe → cooked by hand, no inventory consume.
         recipeLessItems.push(item);
         continue;
       }
@@ -1167,17 +1179,29 @@ export class KitchenFireService {
     const items: any[] = [];
     const componentIds = new Set<number>();
     const perItem: Array<{ item: any; bom: BomExplosionLine[] }> = [];
+    // CP-POLLO-ARABE-727 A.7 — cache explodeBom per recipeId so N lines sharing
+    // the same recipe cost 1 explosion, not N. Mirrors prepareFireContext.
+    const bomCache = new Map<number, BomExplosionLine[]>();
 
     for (const it of rawItems) {
-      const recipe = await this.prisma.recipes.findFirst({
-        where: { product_id: it.product_id, is_active: true },
-        select: { id: true },
-      });
+      // `KITCHEN_TICKET_INCLUDE` ya carga `product.recipe {id, is_active}`, así
+      // que no hay que re-consultar `recipes.findFirst` por línea — ese era el
+      // N+1 del modal de verificación de QUI-655 (10 platos = 10 round-trips).
+      const recipe = it.product?.recipe ?? null;
       // Sin receta activa se devuelve igual, con `components: []`: el cocinero debe
       // verlo en el modal y poder confirmarlo, no que desaparezca.
-      const bom = recipe
-        ? await this.recipesService.explodeBom(recipe.id)
-        : [];
+      let bom: BomExplosionLine[];
+      if (!recipe || !recipe.is_active) {
+        bom = [];
+      } else {
+        const cached = bomCache.get(recipe.id);
+        if (cached) {
+          bom = cached;
+        } else {
+          bom = await this.recipesService.explodeBom(recipe.id);
+          bomCache.set(recipe.id, bom);
+        }
+      }
       for (const l of bom) componentIds.add(l.component_product_id);
       perItem.push({ item: it, bom });
     }
@@ -1353,21 +1377,42 @@ export class KitchenFireService {
     // CP-POS-SVC-PERF-001 / A.2 — cache explodeBom per recipeId locally so
     // multiple cart lines sharing the same recipe cost 1 explosion (not N).
     const bomCache = new Map<number, BomExplosionLine[]>();
+    // CP-POLLO-ARABE-727 A.7 — un único `findMany` en vez de `findFirst` por
+    // línea, y por `client` (el tx de la transacción abierta del llamador), no
+    // por `this.prisma`: esto era la fuga de pool documentada (1 conexión
+    // retenida por la tx + N secuenciales del mismo pool).
+    const firedProductIds = firedItemIds.map((itemId) => {
+      const item = order.order_items.find((oi) => oi.id === itemId)!;
+      return item.product_id!;
+    });
+    const activeRecipes =
+      firedProductIds.length > 0
+        ? await client.recipes.findMany({
+            where: {
+              product_id: { in: [...new Set(firedProductIds)] },
+              is_active: true,
+            },
+            select: { id: true, product_id: true, is_active: true },
+          })
+        : [];
+    const recipeByProduct = new Map<
+      number,
+      { id: number; product_id: number | null; is_active: boolean }
+    >(activeRecipes.map((r) => [r.product_id, r]));
     for (const itemId of firedItemIds) {
       const item = order.order_items.find((oi) => oi.id === itemId)!;
-      const recipe = await this.prisma.recipes.findFirst({
-        where: { product_id: item.product_id!, is_active: true },
-        select: { id: true, product_id: true, is_active: true },
-      });
+      const recipe = recipeByProduct.get(item.product_id!);
       if (!recipe || !recipe.is_active) {
         recipeLessItems.push(item);
         continue;
       }
       let bomLines = bomCache.get(recipe.id);
       if (!bomLines) {
-        bomLines = await this.recipesService.explodeBom(recipe.id, {
-          [recipe.id]: 1,
-        });
+        bomLines = await this.recipesService.explodeBom(
+          recipe.id,
+          { [recipe.id]: 1 },
+          client,
+        );
         bomCache.set(recipe.id, bomLines);
       }
       preparedItems.push({ orderItem: item, recipeId: recipe.id, bomLines });
@@ -1389,7 +1434,7 @@ export class KitchenFireService {
     const locationResults = await Promise.all(
       distinctLeafIds.map((pid) =>
         this.stockLevelManager
-          .getDefaultLocationForProduct(pid)
+          .getDefaultLocationForProduct(pid, undefined, client)
           .then((loc) => [pid, loc] as const)
           .catch(() => [pid, null] as const),
       ),

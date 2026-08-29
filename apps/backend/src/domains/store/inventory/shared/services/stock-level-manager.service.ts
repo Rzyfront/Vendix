@@ -634,6 +634,15 @@ export class StockLevelManager {
   async getDefaultLocationForProduct(
     product_id: number,
     variant_id?: number,
+    /**
+     * Optional Prisma transaction client. When provided, the location lookups
+     * run inside the caller's $transaction instead of on a separate pool
+     * connection. Used by `KitchenFireService.prepareFireContext` when the
+     * caller has the payment transaction open (CP-POLLO-ARABE-727 A.7 — avoids
+     * the pool leak). All the external callers omit it and use the scoped
+     * client.
+     */
+    tx?: Prisma.TransactionClient,
   ): Promise<number> {
     const context = RequestContextService.getContext();
     if (!context?.store_id) {
@@ -641,7 +650,7 @@ export class StockLevelManager {
     }
     const sellable = sellableLocationsWhere(context.store_id);
 
-    const stockLevel = await this.prisma.stock_levels.findFirst({
+    const stockLevel = await (tx ?? this.prisma).stock_levels.findFirst({
       where: {
         product_id,
         product_variant_id: variant_id || null,
@@ -653,7 +662,7 @@ export class StockLevelManager {
     });
     if (stockLevel) return stockLevel.location_id;
 
-    const location = await this.prisma.inventory_locations.findFirst({
+    const location = await (tx ?? this.prisma).inventory_locations.findFirst({
       where: sellable,
       orderBy: { id: 'asc' },
       select: { id: true },

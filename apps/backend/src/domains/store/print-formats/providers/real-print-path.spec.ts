@@ -209,20 +209,18 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
           exclusions: [],
         },
       ],
-      order: {
-        id: 100,
-        order_number: 'ORD-2026-0012',
-        table_sessions: [
-          {
-            id: 5,
-            guest_count: 3,
-            table: { id: 4, name: '04', zone: 'Salón principal' },
-            opener: { first_name: 'Mateo', last_name: 'Sánchez' },
-          },
-        ],
-      },
+      order: { id: 100, order_number: 'ORD-2026-0012' },
     });
-    const prisma = { kitchen_tickets: { findFirst: findFirstTicket } } as any;
+    const findFirstSession = jest.fn().mockResolvedValue({
+      id: 5,
+      guest_count: 3,
+      table: { id: 4, name: '04', zone: 'Salón principal' },
+      opener: { first_name: 'Mateo', last_name: 'Sánchez' },
+    });
+    const prisma = {
+      kitchen_tickets: { findFirst: findFirstTicket },
+      table_sessions: { findFirst: findFirstSession },
+    } as any;
     const p = new KitchenTicketDataProvider(prisma);
 
     const data = await p.fetchDocumentData(10, 42);
@@ -238,12 +236,18 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
     expect(data.custom_variables?.kds_name).toBe('Cocina Caliente');
     expect(data.custom_variables?.order_number).toBe('ORD-2026-0012');
 
-    // A.5 — la consulta pide la sesión ABIERTA (closed_at IS NULL) y la más
-    // reciente, no la más vieja como antes (opened_at asc).
-    const sessionInclude = findFirstTicket.mock.calls[0][0].include.order.select.table_sessions;
-    expect(sessionInclude.where).toEqual({ closed_at: null });
-    expect(sessionInclude.orderBy).toEqual({ opened_at: 'desc' });
-    expect(sessionInclude.take).toBe(1);
+    // A.5 / CP-POLLO-ARABE-727 A.7 — la sesión ABIERTA (closed_at IS NULL) y la
+    // más reciente se resuelve con un `findFirst` top-level sobre `table_sessions`
+    // (que sí pasa por el scoping), no con un include anidado.
+    expect(findFirstSession).toHaveBeenCalledTimes(1);
+    expect(findFirstSession.mock.calls[0][0].where).toEqual({
+      order_id: 100,
+      closed_at: null,
+    });
+    expect(findFirstSession.mock.calls[0][0].orderBy).toEqual({
+      opened_at: 'desc',
+    });
+    expect(findFirstSession.mock.calls[0][0].take).toBe(1);
   });
 
   it('kitchen_ticket: el mesero asignado (table_waiters) manda sobre el opener', async () => {
@@ -264,25 +268,23 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
           exclusions: [],
         },
       ],
-      order: {
-        id: 101,
-        order_number: 'ORD-2026-0013',
-        table_sessions: [
-          {
-            id: 6,
-            guest_count: 2,
-            table: {
-              id: 5,
-              name: '05',
-              zone: 'Salón principal',
-              table_waiters: [{ user: { first_name: 'Lucía', last_name: 'Ramírez' } }],
-            },
-            opener: { first_name: 'Mateo', last_name: 'Sánchez' },
-          },
-        ],
-      },
+      order: { id: 101, order_number: 'ORD-2026-0013' },
     });
-    const prisma = { kitchen_tickets: { findFirst: findFirstTicket } } as any;
+    const findFirstSession = jest.fn().mockResolvedValue({
+      id: 6,
+      guest_count: 2,
+      table: {
+        id: 5,
+        name: '05',
+        zone: 'Salón principal',
+        table_waiters: [{ user: { first_name: 'Lucía', last_name: 'Ramírez' } }],
+      },
+      opener: { first_name: 'Mateo', last_name: 'Sánchez' },
+    });
+    const prisma = {
+      kitchen_tickets: { findFirst: findFirstTicket },
+      table_sessions: { findFirst: findFirstSession },
+    } as any;
     const p = new KitchenTicketDataProvider(prisma);
 
     const data = await p.fetchDocumentData(10, 43);
@@ -310,14 +312,19 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
           exclusions: [],
         },
       ],
-      order: { id: 102, order_number: 'ORD-2026-0014', table_sessions: [] },
+      order: { id: 102, order_number: 'ORD-2026-0014' },
     });
-    const prisma = { kitchen_tickets: { findFirst: findFirstTicket } } as any;
+    const findFirstSession = jest.fn().mockResolvedValue(null);
+    const prisma = {
+      kitchen_tickets: { findFirst: findFirstTicket },
+      table_sessions: { findFirst: findFirstSession },
+    } as any;
     const p = new KitchenTicketDataProvider(prisma);
 
     const data = await p.fetchDocumentData(10, 44);
 
-    // Regresión (A.5/C.3): un ticket sin mesa no debe romper ni inventar datos.
+    // Regresión (A.5/C.3/CP-POLLO-ARABE-727 A.7): un ticket sin mesa no debe
+    // romper ni inventar datos.
     expect(data.document.table_number).toBe('');
     expect(data.document.waiter_name).toBe('');
     expect(data.items).toHaveLength(1);

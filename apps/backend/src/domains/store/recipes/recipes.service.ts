@@ -558,9 +558,23 @@ export class RecipesService {
   async explodeBom(
     recipeId: number,
     multipliers: Record<number, number> = { [recipeId]: 1 },
+    /**
+     * Optional Prisma transaction client. When provided, the recursive recipe
+     * reads run inside the caller's $transaction instead of on a separate pool
+     * connection. Used by `prepareFireContext` when the caller has the payment
+     * transaction open (CP-POLLO-ARABE-727 A.7 — avoids the pool leak).
+     */
+    tx?: Prisma.TransactionClient,
   ): Promise<BomExplosionLine[]> {
     const MAX_DEPTH = 32;
-    return this.explodeBomRecursive(recipeId, multipliers, [], 0, MAX_DEPTH);
+    return this.explodeBomRecursive(
+      recipeId,
+      multipliers,
+      [],
+      0,
+      MAX_DEPTH,
+      tx,
+    );
   }
 
   private async explodeBomRecursive(
@@ -569,12 +583,13 @@ export class RecipesService {
     pathRecipeIds: number[],
     depth: number,
     maxDepth: number,
+    tx?: Prisma.TransactionClient,
   ): Promise<BomExplosionLine[]> {
     if (depth >= maxDepth) {
       return [];
     }
 
-    const recipe = await this.prisma.recipes.findFirst({
+    const recipe = await (tx ?? this.prisma).recipes.findFirst({
       where: { id: recipeId, is_active: true },
       include: {
         items: {
@@ -625,7 +640,7 @@ export class RecipesService {
       const scaled = (perYield * rootMultiplier) / effectiveYield;
 
       // Does the component itself own an active recipe (sub-prep)?
-      const childRecipe = await this.prisma.recipes.findFirst({
+      const childRecipe = await (tx ?? this.prisma).recipes.findFirst({
         where: {
           product_id: item.component_product_id,
           is_active: true,
@@ -646,6 +661,7 @@ export class RecipesService {
           [...pathRecipeIds, recipeId],
           depth + 1,
           maxDepth,
+          tx,
         );
         lines.push(...childLines);
       } else {

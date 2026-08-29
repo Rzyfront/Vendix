@@ -60,35 +60,6 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
           select: {
             id: true,
             order_number: true,
-            // Una orden puede tener muchas sesiones a lo largo del tiempo;
-            // al imprimir solo interesa la ABIERTA (closed_at IS NULL), la
-            // más reciente. Antes se tomaba la más vieja (opened_at asc), lo
-            // que contaminaba el ticket tras cerrar y reabrir una mesa.
-            table_sessions: {
-              // A.5 — tomar la sesión ABIERTA (closed_at IS NULL), la más
-              // reciente. El índice `table_sessions_one_open_per_table`
-              // (A.3) garantiza una sola abierta; el take:1 es defensivo.
-              where: { closed_at: null },
-              orderBy: { opened_at: 'desc' },
-              take: 1,
-              include: {
-                table: {
-                  select: {
-                    id: true,
-                    name: true,
-                    zone: true,
-                    // C.3 — meseros asignados a la mesa (table_waiters).
-                    // Al resolver el mesero tienen prioridad sobre el opener.
-                    table_waiters: {
-                      select: {
-                        user: { select: { first_name: true, last_name: true } },
-                      },
-                    },
-                  },
-                },
-                opener: { select: { first_name: true, last_name: true } },
-              },
-            },
           },
         },
       },
@@ -101,7 +72,37 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
       );
     }
 
-    const session = ticket.order?.table_sessions?.[0];
+    // CP-POLLO-ARABE-727 A.7 — la sesión ABIERTA (closed_at IS NULL) se resuelve
+    // con un `findFirst` top-level en vez del include anidado. El `$extends` de
+    // `StorePrismaService` es por modelo/operación top-level y NO recorre
+    // `include`/`select`, así que el tramo anidado no recibía `store_id` y ningún
+    // índice lo servía. Este `findFirst` sí pasa por el scoping e inyecta
+    // `store_id`, haciendo innecesario el índice DB-16. `ticket.order?.id` es la
+    // única clave que tenemos: la relación vive al revés (table_sessions.order_id).
+    const session = ticket.order?.id
+      ? await this.prisma.table_sessions.findFirst({
+          where: { order_id: ticket.order.id, closed_at: null },
+          orderBy: { opened_at: 'desc' },
+          take: 1,
+          include: {
+            table: {
+              select: {
+                id: true,
+                name: true,
+                zone: true,
+                // C.3 — meseros asignados a la mesa (table_waiters).
+                // Al resolver el mesero tienen prioridad sobre el opener.
+                table_waiters: {
+                  select: {
+                    user: { select: { first_name: true, last_name: true } },
+                  },
+                },
+              },
+            },
+            opener: { select: { first_name: true, last_name: true } },
+          },
+        })
+      : undefined;
     const opener = session?.opener;
     const table = session?.table;
     // C.3 — el mesero asignado (table_waiters) manda sobre el opener.

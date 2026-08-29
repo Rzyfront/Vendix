@@ -167,14 +167,19 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       order_number: `ORD-${orderItems[0].id}`,
       order_items: orderItems,
     });
-    prismaMock.recipes.findFirst.mockResolvedValue(
+    // CP-POLLO-ARABE-727 A.7 — `fireOrderItems` pre-carga las recetas activas
+    // con un único `recipes.findMany`, no un `findFirst` por línea. devuelve el
+    // array de recetas activas (vacío para recipe-less).
+    prismaMock.recipes.findMany.mockResolvedValue(
       opts.noRecipe
-        ? null
-        : (opts.recipe ?? {
-            id: 7,
-            product_id: orderItems[0].product_id,
-            is_active: true,
-          }),
+        ? []
+        : [
+            opts.recipe ?? {
+              id: 7,
+              product_id: orderItems[0].product_id,
+              is_active: true,
+            },
+          ],
     );
     if (!opts.noRecipe) {
       recipesService.explodeBom.mockResolvedValue(
@@ -231,7 +236,7 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
         findMany: jest.fn(),
       },
       recipes: {
-        findFirst: jest.fn(),
+        findMany: jest.fn(),
       },
       stores: {
         findUnique: jest.fn().mockResolvedValue({
@@ -274,11 +279,9 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       ],
     });
 
-    prismaMock.recipes.findFirst.mockResolvedValue({
-      id: 7,
-      product_id: 50,
-      is_active: true,
-    });
+    prismaMock.recipes.findMany.mockResolvedValue([
+      { id: 7, product_id: 50, is_active: true },
+    ]);
 
     // explodeBom returns 3 leaves:
     //   - product 99 (harina, direct, qty 1 per unit — merma-free
