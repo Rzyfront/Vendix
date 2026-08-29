@@ -3,6 +3,17 @@ import { FiscalCreditNoteDataProvider } from './fiscal-credit-note.provider';
 import { CreditNoteDataProvider } from './credit-note.provider';
 import { KitchenTicketDataProvider } from './kitchen-ticket.provider';
 import { TransferNoteDataProvider } from './transfer-note.provider';
+import { PosSaleTicketDataProvider } from './pos-sale-ticket.provider';
+import { DispatchRouteDataProvider } from './dispatch-route.provider';
+import {
+  WithholdingPracticedDataProvider,
+} from './withholding-practiced.provider';
+import {
+  WithholdingSufferedDataProvider,
+} from './withholding-suffered.provider';
+import {
+  WithholdingEmployeeCertificateDataProvider,
+} from './withholding-employee.provider';
 import { mapFiscalDocumentToPrintData } from './fiscal-document-print.mapper';
 
 /**
@@ -72,22 +83,39 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
   });
 
   it.each([
-    ['kitchen_ticket', () => new KitchenTicketDataProvider({} as any)],
-    ['transfer_note', () => new TransferNoteDataProvider({} as any)],
+    ['kitchen_ticket', () => new KitchenTicketDataProvider({
+      kitchen_tickets: { findFirst: jest.fn().mockResolvedValue(null) },
+    } as any)],
+    ['transfer_note', () => new TransferNoteDataProvider({
+      stores: { findFirst: jest.fn().mockResolvedValue({ organization_id: 7, name: 'Tienda Test' }) },
+      stock_transfers: { findFirst: jest.fn().mockResolvedValue(null) },
+    } as any)],
+    ['dispatch_route', () => new DispatchRouteDataProvider({
+      dispatch_routes: { findFirst: jest.fn().mockResolvedValue(null) },
+    } as any)],
+    ['withholding_practiced', () => new WithholdingPracticedDataProvider({
+      withholding_calculations: { findFirst: jest.fn().mockResolvedValue(null) },
+    } as any)],
+    ['withholding_suffered', () => new WithholdingSufferedDataProvider({
+      withholding_calculations: { findFirst: jest.fn().mockResolvedValue(null) },
+    } as any)],
+    ['withholding_employee_certificate', () => new WithholdingEmployeeCertificateDataProvider({
+      withholding_calculations: { findFirst: jest.fn().mockResolvedValue(null) },
+    } as any)],
   ])(
-    '%s se niega con PRINT_DOCUMENT_READER_MISSING_001 en vez de fabricar',
+    '%s: id inexistente → 404 (PRINT_DOCUMENT_NOT_FOUND_001) — ya no fabrica',
     async (_nombre, construir) => {
       const p: any = construir();
 
-      await expect(p.fetchDocumentData(10, 5)).rejects.toMatchObject({
-        errorCode: 'PRINT_DOCUMENT_READER_MISSING_001',
+      await expect(p.fetchDocumentData(10, 999999)).rejects.toMatchObject({
+        errorCode: 'PRINT_DOCUMENT_NOT_FOUND_001',
       });
 
-      // 501 y no 404: el documento puede existir; lo que falta es el lector.
+      // 404 (no 501): el lector EXISTE, lo que pasa es que la fila no.
       try {
-        await p.fetchDocumentData(10, 5);
+        await p.fetchDocumentData(10, 999999);
       } catch (e: any) {
-        expect(e.getStatus()).toBe(501);
+        expect(e.getStatus()).toBe(404);
       }
     },
   );
@@ -105,6 +133,268 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
       expect(muestra.document.number).toBeTruthy();
       expect(muestra.store.name).toBeTruthy();
     }
+  });
+
+  /**
+   * [print-editor-dsk P8] — Camino feliz del lector de `transfer_note`.
+   * Antes del 2026-08-27 este proveedor rechazaba todo id con un 501. Hoy
+   * lee `stock_transfers` filtrado por `organization_id` (derivado de la
+   * tienda, porque la transferencia es a nivel de organización, no de tienda).
+   */
+  it('transfer_note: lee la fila real y arma el modelo de impresión', async () => {
+    const findFirstStore = jest
+      .fn()
+      .mockResolvedValue({ organization_id: 7, name: 'Tienda Test' });
+    const findFirstTransfer = jest.fn().mockResolvedValue({
+      id: 88,
+      transfer_number: 'TRAS-2026-00088',
+      transfer_date: new Date('2026-08-20T15:00:00.000Z'),
+      status: 'completed',
+      notes: 'Reposición fin de semana',
+      from_location: { id: 1, name: 'Bodega Central', code: 'BOD-01' },
+      to_location: { id: 2, name: 'Tienda Unicentro', code: 'TIEN-02' },
+      stock_transfer_items: [
+        {
+          id: 1,
+          quantity: 25,
+          notes: null,
+          products: { id: 10, name: 'Pantalón Jean Slim', sku: 'JEA-SLIM', unit: 'unit' },
+          product_variants: { id: 100, sku: 'JEA-SLIM-AZU-32', name: 'Azul 32' },
+        },
+      ],
+    });
+    const prisma = {
+      stores: { findFirst: findFirstStore },
+      stock_transfers: { findFirst: findFirstTransfer },
+    } as any;
+    const p = new TransferNoteDataProvider(prisma);
+
+    const data = await p.fetchDocumentData(10, 88);
+
+    // Filtro de organización (no `store_id`), derivado del `stores.findFirst`.
+    expect(findFirstStore).toHaveBeenCalledTimes(1);
+    expect(findFirstTransfer.mock.calls[0][0].where).toEqual({
+      id: 88,
+      organization_id: 7,
+    });
+    expect(data.document.number).toBe('TRAS-2026-00088');
+    expect(data.document.origin_location).toBe('Bodega Central');
+    expect(data.document.destination_location).toBe('Tienda Unicentro');
+    expect(data.items).toHaveLength(1);
+    expect(data.items[0].product_name).toBe('Pantalón Jean Slim');
+    expect(data.items[0].variant_sku).toBe('JEA-SLIM-AZU-32');
+    expect(data.items[0].quantity).toBe(25);
+  });
+
+  /**
+   * [print-editor-dsk P8] — Camino feliz del lector de `kitchen_ticket`.
+   * La mesa y el mesero vienen del grafo `orders → table_sessions →
+   * tables/opener` (la tabla `orders` no carga `table_id` directo).
+   */
+  it('kitchen_ticket: lee la fila real y deriva mesa + mesero del grafo de la orden', async () => {
+    const findFirstTicket = jest.fn().mockResolvedValue({
+      id: 42,
+      fired_at: new Date('2026-08-22T14:25:00.000Z'),
+      status: 'fired',
+      daily_number: 7,
+      business_date: new Date('2026-08-22'),
+      ready_at: null,
+      kds: { id: 1, name: 'Cocina Caliente', station_type: 'kitchen' },
+      items: [
+        {
+          id: 1,
+          quantity: 2,
+          notes: 'Término 3/4',
+          product: { id: 10, name: 'Hamburguesa Doble', sku: 'HAM-DOB' },
+          exclusions: [],
+        },
+      ],
+      order: {
+        id: 100,
+        order_number: 'ORD-2026-0012',
+        table_sessions: [
+          {
+            id: 5,
+            guest_count: 3,
+            table: { id: 4, name: '04', zone: 'Salón principal' },
+            opener: { first_name: 'Mateo', last_name: 'Sánchez' },
+          },
+        ],
+      },
+    });
+    const prisma = { kitchen_tickets: { findFirst: findFirstTicket } } as any;
+    const p = new KitchenTicketDataProvider(prisma);
+
+    const data = await p.fetchDocumentData(10, 42);
+
+    expect(findFirstTicket.mock.calls[0][0].where).toEqual({ id: 42, store_id: 10 });
+    expect(data.document.number).toBe('KITCHEN-42');
+    expect(data.document.table_number).toBe('Mesa 04');
+    expect(data.document.waiter_name).toBe('Mateo Sánchez');
+    expect(data.document.time).toMatch(/^\d{2}:\d{2}/);
+    expect(data.items).toHaveLength(1);
+    expect(data.items[0].product_name).toBe('Hamburguesa Doble');
+    expect(data.items[0].quantity).toBe(2);
+    expect(data.custom_variables?.kds_name).toBe('Cocina Caliente');
+    expect(data.custom_variables?.order_number).toBe('ORD-2026-0012');
+  });
+
+  /**
+   * [print-editor-dsk P8] — Camino feliz del lector de `dispatch_route`.
+   * La planilla DSD es OPERATIVA, no transaccional: el documento arma
+   * vehículo + conductor + transportista externo (si lo hay) + la secuencia
+   * de paradas con su cliente y dirección. No usa `items[]` — usa
+   * `custom_variables.stops[]`.
+   */
+  it('dispatch_route: lee la ruta real y arma vehículo + paradas en custom_variables', async () => {
+    const findFirst = jest.fn().mockResolvedValue({
+      id: 5,
+      route_number: 'PLANILLA-2026-0005',
+      planned_date: new Date('2026-08-25T08:00:00.000Z'),
+      created_at: new Date('2026-08-25T07:30:00.000Z'),
+      status: 'dispatched',
+      notes: null,
+      total_to_collect: 1250000,
+      total_collected: 0,
+      vehicles: { plate: 'WXB-987', brand: 'Chevrolet', model_name: 'NPR', type: 'truck' },
+      driver_user: { first_name: 'Carlos', last_name: 'Pérez', document_number: '79123456' },
+      external_carrier: { name: '', code: '', contact_person: '' },
+      origin_location: { name: 'Bodega Central Calle 80', code: 'BOD-01' },
+      stops: [
+        {
+          stop_sequence: 1,
+          status: 'pending',
+          result: null,
+          collected_amount: 0,
+          withholding_amount: 0,
+          is_prepaid: false,
+          dispatch_note: {
+            id: 452,
+            dispatch_number: 'REM-2026-00452',
+            customer_name: 'Cliente Demo 1',
+            customer_phone: '+57 300 111 2222',
+            customer_address: 'Calle 100 # 15-20',
+            order: { user: { first_name: '', last_name: '', phone: '' } },
+          },
+        },
+      ],
+    });
+    const prisma = { dispatch_routes: { findFirst } } as any;
+    const p = new DispatchRouteDataProvider(prisma);
+
+    const data = await p.fetchDocumentData(10, 5);
+
+    expect(findFirst.mock.calls[0][0].where).toEqual({ id: 5, store_id: 10 });
+    expect(data.document.number).toBe('PLANILLA-2026-0005');
+    expect(data.document.state).toBe('dispatched');
+    expect(data.custom_variables?.vehicle_plate).toBe('WXB-987');
+    expect(data.custom_variables?.driver_name).toBe('Carlos Pérez');
+    expect(data.custom_variables?.origin_location).toBe('Bodega Central Calle 80');
+    expect(data.custom_variables?.total_to_collect).toBe(1250000);
+    const stops = data.custom_variables?.stops as any[];
+    expect(stops).toHaveLength(1);
+    expect(stops[0].sequence).toBe(1);
+    expect(stops[0].customer).toBe('Cliente Demo 1');
+    expect(stops[0].address).toBe('Calle 100 # 15-20');
+  });
+
+  /**
+   * [print-editor-dsk P8] — `withholding_practiced` lee de
+   * `withholding_calculations` con `role='practiced'`. Cuando la tabla
+   * `withholding_certificates` exista, este provider se conecta a ella sin
+   * cambiar la interfaz pública — ese salto queda documentado en el plan.
+   */
+  it('withholding_practiced: lee el cálculo con role=practiced y proyecta proveedor', async () => {
+    const findFirst = jest.fn().mockResolvedValue({
+      id: 99,
+      created_at: new Date('2026-08-20T00:00:00.000Z'),
+      year: 2026,
+      base_amount: 1000000,
+      withholding_amount: 25000,
+      withholding_rate: 2.5,
+      concept: { code: 'RETEFTE', name: 'Retención en la fuente', rate: 2.5, withholding_type: 'retefuente' },
+      supplier: { name: 'Proveedor Demo S.A.S.', tax_id: '800.555.444', verification_digit: '9' },
+      customer: null,
+      invoice: { invoice_number: 'FV-2026-0099', issue_date: new Date('2026-08-15') },
+    });
+    const prisma = { withholding_calculations: { findFirst } } as any;
+    const p = new WithholdingPracticedDataProvider(prisma);
+
+    const data = await p.fetchDocumentData(10, 99);
+
+    expect(findFirst.mock.calls[0][0].where).toEqual({
+      id: 99,
+      store_id: 10,
+      role: 'practiced',
+    });
+    expect(data.document.number).toBe('WH-PRAC-99');
+    expect(data.customer?.name).toBe('Proveedor Demo S.A.S.');
+    expect(data.totals.grand_total).toBe(25000);
+    expect(data.custom_variables?.concept_code).toBe('RETEFTE');
+    expect(data.custom_variables?.year).toBe(2026);
+  });
+});
+
+describe('[print-editor-dsk P3.1] — picker de documentos recientes (listRecent)', () => {
+  /**
+   * El picker del editor del Hub se alimenta de `provider.listRecent(storeId, limit)`.
+   * Aquí se verifica que el POS (el caso más común y de mayor volumen) hace la
+   * consulta barata correcta: `select` mínimo + `orderBy created_at desc` +
+   * `take = limit`. Si la proyección cambia, el picker podría leer miles de
+   * filas y romper la previsualización.
+   */
+  it('pos_sale_ticket: ordena por created_at desc, take=limit, select mínimo', async () => {
+    const findMany = jest.fn().mockResolvedValue([
+      {
+        id: 8,
+        order_number: 'POS-0008',
+        created_at: new Date('2026-08-27T10:30:00.000Z'),
+        grand_total: 87500,
+      },
+      {
+        id: 7,
+        order_number: 'POS-0007',
+        created_at: new Date('2026-08-27T09:15:00.000Z'),
+        grand_total: 12000,
+      },
+    ]);
+    const prisma = { orders: { findMany } } as any;
+    const p = new PosSaleTicketDataProvider(prisma);
+
+    const data = await p.listRecent(42, 20);
+
+    // La consulta correcta:
+    const call = findMany.mock.calls[0][0];
+    expect(call.where).toEqual({ store_id: 42 });
+    expect(call.orderBy).toEqual({ created_at: 'desc' });
+    expect(call.take).toBe(20);
+    // Sin `include` — debe ser una consulta barata.
+    expect(call.include).toBeUndefined();
+    // `select` mínimo: id + número + fecha + total.
+    expect(call.select).toEqual({
+      id: true,
+      order_number: true,
+      created_at: true,
+      grand_total: true,
+    });
+
+    // Y la salida formateada:
+    expect(data).toHaveLength(2);
+    expect(data[0].id).toBe(8);
+    expect(data[0].number).toBe('POS-0008');
+    expect(data[0].date_formatted).toMatch(/\d/);
+    expect(data[0].total_formatted).toMatch(/\$/);
+  });
+
+  it('pos_sale_ticket: respeta el take pasado por el servicio (caller controla el cap)', async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const p = new PosSaleTicketDataProvider({ orders: { findMany } } as any);
+
+    await p.listRecent(1, 5);
+    expect(findMany.mock.calls[0][0].take).toBe(5);
+
+    await p.listRecent(1, 50);
+    expect(findMany.mock.calls[1][0].take).toBe(50);
   });
 });
 

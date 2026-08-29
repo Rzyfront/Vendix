@@ -3,6 +3,7 @@ import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
+import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 
@@ -139,6 +140,45 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       { token: '{{order.grand_total}}', path: 'totals.grand_total_formatted', description: 'Total a pagar con formato', example: '$87.500' },
       { token: '{{order.change_due}}', path: 'document.change_due_formatted', description: 'Cambio o vuelto entregado', example: '$12.500' },
     ];
+  }
+
+  /**
+   * [print-editor-dsk P3.1] — Selector del Hub para el tiquete POS:
+   * lee SOLO lo necesario (id, número, fecha, total) sobre `orders`,
+   * que es la misma tabla que consume `fetchDocumentData` pero sin los
+   * `include` de líneas/tributos. El cap lo pone `DocumentIndexService`,
+   * aquí se respeta ciegamente.
+   */
+  async listRecent(
+    storeId: number,
+    limit: number,
+  ): Promise<RecentDocumentSummary[]> {
+    const rows = await this.prisma.orders.findMany({
+      where: { store_id: storeId },
+      orderBy: { created_at: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        order_number: true,
+        created_at: true,
+        grand_total: true,
+      },
+    });
+    const fmt = new Intl.DateTimeFormat('es-CO', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
+    const cop = new Intl.NumberFormat('es-CO', {
+      style: 'currency',
+      currency: 'COP',
+      maximumFractionDigits: 0,
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      number: String(r.order_number),
+      date_formatted: r.created_at ? fmt.format(new Date(r.created_at)) : '',
+      total_formatted: cop.format(Number(r.grand_total || 0)),
+    }));
   }
 
   private mapOrderToStandardModel(order: any): StandardPrintDataModel {

@@ -82,7 +82,7 @@ export const INVOICE_SECTION_MEMBERSHIP = {
   divisa: 'both',
   contabilidad: 'both',
   formato: 'profile',
-  notas_internas: 'profile',
+  notas_internas: 'both',
   previsualizacion: 'profile',
   historial: 'profile',
 } as const satisfies Record<InvoiceSectionId, InvoiceSectionScreen>;

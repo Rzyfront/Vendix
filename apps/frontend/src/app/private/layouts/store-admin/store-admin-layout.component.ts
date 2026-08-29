@@ -637,6 +637,11 @@ export class StoreAdminLayoutComponent {
           icon: 'circle',
           route: '/admin/data-collection',
         },
+        {
+          label: 'CRM',
+          icon: 'sparkles',
+          route: '/admin/customers/crm',
+        },
       ],
     },
     {

@@ -688,17 +688,13 @@ export const PRINT_DEFAULTS: Record<PrintDocument, PrintDocumentConfig> = {
  * Page geometry per format. `page_size` is the CSS `@page size` rule; without it
  * the browser falls back to its own default and silently ignores the configured
  * paper.
+ *
+ * [print-editor-dsk P1.6] Re-exportado del shim local `app/core/lib/page-geometry`
+ * para mantener sincronía byte-a-byte con backend y mobile. La fuente única es
+ * `libs/print-formats/schemas/page-geometry.json` y el script
+ * `scripts/sync-print-geometry.ts` la copia a cada app.
  */
-export const PRINT_PAGE_GEOMETRY: Record<
-  PrintFormat,
-  { page_size: string; width_mm: number; is_roll: boolean }
-> = {
-  letter: { page_size: 'letter', width_mm: 216, is_roll: false },
-  half_letter: { page_size: '216mm 140mm', width_mm: 216, is_roll: false },
-  a4: { page_size: 'A4', width_mm: 210, is_roll: false },
-  thermal_80: { page_size: '80mm auto', width_mm: 80, is_roll: true },
-  thermal_58: { page_size: '58mm auto', width_mm: 58, is_roll: true },
-};
+export { PRINT_PAGE_GEOMETRY } from '../lib/page-geometry';
 
 export interface ReceiptsSettings {
   print_receipt: boolean;

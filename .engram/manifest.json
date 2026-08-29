@@ -1704,6 +1704,14 @@
       "sessions": 2,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "7168ab14",
+      "created_by": "yoner",
+      "created_at": "2026-08-24T20:34:18Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
     }
   ]
 }

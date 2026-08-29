@@ -9,6 +9,7 @@ import { PrintStylesEditorComponent } from '../print-styles-editor/print-styles-
 import { PrintCustomTemplateEditorComponent } from '../print-custom-template-editor/print-custom-template-editor.component';
 import { PrintLivePreviewComponent } from '../print-live-preview/print-live-preview.component';
 import { PrintLibraryModalComponent } from '../print-library-modal/print-library-modal.component';
+import { PrintSamplePickerComponent } from '../print-sample-picker/print-sample-picker.component';
 
 export type EditorTab = 'sections' | 'columns' | 'styles' | 'custom';
 
@@ -25,6 +26,7 @@ export type EditorTab = 'sections' | 'columns' | 'styles' | 'custom';
     PrintCustomTemplateEditorComponent,
     PrintLivePreviewComponent,
     PrintLibraryModalComponent,
+    PrintSamplePickerComponent,
   ],
   template: `
     <div class="space-y-6">
@@ -59,6 +61,16 @@ export type EditorTab = 'sections' | 'columns' | 'styles' | 'custom';
 
         <!-- Action buttons -->
         <div class="flex items-center gap-2">
+          <!-- [print-editor-dsk P3.3] Sample picker — let the merchant swap
+               the preview between fabricated sample data and a real document. -->
+          @if (detail()) {
+            <app-print-sample-picker
+              [formatType]="detail()!.format_type"
+              [selectedDocumentId]="facade.previewDocumentId()"
+              (documentSelected)="onDocumentPicked($event.id)"
+            ></app-print-sample-picker>
+          }
+
           <!-- Library Template Explorer -->
           <app-button
             variant="outline"
@@ -215,5 +227,15 @@ export class PrintFormatEditorComponent {
 
   async save(): Promise<void> {
     await this.facade.saveCurrentFormat();
+  }
+
+  /**
+   * [print-editor-dsk P3.3] — Forwards the picker's choice to the facade.
+   * The facade delegates to `previewFormat(_, _, id)` with `immediate=true`
+   * so the new sample lands on the iframe without going through the
+   * 300ms debounce (which exists for draft edits, not for picker swaps).
+   */
+  async onDocumentPicked(documentId: number | null): Promise<void> {
+    await this.facade.pickPreviewDocument(documentId);
   }
 }

@@ -296,6 +296,11 @@ export const APP_MODULES: {
           label: 'Recolección de Datos',
           description: 'Campos personalizados y formularios de preconsulta',
         },
+        {
+          key: 'customers_crm',
+          label: 'CRM',
+          description: 'Landing page generada con IA y captura de contactos',
+        },
       ],
     },
 

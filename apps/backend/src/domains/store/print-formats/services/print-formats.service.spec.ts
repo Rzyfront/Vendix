@@ -5,6 +5,7 @@ import { OrganizationPrismaService } from '../../../../prisma/services/organizat
 import { PrintGatewayService } from './print-gateway.service';
 import { PrintFiscalValidatorService } from './print-fiscal-validator.service';
 import { DocumentDataProviderRegistry } from '../providers/document-data-provider.registry';
+import { FormatAdapterRegistryService } from './format-adapter-registry.service';
 import { PrintFormatDefinition } from '../interfaces/print-format.interface';
 
 /**
@@ -71,6 +72,11 @@ describe('PrintFormatsService — contrato de lectura y persistencia del selecto
           provide: DocumentDataProviderRegistry,
           useValue: { getProvider: jest.fn().mockReturnValue({ getAvailableTokens: jest.fn().mockReturnValue([]) }) },
         },
+        // [print-editor-dsk P7] — New constructor dependency: wired to the
+        // real `FormatAdapterRegistryService` so the `availableRegions`
+        // allowlist runs at runtime. The adapter table is in-memory only,
+        // so the bare service (no Test double needed) covers every test.
+        FormatAdapterRegistryService,
       ],
     }).compile();
 

@@ -3,6 +3,7 @@ import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
+import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import {
@@ -128,5 +129,43 @@ export class CreditNoteDataProvider implements IDocumentDataProvider {
       { token: '{{customer.name}}', path: 'customer.name', description: 'Nombre del cliente', example: 'María Restrepo' },
       { token: '{{totals.grand_total}}', path: 'totals.grand_total_formatted', description: 'Monto total acreditado', example: '$240.000' },
     ];
+  }
+
+  /**
+   * [print-editor-dsk P3.1] — Notas crédito no fiscales: viven en
+   * `invoices` con `invoice_type='credit_note'`. Sin el filtro, el
+   * picker del Hub mezclaría facturas y notas y el preview pintaría la
+   * cabecera equivocada.
+   */
+  async listRecent(
+    storeId: number,
+    limit: number,
+  ): Promise<RecentDocumentSummary[]> {
+    const rows = await this.prisma.invoices.findMany({
+      where: { store_id: storeId, invoice_type: 'credit_note' },
+      orderBy: { created_at: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        invoice_number: true,
+        created_at: true,
+        total_amount: true,
+      },
+    });
+    const fmt = new Intl.DateTimeFormat('es-CO', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
+    const cop = new Intl.NumberFormat('es-CO', {
+      style: 'currency',
+      currency: 'COP',
+      maximumFractionDigits: 0,
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      number: String(r.invoice_number),
+      date_formatted: r.created_at ? fmt.format(new Date(r.created_at)) : '',
+      total_formatted: cop.format(Number(r.total_amount || 0)),
+    }));
   }
 }

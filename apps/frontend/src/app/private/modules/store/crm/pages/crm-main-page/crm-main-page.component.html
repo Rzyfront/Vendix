@@ -1,0 +1,90 @@
+<div class="crm-page">
+  <header class="crm-header">
+    <div>
+      <h1>CRM</h1>
+      <p class="crm-subtitle">
+        Tu landing page inteligente: se genera con la información de tu tienda
+        y la editas a tu gusto.
+      </p>
+    </div>
+  </header>
+
+  @if (loading()) {
+    <div class="crm-loading">
+      <app-icon name="loader" [size]="20" />
+      <span>Cargando…</span>
+    </div>
+  } @else if (landing(); as state) {
+    <section class="crm-card">
+      <div class="crm-card-row">
+        <div class="crm-status-block">
+          <span class="crm-status-label">Estado</span>
+          <span
+            class="crm-status-pill"
+            [class.crm-status-on]="state.enabled"
+            [class.crm-status-off]="!state.enabled"
+          >
+            {{ state.enabled ? 'Activado' : 'Desactivado' }}
+          </span>
+        </div>
+
+        <div class="crm-status-block">
+          <span class="crm-status-label">Landing</span>
+          <span class="crm-generation">{{ statusLabel() }}</span>
+        </div>
+
+        @if (state.enabled) {
+          <button
+            app-button
+            variant="outline"
+            [disabled]="busy()"
+            (click)="deactivate()"
+          >
+            Desactivar
+          </button>
+        } @else {
+          <button
+            app-button
+            variant="primary"
+            [disabled]="busy()"
+            (click)="activate()"
+          >
+            Activar CRM
+          </button>
+        }
+      </div>
+
+      @if (!state.enabled) {
+        <p class="crm-hint">
+          Al activar el CRM generamos automáticamente una landing page con la
+          información de tu negocio: tipo de tienda, industria, ubicación,
+          datos fiscales y tus productos más vendidos. Después podrás editarla
+          sección por sección.
+        </p>
+      } @else {
+        <ul class="crm-facts">
+          <li>
+            <span class="crm-fact-label">Versión del borrador</span>
+            <span class="crm-fact-value">{{ state.version }}</span>
+          </li>
+          <li>
+            <span class="crm-fact-label">Borrador</span>
+            <span class="crm-fact-value">
+              {{ hasDraft() ? 'Con contenido' : 'Vacío' }}
+            </span>
+          </li>
+          <li>
+            <span class="crm-fact-label">Publicado</span>
+            <span class="crm-fact-value">
+              {{ state.published_at ? 'Sí' : 'Aún no' }}
+            </span>
+          </li>
+        </ul>
+        <p class="crm-hint crm-hint-muted">
+          La generación con IA y el editor visual llegan en las siguientes
+          fases del desarrollo.
+        </p>
+      }
+    </section>
+  }
+</div>

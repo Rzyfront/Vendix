@@ -34,15 +34,12 @@
         </div>
       }
     } @else {
-      <!-- Sin cliente: prompt con dos acciones -->
+      <!-- Sin cliente: prompt único. QUI-723 eliminó "Crear cliente" como
+           acción separada; el sub-step es ahora un único paso (buscar + crear). -->
       <div class="overview-empty">
         <button type="button" class="select-customer-btn" (click)="goToSearch()">
           <app-icon name="search" [size]="18"></app-icon>
-          Buscar cliente
-        </button>
-        <button type="button" class="select-customer-btn" (click)="goToCreate()">
-          <app-icon name="user-plus" [size]="18"></app-icon>
-          Crear cliente
+          Buscar o registrar cliente
         </button>
       </div>
     }
@@ -55,11 +52,7 @@
         <app-icon name="arrow-left" [size]="16"></app-icon>
         Volver
       </button>
-      <span>Buscar cliente</span>
-      <app-button variant="primary" size="sm" (clicked)="goToCreate(lastQuery())">
-        <app-icon name="user-plus" [size]="16" slot="icon"></app-icon>
-        Crear cliente
-      </app-button>
+      <span>Buscar o registrar cliente</span>
     </div>
 
     <app-inputsearch
@@ -139,19 +132,18 @@
         <p>No se encontraron clientes con esos criterios</p>
       </div>
     }
-  }
 
-  <!-- ══════════════════ CREATE ══════════════════ -->
-  @if (view() === 'create') {
-    <div class="selector-header">
-      <button type="button" class="back-btn" (click)="back()">
-        <app-icon name="arrow-left" [size]="16"></app-icon>
-        Volver
-      </button>
-      <span>Crear cliente</span>
-    </div>
+    <!-- QUI-723 — Formulario unificado "registrar cliente". Vive dentro del
+         mismo sub-step BUSCAR CLIENTE. El botón "Siguiente" del anfitrión
+         dispara `resolveIfNeeded()` que hace find-or-create en backend. No
+         hay botón propio adentro del form: fuente única de avance = Siguiente. -->
+    <form
+      [formGroup]="form"
+      class="create-customer-form"
+      (ngSubmit)="$event.preventDefault(); onResolve()"
+    >
+      <span class="form-divider-label">o registra un cliente nuevo</span>
 
-    <form [formGroup]="form" class="create-customer-form" (ngSubmit)="onCreate()">
       <app-input
         formControlName="email"
         label="Email"
@@ -163,27 +155,44 @@
       <div class="form-row">
         <app-input
           formControlName="firstName"
-          label="Nombre *"
+          label="Nombre"
           placeholder="Juan"
           type="text"
           [size]="'md'"
         ></app-input>
         <app-input
           formControlName="lastName"
-          label="Apellido *"
+          label="Apellido"
           placeholder="Pérez"
           type="text"
           [size]="'md'"
         ></app-input>
       </div>
 
-      <app-input
-        formControlName="phone"
-        label="Teléfono"
-        placeholder="+57 300 123 4567"
-        type="tel"
-        [size]="'md'"
-      ></app-input>
+      <div class="phone-field">
+        <app-input
+          formControlName="phone"
+          label="Teléfono"
+          placeholder="+57 300 123 4567"
+          type="tel"
+          [size]="'md'"
+        ></app-input>
+        <!-- QUI-723 — Live counter for the phone input. Dev lead's spec:
+             "el número de teléfono son 10" — exactly 10 Colombian digits,
+             no country prefix. Pure info — does NOT block submit. -->
+        @if (phoneFormatHint(); as hint) {
+          <span
+            class="document-format-hint"
+            [class.document-format-hint--ok]="hint.tone === 'ok'"
+            [class.document-format-hint--warn]="hint.tone === 'warn'"
+            role="status"
+            aria-live="polite"
+          >
+            <app-icon name="info" [size]="14"></app-icon>
+            {{ hint.text }}
+          </span>
+        }
+      </div>
 
       <div class="form-row">
         <app-selector
@@ -193,29 +202,32 @@
           [size]="'md'"
           [placeholder]="'Seleccionar'"
         ></app-selector>
-        <app-input
-          formControlName="documentNumber"
-          label="Número *"
-          placeholder="1023456789"
-          type="text"
-          [size]="'md'"
-        ></app-input>
-      </div>
-
-      <div class="form-actions">
-        <app-button variant="secondary" size="md" type="button" (clicked)="back()">
-          Cancelar
-        </app-button>
-        <app-button
-          variant="primary"
-          size="md"
-          type="submit"
-          [loading]="creating()"
-          [disabled]="!canCreate()"
-        >
-          <app-icon name="save" [size]="16" slot="icon"></app-icon>
-          Crear cliente
-        </app-button>
+        <div class="document-number-field">
+          <app-input
+            formControlName="documentNumber"
+            label="Número"
+            placeholder="1023456789"
+            type="text"
+            [size]="'md'"
+          ></app-input>
+          <!-- QUI-723 — Real-time counter for the document number. Shows the
+               cashier how many digits they have, how many are missing, and the
+               min/max range for the selected document type. Three tones:
+               info (in progress), ok (within range), warn (overflow / bad format).
+               Pure info — does NOT block submit (backend is format-tolerant). -->
+          @if (documentFormatHint(); as hint) {
+            <span
+              class="document-format-hint"
+              [class.document-format-hint--ok]="hint.tone === 'ok'"
+              [class.document-format-hint--warn]="hint.tone === 'warn'"
+              role="status"
+              aria-live="polite"
+            >
+              <app-icon name="info" [size]="14"></app-icon>
+              {{ hint.text }}
+            </span>
+          }
+        </div>
       </div>
     </form>
   }

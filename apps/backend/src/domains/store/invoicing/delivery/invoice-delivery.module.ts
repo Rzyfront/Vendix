@@ -37,5 +37,14 @@ import { InvoiceDeliveryService } from './invoice-delivery.service';
   ],
   controllers: [InvoiceDeliveryController],
   providers: [InvoiceDeliveryService, ModuleFlowGuard],
+  // La entrega PRIMARIA (el `@OnEvent('invoice.pdf.generated')` de
+  // `notifications-events.listener.ts`) delega aquí para no reimplementar el
+  // §9.1. Antes armaba PDF y XML como adjuntos sueltos, sin `.zip` y sin
+  // `AttachedDocument`: cumplía el reenvío de conveniencia y NO la emisión
+  // normal, que es justo la que le llega al adquiriente en toda venta.
+  //
+  // Se exporta el servicio, no el módulo entero, y `NotificationsModule` lo
+  // importa sin ciclo: ni éste ni `PrintFormatsModule` conocen notificaciones.
+  exports: [InvoiceDeliveryService],
 })
 export class InvoiceDeliveryModule {}

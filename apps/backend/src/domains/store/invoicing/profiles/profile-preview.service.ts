@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { DOMParser } from '@xmldom/xmldom';
 
 import { ErrorCodes, VendixHttpException } from '@common/errors';
@@ -388,12 +388,30 @@ export interface ProfilePreviewResult {
  * de `divergences[]`, que es lo que las compuertas `INVOICING_AIU_004`/`005`
  * convierten en rechazo.
  */
+/**
+ * Token de inyección para el lector de perfiles del preview.
+ * Permite que el mismo motor de preview sirva tanto al riel tienda
+ * (ProfilesService, store-scoped) como al riel plataforma
+ * (PlatformProfilesService, organization_id + store_id IS NULL scoped).
+ */
+export const PROFILE_READER = Symbol('PROFILE_READER');
+
+export interface ProfileReader {
+  findOne(id: number): Promise<{
+    id: number;
+    name: string;
+    operation_type: string;
+    current_version: number;
+    current_config: unknown;
+  }>;
+}
+
 @Injectable()
 export class ProfilePreviewService {
   private readonly logger = new Logger(ProfilePreviewService.name);
 
   constructor(
-    private readonly profiles: ProfilesService,
+    @Inject(PROFILE_READER) private readonly profileReader: ProfileReader,
     private readonly calculator: InvoiceCalculatorService,
   ) {}
 
@@ -410,7 +428,7 @@ export class ProfilePreviewService {
     profile_id: number,
     dto: PreviewProfileDto,
   ): Promise<ProfilePreviewResult> {
-    const profile = await this.profiles.findOne(profile_id);
+    const profile = await this.profileReader.findOne(profile_id);
     const config = profile.current_config as InvoiceProfileConfig | null;
 
     if (!config) {
