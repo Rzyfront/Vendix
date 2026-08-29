@@ -86,8 +86,21 @@ export const ASSIGNABLE_SYSTEM_ROLES: Record<
     'employee',
     'cashier',
     'carrier',
+    // QUI-727 (A.1) — roles de operación restaurante, asignables desde
+    // organización y tienda.
+    'mesero',
+    'cocina',
   ],
-  store: ['manager', 'supervisor', 'employee', 'cashier', 'carrier'],
+  store: [
+    'manager',
+    'supervisor',
+    'employee',
+    'cashier',
+    'carrier',
+    // QUI-727 (A.1) — roles de operación restaurante, asignables en tienda.
+    'mesero',
+    'cocina',
+  ],
 };
 
 /**

@@ -1385,6 +1385,59 @@ export class ProductsService {
     };
   }
 
+  /**
+   * QUI-727 (A.1) — ADR-10: ninguna superficie de cocina muestra dinero.
+   *
+   * Se usa en `findAll` y `findOne` para recortar el DTO de producto ANTES de
+   * serializarlo cuando el actor autenticado tiene el rol `cocina`. Es la
+   * primera proyección por rol del repo y se decide AQUÍ (en el servicio),
+   * no con un interceptor global: la regla es específica de un rol concreto
+   * sobre la lectura de productos, y meterla en un interceptor la haría
+   * implícita y difícil de auditar frente a otras lecturas que sí deben
+   * mostrar dinero.
+   *
+   * Alcance de A.1: `cost_price`, `profit_margin` y TODO precio de venta
+   * (`base_price`, `sale_price`, `final_price`, `price_override`, promo
+   * activa). `mesero` y `STORE_ADMIN` ven lo de siempre.
+   */
+  private isKitchenRole(): boolean {
+    return RequestContextService.getRoles().includes('cocina');
+  }
+
+  /**
+   * QUI-727 (A.1) — ADR-10: el dato monetario no debe viajar en el payload
+   * para `cocina`. Recorta el objeto de producto (y sus variantes) quitando
+   * los campos de dinero. Idempotente y no destructivo para el resto de
+   * campos estructurales (stock, flags, atributos) que cocina sí consume.
+   */
+  private stripCocinaMoney(dto: any): any {
+    if (!dto || typeof dto !== 'object') return dto;
+    const {
+      cost_price,
+      profit_margin,
+      base_price,
+      sale_price,
+      final_price,
+      active_promotion,
+      sale_config_summary,
+      ...rest
+    } = dto;
+    if (Array.isArray(rest.product_variants)) {
+      rest.product_variants = rest.product_variants.map((variant: any) => {
+        if (!variant || typeof variant !== 'object') return variant;
+        const {
+          cost_price: _vCost,
+          profit_margin: _vMargin,
+          sale_price: _vSale,
+          price_override: _vOverride,
+          ...variantRest
+        } = variant;
+        return variantRest;
+      });
+    }
+    return rest;
+  }
+
   async findAll(query: ProductQueryDto) {
     const {
       page = 1,
@@ -1399,6 +1452,9 @@ export class ProductsService {
     // Obtener contexto para aplicar scope automático
     const context = RequestContextService.getContext();
     // store_id check is handled by StorePrismaService
+
+    // QUI-727 (A.1) / ADR-10 — proyección por rol: `cocina` no ve dinero.
+    const isCocina = this.isKitchenRole();
 
     const where = this.buildProductWhere(query);
 
@@ -1715,8 +1771,11 @@ export class ProductsService {
         }
       }
 
+      const data = isCocina
+        ? productsWithSignedImages.map((p) => this.stripCocinaMoney(p))
+        : productsWithSignedImages;
       return {
-        data: productsWithSignedImages,
+        data,
         meta: {
           total,
           page,
@@ -1896,8 +1955,11 @@ export class ProductsService {
       }),
     );
 
+    const data = isCocina
+      ? productsWithStock.map((p) => this.stripCocinaMoney(p))
+      : productsWithStock;
     return {
-      data: productsWithStock,
+      data,
       meta: {
         total,
         page,
@@ -1910,6 +1972,8 @@ export class ProductsService {
   async findOne(id: number) {
     // Obtener contexto para aplicar scope automático
     const context = RequestContextService.getContext();
+    // QUI-727 (A.1) / ADR-10 — proyección por rol: `cocina` no ve dinero.
+    const isCocina = this.isKitchenRole();
 
     const product = await this.prisma.products.findFirst({
       where: {
@@ -2042,7 +2106,7 @@ export class ProductsService {
     );
 
     // Retornar producto con información de stock enriquecida
-    return {
+    const dto = {
       id: product.id,
       name: product.name,
       slug: product.slug,
@@ -2156,6 +2220,7 @@ export class ProductsService {
       stock_levels: product.stock_levels,
       stores: product.stores,
     };
+    return isCocina ? this.stripCocinaMoney(dto) : dto;
   }
 
   /**

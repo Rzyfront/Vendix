@@ -5,6 +5,7 @@ import { AuditService } from '../../../common/audit/audit.service';
 import { UserRoleAssignmentService } from '@common/services/user-role-assignment.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors/vendix-http.exception';
+import { canAssignRole } from '@common/utils/role-scope.util';
 
 // Mock the problematic import
 jest.mock('../../../prisma/services/organization-prisma.service', () => ({
@@ -420,6 +421,49 @@ describe('RolesService', () => {
         actor_roles: [],
       });
       expect(result[0].store_id).toBeNull();
+    });
+  });
+
+  describe('canAssignRole allowlist (QUI-727 A.1)', () => {
+    // Actor STORE_ADMIN a nivel tienda. `mesero` y `cocina` son roles de
+    // sistema (organization_id null, is_system_role true) que crea el seed;
+    // la allowlist por INCLUSIÓN de `ASSIGNABLE_SYSTEM_ROLES.store` (que A.1
+    // extiende) es lo que les permite nacer asignables. Si no estuvieran en la
+    // lista, `canAssignRole` devolvería false y cualquier asignación daría 403
+    // (UserRoleAssignmentService.validateAssignment paso 1).
+    const storeActor = {
+      level: 'store' as const,
+      organization_id: ORGANIZATION_ID,
+      store_id: 3,
+      actor_roles: [],
+    };
+
+    it('should allow assigning the mesero system role to a store user', () => {
+      expect(
+        canAssignRole(
+          {
+            name: 'mesero',
+            is_system_role: true,
+            organization_id: null,
+            store_id: null,
+          },
+          storeActor,
+        ),
+      ).toBe(true);
+    });
+
+    it('should allow assigning the cocina system role to a store user', () => {
+      expect(
+        canAssignRole(
+          {
+            name: 'cocina',
+            is_system_role: true,
+            organization_id: null,
+            store_id: null,
+          },
+          storeActor,
+        ),
+      ).toBe(true);
     });
   });
 });

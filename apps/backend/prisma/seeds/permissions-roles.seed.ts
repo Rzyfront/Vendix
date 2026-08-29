@@ -4439,10 +4439,24 @@ export async function seedPermissionsAndRoles(
     'Repartidor',
   );
 
+  // QUI-727 (A.1) — roles de operación restaurante. Lista EXPLÍCITA de
+  // permisos en el bloque de sync de abajo (ADR-2), nunca derivada de
+  // `cashierPermissions` (que no contiene ninguna clave tables/table_sessions/
+  // kitchen_fire — ver A.1).
+  const meseroRole = await findOrCreateSystemRole(
+    'mesero',
+    'Mesero de tienda (restaurante): sirve mesas, dispara pedidos a cocina y cobra',
+  );
+
+  const cocinaRole = await findOrCreateSystemRole(
+    'cocina',
+    'Cocina (restaurante): prepara y marca tickets, sin datos de dinero',
+  );
+
   // Create-only seed: system roles are inserted with organization_id=null on
   // their initial upsert; existing roles are never mutated by this seed.
 
-  const rolesCreated = 8;
+  const rolesCreated = 12;
 
   // Assign permissions to roles
   const allPermissions = await client.permissions.findMany();
@@ -5011,6 +5025,80 @@ export async function seedPermissionsAndRoles(
     'carrier',
   );
   assignmentsCreated += carrierSync.added;
+
+  // Assign permissions to mesero — QUI-727 (A.1) / ADR-2.
+  //
+  // Lista EXPLÍCITA (enumerada), nunca "subset de cashier": cashier no tiene
+  // ninguna clave tables/table_sessions/kitchen_fire, así que un subconjunto
+  // suyo dejaría a mesero sin poder abrir mesas ni disparar a cocina. El
+  // subconjunto de LECTURA de productos y clientes refleja el que cashier ya
+  // tiene (listado explícito, no derivado). ADR-2 cierra: mesero SÍ cobra y
+  // parte cuenta — `store:table_sessions:update` se asigna completo, con sus
+  // cuatro capacidades (add-items, cerrar mesa, confirmar pago, partir cuenta).
+  const meseroPermissionNames: string[] = [
+    // Mesas + cuenta abierta
+    'store:tables:read',
+    'store:table_sessions:read',
+    'store:table_sessions:update',
+    // Disparar a cocina
+    'store:kitchen_fire:create',
+    // Lectura de productos (mismo subset read que cashier)
+    'store:products:read',
+    'store:products:read:one',
+    'store:products:read:store',
+    'store:products:read:slug',
+    // Lectura de clientes (mismo subset read que cashier)
+    'store:customers:read',
+  ];
+
+  const meseroPermissions = allPermissions.filter((p) =>
+    meseroPermissionNames.includes(p.name),
+  );
+
+  const meseroSync = await syncRolePermissions(
+    client,
+    meseroRole.id,
+    meseroPermissions.map((p) => p.id),
+    'mesero',
+  );
+  assignmentsCreated += meseroSync.added;
+
+  // Assign permissions to cocina — QUI-727 (A.1) / ADR-2 / ADR-10.
+  //
+  // Cocina NO ve dinero: `store:products:read` se le asigna con proyección
+  // reducida (sin cost_price / profit_margin / precio de venta), garantizada en
+  // products.service.ts por rol. `store:kds:*` = todos los permisos kds
+  // existentes (estaciones + turnos de estación).
+  const cocinaPermissionNames: string[] = [
+    // Tickets de cocina
+    'store:kitchen_fire:read',
+    'store:kitchen_fire:update',
+    // KDS: estaciones de cocina y turnos de estación (todos los permisos kds existentes)
+    'store:kds:read',
+    'store:kds:create',
+    'store:kds:update',
+    'store:kds:delete',
+    'store:kds_sessions:read',
+    'store:kds_sessions:create',
+    'store:kds_sessions:update',
+    // Mesas + cuenta abierta (solo lectura)
+    'store:tables:read',
+    'store:table_sessions:read',
+    // Productos con proyección reducida (sin dinero)
+    'store:products:read',
+  ];
+
+  const cocinaPermissions = allPermissions.filter((p) =>
+    cocinaPermissionNames.includes(p.name),
+  );
+
+  const cocinaSync = await syncRolePermissions(
+    client,
+    cocinaRole.id,
+    cocinaPermissions.map((p) => p.id),
+    'cocina',
+  );
+  assignmentsCreated += cocinaSync.added;
 
   return {
     permissionsCreated,
