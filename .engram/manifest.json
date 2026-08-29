@@ -1720,6 +1720,14 @@
       "sessions": 0,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "cbd37ade",
+      "created_by": "yoner",
+      "created_at": "2026-08-24T21:38:26Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
     }
   ]
 }

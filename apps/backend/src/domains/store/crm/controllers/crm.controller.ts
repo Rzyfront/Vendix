@@ -4,6 +4,7 @@ import {
   Post,
   Put,
   Body,
+  Param,
   UseGuards,
 } from '@nestjs/common';
 import { CrmService } from '../services/crm.service';
@@ -46,5 +47,12 @@ export class CrmController {
   async updateLanding(@Body() dto: UpdateCrmLandingDto) {
     const result = await this.crmService.updateLanding(dto);
     return this.responseService.success(result, 'Landing guardada');
+  }
+
+  @Permissions('store:crm:read')
+  @Get('generation/:jobId')
+  async getGenerationStatus(@Param('jobId') jobId: string) {
+    const result = await this.crmService.getGenerationJobStatus(jobId);
+    return this.responseService.success(result);
   }
 }

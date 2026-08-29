@@ -4,6 +4,8 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors/vendix-http.exception';
 import { ErrorCodes } from '@common/errors/error-codes';
 import { UpdateCrmLandingDto } from '../dto/crm.dto';
+import { CrmGenerationService } from './crm-generation.service';
+import { validateCrmLandingDocument } from '../crm-blocks.contract';
 
 export interface CrmLandingState {
   enabled: boolean;
@@ -12,13 +14,17 @@ export interface CrmLandingState {
   published_json: unknown;
   published_at: Date | null;
   version: number;
+  last_job_id: string | null;
 }
 
 @Injectable()
 export class CrmService {
   private readonly logger = new Logger(CrmService.name);
 
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly crmGenerationService: CrmGenerationService,
+  ) {}
 
   async getLanding(): Promise<CrmLandingState> {
     const storeId = this.requireStoreId();
@@ -34,6 +40,7 @@ export class CrmService {
         published_json: null,
         published_at: null,
         version: 0,
+        last_job_id: null,
       };
     }
 
@@ -44,6 +51,7 @@ export class CrmService {
       published_json: landing.published_json,
       published_at: landing.published_at,
       version: landing.version,
+      last_job_id: landing.last_job_id,
     };
   }
 
@@ -64,7 +72,14 @@ export class CrmService {
       });
     }
 
+    // Activación ⇒ generación (o regeneración) del draft con IA.
+    await this.crmGenerationService.enqueueGeneration();
+
     return this.getLanding();
+  }
+
+  async getGenerationJobStatus(jobId: string) {
+    return this.crmGenerationService.getGenerationJobStatus(jobId);
   }
 
   async deactivate(): Promise<CrmLandingState> {
@@ -96,6 +111,16 @@ export class CrmService {
     }
     if (!existing.enabled) {
       throw new VendixHttpException(ErrorCodes.CRM_LANDING_002);
+    }
+
+    if (
+      dto.content_json !== undefined &&
+      !validateCrmLandingDocument(dto.content_json).valid
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.CRM_LANDING_003,
+        validateCrmLandingDocument(dto.content_json).errors.join(' '),
+      );
     }
 
     await this.prisma.crm_landing_pages.updateMany({
