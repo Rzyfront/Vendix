@@ -21,6 +21,7 @@ import {
 import { AuthFacade } from '../../../../../core/store';
 import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 import { StoreUiService } from '../../services/store-ui.service';
+import { StoreSettingsService } from '../../../store/settings/general/services/store-settings.service';
 import {
   CatalogService,
   EcommerceProduct,
@@ -117,6 +118,15 @@ export class CartComponent implements OnInit {
   private tableContext = inject(TableContextService);
   private currencyService = inject(CurrencyFormatService);
   private toast = inject(ToastService);
+  private storeSettingsService = inject(StoreSettingsService);
+
+  /**
+   * Toggle "Experiencia de Alta Conversión (Visualización Promocional)"
+   * leído de settings.promotions.enable_high_conversion_ui.
+   * Default `true` mientras el endpoint no responda o el campo esté ausente
+   * (back-compat con stores que aún no tienen la sección promotions).
+   */
+  readonly highConversionEnabled = signal<boolean>(true);
 
   constructor(
     private cart_service: CartService,
@@ -128,6 +138,22 @@ export class CartComponent implements OnInit {
   ngOnInit(): void {
     // Asegurar que la moneda esté cargada para mostrar precios correctamente
     this.currencyService.loadCurrency();
+
+    // Leer el toggle de badges dinámicos desde settings.promotions
+    this.storeSettingsService
+      .getSettings()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          const enabled = response?.data?.promotions?.enable_high_conversion_ui;
+          if (enabled !== undefined) {
+            this.highConversionEnabled.set(enabled !== false);
+          }
+        },
+        error: () => {
+          // Silenciar — default true ya está seteado
+        },
+      });
 
     this.auth_facade.isAuthenticated$
       .pipe(takeUntilDestroyed(this.destroyRef))
