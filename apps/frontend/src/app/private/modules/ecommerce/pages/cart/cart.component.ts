@@ -149,7 +149,7 @@ export class CartComponent implements OnInit {
         next: (response) => {
           const enabled = response?.data?.promotions?.enable_high_conversion_ui;
           if (enabled !== undefined) {
-            this.highConversionEnabled.set(enabled !== false);
+            this.highConversionEnabled.set(enabled);  // ← BUG FIX: era `!== false`, lo que hacía que false nunca se seteara
           }
         },
         error: () => {
