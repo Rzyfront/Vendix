@@ -756,6 +756,12 @@ export interface ReceiptsSettings {
    * Default false (opt-in por admin).
    */
   print_dispatch_ticket_auto_with_pos?: boolean;
+  /**
+   * QUI-727 (A.2) — Si true y print_dispatch_ticket_enabled=true, la
+   * postventa encadena auto el tiquete de despacho al confirmar entrega/pago.
+   * Default false (opt-in por admin).
+   */
+  print_dispatch_ticket_auto_on_postventa?: boolean;
 }
 
 export interface BusinessHoursBlock {

@@ -181,6 +181,7 @@ export function getDefaultStoreSettings(): StoreSettings {
       // pero auto_with_pos=false para que el POS no encadene por sorpresa.
       print_dispatch_ticket_enabled: true,
       print_dispatch_ticket_auto_with_pos: false,
+      print_dispatch_ticket_auto_on_postventa: false,
     },
 
     // Panel UI - Control de módulos disponibles a nivel de tienda

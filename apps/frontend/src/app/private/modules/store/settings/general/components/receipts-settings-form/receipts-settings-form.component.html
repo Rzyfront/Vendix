@@ -523,6 +523,31 @@
             </app-tooltip>
           </div>
         </div>
+
+        <div class="setting-cell">
+          <app-setting-toggle
+            [formControl]="printDispatchTicketAutoOnPostventaControl"
+            label="Auto-imprimir el tiquete de despacho al confirmar"
+            description="Al confirmar una venta postventa, encadena el tiquete de despacho junto con el documento de venta"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+          <div class="setting-cell__meta">
+            <app-badge variant="info" size="xsm" badgeStyle="outline">
+              Disparador postventa
+            </app-badge>
+            <app-tooltip
+              content="Al confirmar una venta postventa se imprime el tiquete de despacho junto con el documento de venta. Default false (opt-in por admin); el botón manual del detalle de la orden sigue funcionando aunque esto esté apagado."
+              position="top"
+              size="sm"
+              color="default"
+            >
+              <span class="help-chip">
+                <app-icon name="alert-triangle" size="12"></app-icon>
+                Cuándo aplica
+              </span>
+            </app-tooltip>
+          </div>
+        </div>
       </div>
     </div>
   </div>

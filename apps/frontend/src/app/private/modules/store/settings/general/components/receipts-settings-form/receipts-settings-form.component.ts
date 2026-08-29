@@ -45,6 +45,7 @@ export interface ReceiptsSettings {
   /** ADR-7 / CP-DTLP-20260827 — Tiquete de despacho encadenado. */
   print_dispatch_ticket_enabled?: boolean;
   print_dispatch_ticket_auto_with_pos?: boolean;
+  print_dispatch_ticket_auto_on_postventa?: boolean;
 }
 
 /**
@@ -225,6 +226,7 @@ export class ReceiptsSettingsForm {
     deliver_printed: new FormControl(false),
     print_dispatch_ticket_enabled: new FormControl(true),
     print_dispatch_ticket_auto_with_pos: new FormControl(false),
+    print_dispatch_ticket_auto_on_postventa: new FormControl(false),
   });
 
   /** Label of the format each preview will render, for the section hint. */
@@ -322,6 +324,9 @@ export class ReceiptsSettingsForm {
   }
   get printDispatchTicketAutoWithPosControl() {
     return this.form.get('print_dispatch_ticket_auto_with_pos') as FormControl;
+  }
+  get printDispatchTicketAutoOnPostventaControl() {
+    return this.form.get('print_dispatch_ticket_auto_on_postventa') as FormControl;
   }
 
   constructor() {

@@ -768,6 +768,23 @@ export class ReceiptsSettingsDto {
   @IsOptional()
   @IsBoolean()
   print_dispatch_ticket_auto_with_pos?: boolean;
+
+  /**
+   * ADR-7: Si true y print_dispatch_ticket_enabled=true, al confirmar una
+   * venta postventa se auto-imprime el tiquete de despacho (dispatch_ticket)
+   * junto con el documento de venta. Default false (opt-in por admin).
+   */
+  @ApiProperty({
+    example: false,
+    required: false,
+    description:
+      'Si true, al confirmar una venta postventa se auto-imprime el tiquete ' +
+      'de despacho junto con el documento de venta. Default false (opt-in ' +
+      'por admin).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  print_dispatch_ticket_auto_on_postventa?: boolean;
 }
 
 export class AppSettingsDto {
