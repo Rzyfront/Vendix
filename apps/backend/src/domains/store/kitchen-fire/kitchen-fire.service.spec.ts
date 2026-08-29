@@ -75,6 +75,140 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     },
   });
 
+  /**
+   * CP-POLLO-ARABE-727 A.6 — helper de order_item con la variante vendida.
+   * Modela el include real de `fireOrderItems`:
+   *   - `product_variant_id` (columna de order_items, nullable)
+   *   - `product_variants` (relación, nullable — `name` para `variant_label`,
+   *     `product_id` para validar pertenencia ERR-15)
+   *   - `products._count.product_variants` (para el warn "producto con variantes")
+   */
+  const makeVariantOrderItem = (
+    id: number,
+    productId: number,
+    opts: {
+      variantId?: number | null;
+      variantName?: string | null;
+      variantProductId?: number;
+      variantCount?: number;
+      productType?: string;
+      quantity?: number;
+      alreadyFired?: boolean;
+    } = {},
+  ) => ({
+    id,
+    order_id: 100,
+    product_id: productId,
+    product_name: `Plato ${id}`,
+    quantity: opts.quantity ?? 2,
+    product_variant_id: opts.variantId ?? null,
+    variant_attributes: null,
+    variant_sku: null,
+    inventory_consumed_at_fire: opts.alreadyFired ?? false,
+    products: {
+      id: productId,
+      name: `Plato ${id}`,
+      product_type: opts.productType ?? 'prepared',
+      track_inventory: true,
+      store_id: 1,
+      _count: { product_variants: opts.variantCount ?? 0 },
+    },
+    product_variants:
+      opts.variantId != null
+        ? {
+            id: opts.variantId,
+            name: opts.variantName ?? 'Picante',
+            product_id: opts.variantProductId ?? productId,
+          }
+        : null,
+  });
+
+  /**
+   * CP-POLLO-ARABE-727 A.6 — tx de prueba para el fire (mismo shape que el
+   * mock corregido del test 1): KDS por defecto, sesión abierta por estación,
+   * update/findMany de order_items y contadores. `kitchen_tickets` se aporta
+   * por test para poder inspeccionar el `.create({})`.
+   */
+  const buildFireTxMock = (opts: { orderItemId?: number } = {}) => ({
+    kds: { findFirst: jest.fn().mockResolvedValue({ id: 1 }) },
+    kds_sessions: { findFirst: jest.fn().mockResolvedValue(null) },
+    order_items: {
+      update: jest.fn().mockResolvedValue({ id: opts.orderItemId ?? 10 }),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    kitchen_ticket_items: {
+      update: jest.fn().mockResolvedValue({}),
+    },
+    kitchen_ticket_item_exclusions: {
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    $executeRaw: jest.fn().mockResolvedValue(undefined),
+  });
+
+  const makeTxTicket = (id: number, orderItemId: number, productId: number) => ({
+    id,
+    items: [
+      { id: 1, order_item_id: orderItemId, product_id: productId, quantity: 2, status: 'pending' },
+    ],
+  });
+
+  /**
+   * CP-POLLO-ARABE-727 A.6 — configura el contexto de fire para un item
+   * `prepared`: orden, receta activa (o `noRecipe` para recipe-less), BOM y
+   * costos deterministas.
+   */
+  const setupFireableContext = (
+    orderItems: any[],
+    opts: { recipe?: any; bom?: any[]; noRecipe?: boolean } = {},
+  ) => {
+    prismaMock.orders.findFirst.mockResolvedValue({
+      id: 100,
+      store_id: 1,
+      order_number: `ORD-${orderItems[0].id}`,
+      order_items: orderItems,
+    });
+    prismaMock.recipes.findFirst.mockResolvedValue(
+      opts.noRecipe
+        ? null
+        : (opts.recipe ?? {
+            id: 7,
+            product_id: orderItems[0].product_id,
+            is_active: true,
+          }),
+    );
+    if (!opts.noRecipe) {
+      recipesService.explodeBom.mockResolvedValue(
+        opts.bom ?? [
+          { component_product_id: 99, quantity: 1, depth: 1, path_recipe_ids: [] },
+        ],
+      );
+      stockLevelManager.getDefaultLocationForProduct.mockResolvedValue(100);
+      stockLevelManager.updateStock.mockResolvedValue({
+        stock_level: { id: 99 } as FakeStockLevel,
+        transaction: { id: 99 } as any,
+        previous_quantity: 100,
+        cost_snapshot: { unit_cost: 1, total_cost: 2, stock_value: 0 },
+      });
+    }
+  };
+
+  /** Configura `$transaction` del fire y devuelve el mock de `kitchen_tickets.create`. */
+  const setupFireTransaction = (orderItemId: number): jest.Mock => {
+    const ticketCreate = jest
+      .fn()
+      .mockResolvedValue(makeTxTicket(555, orderItemId, 50));
+    prismaMock.$transaction.mockImplementation(async (cb: any) =>
+      cb({
+        ...buildFireTxMock({ orderItemId }),
+        kitchen_tickets: {
+          create: ticketCreate,
+          count: jest.fn().mockResolvedValue(0),
+        },
+      }),
+    );
+    return ticketCreate;
+  };
+
   beforeEach(() => {
     recipesService = {
       explodeBom: jest.fn(),
@@ -90,6 +224,11 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     prismaMock = {
       orders: {
         findFirst: jest.fn(),
+      },
+      // CP-POLLO-ARABE-727 A.6 — `splitLinesForExclusions` lee las líneas
+      // originales a partir del DTO (para una línea partida por exclusión).
+      order_items: {
+        findMany: jest.fn(),
       },
       recipes: {
         findFirst: jest.fn(),
@@ -184,6 +323,12 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
 
     // $transaction executes the callback with a fake tx that supports
     // order_items.update, kitchen_tickets.create (with nested items.create).
+    // CP-POLLO-ARABE-727 A.6 — `fireOrderItemsInTx` arranca resolviendo el KDS
+    // por defecto (`tx.kds.findFirst`) y la sesión abierta por estación
+    // (`tx.kds_sessions.findFirst`), y después lee la nota de cada item
+    // (`tx.order_items.findMany`). El mock original sólo tenía
+    // `order_items.update`, así que la suite fallaba en esa cascada KDS
+    // (`tx.kds.findFirst is undefined`).
     const orderItemUpdate = jest.fn().mockResolvedValue({ id: 10 });
     const ticketCreate = jest.fn().mockResolvedValue({
       id: 555,
@@ -193,10 +338,21 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     });
     prismaMock.$transaction.mockImplementation(async (cb: any) =>
       cb({
-        order_items: { update: orderItemUpdate },
+        kds: { findFirst: jest.fn().mockResolvedValue({ id: 1 }) },
+        kds_sessions: { findFirst: jest.fn().mockResolvedValue(null) },
+        order_items: {
+          update: orderItemUpdate,
+          findMany: jest.fn().mockResolvedValue([]),
+        },
         kitchen_tickets: {
           create: ticketCreate,
           count: jest.fn().mockResolvedValue(0),
+        },
+        kitchen_ticket_items: {
+          update: jest.fn().mockResolvedValue({}),
+        },
+        kitchen_ticket_item_exclusions: {
+          createMany: jest.fn().mockResolvedValue({ count: 0 }),
         },
         $executeRaw: jest.fn().mockResolvedValue(undefined),
       }),
@@ -310,5 +466,141 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
 
     expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
     expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  // --------------------------------------------------------------------------
+  // CP-POLLO-ARABE-727 A.6 — la variante vendida viaja a `kitchen_ticket_items`.
+  // Matriz: producto variantizado, producto simple, línea partida por exclusión
+  // (splitLinesForExclusions) y línea recipe-less (el segundo `push()`).
+  // --------------------------------------------------------------------------
+
+  it('persists product_variant_id and variant_label for a prepared item with a variant', async () => {
+    setupFireableContext([
+      makeVariantOrderItem(10, 50, {
+        variantId: 5,
+        variantName: 'Picante',
+        variantCount: 2,
+      }),
+    ]);
+    const ticketCreate = setupFireTransaction(10);
+
+    await service.fireOrderItems({ order_id: 100, order_item_ids: [10] });
+
+    expect(ticketCreate).toHaveBeenCalledTimes(1);
+    const create = ticketCreate.mock.calls[0][0].data.items.create;
+    expect(create).toHaveLength(1);
+    expect(create[0]).toMatchObject({
+      product_variant_id: 5,
+      variant_label: 'Picante',
+    });
+  });
+
+  it('keeps product_variant_id and variant_label NULL for a product without variants', async () => {
+    setupFireableContext([
+      makeVariantOrderItem(10, 50, { variantId: null, variantCount: 0 }),
+    ]);
+    const ticketCreate = setupFireTransaction(10);
+
+    await service.fireOrderItems({ order_id: 100, order_item_ids: [10] });
+
+    const create = ticketCreate.mock.calls[0][0].data.items.create;
+    expect(create[0]).toMatchObject({
+      product_variant_id: null,
+      variant_label: null,
+    });
+  });
+
+  it('persists the variant for a recipe-less item (second push)', async () => {
+    setupFireableContext(
+      [
+        makeVariantOrderItem(10, 50, {
+          variantId: 9,
+          variantName: 'Familiar',
+          variantCount: 1,
+        }),
+      ],
+      { noRecipe: true },
+    );
+    const ticketCreate = setupFireTransaction(10);
+
+    await service.fireOrderItems({ order_id: 100, order_item_ids: [10] });
+
+    // Recipe-less: no BOM → sin consumo de stock.
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    const create = ticketCreate.mock.calls[0][0].data.items.create;
+    expect(create).toHaveLength(1);
+    expect(create[0]).toMatchObject({
+      product_variant_id: 9,
+      variant_label: 'Familiar',
+    });
+  });
+
+  it('keeps the variant on a line split by exclusion (splitLinesForExclusions)', async () => {
+    const original = {
+      ...makeVariantOrderItem(10, 50, {
+        variantId: 5,
+        variantName: 'Picante',
+        quantity: 3,
+        variantCount: 2,
+      }),
+      unit_price: 20,
+      total_price: 60,
+      item_type: 'physical',
+      cost_price: 10,
+      is_price_overridden: false,
+      inventory_committed: false,
+      is_takeaway: false,
+      notes: null,
+      skip_kds: false,
+      split_from_order_item_id: null,
+    };
+    prismaMock.order_items.findMany.mockResolvedValue([original]);
+    const splitCreate = jest.fn().mockResolvedValue({ id: 20 });
+    const splitUpdate = jest.fn().mockResolvedValue({});
+    prismaMock.$transaction.mockImplementation(async (cb: any) =>
+      cb({ order_items: { update: splitUpdate, create: splitCreate } }),
+    );
+
+    const res = await (service as any).splitLinesForExclusions({
+      order_id: 100,
+      order_item_ids: [10],
+      exclusions: [
+        { order_item_id: 10, component_product_ids: [99], applies_to_units: 1 },
+      ],
+    });
+
+    expect(splitCreate).toHaveBeenCalledTimes(1);
+    // La línea NUEVA (la que lleva la exclusión) hereda la variante de la original.
+    expect(splitCreate.mock.calls[0][0].data.product_variant_id).toBe(5);
+    // `product_variant_id` ya se preservaba; A.6 solo exige que no se regrese.
+    expect(splitCreate.mock.calls[0][0].data.quantity).toBe(1);
+    expect(res.orderItemIds).toContain(20);
+    const remapped = res.exclusions.find(
+      (e: any) => e.order_item_id === 20,
+    );
+    expect(remapped).toEqual({ order_item_id: 20, component_product_ids: [99] });
+  });
+
+  it('throws PRODUCT_VARIANT_MISMATCH when the variant does not belong to the product', async () => {
+    prismaMock.orders.findFirst.mockResolvedValue({
+      id: 100,
+      store_id: 1,
+      order_number: 'ORD-MM',
+      order_items: [
+        makeVariantOrderItem(10, 50, {
+          variantId: 5,
+          variantName: 'Ajeno',
+          variantProductId: 999,
+          variantCount: 2,
+        }),
+      ],
+    });
+
+    await expect(
+      service.fireOrderItems({ order_id: 100, order_item_ids: [10] }),
+    ).rejects.toMatchObject({ errorCode: 'PRODUCT_VARIANT_MISMATCH' });
+
+    // La validación ocurre ANTES de abrir la transacción.
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 });

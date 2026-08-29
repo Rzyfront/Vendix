@@ -105,6 +105,14 @@ export interface PreExplodedFireContext {
       // QUI-651 — el contexto ya arrastra el producto; se declara solo lo que
       // el ruteo necesita. `kds_id` null significa "KDS por defecto".
       products?: { kds_id: number | null } | null;
+      // CP-POLLO-ARABE-727 A.6 — la variante vendida viaja al ticket de cocina.
+      // `product_variant_id` viene de `order_items`; `variant_attributes` /
+      // `variant_sku` / `product_variants.name` alimentan el snapshot
+      // `variant_label`.
+      product_variant_id?: number | null;
+      variant_attributes?: string | null;
+      variant_sku?: string | null;
+      product_variants?: { product_id: number; name: string | null } | null;
     };
     recipeId: number;
     bomLines: BomExplosionLine[];
@@ -114,7 +122,12 @@ export interface PreExplodedFireContext {
     product_id: number | null;
     product_name: string;
     quantity: any;
-    products?: { kds_id: number | null } | null;
+    // CP-POLLO-ARABE-727 A.6 — mismo arrastre de variante que `preparedItems`.
+    products?: { kds_id: number | null; _count?: { product_variants?: number } } | null;
+    product_variant_id?: number | null;
+    variant_attributes?: string | null;
+    variant_sku?: string | null;
+    product_variants?: { product_id: number; name: string | null } | null;
   }>;
   locationByProduct: Map<number, number>;
   businessDate: string;
@@ -278,7 +291,20 @@ export class KitchenFireService {
                 store_id: true,
                 // QUI-651 — estacion destino del plato. NULL => KDS por defecto.
                 kds_id: true,
+                // CP-POLLO-ARABE-727 A.6 — para detectar "producto con variantes
+                // y fire sin variante" (`logger.warn`, única señal del riesgo de
+                // inventario descuadrado).
+                _count: { select: { product_variants: true } },
               },
+            },
+            // CP-POLLO-ARABE-727 A.6 — la variante vendida se estampa en el ticket
+            // de cocina. Se incluye para derivar `variant_label` (snapshot inmutable
+            // del nombre) y validar en fire-time que la variante pertenece al
+            // producto (ERR-15, PRODUCT_VARIANT_MISMATCH). A.7 nota que cualquier
+            // consulta extra debe ir por `client`; esta va DENTRO del include (un
+            // JOIN, no un round-trip adicional), así que no agrega N+1.
+            product_variants: {
+              select: { id: true, name: true, product_id: true },
             },
           },
         },
@@ -309,6 +335,15 @@ export class KitchenFireService {
         skippedItemIds.push(item.id);
         continue;
       }
+      // CP-POLLO-ARABE-727 A.6 — ERR-15 en fire-time: la variante que se va a
+      // estampar en `kitchen_ticket_items` tiene que pertenecer al producto. Si
+      // declara una variante ajena, el ticket mostraría una especificación de
+      // otro plato y el inventario quedaría descuadrado — se falla fuerte antes
+      // de crear el ticket. (C.4 cubre los write-sites upstream; esta capa el fire.)
+      this.assertVariantBelongsToProduct(item);
+      // CP-POLLO-ARABE-727 A.6 — única señal del riesgo contable más grave del
+      // plan: un plato con variantes llegando al fire SIN variante vendida.
+      this.warnMissingVariantIdForProduct(item);
       firedItemIds.push(item.id);
     }
 
@@ -570,6 +605,11 @@ export class KitchenFireService {
       productId: number;
       productName: string;
       quantity: number;
+      // CP-POLLO-ARABE-727 A.6 — la variante vendida viaja al ticket de cocina.
+      // `productVariantId` = `order_items.product_variant_id` (nullable);
+      // `variantLabel` snapshot inmutable del nombre de la variante.
+      productVariantId: number | null;
+      variantLabel: string | null;
     }>;
     cogsTotal: number;
     consumedLineCount: number;
@@ -584,6 +624,8 @@ export class KitchenFireService {
       productId: number;
       productName: string;
       quantity: number;
+      productVariantId: number | null;
+      variantLabel: string | null;
     }> = [];
 
     let cogsTotal = 0;
@@ -745,6 +787,8 @@ export class KitchenFireService {
         productId: orderItem.product_id!,
         productName: orderItem.product_name,
         quantity: orderQty,
+        productVariantId: orderItem.product_variant_id ?? null,
+        variantLabel: this.variantLabelFor(orderItem),
       });
     }
 
@@ -765,6 +809,8 @@ export class KitchenFireService {
         productId: item.product_id!,
         productName: item.product_name,
         quantity: orderQty,
+        productVariantId: item.product_variant_id ?? null,
+        variantLabel: this.variantLabelFor(item),
       });
     }
 
@@ -840,6 +886,12 @@ export class KitchenFireService {
               product_id: snap.productId,
               quantity: snap.quantity,
               status: 'pending',
+              // CP-POLLO-ARABE-727 A.6 — la variante vendida viaja al ticket de
+              // cocina. NULL para producto sin variantes (ticket idéntico al de
+              // hoy). `variant_label` es un snapshot inmutable: no se re-etiqueta
+              // si `product_variants.name` cambia después.
+              product_variant_id: snap.productVariantId,
+              variant_label: snap.variantLabel,
             })),
           },
         },
@@ -1234,7 +1286,15 @@ export class KitchenFireService {
                 store_id: true,
                 // QUI-651 — estacion destino del plato. NULL => KDS por defecto.
                 kds_id: true,
+                // CP-POLLO-ARABE-727 A.6 — conteo de variantes para el warn de
+                // "producto con variantes y fire sin variante".
+                _count: { select: { product_variants: true } },
               },
+            },
+            // CP-POLLO-ARABE-727 A.6 — arrastre de la variante vendida (ver nota
+            // en el include de `fireOrderItems`).
+            product_variants: {
+              select: { id: true, name: true, product_id: true },
             },
           },
         },
@@ -1266,6 +1326,10 @@ export class KitchenFireService {
         skippedItemIds.push(item.id);
         continue;
       }
+      // CP-POLLO-ARABE-727 A.6 — mismo guard que `fireOrderItems`: ERR-15
+      // (variante que no pertenece al producto) + warn de variante ausente.
+      this.assertVariantBelongsToProduct(item);
+      this.warnMissingVariantIdForProduct(item);
       firedItemIds.push(item.id);
     }
     if (firedItemIds.length === 0) {
@@ -1370,6 +1434,10 @@ export class KitchenFireService {
         productId: number;
         productName: string;
         quantity: number;
+        // CP-POLLO-ARABE-727 A.6 — mismo shape que `fireOrderItemsInTx`; el
+        // auto-fire también conserva la variante en el snapshot.
+        productVariantId: number | null;
+        variantLabel: string | null;
       }>;
       cogsTotal: number;
       consumedLineCount: number;
@@ -2211,6 +2279,93 @@ export class KitchenFireService {
         component_product_ids: ids,
       })),
     };
+  }
+
+  // ------------------------------------------------------ A.6 variant helpers
+  /**
+   * CP-POLLO-ARABE-727 A.6 — ERR-15 en fire-time. La variante vendida se estampa
+   * en `kitchen_ticket_items`, así que el fire DEBE garantizar que la variante
+   * que declara `order_item.product_variant_id` pertenece realmente a
+   * `order_item.product_id`. Si no, el ticket mostraría una especificación de
+   * otro plato (ej. "Pollo" con la variante de una línea ajena) y el inventario
+   * quedaría descuadrado — se falla fuerte antes de estampar una variante que no
+   * corresponde. Las dos capas de ERR-15 no son redundantes: A.6 cubre el fire;
+   * C.4 cubre los write-sites upstream (retail incluido).
+   *
+   * Invariante del dominio (ver `recipes.service.ts`): el yield puede tener
+   * variantes, los componentes del BOM NO.
+   */
+  private assertVariantBelongsToProduct(
+    item: {
+      id: number;
+      product_id: number | null;
+      product_variant_id: number | null;
+      product_variants?: { product_id: number } | null;
+    },
+  ): void {
+    if (item.product_variant_id == null) return;
+    const belongs = item.product_variants?.product_id === item.product_id;
+    if (!belongs) {
+      throw new VendixHttpException(
+        ErrorCodes.PRODUCT_VARIANT_MISMATCH,
+        undefined,
+        {
+          order_item_id: item.id,
+          product_id: item.product_id,
+          product_variant_id: item.product_variant_id,
+        },
+      );
+    }
+  }
+
+  /**
+   * CP-POLLO-ARABE-727 A.6 — única señal del riesgo contable más grave del plan
+   * ("inventario descuadrado"): un plato con variantes que llega al fire SIN
+   * `product_variant_id`. El operador vendió la línea base (que
+   * `enforceStockLevelsMode` borra), así que el consumo descontaría una fila que
+   * ningún agregado lee. Se avisa con `logger.warn` (no se bloquea): la venta
+   * puede ser legítima —por ejemplo una variante sin stock forzada a la base—
+   * pero el operador debe poder rastrear que ocurrió.
+   */
+  private warnMissingVariantIdForProduct(
+    item: {
+      id: number;
+      product_id: number | null;
+      product_variant_id: number | null;
+      products?: { _count?: { product_variants?: number } } | null;
+    },
+  ): void {
+    if (item.product_variant_id != null) return;
+    const variantCount = item.products?._count?.product_variants ?? 0;
+    if (variantCount > 0) {
+      this.logger.warn('variant_id missing for product with variants', {
+        order_item_id: item.id,
+        product_id: item.product_id,
+      });
+    }
+  }
+
+  /**
+   * CP-POLLO-ARABE-727 A.6 — etiqueta snapshot de la variante que viaja al
+   * ticket de cocina. Se toma del nombre de la variante (via el include de
+   * `order_items → product_variants`); si no lo tiene, cae al snapshot persistido
+   * `variant_attributes` y luego a `variant_sku`. Es INMUTABLE: se congela al
+   * fire y no se re-etiqueta si `product_variants.name` cambia después (igual
+   * que `order_items.product_name`). Devuelve `null` para producto sin variante.
+   */
+  private variantLabelFor(
+    item: {
+      product_variants?: { name: string | null } | null;
+      variant_attributes?: string | null;
+      variant_sku?: string | null;
+    },
+  ): string | null {
+    return (
+      item.product_variants?.name ??
+      item.variant_attributes ??
+      item.variant_sku ??
+      null
+    );
   }
 
 }

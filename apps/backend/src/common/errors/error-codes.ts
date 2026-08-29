@@ -5086,6 +5086,16 @@ export const ErrorCodes = {
     devMessage:
       'El componente excluido no pertenece a la receta explotada de ese plato',
   },
+  // CP-POLLO-ARABE-727 A.6 (ERR-15) — la variante vendida se estampa en
+  // `kitchen_ticket_items`, así que el fire no puede aceptar una variante que no
+  // pertenezca al producto de la línea. Estampar una variante ajena dejaría el
+  // inventario descuadrado y el ticket mostraría lo que no se vendió.
+  PRODUCT_VARIANT_MISMATCH: {
+    code: 'PRODUCT_VARIANT_MISMATCH',
+    httpStatus: 422,
+    devMessage:
+      'La variante declarada no pertenece al producto de la línea de orden',
+  },
   // ── KDS: estaciones de preparación (QUI-651) ────────────────────────
   KDS_NOT_FOUND: {
     code: 'KDS_NOT_FOUND',

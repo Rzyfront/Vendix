@@ -97,18 +97,14 @@ export class KitchenFireController {
         result,
         `Fire-to-kitchen ejecutado: ticket #${result.kitchen_ticket_id}, COGS=${result.cogs_total}`,
       );
-    } catch (error: any) {
-      const errorCode =
-        error?.errorCode ??
-        error?.error?.error_code ??
-        error?.response?.error_code ??
-        null;
-      return this.responseService.error(
-        error.message || 'Error al enviar a cocina',
-        error.response?.message || error.message,
-        error.status || 400,
-        errorCode ?? undefined,
-      );
+    } catch (error) {
+      // CP-POLLO-ARABE-727 A.6 — nunca `return responseService.error(...)` en un
+      // `catch` (ver skill vendix-error-handling). `@Post()` sin `@HttpCode`
+      // responde 201 por defecto y `responseService.error` solo mete el status en
+      // el body, así que el frontend recibe un 2xx con `success:false` y su
+      // `catchError` nunca dispara (res.data === undefined). Rethrowing deja que
+      // `AllExceptionsFilter` emita el status HTTP real (422/404/…) + error_code.
+      throw error;
     }
   }
 
