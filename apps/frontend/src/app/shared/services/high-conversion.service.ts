@@ -38,12 +38,9 @@ export class HighConversionService {
           }
         },
         error: (err) => {
-          // Política de fail-safe:
-          // - 401 Unauthorized: el cart drawer probablemente no tiene el auth
-          //   token configurado. Default a `true` (asumimos que el admin sí
-          //   quiere la feature habilitada — el toggle real se está leyendo
-          //   en otro contexto que sí tiene auth).
-          // - Otros errores (500, network, etc.): default a `false` (conservador).
+          // Fail-safe conservador: si no podemos verificar el toggle,
+          // ocultamos los badges (false). Mejor保守 que mostrarlos sin
+          // poder verificar que el admin los habilitó.
           if (err instanceof HttpErrorResponse) {
             // eslint-disable-next-line no-console
             console.warn(
@@ -51,9 +48,6 @@ export class HighConversionService {
               err.status,
               err.statusText,
             );
-            if (err.status === 401) {
-              this.enabled.set(true);
-            }
           }
         },
       });
