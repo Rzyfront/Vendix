@@ -1,4 +1,4 @@
-import { Component, ChangeDetectionStrategy, inject, input, computed } from '@angular/core';
+import { Component, ChangeDetectionStrategy, effect, inject, input, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../icon/icon.component';
 import { HighConversionService } from '../../services/high-conversion.service';
@@ -116,6 +116,19 @@ export interface IncentiveProgressData {
 export class GamifiedIncentiveBarComponent {
   readonly data = input<IncentiveProgressData | null>(null);
   protected readonly highConversionService = inject(HighConversionService);
+
+  constructor() {
+    // DEBUG: rastrear el valor que lee este componente
+    effect(() => {
+      // eslint-disable-next-line no-console
+      console.log(
+        '[GIB-DEBUG] gamified-incentive-bar leyendo enabled =',
+        this.highConversionService.enabled(),
+        'data =',
+        this.data(),
+      );
+    });
+  }
 
   readonly effectiveProgress = computed(() => {
     const d = this.data();
