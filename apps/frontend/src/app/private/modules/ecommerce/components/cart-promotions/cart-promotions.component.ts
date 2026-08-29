@@ -2,7 +2,6 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
-  effect,
   inject,
   input,
   signal,
@@ -162,17 +161,6 @@ export class CartPromotionsComponent {
   private readonly currencyFormat = inject(CurrencyFormatService);
   /** Sink for `<app-promotion-stack>` outputs (CP-ECOM-PROMO-UX-001 G.1). */
   private readonly promotionsAnalytics = inject(PromotionsAnalyticsService);
-
-  constructor() {
-    // DEBUG: log cada vez que highConversionEnabled cambia
-    effect(() => {
-      // eslint-disable-next-line no-console
-      console.log(
-        '[PROMO-DEBUG] highConversionEnabled cambió a:',
-        this.highConversionEnabled(),
-      );
-    });
-  }
 
   /**
    * Forward `promotionViewed` from the cart's promotion stacks (applied
