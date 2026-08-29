@@ -351,6 +351,11 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Payment receipt not uploaded',
   },
+  PAYMENT_NOT_OWNED: {
+    code: 'PAYMENT_NOT_OWNED',
+    httpStatus: 403,
+    devMessage: 'Payment does not belong to the requesting user',
+  },
 
   // Payment Sources (Card-On-File / Wompi recurrent)
   PAYMENT_SOURCE_NOT_FOUND: {

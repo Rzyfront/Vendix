@@ -239,6 +239,19 @@ export class PaymentsService {
 
       await this.validateUserAccess(user, payment.orders.stores.id);
 
+      // ERR-16 · PAYMENT_NOT_OWNED — verificación de propiedad del recurso.
+      // `validateUserAccess` solo comprueba pertenencia a la tienda, nunca la
+      // propiedad del pago: un cliente que compró una vez ya está en
+      // `store_users` y podría reembolsar el pago de otro cliente conociendo su
+      // `transaction_id`. Si el actor es un `customer`, el pago debe
+      // pertenecerle (`orders.customer_id === user.id`); si no, 403.
+      if (user.roles && user.roles.includes('customer')) {
+        const orderCustomerId = (payment.orders as any)?.customer_id ?? null;
+        if (!orderCustomerId || orderCustomerId !== user.id) {
+          throw new VendixHttpException(ErrorCodes.PAYMENT_NOT_OWNED);
+        }
+      }
+
       const result = await this.paymentGateway.refundPayment(
         paymentId,
         refundPaymentDto.amount,

@@ -25,10 +25,29 @@ import {
   UpdateStorePaymentMethodDto,
   ReorderPaymentMethodsDto,
 } from '../dto';
+import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 
 @ApiTags('Store Payment Methods')
 @Controller('store/payment-methods')
 @ApiBearerAuth()
+/**
+ * A.0 P0 — `PermissionsGuard` a nivel de CLASE + `@Permissions(...)` en cada
+ * handler. Antes la clase no registraba el guard y los 10 handlers quedaban
+ * fail-open: cualquier usuario autenticado de la tienda (mesero/cocina) podía
+ * DELETE/PATCH/reorder los métodos de pago, y tras E.1 eso incluye reescribir
+ * `custom_config.accounts` (a qué cuenta bancaria llega el dinero).
+ *
+ * Permiso por handler:
+ *   - lectura (`getAvailable`, `getEnabled`, `getStats`, `findOne`): `store:settings:read`
+ *   - escritura (`reEnable`, `enable`, `update`, `disable`, `remove`, `reorder`): `store:settings:write`
+ *
+ * No existe fila `store:payment_methods:*` en permissions-roles.seed.ts; las
+ * filas `store:settings:read/write` son las más próximas que owner/admin ya
+ * poseen. `cashier` solo tiene `store:settings:read`, así que los 6 writes
+ * quedan reservados al admin — el cajero no puede tocar los métodos de pago.
+ */
+@UseGuards(PermissionsGuard)
 export class StorePaymentMethodsController {
   constructor(
     private readonly storePaymentMethodsService: StorePaymentMethodsService,
@@ -36,6 +55,7 @@ export class StorePaymentMethodsController {
   ) {}
 
   @Patch(':methodId/enable')
+  @Permissions('store:settings:write')
   @ApiOperation({ summary: 'Re-enable payment method for store' })
   @ApiResponse({
     status: 200,
@@ -65,6 +85,7 @@ export class StorePaymentMethodsController {
   }
 
   @Get('available')
+  @Permissions('store:settings:read')
   @ApiOperation({ summary: 'Get available payment methods to enable' })
   @ApiResponse({
     status: 200,
@@ -87,6 +108,7 @@ export class StorePaymentMethodsController {
   }
 
   @Get()
+  @Permissions('store:settings:read')
   @ApiOperation({ summary: 'Get enabled payment methods for store' })
   @ApiResponse({
     status: 200,
@@ -108,6 +130,7 @@ export class StorePaymentMethodsController {
   }
 
   @Get('stats')
+  @Permissions('store:settings:read')
   @ApiOperation({ summary: 'Get payment method statistics' })
   @ApiResponse({
     status: 200,
@@ -129,6 +152,7 @@ export class StorePaymentMethodsController {
   }
 
   @Get(':methodId')
+  @Permissions('store:settings:read')
   @ApiOperation({ summary: 'Get single store payment method' })
   @ApiResponse({
     status: 200,
@@ -157,6 +181,7 @@ export class StorePaymentMethodsController {
   }
 
   @Post('enable/:systemMethodId')
+  @Permissions('store:settings:write')
   @ApiOperation({ summary: 'Enable a system payment method for this store' })
   @ApiResponse({
     status: 201,
@@ -195,6 +220,7 @@ export class StorePaymentMethodsController {
   }
 
   @Patch(':methodId')
+  @Permissions('store:settings:write')
   @ApiOperation({ summary: 'Update store payment method configuration' })
   @ApiResponse({
     status: 200,
@@ -229,6 +255,7 @@ export class StorePaymentMethodsController {
   }
 
   @Patch(':methodId/disable')
+  @Permissions('store:settings:write')
   @ApiOperation({ summary: 'Disable payment method for store' })
   @ApiResponse({
     status: 200,
@@ -258,6 +285,7 @@ export class StorePaymentMethodsController {
   }
 
   @Delete(':methodId')
+  @Permissions('store:settings:write')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Remove payment method from store' })
   @ApiResponse({
@@ -287,6 +315,7 @@ export class StorePaymentMethodsController {
   }
 
   @Post('reorder')
+  @Permissions('store:settings:write')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reorder payment methods display' })
   @ApiResponse({
