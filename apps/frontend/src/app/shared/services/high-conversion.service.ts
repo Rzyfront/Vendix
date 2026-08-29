@@ -11,22 +11,30 @@ import { StoreSettingsService } from '../../private/modules/store/settings/gener
  * badges de celebración) deben ocultarse. Cuando es `true`, el comportamiento
  * es el normal (badges visibles).
  *
- * Se auto-inicializa cuando se inyecta por primera vez. Usa `forceRefresh: true`
- * para que un cambio en admin (toggle ON/OFF) se refleje inmediatamente al
- * recargar cualquier página que consuma este servicio, sin esperar al TTL
- * del cache de 60s del StoreSettingsService.
- *
- * Default `false` (fail-safe: si la API falla por 401 o cualquier error, los
- * badges se ocultan en vez de mostrarse con un valor que no pudimos verificar).
+ * Política de auth:
+ * - Sin token en localStorage (usuario guest) → no se llama al API, default
+ *   `true` (mostrar badges — el toggle no aplica a guests porque no
+ *   tienen settings personalizados).
+ * - Con token → fetch del API con forceRefresh. Si responde 200 → valor
+ *   del admin. Si responde 401 (token expirado) → default `true`.
+ * - Otros errores (500, network) → default `false` (conservador).
  */
 @Injectable({ providedIn: 'root' })
 export class HighConversionService {
   private readonly storeSettingsService = inject(StoreSettingsService);
   private readonly destroyRef = inject(DestroyRef);
 
-  readonly enabled = signal<boolean>(false);
+  readonly enabled = signal<boolean>(true);
 
   constructor() {
+    // Guest detection: si no hay access token, asumimos true (mostrar
+    // badges). El toggle admin solo aplica a usuarios autenticados.
+    const hasToken = this.hasAuthToken();
+    if (!hasToken) {
+      this.enabled.set(true);
+      return;
+    }
+
     this.storeSettingsService
       .getSettings({ forceRefresh: true })
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -38,9 +46,6 @@ export class HighConversionService {
           }
         },
         error: (err) => {
-          // Fail-safe conservador: si no podemos verificar el toggle,
-          // ocultamos los badges (false). Mejor保守 que mostrarlos sin
-          // poder verificar que el admin los habilitó.
           if (err instanceof HttpErrorResponse) {
             // eslint-disable-next-line no-console
             console.warn(
@@ -48,8 +53,28 @@ export class HighConversionService {
               err.status,
               err.statusText,
             );
+            // 401 = token expirado o inválido. En ese caso, mantenemos el
+            // default `true` (mostrar badges) porque el admin las quiere
+            // habilitadas y el problema es de auth, no de toggle.
+            if (err.status === 401) {
+              this.enabled.set(true);
+            }
           }
         },
       });
+  }
+
+  private hasAuthToken(): boolean {
+    try {
+      // El authService guarda el token en localStorage bajo 'vendix_auth_state'.
+      // Si no está, el usuario es guest y no podemos llamar al endpoint
+      // protegido.
+      const raw = localStorage.getItem('vendix_auth_state');
+      if (!raw) return false;
+      const parsed = JSON.parse(raw);
+      return Boolean(parsed?.tokens?.access_token);
+    } catch {
+      return false;
+    }
   }
 }
