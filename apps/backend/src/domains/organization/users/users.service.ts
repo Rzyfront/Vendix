@@ -26,6 +26,7 @@ import {
 } from '../../../common/audit/audit.service';
 import { S3Service } from '@common/services/s3.service';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
+import { mergePanelUiByAppType } from '@common/utils/panel-ui.util';
 import { StaffProvisioningService } from '@common/services/staff-provisioning.service';
 import { UserRoleAssignmentService } from '@common/services/user-role-assignment.service';
 import { RoleActor, HIDDEN_ROLE_NAMES } from '@common/utils/role-scope.util';
@@ -681,13 +682,22 @@ export class UsersService {
       if (existingSettings) {
         const existingConfig = existingSettings.config || {};
 
+        // Deep-merge por `app_type`: NO sobrescribir `panel_ui` entero. Este
+        // endpoint comparte `user_settings.config.panel_ui` con
+        // `store-user-management.updatePanelUI`; sobrescribir toda la clave
+        // borra la configuración por app que el otro guardó (B.3).
+        const nextPanelUi = mergePanelUiByAppType(
+          existingConfig.panel_ui,
+          panel_ui,
+        );
+
         await tx.user_settings.update({
           where: { id: existingSettings.id },
           data: {
             app_type: app,
             config: {
               ...existingConfig,
-              panel_ui,
+              panel_ui: nextPanelUi,
             },
             updated_at: new Date(),
           },
@@ -697,7 +707,7 @@ export class UsersService {
           data: {
             user_id: id,
             app_type: app,
-            config: { panel_ui },
+            config: { panel_ui: mergePanelUiByAppType(undefined, panel_ui) },
           },
         });
       }

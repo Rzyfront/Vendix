@@ -162,6 +162,13 @@ export class AuthGuard implements CanActivate {
       }
 
       // STORE_ADMIN: any role except customer (panel_ui handles granular visibility)
+      //
+      // A.4: la visibilidad granular la filtra ahora TAMBIÉN `panelUiGuard`
+      // (aplicado después de este guard en `store_admin.routes.ts`): un usuario
+      // con permisos pero `panel_ui[x]=false` que teclee la URL directa es
+      // redirigido al primer módulo activo. Este guard solo resuelve la
+      // autenticación + rol base; `panel_ui` sigue siendo UX (no autorización)
+      // y las APIs permanecen protegidas por permisos/guards del backend.
       return !userRoles.includes('customer');
     }
 

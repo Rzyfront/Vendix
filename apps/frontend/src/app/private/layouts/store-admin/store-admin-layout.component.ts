@@ -66,6 +66,11 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
   template: `
     <div class="admin-layout-shell flex">
       <!-- Sidebar -->
+      <!-- A.4: terminal garantizado. El árbol del sidebar marca varias entradas
+           con alwaysVisible, pero si el usuario no tiene NINGÚN módulo activo
+           filteredMenuItems() es vacío y el sidebar quedaría en blanco. Aquí se
+           muestra la pantalla de "sin módulos" y se evita una barra vacía. -->
+      @if (filteredMenuItems().length > 0 || sidebarShimmer()) {
       <app-sidebar
         #sidebarRef
         [menuItems]="filteredMenuItems()"
@@ -150,6 +155,24 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
           }
         </div>
       </app-sidebar>
+      } @else {
+      <!-- Terminal garantizado: el usuario no tiene ningún módulo habilitado. -->
+      <aside
+        class="terminal-empty-state flex h-full w-64 flex-col items-center justify-center gap-3 px-4 text-center"
+        role="note"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        <div class="rounded-2xl border border-dashed border-gray-300 bg-white p-5 dark:border-gray-700 dark:bg-gray-900">
+          <p class="text-sm font-medium text-gray-900 dark:text-gray-100">
+            Tu cuenta no tiene módulos habilitados.
+          </p>
+          <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+            Pídele a tu administrador que active los módulos que necesitas.
+          </p>
+        </div>
+      </aside>
+      }
 
       <!-- Main Content -->
       <div
@@ -1009,6 +1032,11 @@ export class StoreAdminLayoutComponent {
   };
 
   constructor() {
+    // A.4: registra el árbol real del sidebar en MenuFilterService para que
+    // `currentMenuTree()`/`firstActiveModuleRoute()` lo usen una vez montado
+    // (los guards usan el catálogo mientras el layout aún no existe).
+    this.menuFilterService.registerMenuTree(this.allMenuItems);
+
     // ─── W4: Ambient membership-access validation ──────────────────────────
     // Connect the background SSE stream ONLY when the gym industry is active
     // AND the store setting `membership.ambient_access_enabled` is on;
