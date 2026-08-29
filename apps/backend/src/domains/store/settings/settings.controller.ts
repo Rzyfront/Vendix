@@ -75,7 +75,7 @@ export class SettingsController {
     // because the toggle might be unset in some store configs).
     const client = (this.storePrisma as any).baseClient ?? (this.storePrisma as any).prisma;
     const rows = await client.store_settings.findMany({
-      where: { store: { is_active: true } },
+      where: { stores: { is_active: true } },
       select: { settings: true, store_id: true },
       orderBy: { store_id: 'asc' },
     });
