@@ -1,4 +1,4 @@
-import { DestroyRef, Injectable, inject, signal } from '@angular/core';
+import { DestroyRef, HttpErrorResponse, Injectable, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { StoreSettingsService } from '../../private/modules/store/settings/general/services/store-settings.service';
 
@@ -15,15 +15,15 @@ import { StoreSettingsService } from '../../private/modules/store/settings/gener
  * recargar cualquier página que consuma este servicio, sin esperar al TTL
  * del cache de 60s del StoreSettingsService.
  *
- * Default `true` mientras la primera lectura no responde, para mantener
- * comportamiento existente en stores que aún no tienen la sección `promotions`.
+ * Default `false` (fail-safe: si la API falla por 401 o cualquier error, los
+ * badges se ocultan en vez de mostrarse con un valor que no pudimos verificar).
  */
 @Injectable({ providedIn: 'root' })
 export class HighConversionService {
   private readonly storeSettingsService = inject(StoreSettingsService);
   private readonly destroyRef = inject(DestroyRef);
 
-  readonly enabled = signal<boolean>(true);
+  readonly enabled = signal<boolean>(false);
 
   constructor() {
     this.storeSettingsService
@@ -36,8 +36,18 @@ export class HighConversionService {
             this.enabled.set(flag);
           }
         },
-        error: () => {
-          // Default true ya está seteado
+        error: (err) => {
+          // Si falla la lectura (ej. 401 Unauthorized en storefront guest),
+          // el signal se queda en false (no badges). Mejor UX保守 que mostrar
+          // badges que no podemos verificar que están permitidos.
+          if (err instanceof HttpErrorResponse) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              '[HCS] settings.promotions fetch failed:',
+              err.status,
+              err.statusText,
+            );
+          }
         },
       });
   }
