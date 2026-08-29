@@ -16,7 +16,7 @@ import { Public } from '../../auth/decorators/public.decorator';
 import { IsString } from 'class-validator';
 import { RequestContextService } from '@common/context/request-context.service';
 import { UpdateStoreFiscalDataDto } from './dto/update-store-fiscal-data.dto';
-import { StorePrismaService } from '@modules/store/database/store-prisma.service';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 
 export class ApplyTemplateDto {
   @IsString()
