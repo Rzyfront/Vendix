@@ -24,9 +24,38 @@ export interface PaymentData {
    * `crypto.randomUUID()` for back-compat (still safe within a single invocation).
    */
   idempotencyKey: string;
+  /**
+   * QUI-728 — id de la cuenta bancaria (`bank_accounts.id`) a la que se acredita
+   * un pago por transferencia. Lo elige el cajero en el `payment-collector` y
+   * viaja en el DTO; el gateway lo valida ANTES de invocar al processor.
+   * Únicamente para `bank_transfer`; el resto de métodos lo ignoran.
+   */
+  bankAccountId?: number;
+  /**
+   * Cuenta bancaria YA resuelta y validada por el gateway (existe + activa +
+   * pertenece a la organización + scope de tienda). Se le pasa al processor como
+   * objeto, NO como id, para que no repita la consulta y no confíe en un id
+   * sin validar. QUI-728 / ADR-3.
+   */
+  bankAccount?: ResolvedBankAccount;
   metadata?: Record<string, any>;
   returnUrl?: string;
   cancelUrl?: string;
+}
+
+/**
+ * Proyección reducida de `bank_accounts` que viaja al processor y a la UI de
+ * selección: `{ id, name, bank_name, account_number }` (+ currency). Nunca debe
+ * exponer `current_balance`, `opening_balance`, `chart_account_id` ni
+ * `column_mapping` (el saldo bancario no es asunto de una pantalla cuyo único
+ * propósito es elegir a qué cuenta pagar). QUI-728.
+ */
+export interface ResolvedBankAccount {
+  id: number;
+  name: string;
+  bank_name: string;
+  account_number: string;
+  currency: string;
 }
 
 export interface PaymentResult {

@@ -7,6 +7,7 @@ import {
   PaymentResult,
   RefundResult,
   PaymentStatus,
+  ResolvedBankAccount,
 } from '../interfaces';
 import { PaymentValidatorService } from './payment-validator.service';
 import { PaymentError, PaymentErrorCodes } from '../utils';
@@ -55,8 +56,22 @@ export class PaymentGatewayService {
         );
       }
 
+      // QUI-728 — resuelve y valida la cuenta bancaria ANTES de invocar al
+      // processor (existe + activa + organización + scope de tienda) y le pasa
+      // el objeto ya resuelto, no el id. Ver ADR-3 / ERR-04: validar solo a
+      // nivel de organización dejaría pagar desde la Tienda B contra una cuenta
+      // de la Tienda A en un negocio multi-local.
+      let effectivePaymentData = paymentData;
+      if (paymentData.bankAccountId) {
+        const bankAccount = await this.resolveAndValidateBankAccount(
+          paymentData.bankAccountId,
+          paymentData.storeId,
+        );
+        effectivePaymentData = { ...paymentData, bankAccount };
+      }
+
       const payment = await this.createPaymentRecord(
-        paymentData,
+        effectivePaymentData,
         paymentMethod.system_payment_method?.type || 'unknown',
       );
 
@@ -65,15 +80,16 @@ export class PaymentGatewayService {
       // provider call is still safe within this single attempt. Callers that
       // need cross-attempt safety on retries MUST pass a stable key.
       const idempotencyKey =
-        paymentData.idempotencyKey && paymentData.idempotencyKey.length > 0
-          ? paymentData.idempotencyKey
+        effectivePaymentData.idempotencyKey &&
+        effectivePaymentData.idempotencyKey.length > 0
+          ? effectivePaymentData.idempotencyKey
           : crypto.randomUUID();
 
       const result = await processor.processPayment({
-        ...paymentData,
+        ...effectivePaymentData,
         idempotencyKey,
         metadata: {
-          ...paymentData.metadata,
+          ...effectivePaymentData.metadata,
           paymentId: payment.id,
         },
       });
@@ -310,6 +326,79 @@ export class PaymentGatewayService {
     return paymentMethod;
   }
 
+  /**
+   * QUI-728 / ADR-3 — resuelve y valida una cuenta bancaria de destino antes de
+   * invocar al processor de transferencia. Comprueba que:
+   *   1. exista;
+   *   2. `status === 'active'`;
+   *   3. pertenezca a la ORGANIZACIÓN de la tienda del contexto;
+   *   4. `store_id === null` (cuenta de la organización) o `=== store_id`
+   *      (cuenta de la tienda). Validar solo a nivel de org permitiría cobrar
+   *      desde la Tienda B contra una cuenta de la Tienda A.
+   *
+   * `client` es un parámetro opcional para permitir la misma validación dentro
+   * de una transacción POS (`tx`) desde `PaymentsService`. Devuelve la proyección
+   * mínima `{ id, name, bank_name, account_number, currency }` — nunca el id sin
+   * validar, ni expone `current_balance` / `opening_balance`.
+   */
+  async resolveAndValidateBankAccount(
+    bankAccountId: number,
+    storeId: number,
+    client: StorePrismaService | Prisma.TransactionClient = this.prisma,
+  ): Promise<ResolvedBankAccount> {
+    const account = await client.bank_accounts.findFirst({
+      where: { id: bankAccountId },
+    });
+
+    if (!account) {
+      throw new PaymentError(
+        PaymentErrorCodes.VALIDATION_FAILED,
+        'La cuenta bancaria seleccionada no existe',
+      );
+    }
+
+    if (account.status !== 'active') {
+      throw new PaymentError(
+        PaymentErrorCodes.VALIDATION_FAILED,
+        'La cuenta bancaria seleccionada no está activa',
+      );
+    }
+
+    const store = await client.stores.findUnique({
+      where: { id: storeId },
+      select: { organization_id: true },
+    });
+
+    if (!store) {
+      throw new PaymentError(
+        PaymentErrorCodes.INVALID_ORDER,
+        'Tienda no encontrada para la cuenta bancaria',
+      );
+    }
+
+    if (account.organization_id !== store.organization_id) {
+      throw new PaymentError(
+        PaymentErrorCodes.VALIDATION_FAILED,
+        'La cuenta bancaria no pertenece a la organización de esta tienda',
+      );
+    }
+
+    if (account.store_id !== null && account.store_id !== storeId) {
+      throw new PaymentError(
+        PaymentErrorCodes.VALIDATION_FAILED,
+        'La cuenta bancaria no pertenece a esta tienda',
+      );
+    }
+
+    return {
+      id: account.id,
+      name: account.name,
+      bank_name: account.bank_name,
+      account_number: account.account_number,
+      currency: account.currency,
+    };
+  }
+
   private getProcessor(type: string): BasePaymentProcessor {
     const processor = this.processors.get(type);
     if (!processor) {
@@ -330,6 +419,9 @@ export class PaymentGatewayService {
         order_id: paymentData.orderId,
         customer_id: paymentData.customerId,
         store_payment_method_id: paymentData.storePaymentMethodId,
+        // QUI-728 — cuenta bancaria de destino (bank_transfer). Nullable para
+        // no romper los métodos sin cuenta (cash, card, wompi, wallet).
+        bank_account_id: paymentData.bankAccountId ?? null,
         amount: paymentData.amount,
         currency: paymentData.currency,
         state: 'pending',

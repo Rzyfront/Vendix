@@ -105,27 +105,54 @@ export async function seedSystemPaymentMethods(
       requires_config: true,
       config_schema: {
         type: 'object',
-        required: ['bank_name', 'account_number'],
+        required: ['accounts'],
         properties: {
-          bank_name: {
-            type: 'string',
-            description: 'Nombre del banco',
-          },
-          account_number: {
-            type: 'string',
-            description: 'Número de cuenta',
-          },
-          account_holder: {
-            type: 'string',
-            description: 'Titular de la cuenta',
-          },
-          swift_code: {
-            type: 'string',
-            description: 'Código SWIFT/BIC',
-          },
-          clabe: {
-            type: 'string',
-            description: 'CLABE interbancaria (México)',
+          // QUI-728 — multi-cuenta para transferencia. Cada ref apunta a una
+          // `bank_accounts` (id) o es un legacy auto-migrado sin vínculo.
+          accounts: {
+            type: 'array',
+            description:
+              'Cuentas bancarias de destino del pago por transferencia',
+            items: {
+              type: 'object',
+              required: ['bank_name', 'account_number'],
+              properties: {
+                id: {
+                  type: 'number',
+                  description:
+                    'Id de la cuenta en bank_accounts (opcional en legacy)',
+                },
+                name: {
+                  type: 'string',
+                  description: 'Nombre de la cuenta',
+                },
+                bank_name: {
+                  type: 'string',
+                  description: 'Nombre del banco',
+                },
+                account_number: {
+                  type: 'string',
+                  description: 'Número de cuenta',
+                },
+                account_holder: {
+                  type: 'string',
+                  description: 'Titular de la cuenta',
+                },
+                swift_code: {
+                  type: 'string',
+                  description: 'Código SWIFT/BIC',
+                },
+                clabe: {
+                  type: 'string',
+                  description: 'CLABE interbancaria (México)',
+                },
+                legacy: {
+                  type: 'boolean',
+                  description:
+                    'true si fue migrada desde la configuración anterior',
+                },
+              },
+            },
           },
         },
       },

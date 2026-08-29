@@ -1,6 +1,7 @@
 import {Component, OnInit, signal, computed, inject,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { firstValueFrom } from 'rxjs';
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../../../../environments/environment';
 
@@ -8,6 +9,9 @@ import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup } from '@angular/forms';
 
 import { PaymentMethodsService } from './services/payment-methods.service';
+import type {
+  BankAccountOption,
+} from '../../../../../../app/shared/components/payment-collector/payment-collector.model';
 import {
   PaymentMethodStats,
   StorePaymentMethod,
@@ -27,7 +31,8 @@ import {
   ItemListCardConfig,
   CardComponent,
   InputComponent,
-  SelectorComponent} from '../../../../../../app/shared/components/index';
+  SelectorComponent,
+  AlertBannerComponent} from '../../../../../../app/shared/components/index';
 
 @Component({
   selector: 'app-payments-settings',
@@ -43,7 +48,8 @@ import {
     ResponsiveDataViewComponent,
     CardComponent,
     InputComponent,
-    SelectorComponent
+    SelectorComponent,
+    AlertBannerComponent
 ],
   template: `
     <div class="w-full md:space-y-4">
@@ -380,6 +386,68 @@ import {
               }
             }
           </div>
+
+          <!-- QUI-728: editor multi-cuenta para transferencia bancaria -->
+          @if (isBankTransferConfig()) {
+            <div class="cfg-bank-accounts">
+              <div class="cfg-bank-banner">
+                <app-alert-banner variant="info">
+                  Ahora puedes configurar varias cuentas bancarias para
+                  transferencia. Tu cuenta actual se migró automáticamente;
+                  revísala antes de cobrar.
+                </app-alert-banner>
+              </div>
+
+              <div class="cfg-bank-toolbar">
+                <span class="cfg-bank-title">Cuentas de destino</span>
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  (clicked)="addBankConfigAccount()"
+                >
+                  <app-icon name="plus" [size]="12" slot="icon"></app-icon>
+                  Agregar cuenta
+                </app-button>
+              </div>
+
+              @if (bankConfigAccounts().length === 0) {
+                <p class="cfg-warn">
+                  Sin cuentas configuradas. Agrega al menos una cuenta bancaria.
+                </p>
+              }
+
+              @for (acc of bankConfigAccounts(); track $index) {
+                <div class="cfg-bank-row">
+                  <input
+                    class="cfg-bank-in"
+                    placeholder="Nombre del banco"
+                    [value]="acc.bank_name ?? ''"
+                    (input)="bankConfigAccountInput($event, $index, 'bank_name')"
+                  />
+                  <input
+                    class="cfg-bank-in"
+                    placeholder="Número de cuenta"
+                    [value]="acc.account_number ?? ''"
+                    (input)="bankConfigAccountInput($event, $index, 'account_number')"
+                  />
+                  <input
+                    class="cfg-bank-in"
+                    placeholder="Nombre de la cuenta (opcional)"
+                    [value]="acc.name ?? ''"
+                    (input)="bankConfigAccountInput($event, $index, 'name')"
+                  />
+                  <button
+                    type="button"
+                    class="cfg-bank-remove"
+                    (click)="removeBankConfigAccount($index)"
+                    title="Quitar cuenta"
+                  >
+                    <app-icon name="trash-2" [size]="14"></app-icon>
+                  </button>
+                </div>
+              }
+            </div>
+          }
         }
       </form>
 
@@ -559,6 +627,58 @@ import {
       }
       .cfg-test-msg.ok { color: var(--success); }
       .cfg-test-msg.fail { color: var(--danger); }
+
+      /* QUI-728 — editor multi-cuenta de transferencia bancaria */
+      .cfg-bank-accounts {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-top: 8px;
+      }
+      .cfg-bank-banner { margin-bottom: 2px; }
+      .cfg-bank-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .cfg-bank-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--color-text-secondary);
+      }
+      .cfg-bank-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        padding: 8px;
+        background: var(--color-surface-secondary, #F3F4F6);
+        border: 1px solid var(--color-border);
+        border-radius: 8px;
+      }
+      .cfg-bank-in {
+        flex: 1 1 140px;
+        min-width: 0;
+        height: 32px;
+        padding: 0 8px;
+        font-size: 12px;
+        background: var(--color-surface, #fff);
+        border: 1px solid var(--color-border);
+        border-radius: 6px;
+      }
+      .cfg-bank-remove {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border: 1px solid var(--color-border);
+        border-radius: 6px;
+        background: transparent;
+        color: var(--danger, #ef4444);
+        cursor: pointer;
+      }
     `,
   ]})
 export class PaymentsSettingsComponent implements OnInit {
@@ -583,6 +703,10 @@ export class PaymentsSettingsComponent implements OnInit {
   config_form: FormGroup = new FormGroup({});
   config_fields: Array<{ key: string; title: string; type: string; required: boolean; description: string; enum_values?: string[]; default_value?: any }> = [];
   config_saving = signal(false);
+
+  // QUI-728 — editor multi-cuenta para transferencia bancaria (settings).
+  // Lista de cuentas de destino en el `custom_config.accounts` del método.
+  bankConfigAccounts = signal<BankAccountOption[]>([]);
 
   // Wompi UX enhancements
   readonly wompiFieldHelp: Record<string, string> = {
@@ -926,7 +1050,100 @@ onSearchChange(term: string): void {
       });
   }
 
+  isBankTransferConfig(): boolean {
+    return (
+      (this.config_method?.type as string) === 'bank_transfer' ||
+      this.config_method?.provider === 'bank_transfer'
+    );
+  }
+
+  seedBankConfigAccounts(config?: any): void {
+    const accounts = config?.accounts as BankAccountOption[] | undefined;
+    this.bankConfigAccounts.set(
+      Array.isArray(accounts)
+        ? accounts.map((a: any) => ({ ...a }))
+        : [],
+    );
+  }
+
+  addBankConfigAccount(): void {
+    this.bankConfigAccounts.update((list) => [
+      ...list,
+      { name: '', bank_name: '', account_number: '' },
+    ]);
+  }
+
+  removeBankConfigAccount(index: number): void {
+    this.bankConfigAccounts.update((list) =>
+      list.filter((_, i) => i !== index),
+    );
+  }
+
+  bankConfigAccountInput(
+    event: Event,
+    index: number,
+    field: 'name' | 'bank_name' | 'account_number',
+  ): void {
+    const value = (event.target as HTMLInputElement).value;
+    this.bankConfigAccounts.update((list) =>
+      list.map((acc, i) => {
+        if (i !== index) return acc;
+        if (field === 'name') return { ...acc, name: value };
+        if (field === 'bank_name') return { ...acc, bank_name: value };
+        return { ...acc, account_number: value };
+      }),
+    );
+  }
+
+  /**
+   * QUI-728 — garantiza que cada ref de cuenta tenga un `bank_accounts.id` real.
+   * Las cuentas sin `id` (alta desde el editor) se crean contra el endpoint
+   * `POST /store/payments/bank-accounts` del módulo de payments; las que ya
+   * traen `id` se conservan.
+   */
+  private async persistBankConfigAccounts(): Promise<BankAccountOption[]> {
+    const accounts = this.bankConfigAccounts();
+    const resolved: BankAccountOption[] = [];
+    for (const acc of accounts) {
+      if (acc.id && acc.id > 0) {
+        resolved.push(acc);
+        continue;
+      }
+      try {
+        const created = await firstValueFrom(
+          this.http.post<{ data: BankAccountOption }>(
+            `${environment.apiUrl}/store/payments/bank-accounts`,
+            {
+              name: acc.name || acc.bank_name || 'Cuenta de transferencia',
+              bank_name: acc.bank_name,
+              account_number: acc.account_number,
+            },
+          ),
+        );
+        resolved.push(created.data ?? { ...acc });
+      } catch {
+        // Sin permiso de escritura o fallo de red: se conserva la ref tal cual.
+        // El backend rechazará el cobro al validar el id ausente.
+        resolved.push({ ...acc });
+      }
+    }
+    return resolved;
+  }
+
   buildConfigForm(schema: any): void {
+    // QUI-728 — el editor multi-cuenta de `bank_transfer` es una lista
+    // dinámica, no el grid genérico que asume inputs planos. Se deja el form
+    // vacío (válido) y la UI maneja `custom_config.accounts` vía
+    // `bankConfigAccounts`.
+    if (this.isBankTransferConfig()) {
+      this.seedBankConfigAccounts(
+        (this.config_method as any)?.default_config,
+      );
+      this.config_fields = [];
+      this.config_form = this.fb.group({});
+      return;
+    }
+
     const properties = schema.properties || {};
     const required_fields = schema['required'] || [];
     const controls: Record<string, any> = {};
@@ -963,35 +1180,62 @@ onSearchChange(term: string): void {
       return;
     }
 
-    // Validate required fields
-    const required = this.config_method.config_schema?.['required'] || [];
-    for (const key of required) {
-      if (!this.config_form.value[key]) {
-        this.toast_service.error(`El campo "${key}" es requerido`);
+    // QUI-728 — `bank_transfer` expone una lista dinámica de cuentas, no un
+    // campo plano en el form; se valida y se arma el custom_config por separado.
+    if (this.isBankTransferConfig()) {
+      if (this.bankConfigAccounts().length === 0) {
+        this.toast_service.error(
+          'Agrega al menos una cuenta bancaria para transferencia.',
+        );
         return;
       }
     }
 
+    // Validate required fields (se omite para `bank_transfer`: su campo
+    // requerido `accounts` vive en `bankConfigAccounts`, no en el form plano).
+    if (!this.isBankTransferConfig()) {
+      const required = this.config_method.config_schema?.['required'] || [];
+      for (const key of required) {
+        if (!this.config_form.value[key]) {
+          this.toast_service.error(`El campo "${key}" es requerido`);
+          return;
+        }
+      }
+    }
+
     this.config_saving.set(true);
-    this.payment_methods_service
-      .enablePaymentMethod(this.config_method.id, {
-        display_name: this.config_method.display_name,
-        custom_config: this.config_form.value})
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: () => {
-          this.toast_service.success('Método de pago configurado y agregado correctamente');
-          this.config_saving.set(false);
-          this.show_config_modal.set(false);
-          this.config_method = null;
-          this.loadPaymentMethods();
-          this.loadPaymentMethodStats();
-          this.loadAvailablePaymentMethods();
-        },
-        error: (error: any) => {
-          this.toast_service.error('Error: ' + (error.error?.message || error.message));
-          this.config_saving.set(false);
-        }});
+
+    // QUI-728 — para `bank_transfer`, las cuentas sin `id` se crean contra el
+    // endpoint del módulo de payments antes de guardar el custom_config, para
+    // que cada ref tenga un `bank_accounts.id` real y el cajero pueda cobrar.
+    const configMethod = this.config_method;
+    void (async (): Promise<Record<string, any>> => {
+      if (this.isBankTransferConfig()) {
+        const accounts = await this.persistBankConfigAccounts();
+        return { accounts };
+      }
+      return this.config_form.value as Record<string, any>;
+    })().then((custom_config) => {
+      this.payment_methods_service
+        .enablePaymentMethod(configMethod.id, {
+          display_name: configMethod.display_name,
+          custom_config})
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: () => {
+            this.toast_service.success('Método de pago configurado y agregado correctamente');
+            this.config_saving.set(false);
+            this.show_config_modal.set(false);
+            this.config_method = null;
+            this.loadPaymentMethods();
+            this.loadPaymentMethodStats();
+            this.loadAvailablePaymentMethods();
+          },
+          error: (error: any) => {
+            this.toast_service.error('Error: ' + (error.error?.message || error.message));
+            this.config_saving.set(false);
+          }});
+    });
   }
 
   // QUI-438: confirma antes de descartar cambios sin guardar en el modal
@@ -1014,6 +1258,8 @@ onSearchChange(term: string): void {
     this.editing_store_method = null;
     this.config_method = null;
     this.config_fields = [];
+    // QUI-728 — limpiar la lista de cuentas al cerrar el modal.
+    this.bankConfigAccounts.set([]);
     this.wompiTestResult = null;
   }
 
@@ -1139,7 +1385,13 @@ onSearchChange(term: string): void {
 
     if (sys_method?.config_schema) {
       this.buildConfigForm(sys_method.config_schema);
-      this.config_form.patchValue(store_method.custom_config || {});
+      // QUI-728 — `bank_transfer` edita `custom_config.accounts` desde la lista
+      // dinámica, no desde el form plano.
+      if (this.isBankTransferConfig()) {
+        this.seedBankConfigAccounts(store_method.custom_config as any);
+      } else {
+        this.config_form.patchValue(store_method.custom_config || {});
+      }
     } else {
       this.config_fields = [];
       this.config_form = this.fb.group({ display_name: [store_method.display_name] });
@@ -1155,7 +1407,17 @@ onSearchChange(term: string): void {
     const store_method = this.editing_store_method;
     const has_config = !!this.config_method?.config_schema;
 
-    if (has_config) {
+    // QUI-728 — `bank_transfer`: lista dinámica de cuentas.
+    if (this.isBankTransferConfig()) {
+      if (this.bankConfigAccounts().length === 0) {
+        this.toast_service.error(
+          'Agrega al menos una cuenta bancaria para transferencia.',
+        );
+        return;
+      }
+    }
+
+    if (has_config && !this.isBankTransferConfig()) {
       const required = this.config_method!.config_schema?.['required'] || [];
       for (const key of required) {
         if (!this.config_form.value[key]) {
@@ -1167,25 +1429,34 @@ onSearchChange(term: string): void {
 
     this.config_saving.set(true);
 
-    const update_data = has_config
-      ? { custom_config: this.config_form.value as Record<string, any> }
-      : { display_name: this.config_form.value['display_name'] as string };
+    // QUI-728 — para `bank_transfer`, resolver ids reales antes de guardar.
+    void (async (): Promise<Record<string, any>> => {
+      if (this.isBankTransferConfig()) {
+        const accounts = await this.persistBankConfigAccounts();
+        return { accounts };
+      }
+      return this.config_form.value as Record<string, any>;
+    })().then((custom_config) => {
+      const update_data = has_config
+        ? { custom_config }
+        : { display_name: this.config_form.value['display_name'] as string };
 
-    this.payment_methods_service
-      .updateStorePaymentMethod(store_method.id, update_data)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: () => {
-          this.toast_service.success('Método de pago actualizado correctamente');
-          this.config_saving.set(false);
-          this.closeConfigModal();
-          this.loadPaymentMethods();
-          this.loadPaymentMethodStats();
-        },
-        error: (error: any) => {
-          this.toast_service.error('Error al actualizar: ' + (error.error?.message || error.message));
-          this.config_saving.set(false);
-        }});
+      this.payment_methods_service
+        .updateStorePaymentMethod(store_method.id, update_data)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: () => {
+            this.toast_service.success('Método de pago actualizado correctamente');
+            this.config_saving.set(false);
+            this.closeConfigModal();
+            this.loadPaymentMethods();
+            this.loadPaymentMethodStats();
+          },
+          error: (error: any) => {
+            this.toast_service.error('Error al actualizar: ' + (error.error?.message || error.message));
+            this.config_saving.set(false);
+          }});
+    });
   }
 
   getStateLabel(state: string): string {

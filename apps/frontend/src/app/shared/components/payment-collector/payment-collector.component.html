@@ -243,6 +243,37 @@
               </section>
             }
 
+            <!-- QUI-728: selector de cuenta bancaria de destino (transferencia) -->
+            @if (isBankTransferSelected()) {
+              <section
+                class="pc-card"
+                [class.pc-flash-target]="flashSection() === 'reference'"
+              >
+                <div class="section-header">
+                  <div class="section-indicator"></div>
+                  <h3 class="section-title">Cuenta bancaria de destino</h3>
+                </div>
+                @if (bankTransferConfigured()) {
+                  <select
+                    class="pc-input"
+                    [value]="selectedBankAccountId() ?? ''"
+                    (change)="onBankAccountSelect($event)"
+                  >
+                    <option value="" disabled>Selecciona una cuenta</option>
+                    @for (acc of selectedBankAccounts(); track acc.id) {
+                      <option [value]="acc.id">
+                        {{ acc.bank_name }} · {{ acc.account_number }}
+                      </option>
+                    }
+                  </select>
+                } @else {
+                  <p class="pc-warn">
+                    Sin cuentas configuradas. Contacta al administrador.
+                  </p>
+                }
+              </section>
+            }
+
             <!-- Tip -->
             @if (config().allowTip) {
               <section class="pc-card">

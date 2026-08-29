@@ -394,6 +394,19 @@ export class CreatePosPaymentDto {
   @Type(() => Number)
   store_payment_method_id?: number;
 
+  /**
+   * QUI-728 — cuenta bancaria de destino del pago por transferencia
+   * (`bank_accounts.id`). Lo elige el cajero en el `payment-collector` al cobrar
+   * por `bank_transfer`; el servicio valida que exista, esté `active` y
+   * pertenezca a la organización/tienda del contexto (ADR-3) antes de persistir
+   * `payments.bank_account_id`.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  bank_account_id?: number;
+
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)

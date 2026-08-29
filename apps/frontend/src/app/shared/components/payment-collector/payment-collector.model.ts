@@ -127,6 +127,12 @@ export interface PaymentSubmit {
   change?: number;
   /** Manual reference (card last-4, transfer ref, …). */
   reference?: string;
+  /**
+   * QUI-728 — id de la cuenta bancaria de destino (`bank_accounts.id`) para el
+   * pago por transferencia. Lo elige el cajero en el selector del collector; el
+   * backend lo valida y lo persiste en `payments.bank_account_id`.
+   */
+  bankAccountId?: number;
   /** Optional tip on top of the base. */
   tip?: number;
   /** contado | credito. */
@@ -152,6 +158,21 @@ export interface ManualPaymentMethod {
   value: string;
   label: string;
   icon?: string;
+}
+
+/**
+ * QUI-728 — proyección mínima de una cuenta bancaria para el selector de
+ * transferencia: `{ id, name, bank_name, account_number }`. Nunca debe exponer
+ * `current_balance`, `opening_balance`, `chart_account_id` ni `column_mapping`
+ * (el saldo bancario no es asunto de una pantalla cuyo único propósito es
+ * elegir a qué cuenta pagar). Viene en el `custom_config.accounts` del método
+ * `bank_transfer`.
+ */
+export interface BankAccountOption {
+  id?: number | null;
+  name?: string | null;
+  bank_name?: string;
+  account_number?: string;
 }
 
 /**

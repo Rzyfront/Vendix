@@ -153,6 +153,9 @@ export class PaymentsService {
         currency: createPaymentDto.currency,
         storePaymentMethodId: createPaymentDto.storePaymentMethodId,
         storeId: createPaymentDto.storeId,
+        // QUI-728 — cuenta bancaria de destino (bank_transfer). El gateway la
+        // valida y la pasa resuelta al processor.
+        bankAccountId: createPaymentDto.bank_account_id,
         // Back-compat: legacy eCommerce DTO does not yet carry an idempotency
         // key. Initialize a fresh UUID per attempt so each call still maps
         // to a unique provider-side idempotency key. Cross-attempt retry
@@ -191,6 +194,8 @@ export class PaymentsService {
         currency: createOrderPaymentDto.currency,
         storePaymentMethodId: createOrderPaymentDto.storePaymentMethodId,
         storeId: createOrderPaymentDto.storeId,
+        // QUI-728 — cuenta bancaria de destino (bank_transfer).
+        bankAccountId: createOrderPaymentDto.bank_account_id,
         // Back-compat: see comment in processPayment above.
         idempotencyKey: crypto.randomUUID(),
         metadata: createOrderPaymentDto.metadata,
@@ -3681,11 +3686,29 @@ export class PaymentsService {
       change = this.roundMoney(amountReceived - payableAmount);
     }
 
+    // QUI-728 — si el pago es por transferencia y el cajero eligió cuenta, la
+    // resolvemos y validamos AQUÍ (dentro de la misma transacción) antes de
+    // persistir `bank_account_id`. La comprobación (existe + activa + pertenece
+    // a la organización + scope de tienda) es la misma que hace el gateway
+    // (ADR-3 / ERR-04): validar solo a nivel de organización dejaría pagar
+    // desde la Tienda B contra una cuenta de la Tienda A.
+    let resolvedBankAccountId: number | null = null;
+    if (methodType === 'bank_transfer' && dto.bank_account_id) {
+      const account = await this.paymentGateway.resolveAndValidateBankAccount(
+        dto.bank_account_id,
+        dtoStoreId,
+        tx,
+      );
+      resolvedBankAccountId = account.id;
+    }
+
     // Create payment record
     const payment = await tx.payments.create({
       data: {
         order_id: order.id,
         store_payment_method_id: dto.store_payment_method_id,
+        // QUI-728 — cuenta bancaria de destino del pago por transferencia.
+        bank_account_id: resolvedBankAccountId,
         amount: payableAmount,
         currency: dto.currency,
         state: 'succeeded',

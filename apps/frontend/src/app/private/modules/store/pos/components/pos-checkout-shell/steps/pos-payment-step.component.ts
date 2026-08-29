@@ -608,6 +608,10 @@ export class PosPaymentStepComponent implements OnInit {
       customer_alias: this.isAlias()
         ? this.customerAlias().trim() || undefined
         : undefined,
+      // QUI-728 (E.1) — el selector de cuentas del collector emite bankAccountId;
+      // viaja con el pago para que el POS persista payments.bank_account_id en
+      // processPosPaymentTransaction (CreatePosPaymentDto).
+      bank_account_id: submit.bankAccountId,
     };
 
     if (method.type === 'wallet' && this.walletInfo()) {
