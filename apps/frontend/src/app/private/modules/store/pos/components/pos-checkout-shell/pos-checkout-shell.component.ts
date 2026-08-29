@@ -1450,8 +1450,16 @@ export class PosCheckoutShellComponent {
     if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
     event.preventDefault();
     const modes: Array<'anonymous' | 'alias' | 'customer'> = [];
-    if (this.canBeAnonymous()) modes.push('anonymous');
-    if (this.canBeAlias()) modes.push('alias');
+    // CP-POLLO-ARABE-727 F.1 Round 2 — excluir los modos bloqueados por
+    // envío (checkoutIntent === 'delivery'): el botón está deshabilitado y la
+    // navegación por teclado no debe activar programáticamente un modo que el
+    // usuario no puede pulsar (regresión WCAG del fix de flechas).
+    if (this.canBeAnonymous() && !this.anonymousBlockedByDelivery()) {
+      modes.push('anonymous');
+    }
+    if (this.canBeAlias() && !this.aliasBlockedByDelivery()) {
+      modes.push('alias');
+    }
     modes.push('customer');
     if (modes.length <= 1) return;
     const base = modes.indexOf(this.saleMode());

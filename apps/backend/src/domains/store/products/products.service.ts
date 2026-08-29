@@ -4158,6 +4158,11 @@ export class ProductsService {
         },
       });
 
+      // CP-POLLO-ARABE-727 F.1 — ADR-10: `getProductStats` es alcanzable por
+      // `cocina` vía `store:products:read` (products.controller.ts:554). Los
+      // montos de inventario (`total_value`/`archived_stock_value`) no viajan a
+      // ese rol: se anulan, se conservan las unidades y los conteos.
+      const kitchenStats = this.isKitchenRole();
       return {
         total_products,
         active_products,
@@ -4166,11 +4171,15 @@ export class ProductsService {
         low_stock_products,
         out_of_stock_products,
         products_without_images,
-        total_value,
+        ...(kitchenStats
+          ? { total_value: null }
+          : { total_value }),
         categories_count,
         brands_count,
         /** D.3 — el valor que `total_value` ya NO incluye, para poder mostrarlo aparte. */
-        archived_stock_value,
+        ...(kitchenStats
+          ? { archived_stock_value: null }
+          : { archived_stock_value }),
         archived_stock_units,
       };
     } catch (error) {

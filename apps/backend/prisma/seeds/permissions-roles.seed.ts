@@ -5040,6 +5040,15 @@ export async function seedPermissionsAndRoles(
     'store:tables:read',
     'store:table_sessions:read',
     'store:table_sessions:update',
+    // CP-POLLO-ARABE-727 F.1 Round 2 (B1) — abrir mesa: `POST /store/table-sessions`
+    // exige `table_sessions:create` (table-sessions.controller.ts:109). Sin él,
+    // la primera acción del mesero (abrir una mesa disponible) falla con 403.
+    'store:table_sessions:create',
+    // CP-POLLO-ARABE-727 F.1 Round 2 (B2) — cobrar: el cobro de mesa
+    // (`payTableSession` → `POST /store/payments/pos`) exige `store:pos:access`
+    // (payments.controller.ts:245). ADR-2 declara "mesero SÍ cobra y parte
+    // cuenta"; sin este permiso el mesero no puede cerrar el cobro de una mesa.
+    'store:pos:access',
     // Disparar a cocina — `read` es necesario para `POST /kitchen-fire/preview`
     // (previewFire, kitchen-fire.controller.ts:82 exige `kitchen_fire:read`),
     // que el mesero llama ANTES de `fireOrderItems` (`kitchen_fire:create`) al
@@ -5100,6 +5109,12 @@ export async function seedPermissionsAndRoles(
     'store:kds_sessions:update',
     // Mesas (solo el floor-map, sin montos) — NO table_sessions (ver arriba)
     'store:tables:read',
+    // Lectura de recetas — CP-POLLO-ARABE-727 F.1 Round 2 (m): el detalle del
+    // ticket en el KDS (`kds-ticket-detail-modal` → `GET /recipes/by-product/:id`,
+    // recipes.controller.ts:80 exige `recipes:read`) necesita ver el árbol de la
+    // receta del plato. La receta no lleva montos (solo insumos), así que no
+    // viola ADR-10. Sin él el cocinero ve "receta no disponible" en el detalle.
+    'store:recipes:read',
     // Productos con proyección reducida (sin dinero)
     'store:products:read',
   ];

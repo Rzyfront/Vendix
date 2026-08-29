@@ -404,6 +404,13 @@ export class TablesService {
       ...(payload.tip_amount != null && payload.tip_amount > 0
         ? { tip_amount: payload.tip_amount }
         : {}),
+      // CP-POLLO-ARABE-727 F.1 Round 2 (M) — el mesero elige la cuenta en el
+      // collector (table-payment-modal la emite en TablePaymentSubmit) y el
+      // body del POST /store/payments/pos la descartaba: el cierre de mesa con
+      // transferencia llegaba sin bank_account_id y se perseguía NULL.
+      ...(payload.bank_account_id != null
+        ? { bank_account_id: payload.bank_account_id }
+        : {}),
     };
     return this.http
       .post<ApiResponse<PayTableSessionResult>>(
