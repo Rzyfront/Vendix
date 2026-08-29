@@ -72,7 +72,7 @@ export class SettingsController {
     // TODO multi-store: read from x-store-id header or ?store_id query
     const client = (this.storePrisma as any).baseClient ?? (this.storePrisma as any).prisma;
     const store = await client.stores.findFirst({
-      where: { is_active: true, deleted_at: null },
+      where: { is_active: true },
       orderBy: { id: 'asc' },
     });
     if (!store) {
