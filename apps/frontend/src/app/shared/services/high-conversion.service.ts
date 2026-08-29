@@ -1,5 +1,6 @@
-import { DestroyRef, HttpErrorResponse, Injectable, inject, signal } from '@angular/core';
+import { DestroyRef, Injectable, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { HttpErrorResponse } from '@angular/common/http';
 import { StoreSettingsService } from '../../private/modules/store/settings/general/services/store-settings.service';
 
 /**
