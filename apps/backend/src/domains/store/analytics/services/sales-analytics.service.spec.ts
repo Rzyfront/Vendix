@@ -247,13 +247,41 @@ describe('SalesAnalyticsService', () => {
 
   // ==================== QUI-549: VENTAS POR CANAL ====================
 
-  describe('getSalesByChannelForExport (QUI-549)', () => {
+  describe('getSalesByChannelForExport (QUI-549 + QUI-610 propagation)', () => {
     it('aggregates by channel, sorts by revenue desc, and computes % participation with 2-decimal rounding', async () => {
       prisma.orders.groupBy = prisma.orders.groupBy ?? jest.fn();
+      // QUI-610: el servicio ahora deriva el ingreso de subtotal − discount + shipping
+      // (ex-IVA), no de grand_total. El mock tiene que entregar los TRES componentes
+      // que `computeOperatingRevenue` consume; sin descuentos ni flete, los totales
+      // quedan iguales al subtotal (caso base sin IVA).
       prisma.orders.groupBy.mockResolvedValue([
-        { channel: 'pos', _sum: { grand_total: 600000 }, _count: { id: 12 } },
-        { channel: 'ecommerce', _sum: { grand_total: 300000 }, _count: { id: 8 } },
-        { channel: 'agent', _sum: { grand_total: 100000 }, _count: { id: 2 } },
+        {
+          channel: 'pos',
+          _sum: {
+            subtotal_amount: 600000,
+            discount_amount: 0,
+            shipping_cost: 0,
+          },
+          _count: { id: 12 },
+        },
+        {
+          channel: 'ecommerce',
+          _sum: {
+            subtotal_amount: 300000,
+            discount_amount: 0,
+            shipping_cost: 0,
+          },
+          _count: { id: 8 },
+        },
+        {
+          channel: 'agent',
+          _sum: {
+            subtotal_amount: 100000,
+            discount_amount: 0,
+            shipping_cost: 0,
+          },
+          _count: { id: 2 },
+        },
       ] as any);
 
       const rows = await service.getSalesByChannelForExport({} as any);
@@ -280,6 +308,31 @@ describe('SalesAnalyticsService', () => {
       expect(rows[0].channel).toBe('pos');
       expect(rows[1].channel).toBe('ecommerce');
       expect(rows[2].channel).toBe('agent');
+    });
+
+    it('excludes VAT from channel revenue (subtotal − discount + shipping, not grand_total)', async () => {
+      prisma.orders.groupBy = prisma.orders.groupBy ?? jest.fn();
+      // Si se mantuviera la antigua SUM(grand_total), POS daría 1_190_000
+      // (1_000_000 + 19 % IVA). Con el contract, el ingreso es exactamente
+      // subtotal − discount + shipping = 1_000_000, sin IVA. La diferencia
+      // del 19 % es la garantía de que la propagación de QUI-610 está viva
+      // y no solo cambia el nombre de la columna.
+      prisma.orders.groupBy.mockResolvedValue([
+        {
+          channel: 'pos',
+          _sum: {
+            subtotal_amount: 1_000_000,
+            discount_amount: 0,
+            shipping_cost: 0,
+          },
+          _count: { id: 10 },
+        },
+      ] as any);
+
+      const rows = await service.getSalesByChannelForExport({} as any);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].revenue).toBe(1_000_000); // ex-VAT, no 1_190_000
+      expect(rows[0].percentage).toBe(100);
     });
 
     it('returns empty array (not paginated envelope) when no channels have sales', async () => {
