@@ -263,17 +263,6 @@ export class PromotionStackComponent {
   readonly activeIndex = this.activeIndexSignal.asReadonly();
 
   constructor() {
-    // DEBUG: rastrear el valor del toggle cada vez que cambia
-    effect(() => {
-      // eslint-disable-next-line no-console
-      console.log(
-        '[PS-DEBUG] promotion-stack leyendo highConversionService.enabled =',
-        this.highConversionService.enabled(),
-        'items.length =',
-        this.items().length,
-      );
-    });
-
     // Autoplay del scroll-batch: arranca vía microtask post-construcción
     // para que el viewChild ya esté disponible.
     this.destroyRef.onDestroy(() => this.stopAutoplay());

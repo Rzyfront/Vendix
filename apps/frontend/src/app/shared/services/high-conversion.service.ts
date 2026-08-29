@@ -26,28 +26,18 @@ export class HighConversionService {
   readonly enabled = signal<boolean>(true);
 
   constructor() {
-    // eslint-disable-next-line no-console
-    console.log('[HCS-DEBUG] service CONSTRUCTOR running');
     this.storeSettingsService
       .getSettings({ forceRefresh: true })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           const flag = response?.data?.promotions?.enable_high_conversion_ui;
-          // eslint-disable-next-line no-console
-          console.log(
-            '[HCS-DEBUG] settings.promotions.enable_high_conversion_ui:',
-            flag,
-            '→ set signal to:',
-            flag,
-          );
           if (flag !== undefined) {
             this.enabled.set(flag);
           }
         },
-        error: (err) => {
-          // eslint-disable-next-line no-console
-          console.warn('[HCS-DEBUG] error loading settings:', err);
+        error: () => {
+          // Default true ya está seteado
         },
       });
   }
