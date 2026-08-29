@@ -30,7 +30,7 @@ export class PrintAnnexValidatorService {
 
     const sections = definition.sections || [];
     const columns = definition.columns || [];
-    const companyFields = definition.companyBlock?.fields || [];
+    const companyFields = definition.company_block?.fields || [];
 
     const isFieldEnabled = (fieldKey: string): boolean => {
       for (const sec of sections) {
@@ -77,7 +77,7 @@ export class PrintAnnexValidatorService {
       reference: 'Art. 617 lit. b) E.T. / Anexo 1.9 §8.1.1',
       severity: 'error',
       passed: isFieldEnabled('NIT') || isFieldEnabled('store.tax_id') || isFieldEnabled('f_nit') || isSectionTypeEnabled('header'),
-      fixAction: { label: 'Activar NIT en cabecera', sectionId: 'sec_header', fieldKey: 'f_nit' },
+      fixAction: { label: 'Activar NIT en cabecera', sectionId: 'sec_header', fieldKey: 'f_nit', companyFieldKey: 'NIT' },
     });
 
     rules.push({
@@ -88,7 +88,7 @@ export class PrintAnnexValidatorService {
       reference: 'Anexo Técnico 1.9 DIAN §8.1.1',
       severity: isFiscal ? 'warning' : 'info',
       passed: isFieldEnabled('regimen') || isFieldEnabled('store.tax_regime') || isFieldEnabled('f_regime') || isSectionTypeEnabled('header'),
-      fixAction: { label: 'Activar Régimen Fiscal', sectionId: 'sec_header', fieldKey: 'f_regime' },
+      fixAction: { label: 'Activar Régimen Fiscal', sectionId: 'sec_header', fieldKey: 'f_regime', companyFieldKey: 'regimen' },
     });
 
     rules.push({
@@ -99,7 +99,7 @@ export class PrintAnnexValidatorService {
       reference: 'Art. 617 lit. d) E.T. / Anexo 1.9 §8.1.1',
       severity: 'warning',
       passed: isFieldEnabled('address') || isFieldEnabled('store.address') || isFieldEnabled('f_addr') || isSectionTypeEnabled('header'),
-      fixAction: { label: 'Activar Dirección', sectionId: 'sec_header', fieldKey: 'f_addr' },
+      fixAction: { label: 'Activar Dirección', sectionId: 'sec_header', fieldKey: 'f_addr', companyFieldKey: 'address' },
     });
 
     // ─────────────────────────────────────────────────────────

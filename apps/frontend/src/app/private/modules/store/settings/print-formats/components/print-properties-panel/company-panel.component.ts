@@ -12,7 +12,7 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
 /**
  * [print-editor-dsk P5.6] — Company panel.
  *
- * Edits `definition.companyBlock.fields` — 8 toggles (NIT, DV, regimen,
+ * Edits `definition.company_block.fields` — 8 toggles (NIT, DV, regimen,
  * address, phone, email, website, QR) plus a per-field custom_label.
  *
  * The renderer already supports the same 8 keys; this panel guarantees
@@ -67,7 +67,7 @@ const COMPANY_FIELDS: ReadonlyArray<{
                 </label>
                 <input
                   type="text"
-                  [ngModel]="entry.field.customLabel ?? ''"
+                  [ngModel]="entry.field.custom_label ?? ''"
                   (ngModelChange)="updateLabel(entry.key, $event)"
                   [placeholder]="entry.label"
                   class="w-full px-2 py-1 bg-surface-secondary border border-border rounded text-[11px] text-text-primary focus:border-primary-500 focus:outline-none"
@@ -99,7 +99,7 @@ export class PrintCompanyPanelComponent {
 
   readonly block = computed<PrintCompanyBlock>(() => {
     return (
-      this.definition().companyBlock ?? { fields: [] as PrintCompanyField[] }
+      this.definition().company_block ?? { fields: [] as PrintCompanyField[] }
     );
   });
 
@@ -135,7 +135,7 @@ export class PrintCompanyPanelComponent {
     } else {
       fields.push({ key: key as PrintCompanyFieldKey, enabled: true, ...patch });
     }
-    this.emit({ ...this.definition(), companyBlock: { fields } });
+    this.emit({ ...this.definition(), company_block: { fields } });
   }
 
   toggle(key: PrintCompanyFieldKey | 'QR', event: Event): void {
@@ -143,7 +143,7 @@ export class PrintCompanyPanelComponent {
     this.withField(key, { enabled });
   }
 
-  updateLabel(key: PrintCompanyFieldKey | 'QR', customLabel: string): void {
-    this.withField(key, { customLabel: customLabel || undefined });
+  updateLabel(key: PrintCompanyFieldKey | 'QR', custom_label: string): void {
+    this.withField(key, { custom_label: custom_label || undefined });
   }
 }

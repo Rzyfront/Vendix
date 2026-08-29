@@ -13,6 +13,7 @@ import { PrintPropertiesPanelComponent } from '../print-properties-panel/print-p
 import {
   CanvasRegion,
   PrintAnnexValidationRule,
+  PrintCompanyField,
   PrintFormatDefinition,
   PrintPreviewMode,
 } from '../../../../../../../core/models/print-formats.model';
@@ -773,6 +774,18 @@ export class PrintFormatEditorComponent {
       const cleanColKey = rule.fixAction.columnKey.replace('col_', '');
       const col = next.columns?.find((c) => c.id === cleanColKey || c.key === cleanColKey || c.id === rule.fixAction!.columnKey);
       if (col) col.enabled = true;
+    }
+
+    if (rule.fixAction?.companyFieldKey) {
+      const companyFieldKey = rule.fixAction.companyFieldKey;
+      const fields = [...(next.company_block?.fields ?? [])];
+      const idx = fields.findIndex((f) => f.key === companyFieldKey);
+      if (idx >= 0) {
+        fields[idx] = { ...fields[idx], enabled: true };
+      } else {
+        fields.push({ key: companyFieldKey, enabled: true } as PrintCompanyField);
+      }
+      next.company_block = { fields };
     }
 
     this.facade.draftDefinition.set(next);

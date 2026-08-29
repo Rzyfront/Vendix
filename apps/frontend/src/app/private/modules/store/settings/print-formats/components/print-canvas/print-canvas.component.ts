@@ -248,14 +248,14 @@ export class PrintCanvasComponent {
     if (d.paper.is_roll) {
       return 100;
     }
-    return d.paper.heightMm ?? 297;
+    return d.paper.height_mm ?? 297;
   });
 
   readonly paperLabel = computed<string | null>(() => {
     const d = this.definition();
     if (!d?.paper) return null;
     const w = d.paper.width_mm;
-    const h = d.paper.is_roll ? 'roll' : `${d.paper.heightMm ?? '?'}mm`;
+    const h = d.paper.is_roll ? 'roll' : `${d.paper.height_mm ?? '?'}mm`;
     return `${d.paper.format} — ${w}×${h}`;
   });
 
