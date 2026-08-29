@@ -399,9 +399,12 @@ import { Cart } from '../../services/cart.service';
         z-index: 51;
         display: flex;
         flex-direction: column;
-        // Altura adaptativa: crece con el contenido (0 promos = pequeño,
-        // 5 promos = alto) hasta un cap para no tapar el resto del viewport.
-        max-height: min(95vh, calc(100vh - 80px));
+        // Altura verdaderamente adaptativa: el drawer crece con el contenido
+        // (0 promos = ~180px, 2 promos = ~280px, 5 promos = ~480px) sin cap
+        // que corte el bottom. Cuando el contenido excede el viewport, el
+        // body hace overflow-y: auto (scroll interno) pero el drawer sigue
+        // mostrando el header y el footer.
+        max-height: 100vh;
         background: var(--color-surface);
         border-radius: 20px 20px 0 0;
         box-shadow: 0 -12px 40px -12px rgba(15, 23, 42, 0.35);
