@@ -3,6 +3,11 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { PlatformOrgService } from '../../../../common/services/platform-org.service';
+import { PlatformProfilesService } from './platform-profiles.service';
+import {
+  DIAN_PROFILE_TEMPLATES,
+  findDianProfileTemplate,
+} from '../../../store/invoicing/profiles/dian-profile-templates';
 import { RequestContextService } from '@common/context/request-context.service';
 import { InvoicingService } from '../../../store/invoicing/invoicing.service';
 import { InvoiceFlowService } from '../../../store/invoicing/invoice-flow/invoice-flow.service';
@@ -60,6 +65,7 @@ export class PlatformInvoicingService {
     private readonly tenants: PlatformTenantsService,
     private readonly subscriptionFiscalService: SubscriptionFiscalService,
     private readonly platformOrg: PlatformOrgService,
+    private readonly platformProfiles: PlatformProfilesService,
   ) {}
 
   private get prismaClient(): PrismaClient | Prisma.TransactionClient {
@@ -183,25 +189,54 @@ export class PlatformInvoicingService {
 
     if (args.dto.save_as_profile?.name) {
       try {
-        await this.prismaService.withoutScope().invoice_profiles.create({
-          data: {
-            organization_id: args.organizationId,
-            store_id: null,
-            name: args.dto.save_as_profile.name,
-            operation_type: args.dto.operation_type ?? '10',
-            document_type: 'sales_invoice',
-            state: 'active',
-            is_default: args.dto.save_as_profile.is_default ?? false,
-            current_version: 1,
-            current_config: {
+        // Delega en `PlatformProfilesService.create`, que es el unico camino que
+        // escribe la fila del perfil y su version 1 en la MISMA transaccion. El
+        // `create` crudo que vivia aqui escribia `invoice_profiles` directo y no
+        // creaba `invoice_profile_versions`, dejando `current_version: 1`
+        // apuntando a una version inexistente — la corrupcion que el comentario
+        // de `current_version` en schema.prisma advierte.
+        //
+        // El snapshot va anidado bajo `dian` porque esa es la forma que
+        // `normalizeAndAssertProfileConfig` conoce; las claves planas que se
+        // pasaban antes se habrian rechazado uno por uno como desconocidas.
+        // El cruce de nombres es deliberado y sigue a UBL:
+        //   · `payment_form` ('1' contado / '2' credito) es `cbc:PaymentMeansCode`
+        //   · `payment_means_code` ('10' efectivo)       es `cbc:PaymentMeansID`
+        // que el contrato nombra `payment_means_code` y `payment_method_code`.
+        // `config` es el snapshot COMPLETO del documento fiscal — diez
+        // secciones —, no las cuatro claves que la emisión conoce. Mandar sólo
+        // `dian` lo hace rechazar por `config_version`,
+        // `format.display_decimals` y `format.show_aiu_breakdown`, y el catch
+        // de abajo lo habría enterrado en un WARN. Por eso se parte de la
+        // plantilla canónica del MISMO `operation_type` — la única fuente que
+        // ya trae las diez secciones válidas — y encima se sobreescribe sólo lo
+        // que la factura sí capturó.
+        const operationType = args.dto.operation_type ?? '10';
+        const template =
+          DIAN_PROFILE_TEMPLATES.find(
+            (t) => t.operation_type === operationType,
+          ) ?? findDianProfileTemplate('dian-standard')!;
+
+        await this.platformProfiles.create({
+          name: args.dto.save_as_profile.name,
+          operation_type: operationType,
+          state: 'active',
+          is_default: args.dto.save_as_profile.is_default ?? false,
+          config: {
+            ...template.config,
+            dian: {
+              ...template.config.dian,
               resolution_id: args.dto.resolution_id ?? null,
-              payment_form: args.dto.payment_form ?? '1',
-              payment_means_code: args.dto.payment_means_code ?? '10',
-              notes: args.dto.notes ?? null,
+              payment_means_code: args.dto.payment_form ?? '1',
+              payment_method_code: args.dto.payment_means_code ?? '10',
+              header_notes: args.dto.notes ? [args.dto.notes] : null,
             },
           },
         });
       } catch (err) {
+        // Guardar el perfil es accesorio a emitir: la factura ya se timbro y no
+        // se puede deshacer, asi que un perfil que no nace no puede tumbar la
+        // respuesta. Queda en WARN a proposito.
         this.logger.warn(`Error guardando perfil desde factura: ${err}`);
       }
     }
