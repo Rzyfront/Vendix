@@ -5089,6 +5089,28 @@ export async function seedPermissionsAndRoles(
   );
   assignmentsCreated += meseroSync.added;
 
+  // 🔴 CP-POLLO-ARABE-727 F.1 Round 4 (H1) — syncRolePermissions es
+  // additive-only (su docstring describe el set-difference, la implementación
+  // solo hace createMany). `mesero` es rol de lista explícita (ADR-2): si
+  // arrastra algún permiso fuera de la canónica (DB sembrada con una lista
+  // intermedia de la épica), queda huérfano. Revocación explícita idempotente
+  // por rol (mismo patrón que owner/admin/manager con `superadmin:*`):
+  // deleteMany sobre el complemento de la lista canónica — no-op en re-runs.
+  const meseroRevokeIds = meseroPermissions.map((p) => p.id);
+  if (meseroRevokeIds.length > 0) {
+    const revokeMesero = await client.role_permissions.deleteMany({
+      where: {
+        role_id: meseroRole.id,
+        permission_id: { notIn: meseroRevokeIds },
+      },
+    });
+    if (revokeMesero.count > 0) {
+      console.log(
+        `   🗑️  Revoked ${revokeMesero.count} non-canonical permissions from mesero (QUI-727 F.1 H1 — ADR-2)`,
+      );
+    }
+  }
+
   // Assign permissions to cocina — QUI-727 (A.1) / ADR-2 / ADR-10.
   //
   // Cocina NO ve dinero: `store:products:read` se le asigna con proyección
@@ -5137,6 +5159,28 @@ export async function seedPermissionsAndRoles(
     'cocina',
   );
   assignmentsCreated += cocinaSync.added;
+
+  // 🔴 CP-POLLO-ARABE-727 F.1 Round 4 (H1) — cocina perdió
+  // `store:table_sessions:read` en F.1 Round 1 (ADR-10: abre el detalle de
+  // cuenta de mesa — `order.grand_total`). Como syncRolePermissions no revoca,
+  // cualquier DB sembrada con la lista pre-Round-1 conserva el permiso y cocina
+  // sigue leyendo dinero vía `GET /store/table-sessions/:id`. La revocación
+  // explícita es el complemento de la lista canónica de cocina: quita
+  // `table_sessions:read` (y cualquier otro resto) y es no-op en re-runs.
+  const cocinaRevokeIds = cocinaPermissions.map((p) => p.id);
+  if (cocinaRevokeIds.length > 0) {
+    const revokeCocina = await client.role_permissions.deleteMany({
+      where: {
+        role_id: cocinaRole.id,
+        permission_id: { notIn: cocinaRevokeIds },
+      },
+    });
+    if (revokeCocina.count > 0) {
+      console.log(
+        `   🗑️  Revoked ${revokeCocina.count} non-canonical permissions from cocina (QUI-727 F.1 H1 — ADR-10)`,
+      );
+    }
+  }
 
   return {
     permissionsCreated,

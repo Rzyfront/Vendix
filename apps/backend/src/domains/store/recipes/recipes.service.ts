@@ -132,6 +132,41 @@ export class RecipesService {
     });
   }
 
+  /**
+   * QUI-727 F.1 Round 4 (H2) — ADR-10: `store:recipes:read` (concedido a
+   * `cocina` en F.1 Round 2 para el picker de exclusiones y el árbol de la
+   * receta del detalle del ticket) no debe exponer dinero. `findAll` y
+   * `findOne` seleccionan `product.base_price` y `component_product.cost_price`
+   * — exactamente los campos que ADR-10 prohíbe que viajen a cocina. El KDS
+   * solo consume `findByProduct` (seguro, sin montos); si cocina llama a los
+   * otros dos, el dato monetario no viaja. Mismo patrón por-rol que
+   * `products.service.ts` (`isKitchenRole` / `stripCocinaMoney`).
+   */
+  private isKitchenRole(): boolean {
+    return RequestContextService.getRoles().includes('cocina');
+  }
+
+  private stripCocinaRecipeMoney<T>(recipe: T): T {
+    if (!recipe || typeof recipe !== 'object' || !this.isKitchenRole()) {
+      return recipe;
+    }
+    const r = recipe as { product?: Record<string, unknown>; items?: Array<{ component_product?: Record<string, unknown> }> };
+    if (r.product && typeof r.product === 'object') {
+      const { base_price: _p, ...productRest } = r.product;
+      r.product = productRest;
+    }
+    if (Array.isArray(r.items)) {
+      r.items = r.items.map((item) => {
+        if (item?.component_product && typeof item.component_product === 'object') {
+          const { base_price: _iBase, cost_price: _iCost, ...componentRest } = item.component_product;
+          item.component_product = componentRest;
+        }
+        return item;
+      });
+    }
+    return recipe;
+  }
+
   async findAll(query: RecipeQueryDto) {
     const { page = 1, limit = 10, search, is_active, product_id } = query ?? {};
     const skip = (page - 1) * limit;
@@ -183,7 +218,7 @@ export class RecipesService {
     ]);
 
     return {
-      data,
+      data: this.isKitchenRole() ? data.map((d) => this.stripCocinaRecipeMoney(d)) : data,
       meta: {
         total,
         page,
@@ -232,7 +267,7 @@ export class RecipesService {
     if (!recipe) {
       throw new VendixHttpException(ErrorCodes.RECIPE_NOT_FOUND);
     }
-    return recipe;
+    return this.stripCocinaRecipeMoney(recipe);
   }
 
   async findByProduct(productId: number) {
