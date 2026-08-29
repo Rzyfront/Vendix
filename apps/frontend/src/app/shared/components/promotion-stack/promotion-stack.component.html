@@ -150,6 +150,9 @@
             @if (tierHint(item)) {
               <span class="promotion-stack__tier-hint">{{ tierHint(item) }}</span>
             }
+            @if (formattedValue(item); as formatted) {
+              <span class="promotion-stack__tier-discount" data-testid="promotion-stack-tier-discount">{{ formatted }}</span>
+            }
           </div>
         </div>
       }
