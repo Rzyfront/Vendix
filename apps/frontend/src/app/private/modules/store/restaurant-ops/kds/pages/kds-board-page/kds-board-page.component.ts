@@ -46,7 +46,11 @@ import {
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
-import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
+import {
+  parseApiError,
+  withApiErrorReference,
+  readApiErrorRequestId,
+} from '../../../../../../../core/utils/parse-api-error';
 import { KdsTicketCardComponent } from '../../components/kds-ticket-card/kds-ticket-card.component';
 import { KdsTicketDetailModalComponent } from '../../components/kds-ticket-detail-modal/kds-ticket-detail-modal.component';
 
@@ -1069,14 +1073,18 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
       const { userMessage } = parseApiError({
         error: { error_code: structured.code },
       });
-      this.toastService.error(userMessage);
+      this.toastService.error(
+        withApiErrorReference(userMessage, readApiErrorRequestId(err)),
+      );
       return;
     }
     const message =
       typeof err === 'string'
         ? err
         : (structured?.message ?? 'Error al actualizar el ticket');
-    this.toastService.error(message);
+    this.toastService.error(
+      withApiErrorReference(message, readApiErrorRequestId(err)),
+    );
   }
 
   /**

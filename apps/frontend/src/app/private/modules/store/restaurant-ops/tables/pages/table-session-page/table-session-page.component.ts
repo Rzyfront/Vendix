@@ -51,7 +51,11 @@ import type {
   FirePreview,
 } from '../../../kds/interfaces';
 import { KitchenConfirmModalComponent } from '../../../kds/components/kitchen-confirm-modal/kitchen-confirm-modal.component';
-import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
+import {
+  parseApiError,
+  withApiErrorReference,
+  readApiErrorRequestId,
+} from '../../../../../../../core/utils/parse-api-error';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import { AddItemsModalComponent } from '../../components/add-items-modal/add-items-modal.component';
 import { SplitOrderModalComponent } from '../../components/split-order-modal/split-order-modal.component';
@@ -1070,15 +1074,25 @@ export class TableSessionPageComponent implements OnInit {
       typeof err === 'object' && err !== null
         ? (err as Partial<KitchenMutationError>)
         : null;
+    // Best-effort request correlation for support. The backend wraps
+    // `request_id` in every error body, but the services normalize the error
+    // at the catchError boundary, so it only survives in whichever shape kept
+    // the raw body. Quote it back when present; never invent one.
+    const requestId = readApiErrorRequestId(err);
     if (structured?.code) {
       // parseApiError pulls userMessage from ERROR_MESSAGES using the code,
       // and falls back to DEFAULT_ERROR_MESSAGE if the code isn't mapped.
       const parsed = parseApiError({ error: { error_code: structured.code } });
-      this.toastService.error(parsed.userMessage);
+      this.toastService.error(
+        withApiErrorReference(parsed.userMessage, requestId),
+      );
       return;
     }
     this.toastService.error(
-      structured?.message ?? 'Error al actualizar el estado en cocina',
+      withApiErrorReference(
+        structured?.message ?? 'Error al actualizar el estado en cocina',
+        requestId,
+      ),
     );
   }
 

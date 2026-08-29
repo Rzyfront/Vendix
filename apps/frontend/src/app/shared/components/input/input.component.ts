@@ -6,6 +6,7 @@ import {
   input,
   output,
   signal,
+  computed,
   viewChild,
 } from '@angular/core';
 
@@ -100,6 +101,8 @@ export type InputSize = 'sm' | 'md' | 'lg';
           [min]="min()"
           [max]="max()"
           [attr.maxlength]="resolvedMaxLength()"
+          [attr.aria-invalid]="hasError()"
+          [attr.aria-describedby]="hasError() ? errorId() : null"
           [class]="inputClasses"
           [style]="customInputStyle()"
           (input)="onInput($event)"
@@ -181,7 +184,10 @@ export type InputSize = 'sm' | 'md' | 'lg';
 
       <!-- Error message -->
       @if (getValidationError()) {
-        <p class="mt-2 text-sm text-[var(--color-destructive)]">
+        <p
+          class="mt-2 text-sm text-[var(--color-destructive)]"
+          [id]="errorId()"
+        >
           {{ getValidationError() }}
         </p>
       }
@@ -286,6 +292,13 @@ export class InputComponent implements ControlValueAccessor {
   value = signal('');
   inputId = signal(`input-${Math.random().toString(36).substr(2, 9)}`);
   showPassword = signal(false);
+
+  /**
+   * Id determinista del mensaje de error, derivado del id del input. Se usa
+   * para `aria-describedby` (y como `id` del `<p>` de error) de modo que el
+   * lector de pantalla anuncie el motivo del rechazo junto al campo.
+   */
+  readonly errorId = computed(() => `${this.inputId()}-error`);
 
   readonly inputRef =
     viewChild.required<ElementRef<HTMLInputElement>>('inputRef');
@@ -458,6 +471,15 @@ export class InputComponent implements ControlValueAccessor {
     }
 
     return classes.filter(Boolean).join(' ');
+  }
+
+  /**
+   * ¿El campo está en error? Alimenta `aria-invalid` y `aria-describedby`.
+   * Es el mismo veredicto que pinta el `<p>` de error, para que la semántica
+   * ARIA nunca diverja del mensaje visible.
+   */
+  hasError(): boolean {
+    return !!this.getValidationError();
   }
 
   getValidationError(): string | null {

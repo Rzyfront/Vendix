@@ -10,6 +10,9 @@ import type { IconName } from '../icon/icons.registry';
   imports: [NgClass, IconComponent],
   template: `
     <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
       class="fixed top-4 right-4 z-[10000] flex flex-col gap-3 w-80 max-w-[90vw]"
       >
       @for (t of toasts(); track t.id) {
