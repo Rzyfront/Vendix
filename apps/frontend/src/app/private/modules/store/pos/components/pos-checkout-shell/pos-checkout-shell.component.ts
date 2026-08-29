@@ -1438,6 +1438,31 @@ export class PosCheckoutShellComponent {
     this.goToClienteSubStep(1);
   }
 
+  /**
+   * CP-POLLO-ARABE-727 F.1 — navegación por teclado del radiogroup "Tipo de
+   * venta". Los botones usan roving tabindex (0/-1); sin flechas, las opciones
+   * no seleccionadas quedan inalcanzables por teclado (Enter re-selecciona la
+   * actual). Mismo patrón que `product-type-chip-filter`: ArrowLeft/Right
+   * cíclico sobre los modos disponibles (anonymous si canBeAnonymous, alias si
+   * canBeAlias, customer siempre).
+   */
+  onSaleTypeKeydown(event: KeyboardEvent): void {
+    if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+    event.preventDefault();
+    const modes: Array<'anonymous' | 'alias' | 'customer'> = [];
+    if (this.canBeAnonymous()) modes.push('anonymous');
+    if (this.canBeAlias()) modes.push('alias');
+    modes.push('customer');
+    if (modes.length <= 1) return;
+    const base = modes.indexOf(this.saleMode());
+    const idx = base === -1 ? 0 : base;
+    const next =
+      event.key === 'ArrowRight'
+        ? (idx + 1) % modes.length
+        : (idx - 1 + modes.length) % modes.length;
+    this.onSelectSaleMode(modes[next]);
+  }
+
   /** Cliente elegido/creado: preserva la lógica de selectCustomer y avanza. */
   onSelectCustomerAndAdvance(customer: PosCustomer): void {
     this.selectCustomer(customer);

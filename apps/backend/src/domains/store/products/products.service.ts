@@ -510,7 +510,34 @@ export class ProductsService {
         },
       },
     });
-    return records.map((r) => r.promotions);
+    const result = records.map((r) => r.promotions);
+    // QUI-727 (A.1) / ADR-10 — `cocina` no ve dinero. El `value` de la
+    // promoción es el monto del descuento; para cocina se omite (conservando
+    // el resto de la estructura: tipo, estado, fechas).
+    return this.isKitchenRole()
+      ? result.map((p: any) => this.stripPromotionMoneyForCocina(p))
+      : result;
+  }
+
+  /**
+   * QUI-727 (A.1) / ADR-10 — elimina los campos monetarios de una promoción
+   * antes de exponerla a `cocina`. El shape seleccionado por
+   * `getProductPromotions` sólo trae `value` como monto (descuento); se quita
+   * únicamente ese y cualquier otra clave monetaria que llegue a existir
+   * (`discount_value`, `max_discount`, `min_purchase`), conservando el resto
+   * (tipo de descuento, estado, fechas). Idempotente y no destructivo: si la
+   * promoción ya no tiene montos, devuelve el mismo objeto.
+   */
+  private stripPromotionMoneyForCocina(promotion: any): any {
+    if (!promotion || typeof promotion !== 'object') return promotion;
+    const {
+      value: _value,
+      discount_value: _discountValue,
+      max_discount: _maxDiscount,
+      min_purchase: _minPurchase,
+      ...rest
+    } = promotion;
+    return rest;
   }
 
   /**
@@ -2355,11 +2382,14 @@ export class ProductsService {
 
     await this.signProductImages(product);
 
-    return {
+    const dto = {
       ...product,
       pricing_type: String(product.pricing_type),
       image_url: await this.signProductImage(product),
     };
+    // QUI-727 (A.1) / ADR-10 — `cocina` no ve dinero: recorta precio/costo/
+    // margen (y `price_override` de las variantes incluidas) del objeto final.
+    return this.isKitchenRole() ? this.stripCocinaMoney(dto) : dto;
   }
 
   /**
@@ -3904,7 +3934,7 @@ export class ProductsService {
     });
 
     // Calcular stock totals y firmar imágenes
-    return await Promise.all(
+    const result = await Promise.all(
       products.map(async (product) => {
         const totalStockAvailable = product.stock_levels.reduce(
           (sum, stock) => sum + stock.quantity_available,
@@ -3934,6 +3964,12 @@ export class ProductsService {
         };
       }),
     );
+
+    // QUI-727 (A.1) / ADR-10 — `cocina` no ve dinero: recorta los escalares de
+    // precio/costo/margen de cada producto antes de devolver el listado.
+    return this.isKitchenRole()
+      ? result.map((p) => this.stripCocinaMoney(p))
+      : result;
   }
 
   // Gestión de variantes

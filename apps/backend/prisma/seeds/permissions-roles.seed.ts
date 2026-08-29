@@ -5079,6 +5079,13 @@ export async function seedPermissionsAndRoles(
   // reducida (sin cost_price / profit_margin / precio de venta), garantizada en
   // products.service.ts por rol. `store:kds:*` = todos los permisos kds
   // existentes (estaciones + turnos de estación).
+  //
+  // 🔴 CP-POLLO-ARABE-727 F.1 — `store:table_sessions:read` NO se asigna:
+  // abre el detalle de cuenta de mesa (grand_total / subtotal / tax /
+  // discount / pagos pendientes), dinero que ADR-10 prohíbe para cocina. El
+  // cocinero no usa esa superficie (su tablero es kds / kitchen_fire /
+  // kds_sessions). `store:tables:read` se conserva: el floor-map es una lista
+  // de mesas sin montos.
   const cocinaPermissionNames: string[] = [
     // Tickets de cocina
     'store:kitchen_fire:read',
@@ -5091,9 +5098,8 @@ export async function seedPermissionsAndRoles(
     'store:kds_sessions:read',
     'store:kds_sessions:create',
     'store:kds_sessions:update',
-    // Mesas + cuenta abierta (solo lectura)
+    // Mesas (solo el floor-map, sin montos) — NO table_sessions (ver arriba)
     'store:tables:read',
-    'store:table_sessions:read',
     // Productos con proyección reducida (sin dinero)
     'store:products:read',
   ];

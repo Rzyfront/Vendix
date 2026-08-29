@@ -103,7 +103,12 @@ export class DispatchTicketPrintService {
   async autoPrintDispatchTicket(data: DispatchTicketData): Promise<void> {
     try {
       const result = await this.printDispatchTicket(data, 'automatic');
-      if ((result?.documents ?? 0) > 0) {
+      // CP-POLLO-ARABE-727 F.1 — el éxito solo se anuncia si realmente salió
+      // algo a la impresora: `copies > 0` AND `documents > 0`. `copies === 0`
+      // con trigger 'automatic' significa que el comercio pidió no imprimir
+      // (no es fallo, no se avisa); una plantilla con `documents >= 1` pero
+      // `copies === 0` no debe mostrar un "enviado a imprimir" engañoso.
+      if ((result?.copies ?? 0) > 0 && (result?.documents ?? 0) > 0) {
         this.toast.success('Tiquete de despacho enviado a imprimir');
       }
       // `copies === 0` con trigger 'automatic' significa que el comercio pidió

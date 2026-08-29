@@ -131,6 +131,7 @@
   <app-modal
     [isOpen]="isFormOpen()"
     size="md"
+    [dialog]="true"
     [title]="formTitle()"
     [showCloseButton]="true"
     (cancel)="closeForm()"
@@ -164,6 +165,7 @@
   <app-modal
     [isOpen]="detailSession() !== null"
     size="lg"
+    [dialog]="true"
     title="Detalle del turno"
     [showCloseButton]="true"
     (cancel)="closeDetail()"

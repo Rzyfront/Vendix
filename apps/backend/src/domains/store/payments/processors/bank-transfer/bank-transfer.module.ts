@@ -1,25 +1,17 @@
 import { Module } from '@nestjs/common';
-import { PrismaModule } from '../../../../../prisma/prisma.module';
-import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { BankTransferProcessor } from './bank-transfer.processor';
 
 /**
  * QUI-728 — módulo de transferencia bancaria.
  *
- * La migración a `useFactory`/`inject` (patrón `wompi.module.ts:9-25`) es lo que
- * le da al processor su `StorePrismaService`. Antes el `providers: [BankTransferProcessor]`
- * plano no resolvía la dependencia del constructor, así que Nest inyectaba `undefined`
- * y el processor no podía consultar la tabla `bank_accounts`.
+ * QUI-727 (F.1) / ADR-3 — el processor YA NO inyecta `StorePrismaService`:
+ * dejó de resolver la cuenta bancaria por id (ese fallback saltaba el scope de
+ * tienda). La cuenta la resuelve y valida el gateway y se la pasa en
+ * `paymentData.bankAccount`; el processor ya no consulta `bank_accounts`, por lo
+ * que se registra como provider simple.
  */
 @Module({
-  imports: [PrismaModule],
-  providers: [
-    {
-      provide: BankTransferProcessor,
-      useFactory: (prisma: StorePrismaService) => new BankTransferProcessor(prisma),
-      inject: [StorePrismaService],
-    },
-  ],
+  providers: [BankTransferProcessor],
   exports: [BankTransferProcessor],
 })
 export class BankTransferModule {}

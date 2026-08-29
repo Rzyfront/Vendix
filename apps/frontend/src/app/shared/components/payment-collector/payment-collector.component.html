@@ -256,6 +256,7 @@
                 @if (bankTransferConfigured()) {
                   <select
                     class="pc-input"
+                    aria-label="Cuenta bancaria de destino"
                     [value]="selectedBankAccountId() ?? ''"
                     (change)="onBankAccountSelect($event)"
                   >

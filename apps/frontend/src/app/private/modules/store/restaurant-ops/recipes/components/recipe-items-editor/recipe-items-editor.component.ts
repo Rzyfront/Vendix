@@ -142,7 +142,7 @@ export class RecipeItemsEditorComponent implements OnInit {
           this.prefetchUnits();
         },
         error: () => {
-          this.toastService.error('No se pudieron cargar los ingredientes');
+          this.toastService.error('No se pudieron cargar los insumos');
           this.isLoadingIngredients.set(false);
         },
       });

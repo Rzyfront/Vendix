@@ -238,6 +238,16 @@ export class OrdersService {
         const order = await this.prisma.orders.create({
           data: {
             customer_id: createOrderDto.customer_id ?? null,
+            // QUI-727 (B.4) / ADR-9 — alias↔cliente mutuamente excluyentes
+            // (CHECK orders_customer_xor_alias). Replica el guard de
+            // updateOrderFromEditor/assignCustomer: si vino `customer_id`
+            // explícito, el alias se fuerza a null; si no, se persiste
+            // `customer_alias` (o null). Así una venta "Mesa 5" sin cliente
+            // queda grabada sin romper el CHECK.
+            customer_alias:
+              createOrderDto.customer_id != null
+                ? null
+                : (createOrderDto.customer_alias ?? null),
             store_id: store_id, // Force strict store_id
             order_number: createOrderDto.order_number,
             state: orderState,

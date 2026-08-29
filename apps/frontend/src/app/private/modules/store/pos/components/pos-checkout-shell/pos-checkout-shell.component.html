@@ -126,6 +126,7 @@
                         [class.is-disabled]="anonymousBlockedByDelivery()"
                         [disabled]="anonymousBlockedByDelivery()"
                         (click)="onSelectSaleMode('anonymous')"
+                        (keydown)="onSaleTypeKeydown($event)"
                       >
                         <div class="radio-indicator">
                           @if (isAnonymousSale()) {
@@ -160,6 +161,7 @@
                         [class.is-disabled]="aliasBlockedByDelivery()"
                         [disabled]="aliasBlockedByDelivery()"
                         (click)="onSelectSaleMode('alias')"
+                        (keydown)="onSaleTypeKeydown($event)"
                       >
                         <div class="radio-indicator">
                           @if (saleMode() === 'alias') {
@@ -196,6 +198,7 @@
                       class="sale-type-btn"
                       [class.selected]="saleMode() === 'customer'"
                       (click)="onSelectSaleMode('customer')"
+                      (keydown)="onSaleTypeKeydown($event)"
                     >
                       <div class="radio-indicator">
                         @if (saleMode() === 'customer') {

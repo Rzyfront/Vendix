@@ -1664,11 +1664,13 @@ export class KitchenFireService {
     const recipeLessItemIds: number[] = [];
     for (const item of ticket.items ?? []) {
       if (!item.product_id) continue;
-      const recipe = await this.prisma.recipes.findFirst({
-        where: { product_id: item.product_id, is_active: true },
-        select: { id: true },
-      });
-      if (!recipe) {
+      // CP-POLLO-ARABE-727 F.1 — `KITCHEN_TICKET_INCLUDE` ya carga
+      // `product.recipe {id, is_active}` (su comentario dice "Mirrors the
+      // startPreparation guard"). Re-consultar `recipes.findFirst` por línea
+      // era el mismo N+1 que A.7 eliminó en `fireOrderItems`/`prepareFireContext`
+      // y quedó vivo acá: N round-trips secuenciales al pool por ticket.
+      const hasActiveRecipe = item.product?.recipe?.is_active === true;
+      if (!hasActiveRecipe) {
         recipeLessItemIds.push(item.id);
       }
     }

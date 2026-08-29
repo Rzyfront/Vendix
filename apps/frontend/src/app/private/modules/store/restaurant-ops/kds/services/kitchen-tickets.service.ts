@@ -3,6 +3,8 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
+import { parseApiError } from '../../../../../../../app/core/utils/parse-api-error';
+import { DEFAULT_ERROR_MESSAGE } from '../../../../../../../app/core/utils/error-messages';
 import {
   KitchenTicket,
   KitchenTicketStatus,
@@ -211,30 +213,31 @@ export class KitchenTicketsService {
   // ─── Error mapping ───────────────────────────────────────────────────
 
   private deriveErrorMessage(error: any): string {
-    let message = 'Error al procesar la solicitud';
-    const apiMessage = error?.error?.message;
-    if (apiMessage) {
-      message =
-        typeof apiMessage === 'string'
-          ? apiMessage
-          : Array.isArray(apiMessage)
-            ? apiMessage.join(', ')
-            : message;
-    } else if (error?.status === 401) {
-      message = 'No autorizado';
-    } else if (error?.status === 403) {
-      message = 'No tienes permisos suficientes';
-    } else if (error?.status === 404) {
-      message = 'Ticket de cocina no encontrado';
-    } else if (error?.status === 409) {
-      message =
-        typeof error?.error?.message === 'string'
-          ? error.error.message
-          : 'Conflicto: el ticket ya cambió de estado';
-    } else if (typeof error?.status === 'number' && error.status >= 500) {
-      message = 'Error del servidor. Inténtalo más tarde';
+    // CP-POLLO-ARABE-727 F.1 / C.2 — migrado a `parseApiError` (aduana única
+    // del repo). El orden anterior leía `error?.error?.message` ANTES de la
+    // rama 403: un 403 del guard (`AUTH_PERM_001`, devMessage 'Access denied',
+    // 13 chars < MIN_PRESENTABLE_LENGTH) pasaba tal cual al toast del cocinero
+    // en inglés. parseApiError lo descarta y cae a
+    // `ERROR_MESSAGES[AUTH_PERM_001]`. La red por status de abajo solo actúa
+    // cuando parseApiError cayó al DEFAULT (para no degradar 404/409/5xx).
+    const parsed = parseApiError(error);
+    if (parsed.userMessage !== DEFAULT_ERROR_MESSAGE) {
+      return parsed.userMessage;
     }
-    return message;
+    switch (error?.status) {
+      case 401:
+        return 'No autorizado';
+      case 403:
+        return 'No tienes permisos suficientes';
+      case 404:
+        return 'Ticket de cocina no encontrado';
+      case 409:
+        return 'Conflicto: el ticket ya cambió de estado';
+      default:
+        return typeof error?.status === 'number' && error.status >= 500
+          ? 'Error del servidor. Inténtalo más tarde'
+          : DEFAULT_ERROR_MESSAGE;
+    }
   }
 
   private handleError = (error: any): Observable<never> => {

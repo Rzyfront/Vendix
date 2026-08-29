@@ -1,6 +1,7 @@
 <app-modal
   [isOpen]="isOpen()"
   size="lg"
+  [dialog]="true"
   [title]="'Ticket #' + (ticketDisplay()?.daily_number ?? ticketDisplay()?.id ?? '')"
   [showCloseButton]="true"
   (cancel)="onClose()"

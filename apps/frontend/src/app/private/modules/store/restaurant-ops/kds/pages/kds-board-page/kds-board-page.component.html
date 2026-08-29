@@ -248,6 +248,7 @@
   <app-modal
     [isOpen]="sessionSummaryOpen()"
     size="lg"
+    [dialog]="true"
     title="Mi turno"
     [showCloseButton]="true"
     (cancel)="closeSessionSummary()"
@@ -308,6 +309,7 @@
   <app-modal
     [isOpen]="sessionGateOpen()"
     size="sm"
+    [dialog]="true"
     title="Abrir turno de estación"
     [showCloseButton]="true"
     (cancel)="cancelOpenSession()"
