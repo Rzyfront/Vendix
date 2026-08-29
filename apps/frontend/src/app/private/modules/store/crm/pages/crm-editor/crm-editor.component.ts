@@ -19,18 +19,30 @@ import {
 } from '../../../../../../public/dynamic-landing/blocks/landing-blocks.types';
 import { BlockRendererComponent } from '../../../../../../public/dynamic-landing/blocks/block-renderer/block-renderer.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { ToastService } from '../../../../../../shared/components';
 
 let idSeq = 0;
 
+const BLOCK_ICONS: Record<CrmBlockType, string> = {
+  hero: 'layout',
+  features: 'check-circle',
+  products_grid: 'shopping-bag',
+  about: 'info',
+  contact: 'mail',
+  footer_cta: 'megaphone',
+};
+
 @Component({
   selector: 'app-crm-editor',
-  imports: [CommonModule, IconComponent, BlockRendererComponent],
+  imports: [CommonModule, IconComponent, ButtonComponent, BlockRendererComponent],
   templateUrl: './crm-editor.component.html',
   styleUrl: './crm-editor.component.scss',
 })
 export class CrmEditorComponent {
   private readonly toast = inject(ToastService);
+
+  readonly previewMode = signal<'desktop' | 'mobile'>('desktop');
 
   /** Documento vigente (draft del backend). Se copia al entrar para edición local. */
   readonly document = input.required<CrmLandingDocument | null>();
@@ -124,8 +136,16 @@ export class CrmEditorComponent {
     return CRM_BLOCK_LABELS[type];
   }
 
+  iconFor(type: CrmBlockType): string {
+    return BLOCK_ICONS[type] ?? 'box';
+  }
+
   typesList(): CrmBlockType[] {
     return [...CRM_BLOCK_TYPES];
+  }
+
+  setPreviewMode(mode: 'desktop' | 'mobile'): void {
+    this.previewMode.set(mode);
   }
 
   onPropChange(key: string, value: string): void {

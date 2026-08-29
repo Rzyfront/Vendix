@@ -1,171 +1,189 @@
-<div class="crm-page">
-  <header class="crm-header">
-    <div>
-      <h1>CRM</h1>
-      <p class="crm-subtitle">
-        Tu landing page inteligente: se genera con la información de tu tienda
-        y la editas a tu gusto.
-      </p>
-    </div>
-  </header>
+<div class="w-full min-h-screen">
+  <app-sticky-header
+    title="CRM / Landing Inteligente"
+    subtitle="Tu landing page inteligente: se genera con la información de tu tienda y captura leads automáticamente"
+    icon="sparkles"
+    variant="glass"
+    [badgeText]="landing()?.enabled ? 'CRM Activado' : 'Inactivo'"
+    [badgeColor]="landing()?.enabled ? 'green' : 'gray'"
+    [tabs]="headerTabs()"
+    [activeTab]="tab()"
+    [actions]="headerActions()"
+    (tabChanged)="setTab($any($event))"
+    (actionClicked)="onHeaderAction($event)"
+  />
 
-  @if (loading()) {
-    <div class="crm-loading">
-      <app-icon name="loader" [size]="20" />
-      <span>Cargando…</span>
-    </div>
-  } @else if (landing(); as state) {
-    <nav class="crm-tabs">
-      <button
-        type="button"
-        class="crm-tab"
-        [class.crm-tab-active]="tab() === 'estado'"
-        (click)="setTab('estado')"
-      >
-        Estado
-      </button>
-      <button
-        type="button"
-        class="crm-tab"
-        [class.crm-tab-active]="tab() === 'diseno'"
-        [disabled]="!state.enabled"
-        (click)="setTab('diseno')"
-      >
-        Diseño
-      </button>
-    </nav>
-
-    @switch (tab()) {
-      @case ('estado') {
-        <section class="crm-card">
-          <div class="crm-card-row">
-            <div class="crm-status-block">
-              <span class="crm-status-label">Estado</span>
-              <span
-                class="crm-status-pill"
-                [class.crm-status-on]="state.enabled"
-                [class.crm-status-off]="!state.enabled"
-              >
-                {{ state.enabled ? 'Activado' : 'Desactivado' }}
-              </span>
+  <div class="p-4 md:p-6 max-w-7xl mx-auto flex flex-col gap-6">
+    @if (loading()) {
+      <div class="flex items-center justify-center gap-3 py-16 text-text-secondary">
+        <app-icon name="loader" [size]="24" class="animate-spin text-primary" />
+        <span class="text-sm font-medium">Cargando estado del CRM…</span>
+      </div>
+    } @else if (landing(); as state) {
+      @switch (tab()) {
+        @case ('estado') {
+          <!-- Bloque de Estado & KPIs -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <!-- Card 1: Estado del CRM -->
+            <div class="rounded-xl border border-border bg-surface p-4 shadow-sm flex flex-col justify-between">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold text-text-secondary uppercase tracking-wider">Estado del Módulo</span>
+                <div class="p-2 rounded-lg" [class]="state.enabled ? 'bg-emerald-500/10 text-emerald-600' : 'bg-zinc-500/10 text-zinc-500'">
+                  <app-icon [name]="state.enabled ? 'check-circle' : 'power'" [size]="18" />
+                </div>
+              </div>
+              <div class="mt-3">
+                <span class="text-lg font-bold text-text-primary">
+                  {{ state.enabled ? 'Activado' : 'Desactivado' }}
+                </span>
+                <p class="text-xs text-text-secondary mt-0.5">
+                  {{ state.enabled ? 'Capturando clientes en tu tienda' : 'Activa para generar tu landing' }}
+                </p>
+              </div>
             </div>
 
-            <div class="crm-status-block">
-              <span class="crm-status-label">Landing</span>
-              <span class="crm-generation">{{ statusLabel() }}</span>
+            <!-- Card 2: Generación IA -->
+            <div class="rounded-xl border border-border bg-surface p-4 shadow-sm flex flex-col justify-between">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold text-text-secondary uppercase tracking-wider">Generador IA</span>
+                <div class="p-2 rounded-lg bg-blue-500/10 text-blue-600">
+                  <app-icon name="sparkles" [size]="18" />
+                </div>
+              </div>
+              <div class="mt-3">
+                <span class="text-lg font-bold text-text-primary">
+                  {{ statusLabel() }}
+                </span>
+                <p class="text-xs text-text-secondary mt-0.5">
+                  {{ state.last_job_id ? 'Job ID: ' + state.last_job_id.slice(0, 8) + '…' : 'Listo para procesar' }}
+                </p>
+              </div>
             </div>
 
-            @if (state.enabled) {
-              <button
-                app-button
-                variant="outline"
-                [disabled]="busy()"
-                (click)="deactivate()"
-              >
-                Desactivar
-              </button>
-            } @else {
-              <button
-                app-button
-                variant="primary"
-                [disabled]="busy()"
-                (click)="activate()"
-              >
-                Activar CRM
-              </button>
+            <!-- Card 3: Borrador -->
+            <div class="rounded-xl border border-border bg-surface p-4 shadow-sm flex flex-col justify-between">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold text-text-secondary uppercase tracking-wider">Versión Borrador</span>
+                <div class="p-2 rounded-lg bg-purple-500/10 text-purple-600">
+                  <app-icon name="file-text" [size]="18" />
+                </div>
+              </div>
+              <div class="mt-3">
+                <span class="text-lg font-bold text-text-primary">
+                  v{{ state.version }} · {{ hasDraft() ? 'Con contenido' : 'Vacío' }}
+                </span>
+                <p class="text-xs text-text-secondary mt-0.5">
+                  {{ hasDraft() ? 'Borrador editable listo' : 'Sin cambios guardados' }}
+                </p>
+              </div>
+            </div>
+
+            <!-- Card 4: Publicado -->
+            <div class="rounded-xl border border-border bg-surface p-4 shadow-sm flex flex-col justify-between">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold text-text-secondary uppercase tracking-wider">Publicación Online</span>
+                <div class="p-2 rounded-lg" [class]="state.published_at ? 'bg-teal-500/10 text-teal-600' : 'bg-amber-500/10 text-amber-600'">
+                  <app-icon [name]="state.published_at ? 'globe' : 'clock'" [size]="18" />
+                </div>
+              </div>
+              <div class="mt-3">
+                <span class="text-lg font-bold text-text-primary">
+                  {{ state.published_at ? 'En Línea' : 'Sin Publicar' }}
+                </span>
+                <p class="text-xs text-text-secondary mt-0.5">
+                  {{ state.published_at ? 'Pública y recibiendo leads' : 'Publica para activar formulario' }}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card Informativa de Operación -->
+          <div class="rounded-2xl border border-border bg-surface p-6 shadow-sm flex flex-col gap-6">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-5">
+              <div>
+                <h2 class="text-base font-semibold text-text-primary">¿Cómo funciona la Landing Page CRM?</h2>
+                <p class="text-sm text-text-secondary mt-1">
+                  Generamos automáticamente una página de captura de clientes optimizada utilizando tus datos de catálogo, logotipo y configuración comercial.
+                </p>
+              </div>
+
+              @if (state.enabled) {
+                <app-button
+                  variant="outline-danger"
+                  size="sm"
+                  [disabled]="busy()"
+                  (click)="deactivate()"
+                >
+                  <app-icon slot="icon" name="power" [size]="16" />
+                  Desactivar CRM
+                </app-button>
+              }
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
+              <div class="flex gap-3">
+                <div class="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0 font-bold">1</div>
+                <div>
+                  <h3 class="font-semibold text-text-primary">Generación Inteligente</h3>
+                  <p class="text-xs text-text-secondary mt-1">La IA sintetiza tu propuesta de valor, productos top y colores institucionales en bloques estructurados.</p>
+                </div>
+              </div>
+
+              <div class="flex gap-3">
+                <div class="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0 font-bold">2</div>
+                <div>
+                  <h3 class="font-semibold text-text-primary">Editor Visual sin Código</h3>
+                  <p class="text-xs text-text-secondary mt-1">Reordena secciones, personaliza textos, títulos y enlaces CTA en tiempo real antes de publicar.</p>
+                </div>
+              </div>
+
+              <div class="flex gap-3">
+                <div class="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0 font-bold">3</div>
+                <div>
+                  <h3 class="font-semibold text-text-primary">Captura Automática</h3>
+                  <p class="text-xs text-text-secondary mt-1">Cada consulta en tu formulario público se registra directamente en la base de Clientes de tu tienda.</p>
+                </div>
+              </div>
+            </div>
+
+            @if (!state.enabled) {
+              <div class="bg-primary/5 rounded-xl border border-primary/20 p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                  <app-icon name="sparkles" [size]="24" class="text-primary shrink-0" />
+                  <p class="text-sm text-text-primary font-medium">Activa tu módulo CRM ahora para crear tu primera landing page asistida por Inteligencia Artificial.</p>
+                </div>
+                <app-button
+                  variant="primary"
+                  size="md"
+                  [loading]="busy()"
+                  (click)="activate()"
+                >
+                  Activar CRM Ahora
+                </app-button>
+              </div>
             }
           </div>
+        }
 
-          @if (!state.enabled) {
-            <p class="crm-hint">
-              Al activar el CRM generamos automáticamente una landing page con
-              la información de tu negocio: tipo de tienda, industria,
-              ubicación, datos fiscales y tus productos más vendidos. Después
-              podrás editarla sección por sección en la pestaña Diseño.
-            </p>
-          } @else {
-            <ul class="crm-facts">
-              <li>
-                <span class="crm-fact-label">Versión del borrador</span>
-                <span class="crm-fact-value">{{ state.version }}</span>
-              </li>
-              <li>
-                <span class="crm-fact-label">Borrador</span>
-                <span class="crm-fact-value">
-                  {{ hasDraft() ? 'Con contenido' : 'Vacío' }}
+        @case ('diseno') {
+          <div class="flex flex-col gap-4">
+            @if (pendingDocument()) {
+              <div class="flex items-center justify-between bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 px-4 py-2.5 rounded-xl text-xs font-medium">
+                <span class="flex items-center gap-2">
+                  <app-icon name="alert-circle" [size]="15" />
+                  Tienes cambios sin guardar en el borrador.
                 </span>
-              </li>
-              <li>
-                <span class="crm-fact-label">Publicado</span>
-                <span class="crm-fact-value">
-                  {{ state.published_at ? 'Sí' : 'Aún no' }}
-                </span>
-              </li>
-            </ul>
-            <div class="crm-actions">
-              <button
-                app-button
-                variant="outline"
-                [disabled]="busy()"
-                (click)="regenerate()"
-              >
-                Regenerar con IA
-              </button>
-              @if (state.generation_status === 'ready' || hasDraft()) {
-                <button
-                  app-button
-                  variant="primary"
-                  [disabled]="busy()"
-                  (click)="setTab('diseno')"
-                >
-                  Editar mi landing
-                </button>
-              }
-            </div>
-          }
-        </section>
-      }
-      @case ('diseno') {
-        <section class="crm-design">
-          <div class="crm-design-bar">
-            <span class="crm-dirty-note">
-              @if (pendingDocument()) {
-                Cambios sin guardar
-              }
-            </span>
-            <div class="crm-design-actions">
-              <button
-                app-button
-                variant="outline"
-                [disabled]="busy() || !pendingDocument()"
-                (click)="loadLanding()"
-              >
-                Descartar
-              </button>
-              <button
-                app-button
-                variant="outline"
-                [disabled]="busy()"
-                (click)="saveDraft()"
-              >
-                Guardar borrador
-              </button>
-              <button
-                app-button
-                variant="primary"
-                [disabled]="busy()"
-                (click)="publish()"
-              >
-                Publicar
-              </button>
-            </div>
+                <span class="text-[11px] opacity-80">Guarda o publica para aplicar los cambios en vivo.</span>
+              </div>
+            }
+
+            <app-crm-editor
+              [document]="serverDocument()"
+              (documentChange)="onDocumentChange($event)"
+            />
           </div>
-          <app-crm-editor
-            [document]="serverDocument()"
-            (documentChange)="onDocumentChange($event)"
-          />
-        </section>
+        }
       }
     }
-  }
+  </div>
 </div>

@@ -1,116 +1,228 @@
-<div class="crm-editor">
-  <aside class="crm-blocks-panel">
-    <div class="crm-panel-head">
-      <span class="crm-panel-title">Secciones</span>
-      <button type="button" class="crm-icon-btn" (click)="toggleAdding()" aria-label="Agregar sección">
-        <app-icon [name]="adding() ? 'x' : 'plus'" [size]="16" />
-      </button>
-    </div>
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+  <!-- COLUMNA IZQUIERDA: GESTOR DE SECCIONES Y FORMULARIO (5 cols) -->
+  <div class="lg:col-span-5 flex flex-col gap-5">
+    <!-- Panel 1: Lista de Secciones -->
+    <div class="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+      <div class="flex items-center justify-between border-b border-border pb-3.5">
+        <div class="flex items-center gap-2">
+          <app-icon name="layers" [size]="18" class="text-primary" />
+          <h2 class="text-sm font-bold text-text-primary uppercase tracking-wider">Estructura de Secciones</h2>
+        </div>
+        
+        <app-button
+          variant="outline"
+          size="sm"
+          (click)="toggleAdding()"
+          [attr.aria-label]="adding() ? 'Cerrar opciones' : 'Añadir sección'"
+        >
+          <app-icon slot="icon" [name]="adding() ? 'x' : 'plus'" [size]="14" />
+          {{ adding() ? 'Cerrar' : 'Añadir' }}
+        </app-button>
+      </div>
 
-    @if (adding()) {
-      <ul class="crm-add-list">
-        @for (type of typesList(); track type) {
-          <li>
-            <button type="button" class="crm-add-option" (click)="addBlock(type)">
-              {{ labelFor(type) }}
-            </button>
+      <!-- Menú Desplegable de Añadir Sección -->
+      @if (adding()) {
+        <div class="mt-3.5 p-3 rounded-xl bg-surface-hover/70 border border-border/80 flex flex-col gap-1.5 animate-fadeIn">
+          <span class="text-xs font-semibold text-text-secondary px-1 mb-1">Selecciona el tipo de sección:</span>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+            @for (type of typesList(); track type) {
+              <button
+                type="button"
+                class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-text-primary hover:bg-primary/10 hover:text-primary transition-colors text-left"
+                (click)="addBlock(type)"
+              >
+                <app-icon [name]="iconFor(type)" [size]="15" class="text-primary/80 shrink-0" />
+                <span>{{ labelFor(type) }}</span>
+              </button>
+            }
+          </div>
+        </div>
+      }
+
+      <!-- Lista de Bloques -->
+      <ul class="mt-4 flex flex-col gap-2">
+        @for (block of blocks(); track block.id; let i = $index) {
+          <li
+            class="group flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer select-none"
+            [class]="selectedIndex() === i 
+              ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/30' 
+              : 'border-border bg-surface hover:border-border-hover hover:bg-surface-hover/50'"
+            (click)="select(i)"
+          >
+            <div class="flex items-center gap-2.5">
+              <div 
+                class="p-1.5 rounded-lg flex items-center justify-center transition-colors"
+                [class]="selectedIndex() === i ? 'bg-primary text-white' : 'bg-surface-hover text-text-secondary group-hover:text-text-primary'"
+              >
+                <app-icon [name]="iconFor(block.type)" [size]="15" />
+              </div>
+              <div class="flex flex-col">
+                <span class="text-xs font-semibold text-text-primary">{{ labelFor(block.type) }}</span>
+                <span class="text-[10px] text-text-secondary">Bloque #{{ i + 1 }} · {{ block.type }}</span>
+              </div>
+            </div>
+
+            <!-- Controles de Bloque -->
+            <div class="flex items-center gap-1">
+              <button
+                type="button"
+                class="p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent"
+                [disabled]="i === 0"
+                (click)="move(i, -1); $event.stopPropagation()"
+                title="Subir sección"
+                aria-label="Subir sección"
+              >
+                <app-icon name="chevron-up" [size]="14" />
+              </button>
+              <button
+                type="button"
+                class="p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-surface-hover disabled:opacity-30 disabled:hover:bg-transparent"
+                [disabled]="i === blocks().length - 1"
+                (click)="move(i, 1); $event.stopPropagation()"
+                title="Bajar sección"
+                aria-label="Bajar sección"
+              >
+                <app-icon name="chevron-down" [size]="14" />
+              </button>
+              <button
+                type="button"
+                class="p-1.5 rounded-md text-text-secondary hover:text-red-600 hover:bg-red-500/10"
+                (click)="remove(i); $event.stopPropagation()"
+                title="Eliminar sección"
+                aria-label="Eliminar sección"
+              >
+                <app-icon name="trash-2" [size]="14" />
+              </button>
+            </div>
+          </li>
+        } @empty {
+          <li class="p-8 text-center border-2 border-dashed border-border rounded-xl text-text-secondary flex flex-col items-center gap-2">
+            <app-icon name="layout" [size]="28" class="opacity-40" />
+            <p class="text-xs font-medium">Aún no hay secciones en tu landing page.</p>
+            <p class="text-[11px] opacity-75">Haz clic en "+ Añadir" para agregar tu primera sección.</p>
           </li>
         }
       </ul>
-    }
+    </div>
 
-    <ul class="crm-blocks-list">
-      @for (block of blocks(); track block.id; let i = $index) {
-        <li
-          class="crm-block-item"
-          [class.crm-block-active]="selectedIndex() === i"
-          (click)="select(i)"
-        >
-          <span class="crm-block-label">{{ labelFor(block.type) }}</span>
-          <span class="crm-block-actions">
-            <button
-              type="button"
-              class="crm-mini-btn"
-              (click)="move(i, -1); $event.stopPropagation()"
-              [disabled]="i === 0"
-              aria-label="Subir"
-            >
-              <app-icon name="chevron-up" [size]="14" />
-            </button>
-            <button
-              type="button"
-              class="crm-mini-btn"
-              (click)="move(i, 1); $event.stopPropagation()"
-              [disabled]="i === blocks().length - 1"
-              aria-label="Bajar"
-            >
-              <app-icon name="chevron-down" [size]="14" />
-            </button>
-            <button
-              type="button"
-              class="crm-mini-btn crm-mini-danger"
-              (click)="remove(i); $event.stopPropagation()"
-              aria-label="Quitar"
-            >
-              <app-icon name="trash-2" [size]="14" />
-            </button>
-          </span>
-        </li>
-      } @empty {
-        <li class="crm-empty">Sin secciones. Agrega la primera con +.</li>
-      }
-    </ul>
-  </aside>
-
-  <section class="crm-edit-area">
+    <!-- Panel 2: Editor de Propiedades de la Sección Seleccionada -->
     @if (selectedBlock(); as block) {
-      <div class="crm-form">
-        <h3 class="crm-form-title">{{ labelFor(block.type) }}</h3>
-        @for (field of fields(); track field.key) {
-          <label class="crm-field">
-            <span class="crm-field-label">{{ field.label }}</span>
-            @if (field.multiline) {
-              <textarea
-                class="crm-input"
-                rows="4"
-                [placeholder]="field.placeholder || ''"
-                [value]="block.props[field.key] || ''"
-                (input)="onPropChange(field.key, $any($event.target).value)"
-              ></textarea>
-            } @else {
-              <input
-                class="crm-input"
-                type="text"
-                [placeholder]="field.placeholder || ''"
-                [value]="block.props[field.key] || ''"
-                (input)="onPropChange(field.key, $any($event.target).value)"
-              />
-            }
-            @if (field.hint) {
-              <span class="crm-field-hint">{{ field.hint }}</span>
-            }
-          </label>
-        }
-      </div>
+      <div class="rounded-2xl border border-border bg-surface p-5 shadow-sm flex flex-col gap-4 animate-fadeIn">
+        <div class="flex items-center gap-2 border-b border-border pb-3">
+          <div class="p-1.5 rounded-lg bg-primary/10 text-primary">
+            <app-icon [name]="iconFor(block.type)" [size]="16" />
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-text-primary">Editar: {{ labelFor(block.type) }}</h3>
+            <p class="text-[11px] text-text-secondary">Modifica los contenidos que se mostrarán en esta sección</p>
+          </div>
+        </div>
 
-      <div class="crm-preview">
-        <span class="crm-preview-title">Vista previa</span>
-        <div class="crm-preview-frame">
-          @for (b of blocks(); track b.id; let i = $index) {
-            <div
-              class="crm-preview-block"
-              [class.crm-preview-selected]="selectedIndex() === i"
-              (click)="select(i)"
-            >
-              <app-block-renderer [block]="b" (ctaClick)="ctaClicked()" />
+        <div class="flex flex-col gap-3.5">
+          @for (field of fields(); track field.key) {
+            <div class="flex flex-col gap-1.5">
+              <label class="text-xs font-medium text-text-primary flex items-center justify-between">
+                <span>{{ field.label }}</span>
+                @if (field.hint) {
+                  <span class="text-[10px] text-text-secondary font-normal">{{ field.hint }}</span>
+                }
+              </label>
+
+              @if (field.multiline) {
+                <textarea
+                  class="w-full rounded-xl border border-border bg-surface px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary/50 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                  rows="3"
+                  [placeholder]="field.placeholder || ''"
+                  [value]="block.props[field.key] || ''"
+                  (input)="onPropChange(field.key, $any($event.target).value)"
+                ></textarea>
+              } @else {
+                <input
+                  class="w-full rounded-xl border border-border bg-surface px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary/50 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                  type="text"
+                  [placeholder]="field.placeholder || ''"
+                  [value]="block.props[field.key] || ''"
+                  (input)="onPropChange(field.key, $any($event.target).value)"
+                />
+              }
             </div>
           }
         </div>
       </div>
-    } @else {
-      <p class="crm-placeholder">
-        Selecciona una sección para editarla, o agrega una nueva.
-      </p>
     }
-  </section>
+  </div>
+
+  <!-- COLUMNA DERECHA: VISTA PREVIA EN VIVO (7 cols) -->
+  <div class="lg:col-span-7 flex flex-col gap-3 sticky top-20">
+    <div class="rounded-2xl border border-border bg-surface overflow-hidden shadow-sm flex flex-col">
+      <!-- Barra superior de la vista previa (Simulador Browser) -->
+      <div class="px-4 py-3 bg-surface-hover/60 border-b border-border flex items-center justify-between gap-4">
+        <div class="flex items-center gap-2">
+          <div class="flex items-center gap-1.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-red-400/80"></span>
+            <span class="w-2.5 h-2.5 rounded-full bg-amber-400/80"></span>
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400/80"></span>
+          </div>
+          <span class="text-xs font-semibold text-text-secondary ml-2">Vista Previa en Vivo</span>
+        </div>
+
+        <div class="flex items-center gap-1 bg-surface rounded-lg p-0.5 border border-border">
+          <button
+            type="button"
+            class="px-2.5 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1.5"
+            [class]="previewMode() === 'desktop' ? 'bg-primary text-white shadow-xs' : 'text-text-secondary hover:text-text-primary'"
+            (click)="setPreviewMode('desktop')"
+          >
+            <app-icon name="monitor" [size]="13" />
+            <span class="hidden sm:inline">Escritorio</span>
+          </button>
+          <button
+            type="button"
+            class="px-2.5 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1.5"
+            [class]="previewMode() === 'mobile' ? 'bg-primary text-white shadow-xs' : 'text-text-secondary hover:text-text-primary'"
+            (click)="setPreviewMode('mobile')"
+          >
+            <app-icon name="smartphone" [size]="13" />
+            <span class="hidden sm:inline">Móvil</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Canvas de Render de Bloques -->
+      <div class="p-4 bg-zinc-100 dark:bg-zinc-950 min-h-[500px] max-h-[780px] overflow-y-auto flex justify-center">
+        <div 
+          class="w-full transition-all duration-300 bg-surface rounded-xl shadow-sm overflow-hidden flex flex-col"
+          [style.max-width]="previewMode() === 'mobile' ? '375px' : '100%'"
+        >
+          @for (b of blocks(); track b.id; let i = $index) {
+            <div 
+              class="relative group transition-all"
+              [class.ring-2]="selectedIndex() === i"
+              [class.ring-primary]="selectedIndex() === i"
+              (click)="select(i)"
+            >
+              <app-block-renderer
+                [block]="b"
+                (ctaClick)="ctaClicked()"
+              />
+
+              <!-- Overlay al pasar el cursor para edición rápida -->
+              <div 
+                class="absolute inset-0 bg-primary/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none flex items-start justify-end p-2"
+              >
+                <span class="bg-primary text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-sm">
+                  {{ labelFor(b.type) }}
+                </span>
+              </div>
+            </div>
+          } @empty {
+            <div class="py-20 text-center text-text-secondary flex flex-col items-center gap-2">
+              <app-icon name="sparkles" [size]="32" class="opacity-30 text-primary" />
+              <p class="text-sm font-medium">Agrega secciones para ver la vista previa en vivo</p>
+            </div>
+          }
+        </div>
+      </div>
+    </div>
+  </div>
 </div>

@@ -12,22 +12,33 @@ import {
 } from '../../../../../../public/dynamic-landing/blocks/landing-blocks.types';
 import { ToastService } from '../../../../../../shared/components';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { ButtonComponent } from '../../../../../../shared/components';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import {
+  StickyHeaderComponent,
+  StickyHeaderActionButton,
+  StickyHeaderTab,
+} from '../../../../../../shared/components/sticky-header/sticky-header.component';
 import { CrmEditorComponent } from '../crm-editor/crm-editor.component';
 
 const STATUS_LABELS: Record<CrmGenerationStatus, string> = {
   idle: 'Sin generar',
-  pending: 'En cola',
-  generating: 'Generando con IA',
-  ready: 'Lista',
-  failed: 'Error en la generación',
+  pending: 'En cola de generación',
+  generating: 'Generando con IA…',
+  ready: 'Lista y lista para publicar',
+  failed: 'Generación manual requerida',
 };
 
 type CrmTab = 'estado' | 'diseno';
 
 @Component({
   selector: 'app-crm-main-page',
-  imports: [CommonModule, IconComponent, ButtonComponent, CrmEditorComponent],
+  imports: [
+    CommonModule,
+    IconComponent,
+    ButtonComponent,
+    StickyHeaderComponent,
+    CrmEditorComponent,
+  ],
   templateUrl: './crm-main-page.component.html',
   styleUrl: './crm-main-page.component.scss',
 })
@@ -42,6 +53,91 @@ export class CrmMainPageComponent {
   readonly tab = signal<CrmTab>('estado');
   /** Documento editado localmente aún no guardado. */
   readonly pendingDocument = signal<CrmLandingDocument | null>(null);
+
+  readonly headerTabs = computed<StickyHeaderTab[]>(() => {
+    const state = this.landing();
+    return [
+      {
+        id: 'estado',
+        label: 'Estado y Configuración',
+        shortLabel: 'Estado',
+        icon: 'activity',
+        description: 'Supervisa el estado del CRM, versión del borrador y regeneración inteligente.',
+      },
+      {
+        id: 'diseno',
+        label: 'Editor y Diseño',
+        shortLabel: 'Diseño',
+        icon: 'palette',
+        disabled: !state?.enabled,
+        description: 'Edita los bloques visuales, textos, productos destacados y vista previa de tu landing.',
+      },
+    ];
+  });
+
+  readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
+    const currentTab = this.tab();
+    const state = this.landing();
+    const isBusy = this.busy();
+
+    if (currentTab === 'estado') {
+      if (!state?.enabled) {
+        return [
+          {
+            id: 'activate',
+            label: 'Activar CRM',
+            variant: 'primary',
+            icon: 'sparkles',
+            loading: isBusy,
+            disabled: isBusy,
+          },
+        ];
+      }
+      return [
+        {
+          id: 'regenerate',
+          label: 'Regenerar con IA',
+          variant: 'outline',
+          icon: 'refresh-cw',
+          loading: isBusy,
+          disabled: isBusy,
+        },
+        {
+          id: 'edit_design',
+          label: 'Editar Landing',
+          variant: 'primary',
+          icon: 'edit-3',
+          disabled: isBusy || (!this.hasDraft() && state.generation_status !== 'ready'),
+        },
+      ];
+    }
+
+    return [
+      {
+        id: 'discard',
+        label: 'Descartar',
+        variant: 'ghost',
+        icon: 'rotate-ccw',
+        disabled: isBusy || !this.pendingDocument(),
+      },
+      {
+        id: 'save_draft',
+        label: 'Guardar Borrador',
+        variant: 'outline',
+        icon: 'save',
+        loading: isBusy,
+        disabled: isBusy,
+      },
+      {
+        id: 'publish',
+        label: 'Publicar Landing',
+        variant: 'primary',
+        icon: 'globe',
+        loading: isBusy,
+        disabled: isBusy,
+      },
+    ];
+  });
 
   readonly statusLabel = computed(() => {
     const landing = this.landing();
@@ -68,6 +164,29 @@ export class CrmMainPageComponent {
 
   setTab(tab: CrmTab): void {
     this.tab.set(tab);
+  }
+
+  onHeaderAction(actionId: string): void {
+    switch (actionId) {
+      case 'activate':
+        this.activate();
+        break;
+      case 'regenerate':
+        this.regenerate();
+        break;
+      case 'edit_design':
+        this.setTab('diseno');
+        break;
+      case 'discard':
+        this.loadLanding();
+        break;
+      case 'save_draft':
+        this.saveDraft();
+        break;
+      case 'publish':
+        this.publish();
+        break;
+    }
   }
 
   loadLanding(): void {
