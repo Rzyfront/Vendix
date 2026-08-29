@@ -26,6 +26,8 @@ export class HighConversionService {
   readonly enabled = signal<boolean>(true);
 
   constructor() {
+    // eslint-disable-next-line no-console
+    console.log('[HCS-DEBUG] service CONSTRUCTOR running');
     this.storeSettingsService
       .getSettings({ forceRefresh: true })
       .pipe(takeUntilDestroyed(this.destroyRef))
