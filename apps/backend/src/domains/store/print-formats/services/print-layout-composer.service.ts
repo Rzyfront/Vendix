@@ -510,6 +510,16 @@ export class PrintLayoutComposerService {
       ? '<span class="vendix-token-pill" data-token="order.tax_amount">&#123;&#123; money order.tax_amount &#125;&#125;</span>'
       : this.compiler.escapeHtml(totals.tax_total_formatted || `$${Number(totals.tax_total).toLocaleString('es-CO')}`);
 
+    // Retención: SIEMPRE con el signo de presentación y SIEMPRE informativa —
+    // no resta del total (`invoice-calculator.service.ts`). Sin pastilla de
+    // token porque la fila sólo existe cuando el documento trae retención, y
+    // sólo la factura fiscal la declara; los otros nueve documentos del
+    // dominio no deben ver el elemento en el editor.
+    const retenVal = `-${this.compiler.escapeHtml(
+      totals.withholding_total_formatted ||
+        `$${Number(totals.withholding_total || 0).toLocaleString('es-CO')}`,
+    )}`;
+
     const grandVal = mode === 'tokenized'
       ? '<span class="vendix-token-pill" data-token="order.grand_total">&#123;&#123; money order.grand_total &#125;&#125;</span>'
       : this.compiler.escapeHtml(totals.grand_total_formatted || `$${Number(totals.grand_total || 0).toLocaleString('es-CO')}`);
@@ -540,10 +550,19 @@ export class PrintLayoutComposerService {
               <td class="total-label">Impuestos (IVA):</td>
               <td class="total-val">${taxVal}</td>
             </tr>` : ''}
+            ${Number(totals.withholding_total) > 0 ? `
+            <tr data-element-id="f_reten" data-section-id="sec_totals" data-token="order.withholding_amount">
+              <td class="total-label">Retención:</td>
+              <td class="total-val discount">${retenVal}</td>
+            </tr>` : ''}
             <tr class="grand-total-row" data-element-id="f_tot" data-section-id="sec_totals" data-token="order.grand_total">
               <td class="total-label">TOTAL:</td>
               <td class="total-val grand-total">${grandVal}</td>
             </tr>
+            ${totals.grand_total_in_words ? `
+            <tr class="total-in-words-row" data-element-id="f_words" data-section-id="sec_totals" data-token="order.grand_total_in_words">
+              <td class="total-label" colspan="2">Valor en letras: ${this.compiler.escapeHtml(totals.grand_total_in_words)}</td>
+            </tr>` : ''}
             ${mode === 'tokenized' || doc.payment_method ? `
             <tr class="payment-info-row" data-element-id="f_paym" data-section-id="sec_totals" data-token="order.payment_method">
               <td class="total-label">Pago (${mode === 'tokenized' ? 'Método' : this.compiler.escapeHtml(doc.payment_method)}):</td>

@@ -20,7 +20,7 @@
  * regla de `parallel`: no levantar workers que peleen memoria).
  */
 import { VendixHttpException } from 'src/common/errors';
-import { DispatchTicketDataProvider } from './dispatch-ticket.provider';
+import { DispatchTicketDataProvider } from '../dispatch-ticket.provider';
 
 describe('DispatchTicketDataProvider (CP-DTLP-20260827 Phase B.4)', () => {
   const nulo = null as any;
