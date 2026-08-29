@@ -16,6 +16,7 @@ import { Public } from '../../auth/decorators/public.decorator';
 import { IsString } from 'class-validator';
 import { RequestContextService } from '@common/context/request-context.service';
 import { UpdateStoreFiscalDataDto } from './dto/update-store-fiscal-data.dto';
+import { StorePrismaService } from '@modules/store/database/store-prisma.service';
 
 export class ApplyTemplateDto {
   @IsString()
@@ -30,6 +31,7 @@ export class SettingsController {
     private readonly settingsService: SettingsService,
     private readonly scheduleValidationService: ScheduleValidationService,
     private readonly responseService: ResponseService,
+    private readonly storePrisma: StorePrismaService,
   ) {}
 
   @Get()
@@ -52,6 +54,10 @@ export class SettingsController {
    * business hours, payment config) are NOT exposed here.
    *
    * Consumed by HighConversionService in the cart drawer for guests.
+   *
+   * For now uses Prisma to find the first store. Future improvement:
+   * accept `?store_id=X` query param or read from `x-store-id` header
+   * for multi-store deployments.
    */
   @Get('public')
   @Public()
@@ -63,8 +69,23 @@ export class SettingsController {
     description: 'Public UI flags retrieved successfully',
   })
   async getPublicFlags() {
-    const settings = await this.settingsService.getSettings();
-    const promotions = settings?.promotions ?? {};
+    // TODO multi-store: read from x-store-id header or ?store_id query
+    const store = await this.storePrisma.store.findFirst({
+      where: { is_active: true, deleted_at: null },
+      orderBy: { id: 'asc' },
+    });
+    if (!store) {
+      return this.responseService.success({
+        enable_high_conversion_ui: true,
+      });
+    }
+    // Read the raw settings row to avoid the store-context requirement
+    // in SettingsService.getSettings(). This endpoint is public.
+    const row = await this.storePrisma.store_settings.findFirst({
+      where: { store_id: store.id },
+      select: { settings: true },
+    });
+    const promotions = (row?.settings as any)?.promotions ?? {};
     return this.responseService.success({
       enable_high_conversion_ui:
         promotions.enable_high_conversion_ui !== false,
