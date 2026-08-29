@@ -284,6 +284,14 @@
   color: var(--color-text-secondary, #6b7280);
 }
 
+.promotion-stack__tier-discount {
+  margin-top: 0.125rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-success, #059669);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── active celebration banner ───────────────────────────────────── */
 .promotion-stack__active-celebration {
   display: flex;

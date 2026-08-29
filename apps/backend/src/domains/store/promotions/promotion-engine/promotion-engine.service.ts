@@ -583,20 +583,6 @@ export class PromotionEngineService {
       input.strategy ??
       rawPromoSettings?.evaluation_strategy ??
       'winner_takes_all';
-    // [PROMO-DEBUG] Temporary diagnostic — remove after bug fix is verified.
-    // eslint-disable-next-line no-console
-    console.log(
-      '[PROMO-DEBUG]',
-      JSON.stringify({
-        hasSettingsRow: settingsRow !== undefined && settingsRow !== null,
-        hasPromotionsKey: rawPromoSettings !== undefined,
-        rawEvaluationStrategy: rawPromoSettings?.evaluation_strategy ?? null,
-        maxCombinedDiscountPercent: rawPromoSettings?.max_combined_discount_percentage ?? null,
-        allowOrderPromoStacking: rawPromoSettings?.allow_order_promo_stacking ?? null,
-        inputStrategy: input.strategy ?? null,
-        resolvedStrategy: strategy,
-      }),
-    );
     const maxCombinedDiscountPercent =
       rawPromoSettings?.max_combined_discount_percentage != null
         ? Number(rawPromoSettings.max_combined_discount_percentage)
