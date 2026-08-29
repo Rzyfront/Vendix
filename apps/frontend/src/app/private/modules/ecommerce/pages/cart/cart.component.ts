@@ -140,8 +140,10 @@ export class CartComponent implements OnInit {
     this.currencyService.loadCurrency();
 
     // Leer el toggle de badges dinámicos desde settings.promotions
+    // forceRefresh: true para que un cambio en admin (toggle ON/OFF) se refleje
+    // inmediatamente al recargar el cart, sin esperar al TTL del cache (60s).
     this.storeSettingsService
-      .getSettings()
+      .getSettings({ forceRefresh: true })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
