@@ -2,11 +2,13 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  DestroyRef,
   inject,
   input,
   output,
   signal,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
@@ -17,6 +19,7 @@ import {
   CurrencyFormatService,
 } from '../../../../../shared/pipes/currency';
 import { Cart } from '../../services/cart.service';
+import { StoreSettingsService } from '../../../store/settings/general/services/store-settings.service';
 
 /**
  * POS-style fixed mobile footer for the ecommerce cart.
@@ -150,7 +153,7 @@ import { Cart } from '../../services/cart.service';
 
           <!-- Promociones aplicadas (el nudge de tramo vive ahora en el
                bannersito del carrito, no aquí). -->
-          <app-cart-promotions [cart]="cart()" [showTier]="false" />
+          <app-cart-promotions [cart]="cart()" [showTier]="false" [highConversionEnabled]="highConversionEnabled()" />
 
           <!-- Envío -->
           <div class="sheet-row">
@@ -595,6 +598,8 @@ import { Cart } from '../../services/cart.service';
 })
 export class CartMobileFooterComponent {
   private readonly currencyFormat = inject(CurrencyFormatService);
+  private readonly storeSettingsService = inject(StoreSettingsService);
+  private readonly destroyRef = inject(DestroyRef);
 
   /** Source cart. Totals/promotions are read reactively from this signal. */
   readonly cart = input<Cart | null>(null);
@@ -616,6 +621,10 @@ export class CartMobileFooterComponent {
    *  `@if`-rendered slide-up sheet (overlay + drawer) in the template. */
   readonly detailOpen = signal(false);
 
+  /** Toggle "Experiencia de Alta Conversión". Default true hasta que
+   * settings responda con `enable_high_conversion_ui: false`. */
+  readonly highConversionEnabled = signal<boolean>(true);
+
   /**
    * Tenant currency code, referenced in the template (`[attr.data-currency]`)
    * so this OnPush component's change detection is tied to the async currency
@@ -623,6 +632,26 @@ export class CartMobileFooterComponent {
    * `| currency` pipe from getting stuck on its fallback formatting.
    */
   protected readonly currencyCode = this.currencyFormat.currencyCode;
+
+  constructor() {
+    // Cargar toggle de badges dinámicos desde settings.promotions.
+    // forceRefresh: true para que un cambio en admin se refleje inmediatamente
+    // al recargar el cart (sin esperar al TTL del cache de 60s).
+    this.storeSettingsService
+      .getSettings({ forceRefresh: true })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          const enabled = response?.data?.promotions?.enable_high_conversion_ui;
+          if (enabled !== undefined) {
+            this.highConversionEnabled.set(enabled);
+          }
+        },
+        error: () => {
+          // Silenciar — default true ya está seteado
+        }
+      });
+  }
 
   /** Payable total: promotional subtotal when a discount applies, else subtotal. */
   readonly total = computed<number>(() => {
