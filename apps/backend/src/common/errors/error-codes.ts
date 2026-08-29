@@ -5535,6 +5535,35 @@ export const ErrorCodes = {
     devMessage:
       'Platform profile preview pending (B.4): the calculator + UBL preview path must be wrapped org-scoped, reusing ProfilePreviewService from the store rail rather than copying it.',
   },
+
+  // CRM Landing (QUI-719): la tienda aún no tiene fila de landing.
+  // 404: GET/PUT antes de activar el módulo, o store_id sin landing creada.
+  CRM_LANDING_001: {
+    code: 'CRM_LANDING_001',
+    httpStatus: 404,
+    devMessage:
+      'Aún no existe una landing para esta tienda. Activa el módulo CRM primero.',
+  },
+
+  // CRM Landing (QUI-719): operación que requiere el módulo activado.
+  // 409: editar/guardar draft con enabled=false. El estado inerte es
+  // explícito en el producto: sin activación no hay edición.
+  CRM_LANDING_002: {
+    code: 'CRM_LANDING_002',
+    httpStatus: 409,
+    devMessage:
+      'El módulo CRM está desactivado. Actívalo para editar tu landing.',
+  },
+
+  // CRM Landing (QUI-719): el JSON de bloques no cumple el contrato v1.
+  // 422: el validador del schema rechazó content_json (versión desconocida,
+  // bloque con tipo fuera del catálogo o props faltantes).
+  CRM_LANDING_003: {
+    code: 'CRM_LANDING_003',
+    httpStatus: 422,
+    devMessage:
+      'El contenido de la landing no cumple la estructura esperada. Revisa las secciones e intenta de nuevo.',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {
