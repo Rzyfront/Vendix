@@ -1,7 +1,7 @@
-import { DestroyRef, Injectable, inject, signal } from '@angular/core';
+import { DestroyRef, HttpClient, HttpErrorResponse, Injectable, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { HttpErrorResponse } from '@angular/common/http';
-import { StoreSettingsService } from '../../private/modules/store/settings/general/services/store-settings.service';
+import { environment } from '../../../environments/environment';
+import { catchError, map, of } from 'rxjs';
 
 /**
  * Toggle "Experiencia de Alta Conversión (Visualización Promocional)"
@@ -11,70 +11,41 @@ import { StoreSettingsService } from '../../private/modules/store/settings/gener
  * badges de celebración) deben ocultarse. Cuando es `true`, el comportamiento
  * es el normal (badges visibles).
  *
- * Política de auth:
- * - Sin token en localStorage (usuario guest) → no se llama al API, default
- *   `true` (mostrar badges — el toggle no aplica a guests porque no
- *   tienen settings personalizados).
- * - Con token → fetch del API con forceRefresh. Si responde 200 → valor
- *   del admin. Si responde 401 (token expirado) → default `true`.
- * - Otros errores (500, network) → default `false` (conservador).
+ * Lee SIEMPRE del endpoint público `GET /store/settings/public` (sin auth) para
+ * que el toggle funcione tanto para guests como para usuarios autenticados.
+ * El endpoint público solo expone flags no-sensibles (high_conversion_ui).
  */
 @Injectable({ providedIn: 'root' })
 export class HighConversionService {
-  private readonly storeSettingsService = inject(StoreSettingsService);
+  private readonly http = inject(HttpClient);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly enabled = signal<boolean>(true);
 
   constructor() {
-    // Guest detection: si no hay access token, asumimos true (mostrar
-    // badges). El toggle admin solo aplica a usuarios autenticados.
-    const hasToken = this.hasAuthToken();
-    if (!hasToken) {
-      this.enabled.set(true);
-      return;
-    }
-
-    this.storeSettingsService
-      .getSettings({ forceRefresh: true })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (response) => {
-          const flag = response?.data?.promotions?.enable_high_conversion_ui;
-          if (flag !== undefined) {
-            this.enabled.set(flag);
-          }
-        },
-        error: (err) => {
-          if (err instanceof HttpErrorResponse) {
-            // eslint-disable-next-line no-console
-            console.warn(
-              '[HCS] settings.promotions fetch failed:',
-              err.status,
-              err.statusText,
-            );
-            // 401 = token expirado o inválido. En ese caso, mantenemos el
-            // default `true` (mostrar badges) porque el admin las quiere
-            // habilitadas y el problema es de auth, no de toggle.
-            if (err.status === 401) {
-              this.enabled.set(true);
-            }
-          }
-        },
+    this.http
+      .get<{ success: boolean; data: { enable_high_conversion_ui: boolean } }>(
+        `${environment.apiUrl}/store/settings/public`,
+      )
+      .pipe(
+        map((response) => response?.data?.enable_high_conversion_ui !== false),
+        catchError((err: unknown) => {
+          // Fail-safe conservador: si el endpoint público también falla
+          // (500, network), ocultamos los badges. Los usuarios al menos
+          // no ven celebración falsa.
+          // eslint-disable-next-line no-console
+          console.warn(
+            '[HCS] public settings.promotions fetch failed:',
+            err instanceof HttpErrorResponse
+              ? `${err.status} ${err.statusText}`
+              : String(err),
+          );
+          return of(false);
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((enabled) => {
+        this.enabled.set(enabled);
       });
-  }
-
-  private hasAuthToken(): boolean {
-    try {
-      // El authService guarda el token en localStorage bajo 'vendix_auth_state'.
-      // Si no está, el usuario es guest y no podemos llamar al endpoint
-      // protegido.
-      const raw = localStorage.getItem('vendix_auth_state');
-      if (!raw) return false;
-      const parsed = JSON.parse(raw);
-      return Boolean(parsed?.tokens?.access_token);
-    } catch {
-      return false;
-    }
   }
 }

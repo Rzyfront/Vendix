@@ -12,6 +12,7 @@ import { ScheduleValidationService } from './schedule-validation.service';
 import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { Public } from '../../auth/decorators/public.decorator';
 import { IsString } from 'class-validator';
 import { RequestContextService } from '@common/context/request-context.service';
 import { UpdateStoreFiscalDataDto } from './dto/update-store-fiscal-data.dto';
@@ -41,6 +42,33 @@ export class SettingsController {
   async getSettings() {
     const settings = await this.settingsService.getSettings();
     return this.responseService.success(settings);
+  }
+
+  /**
+   * Public endpoint — no auth required. Returns ONLY non-sensitive UI
+   * flags that the storefront needs before the user is authenticated
+   * (e.g. the high-conversion UI toggle that controls celebration
+   * badges in the cart drawer). Sensitive settings (fiscal data,
+   * business hours, payment config) are NOT exposed here.
+   *
+   * Consumed by HighConversionService in the cart drawer for guests.
+   */
+  @Get('public')
+  @Public()
+  @ApiOperation({
+    summary: 'Get public UI flags (no auth required)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Public UI flags retrieved successfully',
+  })
+  async getPublicFlags() {
+    const settings = await this.settingsService.getSettings();
+    const promotions = settings?.promotions ?? {};
+    return this.responseService.success({
+      enable_high_conversion_ui:
+        promotions.enable_high_conversion_ui !== false,
+    });
   }
 
   @Get('schedule-status')
