@@ -73,8 +73,9 @@ export class KdsSessionsController {
   }
 
   /**
-   * (a) Historial de consumos: una fila por insumo POR PEDIDO, con cantidad y
-   * costo. Permite navegar del resumen al detalle.
+   * (a) Historial de consumos: una fila por insumo POR PEDIDO, con la cantidad
+   * consumida. ADR-10: el KDS no transporta dinero. Permite navegar del resumen
+   * al detalle.
    */
   /**
    * Reporte de consumo de insumos por estación, agregable por KDS y por rango.
@@ -124,9 +125,9 @@ export class KdsSessionsController {
   }
 
   /**
-   * (b) Resumen de consumos: una fila por insumo con cantidad y costo totales
-   * del turno. En vivo mientras la sesión está abierta; tras cerrar, el valor
-   * congelado vive en `kds_sessions.summary`.
+   * (b) Resumen de consumos: una fila por insumo con la cantidad total del
+   * turno. ADR-10: sin dinero en el payload. En vivo mientras la sesión está
+   * abierta; tras cerrar, el valor congelado vive en `kds_sessions.summary`.
    */
   @Get(':id/consumption-summary')
   @Permissions('store:kds_sessions:read')

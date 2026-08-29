@@ -48,7 +48,7 @@ export class KdsSessionsService {
   }
 
   async findAll(kdsId?: number) {
-    return this.prisma.kds_sessions.findMany({
+    const sessions = await this.prisma.kds_sessions.findMany({
       where: { ...(kdsId != null && { kds_id: kdsId }) },
       orderBy: { opened_at: 'desc' },
       take: 100,
@@ -58,6 +58,30 @@ export class KdsSessionsService {
         closed_by_user: { select: { id: true, first_name: true, last_name: true } },
       },
     });
+    return sessions.map((s) => ({ ...s, summary: this.stripSummaryCost(s.summary) }));
+  }
+
+  /**
+   * ADR-10: el KDS nunca muestra dinero. El snapshot `summary` persistido al
+   * cerrar un turno ANTES de esta regla puede traer `total_cost`/`unit_cost` en
+   * su JSON. Al servirlo se proyecta sin dinero: se conservan las cantidades por
+   * insumo y se descartan las claves de costo. No borra nada en base — solo deja
+   * de enviarlas en el payload.
+   */
+  private stripSummaryCost(summary: any): any {
+    if (!summary || typeof summary !== 'object') return summary;
+    const clean = { ...summary };
+    delete clean.total_cost;
+    if (Array.isArray(clean.ingredients)) {
+      clean.ingredients = clean.ingredients.map((i: any) => {
+        if (!i || typeof i !== 'object') return i;
+        const copy = { ...i };
+        delete copy.total_cost;
+        delete copy.unit_cost;
+        return copy;
+      });
+    }
+    return clean;
   }
 
   /**
@@ -138,11 +162,10 @@ export class KdsSessionsService {
    * (a) HISTORIAL de consumos — una fila por insumo POR PEDIDO.
    *
    * Es una consulta sobre `inventory_transactions` filtrada por
-   * `kds_session_id`. El costo sale de las columnas `unit_cost`/`total_cost` que
-   * QUI-651 agregó: antes el costo por movimiento no existía en ninguna parte
-   * joineable — no estaba en inventory_transactions ni en inventory_movements, y
-   * el `total_value` de inventory_valuation_snapshots es el valor del stock
-   * ON-HAND posterior al movimiento, no el costo de lo consumido.
+   * `kds_session_id`. ADR-10: el KDS nunca muestra dinero. El historial expone
+   * SOLO cantidades por insumo; `unit_cost`/`total_cost` no se proyectan (vivían
+   * en las columnas que QUI-651 agregó, pero esa información pertenece a la capa
+   * de contabilidad/reportes, nunca a la superficie de cocina).
    */
   async getConsumptionHistory(sessionId: number) {
     const rows = await this.prisma.inventory_transactions.findMany({
@@ -152,8 +175,6 @@ export class KdsSessionsService {
         id: true,
         created_at: true,
         quantity_change: true,
-        unit_cost: true,
-        total_cost: true,
         products: { select: { id: true, name: true, sku: true } },
         order_items: {
           select: {
@@ -172,8 +193,6 @@ export class KdsSessionsService {
       // El fire registra el consumo como cantidad NEGATIVA. Se expone en
       // positivo porque la vista es "cuánto se consumió", no "cuánto varió".
       quantity: Math.abs(r.quantity_change),
-      unit_cost: r.unit_cost,
-      total_cost: r.total_cost,
       ingredient: r.products,
       // El plato que originó el consumo, vía el order_item del fire.
       dish_name: r.order_items?.product_name ?? null,
@@ -226,7 +245,7 @@ export class KdsSessionsService {
     });
 
     if (sessions.length === 0) {
-      return { sessions: [], by_station: [], total_cost: 0 };
+      return { sessions: [], by_station: [] };
     }
 
     // Un solo barrido de movimientos para todo el rango: consultar por sesión
@@ -236,7 +255,6 @@ export class KdsSessionsService {
       select: {
         kds_session_id: true,
         quantity_change: true,
-        total_cost: true,
         products: { select: { id: true, name: true, sku: true } },
       },
     });
@@ -259,8 +277,7 @@ export class KdsSessionsService {
         code: string;
         session_count: number;
         movement_count: number;
-        total_cost: number;
-        ingredients: Map<number, { product_id: number; name: string; sku: string | null; quantity: number; total_cost: number }>;
+        ingredients: Map<number, { product_id: number; name: string; sku: string | null; quantity: number }>;
       }
     >();
 
@@ -272,7 +289,6 @@ export class KdsSessionsService {
         code: station.code,
         session_count: 0,
         movement_count: 0,
-        total_cost: 0,
         ingredients: new Map(),
       };
       acc.session_count += 1;
@@ -286,31 +302,30 @@ export class KdsSessionsService {
       if (!acc || !r.products) continue;
 
       acc.movement_count += 1;
-      const cost = Number(r.total_cost ?? 0);
-      acc.total_cost += cost;
 
       const ing = acc.ingredients.get(r.products.id) ?? {
         product_id: r.products.id,
         name: r.products.name,
         sku: r.products.sku ?? null,
         quantity: 0,
-        total_cost: 0,
       };
       // El consumo se registra negativo; se expone en positivo porque la vista es
       // "cuánto se consumió", no "cuánto varió el stock".
       ing.quantity += Math.abs(r.quantity_change);
-      ing.total_cost += cost;
       acc.ingredients.set(r.products.id, ing);
     }
 
+    // ADR-10: el reporte de consumo de cocina es SOLO cantidades. Sin totales
+    // monetarios — el costo pertenece a la capa de contabilidad/reportes, nunca
+    // a una superficie que el rol `cocina` puede leer.
     const by_station = [...byStation.values()]
       .map((s) => ({
         ...s,
         ingredients: [...s.ingredients.values()].sort(
-          (a, b) => b.total_cost - a.total_cost,
+          (a, b) => b.quantity - a.quantity,
         ),
       }))
-      .sort((a, b) => b.total_cost - a.total_cost);
+      .sort((a, b) => b.movement_count - a.movement_count);
 
     return {
       sessions: sessions.map((s) => ({
@@ -321,7 +336,6 @@ export class KdsSessionsService {
         status: s.status,
       })),
       by_station,
-      total_cost: by_station.reduce((sum, s) => sum + s.total_cost, 0),
     };
   }
 
@@ -350,21 +364,19 @@ export class KdsSessionsService {
         id: true,
         created_at: true,
         quantity_change: true,
-        total_cost: true,
         products: { select: { id: true, name: true } },
       },
       orderBy: { created_at: 'desc' },
       take: 500,
     });
 
+    // ADR-10: sin dinero en el payload de cocina.
     return {
       movement_count: rows.length,
-      total_cost: rows.reduce((s, r) => s + Number(r.total_cost ?? 0), 0),
       movements: rows.map((r) => ({
         transaction_id: r.id,
         consumed_at: r.created_at,
         quantity: Math.abs(r.quantity_change),
-        total_cost: r.total_cost,
         ingredient: r.products,
       })),
     };
@@ -382,7 +394,7 @@ export class KdsSessionsService {
 
     const byIngredient = new Map<
       number,
-      { product_id: number; name: string; sku: string | null; quantity: number; total_cost: number }
+      { product_id: number; name: string; sku: string | null; quantity: number }
     >();
 
     for (const row of history) {
@@ -393,21 +405,18 @@ export class KdsSessionsService {
         name: row.ingredient!.name,
         sku: row.ingredient!.sku ?? null,
         quantity: 0,
-        total_cost: 0,
       };
       acc.quantity += row.quantity;
-      acc.total_cost += Number(row.total_cost ?? 0);
       byIngredient.set(id, acc);
     }
 
-    const ingredients = [...byIngredient.values()].sort(
-      (a, b) => b.total_cost - a.total_cost,
-    );
+    // ADR-10: el resumen del turno es SOLO cantidades por insumo. Sin totales
+    // monetarios — el costo no viaja a la superficie de cocina.
+    const ingredients = [...byIngredient.values()];
 
     return {
       movement_count: history.length,
       distinct_ingredients: ingredients.length,
-      total_cost: ingredients.reduce((s, i) => s + i.total_cost, 0),
       ingredients,
     };
   }

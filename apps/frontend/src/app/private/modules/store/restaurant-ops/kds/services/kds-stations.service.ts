@@ -46,7 +46,7 @@ export class KdsStationsService {
 
   /**
    * Una sola estación activa => se entra directo al tablero, sin pantalla de
-   * selección. Es el caso de la mayoría de los restaurantes y no debe costar un
+   * selección. Es el caso de la mayoría de los restaurantes y no debe añadir un
    * clic extra.
    */
   readonly needsStationChoice = computed(() => this.activeStations().length > 1);
@@ -193,7 +193,7 @@ export class KdsStationsService {
 
   // -------------------------------------------------- consumo del turno
 
-  /** Detalle: una fila por insumo POR PEDIDO, con cantidad y costo. */
+  /** Detalle: una fila por insumo POR PEDIDO, con la cantidad consumida. */
   getConsumptionHistory(
     sessionId: number,
   ): Observable<KdsConsumptionHistoryRow[]> {
@@ -210,8 +210,8 @@ export class KdsStationsService {
   }
 
   /**
-   * Agregado: una fila por insumo con los totales del turno. En vivo mientras la
-   * sesión está abierta; tras cerrar, el valor congelado vive en
+   * Agregado: una fila por insumo con la cantidad consumida en el turno. En vivo
+   * mientras la sesión está abierta; tras cerrar, el valor congelado vive en
    * `KdsSession.summary` y ya no cambia.
    */
   getConsumptionSummary(sessionId: number): Observable<KdsConsumptionSummary> {

@@ -21,7 +21,6 @@ import {
   StickyHeaderComponent,
   ToastService,
 } from '../../../../../../../shared/components/index';
-import { CurrencyPipe } from '../../../../../../../shared/pipes/index';
 import { KdsStationsService } from '../../services';
 import type {
   KdsConsumptionHistoryRow,
@@ -40,7 +39,7 @@ import type {
  *   1. Crear / editar estaciones y marcar la de por defecto.
  *   2. Historial de turnos, con QUIÉN los abrió y cerró.
  *   3. Detalle de un turno con su historial de movimientos — una fila por insumo
- *      POR PEDIDO, que es lo que permite auditar de dónde salió el costo.
+ *      POR PEDIDO, que es lo que permite ver en qué pedido salió cada insumo.
  *   4. Resumen del turno, agregado por insumo.
  *
  * El par historial/resumen es el mismo que caja tiene entre movimientos y
@@ -61,7 +60,6 @@ import type {
     InputComponent,
     ModalComponent,
     SpinnerComponent,
-    CurrencyPipe,
   ],
   templateUrl: './kds-manage-page.component.html',
   styleUrl: './kds-manage-page.component.scss',
@@ -246,7 +244,7 @@ export class KdsManagePageComponent implements OnInit {
 
     // El resumen de un turno CERRADO ya está congelado en `summary`: se lee de
     // ahí en vez de recalcular, porque el snapshot es la verdad del turno y
-    // recalcular podría dar otro número si los costos cambiaron después.
+    // recalcular podría dar otro número si los datos cambiaron después.
     if (session.status === 'closed' && session.summary) {
       this.detailSummary.set(session.summary);
       this.loadingDetail.set(false);

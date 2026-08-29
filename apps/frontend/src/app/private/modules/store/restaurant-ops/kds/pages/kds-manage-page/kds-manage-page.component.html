@@ -112,10 +112,10 @@
                   }
                 </span>
               </div>
-              <div class="session-cost">
+              <div class="session-summary">
                 @if (s.summary) {
-                  <strong>{{ s.summary.total_cost | currency }}</strong>
-                  <span>{{ s.summary.distinct_ingredients }} insumo(s)</span>
+                  <strong>{{ s.summary.distinct_ingredients }}</strong>
+                  <span>insumo(s) consumido(s)</span>
                 } @else {
                   <span class="muted">Ver detalle</span>
                 }
@@ -197,19 +197,17 @@
                 <li>
                   <span class="sum-name">{{ ing.name }}</span>
                   <span class="sum-qty">{{ ing.quantity }}</span>
-                  <span class="sum-cost">{{ ing.total_cost | currency }}</span>
                 </li>
               }
             </ul>
             <p class="sum-total">
-              Total del turno: <strong>{{ sum.total_cost | currency }}</strong>
-              · {{ sum.movement_count }} movimiento(s)
+              {{ sum.movement_count }} movimiento(s) · {{ sum.distinct_ingredients }} insumo(s)
             </p>
           }
         }
 
-        <!-- HISTORIAL: una fila por insumo POR PEDIDO. Es lo que permite auditar
-             de dónde salió cada peso del resumen. -->
+        <!-- HISTORIAL: una fila por insumo POR PEDIDO. Es lo que permite ver en
+             qué pedido salió cada insumo. ADR-10: solo cantidades, nunca dinero. -->
         <h4 class="detail-title">Historial de movimientos</h4>
         @if (detailHistory().length === 0) {
           <p class="empty">Sin movimientos en este turno.</p>
@@ -223,7 +221,6 @@
                 <span class="hist-dish">{{ r.dish_name ?? '—' }}</span>
                 <span class="hist-ing">{{ r.ingredient?.name ?? '—' }}</span>
                 <span class="hist-qty">{{ r.quantity }}</span>
-                <span class="hist-cost">{{ +(r.total_cost ?? 0) | currency }}</span>
               </li>
             }
           </ul>
