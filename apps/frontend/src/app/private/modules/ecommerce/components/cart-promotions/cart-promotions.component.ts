@@ -73,11 +73,13 @@ import {
     }
 
     <!-- High-Conversion Gamified Incentive Bar -->
-    @if (incentiveData()) {
-      <app-gamified-incentive-bar
-        [data]="incentiveData()"
-        class="block mb-2.5"
-      />
+    @if (incentiveData().length > 0) {
+      @for (data of incentiveData(); track $index) {
+        <app-gamified-incentive-bar
+          [data]="data"
+          class="block mb-2.5"
+        />
+      }
     }
 
     @if (inline()) {
@@ -218,40 +220,47 @@ export class CartPromotionsComponent {
   /**
    * Data for the gamified incentive progress bar.
    * Derives real-time progress towards the next reachable tier or highlights unlocked benefits.
+   *
+   * Returns an ARRAY so each applied promo gets its own celebration bar — antes solo
+   * mostraba la primera promo aplicada, lo que hacía que promociones adicionales
+   * (ej. una promo de orden completa sin tiers) quedaran sin notificación visual
+   * aunque sí se aplicaran al carrito.
    */
-  readonly incentiveData = computed<IncentiveProgressData | null>(() => {
+  readonly incentiveData = computed<IncentiveProgressData[]>(() => {
     const currentCart = this.cart();
-    const tiers = currentCart?.tier_progress ?? [];
-    if (tiers.length > 0) {
-      const first = tiers[0];
-      const benefitLabel =
-        first.benefit_type === 'percentage'
-          ? `-${first.benefit_value}% OFF`
-          : `-$${this.currencyFormat.format(first.benefit_value)} OFF`;
-      const remaining = first.remaining_quantity;
-      const targetName = this.resolveProductName(first.target_product_id);
+    const result: IncentiveProgressData[] = [];
 
-      return {
+    // 1) Una celebración por cada promo aplicada (no solo la primera).
+    const applied = currentCart?.applied_promotions ?? [];
+    for (const promo of applied) {
+      result.push({
+        benefit_label: `-${this.currencyFormat.format(promo.discount_amount)} Ahorro`,
+        unlocked: true,
+        progress_percentage: 100,
+      });
+    }
+
+    // 2) Nudges de tier-progress para próximas metas (tiered promos con
+    // cantidad objetivo).
+    const tiers = currentCart?.tier_progress ?? [];
+    for (const tier of tiers) {
+      const benefitLabel =
+        tier.benefit_type === 'percentage'
+          ? `-${tier.benefit_value}% OFF`
+          : `-${this.currencyFormat.format(tier.benefit_value)} OFF`;
+      const remaining = tier.remaining_quantity;
+      const targetName = this.resolveProductName(tier.target_product_id);
+
+      result.push({
         remaining_quantity: remaining,
         benefit_label: benefitLabel,
         target_product_name: targetName,
         progress_percentage: Math.max(15, Math.min(90, 100 - remaining * 20)),
         unlocked: false,
-      };
+      });
     }
 
-    const applied = currentCart?.applied_promotions ?? [];
-    if (applied.length > 0) {
-      const first = applied[0];
-      const benefitLabel = `-$${this.currencyFormat.format(first.discount_amount)} Ahorro`;
-      return {
-        benefit_label: benefitLabel,
-        unlocked: true,
-        progress_percentage: 100,
-      };
-    }
-
-    return null;
+    return result;
   });
 
   // ── Primary projections (Phase E.1) ───────────────────────────────────
