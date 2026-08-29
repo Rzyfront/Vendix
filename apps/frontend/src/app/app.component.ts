@@ -17,6 +17,7 @@ import { AppLoadingComponent } from './shared/components/app-loading/app-loading
 import { StoreUnavailableBannerComponent } from './shared/components/store-unavailable-banner/store-unavailable-banner.component';
 import { DomainResolutionErrorComponent } from './shared/components/domain-resolution-error/domain-resolution-error.component';
 import { StoreAvailabilityService } from './core/services/store-availability.service';
+import { HighConversionService } from './shared/services/high-conversion.service';
 
 @Component({
   selector: 'app-root',
@@ -79,6 +80,12 @@ export class AppComponent {
   private platformId = inject(PLATFORM_ID);
   // Public storefront availability (drives the full-screen unavailable banner).
   readonly storeAvailability = inject(StoreAvailabilityService);
+  // Forzar eager init del toggle de badges dinámicos (high-conversion UI).
+  // Sin esto, el providedIn:'root' solo instanciaría HighConversionService
+  // cuando el primer <app-promotion-stack> o <app-gamified-incentive-bar>
+  // se renderice — dejando un "gap" donde los badges muestran con el
+  // default true hasta que llegue la respuesta de settings.
+  private readonly highConversionService = inject(HighConversionService);
 
   readonly isBrowser = isPlatformBrowser(this.platformId);
 
