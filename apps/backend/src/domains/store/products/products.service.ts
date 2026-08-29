@@ -1284,6 +1284,7 @@ export class ProductsService {
       requires_booking,
       is_sellable,
       is_batch_produced,
+      is_ingredient,
       ids,
     } = query;
 
@@ -1345,6 +1346,13 @@ export class ProductsService {
       ...(requires_booking !== undefined && { requires_booking }),
       ...(is_sellable !== undefined && { is_sellable }),
       ...(is_batch_produced !== undefined && { is_batch_produced }),
+      // QUI-729 — tri-estado por `is_ingredient`: ausente => sin filtro
+      // ("Todos"), false => solo productos (default del listado admin), true =>
+      // solo insumos. Sin default server-side (ADR-6): el default vive en el
+      // cliente, y `findIds` (selección masiva) hereda exactamente el mismo
+      // conjunto, así que "seleccionar todo" conserva la capacidad de incluir
+      // insumos cuando el parámetro se omite.
+      ...(is_ingredient !== undefined && { is_ingredient }),
       // Hidratación del stack de selección de la edición masiva: el cliente
       // guarda ids que pueden no estar en la página cargada y los pide de golpe.
       // Se combina con el resto de los filtros (no los reemplaza), así que un id

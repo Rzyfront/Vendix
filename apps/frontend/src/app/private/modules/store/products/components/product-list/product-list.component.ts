@@ -6,6 +6,7 @@ import {
   effect,
   signal,
   computed,
+  afterNextRender,
 } from '@angular/core';
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -35,8 +36,16 @@ import {
   ImageLightboxComponent,
   ButtonComponent, // FIX QUI-503
   IconComponent,  // FIX QUI-503
+  AlertBannerComponent,
 } from '../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+
+// QUI-729 — chip tri-estado de tipo de producto (Productos / Insumos / Todos).
+import {
+  ProductTypeChipFilterComponent,
+  ProductTypeFilterValue,
+} from '../product-type-chip-filter/product-type-chip-filter.component';
 
 // Import styles
 import './product-list.component.css';
@@ -56,11 +65,14 @@ import './product-list.component.css';
     ImageLightboxComponent,
     ButtonComponent, // FIX QUI-503
     IconComponent,   // FIX QUI-503
+    AlertBannerComponent,
+    ProductTypeChipFilterComponent,
   ],
   templateUrl: './product-list.component.html',
 })
 export class ProductListComponent {
   private currencyService = inject(CurrencyFormatService);
+  private authFacade = inject(AuthFacade);
 
   readonly products = input<Product[]>([]);
   readonly isLoading = input(false);
@@ -100,6 +112,16 @@ export class ProductListComponent {
   selectedProductType = '';
   readonly selectedImageProduct = signal<Product | null>(null);
   readonly imagePreviewOpen = signal(false);
+
+  // QUI-729 — filtro tri-estado del tipo de producto (Productos / Insumos /
+  // Todos). Default 'products' (solo productos, sin insumos). El default vive
+  // en el CLIENTE, no en el servidor (ADR-6).
+  readonly ingredientFilter = signal<ProductTypeFilterValue>('products');
+
+  // QUI-729 — aviso del cambio de default del listado. Estado "visto"
+  // persistido por usuario (al estilo de `tour.service.ts`).
+  readonly showDefaultFilterNotice = signal(false);
+  private readonly DEFAULT_FILTER_NOTICE_KEY = 'product_list_default_filter_seen';
 
   // Filter configuration for the options dropdown
   filterConfigs: FilterConfig[] = [
@@ -335,12 +357,19 @@ export class ProductListComponent {
   };
 
   constructor() {
+    this.readDefaultFilterNoticeState();
+
     effect(() => {
       // Re-run whenever categories or brands input signals change
       this.categories();
       this.brands();
       this.updateFilterOptions();
     });
+
+    // QUI-729 — el default del listado (solo productos, sin insumos) vive en el
+    // CLIENTE y se emite tras el primer render, de modo que la carga inicial ya
+    // llegue filtrada a `is_ingredient=false`.
+    afterNextRender(() => this.emitQuery());
   }
 
   private updateFilterOptions(): void {
@@ -397,9 +426,24 @@ export class ProductListComponent {
     this.selectedCategory = (values['category_id'] as string) || '';
     this.selectedBrand = (values['brand_id'] as string) || '';
     this.selectedProductType = (values['product_type'] as string) || '';
+    this.emitQuery();
+  }
 
-    // Build the ProductQueryDto
+  onIngredientFilterChange(value: ProductTypeFilterValue): void {
+    this.ingredientFilter.set(value);
+    this.emitQuery();
+  }
+
+  /**
+   * Construye el `ProductQueryDto` a partir de los filtros del dropdown y del
+   * chip tri-estado y lo emite. El chip traduce:
+   *   - 'products'    → `is_ingredient: false` (default del listado admin)
+   *   - 'ingredients' → `is_ingredient: true`
+   *   - 'all'         → OMITE `is_ingredient` (productos E insumos, tercer estado)
+   */
+  private emitQuery(): void {
     const query: ProductQueryDto = {};
+
     if (this.selectedState) {
       query.state = this.selectedState as ProductState;
     }
@@ -413,6 +457,13 @@ export class ProductListComponent {
       query.product_type = this.selectedProductType as 'physical' | 'service';
     }
 
+    const ingredient = this.ingredientFilter();
+    if (ingredient === 'products') {
+      query.is_ingredient = false;
+    } else if (ingredient === 'ingredients') {
+      query.is_ingredient = true;
+    }
+
     this.filter.emit(query);
   }
 
@@ -423,8 +474,35 @@ export class ProductListComponent {
     this.selectedBrand = '';
     this.selectedProductType = '';
     this.filterValues = {};
+    // "Limpiar todo" vuelve al default del listado: solo productos, sin insumos.
+    this.ingredientFilter.set('products');
     this.search.emit('');
-    this.filter.emit({});
+    this.filter.emit({ is_ingredient: false });
+  }
+
+  // ── QUI-729 — aviso del cambio de default (estado "visto" por usuario) ─────
+
+  private readDefaultFilterNoticeState(): void {
+    const settings: any = this.authFacade.getUserSettings();
+    const seen = settings?.config?.banners?.[this.DEFAULT_FILTER_NOTICE_KEY];
+    this.showDefaultFilterNotice.set(!seen);
+  }
+
+  dismissDefaultFilterNotice(): void {
+    this.showDefaultFilterNotice.set(false);
+
+    const settings: any = this.authFacade.getUserSettings();
+    const updated: any = settings
+      ? JSON.parse(JSON.stringify(settings))
+      : { id: 0, user_id: 0, app_type: '', config: {} };
+    if (!updated.config) {
+      updated.config = {};
+    }
+    if (!updated.config.banners) {
+      updated.config.banners = {};
+    }
+    updated.config.banners[this.DEFAULT_FILTER_NOTICE_KEY] = true;
+    this.authFacade.updateUserSettings(updated);
   }
 
   onActionClick(action: string): void {

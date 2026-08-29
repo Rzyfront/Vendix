@@ -1273,6 +1273,37 @@ export class ProductQueryDto {
   @Type(() => Boolean)
   is_batch_produced?: boolean;
 
+  /**
+   * Restaurant Suite — filtra el listado por la bandera `is_ingredient`
+   * (insumos de receta). El CLIENTE manda el default explícito (ADR-6):
+   *   - `is_ingredient=false` → solo productos (el default del listado admin)
+   *   - `is_ingredient=true`  → solo insumos
+   *   - ausente               → productos E insumos (tercer estado "Todos")
+   *
+   * ADR-6 — el `@Transform` lee `obj[key]`, NO `value`. El ValidationPipe
+   * global usa `enableImplicitConversion: true` (`main.ts`), así que un
+   * `@Transform(({ value }) => value === 'true')` recibe el booleano YA
+   * coaccionado — `Boolean('false') === true` — y `?is_ingredient=false`
+   * devolvería insumos: es exactamente el bug que este step cierra.
+   * `obj[key]` conserva la cadena cruda del query param.
+   *
+   * No admite default server-side: lo que "todos" significa se decide en el
+   * cliente (omitir el parámetro), no al silenciar un valor por defecto.
+   */
+  @IsOptional()
+  @Transform(({ obj, key }) => {
+    const raw = obj?.[key];
+    if (raw === undefined || raw === null || raw === '') {
+      return undefined;
+    }
+    if (raw === true || raw === 'true') return true;
+    if (raw === false || raw === 'false') return false;
+    // Cualquier otra cosa se entrega intacta para que `@IsBoolean` la rechace.
+    return raw;
+  })
+  @IsBoolean()
+  is_ingredient?: boolean;
+
   // Hidrata una selección concreta de productos (los que el usuario marcó en el
   // stack de edición masiva), aceptando `?ids=1&ids=2` o `?ids=1,2`.
   @IsOptional()
