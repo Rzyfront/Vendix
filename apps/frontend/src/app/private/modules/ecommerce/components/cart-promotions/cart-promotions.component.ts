@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  effect,
   inject,
   input,
   signal,
@@ -18,6 +19,7 @@ import {
   GamifiedIncentiveBarComponent,
   IncentiveProgressData,
 } from '../../../../../shared/components/gamified-incentive-bar/gamified-incentive-bar.component';
+import { HighConversionService } from '../../../../../shared/services/high-conversion.service';
 import {
   CurrencyPipe,
   CurrencyFormatService,
@@ -72,8 +74,9 @@ import {
       </div>
     }
 
-    <!-- High-Conversion Gamified Incentive Bar (gated por HighConversionService dentro del shared component) -->
-    @if (incentiveData().length > 0) {
+    <!-- High-Conversion Gamified Incentive Bar — defense in depth: gateado
+         a nivel de cart-promotions (además del gate interno del shared). -->
+    @if (incentiveData().length > 0 && highConversionService.enabled()) {
       @for (data of incentiveData(); track $index) {
         <app-gamified-incentive-bar
           [data]="data"
@@ -139,6 +142,17 @@ import {
 export class CartPromotionsComponent {
   /** Source cart. Promotions/tier data are read reactively from this signal. */
   readonly cart = input<Cart | null>(null);
+
+  constructor() {
+    // DEBUG: rastrear el valor que lee este componente
+    effect(() => {
+      // eslint-disable-next-line no-console
+      console.log(
+        '[CPE-DEBUG] cart-promotions leyendo highConversionService.enabled =',
+        this.highConversionService.enabled(),
+      );
+    });
+  }
   /** Denser layout for the header dropdown; relaxed for page/checkout. */
   readonly compact = input<boolean>(false);
   /** Show the "Promociones aplicadas" section (block layout only). */
@@ -151,6 +165,10 @@ export class CartPromotionsComponent {
   private readonly currencyFormat = inject(CurrencyFormatService);
   /** Sink for `<app-promotion-stack>` outputs (CP-ECOM-PROMO-UX-001 G.1). */
   private readonly promotionsAnalytics = inject(PromotionsAnalyticsService);
+  /** Toggle "Experiencia de Alta Conversión". Defense in depth: cart-promotions
+   * gatea los badges directamente, además del gate que ya tiene
+   * <app-gamified-incentive-bar> y <app-promotion-stack> internamente. */
+  protected readonly highConversionService = inject(HighConversionService);
 
   /**
    * Forward `promotionViewed` from the cart's promotion stacks (applied
