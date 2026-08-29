@@ -535,7 +535,7 @@ export interface ProfileAccountingConfig {
  * tarifa que faltaba.
  */
 export interface ProfileTaxRule {
-  bucket: AiuBucket;
+  bucket?: AiuBucket;
   /** Si esta porción entra en la base gravable del documento. */
   taxable: boolean;
   /**
@@ -551,6 +551,27 @@ export interface ProfileTaxRule {
    * casos bloquearía facturas correctas.
    */
   rate: string;
+  /**
+   * Base gravable elegida para esta regla de impuesto (Modelo Siigo).
+   * `'subtotal'` (Contrato completo) | `'aiu'` (AIU completo A+I+U) | `'utilidad'` (Solo Utilidad).
+   * Si no está definida, se deriva de `resolveAiuTaxableBasis(config.aiu)`.
+   */
+  taxable_basis?: AiuTaxableBasis | null;
+}
+
+/**
+ * Resuelve la base gravable efectiva de una regla de impuesto.
+ * Si la regla define su propia base gravable, se usa; de lo contrario, se hereda
+ * la base global del perfil o del régimen legacy.
+ */
+export function resolveRuleTaxableBasis(
+  rule: Pick<ProfileTaxRule, 'taxable_basis' | 'bucket'> | null | undefined,
+  aiu?: Pick<ProfileAiuConfig, 'taxable_basis' | 'regime'> | null | undefined,
+): AiuTaxableBasis {
+  if (rule?.taxable_basis && AIU_TAXABLE_BASES.includes(rule.taxable_basis)) {
+    return rule.taxable_basis;
+  }
+  return resolveAiuTaxableBasis(aiu);
 }
 
 /** Sección 4 — Base de impuestos. */
@@ -1246,7 +1267,7 @@ function validateTaxSection(
   rules.forEach((rule, index) => {
     const at = `taxes.rules[${index}]`;
 
-    if (!AIU_BUCKETS.includes(rule.bucket)) {
+    if (rule.bucket && !AIU_BUCKETS.includes(rule.bucket)) {
       issues.push({
         field: `${at}.bucket`,
         code: 'TAX_BUCKET_UNKNOWN',
@@ -1254,7 +1275,7 @@ function validateTaxSection(
       });
       return;
     }
-    if (seen.has(rule.bucket)) {
+    if (rule.bucket && seen.has(rule.bucket)) {
       // Dos reglas para la misma porción es una contradicción sin resolución
       // determinista: cuál gana dependería del orden del arreglo.
       issues.push({
@@ -1264,7 +1285,17 @@ function validateTaxSection(
       });
       return;
     }
-    seen.add(rule.bucket);
+    if (rule.bucket) {
+      seen.add(rule.bucket);
+    }
+
+    if (rule.taxable_basis && !AIU_TAXABLE_BASES.includes(rule.taxable_basis)) {
+      issues.push({
+        field: `${at}.taxable_basis`,
+        code: 'TAX_BASIS_INVALID',
+        message: `«${String(rule.taxable_basis)}» no es una base gravable válida. Debe ser subtotal, aiu o utilidad.`,
+      });
+    }
 
     const rate = parsePercentScaled(rule.rate);
     if (rate === null) {
@@ -1718,10 +1749,10 @@ export function buildDefaultAiuProfileConfig(
     },
     taxes: {
       rules: [
-        { bucket: 'administracion', taxable: true, tax_code: '01', rate: '19.00' },
-        { bucket: 'imprevistos', taxable: true, tax_code: '01', rate: '19.00' },
-        { bucket: 'utilidad', taxable: true, tax_code: '01', rate: '19.00' },
-        { bucket: 'costo', taxable: false, tax_code: '01', rate: '0.00' },
+        { bucket: 'administracion', taxable: true, tax_code: '01', rate: '19.00', taxable_basis: 'aiu' },
+        { bucket: 'imprevistos', taxable: true, tax_code: '01', rate: '19.00', taxable_basis: 'aiu' },
+        { bucket: 'utilidad', taxable: true, tax_code: '01', rate: '19.00', taxable_basis: 'aiu' },
+        { bucket: 'costo', taxable: false, tax_code: '01', rate: '0.00', taxable_basis: 'aiu' },
       ],
     },
     model_lines: [],
@@ -1907,7 +1938,7 @@ const ACCOUNTING_KEYS = [
   'mapping_key_overrides',
 ] as const;
 const TAXES_KEYS = ['rules'] as const;
-const TAX_RULE_KEYS = ['bucket', 'taxable', 'tax_code', 'rate'] as const;
+const TAX_RULE_KEYS = ['bucket', 'taxable', 'tax_code', 'rate', 'taxable_basis'] as const;
 const WITHHOLDINGS_KEYS = ['rules'] as const;
 const WITHHOLDING_RULE_KEYS = ['concept_id', 'role', 'rate'] as const;
 const CURRENCY_KEYS = ['declare_foreign', 'code'] as const;

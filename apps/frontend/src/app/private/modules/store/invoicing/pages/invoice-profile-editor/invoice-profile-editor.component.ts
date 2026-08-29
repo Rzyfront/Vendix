@@ -2146,6 +2146,7 @@ export class InvoiceProfileEditorComponent {
                 taxable: [true],
                 tax_code: ['01'],
                 rate: ['19.00'],
+                taxable_basis: [this.taxableBasis() ?? 'aiu'],
             }),
         );
     }
@@ -2373,10 +2374,11 @@ export class InvoiceProfileEditorComponent {
         for (const rule of config.taxes.rules) {
             this.taxRules.push(
                 this.fb.group({
-                    bucket: [rule.bucket],
+                    bucket: [rule.bucket ?? 'administracion'],
                     taxable: [rule.taxable],
                     tax_code: [rule.tax_code],
                     rate: [rule.rate],
+                    taxable_basis: [rule.taxable_basis ?? resolveAiuTaxableBasis(config.aiu)],
                 }),
                 { emitEvent: false },
             );
@@ -2493,10 +2495,11 @@ export class InvoiceProfileEditorComponent {
         // OTRAS porciones, así que necesita la matriz completa. Derivarla
         // mientras se recorre habría leído filas ya reemplazadas.
         const rawRules: AiuTaxRuleValue[] = this.taxRules.controls.map((control) => ({
-            bucket: control.get('bucket')?.value as AiuBucket,
+            bucket: (control.get('bucket')?.value ?? 'administracion') as AiuBucket,
             taxable: Boolean(control.get('taxable')?.value),
             tax_code: String(control.get('tax_code')?.value ?? ''),
             rate: String(control.get('rate')?.value ?? '0.00'),
+            taxable_basis: control.get('taxable_basis')?.value as AiuTaxableBasis,
         }));
         const rules: ProfileTaxRule[] = rawRules.map((rule) =>
             aiuProfile && rule.bucket === 'costo'

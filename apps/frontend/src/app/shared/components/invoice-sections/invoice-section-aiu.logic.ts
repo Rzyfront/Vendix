@@ -347,36 +347,42 @@ export function derivedCostTaxRule(
  */
 export function reprojectAiuTaxRules(
   rules: readonly AiuTaxRuleValue[],
-  basis: AiuTaxableBasis,
+  defaultBasis: AiuTaxableBasis,
 ): AiuTaxRuleValue[] {
-  const expected = AIU_TAXABLE_BUCKETS_BY_BASIS[basis];
   const reference = aiuReferenceTaxRate(rules);
 
   const projected: AiuTaxRuleValue[] = rules.map((rule) => {
+    const basis = rule.taxable_basis ?? defaultBasis;
+    const expected = AIU_TAXABLE_BUCKETS_BY_BASIS[basis];
     const bucket = rule.bucket;
-    if (!AIU_BUCKETS.includes(bucket) || bucket === 'costo') return { ...rule };
+    if (!bucket || !AIU_BUCKETS.includes(bucket) || bucket === 'costo') {
+      return { ...rule, taxable_basis: basis };
+    }
     const shouldBeTaxable = expected.includes(bucket);
-    if (Boolean(rule.taxable) === shouldBeTaxable) return { ...rule };
+    if (Boolean(rule.taxable) === shouldBeTaxable) {
+      return { ...rule, taxable_basis: basis };
+    }
     if (!shouldBeTaxable) {
-      return { ...rule, taxable: false, rate: '0.00' };
+      return { ...rule, taxable: false, rate: '0.00', taxable_basis: basis };
     }
     const hasRealRate = (parsePercentScaled(rule.rate) ?? 0) > 0;
     return hasRealRate
-      ? { ...rule, taxable: true }
+      ? { ...rule, taxable: true, taxable_basis: basis }
       : {
           ...rule,
           taxable: true,
           tax_code: reference.tax_code,
           rate: reference.rate,
+          taxable_basis: basis,
         };
   });
 
-  const derived = derivedCostTaxRule(projected, basis);
+  const derived = derivedCostTaxRule(projected, defaultBasis);
   const costIndex = projected.findIndex((rule) => rule.bucket === 'costo');
   if (costIndex >= 0) {
-    projected[costIndex] = derived;
+    projected[costIndex] = { ...derived, taxable_basis: defaultBasis };
   } else {
-    projected.push(derived);
+    projected.push({ ...derived, taxable_basis: defaultBasis });
   }
   return projected;
 }
@@ -391,14 +397,16 @@ export function aiuTaxMatrixOffenders(
   rules: readonly AiuTaxRuleValue[],
   basis: AiuTaxableBasis,
 ): AiuBucket[] {
-  const expected = AIU_TAXABLE_BUCKETS_BY_BASIS[basis];
-  return rules
-    .filter((rule) => {
-      const bucket = rule.bucket;
-      if (!AIU_BUCKETS.includes(bucket) || bucket === 'costo') return false;
-      return Boolean(rule.taxable) !== expected.includes(bucket);
-    })
-    .map((rule) => rule.bucket);
+  const expected: readonly string[] = AIU_TAXABLE_BUCKETS_BY_BASIS[basis];
+  const offenders: AiuBucket[] = [];
+  for (const rule of rules) {
+    const bucket = rule.bucket;
+    if (!bucket || !AIU_BUCKETS.includes(bucket) || bucket === 'costo') continue;
+    if (Boolean(rule.taxable) !== expected.includes(bucket)) {
+      offenders.push(bucket);
+    }
+  }
+  return offenders;
 }
 
 /**

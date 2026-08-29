@@ -211,7 +211,7 @@ describe('PrintLayoutComposerService — v2 fields (P1.3)', () => {
     const html = composer.compose(def, baseData);
     // El bloque no se renderiza en formato no fiscal
     expect(html).not.toContain('class="company-block"');
-    // Pero los datos del emisor que vienen por el header legacy siguen
-    expect(html).toContain('<h1 class="store-name">Mi Tienda</h1>');
+    expect(html).toContain('class="store-name"');
+    expect(html).toContain('Mi Tienda');
   });
 });

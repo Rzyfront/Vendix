@@ -109,6 +109,17 @@ export interface PrintSectionDefinition {
   order: number;
   fields?: PrintFieldDefinition[];
   custom_content?: string;
+  /**
+   * Detalles por linea de `items_table` / `kitchen_items`. Los consume
+   * `PrintLayoutComposerService.renderItemsTableSection` con la semantica
+   * `!== false`: ausente = visible. Por eso son opcionales y solo se
+   * persisten cuando el usuario apaga el detalle desde el editor de columnas.
+   */
+  show_sku?: boolean;
+  show_variant_attributes?: boolean;
+  show_notes?: boolean;
+  show_item_discounts?: boolean;
+  show_item_taxes?: boolean;
 }
 
 export interface PrintColumnDefinition {

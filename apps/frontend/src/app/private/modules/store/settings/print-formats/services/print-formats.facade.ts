@@ -5,11 +5,16 @@ import {
   StorePrintFormatSummary,
   StorePrintFormatDetail,
   PrintFormatDefinition,
+  PrintFieldDefinition,
   PrintTemplate,
   PrintRecentDocument,
+  PrintPreviewMode,
+  PrintSelectedElement,
+  PrintAnnexValidationSummary,
 } from '../../../../../../core/models/print-formats.model';
 import { PrintGatewayClientService } from '../../../../../../shared/services/print/print-gateway-client.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { PrintAnnexValidatorService } from './print-annex-validator.service';
 
 @Injectable({
   providedIn: 'root',
@@ -17,6 +22,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 export class PrintFormatsFacade {
   private readonly client = inject(PrintGatewayClientService);
   private readonly toast = inject(ToastService);
+  private readonly annexValidator = inject(PrintAnnexValidatorService);
 
   // State Signals
   readonly formats = signal<StorePrintFormatSummary[]>([]);
@@ -28,9 +34,21 @@ export class PrintFormatsFacade {
   readonly isLoading = signal<boolean>(false);
   readonly isSaving = signal<boolean>(false);
   readonly isPreviewLoading = signal<boolean>(false);
+  readonly previewMode = signal<PrintPreviewMode>('dummy');
+  readonly selectedElement = signal<PrintSelectedElement | null>(null);
+  readonly selectedRegionId = signal<string | null>(null);
   readonly libraryTemplates = signal<PrintTemplate[]>([]);
   readonly activeCategoryFilter = signal<string>('all');
+  /**
+   * Texto libre del buscador del hub. Es writable a proposito: el hub lo
+   * escribe con `searchQuery.set($event)` desde `(ngModelChange)`, y
+   * `filteredFormats` lo lee para cruzarlo con `activeCategoryFilter`.
+   */
   readonly searchQuery = signal<string>('');
+  readonly isLeftSidebarCollapsed = signal<boolean>(false);
+  readonly isRightSidebarCollapsed = signal<boolean>(false);
+  readonly activeLeftTab = signal<'sections' | 'columns' | 'tokens'>('sections');
+  readonly zoomLevel = signal<number>(100);
   /** [print-editor-dsk P3.3] — Most-recent sample documents for the active format. */
   readonly recentDocuments = signal<PrintRecentDocument[]>([]);
   /** [print-editor-dsk P3.3] — Document id currently feeding the preview, or null for fabricated sample data. */
@@ -107,6 +125,17 @@ export class PrintFormatsFacade {
     return this.formats().filter(
       (f) => f.template_name && f.template_name !== 'Por defecto del sistema',
     ).length;
+  });
+
+  /**
+   * Evaluates the current draft definition against DIAN Anexo Técnico 1.9
+   * and Colombian fiscal requirements.
+   */
+  readonly annexValidation = computed<PrintAnnexValidationSummary | null>(() => {
+    const detail = this.selectedFormatDetail();
+    const draft = this.draftDefinition();
+    if (!detail || !draft) return null;
+    return this.annexValidator.validate(draft, detail.format_type);
   });
 
   async loadFormats(): Promise<void> {
@@ -200,7 +229,7 @@ export class PrintFormatsFacade {
     this.isPreviewLoading.set(true);
     try {
       const preview = await firstValueFrom(
-        this.client.previewFormat(detail.format_type, draft, docId),
+        this.client.previewFormat(detail.format_type, draft, docId, this.previewMode()),
       );
       // Drop the response if a newer call has started.
       if (generation !== this.previewGeneration) return;
@@ -213,6 +242,59 @@ export class PrintFormatsFacade {
       if (generation === this.previewGeneration) {
         this.isPreviewLoading.set(false);
       }
+    }
+  }
+
+  setPreviewMode(mode: PrintPreviewMode): void {
+    this.previewMode.set(mode);
+    void this.refreshPreview(undefined, true);
+  }
+
+  toggleLeftSidebar(): void {
+    this.isLeftSidebarCollapsed.update((v) => !v);
+  }
+
+  toggleRightSidebar(): void {
+    this.isRightSidebarCollapsed.update((v) => !v);
+  }
+
+  setZoom(level: number): void {
+    this.zoomLevel.set(Math.max(40, Math.min(200, Math.round(level))));
+  }
+
+  selectElement(el: PrintSelectedElement | null): void {
+    this.selectedElement.set(el);
+    if (el?.columnId) {
+      this.selectedRegionId.set(`col-${el.columnId}`);
+      this.isRightSidebarCollapsed.set(false);
+    } else if (el?.elementId?.startsWith('comp_')) {
+      this.selectedRegionId.set(`comp-${el.elementId.replace('comp_', '')}`);
+      this.isRightSidebarCollapsed.set(false);
+    } else if (el?.elementId === 'f_logo') {
+      this.selectedRegionId.set('logo');
+      this.isRightSidebarCollapsed.set(false);
+    } else if (el?.elementId) {
+      this.selectedRegionId.set(`field-${el.elementId}`);
+      this.isRightSidebarCollapsed.set(false);
+    } else if (el?.sectionId) {
+      this.selectedRegionId.set(`sec-${el.sectionId}`);
+      this.isRightSidebarCollapsed.set(false);
+    } else {
+      this.selectedRegionId.set(null);
+    }
+  }
+
+  updateField(sectionId: string, fieldId: string, updates: Partial<PrintFieldDefinition>): void {
+    const draft = this.draftDefinition();
+    if (!draft) return;
+    const cloned: PrintFormatDefinition = JSON.parse(JSON.stringify(draft));
+    const sec = cloned.sections?.find((s) => s.id === sectionId || s.type === sectionId);
+    if (!sec || !sec.fields) return;
+    const fieldIndex = sec.fields.findIndex((f) => f.id === fieldId || f.key === fieldId);
+    if (fieldIndex >= 0) {
+      sec.fields[fieldIndex] = { ...sec.fields[fieldIndex], ...updates };
+      this.draftDefinition.set(cloned);
+      void this.refreshPreview();
     }
   }
 

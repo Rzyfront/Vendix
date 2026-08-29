@@ -1,190 +1,324 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   OnInit,
+  computed,
   inject,
   output,
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { Store } from '@ngrx/store';
-import { Observable } from 'rxjs';
+import { HttpClient, HttpParams } from '@angular/common/http';
+import { FormsModule } from '@angular/forms';
+import { Subject, of } from 'rxjs';
 import {
-  PlatformAcquirer,
-  PlatformFiscalInvoicingActions,
-  selectPlatformAcquirerResults,
-  selectPlatformAcquirerSearchLoading,
-} from '../../state';
+  catchError,
+  debounceTime,
+  distinctUntilChanged,
+  switchMap,
+  tap,
+} from 'rxjs/operators';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
+import { environment } from '../../../../../../../../environments/environment';
 import {
+  BadgeComponent,
   ButtonComponent,
   CardComponent,
-  InputComponent,
+  IconComponent,
   SelectorComponent,
 } from '../../../../../../../shared/components';
+import type { SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
+import { PlatformAcquirer } from '../../state';
 
-/**
- * CP-platform-fiscal-invoicing-mvp · Phase C.2
- *
- * TenantPicker: selector del destinatario para el form de crear
- * plataforma invoice. ADR-7: el cliente son stores u organizations,
- * NO `users`.
- *
- * Shape:
- *   [qr] -> <input-search> -> dispatch SearchAcquirers
- *   [tabs kind=store | organization | both]
- *   [results list] -> preview card on click -> emit tenantPicked
- *
- * El picker es smart: cuando el tenant no trae `fiscal_data_complete`
- * (campo derivado en `PlatformTenantsService.checkStoreFiscalComplete`
- * / `checkOrganizationFiscalComplete`), el form lo sabe y bloquea
- * submit hasta que el operador complete los campos faltantes inline.
- *
- * Las sombras de error: las emite el create service — el picker solo
- * muestra readonly y avisa al operador.
- */
+interface SearchResponse {
+  success: boolean;
+  data: {
+    data: PlatformAcquirer[];
+    meta?: { q: string | null; kind: string | null };
+  };
+  message?: string;
+}
+
 @Component({
   selector: 'app-platform-tenant-picker',
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
+    BadgeComponent,
+    ButtonComponent,
     CardComponent,
-    InputComponent,
+    IconComponent,
     SelectorComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section class="space-y-3">
-      <header class="flex items-center gap-3">
-        <h3 class="text-sm font-semibold text-gray-900">Destinatario (tenant cliente)</h3>
-        <span class="text-xs text-gray-500">ADR-7: el cliente del rail super-admin son tiendas u organizaciones, NO usuarios finales.</span>
-      </header>
+    <div class="space-y-3">
+      @if (selectedTenant(); as tenant) {
+        <!-- Estado: Destinatario Seleccionado -->
+        <div class="rounded-xl border border-primary/20 bg-primary/5 p-4 transition-all">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div class="flex items-start gap-3">
+              <div class="flex items-center justify-center w-10 h-10 rounded-lg bg-primary/10 text-primary shrink-0 mt-0.5">
+                <app-icon [name]="tenant.kind === 'organization' ? 'building' : tenant.kind === 'user' ? 'user' : 'store'" [size]="20" />
+              </div>
+              <div class="space-y-1">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="text-sm font-bold text-text-primary">
+                    {{ tenant.legal_name || tenant.name }}
+                  </span>
+                  <app-badge [variant]="tenant.kind === 'organization' ? 'service' : tenant.kind === 'user' ? 'neutral' : 'primary'" size="sm">
+                    {{ tenant.kind === 'organization' ? 'Organización' : tenant.kind === 'user' ? 'Usuario' : 'Tienda' }}
+                  </app-badge>
+                  @if (tenant.fiscal_data_complete) {
+                    <app-badge variant="success" size="sm">
+                      <app-icon slot="icon" name="check" [size]="12" />
+                      Datos fiscales OK
+                    </app-badge>
+                  } @else {
+                    <app-badge variant="warning" size="sm">
+                      <app-icon slot="icon" name="alert-triangle" [size]="12" />
+                      Datos fiscales incompletos
+                    </app-badge>
+                  }
+                </div>
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-secondary">
+                  <span>
+                    <strong class="text-text-primary font-medium">NIT/Doc:</strong>
+                    {{ tenant.tax_id || 'Sin NIT' }}{{ tenant.tax_id_dv ? '-' + tenant.tax_id_dv : '' }}
+                  </span>
+                  @if (tenant.email) {
+                    <span>
+                      <strong class="text-text-primary font-medium">Correo:</strong>
+                      {{ tenant.email }}
+                    </span>
+                  }
+                  @if (tenant.address.city || tenant.address.department_code) {
+                    <span>
+                      <strong class="text-text-primary font-medium">Ubicación:</strong>
+                      {{ tenant.address.city || tenant.address.department_code }}
+                    </span>
+                  }
+                </div>
+              </div>
+            </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-[1fr_180px] gap-2">
-        <app-input
-          placeholder="Buscar por NIT, razón social, slug..."
-          (inputChange)="onQueryChange($event)"
-          aria-label="Buscar destinatario"
-        ></app-input>
-        <app-selector
-          [options]="kindOptions"
-          (valueChange)="onKindChange($event ?? null)"
-        ></app-selector>
-      </div>
+            <app-button
+              type="button"
+              variant="outline"
+              size="sm"
+              class="self-start sm:self-center shrink-0"
+              (clicked)="clearSelection()"
+            >
+              <app-icon slot="icon" name="refresh-cw" [size]="14" />
+              Cambiar cliente
+            </app-button>
+          </div>
+        </div>
+      } @else {
+        <!-- Estado: Búsqueda Interactiva -->
+        <div class="space-y-2 relative">
+          <div class="grid grid-cols-1 sm:grid-cols-[1fr_160px] gap-2">
+            <div class="relative">
+              <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-text-secondary">
+                <app-icon name="search" [size]="16" />
+              </div>
+              <input
+                type="text"
+                class="w-full pl-9 pr-8 py-2 text-xs md:text-sm border border-border rounded-lg bg-surface text-text-primary placeholder:text-text-secondary focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary transition-colors"
+                placeholder="Buscar por nombre, razón social, NIT o slug..."
+                [ngModel]="searchQuery()"
+                (ngModelChange)="onSearchChange($event)"
+                (focus)="onInputFocus()"
+                autocomplete="off"
+              />
+              @if (searchQuery().length > 0) {
+                <button
+                  type="button"
+                  class="absolute inset-y-0 right-0 pr-2.5 flex items-center text-text-secondary hover:text-text-primary"
+                  (click)="onClearQuery()"
+                >
+                  <app-icon name="x" [size]="14" />
+                </button>
+              }
+            </div>
 
-      @if (loading()) {
-        <p class="text-sm text-gray-500">Buscando tenants...</p>
-      } @else if (results().length === 0 && q().trim().length > 0) {
-        <p class="text-sm text-gray-500">Sin coincidencias para "{{ q() }}".</p>
-      } @else if (lockedTenant()) {
-        <div class="bg-success-light border border-success rounded p-3 space-y-1 text-sm">
-          <p class="font-mono text-success">
-            {{ lockedTenant()!.kind }} :{{ lockedTenant()!.tenant_id }} · {{ lockedTenant()!.legal_name }}
-            · {{ lockedTenant()!.tax_id }}{{ lockedTenant()!.tax_id_dv ? '-' + lockedTenant()!.tax_id_dv : '' }}
-          </p>
-          @if (!lockedTenant()!.fiscal_data_complete) {
-            <p class="text-warning">
-              Datos fiscales incompletos. El operador debe completar regimen + responsabilidades en el form.
-            </p>
+            <app-selector
+              [options]="kindOptions"
+              [ngModel]="selectedKind()"
+              (ngModelChange)="onKindChange($event)"
+            ></app-selector>
+          </div>
+
+          <!-- Dropdown / Lista flotante de resultados -->
+          @if (isOpen()) {
+            <div
+              class="absolute z-50 left-0 right-0 top-full mt-1 bg-surface border border-border rounded-xl shadow-xl max-h-72 overflow-y-auto divide-y divide-border"
+            >
+              @if (loading()) {
+                <div class="flex items-center justify-center gap-2 p-4 text-xs text-text-secondary">
+                  <app-icon name="loader-2" [size]="16" class="animate-spin text-primary" />
+                  Buscando clientes...
+                </div>
+              } @else if (results().length === 0) {
+                <div class="p-4 text-center text-xs text-text-secondary">
+                  @if (searchQuery().trim().length > 0) {
+                    No se encontraron tiendas u organizaciones que coincidan con "{{ searchQuery() }}".
+                  } @else {
+                    No hay registros disponibles para el filtro seleccionado.
+                  }
+                </div>
+              } @else {
+                <div class="py-1">
+                  @for (tenant of results(); track tenant.id) {
+                    <button
+                      type="button"
+                      class="w-full text-left px-4 py-3 hover:bg-surface-secondary/70 transition-colors flex items-center justify-between gap-3 group"
+                      (click)="selectTenant(tenant)"
+                    >
+                      <div class="space-y-0.5 flex-1 min-w-0">
+                        <div class="flex items-center gap-2 flex-wrap">
+                          <span class="text-sm font-semibold text-text-primary group-hover:text-primary transition-colors truncate">
+                            {{ tenant.legal_name || tenant.name }}
+                          </span>
+                          <app-badge [variant]="tenant.kind === 'organization' ? 'service' : 'primary'" size="xsm">
+                            {{ tenant.kind === 'organization' ? 'Org' : 'Tienda' }}
+                          </app-badge>
+                          @if (!tenant.fiscal_data_complete) {
+                            <app-badge variant="warning" size="xsm">Incompleto</app-badge>
+                          }
+                        </div>
+                        <div class="flex items-center gap-3 text-xs text-text-secondary truncate">
+                          <span>
+                            NIT: {{ tenant.tax_id || '—' }}{{ tenant.tax_id_dv ? '-' + tenant.tax_id_dv : '' }}
+                          </span>
+                          @if (tenant.address.city) {
+                            <span>· {{ tenant.address.city }}</span>
+                          }
+                          @if (tenant.email) {
+                            <span class="hidden sm:inline">· {{ tenant.email }}</span>
+                          }
+                        </div>
+                      </div>
+
+                      <div class="text-xs text-primary font-medium opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                        Seleccionar →
+                      </div>
+                    </button>
+                  }
+                </div>
+              }
+            </div>
           }
         </div>
-        <button app-button variant="secondary" type="button" (click)="onClear()">Cambiar destinatario</button>
-      } @else {
-        <ul class="divide-y">
-          @for (tenant of results(); track tenant.id) {
-            <li class="py-2">
-              <button
-                type="button"
-                class="text-left w-full hover:bg-gray-50 px-2 py-1 rounded"
-                (click)="onPick(tenant)"
-              >
-                <p class="font-mono text-sm">{{ tenant.kind }} :{{ tenant.tenant_id }}</p>
-                <p class="text-sm text-gray-900">{{ tenant.legal_name }}</p>
-                <p class="text-xs text-gray-500">
-                  {{ tenant.tax_id }}{{ tenant.tax_id_dv ? '-' + tenant.tax_id_dv : '' }}
-                  ·
-                  @if (tenant.tax_regime_code) {
-                    regimen {{ tenant.tax_regime_code }} ·
-                  }
-                  {{ tenant.fiscal_responsibilities.length }} responsabilidades
-                </p>
-                @if (!tenant.fiscal_data_complete) {
-                  <p class="text-xs text-warning mt-1">Datos fiscales incompletos</p>
-                }
-              </button>
-            </li>
-          }
-        </ul>
       }
-    </section>
+    </div>
   `,
 })
 export class TenantPickerComponent implements OnInit {
-  private readonly store = inject(Store);
+  private readonly http = inject(HttpClient);
+  private readonly destroyRef = inject(DestroyRef);
 
-  /** Disabled auto-search while user is typing. */
-  readonly q = signal('');
-  readonly kind = signal<'store' | 'organization' | null>(null);
-  readonly lockedTenant = signal<PlatformAcquirer | null>(null);
+  private readonly searchSubject$ = new Subject<{ q: string; kind: string }>();
 
-  readonly results$: Observable<PlatformAcquirer[]> = this.store.select(selectPlatformAcquirerResults);
-  readonly loading$: Observable<boolean> = this.store.select(selectPlatformAcquirerSearchLoading);
-
-  /** Local mirror for zoneless. *Local* signals — no NgRx subscription here. */
+  readonly searchQuery = signal<string>('');
+  readonly selectedKind = signal<string>('');
   readonly results = signal<PlatformAcquirer[]>([]);
   readonly loading = signal<boolean>(false);
+  readonly isOpen = signal<boolean>(false);
+  readonly selectedTenant = signal<PlatformAcquirer | null>(null);
 
-  /** Output del destinatario seleccionado al padre (form de creación). */
   readonly tenantPicked = output<PlatformAcquirer | null>();
 
-  readonly kindOptions = [
-    { value: '', label: 'Todos' },
-    { value: 'store', label: 'Tiendas' },
-    { value: 'organization', label: 'Organizaciones' },
+  readonly kindOptions: SelectorOption[] = [
+    { value: '', label: 'Todos los tipos' },
+    { value: 'store', label: 'Solo Tiendas' },
+    { value: 'organization', label: 'Solo Organizaciones' },
+    { value: 'user', label: 'Solo Usuarios' },
   ];
 
   ngOnInit(): void {
-    // Suscripcion local a signals (NgRx -> signals, requerido por OnPush).
-    this.results$.subscribe((rows) => this.results.set(rows));
-    this.loading$.subscribe((v) => this.loading.set(v));
+    // Pipeline de búsqueda reactivo con debounce y cancelación de peticiones intermedias
+    this.searchSubject$
+      .pipe(
+        debounceTime(250),
+        distinctUntilChanged((prev, curr) => prev.q === curr.q && prev.kind === curr.kind),
+        tap(() => this.loading.set(true)),
+        switchMap(({ q, kind }) => {
+          let params = new HttpParams();
+          if (q) params = params.set('q', q);
+          if (kind) params = params.set('kind', kind);
+          return this.http
+            .get<SearchResponse>(
+              `${environment.apiUrl}/superadmin/subscriptions/fiscal/customers/search`,
+              { params },
+            )
+            .pipe(
+              catchError(() =>
+                of({
+                  success: false,
+                  data: { data: [] },
+                }),
+              ),
+            );
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((res) => {
+        this.loading.set(false);
+        const rows = res?.data?.data ?? [];
+        this.results.set(rows);
+      });
 
-    // Carga inicial: listar tiendas al abrir el form (sin q).
-    this.store.dispatch(
-      PlatformFiscalInvoicingActions.searchAcquirers({ q: '', kind: null }),
-    );
+    // Carga inicial
+    this.triggerSearch();
   }
 
-  onQueryChange(value: string): void {
-    this.q.set(value ?? '');
-    this.store.dispatch(
-      PlatformFiscalInvoicingActions.searchAcquirers({
-        q: this.q(),
-        kind: this.kind(),
-      }),
-    );
+  onSearchChange(query: string): void {
+    this.searchQuery.set(query ?? '');
+    this.isOpen.set(true);
+    this.triggerSearch();
   }
 
-  onKindChange(value: string | number | null): void {
-    const v = (value ?? '').toString();
-    const next = !v ? null : ((v as 'store' | 'organization') ?? null);
-    this.kind.set(next);
-    this.store.dispatch(
-      PlatformFiscalInvoicingActions.searchAcquirers({
-        q: this.q(),
-        kind: next,
-      }),
-    );
+  onKindChange(kind: any): void {
+    const k = (kind ?? '').toString();
+    this.selectedKind.set(k);
+    this.isOpen.set(true);
+    this.triggerSearch();
   }
 
-  onPick(tenant: PlatformAcquirer): void {
-    this.lockedTenant.set(tenant);
-    this.store.dispatch(PlatformFiscalInvoicingActions.lockAcquirer({ acquirer: tenant }));
+  onInputFocus(): void {
+    this.isOpen.set(true);
+    if (this.results().length === 0 && !this.loading()) {
+      this.triggerSearch();
+    }
+  }
+
+  onClearQuery(): void {
+    this.searchQuery.set('');
+    this.triggerSearch();
+  }
+
+  selectTenant(tenant: PlatformAcquirer): void {
+    this.selectedTenant.set(tenant);
+    this.isOpen.set(false);
     this.tenantPicked.emit(tenant);
   }
 
-  onClear(): void {
-    this.lockedTenant.set(null);
-    this.store.dispatch(PlatformFiscalInvoicingActions.lockAcquirer({ acquirer: null }));
+  clearSelection(): void {
+    this.selectedTenant.set(null);
+    this.searchQuery.set('');
+    this.isOpen.set(true);
     this.tenantPicked.emit(null);
+    this.triggerSearch();
+  }
+
+  private triggerSearch(): void {
+    this.searchSubject$.next({
+      q: this.searchQuery().trim(),
+      kind: this.selectedKind(),
+    });
   }
 }

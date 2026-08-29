@@ -198,52 +198,20 @@ const SECTION = 'AIU';
   ],
   template: `
     <div class="space-y-4">
-      <!--
-        LA BASE GRAVABLE, no el régimen. Es la pregunta que el operador sabe
-        contestar —«qué se grava»— y la única que puede decir «el contrato
-        completo»: el régimen se DERIVA de ella al guardar. Cambiarla reproyecta
-        la matriz de tributos en el MISMO acto.
-      -->
-      <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <div>
-          <app-selector
-            label="Base gravable del contrato"
-            [formControl]="taxableBasisControl()"
-            [options]="basisOptions"
-            size="sm"
-            helpText="Qué porción del contrato lleva IVA. Al cambiarla, la matriz de tributos de abajo se reajusta sola para no contradecirla."
-            [errorText]="issueFor('aiu.taxable_basis')"
-          ></app-selector>
-          @if (departed('taxable_basis')) {
-            <p class="mt-1 flex items-start gap-1.5 text-[11px] text-warning">
-              <app-icon name="git-branch" [size]="12" class="mt-0.5 shrink-0" />
-              <span>{{ departureFieldNote }}</span>
-            </p>
-          }
-          @if (frozen('taxable_basis')) {
-            <p
-              class="mt-1 flex items-start gap-1.5 text-[11px] text-text-secondary"
-            >
-              <app-icon name="lock" [size]="12" class="mt-0.5 shrink-0" />
-              <span>{{ frozenReason() }}</span>
-            </p>
-          }
-        </div>
-        <div>
-          <app-textarea
-            label="Objeto del contrato"
-            [formControl]="contractObjectControl()"
-            [rows]="2"
-            [helperText]="contractObjectHelp()"
-            [error]="issueFor('aiu.contract_object')"
-          ></app-textarea>
-          @if (departed('contract_object')) {
-            <p class="mt-1 flex items-start gap-1.5 text-[11px] text-warning">
-              <app-icon name="git-branch" [size]="12" class="mt-0.5 shrink-0" />
-              <span>{{ departureFieldNote }}</span>
-            </p>
-          }
-        </div>
+      <div class="w-full">
+        <app-textarea
+          label="Objeto del contrato"
+          [formControl]="contractObjectControl()"
+          [rows]="2"
+          [helperText]="contractObjectHelp()"
+          [error]="issueFor('aiu.contract_object')"
+        ></app-textarea>
+        @if (departed('contract_object')) {
+          <p class="mt-1 flex items-start gap-1.5 text-[11px] text-warning">
+            <app-icon name="git-branch" [size]="12" class="mt-0.5 shrink-0" />
+            <span>{{ departureFieldNote }}</span>
+          </p>
+        }
       </div>
 
       <!--
@@ -767,9 +735,9 @@ const SECTION = 'AIU';
                   size="sm"
                 ></app-selector>
                 <app-selector
-                  label="Base"
-                  [formControl]="ruleControl(row.index, 'bucket')"
-                  [options]="bucketOptions"
+                  label="Base gravable"
+                  [formControl]="ruleControl(row.index, 'taxable_basis')"
+                  [options]="basisOptions"
                   size="sm"
                 ></app-selector>
                 <app-input
@@ -1099,10 +1067,11 @@ export class InvoiceSectionAiuComponent {
   private ruleValues(): AiuTaxRuleValue[] {
     this.revision();
     return this.taxRules().controls.map((control) => ({
-      bucket: String(control.get('bucket')?.value ?? '') as AiuBucket,
+      bucket: String(control.get('bucket')?.value ?? 'administracion') as AiuBucket,
       taxable: Boolean(control.get('taxable')?.value),
       tax_code: String(control.get('tax_code')?.value ?? ''),
       rate: String(control.get('rate')?.value ?? '0.00'),
+      taxable_basis: (control.get('taxable_basis')?.value ?? this.taxableBasis()) as AiuTaxableBasis,
     }));
   }
 
@@ -1354,6 +1323,7 @@ export class InvoiceSectionAiuComponent {
           taxable: [true],
           tax_code: [suggestion.tax_code],
           rate: [suggestion.rate],
+          taxable_basis: [basis],
         }),
       );
     }
@@ -1371,11 +1341,10 @@ export class InvoiceSectionAiuComponent {
   }
 
   /**
-   * Sincroniza la fila del costo reembolsable con la base y las tarifas de
-   * arriba, sin tocar nada más.
+   * Sincroniza la fila del costo reembolsable.
    *
-   * Bajo «Subtotal» el costo grava con la tarifa de referencia de las porciones,
-   * así que aplicar un tributo la cambia; bajo las otras dos bases la fila queda
+   * Es la fila que nunca se muestra pero siempre se guarda: bajo «subtotal»
+   * adopta la tarifa de referencia para gravar el costo; bajo «aiu» se guarda
    * exenta y su ausencia o su tarifa sobrante son dos 422 distintos
    * (`TAX_RULE_MISSING`, `TAX_RATE_ON_NON_TAXABLE`).
    */
@@ -1392,6 +1361,7 @@ export class InvoiceSectionAiuComponent {
           taxable: [derived.taxable],
           tax_code: [derived.tax_code],
           rate: [derived.rate],
+          taxable_basis: [basis],
         }),
       );
       return;
@@ -1471,6 +1441,7 @@ export class InvoiceSectionAiuComponent {
         taxable: [true],
         tax_code: ['01'],
         rate: ['19.00'],
+        taxable_basis: [this.taxableBasis() ?? 'aiu'],
       }),
     );
     this.taxRules().markAsDirty();

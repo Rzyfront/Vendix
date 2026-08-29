@@ -55,33 +55,33 @@ import { PlatformInvoicingStore } from '../../platform-invoicing.store';
         title="Perfiles"
         [value]="stats().total"
         smallText="Configuraciones de plataforma"
-        iconName="layout-template"
-        iconBgColor="bg-blue-100"
-        iconColor="text-blue-600"
+        iconName="file-stack"
+        iconBgColor="bg-primary/10"
+        iconColor="text-primary"
       ></app-stats>
       <app-stats
         title="Activos"
         [value]="stats().active"
         smallText="Disponibles para emitir"
         iconName="check-circle"
-        iconBgColor="bg-emerald-100"
-        iconColor="text-emerald-600"
+        iconBgColor="bg-success/10"
+        iconColor="text-success"
       ></app-stats>
       <app-stats
         title="AIU"
         [value]="stats().aiu"
         smallText="Tipo operación 09"
         iconName="percent"
-        iconBgColor="bg-amber-100"
-        iconColor="text-amber-600"
+        iconBgColor="bg-warning/10"
+        iconColor="text-warning"
       ></app-stats>
       <app-stats
         title="Predeterminados"
         [value]="stats().defaults"
         smallText="Uno por tipo de operación"
         iconName="star"
-        iconBgColor="bg-violet-100"
-        iconColor="text-violet-600"
+        iconBgColor="bg-primary/10"
+        iconColor="text-primary"
       ></app-stats>
     </div>
 

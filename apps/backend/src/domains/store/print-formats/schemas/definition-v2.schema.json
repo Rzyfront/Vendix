@@ -202,6 +202,26 @@
             "type": "string",
             "maxLength": 50000,
             "description": "HTML personalizado opcional (inline en la sección). Validación sanitization a nivel código (no schema)."
+          },
+          "show_sku": {
+            "type": "boolean",
+            "description": "Solo `items_table` / `kitchen_items`: muestra el SKU bajo el nombre del ítem. Lo lee el compositor con semántica `!== false`, así que ausente = visible; solo se persiste cuando el usuario lo apaga."
+          },
+          "show_variant_attributes": {
+            "type": "boolean",
+            "description": "Solo `items_table` / `kitchen_items`: muestra los atributos de variante del ítem. Ausente = visible."
+          },
+          "show_notes": {
+            "type": "boolean",
+            "description": "Solo `items_table` / `kitchen_items`: muestra la nota por línea del ítem. Ausente = visible."
+          },
+          "show_item_discounts": {
+            "type": "boolean",
+            "description": "Solo `items_table` / `kitchen_items`: muestra el descuento por línea. Ausente = visible."
+          },
+          "show_item_taxes": {
+            "type": "boolean",
+            "description": "Solo `items_table` / `kitchen_items`: muestra el impuesto por línea. Ausente = visible."
           }
         }
       }

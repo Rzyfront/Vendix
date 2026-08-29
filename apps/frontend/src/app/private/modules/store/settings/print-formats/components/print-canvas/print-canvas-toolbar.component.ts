@@ -7,25 +7,16 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
+import { PrintPreviewMode } from '../../../../../../../core/models/print-formats.model';
 
 /**
  * [print-editor-dsk P4.7] — Toolbar strip rendered above the canvas.
  *
- * Owns four pieces of editor state via signal `model()`s so the parent
- * canvas can two-way bind and react to changes:
- *
+ * Owns editor state via signal `model()`s:
+ *  - `mode`     — 'dummy' | 'tokenized' | 'real' preview mode.
  *  - `zoom`     — 60..160, applied as a CSS scale transform.
  *  - `snap`     — when true, drag-resize quantizes position/size to mm.
  *  - `ruler`    — when true, the canvas paints mm rulers around the paper.
- *
- * Plus one output:
- *
- *  - `fitToScreen` — parent recomputes the zoom so the paper fits its
- *    container width.
- *
- * All icons use the shared `IconComponent` (Lucide) — `rotate-ccw` and
- * `rotate-cw` for undo/redo, `grid` for snap, `maximize` for fit, `minus`
- * / `plus` for zoom, and `scale` toggled on/off for ruler.
  */
 @Component({
   selector: 'app-print-canvas-toolbar',
@@ -33,6 +24,38 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
   imports: [CommonModule, IconComponent],
   template: `
     <div class="vendix-canvas-toolbar">
+      <!-- Mode Toggle [Simulado vs Variables] -->
+      <div class="flex items-center p-0.5 bg-surface-secondary border border-border rounded-lg text-xs">
+        <button
+          type="button"
+          (click)="setMode('dummy')"
+          [class.bg-surface]="mode() === 'dummy'"
+          [class.text-primary-600]="mode() === 'dummy'"
+          [class.font-bold]="mode() === 'dummy'"
+          [class.shadow-xs]="mode() === 'dummy'"
+          [class.text-text-secondary]="mode() !== 'dummy'"
+          class="px-2.5 py-1 rounded-md transition flex items-center gap-1.5 cursor-pointer"
+        >
+          <app-icon name="file-text" [size]="12"></app-icon>
+          <span>Simulado</span>
+        </button>
+        <button
+          type="button"
+          (click)="setMode('tokenized')"
+          [class.bg-surface]="mode() === 'tokenized'"
+          [class.text-primary-600]="mode() === 'tokenized'"
+          [class.font-bold]="mode() === 'tokenized'"
+          [class.shadow-xs]="mode() === 'tokenized'"
+          [class.text-text-secondary]="mode() !== 'tokenized'"
+          class="px-2.5 py-1 rounded-md transition flex items-center gap-1.5 cursor-pointer"
+        >
+          <app-icon name="code" [size]="12"></app-icon>
+          <span>Variables (Tokens)</span>
+        </button>
+      </div>
+
+      <div class="toolbar-divider"></div>
+
       <div class="toolbar-group">
         <button
           type="button"
@@ -194,6 +217,9 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
   ],
 })
 export class PrintCanvasToolbarComponent {
+  /** Two-way bound preview mode ('dummy' | 'tokenized' | 'real'). */
+  readonly mode = model<PrintPreviewMode>('dummy');
+
   /** Two-way bound zoom percentage (60..160). */
   readonly zoom = model<number>(100);
 
@@ -221,6 +247,10 @@ export class PrintCanvasToolbarComponent {
 
   readonly minZoom = computed(() => 60);
   readonly maxZoom = computed(() => 160);
+
+  setMode(m: PrintPreviewMode): void {
+    this.mode.set(m);
+  }
 
   zoomIn(): void {
     const next = Math.min(this.zoom() + 10, this.maxZoom());

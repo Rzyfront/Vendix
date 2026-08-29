@@ -148,6 +148,7 @@ export class PrintFormatsController {
       formatType,
       dto.overrides,
       dto.sample_document_id,
+      dto.render_mode,
     );
     return this.responseService.success(preview);
   }

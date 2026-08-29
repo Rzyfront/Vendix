@@ -21,7 +21,7 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
  * evita que los controles del formulario se den de baja del FormGroup.
  */
 @Component({
-  selector: 'app-profile-section-wrapper',
+  selector: 'app-platform-section-wrapper',
   standalone: true,
   imports: [BadgeComponent, IconComponent],
   template: `
@@ -72,7 +72,7 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
     </div>
   `,
 })
-export class ProfileSectionWrapperComponent {
+export class PlatformSectionWrapperComponent {
   readonly title = input.required<string>();
   readonly icon = input('file-text');
   readonly summary = input<string | null>(null);

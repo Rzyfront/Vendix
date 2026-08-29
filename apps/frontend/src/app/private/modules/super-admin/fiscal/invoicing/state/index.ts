@@ -34,7 +34,7 @@ import { environment } from '../../../../../../../environments/environment';
  * viene del snapshot (kind='platform_acquirer_snapshot') que el
  * servicio devuelve en /customers/search y /customers/:kind/:id.
  */
-export type AcquirerKind = 'store' | 'organization';
+export type AcquirerKind = 'store' | 'organization' | 'user' | 'external';
 
 export interface PlatformAcquirer {
   id: string; // compuesto: 'store:<n>' u 'org:<n>'

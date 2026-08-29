@@ -436,6 +436,7 @@ export class PrintGatewayService {
     formatType: print_format_type_enum,
     overrides?: Record<string, any>,
     sampleDocId?: number,
+    renderMode?: 'dummy' | 'tokenized' | 'real',
   ): Promise<{ html: string; width_mm: number; is_roll: boolean; definition: PrintFormatDefinition }> {
     const effective = await this.resolveEffectiveConfig(storeId, formatType);
     const previewDef = overrides ? this.mergeDefinition(effective.definition, overrides) : effective.definition;
@@ -453,31 +454,75 @@ export class PrintGatewayService {
       data = await provider.getSampleData(storeId);
     }
 
-    const rawHtml = this.composer.compose(previewDef, data);
+    // Always enrich sample preview with the real store logo and business data if available
+    data = await this.enrichDataWithStoreIdentity(storeId, data);
 
-    // [print-editor-dsk P2.2] — Instanciado local a propósito: el servicio
-    // no tiene dependencias y la inyección por constructor forzaría a
-    // añadir un stub en `merge-definition.spec.ts` (que NO toco en esta
-    // fase). Sigue siendo un singleton a nivel de módulo porque Nest lo
-    // registra como provider — `document-print.service.ts` puede seguir
-    // inyectándolo vía DI en su propia refactorización.
-    const renderer = new PrintDocumentRendererService();
-    const wrappedHtml = renderer.render({
-      html: rawHtml,
-      paper: {
-        width_mm: previewDef.paper.width_mm,
-        is_roll: previewDef.paper.is_roll,
-        height_mm: previewDef.paper.height_mm ?? null,
-      },
-      copies: previewDef.paper.copies,
-    });
+    const html = this.composer.compose(
+      previewDef,
+      data,
+      renderMode === 'tokenized' ? 'tokenized' : 'dummy',
+    );
 
     return {
-      html: wrappedHtml,
+      html,
       width_mm: previewDef.paper.width_mm,
       is_roll: previewDef.paper.is_roll,
       definition: previewDef,
     };
+  }
+
+  /**
+   * Enriches standard print data with the store's real identity (logo, name, NIT, address)
+   * so previews immediately reflect the store's branding.
+   */
+  private async enrichDataWithStoreIdentity(
+    storeId: number,
+    data: StandardPrintDataModel,
+  ): Promise<StandardPrintDataModel> {
+    try {
+      const store = await this.prisma.stores.findFirst({
+        where: { id: storeId },
+        include: {
+          addresses: { take: 1 },
+          organizations: true,
+        },
+      });
+      if (store) {
+        const storeLogo = store.logo_url || store.organizations?.logo_url || undefined;
+        const addr = store.addresses?.[0];
+        const addressLine = addr?.address_line1 || undefined;
+        const city = addr?.city || undefined;
+        const stateProv = (addr as any)?.state || addr?.state_province || undefined;
+
+        data.store = {
+          ...data.store,
+          name: store.name || data.store.name,
+          legal_name: store.organizations?.legal_name || store.name || data.store.legal_name,
+          tax_id: store.tax_id || store.organizations?.tax_id || data.store.tax_id,
+          phone: (store as any).phone || data.store.phone,
+          email: (store as any).email || data.store.email,
+          address: addressLine || data.store.address,
+          city: city || data.store.city,
+          state_province: stateProv || data.store.state_province,
+          tax_regime: (store as any).tax_regime || data.store.tax_regime,
+          logo_url: storeLogo || data.store.logo_url,
+        };
+
+        if (!data.organization && store.organizations) {
+          data.organization = {
+            name: store.organizations.name,
+            legal_name: store.organizations.legal_name || store.organizations.name,
+            tax_id: store.organizations.tax_id || undefined,
+            logo_url: store.organizations.logo_url || undefined,
+          };
+        }
+      }
+    } catch (err) {
+      this.logger.warn(
+        `PrintGateway: no se pudo enriquecer datos con identidad de tienda ${storeId}: ${err}`,
+      );
+    }
+    return data;
   }
 
   /**

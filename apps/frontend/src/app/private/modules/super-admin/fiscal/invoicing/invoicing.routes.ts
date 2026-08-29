@@ -135,6 +135,27 @@ export const PLATFORM_INVOICING_ROUTES: Routes = [
             './pages/support-document/platform-support-document.component'
           ).then((c) => c.PlatformSupportDocumentComponent),
       },
+      {
+        path: 'profiles',
+        loadComponent: () =>
+          import('./pages/profiles/platform-profiles.component').then(
+            (c) => c.PlatformProfilesComponent,
+          ),
+      },
+      {
+        path: 'profiles/new',
+        loadComponent: () =>
+          import('./pages/profiles/platform-profile-editor.component').then(
+            (c) => c.PlatformProfileEditorComponent,
+          ),
+      },
+      {
+        path: 'profiles/:id/edit',
+        loadComponent: () =>
+          import('./pages/profiles/platform-profile-editor.component').then(
+            (c) => c.PlatformProfileEditorComponent,
+          ),
+      },
     ],
   },
 ];

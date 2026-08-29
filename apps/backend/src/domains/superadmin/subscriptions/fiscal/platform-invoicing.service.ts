@@ -104,27 +104,47 @@ export class PlatformInvoicingService {
     dian_status: string;
     cufe: string | null;
   }> {
-    const tenant = await this.tenants.getTenantByKindAndId(this.prismaClient, {
-      organizationId: args.organizationId,
-      kind: args.dto.customer.kind,
-      id: args.dto.customer.tenant_id,
-    });
-    if (!tenant) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_TENANT_NOT_FOUND,
-        `No se encontro el destinatario ${args.dto.customer.kind}:${args.dto.customer.tenant_id} en la plataforma.`,
-      );
+    let tenant: any;
+    if (args.dto.customer?.kind === 'external') {
+      if (!args.dto.customer.legal_name?.trim() || !args.dto.customer.tax_id?.trim()) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_VALIDATION_001,
+          'El cliente externo requiere nombre o razón social y NIT / documento válido.',
+        );
+      }
+      tenant = {
+        kind: 'external',
+        tenant_id: 0,
+        name: args.dto.customer.legal_name,
+        legal_name: args.dto.customer.legal_name,
+        tax_id: args.dto.customer.tax_id,
+        tax_id_dv: args.dto.customer.tax_id_dv ?? '0',
+        document_type: args.dto.customer.document_type ?? 'NIT',
+        person_type: args.dto.customer.person_type ?? '2',
+        tax_regime_code: args.dto.customer.tax_regime_code ?? '49',
+        fiscal_responsibilities: args.dto.customer.fiscal_responsibilities ?? ['R-99-PN'],
+        email: args.dto.customer.email ?? null,
+        phone: args.dto.customer.phone ?? null,
+        address: {
+          line: args.dto.customer.address?.line ?? null,
+          city: args.dto.customer.address?.city ?? null,
+          department_code: args.dto.customer.address?.department_code ?? null,
+        },
+      };
+    } else {
+      tenant = await this.tenants.getTenantByKindAndId(this.prismaClient, {
+        organizationId: args.organizationId,
+        kind: args.dto.customer.kind,
+        id: args.dto.customer.tenant_id,
+      });
+      if (!tenant) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_TENANT_NOT_FOUND,
+          `No se encontro el destinatario ${args.dto.customer.kind}:${args.dto.customer.tenant_id} en la plataforma.`,
+        );
+      }
     }
 
-    // C.1: si el caller pidió `profile_id`, validar y propagar al legacy DTO.
-    // La fachada traduce el profile_id en `profile_version` (current_version)
-    // y adjunta `profile_snapshot` (config vigente) — la persistencia final
-    // en `invoices.profile_id/version/snapshot` es responsabilidad del legacy
-    // `createPlatformInvoice`, que aún no acepta estos campos. Hasta que el
-    // legacy se extienda, la facade pasa `profile_id` como metadato y deja
-    // un TODO verificable. La validación de operación-tipo sí es bloqueante
-    // (PLATFORM_PROFILE_008) porque un mismatch corrompe el snapshot antes
-    // de cualquier persistencia.
     if (args.dto.profile_id) {
       await this.assertPlatformProfileMatchesOperation(
         args.dto.profile_id,
@@ -141,9 +161,7 @@ export class PlatformInvoicingService {
         validationError,
       );
     }
-    // AR2-R Validation: USD sin exchange_rate > 0 produce 201 con
-    // subtotal en COP sin conversion (legacy ignora exchange_rate).
-    // Forzar 422 INVOICING_TRM_001 con remediacion concreta.
+
     if (args.dto.currency?.iso_4217 === 'USD') {
       const rate = Number(args.dto.currency?.exchange_rate);
       if (!args.dto.currency?.exchange_rate || rate <= 0) {
@@ -160,15 +178,33 @@ export class PlatformInvoicingService {
       }
     }
 
-    // BYPASS Fase B.1: el facade original reusaba `invoicingService.create()`
-    // del riel tienda, pero esa API rechaza el wrapper con metadata platform
-    // (organization_id, store_id, source_type). El flujo legacy
-    // `createPlatformInvoice()` (Phase C.11) escribe directo a prisma con
-    // pg_advisory_xact_lock + provider chain, sin pasar por el riel tienda.
-    // Es la unica via que produce 2xx con datos reales. Mapeamos el MvpV1 DTO
-    // al `CreatePlatformInvoiceDto` legacy y delegamos.
     const legacyDto = this.mapMvpV1ToLegacyCreateDto(args.dto, tenant);
     const legacyResult = await this.subscriptionFiscalService.createPlatformInvoice(legacyDto);
+
+    if (args.dto.save_as_profile?.name) {
+      try {
+        await this.prismaService.withoutScope().invoice_profiles.create({
+          data: {
+            organization_id: args.organizationId,
+            store_id: null,
+            name: args.dto.save_as_profile.name,
+            operation_type: args.dto.operation_type ?? '10',
+            document_type: 'sales_invoice',
+            state: 'active',
+            is_default: args.dto.save_as_profile.is_default ?? false,
+            current_version: 1,
+            current_config: {
+              resolution_id: args.dto.resolution_id ?? null,
+              payment_form: args.dto.payment_form ?? '1',
+              payment_means_code: args.dto.payment_means_code ?? '10',
+              notes: args.dto.notes ?? null,
+            },
+          },
+        });
+      } catch (err) {
+        this.logger.warn(`Error guardando perfil desde factura: ${err}`);
+      }
+    }
 
     return {
       invoice_id: legacyResult.transmission_id,

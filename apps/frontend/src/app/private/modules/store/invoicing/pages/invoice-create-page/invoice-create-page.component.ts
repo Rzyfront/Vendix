@@ -4430,10 +4430,11 @@ export class InvoiceCreatePageComponent implements OnInit {
     for (const rule of reprojectAiuTaxRules(config.taxes?.rules ?? [], basis)) {
       this.aiuTaxesArray.push(
         this.fb.group({
-          bucket: [rule.bucket],
+          bucket: [rule.bucket ?? 'administracion'],
           taxable: [rule.taxable],
           tax_code: [rule.tax_code],
           rate: [rule.rate],
+          taxable_basis: [rule.taxable_basis ?? basis],
         }),
       );
     }

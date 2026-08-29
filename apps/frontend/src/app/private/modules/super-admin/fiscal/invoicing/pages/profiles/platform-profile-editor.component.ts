@@ -26,7 +26,6 @@ import {
   InputComponent,
   SelectorComponent,
   StickyHeaderActionButton,
-  StickyHeaderComponent,
 } from '../../../../../../../shared/components/index';
 import type { SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
 import {
@@ -60,7 +59,7 @@ import { FiscalBillingAdminService } from '../../../../subscriptions/services/fi
 import type { PlatformInvoiceProfileDetail } from '../../../../subscriptions/interfaces/fiscal-billing.interface';
 import { PlatformProfilePreviewPanelComponent } from '../../components/platform-profile-preview-panel/platform-profile-preview-panel.component';
 import { PlatformProfileVersionsPanelComponent } from '../../components/platform-profile-versions-panel/platform-profile-versions-panel.component';
-import { ProfileSectionWrapperComponent } from './profile-section-wrapper.component';
+import { PlatformSectionWrapperComponent } from '../../components/platform-section-wrapper/platform-section-wrapper.component';
 import {
   InvoiceSectionAiuComponent,
   InvoiceSectionDocumentoComponent,
@@ -100,7 +99,7 @@ type SectionId =
  *
  * No puede importar `InvoiceFormSectionComponent` ni `invoice-dian-catalogs` desde
  * `store/invoicing/`: eso está fuera de su allow-list y moverlo requiere un commit
- * bisectable propio. Usa `ProfileSectionWrapperComponent` local y los catálogos en línea.
+ * bisectable propio. Usa `PlatformSectionWrapperComponent` local y los catálogos en línea.
  */
 @Component({
   selector: 'app-platform-profile-editor',
@@ -108,8 +107,7 @@ type SectionId =
   imports: [
     ReactiveFormsModule,
     RouterLink,
-    StickyHeaderComponent,
-    ProfileSectionWrapperComponent,
+    PlatformSectionWrapperComponent,
     AlertBannerComponent,
     ButtonComponent,
     IconComponent,
@@ -128,16 +126,48 @@ type SectionId =
   ],
   template: `
     <div class="w-full max-w-[1400px] mx-auto">
-      <app-sticky-header
-        [title]="pageTitle()"
-        [subtitle]="pageSubtitle()"
-        icon="layout-template"
-        variant="glass"
-        [showBackButton]="false"
-        [metadataContent]="saveHint()"
-        [actions]="headerActions()"
-        (actionClicked)="onHeaderAction($event)"
-      />
+      <!-- Cabecera de la página (alineada al shell sin duplicar sticky header) -->
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 mb-4 border-b border-border">
+        <div class="flex items-center gap-3">
+          <a
+            routerLink="/super-admin/fiscal/invoicing/profiles"
+            class="flex items-center justify-center w-9 h-9 rounded-lg border border-border bg-surface hover:bg-surface-secondary text-text-secondary hover:text-text-primary transition-colors shrink-0"
+            title="Volver a perfiles"
+          >
+            <app-icon name="arrow-left" [size]="18"></app-icon>
+          </a>
+          <div>
+            <h1 class="text-xl font-bold text-text-primary tracking-tight">{{ pageTitle() }}</h1>
+            <p class="text-xs text-text-secondary">{{ pageSubtitle() }}</p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2 self-end sm:self-auto">
+          @if (saveHint()) {
+            <span class="text-xs text-text-secondary hidden sm:inline mr-2">{{ saveHint() }}</span>
+          }
+          <app-button
+            type="button"
+            variant="outline"
+            size="sm"
+            (clicked)="onHeaderAction('cancel')"
+          >
+            <app-icon slot="icon" name="x" [size]="16"></app-icon>
+            Cancelar
+          </app-button>
+          <app-button
+            type="button"
+            variant="primary"
+            size="sm"
+            [loading]="saving()"
+            [disabled]="saving()"
+            (clicked)="onHeaderAction('save')"
+          >
+            <app-icon slot="icon" name="save" [size]="16"></app-icon>
+            Guardar perfil
+          </app-button>
+        </div>
+      </div>
 
       <div class="px-2 md:px-4 pb-6 space-y-4">
         @if (loading() && isEdit() && !hydrated()) {
@@ -171,7 +201,7 @@ type SectionId =
           </div>
 
           <!-- Documento -->
-          <app-profile-section-wrapper
+          <app-platform-section-wrapper
             title="Documento"
             icon="file-text"
             [summary]="'Resolución, forma y medio de pago'"
@@ -193,11 +223,11 @@ type SectionId =
               [notices]="documentoNotices()"
               [errors]="documentoErrors()"
             ></vendix-invoice-section-documento>
-          </app-profile-section-wrapper>
+          </app-platform-section-wrapper>
 
           <!-- AIU -->
           @if (isAiu()) {
-            <app-profile-section-wrapper
+            <app-platform-section-wrapper
               title="Configuración AIU"
               icon="calculator"
               [summary]="aiuSummary()"
@@ -211,11 +241,11 @@ type SectionId =
                 [taxRules]="taxRules"
                 [issues]="issues()"
               ></vendix-invoice-section-aiu>
-            </app-profile-section-wrapper>
+            </app-platform-section-wrapper>
           }
 
           <!-- Líneas modelo -->
-          <app-profile-section-wrapper
+          <app-platform-section-wrapper
             title="Líneas modelo"
             icon="list"
             [summary]="modelLinesSummary()"
@@ -245,11 +275,11 @@ type SectionId =
                 (removeLine)="removeModelLine($event)"
               ></vendix-invoice-section-lineas>
             </div>
-          </app-profile-section-wrapper>
+          </app-platform-section-wrapper>
 
           <!-- Impuestos (no-AIU) -->
           @if (!isAiu()) {
-            <app-profile-section-wrapper
+            <app-platform-section-wrapper
               title="Impuestos"
               icon="percent"
               [summary]="taxSummary()"
@@ -265,11 +295,11 @@ type SectionId =
                 (addRule)="addTaxRule()"
                 (removeRule)="removeTaxRule($event)"
               ></vendix-invoice-section-impuestos>
-            </app-profile-section-wrapper>
+            </app-platform-section-wrapper>
           }
 
           <!-- Retenciones -->
-          <app-profile-section-wrapper
+          <app-platform-section-wrapper
             title="Retenciones"
             icon="hand-coins"
             [summary]="withholdingsSummary()"
@@ -287,10 +317,10 @@ type SectionId =
               (addWithholding)="addWithholding()"
               (removeWithholding)="removeWithholding($event)"
             ></vendix-invoice-section-retenciones>
-          </app-profile-section-wrapper>
+          </app-platform-section-wrapper>
 
           <!-- Divisa -->
-          <app-profile-section-wrapper
+          <app-platform-section-wrapper
             title="Divisa"
             icon="globe"
             [summary]="currencySummary()"
@@ -304,10 +334,10 @@ type SectionId =
               [currencyOptions]="currency_options"
               [errors]="divisaErrors()"
             ></vendix-invoice-section-divisa>
-          </app-profile-section-wrapper>
+          </app-platform-section-wrapper>
 
           <!-- Contabilidad -->
-          <app-profile-section-wrapper
+          <app-platform-section-wrapper
             title="Contabilidad"
             icon="book"
             [summary]="accountingSummary()"
@@ -337,10 +367,10 @@ type SectionId =
                 </div>
               }
             </div>
-          </app-profile-section-wrapper>
+          </app-platform-section-wrapper>
 
           <!-- Formato -->
-          <app-profile-section-wrapper
+          <app-platform-section-wrapper
             title="Formato de impresión"
             icon="printer"
             [summary]="formatSummary()"
@@ -354,10 +384,10 @@ type SectionId =
               [templateKeyLimit]="template_key_limit"
               [errors]="formatoErrors()"
             ></vendix-invoice-section-formato>
-          </app-profile-section-wrapper>
+          </app-platform-section-wrapper>
 
           <!-- Notas internas -->
-          <app-profile-section-wrapper
+          <app-platform-section-wrapper
             title="Notas internas"
             icon="info"
             summary="No viajan al XML"
@@ -369,12 +399,12 @@ type SectionId =
               [form]="form"
               [paths]="notasSectionPaths"
             ></vendix-invoice-section-notas>
-          </app-profile-section-wrapper>
+          </app-platform-section-wrapper>
         </form>
 
         <!-- Previsualización e Historial (solo edición) -->
         @if (isEdit()) {
-          <app-profile-section-wrapper
+          <app-platform-section-wrapper
             title="Previsualización"
             icon="eye"
             summary="Cómo quedaría un documento con este perfil"
@@ -385,9 +415,9 @@ type SectionId =
               [profileId]="profileId()"
               [isAiu]="isAiu()"
             ></app-platform-profile-preview-panel>
-          </app-profile-section-wrapper>
+          </app-platform-section-wrapper>
 
-          <app-profile-section-wrapper
+          <app-platform-section-wrapper
             title="Historial de versiones"
             icon="history"
             [summary]="'Versión vigente: v' + currentVersionNumber()"
@@ -398,7 +428,7 @@ type SectionId =
               [profileId]="profileId()"
               [currentVersion]="currentVersionNumber()"
             ></app-platform-profile-versions-panel>
-          </app-profile-section-wrapper>
+          </app-platform-section-wrapper>
         }
 
         <!-- Errores de guardado -->

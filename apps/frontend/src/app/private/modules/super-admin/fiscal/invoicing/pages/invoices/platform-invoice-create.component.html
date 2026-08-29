@@ -1,0 +1,485 @@
+<div class="space-y-6 pb-16">
+  <!-- Cabecera de Página -->
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border">
+    <div class="flex items-center gap-3">
+      <a
+        routerLink="/super-admin/fiscal/invoicing/invoices"
+        class="flex items-center justify-center w-9 h-9 rounded-lg border border-border bg-surface hover:bg-surface-secondary text-text-secondary hover:text-text-primary transition-colors shrink-0"
+        title="Volver a facturas"
+      >
+        <app-icon name="arrow-left" [size]="18"></app-icon>
+      </a>
+      <div>
+        <div class="flex items-center gap-2 flex-wrap">
+          <h1 class="text-xl font-bold text-text-primary tracking-tight">Nueva factura de plataforma</h1>
+          <app-badge variant="primary" size="sm">Factura Estándar</app-badge>
+        </div>
+        <p class="text-xs text-text-secondary">Emisión electrónica oficial DIAN con perfil y cliente configurable</p>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-2 self-end sm:self-auto">
+      <app-button
+        type="button"
+        variant="ghost"
+        size="sm"
+        (clicked)="openPrintPreview()"
+      >
+        <app-icon slot="icon" name="eye" [size]="16"></app-icon>
+        Previsualizar
+      </app-button>
+
+      <app-button
+        type="button"
+        variant="primary"
+        size="sm"
+        [loading]="submitting()"
+        [disabled]="submitting() || (itemsArray.length === 0)"
+        (clicked)="submit()"
+      >
+        <app-icon slot="icon" name="send" [size]="16"></app-icon>
+        {{ submitting() ? 'Emitiendo a la DIAN...' : 'Emitir factura' }}
+      </app-button>
+    </div>
+  </div>
+
+  <form [formGroup]="invoiceForm" class="space-y-6">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+
+      <!-- Columna Principal (8 cols) -->
+      <div class="lg:col-span-8 space-y-6">
+
+        <!-- 1. Perfil de Facturación -->
+        <app-platform-section-wrapper
+          title="1. Perfil de facturación"
+          icon="wand-2"
+          [expanded]="sectionExpanded()['perfil']"
+          (expandedChange)="toggleSection('perfil', $event)"
+        >
+          <div class="space-y-3">
+            <p class="text-xs text-text-secondary">
+              Selecciona un perfil para autocompletar la resolución autorizada, medios de pago y notas predeterminadas.
+            </p>
+            @if (profilesForOperationType().length === 0) {
+              <div class="p-3 rounded-lg bg-surface-secondary/50 border border-border text-xs text-text-secondary flex items-center justify-between">
+                <span>No hay perfiles configurados para factura estándar.</span>
+                <a routerLink="/super-admin/fiscal/invoicing/profiles/new" class="text-primary hover:underline font-medium">Crear perfil →</a>
+              </div>
+            } @else {
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                @for (p of profilesForOperationType(); track p.id) {
+                  <div
+                    class="p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3"
+                    [class.border-primary]="invoiceForm.value.profile_id === p.id"
+                    [class.bg-primary/5]="invoiceForm.value.profile_id === p.id"
+                    [class.shadow-sm]="invoiceForm.value.profile_id === p.id"
+                    [class.border-border]="invoiceForm.value.profile_id !== p.id"
+                    (click)="applyProfile(p.id)"
+                  >
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-1.5 flex-wrap">
+                        <span class="text-sm font-semibold text-text-primary truncate">{{ p.name }}</span>
+                        @if (p.is_default) {
+                          <app-badge variant="success" size="xsm">Predeterminado</app-badge>
+                        }
+                      </div>
+                      <p class="text-xs text-text-secondary truncate mt-0.5">Versión {{ p.current_version }}</p>
+                    </div>
+                    @if (invoiceForm.value.profile_id === p.id) {
+                      <app-badge variant="primary" size="sm">Aplicado</app-badge>
+                    }
+                  </div>
+                }
+              </div>
+            }
+          </div>
+        </app-platform-section-wrapper>
+
+        <!-- 2. Documento y Condiciones -->
+        <app-platform-section-wrapper
+          title="2. Documento y condiciones de pago"
+          icon="file-text"
+          [expanded]="sectionExpanded()['documento']"
+          (expandedChange)="toggleSection('documento', $event)"
+        >
+          <vendix-invoice-section-documento
+            context="invoice"
+            [form]="invoiceForm"
+            [paths]="documentoSectionPaths"
+            [invoiceTypeOptions]="invoiceTypeOptions"
+            [paymentFormOptions]="paymentFormOptions"
+            [paymentMeansOptions]="paymentMeansOptions"
+            [resolutionControl]="resolutionControl"
+            [resolutionOptions]="resolutionOptions()"
+            resolutionPlaceholder="Selecciona una resolución DIAN activa"
+          ></vendix-invoice-section-documento>
+        </app-platform-section-wrapper>
+
+        <!-- 3. Adquiriente (Destinatario) -->
+        <app-platform-section-wrapper
+          title="3. Adquiriente (Destinatario)"
+          icon="user-round"
+          [expanded]="sectionExpanded()['adquiriente']"
+          (expandedChange)="toggleSection('adquiriente', $event)"
+        >
+          <!-- Conmutador de modo de cliente -->
+          <div class="flex items-center gap-2 mb-4 p-1 rounded-xl bg-surface-secondary/70 border border-border w-fit">
+            <button
+              type="button"
+              class="px-3 py-1.5 text-xs font-semibold rounded-lg transition-all"
+              [class.bg-surface]="acquirerMode() === 'system'"
+              [class.text-text-primary]="acquirerMode() === 'system'"
+              [class.shadow-sm]="acquirerMode() === 'system'"
+              [class.text-text-secondary]="acquirerMode() !== 'system'"
+              (click)="setAcquirerMode('system')"
+            >
+              <span class="flex items-center gap-1.5">
+                <app-icon name="building-2" [size]="14" />
+                Entidad del sistema
+              </span>
+            </button>
+            <button
+              type="button"
+              class="px-3 py-1.5 text-xs font-semibold rounded-lg transition-all"
+              [class.bg-surface]="acquirerMode() === 'external'"
+              [class.text-text-primary]="acquirerMode() === 'external'"
+              [class.shadow-sm]="acquirerMode() === 'external'"
+              [class.text-text-secondary]="acquirerMode() !== 'external'"
+              (click)="setAcquirerMode('external')"
+            >
+              <span class="flex items-center gap-1.5">
+                <app-icon name="user-plus" [size]="14" />
+                Cliente externo manual
+              </span>
+            </button>
+          </div>
+
+          @if (acquirerMode() === 'system') {
+            <p class="text-xs text-text-secondary mb-3">
+              Busca y selecciona una tienda, organización o usuario registrado para autocompletar su identificación tributaria.
+            </p>
+            <app-platform-tenant-picker
+              (tenantPicked)="onTenantPicked($event)"
+            ></app-platform-tenant-picker>
+          } @else {
+            <div class="space-y-4 pt-1">
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div class="space-y-1">
+                  <label class="text-xs font-medium text-text-secondary">Tipo de documento</label>
+                  <app-selector
+                    [options]="documentTypeOptions"
+                    formControlName="external_document_type"
+                  ></app-selector>
+                </div>
+                <div class="space-y-1">
+                  <app-input
+                    label="Número de documento / NIT"
+                    formControlName="external_tax_id"
+                    placeholder="Ej. 900123456"
+                    [required]="true"
+                  ></app-input>
+                </div>
+                <div class="space-y-1">
+                  <app-input
+                    label="DV (Dígito de verificación)"
+                    formControlName="external_tax_id_dv"
+                    placeholder="Auto"
+                  ></app-input>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div class="space-y-1">
+                  <app-input
+                    label="Razón social / Nombre completo"
+                    formControlName="external_legal_name"
+                    placeholder="Nombre del cliente o empresa"
+                    [required]="true"
+                  ></app-input>
+                </div>
+                <div class="space-y-1">
+                  <label class="text-xs font-medium text-text-secondary">Tipo de persona</label>
+                  <app-selector
+                    [options]="personTypeOptions"
+                    formControlName="external_person_type"
+                  ></app-selector>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div class="space-y-1">
+                  <label class="text-xs font-medium text-text-secondary">Régimen tributario</label>
+                  <app-selector
+                    [options]="taxRegimeOptions"
+                    formControlName="external_tax_regime_code"
+                  ></app-selector>
+                </div>
+                <div class="space-y-1">
+                  <app-input
+                    label="Correo electrónico"
+                    formControlName="external_email"
+                    type="email"
+                    placeholder="facturacion@cliente.com"
+                  ></app-input>
+                </div>
+                <div class="space-y-1">
+                  <app-input
+                    label="Teléfono"
+                    formControlName="external_phone"
+                    placeholder="Ej. 3001234567"
+                  ></app-input>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div class="sm:col-span-2 space-y-1">
+                  <app-input
+                    label="Dirección fiscal"
+                    formControlName="external_address_line"
+                    placeholder="Calle, carrera, número, oficina..."
+                  ></app-input>
+                </div>
+                <div class="space-y-1">
+                  <app-input
+                    label="Ciudad / Municipio"
+                    formControlName="external_city"
+                    placeholder="Bogotá, Medellín, Cali..."
+                  ></app-input>
+                </div>
+              </div>
+            </div>
+          }
+        </app-platform-section-wrapper>
+
+        <!-- 4. Líneas de Factura y Tributos -->
+        <app-platform-section-wrapper
+          title="4. Líneas de factura y tributos"
+          icon="list"
+          [expanded]="sectionExpanded()['lineas']"
+          (expandedChange)="toggleSection('lineas', $event)"
+        >
+          <vendix-invoice-section-lineas
+            context="invoice"
+            [rows]="itemControls()"
+            [rowPaths]="lineasRowPaths"
+            [rowErrors]="rowErrors"
+            [isAiu]="false"
+            [carriesAiu]="carriesAiu"
+            [aiuComponentOptions]="aiuComponentOptions"
+            [toggleAiu]="toggleAiu"
+            emptyStateText="No hay líneas agregadas. Haz clic en «Agregar línea manual» para ingresar los conceptos a facturar."
+            (addCustomItem)="openLineModal()"
+            (removeLine)="removeLine($event)"
+          ></vendix-invoice-section-lineas>
+        </app-platform-section-wrapper>
+
+        <!-- 5. Notas y Observaciones -->
+        <app-platform-section-wrapper
+          title="5. Notas y términos legales"
+          icon="sticky-note"
+          [expanded]="sectionExpanded()['notas']"
+          (expandedChange)="toggleSection('notas', $event)"
+        >
+          <vendix-invoice-section-notas
+            context="invoice"
+            [form]="invoiceForm"
+            [paths]="notasSectionPaths"
+          ></vendix-invoice-section-notas>
+        </app-platform-section-wrapper>
+
+        <!-- 6. Guardar como Perfil -->
+        <div class="p-4 rounded-xl border border-border bg-surface-secondary/30 space-y-3">
+          <div class="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="saveAsProfile"
+              formControlName="save_as_profile_enabled"
+              class="rounded border-border text-primary focus:ring-primary h-4 w-4"
+            />
+            <label for="saveAsProfile" class="text-sm font-semibold text-text-primary cursor-pointer">
+              Guardar esta configuración como un nuevo Perfil de Facturación
+            </label>
+          </div>
+          @if (invoiceForm.value.save_as_profile_enabled) {
+            <div class="pl-6 pt-1 max-w-md">
+              <app-input
+                label="Nombre del nuevo perfil"
+                formControlName="save_as_profile_name"
+                placeholder="Ej. Factura Mensual Servicios SaaS"
+              ></app-input>
+            </div>
+          }
+        </div>
+
+        @if (errorMessage(); as err) {
+          <app-alert-banner variant="danger">{{ err }}</app-alert-banner>
+        }
+      </div>
+
+      <!-- Columna Lateral Sticky: Resumen Financiero y Acciones (4 cols) -->
+      <div class="lg:col-span-4 space-y-4 sticky top-6">
+
+        <!-- Tarjeta de Resumen Financiero -->
+        <div class="rounded-2xl border border-border bg-surface p-5 shadow-sm space-y-4">
+          <div class="flex items-center justify-between border-b border-border pb-3">
+            <h3 class="text-sm font-bold text-text-primary flex items-center gap-2">
+              <app-icon name="calculator" [size]="16" class="text-primary" />
+              Resumen de la factura
+            </h3>
+            <span class="text-xs text-text-secondary">{{ itemsArray.length }} {{ itemsArray.length === 1 ? 'línea' : 'líneas' }}</span>
+          </div>
+
+          <dl class="space-y-2.5 text-xs">
+            <div class="flex items-center justify-between text-text-secondary">
+              <dt>Subtotal bruto:</dt>
+              <dd class="font-medium text-text-primary">{{ totals().grossSubtotal | currency }}</dd>
+            </div>
+
+            @if (totals().totalDiscount > 0) {
+              <div class="flex items-center justify-between text-success">
+                <dt>Descuentos:</dt>
+                <dd class="font-medium">- {{ totals().totalDiscount | currency }}</dd>
+              </div>
+            }
+
+            <div class="flex items-center justify-between text-text-secondary border-t border-border/50 pt-2">
+              <dt>Base gravable:</dt>
+              <dd class="font-medium text-text-primary">{{ totals().taxableBase | currency }}</dd>
+            </div>
+
+            <div class="flex items-center justify-between text-text-secondary">
+              <dt>Total IVA:</dt>
+              <dd class="font-medium text-text-primary">{{ totals().totalIva | currency }}</dd>
+            </div>
+
+            <div class="flex items-center justify-between border-t border-border pt-3 text-sm font-bold text-text-primary">
+              <dt>Total a pagar:</dt>
+              <dd class="text-base text-primary font-extrabold">{{ totals().total | currency }}</dd>
+            </div>
+          </dl>
+
+          <div class="pt-2 space-y-2">
+            <app-button
+              type="button"
+              variant="primary"
+              size="md"
+              class="w-full justify-center"
+              [loading]="submitting()"
+              [disabled]="submitting() || (itemsArray.length === 0)"
+              (clicked)="submit()"
+            >
+              <app-icon slot="icon" name="send" [size]="16"></app-icon>
+              {{ submitting() ? 'Emitiendo a la DIAN...' : 'Emitir Factura Electrónica' }}
+            </app-button>
+
+            <app-button
+              type="button"
+              variant="outline"
+              size="sm"
+              class="w-full justify-center"
+              (clicked)="openPrintPreview()"
+            >
+              <app-icon slot="icon" name="eye" [size]="14"></app-icon>
+              Previsualizar XML técnico
+            </app-button>
+          </div>
+        </div>
+
+        <!-- Indicador de Cumplimiento Fiscal DIAN -->
+        <div class="rounded-xl border border-border/80 bg-surface-secondary/40 p-4 text-xs space-y-2">
+          <div class="flex items-center gap-1.5 font-semibold text-text-primary">
+            <app-icon name="shield-check" [size]="15" class="text-success" />
+            Validación previa DIAN
+          </div>
+          <p class="text-text-secondary text-[11px] leading-relaxed">
+            Esta factura se emitirá firmada digitalmente con el certificado de la plataforma y asignará el siguiente consecutivo de la resolución seleccionada.
+          </p>
+        </div>
+
+      </div>
+    </div>
+  </form>
+</div>
+
+<!-- Modal para Agregar Línea Manual con IVA Incluido / Agregado -->
+<app-modal [(isOpen)]="showLineModal" title="Nueva línea de factura" size="md">
+  <div class="space-y-4">
+    <app-input
+      label="Descripción del concepto o servicio"
+      [ngModel]="newLine().description"
+      (inputChange)="updateNewLine({ description: $event ?? '' })"
+      placeholder="Ej. Suscripción Plan Pro Anual, Consultoría Técnica..."
+      [required]="true"
+    ></app-input>
+
+    <div class="grid grid-cols-2 gap-3">
+      <app-input
+        label="Cantidad"
+        type="number"
+        [ngModel]="newLine().quantity"
+        (inputChange)="updateNewLine({ quantity: +$event || 1 })"
+        [required]="true"
+      ></app-input>
+      <app-input
+        label="Precio unitario"
+        type="number"
+        [ngModel]="newLine().unit_price"
+        (inputChange)="updateNewLine({ unit_price: +$event || 0 })"
+        [required]="true"
+      ></app-input>
+    </div>
+
+    <div class="grid grid-cols-2 gap-3">
+      <div class="space-y-1">
+        <label class="text-xs font-medium text-text-secondary">Tarifa de IVA</label>
+        <app-selector
+          [options]="taxRateOptions"
+          [ngModel]="newLine().tax_rate.toString()"
+          (ngModelChange)="updateNewLine({ tax_rate: +$event || 0 })"
+        ></app-selector>
+      </div>
+      <app-input
+        label="Descuento (COP)"
+        type="number"
+        [ngModel]="newLine().discount_amount"
+        (inputChange)="updateNewLine({ discount_amount: +$event || 0 })"
+      ></app-input>
+    </div>
+
+    <div class="p-3 rounded-lg bg-surface-secondary/60 border border-border flex items-center justify-between">
+      <div>
+        <p class="text-xs font-semibold text-text-primary">IVA incluido en el precio</p>
+        <p class="text-[11px] text-text-secondary">El precio ingresado ya contiene el valor del IVA.</p>
+      </div>
+      <input
+        type="checkbox"
+        [ngModel]="newLine().is_inclusive"
+        (ngModelChange)="updateNewLine({ is_inclusive: !!$event })"
+        class="rounded border-border text-primary focus:ring-primary h-4 w-4"
+      />
+    </div>
+
+    <div class="flex justify-end gap-2 pt-4 border-t border-border">
+      <app-button variant="outline" size="sm" (clicked)="showLineModal.set(false)">Cancelar</app-button>
+      <app-button variant="primary" size="sm" (clicked)="confirmLine()">Agregar a la factura</app-button>
+    </div>
+  </div>
+</app-modal>
+
+<!-- Modal Preview XML -->
+<app-modal [isOpen]="printPreviewOpen()" (isOpenChange)="closePrintPreview($event)" title="Previsualización Técnica DIAN" size="xl">
+  @if (printPreviewLoading()) {
+    <div class="flex flex-col items-center justify-center p-12 space-y-4">
+      <div class="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+      <p class="text-text-secondary font-medium text-sm">Generando XML de prueba con la estructura UBL 2.1...</p>
+    </div>
+  } @else if (printPreviewError(); as err) {
+    <div class="p-6">
+      <app-alert-banner variant="danger">{{ err }}</app-alert-banner>
+    </div>
+  } @else if (printPreviewResult()) {
+    <div class="w-full h-[70vh] bg-surface rounded-xl overflow-hidden border border-border">
+      <iframe [srcdoc]="printPreviewSrcdoc()" class="w-full h-full border-none" title="Print Preview"></iframe>
+    </div>
+  }
+</app-modal>

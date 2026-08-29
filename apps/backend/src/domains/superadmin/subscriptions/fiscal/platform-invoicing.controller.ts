@@ -76,8 +76,8 @@ import { SubscriptionFiscalService } from './subscription-fiscal.service';
 
 class SearchTenantsQueryDto {
   @IsOptional()
-  @IsIn(['store', 'organization'])
-  kind?: 'store' | 'organization';
+  @IsIn(['store', 'organization', 'user'])
+  kind?: 'store' | 'organization' | 'user';
 
   @IsOptional()
   @IsString()

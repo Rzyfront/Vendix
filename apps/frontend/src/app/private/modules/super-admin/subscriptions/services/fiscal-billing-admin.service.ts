@@ -497,4 +497,32 @@ export class FiscalBillingAdminService {
       )
       .pipe(map((res) => res.data));
   }
+
+  registerPlatformDianEvent(
+    id: number,
+    dto: { event_code: string },
+  ): Observable<any> {
+    return this.http
+      .post<ApiEnvelope<any>>(`${this.base}/invoices/${id}/events`, dto)
+      .pipe(map((res) => res.data));
+  }
+
+  getInvoice(id: number, kind?: string): Observable<any> {
+    const params = kind ? new HttpParams().set('kind', kind) : undefined;
+    return this.http
+      .get<ApiEnvelope<any>>(`${this.base}/invoices/${id}`, { params })
+      .pipe(map((res) => res.data));
+  }
+
+  listPlatformDianEvents(id: number): Observable<any[]> {
+    return this.http
+      .get<ApiEnvelope<any[]>>(`${this.base}/invoices/${id}/events`)
+      .pipe(map((res) => res.data ?? []));
+  }
+
+  deliverPlatformInvoice(id: number, email: string): Observable<any> {
+    return this.http
+      .post<ApiEnvelope<any>>(`${this.base}/invoices/${id}/deliver`, { email })
+      .pipe(map((res) => res.data));
+  }
 }

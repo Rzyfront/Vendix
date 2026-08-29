@@ -32,6 +32,37 @@ export function definitionToRegions(
   const regions: CanvasRegion[] = [];
   let cursorY = 0;
 
+  if (definition.logo) {
+    regions.push({
+      id: 'logo',
+      kind: 'logo',
+      anchorId: 'logo',
+      label: 'Logo de la Tienda',
+      x_mm: 0,
+      y_mm: 0,
+      width_mm: definition.logo.sizeMm ?? 15,
+      height_mm: definition.logo.sizeMm ?? 15,
+      zIndex: 3,
+    });
+  }
+
+  if (definition.companyBlock?.fields) {
+    for (const f of definition.companyBlock.fields) {
+      if (!f.enabled) continue;
+      regions.push({
+        id: `comp-${f.key}`,
+        kind: 'company-field',
+        anchorId: f.key,
+        label: f.customLabel || f.key,
+        x_mm: 0,
+        y_mm: cursorY,
+        width_mm: 0,
+        height_mm: 8,
+        zIndex: 2,
+      });
+    }
+  }
+
   const sections: PrintSectionDefinition[] = definition.sections ?? [];
   for (const sec of sections) {
     const secRegion: CanvasRegion = {
@@ -46,6 +77,24 @@ export function definitionToRegions(
       zIndex: 1,
     };
     regions.push(secRegion);
+
+    if (sec.fields && sec.fields.length > 0) {
+      for (const f of sec.fields) {
+        if (!f.enabled) continue;
+        regions.push({
+          id: `field-${f.id || f.key}`,
+          kind: 'field',
+          anchorId: f.id || f.key,
+          label: f.custom_label || f.label || f.key,
+          x_mm: 0,
+          y_mm: cursorY,
+          width_mm: 0,
+          height_mm: 6,
+          zIndex: 2,
+          parentId: `sec-${sec.id}`,
+        });
+      }
+    }
 
     if (sec.type === 'items_table' && definition.columns) {
       let colCursorX = 0;

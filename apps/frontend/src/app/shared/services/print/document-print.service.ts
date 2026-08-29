@@ -256,7 +256,7 @@ export class DocumentPrintService {
     return `
       <html>
         <head>
-          <title>${opts?.title ?? 'Documento'}</title>
+          <title>${opts?.title ?? ''}</title>
           <style>
             /* Without an explicit @page size the driver falls back to its own
                default paper and centres an 80 mm ticket on a letter sheet. */

@@ -19,10 +19,11 @@ export class PrintLayoutComposerService {
   compose(
     definition: PrintFormatDefinition,
     data: StandardPrintDataModel,
+    mode: 'dummy' | 'tokenized' = 'dummy',
   ): string {
     // Si la definición incluye una plantilla custom completa, se compila directamente
     if (definition.custom_template && definition.custom_template.trim().length > 0) {
-      const compiledCustom = this.compiler.compile(definition.custom_template, data);
+      const compiledCustom = this.compiler.compile(definition.custom_template, data, mode);
       return this.wrapInHtmlDocument(definition, compiledCustom.compiled);
     }
 
@@ -34,7 +35,7 @@ export class PrintLayoutComposerService {
     const renderedSections: string[] = [];
 
     for (const section of sortedSections) {
-      const sectionHtml = this.renderSection(section, definition, data);
+      const sectionHtml = this.renderSection(section, definition, data, mode);
       if (sectionHtml) {
         renderedSections.push(sectionHtml);
       }
@@ -53,45 +54,42 @@ export class PrintLayoutComposerService {
     section: any,
     definition: PrintFormatDefinition,
     data: StandardPrintDataModel,
+    mode: 'dummy' | 'tokenized' = 'dummy',
   ): string {
     if (section.custom_content) {
-      return `<div class="print-section section-${section.type}">${this.compiler.compile(section.custom_content, data).compiled}</div>`;
+      return `<div class="print-section section-${section.type}" data-section-id="${section.id || section.type}">${this.compiler.compile(section.custom_content, data, mode).compiled}</div>`;
     }
 
     switch (section.type) {
       case 'header':
       case 'fiscal_header':
-        return this.renderHeaderSection(section, definition, data);
+        return this.renderHeaderSection(section, definition, data, mode);
       case 'document_info':
-        return this.renderDocumentInfoSection(section, data);
+        return this.renderDocumentInfoSection(section, data, mode);
       case 'customer_info':
       case 'fiscal_buyer_info':
-        return this.renderCustomerSection(section, data);
+        return this.renderCustomerSection(section, data, mode);
       case 'parties_info':
-        return this.renderPartiesSection(section, data);
+        return this.renderPartiesSection(section, data, mode);
       case 'items_table':
       case 'kitchen_items':
-        return this.renderItemsTableSection(section, definition, data);
+        return this.renderItemsTableSection(section, definition, data, mode);
       case 'totals_summary':
-        return this.renderTotalsSection(section, data);
+        return this.renderTotalsSection(section, data, mode);
       case 'fiscal_cufe_box':
-        return this.renderCufeBoxSection(data);
+        return this.renderCufeBoxSection(data, mode);
       case 'fiscal_tax_breakdown':
-        return this.renderTaxBreakdownSection(data);
+        return this.renderTaxBreakdownSection(data, mode);
       case 'fiscal_qr_section':
-        return this.renderQrSection(data);
+        return this.renderQrSection(data, mode);
       case 'signatures_box':
-        return this.renderSignaturesSection();
+        return this.renderSignaturesSection(mode);
       case 'footer':
-        return this.renderFooterSection(section, data);
+        return this.renderFooterSection(section, data, mode);
       case 'dispatch_ticket':
-        // CP-DTLP-20260827 (Phase B.5): el undécimo formato del Hub usa una
-        // composición dedicada (no reutiliza header/items_table del resto
-        // porque el contenido es logístico, no fiscal: cliente + dirección +
-        // cant.pedida/cant.despachada). Ver dispatchTicketStyles abajo.
-        return this.renderDispatchTicketSection(section, data);
+        return this.renderDispatchTicketSection(section, data, mode);
       default:
-        return this.renderGenericFieldsSection(section, data);
+        return this.renderGenericFieldsSection(section, data, mode);
     }
   }
 
@@ -99,28 +97,26 @@ export class PrintLayoutComposerService {
     section: any,
     definition: PrintFormatDefinition,
     data: StandardPrintDataModel,
+    mode: 'dummy' | 'tokenized' = 'dummy',
   ): string {
     const store = data.store || ({} as any);
-    // [print-editor-dsk P1.3] v2: `definition.logo` es el fallback estático
-    // cuando la tienda no ha subido un logo propio. Si `data.store.logo_url`
-    // está presente, gana el runtime (igual que antes); sólo cuando el
-    // runtime está vacío recurrimos al `definition.logo.url` firmado por el
-    // controller. Honra `position` y `size_mm`/`opacity`.
     const runtimeLogo = store.logo_url as string | undefined;
     const defLogoBlock = definition.logo;
     const fallbackLogoUrl = !runtimeLogo && defLogoBlock?.url ? defLogoBlock.url : undefined;
+    const defaultMonochromeLogo = '/vlogomono.png';
+    const isLogoExplicitlyDisabled = defLogoBlock && (defLogoBlock as any).enabled === false;
 
-    const logoUrl = runtimeLogo || fallbackLogoUrl;
+    const logoUrl = isLogoExplicitlyDisabled
+      ? undefined
+      : runtimeLogo || fallbackLogoUrl || defaultMonochromeLogo;
+
     let logo = '';
-    if (logoUrl) {
+    if (logoUrl || mode === 'tokenized') {
       const pos = defLogoBlock?.position || 'left';
-      const sizeMm = typeof defLogoBlock?.size_mm === 'number' ? defLogoBlock.size_mm : 12;
+      const sizeMm = typeof defLogoBlock?.size_mm === 'number' ? defLogoBlock.size_mm : 14;
       const opacity = typeof defLogoBlock?.opacity === 'number' ? defLogoBlock.opacity : 100;
-      // `size_mm` para imágenes de logo: convertimos a px (1mm ≈ 3.78px @96dpi)
-      // y aplicamos max-height/max-width razonables. `position: full` ignora el
-      // tamaño y estira el logo al ancho del contenedor.
-      const maxPx = pos === 'full' ? '100%' : `${Math.max(8, Math.min(48, Math.round(sizeMm * 3.78)))}px`;
-      const heightPx = pos === 'full' ? 'auto' : `${Math.max(8, Math.min(48, Math.round(sizeMm * 3.78)))}px`;
+      const maxPx = pos === 'full' ? '100%' : `${Math.max(8, Math.min(64, Math.round(sizeMm * 3.78)))}px`;
+      const heightPx = pos === 'full' ? 'auto' : `${Math.max(8, Math.min(64, Math.round(sizeMm * 3.78)))}px`;
       const styleParts = [
         `max-height: ${heightPx}`,
         `max-width: ${maxPx}`,
@@ -128,26 +124,47 @@ export class PrintLayoutComposerService {
       ];
       const alignStyle =
         pos === 'center' ? 'text-align: center;' : pos === 'right' ? 'text-align: right;' : 'text-align: left;';
-      logo = `<div class="store-logo" style="${alignStyle}"><img src="${this.compiler.escapeHtml(logoUrl)}" alt="Logo" style="${styleParts.join('; ')};" /></div>`;
+      if (mode === 'tokenized') {
+        logo = `<div class="store-logo" style="${alignStyle}" data-element-id="f_logo" data-section-id="sec_header" data-token="store.logo_url"><span class="vendix-token-pill" data-token="store.logo_url">&#123;&#123; store.logo_url &#125;&#125;</span></div>`;
+      } else if (logoUrl) {
+        logo = `<div class="store-logo" style="${alignStyle}" data-element-id="f_logo" data-section-id="sec_header" data-token="store.logo_url"><img src="${this.compiler.escapeHtml(logoUrl)}" alt="Logo" style="${styleParts.join('; ')}; object-fit: contain;" /></div>`;
+      }
     }
-    const name = store.name ? `<h1 class="store-name">${this.compiler.escapeHtml(store.name)}</h1>` : '';
-    const legalName = store.legal_name && store.legal_name !== store.name ? `<div class="store-legal">${this.compiler.escapeHtml(store.legal_name)}</div>` : '';
-    const nit = store.tax_id ? `<div class="store-nit">NIT: ${this.compiler.escapeHtml(store.tax_id)}</div>` : '';
-    const regime = store.tax_regime ? `<div class="store-regime">${this.compiler.escapeHtml(store.tax_regime)}</div>` : '';
-    const addr = store.address ? `<div class="store-address">${this.compiler.escapeHtml(store.address)}${store.city ? ', ' + this.compiler.escapeHtml(store.city) : ''}</div>` : '';
-    const phone = store.phone ? `<div class="store-phone">Tel: ${this.compiler.escapeHtml(store.phone)}</div>` : '';
 
-    // [print-editor-dsk P1.3] v2: el `company_block` se renderiza después del
-    // header SOLO cuando la definición es fiscal. Detectamos fiscal por la
-    // presencia de secciones tipo `fiscal_*` (única señal que el composer
-    // tiene: el `formatType` no se le pasa). El bloque respeta `enabled` por
-    // campo y aplica `custom_label` sobre el label por defecto.
+    const isNameActive = this.isFieldActive(section, 'store_name') && this.isFieldActive(section, 'f_name');
+    const isLegalActive = this.isFieldActive(section, 'store_legal_name') && this.isFieldActive(section, 'f_legal');
+    const isNitActive = this.isFieldActive(section, 'store_tax_id') && this.isFieldActive(section, 'f_nit');
+    const isRegimeActive = this.isFieldActive(section, 'store_regime') && this.isFieldActive(section, 'f_regime');
+    const isAddrActive = this.isFieldActive(section, 'store_address') && this.isFieldActive(section, 'f_addr');
+    const isPhoneActive = this.isFieldActive(section, 'store_phone') && this.isFieldActive(section, 'f_phone');
+
+    const nitLabel = this.getFieldCustomLabel(section, 'f_nit', this.getFieldCustomLabel(section, 'store_tax_id', 'NIT'));
+    const phoneLabel = this.getFieldCustomLabel(section, 'f_phone', this.getFieldCustomLabel(section, 'store_phone', 'Tel'));
+
+    const nameVal = mode === 'tokenized' ? '<span class="vendix-token-pill" data-token="store.name">&#123;&#123; store.name &#125;&#125;</span>' : this.compiler.escapeHtml(store.name || '');
+    const name = isNameActive ? `<h1 class="store-name" data-element-id="f_name" data-section-id="sec_header" data-token="store.name">${nameVal}</h1>` : '';
+
+    const legalVal = mode === 'tokenized' ? '<span class="vendix-token-pill" data-token="store.legal_name">&#123;&#123; store.legal_name &#125;&#125;</span>' : this.compiler.escapeHtml(store.legal_name || '');
+    const legalName = isLegalActive && (store.legal_name || mode === 'tokenized') ? `<div class="store-legal" data-element-id="f_legal" data-section-id="sec_header" data-token="store.legal_name">${legalVal}</div>` : '';
+
+    const nitVal = mode === 'tokenized' ? '<span class="vendix-token-pill" data-token="store.tax_id">&#123;&#123; store.tax_id &#125;&#125;</span>' : `${nitLabel}: ${this.compiler.escapeHtml(store.tax_id || '')}`;
+    const nit = isNitActive && (store.tax_id || mode === 'tokenized') ? `<div class="store-nit" data-element-id="f_nit" data-section-id="sec_header" data-token="store.tax_id">${nitVal}</div>` : '';
+
+    const regimeVal = mode === 'tokenized' ? '<span class="vendix-token-pill" data-token="store.tax_regime">&#123;&#123; store.tax_regime &#125;&#125;</span>' : this.compiler.escapeHtml(store.tax_regime || '');
+    const regime = isRegimeActive && (store.tax_regime || mode === 'tokenized') ? `<div class="store-regime" data-element-id="f_regime" data-section-id="sec_header" data-token="store.tax_regime">${regimeVal}</div>` : '';
+
+    const addrVal = mode === 'tokenized' ? '<span class="vendix-token-pill" data-token="store.address">&#123;&#123; store.address &#125;&#125;</span>' : `${this.compiler.escapeHtml(store.address || '')}${store.city ? ', ' + this.compiler.escapeHtml(store.city) : ''}`;
+    const addr = isAddrActive && (store.address || mode === 'tokenized') ? `<div class="store-address" data-element-id="f_addr" data-section-id="sec_header" data-token="store.address">${addrVal}</div>` : '';
+
+    const phoneVal = mode === 'tokenized' ? '<span class="vendix-token-pill" data-token="store.phone">&#123;&#123; store.phone &#125;&#125;</span>' : `${phoneLabel}: ${this.compiler.escapeHtml(store.phone || '')}`;
+    const phone = isPhoneActive && (store.phone || mode === 'tokenized') ? `<div class="store-phone" data-element-id="f_phone" data-section-id="sec_header" data-token="store.phone">${phoneVal}</div>` : '';
+
     const companyBlock = this.isFiscalDefinition(definition)
-      ? this.renderCompanyBlock(definition, data)
+      ? this.renderCompanyBlock(definition, data, mode)
       : '';
 
     return `
-      <div class="print-section section-header">
+      <div class="print-section section-header" data-section-id="sec_header">
         ${logo}
         ${name}
         ${legalName}
@@ -160,17 +177,22 @@ export class PrintLayoutComposerService {
     `;
   }
 
-  /**
-   * [print-editor-dsk P1.3] v2 NEW — bloque de empresa (NIT, dirección, etc.)
-   * tipado. Sólo se invoca cuando `definition.company_block?.fields` está
-   * presente Y la definición es fiscal. Los campos se emiten en el orden
-   * declarado, respetando `enabled` y `custom_label`. La fuente de cada valor
-   * es `data.store` (los StandardPrintParty tienen todos los campos que el
-   * PrintCompanyFieldKey enum declara).
-   */
+  private isFieldActive(section: any, keyOrId: string): boolean {
+    if (!section?.fields || !Array.isArray(section.fields) || section.fields.length === 0) return true;
+    const f = section.fields.find((field: any) => field.id === keyOrId || field.key === keyOrId);
+    return f ? f.enabled !== false : true;
+  }
+
+  private getFieldCustomLabel(section: any, keyOrId: string, defaultLabel: string): string {
+    if (!section?.fields || !Array.isArray(section.fields)) return defaultLabel;
+    const f = section.fields.find((field: any) => field.id === keyOrId || field.key === keyOrId);
+    return (f?.custom_label && f.custom_label.trim().length > 0) ? f.custom_label : defaultLabel;
+  }
+
   private renderCompanyBlock(
     definition: PrintFormatDefinition,
     data: StandardPrintDataModel,
+    mode: 'dummy' | 'tokenized' = 'dummy',
   ): string {
     const fields = definition.company_block?.fields || [];
     if (fields.length === 0) return '';
@@ -180,22 +202,20 @@ export class PrintLayoutComposerService {
       .filter((f: PrintCompanyField) => f && f.enabled)
       .map((f: PrintCompanyField) => {
         const value = this.lookupCompanyFieldValue(f.key, store);
-        if (value === undefined || value === null || value === '') return '';
+        if (mode !== 'tokenized' && (value === undefined || value === null || value === '')) return '';
         const label = f.custom_label ? f.custom_label : f.key;
-        return `<div class="company-field"><span class="label">${this.compiler.escapeHtml(label)}:</span> <span class="value">${this.compiler.escapeHtml(value)}</span></div>`;
+        const valHtml = mode === 'tokenized'
+          ? `<span class="vendix-token-pill" data-token="store.${f.key}">&#123;&#123; store.${f.key} &#125;&#125;</span>`
+          : this.compiler.escapeHtml(value);
+        return `<div class="company-field" data-element-id="comp_${f.key}" data-token="store.${f.key}"><span class="label">${this.compiler.escapeHtml(label)}:</span> <span class="value">${valHtml}</span></div>`;
       })
       .filter((s) => s.length > 0)
       .join('');
 
     if (rows.length === 0) return '';
-    return `<div class="company-block">${rows}</div>`;
+    return `<div class="company-block" data-section-id="sec_company_block">${rows}</div>`;
   }
 
-  /**
-   * Resolución del valor de un PrintCompanyFieldKey contra el `data.store`.
-   * Sólo fiscales pueden llevar este bloque, así que la fuente es siempre
-   * `data.store` (StandardPrintParty) — el emisor del documento.
-   */
   private lookupCompanyFieldValue(
     key: PrintCompanyField['key'],
     store: any,
@@ -220,17 +240,6 @@ export class PrintLayoutComposerService {
     }
   }
 
-  /**
-   * [print-editor-dsk P1.3] v2 — Inferencia de "definición fiscal" para el
-   * composer. El `compose()` no recibe `formatType`; lo único que sabe es
-   * la `definition`. Cualquier sección de tipo `fiscal_*` (header, buyer,
-   * cufe/cude, tax breakdown, qr) identifica inequívocamente un formato
-   * del set `FISCAL_FORMATS` (fiscal_electronic_invoice, fiscal_credit_note).
-   * Usamos la presencia de esas secciones como proxy declarativo — es la
-   * MISMA guarda que `PrintFiscalValidatorService.assertFiscalCompliance`
-   * aplica antes de validar el contenido, así que el bloque se renderiza
-   * exactamente para los mismos formatos que el validador exige.
-   */
   private isFiscalDefinition(definition: PrintFormatDefinition): boolean {
     const sections = definition.sections || [];
     return sections.some((s) => {
@@ -245,43 +254,91 @@ export class PrintLayoutComposerService {
     });
   }
 
-  private renderDocumentInfoSection(section: any, data: StandardPrintDataModel): string {
+  private renderDocumentInfoSection(section: any, data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {
     const doc = data.document || ({} as any);
+
+    const isNumActive = this.isFieldActive(section, 'order_number') && this.isFieldActive(section, 'f_num');
+    const isDateActive = this.isFieldActive(section, 'order_date') && this.isFieldActive(section, 'f_date');
+    const isCashierActive = this.isFieldActive(section, 'order_cashier') && this.isFieldActive(section, 'f_cashier');
+    const isTerminalActive = this.isFieldActive(section, 'order_terminal') && this.isFieldActive(section, 'f_terminal');
+
+    const cashierLabel = this.getFieldCustomLabel(section, 'f_cashier', this.getFieldCustomLabel(section, 'order_cashier', 'Cajero'));
+    const terminalLabel = this.getFieldCustomLabel(section, 'f_terminal', this.getFieldCustomLabel(section, 'order_terminal', 'Caja'));
+
+    const numVal = mode === 'tokenized'
+      ? '<span class="vendix-token-pill" data-token="order.order_number">&#123;&#123; order.order_number &#125;&#125;</span>'
+      : `${this.compiler.escapeHtml(doc.prefix ? doc.prefix + '-' : '')}#${this.compiler.escapeHtml(doc.number || '')}`;
+    const dateVal = mode === 'tokenized'
+      ? '<span class="vendix-token-pill" data-token="order.created_at">&#123;&#123; order.created_at &#125;&#125;</span>'
+      : `${this.compiler.escapeHtml(doc.date_formatted || doc.date || '')} ${this.compiler.escapeHtml(doc.time || '')}`;
+    const cashierVal = mode === 'tokenized'
+      ? `${cashierLabel}: <span class="vendix-token-pill" data-token="order.cashier_name">&#123;&#123; order.cashier_name &#125;&#125;</span>`
+      : (doc.cashier_name ? `${cashierLabel}: ${this.compiler.escapeHtml(doc.cashier_name)}` : '');
+    const termVal = mode === 'tokenized'
+      ? `${terminalLabel}: <span class="vendix-token-pill" data-token="order.pos_terminal">&#123;&#123; order.pos_terminal &#125;&#125;</span>`
+      : (doc.pos_terminal ? `${terminalLabel}: ${this.compiler.escapeHtml(doc.pos_terminal)}` : '');
+
     return `
-      <div class="print-section section-doc-info">
+      <div class="print-section section-doc-info" data-section-id="sec_doc_info">
         <div class="doc-title-box">
-          <div class="doc-number">${this.compiler.escapeHtml(doc.prefix ? doc.prefix + '-' : '')}#${this.compiler.escapeHtml(doc.number)}</div>
-          <div class="doc-date">${this.compiler.escapeHtml(doc.date_formatted || doc.date)} ${this.compiler.escapeHtml(doc.time || '')}</div>
+          ${isNumActive ? `<div class="doc-number" data-element-id="f_num" data-section-id="sec_doc_info" data-token="order.order_number">${numVal}</div>` : ''}
+          ${isDateActive ? `<div class="doc-date" data-element-id="f_date" data-section-id="sec_doc_info" data-token="order.created_at">${dateVal}</div>` : ''}
         </div>
-        ${doc.cashier_name ? `<div class="doc-cashier">Cajero: ${this.compiler.escapeHtml(doc.cashier_name)}</div>` : ''}
-        ${doc.pos_terminal ? `<div class="doc-terminal">Caja: ${this.compiler.escapeHtml(doc.pos_terminal)}</div>` : ''}
+        ${isCashierActive && cashierVal ? `<div class="doc-cashier" data-element-id="f_cashier" data-section-id="sec_doc_info" data-token="order.cashier_name">${cashierVal}</div>` : ''}
+        ${isTerminalActive && termVal ? `<div class="doc-terminal" data-element-id="f_terminal" data-section-id="sec_doc_info" data-token="order.pos_terminal">${termVal}</div>` : ''}
       </div>
     `;
   }
 
-  private renderCustomerSection(section: any, data: StandardPrintDataModel): string {
-    const cust = data.customer;
-    if (!cust || (!cust.name && !cust.tax_id)) return '';
+  private renderCustomerSection(section: any, data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {
+    const cust = data.customer || ({} as any);
+    if (mode !== 'tokenized' && !cust.name && !cust.tax_id) return '';
+
+    const isNameActive = this.isFieldActive(section, 'customer_name') && this.isFieldActive(section, 'f_cname');
+    const isNitActive = this.isFieldActive(section, 'customer_tax_id') && this.isFieldActive(section, 'f_cnit');
+    const isAddrActive = this.isFieldActive(section, 'customer_address') && this.isFieldActive(section, 'f_caddr');
+    const isPhoneActive = this.isFieldActive(section, 'customer_phone') && this.isFieldActive(section, 'f_cphone');
+    const isEmailActive = this.isFieldActive(section, 'customer_email') && this.isFieldActive(section, 'f_cemail');
+
+    const nitLabel = this.getFieldCustomLabel(section, 'f_cnit', this.getFieldCustomLabel(section, 'customer_tax_id', 'Doc / NIT'));
+    const phoneLabel = this.getFieldCustomLabel(section, 'f_cphone', this.getFieldCustomLabel(section, 'customer_phone', 'Tel'));
+    const emailLabel = this.getFieldCustomLabel(section, 'f_cemail', this.getFieldCustomLabel(section, 'customer_email', 'Email'));
+
+    const nameVal = mode === 'tokenized'
+      ? '<span class="vendix-token-pill" data-token="customer.name">&#123;&#123; customer.name &#125;&#125;</span>'
+      : this.compiler.escapeHtml(cust.name || 'Consumidor Final');
+    const nitVal = mode === 'tokenized'
+      ? `${nitLabel}: <span class="vendix-token-pill" data-token="customer.tax_id">&#123;&#123; customer.tax_id &#125;&#125;</span>`
+      : (cust.tax_id ? `${nitLabel}: ${this.compiler.escapeHtml(cust.tax_id)}` : '');
+    const addrVal = mode === 'tokenized'
+      ? '<span class="vendix-token-pill" data-token="customer.address">&#123;&#123; customer.address &#125;&#125;</span>'
+      : (cust.address ? this.compiler.escapeHtml(cust.address) : '');
+    const phoneVal = mode === 'tokenized'
+      ? `${phoneLabel}: <span class="vendix-token-pill" data-token="customer.phone">&#123;&#123; customer.phone &#125;&#125;</span>`
+      : (cust.phone ? `${phoneLabel}: ${this.compiler.escapeHtml(cust.phone)}` : '');
+    const emailVal = mode === 'tokenized'
+      ? `${emailLabel}: <span class="vendix-token-pill" data-token="customer.email">&#123;&#123; customer.email &#125;&#125;</span>`
+      : (cust.email ? `${emailLabel}: ${this.compiler.escapeHtml(cust.email)}` : '');
 
     return `
-      <div class="print-section section-customer">
+      <div class="print-section section-customer" data-section-id="sec_customer">
         <div class="section-label">CLIENTE</div>
-        <div class="customer-name">${this.compiler.escapeHtml(cust.name)}</div>
-        ${cust.tax_id ? `<div class="customer-nit">Doc / NIT: ${this.compiler.escapeHtml(cust.tax_id)}</div>` : ''}
-        ${cust.address ? `<div class="customer-address">${this.compiler.escapeHtml(cust.address)}</div>` : ''}
-        ${cust.phone ? `<div class="customer-phone">Tel: ${this.compiler.escapeHtml(cust.phone)}</div>` : ''}
-        ${cust.email ? `<div class="customer-email">${this.compiler.escapeHtml(cust.email)}</div>` : ''}
+        ${isNameActive ? `<div class="customer-name" data-element-id="f_cname" data-section-id="sec_customer" data-token="customer.name">${nameVal}</div>` : ''}
+        ${isNitActive && nitVal ? `<div class="customer-nit" data-element-id="f_cnit" data-section-id="sec_customer" data-token="customer.tax_id">${nitVal}</div>` : ''}
+        ${isAddrActive && addrVal ? `<div class="customer-address" data-element-id="f_caddr" data-section-id="sec_customer" data-token="customer.address">${addrVal}</div>` : ''}
+        ${isPhoneActive && phoneVal ? `<div class="customer-phone" data-element-id="f_cphone" data-section-id="sec_customer" data-token="customer.phone">${phoneVal}</div>` : ''}
+        ${isEmailActive && emailVal ? `<div class="customer-email" data-element-id="f_cemail" data-section-id="sec_customer" data-token="customer.email">${emailVal}</div>` : ''}
       </div>
     `;
   }
 
-  private renderPartiesSection(section: any, data: StandardPrintDataModel): string {
+  private renderPartiesSection(section: any, data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {
     const store = data.store || ({} as any);
     const cust = data.customer || ({} as any);
     const doc = data.document || ({} as any);
 
     return `
-      <div class="print-section section-parties-grid">
+      <div class="print-section section-parties-grid" data-section-id="sec_parties">
         <div class="party-col party-issuer">
           <div class="party-title">EMISOR</div>
           <div class="party-name">${this.compiler.escapeHtml(store.legal_name || store.name)}</div>
@@ -298,9 +355,9 @@ export class PrintLayoutComposerService {
         </div>
         <div class="party-col party-doc">
           <div class="party-title">DOCUMENTO</div>
-          <div class="doc-num-highlight">#${this.compiler.escapeHtml(doc.number)}</div>
-          <div>Fecha: ${this.compiler.escapeHtml(doc.date_formatted || doc.date)}</div>
-          <div>Estado: ${this.compiler.escapeHtml(doc.state_label || doc.state)}</div>
+          <div class="doc-num-highlight">#${this.compiler.escapeHtml(doc.number || '')}</div>
+          <div>Fecha: ${this.compiler.escapeHtml(doc.date_formatted || doc.date || '')}</div>
+          <div>Estado: ${this.compiler.escapeHtml(doc.state_label || doc.state || '')}</div>
         </div>
       </div>
     `;
@@ -310,64 +367,121 @@ export class PrintLayoutComposerService {
     section: any,
     definition: PrintFormatDefinition,
     data: StandardPrintDataModel,
+    mode: 'dummy' | 'tokenized' = 'dummy',
   ): string {
     const items = data.items || [];
     const columns = (definition.columns || []).filter((c) => c.enabled);
 
-    if (items.length === 0) {
-      return `<div class="print-section"><div class="empty-items">Sin ítems registrados</div></div>`;
-    }
-
     const theadThs = columns
       .map(
         (col) =>
-          `<th style="width: ${col.width_percent}%; text-align: ${col.align};">${this.compiler.escapeHtml(col.label)}</th>`,
+          `<th data-column-id="${col.id}" data-element-id="col_${col.id}" style="width: ${col.width_percent}%; text-align: ${col.align}; cursor: pointer;">${this.compiler.escapeHtml(col.label)}</th>`,
       )
       .join('');
 
-    const tbodyRows = items
-      .map((item, idx) => {
-        const tds = columns
-          .map((col) => {
-            let val: any = '';
-            switch (col.key) {
-              case 'index':
-                val = item.index || idx + 1;
-                break;
-              case 'product_name':
-                val = `${this.compiler.escapeHtml(item.product_name)}${item.variant_sku ? `<br><small class="item-sub">SKU: ${this.compiler.escapeHtml(item.variant_sku)}</small>` : ''}${item.variant_attributes ? `<br><small class="item-sub">${this.compiler.escapeHtml(item.variant_attributes)}</small>` : ''}${item.notes ? `<br><small class="item-note">Nota: ${this.compiler.escapeHtml(item.notes)}</small>` : ''}`;
-                return `<td style="text-align: ${col.align};">${val}</td>`;
-              case 'variant_sku':
-                val = item.variant_sku || '';
-                break;
-              case 'quantity':
-                val = item.quantity;
-                break;
-              case 'unit_price':
-                val = item.unit_price_formatted || `$${Number(item.unit_price).toLocaleString('es-CO')}`;
-                break;
-              case 'discount_amount':
-                val = item.discount_formatted || (item.discount_amount ? `-$${Number(item.discount_amount).toLocaleString('es-CO')}` : '-');
-                break;
-              case 'tax_rate':
-                val = item.tax_rate !== undefined ? `${item.tax_rate}%` : '-';
-                break;
-              case 'total_price':
-                val = item.total_price_formatted || `$${Number(item.total_price).toLocaleString('es-CO')}`;
-                break;
-              default:
-                val = (item as any)[col.key] || '';
-            }
-            return `<td style="text-align: ${col.align};">${this.compiler.escapeHtml(val)}</td>`;
+    const showSku = section.show_sku !== false;
+    const showVariantAttr = section.show_variant_attributes !== false;
+    const showNotes = section.show_notes !== false;
+    const showItemDiscounts = section.show_item_discounts !== false;
+    const showItemTaxes = section.show_item_taxes !== false;
+
+    let tbodyRows = '';
+    if (mode === 'tokenized') {
+      const tds = columns
+        .map((col) => {
+          let tokenPill = '';
+          switch (col.key) {
+            case 'product_name':
+              tokenPill = '<span class="vendix-token-pill" data-token="item.product_name">&#123;&#123; item.product_name &#125;&#125;</span>';
+              break;
+            case 'quantity':
+              tokenPill = '<span class="vendix-token-pill" data-token="item.quantity">&#123;&#123; item.quantity &#125;&#125;</span>';
+              break;
+            case 'unit_price':
+              tokenPill = '<span class="vendix-token-pill" data-token="item.unit_price">&#123;&#123; money item.unit_price &#125;&#125;</span>';
+              break;
+            case 'total_price':
+              tokenPill = '<span class="vendix-token-pill" data-token="item.total_price">&#123;&#123; money item.total_price &#125;&#125;</span>';
+              break;
+            case 'discount_amount':
+              tokenPill = '<span class="vendix-token-pill" data-token="item.discount_amount">&#123;&#123; money item.discount_amount &#125;&#125;</span>';
+              break;
+            case 'tax_rate':
+              tokenPill = '<span class="vendix-token-pill" data-token="item.tax_rate">&#123;&#123; item.tax_rate &#125;&#125;%</span>';
+              break;
+            default:
+              tokenPill = `<span class="vendix-token-pill" data-token="item.${col.key}">&#123;&#123; item.${col.key} &#125;&#125;</span>`;
+          }
+          return `<td data-column-id="${col.id}" data-element-id="col_${col.id}" style="text-align: ${col.align};">${tokenPill}</td>`;
+        })
+        .join('');
+      tbodyRows = `<tr>${tds}</tr>`;
+    } else {
+      if (items.length === 0) {
+        tbodyRows = `<tr><td colspan="${columns.length}" style="text-align:center;padding:8px;color:#888;">Sin ítems registrados</td></tr>`;
+      } else {
+        tbodyRows = items
+          .map((item, idx) => {
+            const tds = columns
+              .map((col) => {
+                let val: any = '';
+                switch (col.key) {
+                  case 'index':
+                    val = item.index || idx + 1;
+                    break;
+                  case 'product_name': {
+                    let sublines = '';
+                    if (showSku && item.variant_sku) {
+                      sublines += `<br><small class="item-sub item-sku">SKU: ${this.compiler.escapeHtml(item.variant_sku)}</small>`;
+                    }
+                    if (showVariantAttr && item.variant_attributes) {
+                      sublines += `<br><small class="item-sub item-variants">${this.compiler.escapeHtml(item.variant_attributes)}</small>`;
+                    }
+                    if (showNotes && item.notes) {
+                      sublines += `<br><small class="item-note">Nota: ${this.compiler.escapeHtml(item.notes)}</small>`;
+                    }
+                    if (showItemDiscounts && item.discount_amount && Number(item.discount_amount) > 0) {
+                      sublines += `<br><small class="item-sub item-discount" style="color: #ef4444;">Desc: -${item.discount_formatted || `$${Number(item.discount_amount).toLocaleString('es-CO')}`}</small>`;
+                    }
+                    if (showItemTaxes && item.tax_rate !== undefined && Number(item.tax_rate) > 0) {
+                      sublines += `<br><small class="item-sub item-tax" style="color: #6b7280;">IVA: ${item.tax_rate}%</small>`;
+                    }
+                    val = `${this.compiler.escapeHtml(item.product_name)}${sublines}`;
+                    return `<td data-column-id="${col.id}" data-element-id="col_${col.id}" style="text-align: ${col.align};">${val}</td>`;
+                  }
+                  case 'variant_sku':
+                    val = item.variant_sku || '';
+                    break;
+                  case 'quantity':
+                    val = item.quantity;
+                    break;
+                  case 'unit_price':
+                    val = item.unit_price_formatted || `$${Number(item.unit_price).toLocaleString('es-CO')}`;
+                    break;
+                  case 'discount_amount':
+                    val = item.discount_formatted || (item.discount_amount ? `-$${Number(item.discount_amount).toLocaleString('es-CO')}` : '-');
+                    break;
+                  case 'tax_rate':
+                    val = item.tax_rate !== undefined ? `${item.tax_rate}%` : '-';
+                    break;
+                  case 'total_price':
+                    val = item.total_price_formatted || `$${Number(item.total_price).toLocaleString('es-CO')}`;
+                    break;
+                  default:
+                    val = (item as any)[col.key] || '';
+                }
+                return `<td data-column-id="${col.id}" data-element-id="col_${col.id}" style="text-align: ${col.align};">${this.compiler.escapeHtml(val)}</td>`;
+              })
+              .join('');
+
+            return `<tr>${tds}</tr>`;
           })
           .join('');
-
-        return `<tr>${tds}</tr>`;
-      })
-      .join('');
+      }
+    }
 
     return `
-      <div class="print-section section-items">
+      <div class="print-section section-items" data-section-id="sec_items">
         <table class="print-table">
           <thead>
             <tr>${theadThs}</tr>
@@ -380,89 +494,93 @@ export class PrintLayoutComposerService {
     `;
   }
 
-  private renderTotalsSection(section: any, data: StandardPrintDataModel): string {
+  private renderTotalsSection(section: any, data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {
     const totals = data.totals || ({} as any);
     const doc = data.document || ({} as any);
 
+    const subVal = mode === 'tokenized'
+      ? '<span class="vendix-token-pill" data-token="order.subtotal_amount">&#123;&#123; money order.subtotal_amount &#125;&#125;</span>'
+      : this.compiler.escapeHtml(totals.subtotal_formatted || `$${Number(totals.subtotal || 0).toLocaleString('es-CO')}`);
+
+    const discVal = mode === 'tokenized'
+      ? '<span class="vendix-token-pill" data-token="order.discount_amount">&#123;&#123; money order.discount_amount &#125;&#125;</span>'
+      : `-${this.compiler.escapeHtml(totals.discount_total_formatted || `$${Number(totals.discount_total).toLocaleString('es-CO')}`)}`;
+
+    const taxVal = mode === 'tokenized'
+      ? '<span class="vendix-token-pill" data-token="order.tax_amount">&#123;&#123; money order.tax_amount &#125;&#125;</span>'
+      : this.compiler.escapeHtml(totals.tax_total_formatted || `$${Number(totals.tax_total).toLocaleString('es-CO')}`);
+
+    const grandVal = mode === 'tokenized'
+      ? '<span class="vendix-token-pill" data-token="order.grand_total">&#123;&#123; money order.grand_total &#125;&#125;</span>'
+      : this.compiler.escapeHtml(totals.grand_total_formatted || `$${Number(totals.grand_total || 0).toLocaleString('es-CO')}`);
+
+    const paymVal = mode === 'tokenized'
+      ? '<span class="vendix-token-pill" data-token="order.amount_received">&#123;&#123; money order.amount_received &#125;&#125;</span>'
+      : this.compiler.escapeHtml(doc.amount_received_formatted || `$${Number(doc.amount_received || totals.grand_total).toLocaleString('es-CO')}`);
+
+    const chgVal = mode === 'tokenized'
+      ? '<span class="vendix-token-pill" data-token="order.change_due">&#123;&#123; money order.change_due &#125;&#125;</span>'
+      : this.compiler.escapeHtml(doc.change_due_formatted || `$${Number(doc.change_due).toLocaleString('es-CO')}`);
+
     return `
-      <div class="print-section section-totals">
+      <div class="print-section section-totals" data-section-id="sec_totals">
         <div class="totals-table-wrapper">
           <table class="totals-table">
-            <tr>
+            <tr data-element-id="f_sub" data-section-id="sec_totals" data-token="order.subtotal_amount">
               <td class="total-label">Subtotal:</td>
-              <td class="total-val">${this.compiler.escapeHtml(totals.subtotal_formatted || `$${Number(totals.subtotal || 0).toLocaleString('es-CO')}`)}</td>
+              <td class="total-val">${subVal}</td>
             </tr>
-            ${Number(totals.discount_total) > 0 ? `
-            <tr>
+            ${mode === 'tokenized' || Number(totals.discount_total) > 0 ? `
+            <tr data-element-id="f_disc" data-section-id="sec_totals" data-token="order.discount_amount">
               <td class="total-label">Descuento:</td>
-              <td class="total-val discount">-${this.compiler.escapeHtml(totals.discount_total_formatted || `$${Number(totals.discount_total).toLocaleString('es-CO')}`)}</td>
+              <td class="total-val discount">${discVal}</td>
             </tr>` : ''}
-            ${Number(totals.tax_total) > 0 ? `
-            <tr>
+            ${mode === 'tokenized' || Number(totals.tax_total) > 0 ? `
+            <tr data-element-id="f_tax" data-section-id="sec_totals" data-token="order.tax_amount">
               <td class="total-label">Impuestos (IVA):</td>
-              <td class="total-val">${this.compiler.escapeHtml(totals.tax_total_formatted || `$${Number(totals.tax_total).toLocaleString('es-CO')}`)}</td>
+              <td class="total-val">${taxVal}</td>
             </tr>` : ''}
-            ${
-              // E.11 casilla 1 — la retención ya llega en el modelo (antes el
-              // mapeador la ignoraba y desaparecía del papel, mientras el PDF
-              // legal sí imprime «Retencion:»). Fila INFORMATIVA con signo
-              // negativo de presentación: NO descuenta del total, igual que
-              // `invoice-pdf.builder.ts` drawTotals.
-              Number(totals.withholding_total) > 0 ? `
-            <tr>
-              <td class="total-label">Retención:</td>
-              <td class="total-val">-${this.compiler.escapeHtml(totals.withholding_total_formatted || `$${Number(totals.withholding_total).toLocaleString('es-CO')}`)}</td>
-            </tr>` : ''
-            }
-            ${Number(totals.shipping_total) > 0 ? `
-            <tr>
-              <td class="total-label">Envío:</td>
-              <td class="total-val">${this.compiler.escapeHtml(totals.shipping_total_formatted || `$${Number(totals.shipping_total).toLocaleString('es-CO')}`)}</td>
-            </tr>` : ''}
-            <tr class="grand-total-row">
+            <tr class="grand-total-row" data-element-id="f_tot" data-section-id="sec_totals" data-token="order.grand_total">
               <td class="total-label">TOTAL:</td>
-              <td class="total-val grand-total">${this.compiler.escapeHtml(totals.grand_total_formatted || `$${Number(totals.grand_total || 0).toLocaleString('es-CO')}`)}</td>
+              <td class="total-val grand-total">${grandVal}</td>
             </tr>
-            ${doc.payment_method ? `
-            <tr class="payment-info-row">
-              <td class="total-label">Pago (${this.compiler.escapeHtml(doc.payment_method)}):</td>
-              <td class="total-val">${this.compiler.escapeHtml(doc.amount_received_formatted || `$${Number(doc.amount_received || totals.grand_total).toLocaleString('es-CO')}`)}</td>
+            ${mode === 'tokenized' || doc.payment_method ? `
+            <tr class="payment-info-row" data-element-id="f_paym" data-section-id="sec_totals" data-token="order.payment_method">
+              <td class="total-label">Pago (${mode === 'tokenized' ? 'Método' : this.compiler.escapeHtml(doc.payment_method)}):</td>
+              <td class="total-val">${paymVal}</td>
             </tr>` : ''}
-            ${Number(doc.change_due) > 0 ? `
-            <tr class="change-info-row">
+            ${mode === 'tokenized' || Number(doc.change_due) > 0 ? `
+            <tr class="change-info-row" data-element-id="f_chg" data-section-id="sec_totals" data-token="order.change_due">
               <td class="total-label">Cambio:</td>
-              <td class="total-val">${this.compiler.escapeHtml(doc.change_due_formatted || `$${Number(doc.change_due).toLocaleString('es-CO')}`)}</td>
+              <td class="total-val">${chgVal}</td>
             </tr>` : ''}
           </table>
         </div>
-        ${totals.grand_total_in_words ? `
-        <div class="total-in-words">
-          <span class="total-in-words-label">Valor en letras:</span>
-          <span class="total-in-words-value">${this.compiler.escapeHtml(totals.grand_total_in_words)}</span>
-        </div>` : ''}
       </div>
     `;
   }
 
-  private renderCufeBoxSection(data: StandardPrintDataModel): string {
+  private renderCufeBoxSection(data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {
     const fiscal = data.fiscal;
-    if (!fiscal?.cufe && !fiscal?.cude) return '';
-    const codeLabel = fiscal.cufe ? 'CUFE' : 'CUDE';
-    const codeVal = fiscal.cufe || fiscal.cude || '';
+    if (mode !== 'tokenized' && !fiscal?.cufe && !fiscal?.cude) return '';
+    const codeLabel = fiscal?.cufe ? 'CUFE' : 'CUDE';
+    const codeVal = mode === 'tokenized'
+      ? '<span class="vendix-token-pill" data-token="fiscal.cufe">&#123;&#123; fiscal.cufe &#125;&#125;</span>'
+      : this.compiler.escapeHtml(fiscal?.cufe || fiscal?.cude || '');
 
     return `
-      <div class="print-section section-cufe-box">
+      <div class="print-section section-cufe-box" data-section-id="sec_cufe">
         <div class="cufe-label">${codeLabel}:</div>
-        <div class="cufe-value">${this.compiler.escapeHtml(codeVal)}</div>
+        <div class="cufe-value" data-element-id="f_cufe" data-token="fiscal.cufe">${codeVal}</div>
       </div>
     `;
   }
 
-  private renderTaxBreakdownSection(data: StandardPrintDataModel): string {
+  private renderTaxBreakdownSection(data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {
     const taxes = data.taxes || [];
-    if (taxes.length === 0) return '';
+    if (mode !== 'tokenized' && taxes.length === 0) return '';
 
-    const rows = taxes
+    const rows = (taxes.length > 0 ? taxes : [{ name: 'IVA', rate: 19, base_amount: 100000, tax_amount: 19000 }])
       .map(
         (t) => `
       <tr>
@@ -474,7 +592,7 @@ export class PrintLayoutComposerService {
       .join('');
 
     return `
-      <div class="print-section section-taxes">
+      <div class="print-section section-taxes" data-section-id="sec_taxes">
         <div class="section-label">DISCRIMINACIÓN DE IMPUESTOS</div>
         <table class="tax-breakdown-table">
           <thead>
@@ -486,25 +604,25 @@ export class PrintLayoutComposerService {
     `;
   }
 
-  private renderQrSection(data: StandardPrintDataModel): string {
+  private renderQrSection(data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {
     const fiscal = data.fiscal;
-    if (!fiscal?.qr_code_png_base64 && !fiscal?.qr_code_content) return '';
+    if (mode !== 'tokenized' && !fiscal?.qr_code_png_base64 && !fiscal?.qr_code_content) return '';
 
-    const qrImg = fiscal.qr_code_png_base64
+    const qrImg = fiscal?.qr_code_png_base64
       ? `<img src="data:image/png;base64,${fiscal.qr_code_png_base64}" alt="QR Fiscal" style="width: 110px; height: 110px;" />`
-      : '';
+      : `<div style="display:inline-block;width:100px;height:100px;border:1px dashed #3b82f6;line-height:100px;font-size:10px;color:#3b82f6;"><span class="vendix-token-pill" data-token="fiscal.qr_code">&#123;&#123; QR Fiscal &#125;&#125;</span></div>`;
 
     return `
-      <div class="print-section section-qr-fiscal" style="text-align: center; margin-top: 10px;">
+      <div class="print-section section-qr-fiscal" data-section-id="sec_qr" style="text-align: center; margin-top: 10px;">
         ${qrImg}
         <div style="font-size: 8pt; color: #666; margin-top: 4px;">Validación DIAN de Documento Electrónico</div>
       </div>
     `;
   }
 
-  private renderSignaturesSection(): string {
+  private renderSignaturesSection(mode: 'dummy' | 'tokenized' = 'dummy'): string {
     return `
-      <div class="print-section section-signatures" style="display: flex; justify-content: space-between; margin-top: 35px; padding-top: 15px;">
+      <div class="print-section section-signatures" data-section-id="sec_signatures" style="display: flex; justify-content: space-between; margin-top: 35px; padding-top: 15px;">
         <div style="width: 45%; border-top: 1px solid #000; text-align: center; font-size: 8pt;">
           Entregado por / Conductor
         </div>
@@ -515,35 +633,27 @@ export class PrintLayoutComposerService {
     `;
   }
 
-  private renderFooterSection(section: any, data: StandardPrintDataModel): string {
+  private renderFooterSection(section: any, data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {
+    const receipts = (data as any).receipts || ({} as any);
+    const msgVal = mode === 'tokenized'
+      ? '<span class="vendix-token-pill" data-token="receipts.receipt_footer">&#123;&#123; receipts.receipt_footer &#125;&#125;</span>'
+      : (receipts.receipt_footer ? this.compiler.escapeHtml(receipts.receipt_footer) : '¡Gracias por su compra!');
+    const poweredVal = mode === 'tokenized'
+      ? '<span class="vendix-token-pill" data-token="system.powered_by">&#123;&#123; system.powered_by &#125;&#125;</span>'
+      : 'Generado por Vendix';
+
     return `
-      <div class="print-section section-footer">
-        <div class="footer-msg">¡Gracias por su compra!</div>
-        <div class="powered-by">Generado por Vendix</div>
+      <div class="print-section section-footer" data-section-id="sec_footer">
+        <div class="footer-msg" data-element-id="f_msg" data-section-id="sec_footer" data-token="receipts.receipt_footer">${msgVal}</div>
+        <div class="powered-by" data-element-id="f_powered" data-section-id="sec_footer" data-token="system.powered_by">${poweredVal}</div>
       </div>
     `;
   }
 
-  /**
-   * CP-DTLP-20260827 (Phase B.5) — Renderiza la sección de tipo
-   * `dispatch_ticket`. Estructura:
-   *  1. Header: logo (si existe) + nombre tienda + número de orden + fecha
-   *  2. Customer block: nombre + dirección (líneas 1 y 2) + ciudad
-   *  3. Items table: 4 cols (#, SKU/Descripción, Cant.pedida, Cant.despachada)
-   *  4. Footer: línea de firma "Despachado por: ___________"
-   *
-   * Sin totales fiscales (no es formato fiscal). Sin QR (la firma del
-   * recibido se reserva al formato `dispatch_note` que ya existe).
-   *
-   * El HTML producido se inyecta dentro de wrapInHtmlDocument, que añade
-   * el @page { size: 80mm auto; margin: 0 } y los estilos base. Los
-   * estilos específicos del tiquete viven en `dispatchTicketStyles`
-   * (exportados aparte como DISPATCH_TICKET_PRINT_STYLES por si un caller
-   * externo — p.ej. un endpoint de descarga PDF — quiere usarlos solos).
-   */
   private renderDispatchTicketSection(
     _section: any,
     data: StandardPrintDataModel,
+    mode: 'dummy' | 'tokenized' = 'dummy',
   ): string {
     const store = data.store || ({} as any);
     const customer = data.customer || ({} as any);
@@ -612,7 +722,7 @@ export class PrintLayoutComposerService {
     `;
 
     return `
-      <div class="print-section section-dispatch-ticket">
+      <div class="print-section section-dispatch-ticket" data-section-id="sec_dispatch_ticket">
         ${header}
         ${customerBlock}
         ${itemsTable}
@@ -621,19 +731,22 @@ export class PrintLayoutComposerService {
     `;
   }
 
-  private renderGenericFieldsSection(section: any, data: StandardPrintDataModel): string {
+  private renderGenericFieldsSection(section: any, data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {
     const fields = (section.fields || []).filter((f: any) => f.enabled);
     if (fields.length === 0) return '';
 
     const fieldsHtml = fields
       .map((f: any) => {
         const val = this.compiler.resolvePath(data, f.key);
-        if (val === undefined || val === null) return '';
-        return `<div class="field-row"><span class="field-label">${this.compiler.escapeHtml(f.label)}:</span> <span class="field-val">${this.compiler.escapeHtml(val)}</span></div>`;
+        if (mode !== 'tokenized' && (val === undefined || val === null)) return '';
+        const valHtml = mode === 'tokenized'
+          ? `<span class="vendix-token-pill" data-token="${f.key}">&#123;&#123; ${f.key} &#125;&#125;</span>`
+          : this.compiler.escapeHtml(val);
+        return `<div class="field-row" data-element-id="${f.id || f.key}" data-token="${f.key}"><span class="field-label">${this.compiler.escapeHtml(f.label)}:</span> <span class="field-val">${valHtml}</span></div>`;
       })
       .join('');
 
-    return `<div class="print-section section-generic">${fieldsHtml}</div>`;
+    return `<div class="print-section section-generic" data-section-id="${section.id || section.type}">${fieldsHtml}</div>`;
   }
 
   private wrapInHtmlDocument(
@@ -646,15 +759,6 @@ export class PrintLayoutComposerService {
     const font = styles.font_family || "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
     const fontSize = styles.font_size_base_pt || (paper.is_roll ? 9 : 10);
 
-    // [print-editor-dsk P1.3] v2: márgenes por lado. La precedencia es:
-    //   1) per-side (`margin_top_mm`, etc.) si están definidos;
-    //   2) `margin_mm` legacy (uniforme en los 4 lados);
-    //   3) fallback por tipo de papel: 0 en rollo, 10 mm en hoja.
-    // CSS `@page margin` sólo acepta un valor único, así que pasamos el
-    // MÁXIMO de los 4 lados (fidelidad de impresión: ningún lado se sale del
-    // cuadro). Los 4 lados reales se aplican en `body { padding }` para que
-    // el contenido respete cada margen (sobre todo en hojas A4/letter, donde
-    // el binding izquierdo suele necesitar más margen que el derecho).
     const defaultMm = paper.is_roll ? 0 : 10;
     const mTop = paper.margin_top_mm ?? paper.margin_mm ?? defaultMm;
     const mRight = paper.margin_right_mm ?? paper.margin_mm ?? defaultMm;
@@ -662,20 +766,6 @@ export class PrintLayoutComposerService {
     const mLeft = paper.margin_left_mm ?? paper.margin_mm ?? defaultMm;
     const maxMargin = Math.max(mTop, mRight, mBottom, mLeft);
 
-    // [print-editor-dsk P1.3] v2: `@page size` se resuelve desde PAPER_DEFINITIONS
-    // (vía `page-geometry.ts`). El fallback legacy era `paper.format` crudo,
-    // que sólo funciona para los formatos CSS nativos (`A4`, `letter`) pero
-    // falla para `thermal_80` (que necesita `80mm auto`). El lookup nos da
-    // siempre el `css_page_size` canónico. Para `custom` caemos a la
-    // expresión `${width_mm}mm ${height_mm}mm` del pliego declarado.
-    //
-    // E.11 slice 2 — paso 8 del plan de cierre: el composer lee PAPER_DEFINITIONS
-    // (vía `resolvePaperDefinition`), no `page-geometry.ts`. PAPER_DEFINITIONS es la
-    // fuente única: el renderBuffer ya consume de aquí (`fiscal-invoice-pdf-render.
-    // service.ts:358`); los `width_mm` del composer pasan a coincidir bit a bit con
-    // los del PDF (216 vs 215.9 mm en letter — ver `paper-definitions.ts`, tabla
-    // de divergencias conocidas). `getPaperGeometry` queda como DEPRECATED para
-    // consumidores que ya no lean de aquí.
     let pageSize: string;
     if (paper.format === 'custom') {
       const w = Number(paper.width_mm) || 80;
@@ -685,11 +775,6 @@ export class PrintLayoutComposerService {
       try {
         pageSize = resolvePaperDefinition(paper.format).css_page_size;
       } catch {
-        // PAPER_DEFINITIONS no conoce el formato (p.ej. `custom` ya filtrado).
-        // Roll-paper fallback: emite `${width_mm}mm auto`. Si el formato
-        // existe en `page-geometry.ts` pero NO en PAPER_DEFINITIONS, lo
-        // aceptamos para no romper consumidores legacy — pero el log de
-        // arriba deja la divergencia visible.
         try {
           pageSize = getPaperGeometry(paper.format as PaperFormat).css_page_size;
         } catch {
@@ -703,7 +788,7 @@ export class PrintLayoutComposerService {
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <title>Documento de Impresión</title>
+  <title></title>
   <style>
     @page {
       size: ${pageSize};
@@ -718,9 +803,6 @@ export class PrintLayoutComposerService {
       font-size: ${fontSize}pt;
       color: #111827;
       margin: 0;
-      /* [print-editor-dsk P1.3] v2: padding per-side refleja los 4 márgenes
-         reales (top/right/bottom/left). El @page margin usa el máximo para
-         que ningún lado se salga del cuadro físico. */
       padding: ${mTop}mm ${mRight}mm ${mBottom}mm ${mLeft}mm;
       background: #fff;
       line-height: 1.35;
@@ -731,13 +813,6 @@ export class PrintLayoutComposerService {
       margin: 0 auto;
       padding: ${paper.is_roll ? '4px' : '8px'};
     }
-    /* [print-editor-dsk P1.3] v2 — company-block styling. Las clases
-       .company-field / .label / .value se aplican por cada campo del
-       PrintCompanyBlock (NIT, telefono, direccion, etc.). Tipografia menor
-       que el header principal para no competir con el nombre del emisor.
-       Sin acentos graves: viven DENTRO de un template literal, y una
-       comilla invertida cerraria la plantilla — el error que tsc reporta
-       entonces es "'; expected" en una linea de CSS intacta. */
     .company-block {
       margin-top: 4px;
       font-size: ${fontSize - 1}pt;
@@ -798,16 +873,6 @@ export class PrintLayoutComposerService {
     .total-label { text-align: left; }
     .total-val { text-align: right; font-weight: 500; }
     .grand-total { font-weight: bold; font-size: ${fontSize + 2}pt; color: ${primaryColor}; }
-    /*
-     * El valor en letras va a ancho completo y NO dentro de .totals-table
-     * (260px en hoja): la frase de un importe de nueve cifras se rompería en
-     * cuatro líneas dentro de esa columna. clear:both porque la tabla de
-     * totales flota a la derecha con margin-left:auto.
-     *
-     * Sin acentos graves en este comentario: vive DENTRO de un template
-     * literal, y una comilla invertida aquí cierra la plantilla — el error que
-     * tsc reporta entonces es «';' expected» en una línea de CSS intacta.
-     */
     .total-in-words {
       clear: both;
       margin-top: 6px;
@@ -843,13 +908,6 @@ export class PrintLayoutComposerService {
     }
     .party-col { flex: 1; }
     .party-title { font-weight: bold; color: ${primaryColor}; font-size: ${fontSize - 1}pt; margin-bottom: 3px; }
-    /*
-     * CP-DTLP-20260827 (Phase B.5.b) — estilos específicos del Tiquete de
-     * Despacho. Se inyectan siempre que el wrapInHtmlDocument se llame con
-     * un definition que tenga al menos una sección tipo dispatch_ticket,
-     * pero como no son intrusivos (clases con prefijo dt-), conviven con
-     * los otros 10 formatos sin pisar nada.
-     */
     .section-dispatch-ticket .dt-header {
       text-align: center;
       border-bottom: 1px dashed #000;
@@ -941,10 +999,56 @@ export class PrintLayoutComposerService {
       color: #6b7280;
       margin: 6px 0;
     }
+
+    /* Token pills and interactive canvas outline styles */
+    .vendix-token-pill {
+      display: inline-block;
+      background: #eff6ff;
+      color: #1d4ed8;
+      border: 1px dashed #3b82f6;
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-size: 8pt;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-weight: 600;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .vendix-token-pill:hover {
+      background: #dbeafe;
+      border-color: #2563eb;
+    }
+    [data-element-id] {
+      position: relative;
+      cursor: pointer;
+      transition: outline 0.15s ease-in-out, background-color 0.15s ease-in-out;
+    }
+    [data-element-id]:hover {
+      outline: 1.5px dashed #3b82f6 !important;
+      outline-offset: 1px;
+    }
   </style>
 </head>
 <body>
   ${bodyContent}
+  <script>
+    document.addEventListener('click', function(e) {
+      var target = e.target;
+      var el = target.closest('[data-element-id]');
+      var sec = target.closest('[data-section-id]');
+      var tokenEl = target.closest('[data-token]');
+      if (el || sec || tokenEl) {
+        var payload = {
+          type: 'VENDIX_PRINT_ELEMENT_CLICKED',
+          elementId: el ? el.getAttribute('data-element-id') : null,
+          sectionId: sec ? sec.getAttribute('data-section-id') : null,
+          token: tokenEl ? tokenEl.getAttribute('data-token') : null,
+          columnId: el ? el.getAttribute('data-column-id') : null
+        };
+        window.parent.postMessage(payload, '*');
+      }
+    });
+  </script>
 </body>
 </html>`;
   }

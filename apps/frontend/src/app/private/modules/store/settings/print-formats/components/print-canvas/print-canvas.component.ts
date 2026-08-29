@@ -6,6 +6,7 @@ import {
   ElementRef,
   inject,
   input,
+  model,
   output,
   signal,
   viewChild,
@@ -16,7 +17,9 @@ import {
   CanvasRegion,
   PrintColumnDefinition,
   PrintFormatDefinition,
+  PrintPreviewMode,
   PrintSectionDefinition,
+  PrintSelectedElement,
 } from '../../../../../../../core/models/print-formats.model';
 import { definitionToRegions, regionsToDelta } from './canvas-region';
 import { PrintRegionHandleComponent } from './print-region-handle.component';
@@ -32,25 +35,6 @@ const TOKEN_DND_MIME = 'application/x-vendix-token';
 /**
  * [print-editor-dsk P4.1 + P4.3 + P4.4 + P4.5 + P4.6 + P4.7 + P5] — WYSIWYG
  * canvas container for the print-format editor.
- *
- *  - P4.1: lays out `CanvasRegion`s over a paper-shaped area; emits
- *    `regionSelected` on click.
- *  - P4.3: drag/resize via `appCanvasDrag` directive + live overrides.
- *  - P4.4: keyboard handling (Esc to deselect, Delete to remove columns)
- *    and resize handles via `app-print-region-handle`.
- *  - P4.5: hosts the `PrintCanvasHistoryService` so every drag-resize
- *    gesture pushes a coalesced snapshot (250ms); the toolbar surfaces
- *    undo/redo.
- *  - P4.6: accepts HTML5 drag-and-drop from the token catalog. The
- *    dropped token's path becomes a new section appended to the
- *    definition; if the drop lands inside an existing region, that
- *    region's order anchors the new section instead.
- *  - P4.7: embeds the toolbar (zoom 60..160, snap-to-grid, ruler,
- *    fit-to-screen) and applies `transform: scale()` to the paper.
- *  - P5: embeds the `PrintPropertiesPanel` on the right side and
- *    routes its `(definitionChanged)` events through the history
- *    service so panel edits are undoable. Also decodes the new
- *    JSON-shaped drop payload from `print-token-catalog` (P5.9).
  */
 @Component({
   selector: 'app-print-canvas',
@@ -65,6 +49,7 @@ const TOKEN_DND_MIME = 'application/x-vendix-token';
   template: `
     <div class="vendix-canvas-frame">
       <app-print-canvas-toolbar
+        [(mode)]="previewMode"
         [(zoom)]="zoomPct"
         [(snap)]="snapEnabled"
         [(ruler)]="rulerVisible"
@@ -77,45 +62,31 @@ const TOKEN_DND_MIME = 'application/x-vendix-token';
       ></app-print-canvas-toolbar>
 
       <div class="vendix-canvas-split">
-        <div
-          #paper
-          class="vendix-paper"
-          [class.show-rulers]="rulerVisible()"
-          [style.transform]="'scale(' + (zoomPct() / 100) + ')'"
-          [style.width.mm]="paperWidthMm()"
-          [style.min-height.mm]="paperHeightMm()"
-          (click)="onCanvasClick($event)"
-          (dragover)="onDragOver($event)"
-          (drop)="onDrop($event)"
-        >
-          @for (r of regions(); track r.id) {
-            <div
-              class="canvas-region"
-              [class.selected]="r.id === selectedRegionId()"
-              [class.dragging]="isDragging(r.id)"
-              [style.left.mm]="liveRegions()[r.id]?.x_mm ?? r.x_mm"
-              [style.top.mm]="liveRegions()[r.id]?.y_mm ?? r.y_mm"
-              [style.width.mm]="liveRegions()[r.id]?.width_mm ?? r.width_mm"
-              [style.height.mm]="liveRegions()[r.id]?.height_mm ?? r.height_mm"
-              [style.z-index]="r.zIndex"
-              [style.cursor]="r.id === selectedRegionId() ? 'move' : 'pointer'"
-              appCanvasDrag
-              [handle]="getHandleFor(r.id)"
-              (dragStart)="onDragStart($event, r)"
-              (dragMove)="onDragMove($event, r)"
-              (dragEnd)="onDragEnd(r)"
-              (click)="onRegionClick($event, r.id)"
-            >
-              <span class="region-label">{{ r.label }}</span>
-              @if (r.id === selectedRegionId()) {
-                <app-print-region-handle
-                  [visible]="true"
-                  [handleSize]="8"
-                  (handlePressed)="onHandlePressed($event, r)"
-                ></app-print-region-handle>
-              }
-            </div>
-          }
+        <div class="vendix-canvas-viewport">
+          <div
+            #paper
+            class="vendix-paper"
+            [class.show-rulers]="rulerVisible()"
+            [style.transform]="'scale(' + (zoomPct() / 100) + ')'"
+            [style.width.mm]="paperWidthMm()"
+            (click)="onCanvasClick($event)"
+            (dragover)="onDragOver($event)"
+            (drop)="onDrop($event)"
+          >
+            @if (previewHtml()) {
+              <iframe
+                #previewIframe
+                id="vendix-canvas-iframe"
+                [srcdoc]="previewHtml()"
+                class="vendix-preview-iframe"
+                sandbox="allow-same-origin allow-scripts"
+              ></iframe>
+            } @else {
+              <div class="p-8 text-center text-xs text-text-tertiary">
+                Generando vista previa interactiva...
+              </div>
+            }
+          </div>
         </div>
 
         <!-- [print-editor-dsk P5] — Per-element property panel. -->
@@ -123,6 +94,7 @@ const TOKEN_DND_MIME = 'application/x-vendix-token';
           class="vendix-canvas-properties"
           [definition]="definition()"
           [selectedRegion]="selectedRegion()"
+          (unselectRequested)="onUnselect()"
           (definitionChanged)="onPropertiesPanelChanged($event)"
         ></app-print-properties-panel>
       </div>
@@ -133,67 +105,76 @@ const TOKEN_DND_MIME = 'application/x-vendix-token';
       :host {
         display: block;
         width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
       }
       .vendix-canvas-frame {
         display: flex;
         flex-direction: column;
-        gap: 0.5rem;
+        gap: 0.75rem;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
       }
       .vendix-canvas-split {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 320px;
-        gap: 0.75rem;
+        grid-template-columns: minmax(0, 1fr) 340px;
+        gap: 1rem;
         align-items: start;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
       }
       @media (max-width: 1024px) {
         .vendix-canvas-split {
           grid-template-columns: minmax(0, 1fr);
         }
       }
+      .vendix-canvas-viewport {
+        overflow: auto;
+        padding: 1.5rem;
+        background: var(--color-surface-secondary, #f3f4f6);
+        border: 1px solid var(--color-border, #e5e7eb);
+        border-radius: 0.75rem;
+        display: flex;
+        justify-content: center;
+        min-height: calc(100vh - 200px);
+        max-height: calc(100vh - 200px);
+        min-width: 0;
+        box-sizing: border-box;
+      }
       .vendix-canvas-properties {
-        height: calc(100vh - 200px);
+        max-height: calc(100vh - 200px);
         min-height: 360px;
+        overflow-y: auto;
         position: sticky;
-        top: 1rem;
+        top: 4.5rem;
+        min-width: 0;
+        box-sizing: border-box;
       }
       .vendix-paper {
         position: relative;
-        transform-origin: top left;
+        transform-origin: top center;
         background: #ffffff;
         border: 1px solid #d4d4d4;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-        background-image: repeating-linear-gradient(
-          to bottom,
-          #fafafa 0mm,
-          #fafafa 5mm,
-          #f0f0f0 5mm,
-          #f0f0f0 6mm
-        );
+        border-radius: 4px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        min-height: 320px;
+        overflow: hidden;
+        height: fit-content;
+        box-sizing: border-box;
       }
       .vendix-paper.show-rulers {
         border-color: #00bcd4;
         box-shadow: 0 0 0 1px rgba(0, 188, 212, 0.3) inset;
       }
-      .canvas-region {
-        position: absolute;
-        background: rgba(255, 255, 255, 0.9);
-        border: 1px solid #ccc;
-        cursor: pointer;
-        padding: 2mm;
-        overflow: hidden;
-        box-sizing: border-box;
-      }
-      .canvas-region.selected {
-        outline: 2px solid #00bcd4;
-        outline-offset: -1px;
-      }
-      .canvas-region.dragging {
-        opacity: 0.85;
-      }
-      .region-label {
-        font-size: 9pt;
-        color: #333;
-        pointer-events: none;
+      .vendix-preview-iframe {
+        width: 100%;
+        min-height: 520px;
+        height: 100%;
+        border: none;
+        display: block;
+        background: #ffffff;
       }
     `,
   ],
@@ -209,11 +190,20 @@ export class PrintCanvasComponent {
   /** Current print format definition; drives the region layout. */
   readonly definition = input.required<PrintFormatDefinition>();
 
+  /** Compiled preview HTML string rendered inside the paper iframe. */
+  readonly previewHtml = input<string>('');
+
+  /** Two-way bound preview mode: 'dummy' (data simulada) vs 'tokenized' (variables). */
+  readonly previewMode = model<PrintPreviewMode>('dummy');
+
   /** Currently selected region id; matches `CanvasRegion.id`. `null` = none. */
   readonly selectedRegionId = input<string | null>(null);
 
   /** Emitted when a region is clicked, or `null` when empty space is clicked. */
   readonly regionSelected = output<string | null>();
+
+  /** Emitted when an element or token inside the preview iframe is clicked. */
+  readonly elementSelected = output<PrintSelectedElement>();
 
   /**
    * Emitted when a region mutation should be persisted to the composer.
@@ -324,6 +314,31 @@ export class PrintCanvasComponent {
       });
     }
 
+    // Listen to click messages from inside the preview iframe
+    if (typeof window !== 'undefined') {
+      const messageHandler = (event: MessageEvent): void => {
+        if (event.data?.type === 'VENDIX_PRINT_ELEMENT_CLICKED') {
+          const { elementId, sectionId, token, columnId } = event.data;
+          this.elementSelected.emit({ elementId, sectionId, token, columnId });
+          if (columnId) {
+            this.regionSelected.emit(`col-${columnId}`);
+          } else if (elementId?.startsWith('comp_')) {
+            this.regionSelected.emit(`comp-${elementId.replace('comp_', '')}`);
+          } else if (elementId === 'f_logo') {
+            this.regionSelected.emit('logo');
+          } else if (elementId) {
+            this.regionSelected.emit(`field-${elementId}`);
+          } else if (sectionId) {
+            this.regionSelected.emit(`sec-${sectionId}`);
+          }
+        }
+      };
+      window.addEventListener('message', messageHandler);
+      this.destroyRef.onDestroy(() => {
+        window.removeEventListener('message', messageHandler);
+      });
+    }
+
     // [print-editor-dsk P4.5] — Seed the history with the initial
     // definition so the merchant can undo back to "what was loaded"
     // if they make an unwanted change.
@@ -336,6 +351,10 @@ export class PrintCanvasComponent {
   }
 
   // ─── Mutation surface used by drag/resize (P4.3) ──────────────────────
+
+  protected onUnselect(): void {
+    this.regionSelected.emit(null);
+  }
 
   protected notifyDefinitionChanged(def: PrintFormatDefinition): void {
     this._definitionSubject.next(def);

@@ -40,20 +40,20 @@ import { PrintRecentDocument } from '../../../../../../../core/models/print-form
       <div class="flex items-stretch rounded-lg overflow-hidden border border-border bg-surface-secondary">
         <button
           type="button"
-          class="px-3 py-1.5 text-xs font-medium text-text-primary hover:bg-surface-hover transition flex items-center gap-2"
+          class="px-3 py-1.5 text-xs font-medium text-text-primary hover:bg-surface-hover transition flex items-center gap-1.5 cursor-pointer"
           (click)="clearSelection()"
-          [title]="selectedDocumentId() === null ? 'Usando datos de muestra fabricados' : 'Volver a los datos de muestra fabricados'"
+          [title]="selectedDocumentId() === null ? 'Usando datos de muestra' : 'Restablecer a datos de muestra'"
         >
-          <app-icon name="file-text" [size]="13" class="text-text-secondary"></app-icon>
-          {{ selectedDocumentId() === null ? 'Sample data' : 'Doc #' + selectedDocumentId() }}
+          <app-icon name="file-text" [size]="13" class="text-primary-500"></app-icon>
+          <span>{{ selectedDocumentId() === null ? 'Datos de Ejemplo' : 'Doc #' + selectedDocumentId() }}</span>
         </button>
         <button
           type="button"
-          class="px-2 py-1.5 text-xs text-text-secondary hover:bg-surface-hover transition border-l border-border"
+          class="px-2 py-1.5 text-xs text-text-secondary hover:bg-surface-hover transition border-l border-border cursor-pointer flex items-center justify-center"
           (click)="toggle()"
           [attr.aria-expanded]="isOpen()"
           aria-haspopup="listbox"
-          title="Elegir un documento real"
+          title="Elegir un documento real de la tienda"
         >
           <app-icon name="chevron-down" [size]="13"></app-icon>
         </button>

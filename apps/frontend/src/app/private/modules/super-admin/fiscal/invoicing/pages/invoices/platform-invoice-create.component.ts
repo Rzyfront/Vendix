@@ -1,1071 +1,639 @@
-import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
+  OnInit,
   computed,
   inject,
   signal,
 } from '@angular/core';
-import { FormControl, FormGroup, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
+import { CommonModule, DecimalPipe } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
-import { CommonModule } from '@angular/common';
-import { firstValueFrom } from 'rxjs';
+import {
+  FormArray,
+  FormBuilder,
+  FormGroup,
+  FormsModule,
+  ReactiveFormsModule,
+  Validators,
+} from '@angular/forms';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { Observable, firstValueFrom } from 'rxjs';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { startWith } from 'rxjs/operators';
+
 import { environment } from '../../../../../../../../environments/environment';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import {
   AlertBannerComponent,
+  BadgeComponent,
   ButtonComponent,
-  ResponsiveDataViewComponent,
+  CardComponent,
+  IconComponent,
+  InputComponent,
+  ModalComponent,
   SelectorComponent,
-  TableAction,
-  TableColumn,
 } from '../../../../../../../shared/components';
 import { CurrencyPipe as VendixCurrencyPipe } from '../../../../../../../shared/pipes/currency';
+
+// Secciones Compartidas
+import { PlatformSectionWrapperComponent } from '../../components/platform-section-wrapper/platform-section-wrapper.component';
+import {
+  DocumentoSectionPaths,
+  InvoiceSectionDocumentoComponent,
+  InvoiceSectionLineasComponent,
+  InvoiceSectionNotasComponent,
+  NotasSectionPaths,
+} from '../../../../../../../shared/components/invoice-sections';
+
 import { TenantPickerComponent } from '../../components/tenant-picker/tenant-picker.component';
+import { PlatformInvoicingStore } from '../../platform-invoicing.store';
+import { FiscalBillingAdminService } from '../../../../subscriptions/services/fiscal-billing-admin.service';
 import { PlatformAcquirer } from '../../state';
+import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
 
 /**
- * CP-platform-fiscal-invoicing-mvp · Phase C.5 — create page V1.
- *
- * Form completo para crear platform-invoice (sales_invoice + support_document):
- *   - TenantPicker (ADR-7): el cliente son stores u organizations
- *   - Resolution selector (filtra por document_type vigente + ClTec)
- *   - Items table con discount + taxes[] + is_inclusive + aiu_component + unit_code
- *   - Modal de linea custom para capturar tax_type (IVA/INC/ICUI/RETE_*)
- *   - Collapsibles: AIU regime (nota 4900 char), Withholdings (practiced/suffered/self),
- *     Global discount (AllowanceCharge), TRM (USD),
- *     Payment form (contado/credito + payment_means_code)
- *   - Submit deshabilitado si hay blockers (consume el flujo de readiness V1)
- *
- * El cliente es un TenantRef discriminated (`{kind, tenant_id}`).
- * El backend (Phase B.1 facade) traduce a CreateInvoiceDto del rail tienda
- * + persiste snapshots de acquirer + invoice en fiscal_evidences.
- *
- * Local state es signals (zoneless). Submit orquestado por signal:
- *   local `submitted` -> disabled buttons + spinner.
+ * Cálculo estándar DIAN del Dígito de Verificación (Módulo 11).
  */
-
-// ── Tipos del form ───────────────────────────────────────────────────────
-
-interface FormLineTax {
-  tax_type: 'IVA' | 'INC' | 'ICUI' | 'RETE_FUENTE' | 'RETE_IVA' | 'RETE_ICA';
-  rate: number; // 0..1
-  taxable_amount?: number;
-  tax_amount?: number;
-  is_inclusive?: boolean;
+export function calculateDianDv(nit: string): string {
+  const cleanNit = (nit || '').replace(/\D/g, '');
+  if (!cleanNit) return '';
+  const primes = [3, 7, 13, 17, 19, 23, 29, 37, 41, 43, 47, 53, 59, 67, 71];
+  let sum = 0;
+  for (let i = 0; i < cleanNit.length; i++) {
+    const digit = parseInt(cleanNit.charAt(cleanNit.length - 1 - i), 10);
+    sum += digit * primes[i];
+  }
+  const mod = sum % 11;
+  if (mod === 0 || mod === 1) return mod.toString();
+  return (11 - mod).toString();
 }
 
-interface FormLine {
-  id: string; // uuid local
+interface NewLineDraft {
   description: string;
   quantity: number;
   unit_price: number;
   discount_amount: number;
-  taxes: FormLineTax[];
-  unit_code: string; // default 'EA'
-  account_code?: string;
-  aiu_component?: 'administracion' | 'imprevistos' | 'utilidad';
+  tax_rate: number; // 0.19, 0.05, 0
   is_inclusive: boolean;
-}
-
-interface FormWithholding {
-  id: string; // uuid local
-  role: 'practiced' | 'suffered' | 'self';
-  concept_id: number;
-  base_amount: number;
-  rate: number; // 0..1
-  amount?: number; // auto-resuelto
-}
-
-interface FormSelectedResolution {
-  id: number;
-  prefix: string;
-  technical_key_fingerprint?: string;
-  cltec_status: 'present' | 'absent' | 'invalid';
-  emittable: boolean;
-}
-
-interface ResolutionListItem {
-  id: number;
-  prefix: string;
-  resolution_number?: string;
-  range_from: number;
-  range_to: number;
-  current_number: number;
-  document_type: 'sales_invoice' | 'support_document';
-  technical_key_fingerprint: string | null;
-  emittable?: boolean;
-  cltec_status?: 'present' | 'absent' | 'invalid';
+  unit_code: string;
 }
 
 @Component({
   selector: 'app-platform-invoice-create',
   standalone: true,
-  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
-    CommonModule,
     FormsModule,
+    CommonModule,
     ReactiveFormsModule,
     RouterLink,
     AlertBannerComponent,
+    BadgeComponent,
     ButtonComponent,
-    ResponsiveDataViewComponent,
-    VendixCurrencyPipe,
+    CardComponent,
+    IconComponent,
+    InputComponent,
+    ModalComponent,
     SelectorComponent,
     TenantPickerComponent,
+    VendixCurrencyPipe,
+    DecimalPipe,
+    PlatformSectionWrapperComponent,
+    InvoiceSectionDocumentoComponent,
+    InvoiceSectionLineasComponent,
+    InvoiceSectionNotasComponent,
   ],
-  template: `
-    <div class="p-6 max-w-5xl mx-auto">
-      <a
-        routerLink="/super-admin/fiscal/invoicing/invoices"
-        class="text-sm text-primary-600 hover:underline"
-      >← Volver al listado</a>
-
-      <h2 class="mt-4 text-2xl font-semibold text-gray-900">
-        Nueva factura de plataforma
-      </h2>
-      <p class="text-sm text-gray-500 mt-1">
-        Emisión contra un tenant (ADR-7). Cubre sales_invoice y support_document.
-      </p>
-
-      <form (ngSubmit)="submit()" #f="ngForm" class="mt-6 space-y-6">
-        <!-- Section: DocumentType + Resolution + TenantPicker + Items -->
-        <fieldset class="bg-white rounded-lg shadow p-4 space-y-4">
-          <legend class="font-semibold text-gray-900 px-2">Documento</legend>
-
-          <div class="grid grid-cols-2 gap-3">
-            <label class="text-sm">
-              <span class="text-gray-700">Tipo de documento</span>
-              <app-selector
-                [options]="documentTypeOptions"
-                (valueChange)="onDocumentTypeChange(($event ?? '').toString())"
-              ></app-selector>
-            </label>
-
-            <label class="text-sm">
-              <span class="text-gray-700">Resolución</span>
-              <app-selector
-                [options]="resolutionOptions()"
-                (valueChange)="onResolutionChange(($event ?? '').toString())"
-                [placeholder]="resolutionOptions().length === 0 ? 'Cargando resoluciones...' : 'Seleccionar'"
-              ></app-selector>
-              @if (selectedResolution() && !selectedResolution()!.emittable) {
-                <p class="text-xs text-warning mt-1">
-                  Resolución no emitible: {{ selectedResolution()!.cltec_status }} ClTec.
-                </p>
-              }
-            </label>
-          </div>
-
-          <label class="text-sm">
-            <span class="text-gray-700">Operación</span>
-            <app-selector
-              [options]="operationTypeOptions"
-              (valueChange)="onOperationTypeChange($event)"
-            ></app-selector>
-          </label>
-
-          @if (operationType() === '09') {
-            <label class="text-sm block">
-              <span class="text-gray-700">Objeto del contrato AIU <span class="text-red-600">*</span></span>
-              <textarea
-                [ngModel]="aiuContractObject()"
-                (ngModelChange)="aiuContractObject.set($event)"
-                name="aiu_contract_object"
-                rows="3"
-                maxlength="4900"
-                required
-                class="mt-1 w-full border rounded px-3 py-2 text-sm"
-              ></textarea>
-              <span class="text-xs text-gray-500">{{ aiuContractObject().length }} / 4900 caracteres (DIAN)</span>
-            </label>
-          }
-
-          <app-platform-tenant-picker
-            (tenantPicked)="onTenantPicked($event)"
-          ></app-platform-tenant-picker>
-
-          <!-- Tarjeta de perfil colapsable (P3.5) -->
-          <div class="bg-white rounded-lg shadow p-4 space-y-3">
-            <button
-              type="button"
-              (click)="profileCardCollapsed.set(!profileCardCollapsed())"
-              class="flex items-center justify-between w-full text-left"
-            >
-              <span class="font-semibold text-gray-900">
-                Perfil de facturación
-                @if (profileAppliedName()) {
-                  <span class="ml-2 text-xs text-green-700">✓ {{ profileAppliedName() }}</span>
-                }
-              </span>
-              <span class="text-gray-400">{{ profileCardCollapsed() ? '▶' : '▼' }}</span>
-            </button>
-
-            @if (!profileCardCollapsed()) {
-              @if (profileCatalog().length === 0) {
-                <p class="text-sm text-gray-500">
-                  No hay perfiles plataforma para op_type {{ operationType() }}. Cree uno en
-                  <a routerLink="../profiles/new" class="text-blue-600 underline">Perfiles</a>.
-                </p>
-              } @else {
-                <div class="space-y-2">
-                  @for (p of profileCatalog(); track p.id) {
-                    @if (p.operation_type === operationType()) {
-                      <div
-                        class="flex items-center justify-between p-2 border rounded"
-                        [class.border-blue-500]="profileSelectedId() === p.id"
-                        [class.bg-blue-50]="profileSelectedId() === p.id"
-                      >
-                        <div>
-                          <p class="font-medium text-sm">{{ p.name }}</p>
-                          <p class="text-xs text-gray-500">
-                            op {{ p.operation_type }} · v{{ p.current_version }}
-                            @if (p.is_default) { · predeterminado }
-                          </p>
-                        </div>
-                        <div class="flex gap-2">
-                          @if (profileSelectedId() === p.id) {
-                            <button
-                              type="button"
-                              (click)="clearAppliedProfile()"
-                              class="text-xs text-red-600 underline"
-                            >Quitar</button>
-                          } @else {
-                            <button
-                              type="button"
-                              (click)="applyProfile(p.id, p.name)"
-                              class="text-xs text-blue-600 underline"
-                            >Aplicar</button>
-                          }
-                        </div>
-                      </div>
-                    }
-                  }
-                  @if (profilesForOperationType().length === 0) {
-                    <p class="text-sm text-gray-500">
-                      Sin perfiles para op_type {{ operationType() }}. Cree uno en
-                      <a routerLink="../profiles/new" class="text-blue-600 underline">Perfiles</a>.
-                    </p>
-                  }
-                </div>
-              }
-            }
-          </div>
-        </fieldset>
-
-        <!-- Items -->
-        <fieldset class="bg-white rounded-lg shadow p-4 space-y-3">
-          <legend class="font-semibold text-gray-900 px-2">Líneas</legend>
-
-          <app-responsive-data-view
-            [data]="lines()"
-            [columns]="linesColumns()"
-            [cardConfig]="linesCardConfig()"
-            [actions]="linesActions"
-            [loading]="false"
-            emptyTitle="Sin líneas"
-            emptyDescription="Agregue al menos una línea al documento."
-            emptyIcon="file-plus"
-            (actionClick)="onLinesAction($event)"
-          />
-
-          @if (lines().length > 0) {
-            <dl class="flex gap-6 text-sm justify-end mt-4">
-              <div class="text-right">
-                <dt class="text-gray-500">Subtotal</dt>
-                <dd class="font-medium">{{ subtotal() | currency }}</dd>
-              </div>
-              <div class="text-right">
-                <dt class="text-gray-500">Impuestos</dt>
-                <dd class="font-medium">{{ taxesTotal() | currency }}</dd>
-              </div>
-              <div class="text-right">
-                <dt class="font-semibold">Total</dt>
-                <dd class="font-semibold text-lg">{{ total() | currency }}</dd>
-              </div>
-            </dl>
-          }
-
-          <!-- Modal inline para linea (C.3 — CustomItemModal) -->
-          @if (showLineModal()) {
-            <div class="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-              <div class="bg-white rounded-lg shadow-xl w-full max-w-lg p-5 space-y-3">
-                <h3 class="font-semibold text-gray-900">Nueva línea</h3>
-                <div class="grid grid-cols-12 gap-2 items-end">
-                  <label class="col-span-12 text-sm">
-                    <span class="text-gray-700">Descripción <span class="text-red-600">*</span></span>
-                    <input
-                      [ngModel]="newLine().description"
-                      (ngModelChange)="onNewLineDescription($event)"
-                      name="line_desc"
-                      maxlength="500"
-                      required
-                      class="mt-1 w-full border rounded px-3 py-2"
-                    />
-                  </label>
-                  <label class="col-span-4 text-sm">
-                    <span class="text-gray-700">Cant <span class="text-red-600">*</span></span>
-                    <input
-                      type="number"
-                      step="0.0001"
-                      [ngModel]="newLine().quantity"
-                      (ngModelChange)="onNewLineQuantity($event)"
-                      name="line_qty"
-                      required
-                      class="mt-1 w-full border rounded px-3 py-2 text-right"
-                    />
-                  </label>
-                  <label class="col-span-4 text-sm">
-                    <span class="text-gray-700">Precio unit <span class="text-red-600">*</span></span>
-                    <input
-                      type="number"
-                      step="0.0001"
-                      [ngModel]="newLine().unit_price"
-                      (ngModelChange)="onNewLinePrice($event)"
-                      name="line_price"
-                      required
-                      class="mt-1 w-full border rounded px-3 py-2 text-right"
-                    />
-                  </label>
-                  <label class="col-span-4 text-sm">
-                    <span class="text-gray-700">Desc</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      [ngModel]="newLine().discount_amount"
-                      (ngModelChange)="onNewLineDiscount($event)"
-                      name="line_disc"
-                      class="mt-1 w-full border rounded px-3 py-2 text-right"
-                    />
-                  </label>
-
-                  <fieldset class="col-span-12 text-sm border rounded p-2">
-                    <legend class="text-xs text-gray-700 px-1">Impuestos por línea (rate 0..1)</legend>
-                    @for (tax of newLine().taxes; track $index; let i = $index) {
-                      <div class="grid grid-cols-12 gap-2 items-center">
-                        <select
-                          [ngModel]="tax.tax_type"
-                          (ngModelChange)="updateLineTax(i, 'tax_type', $event)"
-                          name="line_tax_type_{{ i }}"
-                          class="col-span-3 border rounded px-2 py-1"
-                        >
-                          <option value="IVA">IVA</option>
-                          <option value="INC">INC</option>
-                          <option value="ICUI">ICUI</option>
-                          <option value="RETE_FUENTE">ReteFuente</option>
-                          <option value="RETE_IVA">ReteIVA</option>
-                          <option value="RETE_ICA">ReteICA</option>
-                        </select>
-                        <input
-                          type="number"
-                          step="0.0001"
-                          min="0"
-                          max="1"
-                          [ngModel]="tax.rate"
-                          (ngModelChange)="updateLineTax(i, 'rate', +$event || 0)"
-                          name="line_tax_rate_{{ i }}"
-                          class="col-span-4 border rounded px-2 py-1 text-right"
-                        />
-                        <label class="col-span-3 flex items-center gap-1 text-xs">
-                          <input
-                            type="checkbox"
-                            [ngModel]="tax.is_inclusive"
-                            (ngModelChange)="updateLineTax(i, 'is_inclusive', $event)"
-                            name="line_tax_incl_{{ i }}"
-                          />inclusivo
-                        </label>
-                        <button type="button" (click)="removeLineTax(i)" class="col-span-2 text-red-600 text-xs">Quitar</button>
-                      </div>
-                    }
-                    <button type="button" (click)="addLineTax()" class="text-xs text-primary-600 mt-2">
-                      + Añadir impuesto
-                    </button>
-                  </fieldset>
-
-                  @if (operationType() === '09') {
-                    <fieldset class="col-span-12 text-sm border rounded p-2">
-                      <legend class="text-xs text-gray-700 px-1">Componente AIU</legend>
-                      <app-selector
-                        [options]="aiuComponentOptions"
-                        (valueChange)="onNewLineAiuComponent($event)"
-                      ></app-selector>
-                    </fieldset>
-                  }
-
-                  <label class="col-span-6 text-sm">
-                    <span class="text-gray-700">Unidad (UN/ECE)</span>
-                    <input
-                      [ngModel]="newLine().unit_code"
-                      (ngModelChange)="onNewLineUnitCode($event)"
-                      name="line_unit_code"
-                      maxlength="10"
-                      class="mt-1 w-full border rounded px-3 py-2"
-                    />
-                  </label>
-                </div>
-
-                <div class="flex justify-end gap-2 pt-2">
-                  <button app-button type="button" variant="secondary" (click)="cancelLine()">
-                    Cancelar
-                  </button>
-                  <button app-button type="button" variant="primary" (click)="confirmLine()">
-                    Añadir línea
-                  </button>
-                </div>
-              </div>
-            </div>
-          }
-
-          <button type="button" app-button variant="primary" (click)="openLineModal()">
-            + Añadir línea
-          </button>
-        </fieldset>
-
-        <!-- Withholdings -->
-        <fieldset class="bg-white rounded-lg shadow p-4 space-y-3">
-          <legend class="font-semibold text-gray-900 px-2">Retenciones</legend>
-          @for (wh of withholdings(); track wh.id; let i = $index) {
-            <div class="grid grid-cols-12 gap-2 items-end">
-              <app-selector
-                [options]="withholdingRoleOptions"
-                (valueChange)="updateWithholding(i, 'role', ($event ?? 'practiced').toString())"
-                class="col-span-3"
-              ></app-selector>
-              <label class="col-span-2 text-sm">
-                <span class="text-gray-700">Concept ID</span>
-                <input
-                  type="number"
-                  [ngModel]="wh.concept_id"
-                  (ngModelChange)="updateWithholding(i, 'concept_id', +$event || 0)"
-                  name="wh_concept_{{ i }}"
-                  class="mt-1 w-full border rounded px-3 py-2 text-right"
-                />
-              </label>
-              <label class="col-span-3 text-sm">
-                <span class="text-gray-700">Base</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  [ngModel]="wh.base_amount"
-                  (ngModelChange)="updateWithholding(i, 'base_amount', +$event || 0)"
-                  name="wh_base_{{ i }}"
-                  class="mt-1 w-full border rounded px-3 py-2 text-right"
-                />
-              </label>
-              <label class="col-span-2 text-sm">
-                <span class="text-gray-700">Rate (0..1)</span>
-                <input
-                  type="number"
-                  step="0.000001"
-                  min="0"
-                  max="1"
-                  [ngModel]="wh.rate"
-                  (ngModelChange)="updateWithholding(i, 'rate', +$event || 0)"
-                  name="wh_rate_{{ i }}"
-                  class="mt-1 w-full border rounded px-3 py-2 text-right"
-                />
-              </label>
-              <span class="col-span-1 text-xs text-gray-500">{{ wh.rate * 100 }}%</span>
-              <button type="button" (click)="removeWithholding(i)" class="col-span-1 text-red-600">×</button>
-            </div>
-          }
-          <button type="button" app-button variant="secondary" (click)="addWithholding()">
-            + Añadir retención
-          </button>
-        </fieldset>
-
-        <!-- Global discount + TRM + Payment form -->
-        <fieldset class="bg-white rounded-lg shadow p-4 space-y-3">
-          <legend class="font-semibold text-gray-900 px-2">Más opciones</legend>
-
-          <div class="grid grid-cols-2 gap-3">
-            <label class="text-sm">
-              <span class="text-gray-700">Descuento global (AllowanceCharge)</span>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                [ngModel]="globalDiscountAmount()"
-                (ngModelChange)="globalDiscountAmount.set(+$event || 0)"
-                name="global_discount"
-                class="mt-1 w-full border rounded px-3 py-2 text-right"
-              />
-            </label>
-            <label class="text-sm">
-              <span class="text-gray-700">Currency</span>
-              <app-selector
-                [options]="currencyOptions"
-                (valueChange)="currencyIso.set(($event ?? 'COP').toString())"
-              ></app-selector>
-            </label>
-          </div>
-
-          @if (currencyIso() !== 'COP') {
-            <div class="grid grid-cols-2 gap-3 border-t pt-3">
-              <label class="text-sm">
-                <span class="text-gray-700">Fecha TRM</span>
-                <input
-                  type="date"
-                  [ngModel]="exchangeRateDate()"
-                  (ngModelChange)="exchangeRateDate.set($event)"
-                  name="erm_date"
-                  class="mt-1 w-full border rounded px-3 py-2"
-                />
-              </label>
-              <label class="text-sm">
-                <span class="text-gray-700">TRM</span>
-                <input
-                  type="number"
-                  step="0.0001"
-                  min="0"
-                  [ngModel]="exchangeRate()"
-                  (ngModelChange)="exchangeRate.set(+$event || 0)"
-                  name="erm"
-                  class="mt-1 w-full border rounded px-3 py-2 text-right"
-                />
-              </label>
-            </div>
-          }
-
-          <div class="grid grid-cols-2 gap-3">
-            <label class="text-sm">
-              <span class="text-gray-700">Forma de pago</span>
-              <app-selector
-                [options]="paymentFormOptions"
-                (valueChange)="onPaymentFormChange($event)"
-              ></app-selector>
-            </label>
-            @if (paymentForm() === '2') {
-              <label class="text-sm">
-                <span class="text-gray-700">Vencimiento</span>
-                <input
-                  type="date"
-                  [ngModel]="dueDate()"
-                  (ngModelChange)="dueDate.set($event)"
-                  name="due_date"
-                  class="mt-1 w-full border rounded px-3 py-2"
-                />
-              </label>
-            }
-          </div>
-        </fieldset>
-
-        @if (errorMessage(); as err) {
-          <app-alert-banner variant="danger">{{ err }}</app-alert-banner>
-        }
-
-        <div class="flex justify-end gap-2">
-          <a routerLink="/super-admin/fiscal/invoicing/invoices" app-button variant="secondary">
-            Cancelar
-          </a>
-          <button
-            type="submit"
-            app-button
-            variant="primary"
-            [disabled]="submitting() || !canSubmit()"
-          >
-            {{ submitting() ? 'Creando…' : 'Crear y emitir' }}
-          </button>
-        </div>
-      </form>
-    </div>
-  `,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  templateUrl: './platform-invoice-create.component.html',
 })
-export class PlatformInvoiceCreateComponent {
-  private readonly http = inject(HttpClient);
-  private readonly toast = inject(ToastService);
+export class PlatformInvoiceCreateComponent implements OnInit {
+  private readonly fb = inject(FormBuilder);
   private readonly router = inject(Router);
+  private readonly toast = inject(ToastService);
+  private readonly destroyRef = inject(DestroyRef);
+  readonly store = inject(PlatformInvoicingStore);
+  private readonly http = inject(HttpClient);
+  private readonly fiscal = inject(FiscalBillingAdminService);
 
-  private readonly base = `${environment.apiUrl}/superadmin/subscriptions/fiscal`;
+  // ── Modo de Adquiriente ─────────────────────────────────────────
+  readonly acquirerMode = signal<'system' | 'external'>('system');
 
-  // ── Document state ──────────────────────────────────────────────────────
+  // ── Formulario Principal ────────────────────────────────────────
+  readonly invoiceForm = this.fb.group({
+    profile_id: [null as number | null],
 
-  readonly documentType = signal<'sales_invoice' | 'support_document'>('sales_invoice');
-  readonly operationType = signal<'10' | '09' | '11' | '12'>('10');
-  readonly aiuContractObject = signal<string>('');
+    // Documento
+    resolution_id: [null as number | null, Validators.required],
+    invoice_type: ['sales_invoice', Validators.required],
+    operation_type: ['10', Validators.required], // Estándar por defecto
+    payment_form: ['1', Validators.required],
+    payment_means_code: ['10'],
+    issue_date: [formatDateOnlyUTC(new Date())],
+    due_date: [''],
+    notes: [''],
 
-  readonly resolutionId = signal<number | null>(null);
-  readonly resolutions = signal<ResolutionListItem[]>([]);
-  readonly selectedResolution = computed(() => {
-    const id = this.resolutionId();
-    return id ? (this.resolutions().find((r) => r.id === id) ?? null) : null;
+    // Adquiriente del Sistema (picker)
+    customer_tenant: [null as PlatformAcquirer | null],
+
+    // Adquiriente Externo Manual
+    external_legal_name: [''],
+    external_tax_id: [''],
+    external_tax_id_dv: [''],
+    external_document_type: ['31'], // 31 = NIT, 13 = CC, 22 = CE
+    external_person_type: ['1'], // 1 = Jurídica, 2 = Natural
+    external_tax_regime_code: ['48'], // 48 = Resp IVA, 49 = No resp
+    external_email: [''],
+    external_phone: [''],
+    external_address_line: [''],
+    external_city: ['Bogotá, D.C.'],
+    external_department_code: ['11'],
+
+    // Guardar como perfil
+    save_as_profile_enabled: [false],
+    save_as_profile_name: [''],
+
+    // Líneas
+    items: this.fb.array([], Validators.required),
   });
-  readonly resolutionOptions = computed(() =>
-    this.resolutions().map((r) => ({
-      value: r.id.toString(),
-      label: `${r.prefix} (${r.document_type}) · ${r.current_number}/${r.range_to}${
-        r.emittable === false ? ' — ! emitible' : ''
-      }`,
-    })),
+
+  get itemsArray(): FormArray {
+    return this.invoiceForm.get('items') as FormArray;
+  }
+
+  // Señales derivadas del Formulario
+  private readonly formValue = toSignal(
+    this.invoiceForm.valueChanges.pipe(startWith(this.invoiceForm.value)),
+    { initialValue: this.invoiceForm.value as Record<string, any> }
   );
 
-  // ── TenantPicker integration ──────────────────────────────────────────
-  // TenantPicker is its own component that emits (tenantPicked).
-  // We capture here and lock the acquirer into the form.
-
-  readonly acquirer = signal<PlatformAcquirer | null>(null);
-
-  // ── Profile catalog (P3.5: tarjeta colapsable) ─────────────────────────
-  readonly profileCatalog = signal<any[]>([]);
-  /**
-   * Catálogo acotado al `operation_type` del documento en curso. Vive aquí y
-   * no en la plantilla porque Angular no admite funciones flecha en los
-   * bindings: expresarlo inline rompe la compilación con NG5002.
-   */
-  readonly profilesForOperationType = computed(() =>
-    this.profileCatalog().filter(
-      (p) => p.operation_type === this.operationType(),
-    ),
+  private readonly itemsValue = toSignal(
+    this.itemsArray.valueChanges as Observable<any[]>,
+    { initialValue: [] }
   );
-  readonly profileSelectedId = signal<number | null>(null);
-  readonly profileAppliedName = signal<string | null>(null);
-  readonly profileCardCollapsed = signal(false);
 
-  // ── Items state (signals para zoneless) ────────────────────────────────
+  readonly itemControls = computed<FormGroup[]>(() => {
+    this.itemsValue();
+    return [...this.itemsArray.controls] as FormGroup[];
+  });
 
-  readonly lines = signal<FormLine[]>([]);
-  readonly newLine = signal<FormLine>(this.makeEmptyLine());
-  readonly showLineModal = signal(false);
+  readonly rawValue = computed<Record<string, any>>(() => {
+    this.formValue();
+    return this.invoiceForm.getRawValue();
+  });
 
-  // Computeds (subtotal / taxes / total con redondeo por línea).
-  readonly subtotal = computed(() =>
-    Math.round(
-      this.lines().reduce(
-        (acc, l) => acc + (l.quantity * l.unit_price - (l.discount_amount ?? 0)),
-        0,
-      ) * 100,
-    ) / 100,
-  );
-  readonly taxesTotal = computed(() => {
-    let total = 0;
-    for (const l of this.lines()) {
-      const lineSubtotal = l.quantity * l.unit_price - (l.discount_amount ?? 0);
-      for (const t of l.taxes) {
-        total += lineSubtotal * (t.rate ?? 0);
+  readonly operationType = computed(() => this.rawValue()['operation_type']);
+  readonly isCredit = computed(() => this.rawValue()['payment_form'] === '2');
+
+  // ── Cálculo Reactivo de Totales ──────────────────────────────────
+  readonly totals = computed(() => {
+    const items = this.itemsValue() || [];
+    let grossSubtotal = 0;
+    let totalDiscount = 0;
+    let taxableBase = 0;
+    let totalIva = 0;
+
+    for (const item of items) {
+      const qty = Number(item.quantity) || 0;
+      const price = Number(item.unit_price) || 0;
+      const discount = Number(item.discount_amount) || 0;
+      const taxes = item.taxes || [];
+      const ivaTax = taxes.find((t: any) => t.tax_type === 'IVA');
+      const rate = ivaTax ? Number(ivaTax.rate) || 0 : 0;
+      const isInclusive = Boolean(ivaTax?.is_inclusive);
+
+      const rawLineTotal = qty * price;
+      grossSubtotal += rawLineTotal;
+      totalDiscount += discount;
+
+      const netLine = Math.max(0, rawLineTotal - discount);
+
+      if (rate > 0) {
+        if (isInclusive) {
+          const base = netLine / (1 + rate);
+          const tax = netLine - base;
+          taxableBase += base;
+          totalIva += tax;
+        } else {
+          taxableBase += netLine;
+          totalIva += netLine * rate;
+        }
+      } else {
+        taxableBase += netLine;
       }
     }
-    return Math.round(total * 100) / 100;
-  });
-  readonly total = computed(
-    () => this.subtotal() + this.taxesTotal() - (this.globalDiscountAmount() ?? 0),
-  );
 
-  // ── Lines table (ResponsiveDataView) ───────────────────────────────────
-  readonly linesColumns = computed<TableColumn[]>(() => [
-    { key: 'description', label: 'Descripción' },
-    { key: 'quantity', label: 'Cant', align: 'right', transform: (v) => String(v) },
-    {
-      key: 'unit_price',
-      label: 'Precio',
-      align: 'right',
-      transform: (v) => this.formatCurrency(v),
-    },
-    {
-      key: 'discount_amount',
-      label: 'Desc',
-      align: 'right',
-      transform: (v) => (v ? this.formatCurrency(v) : '—'),
-    },
-    { key: 'unit_code', label: 'UD' },
-    {
-      key: 'taxes',
-      label: 'Imp.',
-      transform: (v) => `${((v as unknown[]) ?? []).length}`,
-    },
-    {
-      key: 'aiu_component',
-      label: 'AIU',
-      transform: (v) => (v ? String(v) : '—'),
-    },
-  ]);
+    const total = taxableBase + totalIva;
 
-  readonly linesCardConfig = computed(() => ({
-    titleKey: 'description',
-    subtitleKey: 'quantity',
-    footerKey: 'unit_price',
-    footerLabel: 'Precio',
-    footerStyle: 'prominent' as const,
-  }));
-
-  readonly linesActions: TableAction[] = [
-    {
-      label: 'remove',
-      icon: 'trash-2',
-      action: (item: FormLine) => this.removeLineById(item.id),
-      variant: 'danger',
-    },
-  ];
-
-  removeLineById(id: string): void {
-    this.lines.update((arr) => arr.filter((l) => l.id !== id));
-  }
-
-  onLinesAction(event: { action: TableAction; item: FormLine }): void {
-    event.action.action(event.item);
-  }
-
-  private formatCurrency(value: number | string | undefined): string {
-    if (value === undefined || value === null || value === '') return '—';
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 2,
-    }).format(Number(value));
-  }
-
-  // ── Withholdings ──────────────────────────────────────────────────────
-
-  readonly withholdings = signal<FormWithholding[]>([]);
-
-  // ── Discount + Currency + Payment ──────────────────────────────────────
-
-  readonly globalDiscountAmount = signal<number>(0);
-  readonly currencyIso = signal<string>('COP');
-  readonly exchangeRate = signal<number>(0);
-  readonly exchangeRateDate = signal<string>('');
-  readonly paymentForm = signal<'1' | '2'>('1');
-  readonly dueDate = signal<string>('');
-
-  readonly submitting = signal(false);
-  readonly errorMessage = signal<string | null>(null);
-
-  readonly canSubmit = computed(() => {
-    return (
-      this.lines().length > 0 &&
-      !!this.acquirer() &&
-      !!this.resolutionId() &&
-      (this.operationType() !== '09' || this.aiuContractObject().length >= 4900)
-    );
+    return {
+      grossSubtotal,
+      totalDiscount,
+      taxableBase,
+      totalIva,
+      total,
+    };
   });
 
-  // ── Selectors ──────────────────────────────────────────────────────────
+  // ── Paths para las secciones compartidas ────────────────────────
+  readonly documentoSectionPaths: DocumentoSectionPaths = {
+    invoice_type: 'invoice_type',
+    payment_form: 'payment_form',
+    payment_means_code: 'payment_means_code',
+    issue_date: 'issue_date',
+    due_date: 'due_date',
+    notes: 'notes',
+    header_notes: null,
+  };
 
-  readonly documentTypeOptions = [
-    { value: 'sales_invoice', label: 'Factura de venta' },
-    { value: 'support_document', label: 'Documento soporte' },
+  readonly lineasRowPaths = {
+    quantity: 'quantity',
+    unit_price: 'unit_price',
+    description: 'description',
+    unit_code: 'unit_code',
+    discount_amount: 'discount_amount',
+    taxes: 'taxes',
+    product_id: null,
+    account_code: null,
+    aiu_component: null,
+    aiu_field: 'aiu_field',
+    price_unit_quantity: null,
+  };
+
+  readonly notasSectionPaths: NotasSectionPaths = {
+    description: null,
+    internal_note: null,
+  };
+
+  // ── Opciones de Selectores ──────────────────────────────────────
+  readonly invoiceTypeOptions = [
+    { value: 'sales_invoice', label: 'Factura de Venta' },
+    { value: 'support_document', label: 'Documento Soporte' },
   ];
-
-  readonly operationTypeOptions = [
-    { value: '10', label: 'Estandar' },
-    { value: '09', label: 'AIU' },
-    { value: '11', label: 'Mandato' },
-    { value: '12', label: 'Consorcio' },
+  readonly paymentFormOptions = [
+    { value: '1', label: 'Contado' },
+    { value: '2', label: 'Crédito' },
   ];
-
+  readonly paymentMeansOptions = [
+    { value: '10', label: 'Efectivo' },
+    { value: '42', label: 'Transferencia Bancaria' },
+    { value: '48', label: 'Tarjeta de Crédito' },
+    { value: '49', label: 'Tarjeta de Débito' },
+    { value: '1', label: 'Instrumento no definido' },
+  ];
   readonly aiuComponentOptions = [
-    { value: '', label: '— ninguno —' },
     { value: 'administracion', label: 'Administración' },
     { value: 'imprevistos', label: 'Imprevistos' },
     { value: 'utilidad', label: 'Utilidad' },
   ];
 
-  readonly currencyOptions = [
-    { value: 'COP', label: 'COP' },
-    { value: 'USD', label: 'USD' },
+  readonly documentTypeOptions = [
+    { value: '31', label: 'NIT (Número de Identificación Tributaria)' },
+    { value: '13', label: 'Cédula de Ciudadanía (CC)' },
+    { value: '22', label: 'Cédula de Extranjería (CE)' },
+    { value: '41', label: 'Pasaporte' },
   ];
 
-  readonly paymentFormOptions = [
-    { value: '1', label: 'Contado' },
-    { value: '2', label: 'Crédito' },
+  readonly personTypeOptions = [
+    { value: '1', label: 'Persona Jurídica' },
+    { value: '2', label: 'Persona Natural' },
   ];
 
-  readonly withholdingRoleOptions = [
-    { value: 'practiced', label: 'Practiced' },
-    { value: 'suffered', label: 'Suffered' },
-    { value: 'self', label: 'Self' },
+  readonly taxRegimeOptions = [
+    { value: '48', label: 'Responsable de IVA (Régimen Común)' },
+    { value: '49', label: 'No Responsable de IVA (Régimen Simplificado)' },
   ];
 
-  // ── Lifecycle ─────────────────────────────────────────────────────────
+  readonly taxRateOptions = [
+    { value: '0.19', label: 'IVA General 19%' },
+    { value: '0.05', label: 'IVA Reducido 5%' },
+    { value: '0', label: 'Exento / 0%' },
+  ];
 
-  ngOnInit(): void {
-    this.loadResolutions();
-    this.loadProfileCatalog();
+  // ── Estado de UI ────────────────────────────────────────────────
+  readonly sectionExpanded = signal<Record<string, boolean>>({
+    perfil: true,
+    documento: true,
+    adquiriente: true,
+    lineas: true,
+    notas: false,
+  });
+
+  readonly submitting = signal(false);
+  readonly errorMessage = signal('');
+
+  // ── Modal de Nueva Línea ─────────────────────────────────────────
+  readonly showLineModal = signal(false);
+  readonly newLine = signal<NewLineDraft>({
+    description: '',
+    quantity: 1,
+    unit_price: 0,
+    discount_amount: 0,
+    tax_rate: 0.19,
+    is_inclusive: false,
+    unit_code: 'EA',
+  });
+
+  ngOnInit() {
+    this.store.loadResolutions();
+    this.store.loadProfiles();
+
+    // Auto-cálculo del DV cuando se escribe el NIT externo
+    this.invoiceForm
+      .get('external_tax_id')
+      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((nit) => {
+        if (nit && this.invoiceForm.get('external_document_type')?.value === '31') {
+          const dv = calculateDianDv(nit);
+          this.invoiceForm.patchValue({ external_tax_id_dv: dv }, { emitEvent: false });
+        }
+      });
   }
 
-  async loadResolutions(): Promise<void> {
-    try {
-      const res = await firstValueFrom(
-        this.http.get<{ success: boolean; data: { data: ResolutionListItem[]; meta: any } }>(
-          `${this.base}/resolutions-for-emission`,
-          { params: { document_type: this.documentType() } },
-        ),
-      );
-      this.resolutions.set(res.data.data ?? []);
-    } catch {
-      this.resolutions.set([]);
-    }
+  get resolutionControl() {
+    return this.invoiceForm.get('resolution_id') as any;
   }
 
-  async loadProfileCatalog(): Promise<void> {
-    try {
-      const res = await firstValueFrom(
-        this.http.get<{ success: boolean; data: any[] }>(
-          `${this.base}/profiles/catalog`,
-        ),
-      );
-      this.profileCatalog.set(res.data ?? []);
-    } catch {
-      this.profileCatalog.set([]);
-    }
+  get rowErrors() {
+    return this.itemsArray.controls.map((c) => (c.invalid ? { description: 'Requerido' } : {}));
+  }
+  carriesAiu = (row: any, index: number) => false;
+  rowHasError(row: any, index: number): boolean {
+    return row.invalid;
+  }
+  toggleAiu(row: any, index: number, on: boolean): void {}
+
+  toggleSection(section: string, expanded: boolean): void {
+    this.sectionExpanded.update((s) => ({ ...s, [section]: expanded }));
   }
 
-  /**
-   * Aplica un perfil al wizard. El backend acepta `profile_id` en el DTO y
-   * persiste el snapshot. Por ahora sólo guardamos el `profile_id` para
-   * enviarlo en submit; un slice futuro precarga secciones desde el profile
-   * (config.aiu, config.taxes, etc.).
-   */
-  applyProfile(profileId: number, profileName: string): void {
-    this.profileSelectedId.set(profileId);
-    this.profileAppliedName.set(profileName);
-    this.toast.info(`Perfil aplicado: ${profileName}`, '');
-  }
-
-  clearAppliedProfile(): void {
-    this.profileSelectedId.set(null);
-    this.profileAppliedName.set(null);
-  }
-
-  onDocumentTypeChange(value: string): void {
-    const next = value === 'support_document' ? 'support_document' : 'sales_invoice';
-    this.documentType.set(next);
-    this.resolutionId.set(null);
-    this.loadResolutions();
-  }
-
-  onOperationTypeChange(value: string | number | null): void {
-    const v = (value ?? '10').toString();
-    if (v === '09' || v === '11' || v === '12') {
-      this.operationType.set(v);
-    } else {
-      this.operationType.set('10');
-    }
-  }
-
-  onPaymentFormChange(value: string | number | null): void {
-    const v = (value ?? '1').toString();
-    this.paymentForm.set(v === '2' ? '2' : '1');
-  }
-
-  onNewLineDescription(value: string): void {
-    this.newLine.update((l) => ({ ...l, description: value }));
-  }
-
-  onNewLineQuantity(value: string | number): void {
-    this.newLine.update((l) => ({ ...l, quantity: Number(value) || 0 }));
-  }
-
-  onNewLinePrice(value: string | number): void {
-    this.newLine.update((l) => ({ ...l, unit_price: Number(value) || 0 }));
-  }
-
-  onNewLineDiscount(value: string | number): void {
-    this.newLine.update((l) => ({ ...l, discount_amount: Number(value) || 0 }));
-  }
-
-  onNewLineUnitCode(value: string): void {
-    this.newLine.update((l) => ({ ...l, unit_code: value || 'EA' }));
-  }
-
-  onNewLineAiuComponent(value: string | number | null): void {
-    const v = (value ?? '').toString();
-    const valid = v === 'administracion' || v === 'imprevistos' || v === 'utilidad';
-    this.newLine.update((l) => ({
-      ...l,
-      aiu_component: valid ? (v as 'administracion' | 'imprevistos' | 'utilidad') : undefined,
+  readonly resolutionOptions = computed(() => {
+    return this.store.resolutions().map((r) => ({
+      value: r.id.toString(),
+      label: r.prefix
+        ? `${r.prefix} (Resolución ${r.resolution_number})`
+        : `Resolución ${r.resolution_number}`,
     }));
+  });
+
+  // ── Conmutador de Modo de Adquiriente ────────────────────────────
+  setAcquirerMode(mode: 'system' | 'external'): void {
+    this.acquirerMode.set(mode);
+    if (mode === 'external') {
+      this.invoiceForm.patchValue({ customer_tenant: null });
+    }
   }
 
-  onResolutionChange(value: string): void {
-    const id = value ? Number(value) : null;
-    this.resolutionId.set(id && !Number.isNaN(id) ? id : null);
-  }
-
+  // ── Adquiriente del Sistema ──────────────────────────────────────
   onTenantPicked(tenant: PlatformAcquirer | null): void {
-    this.acquirer.set(tenant);
+    this.invoiceForm.patchValue({ customer_tenant: tenant });
   }
 
-  // ── Lines ────────────────────────────────────────────────────────────
+  // ── Modal de Líneas ──────────────────────────────────────────────
+  updateNewLine(patch: Partial<NewLineDraft>): void {
+    this.newLine.update((line) => ({ ...line, ...patch }));
+  }
 
   openLineModal(): void {
-    this.newLine.set(this.makeEmptyLine());
+    this.newLine.set({
+      description: '',
+      quantity: 1,
+      unit_price: 0,
+      discount_amount: 0,
+      tax_rate: 0.19,
+      is_inclusive: false,
+      unit_code: 'EA',
+    });
     this.showLineModal.set(true);
   }
-  cancelLine(): void {
-    this.showLineModal.set(false);
-  }
+
   confirmLine(): void {
     const line = this.newLine();
     if (!line.description || line.quantity <= 0 || line.unit_price < 0) {
-      this.toast.error('La línea requiere descripción, cantidad > 0 y precio >= 0.');
+      this.toast.error('Revisa los datos de la línea: descripción, cantidad > 0 y precio ≥ 0.');
       return;
     }
-    this.lines.update((arr) => [...arr, line]);
+
+    const taxesArray: any[] = [];
+    if (line.tax_rate > 0) {
+      taxesArray.push({
+        tax_type: 'IVA',
+        rate: line.tax_rate,
+        is_inclusive: line.is_inclusive,
+      });
+    }
+
+    const group = this.fb.group({
+      row_uid: [`row-${Date.now()}`],
+      description: [line.description, Validators.required],
+      quantity: [line.quantity, [Validators.required, Validators.min(0.0001)]],
+      unit_price: [line.unit_price, [Validators.required, Validators.min(0)]],
+      unit_code: [line.unit_code || 'EA'],
+      discount_amount: [line.discount_amount || 0],
+      taxes: [taxesArray],
+    });
+
+    this.itemsArray.push(group);
     this.showLineModal.set(false);
   }
-  removeLine(i: number): void {
-    this.lines.update((arr) => arr.filter((_, idx) => idx !== i));
+
+  removeLine(index: number): void {
+    this.itemsArray.removeAt(index);
   }
 
-  addLineTax(): void {
-    this.newLine.update((l) => ({
-      ...l,
-      taxes: [...l.taxes, { tax_type: 'IVA', rate: 0.19 }],
-    }));
-  }
-  removeLineTax(i: number): void {
-    this.newLine.update((l) => ({
-      ...l,
-      taxes: l.taxes.filter((_, idx) => idx !== i),
-    }));
-  }
-  updateLineTax(i: number, key: 'tax_type' | 'rate' | 'is_inclusive', value: any): void {
-    this.newLine.update((l) => ({
-      ...l,
-      taxes: l.taxes.map((t, idx) =>
-        idx === i
-          ? key === 'tax_type'
-            ? { ...t, tax_type: value }
-            : key === 'rate'
-            ? { ...t, rate: Number(value) }
-            : { ...t, is_inclusive: Boolean(value) }
-          : t,
-      ),
-    }));
+  // ── Perfiles ────────────────────────────────────────────────────
+  readonly profilesForOperationType = computed(() => {
+    const op = this.operationType();
+    return this.store.profiles().filter((p) => p.operation_type === op);
+  });
+
+  /**
+   * El listado de perfiles (`GET /profiles`) responde con `PROFILE_SELECT`, que
+   * NO incluye `current_config`: ese snapshot vive en la version vigente y solo
+   * lo resuelve el detalle (`GET /profiles/:id` -> `PlatformInvoiceProfileDetail`).
+   * Por eso el perfil se aplica en dos tiempos: `profile_id` de inmediato desde
+   * la fila del listado, y el resto del snapshot cuando llega el detalle.
+   */
+  applyProfile(profileId: number): void {
+    const p = this.store.profiles().find((x) => x.id === profileId);
+    if (!p) return;
+
+    this.invoiceForm.patchValue({ profile_id: p.id });
+
+    this.fiscal
+      .getProfile(p.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (detail) => {
+          const cfg = detail.current_config;
+          if (cfg) {
+            const patch: Record<string, unknown> = {};
+            if (cfg['resolution_id']) patch['resolution_id'] = cfg['resolution_id'];
+            if (cfg['payment_form']) patch['payment_form'] = cfg['payment_form'];
+            if (cfg['payment_means_code'])
+              patch['payment_means_code'] = cfg['payment_means_code'];
+            if (cfg['notes']) patch['notes'] = cfg['notes'];
+            if (Object.keys(patch).length > 0) this.invoiceForm.patchValue(patch);
+          }
+          this.toast.success(`Perfil «${p.name}» aplicado correctamente.`);
+        },
+        error: () => {
+          this.toast.error(
+            `No se pudo cargar la configuracion del perfil «${p.name}».`,
+            'Error',
+          );
+        },
+      });
   }
 
-  // ── Withholdings ──────────────────────────────────────────────────────
-
-  addWithholding(): void {
-    this.withholdings.update((arr) => [
-      ...arr,
-      { id: this.uuid(), role: 'practiced', concept_id: 0, base_amount: 0, rate: 0 },
-    ]);
-  }
-  removeWithholding(i: number): void {
-    this.withholdings.update((arr) => arr.filter((_, idx) => idx !== i));
-  }
-  updateWithholding(i: number, key: keyof FormWithholding, value: any): void {
-    this.withholdings.update((arr) =>
-      arr.map((wh, idx) => (idx === i ? { ...wh, [key]: value } : wh)),
-    );
+  clearProfile(): void {
+    this.invoiceForm.patchValue({ profile_id: null });
   }
 
-  // ── Submit ────────────────────────────────────────────────────────────
+  // ── Previsualizar & Emitir ──────────────────────────────────────
+  readonly printPreviewOpen = signal(false);
+  readonly printPreviewLoading = signal(false);
+  readonly printPreviewResult = signal<any | null>(null);
+  readonly printPreviewError = signal('');
+  readonly printPreviewSrcdoc = computed(() => this.printPreviewResult()?.html || '');
+
+  openPrintPreview(): void {
+    const profileId = this.invoiceForm.value.profile_id;
+    if (!profileId) {
+      this.printPreviewError.set(
+        'Selecciona un perfil de facturación para generar la previsualización técnica.',
+      );
+      this.printPreviewOpen.set(true);
+      return;
+    }
+
+    const payload = this.buildPayload();
+    if (!payload) return;
+
+    this.printPreviewLoading.set(true);
+    this.printPreviewOpen.set(true);
+    this.printPreviewError.set('');
+
+    this.store.previewProfile(profileId, payload).subscribe({
+      next: (res) => {
+        this.printPreviewResult.set(res);
+        this.printPreviewLoading.set(false);
+      },
+      error: () => {
+        this.printPreviewLoading.set(false);
+        this.printPreviewError.set('No se pudo generar la previsualización del XML.');
+      },
+    });
+  }
+
+  closePrintPreview(open: boolean): void {
+    this.printPreviewOpen.set(open);
+    if (!open) {
+      this.printPreviewResult.set(null);
+    }
+  }
+
+  buildPayload(): any | null {
+    const val = this.rawValue();
+
+    // Validar líneas
+    if (!val['items'] || val['items'].length === 0) {
+      this.toast.error('Debes agregar al menos una línea a la factura.');
+      return null;
+    }
+
+    let customerPayload: any;
+    if (this.acquirerMode() === 'external') {
+      if (!val['external_legal_name']?.trim() || !val['external_tax_id']?.trim()) {
+        this.toast.error('Completa el nombre o razón social y el NIT/documento del cliente externo.');
+        return null;
+      }
+      customerPayload = {
+        kind: 'external',
+        legal_name: val['external_legal_name'].trim(),
+        tax_id: val['external_tax_id'].trim(),
+        tax_id_dv: val['external_tax_id_dv'] || undefined,
+        person_type: val['external_person_type'] || '2',
+        tax_regime_code: val['external_tax_regime_code'] || '49',
+        fiscal_responsibilities: ['R-99-PN'],
+        email: val['external_email']?.trim() || undefined,
+        phone: val['external_phone']?.trim() || undefined,
+        address: {
+          line: val['external_address_line']?.trim() || undefined,
+          city: val['external_city']?.trim() || undefined,
+          department_code: val['external_department_code']?.trim() || undefined,
+        },
+      };
+    } else {
+      const tenant = val['customer_tenant'] as PlatformAcquirer;
+      if (!tenant) {
+        this.toast.error('Selecciona una tienda, usuario u organización como destinatario.');
+        return null;
+      }
+      customerPayload = {
+        kind: tenant.kind,
+        tenant_id: tenant.tenant_id,
+      };
+    }
+
+    const dto: any = {
+      profile_id: val['profile_id'] || undefined,
+      customer: customerPayload,
+      items: val['items'].map((i: any) => ({
+        description: i.description,
+        quantity: +i.quantity,
+        unit_price: +i.unit_price,
+        unit_code: i.unit_code || 'EA',
+        discount_amount: +i.discount_amount || 0,
+        taxes: i.taxes || [],
+      })),
+      operation_type: val['operation_type'] || '10',
+      payment_form: val['payment_form'] || '1',
+      payment_means_code: val['payment_means_code'] || '10',
+      due_date: val['payment_form'] === '2' ? val['due_date'] : undefined,
+      notes: val['notes']?.trim() || undefined,
+    };
+
+    if (val['save_as_profile_enabled'] && val['save_as_profile_name']?.trim()) {
+      dto.save_as_profile = {
+        name: val['save_as_profile_name'].trim(),
+        is_default: false,
+      };
+    }
+
+    return dto;
+  }
 
   async submit(): Promise<void> {
-    if (!this.canSubmit()) {
-      this.toast.error('Formulario incompleto. Verifica destinatario, resolución y líneas.');
-      return;
-    }
-    const tenant = this.acquirer();
-    if (!tenant) {
-      this.toast.error('Selecciona un destinatario.');
-      return;
-    }
+    const dto = this.buildPayload();
+    if (!dto) return;
 
     this.submitting.set(true);
-    this.errorMessage.set(null);
+    this.errorMessage.set('');
 
-    const customer = {
-      kind: tenant.kind,
-      tenant_id: tenant.tenant_id,
-      // overrides inline si el operador los lleno en el form
-      legal_name_override: tenant.legal_name,
-      person_type_override: tenant.person_type ?? '2',
-      tax_regime_code_override: tenant.tax_regime_code,
-    } as any;
-
-    const body =
-      this.documentType() === 'sales_invoice'
-        ? {
-            customer,
-            items: this.lines().map((l) => ({
-              description: l.description,
-              quantity: l.quantity,
-              unit_price: l.unit_price,
-              discount_amount: l.discount_amount || undefined,
-              taxes: l.taxes.length > 0 ? l.taxes : undefined,
-              unit_code: l.unit_code,
-              account_code: l.account_code,
-              aiu_component: l.aiu_component,
-              is_inclusive: l.is_inclusive,
-            })),
-            operation_type: this.operationType(),
-            aiu_contract_object:
-              this.operationType() === '09' ? this.aiuContractObject() : undefined,
-            payment_form: this.paymentForm(),
-            due_date: this.dueDate() || undefined,
-            currency: {
-              iso_4217: this.currencyIso(),
-              exchange_rate: this.exchangeRate() || undefined,
-              exchange_rate_date: this.exchangeRateDate() || undefined,
-            },
-            withholdings:
-              this.withholdings().length > 0
-                ? this.withholdings().map((wh) => ({
-                    role: wh.role,
-                    concept_id: wh.concept_id,
-                    base_amount: wh.base_amount,
-                    rate: wh.rate,
-                    amount: wh.amount,
-                  }))
-                : undefined,
-            global_discount_amount: this.globalDiscountAmount() || undefined,
-            resolution_id: this.resolutionId(),
-            profile_id: this.profileSelectedId() ?? undefined,
-          }
-        : {
-            supplier: customer,
-            items: this.lines().map((l) => ({
-              description: l.description,
-              quantity: l.quantity,
-              unit_price: l.unit_price,
-              discount_amount: l.discount_amount || undefined,
-              taxes: l.taxes.length > 0 ? l.taxes : undefined,
-              unit_code: l.unit_code,
-            })),
-            operation_type: this.operationType(),
-            payment_means_code: '10',
-            due_date: this.dueDate() || undefined,
-            currency: {
-              iso_4217: this.currencyIso(),
-              exchange_rate: this.exchangeRate() || undefined,
-              exchange_rate_date: this.exchangeRateDate() || undefined,
-            },
-            global_discount_amount: this.globalDiscountAmount() || undefined,
-            resolution_id: this.resolutionId(),
-            profile_id: this.profileSelectedId() ?? undefined,
-          };
-
-    const url =
-      this.documentType() === 'sales_invoice'
-        ? `${this.base}/sales-invoices`
-        : `${this.base}/support-documents`;
+    const url = `${environment.apiUrl}/superadmin/subscriptions/fiscal/sales-invoices`;
 
     try {
       const res = await firstValueFrom(
-        this.http.post<{ success: boolean; data: { invoice_id: number; fiscal_number: string } }>(
-          url,
-          body,
-        ),
+        this.http.post<{
+          success: boolean;
+          data: { invoice_id: number; fiscal_number: string };
+        }>(url, dto),
       );
       if (res.success && res.data?.invoice_id) {
         this.toast.success(
-          `Factura ${res.data.fiscal_number} creada. Redirigiendo al detalle.`,
+          `Factura ${res.data.fiscal_number || ''} emitida exitosamente. Redirigiendo al detalle...`,
         );
         this.router.navigate([
-          '/super-admin/fiscal/invoicing/platform-invoices',
+          '/super-admin/fiscal/invoicing/invoices',
           res.data.invoice_id,
         ]);
       } else {
-        this.errorMessage.set('La API no devolvió el resultado esperado.');
+        this.errorMessage.set('La API no devolvió la confirmación esperada.');
       }
-    } catch (error) {
+    } catch (error: any) {
       const msg =
         (error instanceof HttpErrorResponse && (error.error?.message ?? error.message)) ||
         (error instanceof Error ? error.message : null) ||
-        'Error desconocido al crear la factura.';
+        'Error desconocido al emitir la factura.';
       this.errorMessage.set(msg);
       this.toast.error(msg);
     } finally {
@@ -1073,22 +641,7 @@ export class PlatformInvoiceCreateComponent {
     }
   }
 
-  // ── Utils ────────────────────────────────────────────────────────────
-
-  private makeEmptyLine(): FormLine {
-    return {
-      id: this.uuid(),
-      description: '',
-      quantity: 1,
-      unit_price: 0,
-      discount_amount: 0,
-      taxes: [],
-      unit_code: 'EA',
-      is_inclusive: false,
-    };
-  }
-
-  private uuid(): string {
-    return `l-${Math.random().toString(36).slice(2, 10)}`;
+  onCancel(): void {
+    this.router.navigate(['/super-admin/fiscal/invoicing/invoices']);
   }
 }

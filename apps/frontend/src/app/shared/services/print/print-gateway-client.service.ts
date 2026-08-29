@@ -82,11 +82,16 @@ export class PrintGatewayClientService {
     formatType: PrintFormatType,
     overrides?: Record<string, any>,
     sampleDocumentId?: number,
+    renderMode?: 'dummy' | 'tokenized' | 'real',
   ): Observable<PrintPreviewResponse> {
     return this.http
       .post<{ success: boolean; data: PrintPreviewResponse }>(
         `${this.baseUrl}/${formatType}/preview`,
-        { overrides, sample_document_id: sampleDocumentId },
+        {
+          overrides,
+          sample_document_id: sampleDocumentId,
+          render_mode: renderMode,
+        },
       )
       .pipe(map((res) => res.data));
   }

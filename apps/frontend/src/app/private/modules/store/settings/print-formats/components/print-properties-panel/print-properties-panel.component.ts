@@ -14,6 +14,7 @@ import { PrintSectionPanelComponent } from './section-panel.component';
 import { PrintColumnPanelComponent } from './column-panel.component';
 import { PrintLogoPanelComponent } from './logo-panel.component';
 import { PrintCompanyPanelComponent } from './company-panel.component';
+import { PrintFieldPanelComponent } from './field-panel.component';
 import { PrintStylesPanelComponent } from './styles-panel.component';
 import { PrintCustomTemplatePanelComponent } from './custom-template-panel.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
@@ -42,6 +43,7 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
     PrintColumnPanelComponent,
     PrintLogoPanelComponent,
     PrintCompanyPanelComponent,
+    PrintFieldPanelComponent,
     PrintStylesPanelComponent,
     PrintCustomTemplatePanelComponent,
   ],
@@ -53,9 +55,19 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
             <app-icon [name]="regionIcon(r.kind)" [size]="14"></app-icon>
             <span class="text-sm font-semibold text-text-primary">{{ regionTitle(r) }}</span>
           </div>
-          <span class="text-[10px] font-mono text-text-tertiary uppercase tracking-wider">
-            {{ r.kind }}
-          </span>
+          <div class="flex items-center gap-2">
+            <span class="text-[10px] font-mono text-text-tertiary uppercase tracking-wider">
+              {{ r.kind }}
+            </span>
+            <button
+              type="button"
+              (click)="unselectRequested.emit()"
+              class="p-1 rounded hover:bg-surface-hover text-text-tertiary hover:text-text-primary transition cursor-pointer"
+              title="Deseleccionar y ver propiedades globales"
+            >
+              <app-icon name="x" [size]="13"></app-icon>
+            </button>
+          </div>
         } @else {
           <div class="flex items-center gap-2">
             <app-icon name="file-text" [size]="14"></app-icon>
@@ -94,6 +106,13 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
               [definition]="definition()"
               (definitionChanged)="definitionChanged.emit($event)"
             ></app-print-company-panel>
+          }
+          @case ('field') {
+            <app-print-field-panel
+              [definition]="definition()"
+              [fieldIdentifier]="selectedRegion()!.anchorId"
+              (definitionChanged)="definitionChanged.emit($event)"
+            ></app-print-field-panel>
           }
           @default {
             <app-print-paper-panel
@@ -157,6 +176,9 @@ export class PrintPropertiesPanelComponent {
 
   /** Emitted with the new definition when any subpanel mutates it. */
   readonly definitionChanged = output<PrintFormatDefinition>();
+
+  /** Emitted when the user dismisses the active element selection. */
+  readonly unselectRequested = output<void>();
 
   /** Pre-computed title for the header. */
   readonly headerTitle = computed<string>(() => {

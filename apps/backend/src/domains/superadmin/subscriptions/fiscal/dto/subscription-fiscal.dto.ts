@@ -463,20 +463,99 @@ export class PlatformInvoiceTenantRefOrganization {
   organization_id!: number;
 }
 
+export class PlatformInvoiceExternalCustomerAddressDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  line?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  city?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  city_code?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  department_code?: string;
+}
+
 /**
- * Discriminated union. `class-validator` valida cada rama por separado si
- * `IsIn(['store'])` o `IsIn(['organization'])` discrimina correctamente; el
- * backend re-checka con ValidateNested-or-custom en el servicio.
+ * Discriminated union extendida para soportar:
+ *   - 'store' | 'organization' | 'user' (referenciados por tenant_id)
+ *   - 'external' (cliente manual con todos los datos fiscales legales)
  */
 export class PlatformInvoiceTenantRefDto {
-  // Campo plano que decide la rama. La union en runtime la construye el frontend.
-  @IsIn(['store', 'organization'])
-  kind!: 'store' | 'organization';
+  @IsIn(['store', 'organization', 'user', 'external'])
+  kind!: 'store' | 'organization' | 'user' | 'external';
 
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  tenant_id!: number;
+  tenant_id?: number;
+
+  @IsOptional()
+  @TrimString()
+  @IsString()
+  @MaxLength(255)
+  legal_name?: string;
+
+  @IsOptional()
+  @TrimTaxId()
+  @IsString()
+  tax_id?: string;
+
+  @IsOptional()
+  @TrimString()
+  @IsString()
+  @MaxLength(1)
+  tax_id_dv?: string;
+
+  @IsOptional()
+  @IsIn(['1', '2'])
+  person_type?: '1' | '2';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  tax_regime_code?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  fiscal_responsibilities?: string[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  phone?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PlatformInvoiceExternalCustomerAddressDto)
+  address?: PlatformInvoiceExternalCustomerAddressDto;
+}
+
+export class SaveAsProfileDto {
+  @TrimString()
+  @IsString()
+  @MaxLength(100)
+  name!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  is_default?: boolean;
 }
 
 // ── Item (line) con taxes + discount + AIU + is_inclusive + unit_code ────────
@@ -715,6 +794,11 @@ export class CreatePlatformSalesInvoiceDto {
   @IsInt({ message: 'profile_id debe ser un entero positivo.' })
   @Min(1, { message: 'profile_id debe ser un entero positivo.' })
   profile_id?: number;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SaveAsProfileDto)
+  save_as_profile?: SaveAsProfileDto;
 }
 
 // ── V1: CreatePlatformSupportDocumentDto ────────────────────────────────────
