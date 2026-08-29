@@ -45,15 +45,18 @@ const DEFAULTS: PromotionsSettings = {
       <div class="space-y-4">
         <div>
           <label class="block text-sm font-semibold text-text-primary mb-1">
-            Estrategia de Evaluación de Promociones
+            Modo de Evaluación de Promociones
           </label>
+          <p class="text-xs text-text-secondary mb-1">
+            Elegí <strong>un solo modo</strong> — seleccionar otro modo reemplaza el actual.
+          </p>
           <p class="text-xs text-text-secondary mb-3">
-            Determina cómo interactúan múltiples promociones cuando un carrito califica para varias reglas.
+            Define cómo el motor resuelve el caso en que un carrito califica para varias promociones simultáneamente.
           </p>
           <app-selector
             [options]="strategyOptions"
             formControlName="evaluation_strategy"
-            placeholder="Selecciona la estrategia"
+            placeholder="Selecciona el modo de evaluación"
           />
         </div>
 
@@ -121,11 +124,11 @@ export class PromotionsSettingsForm {
   readonly strategyOptions: SelectorOption[] = [
     {
       value: 'winner_takes_all',
-      label: 'Winner-Takes-All (Una sola promoción por orden)',
+      label: 'Mejor Promoción Única — Winner-Takes-All',
     },
     {
       value: 'stacking_groups',
-      label: 'Stacking Groups (Acumulación inteligente por categorías y orden)',
+      label: 'Acumulación por Categorías — Stacking Groups',
     },
   ];
 

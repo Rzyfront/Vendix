@@ -521,6 +521,7 @@ export class GeneralSettingsStore {
         'membership',
         'panel_ui',
         'reservations',
+        'promotions',
       ];
       const currentSettings = this.settings();
       const sanitizedSettings = knownSections.reduce((acc, key) => {
