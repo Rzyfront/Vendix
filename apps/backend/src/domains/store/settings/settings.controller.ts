@@ -70,26 +70,30 @@ export class SettingsController {
   })
   async getPublicFlags() {
     // TODO multi-store: read from x-store-id header or ?store_id query
+    // Find the first store that EXPLICITLY has the toggle set in
+    // promotions.enable_high_conversion_ui (not just any active store,
+    // because the toggle might be unset in some store configs).
     const client = (this.storePrisma as any).baseClient ?? (this.storePrisma as any).prisma;
-    const store = await client.stores.findFirst({
-      where: { is_active: true },
-      orderBy: { id: 'asc' },
+    const rows = await client.store_settings.findMany({
+      where: { store: { is_active: true } },
+      select: { settings: true, store_id: true },
+      orderBy: { store_id: 'asc' },
     });
-    if (!store) {
-      return this.responseService.success({
-        enable_high_conversion_ui: true,
-      });
+    // Find first row that explicitly has the toggle set (not undefined).
+    let flag: boolean | undefined;
+    for (const row of rows) {
+      const promo = (row.settings as any)?.promotions;
+      if (promo && typeof promo.enable_high_conversion_ui === 'boolean') {
+        flag = promo.enable_high_conversion_ui;
+        break;
+      }
     }
-    // Read the raw settings row to avoid the store-context requirement
-    // in SettingsService.getSettings(). This endpoint is public.
-    const row = await client.store_settings.findFirst({
-      where: { store_id: store.id },
-      select: { settings: true },
-    });
-    const promotions = (row?.settings as any)?.promotions ?? {};
+    // Fail-safe: si ningún store tiene el toggle explícitamente seteado,
+    // retornamos `false` (ocultar badges) en vez de `true` (mostrar).
+    // El admin puede togglear en cualquier momento y el siguiente fetch
+    // del storefront traerá el valor real.
     return this.responseService.success({
-      enable_high_conversion_ui:
-        promotions.enable_high_conversion_ui !== false,
+      enable_high_conversion_ui: flag === true,
     });
   }
 
