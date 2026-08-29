@@ -58,6 +58,7 @@ import { TablesService } from '../../services/tables.service';
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="close()"
       [size]="'sm'"
+      [dialog]="true"
       [title]="title()"
       [subtitle]="subtitle()"
     >

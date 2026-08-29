@@ -8,6 +8,7 @@
   <app-modal
     [isOpen]="isOpen()"
     size="sm"
+    [dialog]="true"
     [title]="modalTitle()"
     [subtitle]="tableName() ? tableName() : ''"
     (isOpenChange)="onIsOpenChange($event)"
@@ -75,11 +76,12 @@
     </div>
 
     <div slot="footer" class="payment-footer">
-      <app-button variant="ghost" (clicked)="onModalClosed()">
+      <app-button variant="ghost" size="lg" (clicked)="onModalClosed()">
         Cancelar
       </app-button>
       <app-button
         variant="primary"
+        size="lg"
         [disabled]="!canProcess()"
         [loading]="isProcessing()"
         [showTextWhileLoading]="true"

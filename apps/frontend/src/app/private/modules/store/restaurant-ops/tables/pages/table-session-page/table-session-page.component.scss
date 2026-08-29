@@ -601,3 +601,40 @@
     max-width: 22rem;
   }
 }
+
+/* ── C.1 (QUI-735) — sticky-cta móvil ─────────────────────────────────────
+   Barra de acción persistente al final del contenido (patrón `.checkout-footer`
+   del POS). Solo en móvil; en desktop las acciones viven en el sticky-header. */
+.session-cta {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .session-cta {
+    position: sticky;
+    bottom: 0;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    width: 100%;
+    margin-top: 1.25rem;
+    padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom));
+    background: var(--color-surface, #fff);
+    border-top: 1px solid var(--color-border, #e5e7eb);
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.06);
+
+    .session-cta__secondary {
+      flex-shrink: 0;
+    }
+
+    .session-cta__primary {
+      flex: 1 1 auto;
+    }
+  }
+
+  /* Reserva espacio inferior para que la barra sticky no tape el último card. */
+  .session-body {
+    padding-bottom: 1.5rem;
+  }
+}

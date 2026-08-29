@@ -1,3 +1,19 @@
+:host {
+  display: block;
+}
+
+/* C.1 (QUI-735) — mobile-first del piso de mesas.
+   La rejilla de stats (`repeat(4,1fr)` → scroll horizontal iOS <640px) y las
+   celdas del mapa las gobiernan la base global `.stats-container` y
+   `app-table-floor-map` (fuera de este scope). Aquí solo se afina el estado
+   de carga y el respiro del contenido en pantallas estrechas; el resto del
+   layout es Tailwind (`p-2 md:p-4`, sticky de stats ya existente). */
+@media (max-width: 640px) {
+  .loading {
+    padding: 3rem 0.75rem;
+  }
+}
+
 .loading {
   display: flex;
   flex-direction: column;

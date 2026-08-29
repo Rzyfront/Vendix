@@ -97,21 +97,21 @@
           <div class="qty-controls">
             <app-button
               variant="outline"
-              size="sm"
+              size="lg"
               [disabled]="quantityOf(row.id) <= 0"
               [attr.aria-label]="'Disminuir'"
               (clicked)="decrement(row)"
             >
-              <app-icon slot="icon" name="minus" [size]="14"></app-icon>
+              <app-icon slot="icon" name="minus" [size]="16"></app-icon>
             </app-button>
             <span class="qty">{{ quantityOf(row.id) }}</span>
             <app-button
               variant="outline"
-              size="sm"
+              size="lg"
               [attr.aria-label]="'Aumentar'"
               (clicked)="increment(row)"
             >
-              <app-icon slot="icon" name="plus" [size]="14"></app-icon>
+              <app-icon slot="icon" name="plus" [size]="16"></app-icon>
             </app-button>
           </div>
 
@@ -174,6 +174,7 @@
       <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
       <app-button
         variant="primary"
+        size="lg"
         [loading]="loading()"
         [disabled]="!hasItems() || hasMissingVariant()"
         (clicked)="onSubmit()"

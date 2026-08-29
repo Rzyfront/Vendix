@@ -129,7 +129,7 @@
             <div class="summary-actions">
               <app-button
                 variant="outline"
-                size="sm"
+                size="lg"
                 [disabled]="items().length < 2"
                 (clicked)="openSplit()"
               >
@@ -139,7 +139,7 @@
 
               <app-button
                 variant="outline"
-                size="sm"
+                size="lg"
                 (clicked)="openAssignCustomer()"
               >
                 <app-icon slot="icon" name="user-plus" [size]="14"></app-icon>
@@ -218,7 +218,7 @@
                       <app-button
                         class="pending-payment-action"
                         variant="primary"
-                        size="sm"
+                        size="lg"
                         (clicked)="openConfirmPayment(payment)"
                       >
                         <app-icon slot="icon" name="check-circle" [size]="14"></app-icon>
@@ -243,7 +243,7 @@
             <h3 class="items-card-title">Items ({{ items().length }})</h3>
             <app-button
               variant="primary"
-              size="sm"
+              size="lg"
               [disabled]="isClosed()"
               (clicked)="openAddItems()"
             >
@@ -262,7 +262,7 @@
                 Agrega items para empezar a tomar el pedido de esta mesa.
               </p>
               @if (!isClosed()) {
-                <app-button variant="primary" (clicked)="openAddItems()">
+                <app-button variant="primary" size="lg" (clicked)="openAddItems()">
                   <app-icon slot="icon" name="plus" [size]="16"></app-icon>
                   Agregar el primer plato
                 </app-button>
@@ -304,7 +304,7 @@
                     </span>
                     <app-button
                       variant="secondary"
-                      size="sm"
+                      size="lg"
                       [loading]="isFiring() && firingItemId() === null"
                       [disabled]="selectedCount() === 0"
                       (clicked)="fireSelected()"
@@ -314,7 +314,7 @@
                     </app-button>
                     <app-button
                       variant="ghost"
-                      size="sm"
+                      size="lg"
                       (clicked)="exitSelectionMode()"
                     >
                       Cancelar
@@ -454,7 +454,7 @@
                         @if (!isItemFired(item)) {
                           <app-button
                             variant="secondary"
-                            size="sm"
+                            size="lg"
                             [loading]="isFiring() && firingItemId() === item.id"
                             (clicked)="fireItem(item)"
                           >
@@ -468,7 +468,7 @@
                         } @else if (canDeliver(item)) {
                           <app-button
                             variant="success"
-                            size="sm"
+                            size="lg"
                             [loading]="
                               deliveringItemId() === item.id ||
                               (deliveringTicketId() != null &&
@@ -532,7 +532,7 @@
                         } @else {
                           <app-button
                             variant="success"
-                            size="sm"
+                            size="lg"
                             [loading]="deliveringItemId() === item.id"
                             [attr.title]="deliverHint(item)"
                             (clicked)="markDelivered(item)"
@@ -558,7 +558,7 @@
                         <app-button
                           class="item-remove-btn"
                           variant="ghost"
-                          size="sm"
+                          size="lg"
                           [loading]="removingItemId() === item.id"
                           [attr.title]="'Eliminar de la cuenta'"
                           [attr.aria-label]="'Eliminar ' + item.product_name"
@@ -581,6 +581,39 @@
       </div>
     }
   </div>
+
+  <!--
+    C.1 (QUI-735) — sticky-cta móvil. Barra de acción persistente al final
+    del contenido (patrón `.checkout-footer` del POS). Solo se muestra en
+    móvil; en desktop las acciones siguen en el sticky-header.
+  -->
+  @if (session() && !isClosed()) {
+    <div class="session-cta">
+      <app-button
+        class="session-cta__secondary"
+        variant="outline-danger"
+        size="lg"
+        [loading]="isClosing()"
+        (clicked)="onHeaderAction('close')"
+      >
+        <app-icon slot="icon" name="lock" [size]="16"></app-icon>
+        Cerrar mesa
+      </app-button>
+      @if (checkoutEnabled()) {
+        <app-button
+          class="session-cta__primary"
+          variant="primary"
+          size="lg"
+          [fullWidth]="true"
+          [disabled]="items().length === 0"
+          (clicked)="onHeaderAction('pay')"
+        >
+          <app-icon slot="icon" name="credit-card" [size]="16"></app-icon>
+          Cobrar
+        </app-button>
+      }
+    </div>
+  }
 
   <!-- ── Modals ─────────────────────────────────────────────────────── -->
   <app-add-items-modal

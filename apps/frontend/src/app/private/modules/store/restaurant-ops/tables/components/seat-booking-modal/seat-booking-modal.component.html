@@ -3,6 +3,7 @@
   (isOpenChange)="isOpenChange.emit($event)"
   (cancel)="close()"
   [size]="'md'"
+  [dialog]="true"
   [title]="title()"
   subtitle="Elige la reserva que quieres sentar en esta mesa"
 >
@@ -38,7 +39,7 @@
           </div>
           <app-button
             variant="primary"
-            size="sm"
+            size="lg"
             [loading]="internalLoading()"
             (clicked)="seat(b)"
           >
