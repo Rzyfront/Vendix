@@ -150,6 +150,7 @@ export class MenuFilterService {
     'Todos los Clientes': 'customers_all',
     Reseñas: ['analytics_reviews', 'customers_reviews'],
     'Recolección de Datos': 'customers_data_collection',
+    CRM: 'customers_crm',
 
     // STORE_ADMIN - Marketing (padre + submódulos)
     Marketing: 'marketing',

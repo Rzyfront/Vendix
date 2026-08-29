@@ -4290,6 +4290,21 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/support/pqr/:id/comments',
       method: 'POST',
     },
+
+    // CRM Landing (QUI-719) — módulo hijo de Clientes
+    {
+      name: 'store:crm:read',
+      description: 'Ver el módulo CRM y su landing (draft, publicado, estado)',
+      path: '/api/store/crm/landing',
+      method: 'GET',
+    },
+    {
+      name: 'store:crm:manage',
+      description:
+        'Administrar el módulo CRM: activar/desactivar, guardar draft y publicar la landing',
+      path: '/api/store/crm/landing',
+      method: 'PUT',
+    },
   ];
 
   // Create-only seed: never delete existing permission rows.
