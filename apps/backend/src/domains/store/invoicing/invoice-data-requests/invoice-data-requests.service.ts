@@ -652,10 +652,13 @@ export class InvoiceDataRequestsService {
       }
 
       // 2. Link customer to order (update order with customer_id)
+      // QUI-727 (A.3 / ADR-9): al fijar customer_id garantizamos customer_alias
+      // NULL — el CHECK orders_customer_xor_alias rechaza ambos poblados.
       await this.prisma.orders.update({
         where: { id: order.id },
         data: {
           customer_id: customer.id,
+          customer_alias: null,
           updated_at: new Date(),
         },
       });

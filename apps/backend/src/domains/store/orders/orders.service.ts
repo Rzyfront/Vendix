@@ -2418,7 +2418,18 @@ export class OrdersService {
       await tx.orders.update({
         where: { id: orderId },
         data: {
-          customer_id: dto.customer_id,
+          // ADR-9 (CP-POLLO-ARABE-727 A.3): alias↔cliente mutuamente excluyentes
+          // (CHECK orders_customer_xor_alias). UpdateOrderEditorDto todavía no
+          // expone customer_alias; al fijar un customer_id (o al limpiarlo
+          // explícitamente) garantizamos que el alias quede NULL. El CHECK
+          // respondería 500 si ambos se poblaran en la misma fila — este guard
+          // es la 1ª defensa. Preserva el comportamiento previo: `undefined`
+          // (no enviado) no toca customer_id; solo null/número lo modifican.
+          ...(dto.customer_id != null
+            ? { customer_id: dto.customer_id, customer_alias: null }
+            : dto.customer_id === null
+              ? { customer_id: null, customer_alias: null }
+              : {}),
           notes: dto.notes ?? existingOrder.notes,
           internal_notes: dto.internal_notes ?? existingOrder.internal_notes,
           delivery_type: dto.delivery_type ?? existingOrder.delivery_type,

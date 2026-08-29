@@ -312,16 +312,36 @@ export class TableSessionsService {
       },
     });
 
-    const newSession = await tx.table_sessions.create({
-      data: {
-        store_id: args.storeId,
-        table_id: args.tableId,
-        order_id: order.id,
-        opened_by: args.openedBy,
-        guest_count: args.guestCount,
-        updated_at: new Date(),
-      },
-    });
+    let newSession;
+    try {
+      newSession = await tx.table_sessions.create({
+        data: {
+          store_id: args.storeId,
+          table_id: args.tableId,
+          order_id: order.id,
+          opened_by: args.openedBy,
+          guest_count: args.guestCount,
+          updated_at: new Date(),
+        },
+      });
+    } catch (error) {
+      // CP-POLLO-ARABE-727 A.3 — carrera check-then-act sin lock: dos
+      // peticiones concurrentes sobre una mesa `available` pasan el pre-check
+      // (`openSession` :354-363, `openTableSessionPublic` :439-442) y ambas
+      // llegan al create. El índice único parcial `table_sessions_one_open_per_table`
+      // las blinda, pero sin catch el P2002 saldría como 500 crudo. Este catch
+      // cubre TODOS los caminos (openSession, openTableSessionPublic y el
+      // desembolso POS vía PaymentsService.createOpenSessionInTx).
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.TABLE_SESSION_ALREADY_OPEN,
+        );
+      }
+      throw error;
+    }
 
     await tx.tables.update({
       where: { id: args.tableId },
@@ -1355,7 +1375,11 @@ export class TableSessionsService {
     // store order can never be mutated.
     await this.prisma.orders.updateMany({
       where: { id: session.order_id, store_id: storeId },
-      data: { customer_id: customerId, updated_at: new Date() },
+      // ADR-9 (CP-POLLO-ARABE-727 A.3): alias↔cliente mutuamente excluyentes
+      // (CHECK orders_customer_xor_alias). Al fijar customer_id (o al
+      // desasociarlo) garantizamos que customer_alias quede NULL; el CHECK
+      // respondería 500 si ambos se poblaran en la misma fila.
+      data: { customer_id: customerId, customer_alias: null, updated_at: new Date() },
     });
 
     this.logger.log(

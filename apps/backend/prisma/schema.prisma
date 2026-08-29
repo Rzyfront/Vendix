@@ -1438,6 +1438,11 @@ model orders {
   id                                              Int                       @id @default(autoincrement())
   store_id                                        Int
   customer_id                                     Int?
+  // ADR-9 (CP-POLLO-ARABE-727 A.3): alias de cliente en venta anónima/física.
+  // `customer_id` y `customer_alias` son mutuamente excluyentes — el CHECK
+  // `orders_customer_xor_alias` (en la migración add_customer_alias) garantiza
+  // que nunca ambos se pueblen en la misma fila.
+  customer_alias                                  String?                    @db.VarChar(100)
   order_number                                    String                    @db.VarChar(50)
   shipping_address_id                             Int?
   billing_address_id                              Int?
@@ -1611,10 +1616,17 @@ model payments {
   created_at              DateTime?                 @default(now()) @db.Timestamp(6)
   updated_at              DateTime?                 @default(now()) @db.Timestamp(6)
   store_payment_method_id Int?
+  // CP-POLLO-ARABE-727 A.3 / ADR-3: cuenta bancaria de destino del pago.
+  // Nullable; ON DELETE RESTRICT (no SET NULL) por trazabilidad contable —
+  // misma regla que la FK hermana store_payment_method_id. El borrado físico de
+  // una cuenta con pagos asociados no debe ocurrir (status inactive/closed
+  // para retiro lógico).
+  bank_account_id         Int?
   receipt_s3_key          String?                   @db.VarChar(512)
   receipt_uploaded_at     DateTime?                 @db.Timestamp(6)
   orders                  orders                    @relation(fields: [order_id], references: [id], onUpdate: NoAction)
   store_payment_method    store_payment_methods?    @relation(fields: [store_payment_method_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  bank_account            bank_accounts?            @relation(fields: [bank_account_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   refunds                 refunds[]
   cash_register_movements cash_register_movements[]
 
@@ -1712,6 +1724,7 @@ model product_variants {
   inventory_valuation_snapshots inventory_valuation_snapshots[]
   layaway_items                 layaway_items[]
   dispatch_note_items           dispatch_note_items[]
+  kitchen_ticket_items          kitchen_ticket_items[]
 
   // Multi-tarifa overrides (Phase 1: price tiers)
   price_tier_overrides product_price_tier_overrides[]
@@ -7785,6 +7798,8 @@ model bank_accounts {
   bank_transactions    bank_transactions[]
   bank_reconciliations bank_reconciliations[]
   refund_items         refund_items[]
+  // CP-POLLO-ARABE-727 A.3 — pagos asociados a esta cuenta (FK Restrict)
+  payments             payments[]
 
   @@unique([organization_id, account_number])
   @@index([organization_id, store_id])
@@ -10359,6 +10374,7 @@ model tables {
   sessions      table_sessions[]
   bookings      bookings[]
   table_waiters table_waiters[]
+  kitchen_tickets kitchen_tickets[]
 
   @@unique([store_id, name])
   @@index([store_id, status])
@@ -10413,6 +10429,9 @@ model kitchen_tickets {
   store stores                 @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   order orders                 @relation(fields: [order_id], references: [id], onUpdate: NoAction)
   kds   kds                    @relation(fields: [kds_id], references: [id], onUpdate: NoAction)
+  // CP-POLLO-ARABE-727 A.3 — la columna table_id YA EXISTE (creada en
+  // 20260613000000_restaurant_suite_foundation); aquí solo se le declara la FK.
+  table tables?                @relation(fields: [table_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   items kitchen_ticket_items[]
 
   /// El consecutivo diario es POR ESTACIÓN, no por tienda: cada tablero cuenta
@@ -10435,6 +10454,12 @@ model kitchen_ticket_items {
   kitchen_ticket_id Int
   order_item_id     Int
   product_id        Int
+  // CP-POLLO-ARABE-727 A.3: denormalización de la variante en el ticket de
+  // cocina. product_variant_id es nullable (SET NULL si la variante se borra);
+  // variant_label es un snapshot inmutable al fire (no varía si
+  // product_variants.name cambia después).
+  product_variant_id Int?
+  variant_label      String?                    @db.VarChar(120)
   quantity          Int
   status            kitchen_ticket_item_state_enum @default(pending)
   notes             String?                        @db.Text
@@ -10444,6 +10469,7 @@ model kitchen_ticket_items {
   kitchen_ticket kitchen_tickets                  @relation(fields: [kitchen_ticket_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   order_item     order_items                      @relation(fields: [order_item_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   product        products                         @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  product_variant product_variants?                @relation(fields: [product_variant_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   exclusions     kitchen_ticket_item_exclusions[]
 
   @@index([kitchen_ticket_id])

@@ -3015,7 +3015,12 @@ export class PaymentsService {
     const updated = await tx.orders.update({
       where: { id: session.order_id },
       data: {
-        ...(dto.customer_id != null ? { customer_id: dto.customer_id } : {}),
+        // ADR-9 (CP-POLLO-ARABE-727 A.3): alias↔cliente mutuamente excluyentes
+        // (CHECK orders_customer_xor_alias). El alias también aplica a mesas
+        // (FB-21 cerrado); al fijar customer_id garantizamos customer_alias NULL.
+        ...(dto.customer_id != null
+          ? { customer_id: dto.customer_id, customer_alias: null }
+          : {}),
         ...(newItems.length > 0
           ? { order_items: { create: newItems } }
           : {}),
