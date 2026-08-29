@@ -114,6 +114,14 @@ import { StatementImportModalComponent } from './statement-import-modal.componen
                 <span class="hidden sm:inline">Conciliaciones</span>
               </app-button>
               <app-button
+                variant="outline"
+                size="sm"
+                (clicked)="navigateToUnassignedPayments()"
+              >
+                <app-icon name="circle-alert" [size]="16" slot="icon" ></app-icon>
+                <span class="hidden sm:inline">Pagos sin asignar</span>
+              </app-button>
+              <app-button
                 variant="primary"
                 size="sm"
                 (clicked)="openCreateModal()"
@@ -429,6 +437,12 @@ export class BankAccountsComponent {
   navigateToReconciliations(): void {
     this.router.navigate([
       '/store/accounting/bank-reconciliation/reconciliations',
+    ]);
+  }
+
+  navigateToUnassignedPayments(): void {
+    this.router.navigate([
+      '/store/accounting/bank-reconciliation/unassigned-payments',
     ]);
   }
 

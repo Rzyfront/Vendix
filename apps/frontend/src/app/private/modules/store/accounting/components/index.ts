@@ -20,6 +20,7 @@ export * from './bank-reconciliation/bank-account-form-modal.component';
 export * from './bank-reconciliation/statement-import-modal.component';
 export * from './bank-reconciliation/reconciliation-list.component';
 export * from './bank-reconciliation/reconciliation-workspace.component';
+export * from './bank-reconciliation/unassigned-payments.component';
 export * from './consolidation/consolidation.component';
 export * from './consolidation/consolidation-sessions/consolidation-sessions.component';
 export * from './consolidation/session-create-modal/session-create-modal.component';

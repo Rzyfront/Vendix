@@ -294,6 +294,13 @@ export const accountingRoutes: Routes = [
                 (c) => c.ReconciliationWorkspaceComponent,
               ),
           },
+          {
+            path: 'unassigned-payments',
+            loadComponent: () =>
+              import('./components/bank-reconciliation/unassigned-payments.component').then(
+                (c) => c.UnassignedPaymentsComponent,
+              ),
+          },
         ],
       },
       {

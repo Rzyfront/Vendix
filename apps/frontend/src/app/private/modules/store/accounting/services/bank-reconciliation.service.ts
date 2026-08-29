@@ -11,6 +11,9 @@ import {
   AutoMatchResult,
   ApiResponse,
   AccountingListResponse,
+  PaginatedApiResponse,
+  UnassignedPayment,
+  AssignableBankAccount,
 } from '../interfaces/accounting.interface';
 
 @Injectable({
@@ -165,6 +168,42 @@ export class BankReconciliationService {
   deleteReconciliation(id: number): Observable<ApiResponse<null>> {
     return this.http.delete<ApiResponse<null>>(
       this.getApiUrl(`reconciliations/${id}`),
+    );
+  }
+
+  // ── Unassigned Payments (E.2 — CP-POLLO-ARABE-727 / QUI-728) ──────
+  getUnassignedPayments(params: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    date_from?: string;
+    date_to?: string;
+  }): Observable<PaginatedApiResponse<UnassignedPayment>> {
+    const cleanParams: Record<string, any> = {};
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null && value !== '') {
+        cleanParams[key] = value;
+      }
+    }
+    return this.http.get<PaginatedApiResponse<UnassignedPayment>>(
+      this.getApiUrl('payments/unassigned'),
+      { params: cleanParams },
+    );
+  }
+
+  getAssignableAccounts(): Observable<ApiResponse<AssignableBankAccount[]>> {
+    return this.http.get<ApiResponse<AssignableBankAccount[]>>(
+      this.getApiUrl('payments/assignable-accounts'),
+    );
+  }
+
+  assignPaymentAccount(
+    payment_id: number,
+    bank_account_id: number,
+  ): Observable<ApiResponse<UnassignedPayment>> {
+    return this.http.patch<ApiResponse<UnassignedPayment>>(
+      this.getApiUrl(`payments/${payment_id}/assign-account`),
+      { bank_account_id },
     );
   }
 }
