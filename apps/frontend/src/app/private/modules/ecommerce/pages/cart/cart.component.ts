@@ -148,8 +148,10 @@ export class CartComponent implements OnInit {
       .subscribe({
         next: (response) => {
           const enabled = response?.data?.promotions?.enable_high_conversion_ui;
+          // eslint-disable-next-line no-console
+          console.log('[CART-DEBUG] enable_high_conversion_ui:', enabled, '→ set signal to:', enabled);
           if (enabled !== undefined) {
-            this.highConversionEnabled.set(enabled);  // ← BUG FIX: era `!== false`, lo que hacía que false nunca se seteara
+            this.highConversionEnabled.set(enabled);
           }
         },
         error: () => {
