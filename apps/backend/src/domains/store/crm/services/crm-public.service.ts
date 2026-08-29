@@ -84,7 +84,7 @@ export class CrmPublicService {
     let publication: Record<string, unknown> | undefined;
     try {
       const settings = await this.settingsService.getSettings();
-      publication = settings?.publication as Record<string, unknown> | undefined;
+      publication = settings?.publication as unknown as Record<string, unknown> | undefined;
     } catch {
       publication = undefined;
     }
@@ -241,7 +241,7 @@ export class CrmPublicService {
     let publication: Record<string, unknown> | undefined;
     try {
       const settings = await this.settingsService.getSettings();
-      publication = settings?.publication as Record<string, unknown> | undefined;
+      publication = settings?.publication as unknown as Record<string, unknown> | undefined;
     } catch {
       publication = undefined;
     }
