@@ -253,13 +253,18 @@ export class CrmMainPageComponent {
       next: (res) => {
         this.landing.set(res.data);
         this.busy.set(false);
-        this.toast.success('Landing publicada');
+        this.toast.success('¡Landing publicada con éxito! Abriendo en nueva pestaña…');
+        this.openPublicLanding();
       },
       error: () => {
         this.busy.set(false);
         this.toast.error('No pudimos publicar la landing');
       },
     });
+  }
+
+  openPublicLanding(): void {
+    window.open('/', '_blank', 'noopener,noreferrer');
   }
 
   activate(): void {

@@ -2,3 +2,24 @@
   display: block;
   width: 100%;
 }
+
+.crm-preview-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.6) transparent;
+
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background-color: rgba(148, 163, 184, 0.6);
+    border-radius: 9999px;
+
+    &:hover {
+      background-color: rgba(100, 116, 139, 0.85);
+    }
+  }
+}
+

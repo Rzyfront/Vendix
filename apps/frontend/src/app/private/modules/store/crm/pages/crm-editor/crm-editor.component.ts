@@ -162,4 +162,8 @@ export class CrmEditorComponent {
   ctaClicked(): void {
     this.toast.info('El botón funcionará en tu landing publicada');
   }
+
+  openPublicLanding(): void {
+    window.open('/', '_blank', 'noopener,noreferrer');
+  }
 }

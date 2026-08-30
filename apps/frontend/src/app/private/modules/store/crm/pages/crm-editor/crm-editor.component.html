@@ -156,43 +156,58 @@
   <div class="lg:col-span-7 flex flex-col gap-3 sticky top-20">
     <div class="rounded-2xl border border-border bg-surface overflow-hidden shadow-sm flex flex-col">
       <!-- Barra superior de la vista previa (Simulador Browser) -->
-      <div class="px-4 py-3 bg-surface-hover/60 border-b border-border flex items-center justify-between gap-4">
+      <div class="px-4 py-3 bg-surface-hover/60 border-b border-border flex items-center justify-between gap-3 flex-wrap">
         <div class="flex items-center gap-2">
           <div class="flex items-center gap-1.5">
             <span class="w-2.5 h-2.5 rounded-full bg-red-400/80"></span>
             <span class="w-2.5 h-2.5 rounded-full bg-amber-400/80"></span>
             <span class="w-2.5 h-2.5 rounded-full bg-emerald-400/80"></span>
           </div>
-          <span class="text-xs font-semibold text-text-secondary ml-2">Vista Previa en Vivo</span>
+          <span class="text-xs font-semibold text-text-secondary ml-1 sm:ml-2">Vista Previa en Vivo</span>
         </div>
 
-        <div class="flex items-center gap-1 bg-surface rounded-lg p-0.5 border border-border">
+        <div class="flex items-center gap-2">
+          <!-- Selector de Modo de Dispositivo -->
+          <div class="flex items-center gap-1 bg-surface rounded-lg p-0.5 border border-border">
+            <button
+              type="button"
+              class="px-2.5 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer"
+              [class]="previewMode() === 'desktop' ? 'bg-primary text-white shadow-xs' : 'text-text-secondary hover:text-text-primary'"
+              (click)="setPreviewMode('desktop')"
+            >
+              <app-icon name="monitor" [size]="13" />
+              <span class="hidden sm:inline">Escritorio</span>
+            </button>
+            <button
+              type="button"
+              class="px-2.5 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer"
+              [class]="previewMode() === 'mobile' ? 'bg-primary text-white shadow-xs' : 'text-text-secondary hover:text-text-primary'"
+              (click)="setPreviewMode('mobile')"
+            >
+              <app-icon name="smartphone" [size]="13" />
+              <span class="hidden sm:inline">Móvil</span>
+            </button>
+          </div>
+
+          <!-- Botón de Abrir en Nueva Pestaña -->
           <button
             type="button"
-            class="px-2.5 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1.5"
-            [class]="previewMode() === 'desktop' ? 'bg-primary text-white shadow-xs' : 'text-text-secondary hover:text-text-primary'"
-            (click)="setPreviewMode('desktop')"
+            class="px-2.5 py-1 rounded-lg text-xs font-semibold text-primary bg-primary/10 hover:bg-primary/20 transition-all flex items-center gap-1.5 cursor-pointer"
+            (click)="openPublicLanding()"
+            title="Abrir landing completa en una nueva pestaña del navegador"
           >
-            <app-icon name="monitor" [size]="13" />
-            <span class="hidden sm:inline">Escritorio</span>
-          </button>
-          <button
-            type="button"
-            class="px-2.5 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1.5"
-            [class]="previewMode() === 'mobile' ? 'bg-primary text-white shadow-xs' : 'text-text-secondary hover:text-text-primary'"
-            (click)="setPreviewMode('mobile')"
-          >
-            <app-icon name="smartphone" [size]="13" />
-            <span class="hidden sm:inline">Móvil</span>
+            <app-icon name="external-link" [size]="13" />
+            <span class="hidden sm:inline">Abrir en pestaña</span>
           </button>
         </div>
       </div>
 
-      <!-- Canvas de Render de Bloques -->
-      <div class="p-4 bg-zinc-100 dark:bg-zinc-950 min-h-[500px] max-h-[780px] overflow-y-auto flex justify-center">
+      <!-- Canvas de Render de Bloques con Scroll Suave y Visibilidad Total -->
+      <div class="p-3 sm:p-5 bg-zinc-100 dark:bg-zinc-950 min-h-[580px] max-h-[calc(100vh-210px)] overflow-y-auto crm-preview-scroll flex justify-center items-start">
         <div 
-          class="w-full transition-all duration-300 bg-surface rounded-xl shadow-sm overflow-hidden flex flex-col"
+          class="w-full transition-all duration-300 bg-surface rounded-xl shadow-md overflow-hidden flex flex-col my-1"
           [style.max-width]="previewMode() === 'mobile' ? '375px' : '100%'"
+          [style.min-height]="previewMode() === 'mobile' ? '667px' : 'auto'"
         >
           @for (b of blocks(); track b.id; let i = $index) {
             <div 
@@ -216,9 +231,10 @@
               </div>
             </div>
           } @empty {
-            <div class="py-20 text-center text-text-secondary flex flex-col items-center gap-2">
-              <app-icon name="sparkles" [size]="32" class="opacity-30 text-primary" />
-              <p class="text-sm font-medium">Agrega secciones para ver la vista previa en vivo</p>
+            <div class="py-24 text-center text-text-secondary flex flex-col items-center gap-2">
+              <app-icon name="sparkles" [size]="36" class="opacity-30 text-primary" />
+              <p class="text-sm font-semibold">Agrega secciones para ver la vista previa en vivo</p>
+              <p class="text-xs text-text-secondary">Usa el botón "+ Añadir" en la columna izquierda</p>
             </div>
           }
         </div>
