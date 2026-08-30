@@ -149,6 +149,11 @@ export class PosCheckoutShellComponent {
   protected readonly consumoStep = viewChild(PosConsumoStepComponent);
   protected readonly paymentStep = viewChild(PosPaymentStepComponent);
   protected readonly shippingStep = viewChild(PosShippingStepComponent);
+  /**
+   * Cliente step hosts the 2-option selector (Buscar 3 compact / Crear) without invasive scroll.
+   * Shell passes [searchLimit]="3" and keeps container overflow:visible (see .cliente-section--no-scroll).
+   * attemptNextStep delegates to resolveIfNeeded() which works from either tab via unified find-or-create.
+   */
   private readonly customerSelector = viewChild(PosCustomerSelectorComponent);
 
   // ── Address capture (moved from the Envío step into the Cliente step) ────

@@ -272,7 +272,10 @@
                   }
                 } @else {
                   @if (clienteSubStep() === 1) {
-                    <section class="cliente-section">
+                    <section
+                      class="cliente-section cliente-section--no-scroll"
+                      style="max-height: none; overflow: visible"
+                    >
                       <div class="section-header">
                         <app-icon name="user" [size]="16" class="section-icon"></app-icon>
                         <h2 class="section-title">Cliente</h2>
@@ -286,10 +289,13 @@
                           >
                         }
                       </div>
+                      <!-- 2 opciones (Buscar 3 compact / Crear) viven en el selector via segmented tabs;
+                           el shell solo hostea sin scroll y fija searchLimit=3 (sin tabs duplicados). -->
                       <app-pos-customer-selector
                         [selectedCustomer]="cartState()?.customer ?? null"
                         [allowAnonymous]="canBeAnonymous()"
                         [showTopSuggestions]="true"
+                        [searchLimit]="3"
                         (customerSelected)="onSelectCustomerAndAdvance($event)"
                         (customerCleared)="onCustomerCleared()"
                       ></app-pos-customer-selector>
