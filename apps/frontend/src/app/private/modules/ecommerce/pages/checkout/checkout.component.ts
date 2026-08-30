@@ -1077,14 +1077,11 @@ export class CheckoutComponent implements OnInit {
         // Cache hit: default a la primera cuenta SOLO si la elección actual
         // no es válida para este método (cuenta borrada, método nuevo que
         // nunca tuvo elección previa, etc.). Misma guarda que
-        // `loadBankAccountsForMethod` (líneas 1086-1091): respeta elecciones
-        // previas válidas y solo rellena el hueco.
+        // `loadBankAccountsForMethod` (líneas 1126-1131): respeta elecciones
+        // previas válidas y solo rellena el hueco. El predicado vive en
+        // `isBankAccountStillValid` para no divergir entre los dos sitios.
         const cached = this.bankAccountsByMethod().get(method_id) ?? [];
-        const currentChoice = this.selected_bank_account_id();
-        const validPriorChoice =
-          currentChoice != null &&
-          cached.some((a) => a.id === currentChoice);
-        if (!validPriorChoice) {
+        if (!this.isBankAccountStillValid(cached)) {
           this.selected_bank_account_id.set(cached[0]?.id ?? null);
         }
       }
@@ -1103,6 +1100,20 @@ export class CheckoutComponent implements OnInit {
   }
 
   /**
+   * Predicado compartido: ¿la cuenta seleccionada actualmente sigue siendo
+   * válida para esta lista de cuentas? Vive en un método privado porque el
+   * mismo predicado se usa en dos sitios (cache hit y cache miss de
+   * `loadBankAccountsForMethod`) — si dos implementaciones del mismo
+   * predicado divergen, una paga a la cuenta equivocada (QUI-756).
+   */
+  private isBankAccountStillValid(
+    accounts: ReadonlyArray<{ id: number }>,
+  ): boolean {
+    const current = this.selected_bank_account_id();
+    return current != null && accounts.some((a) => a.id === current);
+  }
+
+  /**
    * Carga las cuentas activas para un método `bank_transfer`/`voucher` desde
    * el endpoint del storefront. El resultado se cachea en
    * `bankAccountsByMethod` por método para evitar refetch al alternar.
@@ -1116,10 +1127,22 @@ export class CheckoutComponent implements OnInit {
         const next = new Map(this.bankAccountsByMethod());
         next.set(method_id, accounts);
         this.bankAccountsByMethod.set(next);
-        // Default a la primera cuenta (si hay). El modal las muestra todas.
+        // Default a la primera cuenta SOLO si la elección actual no es válida
+        // para esta lista. Mismo predicado que el cache hit de arriba
+        // (`isBankAccountStillValid`): chequea validez contra la lista del
+        // método destino, no solo null. Antes este chequeo era `== null`,
+        // pero ahora `selectPaymentMethod` ya no nulifica la cuenta al
+        // cambiar entre métodos — así que un cliente que eligió cuenta 19 en
+        // Transferencia y pasa a Vouchers (otro método de tipo transferencia,
+        // también cache miss) podía terminar con la cuenta 19 seleccionada
+        // aunque 19 no estuviera en la lista de Vouchers. El predicado
+        // extraído evita ese hueco y mantiene los dos sitios sincronizados.
+        // El chequeo `selected_payment_method_id() === method_id` se
+        // conserva: protege contra una respuesta tardía que pisa la elección
+        // de un método que el usuario ya abandonó.
         if (
           this.selected_payment_method_id() === method_id &&
-          this.selected_bank_account_id() == null
+          !this.isBankAccountStillValid(accounts)
         ) {
           this.selected_bank_account_id.set(accounts[0]?.id ?? null);
         }
