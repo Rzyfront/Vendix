@@ -97,6 +97,12 @@ export class PosCustomerSelectorComponent {
 
   // ── View-state machine ──────────────────────────────────────────────
   readonly view = signal<CustomerSelectorView>('overview');
+  /**
+   * Segmented mode inside the `search` view — separates the two user intents
+   * without stacking them on a shared scroll. `search` = compressed 3-item
+   * lookup; `create` = isolated creation form that advances via wizard.
+   */
+  readonly activeTab = signal<'search' | 'create'>('search');
 
   // ── Internal signals ────────────────────────────────────────────────
   readonly results = signal<PosCustomer[]>([]);
@@ -110,10 +116,10 @@ export class PosCustomerSelectorComponent {
   readonly lastQuery = signal('');
 
   // ── Top-suggestions (clientes más frecuentes) ───────────────────────
-  /** Top-5 clientes por volumen de órdenes (carga on-init si showTopSuggestions). */
+  /** Top-3 clientes por volumen de órdenes (carga on-init si showTopSuggestions). */
   readonly topCustomers = signal<PosCustomer[]>([]);
   readonly loadingTop = signal(false);
-  /** Guard one-shot para la inicialización de vista + carga de top-5. */
+  /** Guard one-shot para la inicialización de vista + carga de top-3. */
   private topInitialized = false;
 
   /**
@@ -126,6 +132,13 @@ export class PosCustomerSelectorComponent {
       this.showTopSuggestions() &&
       this.query().trim().length < 2 &&
       !this.isSearching(),
+  );
+
+  /** Compressed slices — enforce 3-item MAX without scroll. */
+  readonly topCustomersSlice = computed(() => this.topCustomers().slice(0, 3));
+  readonly resultsSlice = computed(() => this.results().slice(0, 3));
+  readonly resultsOverflow = computed(() =>
+    Math.max(0, this.results().length - this.resultsSlice().length),
   );
 
   /** Opciones del selector de tipo de documento (single source of truth). */
@@ -257,16 +270,16 @@ export class PosCustomerSelectorComponent {
     });
   }
 
-  /** Carga perezosa e idempotente del top-5 (solo cuando showTopSuggestions). */
+  /** Carga perezosa e idempotente del top-3 comprimido (solo cuando showTopSuggestions). */
   private loadTopCustomers(): void {
     if (this.topCustomers().length > 0 || this.loadingTop()) return;
     this.loadingTop.set(true);
     this.customerService
-      .topCustomers(5)
+      .topCustomers(3)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (list) => {
-          this.topCustomers.set(list ?? []);
+          this.topCustomers.set((list ?? []).slice(0, 3));
           this.loadingTop.set(false);
         },
         error: () => {
@@ -278,11 +291,16 @@ export class PosCustomerSelectorComponent {
 
   // ── Navegación ──────────────────────────────────────────────────────
   goToSearch(): void {
+    this.activeTab.set('search');
     this.view.set('search');
   }
 
   back(): void {
     this.view.set('overview');
+  }
+
+  setActiveTab(tab: 'search' | 'create'): void {
+    this.activeTab.set(tab);
   }
 
   // ── Búsqueda ────────────────────────────────────────────────────────
@@ -456,6 +474,7 @@ export class PosCustomerSelectorComponent {
     this.resolving.set(false);
     this.query.set('');
     this.lastQuery.set('');
+    this.activeTab.set('search');
     this.view.set('overview');
   }
 }
