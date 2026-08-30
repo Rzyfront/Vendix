@@ -18,7 +18,7 @@ export type CrmBlockType = (typeof CRM_BLOCK_TYPES)[number];
 export interface CrmBlock {
   id: string;
   type: CrmBlockType;
-  props: Record<string, string>;
+  props: Record<string, any>;
 }
 
 export interface CrmLandingTheme {

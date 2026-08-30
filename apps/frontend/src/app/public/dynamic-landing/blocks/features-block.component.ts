@@ -65,17 +65,27 @@ interface FeatureItem {
   ],
 })
 export class FeaturesBlockComponent {
-  readonly props = input.required<Record<string, string>>();
+  readonly props = input.required<Record<string, unknown>>();
 
   readonly items = computed<FeatureItem[]>(() => {
-    const raw = this.props()['items'] ?? '';
-    return raw
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => {
-        const [title, description = ''] = line.split('|');
-        return { title: title.trim(), description: description.trim() };
-      });
+    const raw = this.props()['items'];
+    if (!raw) return [];
+    if (Array.isArray(raw)) {
+      return (raw as any[]).map((it) => ({
+        title: String(it?.title || it?.name || ''),
+        description: String(it?.description || it?.desc || ''),
+      }));
+    }
+    if (typeof raw === 'string') {
+      return raw
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => {
+          const [title, description = ''] = line.split('|');
+          return { title: title.trim(), description: description.trim() };
+        });
+    }
+    return [];
   });
 }

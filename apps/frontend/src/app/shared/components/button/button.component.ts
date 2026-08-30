@@ -1,4 +1,4 @@
-import { Component, HostBinding, input, output, signal, computed } from '@angular/core';
+import { Component, input, output, signal, computed } from '@angular/core';
 
 
 export type ButtonVariant =
@@ -16,6 +16,10 @@ export type ButtonSize = 'xsm' | 'sm' | 'md' | 'lg';
   selector: 'app-button',
   standalone: true,
   imports: [],
+  host: {
+    '[class.icon-only-mobile]': 'iconOnlyMobile()',
+    '[class.w-full]': 'fullWidth()',
+  },
   template: `
     <button
       [type]="type()"
@@ -189,16 +193,6 @@ export class ButtonComponent {
    * BORRA el nombre accesible que el propio texto del botón ya daba.
    */
   readonly ariaLabel = input('');
-
-  @HostBinding('class.icon-only-mobile')
-  get isIconOnlyMobile(): boolean {
-    return this.iconOnlyMobile();
-  }
-
-  @HostBinding('class.w-full')
-  get isFullWidth(): boolean {
-    return this.fullWidth();
-  }
 
   readonly clicked = output<Event>();
 

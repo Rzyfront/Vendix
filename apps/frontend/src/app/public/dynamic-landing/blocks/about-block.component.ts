@@ -42,12 +42,20 @@ import { CrmBlock } from './landing-blocks.types';
   ],
 })
 export class AboutBlockComponent {
-  readonly props = input.required<Record<string, string>>();
+  readonly props = input.required<Record<string, unknown>>();
 
-  readonly paragraphs = computed<string[]>(() =>
-    (this.props()['body'] ?? '')
-      .split(/\n+/)
-      .map((p) => p.trim())
-      .filter(Boolean),
-  );
+  readonly paragraphs = computed<string[]>(() => {
+    const body = this.props()['body'];
+    if (!body) return [];
+    if (Array.isArray(body)) {
+      return body.map((p) => String(p).trim()).filter(Boolean);
+    }
+    if (typeof body === 'string') {
+      return body
+        .split(/\n+/)
+        .map((p) => p.trim())
+        .filter(Boolean);
+    }
+    return [String(body)];
+  });
 }

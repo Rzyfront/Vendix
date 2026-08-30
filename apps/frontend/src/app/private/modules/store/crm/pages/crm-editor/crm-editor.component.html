@@ -133,7 +133,7 @@
                   class="w-full rounded-xl border border-border bg-surface px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary/50 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
                   rows="3"
                   [placeholder]="field.placeholder || ''"
-                  [value]="block.props[field.key] || ''"
+                  [value]="getFieldValue(block, field.key)"
                   (input)="onPropChange(field.key, $any($event.target).value)"
                 ></textarea>
               } @else {
@@ -141,7 +141,7 @@
                   class="w-full rounded-xl border border-border bg-surface px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary/50 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
                   type="text"
                   [placeholder]="field.placeholder || ''"
-                  [value]="block.props[field.key] || ''"
+                  [value]="getFieldValue(block, field.key)"
                   (input)="onPropChange(field.key, $any($event.target).value)"
                 />
               }

@@ -159,6 +159,29 @@ export class CrmEditorComponent {
     this.emitDocument();
   }
 
+  getFieldValue(block: CrmBlock, fieldKey: string): string {
+    const val = (block.props as any)?.[fieldKey];
+    if (val == null) return '';
+    if (Array.isArray(val)) {
+      return val
+        .map((item) => {
+          if (typeof item === 'string') return item;
+          if (item && typeof item === 'object') {
+            const title = item.title || item.name || '';
+            const desc = item.description || item.desc || '';
+            return desc ? `${title} | ${desc}` : title;
+          }
+          return '';
+        })
+        .filter(Boolean)
+        .join('\n');
+    }
+    if (typeof val === 'object') {
+      return JSON.stringify(val);
+    }
+    return String(val);
+  }
+
   ctaClicked(): void {
     this.toast.info('El botón funcionará en tu landing publicada');
   }
