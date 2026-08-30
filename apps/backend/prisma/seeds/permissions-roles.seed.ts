@@ -3109,6 +3109,34 @@ export async function seedPermissionsAndRoles(
       method: 'PATCH',
     },
 
+    // ──── Métodos de pago del catálogo de plataforma (QUI-747) ────
+    //
+    // DEFENSA EN PROFUNDIDAD. El servicio `SystemPaymentMethodsService` ya
+    // filtra `is_active=true` para no-super_admin en lecturas y lanza
+    // `ForbiddenException` en escrituras (service.ts:79, 109, 134, 160), así
+    // que el riesgo inmediato era bajo. Pero ese check es blando: depende de
+    // que cada método nuevo del servicio repita la verificación. `PermissionsGuard`
+    // cierra la puerta a nivel de controller, antes de tocar el servicio, con
+    // la misma convención `superadmin:<recurso>:<acción>` que ya usan
+    // `superadmin:stores:*` y `superadmin:roles:*`.
+    //
+    // Se asignan EXCLUSIVAMENTE al rol `super_admin` (ver filtro
+    // `!p.name.startsWith('superadmin:')` en la asignación a owner).
+    {
+      name: 'superadmin:system_payment_methods:read',
+      description:
+        'Leer el catálogo de métodos de pago de plataforma (todos, incluidos inactivos)',
+      path: '/api/system-payment-methods',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:system_payment_methods:write',
+      description:
+        'Crear, actualizar, alternar y eliminar métodos de pago del catálogo de plataforma',
+      path: '/api/system-payment-methods',
+      method: 'POST',
+    },
+
     // ──── Cuentas por Cobrar (Cartera) ────
     {
       name: 'store:accounts_receivable:read',
