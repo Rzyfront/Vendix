@@ -1033,6 +1033,15 @@ export class CheckoutComponent implements OnInit {
   }
 
   selectPaymentMethod(method_id: number): void {
+    // Guarda de "mismo método": si el cliente ya está en este método (re-click
+    // del pill desde el picker) NO reiniciamos nada — preservamos su elección
+    // de cuenta, el comprobante ya cargado y el flag de acuse. Antes este
+    // handler re-ejecutaba el bloque completo en cada clic, lo que pisaba la
+    // selección del usuario con la primera cuenta cacheada y descartaba el
+    // `payment_receipt_file` sin aviso. Patrón silencioso de "compré
+    // transferencia y terminé pagando a la cuenta equivocada".
+    const isSameMethod = method_id === this.selected_payment_method_id();
+
     this.selected_payment_method_id.set(method_id);
 
     // Check if selected method is Wompi
@@ -1045,26 +1054,51 @@ export class CheckoutComponent implements OnInit {
 
     const t = selectedMethod?.type;
     if (t === 'bank_transfer' || t === 'voucher') {
+      if (isSameMethod) {
+        // Mismo método: re-abrimos el modal y salimos. Estado preservado.
+        this.show_payment_instructions_modal.set(true);
+        return;
+      }
+
+      // Cambio real desde otro método: descartar comprobante y acuse del
+      // método anterior. NO tocamos `selected_bank_account_id`: la elección
+      // previa se conserva si sigue siendo válida para este método (la
+      // validez se chequea contra la lista cacheada del método destino, así
+      // no se arrastra una cuenta ajena). Esto resuelve el round trip
+      // Transferencia → Efectivo → Transferencia sin re-pisar la elección.
       this.payment_receipt_file.set(null);
       this.payment_instructions_acknowledged.set(false);
-      this.selected_bank_account_id.set(null);
 
       // Carga lazy de cuentas. Si ya están cacheadas, no refetch — el modal
       // las resuelve instantáneamente desde `bankAccountsByMethod`.
       if (!this.bankAccountsByMethod().has(method_id)) {
         this.loadBankAccountsForMethod(method_id);
       } else {
-        // Cache hit: default a la primera cuenta disponible para que el modal
-        // muestre datos y el cliente solo tenga que confirmar.
+        // Cache hit: default a la primera cuenta SOLO si la elección actual
+        // no es válida para este método (cuenta borrada, método nuevo que
+        // nunca tuvo elección previa, etc.). Misma guarda que
+        // `loadBankAccountsForMethod` (líneas 1086-1091): respeta elecciones
+        // previas válidas y solo rellena el hueco.
         const cached = this.bankAccountsByMethod().get(method_id) ?? [];
-        this.selected_bank_account_id.set(cached[0]?.id ?? null);
+        const currentChoice = this.selected_bank_account_id();
+        const validPriorChoice =
+          currentChoice != null &&
+          cached.some((a) => a.id === currentChoice);
+        if (!validPriorChoice) {
+          this.selected_bank_account_id.set(cached[0]?.id ?? null);
+        }
       }
 
       this.show_payment_instructions_modal.set(true);
     } else {
+      // Cambio a un método no-transferencia: descartar comprobante y acuse
+      // del método anterior. La cuenta seleccionada NO se descarta — si el
+      // usuario vuelve a Transferencia/Voucher, la preservamos mientras siga
+      // siendo válida (la guarda del cache hit de arriba se encarga). Esto
+      // es lo que faltaba para que el round trip del repro original no
+      // re-pise la elección.
       this.payment_receipt_file.set(null);
       this.payment_instructions_acknowledged.set(false);
-      this.selected_bank_account_id.set(null);
     }
   }
 
