@@ -145,6 +145,35 @@ Properties of the runner (`scripts/buildcheck.sh`):
 - A **preflight** aborts before spawning anything if free RAM is below what the
   step needs. Override only knowingly with `--force`.
 
+### Shared log path — do not trust the file under `.buildcheck/`
+
+The runner writes its log to `.buildcheck/<step>.log`, a path that lives **inside the repo and inside the shared dev tree**. When more than one agent is working on the same checkout at once, the file is being written by N writers and read by N readers. A PASS line that this agent reads may belong to a different agent's run, on a different tree state, finished seconds ago or minutes ago. Reporting `buildcheck PASS` without confirming the log was produced by the local run on the final tree is reporting hearsay.
+
+Two specific signals that a reported PASS is not trustworthy:
+
+1. **Total time landing exactly on `BUILDCHECK_TIMEOUT` (default 900 s).** This is not coincidence: it is the pattern of the pipeline hanging on an orphaned `sleep` left behind by a previous run. The typecheck step itself may still have completed and emitted `PASS`, so the verdict can be true, but a total time equal to the timeout is a tell that the wrapper did not exit cleanly and that the `exit code` is suspect.
+2. **Identical lines between two consecutive reports.** If the last 10 lines of `.buildcheck/frontend-typecheck.log` look exactly like the previous run's last 10 lines — including timestamps that haven't advanced — the file was probably not overwritten.
+
+Correct invocation when the runner is used at all (still subject to the two exceptions in the Core Rule):
+
+```bash
+LOG=/tmp/buildcheck-$$-fe.log            # $$ is this shell's PID: no collision with other agents
+date -u +"start %Y-%m-%dT%H:%M:%SZ"
+npm run buildcheck:fe > "$LOG" 2>&1; echo "exit=$?"
+date -u +"end   %Y-%m-%dT%H:%M:%SZ"
+tail -12 "$LOG"
+```
+
+Read the `exit code`, not the last line of the log. Capture `$?` on the line right after the command — any other command in between overwrites it.
+
+Always report:
+
+- The **HEAD hash** taken in the same shell call as the report — not a hash copied from a previous minute's dump. `dev` moves under you.
+- **UTC start and end** of the local run.
+- An explicit confirmation that the tree was the **final** state, not an intermediate one.
+
+For anyone orchestrating pushes: run your own buildcheck, then add a **HEAD guard immediately before pushing** that compares the local `git rev-parse HEAD` against the SHA you audited. A 2-minute typecheck is enough time for another agent to land a commit on `dev`.
+
 ## Memory Budget — 16 GB Dev Machine, 10 Cores
 
 The host does **not** have 16 GB available for a build. The Docker dev stack holds
