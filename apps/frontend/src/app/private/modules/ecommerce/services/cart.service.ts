@@ -968,14 +968,39 @@ export class CartService {
           const data = response?.data ?? response;
           const now = this.cart();
           if (!now || !data) return;
+
+          // SAFETY NET: si la API retorna `applied_promotions` con
+          // `discount_amount` populados pero el `promotion_discount` y/o
+          // `promotional_subtotal` están en 0/igual-al-subtotal, calculamos
+          // los totales localmente desde el array. Esto evita el bug donde el
+          // cart muestra los expanded cards (prueba, test) pero el Total
+          // queda = Subtotal porque el backend no propagó los montos.
+          const appliedPromos = data.applied_promotions ?? [];
+          const localDiscountTotal = appliedPromos.reduce(
+            (sum, p) => sum + (Number(p.discount_amount) || 0),
+            0,
+          );
+          const apiDiscount = Number(data.promotion_discount) || 0;
+          // Si la API devolvió discount=0 pero los applied_promotions SÍ
+          // tienen discount_amount, usamos el cálculo local.
+          const effectiveDiscount =
+            apiDiscount > 0 ? apiDiscount : localDiscountTotal;
+          const effectivePromoSubtotal =
+            effectiveDiscount > 0
+              ? Math.max(0, (now.subtotal ?? 0) - effectiveDiscount)
+              : now.subtotal;
+
           this.cart.set({
             ...now,
-            promotion_discount: Number(data.promotion_discount) || 0,
+            promotion_discount: effectiveDiscount,
             promotional_subtotal:
               data.promotional_subtotal != null
-                ? Number(data.promotional_subtotal)
-                : now.subtotal,
-            applied_promotions: data.applied_promotions ?? [],
+                ? Math.min(
+                    Number(data.promotional_subtotal),
+                    effectivePromoSubtotal,
+                  )
+                : effectivePromoSubtotal,
+            applied_promotions: appliedPromos,
             tier_progress: data.tier_progress ?? [],
             per_product_tier_ladder: data.per_product_tier_ladder,
             // CP-ECOM-PROMO-UX-001 convergence-R5: propagate the backend's
