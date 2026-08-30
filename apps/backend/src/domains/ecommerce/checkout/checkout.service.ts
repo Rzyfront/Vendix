@@ -26,6 +26,7 @@ import { WompiEnvironment } from '../../store/payments/processors/wompi/wompi.ty
 import { WompiProcessor } from '../../store/payments/processors/wompi/wompi.processor';
 import { PaymentEncryptionService } from '../../store/payments/services/payment-encryption.service';
 import { WebhookHandlerService } from '../../store/payments/services/webhook-handler.service';
+import { PaymentGatewayService } from '../../store/payments/services/payment-gateway.service';
 import * as crypto from 'crypto';
 import { ReservationsService } from '../../store/reservations/reservations.service';
 import { order_channel_enum } from '@prisma/client';
@@ -132,6 +133,9 @@ export class CheckoutService {
     private readonly paymentEncryption: PaymentEncryptionService,
     private readonly reservationsService: ReservationsService,
     private readonly webhookHandler: WebhookHandlerService,
+    // QUI-728 — valida y resuelve la cuenta bancaria destino de un
+    // `bank_transfer` / `voucher` antes de persistir el pago.
+    private readonly paymentGateway: PaymentGatewayService,
     private readonly invoiceDataRequestsService: InvoiceDataRequestsService,
     private readonly invoicingService: InvoicingService,
     private readonly operatingScopeService: OperatingScopeService,
@@ -157,6 +161,93 @@ export class CheckoutService {
     'image/webp',
     'application/pdf',
   ];
+
+  /**
+   * Firma la URL pre-firmada del logo de la cuenta. Devuelve `null` si el key
+   * está ausente o si la firma falla (defensivo: no romper el listado si S3
+   * se cae — el comprador sigue viendo nombre y número de cuenta).
+   */
+  private async signImageUrl(
+    key: string | null | undefined,
+  ): Promise<string | null> {
+    if (!key) return null;
+    try {
+      return await this.s3Service.getPresignedUrl(key, 300);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * QUI-728 — lista las cuentas bancarias activas que la tienda del contexto
+   * puede ofrecer al comprador en un método de pago. Se filtran por:
+   *   - `organization_id` de la tienda del contexto (multi-tenant),
+   *   - `status='active'`,
+   *   - `store_id === null` (cuenta de la organización) o `=== storeId`
+   *     (cuenta de la tienda).
+   *
+   * El método de pago en sí mismo (`methodId`) es solo el "scope" del listado
+   * para la UI: hoy todas las cuentas activas de la tienda se exponen igual
+   * independientemente del método, porque las cuentas viven en `bank_accounts`
+   * (no están atadas a un `store_payment_methods.id`). El `methodId` queda
+   * disponible para callers que en el futuro quieran limitar por tipo
+   * (`bank_transfer` vs `voucher`).
+   *
+   * Devuelve solo lo necesario para el selector de cuenta del checkout: id,
+   * name, bank_name, account_number, image_url (pre-firmada). Nunca expone
+   * balances ni configuración contable.
+   */
+  async getBankAccountsForMethod(
+    methodId: number,
+    storeId: number,
+  ): Promise<
+    Array<{
+      id: number;
+      name: string | null;
+      bank_name: string;
+      account_number: string;
+      image_url: string | null;
+    }>
+  > {
+    // methodId se acepta por contrato del endpoint, hoy no se usa para filtrar
+    // las cuentas (todas las `bank_accounts` activas son válidas). Reservado
+    // para un futuro filtro por tipo de método.
+    void methodId;
+
+    const store = await this.store_prisma.stores.findUnique({
+      where: { id: storeId },
+      select: { organization_id: true },
+    });
+    if (!store) return [];
+
+    const rows = await this.store_prisma.bank_accounts.findMany({
+      where: {
+        organization_id: store.organization_id,
+        status: 'active',
+        OR: [{ store_id: null }, { store_id: storeId }],
+      },
+      orderBy: { bank_name: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        bank_name: true,
+        account_number: true,
+        image_s3_key: true,
+      },
+    });
+
+    return Promise.all(
+      rows.map(async (r) => ({
+        id: r.id,
+        name: r.name,
+        bank_name: r.bank_name,
+        account_number: r.account_number,
+        image_url: r.image_s3_key
+          ? await this.signImageUrl(r.image_s3_key)
+          : null,
+      })),
+    );
+  }
 
   /**
    * Returns whether the current ecommerce store has invoicing fiscal status
@@ -1314,6 +1405,21 @@ export class CheckoutService {
       receipt_uploaded_at = new Date();
     }
 
+    // QUI-728 — valida y resuelve la cuenta bancaria destino ANTES de crear
+    // el pago. El DTO puede traer `bank_account_id` solo cuando el método es
+    // `bank_transfer` o `voucher`; el resto de métodos lo ignoran. La
+    // validación reusa la misma lógica que el POS / cobros en tienda (mismo
+    // `PaymentGatewayService.resolveAndValidateBankAccount`) para que las dos
+    // superficies nunca discrepen sobre qué cuenta es válida.
+    let resolved_bank_account_id: number | null = null;
+    if (dto.bank_account_id != null) {
+      const resolved = await this.paymentGateway.resolveAndValidateBankAccount(
+        dto.bank_account_id,
+        store_id ?? 0,
+      );
+      resolved_bank_account_id = resolved.id;
+    }
+
     // store_id y customer_id se inyectan automáticamente
     await this.prisma.payments.create({
       data: {
@@ -1324,6 +1430,7 @@ export class CheckoutService {
         store_payment_method_id: dto.payment_method_id,
         receipt_s3_key,
         receipt_uploaded_at,
+        bank_account_id: resolved_bank_account_id,
       },
     });
 

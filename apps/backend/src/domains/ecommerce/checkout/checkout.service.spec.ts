@@ -13,6 +13,7 @@ import { WompiClientFactory } from '../../store/payments/processors/wompi/wompi.
 import { WompiProcessor } from '../../store/payments/processors/wompi/wompi.processor';
 import { PaymentEncryptionService } from '../../store/payments/services/payment-encryption.service';
 import { WebhookHandlerService } from '../../store/payments/services/webhook-handler.service';
+import { PaymentGatewayService } from '../../store/payments/services/payment-gateway.service';
 import { ReservationsService } from '../../store/reservations/reservations.service';
 import { InvoiceDataRequestsService } from '../../store/invoicing/invoice-data-requests/invoice-data-requests.service';
 import { InvoicingService } from '../../store/invoicing/invoicing.service';
@@ -246,6 +247,22 @@ describe('CheckoutService - promotions and coupons', () => {
         { provide: WompiProcessor, useValue: {} },
         { provide: PaymentEncryptionService, useValue: {} },
         { provide: WebhookHandlerService, useValue: {} },
+        // QUI-728 — el checkout ahora valida la cuenta bancaria destino vía
+        // `PaymentGatewayService.resolveAndValidateBankAccount` antes de
+        // persistir el pago. Por defecto el mock eco del id (los tests de
+        // promoción/cupón no pasan `bank_account_id`).
+        {
+          provide: PaymentGatewayService,
+          useValue: {
+            resolveAndValidateBankAccount: jest.fn(async (id: number) => ({
+              id,
+              name: null,
+              bank_name: 'mock',
+              account_number: '000',
+              currency: 'COP',
+            })),
+          },
+        },
         { provide: ReservationsService, useValue: { create: jest.fn() } },
         {
           provide: InvoiceDataRequestsService,
@@ -269,7 +286,7 @@ describe('CheckoutService - promotions and coupons', () => {
             getStoreInvoicingState: jest.fn().mockResolvedValue('INACTIVE'),
           },
         },
-        { provide: S3Service, useValue: { signUrl: jest.fn(), uploadFile: jest.fn() } },
+        { provide: S3Service, useValue: { signUrl: jest.fn(), uploadFile: jest.fn(), getPresignedUrl: jest.fn().mockResolvedValue(null) } },
         {
           provide: S3PathHelper,
           useValue: { buildReceiptPath: jest.fn(() => 'receipts/test') },

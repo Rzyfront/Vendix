@@ -7783,6 +7783,10 @@ model bank_accounts {
   account_number   String                   @db.VarChar(50)
   bank_name        String                   @db.VarChar(100)
   bank_code        String?                  @db.VarChar(20)
+  // QUI-728 — S3 key del logo/imagen 21:9 de la cuenta. Nullable: las
+  // cuentas existentes y las que no requieren imagen siguen siendo válidas.
+  // La URL firmada se genera en lectura vía `S3Service.getPresignedUrl`.
+  image_s3_key     String?                  @db.VarChar(512)
   currency         String                   @default("COP") @db.VarChar(10)
   opening_balance  Decimal                  @default(0) @db.Decimal(12, 2)
   current_balance  Decimal                  @default(0) @db.Decimal(12, 2)

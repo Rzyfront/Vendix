@@ -20,6 +20,7 @@ import { WhatsappCheckoutDto } from './dto/whatsapp-checkout.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { StoreAvailabilityGuard } from './guards/store-availability.guard';
 import { OptionalAuth } from '@common/decorators/optional-auth.decorator';
+import { RequestContextService } from '@common/context/request-context.service';
 
 @Controller('ecommerce/checkout')
 @UseGuards(JwtAuthGuard)
@@ -49,6 +50,39 @@ export class CheckoutController {
     // - pickup: DIRECT + ONLINE
     // - delivery/carrier/etc: ONLINE + ON_DELIVERY
     const data = await this.checkout_service.getPaymentMethods(shippingType);
+    return { success: true, data };
+  }
+
+  /**
+   * QUI-728 — devuelve las cuentas bancarias activas que la tienda del
+   * contexto puede mostrar al comprador para el método `methodId`. Endpoint
+   * público-friendly (`@OptionalAuth()`) para que el checkout guest pueda
+   * pedirlo sin sesión; el contexto de tienda lo resuelve
+   * `DomainResolverMiddleware`.
+   *
+   * NO envuelve el handler en try/catch: el patrón del módulo
+   * (`BankAccountsController` ya migrado por QUI-728) confirma que
+   * `responseService.error` retorna 201+success:false y rompe el `catchError`
+   * del frontend. Las excepciones suben al `AllExceptionsFilter` global.
+   */
+  @Get('payment-methods/:methodId/bank-accounts')
+  @OptionalAuth()
+  async getBankAccountsForPaymentMethod(
+    @Param('methodId', ParseIntPipe) methodId: number,
+  ) {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      // Sin contexto de tienda el `DomainResolverMiddleware` ya habría
+      // rechazado la petición aguas arriba; este 400 es por defensa en
+      // profundidad si alguien llama al endpoint directamente.
+      throw new BadRequestException(
+        'Se requiere contexto de tienda para listar cuentas bancarias',
+      );
+    }
+    const data = await this.checkout_service.getBankAccountsForMethod(
+      methodId,
+      storeId,
+    );
     return { success: true, data };
   }
 
