@@ -461,7 +461,20 @@ export async function seedRestaurantE2E(
           user_id: user.id,
           app_type: 'STORE_ADMIN' as any,
           config: {
-            panel_ui: { STORE_ADMIN: { dashboard: true, pos: true } },
+            // QUI-730 — el fixture debe reflejar lo que produce el flujo real
+            // de creación de usuarios (`users.service.ts` → `generatePanelUI`),
+            // cuyo fallback ya trae `restaurant_ops*` en true. Hardcodear
+            // `{dashboard, pos}` dejaba al mesero sin acceso al módulo Mesas,
+            // que es justamente donde vive su vista móvil (QUI-735), y eso se
+            // leyó como un defecto de producto que no existe fuera del fixture.
+            panel_ui: {
+              STORE_ADMIN: {
+                pos: true,
+                dashboard: true,
+                restaurant_ops: true,
+                restaurant_ops_tables: true,
+              },
+            },
             preferences: { language: 'es', theme: 'default' },
           },
         },
