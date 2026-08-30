@@ -9,13 +9,6 @@ import {
 } from './dto/unassigned-payment.dto';
 
 /**
- * `payments` NO tiene relación `payment_methods`: el método se alcanza vía
- * `store_payment_method` → `system_payment_method` (schema.prisma, modelo
- * `payments`). Escribir el nombre equivocado no rompe el build —Prisma lo
- * rechaza en runtime con un `PrismaClientValidationError` que sale como 500—,
- * así que el include vive aquí una sola vez y lo comparten las dos consultas.
- */
-/**
  * Métodos que por naturaleza NO llegan a una cuenta bancaria: el dinero queda
  * en caja. Listarlos como "sin asignar" no le da al contador nada que asignar
  * —el contador solo crecería— así que se excluyen del listado. Valores del
@@ -23,6 +16,13 @@ import {
  */
 const METHODS_WITHOUT_BANK_ACCOUNT = ['cash', 'cash_on_delivery'] as const;
 
+/**
+ * `payments` NO tiene relación `payment_methods`: el método se alcanza vía
+ * `store_payment_method` → `system_payment_method` (schema.prisma, modelo
+ * `payments`). Escribir el nombre equivocado no rompe el build —Prisma lo
+ * rechaza en runtime con un `PrismaClientValidationError` que sale como 500—,
+ * así que el include vive aquí una sola vez y lo comparten las dos consultas.
+ */
 const PAYMENT_METHOD_INCLUDE = {
   select: {
     display_name: true,
@@ -31,6 +31,29 @@ const PAYMENT_METHOD_INCLUDE = {
     },
   },
 } as const;
+
+/**
+ * Predicado de "asignable": un pago que sigue sin cuenta y que además PUEDE
+ * llegar a tener una. Vive aquí, y no repetido en cada consulta, porque el
+ * listado y el agregado que devuelve `assignAccount` tienen que responder
+ * sobre EL MISMO conjunto. Cuando no lo hacían, asignar una cuenta hacía
+ * saltar la tarjeta "Monto Total" al total con efectivo incluido —justo la
+ * contradicción entre la tarjeta y la lista que este módulo vino a cerrar.
+ */
+const assignableUnassignedWhere = (): Prisma.paymentsWhereInput => ({
+  bank_account_id: null,
+  state: 'succeeded',
+  OR: [
+    { store_payment_method_id: null },
+    {
+      store_payment_method: {
+        system_payment_method: {
+          type: { notIn: [...METHODS_WITHOUT_BANK_ACCOUNT] },
+        },
+      },
+    },
+  ],
+});
 
 /**
  * Servicio de "pagos sin asignar" (CP-POLLO-ARABE-727 / E.2 — cross-ref QUI-728).
@@ -90,18 +113,7 @@ export class UnassignedPaymentsService {
         // method_id` NULL, históricos anteriores al catálogo) sí se listan: no
         // hay forma de saber si fueron transferencia, y el contador debe poder
         // vaciarse a mano.
-        {
-          OR: [
-            { store_payment_method_id: null },
-            {
-              store_payment_method: {
-                system_payment_method: {
-                  type: { notIn: [...METHODS_WITHOUT_BANK_ACCOUNT] },
-                },
-              },
-            },
-          ],
-        },
+        { OR: assignableUnassignedWhere().OR as Prisma.paymentsWhereInput[] },
         ...(query.search
           ? [
               {
@@ -269,14 +281,15 @@ export class UnassignedPaymentsService {
       `Payment ${payment_id} assigned to bank account ${bank_account_id}`,
     );
 
-    // Después del `updateMany` re-leemos el agregado del CONJUNTO sin asignar
-    // GLOBAL (sin filtros de fecha/búsqueda del listado, porque este endpoint
-    // no los recibe). Esto le da al frontend el monto restante sin tener que
-    // pegarle de nuevo a `findUnassigned` solo para refrescar la tarjeta "Monto
-    // Total". El pago recién asignado queda excluido porque su `bank_account_id`
-    // ya no es NULL y sale del `where`.
+    // Después del `updateMany` re-leemos el agregado sobre el MISMO predicado
+    // de asignables que usa el listado, sin los filtros de fecha/búsqueda
+    // (este endpoint no los recibe). Usar el predicado compartido importa: con
+    // un `where` propio de `{ bank_account_id: null, state: 'succeeded' }` el
+    // monto devuelto incluía el efectivo que el listado excluye, y la tarjeta
+    // "Monto Total" saltaba a otra cifra justo al asignar. El pago recién
+    // asignado queda fuera porque su `bank_account_id` ya no es NULL.
     const sum = await this.prisma.payments.aggregate({
-      where: { bank_account_id: null, state: 'succeeded' },
+      where: assignableUnassignedWhere(),
       _sum: { amount: true },
     });
 
