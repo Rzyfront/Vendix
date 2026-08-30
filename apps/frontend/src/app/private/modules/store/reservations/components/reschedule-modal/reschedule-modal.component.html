@@ -1,5 +1,5 @@
 <app-modal [isOpen]="isOpen()" (isOpenChange)="onModalOpenChange($event)"
-  (opened)="onOpen()" title="Reprogramar Reserva" size="md">
+  (opened)="onOpen()" [dialog]="true" title="Reprogramar Reserva" size="md">
 
   @if (booking()) {
     <!-- Synthetic booking: id=0 means the backend never persisted a real
