@@ -52,9 +52,11 @@ export interface CrmBlockFieldConfig {
 
 export const CRM_BLOCK_FIELDS: Record<CrmBlockType, CrmBlockFieldConfig[]> = {
   hero: [
+    { key: 'badge', label: 'Insignia superior (Badge)', placeholder: '✨ Tecnología y Calidad' },
     { key: 'title', label: 'Título principal' },
     { key: 'subtitle', label: 'Subtítulo', multiline: true },
-    { key: 'cta_label', label: 'Texto del botón', placeholder: 'Ver catálogo' },
+    { key: 'cta_label', label: 'Texto del botón principal', placeholder: 'Ver catálogo de productos' },
+    { key: 'secondary_cta_label', label: 'Texto botón secundario', placeholder: 'Contactar un asesor' },
   ],
   features: [
     { key: 'title', label: 'Título de la sección' },

@@ -39,6 +39,7 @@ import { FooterCtaBlockComponent } from '../footer-cta-block.component';
         <app-hero-block
           [props]="block().props"
           (ctaClick)="ctaClick.emit()"
+          (secondaryCtaClick)="secondaryCtaClick.emit()"
         />
       }
       @case ('features') {
@@ -73,6 +74,7 @@ export class BlockRendererComponent {
   /** Base del ecommerce para deep-links de productos (opcional). */
   readonly baseUrl = input<string | null>(null);
   readonly ctaClick = output<void>();
+  readonly secondaryCtaClick = output<void>();
 
   readonly label = computed(() => CRM_BLOCK_LABELS[this.block().type]);
 }
