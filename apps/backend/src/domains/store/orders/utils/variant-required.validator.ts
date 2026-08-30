@@ -106,9 +106,25 @@ export async function assertVariantRequiredForPrepared(
   }
 
   for (const item of items) {
+    // Items sin `product_id` son líneas custom (recargas, descuentos, fees).
+    // El caller decide su persistencia por su cuenta; este helper solo
+    // aplica el invariante de variante para líneas que referencian un
+    // producto del catálogo.
     if (!item.product_id) continue;
     const product = productById.get(item.product_id);
-    if (!product) continue; // productos inexistentes los rechaza el caller
+    // `prisma` (sea `this.prisma` de orders.service o `tx` de
+    // payments.service) está escopeado por tienda vía StorePrismaService:
+    // `products.store_id` es NOT NULL en el schema y StorePrismaService
+    // sobreescribe `$transaction` para que el `tx` herede el scoping
+    // (store-prisma.service.ts:1806-1807). Si el `findUnique` retorna
+    // null es porque el producto pertenece a OTRA tienda (o no existe);
+    // en ambos casos no es vendible desde este comercio.
+    if (!product) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        `El producto #${item.product_id} no existe en este comercio.`,
+      );
+    }
     if (
       product.product_type === 'prepared' &&
       product.product_variants.length > 0 &&
