@@ -150,6 +150,8 @@ export class StoreRolesController {
   }
 
   @Post()
+  @UseGuards(PermissionsGuard)
+  @Permissions('store:users:update')
   @ApiOperation({ summary: 'Create a custom role' })
   @ApiResponse({ status: 201, description: 'Role created successfully' })
   @ApiResponse({ status: 409, description: 'Role name already exists' })
@@ -164,6 +166,8 @@ export class StoreRolesController {
   }
 
   @Patch(':id')
+  @UseGuards(PermissionsGuard)
+  @Permissions('store:users:update')
   @ApiOperation({ summary: 'Update a role' })
   @ApiResponse({ status: 200, description: 'Role updated successfully' })
   @ApiResponse({ status: 403, description: 'System roles cannot be modified' })
@@ -182,6 +186,8 @@ export class StoreRolesController {
   }
 
   @Delete(':id')
+  @UseGuards(PermissionsGuard)
+  @Permissions('store:users:update')
   @ApiOperation({ summary: 'Delete a role' })
   @ApiResponse({ status: 200, description: 'Role deleted successfully' })
   @ApiResponse({ status: 403, description: 'System roles cannot be deleted' })
@@ -197,6 +203,8 @@ export class StoreRolesController {
   }
 
   @Post(':id/permissions')
+  @UseGuards(PermissionsGuard)
+  @Permissions('store:users:update')
   @ApiOperation({ summary: 'Assign store:* permissions to a role' })
   @ApiResponse({
     status: 200,
@@ -227,6 +235,8 @@ export class StoreRolesController {
   }
 
   @Delete(':id/permissions')
+  @UseGuards(PermissionsGuard)
+  @Permissions('store:users:update')
   @ApiOperation({ summary: 'Remove permissions from a role' })
   @ApiResponse({ status: 200, description: 'Permissions removed successfully' })
   @ApiResponse({
