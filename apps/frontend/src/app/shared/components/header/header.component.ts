@@ -132,7 +132,7 @@ import { AuthFacade } from '../../../core/store/auth/auth.facade';
               </div>
             }
             <!-- Antes <h1>. Bajado a <h2> en C.1 — el H1 de página vive
-                 en `<app-sticky-header>` (lo emite cada vista privada que
+                 en app-sticky-header (lo emite cada vista privada que
                  lo usa). El nombre del módulo no es título de página;
                  dejarlo como <h1> duplicaba el landmark en todas las
                  vistas y rompía la regla "una sola H1 por página".
