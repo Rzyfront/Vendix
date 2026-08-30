@@ -422,25 +422,41 @@ import { dataUrlToFile } from '../../../../../../app/shared/utils/data-url.util'
 
               @for (acc of bankConfigAccounts(); track $index) {
                 <div class="cfg-bank-row">
-                  <input
-                    class="cfg-bank-in"
-                    placeholder="Nombre del banco"
-                    [value]="acc.bank_name ?? ''"
-                    (input)="bankConfigAccountInput($event, $index, 'bank_name')"
-                  />
-                  <input
-                    class="cfg-bank-in"
-                    placeholder="Número de cuenta"
-                    [value]="acc.account_number ?? ''"
-                    (input)="bankConfigAccountInput($event, $index, 'account_number')"
-                  />
-                  <input
-                    class="cfg-bank-in"
-                    placeholder="Nombre de la cuenta (opcional)"
-                    [value]="acc.name ?? ''"
-                    (input)="bankConfigAccountInput($event, $index, 'name')"
-                  />
-                  <div class="cfg-bank-image">
+                  <!-- Cada campo lleva su rótulo encima: el placeholder
+                       desaparece al escribir y la fila se quedaba sin decir
+                       qué es cada casilla. La fila es flex-wrap, no grid, así
+                       que el rótulo va dentro del campo (una cabecera común
+                       se desalinearía al envolver). -->
+                  <label class="cfg-bank-field">
+                    <span class="cfg-bank-field-label">Banco</span>
+                    <input
+                      class="cfg-bank-in"
+                      placeholder="Bancolombia, NEQUI, Davivienda..."
+                      [value]="acc.bank_name ?? ''"
+                      (input)="bankConfigAccountInput($event, $index, 'bank_name')"
+                    />
+                  </label>
+                  <label class="cfg-bank-field">
+                    <span class="cfg-bank-field-label">Número de cuenta o llave</span>
+                    <input
+                      class="cfg-bank-in"
+                      placeholder="123-456789-00, correo, celular o llave"
+                      [value]="acc.account_number ?? ''"
+                      (input)="bankConfigAccountInput($event, $index, 'account_number')"
+                    />
+                  </label>
+                  <label class="cfg-bank-field">
+                    <span class="cfg-bank-field-label">Titular</span>
+                    <input
+                      class="cfg-bank-in"
+                      placeholder="A nombre de quién está la cuenta"
+                      [value]="acc.name ?? ''"
+                      (input)="bankConfigAccountInput($event, $index, 'name')"
+                    />
+                  </label>
+                  <div class="cfg-bank-field cfg-bank-field--image">
+                    <span class="cfg-bank-field-label">Imagen 21:9</span>
+                    <div class="cfg-bank-image">
                     @if (signedPreviewUrl(acc, $index); as preview) {
                       <img
                         [src]="preview"
@@ -461,6 +477,7 @@ import { dataUrlToFile } from '../../../../../../app/shared/utils/data-url.util'
                       ></app-icon>
                       {{ acc.image_s3_key ? 'Cambiar imagen' : 'Subir imagen' }}
                     </button>
+                    </div>
                   </div>
                   <button
                     type="button"
@@ -682,10 +699,33 @@ import { dataUrlToFile } from '../../../../../../app/shared/utils/data-url.util'
         font-weight: 600;
         color: var(--color-text-secondary);
       }
+      /* OJO: este bloque vive dentro de un template literal de styles.
+         Nada de acentos graves aqui dentro: uno solo lo cierra y Angular
+         responde con "Code: 1010" sin nombrar el archivo. */
+      .cfg-bank-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        flex: 1 1 140px;
+        min-width: 0;
+      }
+      .cfg-bank-field--image {
+        flex: 0 0 auto;
+      }
+      .cfg-bank-field-label {
+        font-size: 11px;
+        font-weight: 600;
+        line-height: 1.2;
+        color: var(--color-text-secondary, #6b7280);
+      }
+      .cfg-bank-field .cfg-bank-in {
+        flex: none;
+        width: 100%;
+      }
       .cfg-bank-row {
         display: flex;
         flex-wrap: wrap;
-        align-items: center;
+        align-items: flex-end;
         gap: 8px;
         padding: 8px;
         background: var(--color-surface-secondary, #F3F4F6);

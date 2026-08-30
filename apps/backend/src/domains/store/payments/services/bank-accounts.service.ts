@@ -131,6 +131,7 @@ export class BankAccountsService {
         account_number: true,
         status: true,
         store_id: true,
+        image_s3_key: true,
       },
     });
 
@@ -141,14 +142,34 @@ export class BankAccountsService {
         );
       }
       if (existing.status !== 'active') {
-        return this.prisma.bank_accounts.update({
+        const reactivated = await this.prisma.bank_accounts.update({
           where: { id: existing.id },
-          data: { status: 'active' },
-          select: { id: true, name: true, bank_name: true, account_number: true },
+          data: {
+            status: 'active',
+            // El alta puede traer imagen nueva; si no la trae, se conserva la
+            // que la cuenta ya tenía antes de cerrarse.
+            ...(dto.image_s3_key !== undefined && {
+              image_s3_key: dto.image_s3_key,
+            }),
+          },
+          select: {
+            id: true,
+            name: true,
+            bank_name: true,
+            account_number: true,
+            image_s3_key: true,
+          },
         });
+        return {
+          ...reactivated,
+          image_url: await this.signImageUrl(reactivated.image_s3_key),
+        };
       }
       const { status: _status, store_id: _storeId, ...projection } = existing;
-      return projection;
+      return {
+        ...projection,
+        image_url: await this.signImageUrl(existing.image_s3_key),
+      };
     }
 
     const account = await this.prisma.bank_accounts.create({
@@ -160,11 +181,27 @@ export class BankAccountsService {
         account_number: dto.account_number,
         bank_code: dto.bank_code ?? null,
         currency: dto.currency ?? 'COP',
+        // Sin esto la imagen 21:9 de una cuenta NUEVA se perdía en silencio: el
+        // DTO la acepta y el editor la manda en el POST inicial (la cuenta aún
+        // no tiene id, así que no hay PATCH que la salve), pero el `data` no la
+        // escribía. Toda cuenta recién creada quedaba sin imagen.
+        ...(dto.image_s3_key !== undefined && {
+          image_s3_key: dto.image_s3_key,
+        }),
       },
-      select: { id: true, name: true, bank_name: true, account_number: true },
+      select: {
+        id: true,
+        name: true,
+        bank_name: true,
+        account_number: true,
+        image_s3_key: true,
+      },
     });
 
-    return account;
+    return {
+      ...account,
+      image_url: await this.signImageUrl(account.image_s3_key),
+    };
   }
 
   async update(id: number, dto: UpdateBankAccountDto): Promise<BankAccountOptionDto> {

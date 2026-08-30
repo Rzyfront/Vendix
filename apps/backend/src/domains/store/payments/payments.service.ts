@@ -28,6 +28,7 @@ import {
   UpdateOrderWithPaymentDto,
 } from './dto';
 import { PaymentError, PaymentErrorCodes, LEGACY_TO_NEW } from './utils';
+import { assertVariantRequiredForPrepared } from '../orders/utils/variant-required.validator';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { buildTaxBreakdown } from 'src/common/interfaces/tax-breakdown.interface';
 import {
@@ -2946,6 +2947,14 @@ export class PaymentsService {
       dto.items && dto.items.length > 0
         ? await resolveTierSnapshotsForItems(tx, dto.items, context)
         : [];
+
+    // ERR-07 / DB-14 — invariante "prepared + variantes exige variante".
+    // El POS payment flow NO la aplicaba antes (este fue el camino que
+    // slipped por `createOrder` para oi_id=1660). Mismo helper que
+    // `orders.service.ts create/updateOrderItems/updateOrderFromEditor`.
+    if (dto.items && dto.items.length > 0) {
+      await assertVariantRequiredForPrepared(tx, dto.items);
+    }
 
     // Build the new order_items from the POS payload (if any).
     const newItems =

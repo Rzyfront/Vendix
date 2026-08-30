@@ -18,6 +18,7 @@ import { OrderStatsDto } from './dto/order-stats.dto';
 import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { resolveCostPrice } from './utils/resolve-cost-price';
+import { assertVariantRequiredForPrepared } from './utils/variant-required.validator';
 import { SettingsService } from '../settings/settings.service';
 import { ScheduleValidationService } from '../settings/schedule-validation.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -146,6 +147,15 @@ export class OrdersService {
       context,
     );
 
+    // ERR-07 / DB-14 — invariante "prepared + variantes exige variante".
+    // Resuelve los productos una sola vez (batch) y aplica el check. El
+    // mapa devuelto se reutiliza abajo para snapshots de `name` /
+    // `product_type` sin una segunda consulta por línea.
+    const variantCheckProductById = await assertVariantRequiredForPrepared(
+      this.prisma,
+      createOrderDto.items,
+    );
+
     // Precio por N unidades de stock: el producto publica "$5.000 por metro" y
     // la línea llega en milímetros. El total lo recalcula el servidor porque la
     // escala es del producto y el cliente puede traer la aritmética vieja.
@@ -267,34 +277,13 @@ export class OrdersService {
             order_items: {
               create: await Promise.all(
                 createOrderDto.items.map(async (item, index) => {
-                  // Resolve product type for snapshot
+                  // El invariant ERR-07 ya fue enforced por
+                  // `assertVariantRequiredForPrepared` arriba; aquí solo
+                  // reusamos el mapa resuelto para snapshots de `name` /
+                  // `product_type` (evita una segunda consulta por línea).
                   const product = item.product_id
-                    ? await this.prisma.products.findUnique({
-                        where: { id: item.product_id },
-                        select: {
-                          product_type: true,
-                          name: true,
-                          // ERR-07 — solo interesa SI tiene variantes.
-                          product_variants: { select: { id: true }, take: 1 },
-                        },
-                      })
+                    ? variantCheckProductById.get(item.product_id) ?? null
                     : null;
-                  // CP-POLLO-ARABE-727 (ERR-07) — un `prepared` con variantes no
-                  // puede entrar sin declarar cuál: la comanda saldría con el
-                  // producto base y el inventario se descontaría contra la fila
-                  // sin variante (invariante DB-14). Se aplica al NACIMIENTO de
-                  // la línea, no en el editor: exigirlo también al editar dejaría
-                  // inguardable cualquier orden histórica que ya viole DB-14.
-                  if (
-                    product?.product_type === 'prepared' &&
-                    product.product_variants.length > 0 &&
-                    item.product_variant_id == null
-                  ) {
-                    throw new VendixHttpException(
-                      ErrorCodes.PRODUCT_VARIANT_REQUIRED,
-                      `El producto "${product.name}" tiene variantes: selecciona una.`,
-                    );
-                  }
                   const itemType =
                     item.item_type === 'product'
                       ? product?.product_type || 'physical'
@@ -643,6 +632,21 @@ export class OrdersService {
             store_payment_method: {
               include: { system_payment_method: true },
             },
+            // QUI-728 (E.2) — cuenta de destino de la transferencia, para que
+            // el detalle de orden responda "¿a qué cuenta entró este dinero?"
+            // sin ir a conciliación. Proyección MÍNIMA a propósito: nunca
+            // `current_balance` / `opening_balance` / `chart_account_id` /
+            // `column_mapping` — el saldo bancario no tiene por qué viajar a
+            // una pantalla cuyo único propósito es identificar la cuenta.
+            // Misma proyección que el selector de cobro del payment-collector.
+            bank_account: {
+              select: {
+                id: true,
+                name: true,
+                bank_name: true,
+                account_number: true,
+              },
+            },
           },
           orderBy: { created_at: 'asc' },
         },
@@ -791,7 +795,7 @@ export class OrdersService {
   async getPaymentReceiptUrl(
     orderId: number,
     paymentId: number,
-  ): Promise<{ url: string; expires_at: string; content_type?: string }> {
+  ): Promise<{ url: string; expires_at: string; content_type: string | null }> {
     const payment = await this.prisma.payments.findFirst({
       where: { id: paymentId, order_id: orderId },
       select: {
@@ -811,15 +815,19 @@ export class OrdersService {
     }
 
     const TTL_SECONDS = 300;
-    const url = await this.s3Service.getPresignedUrl(
-      payment.receipt_s3_key,
-      TTL_SECONDS,
-    );
+    const [url, head] = await Promise.all([
+      this.s3Service.getPresignedUrl(payment.receipt_s3_key, TTL_SECONDS),
+      this.s3Service.headObject(payment.receipt_s3_key),
+    ]);
     const expires_at = new Date(
       Date.now() + TTL_SECONDS * 1000,
     ).toISOString();
 
-    return { url, expires_at };
+    // El frontend usa `content_type` para decidir si previsualiza como imagen
+    // (`<img>`) o incrusta como PDF (`<iframe>`/`<embed>`). Se obtiene del HEAD
+    // del objeto S3 — no se persiste en BD para no añadir migración. Si el HEAD
+    // falla (objeto borrado, red) devolvemos `null` y el frontend cae al PDF.
+    return { url, expires_at, content_type: head?.contentType ?? null };
   }
 
   async update(id: number, updateOrderDto: UpdateOrderDto) {
@@ -1048,6 +1056,12 @@ export class OrdersService {
       dto.total_amount ?? subtotal + taxAmount - discountAmount;
 
     return this.prisma.$transaction(async (tx) => {
+      // ERR-07 / DB-14 — invariante "prepared + variantes exige variante".
+      // Único enforcement centralizado (mismo helper que `create` y
+      // `updateOrderFromEditor`); si queda duplicado en dos sitios,
+      // vuelve a divergir como ya pasó (Round 3 minor #15).
+      await assertVariantRequiredForPrepared(tx, dto.items);
+
       // Release old reservations before deleting items
       const existingOrder = await tx.orders.findUnique({
         where: { id },
@@ -1855,6 +1869,11 @@ export class OrdersService {
     // 13) Transacción atómica: claim + replace items + order_promotions +
     //     cupón + reservas de stock + commit.
     const result = await this.prisma.$transaction(async (tx) => {
+      // 13-pre) ERR-07 / DB-14 — invariante "prepared + variantes exige
+      //        variante". Mismo helper que `create` y `updateOrderItems`:
+      //        una sola definición para que no vuelva a divergir.
+      await assertVariantRequiredForPrepared(tx, dto.items);
+
       // 13a) Claim atómico del estado. Si otro operador cambió la orden
       //      entre el findFirst y acá, count=0 → 409.
       //
@@ -2551,6 +2570,16 @@ export class OrdersService {
               store_payment_method: {
                 include: { system_payment_method: true },
               },
+              // QUI-728 (E.2) — ver la nota de `findOne`: proyección mínima de
+              // la cuenta de destino, sin saldos ni cuenta contable.
+              bank_account: {
+                select: {
+                  id: true,
+                  name: true,
+                  bank_name: true,
+                  account_number: true,
+                },
+              },
             },
             orderBy: { created_at: 'asc' },
           },
@@ -2895,6 +2924,21 @@ export class OrdersService {
           include: {
             store_payment_method: {
               include: { system_payment_method: true },
+            },
+            // QUI-728 (E.2) — cuenta de destino de la transferencia, para que
+            // el detalle de orden responda "¿a qué cuenta entró este dinero?"
+            // sin ir a conciliación. Proyección MÍNIMA a propósito: nunca
+            // `current_balance` / `opening_balance` / `chart_account_id` /
+            // `column_mapping` — el saldo bancario no tiene por qué viajar a
+            // una pantalla cuyo único propósito es identificar la cuenta.
+            // Misma proyección que el selector de cobro del payment-collector.
+            bank_account: {
+              select: {
+                id: true,
+                name: true,
+                bank_name: true,
+                account_number: true,
+              },
             },
           },
           orderBy: { created_at: 'asc' },

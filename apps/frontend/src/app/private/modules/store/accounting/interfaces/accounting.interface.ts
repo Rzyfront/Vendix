@@ -334,6 +334,18 @@ export interface UnassignedPayment {
   customer_alias: string | null;
 }
 
+/**
+ * El listado de pagos sin asignar agrega `total_amount` a la meta: es la suma
+ * del CONJUNTO filtrado, no de la página. Sumarlo en el cliente sobre las filas
+ * visibles daba el total de 25 de 80 pagos.
+ */
+export interface UnassignedPaymentsResponse
+  extends PaginatedApiResponse<UnassignedPayment> {
+  meta: PaginatedApiResponse<UnassignedPayment>['meta'] & {
+    total_amount: number;
+  };
+}
+
 // ── Fixed Assets ────────────────────────────────────────────────
 export interface FixedAssetCategory {
   id: number;

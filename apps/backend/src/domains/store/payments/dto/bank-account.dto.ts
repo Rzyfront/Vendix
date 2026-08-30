@@ -33,10 +33,19 @@ export class CreateBankAccountDto {
   @MaxLength(100)
   name: string;
 
+  /**
+   * Alfanumérico a propósito. En Colombia ya no se transfiere solo a un
+   * número de cuenta: las **llaves** de Transfiya/Bre-B admiten correo,
+   * celular, documento y cadenas alfanuméricas con símbolos (`@`, `.`, `+`,
+   * `-`, `_`, `#`, `/`). La validación anterior era `^[\d\s-]*$` y rechazaba
+   * cualquier llave que no fuera dígitos —es decir, el caso que hoy más se
+   * usa—. Lo único que se exige es que no venga en blanco; el formato lo
+   * define el banco, no nosotros, y `MaxLength(50)` ya acota el tamaño.
+   */
   @IsString()
   @MaxLength(50)
-  @Matches(/^[\d\s-]*$/, {
-    message: 'El número de cuenta solo puede contener dígitos, espacios y guiones',
+  @Matches(/\S/, {
+    message: 'El número de cuenta o llave no puede estar vacío',
   })
   account_number: string;
 
@@ -71,9 +80,16 @@ export class UpdateBankAccountDto {
   @MaxLength(100)
   name?: string;
 
+  // Misma regla que en create: alfanumérico libre (llaves Bre-B/Transfiya),
+  // solo se prohíbe el valor en blanco. Antes update no validaba nada
+  // mientras create exigía dígitos: la asimetría dejaba pasar por PATCH lo
+  // que POST rechazaba.
   @IsOptional()
   @IsString()
   @MaxLength(50)
+  @Matches(/\S/, {
+    message: 'El número de cuenta o llave no puede estar vacío',
+  })
   account_number?: string;
 
   @IsOptional()

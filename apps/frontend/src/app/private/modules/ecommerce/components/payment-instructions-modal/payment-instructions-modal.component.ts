@@ -297,6 +297,16 @@ type InstructionField = {
            ~390px de ancho, 21:9 daría menos alto que el propio contenido del
            hero y el título quedaría recortado. */
         min-height: 168px;
+        /* Techo atado al alto de la ventana. El modal vive dentro de un panel
+           max-h-[90vh] con el cuerpo en overflow-y-auto: sin este techo, un
+           hero de 21:9 sobre un modal "md" (~655px) mide ~281px y empuja el
+           bloque del comprobante fuera de la vista, que es justo el scroll que
+           no debe existir. Con 26vh el ratio se respeta ENTERO a partir de
+           ~1080px de alto (26vh = 281px) y solo se recorta —siempre en banda
+           ancha, por el object-fit: cover— en ventanas más bajas.
+           OJO: nada de acentos graves aquí dentro; este bloque es un template
+           literal y un solo backtick lo cierra (error NG1010). */
+        max-height: min(280px, 26vh);
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -446,8 +456,8 @@ type InstructionField = {
       .pi-body {
         display: flex;
         flex-direction: column;
-        gap: 0.875rem;
-        padding: 1.125rem 1.25rem 0.5rem;
+        gap: 0.75rem;
+        padding: 0.875rem 1.25rem 0.5rem;
         background: var(--color-surface);
       }
 
@@ -560,9 +570,10 @@ type InstructionField = {
 
       /* ---------- UPLOAD ---------- */
       .pi-upload-hint {
-        font-size: 0.8125rem;
+        font-size: 0.75rem;
+        line-height: 1.35;
         color: #6b7280;
-        margin: 0 0 0.625rem;
+        margin: 0 0 0.5rem;
       }
 
       .pi-dropzone-wrap {
@@ -794,6 +805,49 @@ type InstructionField = {
         }
       }
 
+      /* Ventanas bajas: el panel del modal mide 90vh y el bloque del
+         comprobante es lo último del cuerpo. Aquí se recorta lo prescindible
+         —el icono del hero, la pista de ayuda (que el propio dropzone ya
+         repite) y el aire entre tarjetas— para que el bloque de adjuntar
+         comprobante siga alcanzable sin scroll.
+         Va DESPUÉS del bloque de 480px a propósito: en un teléfono apaisado
+         aplican los dos y debe ganar la compactación por altura. */
+      @media (max-height: 860px) {
+        /* El 21:9 completo solo cabe en pantallas altas. Por debajo de 860px
+           el hero se recorta a 22vh (banda mas ancha, object-fit: cover) para
+           que el bloque de comprobante quede alcanzable sin scroll. A partir
+           de 861px vuelve el tope de 26vh, que a 1080px da los 280px del
+           21:9 exacto sobre el ancho del modal. */
+        .pi-hero.has-image {
+          min-height: 132px;
+          max-height: min(280px, 22vh);
+        }
+        /* Shorthand a proposito: el base declara la propiedad padding
+           completa y un longhand no siempre gana el orden de cascada. */
+        .pi-hero {
+          padding: 0.75rem 1.5rem;
+        }
+        /* OJO: la cuenta SIN imagen es el caso alto, no el bajo. Su hero de
+           icono mide menos que el hero 21:9, pero la tarjeta de datos que la
+           acompana trae mas campos (tipo, numero, titular, NIT) y ahi es donde
+           el cuerpo se desborda. Medido: 13px de scroll en Bancolombia y 0 en
+           NEQUI. Por eso se recorta el hero de icono, no el de imagen. */
+        .pi-hero-icon {
+          width: 48px;
+          height: 48px;
+        }
+        .pi-body {
+          gap: 0.625rem;
+          padding-top: 0.75rem;
+        }
+        .pi-card {
+          padding: 0.625rem 0.875rem;
+        }
+        .pi-upload-hint {
+          display: none;
+        }
+      }
+
       @media (prefers-reduced-motion: reduce) {
         .pi-hero-icon,
         .pi-hero-title,
@@ -906,23 +960,30 @@ export class PaymentInstructionsModalComponent {
     // Camino nuevo: derivar de la cuenta seleccionada.
     const acc = this.selectedAccount();
     if (acc) {
-      const fields: InstructionField[] = [
-        {
+      const fields: InstructionField[] = [];
+
+      // El banco ya lo anuncia el selector de cuenta, así que repetirlo aquí
+      // es ruido. Pero el selector solo se renderiza con dos o más cuentas
+      // (`accounts().length > 1`): con una sola cuenta no hay dónde más leerlo
+      // —el hero es texto fijo— y omitirlo dejaría al comprador sin saber a
+      // qué banco transferir. Por eso la condición es la del selector, no un
+      // borrado incondicional.
+      if (this.accounts().length <= 1) {
+        fields.push({
           key: 'bank_name',
           label: 'Banco',
           value: acc.bank_name,
           copyable: true,
-        },
-        {
-          key: 'account_number',
-          label: 'Número de cuenta',
-          value: acc.account_number,
-          copyable: true,
-        },
-      ];
-      // Titular solo si difiere del nombre del banco (evita duplicado visual
-      // cuando el banco se autodenomina como titular, p. ej. NEQUI).
-      if (acc.name && acc.name !== acc.bank_name) {
+        });
+      }
+
+      // El titular se muestra SIEMPRE. No hay columna dedicada en
+      // `bank_accounts`: el titular es `name`. Antes se ocultaba cuando
+      // coincidía con `bank_name` para evitar un duplicado visual, y eso
+      // dejaba sin titular justo a las cuentas cuyo nombre es el del banco
+      // (NEQUI). Quien transfiere necesita el titular para confirmar el
+      // destino, así que la comparación se elimina en vez de listar bancos.
+      if (acc.name) {
         fields.push({
           key: 'name',
           label: 'Titular',
@@ -930,6 +991,14 @@ export class PaymentInstructionsModalComponent {
           copyable: true,
         });
       }
+
+      fields.push({
+        key: 'account_number',
+        label: 'Número de cuenta',
+        value: acc.account_number,
+        copyable: true,
+      });
+
       return fields;
     }
 

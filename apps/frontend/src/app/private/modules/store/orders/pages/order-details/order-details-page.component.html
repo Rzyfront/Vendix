@@ -1933,6 +1933,25 @@
                           '—'
                       }}
                     </p>
+                    <!-- QUI-728 (E.2) — cuenta de destino de la transferencia.
+                         Solo aparece cuando el pago la tiene: los pagos en
+                         efectivo no la llevan, y las transferencias sin
+                         `bank_account_id` quedan en "Pagos sin asignar" hasta
+                         que alguien las asigne desde conciliación. -->
+                    @if ($any(payment).bank_account; as bankAccount) {
+                      <p
+                        class="text-[11px] text-text-secondary mt-1 flex items-center gap-1 flex-wrap"
+                      >
+                        <app-icon name="bank" size="12"></app-icon>
+                        <span class="font-medium"
+                          >{{ bankAccount.bank_name }} ·
+                          {{ bankAccount.name }}</span
+                        >
+                        <span class="text-gray-400">{{
+                          bankAccount.account_number
+                        }}</span>
+                      </p>
+                    }
                     <p class="text-[10px] text-gray-400 mt-1">
                       {{ formatDate(payment.created_at) }}
                     </p>

@@ -3633,6 +3633,19 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'This bank transaction is already reconciled',
   },
+  /**
+   * No se puede asignar una cuenta bancaria a un pago cuyo método NO liquida
+   * por una cuenta propia (efectivo, contra entrega). El dinero nunca pasó
+   * por una cuenta de la organización: la conciliación bancaria no aplica.
+   * `unassigned-payments.service.ts:assignAccount` lo lanza tras leer el tipo
+   * del método del pago y compararlo contra `METHODS_WITHOUT_BANK_ACCOUNT`.
+   */
+  BANK_RECONCILIATION_CASH_METHOD_REJECTED: {
+    code: 'BANK_RECONCILIATION_CASH_METHOD_REJECTED',
+    httpStatus: 422,
+    devMessage:
+      'A bank account cannot be assigned to a payment whose method does not settle through a bank account (cash, cash_on_delivery).',
+  },
   STATEMENT_PARSE_ERROR: {
     code: 'STATEMENT_PARSE_ERROR',
     httpStatus: 400,

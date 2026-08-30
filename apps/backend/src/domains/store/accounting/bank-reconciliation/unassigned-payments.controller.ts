@@ -43,9 +43,13 @@ export class UnassignedPaymentsController {
   @Get('unassigned')
   @Permissions('store:accounting:bank_reconciliation:read')
   async findUnassigned(@Query() query: QueryUnassignedPaymentsDto) {
-    const { data, total, page, limit } =
+    const { data, total, page, limit, total_amount } =
       await this.unassigned_payments_service.findUnassigned(query);
-    return this.response_service.paginated(data, total, page, limit);
+    const response = this.response_service.paginated(data, total, page, limit);
+    // `createPaginationMeta` es compartido por toda la plataforma: el total en
+    // dinero se agrega aquí, sobre la respuesta ya armada, en vez de tocar el
+    // helper que arma la meta de cada listado del backend.
+    return { ...response, meta: { ...response.meta, total_amount } };
   }
 
   @Get('assignable-accounts')
@@ -62,13 +66,18 @@ export class UnassignedPaymentsController {
     @Param('payment_id') payment_id: string,
     @Body() dto: AssignPaymentAccountDto,
   ) {
-    const result = await this.unassigned_payments_service.assignAccount(
-      +payment_id,
-      dto.bank_account_id,
-    );
+    const { payment, total_amount } =
+      await this.unassigned_payments_service.assignAccount(
+        +payment_id,
+        dto.bank_account_id,
+      );
+    // `data` mantiene la forma del pago (el frontend ya la consume); el monto
+    // total restante va en `meta` para que la tarjeta "Monto Total" se refresque
+    // sin un round-trip extra a `findUnassigned`.
     return this.response_service.success(
-      result,
+      payment,
       'Bank account assigned successfully',
+      { total_amount },
     );
   }
 }

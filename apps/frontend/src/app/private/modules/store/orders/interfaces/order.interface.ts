@@ -313,6 +313,24 @@ export interface Payment {
       processing_mode?: 'DIRECT' | 'ONLINE' | 'ON_DELIVERY';
     };
   };
+  /** QUI-728 (E.1) — id de `bank_accounts` al que entró la transferencia. */
+  bank_account_id?: number | null;
+  /**
+   * QUI-728 (E.2) — cuenta de destino ya resuelta por el detalle de orden.
+   *
+   * Proyección MÍNIMA a propósito (`orders.service.ts` findOne): id, nombre,
+   * banco y número. NUNCA saldos ni cuenta contable — esta pantalla solo
+   * identifica la cuenta, no la concilia. Es `undefined` en todo pago que no
+   * sea transferencia, y también en las transferencias anteriores al fix del
+   * `bank_account_id` que se perdía en el POS: esas quedan en "Pagos sin
+   * asignar" hasta que alguien las asigne a mano.
+   */
+  bank_account?: {
+    id: number;
+    name: string;
+    bank_name: string;
+    account_number: string;
+  } | null;
   users?: {
     id: number;
     first_name: string;

@@ -13,6 +13,7 @@ import {
   AccountingListResponse,
   PaginatedApiResponse,
   UnassignedPayment,
+  UnassignedPaymentsResponse,
   AssignableBankAccount,
 } from '../interfaces/accounting.interface';
 
@@ -178,14 +179,14 @@ export class BankReconciliationService {
     search?: string;
     date_from?: string;
     date_to?: string;
-  }): Observable<PaginatedApiResponse<UnassignedPayment>> {
+  }): Observable<UnassignedPaymentsResponse> {
     const cleanParams: Record<string, any> = {};
     for (const [key, value] of Object.entries(params)) {
       if (value !== undefined && value !== null && value !== '') {
         cleanParams[key] = value;
       }
     }
-    return this.http.get<PaginatedApiResponse<UnassignedPayment>>(
+    return this.http.get<UnassignedPaymentsResponse>(
       this.getApiUrl('payments/unassigned'),
       { params: cleanParams },
     );
