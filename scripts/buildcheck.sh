@@ -31,6 +31,23 @@ NEED_FE="${BUILDCHECK_NEED_FE:-2560}"
 NEED_DEEP="${BUILDCHECK_NEED_DEEP:-4096}"
 NEED_TEST="${BUILDCHECK_NEED_TEST:-3072}"
 
+# npm decide por su cuenta si iza un binario de workspace a la raíz o lo deja
+# anidado en apps/frontend/node_modules/.bin. El 2026-08-30, al alinear
+# @angular/cli de ^21 a ^20.3, `ng` se movió de la raíz al workspace y este
+# script —que fijaba la ruta de la raíz— dejó de encontrarlo. La ruta no es un
+# hecho estable: hay que resolverla.
+resolve_bin() {
+  local name="$1" c
+  for c in "$ROOT/node_modules/.bin/$name" \
+           "$ROOT/apps/frontend/node_modules/.bin/$name" \
+           "$ROOT/apps/backend/node_modules/.bin/$name"; do
+    [ -x "$c" ] && { printf '%s' "$c"; return 0; }
+  done
+  echo "buildcheck: no encuentro el binario '$name' en ningún node_modules/.bin." >&2
+  echo "  ¿Falta un npm install? Buscado en raíz, apps/frontend y apps/backend." >&2
+  return 1
+}
+
 # PGID del propio script: nunca lo matamos.
 SELF_PGID="$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')"
 
@@ -236,10 +253,11 @@ preflight() {
 ✖ ABORTADO antes de empezar: memoria libre insuficiente para "$label".
   Disponible: ${avail} MB — necesario: ${need} MB
 
-  La VM de Docker retiene su RAM aunque los contenedores estén ociosos, así que
-  con el stack dev arriba el host queda sin presupuesto. Opciones:
+  Dos consumidores se reparten la RAM: la VM de Docker la retiene aunque los
+  contenedores estén ociosos, y el `ng serve` NATIVO (fuera de Docker desde el
+  2026-08-30) es el proceso más pesado del host. Opciones:
 
-    docker compose stop frontend     # libera el contenedor más pesado (mem_limit 6g)
+    pkill -f 'ng serve'              # libera el proceso más pesado (~4-5 GB, nativo)
     docker compose stop              # libera todo el stack dev
     bash scripts/buildcheck.sh --top # ver qué se está comiendo la RAM
     ... --force                      # correr igual, asumiendo el swap
@@ -323,7 +341,7 @@ if [ "$TARGET_FE" -eq 1 ]; then
     if preflight "$NEED_DEEP" "frontend-bundle"; then
       # NG_BUILD_MAX_WORKERS=2: el bundler de Angular abre un pool por cores.
       run_step frontend-bundle \
-        bash -c "cd '$ROOT/apps/frontend' && NG_BUILD_MAX_WORKERS=2 exec node '--max-old-space-size=$FE_MEM' '$ROOT/node_modules/.bin/ng' build --configuration buildcheck"
+        bash -c "cd '$ROOT/apps/frontend' && NG_BUILD_MAX_WORKERS=2 exec node '--max-old-space-size=$FE_MEM' '$(resolve_bin ng)' build --configuration buildcheck"
       rm -rf "$ROOT/apps/frontend/dist/buildcheck"
     else
       FAILED="$FAILED frontend-bundle(preflight)"
@@ -331,7 +349,7 @@ if [ "$TARGET_FE" -eq 1 ]; then
   else
     if preflight "$NEED_FE" "frontend-typecheck"; then
       run_step frontend-typecheck \
-        bash -c "cd '$ROOT/apps/frontend' && exec node '--max-old-space-size=$FE_MEM' '$ROOT/node_modules/.bin/ngc' -p tsconfig.buildcheck.json --pretty false"
+        bash -c "cd '$ROOT/apps/frontend' && exec node '--max-old-space-size=$FE_MEM' '$(resolve_bin ngc)' -p tsconfig.buildcheck.json --pretty false"
     else
       FAILED="$FAILED frontend-typecheck(preflight)"
     fi
