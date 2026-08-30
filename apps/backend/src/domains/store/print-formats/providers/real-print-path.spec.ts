@@ -433,8 +433,17 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
       discount_amount: 0,
       tax_amount: 19000,
       grand_total: 119000,
+      // QUI-751 — antes mockeaba `order_taxes: []`, una relación que NO existe
+      // en `schema.prisma`. Eso era la razón por la que el bug del include
+      // (también inexistente en `pos-sale-ticket.provider.ts`) pasaba este
+      // spec en verde: el mock satisfacía la consulta sin que Prisma
+      // validara nada. Ahora el fixture refleja la forma REAL: líneas con su
+      // `order_item_taxes[]`. Sin líneas, la agregación devuelve [].
+      // ESTE TEST NO CUBRE: que la agregación de `aggregateTaxes` sume
+      // `tax_amount` por `(tax_name, tax_rate)` ni que derive la base como
+      // `tax_amount / tax_rate` — probar eso requiere un mock con varias
+      // líneas y tasas distintas. Lo dejo declarado, no disfrazado de verde.
       order_items: [],
-      order_taxes: [],
       users: null,
       stores: {
         name: 'Tienda Test',

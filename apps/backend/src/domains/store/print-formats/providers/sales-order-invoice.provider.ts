@@ -25,8 +25,11 @@ export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
     const order = await this.prisma.orders.findFirst({
       where: { id: orderId, store_id: storeId },
       include: {
-        order_items: true,
-        order_taxes: true,
+        // QUI-751 — el impuesto vive a nivel de línea (`order_item_taxes`),
+        // no existe la relación `order_taxes`. Antes del fix esto compilaba
+        // porque TypeScript no valida nombres de `include` contra Prisma, pero
+        // la 1ª llamada runtime hubiera sido `PrismaClientValidationError` 500.
+        order_items: { include: { order_item_taxes: true } },
         users: true,
         addresses_orders_shipping_address_idToaddresses: true,
         stores: {
@@ -67,14 +70,7 @@ export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
       total_price_formatted: `$${Number(it.total_price || 0).toLocaleString('es-CO')}`,
     }));
 
-    const taxes = (order.order_taxes || []).map((t: any) => ({
-      name: t.tax_name || 'IVA',
-      rate: Number(t.tax_rate || 0),
-      base_amount: Number(t.taxable_amount || 0),
-      tax_amount: Number(t.tax_amount || 0),
-      base_formatted: `$${Number(t.taxable_amount || 0).toLocaleString('es-CO')}`,
-      tax_formatted: `$${Number(t.tax_amount || 0).toLocaleString('es-CO')}`,
-    }));
+    const taxes = this.aggregateTaxes(order.order_items);
 
     const subtotal = Number(order.subtotal_amount || 0);
     const discount = Number(order.discount_amount || 0);
@@ -128,6 +124,61 @@ export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
         grand_total_formatted: `$${grandTotal.toLocaleString('es-CO')}`,
       },
     };
+  }
+
+  /**
+   * QUI-751 — agrega los impuestos de línea en uno por cabecera.
+   *
+   * Espejo del helper de `pos-sale-ticket.provider.ts`. Mismo invariante:
+   * la base se deriva `tax_amount / tax_rate` (no `base × tarifa`), la
+   * escala cruda de `rate` se preserva (`Decimal(6,5)` ⇒ 0.19, NO 19),
+   * y se agrupa por `(tax_name, tax_rate)` para que dos tarifas del
+   * mismo tributo no se sumen en una sola fila.
+   */
+  private aggregateTaxes(orderItems: any[]): Array<{
+    name: string;
+    rate: number;
+    base_amount: number;
+    tax_amount: number;
+    base_formatted: string;
+    tax_formatted: string;
+  }> {
+    const grouped = new Map<
+      string,
+      { name: string; rate: number; tax_amount: number; base_amount: number }
+    >();
+
+    for (const item of orderItems || []) {
+      for (const t of item.order_item_taxes || []) {
+        const name = t.tax_name || 'IVA';
+        const rate = Number(t.tax_rate || 0);
+        const taxAmount = Number(t.tax_amount || 0);
+        const key = `${name}|${rate}`;
+
+        const lineBase = rate > 0 ? taxAmount / rate : 0;
+        const existing = grouped.get(key);
+        if (existing) {
+          existing.tax_amount += taxAmount;
+          existing.base_amount += lineBase;
+        } else {
+          grouped.set(key, {
+            name,
+            rate,
+            tax_amount: taxAmount,
+            base_amount: lineBase,
+          });
+        }
+      }
+    }
+
+    return Array.from(grouped.values()).map((g) => ({
+      name: g.name,
+      rate: g.rate,
+      base_amount: g.base_amount,
+      tax_amount: g.tax_amount,
+      base_formatted: `$${g.base_amount.toLocaleString('es-CO')}`,
+      tax_formatted: `$${g.tax_amount.toLocaleString('es-CO')}`,
+    }));
   }
 
   async getSampleData(storeId?: number): Promise<StandardPrintDataModel> {
