@@ -1007,6 +1007,30 @@ export class TableSessionsService {
         where: { id: session.table_id },
         data: { status: 'cleaning', updated_at: new Date() },
       });
+
+      // FIX/ table-close-order: close the bound order so the editor stops
+      // accepting mutations on a paid order. Gateado a estados editables
+      // (draft / created / pending_payment) para no clobber órdenes que ya
+      // están en processing (KDS en curso) o terminales.
+      if (session.order_id) {
+        const orderRow = await tx.orders.findUnique({
+          where: { id: session.order_id },
+          select: { state: true },
+        });
+        if (
+          orderRow &&
+          ['draft', 'created', 'pending_payment'].includes(orderRow.state)
+        ) {
+          await tx.orders.update({
+            where: { id: session.order_id },
+            data: {
+              state: 'finished',
+              completed_at: new Date(),
+              updated_at: new Date(),
+            },
+          });
+        }
+      }
     });
 
     // Notify staff + comensal streams of the close (ONLY on the real

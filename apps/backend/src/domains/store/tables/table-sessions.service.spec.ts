@@ -430,4 +430,144 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       expect(prismaMock.orders.create).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('closeSession (FIX/ table-close-order)', () => {
+    // Helper para armar una session activa con `order_id` mockeado.
+    const mockSession = (overrides: Partial<{ closed_at: Date | null; order_id: number }> = {}) => ({
+      id: 77,
+      table_id: 5,
+      store_id: STORE_ID,
+      order_id: 10,
+      closed_at: null,
+      opened_at: new Date(),
+      opened_by: USER_ID,
+      ...overrides,
+    });
+
+    it('closes the bound order to "finished" when the order is in "draft"', async () => {
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        mockSession(),
+      );
+      prismaMock.table_sessions.update.mockResolvedValue({});
+      prismaMock.tables.update.mockResolvedValue({});
+      prismaMock.orders.findUnique.mockResolvedValue({ state: 'draft' });
+      prismaMock.orders.update.mockResolvedValue({});
+
+      await service.closeSession(77);
+
+      const orderUpdate = prismaMock.orders.update.mock.calls[0][0];
+      expect(orderUpdate.where).toEqual({ id: 10 });
+      expect(orderUpdate.data.state).toBe('finished');
+      expect(orderUpdate.data.completed_at).toBeInstanceOf(Date);
+    });
+
+    it('closes the bound order when the order is in "created"', async () => {
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        mockSession(),
+      );
+      prismaMock.table_sessions.update.mockResolvedValue({});
+      prismaMock.tables.update.mockResolvedValue({});
+      prismaMock.orders.findUnique.mockResolvedValue({ state: 'created' });
+      prismaMock.orders.update.mockResolvedValue({});
+
+      await service.closeSession(77);
+
+      expect(prismaMock.orders.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('closes the bound order when the order is in "pending_payment"', async () => {
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        mockSession(),
+      );
+      prismaMock.table_sessions.update.mockResolvedValue({});
+      prismaMock.tables.update.mockResolvedValue({});
+      prismaMock.orders.findUnique.mockResolvedValue({
+        state: 'pending_payment',
+      });
+      prismaMock.orders.update.mockResolvedValue({});
+
+      await service.closeSession(77);
+
+      expect(prismaMock.orders.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT touch the order when the order is in "processing" (KDS in flight)', async () => {
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        mockSession(),
+      );
+      prismaMock.table_sessions.update.mockResolvedValue({});
+      prismaMock.tables.update.mockResolvedValue({});
+      prismaMock.orders.findUnique.mockResolvedValue({
+        state: 'processing',
+      });
+      prismaMock.orders.update.mockResolvedValue({});
+
+      await service.closeSession(77);
+
+      // orders.update should NOT have been called for state change.
+      // (prismaMock.orders.update may still be called for other fields, but
+      // in this path we expect zero writes to the orders table.)
+      expect(prismaMock.orders.update).not.toHaveBeenCalled();
+    });
+
+    it('does NOT touch the order when it is already "finished" (idempotency)', async () => {
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        mockSession(),
+      );
+      prismaMock.table_sessions.update.mockResolvedValue({});
+      prismaMock.tables.update.mockResolvedValue({});
+      prismaMock.orders.findUnique.mockResolvedValue({ state: 'finished' });
+      prismaMock.orders.update.mockResolvedValue({});
+
+      await service.closeSession(77);
+
+      expect(prismaMock.orders.update).not.toHaveBeenCalled();
+    });
+
+    it('does NOT fail when the session has no order_id', async () => {
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        mockSession({ order_id: undefined as any }),
+      );
+      prismaMock.table_sessions.update.mockResolvedValue({});
+      prismaMock.tables.update.mockResolvedValue({});
+
+      await expect(service.closeSession(77)).resolves.toBeDefined();
+
+      // orders.findUnique should NOT have been queried.
+      expect(prismaMock.orders.findUnique).not.toHaveBeenCalled();
+      // orders.update should NOT have been called.
+      expect(prismaMock.orders.update).not.toHaveBeenCalled();
+    });
+
+    it('is idempotent: a second close on the same session is a no-op', async () => {
+      // First close: session with closed_at = null → proceeds.
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValueOnce(
+        mockSession(),
+      );
+      // Second close: findOne returns the SAME session, but with closed_at
+      // already set → short-circuit at the guard.
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValueOnce(
+        mockSession({ closed_at: new Date() }),
+      );
+
+      prismaMock.table_sessions.update.mockResolvedValue({});
+      prismaMock.tables.update.mockResolvedValue({});
+      prismaMock.orders.findUnique.mockResolvedValue({ state: 'draft' });
+      prismaMock.orders.update.mockResolvedValue({});
+
+      // First close.
+      await service.closeSession(77);
+      expect(prismaMock.orders.update).toHaveBeenCalledTimes(1);
+
+      // Reset mocks and run a second close.
+      prismaMock.orders.update.mockClear();
+      prismaMock.table_sessions.findFirst.mockClear();
+
+      await service.closeSession(77);
+      // No writes happened on the second close.
+      expect(prismaMock.orders.update).not.toHaveBeenCalled();
+      expect(prismaMock.table_sessions.update).not.toHaveBeenCalled();
+      expect(prismaMock.tables.update).not.toHaveBeenCalled();
+    });
+  });
 });
