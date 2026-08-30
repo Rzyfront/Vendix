@@ -2617,17 +2617,32 @@ export class OrderFlowService {
       include: { order_installments: true },
     });
 
-    if (!order) throw new NotFoundException('Order not found');
-    if (order.payment_form !== '2')
-      throw new BadRequestException('Not a credit order');
+    if (!order) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_FIND_001,
+        'La orden no existe en este comercio.',
+      );
+    }
+    if (order.payment_form !== '2') {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_VALIDATE_001,
+        'Esta orden no es de tipo crédito. Solo se pueden condonar cuotas en órdenes a crédito.',
+      );
+    }
 
     const installment = order.order_installments.find(
       (i: any) => i.id === installmentId,
     );
-    if (!installment) throw new NotFoundException('Installment not found');
+    if (!installment) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_FIND_001,
+        'La cuota no existe o no pertenece a esta orden.',
+      );
+    }
     if (installment.state === 'paid' || installment.state === 'forgiven') {
-      throw new BadRequestException(
-        `Installment is already ${installment.state}`,
+      throw new VendixHttpException(
+        ErrorCodes.ORD_STATUS_001,
+        `La cuota ya está en estado terminal (${installment.state}) y no se puede condonar.`,
       );
     }
 

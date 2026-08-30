@@ -2807,7 +2807,7 @@ export class OrderDetailsPageComponent {
             },
             error: (err: any) => {
               this.isProcessingAction.set(false);
-              this.toastService.error(err.error?.message || err.message || 'Error al condonar la cuota');
+              this.toastService.error(parseApiError(err).userMessage);
             },
           });
       });
