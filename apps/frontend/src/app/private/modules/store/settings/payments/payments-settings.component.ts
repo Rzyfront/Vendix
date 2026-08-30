@@ -32,7 +32,10 @@ import {
   CardComponent,
   InputComponent,
   SelectorComponent,
-  AlertBannerComponent} from '../../../../../../app/shared/components/index';
+  AlertBannerComponent,
+  ImageSourceModalComponent} from '../../../../../../app/shared/components/index';
+import { ImageUploadService } from '../../../../../../app/shared/services/image-upload.service';
+import { dataUrlToFile } from '../../../../../../app/shared/utils/data-url.util';
 
 @Component({
   selector: 'app-payments-settings',
@@ -49,7 +52,8 @@ import {
     CardComponent,
     InputComponent,
     SelectorComponent,
-    AlertBannerComponent
+    AlertBannerComponent,
+    ImageSourceModalComponent
 ],
   template: `
     <div class="w-full md:space-y-4">
@@ -436,6 +440,28 @@ import {
                     [value]="acc.name ?? ''"
                     (input)="bankConfigAccountInput($event, $index, 'name')"
                   />
+                  <div class="cfg-bank-image">
+                    @if (signedPreviewUrl(acc, $index); as preview) {
+                      <img
+                        [src]="preview"
+                        alt="Imagen de la cuenta"
+                        class="cfg-bank-image-preview"
+                      />
+                    }
+                    <button
+                      type="button"
+                      class="cfg-bank-image-btn"
+                      (click)="openBankAccountImageModal($index)"
+                      [disabled]="uploadingBankAccountImage"
+                      title="Subir o cambiar la imagen de la cuenta"
+                    >
+                      <app-icon
+                        [name]="acc.image_s3_key ? 'refresh-cw' : 'upload'"
+                        [size]="12"
+                      ></app-icon>
+                      {{ acc.image_s3_key ? 'Cambiar imagen' : 'Subir imagen' }}
+                    </button>
+                  </div>
                   <button
                     type="button"
                     class="cfg-bank-remove"
@@ -463,6 +489,15 @@ import {
         </app-button>
       </div>
     </app-modal>
+
+    <!-- QUI-728 — modal de subida de imagen por cuenta bancaria. -->
+    <app-image-source-modal
+      [isOpen]="bankAccountImageModalIdx() !== null"
+      [singleImage]="true"
+      headerTitle="Imagen de la cuenta"
+      (closed)="closeBankAccountImageModal()"
+      (imagesAdded)="onBankAccountImage($event)"
+    ></app-image-source-modal>
   `,
   styles: [
     `
@@ -679,6 +714,46 @@ import {
         color: var(--danger, #ef4444);
         cursor: pointer;
       }
+      /* QUI-728 — bloque de imagen por cuenta */
+      .cfg-bank-image {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        flex: 0 0 auto;
+      }
+      .cfg-bank-image-preview {
+        height: 32px;
+        width: auto;
+        max-width: 80px;
+        object-fit: contain;
+        background: var(--color-surface, #fff);
+        border: 1px solid var(--color-border);
+        border-radius: 4px;
+        padding: 2px;
+      }
+      .cfg-bank-image-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        height: 28px;
+        padding: 0 8px;
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--color-text-secondary);
+        background: var(--color-surface, #fff);
+        border: 1px solid var(--color-border);
+        border-radius: 6px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .cfg-bank-image-btn:hover {
+        color: var(--color-text-primary);
+        background: var(--color-surface-hover, #f9fafb);
+      }
+      .cfg-bank-image-btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
     `,
   ]})
 export class PaymentsSettingsComponent implements OnInit {
@@ -707,6 +782,12 @@ export class PaymentsSettingsComponent implements OnInit {
   // QUI-728 — editor multi-cuenta para transferencia bancaria (settings).
   // Lista de cuentas de destino en el `custom_config.accounts` del método.
   bankConfigAccounts = signal<BankAccountOption[]>([]);
+  // QUI-728 — índice de la cuenta cuyo modal de imagen está abierto (null = cerrado).
+  bankAccountImageModalIdx = signal<number | null>(null);
+  // QUI-728 — cache local idx → URL firmada devuelta por el upload más reciente,
+  // para previsualizar la imagen sin esperar al reload del `custom_config`.
+  bankAccountImagesCache = signal<Map<number, string>>(new Map());
+  uploadingBankAccountImage = false;
 
   // Wompi UX enhancements
   readonly wompiFieldHelp: Record<string, string> = {
@@ -1096,10 +1177,111 @@ onSearchChange(term: string): void {
   }
 
   /**
+   * QUI-728 — abre el modal de imagen apuntando a la cuenta `idx`. El modal
+   * emite `imagesAdded` con data URLs listas para subir.
+   */
+  openBankAccountImageModal(idx: number): void {
+    this.bankAccountImageModalIdx.set(idx);
+  }
+
+  closeBankAccountImageModal(): void {
+    this.bankAccountImageModalIdx.set(null);
+  }
+
+  /**
+   * QUI-728 — devuelve la URL firmada de preview para una cuenta, priorizando
+   * la cacheada localmente (subida reciente) y cayendo al `image_url` que
+   * llegó del backend con la cuenta.
+   */
+  signedPreviewUrl(acc: BankAccountOption, idx: number): string | null {
+    const cached = this.bankAccountImagesCache().get(idx);
+    if (cached) return cached;
+    return acc.image_url ?? null;
+  }
+
+  /**
+   * QUI-728 — handler de subida de imagen por cuenta. Flujo:
+   *  1. Convierte el data URL a `File`.
+   *  2. Sube vía `ImageUploadService` con `entityType='bank_account_logos'`
+   *     (la tienda se infiere del `RequestContext`).
+   *  3. Cachea la URL firmada devuelta para previsualización inmediata.
+   *  4. PATCH inmediato si la cuenta ya tiene id (persistencia ya).
+   *  5. Si la cuenta aún no tiene id, `persistBankConfigAccounts` enviará el
+   *     `image_s3_key` dentro del POST inicial.
+   */
+  onBankAccountImage(dataUrls: string[]): void {
+    const dataUrl = dataUrls?.[0];
+    const idx = this.bankAccountImageModalIdx();
+    if (!dataUrl || idx === null) return;
+    const accounts = this.bankConfigAccounts();
+    const acc = accounts[idx];
+    if (!acc) return;
+
+    const file = dataUrlToFile(dataUrl, `bank-account-logo-${Date.now()}.jpg`);
+
+    this.uploadingBankAccountImage = true;
+    this.imageUploadService
+      .uploadFile(file, 'bank_account_logos')
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          // Guardar key en el objeto local de la cuenta.
+          this.bankConfigAccounts.update((arr) => {
+            const next = [...arr];
+            next[idx] = { ...next[idx], image_s3_key: result.key };
+            return next;
+          });
+          // Cachear la URL firmada (thumbUrl preferida, sino url).
+          const previewUrl = result.thumbUrl ?? result.url ?? null;
+          if (previewUrl) {
+            this.bankAccountImagesCache.update((m) => {
+              const next = new Map(m);
+              next.set(idx, previewUrl);
+              return next;
+            });
+          }
+
+          // Si la cuenta ya tiene id, PATCH inmediato para persistir ya.
+          if (acc.id && acc.id > 0) {
+            this.http
+              .patch(
+                `${environment.apiUrl}/store/payments/bank-accounts/${acc.id}`,
+                { image_s3_key: result.key },
+              )
+              .pipe(takeUntilDestroyed(this.destroyRef))
+              .subscribe({
+                error: () =>
+                  this.toast_service.error(
+                    'No se pudo guardar la imagen de la cuenta',
+                  ),
+              });
+          }
+          // Si no tiene id todavía, la imagen se enviará en el POST inicial
+          // vía `persistBankConfigAccounts` (spread condicional).
+
+          this.uploadingBankAccountImage = false;
+          this.bankAccountImageModalIdx.set(null);
+        },
+        error: () => {
+          this.toast_service.error('No se pudo subir la imagen');
+          this.uploadingBankAccountImage = false;
+        },
+      });
+  }
+
+  /**
    * QUI-728 — garantiza que cada ref de cuenta tenga un `bank_accounts.id` real.
    * Las cuentas sin `id` (alta desde el editor) se crean contra el endpoint
    * `POST /store/payments/bank-accounts` del módulo de payments; las que ya
-   * traen `id` se conservan.
+   * traen `id` se conservan. El endpoint es idempotente por
+   * `(organization_id, account_number)`: reenviar una cuenta ya existente
+   * devuelve la fila con su id, no un duplicado.
+   *
+   * Una ref sin `id` NO se guarda: el cobro no podría enviar `bank_account_id`
+   * y el pago caería en "Pagos sin asignar" sin que nadie se entere. Antes el
+   * `?? { ...acc }` del camino feliz hacía exactamente eso — el backend
+   * respondía 201 con `success:false` (P2002 por duplicado), `data` llegaba
+   * `undefined`, el `catch` nunca corría y la cuenta quedaba huérfana de id.
    */
   private async persistBankConfigAccounts(): Promise<BankAccountOption[]> {
     const accounts = this.bankConfigAccounts();
@@ -1109,23 +1291,24 @@ onSearchChange(term: string): void {
         resolved.push(acc);
         continue;
       }
-      try {
-        const created = await firstValueFrom(
-          this.http.post<{ data: BankAccountOption }>(
-            `${environment.apiUrl}/store/payments/bank-accounts`,
-            {
-              name: acc.name || acc.bank_name || 'Cuenta de transferencia',
-              bank_name: acc.bank_name,
-              account_number: acc.account_number,
-            },
-          ),
+      const created = await firstValueFrom(
+        this.http.post<{ data: BankAccountOption }>(
+          `${environment.apiUrl}/store/payments/bank-accounts`,
+          {
+            name: acc.name || acc.bank_name || 'Cuenta de transferencia',
+            bank_name: acc.bank_name,
+            account_number: acc.account_number,
+            ...(acc.image_s3_key && { image_s3_key: acc.image_s3_key }),
+          },
+        ),
+      );
+      const persisted = created?.data;
+      if (!persisted?.id) {
+        throw new Error(
+          `No se pudo registrar la cuenta "${acc.name || acc.bank_name || acc.account_number}". Revisa los datos e inténtalo de nuevo.`,
         );
-        resolved.push(created.data ?? { ...acc });
-      } catch {
-        // Sin permiso de escritura o fallo de red: se conserva la ref tal cual.
-        // El backend rechazará el cobro al validar el id ausente.
-        resolved.push({ ...acc });
       }
+      resolved.push(persisted);
     }
     return resolved;
   }
@@ -1215,27 +1398,46 @@ onSearchChange(term: string): void {
         return { accounts };
       }
       return this.config_form.value as Record<string, any>;
-    })().then((custom_config) => {
-      this.payment_methods_service
-        .enablePaymentMethod(configMethod.id, {
-          display_name: configMethod.display_name,
-          custom_config})
-        .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe({
-          next: () => {
-            this.toast_service.success('Método de pago configurado y agregado correctamente');
-            this.config_saving.set(false);
-            this.show_config_modal.set(false);
-            this.config_method = null;
-            this.loadPaymentMethods();
-            this.loadPaymentMethodStats();
-            this.loadAvailablePaymentMethods();
-          },
-          error: (error: any) => {
-            this.toast_service.error('Error: ' + (error.error?.message || error.message));
-            this.config_saving.set(false);
-          }});
-    });
+    })().then(
+      (custom_config) => {
+        this.payment_methods_service
+          .enablePaymentMethod(configMethod.id, {
+            display_name: configMethod.display_name,
+            custom_config})
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe({
+            next: () => {
+              this.toast_service.success('Método de pago configurado y agregado correctamente');
+              this.config_saving.set(false);
+              this.show_config_modal.set(false);
+              this.config_method = null;
+              this.loadPaymentMethods();
+              this.loadPaymentMethodStats();
+              this.loadAvailablePaymentMethods();
+            },
+            error: (error: any) => {
+              this.toast_service.error('Error: ' + (error.error?.message || error.message));
+              this.config_saving.set(false);
+            }});
+      },
+      (error: unknown) => this.reportBankAccountPersistError(error),
+    );
+  }
+
+  /**
+   * QUI-728 — el alta de cuentas ya no se traga los fallos, así que el
+   * `.then()` que guarda el `custom_config` necesita rama de rechazo: sin ella
+   * la promesa quedaba sin manejar y `config_saving` se congelaba en `true`
+   * (spinner eterno, modal inservible) justo en el caso que este fix expone.
+   */
+  private reportBankAccountPersistError(error: unknown): void {
+    const httpMessage = (error as { error?: { message?: string } })?.error?.message;
+    const message =
+      httpMessage ||
+      (error instanceof Error ? error.message : null) ||
+      'No se pudieron registrar las cuentas bancarias.';
+    this.toast_service.error(message);
+    this.config_saving.set(false);
   }
 
   // QUI-438: confirma antes de descartar cambios sin guardar en el modal
@@ -1260,6 +1462,8 @@ onSearchChange(term: string): void {
     this.config_fields = [];
     // QUI-728 — limpiar la lista de cuentas al cerrar el modal.
     this.bankConfigAccounts.set([]);
+    this.bankAccountImageModalIdx.set(null);
+    this.bankAccountImagesCache.set(new Map());
     this.wompiTestResult = null;
   }
 
@@ -1297,6 +1501,7 @@ onSearchChange(term: string): void {
   }
 
   private readonly http = inject(HttpClient);
+  private readonly imageUploadService = inject(ImageUploadService);
 
   testWompiConnection(): void {
     this.wompiTestLoading = true;
@@ -1436,27 +1641,30 @@ onSearchChange(term: string): void {
         return { accounts };
       }
       return this.config_form.value as Record<string, any>;
-    })().then((custom_config) => {
-      const update_data = has_config
-        ? { custom_config }
-        : { display_name: this.config_form.value['display_name'] as string };
+    })().then(
+      (custom_config) => {
+        const update_data = has_config
+          ? { custom_config }
+          : { display_name: this.config_form.value['display_name'] as string };
 
-      this.payment_methods_service
-        .updateStorePaymentMethod(store_method.id, update_data)
-        .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe({
-          next: () => {
-            this.toast_service.success('Método de pago actualizado correctamente');
-            this.config_saving.set(false);
-            this.closeConfigModal();
-            this.loadPaymentMethods();
-            this.loadPaymentMethodStats();
-          },
-          error: (error: any) => {
-            this.toast_service.error('Error al actualizar: ' + (error.error?.message || error.message));
-            this.config_saving.set(false);
-          }});
-    });
+        this.payment_methods_service
+          .updateStorePaymentMethod(store_method.id, update_data)
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe({
+            next: () => {
+              this.toast_service.success('Método de pago actualizado correctamente');
+              this.config_saving.set(false);
+              this.closeConfigModal();
+              this.loadPaymentMethods();
+              this.loadPaymentMethodStats();
+            },
+            error: (error: any) => {
+              this.toast_service.error('Error al actualizar: ' + (error.error?.message || error.message));
+              this.config_saving.set(false);
+            }});
+      },
+      (error: unknown) => this.reportBankAccountPersistError(error),
+    );
   }
 
   getStateLabel(state: string): string {

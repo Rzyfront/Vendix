@@ -173,6 +173,16 @@ export interface BankAccountOption {
   name?: string | null;
   bank_name?: string;
   account_number?: string;
+  /**
+   * S3 key persistida de la imagen/logo de la cuenta (sin URL firmada).
+   * La URL firmada de lectura la entrega el backend por separado.
+   */
+  image_s3_key?: string | null;
+  /**
+   * URL firmada (TTL corto) de la imagen de la cuenta, o null si no tiene
+   * imagen. Nunca persiste en BD: la resuelve el backend a cada lectura.
+   */
+  image_url?: string | null;
 }
 
 /**
