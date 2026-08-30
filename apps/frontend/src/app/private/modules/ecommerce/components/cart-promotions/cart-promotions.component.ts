@@ -75,8 +75,17 @@ import {
     }
 
     <!-- High-Conversion Gamified Incentive Bar — defense in depth: gateado
-         a nivel de cart-promotions (además del gate interno del shared). -->
-    @if (incentiveData().length > 0 && highConversionService.enabled()) {
+         a nivel de cart-promotions (además del gate interno del shared).
+
+         Cuando hay 2+ promos aplicadas, los celebration bars son
+         redundantes con las expanded cards (que ya muestran el monto).
+         En ese caso los ocultamos para que el cart drawer no explote en
+         altura. Las expanded cards siguen mostrando toda la info. -->
+    @if (
+      incentiveData().length > 0 &&
+      incentiveData().length < 2 &&
+      highConversionService.enabled()
+    ) {
       @for (data of incentiveData(); track $index) {
         <app-gamified-incentive-bar
           [data]="data"

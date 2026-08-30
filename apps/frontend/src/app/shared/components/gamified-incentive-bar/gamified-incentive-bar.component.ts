@@ -73,7 +73,8 @@ export interface IncentiveProgressData {
 
         <!-- Animated Progress Track -->
         <div
-          class="h-1.5 w-full rounded-full bg-surface-hover/80 overflow-hidden relative"
+          class="h-1.5 w-full rounded-full overflow-hidden relative"
+          [style.background-color]="d.unlocked ? '#d1fae5' : '#e5e7eb'"
           role="progressbar"
           [attr.aria-valuenow]="effectiveProgress()"
           aria-valuemin="0"
@@ -81,12 +82,8 @@ export interface IncentiveProgressData {
         >
           <div
             class="h-full rounded-full transition-all duration-500 ease-out relative"
-            [ngClass]="
-              d.unlocked
-                ? 'bg-emerald-500'
-                : 'bg-gradient-to-r from-primary/80 to-primary'
-            "
             [style.width.%]="effectiveProgress()"
+            [style.background-color]="d.unlocked ? '#10b981' : '#3b82f6'"
           >
             <!-- High-conversion sheen animation -->
             @if (!d.unlocked) {
