@@ -23,9 +23,12 @@ import {
   CreateSystemPaymentMethodDto,
   UpdateSystemPaymentMethodDto,
 } from '../dto';
+import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
+import { Permissions } from '../../../auth/decorators/permissions.decorator';
 
 @ApiTags('System Payment Methods')
 @Controller('system-payment-methods')
+@UseGuards(PermissionsGuard)
 @ApiBearerAuth()
 export class SystemPaymentMethodsController {
   constructor(
@@ -33,27 +36,32 @@ export class SystemPaymentMethodsController {
   ) {}
 
   @Get()
+  @Permissions('superadmin:system_payment_methods:read')
   @ApiOperation({ summary: 'Get all system payment methods' })
   @ApiResponse({
     status: 200,
     description: 'System payment methods retrieved successfully',
   })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
   async findAll(@Request() req) {
     return this.systemPaymentMethodsService.findAll(req.user);
   }
 
   @Get(':id')
+  @Permissions('superadmin:system_payment_methods:read')
   @ApiOperation({ summary: 'Get system payment method by ID' })
   @ApiResponse({
     status: 200,
     description: 'System payment method retrieved successfully',
   })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'System payment method not found' })
   async findOne(@Param('id') id: string, @Request() req) {
     return this.systemPaymentMethodsService.findOne(parseInt(id), req.user);
   }
 
   @Post()
+  @Permissions('superadmin:system_payment_methods:write')
   @ApiOperation({
     summary: 'Create system payment method (super_admin only)',
   })
@@ -70,6 +78,7 @@ export class SystemPaymentMethodsController {
   }
 
   @Patch(':id')
+  @Permissions('superadmin:system_payment_methods:write')
   @ApiOperation({
     summary: 'Update system payment method (super_admin only)',
   })
@@ -92,6 +101,7 @@ export class SystemPaymentMethodsController {
   }
 
   @Patch(':id/toggle')
+  @Permissions('superadmin:system_payment_methods:write')
   @ApiOperation({
     summary: 'Toggle active status (super_admin only)',
   })
@@ -109,6 +119,7 @@ export class SystemPaymentMethodsController {
   }
 
   @Delete(':id')
+  @Permissions('superadmin:system_payment_methods:write')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Delete system payment method (super_admin only)',
