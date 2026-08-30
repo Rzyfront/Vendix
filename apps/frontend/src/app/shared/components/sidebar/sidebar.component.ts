@@ -142,7 +142,7 @@ export interface MenuItem {
           }
         </div>
         <div class="logo-text-container">
-          <h1 class="org-name">{{ title() }}</h1>
+          <h2 class="org-name">{{ title() }}</h2>
           <div class="vlink-container">
             <a
               [href]="vlinkUrl"
