@@ -43,9 +43,9 @@ type InstructionField = {
     >
       <div class="pi-shell" [class.is-voucher]="isVoucher()">
         <!-- Hero -->
-        <div class="pi-hero">
+        <div class="pi-hero" [class.has-image]="hasHeroImage()">
           <div class="pi-hero-bg"></div>
-          @if (heroImageUrl() && !isVoucher()) {
+          @if (hasHeroImage()) {
             <img
               class="pi-hero-img"
               [src]="heroImageUrl()"
@@ -54,6 +54,12 @@ type InstructionField = {
             />
           }
           <div class="pi-hero-pattern" aria-hidden="true"></div>
+          @if (hasHeroImage()) {
+            <!-- Va DESPUÉS del pattern a propósito: es la última capa de
+                 oscurecido, así el texto blanco del hero conserva contraste
+                 sobre cualquier imagen que suba el comercio. -->
+            <div class="pi-hero-scrim" aria-hidden="true"></div>
+          }
           <div class="pi-hero-icon">
             <span class="pi-hero-halo" aria-hidden="true"></span>
             <app-icon
@@ -68,6 +74,11 @@ type InstructionField = {
 
         <!-- Body -->
         <div class="pi-body">
+          <!-- Row: picker + instrucciones lado a lado (50/50) cuando ambos existen -->
+          <div
+            class="pi-row"
+            [class.pi-row--split]="accounts().length > 1 && visibleFields().length > 0"
+          >
           <!-- Account picker (solo si hay más de 1 cuenta configurada) -->
           @if (accounts().length > 1) {
             <section class="pi-card pi-account-picker">
@@ -142,6 +153,8 @@ type InstructionField = {
               </p>
             </div>
           }
+          </div>
+          <!-- /pi-row -->
 
           <!-- Receipt upload -->
           <section class="pi-card pi-upload">
@@ -271,19 +284,51 @@ type InstructionField = {
         background: linear-gradient(135deg, #b45309 0%, #f59e0b 55%, #fbbf24 100%);
       }
 
-      /* Imagen del banco (21:9) — queda DEBAJO del gradiente azul como filtro
-         translúcido. Decision documentada: coherente con el look actual del
-         hero; el gradiente aporta la identidad cromática del módulo. */
+      /* El ratio 21:9 lo impone el HERO, no la imagen: .pi-hero-img está en
+         position:absolute con las cuatro insets y width/height:100%, así que
+         su tamaño ya queda determinado y un aspect-ratio sobre ella no tendría
+         efecto — la imagen se recortaría al ratio que el contenido le diera al
+         hero. Con has-image el hero mide 21:9 y object-fit:cover encuadra la
+         imagen dentro de ese ratio. Sin imagen, el hero conserva exactamente
+         el alto por contenido de hoy. */
+      .pi-hero.has-image {
+        aspect-ratio: 21 / 9;
+        /* Piso para el modal a pantalla completa en móvil: por debajo de
+           ~390px de ancho, 21:9 daría menos alto que el propio contenido del
+           hero y el título quedaría recortado. */
+        min-height: 168px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 1rem 1.5rem;
+      }
+
       .pi-hero-img {
         position: absolute;
         inset: 0;
         width: 100%;
         height: 100%;
-        aspect-ratio: 21 / 9;
         object-fit: cover;
         z-index: 0;
         pointer-events: none;
         user-select: none;
+      }
+
+      /* Oscurecido sobre la imagen del comercio. Sin él, el título y el
+         subtítulo (blancos, z-index 2) quedan sobre una foto arbitraria y el
+         contraste depende de qué haya subido el comercio. */
+      .pi-hero-scrim {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        pointer-events: none;
+        background: linear-gradient(
+          180deg,
+          rgba(15, 23, 42, 0.55) 0%,
+          rgba(15, 23, 42, 0.35) 45%,
+          rgba(15, 23, 42, 0.65) 100%
+        );
       }
 
       /* ---------- ACCOUNT PICKER ---------- */
@@ -295,6 +340,19 @@ type InstructionField = {
         display: flex;
         flex-direction: column;
         gap: 0.5rem;
+      }
+
+      /* ---------- ROW (picker + instrucciones 50/50 cuando ambos existen) ---------- */
+      .pi-row {
+        display: flex;
+        flex-direction: column;
+        gap: 0.875rem;
+      }
+      .pi-row--split {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.875rem;
+        align-items: start;
       }
 
       .pi-account-option {
@@ -728,6 +786,9 @@ type InstructionField = {
         .pi-body {
           padding: 1rem 1rem 0.5rem;
         }
+        .pi-row--split {
+          grid-template-columns: 1fr;
+        }
         .pi-footer app-button {
           flex: 1 1 100%;
         }
@@ -833,6 +894,13 @@ export class PaymentInstructionsModalComponent {
     if (this.isVoucher()) return null;
     return this.selectedAccount()?.image_url ?? null;
   });
+
+  /**
+   * Gobierna las tres piezas del hero con imagen —la `<img>`, el scrim y el
+   * ratio 21:9 de `.pi-hero`— desde una sola condición. Sin imagen el hero
+   * queda tal como está hoy: gradiente, alto por contenido y sin scrim.
+   */
+  readonly hasHeroImage = computed(() => this.heroImageUrl() !== null);
 
   readonly visibleFields = computed<InstructionField[]>(() => {
     // Camino nuevo: derivar de la cuenta seleccionada.
