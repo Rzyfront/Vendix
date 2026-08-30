@@ -21,6 +21,7 @@ import { BlockRendererComponent } from '../../../../../../public/dynamic-landing
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { ToastService } from '../../../../../../shared/components';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
 let idSeq = 0;
 
@@ -41,7 +42,9 @@ const BLOCK_ICONS: Record<CrmBlockType, string> = {
 })
 export class CrmEditorComponent {
   private readonly toast = inject(ToastService);
+  private readonly authFacade = inject(AuthFacade);
 
+  readonly storeDomainHostname = this.authFacade.userDomainHostname;
   readonly previewMode = signal<'desktop' | 'mobile'>('desktop');
 
   /** Documento vigente (draft del backend). Se copia al entrar para edición local. */
@@ -187,6 +190,10 @@ export class CrmEditorComponent {
   }
 
   openPublicLanding(): void {
-    window.open('/', '_blank', 'noopener,noreferrer');
+    const hostname = this.storeDomainHostname();
+    const targetUrl = hostname
+      ? `https://${hostname}`
+      : `${window.location.protocol}//${window.location.host}/landing`;
+    window.open(targetUrl, '_blank', 'noopener,noreferrer');
   }
 }

@@ -13,6 +13,7 @@ import {
 import { ToastService } from '../../../../../../shared/components';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import {
   StickyHeaderComponent,
   StickyHeaderActionButton,
@@ -44,9 +45,11 @@ type CrmTab = 'estado' | 'diseno';
 })
 export class CrmMainPageComponent {
   private readonly crmService = inject(CrmService);
+  private readonly authFacade = inject(AuthFacade);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
+  readonly storeDomainHostname = this.authFacade.userDomainHostname;
   readonly landing = signal<CrmLandingState | null>(null);
   readonly loading = signal(false);
   readonly busy = signal(false);
@@ -264,7 +267,11 @@ export class CrmMainPageComponent {
   }
 
   openPublicLanding(): void {
-    window.open('/', '_blank', 'noopener,noreferrer');
+    const hostname = this.storeDomainHostname();
+    const targetUrl = hostname
+      ? `https://${hostname}`
+      : `${window.location.protocol}//${window.location.host}/landing`;
+    window.open(targetUrl, '_blank', 'noopener,noreferrer');
   }
 
   activate(): void {
