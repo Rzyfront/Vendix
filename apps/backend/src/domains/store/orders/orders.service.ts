@@ -2,6 +2,7 @@ import { Injectable, ConflictException, Logger } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import {
   CreateOrderDto,
+  CreateOrderItemDto,
   UpdateOrderDto,
   OrderQueryDto,
   UpdateOrderItemsDto,
@@ -39,6 +40,22 @@ import { OrderFlowService } from './order-flow/order-flow.service';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { CouponsService } from '../coupons/coupons.service';
 import { AuditService, AuditAction, AuditResource } from '@common/audit/audit.service';
+
+/**
+ * Mejor `tax_rate` de un producto con impuesto, resuelto en batch desde
+ * `product_tax_assignments → tax_categories → tax_rates`. El DTO del POS
+ * llega con el snapshot agregado por línea (`tax_amount_item`, `tax_rate`),
+ * así que estos campos se derivan aquí para poder construir las filas de
+ * `order_item_taxes` (el resto de flows — checkout y payments POS — ya
+ * reciben el desglose resuelto desde el llamador).
+ */
+type ResolvedLineTax = {
+  id: number;
+  name: string;
+  rate: Prisma.Decimal | number | string;
+  is_compound: boolean | null;
+  tax_type: string | null;
+};
 
 @Injectable()
 export class OrdersService {
@@ -228,6 +245,31 @@ export class OrdersService {
     // F4 — comercio no responsable de IVA no puede cobrar IVA en la venta.
     await this.assertSaleVatAllowed(createOrderDto.items);
 
+    // Persistir desglose de impuestos por línea. checkout y payments POS ya
+    // lo hacen; aquí faltaba, así que los tiquetes de órdenes POS salían
+    // sin desglose de IVA aunque la cabecera trajera `tax_amount`. Espeja
+    // el patrón de checkout.service.ts (createOrderAndCheckout, ~1422) y
+    // payments.service.ts (buildPosOrderItem, ~2791): una fila por
+    // impuesto aplicado a la línea, con `tax_rate` como fracción
+    // (`Decimal(6,5)` → 0.19 para 19%). El DTO del POS solo trae el
+    // snapshot agregado por línea (`tax_amount_item`); los nombres, tipos y
+    // FKs se derivan server-side desde `product_tax_assignments`. Se hace
+    // UN batch lookup (no N+1) y se reusan los mismos `productIds` que ya
+    // pasaron por `assertSaleVatAllowed` arriba.
+    const taxedProductIds = Array.from(
+      new Set(
+        createOrderDto.items
+          .filter(
+            (it) => it.product_id && Number(it.tax_amount_item ?? 0) > 0,
+          )
+          .map((it) => it.product_id as number),
+      ),
+    );
+    const lineTaxByProductId =
+      taxedProductIds.length > 0
+        ? await this.resolveLineTaxesForOrder(taxedProductIds)
+        : new Map<number, ResolvedLineTax>();
+
     let retries = 3;
     while (retries > 0) {
       try {
@@ -324,6 +366,21 @@ export class OrdersService {
                     total_price: item.total_price,
                     tax_rate: item.tax_rate,
                     tax_amount_item: item.tax_amount_item,
+                    // Desglose por línea (espejo de checkout/payments):
+                    // una fila en `order_item_taxes` por impuesto aplicado
+                    // a la línea, con `tax_rate` como fracción. Si la
+                    // línea no trae impuesto (`tax_amount_item <= 0`), no
+                    // se emite la fila — coincide con checkout y payments.
+                    order_item_taxes:
+                      Number(item.tax_amount_item ?? 0) > 0
+                        ? this.buildOrderItemTaxesCreate(
+                            item,
+                            item.product_id
+                              ? lineTaxByProductId.get(item.product_id) ??
+                                null
+                              : null,
+                          )
+                        : undefined,
                     catalog_unit_price: item.catalog_unit_price,
                     catalog_final_price: item.catalog_final_price,
                     final_unit_price: item.final_unit_price ?? item.unit_price,
@@ -582,6 +639,13 @@ export class OrdersService {
               },
             },
             product_variants: true,
+            // Desglose por línea: el `pos_sale_ticket` y el detalle de
+            // orden necesitan las filas de `order_item_taxes` para
+            // pintar el IVA. Sin esto, la cabecera trae `tax_amount` pero
+            // el render sale en blanco — el mismo síntoma que reportaba
+            // el fix del `create`. Espeja el patrón de
+            // `refund-calculation.service.ts:66`.
+            order_item_taxes: true,
             // Restaurant Suite — Fase K Gap 2: surface the KDS state
             // for every order_item so the order detail can show
             // "Cocina: <estado>" badges per dish. We order by id desc
@@ -3169,5 +3233,132 @@ export class OrdersService {
       sequence = lastSequence + 1;
     }
     return `${prefix}${sequence.toString().padStart(4, '0')}`;
+  }
+
+  /**
+   * Resuelve el mejor `tax_rate` por producto en UN batch lookup.
+   *
+   * El DTO del POS llega con un snapshot agregado por línea
+   * (`tax_amount_item`, `tax_rate` como fracción) — sin `tax_rate_id`, sin
+   * `tax_name`, sin `tax_type`. Para construir las filas de
+   * `order_item_taxes` que respalden la cabecera del tiquete, consultamos
+   * la mejor `tax_rate` activa del producto (ordenada por `priority` desc,
+   * `take: 1`). Si el producto no tiene asignaciones, el `Map` queda sin
+   * entrada y `buildOrderItemTaxesCreate` cae al fallback del snapshot del
+   * DTO (tax_name='IVA', tax_type='iva', tax_rate_id=null).
+   *
+   * Misma forma de batch lookup que `assertSaleVatAllowed` arriba — sin
+   * N+1 por línea. Las relaciones `product_tax_assignments`,
+   * `tax_categories` y `tax_rates` no requieren scope explícito; el
+   * `StorePrismaService` solo escopea las tablas registradas (products
+   * hereda el filtro por tienda vía `id` que ya viene validado arriba).
+   */
+  private async resolveLineTaxesForOrder(
+    productIds: number[],
+  ): Promise<Map<number, ResolvedLineTax>> {
+    const map = new Map<number, ResolvedLineTax>();
+    if (productIds.length === 0) return map;
+
+    const products = await this.prisma.products.findMany({
+      where: { id: { in: productIds } },
+      select: {
+        id: true,
+        product_tax_assignments: {
+          select: {
+            tax_categories: {
+              select: {
+                tax_type: true,
+                tax_rates: {
+                  select: {
+                    id: true,
+                    name: true,
+                    rate: true,
+                    is_compound: true,
+                    priority: true,
+                  },
+                  orderBy: { priority: 'desc' },
+                  take: 1,
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    for (const p of products) {
+      // Prisma ya devuelve `tax_rates` ordenadas por `priority` desc; el
+      // primer match de cualquier asignación es la mejor tasa del producto.
+      for (const assignment of p.product_tax_assignments ?? []) {
+        const rate = assignment.tax_categories?.tax_rates?.[0];
+        if (!rate) continue;
+        map.set(p.id, {
+          id: rate.id,
+          name: rate.name,
+          rate: rate.rate,
+          is_compound: rate.is_compound ?? false,
+          tax_type: assignment.tax_categories?.tax_type ?? null,
+        });
+        break;
+      }
+    }
+    return map;
+  }
+
+  /**
+   * Construye el payload `order_item_taxes: { create: [...] }` para anidar
+   * dentro de `order_items.create`. Espeja checkout.service.ts (~1422,
+   * ~2070) y payments.service.ts (~2791).
+   *
+   * Reglas:
+   *  - `tax_rate` SIEMPRE como fracción (`0.19` para 19%). `Decimal(6,5)`.
+   *  - `tax_amount` viene del snapshot del DTO (`tax_amount_item`); es la
+   *    suma de impuestos de la línea, NO se recalcula — recalcular desde
+   *    `base × tarifa` agrega un céntimo y descuadra la cabecera
+   *    (orders.tax_amount ≠ Σ order_items.tax_amount).
+   *  - Si el producto tiene `tax_rate` resuelto del catálogo, persistimos
+   *    FK + nombre + tipo reales; si NO (producto sin asignaciones),
+   *    fallback al snapshot del DTO con `tax_name='IVA'`, `tax_type='iva'`,
+   *    `tax_rate_id=null` para que el tiquete al menos pinte la línea.
+   */
+  private buildOrderItemTaxesCreate(
+    item: CreateOrderItemDto,
+    resolved: ResolvedLineTax | null,
+  ) {
+    const taxAmount = Number(item.tax_amount_item ?? 0);
+    if (taxAmount <= 0) return undefined;
+
+    if (resolved) {
+      return {
+        create: [
+          {
+            tax_rate_id: resolved.id,
+            tax_name: resolved.name,
+            tax_rate: new Prisma.Decimal(resolved.rate as any),
+            tax_amount: new Prisma.Decimal(item.tax_amount_item as any),
+            tax_type: (resolved.tax_type ?? 'iva') as any,
+            is_compound: resolved.is_compound ?? false,
+          },
+        ],
+      };
+    }
+
+    // Fallback: producto sin `tax_rates` configuradas. Persistimos el
+    // snapshot del DTO con defaults conservadores para que el tiquete
+    // muestre la línea de IVA en vez de salir en blanco.
+    return {
+      create: [
+        {
+          tax_rate_id: null,
+          tax_name: 'IVA',
+          tax_rate: new Prisma.Decimal(
+            item.tax_rate != null ? item.tax_rate : 0,
+          ),
+          tax_amount: new Prisma.Decimal(item.tax_amount_item as any),
+          tax_type: 'iva' as const,
+          is_compound: false,
+        },
+      ],
+    };
   }
 }
