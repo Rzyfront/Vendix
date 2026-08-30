@@ -32,6 +32,7 @@ import {
   GuestCheckoutCustomer,
   BookingSelection,
   WompiWidgetConfig,
+  BankAccountOption,
 } from '../../services/checkout.service';
 import { WompiService } from '../../../../../shared/services/wompi.service';
 import { AccountService, Address } from '../../services/account.service';
@@ -209,6 +210,44 @@ export class CheckoutComponent implements OnInit {
     const t = this.selectedPaymentMethodObj()?.type;
     return t === 'bank_transfer' || t === 'voucher';
   });
+
+  // ====== Cuentas bancarias (bank_transfer / voucher) ======
+  /**
+   * Cuenta bancaria destino seleccionada por el cliente. Se inicializa al
+   * cargar el catálogo del método y se persiste en el `CheckoutRequest` para
+   * que el backend la valide con `resolveAndValidateBankAccount`.
+   *
+   * Permanece en `null` cuando el método no requiere cuenta o cuando el
+   * backend devuelve `[]` (caso legacy: la tienda aún no configuró cuentas).
+   * En ese último escenario el modal sigue mostrando `payment_instructions`
+   * para no romper el flujo existente.
+   */
+  readonly selected_bank_account_id = signal<number | null>(null);
+
+  /**
+   * Cache de cuentas por método (`method_id → accounts[]`). La entrada se
+   * setea al cargar y se conserva durante toda la sesión de checkout para
+   * que cambiar de método y volver no dispare un refetch. El modal abre
+   * instantáneamente con las cuentas cacheadas.
+   */
+  readonly bankAccountsByMethod = signal<Map<number, BankAccountOption[]>>(
+    new Map(),
+  );
+
+  /**
+   * Lista de cuentas correspondiente al método actualmente seleccionado.
+   * Devuelve `[]` cuando el método no es `bank_transfer`/`voucher`, cuando
+   * aún no se cargaron las cuentas, o cuando el backend devolvió catálogo
+   * vacío.
+   */
+  readonly currentBankAccounts = computed<BankAccountOption[]>(() => {
+    const methodId = this.selected_payment_method_id();
+    if (methodId == null) return [];
+    return this.bankAccountsByMethod().get(methodId) ?? [];
+  });
+
+  /** True mientras se carga el catálogo de cuentas del método actual. */
+  readonly loadingBankAccounts = signal(false);
 
   /**
    * Disables the "Confirmar Pedido" button when the order cannot be placed
@@ -1008,11 +1047,59 @@ export class CheckoutComponent implements OnInit {
     if (t === 'bank_transfer' || t === 'voucher') {
       this.payment_receipt_file.set(null);
       this.payment_instructions_acknowledged.set(false);
+      this.selected_bank_account_id.set(null);
+
+      // Carga lazy de cuentas. Si ya están cacheadas, no refetch — el modal
+      // las resuelve instantáneamente desde `bankAccountsByMethod`.
+      if (!this.bankAccountsByMethod().has(method_id)) {
+        this.loadBankAccountsForMethod(method_id);
+      } else {
+        // Cache hit: default a la primera cuenta disponible para que el modal
+        // muestre datos y el cliente solo tenga que confirmar.
+        const cached = this.bankAccountsByMethod().get(method_id) ?? [];
+        this.selected_bank_account_id.set(cached[0]?.id ?? null);
+      }
+
       this.show_payment_instructions_modal.set(true);
     } else {
       this.payment_receipt_file.set(null);
       this.payment_instructions_acknowledged.set(false);
+      this.selected_bank_account_id.set(null);
     }
+  }
+
+  /**
+   * Carga las cuentas activas para un método `bank_transfer`/`voucher` desde
+   * el endpoint del storefront. El resultado se cachea en
+   * `bankAccountsByMethod` por método para evitar refetch al alternar.
+   * Errores se tragan silenciosamente: el modal cae al flujo legacy de
+   * `payment_instructions` y el cliente sigue viendo instrucciones.
+   */
+  private loadBankAccountsForMethod(method_id: number): void {
+    this.loadingBankAccounts.set(true);
+    this.checkout_service.getBankAccountsForMethod(method_id).subscribe({
+      next: (accounts) => {
+        const next = new Map(this.bankAccountsByMethod());
+        next.set(method_id, accounts);
+        this.bankAccountsByMethod.set(next);
+        // Default a la primera cuenta (si hay). El modal las muestra todas.
+        if (
+          this.selected_payment_method_id() === method_id &&
+          this.selected_bank_account_id() == null
+        ) {
+          this.selected_bank_account_id.set(accounts[0]?.id ?? null);
+        }
+        this.loadingBankAccounts.set(false);
+      },
+      error: () => {
+        // Cachea `[]` para no reintentar en cada apertura; el modal usará el
+        // fallback de `payment_instructions` que ya renderizaba antes.
+        const next = new Map(this.bankAccountsByMethod());
+        next.set(method_id, []);
+        this.bankAccountsByMethod.set(next);
+        this.loadingBankAccounts.set(false);
+      },
+    });
   }
 
   onReceiptFile(file: File | null): void {
@@ -1744,6 +1831,15 @@ export class CheckoutComponent implements OnInit {
       // Send coupon code as raw string; backend validates and recomputes
       // the total. Frontend never sends a precomputed grand_total.
       coupon_code: this.coupon_code().trim() || undefined,
+      // bank_transfer / voucher: backend resuelve y valida la cuenta con
+      // `resolveAndValidateBankAccount`. Solo viajamos el id cuando el
+      // método actual lo soporta y el cliente eligió una cuenta. Para el
+      // resto de métodos omitimos el campo (undefined) para que el backend
+      // no lo inspeccione.
+      ...(this.requiresPaymentInstructions() &&
+      this.selected_bank_account_id() != null
+        ? { bank_account_id: this.selected_bank_account_id() }
+        : {}),
     };
 
     if (!this.cartHasOnlyServices && this.use_new_address()) {

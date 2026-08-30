@@ -26,6 +26,14 @@ export interface PaymentMethod {
   };
 }
 
+export interface BankAccountOption {
+  id: number;
+  name: string | null;
+  bank_name: string;
+  account_number: string;
+  image_url: string | null;
+}
+
 export interface BookingSelection {
   product_id: number;
   product_variant_id?: number;
@@ -103,6 +111,14 @@ export interface CheckoutRequest {
    * The frontend NEVER sends precomputed totals.
    */
   coupon_code?: string;
+  /**
+   * ID de la cuenta bancaria destino para `bank_transfer`/`voucher`. Backend
+   * resuelve y valida con `resolveAndValidateBankAccount`. Omitir (undefined)
+   * para métodos que no requieren cuenta; pasar `null` explícito cuando el
+   * usuario eligió un método con cuentas configuradas pero ninguna quedó
+   * disponible.
+   */
+  bank_account_id?: number | null;
 }
 
 export interface CheckoutResponse {
@@ -215,6 +231,27 @@ export class CheckoutService {
       `${this.api_url}/payment-methods`,
       { headers: this.getHeaders(), params },
     );
+  }
+
+  /**
+   * Devuelve las cuentas bancarias activas configuradas para un método
+   * `bank_transfer` / `voucher` del storefront. El endpoint usa
+   * `@OptionalAuth()` y resuelve el tenant a partir del header `x-store-id`
+   * que ya inyecta `getHeaders()` desde el `TenantFacade`.
+   *
+   * Devuelve `[]` cuando:
+   * - el tenant no tiene cuentas activas para ese método, o
+   * - el `x-store-id` no resuelve a una tienda (404 silencioso a `[]`).
+   */
+  getBankAccountsForMethod(
+    methodId: number,
+  ): Observable<BankAccountOption[]> {
+    return this.http
+      .get<{ success: boolean; data: BankAccountOption[] }>(
+        `${this.api_url}/payment-methods/${methodId}/bank-accounts`,
+        { headers: this.getHeaders() },
+      )
+      .pipe(map((r) => r?.data ?? []));
   }
 
   checkout(

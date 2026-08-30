@@ -3,6 +3,7 @@ import {
   Component,
   computed,
   input,
+  model,
   output,
   signal,
 } from '@angular/core';
@@ -11,7 +12,10 @@ import { ModalComponent } from '../../../../../shared/components/modal/modal.com
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { FileUploadDropzoneComponent } from '../../../../../shared/components/file-upload-dropzone/file-upload-dropzone.component';
-import { PaymentMethod } from '../../services/checkout.service';
+import {
+  PaymentMethod,
+  BankAccountOption,
+} from '../../services/checkout.service';
 
 type InstructionField = {
   key: string;
@@ -41,6 +45,14 @@ type InstructionField = {
         <!-- Hero -->
         <div class="pi-hero">
           <div class="pi-hero-bg"></div>
+          @if (heroImageUrl() && !isVoucher()) {
+            <img
+              class="pi-hero-img"
+              [src]="heroImageUrl()"
+              alt=""
+              aria-hidden="true"
+            />
+          }
           <div class="pi-hero-pattern" aria-hidden="true"></div>
           <div class="pi-hero-icon">
             <span class="pi-hero-halo" aria-hidden="true"></span>
@@ -56,6 +68,36 @@ type InstructionField = {
 
         <!-- Body -->
         <div class="pi-body">
+          <!-- Account picker (solo si hay más de 1 cuenta configurada) -->
+          @if (accounts().length > 1) {
+            <section class="pi-card pi-account-picker">
+              <header class="pi-card-header">
+                <app-icon name="bank" size="16" class="text-primary-500" />
+                <span>Elige la cuenta a la que vas a transferir</span>
+              </header>
+              <div class="pi-account-options">
+                @for (acc of accounts(); track acc.id) {
+                  <label
+                    class="pi-account-option"
+                    [class.is-selected]="selectedBankAccountId() === acc.id"
+                  >
+                    <input
+                      type="radio"
+                      [name]="'bank-account-' + (method()?.id ?? 'm')"
+                      [value]="acc.id"
+                      [checked]="selectedBankAccountId() === acc.id"
+                      (change)="selectedBankAccountId.set(acc.id)"
+                    />
+                    <span class="pi-account-name">{{ acc.bank_name }}</span>
+                    @if (acc.name && acc.name !== acc.bank_name) {
+                      <span class="pi-account-sub">· {{ acc.name }}</span>
+                    }
+                  </label>
+                }
+              </div>
+            </section>
+          }
+
           <!-- Instructions card -->
           @if (visibleFields().length > 0) {
             <section class="pi-card pi-instructions">
@@ -227,6 +269,65 @@ type InstructionField = {
 
       .pi-shell.is-voucher .pi-hero-bg {
         background: linear-gradient(135deg, #b45309 0%, #f59e0b 55%, #fbbf24 100%);
+      }
+
+      /* Imagen del banco (21:9) — queda DEBAJO del gradiente azul como filtro
+         translúcido. Decision documentada: coherente con el look actual del
+         hero; el gradiente aporta la identidad cromática del módulo. */
+      .pi-hero-img {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        aspect-ratio: 21 / 9;
+        object-fit: cover;
+        z-index: 0;
+        pointer-events: none;
+        user-select: none;
+      }
+
+      /* ---------- ACCOUNT PICKER ---------- */
+      .pi-account-picker {
+        /* reusa el patrón .pi-card del resto del modal */
+      }
+
+      .pi-account-options {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .pi-account-option {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 0.75rem;
+        border: 1px solid var(--color-border);
+        border-radius: 10px;
+        cursor: pointer;
+        transition: border-color 0.15s ease;
+      }
+
+      .pi-account-option.is-selected {
+        border-color: var(--color-primary-500);
+        background: var(--color-primary-50, rgba(59, 130, 246, 0.06));
+      }
+
+      .pi-account-option input[type='radio'] {
+        accent-color: var(--color-primary-500);
+        margin: 0;
+        cursor: pointer;
+      }
+
+      .pi-account-name {
+        font-weight: 600;
+        font-size: 0.9375rem;
+        color: var(--color-text, #111827);
+      }
+
+      .pi-account-sub {
+        color: var(--color-text-muted, #6b7280);
+        font-size: 0.875rem;
       }
 
       .pi-hero-pattern {
@@ -653,6 +754,20 @@ export class PaymentInstructionsModalComponent {
   readonly method = input<PaymentMethod | null>(null);
   readonly currentFile = input<File | null>(null);
 
+  /**
+   * Catálogo de cuentas activas del método actual (provisto por el padre).
+   * Si está vacío, el modal renderiza las `payment_instructions` legacy
+   * del método (`PaymentMethod.payment_instructions`).
+   */
+  readonly accounts = input<BankAccountOption[]>([]);
+
+  /**
+   * ID de la cuenta seleccionada por el cliente. Two-way binding vía
+   * `model()`: el padre hace `[(selectedBankAccountId)]="..."` y el modal
+   * emite cambios al hacer click en una opción del picker.
+   */
+  readonly selectedBankAccountId = model<number | null>(null);
+
   readonly isOpenChange = output<boolean>();
   readonly fileChange = output<File | null>();
   readonly confirmed = output<void>();
@@ -694,7 +809,65 @@ export class PaymentInstructionsModalComponent {
     this.isVoucher() ? 'Datos del voucher' : 'Datos de la cuenta',
   );
 
+  /**
+   * Cuenta actualmente seleccionada. Si el catálogo está vacío, devuelve
+   * `null` y el modal cae al flujo legacy de `payment_instructions`.
+   * Si hay catálogo pero el id no coincide con ninguna entrada (carrera al
+   * cambiar de método), cae a la primera cuenta para evitar un modal en
+   * blanco.
+   */
+  readonly selectedAccount = computed<BankAccountOption | null>(() => {
+    const list = this.accounts();
+    if (list.length === 0) return null;
+    const id = this.selectedBankAccountId();
+    if (id == null) return list[0] ?? null;
+    return list.find((a) => a.id === id) ?? list[0] ?? null;
+  });
+
+  /**
+   * URL del hero: imagen 21:9 del banco cuando hay cuenta seleccionada y
+   * el método NO es voucher. Voucher mantiene el gradiente ámbar sin
+   * imagen para no romper la identidad visual del flujo.
+   */
+  readonly heroImageUrl = computed<string | null>(() => {
+    if (this.isVoucher()) return null;
+    return this.selectedAccount()?.image_url ?? null;
+  });
+
   readonly visibleFields = computed<InstructionField[]>(() => {
+    // Camino nuevo: derivar de la cuenta seleccionada.
+    const acc = this.selectedAccount();
+    if (acc) {
+      const fields: InstructionField[] = [
+        {
+          key: 'bank_name',
+          label: 'Banco',
+          value: acc.bank_name,
+          copyable: true,
+        },
+        {
+          key: 'account_number',
+          label: 'Número de cuenta',
+          value: acc.account_number,
+          copyable: true,
+        },
+      ];
+      // Titular solo si difiere del nombre del banco (evita duplicado visual
+      // cuando el banco se autodenomina como titular, p. ej. NEQUI).
+      if (acc.name && acc.name !== acc.bank_name) {
+        fields.push({
+          key: 'name',
+          label: 'Titular',
+          value: acc.name,
+          copyable: true,
+        });
+      }
+      return fields;
+    }
+
+    // Fallback legacy: `payment_instructions` del método (tiendas sin
+    // cuentas configuradas aún). Se preserva intacto para no romper el
+    // flujo existente.
     const i = this.method()?.payment_instructions;
     if (!i) return [];
     const all: InstructionField[] = [
