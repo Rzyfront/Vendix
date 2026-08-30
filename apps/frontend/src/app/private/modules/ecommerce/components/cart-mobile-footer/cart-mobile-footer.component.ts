@@ -16,7 +16,7 @@ import {
   CurrencyPipe,
   CurrencyFormatService,
 } from '../../../../../shared/pipes/currency';
-import { Cart } from '../../services/cart.service';
+import { Cart, CartService } from '../../services/cart.service';
 
 /**
  * POS-style fixed mobile footer for the ecommerce cart.
@@ -600,9 +600,10 @@ import { Cart } from '../../services/cart.service';
 })
 export class CartMobileFooterComponent {
   private readonly currencyFormat = inject(CurrencyFormatService);
+  private readonly cartService = inject(CartService);
 
   /** Source cart. Totals/promotions are read reactively from this signal. */
-  readonly cart = input<Cart | null>(null);
+  readonly cart = this.cartService.cart;
   /** Whether the customer is logged in. Drives the CTA label. */
   readonly isAuthenticated = input<boolean>(false);
   /** Store requires registration before checkout (with `!isAuthenticated`). */
