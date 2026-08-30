@@ -1,6 +1,6 @@
 .session-body {
-  padding: 1rem;
-  max-width: 1200px;
+  padding: 1.25rem 1rem 2rem;
+  max-width: 1360px;
   margin: 0 auto;
 }
 
@@ -19,6 +19,7 @@
   border-radius: var(--radius-lg, 12px);
   overflow: hidden;
   background: var(--color-surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 .summary-hero {
@@ -26,14 +27,12 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 1rem;
-  /* Subtle brand-tinted gradient using theme tokens (no hardcoded hex). */
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--color-primary) 12%, var(--color-surface)),
-      var(--color-surface)
-    );
+  padding: 1rem 1.125rem;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--color-primary) 10%, var(--color-surface)),
+    var(--color-surface)
+  );
   border-bottom: 1px solid var(--color-border);
 
   .hero-total {
@@ -41,6 +40,7 @@
     flex-direction: column;
     gap: 0.25rem;
     min-width: 0;
+    flex: 1;
   }
 
   .hero-label {
@@ -52,14 +52,22 @@
   }
 
   .hero-amount {
-    font-size: 1.6rem;
-    line-height: 1.1;
+    font-size: 1.5rem;
+    line-height: 1.2;
     font-weight: 800;
     color: var(--color-primary);
-    word-break: break-word;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
   }
 
-  .hero-badge {
+  .hero-badges {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.375rem;
     flex-shrink: 0;
   }
 }
@@ -77,7 +85,6 @@
     padding: 0.75rem 1rem;
     border-top: 1px solid var(--color-border);
 
-    /* second column gets a left divider on >1 col layouts */
     &:nth-child(even) {
       border-left: 1px solid var(--color-border);
     }
@@ -92,7 +99,7 @@
 
     dd {
       margin: 0;
-      font-size: 0.9rem;
+      font-size: 0.875rem;
       font-weight: 600;
       color: var(--color-text-primary);
     }
@@ -105,11 +112,20 @@
     .customer-name {
       display: inline-flex;
       align-items: center;
-      gap: 0.375rem;
+      gap: 0.35rem;
       min-width: 0;
+      max-width: 100%;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      color: var(--color-text-primary);
+    }
+
+    .meta-val {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      color: var(--color-text-primary);
     }
   }
 }
@@ -128,10 +144,10 @@
 
   .group-label {
     display: block;
-    font-size: 0.75rem;
-    font-weight: 600;
+    font-size: 0.72rem;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.05em;
     color: var(--color-text-secondary, #6b7280);
     margin-bottom: 0.5rem;
   }
@@ -150,24 +166,114 @@
   gap: 0.75rem;
   width: 100%;
 
+  .header-title-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
   .items-card-title {
     font-size: 1.125rem;
-    font-weight: 600;
+    font-weight: 700;
     color: var(--color-text-primary);
     margin: 0;
+  }
+
+  .items-count-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.375rem;
+    height: 1.375rem;
+    padding: 0 0.4rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface));
+    color: var(--color-primary);
+    font-size: 0.75rem;
+    font-weight: 700;
+  }
+}
+
+/* ── Filter Tabs ───────────────────────────────────────────────────────── */
+.filter-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+
+  .filter-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.7rem;
+    border-radius: 999px;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+
+    &:hover {
+      background: var(--color-background);
+      color: var(--color-text-primary);
+    }
+
+    &.active {
+      background: var(--color-primary);
+      border-color: var(--color-primary);
+      color: var(--color-text-on-primary, #ffffff);
+
+      .tab-count {
+        background: rgba(255, 255, 255, 0.25);
+        color: var(--color-text-on-primary, #ffffff);
+      }
+    }
+
+    .tab-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 1.125rem;
+      height: 1.125rem;
+      padding: 0 0.3rem;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--color-border) 60%, transparent);
+      font-size: 0.7rem;
+      font-weight: 700;
+    }
+
+    &.has-pending:not(.active) {
+      border-color: color-mix(in srgb, var(--color-warning) 50%, var(--color-border));
+      color: var(--color-warning);
+
+      .tab-count {
+        background: color-mix(in srgb, var(--color-warning) 15%, transparent);
+        color: var(--color-warning);
+      }
+    }
   }
 }
 
 .unfired-hint {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.5rem;
   margin-top: 1rem;
-  padding: 0.625rem 0.75rem;
-  background: rgba(234, 179, 8, 0.1);
+  padding: 0.625rem 0.875rem;
+  background: color-mix(in srgb, var(--color-warning) 10%, var(--color-surface));
+  border: 1px solid color-mix(in srgb, var(--color-warning) 30%, var(--color-border));
   border-radius: var(--radius-md, 8px);
   font-size: 0.8rem;
   color: var(--color-warning, #b45309);
+
+  .hint-icon {
+    flex-shrink: 0;
+  }
 }
 
 /* ── E2 — Pagos por confirmar (mesero) ───────────────────────────────── */
@@ -184,10 +290,10 @@
   margin-bottom: 0.5rem;
 
   .label {
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.05em;
     color: var(--color-text-secondary, #6b7280);
   }
 }
@@ -208,7 +314,6 @@
 
 .pending-payment-row {
   display: grid;
-  /* method+amount | meta | action — collapses on mobile via media query */
   grid-template-columns: 1fr auto auto;
   align-items: center;
   gap: 0.5rem 0.75rem;
@@ -235,15 +340,16 @@
       display: inline-flex;
       align-items: center;
       gap: 0.35rem;
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       font-weight: 600;
       color: var(--color-text-primary, #111827);
     }
 
     .amount {
-      font-size: 0.95rem;
+      font-size: 0.92rem;
       font-weight: 700;
       color: var(--color-primary, #2f6f4e);
+      font-variant-numeric: tabular-nums;
     }
   }
 
@@ -251,7 +357,7 @@
     display: flex;
     flex-direction: column;
     gap: 0.125rem;
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     color: var(--color-text-secondary, #6b7280);
     text-align: right;
 
@@ -265,7 +371,7 @@
 
     .ref {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      max-width: 9rem;
+      max-width: 8.5rem;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -320,6 +426,9 @@
   }
 
   .batch-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
     font-size: 0.8rem;
     font-weight: 600;
     color: var(--color-text-secondary);
@@ -328,7 +437,7 @@
   .batch-toggle {
     display: inline-flex;
     align-items: center;
-    gap: 0.375rem;
+    gap: 0.35rem;
     padding: 0.25rem 0.5rem;
     border: none;
     background: transparent;
@@ -348,7 +457,7 @@
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
-    font-size: 0.85rem;
+    font-size: 0.82rem;
     font-weight: 600;
     color: var(--color-text-primary);
     cursor: pointer;
@@ -362,7 +471,7 @@
   }
 
   .batch-count {
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     font-weight: 600;
     color: var(--color-text-secondary);
   }
@@ -380,16 +489,10 @@
 
 .item-row {
   display: grid;
-  /*
-   * Up to 4 columns: checkbox/qty, name+price, kitchen status, action.
-   * The status and action columns only render for `prepared` dishes
-   * (see template guards), so a non-dish row collapses to the first
-   * two columns and the price sits at the end of `item-main`.
-   */
   grid-template-columns: auto 1fr auto auto;
   align-items: center;
   gap: 0.75rem 1rem;
-  padding: 0.75rem 0.875rem;
+  padding: 0.625rem 0.875rem;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md, 8px);
   background: var(--color-surface);
@@ -398,13 +501,6 @@
     background 0.15s ease,
     box-shadow 0.15s ease;
 
-  /*
-   * Status differentiation is carried by a soft background tint per
-   * state instead of a side bar. The kitchen-state badge in the row
-   * remains the primary signal; the tint is a secondary cue so a
-   * pending dish and a sent one are still distinguishable at a glance
-   * even when scrolling.
-   */
   &:not(.is-fired) {
     background: color-mix(in srgb, var(--color-warning) 3%, var(--color-surface));
   }
@@ -439,11 +535,11 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 2.25rem;
+    min-width: 2rem;
     height: 1.75rem;
-    padding: 0 0.4rem;
+    padding: 0 0.35rem;
     border-radius: var(--radius-sm, 6px);
-    background: color-mix(in srgb, var(--color-primary) 14%, var(--color-surface));
+    background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface));
     color: var(--color-primary);
     font-size: 0.8rem;
     font-weight: 800;
@@ -454,22 +550,30 @@
   .item-main {
     display: flex;
     flex-direction: column;
-    gap: 0.125rem;
+    gap: 0.15rem;
     min-width: 0;
+
+    .item-title-row {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.375rem;
+    }
 
     .name {
       font-weight: 600;
       color: var(--color-text-primary);
-      font-size: 0.95rem;
+      font-size: 0.9rem;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
 
     .price {
-      font-size: 0.8rem;
+      font-size: 0.78rem;
       font-weight: 600;
       color: var(--color-text-secondary);
+      font-variant-numeric: tabular-nums;
     }
   }
 
@@ -494,13 +598,11 @@
     gap: 0.375rem;
   }
 
-  /* Compact icon-only delete button — never stretches next to the
-     primary kitchen action. */
   .item-remove-btn {
     flex: 0 0 auto;
   }
 
-  /* Terminal "Entregado" label when no further action remains */
+  /* Terminal "Entregado" label */
   .item-done {
     display: inline-flex;
     align-items: center;
@@ -510,26 +612,20 @@
     color: var(--color-success);
     white-space: nowrap;
 
-    /* Cancelled is also terminal but reads as an error, not a success. */
     &.item-cancelled {
       color: var(--color-error);
     }
   }
 
-  /* QUI-653 — "Para llevar" en la fila. Va junto al nombre y no en la columna
-     de estado, porque no es un estado del item: es una propiedad de cómo se
-     entrega, y convive con el estado de cocina sin competir por el mismo hueco.
-     Se usa el shade del token en vez de primary/opacity porque `/opacity` no
-     compone sobre estas variables. */
+  /* Takeaway pill */
   .item-takeaway {
     display: inline-flex;
     align-items: center;
     gap: 0.2rem;
-    margin-left: 0.4rem;
     padding: 0.1rem 0.4rem;
-    border-radius: 0.75rem;
-    background-color: var(--color-warning-100);
-    color: var(--color-warning-700);
+    border-radius: 999px;
+    background-color: color-mix(in srgb, var(--color-warning) 15%, var(--color-surface));
+    color: var(--color-warning, #b45309);
     font-size: 0.68rem;
     font-weight: 600;
     white-space: nowrap;
@@ -541,6 +637,7 @@
   .item-row {
     grid-template-columns: auto 1fr auto;
     row-gap: 0.5rem;
+    padding: 0.75rem;
 
     .item-status {
       grid-column: 2 / 4;
@@ -552,8 +649,6 @@
       justify-content: flex-end;
       gap: 0.5rem;
 
-      /* Primary kitchen action fills the row; the delete button stays
-         compact so the two never overflow on narrow screens. */
       app-button:not(.item-remove-btn) {
         flex: 1 1 auto;
       }
@@ -579,8 +674,8 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 3.5rem;
-    height: 3.5rem;
+    width: 3.25rem;
+    height: 3.25rem;
     border-radius: 50%;
     background: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface));
     color: var(--color-primary);
@@ -595,16 +690,14 @@
   }
 
   .empty-sub {
-    margin: 0 0 0.5rem;
+    margin: 0 0 0.75rem;
     font-size: 0.85rem;
     color: var(--color-text-secondary);
     max-width: 22rem;
   }
 }
 
-/* ── C.1 (QUI-735) — sticky-cta móvil ─────────────────────────────────────
-   Barra de acción persistente al final del contenido (patrón `.checkout-footer`
-   del POS). Solo en móvil; en desktop las acciones viven en el sticky-header. */
+/* ── Sticky-cta móvil ─────────────────────────────────────────────────── */
 .session-cta {
   display: none;
 }
@@ -633,8 +726,7 @@
     }
   }
 
-  /* Reserva espacio inferior para que la barra sticky no tape el último card. */
   .session-body {
-    padding-bottom: 1.5rem;
+    padding-bottom: 2rem;
   }
 }

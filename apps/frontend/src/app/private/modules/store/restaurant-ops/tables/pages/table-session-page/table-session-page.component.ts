@@ -261,6 +261,53 @@ export class TableSessionPageComponent implements OnInit {
     );
   });
 
+  /** Normalized table name avoiding duplicate "Mesa Mesa X" */
+  readonly tableName = computed(() => {
+    const raw = this.session()?.table?.name;
+    if (!raw) return null;
+    const trimmed = raw.trim();
+    if (/^mesa\b/i.test(trimmed)) {
+      return trimmed;
+    }
+    return `Mesa ${trimmed}`;
+  });
+
+  /** Quick filter tabs for multi-item table orders */
+  readonly activeFilter = signal<'all' | 'unfired' | 'in_kitchen' | 'delivered'>('all');
+
+  readonly inKitchenCount = computed(() =>
+    this.items().filter((it) => {
+      const st = this.kitchenStatusFor(it);
+      return st != null && st !== 'delivered' && st !== 'cancelled';
+    }).length,
+  );
+
+  readonly deliveredCount = computed(() =>
+    this.items().filter((it) => this.isDelivered(it)).length,
+  );
+
+  readonly filteredItems = computed<TableSessionOrderItem[]>(() => {
+    const filter = this.activeFilter();
+    const all = this.items();
+    if (filter === 'unfired') {
+      return all.filter((it) => this.isPrepared(it) && !this.isItemFired(it));
+    }
+    if (filter === 'in_kitchen') {
+      return all.filter((it) => {
+        const st = this.kitchenStatusFor(it);
+        return st != null && st !== 'delivered' && st !== 'cancelled';
+      });
+    }
+    if (filter === 'delivered') {
+      return all.filter((it) => this.isDelivered(it));
+    }
+    return all;
+  });
+
+  setFilter(filter: 'all' | 'unfired' | 'in_kitchen' | 'delivered'): void {
+    this.activeFilter.set(filter);
+  }
+
   /** Count of currently selected (pending) items for the batch toolbar. */
   readonly selectedCount = computed(() => this.selectedItemIds().size);
 
