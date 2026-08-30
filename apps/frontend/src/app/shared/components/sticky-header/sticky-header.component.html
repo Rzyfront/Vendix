@@ -192,6 +192,11 @@
             </app-button>
           }
         }
+        <!-- Slot aditivo: permite proyectar acciones compuestas (p. ej. un
+             menú de desbordamiento `app-dropdown`) junto a los botones planos
+             de `actions()`. Sin contenido proyectado no renderiza nada, así
+             que ningún consumidor existente cambia. -->
+        <ng-content select="[actions-extra]"></ng-content>
       </div>
     </div>
   </div>

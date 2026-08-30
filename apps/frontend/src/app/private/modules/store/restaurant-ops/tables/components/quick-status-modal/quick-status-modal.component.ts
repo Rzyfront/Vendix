@@ -16,10 +16,36 @@ import {
   ModalComponent,
   SelectorComponent,
   SelectorOption,
+  TimelineComponent,
+  TimelineStep,
   ToastService,
 } from '../../../../../../../shared/components/index';
 import { Table, TableStatus } from '../../interfaces';
 import { TablesService } from '../../services/tables.service';
+
+const TABLE_STATUS_VALUES: readonly TableStatus[] = [
+  'available',
+  'occupied',
+  'reserved',
+  'cleaning',
+];
+
+function toTableStatus(value: string | undefined | null): TableStatus | null {
+  return (TABLE_STATUS_VALUES as readonly string[]).includes(value ?? '')
+    ? (value as TableStatus)
+    : null;
+}
+
+/**
+ * Forma mínima que el modal necesita de una mesa. `Table` la satisface,
+ * así que el plano de mesas sigue pasando su objeto completo sin cambios;
+ * la página de sesión puede pasar la proyección reducida que trae
+ * `GET /store/table-sessions/:id`.
+ */
+export type QuickStatusTable = Pick<Table, 'id' | 'name'> & {
+  status: TableStatus | string;
+  effective_status?: TableStatus | string;
+};
 
 /**
  * Quick status change modal for a single mesa on the floor map.
@@ -51,6 +77,7 @@ import { TablesService } from '../../services/tables.service';
     ButtonComponent,
     SelectorComponent,
     IconComponent,
+    TimelineComponent,
   ],
   template: `
     <app-modal
@@ -86,6 +113,19 @@ import { TablesService } from '../../services/tables.service';
             (valueChange)="onStatusChange($event)"
           />
         }
+
+        @if (historySteps().length > 0) {
+          <div class="history-group">
+            <span class="group-label">Historial de estados</span>
+            <app-timeline
+              [steps]="historySteps()"
+              [collapsible]="!historyExpanded()"
+              expand_label="Ver historial de estados"
+              collapse_label="Ocultar estados"
+              size="sm"
+            />
+          </div>
+        }
       </div>
 
       <div slot="footer" class="flex justify-end gap-2">
@@ -115,6 +155,22 @@ import { TablesService } from '../../services/tables.service';
         letter-spacing: 0.025em;
         color: #fff;
       }
+
+      .history-group {
+        margin-top: 1rem;
+        padding-top: 0.875rem;
+        border-top: 1px solid var(--color-border);
+      }
+
+      .group-label {
+        display: block;
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--color-text-secondary);
+        margin-bottom: 0.5rem;
+      }
     `,
   ],
 })
@@ -124,7 +180,11 @@ export class QuickStatusModalComponent {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly isOpen = input(false);
-  readonly table = input<Table | null>(null);
+  readonly table = input<QuickStatusTable | null>(null);
+  /** Pasos del historial de estados. Vacío = no se renderiza la sección. */
+  readonly historySteps = input<TimelineStep[]>([]);
+  /** Abre el historial ya desplegado (entrada "Historial de estados"). */
+  readonly historyExpanded = input<boolean>(false);
   /** Externally controlled busy state (e.g. parent is already saving). */
   readonly loadingInput = input(false, { alias: 'loading' });
   readonly internalLoading = signal(false);
@@ -141,7 +201,7 @@ export class QuickStatusModalComponent {
   readonly currentStatus = computed<TableStatus | null>(() => {
     const t = this.table();
     if (!t) return null;
-    return (t.effective_status ?? t.status) ?? null;
+    return toTableStatus(t.effective_status ?? t.status);
   });
 
   readonly currentStatusLabel = computed(() => {
@@ -159,8 +219,12 @@ export class QuickStatusModalComponent {
     return name ? `Cambiar estado — ${name}` : 'Cambiar estado de mesa';
   });
 
+  /** Permite a cada consumidor (plano vs. página de sesión) contextualizar el subtítulo. */
+  readonly subtitleText = input<string>('');
+
   readonly subtitle = computed(
     () =>
+      this.subtitleText() ||
       'Movimiento rápido desde el plano. La página se recargará para reflejar el nuevo estado.',
   );
 

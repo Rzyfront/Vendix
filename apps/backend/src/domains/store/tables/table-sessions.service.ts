@@ -42,6 +42,13 @@ export interface TableSessionView {
       last_name: string;
     } | null;
     /**
+     * QUI-737 (B.4 / FB-21) — alias de la venta cuando la mesa se abrio sin
+     * cliente formal ("Mesa 5", "Juan del taller"). Excluyente con `customer`
+     * por el CHECK `orders_customer_xor_alias` (ADR-9): si hay cliente, el
+     * alias es null. La cabecera de la mesa lo pinta en lugar del nombre.
+     */
+    customer_alias: string | null;
+    /**
      * QUI-653 — la orden tiene items para consumo en la mesa Y items para
      * llevar. Es DERIVADO de las lineas, no una columna: la cabecera de la mesa
      * y el tiquete impreso lo usan para distinguir las dos partes del pedido.
@@ -50,6 +57,15 @@ export interface TableSessionView {
     order_items: Array<{
       id: number;
       product_id: number | null;
+      product_variant_id: number | null;
+      // CP-POLLO-ARABE-727 F.1 Round 4 — C.4 completado: etiqueta legible de
+      // la variante (o null para producto sin variante), SIN NINGUN campo
+      // monetario (ADR-10: esta misma vista la puede leer `cocina`). Deriva
+      // el mismo criterio que `KitchenFireService.variantLabelFor`
+      // (kitchen-fire.service.ts:2409) — nombre de la variante, luego el
+      // snapshot `variant_attributes`, luego `variant_sku`. `product_name`
+      // sigue siendo el nombre BASE del producto (no se toca).
+      variant_label: string | null;
       product_name: string;
       quantity: number;
       unit_price: Prisma.Decimal | number;
@@ -115,6 +131,13 @@ export interface CreateOpenSessionArgs {
   deliveryType: 'direct_delivery' | 'dine_in';
   guestCount: number | null;
   internalNotes: string;
+  /**
+   * QUI-737 (B.4 / FB-21) — alias de venta cuando la mesa se abre sin cliente
+   * formal. OPCIONAL a proposito: `PaymentsService.processPosPayment` enlista
+   * `createOpenSessionInTx` con un literal que no lo declara.
+   * Excluyente con `customerId` (CHECK `orders_customer_xor_alias`, ADR-9).
+   */
+  customerAlias?: string | null;
 }
 
 /**
@@ -302,6 +325,11 @@ export class TableSessionsService {
       data: {
         store_id: args.storeId,
         customer_id: args.customerId,
+        // ADR-9 — cliente y alias son excluyentes (CHECK
+        // `orders_customer_xor_alias`). Si la mesa se abre con cliente, el
+        // alias se descarta; nunca se escriben los dos.
+        customer_alias:
+          args.customerId == null ? (args.customerAlias ?? null) : null,
         order_number: orderNumber,
         state: 'draft',
         channel: args.channel,
@@ -398,9 +426,18 @@ export class TableSessionsService {
     //    Anonymous open is gated by the `pos.allow_anonymous_sales` setting
     //    (mirrors the POS cobro flow): if anonymous sales are disabled and
     //    no customer was provided, opening the table is a business error.
+    //
+    //    QUI-737 (B.4 / FB-21) — el modo alias es la OTRA salida legitima de
+    //    "sin cliente". Mismo criterio que `orders.service.updateOrderFromEditor`
+    //    (`allowAnonymous || (allowAlias && alias)`): sin esto, una tienda con
+    //    `allow_alias_sales=true` y `allow_anonymous_sales=false` no puede
+    //    abrir mesa con alias y la feature queda inalcanzable.
     if (dto.customer_id == null) {
       const settings = await this.settingsService.getSettings();
-      if (settings.pos?.allow_anonymous_sales !== true) {
+      const allowAnonymous = settings.pos?.allow_anonymous_sales === true;
+      const allowAlias = settings.pos?.allow_alias_sales === true;
+      const hasAlias = !!dto.customer_alias;
+      if (!allowAnonymous && !(allowAlias && hasAlias)) {
         throw new VendixHttpException(
           ErrorCodes.TABLE_SESSION_CUSTOMER_REQUIRED,
         );
@@ -420,6 +457,9 @@ export class TableSessionsService {
       channel: 'pos',
       deliveryType: 'direct_delivery',
       guestCount: dto.guest_count ?? null,
+      // QUI-737 (B.4 / FB-21) — el DTO ya lo declara y el controller ya lo
+      // liga; sin este paso el alias moria aca y la orden nacia sin el.
+      customerAlias: dto.customer_alias ?? null,
       internalNotes: 'Mesa abierta — cuenta editable',
     });
 
@@ -592,6 +632,9 @@ export class TableSessionsService {
         is_sellable: true,
         product_type: true,
         track_inventory: true,
+        // ERR-07 — basta saber SI el producto tiene variantes, no cuáles.
+        // `take: 1` evita traer el catálogo completo de variantes por línea.
+        product_variants: { select: { id: true }, take: 1 },
       },
     });
     type ProductRow = (typeof products)[number];
@@ -611,6 +654,19 @@ export class TableSessionsService {
         throw new VendixHttpException(
           ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
           `Producto "${p.name}" no es vendible (is_sellable=false)`,
+        );
+      }
+      // ERR-07 — un `prepared` con variantes exige que la línea declare cuál.
+      // Sin esto la comanda llega a cocina como el producto base y el descuento
+      // de inventario va contra la fila sin variante (invariante DB-14).
+      if (
+        p.product_type === 'prepared' &&
+        p.product_variants.length > 0 &&
+        item.product_variant_id == null
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.PRODUCT_VARIANT_REQUIRED,
+          `El producto "${p.name}" tiene variantes: selecciona una.`,
         );
       }
     }
@@ -1172,6 +1228,8 @@ export class TableSessionsService {
             subtotal_amount: true,
             tax_amount: true,
             discount_amount: true,
+            // QUI-737 (B.4 / FB-21) — alias de la venta sin cliente formal.
+            customer_alias: true,
             // Customer of the draft order. orders.customer_id is Int?
             // nullable; the Prisma relation is `users`. We remap it to
             // `customer` below.
@@ -1187,11 +1245,22 @@ export class TableSessionsService {
               select: {
                 id: true,
                 product_id: true,
+                product_variant_id: true,
                 product_name: true,
                 quantity: true,
                 unit_price: true,
                 total_price: true,
                 inventory_consumed_at_fire: true,
+                // CP-POLLO-ARABE-727 F.1 Round 4 (C.4) — insumos para derivar
+                // `variant_label` con el mismo criterio de
+                // `KitchenFireService.variantLabelFor`. SOLO la etiqueta:
+                // ningun campo de precio/costo de la variante se proyecta aca
+                // (ADR-10 — esta respuesta la puede leer el rol `cocina`).
+                variant_attributes: true,
+                variant_sku: true,
+                product_variants: {
+                  select: { name: true },
+                },
                 // Snapshot of product_type (see addItems at L311).
                 // Read-only projection: lets the table-session UI hide
                 // the kitchen controls for non-dish items.
@@ -1289,6 +1358,7 @@ export class TableSessionsService {
                   last_name: order.users.last_name,
                 }
               : null,
+            customer_alias: order.customer_alias ?? null,
             // QUI-653 — DERIVADO, nunca persistido: la orden es mixta cuando
             // tiene items de los dos tipos. Persistirlo permitiria que quedara
             // desincronizado de sus propias lineas.
@@ -1298,6 +1368,8 @@ export class TableSessionsService {
             order_items: order.order_items.map((it) => ({
               id: it.id,
               product_id: it.product_id,
+              product_variant_id: it.product_variant_id,
+              variant_label: this.variantLabelFor(it),
               product_name: it.product_name,
               quantity: it.quantity,
               unit_price: it.unit_price,
@@ -1833,5 +1905,27 @@ export class TableSessionsService {
       },
     });
     return Math.round(newTotalPaid * 100) / 100;
+  }
+
+  /**
+   * CP-POLLO-ARABE-727 F.1 Round 4 — C.4 completado: etiqueta legible de la
+   * variante para `findOne`. Reutiliza el MISMO criterio que
+   * `KitchenFireService.variantLabelFor` (kitchen-fire.service.ts:2409):
+   * nombre de la variante, luego el snapshot `variant_attributes`, luego
+   * `variant_sku`. `null` para producto sin variante. ADR-10: SOLO la
+   * etiqueta — ningun campo monetario de la variante viaja aca, porque esta
+   * misma respuesta la puede leer el rol `cocina`.
+   */
+  private variantLabelFor(item: {
+    product_variants?: { name: string | null } | null;
+    variant_attributes?: string | null;
+    variant_sku?: string | null;
+  }): string | null {
+    return (
+      item.product_variants?.name ??
+      item.variant_attributes ??
+      item.variant_sku ??
+      null
+    );
   }
 }

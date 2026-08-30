@@ -5096,6 +5096,18 @@ export const ErrorCodes = {
     devMessage:
       'La variante declarada no pertenece al producto de la línea de orden',
   },
+  // CP-POLLO-ARABE-727 (ERR-07) — hermano de ERR-15 y complemento suyo:
+  // `PRODUCT_VARIANT_MISMATCH` cubre "variante ajena", nunca "falta variante".
+  // Un `prepared` con variantes vendido SIN variante entra al ticket de cocina
+  // como el producto base ("Pollo" cuando el cliente pidió "Pollo Picante") y
+  // descuenta inventario contra la fila base. Es el invariante que DB-14
+  // verifica en base de datos; esta es su defensa de escritura.
+  PRODUCT_VARIANT_REQUIRED: {
+    code: 'PRODUCT_VARIANT_REQUIRED',
+    httpStatus: 422,
+    devMessage:
+      'El producto preparado tiene variantes y la línea no declara ninguna',
+  },
   // ── KDS: estaciones de preparación (QUI-651) ────────────────────────
   KDS_NOT_FOUND: {
     code: 'KDS_NOT_FOUND',

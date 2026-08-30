@@ -413,6 +413,10 @@ export class PosShippingStepComponent {
         paymentMethod: paymentSubmit.method,
         cashReceived: paymentSubmit.amountReceived,
         reference: paymentSubmit.reference,
+        // QUI-728 (E.1) — la cuenta de destino elegida en el collector viaja
+        // también en la venta con envío; sin esto el pago por transferencia de
+        // una venta a domicilio queda sin `payments.bank_account_id`.
+        bank_account_id: paymentSubmit.bankAccountId,
       };
     } else {
       // credito: build the installment-shaped plan (see limitation above).

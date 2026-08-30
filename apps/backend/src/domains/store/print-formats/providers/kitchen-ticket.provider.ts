@@ -41,7 +41,7 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
     const ticket = await this.prisma.kitchen_tickets.findFirst({
       where: { id, store_id: storeId },
       include: {
-        kds: { select: { id: true, name: true, station_type: true } },
+        kds: { select: { id: true, name: true, code: true } },
         items: {
           orderBy: { id: 'asc' },
           include: {
@@ -178,7 +178,7 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
       },
       custom_variables: {
         kds_name: ticket.kds?.name || '',
-        kds_station_type: ticket.kds?.station_type || '',
+        kds_station_type: ticket.kds?.code || '',
         daily_number: ticket.daily_number || 0,
         business_date: ticket.business_date
           ? new Date(ticket.business_date).toISOString()

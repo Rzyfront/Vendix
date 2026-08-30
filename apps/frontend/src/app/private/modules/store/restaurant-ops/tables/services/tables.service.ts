@@ -3,7 +3,10 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
 import { catchError, map, switchMap } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
-import { parseApiError } from '../../../../../../../app/core/utils/parse-api-error';
+import {
+  parseApiError,
+  withApiErrorReference,
+} from '../../../../../../../app/core/utils/parse-api-error';
 import { DEFAULT_ERROR_MESSAGE } from '../../../../../../../app/core/utils/error-messages';
 import {
   Table,
@@ -528,7 +531,16 @@ export class TablesService {
       message = tablesStatusErrorCopy(error);
     }
 
-    return throwError(() => message);
+    // CP-POLLO-ARABE-727 F.1 — A.8 parcial. El backend adjunta `request_id`
+    // best-effort a todo cuerpo de error (`http-exception.filter.ts`) para
+    // que soporte pueda correlacionar la petición. Este handler normaliza el
+    // error a un string plano (contrato que ~15 llamadores verifican con
+    // `typeof err === 'string'`), así que la referencia se hornea en el
+    // propio mensaje aquí — no se puede recuperar más tarde leyendo el `err`
+    // crudo como sí hace `readApiErrorRequestId` cuando el error sobrevive
+    // como objeto. `withApiErrorReference` es un no-op si no hay
+    // `request_id` (red, auth, proxy).
+    return throwError(() => withApiErrorReference(message, parsed.request_id));
   };
 }
 

@@ -3,7 +3,10 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
-import { parseApiError } from '../../../../../../../app/core/utils/parse-api-error';
+import {
+  parseApiError,
+  withApiErrorReference,
+} from '../../../../../../../app/core/utils/parse-api-error';
 import { DEFAULT_ERROR_MESSAGE } from '../../../../../../../app/core/utils/error-messages';
 import {
   KitchenTicket,
@@ -31,6 +34,15 @@ export interface KitchenMutationError {
   code: string | null;
   message: string;
   details?: any;
+  /**
+   * CP-POLLO-ARABE-727 F.1 — A.8 parcial. Se propaga SIN hornear en
+   * `message`: `kds-board-page`/`table-session-page` ya leen este campo con
+   * `readApiErrorRequestId(err)` y lo añaden ellos mismos con
+   * `withApiErrorReference` al armar el toast (mismo patrón que usan para el
+   * `error_code` estructurado). Hornearlo aquí también duplicaría la
+   * referencia en ese camino.
+   */
+  request_id?: string;
 }
 
 interface ApiResponse<T> {
@@ -243,7 +255,15 @@ export class KitchenTicketsService {
   private handleError = (error: any): Observable<never> => {
     // eslint-disable-next-line no-console
     console.error('KitchenTicketsService Error:', error);
-    return throwError(() => this.deriveErrorMessage(error));
+    // CP-POLLO-ARABE-727 F.1 — A.8 parcial. Este camino normaliza el error a
+    // un string plano (snapshot/preview/fire), así que — igual que
+    // `TablesService.handleError` — la referencia de soporte se hornea aquí:
+    // no sobrevive ningún objeto crudo hasta el componente donde
+    // `readApiErrorRequestId` pudiera leerla después.
+    const message = this.deriveErrorMessage(error);
+    return throwError(() =>
+      withApiErrorReference(message, parseApiError(error).request_id),
+    );
   };
 
   /**
@@ -260,6 +280,11 @@ export class KitchenTicketsService {
       code: error?.error?.error_code ?? error?.error?.code ?? null,
       message: this.deriveErrorMessage(error),
       details: error?.error?.details ?? null,
+      // CP-POLLO-ARABE-727 F.1 — A.8 parcial. Campo crudo, sin hornear en
+      // `message`: `onMutationError` (kds-board-page) y
+      // `onKitchenMutationError` (table-session-page) lo leen con
+      // `readApiErrorRequestId(err)` y arman la referencia ellos mismos.
+      request_id: parseApiError(error).request_id,
     };
     return throwError(() => mutationError);
   };

@@ -15,6 +15,10 @@ import {
   WithholdingEmployeeCertificateDataProvider,
 } from './withholding-employee.provider';
 import { mapFiscalDocumentToPrintData } from './fiscal-document-print.mapper';
+import { PrintLayoutComposerService } from '../services/print-layout-composer.service';
+import { PrintTemplateCompilerService } from '../services/print-template-compiler.service';
+import { PrintFormatDefinition } from '../interfaces/print-format.interface';
+import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 
 /**
  * El carril REAL de impresión no puede devolver una muestra.
@@ -199,7 +203,7 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
       daily_number: 7,
       business_date: new Date('2026-08-22'),
       ready_at: null,
-      kds: { id: 1, name: 'Cocina Caliente', station_type: 'kitchen' },
+      kds: { id: 1, name: 'Cocina Caliente', code: 'kitchen' },
       items: [
         {
           id: 1,
@@ -258,7 +262,7 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
       daily_number: 8,
       business_date: new Date('2026-08-22'),
       ready_at: null,
-      kds: { id: 1, name: 'Cocina Caliente', station_type: 'kitchen' },
+      kds: { id: 1, name: 'Cocina Caliente', code: 'kitchen' },
       items: [
         {
           id: 2,
@@ -302,7 +306,7 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
       daily_number: 9,
       business_date: new Date('2026-08-22'),
       ready_at: null,
-      kds: { id: 1, name: 'Cocina Caliente', station_type: 'kitchen' },
+      kds: { id: 1, name: 'Cocina Caliente', code: 'kitchen' },
       items: [
         {
           id: 3,
@@ -328,6 +332,95 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
     expect(data.document.table_number).toBe('');
     expect(data.document.waiter_name).toBe('');
     expect(data.items).toHaveLength(1);
+  });
+
+  /**
+   * [QUI-727 F.1 — cierre, Step 8] — Un spec que afirma sobre el modelo de
+   * datos (`data.document.table_number`, como los dos tests de arriba) puede
+   * quedar en verde mientras el papel sale vacío: exactamente el defecto que
+   * la oleada 5 encontró en la sección `table_info`. Antes de C.3, la
+   * sección `table_info` de la plantilla sembrada NO declaraba `fields`, y
+   * el compositor no tenía `case 'table_info'` en el switch de
+   * `renderSection` — caía al `default: renderGenericFieldsSection(...)`,
+   * cuya primera instrucción es `if (fields.length === 0) return '';`.
+   * Resultado: sección habilitada, con título, que emitía cadena vacía.
+   *
+   * Este test grepea el HTML devuelto por `compose()` (el método real,
+   * ejercitando el switch completo), no el objeto `StandardPrintDataModel`.
+   * Reproduce a propósito la plantilla sembrada sin `fields` en la sección
+   * `table_info` — si el `case 'table_info'` se revierte, este caso debe
+   * fallar aunque los dos tests de arriba (que solo miran el modelo) sigan
+   * en verde.
+   */
+  it('compose(): el tiquete de cocina renderiza mesa y mesero en el HTML, no solo en el modelo de datos', () => {
+    const composer = new PrintLayoutComposerService(
+      new PrintTemplateCompilerService(),
+    );
+
+    const data: StandardPrintDataModel = {
+      store: { name: 'Restaurante Test' },
+      document: {
+        id: 42,
+        number: 'KITCHEN-42',
+        date: '2026-08-22',
+        date_formatted: '2026-08-22',
+        time: '14:25',
+        state: 'fired',
+        state_label: 'Disparado',
+        table_number: 'Mesa 7',
+        waiter_name: 'Ana Mesera',
+      },
+      items: [
+        {
+          index: 1,
+          product_name: 'Hamburguesa Doble',
+          quantity: 2,
+          unit_price: 0,
+          total_price: 0,
+        },
+      ],
+      taxes: [],
+      totals: {
+        subtotal: 0,
+        subtotal_formatted: '$0',
+        discount_total: 0,
+        discount_total_formatted: '$0',
+        shipping_total: 0,
+        shipping_total_formatted: '$0',
+        tax_total: 0,
+        tax_total_formatted: '$0',
+        grand_total: 0,
+        grand_total_formatted: '$0',
+      },
+    };
+
+    // Plantilla sembrada real: la sección `table_info` habilitada, SIN
+    // `fields` (así se siembra hoy — ver comentario en
+    // `print-layout-composer.service.ts` junto al `case 'table_info'`).
+    const definition: PrintFormatDefinition = {
+      v: 1,
+      paper: {
+        format: 'thermal_80',
+        width_mm: 80,
+        is_roll: true,
+        margin_mm: 5,
+        copies: 1,
+      },
+      sections: [
+        {
+          id: 'mesa-mesero',
+          type: 'table_info',
+          title: 'Mesa, Mesero y Turno',
+          enabled: true,
+          order: 1,
+        },
+      ],
+    };
+
+    const html = composer.compose(definition, data);
+
+    expect(html).toContain('Mesa 7');
+    expect(html).toContain('Ana Mesera');
   });
 
   it('pos_sale_ticket: venta en mesa — incluye la sesión ABIERTA y mapea mesa + mesero', async () => {

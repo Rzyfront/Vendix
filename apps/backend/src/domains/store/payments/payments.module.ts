@@ -84,13 +84,21 @@ import { TablesModule } from '../tables/tables.module';
     TablesModule,
   ],
   controllers: [
+    // CP-POLLO-ARABE-727 (verificación E2E) — `BankAccountsController` va ANTES
+    // que `PaymentsController`. Nest resuelve las rutas en el orden de este
+    // arreglo, y `PaymentsController` declara `@Get(':paymentId')` bajo el mismo
+    // prefijo `store/payments`: registrado primero, se tragaba
+    // `GET /store/payments/bank-accounts` como si `bank-accounts` fuera un id y
+    // respondía 404 `PAY_FIND_001` ("Payment not found") al dueño de la tienda.
+    // El POST sí funcionaba, así que el defecto solo mataba la lista que el
+    // selector de cuentas del cajero necesita (E.1). No mover de lugar.
+    BankAccountsController,
     PaymentsController,
     WebhookController,
     SystemPaymentMethodsController,
     StorePaymentMethodsController,
     OrganizationPaymentPoliciesController,
     WompiController,
-    BankAccountsController,
   ],
   providers: [
     PaymentsService,

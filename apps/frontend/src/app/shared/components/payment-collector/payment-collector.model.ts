@@ -176,6 +176,28 @@ export interface BankAccountOption {
 }
 
 /**
+ * La misma cuenta, ya normalizada para el `<select>` del cajero.
+ *
+ * Existe por una razón concreta: una entrada migrada por
+ * `20260829095000_bank_transfer_config_accounts` **no tiene**
+ * `bank_accounts.id` — el legado guardaba los datos sueltos en el JSON, sin
+ * fila en la tabla. Con el id como valor de la opción, esa cuenta se pintaba
+ * `value="undefined"`, la selección se coaccionaba a `null` y la compuerta de
+ * cobro no abría nunca: la tienda migrada no podía cobrar por transferencia.
+ * `key` siempre existe; `id` es la FK real o `null`.
+ */
+export interface BankAccountSelectOption extends BankAccountOption {
+  /** Identidad estable dentro del selector: `id:<n>` o `legacy:<índice>`. */
+  key: string;
+  /**
+   * FK a `bank_accounts.id`, o `null` si la entrada es legado. Un `null` viaja
+   * como `bank_account_id` ausente y el pago cae en la pantalla "Pagos sin
+   * asignar" de E.2 para asignación manual — degradación deliberada.
+   */
+  id: number | null;
+}
+
+/**
  * Sane per-context defaults. A flag left `undefined` on the component resolves
  * to the value here for the active `context`.
  */

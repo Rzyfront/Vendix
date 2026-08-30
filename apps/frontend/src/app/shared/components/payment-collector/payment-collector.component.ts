@@ -31,7 +31,7 @@ import { PaymentCreditFieldsComponent } from './payment-credit-fields.component'
 import { StepsLineComponent, type StepsLineItem } from '../steps-line/steps-line.component';
 import {
   DEFAULT_CONFIG_BY_CONTEXT,
-  type BankAccountOption,
+  type BankAccountSelectOption,
   type CreditTerms,
   type ManualPaymentMethod,
   type PaymentCollectorConfig,
@@ -175,8 +175,14 @@ export class PaymentCollectorComponent implements OnInit {
    * Se derivan del `custom_config.accounts` del propio método (shape nuevo
    * `{ accounts: BankAccountRef[] }`), nunca de un endpoint contable.
    */
-  readonly bankAccounts = signal<BankAccountOption[]>([]);
-  /** Id de la cuenta `bank_accounts.id` que el cajero eligió. */
+  readonly bankAccounts = signal<BankAccountSelectOption[]>([]);
+  /**
+   * Clave estable de la cuenta elegida ({@link BankAccountSelectOption.key}). Es lo
+   * que gobierna el `<select>` y la compuerta de cobro, NUNCA el id: una cuenta
+   * migrada del legado no tiene id y con el id como valor quedaba inelegible.
+   */
+  readonly selectedBankAccountKey = signal<string | null>(null);
+  /** FK `bank_accounts.id` de la cuenta elegida; `null` si la entrada es legado. */
   readonly selectedBankAccountId = signal<number | null>(null);
 
   /**
@@ -316,7 +322,7 @@ export class PaymentCollectorComponent implements OnInit {
    * método trae su propio `custom_config.accounts`; solo interesa el del método
    * activo.
    */
-  readonly selectedBankAccounts = computed<BankAccountOption[]>(() =>
+  readonly selectedBankAccounts = computed<BankAccountSelectOption[]>(() =>
     this.bankAccounts(),
   );
   /** Conocimiento de que el método `bank_transfer` activo tiene >= 1 cuenta. */
@@ -436,7 +442,7 @@ export class PaymentCollectorComponent implements OnInit {
       // vacío), y aun con cuentas el cajero debe elegir una. Se suma a la
       // referencia: ambas se exigen.
       if (this.selectedBankAccounts().length === 0) return false;
-      if (this.selectedBankAccountId() == null) return false;
+      if (this.selectedBankAccountKey() == null) return false;
     }
 
     if (this.needsReference()) {
@@ -570,6 +576,7 @@ export class PaymentCollectorComponent implements OnInit {
     this.referenceControl.setValue('');
     // QUI-728 — la cuenta bancaria elegida pertenece al método activo; al cambiar
     // de método se limpia y se recarga desde el `custom_config.accounts` del nuevo.
+    this.selectedBankAccountKey.set(null);
     this.selectedBankAccountId.set(null);
     this.bankAccounts.set(this.bankAccountsFor(method));
     // A method switch clears any prior manual cash override.
@@ -616,16 +623,56 @@ export class PaymentCollectorComponent implements OnInit {
    * su propia lista; si el método no expone `original` o el shape es legacy,
    * devuelve [].
    */
-  bankAccountsFor(method: PaymentMethod | null): BankAccountOption[] {
+  bankAccountsFor(method: PaymentMethod | null): BankAccountSelectOption[] {
     const cfg = (method?.original as any)?.custom_config;
     const list = Array.isArray(cfg?.accounts) ? cfg.accounts : [];
-    return list.filter((a: any) => a && typeof a === 'object');
+    return list
+      .filter((a: any) => a && typeof a === 'object')
+      .map((raw: any, index: number) => this.normalizeBankAccount(raw, index));
+  }
+
+  /**
+   * Aplana las TRES formas que conviven en `custom_config.accounts` a una sola
+   * opción con `key` estable:
+   *
+   * 1. `{ bank_account_id, … }` — la forma nueva, con FK real.
+   * 2. `{ legacy: { bank_name, account_number, … } }` — la que declara DB-04.
+   * 3. `{ bank_name, account_number, legacy: true }` — la que la migración
+   *    dejó realmente en producción: objeto PLANO, sin anidar y sin id.
+   *
+   * La tercera es la que rompía el selector: sin `id`, la opción se pintaba con
+   * `value="undefined"`, la selección se coaccionaba a `null` y la compuerta de
+   * cobro no abría nunca. Se resuelve aquí, sin migración de datos: una entrada
+   * sin FK se cobra igual y el pago aparece en "Pagos sin asignar" (E.2).
+   */
+  private normalizeBankAccount(raw: any, index: number): BankAccountSelectOption {
+    const nested =
+      raw.legacy && typeof raw.legacy === 'object' ? raw.legacy : raw;
+    const rawId = raw.bank_account_id ?? raw.id ?? nested.bank_account_id ?? nested.id;
+    const id = Number(rawId);
+    const hasId = Number.isFinite(id) && id > 0;
+    return {
+      key: hasId ? `id:${id}` : `legacy:${index}`,
+      id: hasId ? id : null,
+      name: nested.name ?? nested.account_holder ?? null,
+      bank_name: nested.bank_name,
+      account_number: nested.account_number,
+    };
   }
 
   onBankAccountSelect(event: Event): void {
-    const raw = (event.target as HTMLSelectElement).value;
-    const id = Number(raw);
-    this.selectedBankAccountId.set(Number.isFinite(id) && id > 0 ? id : null);
+    const key = (event.target as HTMLSelectElement).value;
+    const match = this.selectedBankAccounts().find((a) => a.key === key);
+    this.selectedBankAccountKey.set(match ? match.key : null);
+    this.selectedBankAccountId.set(match?.id ?? null);
+  }
+
+  /** Etiqueta visible de una cuenta; nunca cae en `undefined · undefined`. */
+  bankAccountLabel(account: BankAccountSelectOption): string {
+    const parts = [account.bank_name, account.account_number, account.name].filter(
+      (p): p is string => typeof p === 'string' && p.trim().length > 0,
+    );
+    return parts.length ? parts.join(' · ') : 'Cuenta bancaria';
   }
 
   iconFor(method: PaymentMethod): IconName {
@@ -719,10 +766,10 @@ export class PaymentCollectorComponent implements OnInit {
           message: 'Sin cuentas configuradas. Contacta al administrador.',
         };
       }
-      if (this.selectedBankAccountId() == null) {
+      if (this.selectedBankAccountKey() == null) {
         return {
           section: 'reference',
-          message: 'Selecciona la cuenta bancaria de destino',
+          message: 'Selecciona la cuenta bancaria de destino.',
         };
       }
     }
@@ -795,6 +842,7 @@ export class PaymentCollectorComponent implements OnInit {
     this.amountOverrideControl.setValue(null);
     this.referenceControl.setValue('');
     // QUI-728 — limpiar el estado de cuenta bancaria al resetear el collector.
+    this.selectedBankAccountKey.set(null);
     this.selectedBankAccountId.set(null);
     this.bankAccounts.set([]);
     const pre = this.preSelectedInstallment();
@@ -850,6 +898,9 @@ export class PaymentCollectorComponent implements OnInit {
     // QUI-728 — cuenta bancaria de destino (bank_transfer). El padre lo traduce
     // a `CreatePosPaymentDto.bank_account_id` / `CreatePaymentDto.bank_account_id`.
     if (method.type === PaymentMethodType.BANK_TRANSFER) {
+      // Solo viaja cuando hay FK real. Una cuenta legado (sin fila en
+      // `bank_accounts`) se cobra igual y el pago queda sin asignar: mandar un
+      // id inventado lo rechazaría el gateway con ERR-04.
       out.bankAccountId = this.selectedBankAccountId() ?? undefined;
     }
     if (method.type === PaymentMethodType.WOMPI && this.wompiSlice()) {

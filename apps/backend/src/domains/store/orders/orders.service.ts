@@ -271,9 +271,30 @@ export class OrdersService {
                   const product = item.product_id
                     ? await this.prisma.products.findUnique({
                         where: { id: item.product_id },
-                        select: { product_type: true },
+                        select: {
+                          product_type: true,
+                          name: true,
+                          // ERR-07 — solo interesa SI tiene variantes.
+                          product_variants: { select: { id: true }, take: 1 },
+                        },
                       })
                     : null;
+                  // CP-POLLO-ARABE-727 (ERR-07) — un `prepared` con variantes no
+                  // puede entrar sin declarar cuál: la comanda saldría con el
+                  // producto base y el inventario se descontaría contra la fila
+                  // sin variante (invariante DB-14). Se aplica al NACIMIENTO de
+                  // la línea, no en el editor: exigirlo también al editar dejaría
+                  // inguardable cualquier orden histórica que ya viole DB-14.
+                  if (
+                    product?.product_type === 'prepared' &&
+                    product.product_variants.length > 0 &&
+                    item.product_variant_id == null
+                  ) {
+                    throw new VendixHttpException(
+                      ErrorCodes.PRODUCT_VARIANT_REQUIRED,
+                      `El producto "${product.name}" tiene variantes: selecciona una.`,
+                    );
+                  }
                   const itemType =
                     item.item_type === 'product'
                       ? product?.product_type || 'physical'

@@ -257,13 +257,13 @@
                   <select
                     class="pc-input"
                     aria-label="Cuenta bancaria de destino"
-                    [value]="selectedBankAccountId() ?? ''"
+                    [value]="selectedBankAccountKey() ?? ''"
                     (change)="onBankAccountSelect($event)"
                   >
                     <option value="" disabled>Selecciona una cuenta</option>
-                    @for (acc of selectedBankAccounts(); track acc.id) {
-                      <option [value]="acc.id">
-                        {{ acc.bank_name }} · {{ acc.account_number }}
+                    @for (acc of selectedBankAccounts(); track acc.key) {
+                      <option [value]="acc.key">
+                        {{ bankAccountLabel(acc) }}
                       </option>
                     }
                   </select>

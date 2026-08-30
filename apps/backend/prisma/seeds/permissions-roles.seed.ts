@@ -5049,13 +5049,20 @@ export async function seedPermissionsAndRoles(
     // (payments.controller.ts:245). ADR-2 declara "mesero SÍ cobra y parte
     // cuenta"; sin este permiso el mesero no puede cerrar el cobro de una mesa.
     'store:pos:access',
-    // CP-POLLO-ARABE-727 F.1 Round 3 (M-1) — el payment-collector carga el
-    // catálogo de métodos con `GET /store/payments/payment-methods`, que exige
-    // `store:settings:read` (payments.controller.ts:453). Sin él el mesero cae
-    // a métodos genéricos (sin custom_config.accounts) y la cuenta bancaria
-    // nunca se puebla en el cobro por transferencia — el fix del puente queda
-    // sin efecto real. El cashier ya tiene este permiso (2x en el seed).
-    'store:settings:read',
+    // CP-POLLO-ARABE-727 F.1 Round 3 (M-1) — REVERTIDO en Round 4. El
+    // payment-collector carga el catálogo de métodos con
+    // `GET /store/payments/payment-methods`, que en M-1 exigía
+    // `store:settings:read` (payments.controller.ts:453). Se le concedió ese
+    // permiso al mesero para desatascar el 403, pero `store:settings:read`
+    // gatea 12 controladores de configuración (tenant-settings, invoicing,
+    // bank-accounts, payments, etc.) — el arreglo abrió once puertas que
+    // nadie pidió. El fix correcto es del handler, no del rol: el endpoint
+    // ahora exige `store:pos:access` (payments.controller.ts:~453, mismo
+    // patrón que :245), permiso que el mesero YA tiene arriba para cobrar
+    // (Round 2 B2). No hace falta ninguna fila extra aquí — se retira
+    // `store:settings:read` de esta lista canónica; el bloque
+    // `deleteMany({ notIn })` de abajo (F.1 Round 4 H1) revoca la fila
+    // residual en la próxima corrida del seed.
     // Disparar a cocina — `read` es necesario para `POST /kitchen-fire/preview`
     // (previewFire, kitchen-fire.controller.ts:82 exige `kitchen_fire:read`),
     // que el mesero llama ANTES de `fireOrderItems` (`kitchen_fire:create`) al
@@ -5141,8 +5148,16 @@ export async function seedPermissionsAndRoles(
     // Lectura de recetas — CP-POLLO-ARABE-727 F.1 Round 2 (m): el detalle del
     // ticket en el KDS (`kds-ticket-detail-modal` → `GET /recipes/by-product/:id`,
     // recipes.controller.ts:80 exige `recipes:read`) necesita ver el árbol de la
-    // receta del plato. La receta no lleva montos (solo insumos), así que no
-    // viola ADR-10. Sin él el cocinero ve "receta no disponible" en el detalle.
+    // receta del plato. Sin él el cocinero ve "receta no disponible" en el detalle.
+    //
+    // ⚠️ Este permiso NO es inocuo por sí solo: la premisa original ("la receta no
+    // lleva montos, solo insumos") fue REFUTADA en F.1 Round 4 (H2). `recipes:read`
+    // también abre `GET /store/recipes` y `GET /store/recipes/:id`, que sí
+    // seleccionan `product.base_price` y `component_product.cost_price`. ADR-10 se
+    // sostiene porque `recipes.service.ts` aplica `stripCocinaRecipeMoney` en
+    // findAll (:221) y findOne (:270) cuando el actor es cocina; `findByProduct`
+    // —el que usa el KDS— nunca llevó montos. Si ese strip se quita, este permiso
+    // vuelve a exponer dinero a cocina.
     'store:recipes:read',
     // Productos con proyección reducida (sin dinero)
     'store:products:read',
