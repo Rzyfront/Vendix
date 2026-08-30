@@ -9,12 +9,15 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
+  CRM_BLOCK_CATALOG,
   CRM_BLOCK_FIELDS,
   CRM_BLOCK_LABELS,
   CRM_BLOCK_TYPES,
   CrmBlock,
+  CrmBlockMeta,
   CrmBlockType,
   CrmLandingDocument,
+  CrmLandingTheme,
   emptyCrmLandingDocument,
 } from '../../../../../../public/dynamic-landing/blocks/landing-blocks.types';
 import { BlockRendererComponent } from '../../../../../../public/dynamic-landing/blocks/block-renderer/block-renderer.component';
@@ -25,17 +28,39 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
 let idSeq = 0;
 
+export interface ColorPreset {
+  name: string;
+  primary: string;
+  secondary: string;
+  badge: string;
+}
+
+export const COLOR_PRESETS: ColorPreset[] = [
+  { name: 'Azul Tech / Pro', primary: '#1E40AF', secondary: '#0EA5E9', badge: 'Tecnología & Retail' },
+  { name: 'Esmeralda Vital', primary: '#059669', secondary: '#10B981', badge: 'Salud, Bienestar & Hogar' },
+  { name: 'Púrpura Moderno', primary: '#7C3AED', secondary: '#C084FC', badge: 'Moda, Belleza & Joyería' },
+  { name: 'Naranja Dinámico', primary: '#EA580C', secondary: '#FB923C', badge: 'Restaurante & Comida' },
+  { name: 'Rojo Vital / Pasión', primary: '#DC2626', secondary: '#F87171', badge: 'Deportes & Ofertas' },
+  { name: 'Dark Luxury', primary: '#0F172A', secondary: '#334155', badge: 'Alta Gama & Lujo' },
+];
+
 const BLOCK_ICONS: Record<CrmBlockType, string> = {
-  hero: 'layout',
-  features: 'check-circle',
+  hero: 'sparkles',
+  features: 'shield-check',
   products_grid: 'shopping-bag',
-  about: 'info',
+  store_gallery: 'image',
+  testimonials: 'star',
+  faq: 'help-circle',
+  location_hours: 'map-pin',
+  promo_banner: 'tag',
+  about: 'building',
   contact: 'mail',
-  footer_cta: 'megaphone',
+  footer_cta: 'zap',
 };
 
 @Component({
   selector: 'app-crm-editor',
+  standalone: true,
   imports: [CommonModule, IconComponent, ButtonComponent, BlockRendererComponent],
   templateUrl: './crm-editor.component.html',
   styleUrl: './crm-editor.component.scss',
@@ -45,16 +70,24 @@ export class CrmEditorComponent {
   private readonly authFacade = inject(AuthFacade);
 
   readonly storeDomainHostname = this.authFacade.userDomainHostname;
-  readonly previewMode = signal<'desktop' | 'mobile'>('desktop');
+  readonly previewMode = signal<'desktop' | 'mobile'>('mobile');
+  readonly activeTab = signal<'sections' | 'theme' | 'ai'>('sections');
 
   /** Documento vigente (draft del backend). Se copia al entrar para edición local. */
   readonly document = input.required<CrmLandingDocument | null>();
-
   readonly documentChange = output<CrmLandingDocument>();
 
   readonly blocks = signal<CrmBlock[]>([]);
+  readonly theme = signal<CrmLandingTheme>({
+    primary_color: '#1E40AF',
+    secondary_color: '#0F172A',
+    enable_whatsapp_float: true,
+    border_radius: 'rounded-2xl',
+  });
+
   readonly selectedIndex = signal<number | null>(null);
-  readonly adding = signal(false);
+  readonly catalogModalOpen = signal(false);
+  readonly catalogCategory = signal<string>('all');
 
   readonly selectedBlock = computed<CrmBlock | null>(() => {
     const index = this.selectedIndex();
@@ -69,10 +102,18 @@ export class CrmEditorComponent {
     return block ? CRM_BLOCK_FIELDS[block.type] : [];
   });
 
+  readonly primaryColor = computed(() => this.theme().primary_color || '#1E40AF');
+  readonly secondaryColor = computed(() => this.theme().secondary_color || '#0F172A');
+  readonly colorPresets = COLOR_PRESETS;
+  readonly blockCatalog = CRM_BLOCK_CATALOG;
+
+  readonly filteredCatalog = computed(() => {
+    const cat = this.catalogCategory();
+    if (cat === 'all') return this.blockCatalog;
+    return this.blockCatalog.filter((item) => item.category === cat);
+  });
+
   constructor() {
-    // Signal inputs no disparan ngOnChanges: el efecto re-sincroniza la
-    // copia local cada vez que el padre entrega un documento nuevo
-    // (tras guardar/publicar/recargar).
     effect(() => {
       this.resetFromDocument(this.document());
     });
@@ -80,8 +121,18 @@ export class CrmEditorComponent {
 
   private resetFromDocument(document: CrmLandingDocument | null): void {
     const source = document ?? emptyCrmLandingDocument();
-    const newBlocks = source.blocks.map((b) => ({ ...b, props: { ...b.props } }));
+    const newBlocks = (source.blocks || []).map((b) => ({ ...b, props: { ...b.props } }));
     this.blocks.set(newBlocks);
+    if (source.theme) {
+      this.theme.set({
+        primary_color: source.theme.primary_color || '#1E40AF',
+        secondary_color: source.theme.secondary_color || '#0F172A',
+        whatsapp_number: source.theme.whatsapp_number || '',
+        whatsapp_message: source.theme.whatsapp_message || '',
+        border_radius: source.theme.border_radius || 'rounded-2xl',
+        enable_whatsapp_float: source.theme.enable_whatsapp_float ?? true,
+      });
+    }
     const currentIndex = this.selectedIndex();
     if (currentIndex != null && currentIndex >= newBlocks.length) {
       this.selectedIndex.set(null);
@@ -91,13 +142,18 @@ export class CrmEditorComponent {
   private emitDocument(): void {
     this.documentChange.emit({
       schema_version: 1,
-      theme: {},
+      theme: this.theme(),
       blocks: this.blocks(),
     });
   }
 
   select(index: number): void {
     this.selectedIndex.set(index);
+    this.activeTab.set('sections');
+  }
+
+  deselect(): void {
+    this.selectedIndex.set(null);
   }
 
   move(index: number, direction: -1 | 1): void {
@@ -115,10 +171,15 @@ export class CrmEditorComponent {
     this.blocks.set(blocks);
     if (this.selectedIndex() === index) this.selectedIndex.set(null);
     this.emitDocument();
+    this.toast.success('Sección eliminada del borrador');
   }
 
-  toggleAdding(): void {
-    this.adding.update((v) => !v);
+  openCatalog(): void {
+    this.catalogModalOpen.set(true);
+  }
+
+  closeCatalog(): void {
+    this.catalogModalOpen.set(false);
   }
 
   addBlock(type: CrmBlockType): void {
@@ -126,29 +187,45 @@ export class CrmEditorComponent {
       id: `${type}_${Date.now()}_${idSeq++}`,
       type,
       props: Object.fromEntries(
-        CRM_BLOCK_FIELDS[type].map((f) => [f.key, '']),
+        (CRM_BLOCK_FIELDS[type] || []).map((f) => [f.key, '']),
       ),
     };
     this.blocks.update((b) => [...b, block]);
     this.selectedIndex.set(this.blocks().length - 1);
-    this.adding.set(false);
+    this.catalogModalOpen.set(false);
     this.emitDocument();
+    this.toast.success(`Sección "${this.labelFor(type)}" agregada`);
   }
 
   labelFor(type: CrmBlockType): string {
-    return CRM_BLOCK_LABELS[type];
+    return CRM_BLOCK_LABELS[type] || type;
   }
 
   iconFor(type: CrmBlockType): string {
     return BLOCK_ICONS[type] ?? 'box';
   }
 
-  typesList(): CrmBlockType[] {
-    return [...CRM_BLOCK_TYPES];
-  }
-
   setPreviewMode(mode: 'desktop' | 'mobile'): void {
     this.previewMode.set(mode);
+  }
+
+  setActiveTab(tab: 'sections' | 'theme' | 'ai'): void {
+    this.activeTab.set(tab);
+  }
+
+  applyPreset(preset: ColorPreset): void {
+    this.theme.update((t) => ({
+      ...t,
+      primary_color: preset.primary,
+      secondary_color: preset.secondary,
+    }));
+    this.emitDocument();
+    this.toast.success(`Paleta "${preset.name}" aplicada`);
+  }
+
+  onThemeChange(key: keyof CrmLandingTheme, value: any): void {
+    this.theme.update((t) => ({ ...t, [key]: value }));
+    this.emitDocument();
   }
 
   onPropChange(key: string, value: string): void {
@@ -170,8 +247,8 @@ export class CrmEditorComponent {
         .map((item) => {
           if (typeof item === 'string') return item;
           if (item && typeof item === 'object') {
-            const title = item.title || item.name || '';
-            const desc = item.description || item.desc || '';
+            const title = item.title || item.name || item.question || '';
+            const desc = item.description || item.desc || item.answer || item.comment || '';
             return desc ? `${title} | ${desc}` : title;
           }
           return '';
@@ -186,7 +263,7 @@ export class CrmEditorComponent {
   }
 
   ctaClicked(): void {
-    this.toast.info('El botón funcionará en tu landing publicada');
+    this.toast.info('El botón de acción funcionará directamente en tu landing pública');
   }
 
   openPublicLanding(): void {
@@ -197,3 +274,4 @@ export class CrmEditorComponent {
     window.open(targetUrl, '_blank', 'noopener,noreferrer');
   }
 }
+

@@ -13,6 +13,11 @@ export const CRM_BLOCK_TYPES = [
   'hero',
   'features',
   'products_grid',
+  'store_gallery',
+  'testimonials',
+  'faq',
+  'location_hours',
+  'promo_banner',
   'about',
   'contact',
   'footer_cta',
@@ -31,6 +36,9 @@ export interface CrmBlock {
 export interface CrmLandingTheme {
   primary_color?: string;
   secondary_color?: string;
+  whatsapp_number?: string;
+  whatsapp_message?: string;
+  border_radius?: string;
 }
 
 export interface CrmLandingDocument {

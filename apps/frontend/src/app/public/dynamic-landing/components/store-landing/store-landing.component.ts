@@ -43,7 +43,7 @@ import {
   ],
   template: `
     <app-landing-layout [brandName]="storeName()" [logoUrl]="logoUrl()">
-      <div class="crm-landing" [style.--crm-primary]="primaryColor()">
+      <div class="crm-landing" [style.--crm-primary]="primaryColor()" [style.--crm-secondary]="secondaryColor()">
         @if (loading()) {
           <section class="crm-state">
             <app-icon name="loader" [size]="22" />
@@ -151,13 +151,27 @@ import {
           }
 
           <!-- Floating WhatsApp Widget Button -->
-          <a
-            (click)="scrollToForm()"
-            class="crm-floating-whatsapp fixed bottom-6 right-6 z-50 inline-flex items-center gap-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-4 py-3 rounded-full shadow-2xl transition-all duration-300 hover:scale-105 cursor-pointer"
-          >
-            <app-icon name="headphones" [size]="18" color="white" />
-            <span class="text-xs sm:text-sm font-bold">¿Dudas? Chatea en vivo</span>
-          </a>
+          @if (enableWhatsappFloat()) {
+            @if (whatsappUrl(); as waUrl) {
+              <a
+                [href]="waUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="crm-floating-whatsapp fixed bottom-6 right-6 z-50 inline-flex items-center gap-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-4 py-3 rounded-full shadow-2xl transition-all duration-300 hover:scale-105 cursor-pointer"
+              >
+                <app-icon name="headphones" [size]="18" color="white" />
+                <span class="text-xs sm:text-sm font-bold">¿Dudas? Chatea en vivo</span>
+              </a>
+            } @else {
+              <a
+                (click)="scrollToForm()"
+                class="crm-floating-whatsapp fixed bottom-6 right-6 z-50 inline-flex items-center gap-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-4 py-3 rounded-full shadow-2xl transition-all duration-300 hover:scale-105 cursor-pointer"
+              >
+                <app-icon name="headphones" [size]="18" color="white" />
+                <span class="text-xs sm:text-sm font-bold">¿Dudas? Chatea en vivo</span>
+              </a>
+            }
+          }
         } @else {
           <!-- Fallback branded para tiendas sin landing CRM publicada -->
           <section class="relative h-screen">
@@ -363,8 +377,26 @@ export class StoreLandingComponent {
   readonly formError = signal('');
 
   readonly primaryColor = computed(
-    () => this.document()?.theme?.primary_color ?? '#3b82f6',
+    () => this.document()?.theme?.primary_color ?? '#1E40AF',
   );
+
+  readonly secondaryColor = computed(
+    () => this.document()?.theme?.secondary_color ?? '#0F172A',
+  );
+
+  readonly enableWhatsappFloat = computed(
+    () => this.document()?.theme?.enable_whatsapp_float ?? true,
+  );
+
+  readonly whatsappUrl = computed(() => {
+    const rawNumber = this.document()?.theme?.whatsapp_number?.trim();
+    const rawMsg =
+      this.document()?.theme?.whatsapp_message?.trim() ||
+      '¡Hola! Vi su catálogo en la landing y quiero más información.';
+    if (!rawNumber) return null;
+    const cleanNumber = rawNumber.replace(/[^0-9]/g, '');
+    return `https://wa.me/${cleanNumber}?text=${encodeURIComponent(rawMsg)}`;
+  });
 
   constructor() {
     this.loadDocument();
