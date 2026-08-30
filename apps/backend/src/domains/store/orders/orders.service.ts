@@ -3289,6 +3289,21 @@ export class OrdersService {
     for (const p of products) {
       // Prisma ya devuelve `tax_rates` ordenadas por `priority` desc; el
       // primer match de cualquier asignación es la mejor tasa del producto.
+      //
+      // CAVEAT (auditoría 2026-08-30): el `for` externo recorre
+      // `product_tax_assignments` en el orden que Postgres las devuelva
+      // — sin `orderBy`, sin criterio. Con una sola categoría por
+      // producto (caso actual) el resultado es estable y da igual. Con
+      // dos o más categorías (futuro: IVA + INC, o múltiples impuestos
+      // por industria), la tasa elegida puede cambiar entre llamadas
+      // según el plan de query. NO es bug hoy — los productos del
+      // dominio POS rara vez tienen más de una categoría — pero el día
+      // que aparezca un producto multi-impuesto la "primera" asignación
+      // ganadora será arbitraria. Cuando llegue ese caso, hay que
+      // agregar `orderBy: { tax_category_id: 'asc' }` (o un criterio
+      // explícito de prioridad a nivel de categoría) y backfillear las
+      // `order_item_taxes` históricas para que el render del tiquete no
+      // salte entre tasas para el mismo producto.
       for (const assignment of p.product_tax_assignments ?? []) {
         const rate = assignment.tax_categories?.tax_rates?.[0];
         if (!rate) continue;
