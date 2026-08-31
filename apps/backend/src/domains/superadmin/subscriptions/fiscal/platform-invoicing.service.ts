@@ -861,7 +861,17 @@ export class PlatformInvoicingService {
       })),
       period_start: dto.period_start ?? undefined,
       period_end: dto.period_end ?? undefined,
+      // `currency` queda como string ISO 4217 para el snapshot y para
+      // callers legacy que ya mandaban `currency: 'USD'` plano — el cambio
+      // a objeto rompería ambos lectores.
       currency: dto.currency?.iso_4217 ?? 'COP',
+      // `exchange_rate_payload` viaja APARTE con el objeto completo para que
+      // el legacy `buildExchangeRate` (subscription-fiscal.service.ts:2482)
+      // emita `cac:PaymentAlternativeExchangeRate` cuando hay TRM. Sin este
+      // campo, el grupo nunca se emite y la sección «Divisa extranjera» del
+      // wizard queda decorativa (el operador marca la casilla, teclea la
+      // TRM y nada de eso llega al XML firmado).
+      exchange_rate_payload: dto.currency ?? undefined,
       resolution_id: dto.resolution_id ?? undefined,
       issue_date: dto.issue_date ?? undefined,
       due_date: dto.due_date ?? undefined,

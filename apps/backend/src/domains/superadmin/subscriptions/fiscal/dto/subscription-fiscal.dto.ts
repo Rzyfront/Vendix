@@ -492,6 +492,29 @@ export class CreatePlatformInvoiceWithholdingInputDto {
   amount?: number;
 }
 
+export class PlatformInvoiceCurrencyDto {
+  // Misma regla que `MvpV1CurrencyDto.iso_4217`: V1 sólo soporta COP y USD.
+  // Si la fachada trae otra moneda, `@IsIn` rechaza con 400 — sin bypass.
+  @IsString()
+  @Length(3, 3)
+  @IsIn(['COP', 'USD'], {
+    message: 'V1 solo soporta COP y USD (multi-moneda es V2)',
+  })
+  iso_4217!: string;
+
+  // TRM. 0 o ausente = «declarar divisa sin tasa» → el grupo
+  // `cac:PaymentAlternativeExchangeRate` NO se emite; la firma sigue en COP.
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 6 })
+  @Min(0)
+  exchange_rate?: number;
+
+  @IsOptional()
+  @IsISO8601()
+  exchange_rate_date?: string;
+}
+
 export class CreatePlatformInvoiceDto {
   @ValidateNested()
   @Type(() => PlatformInvoiceCustomerDto)
@@ -563,6 +586,22 @@ export class CreatePlatformInvoiceDto {
   @ValidateNested({ each: true })
   @Type(() => CreatePlatformInvoiceWithholdingInputDto)
   withholdings?: CreatePlatformInvoiceWithholdingInputDto[];
+
+  /**
+   * Bloque de divisa extranjera completo (`iso_4217`, `exchange_rate`,
+   * `exchange_rate_date`). Se mantiene APARTE del campo `currency` (string)
+   * para no romper a callers legacy que ya mandaban `currency: 'USD'` plano.
+   *
+   * El legacy lo lee en `buildExchangeRate` (subscription-fiscal.service.ts:2482)
+   * para emitir `cac:PaymentAlternativeExchangeRate` cuando hay tasa. Si el
+   * operador sólo eligió la casilla «declarar divisa» sin TRM, este campo
+   * queda con `exchange_rate` null/0 y el grupo NO se emite (firma COP
+   * intacta, no se rechaza el documento).
+   */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PlatformInvoiceCurrencyDto)
+  exchange_rate_payload?: PlatformInvoiceCurrencyDto;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
