@@ -2,6 +2,7 @@ import {
   Component,
   ElementRef,
   HostListener,
+  input,
   output,
   signal,
   viewChild,
@@ -25,7 +26,11 @@ import {
       @if (open()) {
         <div
           #panel
-          class="absolute right-0 top-full mt-1.5 z-[10000] w-56 origin-top-right rounded-md bg-[var(--color-background)] shadow-lg ring-1 ring-[var(--color-border)] focus:outline-none"
+          class="absolute top-full mt-1.5 z-[10000] w-56 rounded-md bg-[var(--color-background)] shadow-lg ring-1 ring-[var(--color-border)] focus:outline-none"
+          [class.right-0]="align() === 'right'"
+          [class.origin-top-right]="align() === 'right'"
+          [class.left-0]="align() === 'left'"
+          [class.origin-top-left]="align() === 'left'"
           role="menu"
         >
           <div class="py-1" role="none">
@@ -37,6 +42,7 @@ import {
   `,
 })
 export class DropdownComponent {
+  readonly align = input<'right' | 'left'>('right');
   open = signal(false);
   readonly isOpenChange = output<boolean>();
 

@@ -68,9 +68,9 @@ import {
 import { AssignCustomerModalComponent } from '../../components/assign-customer-modal/assign-customer-modal.component';
 import { QuickStatusModalComponent } from '../../components/quick-status-modal/quick-status-modal.component';
 
-/** One entry of the `···` overflow menu (desktop dropdown + mobile action sheet). */
+/** One entry of the `Opciones` overflow menu (desktop dropdown + mobile action sheet). */
 interface SecondaryAction {
-  id: 'split' | 'customer' | 'table-status' | 'history' | 'close';
+  id: 'pay' | 'split' | 'customer' | 'table-status' | 'history' | 'close';
   label: string;
   icon: string;
   disabled?: boolean;
@@ -425,48 +425,45 @@ export class TableSessionPageComponent implements OnInit {
   });
 
   /**
-   * ONE primary action per screen (Specific Objective 4): `Cobrar` when
-   * checkout is enabled, else `Agregar items`. Everything else — including
-   * the terminal `Cerrar mesa` — lives in `secondaryActions()`'s `···` menu.
+   * Primary action in the sticky header: `Cerrar mesa`.
+   * Secondary / contextual actions (Cobrar, Dividir cuenta, Asignar cliente, etc.)
+   * live inside `secondaryActions()`'s dropdown menu.
    */
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
-    if (this.checkoutEnabled()) {
-      return [
-        {
-          id: 'pay',
-          label: 'Cobrar',
-          icon: 'credit-card',
-          variant: 'primary',
-          disabled: this.isClosed() || this.items().length === 0,
-          title: this.isClosed()
-            ? 'La mesa ya está cerrada'
-            : 'Cobrar (la mesa queda ocupada — ciérrala desde el menú "···")',
-        },
-      ];
-    }
     return [
       {
-        id: 'add-items',
-        label: 'Agregar items',
-        icon: 'plus',
-        variant: 'primary',
+        id: 'close',
+        label: 'Cerrar mesa',
+        icon: 'lock',
+        variant: 'danger',
         disabled: this.isClosed(),
         title: this.isClosed()
           ? 'La mesa ya está cerrada'
-          : 'Agregar items a la cuenta',
+          : 'Cerrar la mesa y finalizar la sesión',
       },
     ];
   });
 
   /**
-   * Advanced actions grouped in the `···` overflow menu — a single source
+   * Advanced actions grouped in the `Opciones` dropdown menu — a single source
    * of truth consumed by BOTH the desktop `app-dropdown` (projected into
    * the sticky header's `[actions-extra]` slot) and the mobile action
    * sheet (`app-modal`). Empty once the session is closed.
    */
   readonly secondaryActions = computed<SecondaryAction[]>(() => {
     if (this.isClosed()) return [];
-    return [
+    const actions: SecondaryAction[] = [];
+
+    if (this.checkoutEnabled()) {
+      actions.push({
+        id: 'pay',
+        label: 'Cobrar',
+        icon: 'credit-card',
+        disabled: this.items().length === 0,
+      });
+    }
+
+    actions.push(
       {
         id: 'split',
         label: 'Dividir cuenta',
@@ -480,8 +477,9 @@ export class TableSessionPageComponent implements OnInit {
       },
       { id: 'table-status', label: 'Cambiar estado de mesa', icon: 'table' },
       { id: 'history', label: 'Historial de estados', icon: 'clock' },
-      { id: 'close', label: 'Cerrar mesa', icon: 'lock', danger: true },
-    ];
+    );
+
+    return actions;
   });
 
   constructor() {
@@ -1266,6 +1264,9 @@ export class TableSessionPageComponent implements OnInit {
   onSecondaryAction(id: SecondaryAction['id']): void {
     this.isActionsSheetOpen.set(false);
     switch (id) {
+      case 'pay':
+        this.openPay();
+        return;
       case 'split':
         this.openSplit();
         return;
@@ -1521,6 +1522,9 @@ export class TableSessionPageComponent implements OnInit {
 
   onHeaderAction(actionId: string): void {
     switch (actionId) {
+      case 'close':
+        this.closeSession();
+        return;
       case 'pay':
         this.openPay();
         return;
