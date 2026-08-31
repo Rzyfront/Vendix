@@ -362,7 +362,7 @@ export class PosSessionCloseModalComponent {
   readonly expectedChanged = computed(() => this.staleFrom() !== null);
 
   /** Etiquetas de método de pago: el backend manda `method` crudo, sin label. */
-  readonly methodLabels: Record<string, string> = {
+  readonly methodLabels: Record<string, string | undefined> = {
     cash: 'Efectivo',
     card: 'Tarjeta',
     bank_transfer: 'Transferencia',

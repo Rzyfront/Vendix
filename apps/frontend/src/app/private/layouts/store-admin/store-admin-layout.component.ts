@@ -177,9 +177,9 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
       <!-- Main Content -->
       <div
         class="main-content flex-1 flex flex-col h-screen overflow-hidden transition-all duration-300 ease-in-out"
-        [class.margin-desktop]="sidebarReady() && !sidebarRef?.isMobile()"
+        [class.margin-desktop]="sidebarReady() && !sidebarRef.isMobile()"
         [style.margin-left]="
-          sidebarReady() && !sidebarRef?.isMobile()
+          sidebarReady() && !sidebarRef.isMobile()
             ? sidebarCollapsed()
               ? '3.5rem'
               : '12.5rem'

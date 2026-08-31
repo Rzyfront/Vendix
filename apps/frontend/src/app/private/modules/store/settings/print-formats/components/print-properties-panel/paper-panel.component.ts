@@ -6,7 +6,6 @@ import {
   PrintPaperFormat,
 } from '../../../../../../../core/models/print-formats.model';
 import { PAPER_GEOMETRY } from '../../../../../../../core/lib/page-geometry';
-import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 
 /** Cast helper — PAPER_GEOMETRY is keyed by a closed set, but the
  *  editor dropdown also exposes `custom`. Unknown keys fall through to
@@ -26,7 +25,7 @@ function lookupGeometry(format: PrintPaperFormat) {
 @Component({
   selector: 'app-print-paper-panel',
   standalone: true,
-  imports: [CommonModule, FormsModule, IconComponent],
+  imports: [CommonModule, FormsModule],
   template: `
     <section class="vendix-subpanel">
       <h4 class="text-xs font-bold uppercase tracking-wider text-text-secondary mb-2">

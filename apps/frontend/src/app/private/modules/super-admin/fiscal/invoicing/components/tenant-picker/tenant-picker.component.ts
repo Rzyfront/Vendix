@@ -25,7 +25,6 @@ import { environment } from '../../../../../../../../environments/environment';
 import {
   BadgeComponent,
   ButtonComponent,
-  CardComponent,
   IconComponent,
   InputsearchComponent,
   SelectorComponent,
@@ -50,7 +49,6 @@ interface SearchResponse {
     FormsModule,
     BadgeComponent,
     ButtonComponent,
-    CardComponent,
     IconComponent,
     InputsearchComponent,
     SelectorComponent,

@@ -22,8 +22,6 @@ import {
   PrintSelectedElement,
 } from '../../../../../../../core/models/print-formats.model';
 import { definitionToRegions, regionsToDelta } from './canvas-region';
-import { PrintRegionHandleComponent } from './print-region-handle.component';
-import { PrintCanvasDragDirective } from './print-canvas-drag.directive';
 import { MmToPxService } from '../../../../../../../shared/services/print/mm-to-px.service';
 import { PrintCanvasHistoryService } from '../../services/print-canvas-history.service';
 import { PrintCanvasToolbarComponent } from './print-canvas-toolbar.component';
@@ -40,8 +38,6 @@ const TOKEN_DND_MIME = 'application/x-vendix-token';
   selector: 'app-print-canvas',
   standalone: true,
   imports: [
-    PrintRegionHandleComponent,
-    PrintCanvasDragDirective,
     PrintCanvasToolbarComponent,
     PrintPropertiesPanelComponent,
   ],

@@ -7,7 +7,6 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
-import { PublicHeaderComponent } from '../../../landing/components/public-header/public-header.component';
 import {
   FormBuilder,
   FormGroup,
@@ -39,7 +38,7 @@ type SubmitState = 'idle' | 'submitting' | 'success' | 'error';
 @Component({
   selector: 'app-pqr-submit',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, IconComponent, PublicHeaderComponent],
+  imports: [CommonModule, ReactiveFormsModule, IconComponent],
   templateUrl: './pqr-submit.component.html',
   styleUrls: ['./pqr-submit.component.scss'],
 })

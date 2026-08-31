@@ -787,8 +787,8 @@
               <span>Subtotal</span>
               <span>{{
                 ((cart()!.promotion_discount ?? 0) > 0
-                  ? (cart()!.promotional_subtotal ?? cart()!.subtotal ?? 0)
-                  : (cart()!.subtotal ?? 0)) | currency
+                  ? (cart()!.promotional_subtotal ?? cart()!.subtotal)
+                  : cart()!.subtotal) | currency
               }}</span>
             </div>
             @if (

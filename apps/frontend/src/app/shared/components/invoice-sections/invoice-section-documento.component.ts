@@ -280,7 +280,7 @@ export interface DocumentoSectionErrors {
                     [formControl]="asFormControl(note)"
                     [maxlength]="headerNoteLimit()"
                     size="sm"
-                    [error]="headerNoteErrors()[$index] ?? ''"
+                    [error]="headerNoteErrors()[$index]"
                   ></app-input>
                   @if (showCharCounter(asFormControl(note).value, headerNoteLimit())) {
                     <p
@@ -351,7 +351,7 @@ export class InvoiceSectionDocumentoComponent {
   readonly dueDateRequired = input<boolean>(false);
   readonly dueDateHelp = input<string>('');
   /** Un mensaje por índice de nota de cabecera. Sólo aplica en el perfil. */
-  readonly headerNoteErrors = input<readonly string[]>([]);
+  readonly headerNoteErrors = input<readonly (string | undefined)[]>([]);
   readonly headerNoteLimit = input<number>(CONFIG_LIMITS.header_note);
 
   readonly invoiceTypeChanged = output<void>();

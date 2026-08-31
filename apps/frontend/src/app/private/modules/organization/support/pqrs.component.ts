@@ -12,7 +12,6 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { catchError, of } from 'rxjs';
 import { environment } from '../../../../../environments/environment';
-import { RouterLink } from '@angular/router';
 import {
   IconComponent,
   StatsComponent,
@@ -47,7 +46,6 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
     CommonModule,
     FormsModule,
     DatePipe,
-    RouterLink,
     IconComponent,
     StatsComponent,
     StickyHeaderComponent,

@@ -563,7 +563,7 @@
     <app-input
       label="Descripción del concepto o servicio"
       [ngModel]="newLine().description"
-      (inputChange)="updateNewLine({ description: $event ?? '' })"
+      (inputChange)="updateNewLine({ description: $event })"
       placeholder="Ej. Suscripción Plan Pro Anual, Consultoría Técnica..."
       [required]="true"
     ></app-input>

@@ -12,7 +12,6 @@ import {
 } from '../../../../../../public/dynamic-landing/blocks/landing-blocks.types';
 import { ToastService } from '../../../../../../shared/components';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { ButtonComponent } from '../../../../../../shared/components';
 import { CrmEditorComponent } from '../crm-editor/crm-editor.component';
 
 const STATUS_LABELS: Record<CrmGenerationStatus, string> = {
@@ -27,7 +26,7 @@ type CrmTab = 'estado' | 'diseno';
 
 @Component({
   selector: 'app-crm-main-page',
-  imports: [CommonModule, IconComponent, ButtonComponent, CrmEditorComponent],
+  imports: [CommonModule, IconComponent, CrmEditorComponent],
   templateUrl: './crm-main-page.component.html',
   styleUrl: './crm-main-page.component.scss',
 })

@@ -13,7 +13,6 @@ import {
   PrintFormatDefinition,
   PrintTokenDefinition,
 } from '../../../../../../../core/models/print-formats.model';
-import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 
 /**
  * [print-editor-dsk P5.8] — Custom template panel.
@@ -27,7 +26,7 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
 @Component({
   selector: 'app-print-custom-template-panel',
   standalone: true,
-  imports: [CommonModule, FormsModule, IconComponent],
+  imports: [CommonModule, FormsModule],
   template: `
     <section class="vendix-subpanel">
       <h4 class="text-xs font-bold uppercase tracking-wider text-text-secondary mb-2">

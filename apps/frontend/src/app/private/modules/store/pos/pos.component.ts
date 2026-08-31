@@ -66,7 +66,6 @@ import {
 import { PosPaymentService } from './services/pos-payment.service';
 import { PosOrderService } from './services/pos-order.service';
 import { StoreOrdersService } from '../orders/services/store-orders.service';
-import { PosStatsComponent } from './components/pos-stats.component';
 import { PosProductSelectionComponent } from './components/pos-product-selection.component';
 import { PosBarcodeService } from './services/pos-barcode.service';
 import {
@@ -115,7 +114,6 @@ import { PosSessionDetailModalComponent } from './components/pos-session-detail-
 import { PosScheduleIndicatorComponent } from './components/pos-schedule-indicator.component';
 import { PosScheduleModalComponent } from './components/pos-schedule-modal.component';
 import { PosHeaderDropdownComponent } from './components/pos-header-dropdown.component';
-import { ReservationFormModalComponent } from '../reservations/components/reservation-form-modal/reservation-form-modal.component';
 import { BookingSchedulerModalComponent } from '../../../../shared/components/booking-scheduler-modal/booking-scheduler-modal.component';
 import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.component';
 import {
@@ -145,7 +143,6 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
     PosCustomItemModalComponent,
     SpinnerComponent,
     CardComponent,
-    PosStatsComponent,
     PosProductSelectionComponent,
     PosCustomerModalComponent,
     PosCheckoutShellComponent,
@@ -163,7 +160,6 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
     PosScheduleModalComponent,
     PosHeaderDropdownComponent,
     LayawayConfigModalComponent,
-    ReservationFormModalComponent,
     BookingSchedulerModalComponent,
     PosAISummaryModalComponent,
     OrderPaymentModalComponent,

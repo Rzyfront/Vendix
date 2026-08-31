@@ -499,7 +499,7 @@ import { dataUrlToFile } from '../../../../../../app/shared/utils/data-url.util'
         <app-button
           variant="primary"
           [loading]="config_saving()"
-          [disabled]="!edit_mode() && (config_form?.invalid === true)"
+          [disabled]="!edit_mode() && config_form.invalid"
           (clicked)="edit_mode() ? saveEdit() : saveConfigAndEnable()"
         >
           {{ edit_mode() ? 'Guardar Cambios' : 'Guardar y Confirmar' }}

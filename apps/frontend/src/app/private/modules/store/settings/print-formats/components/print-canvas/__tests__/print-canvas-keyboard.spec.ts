@@ -6,18 +6,6 @@ import {
   PrintFormatDefinition,
 } from '../../../../../../../../core/models/print-formats.model';
 import { PrintCanvasComponent } from '../print-canvas.component';
-import { PrintCanvasToolbarComponent } from '../print-canvas-toolbar.component';
-import { PrintPropertiesPanelComponent } from '../../print-properties-panel/print-properties-panel.component';
-import { PrintPaperPanelComponent } from '../../print-properties-panel/paper-panel.component';
-import { PrintSectionPanelComponent } from '../../print-properties-panel/section-panel.component';
-import { PrintColumnPanelComponent } from '../../print-properties-panel/column-panel.component';
-import { PrintLogoPanelComponent } from '../../print-properties-panel/logo-panel.component';
-import { PrintCompanyPanelComponent } from '../../print-properties-panel/company-panel.component';
-import { PrintStylesPanelComponent } from '../../print-properties-panel/styles-panel.component';
-import { PrintCustomTemplatePanelComponent } from '../../print-properties-panel/custom-template-panel.component';
-import { PrintRegionHandleComponent } from '../print-region-handle.component';
-import { PrintCanvasDragDirective } from '../print-canvas-drag.directive';
-import { IconComponent } from '../../../../../../../../shared/components/icon/icon.component';
 
 /**
  * [print-editor-dsk P9] — Keyboard handling contract for the canvas.
@@ -40,18 +28,6 @@ import { IconComponent } from '../../../../../../../../shared/components/icon/ic
   standalone: true,
   imports: [
     PrintCanvasComponent,
-    PrintCanvasToolbarComponent,
-    PrintPropertiesPanelComponent,
-    PrintPaperPanelComponent,
-    PrintSectionPanelComponent,
-    PrintColumnPanelComponent,
-    PrintLogoPanelComponent,
-    PrintCompanyPanelComponent,
-    PrintStylesPanelComponent,
-    PrintCustomTemplatePanelComponent,
-    PrintRegionHandleComponent,
-    PrintCanvasDragDirective,
-    IconComponent,
   ],
   template: `
     <app-print-canvas

@@ -1,4 +1,3 @@
-import { DatePipe } from '@angular/common';
 import {
   Component,
   DestroyRef,
@@ -18,13 +17,11 @@ import {
 } from '@angular/forms';
 
 import {
-  BadgeComponent,
   ButtonComponent,
   CardComponent,
   ConfirmationModalComponent,
   DianResolutionScanResult,
   DianResolutionScannerModalComponent,
-  EmptyStateComponent,
   IconComponent,
   InputComponent,
   ItemListCardConfig,
@@ -76,13 +73,10 @@ interface ResolutionFormControls {
   standalone: true,
   imports: [
     ReactiveFormsModule,
-    DatePipe,
-    BadgeComponent,
     ButtonComponent,
     CardComponent,
     ConfirmationModalComponent,
     DianResolutionScannerModalComponent,
-    EmptyStateComponent,
     IconComponent,
     InputComponent,
     ModalComponent,

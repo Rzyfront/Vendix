@@ -83,7 +83,6 @@ import {
   SelectorComponent,
   SelectorOption,
 } from '../../../../../../shared/components/selector/selector.component';
-import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
 import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import {
@@ -142,7 +141,6 @@ import { InvoiceProductOption } from '../../services/invoice-product-lookup.serv
 // siguen viviendo en `components/invoice-create/`: son piezas del formulario,
 // no de la página, y el POS u otra superficie podría montarlas sin esta vista.
 import { InvoiceFormSectionComponent } from '../../components/invoice-create/invoice-form-section.component';
-import { InvoiceLineTaxesComponent } from '../../components/invoice-create/invoice-line-taxes.component';
 import { InvoiceItemPickerModalComponent } from '../../components/invoice-create/invoice-item-picker-modal.component';
 import {
   InvoiceCustomItemDraft,
@@ -798,7 +796,6 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     ButtonComponent,
     InputComponent,
     SelectorComponent,
-    TextareaComponent,
     ToggleComponent,
     IconComponent,
     AccountCodeSelectComponent,
@@ -807,7 +804,6 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     ConfirmationModalComponent,
     SaveRequirementsModalComponent,
     InvoiceFormSectionComponent,
-    InvoiceLineTaxesComponent,
     InvoiceItemPickerModalComponent,
     InvoiceCustomItemModalComponent,
     InvoiceOrderSelectComponent,

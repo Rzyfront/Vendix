@@ -15,8 +15,6 @@ import {
 } from '../../../../../../../shared/components/selector/selector.component';
 import {
   AlertBannerComponent,
-  BadgeComponent,
-  IconComponent,
 } from '../../../../../../../shared/components/index';
 import { PromotionsSettings } from '../../../../../../../core/models/store-settings.interface';
 
@@ -37,8 +35,6 @@ const DEFAULTS: PromotionsSettings = {
     SettingToggleComponent,
     SelectorComponent,
     AlertBannerComponent,
-    BadgeComponent,
-    IconComponent,
   ],
   template: `
     <form [formGroup]="form" class="space-y-6">

@@ -168,24 +168,24 @@ const TIER_LABEL: Record<WeeklyTier, string> = {
                     <div class="metric-grid__item">
                       <div class="metric-grid__label">Ventas completadas</div>
                       <div class="metric-grid__value metric-grid__value--big">
-                        {{ slide.payload?.['total_revenue'] | currency:'$':'symbol-narrow':'1.0-0':'es-CO' }}
+                        {{ slide.payload['total_revenue'] | currency:'$':'symbol-narrow':'1.0-0':'es-CO' }}
                       </div>
                     </div>
                     <div class="metric-grid__item">
                       <div class="metric-grid__label">Órdenes</div>
-                      <div class="metric-grid__value">{{ slide.payload?.['total_orders'] }}</div>
+                      <div class="metric-grid__value">{{ slide.payload['total_orders'] }}</div>
                     </div>
                     <div class="metric-grid__item">
                       <div class="metric-grid__label">Ticket promedio</div>
                       <div class="metric-grid__value">
-                        {{ slide.payload?.['average_ticket'] | currency:'$':'symbol-narrow':'1.0-0':'es-CO' }}
+                        {{ slide.payload['average_ticket'] | currency:'$':'symbol-narrow':'1.0-0':'es-CO' }}
                       </div>
                     </div>
                   </div>
                 }
                 @case ('orders') {
                   <div class="orders">
-                    @if (slide.payload?.['best_day']) {
+                    @if (slide.payload['best_day']) {
                       <div class="orders__best-day">
                         <div class="orders__label">Tu mejor día</div>
                         <div class="orders__date">{{ slide.payload['best_day'].date }}</div>
@@ -203,7 +203,7 @@ const TIER_LABEL: Record<WeeklyTier, string> = {
                 }
                 @case ('top_product') {
                   <div class="top-product">
-                    @if (slide.payload?.['top_product']) {
+                    @if (slide.payload['top_product']) {
                       <div class="top-product__name">{{ slide.payload['top_product'].name }}</div>
                       <div class="top-product__units">
                         {{ slide.payload['top_product'].units }} unidades
@@ -219,14 +219,14 @@ const TIER_LABEL: Record<WeeklyTier, string> = {
                 @case ('customers') {
                   <div class="customers">
                     <div class="customers__big">
-                      {{ slide.payload?.['new_customers'] }}
+                      {{ slide.payload['new_customers'] }}
                     </div>
                     <div class="customers__label">clientes nuevos</div>
                   </div>
                 }
                 @case ('channels') {
                   <ul class="channels">
-                    @for (c of slide.payload?.['channels'] ?? []; track c.channel) {
+                    @for (c of slide.payload['channels'] ?? []; track c.channel) {
                       <li class="channels__row">
                         <span class="channels__name">{{ c.display_name || c.channel }}</span>
                         <span class="channels__bar">
@@ -239,7 +239,7 @@ const TIER_LABEL: Record<WeeklyTier, string> = {
                         <span class="channels__pct">{{ c.percentage | number:'1.0-0' }}%</span>
                       </li>
                     }
-                    @if ((slide.payload?.['channels'] ?? []).length === 0) {
+                    @if ((slide.payload['channels'] ?? []).length === 0) {
                       <li class="channels__empty">Sin ventas por canales esta semana.</li>
                     }
                   </ul>
@@ -248,7 +248,7 @@ const TIER_LABEL: Record<WeeklyTier, string> = {
                   <div class="inventory">
                     <div class="inventory__row">
                       <span>Órdenes de compra</span>
-                      <strong>{{ slide.payload?.['purchase_orders'] }}</strong>
+                      <strong>{{ slide.payload['purchase_orders'] }}</strong>
                     </div>
                     <div class="inventory__row">
                       <span>Total comprado</span>
@@ -287,7 +287,7 @@ const TIER_LABEL: Record<WeeklyTier, string> = {
                 }
                 @case ('closing') {
                   <div class="closing">
-                    <div class="closing__emoji">{{ slide.payload?.['emoji'] }}</div>
+                    <div class="closing__emoji">{{ slide.payload['emoji'] }}</div>
                     <p>¡Nos vemos la próxima semana!</p>
                     <button
                       type="button"

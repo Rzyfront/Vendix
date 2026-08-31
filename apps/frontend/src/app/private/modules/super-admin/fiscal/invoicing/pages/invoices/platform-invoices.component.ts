@@ -1,4 +1,3 @@
-import { DatePipe } from '@angular/common';
 import { Component, DestroyRef, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, FormsModule, ReactiveFormsModule } from '@angular/forms';
@@ -26,7 +25,6 @@ import type {
   FilterConfig,
   FilterValues,
 } from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
-import { CurrencyPipe } from '../../../../../../../shared/pipes/currency';
 import {
   SubscriptionFiscalEnvironment,
   SubscriptionFiscalTransmission,
@@ -54,8 +52,6 @@ import {
   imports: [
     ReactiveFormsModule,
     FormsModule,
-    DatePipe,
-    CurrencyPipe,
     CardComponent,
     StatsComponent,
     ButtonComponent,

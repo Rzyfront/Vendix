@@ -10,18 +10,11 @@ import { ReservationListComponent } from './components/reservation-list/reservat
 import { ReservationFormModalComponent } from './components/reservation-form-modal/reservation-form-modal.component';
 import { CalendarContainerComponent } from './components/calendar/calendar-container/calendar-container.component';
 import { QuickBookFromSlotModalComponent } from './components/calendar/quick-book-from-slot-modal/quick-book-from-slot-modal.component';
-// CP-POS-SVC-PERF-001 — admin re-agendar now uses the unified
-// `booking-scheduler-modal` (same as POS cart). The previous
-// `reschedule-modal` is being deprecated; kept as a parallel import
-// for now so other callers (e.g. my-reservations in ecommerce) keep
-// working until that page is migrated too.
-import { RescheduleModalComponent } from './components/reschedule-modal/reschedule-modal.component';
 import { BookingSchedulerModalComponent } from '../../../../shared/components/booking-scheduler-modal/booking-scheduler-modal.component';
 import { ReservationsService } from './services/reservations.service';
 import { BookingDetailModalComponent } from './components/booking-detail-modal/booking-detail-modal.component';
 import { TodayReservationsPanelComponent } from './components/today-reservations-panel/today-reservations-panel.component';
 import { QuickActionsPanelComponent } from './components/quick-actions-panel/quick-actions-panel.component';
-import { RescheduleRequestsPanelComponent } from './components/reschedule-requests-panel/reschedule-requests-panel.component';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 import { CardComponent } from '../../../../shared/components/card/card.component';
 import {
@@ -50,12 +43,10 @@ type ReservationView = 'calendar' | 'list';
     ReservationFormModalComponent,
     CalendarContainerComponent,
     QuickBookFromSlotModalComponent,
-    RescheduleModalComponent,
     BookingSchedulerModalComponent,
     BookingDetailModalComponent,
     TodayReservationsPanelComponent,
     QuickActionsPanelComponent,
-    RescheduleRequestsPanelComponent,
     CardComponent,
     IconComponent,
     TooltipComponent,

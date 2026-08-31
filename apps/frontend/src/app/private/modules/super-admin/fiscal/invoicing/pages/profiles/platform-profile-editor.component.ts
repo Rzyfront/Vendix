@@ -22,7 +22,6 @@ import { map } from 'rxjs/operators';
 import {
   AlertBannerComponent,
   InputComponent,
-  SelectorComponent,
   StickyHeaderActionButton,
 } from '../../../../../../../shared/components/index';
 import type { SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
@@ -108,7 +107,6 @@ type SectionId =
     PlatformSectionWrapperComponent,
     AlertBannerComponent,
     InputComponent,
-    SelectorComponent,
     InvoiceSectionAiuComponent,
     InvoiceSectionDocumentoComponent,
     InvoiceSectionLineasComponent,

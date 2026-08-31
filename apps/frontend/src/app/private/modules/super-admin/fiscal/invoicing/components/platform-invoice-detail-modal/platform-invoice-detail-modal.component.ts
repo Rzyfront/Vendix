@@ -10,15 +10,13 @@ import {
   output,
   signal,
 } from '@angular/core';
-import { DatePipe, DecimalPipe, NgClass } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 
 import {
   AlertBannerComponent,
-  BadgeComponent,
   ButtonComponent,
-  ConfirmationModalComponent,
   IconComponent,
   InputComponent,
   ModalComponent,
@@ -43,13 +41,9 @@ import {
   imports: [
     FormsModule,
     DatePipe,
-    DecimalPipe,
-    NgClass,
     VendixCurrencyPipe,
     AlertBannerComponent,
-    BadgeComponent,
     ButtonComponent,
-    ConfirmationModalComponent,
     IconComponent,
     InputComponent,
     ModalComponent,

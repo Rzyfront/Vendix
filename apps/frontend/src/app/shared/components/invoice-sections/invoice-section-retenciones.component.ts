@@ -226,7 +226,7 @@ export interface RetencionesRowErrors {
                   <span
                     class="block text-sm font-semibold text-text-primary truncate"
                   >
-                    {{ formatCurrency()(rowAmounts()[i] ?? 0) }}
+                    {{ formatCurrency()(rowAmounts()[i]) }}
                   </span>
                 </div>
                 <app-button
