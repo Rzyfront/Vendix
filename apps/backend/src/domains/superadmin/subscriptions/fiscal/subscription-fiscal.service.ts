@@ -1908,6 +1908,152 @@ export class SubscriptionFiscalService {
     };
   }
 
+  /**
+   * Adquiriente en el contrato de `CustomerFiscalIdentityValidator`, desde el
+   * `dto.customer` de `createPlatformInvoice`. Espejo de
+   * `buildCustomerIdentityInput` (que lee de `organizations`): mismos campos,
+   * misma coerción de tipos. La rama del frontend manda lo que el riel tienda
+   * lee de la organización, así que el contrato que valida el validador es
+   * el MISMO.
+   */
+  private buildPlatformCustomerIdentityInput(
+    dto: CreatePlatformInvoiceDto,
+  ): CustomerFiscalIdentityInput {
+    const documentType = dto.customer.document_type ?? '31';
+    const isNit = documentType === '31' || documentType === 'NIT';
+
+    return {
+      identification_mode: 'nominative',
+      document_type: documentType,
+      document_number: dto.customer.tax_id ?? null,
+      // El DV sólo es relevante para NIT (Anexo 19). Cédula, CE y Pasaporte
+      // NO llevan DV — pasarlo aunque sea undefined dispara falsos positivos.
+      verification_digit: isNit ? (dto.customer.tax_id_dv ?? null) : null,
+      // `customer.person_type` guarda el CÓDIGO DIAN (`'1'`/`'2'`), no la
+      // etiqueta del validador. Sin traducir, cada factura legítima
+      // levantaba un `PERSON_TYPE_UNKNOWN` sobre un dato correcto.
+      person_type: normalizePersonType(dto.customer.person_type),
+      legal_name: dto.customer.legal_name ?? null,
+      tax_regime: normalizeAcquirerTaxRegime(dto.customer.tax_regime_code),
+      tax_responsibilities: dto.customer.fiscal_responsibilities?.length
+        ? dto.customer.fiscal_responsibilities
+        : null,
+      email: dto.customer.email ?? null,
+      address: dto.customer.address_line
+        ? {
+            address_line: dto.customer.address_line,
+            city_code: null,
+            city_name: dto.customer.city ?? null,
+            department_code: dto.customer.department_code ?? null,
+            department_name: null,
+            country_code: 'CO',
+            postal_code: null,
+          }
+        : null,
+    };
+  }
+
+  /**
+   * Arma el `ProviderInvoiceData` que firma el emisor DIAN. Vive como helper
+   * para que los pre-validadores (F4) puedan correr ANTES de
+   * `allocateFiscalNumber` con el NÚMERO DE SONDEO, y después —ya con la
+   * numeración real bajo el lock consultivo— se mutan sólo
+   * `invoice_number` y `control.resolution_id`. Items, totales, taxes,
+   * withholdings y todo lo que validan los pre-validadores se mantiene
+   * idéntico entre el sondeo y la asignación real.
+   */
+  private buildPlatformProviderData(
+    dto: CreatePlatformInvoiceDto,
+    fiscalNumber: string,
+    resolution: PlatformInvoiceResolution,
+    issuedAt: Date,
+    issuedAtTime: string,
+    dueAt: string,
+    issueAtLocal: string,
+    lineItems: any[],
+    subtotal: number,
+    taxAmount: number,
+    total: number,
+    withholdingAmount: number,
+    hasAnyTax: boolean,
+    notesText: string,
+  ): ProviderInvoiceData {
+    const customerDocumentType = dto.customer.document_type ?? '31';
+    const customerPersonType = dto.customer.person_type ?? '2';
+    const customerRegime = dto.customer.tax_regime_code ?? '49';
+    const customerResponsibilities =
+      dto.customer.fiscal_responsibilities ??
+      (customerRegime === '49' ? ['O-13'] : [customerRegime]);
+
+    return {
+      invoice_number: fiscalNumber,
+      invoice_type: 'sales_invoice',
+      issue_date: issueAtLocal,
+      issue_time: issuedAtTime,
+      due_date: dueAt,
+      invoice_period: {
+        start_date: dto.period_start
+          ? localDateString(new Date(dto.period_start), PLATFORM_TIMEZONE)
+          : issueAtLocal,
+        end_date: dto.period_end
+          ? localDateString(new Date(dto.period_end), PLATFORM_TIMEZONE)
+          : issueAtLocal,
+      },
+      customer_name: dto.customer.legal_name,
+      customer_tax_id: dto.customer.tax_id,
+      customer_email: dto.customer.email ?? null,
+      customer_address: dto.customer.address_line
+        ? {
+            line: dto.customer.address_line,
+            city: dto.customer.city ?? null,
+            department_code: dto.customer.department_code ?? null,
+            country_code: 'CO',
+          }
+        : null,
+      customer_document_type: customerDocumentType,
+      customer_verification_digit: dto.customer.tax_id_dv ?? null,
+      customer_person_type: customerPersonType,
+      customer_regime: customerRegime,
+      customer_tax_responsibilities: customerResponsibilities,
+      subtotal_amount: subtotal.toFixed(2),
+      discount_amount: dto.items
+        .reduce((acc, it) => acc + Number(it.discount_amount ?? 0), 0)
+        .toFixed(2),
+      tax_amount: taxAmount.toFixed(2),
+      withholding_amount: withholdingAmount.toFixed(2),
+      total_amount: total.toFixed(2),
+      currency: 'COP',
+      ...(function buildExchangeRate() {
+        const cur = dto.exchange_rate_payload;
+        if (!cur) return {};
+        const foreign = cur.iso_4217;
+        if (!foreign || foreign.toUpperCase() === 'COP') return {};
+        const rateRaw = Number(cur.exchange_rate);
+        if (!Number.isFinite(rateRaw) || rateRaw <= 0) return {};
+        return {
+          exchange_rate: {
+            foreign_currency: foreign.toUpperCase(),
+            rate: dianAmount(rateRaw),
+            date: cur.exchange_rate_date ?? issueAtLocal,
+          },
+        };
+      })(),
+      items: lineItems,
+      taxes: hasAnyTax ? lineItems.flatMap((l) => l.taxes ?? []) : [],
+      notes: notesText,
+      order_reference: null,
+      resolution_number: resolution.resolution_number,
+      technical_key: this.technicalKeyVault.reveal(resolution),
+      control: resolveInvoiceControl(resolution, PLATFORM_TIMEZONE, issuedAt, {
+        resolution_id: resolution.id,
+        document_type: 'sales_invoice',
+      }),
+      payment_form: dto.payment_form ?? '1',
+      payment_means: dto.payment_means_code ?? '42',
+      payment_method: null,
+    } as unknown as ProviderInvoiceData;
+  }
+
   async retryTransmission(transmissionId: number) {
     const transmission = await this.prisma.withoutScope().fiscal_transmissions.findUnique({
       where: { id: transmissionId },
@@ -2391,6 +2537,116 @@ export class SubscriptionFiscalService {
         resolution_id: dto.resolution_id ?? null,
       });
 
+      // 0.d) F4 (auditoría vendix-db) — pre-validadores ANTES de
+      //      `allocateFiscalNumber`. Lo que el riel de suscripción corre en
+      //      `evaluateEmitReadiness` (42 reglas de identidad + documento) y
+      //      que el riel de tienda corre como compuerta dura, hoy saltaba
+      //      acá: el documento se creaba y la transmisión quedaba huérfana
+      //      con la numeración ya quemada, mientras que los bloqueos aparecían
+      //      recién en `UblStructureValidator`/`DianTotalsValidator` — en la
+      //      compuerta de totales, con la fila ya persistida.
+      //
+      //      Mismo suelo que `allocateFiscalNumber` (`range_from - 1`,
+      //      `cursor = max(current_number, floor)`): sin nivelar, una
+      //      resolución cuyo cursor derivó a 0 sondearía el número 1 y
+      //      la regla de rango denunciaría un falso positivo que la
+      //      asignación real ya corrige.
+      const probeResolution = await this.prisma
+        .withoutScope()
+        .invoice_resolutions.findFirst({
+          where: {
+            id: dto.resolution_id ?? settings.invoice_resolution_id!,
+            accounting_entity_id: settings.accounting_entity_id!,
+            document_type: 'sales_invoice',
+            is_active: true,
+            valid_from: { lte: new Date() },
+            valid_to: { gte: new Date() },
+          },
+        });
+      if (!probeResolution) {
+        throw new BadRequestException(
+          'No hay una resolución de numeración activa para ventas (sales_invoice) ' +
+            'que coincida con la entidad contable y la ventana de vigencia actuales.',
+        );
+      }
+      const probeFloor = probeResolution.range_from - 1;
+      const probeCursor =
+        probeResolution.current_number < probeFloor
+          ? probeFloor
+          : probeResolution.current_number;
+      const probeNumber = `${probeResolution.prefix}${probeCursor + 1}`;
+
+      // Construimos el providerData con el número de SONDEO. Mismos
+      // items/totals/taxes/withholdings que la versión final — el `invoice_number`
+      // y el `control` son los únicos campos que pueden cambiar entre el
+      // sondeo y la asignación real (un proceso concurrente podría consumir
+      // un número entre el `findFirst` y el `pg_advisory_xact_lock`). Después
+      // de `allocateFiscalNumber` re-armamos el providerData con los valores
+      // reales, dentro de la tx.
+      //
+      // `notesText` se calcula acá (no dentro de la tx) porque la rama
+      // pre-validadora no necesita la tx para nada: corre contra el snapshot
+      // del sondeo. Si la nota cambia entre sondeo y final —no puede, sale
+      // sólo del DTO y de los totales locales, todos inmutables entre los dos
+      // puntos— el providerData real lo recalcula dentro de la tx.
+      const defaultNotes = hasAnyTax
+        ? [`Factura de servicios generada desde super-admin el ${issueAtLocal}`]
+        : [
+            `Factura de servicios generada desde super-admin el ${issueAtLocal}`,
+            'Servicio excluido de IVA — art. 476 num. 21 del Estatuto Tributario',
+          ];
+      const notesText = dto.notes ?? defaultNotes.join('\n');
+
+      const probeProviderData = this.buildPlatformProviderData(
+        dto,
+        probeNumber,
+        probeResolution,
+        issuedAt,
+        issuedAtTime,
+        dueAt,
+        issueAtLocal,
+        lineItems,
+        subtotal,
+        taxAmount,
+        total,
+        withholdingAmount,
+        hasAnyTax,
+        notesText,
+      );
+
+      const blockers: Array<{ code: string; problem: string; field?: string }> = [];
+      const identityInput = this.buildPlatformCustomerIdentityInput(dto);
+      const identityFindings = this.identityValidator.validate(identityInput);
+      for (const f of identityFindings.findings) {
+        if (f.severity === 'blocker') {
+          blockers.push({
+            code: f.code,
+            field: f.field,
+            problem: `Identidad del adquiriente: ${f.problem}`,
+          });
+        }
+      }
+      const documentFindings = this.documentValidator.validate(
+        this.buildFiscalDocumentInput(probeProviderData, probeResolution),
+      );
+      for (const f of documentFindings.findings) {
+        if (f.severity === 'blocker') {
+          blockers.push({
+            code: f.code,
+            field: f.field,
+            problem: `Documento: ${f.problem}`,
+          });
+        }
+      }
+      if (blockers.length > 0) {
+        throw new BadRequestException({
+          message:
+            'La factura no se puede emitir todavía: hay validaciones de pre-emisión que fallaron. ' +
+            'Corregí los puntos siguientes antes de reintentar.',
+          blockers,
+        });
+      }
+
       // 1) TODO dentro de UNA transacción. `pg_advisory_xact_lock` se
       //    libera al COMMIT, no antes. Si la llamada anterior era
       //    `await this.prisma.$transaction(async (tx) => tx)`, el
@@ -2403,124 +2659,29 @@ export class SubscriptionFiscalService {
         const fiscalNumber = allocated.invoice_number;
         const resolution = allocated.resolution;
 
-        // 1.b) Construir el ProviderInvoiceData.
-        //
-        // Customer fiscal fields: si el DTO trae `document_type`,
-        // `person_type`, `tax_regime_code` o `fiscal_responsibilities`,
-        // fluyen; si NO, caen a los defaults legacy exentos (NIT/31,
-        // juridica/2, régimen 49, responsabilidad O-13). El legado queda
-        // idéntico para callers que no envíen esos campos.
-        const customerDocumentType = dto.customer.document_type ?? '31';
-        const customerPersonType = dto.customer.person_type ?? '2';
-        const customerRegime = dto.customer.tax_regime_code ?? '49';
-        const customerResponsibilities =
-          dto.customer.fiscal_responsibilities ??
-          (customerRegime === '49' ? ['O-13'] : [customerRegime]);
-
-        // Notas. La nota de exclusión art. 476 num. 21 SÓLO se incluye
-        // cuando la factura no lleva ningún impuesto. Con al menos un
-        // impuesto presente, declarar exclusión sería falso y la DIAN lo
-        // rechaza. Si el caller trae `notes`, gana su contenido.
-        const defaultNotes = hasAnyTax
-          ? [`Factura de servicios generada desde super-admin el ${issueAtLocal}`]
-          : [
-              `Factura de servicios generada desde super-admin el ${issueAtLocal}`,
-              'Servicio excluido de IVA — art. 476 num. 21 del Estatuto Tributario',
-            ];
-        const notesText = dto.notes ?? defaultNotes.join('\n');
-
-        const providerData = {
-          invoice_number: fiscalNumber,
-          invoice_type: 'sales_invoice',
-          issue_date: issueAtLocal,
-          issue_time: issuedAtTime,
-          due_date: dueAt,
-          invoice_period: {
-            start_date: dto.period_start
-              ? localDateString(new Date(dto.period_start), PLATFORM_TIMEZONE)
-              : issueAtLocal,
-            end_date: dto.period_end
-              ? localDateString(new Date(dto.period_end), PLATFORM_TIMEZONE)
-              : issueAtLocal,
-          },
-          customer_name: dto.customer.legal_name,
-          customer_tax_id: dto.customer.tax_id,
-          customer_email: dto.customer.email ?? null,
-          customer_address: dto.customer.address_line
-            ? {
-                line: dto.customer.address_line,
-                city: dto.customer.city ?? null,
-                department_code: dto.customer.department_code ?? null,
-                country_code: 'CO',
-              }
-            : null,
-          customer_document_type: customerDocumentType,
-          customer_verification_digit: dto.customer.tax_id_dv ?? null,
-          customer_person_type: customerPersonType,
-          customer_regime: customerRegime,
-          customer_tax_responsibilities: customerResponsibilities,
-          subtotal_amount: subtotal.toFixed(2),
-          discount_amount: dto.items
-            .reduce((acc, it) => acc + Number(it.discount_amount ?? 0), 0)
-            .toFixed(2),
-          // peer rule 3 — header tax_amount = suma de impuestos de línea.
-          tax_amount: taxAmount.toFixed(2),
-          withholding_amount: withholdingAmount.toFixed(2),
-          total_amount: total.toFixed(2),
-          // peer rule (vendix-db) — la moneda del documento es SIEMPRE COP.
-          // El XML builder (ubl-invoice.builder.ts:151) emite
-          // `cbc:DocumentCurrencyCode` con este valor. Una factura en USD
-          // sale denominada en dólares y la convierte automáticamente a COP
-          // al cobro, contradiciendo el objetivo 6 del plan («sin bloquear
-          // la emisión en COP»). Cuando el operador marca «declarar
-          // divisa», lo que se declara es la CONVERSIÓN
-          // (`cac:PaymentAlternativeExchangeRate`), NO la moneda.
-          currency: 'COP',
-          // Extracción de la tasa alternativa desde el campo tipado del
-          // DTO legacy. El mapper V1→legacy de elon
-          // (`platform-invoicing.service.ts:mapMvpV1ToLegacyCreateDto`)
-          // escribe `exchange_rate_payload?: PlatformInvoiceCurrencyDto`
-          // con la TRM y su fecha — los tres del bloque
-          // `iso_4217/exchange_rate/exchange_rate_date` están tipados por
-          // la clase y `tsc` los valida sin cast.
-          //
-          // El bloque se auto-desactiva cuando el caller no marca
-          // «declarar divisa»: `exchange_rate_payload` queda undefined y
-          // `cac:PaymentAlternativeExchangeRate` no se emite.
-          ...(function buildExchangeRate() {
-            const cur = dto.exchange_rate_payload;
-            if (!cur) return {};
-            const foreign = cur.iso_4217;
-            if (!foreign || foreign.toUpperCase() === 'COP') return {};
-            const rateRaw = Number(cur.exchange_rate);
-            if (!Number.isFinite(rateRaw) || rateRaw <= 0) return {};
-            return {
-              exchange_rate: {
-                foreign_currency: foreign.toUpperCase(),
-                // TRM = pesos por una unidad de la divisa (FAR06).
-                rate: dianAmount(rateRaw),
-                date: cur.exchange_rate_date ?? issueAtLocal,
-              },
-            };
-          })(),
-          items: lineItems,
-          // peer rule 2 — taxes de cabecera presente SÓLO si al menos una
-          // línea trae taxes. Legacy sin taxes: `taxes: []`.
-          taxes: hasAnyTax ? lineItems.flatMap((l) => l.taxes ?? []) : [],
-          notes: notesText,
-          order_reference: null,
-          resolution_number: resolution.resolution_number,
-          technical_key: this.technicalKeyVault.reveal(resolution),
-          control: resolveInvoiceControl(resolution, PLATFORM_TIMEZONE, issuedAt, {
-            resolution_id: resolution.id,
-            document_type: 'sales_invoice',
-          }),
-          // peer rule 2 — payment_form/payment_means honran el DTO cuando
-          // está presente; caen a defaults legacy ('1'/'42') cuando no.
-          payment_form: dto.payment_form ?? '1',
-          payment_means: dto.payment_means_code ?? '42',
-          payment_method: null,
-        } as unknown as ProviderInvoiceData;
+        // 1.b) Re-construir el providerData con los valores REALES. El
+        //      `probeProviderData` se construyó fuera de la tx para que los
+        //      pre-validadores (F4) lo vieran; sólo difieren `invoice_number`
+        //      y `control` (resolución que efectivamente dio el número bajo
+        //      `pg_advisory_xact_lock`). Re-armarlo es más barato que
+        //      mutar campo por campo y deja el código idéntico al que el riel
+        //      tienda esperaba.
+        const providerData = this.buildPlatformProviderData(
+          dto,
+          fiscalNumber,
+          resolution,
+          issuedAt,
+          issuedAtTime,
+          dueAt,
+          issueAtLocal,
+          lineItems,
+          subtotal,
+          taxAmount,
+          total,
+          withholdingAmount,
+          hasAnyTax,
+          notesText,
+        );
 
         // 1.c) Insertar la fila. Si la idempotency_key ya existe, el
         // UNIQUE la rechaza y devolvemos la fila existente — el caller
