@@ -1,18 +1,19 @@
 import {
   Component,
   DestroyRef,
+  OnDestroy,
+  OnInit,
   computed,
   inject,
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Router, RouterLink } from '@angular/router';
+import { Router } from '@angular/router';
 
 import {
   ButtonComponent,
   CardComponent,
   ConfirmationModalComponent,
-  IconComponent,
   InputsearchComponent,
   ResponsiveDataViewComponent,
   StatsComponent,
@@ -25,6 +26,7 @@ import {
   PlatformInvoiceProfile,
   PlatformInvoiceProfileDetail,
 } from '../../../../subscriptions/interfaces/fiscal-billing.interface';
+import { ModuleShellActionsService } from '../../../../../../../shared/components/module-tabs-shell/module-shell-actions.service';
 import { PlatformInvoicingStore } from '../../platform-invoicing.store';
 
 /**
@@ -39,11 +41,9 @@ import { PlatformInvoicingStore } from '../../platform-invoicing.store';
   selector: 'app-platform-profiles',
   standalone: true,
   imports: [
-    RouterLink,
     CardComponent,
     ButtonComponent,
     ConfirmationModalComponent,
-    IconComponent,
     InputsearchComponent,
     ResponsiveDataViewComponent,
     StatsComponent,
@@ -93,26 +93,23 @@ import { PlatformInvoicingStore } from '../../platform-invoicing.store';
         </div>
       }
 
-      <!-- Encabezado con búsqueda y filtros -->
-      <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-4 md:py-4 md:border-b md:border-border">
+      <!--
+        Barra de FILTROS, no una segunda cabecera.
+
+        Antes esto era un bloque sticky a top-[99px] que se pegaba justo debajo
+        del sticky-header del módulo y repetía su título: dos cabeceras fijas,
+        una sobre otra. El título y el botón «Nuevo perfil» ahora los publica
+        el componente en el sticky-header del shell; acá queda sólo lo que de
+        verdad filtra la tabla.
+      -->
+      <div class="px-2 py-1.5 md:px-4 md:py-4 md:border-b md:border-border">
         <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
-          <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
-            Perfiles de plataforma ({{ total() }})
-          </h2>
-          <div class="flex items-center gap-2 w-full md:w-auto">
-            <app-inputsearch
-              class="flex-1 md:w-64"
-              placeholder="Buscar por nombre…"
-              [debounceTime]="300"
-              (searchChange)="onSearch($event)"
-            ></app-inputsearch>
-            <a routerLink="new">
-              <app-button variant="primary">
-                <app-icon slot="icon" name="plus" [size]="16"></app-icon>
-                Nuevo perfil
-              </app-button>
-            </a>
-          </div>
+          <app-inputsearch
+            class="w-full md:w-72"
+            placeholder="Buscar por nombre…"
+            [debounceTime]="300"
+            (searchChange)="onSearch($event)"
+          ></app-inputsearch>
         </div>
 
         <!-- Chips de filtro -->
@@ -239,11 +236,36 @@ import { PlatformInvoicingStore } from '../../platform-invoicing.store';
     }
   `,
 })
-export class PlatformProfilesComponent {
+export class PlatformProfilesComponent implements OnInit, OnDestroy {
   private readonly store = inject(PlatformInvoicingStore);
   private readonly toast = inject(ToastService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly shellActions = inject(ModuleShellActionsService);
+
+  /**
+   * «Nuevo perfil» vive en el sticky-header del módulo, no en una barra propia
+   * debajo. Ver el comentario del bloque de filtros en el template.
+   */
+  ngOnInit(): void {
+    this.shellActions.set([
+      {
+        id: 'new',
+        label: 'Nuevo perfil',
+        variant: 'primary',
+        icon: 'plus',
+        run: () =>
+          this.router.navigate([
+            '/super-admin/fiscal/invoicing/profiles',
+            'new',
+          ]),
+      },
+    ]);
+  }
+
+  ngOnDestroy(): void {
+    this.shellActions.clear();
+  }
 
   readonly profiles = this.store.profiles;
   readonly loading = this.store.loadingProfiles;
@@ -460,7 +482,7 @@ export class PlatformProfilesComponent {
         ]);
       },
       error: (err: any) => {
-        this.toast.error(`${err?.error_code ?? 'ERR'}: ${err?.message ?? 'Error al clonar'}`, '');
+        this.toast.error(this.describeApiError(err, 'Error al clonar'), '');
       },
     });
   }
@@ -491,10 +513,29 @@ export class PlatformProfilesComponent {
         this.deleting.set(false);
         this.pending_delete.set(null);
         this.delete_confirmation.set('');
-        const code = err?.error_code ?? 'ERR';
-        const message = err?.message ?? 'No se pudo eliminar el perfil.';
-        this.toast.error(`${code}: ${message}`, '');
+        this.toast.error(this.describeApiError(err, 'No se pudo eliminar el perfil.'), '');
       },
     });
+  }
+
+  /**
+   * Traduce un error HTTP al mensaje que el backend realmente escribio.
+   *
+   * El store re-emite el HttpErrorResponse crudo, y ese objeto lleva en
+   * `message` el texto de transporte de Angular
+   * ("Http failure response for https://api...: 409 Conflict"), no el motivo
+   * de negocio. El envelope del backend
+   * ({ statusCode, error_code, message, details }) viaja dentro de `err.error`,
+   * asi que hay que bajar un nivel antes de leer. Sin esto, un 409 legitimo se
+   * muestra como "ERR: Http failure response ..." y el operador no tiene forma
+   * de saber que el perfil esta fijado por facturas emitidas.
+   */
+  private describeApiError(err: any, fallback: string): string {
+    const envelope = err?.error ?? err;
+    const code = envelope?.error_code ?? err?.error_code ?? '';
+    const raw = envelope?.message ?? envelope?.error ?? '';
+    const message = Array.isArray(raw) ? raw.join(' · ') : raw;
+    const text = typeof message === 'string' && message.trim() ? message : fallback;
+    return code ? `${code}: ${text}` : text;
   }
 }

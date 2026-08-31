@@ -187,6 +187,26 @@ export class PlatformInvoiceCreateComponent implements OnInit {
   // ── Modo de Adquiriente ─────────────────────────────────────────
   readonly acquirerMode = signal<'system' | 'external'>('system');
 
+  /**
+   * Tenant elegido en el picker. Existe como signal aparte del control del
+   * formulario porque el template lo lee para decidir si muestra el bloque de
+   * datos fiscales, y `invoiceForm.value` no es reactivo bajo zoneless.
+   */
+  readonly selectedTenant = signal<PlatformAcquirer | null>(null);
+
+  /**
+   * La DIAN rechaza el documento sin identificacion del adquiriente. Es lo
+   * unico que se marca como bloqueante en el bloque fiscal; el resto (correo,
+   * telefono, direccion) el anexo lo admite ausente.
+   */
+  readonly acquirerFiscalIncomplete = computed(() => {
+    const v = this.rawValue();
+    return (
+      !String(v['external_legal_name'] ?? '').trim() ||
+      !String(v['external_tax_id'] ?? '').trim()
+    );
+  });
+
   // ── Formulario Principal ────────────────────────────────────────
   readonly invoiceForm = this.fb.group({
     profile_id: [null as number | null],
@@ -774,13 +794,21 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     this.sectionExpanded.update((s) => ({ ...s, [section]: expanded }));
   }
 
+  /**
+   * Sólo rangos de FACTURA DE VENTA y activos. Un rango de documento soporte
+   * o uno desactivado en este desplegable deja emitir contra una resolución
+   * que la DIAN rechaza, y el error aparece recién en la transmisión.
+   */
   readonly resolutionOptions = computed<SelectorOption[]>(() =>
-    this.store.resolutions().map((r) => ({
-      value: r.id,
-      label: r.prefix
-        ? `${r.prefix} (Resolución ${r.resolution_number})`
-        : `Resolución ${r.resolution_number}`,
-    })),
+    this.store
+      .resolutions()
+      .filter((r) => r.document_type === 'sales_invoice' && r.is_active)
+      .map((r) => ({
+        value: r.id,
+        label: r.prefix
+          ? `${r.prefix} (Resolución ${r.resolution_number})`
+          : `Resolución ${r.resolution_number}`,
+      })),
   );
 
   // ── Conmutador de Modo de Adquiriente ────────────────────────────
@@ -788,12 +816,82 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     this.acquirerMode.set(mode);
     if (mode === 'external') {
       this.invoiceForm.patchValue({ customer_tenant: null });
+      this.selectedTenant.set(null);
     }
+    // Cambiar de pestaña limpia los campos fiscales en los dos sentidos: los
+    // datos del tenant anterior no pueden quedar colgados como si fueran los
+    // que tecleó el operador para un cliente externo, ni al revés.
+    this.resetAcquirerFiscalFields();
   }
 
   // ── Adquiriente del Sistema ──────────────────────────────────────
   onTenantPicked(tenant: PlatformAcquirer | null): void {
     this.invoiceForm.patchValue({ customer_tenant: tenant });
+    this.selectedTenant.set(tenant);
+
+    if (!tenant) {
+      this.resetAcquirerFiscalFields();
+      return;
+    }
+
+    // Los datos fiscales del tenant se vuelcan sobre los MISMOS controles que
+    // usa el cliente externo. Antes el picker sólo guardaba el objeto y no
+    // mostraba nada: si a la tienda le faltaba el NIT o el DV, la emisión
+    // moria en el backend con «Captura los campos faltantes en el formulario
+    // antes de emitir» y en el formulario no habia ningun campo que capturar.
+    // Ahora se ven, se pueden completar y se mandan como override.
+    const personType = tenant.person_type === '2' ? '2' : '1';
+    this.invoiceForm.patchValue({
+      external_legal_name: tenant.legal_name || tenant.name || '',
+      external_tax_id: tenant.tax_id ?? '',
+      external_tax_id_dv: tenant.tax_id_dv ?? '',
+      external_document_type: this.normalizeDocumentType(tenant.document_type),
+      external_person_type: personType,
+      external_tax_regime_code: tenant.tax_regime_code || '48',
+      external_email: tenant.email ?? '',
+      external_phone: tenant.phone ?? '',
+      external_address_line: tenant.address?.line ?? '',
+      external_city: tenant.address?.city ?? '',
+      external_department_code: tenant.address?.department_code || '11',
+    });
+  }
+
+  /**
+   * `document_type` llega de la base como codigo DIAN ('31') o como etiqueta
+   * ('NIT', 'CC'). El selector del formulario trabaja con codigos, asi que una
+   * etiqueta cruda dejaba el campo en blanco y el operador creia que el dato
+   * no existia.
+   */
+  private normalizeDocumentType(raw: string | null | undefined): string {
+    const value = (raw ?? '').trim().toUpperCase();
+    if (!value) return '31';
+    const byLabel: Record<string, string> = {
+      NIT: '31',
+      CC: '13',
+      CE: '22',
+      PASAPORTE: '41',
+      PA: '41',
+    };
+    if (byLabel[value]) return byLabel[value];
+    return this.documentTypeOptions.some((o) => String(o.value) === value)
+      ? value
+      : '31';
+  }
+
+  private resetAcquirerFiscalFields(): void {
+    this.invoiceForm.patchValue({
+      external_legal_name: '',
+      external_tax_id: '',
+      external_tax_id_dv: '',
+      external_document_type: '31',
+      external_person_type: '1',
+      external_tax_regime_code: '48',
+      external_email: '',
+      external_phone: '',
+      external_address_line: '',
+      external_city: '',
+      external_department_code: '11',
+    });
   }
 
   // ── Líneas ───────────────────────────────────────────────────────
@@ -937,16 +1035,8 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (detail) => {
-          const cfg = detail.current_config;
-          if (cfg) {
-            const patch: Record<string, unknown> = {};
-            if (cfg['resolution_id']) patch['resolution_id'] = cfg['resolution_id'];
-            if (cfg['payment_form']) patch['payment_form'] = cfg['payment_form'];
-            if (cfg['payment_means_code'])
-              patch['payment_means_code'] = cfg['payment_means_code'];
-            if (cfg['notes']) patch['notes'] = cfg['notes'];
-            if (Object.keys(patch).length > 0) this.invoiceForm.patchValue(patch);
-          }
+          const cfg = detail.current_config as Record<string, any> | null;
+          if (cfg) this.applyProfileConfig(cfg);
           this.toast.success(`Perfil «${p.name}» aplicado correctamente.`);
         },
         error: () => {
@@ -956,6 +1046,118 @@ export class PlatformInvoiceCreateComponent implements OnInit {
           );
         },
       });
+  }
+
+  /**
+   * Vuelca la configuración del perfil sobre el formulario de la factura.
+   *
+   * El perfil guarda la config ANIDADA (`dian.*`, `general.*`, `currency.*`,
+   * `withholdings[]`, `model_lines[]`) — es la misma forma que arma
+   * `buildConfig()` en el editor. Este método leía `cfg['resolution_id']`,
+   * `cfg['payment_form']` y `cfg['notes']` a nivel RAÍZ, claves que la config
+   * no tiene nunca. El resultado era una aplicación de perfil silenciosamente
+   * vacía: el toast decía «Perfil aplicado correctamente» y no se movía ni un
+   * campo, incluida la resolución DIAN, que es justamente lo que se fija en el
+   * perfil para no tener que elegirla en cada emisión.
+   */
+  private applyProfileConfig(cfg: Record<string, any>): void {
+    const dian = (cfg['dian'] ?? {}) as Record<string, any>;
+    const general = (cfg['general'] ?? {}) as Record<string, any>;
+    const currency = (cfg['currency'] ?? {}) as Record<string, any>;
+
+    const patch: Record<string, unknown> = {};
+    if (dian['resolution_id']) patch['resolution_id'] = dian['resolution_id'];
+    if (dian['payment_method_code']) patch['payment_form'] = dian['payment_method_code'];
+    if (dian['payment_means_code']) patch['payment_means_code'] = dian['payment_means_code'];
+
+    // Las notas del documento salen de `dian.header_notes` (arreglo, tal cual
+    // van al XML) y, si no hay, de la descripción libre del perfil.
+    const headerNotes = Array.isArray(dian['header_notes']) ? dian['header_notes'] : [];
+    const notes = headerNotes.filter((n: unknown) => !!String(n ?? '').trim()).join('\n')
+      || String(general['description'] ?? '').trim();
+    if (notes) patch['notes'] = notes;
+
+    if (currency['declare_foreign'] && currency['code']) {
+      patch['declare_foreign'] = true;
+      patch['foreign_currency_code'] = currency['code'];
+    }
+
+    if (Object.keys(patch).length > 0) this.invoiceForm.patchValue(patch);
+
+    this.applyProfileWithholdings(cfg['withholdings']);
+    this.applyProfileModelLines(cfg['model_lines'], cfg['taxes']);
+  }
+
+  /**
+   * Retenciones del perfil. Se reemplaza el arreglo entero en vez de sumar:
+   * aplicar dos perfiles seguidos duplicaba cada concepto.
+   */
+  private applyProfileWithholdings(raw: unknown): void {
+    if (!Array.isArray(raw) || raw.length === 0) return;
+    this.withholdingsArray.clear();
+    for (const w of raw as Record<string, any>[]) {
+      const conceptId = Number(w['concept_id']);
+      if (!Number.isFinite(conceptId) || conceptId <= 0) continue;
+      this.withholdingsArray.push(
+        this.fb.group({
+          concept_id: [conceptId, Validators.required],
+          role: [String(w['role'] ?? 'practiced'), Validators.required],
+          rate: [
+            Number(w['rate']) || 0,
+            [Validators.required, Validators.min(0), Validators.max(100)],
+          ],
+          base: [
+            Math.round(this.totals().taxableBase * 100) / 100,
+            Validators.min(0),
+          ],
+        }),
+      );
+    }
+    this.sectionExpanded.update((s) => ({ ...s, retenciones: true }));
+  }
+
+  /**
+   * Líneas modelo del perfil. Sólo siembran una factura VACÍA: si el operador
+   * ya cargó líneas, aplicar un perfil no puede borrárselas.
+   *
+   * Las tarifas del perfil vienen en `taxes[]` como porcentaje en texto
+   * ('19.00'); se resuelven contra el catálogo para conservar el nombre y el
+   * `tax_type` que después arman el desglose y el total de impuestos.
+   */
+  private applyProfileModelLines(rawLines: unknown, rawTaxes: unknown): void {
+    if (!Array.isArray(rawLines) || rawLines.length === 0) return;
+    if (this.itemsArray.length > 0) return;
+
+    const taxes: LineTaxSelection[] = (Array.isArray(rawTaxes) ? rawTaxes : [])
+      .filter((t: any) => t?.taxable !== false)
+      .map((t: any) => {
+        const rate = Number(t?.rate) || 0;
+        const catalog = this.availableTaxes.find((c) => c.rate === rate);
+        return {
+          tax_rate_id: catalog?.id ?? 0,
+          name: catalog?.name ?? `Impuesto ${rate}%`,
+          rate,
+          tax_type: catalog?.tax_type ?? 'IVA',
+          is_inclusive: false,
+        } as LineTaxSelection;
+      })
+      .filter((t) => t.rate > 0);
+
+    for (const l of rawLines as Record<string, any>[]) {
+      this.itemsArray.push(
+        this.buildLineGroup(
+          {
+            description: String(l['description'] ?? ''),
+            quantity: Number(l['quantity']) || 1,
+            unit_price: Number(l['unit_price']) || 0,
+            unit_code: String(l['unit_code'] || DEFAULT_UNIT_CODE),
+            discount_amount: 0,
+          },
+          taxes,
+        ),
+      );
+    }
+    this.sectionExpanded.update((s) => ({ ...s, lineas: true }));
   }
 
   clearProfile(): void {
@@ -1112,9 +1314,37 @@ export class PlatformInvoiceCreateComponent implements OnInit {
         this.toast.error('Selecciona una tienda, usuario u organización como destinatario.');
         return null;
       }
+      // Se manda el tenant_id Y los datos fiscales que quedaron en pantalla.
+      // El backend resuelve la ficha por `tenant_id` y aplica encima lo que
+      // venga en estos campos, que es lo que permite emitirle a una tienda a
+      // la que le falta el NIT o el DV en la base sin tener que editarle la
+      // ficha primero. Si un campo va vacío no se envía: `undefined` significa
+      // «no lo toques», no «bórralo».
+      const trimmed = (key: string): string | undefined => {
+        const raw = String(val[key] ?? '').trim();
+        return raw ? raw : undefined;
+      };
+      const addressLine = trimmed('external_address_line');
+      const addressCity = trimmed('external_city');
+      const addressDepartment = trimmed('external_department_code');
       customerPayload = {
         kind: tenant.kind,
         tenant_id: tenant.tenant_id,
+        legal_name: trimmed('external_legal_name'),
+        tax_id: trimmed('external_tax_id'),
+        tax_id_dv: trimmed('external_tax_id_dv'),
+        person_type: val['external_person_type'] === '2' ? '2' : '1',
+        tax_regime_code: trimmed('external_tax_regime_code'),
+        email: trimmed('external_email'),
+        phone: trimmed('external_phone'),
+        address:
+          addressLine || addressCity || addressDepartment
+            ? {
+                line: addressLine,
+                city: addressCity,
+                department_code: addressDepartment,
+              }
+            : undefined,
       };
     }
 

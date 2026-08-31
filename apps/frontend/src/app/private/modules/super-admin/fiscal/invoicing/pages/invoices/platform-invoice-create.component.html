@@ -1,48 +1,13 @@
 <div class="space-y-6 pb-16">
-  <!-- Cabecera de Página -->
-  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border">
-    <div class="flex items-center gap-3">
-      <a
-        routerLink="/super-admin/fiscal/invoicing/invoices"
-        class="flex items-center justify-center w-9 h-9 rounded-lg border border-border bg-surface hover:bg-surface-secondary text-text-secondary hover:text-text-primary transition-colors shrink-0"
-        title="Volver a facturas"
-      >
-        <app-icon name="arrow-left" [size]="18"></app-icon>
-      </a>
-      <div>
-        <div class="flex items-center gap-2 flex-wrap">
-          <h1 class="text-xl font-bold text-text-primary tracking-tight">Nueva factura de plataforma</h1>
-          <app-badge variant="primary" size="sm">Factura Estándar</app-badge>
-        </div>
-        <p class="text-xs text-text-secondary">Emisión electrónica oficial DIAN con perfil y cliente configurable</p>
-      </div>
-    </div>
+  <!--
+    Sin cabecera de página propia.
 
-    <div class="flex items-center gap-2 self-end sm:self-auto">
-      <app-button
-        type="button"
-        variant="ghost"
-        size="sm"
-        (clicked)="openPrintPreview()"
-      >
-        <app-icon slot="icon" name="eye" [size]="16"></app-icon>
-        Previsualizar
-      </app-button>
-
-      <app-button
-        type="button"
-        variant="primary"
-        size="sm"
-        [loading]="submitting()"
-        [disabled]="submitting() || (itemsArray.length === 0)"
-        (clicked)="submit()"
-      >
-        <app-icon slot="icon" name="send" [size]="16"></app-icon>
-        {{ submitting() ? 'Emitiendo a la DIAN...' : 'Emitir factura' }}
-      </app-button>
-    </div>
-  </div>
-
+    El sticky-header del módulo ya pinta título, subtítulo, icono, botón de
+    volver y pestañas; lo que había acá repetía todo eso más abajo, y sus dos
+    botones («Previsualizar» y «Emitir factura») estaban duplicados literalmente
+    en el panel de resumen de la derecha, que es donde se ven junto al total que
+    se va a emitir.
+  -->
   <form [formGroup]="invoiceForm" class="space-y-6">
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
 
@@ -163,8 +128,35 @@
             <app-platform-tenant-picker
               (tenantPicked)="onTenantPicked($event)"
             ></app-platform-tenant-picker>
-          } @else {
-            <div class="space-y-4 pt-1">
+          }
+
+          <!--
+            Los datos fiscales se muestran en LOS DOS modos.
+
+            En modo sistema aparecen recién elegido el destinatario, ya
+            precargados desde su ficha, para revisarlos o completarlos. Antes
+            el picker guardaba el tenant y no enseñaba nada: cuando a la tienda
+            le faltaba el NIT o el DV la emisión moría en el backend pidiendo
+            «captura los campos faltantes en el formulario», y en el formulario
+            no había ningún campo que capturar.
+          -->
+          @if (acquirerMode() === 'external' || selectedTenant()) {
+            <div class="space-y-4 pt-1" [class.mt-4]="acquirerMode() === 'system'">
+              @if (acquirerMode() === 'system') {
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
+                  <div>
+                    <p class="text-xs font-semibold text-text-primary">Datos fiscales del destinatario</p>
+                    <p class="text-[11px] text-text-secondary">
+                      Precargados desde su ficha. Lo que quede acá es lo que se declara en el documento.
+                    </p>
+                  </div>
+                  @if (acquirerFiscalIncomplete()) {
+                    <app-badge variant="warning" size="sm">Faltan identificación o razón social</app-badge>
+                  } @else {
+                    <app-badge variant="success" size="sm">Identificación completa</app-badge>
+                  }
+                </div>
+              }
               <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div class="space-y-1">
                   <label class="text-xs font-medium text-text-secondary">Tipo de documento</label>
@@ -544,7 +536,7 @@
               (clicked)="openPrintPreview()"
             >
               <app-icon slot="icon" name="eye" [size]="14"></app-icon>
-              Previsualizar XML técnico
+              Previsualizar documento
             </app-button>
           </div>
         </div>
@@ -639,12 +631,12 @@
   </div>
 </app-modal>
 
-<!-- Modal Preview XML -->
-<app-modal [isOpen]="printPreviewOpen()" (isOpenChange)="closePrintPreview($event)" title="Previsualización Técnica DIAN" size="xl">
+<!-- Modal de previsualización del documento impreso (HTML del formato) -->
+<app-modal [isOpen]="printPreviewOpen()" (isOpenChange)="closePrintPreview($event)" title="Previsualización del documento" size="xl">
   @if (printPreviewLoading()) {
     <div class="flex flex-col items-center justify-center p-12 space-y-4">
       <div class="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-      <p class="text-text-secondary font-medium text-sm">Generando XML de prueba con la estructura UBL 2.1...</p>
+      <p class="text-text-secondary font-medium text-sm">Generando la representación gráfica del documento...</p>
     </div>
   } @else if (printPreviewError(); as err) {
     <div class="p-6">

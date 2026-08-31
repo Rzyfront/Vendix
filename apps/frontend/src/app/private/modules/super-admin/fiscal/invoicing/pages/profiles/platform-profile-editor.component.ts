@@ -522,16 +522,26 @@ export class PlatformProfileEditorComponent {
   readonly isEdit = computed(() => this.profileId() !== null);
   readonly isAiu = computed(() => this.operationType() === '09');
 
+  /**
+   * Sólo rangos de FACTURA DE VENTA y activos.
+   *
+   * Ofrecer un rango de documento soporte para un perfil de factura deja fijar
+   * en el perfil una resolución que la DIAN rechaza al emitir, y el error sale
+   * recién en la transmisión. Un rango inactivo tiene el mismo problema.
+   */
   readonly resolutionOptions = computed<SelectorOption[]>(() =>
-    this.store.resolutions().map((r) => ({
-      value: r.id,
-      label: `${r.prefix} · rango ${r.range_from}-${r.range_to}`,
-    })),
+    this.store
+      .resolutions()
+      .filter((r) => r.document_type === 'sales_invoice' && r.is_active)
+      .map((r) => ({
+        value: r.id,
+        label: `${r.prefix} · rango ${r.range_from}-${r.range_to}`,
+      })),
   );
 
   readonly documentoResolutionHint = computed<string | null>(() =>
     this.resolutionOptions().length === 0
-      ? 'No hay resoluciones registradas. Configúralas en la pestaña Resoluciones.'
+      ? 'No hay resoluciones de factura de venta activas. Regístralas en la pestaña Resoluciones.'
       : null,
   );
 
@@ -859,6 +869,13 @@ export class PlatformProfileEditorComponent {
 
   // ─── Lifecycle ───────────────────────────────────────────────
   constructor() {
+    // El selector de resolución del bloque «Documento» lee
+    // store.resolutions(), que sólo se llena cuando alguien abre la pestaña
+    // Resoluciones. Sin esta carga el desplegable salía vacío en el editor y
+    // no había forma de dejarle una resolución fija al perfil: la pantalla
+    // ofrecía el campo y el campo no tenía opciones.
+    this.store.loadResolutions();
+
     effect(() => {
       const id = this.profileId();
       if (id !== null) this.loadProfile(id);

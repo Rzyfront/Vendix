@@ -27,6 +27,7 @@ import {
   ButtonComponent,
   CardComponent,
   IconComponent,
+  InputsearchComponent,
   SelectorComponent,
 } from '../../../../../../../shared/components';
 import type { SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
@@ -51,6 +52,7 @@ interface SearchResponse {
     ButtonComponent,
     CardComponent,
     IconComponent,
+    InputsearchComponent,
     SelectorComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -121,29 +123,24 @@ interface SearchResponse {
         <!-- Estado: Búsqueda Interactiva -->
         <div class="space-y-2 relative">
           <div class="grid grid-cols-1 sm:grid-cols-[1fr_160px] gap-2">
-            <div class="relative">
-              <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-text-secondary">
-                <app-icon name="search" [size]="16" />
-              </div>
-              <input
-                type="text"
-                class="w-full pl-9 pr-8 py-2 text-xs md:text-sm border border-border rounded-lg bg-surface text-text-primary placeholder:text-text-secondary focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary transition-colors"
-                placeholder="Buscar por nombre, razón social, NIT o slug..."
-                [ngModel]="searchQuery()"
-                (ngModelChange)="onSearchChange($event)"
-                (focus)="onInputFocus()"
-                autocomplete="off"
-              />
-              @if (searchQuery().length > 0) {
-                <button
-                  type="button"
-                  class="absolute inset-y-0 right-0 pr-2.5 flex items-center text-text-secondary hover:text-text-primary"
-                  (click)="onClearQuery()"
-                >
-                  <app-icon name="x" [size]="14" />
-                </button>
-              }
-            </div>
+            <!--
+              Buscador del sistema en lugar del <input> suelto que había acá:
+              trae el icono, el botón de limpiar, los tamaños y el foco del
+              resto del panel. El debounce se deja en 0 a propósito porque el
+              pipeline de este componente ya tiene su propio debounceTime(250);
+              con los dos activos la lista tardaba medio segundo largo en
+              moverse y parecía colgada.
+            -->
+            <app-inputsearch
+              type="search"
+              size="sm"
+              placeholder="Buscar por nombre, razón social, NIT o slug..."
+              [debounceTime]="0"
+              [ngModel]="searchQuery()"
+              (searchChange)="onSearchChange($event)"
+              (focus)="onInputFocus()"
+              (clear)="onClearQuery()"
+            ></app-inputsearch>
 
             <app-selector
               [options]="kindOptions"
@@ -152,10 +149,22 @@ interface SearchResponse {
             ></app-selector>
           </div>
 
-          <!-- Dropdown / Lista flotante de resultados -->
+          <!--
+            Lista de resultados EN FLUJO, no flotante.
+
+            Antes era un absolute z-50 y no se veía nunca: el
+            app-platform-section-wrapper que la contiene lleva
+            overflow-hidden para redondear sus esquinas, y eso recorta a
+            cualquier descendiente posicionado que se salga de la caja. El
+            z-index no salva de un recorte por overflow — el apilado y el
+            clipping son cosas distintas. Poner la lista en flujo la vuelve
+            inmune al overflow de CUALQUIER ancestro, presente o futuro, que
+            es lo que un dropdown flotante dentro de un acordeón no puede
+            garantizar.
+          -->
           @if (isOpen()) {
             <div
-              class="absolute z-50 left-0 right-0 top-full mt-1 bg-surface border border-border rounded-xl shadow-xl max-h-72 overflow-y-auto divide-y divide-border"
+              class="bg-surface border border-border rounded-xl shadow-sm max-h-72 overflow-y-auto divide-y divide-border"
             >
               @if (loading()) {
                 <div class="flex items-center justify-center gap-2 p-4 text-xs text-text-secondary">
@@ -243,7 +252,13 @@ export class TenantPickerComponent implements OnInit {
   readonly loading = signal<boolean>(false);
   /** Motivo por el que la última búsqueda falló. Vacío mientras vaya bien. */
   readonly searchError = signal<string>('');
-  readonly isOpen = signal<boolean>(false);
+  /**
+   * La lista arranca ABIERTA. Mientras no haya destinatario elegido, la lista
+   * ES el contenido de la sección: arrancar cerrada dejaba un buscador mudo
+   * que sólo reaccionaba al foco, y el operador no tenía forma de saber que
+   * había algo que elegir.
+   */
+  readonly isOpen = signal<boolean>(true);
   readonly selectedTenant = signal<PlatformAcquirer | null>(null);
 
   readonly tenantPicked = output<PlatformAcquirer | null>();
