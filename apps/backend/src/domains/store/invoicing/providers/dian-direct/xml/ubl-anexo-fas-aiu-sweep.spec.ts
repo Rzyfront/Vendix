@@ -26,16 +26,13 @@ import { DIAN_INVOICE_OPERATION_TYPES } from '../constants/dian-document-types';
  * Las páginas citadas son las IMPRESAS en el pie del PDF («Página N de 753»),
  * extraídas con `pdftotext -layout`, no las del visor.
  *
- * ## UNA divergencia sigue FIJADA; dos se arreglaron
+ * ## Las divergencias FAS quedaron resueltas; ninguna sigue fijada
  *
- * Los casos marcados «DIVERGE» afirman lo que el emisor hace HOY, con la regla
- * que incumple citada al lado. Se fijan a propósito: cambiarlos altera el XML de
- * todo documento con más de un tributo, así que el arreglo es un paso de plan
- * con su propia verificación, no un efecto colateral de una spec. Si alguien
- * corrige el emisor, ESE caso se cae y ahí está la señal.
- *
- * Lo que YA se corrigió, y por eso los casos correspondientes exigen ahora la
- * forma del anexo en vez de fijar la del emisor:
+ * Los casos marcados «DIVERGE» afirmaban lo que el emisor hacía HOY, con la
+ * regla que incumple citada al lado. Se fijaban a propósito: cambiarlos altera
+ * el XML de todo documento con más de un tributo, así que el arreglo era un
+ * paso de plan con su propia verificación, no un efecto colateral de una spec.
+ * Los tres cerraron:
  *
  * · **FAS01a / FAS04 / FAS07** — la cabecera abre un `cac:TaxSubtotal` por
  *   TARIFA, no uno por esquema. Antes un IVA 19 % + IVA 5 % salía como un
@@ -45,11 +42,14 @@ import { DIAN_INVOICE_OPERATION_TYPES } from '../constants/dian-document-types';
  *   cada uno con su propio importe. Antes un IVA 190 + INC 80 en la misma línea
  *   salía en un bloque que declaraba 270,00 donde el predicado de FAX02 para el
  *   esquema '01' exige 190,00.
- *
- * Lo que SIGUE divergiendo: **FAS01** pide un `cac:TaxTotal` de CABECERA por
- * código de tributo y el emisor abre uno solo con un subtotal por código. Es una
- * regla distinta de las dos anteriores —cardinalidad del grupo de CABECERA, no
- * de sus subtotales ni de la línea— y su caso `DIVERGE` la mantiene fijada.
+ * · **FAS01** — DECIDIDA el 2026-08-25 (dueño, paso F.7): UN `cac:TaxTotal` de
+ *   cabecera con TODOS los esquemas como `cac:TaxSubtotal`. El rechazo
+ *   enumerado (pág. 76) castiga «más de un grupo con el mismo valor en
+ *   …TaxScheme/cbc:ID» y FAS01b (pág. 428) exige «solo un grupo con información
+ *   de totales para un mismo tributo»: el grupo único multi-esquema cumple las
+ *   dos lecturas. Su caso pasó de `DIVERGE:` a exigir la forma decidida, junto
+ *   con la política de redondeo escrita en `buildTaxTotals`: subtotal al centavo
+ *   y total = suma EXACTA de los subtotales ya redondeados.
  */
 describe('Anexo 1.9 — barrido de los grupos FAS, FAV03 y FAD02', () => {
   function createInvoice(): any {
@@ -308,24 +308,26 @@ describe('Anexo 1.9 — barrido de los grupos FAS, FAV03 y FAD02', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // FAS01 — UN GRUPO POR CÓDIGO DE TRIBUTO  ·  DIVERGE
+  // FAS01 — UN GRUPO DE CABECERA CON TODOS LOS ESQUEMAS · forma decidida (F.7)
   // ---------------------------------------------------------------------------
 
-  describe('FAS01 (pág. 76-77 estructura, FAS01a/FAS01b pág. 428) — un cac:TaxTotal por tributo', () => {
+  describe('FAS01 (pág. 76-77 estructura, FAS01a/FAS01b pág. 428) — un cac:TaxTotal con todos los esquemas', () => {
     /**
-     * La regla, literal (pág. 76): «Grupo que informa los totales para un
-     * impuesto. Es decir, por cada impuesto que se requiera informar el total,
-     * debe ir un grupo TaxTotal. Un bloque para cada código de tributo».
-     * FAS01a (pág. 428) lo repite en el mensaje de rechazo: «Debe existir un
-     * TaxTotal a nivel de la cabecera por cada tipo de impuesto que se informa a
-     * nivel de línea».
+     * DECISIÓN F.7 (dueño, 2026-08-25). La lectura «un TaxTotal por código de
+     * tributo» convivió siempre con su propio rechazo enumerado: FAS01
+     * (pág. 76) castiga «si existe MÁS DE UN grupo con el MISMO valor en
+     * …TaxScheme/cbc:ID», y FAS01b (pág. 428) exige «existe SOLO un grupo con
+     * información de totales para un mismo tributo». La forma que cumple las
+     * dos — y la que el emisor decide — es UN `cac:TaxTotal` de cabecera cuyo
+     * `cac:TaxSubtotal` separa esquemas y tarifas.
      *
-     * DIVERGE — `buildTaxTotals` abre UN solo `cac:TaxTotal` y mete dentro un
-     * `cac:TaxSubtotal` por código, así que una cuenta con IVA e INC declara los
-     * dos tributos en el grupo de uno. `cac:TaxSubtotal` separa TARIFAS del
-     * MISMO tributo (FAS04), no tributos distintos.
+     * Este caso vivió como `DIVERGE:` fijando la conducta contraria mientras la
+     * decisión estaba abierta; hoy exige la forma del anexo decidida, junto con
+     * la política de redondeo escrita en `buildTaxTotals`: cada subtotal al
+     * centavo y el `cbc:TaxAmount` del grupo como SUMA EXACTA de los subtotales
+     * ya redondeados, nunca recalculado aparte.
      */
-    it('DIVERGE: IVA + INC salen en UN grupo con dos subtotales, no en dos grupos', () => {
+    it('IVA + INC informan UN grupo de cabecera con dos subtotales, uno por esquema', () => {
       const xml = emit({
         discount_amount: '0.00',
         tax_amount: '270.00',
@@ -342,12 +344,11 @@ describe('Anexo 1.9 — barrido de los grupos FAS, FAV03 y FAD02', () => {
       });
 
       const groups = headerTaxGroups(xml);
-      // Lo que la regla pide: groups.length === 2, uno por código.
       expect(groups).toHaveLength(1);
       expect(groups[0].subtotals.map((s) => s.scheme_id)).toEqual(['01', '04']);
     });
 
-    it('con un solo código el resultado ya coincide con la regla: un grupo, un tributo', () => {
+    it('un documento mono-impuesto: el mismo grupo único, con su único subtotal', () => {
       const xml = emit({
         discount_amount: '0.00',
         tax_amount: '190.00',
@@ -358,6 +359,76 @@ describe('Anexo 1.9 — barrido de los grupos FAS, FAV03 y FAD02', () => {
       const groups = headerTaxGroups(xml);
       expect(groups).toHaveLength(1);
       expect(groups[0].subtotals.map((s) => s.scheme_id)).toEqual(['01']);
+    });
+
+    it('no aparecen dos grupos con el mismo TaxScheme/cbc:ID — el rechazo que sí está enumerado', () => {
+      const xml = emit({
+        discount_amount: '0.00',
+        tax_amount: '270.00',
+        items: [line({ tax_amount: '270.00' })],
+        taxes: [
+          tax({ tax_amount: '190.00' }),
+          tax({
+            tax_name: 'INC',
+            tax_type: 'inc',
+            tax_rate: '8.00',
+            tax_amount: '80.00',
+          }),
+        ],
+      });
+
+      const groups = headerTaxGroups(xml);
+      const seen = new Set<string>();
+      for (const group of groups) {
+        for (const subtotal of group.subtotals) {
+          expect(seen.has(subtotal.scheme_id)).toBe(false);
+          seen.add(subtotal.scheme_id);
+        }
+      }
+      expect([...seen].sort()).toEqual(['01', '04']);
+    });
+
+    it('el documento IVA+INC completo pasa DianTotalsValidator y el total es la suma exacta de los subtotales', () => {
+      const xml = emit({
+        discount_amount: '0.00',
+        tax_amount: '270.00',
+        items: [
+          line({
+            tax_amount: '270.00',
+            taxes: [
+              tax({}),
+              tax({
+                tax_name: 'INC',
+                tax_type: 'inc',
+                tax_rate: '8.00',
+                taxable_amount: '1000.00',
+                tax_amount: '80.00',
+              }),
+            ],
+          }),
+        ],
+        taxes: [
+          tax({ tax_amount: '190.00' }),
+          tax({
+            tax_name: 'INC',
+            tax_type: 'inc',
+            tax_rate: '8.00',
+            tax_amount: '80.00',
+          }),
+        ],
+      });
+
+      const result = DianTotalsValidator.validate(xml);
+      expect(result.violations.map((v) => `${v.rule}: ${v.message}`)).toEqual(
+        [],
+      );
+      expect(result.valid).toBe(true);
+
+      // Política de redondeo F.7 sobre el XML emitido: el TaxAmount del grupo
+      // es la suma EXACTA de los subtotales ya redondeados al centavo.
+      const [group] = headerTaxGroups(xml);
+      expect(group.amount).toBe('270.00');
+      expect(group.amount).toBe(sum(group.subtotals.map((s) => s.amount)));
     });
   });
 

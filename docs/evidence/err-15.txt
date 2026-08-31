@@ -1,0 +1,42 @@
+# ERR-15: PRINT_PREVIEW_TIMEOUT_001
+# HTTP: 504
+# Source: apps/backend/src/common/errors/error-codes.ts:290-294
+# Emitido cuando: preview compilation > 5s (timeout middleware)
+
+COMMAND (provocar timeout):
+# Opción: matar el middleware de preview temporalmente y enviar preview complejo
+curl -sk -X POST 'https://api.vendix.com/api/store/print-formats/dispatch_ticket/preview' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "overrides": {
+      "custom_template": "<complex 100KB template with nested loops>"
+    }
+  }' \
+  -w '\nHTTP_CODE: %{http_code}\n'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+EXPECTED HTTP: 504
+
+EXPECTED RESPONSE BODY:
+{
+  "success": false,
+  "error": {
+    "code": "PRINT_PREVIEW_TIMEOUT_001",
+    "message": "Print preview compilation timed out (>5s)"
+  }
+}
+
+VERIFICATION:
+# Provocar timeout con template complejo
+curl .../dispatch_ticket/preview -d '{"overrides":{"custom_template":"<%REPEAT 5000%>x<%END%>"}}' | jq '.error.code' debe ser 'PRINT_PREVIEW_TIMEOUT_001'
+curl .../dispatch_ticket/preview -d '{"overrides":{"custom_template":"<%REPEAT 5000%>x<%END%>"}}' -w '%{http_code}' | grep -q '504'
+
+# Frontend behavior: toast "Preview timeout" + botón retry
+
+# Log esperado: "[PrintGatewayService] Preview timeout for store=5 format=dispatch_ticket after 5000ms"
+# Mitigation: cache de preview por hash de overrides (TTL 60s)
+
+# Verificar timeout real (no solo artificial):
+# Test E2E: enviar preview que toma 6s y verificar que retorna 504 (no cuelga)

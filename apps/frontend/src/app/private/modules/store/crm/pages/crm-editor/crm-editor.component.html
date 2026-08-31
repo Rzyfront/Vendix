@@ -1,0 +1,116 @@
+<div class="crm-editor">
+  <aside class="crm-blocks-panel">
+    <div class="crm-panel-head">
+      <span class="crm-panel-title">Secciones</span>
+      <button type="button" class="crm-icon-btn" (click)="toggleAdding()" aria-label="Agregar sección">
+        <app-icon [name]="adding() ? 'x' : 'plus'" [size]="16" />
+      </button>
+    </div>
+
+    @if (adding()) {
+      <ul class="crm-add-list">
+        @for (type of typesList(); track type) {
+          <li>
+            <button type="button" class="crm-add-option" (click)="addBlock(type)">
+              {{ labelFor(type) }}
+            </button>
+          </li>
+        }
+      </ul>
+    }
+
+    <ul class="crm-blocks-list">
+      @for (block of blocks(); track block.id; let i = $index) {
+        <li
+          class="crm-block-item"
+          [class.crm-block-active]="selectedIndex() === i"
+          (click)="select(i)"
+        >
+          <span class="crm-block-label">{{ labelFor(block.type) }}</span>
+          <span class="crm-block-actions">
+            <button
+              type="button"
+              class="crm-mini-btn"
+              (click)="move(i, -1); $event.stopPropagation()"
+              [disabled]="i === 0"
+              aria-label="Subir"
+            >
+              <app-icon name="chevron-up" [size]="14" />
+            </button>
+            <button
+              type="button"
+              class="crm-mini-btn"
+              (click)="move(i, 1); $event.stopPropagation()"
+              [disabled]="i === blocks().length - 1"
+              aria-label="Bajar"
+            >
+              <app-icon name="chevron-down" [size]="14" />
+            </button>
+            <button
+              type="button"
+              class="crm-mini-btn crm-mini-danger"
+              (click)="remove(i); $event.stopPropagation()"
+              aria-label="Quitar"
+            >
+              <app-icon name="trash-2" [size]="14" />
+            </button>
+          </span>
+        </li>
+      } @empty {
+        <li class="crm-empty">Sin secciones. Agrega la primera con +.</li>
+      }
+    </ul>
+  </aside>
+
+  <section class="crm-edit-area">
+    @if (selectedBlock(); as block) {
+      <div class="crm-form">
+        <h3 class="crm-form-title">{{ labelFor(block.type) }}</h3>
+        @for (field of fields(); track field.key) {
+          <label class="crm-field">
+            <span class="crm-field-label">{{ field.label }}</span>
+            @if (field.multiline) {
+              <textarea
+                class="crm-input"
+                rows="4"
+                [placeholder]="field.placeholder || ''"
+                [value]="block.props[field.key] || ''"
+                (input)="onPropChange(field.key, $any($event.target).value)"
+              ></textarea>
+            } @else {
+              <input
+                class="crm-input"
+                type="text"
+                [placeholder]="field.placeholder || ''"
+                [value]="block.props[field.key] || ''"
+                (input)="onPropChange(field.key, $any($event.target).value)"
+              />
+            }
+            @if (field.hint) {
+              <span class="crm-field-hint">{{ field.hint }}</span>
+            }
+          </label>
+        }
+      </div>
+
+      <div class="crm-preview">
+        <span class="crm-preview-title">Vista previa</span>
+        <div class="crm-preview-frame">
+          @for (b of blocks(); track b.id; let i = $index) {
+            <div
+              class="crm-preview-block"
+              [class.crm-preview-selected]="selectedIndex() === i"
+              (click)="select(i)"
+            >
+              <app-block-renderer [block]="b" (ctaClick)="ctaClicked()" />
+            </div>
+          }
+        </div>
+      </div>
+    } @else {
+      <p class="crm-placeholder">
+        Selecciona una sección para editarla, o agrega una nueva.
+      </p>
+    }
+  </section>
+</div>

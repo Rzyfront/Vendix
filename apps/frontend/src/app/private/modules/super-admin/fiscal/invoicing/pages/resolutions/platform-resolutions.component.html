@@ -1,176 +1,62 @@
-<div
-  class="bg-[var(--color-surface)] rounded-card border border-border p-4 md:p-6 space-y-4"
->
-  <div
-    class="flex flex-col md:flex-row md:items-center md:justify-between gap-3"
-  >
-    <div class="space-y-1">
-      <div class="flex items-center gap-2">
-        <app-icon name="file-stack" [size]="18" class="text-text-primary"></app-icon>
-        <h2
-          class="text-sm font-semibold text-text-primary uppercase tracking-wide"
-        >
-          Resoluciones DIAN plataforma
-        </h2>
-      </div>
-      <p class="text-sm text-text-secondary max-w-3xl">
-        Rangos de numeración autorizados por la DIAN para la organización
-        plataforma. Cada documento electrónico consume un consecutivo del rango
-        activo de su tipo y ambiente.
-      </p>
-    </div>
-    <div class="flex items-center gap-2">
-      <app-button
-        type="button"
-        variant="outline"
-        size="sm"
-        title="Leer los datos desde una foto o PDF de la resolución"
-        (clicked)="openScanner()"
-      >
-        <app-icon slot="icon" name="sparkles" [size]="14"></app-icon>
-        Escanear con IA
-      </app-button>
-      <app-button
-        type="button"
-        variant="primary"
-        size="sm"
-        (clicked)="openModal()"
-      >
-        <app-icon slot="icon" name="plus" [size]="14"></app-icon>
-        Nueva resolución
-      </app-button>
-    </div>
+<div class="space-y-4">
+  <!-- Top KPI Stats -->
+  <div class="stats-container">
+    <app-stats
+      title="Total resoluciones"
+      [value]="totalCount()"
+      iconName="file-stack"
+      iconBgColor="bg-primary/10"
+      iconColor="text-primary"
+    ></app-stats>
+    <app-stats
+      title="Activas / Emitibles"
+      [value]="activeCount()"
+      iconName="check-circle"
+      iconBgColor="bg-success/10"
+      iconColor="text-success"
+    ></app-stats>
+    <app-stats
+      title="Factura de venta"
+      [value]="salesCount()"
+      iconName="file-text"
+      iconBgColor="bg-primary/10"
+      iconColor="text-primary"
+    ></app-stats>
+    <app-stats
+      title="Documento soporte"
+      [value]="supportCount()"
+      iconName="receipt"
+      iconBgColor="bg-warning/10"
+      iconColor="text-warning"
+    ></app-stats>
   </div>
 
-  @if (store.loadingResolutions()) {
-    <div class="p-6 text-center">
-      <div
-        class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"
-      ></div>
-      <p class="mt-2 text-sm text-text-secondary">Cargando resoluciones...</p>
-    </div>
-  } @else if (store.resolutions().length === 0) {
-    <app-empty-state
-      icon="file-stack"
-      title="Sin resoluciones DIAN"
-      description="Crea la primera resolución DIAN para la organización plataforma."
-    ></app-empty-state>
-  } @else {
-    <div class="overflow-x-auto">
-      <table class="min-w-full text-sm">
-        <thead>
-          <tr class="border-b border-border text-left text-text-secondary">
-            <th class="py-2 pr-4 font-medium">Prefijo</th>
-            <th class="py-2 pr-4 font-medium">Tipo</th>
-            <th class="py-2 pr-4 font-medium">Rango</th>
-            <th class="py-2 pr-4 font-medium">Vigencia</th>
-            <th class="py-2 pr-4 font-medium text-right">Actual</th>
-            <th class="py-2 pr-4 font-medium text-center">Estado</th>
-            <th class="py-2 font-medium text-right">Acciones</th>
-          </tr>
-        </thead>
-        <tbody>
-          @for (row of store.resolutions(); track row.id) {
-            <tr class="border-b border-border/70 last:border-0">
-              <td class="py-2 pr-4 font-medium text-text-primary">
-                {{ row.prefix }}
-              </td>
-              <td class="py-2 pr-4 text-text-secondary">
-                {{ docTypeLabel(row.document_type) }}
-              </td>
-              <td class="py-2 pr-4 text-text-secondary">
-                {{ row.range_from }} – {{ row.range_to }}
-              </td>
-              <td class="py-2 pr-4 text-text-secondary">
-                @if (row.valid_from) {
-                  {{ row.valid_from | date: 'mediumDate':'UTC' }}
-                } @else {
-                  —
-                }
-                <span class="px-1">→</span>
-                @if (row.valid_to) {
-                  {{ row.valid_to | date: 'mediumDate':'UTC' }}
-                } @else {
-                  —
-                }
-              </td>
-              <td class="py-2 pr-4 text-right font-medium text-text-primary">
-                {{ row.current_number }}
-              </td>
-              <td class="py-2 pr-4 text-center">
-                <span
-                  class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium"
-                  [class]="
-                    row.is_active
-                      ? 'bg-success-light text-success border-success'
-                      : 'bg-[var(--color-surface-secondary)] text-text-secondary border-border'
-                  "
-                >
-                  {{ row.is_active ? 'Activa' : 'Inactiva' }}
-                </span>
-              </td>
-              <td class="py-2">
-                <div class="flex items-center justify-end gap-1">
-                  <app-button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    title="Editar resolución"
-                    (clicked)="openEdit(row)"
-                  >
-                    <app-icon slot="icon" name="edit" [size]="14"></app-icon>
-                  </app-button>
+  <!-- Main Card with Table -->
+  <app-card [responsive]="true" [padding]="false">
+    <!--
+      Sin barra de cabecera propia: el título, el subtítulo y los dos botones
+      («Escanear con IA» y «Nueva resolución») los publica el componente en el
+      sticky-header del shell vía ModuleShellActionsService. Lo que había acá
+      era una SEGUNDA barra fija a top-[99px], justo debajo de la del módulo,
+      repitiendo el mismo encabezado.
+    -->
+    <p class="px-4 pt-3 text-xs text-text-secondary">
+      Rangos de numeración autorizados por la DIAN para la organización plataforma.
+    </p>
 
-                  <app-button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    [loading]="togglingId() === row.id"
-                    [disabled]="togglingId() !== null"
-                    [title]="
-                      row.is_active
-                        ? 'Desactivar resolución'
-                        : 'Activar resolución'
-                    "
-                    (clicked)="toggleActive(row)"
-                  >
-                    <app-icon
-                      slot="icon"
-                      [name]="row.is_active ? 'pause' : 'play'"
-                      [size]="14"
-                    ></app-icon>
-                  </app-button>
-
-                  <!-- Una resolución que ya numeró documentos es evidencia
-                       fiscal: el backend rechaza borrarla, así que el botón se
-                       deshabilita en vez de ofrecer una acción que va a fallar. -->
-                  <app-button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    [disabled]="isLocked(row)"
-                    [title]="
-                      isLocked(row)
-                        ? 'Ya consumió numeración DIAN: desactívala en vez de borrarla'
-                        : 'Eliminar resolución'
-                    "
-                    (clicked)="askDelete(row)"
-                  >
-                    <app-icon
-                      slot="icon"
-                      name="trash-2"
-                      [size]="14"
-                      [class]="isLocked(row) ? '' : 'text-error'"
-                    ></app-icon>
-                  </app-button>
-                </div>
-              </td>
-            </tr>
-          }
-        </tbody>
-      </table>
+    <div class="p-2 md:p-4">
+      <app-responsive-data-view
+        [columns]="columns"
+        [data]="store.resolutions()"
+        [cardConfig]="cardConfig"
+        [actions]="tableActions"
+        [loading]="store.loadingResolutions()"
+        emptyMessage="No hay resoluciones DIAN configuradas para la plataforma."
+        emptyIcon="file-stack"
+        (actionClick)="onTableAction($event)"
+      ></app-responsive-data-view>
     </div>
-  }
+  </app-card>
 </div>
 
 <app-modal

@@ -292,6 +292,18 @@ export const ErrorCodes = {
     httpStatus: 504,
     devMessage: 'Print preview compilation timed out',
   },
+  // CP-DTLP-20260827 — IDOR fix (H-1 finding). The print gateway must not
+  // accept a render request whose `x-store-id` header resolves to a store that
+  // belongs to a DIFFERENT organization than the one on the JWT. Without this
+  // gate a token from `tech-solutions` (org=2) with `x-store-id: 999` would
+  // render the order hosted by `org=3`. 403 because identity/auth are fine —
+  // the failure is scope/tenant isolation, the same family as `ROLE_SCOPE_001`.
+  PRINT_RENDER_TENANT_MISMATCH_001: {
+    code: 'PRINT_RENDER_TENANT_MISMATCH_001',
+    httpStatus: 403,
+    devMessage:
+      'x-store-id does not belong to the JWT organization_id. Cross-tenant render blocked.',
+  },
 
   // Payments
   PAY_INVALID_ORDER_001: {
@@ -338,6 +350,11 @@ export const ErrorCodes = {
     code: 'PAY_RECEIPT_NOT_FOUND_001',
     httpStatus: 404,
     devMessage: 'Payment receipt not uploaded',
+  },
+  PAYMENT_NOT_OWNED: {
+    code: 'PAYMENT_NOT_OWNED',
+    httpStatus: 403,
+    devMessage: 'Payment does not belong to the requesting user',
   },
 
   // Payment Sources (Card-On-File / Wompi recurrent)
@@ -2332,6 +2349,26 @@ export const ErrorCodes = {
     devMessage:
       'A per-line tax contradicts the AIU taxable base for that component: the base is determined by the regime, never by what the line declares. Two sites raise it. At CAPTURE, the declared tax disagrees with the tax matrix frozen in the billing profile version (different rate, or a tax on a component the regime does not tax). At EMISSION, a line whose component the regime does not tax carries a tax PERSISTED under a different regime: the XML would drop that line cac:TaxTotal while the amount stays in the header total and cbc:PayableAmount, and FAU04 contrasts one against the sum of the other',
   },
+  /**
+   * D.4 (ADR-6) — `aiu_component: 'contrato'` (Modelo 1 / `no_sumada`) declara
+   * que la línea ES el AIU completo del contrato, en vez de venir partido en
+   * tres renglones (Modelo 2 / `'sumada'`). Las dos formas no pueden convivir
+   * en el mismo documento, ni puede haber dos líneas `'contrato'`: cualquiera
+   * de las dos cosas deja sin definir cuánto vale el AIU que el piso legal del
+   * 10 % (E.T. art. 462-1) necesita comparar contra el contrato. No se elige
+   * una de las dos declaraciones por precedencia — sería adivinar cuál de las
+   * dos miente — se rechaza antes de gastar numeración.
+   *
+   * No confundir con `INVOICING_AIU_001` (AIU por debajo del piso legal): ese
+   * código asume un ÚNICO AIU bien formado y sólo cuestiona si alcanza el 10 %;
+   * éste dispara ANTES, cuando el documento ni siquiera declara un AIU único.
+   */
+  INVOICING_AIU_007: {
+    code: 'INVOICING_AIU_007',
+    httpStatus: 422,
+    devMessage:
+      "Document mixes Modelo 1 (aiu_component: 'contrato') with Modelo 2 component lines (administracion/imprevistos/utilidad), or declares more than one 'contrato' line; a 'contrato' line already IS the whole contract AIU, so either combination leaves the AIU value the art. 462-1 floor compares against undefined",
+  },
 
   /**
    * Configuración de un perfil de facturación que no se puede guardar.
@@ -2543,6 +2580,55 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'The billing profile has no committed version (current_version = 0), so there is no frozen config to stamp: emission is refused instead of silently falling back to live store settings',
+  },
+
+  /**
+   * Compuerta de cuentas PUC del perfil contra `chart_of_accounts` (F.13, paso
+   * dueño de DB-07).
+   *
+   * ## Qué rechaza
+   *
+   * Guardar un perfil cuya sección `accounting` trae un código que NO existe en
+   * el plan de cuentas que gobierna ese perfil, o que existe pero es de
+   * AGRUPACIÓN (`accepts_entries = false`) y por tanto no admite asientos. Son
+   * las dos mitades del invariante de DB-07; la segunda es la que faltaba: una
+   * cuenta de agrupación guardada produce un asiento imposible en la emisión,
+   * cuando el fallo ya es tarde y el documento está emitido.
+   *
+   * ## Por qué 422 y no aviso
+   *
+   * Decisión de negocio escrita el 2026-08-25 (rzy): RECHAZAR desde ya. La
+   * consecuencia aceptada es que editar por un motivo ajeno uno de los perfiles
+   * vivos con códigos inválidos exige corregir primero la cuenta; los perfiles
+   * afectados quedan identificables por la consulta de DB-07 y su corrección
+   * ocurre por edición normal, que crea versión nueva append-only — nunca un
+   * UPDATE sobre versiones existentes, que son inmutables por diseño.
+   *
+   * ## Por qué su propio código y no INVOICING_PROFILE_005
+   *
+   * El 005 significa «la forma/fiscalidad interna del snapshot es inválida» y
+   * lo calcula un contrato puro espejado al frontend; esta compuerta es de
+   * EXISTENCIA contra una tabla de la base, no puede vivir ahí ni debe
+   * confundirse con ella. La FORMA de la respuesta sí se copia del editor:
+   * `details.issues[]` con `{field, code, message}` y la ruta con puntos
+   * (`accounting.revenue_account_by_bucket.costo`,
+   * `accounting.vat_payable_account`), para que el mismo pintado de campo del
+   * editor sirva sin cambios.
+   *
+   * ## Alcance del PUC contra el que se valida
+   *
+   * Lo decide `organizations.fiscal_scope`, con el mismo resolutor que usa el
+   * módulo de contabilidad (FiscalScopeService): ORGANIZATION ⇒ PUC de nivel
+   * organización; STORE ⇒ PUC de la entidad contable de la tienda del perfil.
+   * Validar contra otro PUC aceptaría un código que no existe donde el asiento
+   * va a caer, que es exactamente el defecto que esta compuerta adelanta al
+   * guardado.
+   */
+  INVOICING_PROFILE_010: {
+    code: 'INVOICING_PROFILE_010',
+    httpStatus: 422,
+    devMessage:
+      'A billing profile account code does not exist in the chart of accounts that governs it, or exists as a grouping account with accepts_entries=false. Resolved by organizations.fiscal_scope via FiscalScopeService (ORGANIZATION => org-level PUC, STORE => the profile store entity PUC); all offending fields are returned in details.issues with their dotted path',
   },
 
   /**
@@ -2761,6 +2847,38 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'Invoice data request has already been submitted or completed; the link accepts data only once',
+  },
+  /**
+   * REENVÍO DE FACTURA (E.6, `POST /store/invoicing/:id/deliver`).
+   *
+   * Los tres códigos cubren el ciclo del reenvío a un correo distinto del
+   * capturado en la factura. Deliberadamente NO se usa `@IsEmail()` en el DTO:
+   * eso haría que Nest respondiera 400 `SYS_VALIDATION_001` antes de llegar al
+   * servicio, y el contrato de esta feature pide un 422 de dominio con código
+   * propio. La validación de formato vive en el servicio con `isEmail()` de
+   * `class-validator` en modo standalone.
+   */
+  INVOICING_DELIVERY_001: {
+    code: 'INVOICING_DELIVERY_001',
+    httpStatus: 422,
+    devMessage: 'Destination email is missing or has an invalid format',
+  },
+  /** Una factura en `draft` no se puede reenviar: todavía no es un documento emitido. */
+  INVOICING_DELIVERY_002: {
+    code: 'INVOICING_DELIVERY_002',
+    httpStatus: 409,
+    devMessage: 'Cannot deliver a draft invoice; it has not been issued yet',
+  },
+  /**
+   * El proveedor de correo (`EmailService`) devolvió `success: false`. La traza
+   * en `invoice_delivery_events` ya quedó escrita con `status: 'error'` y
+   * `provider_error` ANTES de lanzar esta excepción, para que el fallo del
+   * proveedor no borre la evidencia de que se intentó.
+   */
+  INVOICING_DELIVERY_003: {
+    code: 'INVOICING_DELIVERY_003',
+    httpStatus: 502,
+    devMessage: 'Email provider failed to send the invoice delivery',
   },
   /**
    * IDENTIDAD FISCAL DEL EMISOR INCOMPLETA — lo lanza el resolvedor estricto
@@ -3514,6 +3632,19 @@ export const ErrorCodes = {
     code: 'BANK_TRANSACTION_ALREADY_RECONCILED',
     httpStatus: 409,
     devMessage: 'This bank transaction is already reconciled',
+  },
+  /**
+   * No se puede asignar una cuenta bancaria a un pago cuyo método NO liquida
+   * por una cuenta propia (efectivo, contra entrega). El dinero nunca pasó
+   * por una cuenta de la organización: la conciliación bancaria no aplica.
+   * `unassigned-payments.service.ts:assignAccount` lo lanza tras leer el tipo
+   * del método del pago y compararlo contra `METHODS_WITHOUT_BANK_ACCOUNT`.
+   */
+  BANK_RECONCILIATION_CASH_METHOD_REJECTED: {
+    code: 'BANK_RECONCILIATION_CASH_METHOD_REJECTED',
+    httpStatus: 422,
+    devMessage:
+      'A bank account cannot be assigned to a payment whose method does not settle through a bank account (cash, cash_on_delivery).',
   },
   STATEMENT_PARSE_ERROR: {
     code: 'STATEMENT_PARSE_ERROR',
@@ -4959,6 +5090,21 @@ export const ErrorCodes = {
     devMessage:
       'La tienda no tiene un KDS por defecto activo al cual rutear el ticket',
   },
+  // QUI-762 — el reenvio de un plato a cocina solo aplica a items que ya
+  // fueron consumidos (inventory_consumed_at_fire=true). Si el item no
+  // tiene la bandera, el camino correcto es el fire normal (no el
+  // resend), porque disparar resend sobre un item sin consumir lo
+  // crearia con cero consumo y dejaria el flag apagado, rompiendo la
+  // invariante anti-doble-descuento del pago. Ademas, no se reenvian
+  // items ya entregados (kitchen_ticket_item.status='delivered').
+  KITCHEN_FIRE_NOT_RESENDABLE: {
+    code: 'KITCHEN_FIRE_NOT_RESENDABLE',
+    httpStatus: 422,
+    devMessage:
+      'El item no es elegible para reenvio: o no fue consumido al disparar, ' +
+      'o la orden esta cancelada o devuelta, o el item ya fue entregado. ' +
+      'Si nunca se disparo a cocina, use el fire normal en lugar de reenviar.',
+  },
   // QUI-655 — el cliente no puede excluir un producto arbitrario del consumo:
   // el componente tiene que pertenecer al BOM explotado de ESE plato, o el
   // consumo dejaría de reflejar la receta y el costeo se volvería inauditable.
@@ -4967,6 +5113,28 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage:
       'El componente excluido no pertenece a la receta explotada de ese plato',
+  },
+  // CP-POLLO-ARABE-727 A.6 (ERR-15) — la variante vendida se estampa en
+  // `kitchen_ticket_items`, así que el fire no puede aceptar una variante que no
+  // pertenezca al producto de la línea. Estampar una variante ajena dejaría el
+  // inventario descuadrado y el ticket mostraría lo que no se vendió.
+  PRODUCT_VARIANT_MISMATCH: {
+    code: 'PRODUCT_VARIANT_MISMATCH',
+    httpStatus: 422,
+    devMessage:
+      'La variante declarada no pertenece al producto de la línea de orden',
+  },
+  // CP-POLLO-ARABE-727 (ERR-07) — hermano de ERR-15 y complemento suyo:
+  // `PRODUCT_VARIANT_MISMATCH` cubre "variante ajena", nunca "falta variante".
+  // Un `prepared` con variantes vendido SIN variante entra al ticket de cocina
+  // como el producto base ("Pollo" cuando el cliente pidió "Pollo Picante") y
+  // descuenta inventario contra la fila base. Es el invariante que DB-14
+  // verifica en base de datos; esta es su defensa de escritura.
+  PRODUCT_VARIANT_REQUIRED: {
+    code: 'PRODUCT_VARIANT_REQUIRED',
+    httpStatus: 422,
+    devMessage:
+      'El producto preparado tiene variantes y la línea no declara ninguna',
   },
   // ── KDS: estaciones de preparación (QUI-651) ────────────────────────
   KDS_NOT_FOUND: {
@@ -5106,6 +5274,17 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage:
       'El número de comensales excede la capacidad de la mesa',
+  },
+  // QUI-704 — second charge attempt on the same table session recalculates
+  // the order total (including already-paid items) when applyPosPaymentToTableSession
+  // is called twice because the session is no longer auto-closed on payment.
+  // Block the second attempt with 409 so the operator can't accidentally
+  // double-bill the customer.
+  POS_TABLE_SESSION_ALREADY_CHARGED: {
+    code: 'POS_TABLE_SESSION_ALREADY_CHARGED',
+    httpStatus: 409,
+    devMessage:
+      'La sesión de mesa ya fue cobrada; no se puede cobrar dos veces',
   },
   // ── Split Order (Restaurant Suite Fase E) ────────────────────
   SPLIT_ORDER_NOT_FOUND: {
@@ -5340,6 +5519,142 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage:
       'Invalid date range: history_from must be less than or equal to history_to',
+  },
+
+  /**
+   * `platform_settings.platform_organization_id` ausente al operar perfiles
+   * (u otra operación fiscal del riel plataforma).
+   *
+   * ## Por qué 500 con código y no fallback silencioso
+   *
+   * El resto del módulo superadmin cae a `PLATFORM_ORGANIZATION_ID_FALLBACK = 1`
+   * cuando el setting falta, para no romper pantallas de UI no-fiscales
+   * (chart-of-accounts, journal-entries). Eso es razonable para esas
+   * superficies: leer o listar sin settings no corrompe estado fiscal.
+   *
+   * Acá NO: emitir un perfil contra una organización equivocada es el modo
+   * silencioso de firmar documentos bajo el NIT equivocado. La ausencia del
+   * setting debe gritar con código para que un operador lo arregle antes de
+   * continuar. 500 con `code` es lo correcto: el filtro global degrada
+   * `Error` pelado a 500 sin código, pero un `VendixHttpException` con
+   * `httpStatus: 500` viaja tal cual.
+   */
+  PLATFORM_FISCAL_SCOPE_MISSING: {
+    code: 'PLATFORM_FISCAL_SCOPE_MISSING',
+    httpStatus: 500,
+    devMessage:
+      'platform_settings.platform_organization_id is missing: refusing to operate billing profiles against an implicit organization, since emission with the wrong NIT is unrecoverable',
+  },
+
+  /**
+   * `operation_type` del documento y del perfil plataforma no coinciden.
+   *
+   * Mismo invariante que `INVOICING_PROFILE_008` (riel tienda), expuesto con
+   * prefijo PLATFORM para que el frontend pueda distinguir el origen del
+   * rechazo y enrutar el mensaje al banner de la tarjeta de perfil del
+   * wizard plataforma sin tener que mapear códigos.
+   */
+  PLATFORM_PROFILE_008: {
+    code: 'PLATFORM_PROFILE_008',
+    httpStatus: 409,
+    devMessage:
+      "Platform invoice operation_type does not match the profile's: freezing (profile_id, profile_version) from a profile of another type would make the stamped provenance false, and the aiu_* columns would stay NULL with no error",
+  },
+
+  /**
+   * Generación de PDF plataforma no configurada. Stub honesto para C.5.5 del
+   * CP-platform-invoicing-parity: el pipeline PDF del riel tienda tiene tres
+   * acoplamientos al store (llave S3 `stores/${store_id}`, formato desde
+   * `store_settings.receipts`, emisor desde `invoice.store`) que requieren
+   * wrapper org-scoped. Hasta que C.5.5 exista, el endpoint responde 503 con
+   * este código — el mismo patrón de honestidad que `PLATFORM_PROFILE_PREVIEW_PENDING`.
+   */
+  PLATFORM_PDF_NOT_CONFIGURED: {
+    code: 'PLATFORM_PDF_NOT_CONFIGURED',
+    httpStatus: 503,
+    devMessage:
+      'Platform PDF pipeline not yet configured: the store PDF service is store-scoped (S3 key prefix, format from store_settings, issuer from invoice.store). The C.5.5 wrapper must run those three steps org-scoped.',
+  },
+
+  /**
+   * `POST /profiles/:id/preview` (B.4 del CP-platform-invoicing-parity) stub
+   * honesto: devuelve 501 hasta que `PlatformProfilePreviewService` exista.
+   * 501 Not Implemented — el método existe y la ruta está cableada, sólo
+   * falta el motor de cálculo paralelo a `ProfilePreviewService` del riel
+   * tienda (1.850 líneas probadas que se reutilizan vía fachada, no se
+   * copian).
+   */
+  PLATFORM_PROFILE_PREVIEW_PENDING: {
+    code: 'PLATFORM_PROFILE_PREVIEW_PENDING',
+    httpStatus: 501,
+    devMessage:
+      'Platform profile preview pending (B.4): the calculator + UBL preview path must be wrapped org-scoped, reusing ProfilePreviewService from the store rail rather than copying it.',
+  },
+
+  // CRM Landing (QUI-719): la tienda aún no tiene fila de landing.
+  // 404: GET/PUT antes de activar el módulo, o store_id sin landing creada.
+  CRM_LANDING_001: {
+    code: 'CRM_LANDING_001',
+    httpStatus: 404,
+    devMessage:
+      'Aún no existe una landing para esta tienda. Activa el módulo CRM primero.',
+  },
+
+  // CRM Landing (QUI-719): operación que requiere el módulo activado.
+  // 409: editar/guardar draft con enabled=false. El estado inerte es
+  // explícito en el producto: sin activación no hay edición.
+  CRM_LANDING_002: {
+    code: 'CRM_LANDING_002',
+    httpStatus: 409,
+    devMessage:
+      'El módulo CRM está desactivado. Actívalo para editar tu landing.',
+  },
+
+  // CRM Landing (QUI-719): el JSON de bloques no cumple el contrato v1.
+  // 422: el validador del schema rechazó content_json (versión desconocida,
+  // bloque con tipo fuera del catálogo o props faltantes).
+  CRM_LANDING_003: {
+    code: 'CRM_LANDING_003',
+    httpStatus: 422,
+    devMessage:
+      'El contenido de la landing no cumple la estructura esperada. Revisa las secciones e intenta de nuevo.',
+  },
+
+  // CRM Landing (QUI-719): fallo al encolar el job en BullMQ.
+  // 500: Redis/caída del queue — la fila queda `failed` con mensaje y el
+  // usuario puede reintentar desde el panel.
+  CRM_LANDING_004: {
+    code: 'CRM_LANDING_004',
+    httpStatus: 500,
+    devMessage:
+      'No pudimos iniciar la generación de tu landing. Intenta de nuevo en unos segundos.',
+  },
+
+  // CRM Landing (QUI-719): publicar sin draft.
+  // 400: la fila existe pero content_json es null (nunca se generó/editó).
+  CRM_LANDING_005: {
+    code: 'CRM_LANDING_005',
+    httpStatus: 400,
+    devMessage:
+      'Aún no hay contenido en el borrador. Genera o edita tu landing antes de publicar.',
+  },
+
+  // CRM Landing (QUI-719): contacto público sin medio de respuesta.
+  // 422: el formulario exige nombre + mensaje y al menos un canal
+  // (correo o teléfono) para que la tienda pueda responder.
+  CRM_LANDING_006: {
+    code: 'CRM_LANDING_006',
+    httpStatus: 422,
+    devMessage:
+      'Déjanos tu correo o tu teléfono para poder responderte.',
+  },
+
+  // CRM Landing (QUI-719): intento de contacto sobre landing no publicada o desactivada.
+  CRM_LANDING_007: {
+    code: 'CRM_LANDING_007',
+    httpStatus: 404,
+    devMessage:
+      'La landing de esta tienda no está disponible para recibir mensajes de contacto.',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 

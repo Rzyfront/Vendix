@@ -8,6 +8,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import {
+    AbstractControl,
     FormBuilder,
     FormArray,
     FormControl,
@@ -15,7 +16,7 @@ import {
     ReactiveFormsModule,
     Validators,
 } from '@angular/forms';
-import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { map } from 'rxjs/operators';
 
@@ -27,8 +28,6 @@ import {
     SelectorComponent,
     StickyHeaderActionButton,
     StickyHeaderComponent,
-    TextareaComponent,
-    ToggleComponent,
 } from '../../../../../../shared/components/index';
 import type { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
@@ -82,11 +81,73 @@ import {
     aiuComponentsSumScaled,
     aiuTaxableBasisShortLabel,
     firstTaxableAiuComponent,
-} from '../../components/invoice-sections/index';
+    AiuAccountDefaultsResolver,
+    EMPTY_AIU_INHERITED_DEFAULTS,
+} from '../../../../../../shared/components/invoice-sections/index';
+import type { InheritedAccountHint } from '../../../../../../shared/components/account-select/account-select.component';
 import type {
     AiuSectionPaths,
     AiuTaxRuleValue,
-} from '../../components/invoice-sections/index';
+} from '../../../../../../shared/components/invoice-sections/index';
+/**
+ * SECCIÓN DOCUMENTO COMPARTIDA con «Nueva factura» (B.2). Mismo componente,
+ * mismos controles: resolución, tipo de documento, forma y medio de pago, y
+ * notas de cabecera. Las fechas se ocultan en este contexto («profile»).
+ */
+import { InvoiceSectionDocumentoComponent } from '../../../../../../shared/components/invoice-sections/index';
+import type {
+    DocumentoSectionErrors,
+    DocumentoSectionNotice,
+    DocumentoSectionPaths,
+} from '../../../../../../shared/components/invoice-sections/index';
+/**
+ * SECCIÓN LÍNEAS COMPARTIDA con «Líneas» de la factura (B.3). El componente
+ * tiene dos plantillas internas por contexto —acá no hay picker de producto
+ * ni impuestos por línea—, así que el editor sólo le pasa `context="profile"`
+ * y su propio mapa de rutas. Ver el docblock del componente.
+ */
+import { InvoiceSectionLineasComponent } from '../../../../../../shared/components/invoice-sections/index';
+import type {
+    LineasRowErrors,
+    LineasRowPaths,
+} from '../../../../../../shared/components/invoice-sections/index';
+/**
+ * SECCIÓN IMPUESTOS COMPARTIDA con el agregado de línea de la factura (B.4).
+ * El editor le pasa `context="profile"`: el componente pinta la matriz
+ * editable por porción (`taxes` FormArray) y el editor sigue dueño de
+ * `addTaxRule()`/`removeTaxRule()`. Ver el docblock del componente.
+ */
+import { InvoiceSectionImpuestosComponent } from '../../../../../../shared/components/invoice-sections/index';
+/**
+ * SECCIÓN RETENCIONES COMPARTIDA con la factura (B.5). El editor no tiene
+ * importe manual ni base gravable —la base es del documento, no del
+ * perfil—, así que sólo le pasa concepto, lado y tarifa. Ver el docblock
+ * del componente.
+ */
+import { InvoiceSectionRetencionesComponent } from '../../../../../../shared/components/invoice-sections/index';
+import type { RetencionesRowErrors } from '../../../../../../shared/components/invoice-sections/index';
+/**
+ * SECCIÓN DIVISA COMPARTIDA con la factura (B.6). El perfil no consulta
+ * ninguna TRM —eso es del día de cada factura, no algo que un perfil pueda
+ * congelar—, así que sólo le pasa el interruptor y la divisa. Ver el
+ * docblock del componente.
+ */
+import { InvoiceSectionDivisaComponent } from '../../../../../../shared/components/invoice-sections/index';
+import type { DivisaSectionPaths } from '../../../../../../shared/components/invoice-sections/index';
+/**
+ * SECCIONES FORMATO Y NOTAS INTERNAS COMPARTIDAS con «Nueva factura» (B.7 —
+ * cierre del re-cableado del editor). Mismo componente, mismos controles: el
+ * editor le pasa `context="profile"` y sus rutas `format.*` / `general.*`.
+ * Ver el docblock de cada componente.
+ */
+import {
+    InvoiceSectionFormatoComponent,
+    InvoiceSectionNotasComponent,
+} from '../../../../../../shared/components/invoice-sections/index';
+import type {
+    FormatoSectionPaths,
+    NotasSectionPaths,
+} from '../../../../../../shared/components/invoice-sections/index';
 import {
     FOREIGN_CURRENCY_OPTIONS,
     INVOICE_TYPE_OPTIONS,
@@ -213,18 +274,22 @@ type SectionId = ProfileScreenSectionId;
     standalone: true,
     imports: [
         ReactiveFormsModule,
-        RouterLink,
         StickyHeaderComponent,
         InvoiceFormSectionComponent,
         AlertBannerComponent,
         ButtonComponent,
         IconComponent,
         InputComponent,
-        TextareaComponent,
         SelectorComponent,
-        ToggleComponent,
         AccountCodeSelectComponent,
         InvoiceSectionAiuComponent,
+        InvoiceSectionDocumentoComponent,
+        InvoiceSectionLineasComponent,
+        InvoiceSectionImpuestosComponent,
+        InvoiceSectionRetencionesComponent,
+        InvoiceSectionDivisaComponent,
+        InvoiceSectionFormatoComponent,
+        InvoiceSectionNotasComponent,
         InvoiceProfilePreviewPanelComponent,
         InvoiceProfileVersionsPanelComponent,
     ],
@@ -313,175 +378,52 @@ type SectionId = ProfileScreenSectionId;
                         [expanded]="isSectionOpen('documento')"
                         (expandedChange)="setSection('documento', $event)"
                     >
-                        <div class="space-y-3" formGroupName="dian">
-                            <!--
-                                El TIPO va primero porque decide qué secciones
-                                tienen sentido más abajo: una exportación no está
-                                sujeta a retención en Colombia, y verlo después de
-                                haber llenado retenciones es verlo tarde.
-                            -->
-                            <app-selector
-                                label="Tipo de documento"
-                                formControlName="document_type"
-                                [options]="document_type_options"
-                                size="sm"
-                                helpText="Se precarga en la factura. Una exportación es un documento DIAN distinto de una venta nacional."
-                            ></app-selector>
-
-                            @if (inapplicableWithholdings(); as count) {
-                                <!--
-                                    «app-alert-banner» y no un párrafo teñido: un
-                                    texto «text-warning» sobre fondo claro no
-                                    llega al contraste AA, y el aviso es
-                                    justamente el que evita emitir una
-                                    exportación con retención colombiana.
-                                -->
-                                <app-alert-banner
-                                    variant="warning"
-                                    icon="alert-triangle"
-                                >
-                                    Este perfil tiene {{ count }}
-                                    {{
-                                        count === 1
-                                            ? 'retención configurada'
-                                            : 'retenciones configuradas'
-                                    }}
-                                    y una factura de exportación no está sujeta a
-                                    retención en Colombia. Quítalas o cambia el
-                                    tipo de documento: se seguirán precargando tal
-                                    como están.
-                                </app-alert-banner>
-                            }
-
-                            <div
-                                class="rounded-lg border border-border p-3 space-y-2"
+                        <!--
+                            B.2: sección compartida con «Nueva factura»
+                            («InvoiceSectionDocumentoComponent», contexto
+                            «profile»). El aviso de retenciones inaplicables
+                            se queda en la PÁGINA, no en el componente
+                            compartido: depende de «withholdingRules», que es
+                            ajeno a esta sección —la decisión de negocio
+                            («¿aplica retención a una exportación?») sigue
+                            siendo de la pantalla; el componente sólo pinta el
+                            marcado compartido de resolución, tipo de
+                            documento, forma/medio de pago y notas—.
+                        -->
+                        @if (inapplicableWithholdings(); as count) {
+                            <app-alert-banner
+                                variant="warning"
+                                icon="alert-triangle"
                             >
-                                <app-selector
-                                    label="Resolución de numeración preferida"
-                                    [formControl]="resolutionControl"
-                                    [options]="resolution_options()"
-                                    [placeholder]="
-                                        'Sin preferencia — la factura elige la vigente más antigua'
-                                    "
-                                    size="sm"
-                                    helpText="Para cuando la tienda tiene varios rangos autorizados vivos a la vez. Es una preferencia: si el rango no puede numerar el día de la emisión, la factura usa la vigente más antigua y lo avisa."
-                                ></app-selector>
-                                @if (resolution_options().length === 0) {
-                                    <p class="text-xs text-text-secondary">
-                                        No hay resoluciones de factura de venta
-                                        registradas. Regístralas en Facturación →
-                                        Resoluciones; sin rango autorizado la
-                                        emisión no tiene de dónde tomar el
-                                        consecutivo.
-                                    </p>
-                                }
-                                @if (resolutionWarning(); as warning) {
-                                    <p
-                                        class="text-xs text-warning flex items-start gap-1.5"
-                                    >
-                                        <app-icon
-                                            name="alert-triangle"
-                                            [size]="14"
-                                            class="mt-0.5 shrink-0"
-                                        ></app-icon>
-                                        <span>{{ warning }}</span>
-                                    </p>
-                                }
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-                                <app-selector
-                                    label="Forma de pago"
-                                    formControlName="payment_method_code"
-                                    [options]="payment_form_options"
-                                    size="sm"
-                                    helpText="Se precarga en la factura. Contado o crédito."
-                                ></app-selector>
-                                <app-selector
-                                    label="Medio de pago"
-                                    formControlName="payment_means_code"
-                                    [options]="payment_means_options"
-                                    size="sm"
-                                    helpText="Código del anexo (efectivo, transferencia, tarjeta…)."
-                                ></app-selector>
-                            </div>
-
-                            <div
-                                class="rounded-lg border border-border p-3 space-y-2"
-                            >
-                                <div
-                                    class="flex flex-wrap items-center justify-between gap-2"
-                                >
-                                    <p class="text-xs text-text-secondary">
-                                        Notas de cabecera. Se precargan en la
-                                        factura y viajan como
-                                        <code>cbc:Note</code> del documento.
-                                    </p>
-                                    <app-button
-                                        variant="secondary"
-                                        size="sm"
-                                        (clicked)="addHeaderNote()"
-                                    >
-                                        <app-icon
-                                            slot="icon"
-                                            name="plus"
-                                            [size]="14"
-                                        ></app-icon>
-                                        Nota
-                                    </app-button>
-                                </div>
-                                @if (headerNotes.controls.length === 0) {
-                                    <p class="text-xs text-text-secondary italic">
-                                        Sin notas. La factura no llevará ninguna
-                                        precargada.
-                                    </p>
-                                }
-                                <div class="space-y-2" formArrayName="header_notes">
-                                    @for (
-                                        note of headerNotes.controls;
-                                        track $index
-                                    ) {
-                                        <div class="flex items-end gap-2">
-                                            <div class="flex-1">
-                                                <app-input
-                                                    [label]="'Nota ' + ($index + 1)"
-                                                    [formControlName]="$index"
-                                                    [maxlength]="header_note_limit"
-                                                    size="sm"
-                                                    [error]="
-                                                        issueFor(
-                                                            'dian.header_notes[' +
-                                                                $index +
-                                                                ']'
-                                                        )
-                                                    "
-                                                ></app-input>
-                                            </div>
-                                            <!--
-                                                SÓLO EL ICONO. La palabra «Quitar» repetida en cada fila de
-                                                cada matriz no aporta nada que el bote de basura no diga, y
-                                                ensancha el botón hasta empujar los campos de la fila. El
-                                                nombre accesible viaja en «ariaLabel», que app-button pone en
-                                                el <button> interno junto con el «title»: sin él, un botón de
-                                                sólo icono se anuncia sin nombre.
-                                            -->
-                                            <app-button
-                                                variant="outline-danger"
-                                                size="sm"
-                                                ariaLabel="Quitar esta nota de cabecera"
-                                                (clicked)="removeHeaderNote($index)"
-                                            >
-                                                <app-icon
-                                                    slot="icon"
-                                                    name="trash-2"
-                                                    [size]="15"
-                                                ></app-icon>
-                                            </app-button>
-                                        </div>
-                                    }
-                                </div>
-                            </div>
-                        </div>
+                                Este perfil tiene {{ count }}
+                                {{
+                                    count === 1
+                                        ? 'retención configurada'
+                                        : 'retenciones configuradas'
+                                }}
+                                y una factura de exportación no está sujeta a
+                                retención en Colombia. Quítalas o cambia el
+                                tipo de documento: se seguirán precargando tal
+                                como están.
+                            </app-alert-banner>
+                        }
+                        <vendix-invoice-section-documento
+                            context="profile"
+                            [form]="form"
+                            [paths]="documentoSectionPaths"
+                            [invoiceTypeOptions]="document_type_options"
+                            [paymentFormOptions]="payment_form_options"
+                            [paymentMeansOptions]="payment_means_options"
+                            [resolutionControl]="resolutionControl"
+                            [resolutionOptions]="resolution_options()"
+                            resolutionPlaceholder="Sin preferencia — la factura elige la vigente más antigua"
+                            resolutionHelpText="Para cuando la tienda tiene varios rangos autorizados vivos a la vez. Es una preferencia: si el rango no puede numerar el día de la emisión, la factura usa la vigente más antigua y lo avisa."
+                            [resolutionHint]="documentoResolutionHint()"
+                            [notices]="documentoNotices()"
+                            [errors]="documentoErrors()"
+                            [headerNoteErrors]="headerNoteErrors()"
+                            [headerNoteLimit]="header_note_limit"
+                        ></vendix-invoice-section-documento>
                     </vendix-invoice-form-section>
 
                     <!-- ══ AIU ══ los CUATRO BLOQUES.
@@ -568,18 +510,6 @@ type SectionId = ProfileScreenSectionId;
                                     factura: son un punto de partida, no un
                                     candado.
                                 </p>
-                                <app-button
-                                    variant="secondary"
-                                    size="sm"
-                                    (clicked)="addModelLine()"
-                                >
-                                    <app-icon
-                                        slot="icon"
-                                        name="plus"
-                                        [size]="14"
-                                    ></app-icon>
-                                    Línea
-                                </app-button>
                             </div>
                             @if (modelLines.controls.length === 0) {
                                 <p class="text-xs text-text-secondary italic">
@@ -587,162 +517,27 @@ type SectionId = ProfileScreenSectionId;
                                     línea vacía, como en el flujo manual.
                                 </p>
                             }
-                            <div class="space-y-2" formArrayName="model_lines">
-                                @for (line of modelLines.controls; track $index) {
-                                    <div
-                                        class="grid grid-cols-1 items-end gap-2 rounded-lg border border-border p-2 md:grid-cols-7"
-                                        [formGroupName]="$index"
-                                    >
-                                        <!--
-                                            El COMPONENTE sólo existe en un
-                                            documento AIU: las cubetas son
-                                            porciones del AIU y en una venta
-                                            ordinaria no significan nada. Fuera
-                                            de AIU se oculta y la línea nace en
-                                            «costo», que es la única cubeta que
-                                            no es componente del régimen.
-
-                                            El INTERRUPTOR es el mismo que la
-                                            vista de emisión pone en cada línea:
-                                            «lleva la base AIU» no es un campo
-                                            nuevo, es bucket distinto de
-                                            «costo». Sin él la decisión fiscal
-                                            queda escondida en elegir una opción
-                                            de un selector de cuatro, y nadie lee
-                                            eso como encender o apagar el AIU de
-                                            la línea.
-                                        -->
-                                        @if (isAiu()) {
-                                            <div class="space-y-1">
-                                                <!--
-                                                    «app-toggle» y no un
-                                                    «<input type="checkbox">»
-                                                    suelto: es el control de
-                                                    encendido/apagado del sistema,
-                                                    así que hereda el color del
-                                                    tenant, el foco visible y el
-                                                    área táctil. Un checkbox de
-                                                    16 px pintado con «accent-»
-                                                    no tenía ninguna de las tres.
-                                                    No se le pasa «styleVariant».
-                                                -->
-                                                <div
-                                                    class="flex items-center"
-                                                    [title]="
-                                                        lineCarriesAiu($index)
-                                                            ? 'Esta línea lleva la base AIU configurada'
-                                                            : 'Costo reembolsable: no entra a la base AIU'
-                                                    "
-                                                >
-                                                    <app-toggle
-                                                        label="AIU"
-                                                        ariaLabel="Aplicar la base AIU a esta línea"
-                                                        [checked]="
-                                                            lineCarriesAiu($index)
-                                                        "
-                                                        (changed)="
-                                                            toggleLineAiu(
-                                                                $index,
-                                                                $event
-                                                            )
-                                                        "
-                                                    ></app-toggle>
-                                                </div>
-                                                @if (lineCarriesAiu($index)) {
-                                                    <app-selector
-                                                        formControlName="bucket"
-                                                        [options]="component_options"
-                                                        size="sm"
-                                                    ></app-selector>
-                                                } @else {
-                                                    <span
-                                                        class="block truncate text-[11px] text-text-secondary"
-                                                        >Costo reembolsable</span
-                                                    >
-                                                }
-                                            </div>
-                                        }
-                                        <div
-                                            [class.md:col-span-2]="isAiu()"
-                                            [class.md:col-span-3]="!isAiu()"
-                                        >
-                                            <app-input
-                                                label="Descripción"
-                                                formControlName="description"
-                                                [maxlength]="line_description_limit"
-                                                size="sm"
-                                                [error]="
-                                                    issueFor(
-                                                        'model_lines[' +
-                                                            $index +
-                                                            '].description'
-                                                    )
-                                                "
-                                            ></app-input>
-                                        </div>
-                                        <app-input
-                                            label="Cantidad"
-                                            formControlName="quantity"
-                                            size="sm"
-                                        ></app-input>
-                                        <app-input
-                                            label="Unidad"
-                                            formControlName="unit_code"
-                                            [maxlength]="4"
-                                            size="sm"
-                                            [error]="
-                                                issueFor(
-                                                    'model_lines[' +
-                                                        $index +
-                                                        '].unit_code'
-                                                )
-                                            "
-                                        ></app-input>
-                                        <!--
-                                            Precio en BLANCO = se teclea en cada
-                                            factura. No es un campo de dinero con
-                                            formato: es la cadena que viaja al
-                                            snapshot, y darle formato de moneda
-                                            acá la redondearía a dos decimales
-                                            cuando el anexo admite seis en el
-                                            precio unitario.
-                                        -->
-                                        <app-input
-                                            label="Precio"
-                                            formControlName="unit_price"
-                                            size="sm"
-                                            placeholder="Se teclea"
-                                            [error]="
-                                                issueFor(
-                                                    'model_lines[' +
-                                                        $index +
-                                                        '].unit_price'
-                                                )
-                                            "
-                                        ></app-input>
-                                        <!--
-                                            SÓLO EL ICONO. La palabra «Quitar» repetida en cada fila de
-                                            cada matriz no aporta nada que el bote de basura no diga, y
-                                            ensancha el botón hasta empujar los campos de la fila. El
-                                            nombre accesible viaja en «ariaLabel», que app-button pone en
-                                            el <button> interno junto con el «title»: sin él, un botón de
-                                            sólo icono se anuncia sin nombre.
-                                        -->
-                                        <app-button
-                                            variant="outline-danger"
-                                            size="sm"
-                                            ariaLabel="Quitar esta línea modelo"
-                                            (clicked)="removeModelLine($index)"
-                                        >
-                                            <app-icon
-                                                slot="icon"
-                                                name="trash-2"
-                                                [size]="15"
-                                            ></app-icon>
-                                        </app-button>
-                                    </div>
-                                }
-                            </div>
+                            <!--
+                                B.3: sección compartida con «Líneas» de la
+                                factura («InvoiceSectionLineasComponent»). El
+                                botón «Línea» del pie lo pinta el propio
+                                componente en su rama de contexto «profile».
+                            -->
+                            <vendix-invoice-section-lineas
+                                context="profile"
+                                [rows]="modelLines.controls"
+                                [rowPaths]="lineasRowPaths"
+                                [isAiu]="isAiu()"
+                                [aiuComponentOptions]="component_options"
+                                [descriptionLimit]="line_description_limit"
+                                [rowErrors]="lineasRowErrors()"
+                                [carriesAiu]="lineCarriesAiuBound"
+                                [toggleAiu]="toggleLineAiuBound"
+                                [maxLines]="999"
+                                emptyStateText="Sin líneas modelo. La factura abrirá con una línea vacía, como en el flujo manual."
+                                (addBlankLine)="addModelLine()"
+                                (removeLine)="removeModelLine($event)"
+                            ></vendix-invoice-section-lineas>
                         </div>
                     </vendix-invoice-form-section>
 
@@ -762,86 +557,15 @@ type SectionId = ProfileScreenSectionId;
                             [expanded]="isSectionOpen('impuestos')"
                             (expandedChange)="setSection('impuestos', $event)"
                         >
-                            <div class="space-y-2">
-                                <div
-                                    class="flex flex-wrap items-center justify-between gap-2"
-                                >
-                                    <p class="text-xs text-text-secondary">
-                                        Qué impuesto grava qué base.
-                                    </p>
-                                    <app-button
-                                        variant="secondary"
-                                        size="sm"
-                                        (clicked)="addTaxRule()"
-                                    >
-                                        <app-icon
-                                            slot="icon"
-                                            name="plus"
-                                            [size]="14"
-                                        ></app-icon>
-                                        Agregar impuesto
-                                    </app-button>
-                                </div>
-                                <div class="space-y-2" formArrayName="taxes">
-                                    @for (rule of taxRules.controls; track $index) {
-                                        <div
-                                            class="grid grid-cols-1 items-end gap-2 rounded-lg border border-border p-2 md:grid-cols-5"
-                                            [formGroupName]="$index"
-                                        >
-                                            <app-selector
-                                                label="Impuesto"
-                                                formControlName="tax_code"
-                                                [options]="tax_code_options"
-                                                size="sm"
-                                            ></app-selector>
-                                            <app-selector
-                                                label="Base"
-                                                formControlName="bucket"
-                                                [options]="bucket_options()"
-                                                size="sm"
-                                            ></app-selector>
-                                            <app-input
-                                                label="Tarifa (%)"
-                                                formControlName="rate"
-                                                size="sm"
-                                                [error]="
-                                                    issueFor(
-                                                        'taxes.rules[' +
-                                                            $index +
-                                                            '].rate'
-                                                    )
-                                                "
-                                            ></app-input>
-                                            <div class="flex items-center pb-2">
-                                                <app-toggle
-                                                    formControlName="taxable"
-                                                    label="Gravable"
-                                                ></app-toggle>
-                                            </div>
-                                            <!--
-                                                SÓLO EL ICONO. La palabra «Quitar» repetida en cada fila de
-                                                cada matriz no aporta nada que el bote de basura no diga, y
-                                                ensancha el botón hasta empujar los campos de la fila. El
-                                                nombre accesible viaja en «ariaLabel», que app-button pone en
-                                                el <button> interno junto con el «title»: sin él, un botón de
-                                                sólo icono se anuncia sin nombre.
-                                            -->
-                                            <app-button
-                                                variant="outline-danger"
-                                                size="sm"
-                                                ariaLabel="Quitar esta regla de impuesto"
-                                                (clicked)="removeTaxRule($index)"
-                                            >
-                                                <app-icon
-                                                    slot="icon"
-                                                    name="trash-2"
-                                                    [size]="15"
-                                                ></app-icon>
-                                            </app-button>
-                                        </div>
-                                    }
-                                </div>
-                            </div>
+                            <vendix-invoice-section-impuestos
+                                context="profile"
+                                [rows]="taxRules.controls"
+                                [bucketOptions]="bucket_options()"
+                                [taxCodeOptions]="tax_code_options"
+                                [rateErrors]="taxRateErrors()"
+                                (addRule)="addTaxRule()"
+                                (removeRule)="removeTaxRule($event)"
+                            ></vendix-invoice-section-impuestos>
                         </vendix-invoice-form-section>
                     }
 
@@ -864,138 +588,22 @@ type SectionId = ProfileScreenSectionId;
                             [expanded]="isSectionOpen('retenciones')"
                             (expandedChange)="setSection('retenciones', $event)"
                         >
-                            <div class="space-y-3">
-                                <div
-                                    class="flex flex-wrap items-center justify-between gap-2"
-                                >
-                                    <p class="text-xs text-text-secondary">
-                                        Conceptos que se precargarán en la
-                                        factura. La BASE no se guarda: es el
-                                        importe de cada documento y se calcula al
-                                        emitir.
-                                    </p>
-                                    <app-button
-                                        variant="secondary"
-                                        size="sm"
-                                        (clicked)="addWithholding()"
-                                    >
-                                        <app-icon
-                                            slot="icon"
-                                            name="plus"
-                                            [size]="14"
-                                        ></app-icon>
-                                        Retención
-                                    </app-button>
-                                </div>
-
-                                @if (isExport() && withholdingRules.length > 0) {
-                                    <p
-                                        class="text-xs text-warning flex items-start gap-1.5"
-                                    >
-                                        <app-icon
-                                            name="alert-triangle"
-                                            [size]="14"
-                                            class="mt-0.5 shrink-0"
-                                        ></app-icon>
-                                        <span
-                                            >El tipo de documento es exportación y
-                                            una exportación no está sujeta a
-                                            retención en Colombia. Estas filas se
-                                            seguirán precargando: quítalas si no
-                                            corresponden.</span
-                                        >
-                                    </p>
-                                }
-
-                                @if (withholdingRules.controls.length === 0) {
-                                    <p class="text-xs text-text-secondary italic">
-                                        Sin retenciones. La factura abrirá sin
-                                        ninguna fila, y se pueden añadir al
-                                        emitir.
-                                    </p>
-                                }
-
-                                <div
-                                    class="space-y-2"
-                                    formArrayName="withholdings"
-                                >
-                                    @for (
-                                        rule of withholdingRules.controls;
-                                        track $index
-                                    ) {
-                                        <div
-                                            class="grid grid-cols-1 items-end gap-2 rounded-lg border border-border p-2 md:grid-cols-6"
-                                            [formGroupName]="$index"
-                                        >
-                                            <div class="md:col-span-3">
-                                                <app-selector
-                                                    label="Concepto"
-                                                    formControlName="concept_id"
-                                                    [options]="
-                                                        withholding_concept_options()
-                                                    "
-                                                    size="sm"
-                                                    placeholder="Elige el concepto"
-                                                    [errorText]="
-                                                        issueFor(
-                                                            'withholdings.rules[' +
-                                                                $index +
-                                                                '].concept_id'
-                                                        )
-                                                    "
-                                                ></app-selector>
-                                            </div>
-                                            <app-selector
-                                                label="Lado"
-                                                formControlName="role"
-                                                [options]="
-                                                    withholding_role_options
-                                                "
-                                                size="sm"
-                                            ></app-selector>
-                                            <app-input
-                                                label="Tarifa %"
-                                                formControlName="rate"
-                                                size="sm"
-                                                [helperText]="
-                                                    catalogRateFor($index)
-                                                        ? 'Catálogo: ' +
-                                                          catalogRateFor($index) +
-                                                          ' %'
-                                                        : ''
-                                                "
-                                                [error]="
-                                                    issueFor(
-                                                        'withholdings.rules[' +
-                                                            $index +
-                                                            '].rate'
-                                                    )
-                                                "
-                                            ></app-input>
-                                            <!--
-                                                SÓLO EL ICONO. La palabra «Quitar» repetida en cada fila de
-                                                cada matriz no aporta nada que el bote de basura no diga, y
-                                                ensancha el botón hasta empujar los campos de la fila. El
-                                                nombre accesible viaja en «ariaLabel», que app-button pone en
-                                                el <button> interno junto con el «title»: sin él, un botón de
-                                                sólo icono se anuncia sin nombre.
-                                            -->
-                                            <app-button
-                                                variant="outline-danger"
-                                                size="sm"
-                                                ariaLabel="Quitar este concepto de retención"
-                                                (clicked)="removeWithholding($index)"
-                                            >
-                                                <app-icon
-                                                    slot="icon"
-                                                    name="trash-2"
-                                                    [size]="15"
-                                                ></app-icon>
-                                            </app-button>
-                                        </div>
-                                    }
-                                </div>
-                            </div>
+                            <vendix-invoice-section-retenciones
+                                context="profile"
+                                [rows]="withholdingRules.controls"
+                                [conceptOptions]="withholding_concept_options()"
+                                [roleOptions]="withholding_role_options"
+                                [rowErrors]="retencionesRowErrors()"
+                                [catalogRateFor]="catalogRateForBound"
+                                emptyStateText="Sin retenciones. La factura abrirá sin ninguna fila, y se pueden añadir al emitir."
+                                [exportWarningText]="
+                                    isExport() && withholdingRules.length > 0
+                                        ? 'El tipo de documento es exportación y una exportación no está sujeta a retención en Colombia. Estas filas se seguirán precargando: quítalas si no corresponden.'
+                                        : null
+                                "
+                                (addWithholding)="addWithholding()"
+                                (removeWithholding)="removeWithholding($event)"
+                            ></vendix-invoice-section-retenciones>
                         </vendix-invoice-form-section>
                     }
 
@@ -1016,23 +624,13 @@ type SectionId = ProfileScreenSectionId;
                         [expanded]="isSectionOpen('divisa')"
                         (expandedChange)="setSection('divisa', $event)"
                     >
-                        <div class="space-y-3" formGroupName="currency">
-                            <app-toggle
-                                label="Declarar conversión a divisa extranjera"
-                                formControlName="declare_foreign"
-                                helpText="La factura se emite SIEMPRE en pesos. Esto sólo añade la conversión al XML (Res. DIAN 000042/2020, art. 73)."
-                            ></app-toggle>
-
-                            <app-selector
-                                label="Divisa"
-                                formControlName="code"
-                                [options]="currency_options"
-                                size="sm"
-                                placeholder="Sin divisa"
-                                helpText="Se guarda la divisa, no la tasa: la tasa es del día de cada factura."
-                                [errorText]="issueFor('currency.code')"
-                            ></app-selector>
-                        </div>
+                        <vendix-invoice-section-divisa
+                            context="profile"
+                            [form]="form"
+                            [paths]="divisaSectionPaths"
+                            [currencyOptions]="currency_options"
+                            [errors]="divisaErrors()"
+                        ></vendix-invoice-section-divisa>
                     </vendix-invoice-form-section>
 
                     <!-- ══ CONTABILIDAD ══ espejo de la sección homónima.
@@ -1044,7 +642,17 @@ type SectionId = ProfileScreenSectionId;
                          mantendrían sincronizados, pero el operador no sabría
                          cuál es la que manda y buscaría la diferencia. Aquí
                          quedan sólo cuando el perfil NO es AIU, donde no hay
-                         sección AIU que las aloje. -->
+                         sección AIU que las aloje.
+
+                         B.6 evaluó extraer TAMBIÉN esta rama (no-AIU) a un
+                         componente compartido con la factura y concluyó que
+                         no hay campo en común: aquí son dos cuentas FIJAS
+                         por bucket («revenue_costo», «vat_payable_account»);
+                         la factura fuerza una cuenta por defecto MÁS un mapa
+                         de overrides por línea, porque una factura tiene
+                         líneas que un perfil no tiene. Cero controles
+                         compartibles — ver el comentario espejo en
+                         «invoice-create-page.component.ts». -->
                     <vendix-invoice-form-section
                         title="Contabilidad"
                         [help]="help('contabilidad')"
@@ -1077,6 +685,7 @@ type SectionId = ProfileScreenSectionId;
                                         label="Ingreso · Costo reembolsable"
                                         formControlName="revenue_costo"
                                         placeholder="Mapeo contable de la tienda"
+                                        [inheritedAccount]="inheritedRevenueCosto()"
                                         [error]="
                                             issueFor(
                                                 'accounting.revenue_account_by_bucket.costo'
@@ -1087,6 +696,7 @@ type SectionId = ProfileScreenSectionId;
                                         label="Cuenta de IVA por pagar"
                                         formControlName="vat_payable_account"
                                         placeholder="Mapeo contable de la tienda"
+                                        [inheritedAccount]="inheritedVatPayable()"
                                         [error]="issueFor('accounting.vat_payable_account')"
                                     ></app-account-code-select>
                                 </div>
@@ -1104,83 +714,24 @@ type SectionId = ProfileScreenSectionId;
                         [expanded]="isSectionOpen('formato')"
                         (expandedChange)="setSection('formato', $event)"
                     >
-                        <div class="space-y-3" formGroupName="format">
-                            <div
-                                class="flex items-start gap-2.5 rounded-lg border border-border bg-[var(--color-surface-muted)] px-3 py-2.5"
-                            >
-                                <app-icon
-                                    name="info"
-                                    [size]="15"
-                                    class="mt-0.5 shrink-0 text-[var(--color-text-secondary)]"
-                                ></app-icon>
-                                <p
-                                    class="text-xs leading-relaxed text-text-secondary"
-                                >
-                                    El diseño del documento —papel, secciones,
-                                    columnas y estilos— se edita en el
-                                    <a
-                                        routerLink="/admin/settings/print-formats"
-                                        class="font-semibold text-[var(--color-primary)] underline underline-offset-2"
-                                        >Hub de formatos de impresión</a
-                                    >, sobre el formato
-                                    <strong>Factura Electrónica (DIAN)</strong>.
-                                    Aquí sólo se elige la plantilla con que este
-                                    perfil imprime y qué se muestra en ella.
-                                </p>
-                            </div>
-
-                            <app-selector
-                                label="Plantilla de impresión"
-                                formControlName="template_id"
-                                [options]="print_template_options()"
-                                size="sm"
-                                [errorText]="issueFor('format.template_id') ?? ''"
-                                helpText="La factura se imprime con la plantilla que el perfil tenía al emitirse, no con la que la tienda tenga activa después."
-                            ></app-selector>
-
-                            @if (print_templates_failed()) {
-                                <p
-                                    class="text-[11px] text-[var(--color-warning)]"
-                                >
-                                    No se pudo leer la biblioteca del Hub. El
-                                    perfil se guarda igual y la factura se
-                                    imprimirá con la plantilla activa de la
-                                    tienda.
-                                </p>
-                            }
-
-                            <!--
-                              LEGADO. Sólo se muestra si el perfil guardado ya
-                              trae una clave de «default_templates». No se borra
-                              en silencio: hay perfiles con este dato y borrarlo
-                              al guardar cambiaría la impresión sin que nadie lo
-                              haya pedido.
-                            -->
-                            @if (hasLegacyTemplateKey()) {
-                                <app-input
-                                    label="Clave de plantilla (legado)"
-                                    formControlName="template_key"
-                                    [maxlength]="template_key_limit"
-                                    size="sm"
-                                    helperText="Catálogo anterior. Si eliges una plantilla del Hub arriba, manda esa."
-                                ></app-input>
-                            }
-
-                            <app-toggle
-                                formControlName="show_aiu_breakdown"
-                                label="Mostrar el desglose AIU en la impresión"
-                            ></app-toggle>
-
-                            <app-input
-                                label="Decimales a mostrar"
-                                formControlName="display_decimals"
-                                type="number"
-                                min="0"
-                                max="6"
-                                size="sm"
-                                [error]="issueFor('format.display_decimals')"
-                            ></app-input>
-                        </div>
+                        <!--
+                            B.7: sección compartida con «Nueva factura»
+                            («InvoiceSectionFormatoComponent», contexto
+                            «profile»). El aviso del Hub, el selector de
+                            plantilla, la clave legada, el desglose AIU y los
+                            decimales viven en el componente; esta página sólo
+                            aporta su FormGroup, las rutas y la biblioteca ya
+                            cargada del Hub.
+                        -->
+                        <vendix-invoice-section-formato
+                            context="profile"
+                            [form]="form"
+                            [paths]="formatoSectionPaths()"
+                            [templateOptions]="print_template_options()"
+                            [libraryFailed]="print_templates_failed()"
+                            [templateKeyLimit]="template_key_limit"
+                            [errors]="formatoErrors()"
+                        ></vendix-invoice-section-formato>
                     </vendix-invoice-form-section>
 
                     <!-- ══ GENERAL ══ va al FINAL: es documentación interna, no
@@ -1195,20 +746,13 @@ type SectionId = ProfileScreenSectionId;
                         [expanded]="isSectionOpen('notas_internas')"
                         (expandedChange)="setSection('notas_internas', $event)"
                     >
-                        <div class="space-y-2" formGroupName="general">
-                            <app-textarea
-                                label="Descripción"
-                                formControlName="description"
-                                [rows]="2"
-                                helperText="Para el operador. No viaja al XML."
-                            ></app-textarea>
-                            <app-textarea
-                                label="Nota interna"
-                                formControlName="internal_note"
-                                [rows]="3"
-                                helperText="Por qué existe este perfil. Queda en el historial de versiones."
-                            ></app-textarea>
-                        </div>
+                        <!-- B.7: misma sustitución — el par Descripción/Nota
+                             interna vive ahora en el componente compartido. -->
+                        <vendix-invoice-section-notas
+                            context="profile"
+                            [form]="form"
+                            [paths]="notasSectionPaths"
+                        ></vendix-invoice-section-notas>
                     </vendix-invoice-form-section>
                 </form>
 
@@ -1335,6 +879,13 @@ export class InvoiceProfileEditorComponent {
     private readonly route = inject(ActivatedRoute);
     private readonly router = inject(Router);
     private readonly printGateway = inject(PrintGatewayClientService);
+
+    /** Resolver de defaults heredados para los selectores NO-AIU del bloque contable (C.9). */
+    private readonly accountDefaultsResolver = inject(AiuAccountDefaultsResolver);
+    private readonly inheritedAccountDefaults = toSignal(
+        this.accountDefaultsResolver.defaults(),
+        { initialValue: EMPTY_AIU_INHERITED_DEFAULTS },
+    );
 
     /**
      * Id del perfil, leído de la RUTA.
@@ -1784,26 +1335,11 @@ export class InvoiceProfileEditorComponent {
             costo: 'accounting.revenue_costo',
         },
         vat_payable_account: 'accounting.vat_payable_account',
-        // FALTA `accounting_model: 'aiu.accounting_model'`.
-        //
-        // El control YA EXISTE en el formulario de arriba, se hidrata desde el
-        // snapshot y viaja en el payload; lo que falta es pintarlo. El bloque
-        // «Modelo de contabilización» son todavía dos `div` estáticos con
-        // insignias `ACTIVO` / `NO DISPONIBLE`, y vive en
-        // `components/invoice-sections/invoice-section-aiu.component.ts`, que es
-        // de otro paso del plan y no de éste. Añadir la ruta acá sin declarar
-        // primero la clave en `AiuSectionPaths` —que se declara en ese mismo
-        // archivo— no compila.
-        //
-        // Para cerrarlo hacen falta exactamente tres cosas, todas allá:
-        //   1. `AiuSectionPaths` gana `accounting_model: string`.
-        //   2. Los dos `div` pasan a ser un grupo de radio enlazado con
-        //      `[formControl]` a esa ruta, con el de `'no_sumada'` deshabilitado
-        //      por `isAccountingModelEnabled()`.
-        //   3. La insignia muda se reemplaza por
-        //      `accountingModelDisabledReason('no_sumada')`, que ya dice el
-        //      motivo y lo fecha a la Fase D.
-        // Y esta línea se descomenta.
+        // El control ya existía en el formulario de arriba (hidratado desde el
+        // snapshot, viaja en el payload); lo que faltaba era pintarlo. C.6 lo
+        // cierra: el BLOQUE 1 de `invoice-section-aiu.component.ts` pasó de dos
+        // `div` estáticos a un radio real enlazado a esta ruta.
+        accounting_model: 'aiu.accounting_model',
     };
 
     /**
@@ -1817,6 +1353,191 @@ export class InvoiceProfileEditorComponent {
     private readonly form_value = toSignal(this.form.valueChanges, {
         initialValue: this.form.getRawValue(),
     });
+
+    /**
+     * SECCIÓN DOCUMENTO COMPARTIDA (B.2). El componente no usa
+     * `formControlName`: recibe el `FormGroup` raíz y este mapa de rutas.
+     * `issue_date`/`due_date`/`notes` quedan en `null` a propósito —un
+     * perfil no tiene fecha de emisión propia y guarda sus notas en un
+     * `FormArray` (`header_notes`), no en un control de texto único—.
+     */
+    readonly documentoSectionPaths: DocumentoSectionPaths = {
+        invoice_type: 'dian.document_type',
+        payment_form: 'dian.payment_method_code',
+        payment_means_code: 'dian.payment_means_code',
+        issue_date: null,
+        due_date: null,
+        notes: null,
+        header_notes: 'dian.header_notes',
+    };
+
+    /**
+     * Texto plano para el estado «sin resoluciones registradas». Sólo el
+     * perfil lo pinta así: la factura ya tiene su propio aviso de peligro
+     * dentro de `notices` (ver `resolutionEmptyReason` en «Nueva factura»).
+     */
+    readonly documentoResolutionHint = computed<string | null>(() =>
+        this.resolution_options().length === 0
+            ? 'No hay resoluciones de factura de venta registradas. Regístralas en Facturación → Resoluciones; sin rango autorizado la emisión no tiene de dónde tomar el consecutivo.'
+            : null,
+    );
+
+    /**
+     * `resolutionWarning()` pasa de párrafo suelto a `app-alert-banner`: es
+     * la MISMA regla de accesibilidad que ya se aplicó en «Nueva factura»
+     * —un aviso que un lector de pantalla no anuncia no es un aviso—, y de
+     * paso queda dentro del vocabulario `notices` que ya entiende la
+     * sección compartida.
+     */
+    readonly documentoNotices = computed<readonly DocumentoSectionNotice[]>(() => {
+        const notices: DocumentoSectionNotice[] = [];
+        const warning = this.resolutionWarning();
+        if (warning) {
+            notices.push({ variant: 'warning', text: warning });
+        }
+        return notices;
+    });
+
+    /**
+     * Antes de este mapa, «Documento» era la única sección del editor que no
+     * marcaba ninguno de sus cuatro campos con el error del validador del
+     * contrato: la resolución, el tipo de documento y las dos formas de pago
+     * se guardaban sin decir nada cuando estaban mal. `issueFor` ya resolvía
+     * la ruta correcta —la usan las demás secciones—; sólo faltaba pintarla
+     * aquí.
+     */
+    readonly documentoErrors = computed<DocumentoSectionErrors>(() => ({
+        resolution: this.issueFor('dian.resolution_id'),
+        invoice_type: this.issueFor('dian.document_type'),
+        payment_form: this.issueFor('dian.payment_method_code'),
+        payment_means_code: this.issueFor('dian.payment_means_code'),
+    }));
+
+    /** Un mensaje por índice de nota de cabecera, reactivo al `FormArray`. */
+    readonly headerNoteErrors = computed<readonly string[]>(() => {
+        this.form_value();
+        return this.headerNotes.controls.map((_, index) =>
+            this.issueFor('dian.header_notes[' + index + ']'),
+        );
+    });
+
+    /**
+     * SECCIÓN LÍNEAS COMPARTIDA (B.3). `aiu_field` apunta a `bucket` —así se
+     * llama el control acá—; la factura apunta el mismo campo canónico a
+     * `aiu_component`, el suyo (ADR-2). `discount_amount` y `taxes` quedan en
+     * `null`: un perfil no descuenta por línea modelo ni declara impuestos
+     * por línea —los declara por PORCIÓN, en la sección Impuestos (B.4)—.
+     */
+    readonly lineasRowPaths: LineasRowPaths = {
+        description: 'description',
+        quantity: 'quantity',
+        unit_code: 'unit_code',
+        unit_price: 'unit_price',
+        discount_amount: null,
+        aiu_field: 'bucket',
+        taxes: null,
+    };
+
+    /** Un objeto de errores por línea modelo, en el vocabulario del componente. */
+    readonly lineasRowErrors = computed<readonly LineasRowErrors[]>(() => {
+        this.form_value();
+        return this.modelLines.controls.map((_, i) => ({
+            description: this.issueFor('model_lines[' + i + '].description'),
+            unit_code: this.issueFor('model_lines[' + i + '].unit_code'),
+            unit_price: this.issueFor('model_lines[' + i + '].unit_price'),
+        }));
+    });
+
+    /**
+     * Envoltorios de `lineCarriesAiu`/`toggleLineAiu` con la firma que espera
+     * el componente compartido —`(row, index[, on])`—: esta pantalla
+     * identifica la línea modelo por su ÍNDICE, no por su control, así que la
+     * fila se ignora. Son campos de flecha, no métodos, para que `this` quede
+     * fijo sin `.bind()` en la plantilla.
+     */
+    readonly lineCarriesAiuBound = (_row: AbstractControl, index: number): boolean =>
+        this.lineCarriesAiu(index);
+    readonly toggleLineAiuBound = (
+        _row: AbstractControl,
+        index: number,
+        on: boolean,
+    ): void => this.toggleLineAiu(index, on);
+
+    /** Error de `rate` por fila de la matriz de impuestos (B.4). */
+    readonly taxRateErrors = computed<readonly string[]>(() => {
+        this.form_value();
+        return this.taxRules.controls.map((_, i) =>
+            this.issueFor('taxes.rules[' + i + '].rate'),
+        );
+    });
+
+    /** Errores por fila de «Retenciones» (B.5): concepto y tarifa. */
+    readonly retencionesRowErrors = computed<readonly RetencionesRowErrors[]>(() => {
+        this.form_value();
+        return this.withholdingRules.controls.map((_, i) => ({
+            concept_id: this.issueFor('withholdings.rules[' + i + '].concept_id'),
+            rate: this.issueFor('withholdings.rules[' + i + '].rate'),
+        }));
+    });
+
+    /**
+     * Envoltorio de `catalogRateFor` para el componente compartido: el método
+     * usa `this.withholdingRules`/`this.withholding_concepts()`, así que
+     * pasarlo desnudo perdería el `this`. Mismo criterio que en la factura.
+     */
+    readonly catalogRateForBound = (index: number): string | null =>
+        this.catalogRateFor(index);
+
+    /**
+     * Rutas de «Divisa» (B.6). `exchange_rate`/`exchange_rate_date` quedan
+     * en `null`: el perfil no guarda ninguna TRM, es del día de cada
+     * factura.
+     */
+    readonly divisaSectionPaths: DivisaSectionPaths = {
+        declare_foreign: 'currency.declare_foreign',
+        currency_code: 'currency.code',
+        exchange_rate: null,
+        exchange_rate_date: null,
+    };
+
+    readonly divisaErrors = computed<{ currency_code?: string }>(() => ({
+        currency_code: this.issueFor('currency.code'),
+    }));
+
+    /**
+     * Rutas de «Formato» (B.7). Las cuatro existen en el formulario; la clave
+     * legada sólo se EXPONE cuando el perfil guardado ya la trae —igual que
+     * hacía el bloque inline—: enseñar siempre un input vacío del catálogo
+     * anterior invitaría a escribir donde el Hub ya decidió. Es un `computed`
+     * y no una constante por eso: el mapa respira con `hasLegacyTemplateKey`.
+     */
+    readonly formatoSectionPaths = computed<FormatoSectionPaths>(() => ({
+        template_id: 'format.template_id',
+        template_key: this.hasLegacyTemplateKey()
+            ? 'format.template_key'
+            : null,
+        show_aiu_breakdown: 'format.show_aiu_breakdown',
+        display_decimals: 'format.display_decimals',
+    }));
+
+    /** Errores del validador del contrato, en el vocabulario del componente. */
+    readonly formatoErrors = computed<{
+        template_id?: string;
+        display_decimals?: string;
+    }>(() => ({
+        template_id: this.issueFor('format.template_id'),
+        display_decimals: this.issueFor('format.display_decimals'),
+    }));
+
+    /**
+     * Rutas de «Notas internas» (B.7). Los dos controles son del perfil y
+     * viajan en el snapshot (`general`); no hay campo en `null` porque no
+     * existe ninguno que este contexto legítimamente omita.
+     */
+    readonly notasSectionPaths: NotasSectionPaths = {
+        description: 'general.description',
+        internal_note: 'general.internal_note',
+    };
 
     readonly saving = toSignal(this.store.select(selectProfileSaving), {
         initialValue: false,
@@ -2023,6 +1744,20 @@ export class InvoiceProfileEditorComponent {
             ? 'Las cuentas AIU se editan en Configuración AIU'
             : 'Costo reembolsable e IVA por pagar';
     });
+
+    /**
+     * El heredado para el selector «Ingreso · Costo reembolsable» del bloque NO-AIU.
+     * Todas las porciones de ingreso reciben la misma cuenta resuelta por
+     * `invoice.validated.revenue` en el backend.
+     */
+    inheritedRevenueCosto(): InheritedAccountHint | null {
+        return this.inheritedAccountDefaults().revenue.costo;
+    }
+
+    /** El heredado para el selector «Cuenta de IVA por pagar» del bloque NO-AIU. */
+    inheritedVatPayable(): InheritedAccountHint | null {
+        return this.inheritedAccountDefaults().vat;
+    }
 
     readonly aiuSummary = computed<string>(() => {
         this.form_value();
@@ -2411,6 +2146,7 @@ export class InvoiceProfileEditorComponent {
                 taxable: [true],
                 tax_code: ['01'],
                 rate: ['19.00'],
+                taxable_basis: [this.taxableBasis() ?? 'aiu'],
             }),
         );
     }
@@ -2542,12 +2278,11 @@ export class InvoiceProfileEditorComponent {
         return concept ? concept.ratePercent.toFixed(2) : null;
     }
 
-    addHeaderNote(): void {
-        this.headerNotes.push(this.fb.control(''));
-    }
-    removeHeaderNote(index: number): void {
-        this.headerNotes.removeAt(index);
-    }
+    // Añadir/quitar una nota de cabecera ahora vive DENTRO de
+    // `InvoiceSectionDocumentoComponent` (B.2): opera sobre
+    // `headerNotesArray()`, resuelto vía `documentoSectionPaths.header_notes`
+    // contra este mismo `this.form`. El getter `headerNotes` de abajo sigue
+    // vivo porque lo usan `hydrate()` y el armado del payload.
 
     // ── Hidratación ─────────────────────────────────────────────────────────
     private hydrate(profile: InvoiceProfileDetail, config: InvoiceProfileConfig): void {
@@ -2639,10 +2374,11 @@ export class InvoiceProfileEditorComponent {
         for (const rule of config.taxes.rules) {
             this.taxRules.push(
                 this.fb.group({
-                    bucket: [rule.bucket],
+                    bucket: [rule.bucket ?? 'administracion'],
                     taxable: [rule.taxable],
                     tax_code: [rule.tax_code],
                     rate: [rule.rate],
+                    taxable_basis: [rule.taxable_basis ?? resolveAiuTaxableBasis(config.aiu)],
                 }),
                 { emitEvent: false },
             );
@@ -2679,7 +2415,14 @@ export class InvoiceProfileEditorComponent {
 
         this.headerNotes.clear({ emitEvent: false });
         for (const note of config.dian.header_notes ?? []) {
-            this.headerNotes.push(this.fb.control(note), { emitEvent: false });
+            // F.3: la misma cota (header_note_limit) que el `maxlength` nativo
+            // del `app-input` en pantalla — sin esto, una nota hidratada que ya
+            // venía larga (dato antiguo, o escrita antes de que este tope
+            // existiera) se mostraría válida hasta el próximo guardado.
+            this.headerNotes.push(
+                this.fb.control(note, Validators.maxLength(this.header_note_limit)),
+                { emitEvent: false },
+            );
         }
 
         this.loaded_config.set(JSON.stringify(config));
@@ -2752,10 +2495,11 @@ export class InvoiceProfileEditorComponent {
         // OTRAS porciones, así que necesita la matriz completa. Derivarla
         // mientras se recorre habría leído filas ya reemplazadas.
         const rawRules: AiuTaxRuleValue[] = this.taxRules.controls.map((control) => ({
-            bucket: control.get('bucket')?.value as AiuBucket,
+            bucket: (control.get('bucket')?.value ?? 'administracion') as AiuBucket,
             taxable: Boolean(control.get('taxable')?.value),
             tax_code: String(control.get('tax_code')?.value ?? ''),
             rate: String(control.get('rate')?.value ?? '0.00'),
+            taxable_basis: control.get('taxable_basis')?.value as AiuTaxableBasis,
         }));
         const rules: ProfileTaxRule[] = rawRules.map((rule) =>
             aiuProfile && rule.bucket === 'costo'

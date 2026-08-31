@@ -123,6 +123,17 @@ describe('InvoicingService support adjustment notes', () => {
         fiscalScope as any,
         retryQueue as any,
         fiscalGate as any,
+        // Compuerta de emisión extraída a `InvoiceEmissionGateService` en el
+        // commit `9cb5aff05`: `InvoicingService` ya no lleva el predicado, lo
+        // delega. Se pasa permisiva porque ninguno de estos casos prueba la
+        // compuerta en sí — la prueban `invoice-emission-gate.service.spec.ts`
+        // y sus propios casos. Omitirla no da un fallo de aserción, da un
+        // `TS2554` que tumba la suite entera y no aparece en el conteo de
+        // `Tests:`, que es como pasó desapercibida.
+        {
+          assertAreaActive: jest.fn().mockResolvedValue(undefined),
+          assertElectronicEmissionLive: jest.fn().mockResolvedValue(undefined),
+        } as any,
         // El umbral 5 UVT no participa en ninguno de estos flujos; se pasa
         // desactivado para que el constructor quede completo sin alterarlos.
         {

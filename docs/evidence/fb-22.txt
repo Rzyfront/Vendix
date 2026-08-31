@@ -1,0 +1,35 @@
+# FB-22: POST /store/dispatch-notes/:id/print
+# Plan section: A.3 + Phase D (legacy dispatch_note print path)
+# Source: apps/backend/src/domains/store/dispatch-notes/dispatch-notes.controller.ts (extracted)
+# Permission: store:orders:read, store:dispatch:read
+
+COMMAND:
+curl -sk -X POST 'https://api.vendix.com/api/store/dispatch-notes/1/print' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{ "trigger": "explicit", "copies": 1 }'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESPONSE SHAPE:
+{
+  "success": true,
+  "data": {
+    "html": "<!DOCTYPE html>...dispatch_note...",
+    "format_type": "dispatch_note",
+    "copies": 1,
+    "is_roll": false,
+    "width_mm": 210
+  }
+}
+
+VERIFICATION:
+# Happy path (dispatch_note legacy migrated to gateway)
+curl .../dispatch-notes/1/print -d '{...}' | jq '.data.format_type' debe ser 'dispatch_note'
+
+# Dispatch note no encontrada
+curl .../dispatch-notes/9999999/print -d '{...}' | jq '.error.code' debe ser ORD_FIND_001 (404) o código similar
+
+# Trigger inválido
+curl .../dispatch-notes/1/print -d '{"trigger":"svg"}' | jq '.error.code' debe ser SYS_VALIDATION_001 (422)

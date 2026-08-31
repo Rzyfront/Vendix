@@ -37,6 +37,30 @@ import {
 } from '../../interfaces';
 
 /**
+ * CP-POLLO-ARABE-727 C.4 (QUI-736) — producto del picker con la variante.
+ * `GET /store/products` con `include_variants: true` devuelve `product_variants`
+ * en el JSON (el backend lo mapea con `parseVariantAttributes` a
+ * `[{attribute_name, attribute_value}]`). `SellableProductOption` no lo declara,
+ * así que se extiende localmente para que el template pueda leerlo sin `as any`.
+ */
+interface AddItemsVariant {
+  id: number;
+  name?: string | null;
+  sku?: string | null;
+  attributes?:
+    | Array<{ attribute_name: string; attribute_value: string }>
+    | Record<string, unknown>
+    | null;
+  effective_track_inventory?: boolean;
+  stock_quantity?: number;
+  is_available?: boolean;
+}
+
+interface AddItemsProductOption extends SellableProductOption {
+  product_variants?: AddItemsVariant[];
+}
+
+/**
  * Modal to append lines to an open table session (cuenta abierta).
  *
  * Single source of truth for selection survives page changes and modal
@@ -82,7 +106,7 @@ export class AddItemsModalComponent {
   private readonly searchDebounce$ = new Subject<string>();
 
   // --- Paginated product list state ---------------------------------------
-  readonly currentProducts = signal<SellableProductOption[]>([]);
+  readonly currentProducts = signal<AddItemsProductOption[]>([]);
   readonly isLoading = signal(false);
   readonly currentPage = signal(1);
   readonly totalPages = signal(1);
@@ -91,9 +115,16 @@ export class AddItemsModalComponent {
 
   // --- Selection state (survives page change and reopen) -----------------
   readonly selectedQty = signal<Map<number, number>>(new Map());
-  readonly productById = signal<Map<number, SellableProductOption>>(
+  readonly productById = signal<Map<number, AddItemsProductOption>>(
     new Map(),
   );
+  /**
+   * CP-POLLO-ARABE-727 C.4 (QUI-736) — variante seleccionada por producto.
+   * Una línea de un producto VARIANTIZADO no se puede agregar sobre la base: se
+   * guarda en su propio Map porque la cantidad (`selectedQty`) es una dimensión
+   * y la variante es otra, igual que `takeawayIds`.
+   */
+  readonly selectedVariantByProduct = signal<Map<number, number>>(new Map());
   readonly searchTerm = signal('');
 
   readonly form: FormGroup<{ search: FormControl<string> }>;
@@ -109,6 +140,22 @@ export class AddItemsModalComponent {
   );
 
   readonly hasItems = computed(() => this.selectedCount() > 0);
+
+  /**
+   * CP-POLLO-ARABE-727 C.4 (QUI-736) — ¿algún producto VARIANTIZADO en la
+   * selección quedó sin variante? Bloquea el submit: agregar la línea sobre la
+   * base descontaría inventario en la fila equivocada (base XOR variante).
+   */
+  readonly hasMissingVariant = computed(() => {
+    for (const [productId, qty] of this.selectedQty()) {
+      if (qty <= 0) continue;
+      const p = this.productById().get(productId);
+      if (p?.product_variants?.length && this.selectedVariantOf(productId) == null) {
+        return true;
+      }
+    }
+    return false;
+  });
 
   readonly totalPreview = computed(() => {
     const byId = this.productById();
@@ -259,6 +306,38 @@ export class AddItemsModalComponent {
     });
   }
 
+  // --- CP-POLLO-ARABE-727 C.4 (QUI-736): variant picker -------------------
+  /** Variante seleccionada para un producto, o `null` si ninguna. */
+  selectedVariantOf(productId: number): number | null {
+    return this.selectedVariantByProduct().get(productId) ?? null;
+  }
+
+  /**
+   * Alterna la variante de un producto. Tocar la variante ya seleccionada la
+   * deselecciona (para volver a la base), pero el submit lo bloquea si el
+   * producto es variantizado y quedó sin variante.
+   */
+  selectVariant(product: AddItemsProductOption, variantId: number): void {
+    const map = new Map(this.selectedVariantByProduct());
+    if (map.get(product.id) === variantId) map.delete(product.id);
+    else map.set(product.id, variantId);
+    this.selectedVariantByProduct.set(map);
+  }
+
+  /** ¿Este producto exige elegir variante? */
+  hasVariants(product: AddItemsProductOption): boolean {
+    return (product.product_variants?.length ?? 0) > 0;
+  }
+
+  /** Etiqueta legible de la variante (atributos → name → sku). */
+  variantLabel(variant: AddItemsVariant): string {
+    const attrs = variant.attributes;
+    if (Array.isArray(attrs) && attrs.length > 0) {
+      return attrs.map((a) => a.attribute_value).join(' / ');
+    }
+    return variant.name || variant.sku || `Variante #${variant.id}`;
+  }
+
   increment(product: SellableProductOption): void {
     this.bumpQty(product, 1);
   }
@@ -275,20 +354,33 @@ export class AddItemsModalComponent {
   onSubmit(): void {
     const items: TableSessionAddItem[] = [];
     for (const [productId, qty] of this.selectedQty()) {
-      if (qty > 0)
-        items.push({
-          product_id: productId,
-          quantity: qty,
-          // Solo se envía cuando está marcado: el backend ya tiene default
-          // false, y mandar `false` explícito en cada línea ensucia el payload
-          // sin cambiar nada.
-          ...(this.isTakeaway(productId) && { is_takeaway: true }),
-          // Solo se manda cuando hay algo excluido: el backend trata la ausencia
-          // como "receta completa".
-          ...(this.excludedCountFor(productId) > 0 && {
-            excluded_component_ids: [...this.excludedByProduct().get(productId)!],
-          }),
-        });
+      if (qty <= 0) continue;
+      const product = this.productById().get(productId);
+      const variantId = this.selectedVariantOf(productId);
+      // CP-POLLO-ARABE-727 C.4 (QUI-736) — una línea de producto variantizado
+      // sin variante se rechaza: vender la base descontaría inventario en la
+      // fila equivocada (base XOR variante). El botón también se deshabilita.
+      if (product?.product_variants?.length && variantId == null) {
+        this.toastService.error(
+          `Selecciona una variante para "${product.name}"`,
+        );
+        return;
+      }
+      items.push({
+        product_id: productId,
+        quantity: qty,
+        // CP-POLLO-ARABE-727 C.4 (QUI-736) — la variante elegida viaja a la línea.
+        ...(variantId != null && { product_variant_id: variantId }),
+        // Solo se envía cuando está marcado: el backend ya tiene default
+        // false, y mandar `false` explícito en cada línea ensucia el payload
+        // sin cambiar nada.
+        ...(this.isTakeaway(productId) && { is_takeaway: true }),
+        // Solo se manda cuando hay algo excluido: el backend trata la ausencia
+        // como "receta completa".
+        ...(this.excludedCountFor(productId) > 0 && {
+          excluded_component_ids: [...this.excludedByProduct().get(productId)!],
+        }),
+      });
     }
     if (items.length === 0) {
       this.toastService.error('Agrega al menos un producto con cantidad > 0');
@@ -313,11 +405,13 @@ export class AddItemsModalComponent {
     // QUI-653 — sin esto un "para llevar" de la tanda anterior sobrevive al
     // cierre y se filtra a la siguiente, marcando un plato que nadie pidió así.
     this.takeawayIds.set(new Set());
+    // CP-POLLO-ARABE-727 C.4 (QUI-736) — la variante elegida en la tanda
+    // anterior no debe filtrarse a la siguiente.
+    this.selectedVariantByProduct.set(new Map());
     // Sin esto una exclusion de la tanda anterior se filtra y se captura un "sin
     // papas" que nadie pidio en ESTE pedido.
     this.excludedByProduct.set(new Map());
     this.recipeProductId.set(null);
-    this.productById.set(new Map());
     this.searchTerm.set('');
     this.form.controls.search.setValue('', { emitEvent: false });
     this.currentPage.set(1);
@@ -340,6 +434,14 @@ export class AddItemsModalComponent {
         cleaned.delete(product.id);
         return cleaned;
       });
+      // CP-POLLO-ARABE-727 C.4 (QUI-736) — la variante se limpia igual: una línea
+      // recién agregada no debe arrastrar la variante de la anterior.
+      this.selectedVariantByProduct.update((prev) => {
+        if (!prev.has(product.id)) return prev;
+        const cleaned = new Map(prev);
+        cleaned.delete(product.id);
+        return cleaned;
+      });
       this.excludedByProduct.update((prev) => {
         if (!prev.has(product.id)) return prev;
         const cleaned = new Map(prev);
@@ -352,9 +454,11 @@ export class AddItemsModalComponent {
     this.selectedQty.set(map);
 
     // Cache metadata (name, price, image) for products in the selection
-    // so subtotal keeps working when the user pages away.
+    // so subtotal keeps working when the user pages away. El producto viene
+    // tipado como `SellableProductOption` pero en runtime arrastra
+    // `product_variants` (el picker lo exige); por eso el cast.
     const byId = new Map(this.productById());
-    byId.set(product.id, product);
+    byId.set(product.id, product as AddItemsProductOption);
     this.productById.set(byId);
   }
 
@@ -366,11 +470,15 @@ export class AddItemsModalComponent {
         page: this.currentPage(),
         is_sellable: true,
         search: this.searchTerm().trim() || undefined,
+        // CP-POLLO-ARABE-727 C.4 (QUI-736) — para el picker de variante de
+        // platos `prepared`. Sin esto el backend no incluye `product_variants`
+        // y el picker no tiene nada que mostrar.
+        include_variants: true,
       } as any)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
-          const list = (res.data ?? []) as unknown as SellableProductOption[];
+          const list = (res.data ?? []) as unknown as AddItemsProductOption[];
           this.currentProducts.set(list);
 
           const p = res.pagination;

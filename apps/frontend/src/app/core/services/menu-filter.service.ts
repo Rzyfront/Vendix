@@ -6,12 +6,26 @@ import { AuthFacade } from '../store/auth/auth.facade';
 import { SubscriptionAccessService } from './subscription-access.service';
 import { MenuItem } from '../../shared/components/sidebar/sidebar.component';
 import { getModulesHiddenByIndustries } from '../../shared/constants/industry-modules.constant';
-import { STORE_MODULE_BY_KEY } from '../../shared/constants/store-module-catalog.constant';
+import {
+  MODULE_ROUTES,
+  STORE_MODULE_BY_KEY,
+  STORE_MODULE_CATALOG,
+} from '../../shared/constants/store-module-catalog.constant';
 import type {
   OrganizationOperatingScope,
   OrganizationFiscalScope,
 } from '../models/organization.model';
 import type { FiscalArea } from '../models/fiscal-status.model';
+
+/**
+ * Terminal garantizado de la cadena de fallback "primer módulo activo".
+ * Ruta a la que se rebota cuando ningún módulo del panel está habilitado, de
+ * forma que el navegador nunca quede en bucle infinito ni en pantalla en
+ * blanco. El guardla trata como compuerta de escape (la permite siempre);
+ * el layout muestra una pantalla de "sin módulos" cuando el sidebar queda
+ * vacío. Es el terminal de A.4 / B.1 / `storeDashboardGuard`.
+ */
+export const PANEL_UI_TERMINAL_ROUTE = '/admin/settings/general';
 
 /**
  * Why a module is not on screen. Ordered from structural (the store simply
@@ -63,6 +77,21 @@ export class MenuFilterService {
    * blame this layer while unknown rather than assert a reason it cannot back.
    */
   readonly storeHasPqrs = signal<boolean | null>(null);
+
+  /**
+   * Árbol de menú del store-admin. Por defecto se reconstruye del catálogo
+   * (`STORE_MODULE_CATALOG`) para que el guard y el redirect de B.1 funcionen
+   * ANTES de que el layout se monte (los guards corren antes de la creación de
+   * componentes). El layout lo sobreescribe con su árbol real (con
+   * `alwaysVisible`, badges, etc.) al montarse vía `registerMenuTree`.
+   */
+  private menuTree: MenuItem[] | null = null;
+
+  /** Caché del árbol reconstruido del catálogo. */
+  private catalogTreeCache: MenuItem[] | null = null;
+
+  /** Caché del índice ruta → keys panel_ui. */
+  private routeKeysIndexCache: Record<string, string[]> | null = null;
 
   /**
    * Emits whenever an authorization prefilter flips, so `filterMenuItems`
@@ -150,6 +179,7 @@ export class MenuFilterService {
     'Todos los Clientes': 'customers_all',
     Reseñas: ['analytics_reviews', 'customers_reviews'],
     'Recolección de Datos': 'customers_data_collection',
+    CRM: 'customers_crm',
 
     // STORE_ADMIN - Marketing (padre + submódulos)
     Marketing: 'marketing',
@@ -285,6 +315,9 @@ export class MenuFilterService {
    * @returns Observable of filtered menu items
    */
   filterMenuItems(menuItems: MenuItem[]): Observable<MenuItem[]> {
+    // Register the tree so `currentMenuTree()`/`firstActiveModuleRoute()`
+    // reflect the real sidebar (with alwaysVisible/badges) once mounted.
+    this.menuTree = menuItems;
     return combineLatest([
       this.authFacade.getVisibleModules$(),
       this.authFacade.userStoreType$,
@@ -881,6 +914,123 @@ export class MenuFilterService {
       if (item.children?.length) {
         const found = this.findItemByModuleKey(item.children, moduleKey);
         if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Árbol de menú actual (layout real si ya se montó, o el reconstruido del
+   * catálogo). Usado por `panelUiGuard`, `storeDashboardGuard` y el redirect
+   * de B.1, que corren antes de que el layout se monte — por eso el default
+   * es el catálogo y no un array vacío.
+   */
+  currentMenuTree(): MenuItem[] {
+    return this.menuTree ?? this.catalogMenuTree();
+  }
+
+  /** El layout registra su árbol real (con `alwaysVisible`, badges, etc.). */
+  registerMenuTree(items: MenuItem[]): void {
+    this.menuTree = items;
+  }
+
+  /**
+   * Reconstruye un árbol `MenuItem[]` desde `STORE_MODULE_CATALOG` (orden
+   * top-down del catálogo), agrupando hijos por `parentKey`. Es el "orden del
+   * módulo catalog" que B.1/QUI-740 pide explícitamente, y evita depender del
+   * layout durante los guards.
+   */
+  private catalogMenuTree(): MenuItem[] {
+    if (this.catalogTreeCache) return this.catalogTreeCache;
+    const roots: MenuItem[] = [];
+    const byKey = new Map<string, MenuItem>();
+
+    for (const entry of STORE_MODULE_CATALOG) {
+      const node: MenuItem = { label: entry.label, icon: '', route: entry.route };
+      byKey.set(entry.key, node);
+      if (entry.parentKey && byKey.has(entry.parentKey)) {
+        const parent = byKey.get(entry.parentKey)!;
+        (parent.children ??= []).push(node);
+      } else {
+        roots.push(node);
+      }
+    }
+
+    this.catalogTreeCache = roots;
+    return roots;
+  }
+
+  /**
+   * Keys `panel_ui` que gobiernan una ruta. Índice inverso de `MODULE_ROUTES`
+   * (ruta → keys); la ruta más específica (prefijo más largo) gana. Para
+   * `/admin/orders/sales` devuelve `['orders', 'orders_sales']` (la específica
+   * es la que decide el acceso, pero si el padre está oculto la hoja es
+   * inalcanzable, así que ambas entran como gobernantes).
+   */
+  resolveKeysForRoute(path: string): string[] {
+    const clean = (path.split('?')[0] || '/').replace(/\/+$/, '') || '/';
+    const index = (this.routeKeysIndexCache ??= this.buildRouteKeysIndex());
+
+    let bestLength = -1;
+    let bestKeys: string[] = [];
+    for (const [route, keys] of Object.entries(index)) {
+      const normalized = route.replace(/\/+$/, '');
+      if (clean === normalized || clean.startsWith(`${normalized}/`)) {
+        if (normalized.length > bestLength) {
+          bestLength = normalized.length;
+          bestKeys = keys;
+        }
+      }
+    }
+    return bestKeys;
+  }
+
+  private buildRouteKeysIndex(): Record<string, string[]> {
+    const index: Record<string, string[]> = {};
+    for (const [key, route] of Object.entries(MODULE_ROUTES)) {
+      (index[route] ??= []).push(key);
+    }
+    return index;
+  }
+
+  /**
+   * Primera ruta navegable de un módulo activo, en el orden del árbol/catálogo
+   * recibido. Es el terminal de la cadena de fallback: nunca devuelve `null`,
+   * siempre aterriza en `PANEL_UI_TERMINAL_ROUTE` si nada está activo.
+   *
+   * A.4 la crea (ownership ADR-4); B.1 la consume en el `redirectTo` de
+   * `store_admin.routes.ts`; `storeDashboardGuard` la usa para migrar su
+   * `/admin/pos` hardcodeado.
+   */
+  firstActiveModuleRoute(modules: MenuItem[]): string {
+    const tree = modules?.length ? modules : this.catalogMenuTree();
+    const route = this.firstVisibleRoute(tree);
+    return route ?? PANEL_UI_TERMINAL_ROUTE;
+  }
+
+  private firstVisibleRoute(items: MenuItem[]): string | null {
+    for (const item of items) {
+      if (item.alwaysVisible) {
+        // alwaysVisible se renderiza sin importar panel_ui (filter Case 1);
+        // solo lo detienen los prefiltros de autorización y la suscripción.
+        if (
+          this.passesAuthorizationGates(item) &&
+          (!item.requiresFeature ||
+            this.subscriptionAccess.canUseAI(item.requiresFeature)())
+        ) {
+          if (item.route) return item.route;
+          if (item.children?.length) {
+            const child = this.firstVisibleRoute(item.children);
+            if (child) return child;
+          }
+        }
+      } else if (this.diagnose(item).visible) {
+        // Un grupo sin ruta propia (header de grupo) cae a su primer hijo visible.
+        if (item.route) return item.route;
+        if (item.children?.length) {
+          const child = this.firstVisibleRoute(item.children);
+          if (child) return child;
+        }
       }
     }
     return null;

@@ -1,0 +1,31 @@
+-- DATA IMPACT:
+-- Tables affected: none. Ningún dato existente se lee ni se escribe.
+-- Enum changes: aiu_component_enum += 'contrato'
+--   (ADD VALUE idempotente; el valor NO se consume en el DDL de esta migración).
+-- Expected row changes: 0 filas mutadas. `invoice_items.aiu_component` hoy tiene
+--   31 filas no nulas (administracion/imprevistos/utilidad); ninguna se toca.
+-- Destructive operations: none. Sin TRUNCATE, DROP, DELETE ni UPDATE.
+-- FK/cascade risk: none. Un valor de enum nuevo no altera constraints.
+-- Idempotency: guarded con ADD VALUE IF NOT EXISTS — seguro de re-ejecutar.
+-- Approval: autorizada explícitamente por el usuario (Fase D del plan
+--   CP-INVOICE-PROFILE-MIRROR-AIU.md, paso D.2 / ADR-6), alcance limitado
+--   estrictamente a esta sentencia.
+--
+-- POR QUÉ ESTA MIGRACIÓN VA SOLA (D.2, sin consumidor)
+-- Postgres no permite usar un valor de enum recién añadido en la MISMA
+-- transacción en que se añade, y Prisma envuelve cada migración en una
+-- transacción. `ADD VALUE IF NOT EXISTS` fuera de cualquier bloque de
+-- transacción explícito resuelve el primer problema; no meter ningún
+-- consumidor en este archivo resuelve el segundo. La explosión de la línea
+-- `contrato` en A/I/U (calculador) y su uso en el armado UBL viven en pasos
+-- posteriores del plan (D.3-D.7), en migraciones o código separados.
+--
+-- QUÉ REPRESENTA 'contrato'
+-- ADR-6 del plan: una línea marcada `aiu_component = 'contrato'` declara que
+-- ES el contrato entero (Modelo 1 / `no_sumada`), en vez de ser una de las
+-- tres líneas por componente (administracion/imprevistos/utilidad). El
+-- calculador la explota en A/I/U según los porcentajes configurados del
+-- perfil. Mutuamente excluyente con líneas por componente en el mismo
+-- documento (error de negocio, no técnico — ver D.4 / INVOICING_AIU_007).
+
+ALTER TYPE "aiu_component_enum" ADD VALUE IF NOT EXISTS 'contrato';

@@ -14,7 +14,12 @@
     "importHelpers": true,
     "target": "ES2022",
     "module": "ESNext",
-    "lib": ["ES2022", "dom"]
+    "lib": ["ES2022", "dom"],
+    // [print-editor-dsk P1.6] Permite que el shim local en
+    // `app/core/lib/page-geometry.ts` importe su JSON hermano
+    // (`page-geometry.json`) bajo `moduleResolution: bundler`.
+    // Mobile ya hereda esta flag de expo/tsconfig.base.
+    "resolveJsonModule": true
   },
   "files": ["src/main.ts", "src/main.server.ts"],
   "include": ["src/**/*.ts", "src/**/*.d.ts"],

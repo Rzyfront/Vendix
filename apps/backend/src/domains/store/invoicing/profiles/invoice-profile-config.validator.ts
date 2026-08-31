@@ -66,7 +66,14 @@ export function normalizeAndAssertProfileConfig(
   return config;
 }
 
-function buildProfileConfigException(
+/**
+ * Exportada para C.7: `invoicing.service.ts` la reusa cuando un documento se
+ * aparta de la base gravable (`aiu_taxable_basis`) que declaró el perfil
+ * congelado, para lanzar el MISMO `INVOICING_PROFILE_005` con el mismo
+ * formato de `details` que el editor de perfiles — no un código nuevo para
+ * el mismo problema.
+ */
+export function buildProfileConfigException(
   issues: ProfileConfigIssue[],
   options: { operation_type: string; profile_id?: number | null },
 ): VendixHttpException {

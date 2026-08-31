@@ -231,3 +231,164 @@ describe('NotificationsEventsListener — appointment redesign handlers', () => 
     });
   });
 });
+
+/**
+ * E.10 (2026-08-25) — la entrega PRIMARIA al adquiriente (Anexo Técnico 1.9
+ * §9.1) vive en `handleInvoicePdfGenerated`, no en `InvoiceDeliveryService`
+ * (ese es el reenvío de conveniencia, E.6). Antes de este bloque el método
+ * NO tenía cobertura de su propia lógica de decisión: sólo se probaba
+ * `buildInvoiceEmailSubject` por separado (ver comentario de esa suite). El
+ * hallazgo que motivó esto: se estampaba `email_sent_at` con sólo mirar
+ * `result.success` del proveedor de correo, así que un correo enviado con
+ * CERO adjuntos (PDF no descargable de S3 + factura sin `xml_document`)
+ * quedaba contado como "entregado" — 16 de 95 facturas así, sin ninguna fila
+ * en `invoice_delivery_events` para auditarlo.
+ *
+ * Se construye el listener con mocks completos (Prisma/S3/email) y se llama
+ * al método PÚBLICO tal como lo dispara el event emitter real — no el
+ * método privado — porque lo que se prueba aquí es la decisión que cruza
+ * "¿hubo adjunto?" con "¿el proveedor aceptó?", que vive en el cuerpo del
+ * handler, no en una función pura extraíble.
+ */
+describe('NotificationsEventsListener.handleInvoicePdfGenerated (E.10)', () => {
+  function buildInvoiceRow(overrides: Record<string, any> = {}) {
+    return {
+      id: 501,
+      invoice_number: 'FVET9001',
+      invoice_type: 'sales_invoice',
+      invoice_items: [],
+      subtotal_amount: 100,
+      discount_amount: 0,
+      tax_amount: 19,
+      withholding_amount: 0,
+      total_amount: 119,
+      currency: 'COP',
+      cufe: 'cufe-fake',
+      notes: null,
+      issue_date: new Date('2026-08-20'),
+      due_date: null,
+      xml_document: null,
+      email_sent_at: null,
+      organization_id: 6,
+      store_id: 10,
+      customer: { id: 200, first_name: 'Ana', last_name: 'Ríos', email: 'ana@example.com' },
+      customer_name: null,
+      organization: {
+        id: 6, name: 'Roku', legal_name: 'ROKU SAS', tax_id: '900000000',
+        phone: null, email: null, addresses: [], fiscal_scope: 'ORGANIZATION',
+        document_type: null, person_type: null, organization_settings: null,
+      },
+      store: { id: 10, name: 'Roku Store', legal_name: null, tax_id: null, store_settings: null },
+      ...overrides,
+    };
+  }
+
+  function buildListenerWithMocks(invoiceRow: any) {
+    const notificationsService = { createAndBroadcast: jest.fn() } as any;
+    const invoicesUpdate = jest.fn().mockResolvedValue({});
+    const deliveryEventsCreate = jest.fn().mockResolvedValue({});
+    const globalPrisma = {
+      invoices: {
+        findUnique: jest.fn().mockResolvedValue(invoiceRow),
+        update: invoicesUpdate,
+      },
+      invoice_delivery_events: { create: deliveryEventsCreate },
+    } as any;
+    const emailService = {
+      sendEmail: jest.fn(),
+      sendEmailWithAttachments: jest.fn(),
+    } as any;
+    const s3Service = { downloadImage: jest.fn() } as any;
+    const appointmentQueueService = {} as any;
+    const eventEmitter = { emit: jest.fn() } as any;
+
+    const listener = new NotificationsEventsListener(
+      notificationsService,
+      globalPrisma,
+      emailService,
+      s3Service,
+      appointmentQueueService,
+      eventEmitter,
+    );
+
+    return { listener, globalPrisma, emailService, s3Service, invoicesUpdate, deliveryEventsCreate };
+  }
+
+  it('PDF no descargable + sin xml_document: NO estampa email_sent_at y deja fila status=error', async () => {
+    const invoiceRow = buildInvoiceRow({ xml_document: null });
+    const { listener, s3Service, emailService, invoicesUpdate, deliveryEventsCreate } =
+      buildListenerWithMocks(invoiceRow);
+
+    s3Service.downloadImage.mockRejectedValue(new Error('NoSuchKey: does-not-exist'));
+    // Sin adjuntos, el handler cae a sendEmail (no sendEmailWithAttachments) y
+    // el proveedor igual puede "aceptar" el envío — ese es justo el caso que
+    // antes se contaba como entregado.
+    emailService.sendEmail.mockResolvedValue({ success: true, messageId: 'm-1' });
+
+    await listener.handleInvoicePdfGenerated({
+      invoice_id: 501,
+      pdf_key: 'invoices/does-not-exist.pdf',
+    });
+
+    expect(emailService.sendEmailWithAttachments).not.toHaveBeenCalled();
+    expect(invoicesUpdate).not.toHaveBeenCalled();
+    expect(deliveryEventsCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        invoice_id: 501,
+        organization_id: 6,
+        store_id: 10,
+        channel: 'email',
+        recipient: 'ana@example.com',
+        zip_name: null,
+        status: 'error',
+        provider_error: expect.stringContaining('sin adjuntos'),
+      }),
+    });
+  });
+
+  it('descarga sana del PDF: estampa email_sent_at y deja fila status=sent', async () => {
+    const invoiceRow = buildInvoiceRow({ xml_document: null });
+    const { listener, s3Service, emailService, invoicesUpdate, deliveryEventsCreate } =
+      buildListenerWithMocks(invoiceRow);
+
+    s3Service.downloadImage.mockResolvedValue(Buffer.from('%PDF-fake'));
+    emailService.sendEmailWithAttachments.mockResolvedValue({ success: true, messageId: 'm-2' });
+
+    await listener.handleInvoicePdfGenerated({
+      invoice_id: 501,
+      pdf_key: 'invoices/501.pdf',
+    });
+
+    expect(emailService.sendEmailWithAttachments).toHaveBeenCalled();
+    expect(invoicesUpdate).toHaveBeenCalledWith({
+      where: { id: 501 },
+      data: { email_sent_at: expect.any(Date) },
+    });
+    expect(deliveryEventsCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        invoice_id: 501,
+        status: 'sent',
+        provider_error: null,
+      }),
+    });
+  });
+
+  it('proveedor de correo falla incluso con adjunto: NO estampa y provider_error trae el motivo del proveedor', async () => {
+    const invoiceRow = buildInvoiceRow({ xml_document: '<xml/>' });
+    const { listener, s3Service, emailService, invoicesUpdate, deliveryEventsCreate } =
+      buildListenerWithMocks(invoiceRow);
+
+    s3Service.downloadImage.mockResolvedValue(Buffer.from('%PDF-fake'));
+    emailService.sendEmailWithAttachments.mockResolvedValue({ success: false, error: 'SMTP timeout' });
+
+    await listener.handleInvoicePdfGenerated({
+      invoice_id: 501,
+      pdf_key: 'invoices/501.pdf',
+    });
+
+    expect(invoicesUpdate).not.toHaveBeenCalled();
+    expect(deliveryEventsCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ status: 'error', provider_error: 'SMTP timeout' }),
+    });
+  });
+});

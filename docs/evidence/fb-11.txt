@@ -1,0 +1,48 @@
+# FB-11: GET /store/print-formats/library?formatType=...
+# Plan section: A.3 + Phase B (catalog) + Phase D (library modal dispatch_ticket)
+# Source: apps/backend/src/domains/store/print-formats/controllers/print-templates-library.controller.ts:34
+# Permission: organization:settings:read, store:settings:read, invoicing:read
+
+COMMAND:
+curl -sk -X GET 'https://api.vendix.com/api/store/print-formats/library?formatType=dispatch_ticket' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESPONSE SHAPE:
+{
+  "success": true,
+  "data": [
+    {
+      "id": int,
+      "organization_id": int | null,
+      "format_type": "dispatch_ticket",
+      "name": string,
+      "description": string | null,
+      "definition": { /* PrintFormatDefinition v2 */ },
+      "is_system": bool,
+      "is_shared": bool,
+      "created_at": ISO,
+      "updated_at": ISO,
+      "author": { "id": int, "first_name": string, "last_name": string, "email": string } | null
+    },
+    ...
+  ]
+}
+
+VERIFICATION:
+# Pre-B.3: formatType=dispatch_ticket no devuelve nada (enum no lo conoce)
+curl '.../library?formatType=dispatch_ticket' (pre-B.3) | jq '.data | length' debe ser 0 (o error 422)
+
+# Post-B.2+B.3: SYSTEM_PRINT_TEMPLATES.dispatch_ticket aparece
+curl '.../library?formatType=dispatch_ticket' (post-B.3) | jq '.data | length >= 1' debe ser true
+curl '.../library?formatType=dispatch_ticket' (post-B.3) | jq '.data[0].format_type' debe ser 'dispatch_ticket'
+curl '.../library?formatType=dispatch_ticket' (post-B.3) | jq '.data[0].is_system' debe ser true (seed)
+
+# Sin formatType: devuelve TODOS los templates de la org + system
+curl '.../library' | jq '.data | length' debe ser >= 10 (10 system + N de la org)
+
+# Cross-tenant: org_id distinto no debe ver templates privados de otra org
+# Verificable cambiando de JWT a un usuario de otra organización

@@ -1,0 +1,35 @@
+# FB-15: DELETE /store/print-formats/library/:id
+# Plan section: A.3 + Phase D.9 (library template delete)
+# Source: GAP — endpoint NO EXISTE en apps/backend/src/domains/store/print-formats/controllers/print-templates-library.controller.ts
+#          Solo existe PUT /library/:id/share. DELETE pendiente para D.9.
+
+COMMAND:
+curl -sk -X DELETE 'https://api.vendix.com/api/store/print-formats/library/1' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+EXPECTED HTTP: 404 Not Found (until D.9 implements this endpoint)
+
+EXPECTED RESPONSE SHAPE (post-D.9):
+{
+  "success": true,
+  "data": { "success": true, "message": "Plantilla eliminada" }
+}
+
+VERIFICATION:
+# Pre-D.9 (current): endpoint no existe
+curl .../library/1 -X DELETE | jq '.error.code' debe ser SYS_NOT_FOUND_001 (404)
+
+# Post-D.9:
+curl .../library/<user_template_id> -X DELETE | jq '.success' debe ser true
+
+# System template DELETE debe rechazar (ERR-10)
+curl .../library/<system_id> -X DELETE (post-D.9) | jq '.error.code' debe ser 'PRINT_TEMPLATE_SYSTEM_PROTECTED_001' (403)
+
+# Template con store_print_format_configs apuntando: bloquear o cascade?
+# Decisión arquitectónica pendiente: ON DELETE RESTRICT vs ON DELETE SET NULL
+# Si RESTRICT: error 409 con código nuevo
+# Si SET NULL: success, configs.template_id=null
+curl .../library/<in_use_id> -X DELETE (post-D.9) | jq '.success' debe ser false (RESTRICT) o true (SET NULL)

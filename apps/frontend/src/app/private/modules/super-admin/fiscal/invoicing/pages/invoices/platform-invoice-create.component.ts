@@ -1,910 +1,1491 @@
-import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
+  OnInit,
   computed,
   inject,
   signal,
 } from '@angular/core';
-import { FormsModule } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
 import { CommonModule } from '@angular/common';
-import { firstValueFrom } from 'rxjs';
+import { Router, RouterLink } from '@angular/router';
+import {
+  FormArray,
+  FormBuilder,
+  FormControl,
+  FormGroup,
+  FormsModule,
+  ReactiveFormsModule,
+  Validators,
+} from '@angular/forms';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { Observable, firstValueFrom, of } from 'rxjs';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { catchError, map, startWith } from 'rxjs/operators';
+
 import { environment } from '../../../../../../../../environments/environment';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import {
+  AlertBannerComponent,
+  BadgeComponent,
   ButtonComponent,
+  IconComponent,
+  InputComponent,
+  ModalComponent,
   SelectorComponent,
 } from '../../../../../../../shared/components';
+import type { SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
 import { CurrencyPipe as VendixCurrencyPipe } from '../../../../../../../shared/pipes/currency';
+import { AccountCodeSelectComponent } from '../../../../../store/products/components/account-code-select.component';
+
+// Secciones Compartidas
+import { PlatformSectionWrapperComponent } from '../../components/platform-section-wrapper/platform-section-wrapper.component';
+import {
+  DivisaSectionPaths,
+  DocumentoSectionPaths,
+  InvoiceSectionDivisaComponent,
+  InvoiceSectionDocumentoComponent,
+  InvoiceSectionImpuestosComponent,
+  InvoiceSectionLineasComponent,
+  InvoiceSectionNotasComponent,
+  InvoiceSectionRetencionesComponent,
+  LineasRowErrors,
+  LineasRowPaths,
+  NotasSectionPaths,
+  RetencionesRowErrors,
+  RetencionesRowPaths,
+  TaxBreakdownRow,
+  DEFAULT_UNIT_CODE,
+  PLATFORM_FOREIGN_CURRENCY_OPTIONS,
+  PLATFORM_TAX_CATALOG,
+  UNIT_CODE_OPTIONS,
+} from '../../../../../../../shared/components/invoice-sections';
+
 import { TenantPickerComponent } from '../../components/tenant-picker/tenant-picker.component';
+import { PlatformInvoicingStore } from '../../platform-invoicing.store';
+import { FiscalBillingAdminService } from '../../../../subscriptions/services/fiscal-billing-admin.service';
+import type { PreviewPlatformProfilePayload } from '../../../../subscriptions/interfaces/fiscal-billing.interface';
 import { PlatformAcquirer } from '../../state';
+import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
 
 /**
- * CP-platform-fiscal-invoicing-mvp · Phase C.5 — create page V1.
- *
- * Form completo para crear platform-invoice (sales_invoice + support_document):
- *   - TenantPicker (ADR-7): el cliente son stores u organizations
- *   - Resolution selector (filtra por document_type vigente + ClTec)
- *   - Items table con discount + taxes[] + is_inclusive + aiu_component + unit_code
- *   - Modal de linea custom para capturar tax_type (IVA/INC/ICUI/RETE_*)
- *   - Collapsibles: AIU regime (nota 4900 char), Withholdings (practiced/suffered/self),
- *     Global discount (AllowanceCharge), TRM (USD),
- *     Payment form (contado/credito + payment_means_code)
- *   - Submit deshabilitado si hay blockers (consume el flujo de readiness V1)
- *
- * El cliente es un TenantRef discriminated (`{kind, tenant_id}`).
- * El backend (Phase B.1 facade) traduce a CreateInvoiceDto del rail tienda
- * + persiste snapshots de acquirer + invoice en fiscal_evidences.
- *
- * Local state es signals (zoneless). Submit orquestado por signal:
- *   local `submitted` -> disabled buttons + spinner.
+ * Cálculo estándar DIAN del Dígito de Verificación (Módulo 11).
  */
+export function calculateDianDv(nit: string): string {
+  const cleanNit = (nit || '').replace(/\D/g, '');
+  if (!cleanNit) return '';
+  const primes = [3, 7, 13, 17, 19, 23, 29, 37, 41, 43, 47, 53, 59, 67, 71];
+  let sum = 0;
+  for (let i = 0; i < cleanNit.length; i++) {
+    const digit = parseInt(cleanNit.charAt(cleanNit.length - 1 - i), 10);
+    sum += digit * primes[i];
+  }
+  const mod = sum % 11;
+  if (mod === 0 || mod === 1) return mod.toString();
+  return (11 - mod).toString();
+}
 
-// ── Tipos del form ───────────────────────────────────────────────────────
-
-interface FormLineTax {
-  tax_type: 'IVA' | 'INC' | 'ICUI' | 'RETE_FUENTE' | 'RETE_IVA' | 'RETE_ICA';
-  rate: number; // 0..1
-  taxable_amount?: number;
-  tax_amount?: number;
+/**
+ * Un impuesto tal como lo guarda `vendix-invoice-line-taxes` DENTRO de la fila.
+ *
+ * `rate` viene en PORCENTAJE (19), que es la unidad de `TaxOption`. El DTO
+ * espera la fracción 0–1: la conversión ocurre en un ÚNICO sitio,
+ * `buildPayload`, y nunca en los cómputos de pantalla.
+ */
+interface LineTaxSelection {
+  tax_rate_id: number;
+  rate: number;
+  tax_type?: string;
+  name?: string;
   is_inclusive?: boolean;
 }
 
-interface FormLine {
-  id: string; // uuid local
+/** Concepto de retención tal como lo publica el backend de la plataforma. */
+interface PlatformWithholdingConcept {
+  id: number;
+  code?: string;
+  name: string;
+  rate?: number;
+}
+
+/** Desglose financiero de UNA línea, con su base y sus impuestos resueltos. */
+interface LineFinancials {
+  gross: number;
+  discount: number;
+  net: number;
+  base: number;
+  taxes: {
+    key: string;
+    name: string;
+    ratePercent: number;
+    isInclusive: boolean;
+    base: number;
+    amount: number;
+  }[];
+  taxAmount: number;
+  total: number;
+}
+
+interface NewLineDraft {
   description: string;
   quantity: number;
   unit_price: number;
   discount_amount: number;
-  taxes: FormLineTax[];
-  unit_code: string; // default 'EA'
-  account_code?: string;
-  aiu_component?: 'administracion' | 'imprevistos' | 'utilidad';
+  tax_rate_id: number;
   is_inclusive: boolean;
-}
-
-interface FormWithholding {
-  id: string; // uuid local
-  role: 'practiced' | 'suffered' | 'self';
-  concept_id: number;
-  base_amount: number;
-  rate: number; // 0..1
-  amount?: number; // auto-resuelto
-}
-
-interface FormSelectedResolution {
-  id: number;
-  prefix: string;
-  technical_key_fingerprint?: string;
-  cltec_status: 'present' | 'absent' | 'invalid';
-  emittable: boolean;
-}
-
-interface ResolutionListItem {
-  id: number;
-  prefix: string;
-  resolution_number?: string;
-  range_from: number;
-  range_to: number;
-  current_number: number;
-  document_type: 'sales_invoice' | 'support_document';
-  technical_key_fingerprint: string | null;
-  emittable?: boolean;
-  cltec_status?: 'present' | 'absent' | 'invalid';
+  unit_code: string;
 }
 
 @Component({
   selector: 'app-platform-invoice-create',
   standalone: true,
-  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
-    CommonModule,
     FormsModule,
+    CommonModule,
+    ReactiveFormsModule,
     RouterLink,
+    AlertBannerComponent,
+    BadgeComponent,
     ButtonComponent,
-    VendixCurrencyPipe,
+    IconComponent,
+    InputComponent,
+    ModalComponent,
     SelectorComponent,
     TenantPickerComponent,
+    VendixCurrencyPipe,
+    AccountCodeSelectComponent,
+    PlatformSectionWrapperComponent,
+    InvoiceSectionDocumentoComponent,
+    InvoiceSectionLineasComponent,
+    InvoiceSectionImpuestosComponent,
+    InvoiceSectionRetencionesComponent,
+    InvoiceSectionDivisaComponent,
+    InvoiceSectionNotasComponent,
   ],
-  template: `
-    <div class="p-6 max-w-5xl mx-auto">
-      <a
-        routerLink="/super-admin/fiscal/invoicing/invoices"
-        class="text-sm text-primary-600 hover:underline"
-      >← Volver al listado</a>
-
-      <h2 class="mt-4 text-2xl font-semibold text-gray-900">
-        Nueva factura de plataforma (V1)
-      </h2>
-      <p class="text-sm text-gray-500 mt-1">
-        Emisión contra un tenant (ADR-7). Cubre sales_invoice y support_document.
-      </p>
-
-      <form (ngSubmit)="submit()" #f="ngForm" class="mt-6 space-y-6">
-        <!-- Section: DocumentType + Resolution + TenantPicker + Items -->
-        <fieldset class="bg-white rounded-lg shadow p-4 space-y-4">
-          <legend class="font-semibold text-gray-900 px-2">Documento</legend>
-
-          <div class="grid grid-cols-2 gap-3">
-            <label class="text-sm">
-              <span class="text-gray-700">Tipo de documento</span>
-              <app-selector
-                [options]="documentTypeOptions"
-                (valueChange)="onDocumentTypeChange(($event ?? '').toString())"
-              ></app-selector>
-            </label>
-
-            <label class="text-sm">
-              <span class="text-gray-700">Resolución</span>
-              <app-selector
-                [options]="resolutionOptions()"
-                (valueChange)="onResolutionChange(($event ?? '').toString())"
-                [placeholder]="resolutionOptions().length === 0 ? 'Cargando resoluciones...' : 'Seleccionar'"
-              ></app-selector>
-              @if (selectedResolution() && !selectedResolution()!.emittable) {
-                <p class="text-xs text-warning mt-1">
-                  Resolución no emitible: {{ selectedResolution()!.cltec_status }} ClTec.
-                </p>
-              }
-            </label>
-          </div>
-
-          <label class="text-sm">
-            <span class="text-gray-700">Operación</span>
-            <app-selector
-              [options]="operationTypeOptions"
-              (valueChange)="onOperationTypeChange($event)"
-            ></app-selector>
-          </label>
-
-          @if (operationType() === '09') {
-            <label class="text-sm block">
-              <span class="text-gray-700">Objeto del contrato AIU <span class="text-red-600">*</span></span>
-              <textarea
-                [ngModel]="aiuContractObject()"
-                (ngModelChange)="aiuContractObject.set($event)"
-                name="aiu_contract_object"
-                rows="3"
-                maxlength="4900"
-                required
-                class="mt-1 w-full border rounded px-3 py-2 text-sm"
-              ></textarea>
-              <span class="text-xs text-gray-500">{{ aiuContractObject().length }} / 4900 caracteres (DIAN)</span>
-            </label>
-          }
-
-          <app-platform-tenant-picker
-            (tenantPicked)="onTenantPicked($event)"
-          ></app-platform-tenant-picker>
-        </fieldset>
-
-        <!-- Items -->
-        <fieldset class="bg-white rounded-lg shadow p-4 space-y-3">
-          <legend class="font-semibold text-gray-900 px-2">Líneas</legend>
-
-          @if (lines().length === 0) {
-            <p class="text-sm text-gray-500">Sin líneas. Agregue al menos una.</p>
-          } @else {
-            <table class="w-full text-sm">
-              <thead>
-                <tr class="text-left text-xs text-gray-500 border-b">
-                  <th>Descripción</th>
-                  <th class="w-20 text-right">Cant</th>
-                  <th class="w-28 text-right">Precio</th>
-                  <th class="w-24 text-right">Desc</th>
-                  <th class="w-20">UD</th>
-                  <th class="w-32">Impuestos</th>
-                  <th class="w-24">AIU</th>
-                  <th class="w-12"></th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (line of lines(); track line.id; let i = $index) {
-                  <tr class="border-b">
-                    <td class="py-2">{{ line.description }}</td>
-                    <td class="text-right">{{ line.quantity }}</td>
-                    <td class="text-right">{{ line.unit_price | currency }}</td>
-                    <td class="text-right">
-                      @if (line.discount_amount) { {{ line.discount_amount | currency }} }
-                    </td>
-                    <td>{{ line.unit_code }}</td>
-                    <td class="text-xs">{{ line.taxes.length }} imp</td>
-                    <td class="text-xs">{{ line.aiu_component ?? '—' }}</td>
-                    <td>
-                      <button type="button" (click)="removeLine(i)" class="text-red-600">×</button>
-                    </td>
-                  </tr>
-                }
-              </tbody>
-              <tfoot class="text-sm border-t">
-                <tr>
-                  <td colspan="2" class="py-2 text-right font-semibold">Subtotal</td>
-                  <td class="text-right">{{ subtotal() | currency }}</td>
-                  <td></td>
-                </tr>
-                <tr>
-                  <td colspan="2" class="text-right">Impuestos</td>
-                  <td class="text-right">{{ taxesTotal() | currency }}</td>
-                  <td></td>
-                </tr>
-                <tr class="border-t">
-                  <td colspan="2" class="py-2 text-right font-semibold">Total</td>
-                  <td class="text-right font-semibold">{{ total() | currency }}</td>
-                  <td></td>
-                </tr>
-              </tfoot>
-            </table>
-          }
-
-          <!-- Modal inline para linea (C.3 — CustomItemModal) -->
-          @if (showLineModal()) {
-            <div class="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-              <div class="bg-white rounded-lg shadow-xl w-full max-w-lg p-5 space-y-3">
-                <h3 class="font-semibold text-gray-900">Nueva línea</h3>
-                <div class="grid grid-cols-12 gap-2 items-end">
-                  <label class="col-span-12 text-sm">
-                    <span class="text-gray-700">Descripción <span class="text-red-600">*</span></span>
-                    <input
-                      [ngModel]="newLine().description"
-                      (ngModelChange)="onNewLineDescription($event)"
-                      name="line_desc"
-                      maxlength="500"
-                      required
-                      class="mt-1 w-full border rounded px-3 py-2"
-                    />
-                  </label>
-                  <label class="col-span-4 text-sm">
-                    <span class="text-gray-700">Cant <span class="text-red-600">*</span></span>
-                    <input
-                      type="number"
-                      step="0.0001"
-                      [ngModel]="newLine().quantity"
-                      (ngModelChange)="onNewLineQuantity($event)"
-                      name="line_qty"
-                      required
-                      class="mt-1 w-full border rounded px-3 py-2 text-right"
-                    />
-                  </label>
-                  <label class="col-span-4 text-sm">
-                    <span class="text-gray-700">Precio unit <span class="text-red-600">*</span></span>
-                    <input
-                      type="number"
-                      step="0.0001"
-                      [ngModel]="newLine().unit_price"
-                      (ngModelChange)="onNewLinePrice($event)"
-                      name="line_price"
-                      required
-                      class="mt-1 w-full border rounded px-3 py-2 text-right"
-                    />
-                  </label>
-                  <label class="col-span-4 text-sm">
-                    <span class="text-gray-700">Desc</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      [ngModel]="newLine().discount_amount"
-                      (ngModelChange)="onNewLineDiscount($event)"
-                      name="line_disc"
-                      class="mt-1 w-full border rounded px-3 py-2 text-right"
-                    />
-                  </label>
-
-                  <fieldset class="col-span-12 text-sm border rounded p-2">
-                    <legend class="text-xs text-gray-700 px-1">Impuestos por línea (rate 0..1)</legend>
-                    @for (tax of newLine().taxes; track $index; let i = $index) {
-                      <div class="grid grid-cols-12 gap-2 items-center">
-                        <select
-                          [ngModel]="tax.tax_type"
-                          (ngModelChange)="updateLineTax(i, 'tax_type', $event)"
-                          name="line_tax_type_{{ i }}"
-                          class="col-span-3 border rounded px-2 py-1"
-                        >
-                          <option value="IVA">IVA</option>
-                          <option value="INC">INC</option>
-                          <option value="ICUI">ICUI</option>
-                          <option value="RETE_FUENTE">ReteFuente</option>
-                          <option value="RETE_IVA">ReteIVA</option>
-                          <option value="RETE_ICA">ReteICA</option>
-                        </select>
-                        <input
-                          type="number"
-                          step="0.0001"
-                          min="0"
-                          max="1"
-                          [ngModel]="tax.rate"
-                          (ngModelChange)="updateLineTax(i, 'rate', +$event || 0)"
-                          name="line_tax_rate_{{ i }}"
-                          class="col-span-4 border rounded px-2 py-1 text-right"
-                        />
-                        <label class="col-span-3 flex items-center gap-1 text-xs">
-                          <input
-                            type="checkbox"
-                            [ngModel]="tax.is_inclusive"
-                            (ngModelChange)="updateLineTax(i, 'is_inclusive', $event)"
-                            name="line_tax_incl_{{ i }}"
-                          />inclusivo
-                        </label>
-                        <button type="button" (click)="removeLineTax(i)" class="col-span-2 text-red-600 text-xs">Quitar</button>
-                      </div>
-                    }
-                    <button type="button" (click)="addLineTax()" class="text-xs text-primary-600 mt-2">
-                      + Añadir impuesto
-                    </button>
-                  </fieldset>
-
-                  @if (operationType() === '09') {
-                    <fieldset class="col-span-12 text-sm border rounded p-2">
-                      <legend class="text-xs text-gray-700 px-1">Componente AIU</legend>
-                      <app-selector
-                        [options]="aiuComponentOptions"
-                        (valueChange)="onNewLineAiuComponent($event)"
-                      ></app-selector>
-                    </fieldset>
-                  }
-
-                  <label class="col-span-6 text-sm">
-                    <span class="text-gray-700">Unidad (UN/ECE)</span>
-                    <input
-                      [ngModel]="newLine().unit_code"
-                      (ngModelChange)="onNewLineUnitCode($event)"
-                      name="line_unit_code"
-                      maxlength="10"
-                      class="mt-1 w-full border rounded px-3 py-2"
-                    />
-                  </label>
-                </div>
-
-                <div class="flex justify-end gap-2 pt-2">
-                  <button app-button type="button" variant="secondary" (click)="cancelLine()">
-                    Cancelar
-                  </button>
-                  <button app-button type="button" variant="primary" (click)="confirmLine()">
-                    Añadir línea
-                  </button>
-                </div>
-              </div>
-            </div>
-          }
-
-          <button type="button" app-button variant="primary" (click)="openLineModal()">
-            + Añadir línea
-          </button>
-        </fieldset>
-
-        <!-- Withholdings -->
-        <fieldset class="bg-white rounded-lg shadow p-4 space-y-3">
-          <legend class="font-semibold text-gray-900 px-2">Retenciones</legend>
-          @for (wh of withholdings(); track wh.id; let i = $index) {
-            <div class="grid grid-cols-12 gap-2 items-end">
-              <app-selector
-                [options]="withholdingRoleOptions"
-                (valueChange)="updateWithholding(i, 'role', ($event ?? 'practiced').toString())"
-                class="col-span-3"
-              ></app-selector>
-              <label class="col-span-2 text-sm">
-                <span class="text-gray-700">Concept ID</span>
-                <input
-                  type="number"
-                  [ngModel]="wh.concept_id"
-                  (ngModelChange)="updateWithholding(i, 'concept_id', +$event || 0)"
-                  name="wh_concept_{{ i }}"
-                  class="mt-1 w-full border rounded px-3 py-2 text-right"
-                />
-              </label>
-              <label class="col-span-3 text-sm">
-                <span class="text-gray-700">Base</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  [ngModel]="wh.base_amount"
-                  (ngModelChange)="updateWithholding(i, 'base_amount', +$event || 0)"
-                  name="wh_base_{{ i }}"
-                  class="mt-1 w-full border rounded px-3 py-2 text-right"
-                />
-              </label>
-              <label class="col-span-2 text-sm">
-                <span class="text-gray-700">Rate (0..1)</span>
-                <input
-                  type="number"
-                  step="0.000001"
-                  min="0"
-                  max="1"
-                  [ngModel]="wh.rate"
-                  (ngModelChange)="updateWithholding(i, 'rate', +$event || 0)"
-                  name="wh_rate_{{ i }}"
-                  class="mt-1 w-full border rounded px-3 py-2 text-right"
-                />
-              </label>
-              <span class="col-span-1 text-xs text-gray-500">{{ wh.rate * 100 }}%</span>
-              <button type="button" (click)="removeWithholding(i)" class="col-span-1 text-red-600">×</button>
-            </div>
-          }
-          <button type="button" app-button variant="secondary" (click)="addWithholding()">
-            + Añadir retención
-          </button>
-        </fieldset>
-
-        <!-- Global discount + TRM + Payment form -->
-        <fieldset class="bg-white rounded-lg shadow p-4 space-y-3">
-          <legend class="font-semibold text-gray-900 px-2">Más opciones</legend>
-
-          <div class="grid grid-cols-2 gap-3">
-            <label class="text-sm">
-              <span class="text-gray-700">Descuento global (AllowanceCharge)</span>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                [ngModel]="globalDiscountAmount()"
-                (ngModelChange)="globalDiscountAmount.set(+$event || 0)"
-                name="global_discount"
-                class="mt-1 w-full border rounded px-3 py-2 text-right"
-              />
-            </label>
-            <label class="text-sm">
-              <span class="text-gray-700">Currency</span>
-              <app-selector
-                [options]="currencyOptions"
-                (valueChange)="currencyIso.set(($event ?? 'COP').toString())"
-              ></app-selector>
-            </label>
-          </div>
-
-          @if (currencyIso() !== 'COP') {
-            <div class="grid grid-cols-2 gap-3 border-t pt-3">
-              <label class="text-sm">
-                <span class="text-gray-700">Fecha TRM</span>
-                <input
-                  type="date"
-                  [ngModel]="exchangeRateDate()"
-                  (ngModelChange)="exchangeRateDate.set($event)"
-                  name="erm_date"
-                  class="mt-1 w-full border rounded px-3 py-2"
-                />
-              </label>
-              <label class="text-sm">
-                <span class="text-gray-700">TRM</span>
-                <input
-                  type="number"
-                  step="0.0001"
-                  min="0"
-                  [ngModel]="exchangeRate()"
-                  (ngModelChange)="exchangeRate.set(+$event || 0)"
-                  name="erm"
-                  class="mt-1 w-full border rounded px-3 py-2 text-right"
-                />
-              </label>
-            </div>
-          }
-
-          <div class="grid grid-cols-2 gap-3">
-            <label class="text-sm">
-              <span class="text-gray-700">Forma de pago</span>
-              <app-selector
-                [options]="paymentFormOptions"
-                (valueChange)="onPaymentFormChange($event)"
-              ></app-selector>
-            </label>
-            @if (paymentForm() === '2') {
-              <label class="text-sm">
-                <span class="text-gray-700">Vencimiento</span>
-                <input
-                  type="date"
-                  [ngModel]="dueDate()"
-                  (ngModelChange)="dueDate.set($event)"
-                  name="due_date"
-                  class="mt-1 w-full border rounded px-3 py-2"
-                />
-              </label>
-            }
-          </div>
-        </fieldset>
-
-        @if (errorMessage(); as err) {
-          <p class="text-sm text-red-600">{{ err }}</p>
-        }
-
-        <div class="flex justify-end gap-2">
-          <a routerLink="/super-admin/fiscal/invoicing/invoices" app-button variant="secondary">
-            Cancelar
-          </a>
-          <button
-            type="submit"
-            app-button
-            variant="primary"
-            [disabled]="submitting() || !canSubmit()"
-          >
-            {{ submitting() ? 'Creando…' : 'Crear y emitir' }}
-          </button>
-        </div>
-      </form>
-    </div>
-  `,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  templateUrl: './platform-invoice-create.component.html',
 })
-export class PlatformInvoiceCreateComponent {
-  private readonly http = inject(HttpClient);
-  private readonly toast = inject(ToastService);
+export class PlatformInvoiceCreateComponent implements OnInit {
+  private readonly fb = inject(FormBuilder);
   private readonly router = inject(Router);
+  private readonly toast = inject(ToastService);
+  private readonly destroyRef = inject(DestroyRef);
+  readonly store = inject(PlatformInvoicingStore);
+  private readonly http = inject(HttpClient);
+  private readonly fiscal = inject(FiscalBillingAdminService);
 
-  private readonly base = `${environment.apiUrl}/superadmin/subscriptions/fiscal`;
+  /**
+   * LA PLATAFORMA SÓLO EMITE FACTURA DE VENTA ESTÁNDAR.
+   *
+   * `operation_type` se queda fijo en `'10'` y no hay selector: AIU (`'09'`),
+   * mandato (`'11'`) y consorcio (`'12'`) son contratos que esta consola no
+   * factura. El control sigue existiendo porque el DTO lo exige, pero es un
+   * valor constante, no una decisión del operador.
+   */
+  static readonly OPERATION_TYPE_STANDARD = '10';
 
-  // ── Document state ──────────────────────────────────────────────────────
+  // ── Modo de Adquiriente ─────────────────────────────────────────
+  readonly acquirerMode = signal<'system' | 'external'>('system');
 
-  readonly documentType = signal<'sales_invoice' | 'support_document'>('sales_invoice');
-  readonly operationType = signal<'10' | '09' | '11' | '12'>('10');
-  readonly aiuContractObject = signal<string>('');
+  /**
+   * Tenant elegido en el picker. Existe como signal aparte del control del
+   * formulario porque el template lo lee para decidir si muestra el bloque de
+   * datos fiscales, y `invoiceForm.value` no es reactivo bajo zoneless.
+   */
+  readonly selectedTenant = signal<PlatformAcquirer | null>(null);
 
-  readonly resolutionId = signal<number | null>(null);
-  readonly resolutions = signal<ResolutionListItem[]>([]);
-  readonly selectedResolution = computed(() => {
-    const id = this.resolutionId();
-    return id ? (this.resolutions().find((r) => r.id === id) ?? null) : null;
+  /**
+   * La DIAN rechaza el documento sin identificacion del adquiriente. Es lo
+   * unico que se marca como bloqueante en el bloque fiscal; el resto (correo,
+   * telefono, direccion) el anexo lo admite ausente.
+   */
+  readonly acquirerFiscalIncomplete = computed(() => {
+    const v = this.rawValue();
+    return (
+      !String(v['external_legal_name'] ?? '').trim() ||
+      !String(v['external_tax_id'] ?? '').trim()
+    );
   });
-  readonly resolutionOptions = computed(() =>
-    this.resolutions().map((r) => ({
-      value: r.id.toString(),
-      label: `${r.prefix} (${r.document_type}) · ${r.current_number}/${r.range_to}${
-        r.emittable === false ? ' — ! emitible' : ''
-      }`,
+
+  // ── Formulario Principal ────────────────────────────────────────
+  readonly invoiceForm = this.fb.group({
+    profile_id: [null as number | null],
+
+    // Documento
+    resolution_id: [null as number | null, Validators.required],
+    invoice_type: ['sales_invoice', Validators.required],
+    operation_type: [
+      PlatformInvoiceCreateComponent.OPERATION_TYPE_STANDARD,
+      Validators.required,
+    ],
+    payment_form: ['1', Validators.required],
+    payment_means_code: ['10'],
+    issue_date: [formatDateOnlyUTC(new Date())],
+    due_date: [''],
+    notes: [''],
+
+    // Adquiriente del Sistema (picker)
+    customer_tenant: [null as PlatformAcquirer | null],
+
+    // Adquiriente Externo Manual
+    external_legal_name: [''],
+    external_tax_id: [''],
+    external_tax_id_dv: [''],
+    external_document_type: ['31'], // 31 = NIT, 13 = CC, 22 = CE
+    external_person_type: ['1'], // 1 = Jurídica, 2 = Natural
+    external_tax_regime_code: ['48'], // 48 = Resp IVA, 49 = No resp
+    external_email: [''],
+    external_phone: [''],
+    external_address_line: [''],
+    external_city: ['Bogotá, D.C.'],
+    external_department_code: ['11'],
+
+    // Contabilidad
+    counterpart_account_code: [null as string | null],
+
+    // Divisa (declarativa: el documento se emite SIEMPRE en COP)
+    declare_foreign: [false],
+    foreign_currency_code: ['USD'],
+    exchange_rate: [null as number | null],
+    exchange_rate_date: [formatDateOnlyUTC(new Date())],
+
+    // Guardar como perfil
+    save_as_profile_enabled: [false],
+    save_as_profile_name: [''],
+
+    // Líneas y retenciones
+    items: this.fb.array([], Validators.required),
+    withholdings: this.fb.array([]),
+  });
+
+  get itemsArray(): FormArray {
+    return this.invoiceForm.get('items') as FormArray;
+  }
+
+  get withholdingsArray(): FormArray {
+    return this.invoiceForm.get('withholdings') as FormArray;
+  }
+
+  // Señales derivadas del Formulario
+  private readonly formValue = toSignal(
+    this.invoiceForm.valueChanges.pipe(startWith(this.invoiceForm.value)),
+    { initialValue: this.invoiceForm.value as Record<string, any> },
+  );
+
+  private readonly itemsValue = toSignal(
+    this.itemsArray.valueChanges as Observable<any[]>,
+    { initialValue: [] },
+  );
+
+  private readonly withholdingsValue = toSignal(
+    this.withholdingsArray.valueChanges as Observable<any[]>,
+    { initialValue: [] },
+  );
+
+  readonly itemControls = computed<FormGroup[]>(() => {
+    this.itemsValue();
+    return [...this.itemsArray.controls] as FormGroup[];
+  });
+
+  readonly withholdingControls = computed<FormGroup[]>(() => {
+    this.withholdingsValue();
+    return [...this.withholdingsArray.controls] as FormGroup[];
+  });
+
+  readonly rawValue = computed<Record<string, any>>(() => {
+    this.formValue();
+    return this.invoiceForm.getRawValue();
+  });
+
+  readonly isCredit = computed(() => this.rawValue()['payment_form'] === '2');
+  readonly usesForeignCurrency = computed(
+    () => this.rawValue()['declare_foreign'] === true,
+  );
+
+  // ── Catálogos ───────────────────────────────────────────────────
+  readonly unitCodeOptions = UNIT_CODE_OPTIONS;
+  readonly availableTaxes = PLATFORM_TAX_CATALOG;
+  readonly currencyOptions = PLATFORM_FOREIGN_CURRENCY_OPTIONS;
+
+  /** Alimenta el selector de tarifa del modal de línea rápida. */
+  readonly taxRateOptions: SelectorOption[] = [
+    { value: '0', label: 'Sin impuesto (excluido)' },
+    ...PLATFORM_TAX_CATALOG.map((t) => ({
+      value: String(t.id),
+      label: t.name,
+    })),
+  ];
+
+  /**
+   * Conceptos de retención de la organización de plataforma.
+   *
+   * Se leen del backend y no se inventan: `concept_id` viaja al DTO como
+   * ENTERO (`@IsInt()`), así que una lista escrita a mano con códigos de texto
+   * («RCO01») produce un 400 en la emisión, no un aviso en pantalla.
+   */
+  readonly withholdingConcepts = signal<PlatformWithholdingConcept[]>([]);
+
+  readonly withholdingConceptOptions = computed<SelectorOption[]>(() =>
+    this.withholdingConcepts().map((c) => ({
+      value: c.id,
+      label: c.code ? `${c.code} — ${c.name}` : c.name,
     })),
   );
 
-  // ── TenantPicker integration ──────────────────────────────────────────
-  // TenantPicker is its own component that emits (tenantPicked).
-  // We capture here and lock the acquirer into the form.
+  readonly withholdingRoleOptions: SelectorOption[] = [
+    { value: 'practiced', label: 'Practicada (la retiene el cliente)' },
+    { value: 'suffered', label: 'Sufrida (nos la retienen)' },
+    { value: 'self', label: 'Autorretención' },
+  ];
 
-  readonly acquirer = signal<PlatformAcquirer | null>(null);
+  // ── Cálculo Reactivo de Totales ──────────────────────────────────
 
-  // ── Items state (signals para zoneless) ────────────────────────────────
+  /**
+   * Desglose de UNA línea.
+   *
+   * ## Base gravable e impuesto incluido
+   *
+   * La base sale del NETO de descuento, nunca del bruto. Cuando la línea
+   * declara impuestos INCLUIDOS en el precio, el neto ya los contiene, así que
+   * la base es `neto / (1 + Σ tarifas incluidas)` y cada impuesto se liquida
+   * sobre esa base. Los impuestos AGREGADOS se liquidan sobre la misma base y
+   * se suman encima. Una línea puede llevar ambos (IVA incluido + INC
+   * agregado) y el reparto sigue siendo correcto.
+   */
+  private lineFinancials(item: any): LineFinancials {
+    const qty = Number(item?.quantity) || 0;
+    const price = Number(item?.unit_price) || 0;
+    const discount = Number(item?.discount_amount) || 0;
+    const taxes = (item?.taxes || []) as LineTaxSelection[];
 
-  readonly lines = signal<FormLine[]>([]);
-  readonly newLine = signal<FormLine>(this.makeEmptyLine());
-  readonly showLineModal = signal(false);
+    const gross = qty * price;
+    const net = Math.max(0, gross - discount);
 
-  // Computeds (subtotal / taxes / total con redondeo por línea).
-  readonly subtotal = computed(() =>
-    Math.round(
-      this.lines().reduce(
-        (acc, l) => acc + (l.quantity * l.unit_price - (l.discount_amount ?? 0)),
-        0,
-      ) * 100,
-    ) / 100,
-  );
-  readonly taxesTotal = computed(() => {
-    let total = 0;
-    for (const l of this.lines()) {
-      const lineSubtotal = l.quantity * l.unit_price - (l.discount_amount ?? 0);
-      for (const t of l.taxes) {
-        total += lineSubtotal * (t.rate ?? 0);
+    const inclusiveFraction = taxes
+      .filter((t) => t?.is_inclusive)
+      .reduce((acc, t) => acc + (Number(t?.rate) || 0) / 100, 0);
+
+    const base = inclusiveFraction > 0 ? net / (1 + inclusiveFraction) : net;
+
+    const resolved = taxes.map((t) => {
+      const ratePercent = Number(t?.rate) || 0;
+      const type = (t?.tax_type || 'IVA').toUpperCase();
+      const isInclusive = Boolean(t?.is_inclusive);
+      return {
+        key: `${type}|${ratePercent}|${isInclusive ? 'inc' : 'add'}`,
+        name: t?.name || `${type} ${ratePercent}%`,
+        ratePercent,
+        isInclusive,
+        base,
+        amount: base * (ratePercent / 100),
+      };
+    });
+
+    const taxAmount = resolved.reduce((acc, t) => acc + t.amount, 0);
+
+    return {
+      gross,
+      discount,
+      net,
+      base,
+      taxes: resolved,
+      taxAmount,
+      total: base + taxAmount,
+    };
+  }
+
+  readonly totals = computed(() => {
+    const items = this.itemsValue() || [];
+
+    let grossSubtotal = 0;
+    let totalDiscount = 0;
+    let taxableBase = 0;
+    let totalTax = 0;
+
+    for (const item of items) {
+      const line = this.lineFinancials(item);
+      grossSubtotal += line.gross;
+      totalDiscount += line.discount;
+      taxableBase += line.base;
+      // El impuesto de cabecera es la SUMA de los impuestos de línea, nunca
+      // `base × tarifa` recalculado sobre el total: recalcular produce
+      // diferencias de céntimos que la DIAN rechaza (FAS02).
+      totalTax += line.taxAmount;
+    }
+
+    const total = taxableBase + totalTax;
+
+    return {
+      grossSubtotal,
+      totalDiscount,
+      taxableBase,
+      totalIva: totalTax,
+      total,
+      totalWithheld: this.totalWithheld(),
+      netPayable: total - this.totalWithheld(),
+    };
+  });
+
+  /**
+   * Desglose agregado por tarifa. Cada grupo suma las BASES y los IMPORTES de
+   * las líneas que lo declaran; dos tarifas distintas del mismo tributo son
+   * dos filas, y una misma tarifa incluida y agregada también, porque el
+   * operador necesita ver por qué el total no cuadra con su intuición.
+   */
+  readonly taxBreakdown = computed<TaxBreakdownRow[]>(() => {
+    const items = this.itemsValue() || [];
+    const groups = new Map<string, TaxBreakdownRow>();
+
+    for (const item of items) {
+      for (const tax of this.lineFinancials(item).taxes) {
+        const existing = groups.get(tax.key);
+        if (existing) {
+          groups.set(tax.key, {
+            ...existing,
+            base: existing.base + tax.base,
+            amount: existing.amount + tax.amount,
+          });
+        } else {
+          groups.set(tax.key, {
+            key: tax.key,
+            name: tax.name,
+            rate: tax.ratePercent,
+            isInclusive: tax.isInclusive,
+            base: tax.base,
+            amount: tax.amount,
+          });
+        }
       }
     }
-    return Math.round(total * 100) / 100;
+
+    return [...groups.values()].sort((a, b) => b.rate - a.rate);
   });
-  readonly total = computed(
-    () => this.subtotal() + this.taxesTotal() - (this.globalDiscountAmount() ?? 0),
+
+  /** Importe retenido de cada fila. */
+  readonly withholdingAmounts = computed<number[]>(() =>
+    (this.withholdingsValue() || []).map((row: any) => {
+      const base = Number(row?.base) || 0;
+      const rate = Number(row?.rate) || 0;
+      return base * (rate / 100);
+    }),
   );
 
-  // ── Withholdings ──────────────────────────────────────────────────────
+  readonly totalWithheld = computed(() =>
+    this.withholdingAmounts().reduce((acc, amount) => acc + amount, 0),
+  );
 
-  readonly withholdings = signal<FormWithholding[]>([]);
+  // ── Paths para las secciones compartidas ────────────────────────
+  readonly documentoSectionPaths: DocumentoSectionPaths = {
+    invoice_type: 'invoice_type',
+    payment_form: 'payment_form',
+    payment_means_code: 'payment_means_code',
+    issue_date: 'issue_date',
+    due_date: 'due_date',
+    notes: 'notes',
+    header_notes: null,
+  };
 
-  // ── Discount + Currency + Payment ──────────────────────────────────────
+  readonly lineasRowPaths: LineasRowPaths = {
+    description: 'description',
+    quantity: 'quantity',
+    unit_code: 'unit_code',
+    unit_price: 'unit_price',
+    discount_amount: 'discount_amount',
+    taxes: 'taxes',
+    // Inerte: la superficie es sólo estándar, ninguna línea entra a una base
+    // AIU. El control existe porque el mapa de rutas lo exige.
+    aiu_field: 'aiu_field',
+  };
 
-  readonly globalDiscountAmount = signal<number>(0);
-  readonly currencyIso = signal<string>('COP');
-  readonly exchangeRate = signal<number>(0);
-  readonly exchangeRateDate = signal<string>('');
-  readonly paymentForm = signal<'1' | '2'>('1');
-  readonly dueDate = signal<string>('');
+  readonly retencionesRowPaths: RetencionesRowPaths = {
+    concept_id: 'concept_id',
+    role: 'role',
+    rate: 'rate',
+    base: 'base',
+  };
 
-  readonly submitting = signal(false);
-  readonly errorMessage = signal<string | null>(null);
+  readonly divisaSectionPaths: DivisaSectionPaths = {
+    declare_foreign: 'declare_foreign',
+    currency_code: 'foreign_currency_code',
+    exchange_rate: 'exchange_rate',
+    exchange_rate_date: 'exchange_rate_date',
+  };
 
-  readonly canSubmit = computed(() => {
-    return (
-      this.lines().length > 0 &&
-      !!this.acquirer() &&
-      !!this.resolutionId() &&
-      (this.operationType() !== '09' || this.aiuContractObject().length >= 4900)
-    );
-  });
+  readonly notasSectionPaths: NotasSectionPaths = {
+    description: null,
+    internal_note: null,
+  };
 
-  // ── Selectors ──────────────────────────────────────────────────────────
+  // ── Opciones de Selectores ──────────────────────────────────────
 
-  readonly documentTypeOptions = [
-    { value: 'sales_invoice', label: 'Factura de venta' },
-    { value: 'support_document', label: 'Documento soporte' },
+  /**
+   * UN solo tipo de documento.
+   *
+   * «Documento soporte» estaba en la lista y era un botón cuyo único desenlace
+   * era emitir una factura de venta igual: el `submit` siempre publica en
+   * `POST /sales-invoices`, y el documento soporte exige un proveedor que este
+   * formulario no captura. Ofrecerlo era ofrecer una mentira.
+   */
+  readonly invoiceTypeOptions: SelectorOption[] = [
+    { value: 'sales_invoice', label: 'Factura de Venta' },
   ];
-
-  readonly operationTypeOptions = [
-    { value: '10', label: 'Estandar' },
-    { value: '09', label: 'AIU' },
-    { value: '11', label: 'Mandato' },
-    { value: '12', label: 'Consorcio' },
-  ];
-
-  readonly aiuComponentOptions = [
-    { value: '', label: '— ninguno —' },
-    { value: 'administracion', label: 'Administración' },
-    { value: 'imprevistos', label: 'Imprevistos' },
-    { value: 'utilidad', label: 'Utilidad' },
-  ];
-
-  readonly currencyOptions = [
-    { value: 'COP', label: 'COP' },
-    { value: 'USD', label: 'USD' },
-  ];
-
-  readonly paymentFormOptions = [
+  readonly paymentFormOptions: SelectorOption[] = [
     { value: '1', label: 'Contado' },
     { value: '2', label: 'Crédito' },
   ];
-
-  readonly withholdingRoleOptions = [
-    { value: 'practiced', label: 'Practiced' },
-    { value: 'suffered', label: 'Suffered' },
-    { value: 'self', label: 'Self' },
+  readonly paymentMeansOptions: SelectorOption[] = [
+    { value: '10', label: 'Efectivo' },
+    { value: '42', label: 'Transferencia Bancaria' },
+    { value: '48', label: 'Tarjeta de Crédito' },
+    { value: '49', label: 'Tarjeta de Débito' },
+    { value: '1', label: 'Instrumento no definido' },
   ];
 
-  // ── Lifecycle ─────────────────────────────────────────────────────────
+  readonly documentTypeOptions: SelectorOption[] = [
+    { value: '31', label: 'NIT (Número de Identificación Tributaria)' },
+    { value: '13', label: 'Cédula de Ciudadanía (CC)' },
+    { value: '22', label: 'Cédula de Extranjería (CE)' },
+    { value: '41', label: 'Pasaporte' },
+  ];
 
-  ngOnInit(): void {
-    this.loadResolutions();
+  readonly personTypeOptions: SelectorOption[] = [
+    { value: '1', label: 'Persona Jurídica' },
+    { value: '2', label: 'Persona Natural' },
+  ];
+
+  readonly taxRegimeOptions: SelectorOption[] = [
+    { value: '48', label: 'Responsable de IVA (Régimen Común)' },
+    { value: '49', label: 'No Responsable de IVA (Régimen Simplificado)' },
+  ];
+
+  /**
+   * Departamentos DIVIPOLA. La dirección del adquiriente externo viaja al
+   * snapshot fiscal, y el código de departamento es obligatorio allí: sin este
+   * control el formulario capturaba ciudad pero mandaba el departamento por
+   * defecto de Bogotá para cualquier municipio del país.
+   */
+  readonly departmentOptions: SelectorOption[] = [
+    { value: '05', label: 'Antioquia' },
+    { value: '08', label: 'Atlántico' },
+    { value: '11', label: 'Bogotá, D.C.' },
+    { value: '13', label: 'Bolívar' },
+    { value: '15', label: 'Boyacá' },
+    { value: '17', label: 'Caldas' },
+    { value: '18', label: 'Caquetá' },
+    { value: '19', label: 'Cauca' },
+    { value: '20', label: 'Cesar' },
+    { value: '23', label: 'Córdoba' },
+    { value: '25', label: 'Cundinamarca' },
+    { value: '27', label: 'Chocó' },
+    { value: '41', label: 'Huila' },
+    { value: '44', label: 'La Guajira' },
+    { value: '47', label: 'Magdalena' },
+    { value: '50', label: 'Meta' },
+    { value: '52', label: 'Nariño' },
+    { value: '54', label: 'Norte de Santander' },
+    { value: '63', label: 'Quindío' },
+    { value: '66', label: 'Risaralda' },
+    { value: '68', label: 'Santander' },
+    { value: '70', label: 'Sucre' },
+    { value: '73', label: 'Tolima' },
+    { value: '76', label: 'Valle del Cauca' },
+    { value: '81', label: 'Arauca' },
+    { value: '85', label: 'Casanare' },
+    { value: '86', label: 'Putumayo' },
+    { value: '88', label: 'San Andrés y Providencia' },
+    { value: '91', label: 'Amazonas' },
+    { value: '94', label: 'Guainía' },
+    { value: '95', label: 'Guaviare' },
+    { value: '97', label: 'Vaupés' },
+    { value: '99', label: 'Vichada' },
+  ];
+
+  // ── Estado de UI ────────────────────────────────────────────────
+  readonly sectionExpanded = signal<Record<string, boolean>>({
+    perfil: true,
+    documento: true,
+    adquiriente: true,
+    lineas: true,
+    impuestos: true,
+    retenciones: false,
+    contabilidad: false,
+    divisa: false,
+    notas: false,
+  });
+
+  readonly submitting = signal(false);
+  readonly errorMessage = signal('');
+
+  // ── Modal de Nueva Línea ─────────────────────────────────────────
+  readonly showLineModal = signal(false);
+  readonly newLine = signal<NewLineDraft>(this.emptyLineDraft());
+
+  private emptyLineDraft(): NewLineDraft {
+    return {
+      description: '',
+      quantity: 1,
+      unit_price: 0,
+      discount_amount: 0,
+      tax_rate_id: PLATFORM_TAX_CATALOG[0]?.id ?? 0,
+      is_inclusive: false,
+      unit_code: DEFAULT_UNIT_CODE,
+    };
   }
 
-  async loadResolutions(): Promise<void> {
-    try {
-      const res = await firstValueFrom(
-        this.http.get<{ success: boolean; data: { data: ResolutionListItem[]; meta: any } }>(
-          `${this.base}/resolutions-for-emission`,
-          { params: { document_type: this.documentType() } },
-        ),
-      );
-      this.resolutions.set(res.data.data ?? []);
-    } catch {
-      this.resolutions.set([]);
+  ngOnInit() {
+    this.store.loadResolutions();
+    this.store.loadProfiles();
+    this.loadWithholdingConcepts();
+
+    // Auto-cálculo del DV cuando se escribe el NIT externo
+    this.invoiceForm
+      .get('external_tax_id')
+      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((nit) => {
+        if (nit && this.invoiceForm.get('external_document_type')?.value === '31') {
+          const dv = calculateDianDv(nit);
+          this.invoiceForm.patchValue({ external_tax_id_dv: dv }, { emitEvent: false });
+        }
+      });
+
+    // La fecha de vencimiento sólo es obligatoria a crédito. Se sincroniza el
+    // validador en vez de dejar que el backend conteste 400 con la forma de
+    // pago que el propio formulario eligió.
+    this.invoiceForm
+      .get('payment_form')
+      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((form) => {
+        const dueDate = this.invoiceForm.get('due_date');
+        if (!dueDate) return;
+        if (form === '2') {
+          dueDate.addValidators(Validators.required);
+        } else {
+          dueDate.removeValidators(Validators.required);
+        }
+        dueDate.updateValueAndValidity({ emitEvent: false });
+      });
+  }
+
+  private loadWithholdingConcepts(): void {
+    this.http
+      .get<any>(
+        `${environment.apiUrl}/superadmin/subscriptions/fiscal/withholding-concepts`,
+      )
+      .pipe(
+        map((res) => {
+          const payload = res?.data ?? res;
+          const rows = Array.isArray(payload) ? payload : (payload?.data ?? []);
+          return rows as PlatformWithholdingConcept[];
+        }),
+        // La sección de retenciones es OPCIONAL: si el catálogo no está
+        // disponible el formulario debe seguir emitiendo sin ella, no romperse.
+        catchError(() => of([] as PlatformWithholdingConcept[])),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((concepts) => this.withholdingConcepts.set(concepts));
+  }
+
+  get resolutionControl(): FormControl<number | null> {
+    return this.invoiceForm.get('resolution_id') as FormControl<number | null>;
+  }
+
+  get counterpartControl(): FormControl<string | null> {
+    return this.invoiceForm.get(
+      'counterpart_account_code',
+    ) as FormControl<string | null>;
+  }
+
+  accountControl(row: FormGroup): FormControl<string | null> {
+    return row.get('account_code') as FormControl<string | null>;
+  }
+
+  /**
+   * Errores por fila, ya resueltos.
+   *
+   * Es un `computed` y no un getter: un getter devuelve un ARREGLO NUEVO en
+   * cada detección de cambios, y como es la entrada de un componente `OnPush`
+   * la referencia distinta lo repinta en cada ciclo.
+   */
+  readonly lineasRowErrors = computed<LineasRowErrors[]>(() =>
+    this.itemControls().map((row) => {
+      const errors: LineasRowErrors = {};
+      const description = row.get('description');
+      const quantity = row.get('quantity');
+      const unitPrice = row.get('unit_price');
+      if (description?.invalid && description.touched) {
+        errors.description = 'La descripción es obligatoria.';
+      }
+      if (quantity?.invalid && quantity.touched) {
+        errors.quantity = 'La cantidad debe ser mayor que cero.';
+      }
+      if (unitPrice?.invalid && unitPrice.touched) {
+        errors.unit_price = 'El precio no puede ser negativo.';
+      }
+      return errors;
+    }),
+  );
+
+  /** Resumen por fila que pinta la sección compartida bajo cada renglón. */
+  readonly lineasRowSummaries = computed<string[]>(() =>
+    (this.itemsValue() || []).map((item: any) => {
+      const line = this.lineFinancials(item);
+      if (line.taxes.length === 0) {
+        return `Sin impuestos · Total ${this.formatCurrencyValue(line.total)}`;
+      }
+      const detail = line.taxes
+        .map(
+          (t) =>
+            `${t.name}${t.isInclusive ? ' (incl.)' : ''} ${this.formatCurrencyValue(t.amount)}`,
+        )
+        .join(' · ');
+      return `Base ${this.formatCurrencyValue(line.base)} · ${detail} · Total ${this.formatCurrencyValue(line.total)}`;
+    }),
+  );
+
+  readonly retencionesRowErrors = computed<RetencionesRowErrors[]>(() =>
+    this.withholdingControls().map((row) => {
+      const errors: RetencionesRowErrors = {};
+      const concept = row.get('concept_id');
+      const rate = row.get('rate');
+      if (concept?.invalid && concept.touched) {
+        errors.concept_id = 'Selecciona un concepto de retención.';
+      }
+      if (rate?.invalid && rate.touched) {
+        errors.rate = 'La tarifa debe estar entre 0 y 100.';
+      }
+      return errors;
+    }),
+  );
+
+  /** Tarifa de catálogo del concepto elegido, para contrastarla con la escrita. */
+  readonly catalogRateForBound = (index: number): string | null => {
+    const row = this.withholdingControls()[index];
+    if (!row) return null;
+    const conceptId = Number(row.get('concept_id')?.value);
+    const concept = this.withholdingConcepts().find((c) => c.id === conceptId);
+    if (!concept || concept.rate == null) return null;
+    return `${(concept.rate * 100).toFixed(2)}%`;
+  };
+
+  /**
+   * Inertes: la superficie es sólo estándar y ninguna línea entra a una base
+   * AIU. Siguen existiendo porque `vendix-invoice-section-lineas` los declara
+   * `input.required` para el riel de tienda, que sí factura contratos AIU.
+   */
+  readonly carriesAiu = (_row: unknown, _index: number): boolean => false;
+  readonly toggleAiu = (
+    _row: unknown,
+    _index: number,
+    _on: boolean,
+  ): void => undefined;
+
+  readonly formatCurrencyBound = (value: number): string =>
+    this.formatCurrencyValue(value);
+
+  private formatCurrencyValue(value: number): string {
+    return new Intl.NumberFormat('es-CO', {
+      style: 'currency',
+      currency: 'COP',
+      maximumFractionDigits: 2,
+    }).format(Number.isFinite(value) ? value : 0);
+  }
+
+  toggleSection(section: string, expanded: boolean): void {
+    this.sectionExpanded.update((s) => ({ ...s, [section]: expanded }));
+  }
+
+  /**
+   * Sólo rangos de FACTURA DE VENTA y activos. Un rango de documento soporte
+   * o uno desactivado en este desplegable deja emitir contra una resolución
+   * que la DIAN rechaza, y el error aparece recién en la transmisión.
+   */
+  readonly resolutionOptions = computed<SelectorOption[]>(() =>
+    this.store
+      .resolutions()
+      .filter((r) => r.document_type === 'sales_invoice' && r.is_active)
+      .map((r) => ({
+        value: r.id,
+        label: r.prefix
+          ? `${r.prefix} (Resolución ${r.resolution_number})`
+          : `Resolución ${r.resolution_number}`,
+      })),
+  );
+
+  // ── Conmutador de Modo de Adquiriente ────────────────────────────
+  setAcquirerMode(mode: 'system' | 'external'): void {
+    this.acquirerMode.set(mode);
+    if (mode === 'external') {
+      this.invoiceForm.patchValue({ customer_tenant: null });
+      this.selectedTenant.set(null);
     }
+    // Cambiar de pestaña limpia los campos fiscales en los dos sentidos: los
+    // datos del tenant anterior no pueden quedar colgados como si fueran los
+    // que tecleó el operador para un cliente externo, ni al revés.
+    this.resetAcquirerFiscalFields();
   }
 
-  onDocumentTypeChange(value: string): void {
-    const next = value === 'support_document' ? 'support_document' : 'sales_invoice';
-    this.documentType.set(next);
-    this.resolutionId.set(null);
-    this.loadResolutions();
-  }
-
-  onOperationTypeChange(value: string | number | null): void {
-    const v = (value ?? '10').toString();
-    if (v === '09' || v === '11' || v === '12') {
-      this.operationType.set(v);
-    } else {
-      this.operationType.set('10');
-    }
-  }
-
-  onPaymentFormChange(value: string | number | null): void {
-    const v = (value ?? '1').toString();
-    this.paymentForm.set(v === '2' ? '2' : '1');
-  }
-
-  onNewLineDescription(value: string): void {
-    this.newLine.update((l) => ({ ...l, description: value }));
-  }
-
-  onNewLineQuantity(value: string | number): void {
-    this.newLine.update((l) => ({ ...l, quantity: Number(value) || 0 }));
-  }
-
-  onNewLinePrice(value: string | number): void {
-    this.newLine.update((l) => ({ ...l, unit_price: Number(value) || 0 }));
-  }
-
-  onNewLineDiscount(value: string | number): void {
-    this.newLine.update((l) => ({ ...l, discount_amount: Number(value) || 0 }));
-  }
-
-  onNewLineUnitCode(value: string): void {
-    this.newLine.update((l) => ({ ...l, unit_code: value || 'EA' }));
-  }
-
-  onNewLineAiuComponent(value: string | number | null): void {
-    const v = (value ?? '').toString();
-    const valid = v === 'administracion' || v === 'imprevistos' || v === 'utilidad';
-    this.newLine.update((l) => ({
-      ...l,
-      aiu_component: valid ? (v as 'administracion' | 'imprevistos' | 'utilidad') : undefined,
-    }));
-  }
-
-  onResolutionChange(value: string): void {
-    const id = value ? Number(value) : null;
-    this.resolutionId.set(id && !Number.isNaN(id) ? id : null);
-  }
-
+  // ── Adquiriente del Sistema ──────────────────────────────────────
   onTenantPicked(tenant: PlatformAcquirer | null): void {
-    this.acquirer.set(tenant);
-  }
+    this.invoiceForm.patchValue({ customer_tenant: tenant });
+    this.selectedTenant.set(tenant);
 
-  // ── Lines ────────────────────────────────────────────────────────────
-
-  openLineModal(): void {
-    this.newLine.set(this.makeEmptyLine());
-    this.showLineModal.set(true);
-  }
-  cancelLine(): void {
-    this.showLineModal.set(false);
-  }
-  confirmLine(): void {
-    const line = this.newLine();
-    if (!line.description || line.quantity <= 0 || line.unit_price < 0) {
-      this.toast.error('La línea requiere descripción, cantidad > 0 y precio >= 0.');
+    if (!tenant) {
+      this.resetAcquirerFiscalFields();
       return;
     }
-    this.lines.update((arr) => [...arr, line]);
+
+    // Los datos fiscales del tenant se vuelcan sobre los MISMOS controles que
+    // usa el cliente externo. Antes el picker sólo guardaba el objeto y no
+    // mostraba nada: si a la tienda le faltaba el NIT o el DV, la emisión
+    // moria en el backend con «Captura los campos faltantes en el formulario
+    // antes de emitir» y en el formulario no habia ningun campo que capturar.
+    // Ahora se ven, se pueden completar y se mandan como override.
+    const personType = tenant.person_type === '2' ? '2' : '1';
+    this.invoiceForm.patchValue({
+      external_legal_name: tenant.legal_name || tenant.name || '',
+      external_tax_id: tenant.tax_id ?? '',
+      external_tax_id_dv: tenant.tax_id_dv ?? '',
+      external_document_type: this.normalizeDocumentType(tenant.document_type),
+      external_person_type: personType,
+      external_tax_regime_code: tenant.tax_regime_code || '48',
+      external_email: tenant.email ?? '',
+      external_phone: tenant.phone ?? '',
+      external_address_line: tenant.address?.line ?? '',
+      external_city: tenant.address?.city ?? '',
+      external_department_code: tenant.address?.department_code || '11',
+    });
+  }
+
+  /**
+   * `document_type` llega de la base como codigo DIAN ('31') o como etiqueta
+   * ('NIT', 'CC'). El selector del formulario trabaja con codigos, asi que una
+   * etiqueta cruda dejaba el campo en blanco y el operador creia que el dato
+   * no existia.
+   */
+  private normalizeDocumentType(raw: string | null | undefined): string {
+    const value = (raw ?? '').trim().toUpperCase();
+    if (!value) return '31';
+    const byLabel: Record<string, string> = {
+      NIT: '31',
+      CC: '13',
+      CE: '22',
+      PASAPORTE: '41',
+      PA: '41',
+    };
+    if (byLabel[value]) return byLabel[value];
+    return this.documentTypeOptions.some((o) => String(o.value) === value)
+      ? value
+      : '31';
+  }
+
+  private resetAcquirerFiscalFields(): void {
+    this.invoiceForm.patchValue({
+      external_legal_name: '',
+      external_tax_id: '',
+      external_tax_id_dv: '',
+      external_document_type: '31',
+      external_person_type: '1',
+      external_tax_regime_code: '48',
+      external_email: '',
+      external_phone: '',
+      external_address_line: '',
+      external_city: '',
+      external_department_code: '11',
+    });
+  }
+
+  // ── Líneas ───────────────────────────────────────────────────────
+  updateNewLine(patch: Partial<NewLineDraft>): void {
+    this.newLine.update((line) => ({ ...line, ...patch }));
+  }
+
+  openLineModal(): void {
+    this.newLine.set(this.emptyLineDraft());
+    this.showLineModal.set(true);
+  }
+
+  private buildLineGroup(draft: Partial<NewLineDraft>, taxes: LineTaxSelection[]): FormGroup {
+    return this.fb.group({
+      row_uid: [`row-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`],
+      description: [draft.description ?? '', Validators.required],
+      quantity: [
+        draft.quantity ?? 1,
+        [Validators.required, Validators.min(0.0001)],
+      ],
+      unit_price: [draft.unit_price ?? 0, [Validators.required, Validators.min(0)]],
+      unit_code: [draft.unit_code || DEFAULT_UNIT_CODE],
+      discount_amount: [draft.discount_amount ?? 0, Validators.min(0)],
+      taxes: [taxes],
+      account_code: [null as string | null],
+      // Inerte en una superficie sólo-estándar; ver `lineasRowPaths`.
+      aiu_field: [''],
+    });
+  }
+
+  confirmLine(): void {
+    const line = this.newLine();
+    if (!line.description?.trim() || line.quantity <= 0 || line.unit_price < 0) {
+      this.toast.error('Revisa los datos de la línea: descripción, cantidad > 0 y precio ≥ 0.');
+      return;
+    }
+
+    const selected = PLATFORM_TAX_CATALOG.find((t) => t.id === line.tax_rate_id);
+    const taxes: LineTaxSelection[] =
+      selected && selected.rate > 0
+        ? [
+            {
+              tax_rate_id: selected.id,
+              rate: selected.rate,
+              tax_type: selected.tax_type,
+              name: selected.name,
+              is_inclusive: line.is_inclusive,
+            },
+          ]
+        : [];
+
+    this.itemsArray.push(this.buildLineGroup(line, taxes));
     this.showLineModal.set(false);
   }
-  removeLine(i: number): void {
-    this.lines.update((arr) => arr.filter((_, idx) => idx !== i));
+
+  /** Línea en blanco, para quien prefiere teclear directo en la rejilla. */
+  addBlankLine(): void {
+    this.itemsArray.push(this.buildLineGroup({}, []));
   }
 
-  addLineTax(): void {
-    this.newLine.update((l) => ({
-      ...l,
-      taxes: [...l.taxes, { tax_type: 'IVA', rate: 0.19 }],
-    }));
-  }
-  removeLineTax(i: number): void {
-    this.newLine.update((l) => ({
-      ...l,
-      taxes: l.taxes.filter((_, idx) => idx !== i),
-    }));
-  }
-  updateLineTax(i: number, key: 'tax_type' | 'rate' | 'is_inclusive', value: any): void {
-    this.newLine.update((l) => ({
-      ...l,
-      taxes: l.taxes.map((t, idx) =>
-        idx === i
-          ? key === 'tax_type'
-            ? { ...t, tax_type: value }
-            : key === 'rate'
-            ? { ...t, rate: Number(value) }
-            : { ...t, is_inclusive: Boolean(value) }
-          : t,
-      ),
-    }));
+  removeLine(index: number): void {
+    this.itemsArray.removeAt(index);
   }
 
-  // ── Withholdings ──────────────────────────────────────────────────────
-
+  // ── Retenciones ──────────────────────────────────────────────────
   addWithholding(): void {
-    this.withholdings.update((arr) => [
-      ...arr,
-      { id: this.uuid(), role: 'practiced', concept_id: 0, base_amount: 0, rate: 0 },
-    ]);
-  }
-  removeWithholding(i: number): void {
-    this.withholdings.update((arr) => arr.filter((_, idx) => idx !== i));
-  }
-  updateWithholding(i: number, key: keyof FormWithholding, value: any): void {
-    this.withholdings.update((arr) =>
-      arr.map((wh, idx) => (idx === i ? { ...wh, [key]: value } : wh)),
+    this.withholdingsArray.push(
+      this.fb.group({
+        concept_id: [null as number | null, Validators.required],
+        role: ['practiced', Validators.required],
+        rate: [
+          0,
+          [Validators.required, Validators.min(0), Validators.max(100)],
+        ],
+        base: [Math.round(this.totals().taxableBase * 100) / 100, Validators.min(0)],
+      }),
     );
   }
 
-  // ── Submit ────────────────────────────────────────────────────────────
+  removeWithholding(index: number): void {
+    this.withholdingsArray.removeAt(index);
+  }
+
+  /**
+   * Al elegir concepto se propone su tarifa de catálogo. Se PROPONE, no se
+   * impone: la tarifa efectiva puede diferir por acuerdo o por base especial,
+   * y el operador debe poder corregirla.
+   */
+  onWithholdingConceptChange(index: number): void {
+    const row = this.withholdingControls()[index];
+    if (!row) return;
+    const conceptId = Number(row.get('concept_id')?.value);
+    const concept = this.withholdingConcepts().find((c) => c.id === conceptId);
+    if (concept?.rate != null) {
+      row.get('rate')?.setValue(Number((concept.rate * 100).toFixed(4)));
+    }
+  }
+
+  // ── Contabilidad ─────────────────────────────────────────────────
+
+  /** Aplica la cuenta de la primera línea a todas las demás. */
+  applyAccountToAllLines(): void {
+    const rows = this.itemControls();
+    const first = rows[0]?.get('account_code')?.value ?? null;
+    for (const row of rows.slice(1)) {
+      row.get('account_code')?.setValue(first);
+    }
+    this.toast.success('Cuenta de ingreso aplicada a todas las líneas.');
+  }
+
+  // ── Perfiles ────────────────────────────────────────────────────
+
+  /**
+   * Sólo perfiles de operación estándar: es lo único que esta consola emite.
+   */
+  readonly profilesForOperationType = computed(() =>
+    this.store
+      .profiles()
+      .filter(
+        (p) =>
+          p.operation_type ===
+          PlatformInvoiceCreateComponent.OPERATION_TYPE_STANDARD,
+      ),
+  );
+
+  /**
+   * El listado de perfiles (`GET /profiles`) responde con `PROFILE_SELECT`, que
+   * NO incluye `current_config`: ese snapshot vive en la version vigente y solo
+   * lo resuelve el detalle (`GET /profiles/:id` -> `PlatformInvoiceProfileDetail`).
+   * Por eso el perfil se aplica en dos tiempos: `profile_id` de inmediato desde
+   * la fila del listado, y el resto del snapshot cuando llega el detalle.
+   */
+  applyProfile(profileId: number): void {
+    const p = this.store.profiles().find((x) => x.id === profileId);
+    if (!p) return;
+
+    this.invoiceForm.patchValue({ profile_id: p.id });
+
+    this.fiscal
+      .getProfile(p.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (detail) => {
+          const cfg = detail.current_config as Record<string, any> | null;
+          if (cfg) this.applyProfileConfig(cfg);
+          this.toast.success(`Perfil «${p.name}» aplicado correctamente.`);
+        },
+        error: () => {
+          this.toast.error(
+            `No se pudo cargar la configuracion del perfil «${p.name}».`,
+            'Error',
+          );
+        },
+      });
+  }
+
+  /**
+   * Vuelca la configuración del perfil sobre el formulario de la factura.
+   *
+   * El perfil guarda la config ANIDADA (`dian.*`, `general.*`, `currency.*`,
+   * `withholdings[]`, `model_lines[]`) — es la misma forma que arma
+   * `buildConfig()` en el editor. Este método leía `cfg['resolution_id']`,
+   * `cfg['payment_form']` y `cfg['notes']` a nivel RAÍZ, claves que la config
+   * no tiene nunca. El resultado era una aplicación de perfil silenciosamente
+   * vacía: el toast decía «Perfil aplicado correctamente» y no se movía ni un
+   * campo, incluida la resolución DIAN, que es justamente lo que se fija en el
+   * perfil para no tener que elegirla en cada emisión.
+   */
+  private applyProfileConfig(cfg: Record<string, any>): void {
+    const dian = (cfg['dian'] ?? {}) as Record<string, any>;
+    const general = (cfg['general'] ?? {}) as Record<string, any>;
+    const currency = (cfg['currency'] ?? {}) as Record<string, any>;
+
+    const patch: Record<string, unknown> = {};
+    if (dian['resolution_id']) patch['resolution_id'] = dian['resolution_id'];
+    if (dian['payment_method_code']) patch['payment_form'] = dian['payment_method_code'];
+    if (dian['payment_means_code']) patch['payment_means_code'] = dian['payment_means_code'];
+
+    // Las notas del documento salen de `dian.header_notes` (arreglo, tal cual
+    // van al XML) y, si no hay, de la descripción libre del perfil.
+    const headerNotes = Array.isArray(dian['header_notes']) ? dian['header_notes'] : [];
+    const notes = headerNotes.filter((n: unknown) => !!String(n ?? '').trim()).join('\n')
+      || String(general['description'] ?? '').trim();
+    if (notes) patch['notes'] = notes;
+
+    if (currency['declare_foreign'] && currency['code']) {
+      patch['declare_foreign'] = true;
+      patch['foreign_currency_code'] = currency['code'];
+    }
+
+    if (Object.keys(patch).length > 0) this.invoiceForm.patchValue(patch);
+
+    // `taxes` y `withholdings` viajan como `{ rules: [...] }` — es la forma
+    // canónica de `invoice-profile-config.contract`. Se acepta también el
+    // arreglo suelto por snapshots viejos.
+    this.applyProfileWithholdings(this.configRules(cfg['withholdings']));
+    this.applyProfileModelLines(cfg['model_lines'], this.configRules(cfg['taxes']));
+  }
+
+  private configRules(raw: unknown): Record<string, any>[] {
+    if (Array.isArray(raw)) return raw as Record<string, any>[];
+    const nested = (raw as Record<string, any> | null)?.['rules'];
+    return Array.isArray(nested) ? (nested as Record<string, any>[]) : [];
+  }
+
+  /**
+   * Retenciones del perfil. Se reemplaza el arreglo entero en vez de sumar:
+   * aplicar dos perfiles seguidos duplicaba cada concepto.
+   */
+  private applyProfileWithholdings(raw: unknown): void {
+    if (!Array.isArray(raw) || raw.length === 0) return;
+    this.withholdingsArray.clear();
+    for (const w of raw as Record<string, any>[]) {
+      const conceptId = Number(w['concept_id']);
+      if (!Number.isFinite(conceptId) || conceptId <= 0) continue;
+      this.withholdingsArray.push(
+        this.fb.group({
+          concept_id: [conceptId, Validators.required],
+          role: [String(w['role'] ?? 'practiced'), Validators.required],
+          rate: [
+            Number(w['rate']) || 0,
+            [Validators.required, Validators.min(0), Validators.max(100)],
+          ],
+          base: [
+            Math.round(this.totals().taxableBase * 100) / 100,
+            Validators.min(0),
+          ],
+        }),
+      );
+    }
+    this.sectionExpanded.update((s) => ({ ...s, retenciones: true }));
+  }
+
+  /**
+   * Líneas modelo del perfil. Sólo siembran una factura VACÍA: si el operador
+   * ya cargó líneas, aplicar un perfil no puede borrárselas.
+   *
+   * Las tarifas del perfil vienen en `taxes[]` como porcentaje en texto
+   * ('19.00'); se resuelven contra el catálogo para conservar el nombre y el
+   * `tax_type` que después arman el desglose y el total de impuestos.
+   */
+  private applyProfileModelLines(rawLines: unknown, rawTaxes: unknown): void {
+    if (!Array.isArray(rawLines) || rawLines.length === 0) return;
+    if (this.itemsArray.length > 0) return;
+
+    const taxes: LineTaxSelection[] = (Array.isArray(rawTaxes) ? rawTaxes : [])
+      .filter((t: any) => t?.taxable !== false)
+      .map((t: any) => {
+        const rate = Number(t?.rate) || 0;
+        // `tax_code` es el código de tributo del anexo (13.2.2): '01' IVA,
+        // '04' INC. Se busca primero por código+tarifa y sólo se cae a la
+        // tarifa sola cuando el perfil no lo trae, porque dos tributos pueden
+        // compartir porcentaje y quedarían intercambiados en el XML.
+        const type = t?.tax_code === '04' ? 'INC' : t?.tax_code === '01' ? 'IVA' : null;
+        const catalog =
+          (type && this.availableTaxes.find((c) => c.tax_type === type && c.rate === rate)) ||
+          this.availableTaxes.find((c) => c.rate === rate);
+        return {
+          tax_rate_id: catalog?.id ?? 0,
+          name: catalog?.name ?? `Impuesto ${rate}%`,
+          rate,
+          tax_type: catalog?.tax_type ?? 'IVA',
+          is_inclusive: false,
+        } as LineTaxSelection;
+      })
+      .filter((t) => t.rate > 0);
+
+    for (const l of rawLines as Record<string, any>[]) {
+      this.itemsArray.push(
+        this.buildLineGroup(
+          {
+            description: String(l['description'] ?? ''),
+            quantity: Number(l['quantity']) || 1,
+            unit_price: Number(l['unit_price']) || 0,
+            unit_code: String(l['unit_code'] || DEFAULT_UNIT_CODE),
+            discount_amount: 0,
+          },
+          taxes,
+        ),
+      );
+    }
+    this.sectionExpanded.update((s) => ({ ...s, lineas: true }));
+  }
+
+  clearProfile(): void {
+    this.invoiceForm.patchValue({ profile_id: null });
+  }
+
+  // ── Previsualizar & Emitir ──────────────────────────────────────
+  readonly printPreviewOpen = signal(false);
+  readonly printPreviewLoading = signal(false);
+  readonly printPreviewResult = signal<any | null>(null);
+  readonly printPreviewError = signal('');
+  readonly printPreviewSrcdoc = computed(() => this.printPreviewResult()?.html || '');
+
+  /**
+   * Payload de la MUESTRA. No es el de emisión.
+   *
+   * El endpoint de previsualización valida `PreviewProfileDto` bajo
+   * `forbidNonWhitelisted: true`: mandarle el DTO de la factura devolvía un
+   * 400 en TODAS las previsualizaciones, y el modal lo pintaba como «no se
+   * pudo generar» sin decir por qué.
+   *
+   * `bucket: 'costo'` es lo correcto para una factura estándar — el servicio lo
+   * traduce a `aiu_component: null`, que es exactamente «esta línea no hace
+   * parte de una base AIU».
+   */
+  private buildPreviewPayload(): PreviewPlatformProfilePayload {
+    const val = this.rawValue();
+    const items = (val['items'] || []) as any[];
+
+    const payload: PreviewPlatformProfilePayload = {
+      issue_date: val['issue_date'] || undefined,
+      lines: items.map((i) => ({
+        bucket: 'costo',
+        description: i.description || undefined,
+        quantity: Number(i.quantity) || 1,
+        unit_price: Number(i.unit_price) || 0,
+        discount_amount: Number(i.discount_amount) || 0,
+        unit_code: i.unit_code || DEFAULT_UNIT_CODE,
+      })),
+    };
+
+    if (this.acquirerMode() === 'external' && val['external_legal_name']?.trim()) {
+      payload.customer = {
+        legal_name: val['external_legal_name'].trim(),
+        document_number: val['external_tax_id']?.trim() || undefined,
+        document_type: val['external_document_type'] || undefined,
+      };
+    } else {
+      const tenant = val['customer_tenant'] as PlatformAcquirer | null;
+      if (tenant) {
+        payload.customer = {
+          legal_name: tenant.legal_name || tenant.name || undefined,
+          document_number: tenant.tax_id || undefined,
+          document_type: '31',
+        };
+      }
+    }
+
+    return payload;
+  }
+
+  openPrintPreview(): void {
+    const profileId =
+      this.invoiceForm.value.profile_id ??
+      this.store.profiles().find((p) => p.is_default)?.id ??
+      this.profilesForOperationType()[0]?.id ??
+      null;
+
+    if (!profileId) {
+      this.printPreviewError.set(
+        'No hay ningún perfil de facturación estándar configurado. Crea uno para poder previsualizar el documento.',
+      );
+      this.printPreviewResult.set(null);
+      this.printPreviewOpen.set(true);
+      return;
+    }
+
+    this.printPreviewLoading.set(true);
+    this.printPreviewOpen.set(true);
+    this.printPreviewError.set('');
+
+    this.store
+      .previewProfile(profileId, this.buildPreviewPayload())
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          this.printPreviewResult.set(res);
+          this.printPreviewLoading.set(false);
+        },
+        error: (error: unknown) => {
+          this.printPreviewLoading.set(false);
+          this.printPreviewError.set(this.describeError(error, 'previsualizar'));
+        },
+      });
+  }
+
+  closePrintPreview(open: boolean): void {
+    this.printPreviewOpen.set(open);
+    if (!open) {
+      this.printPreviewResult.set(null);
+      this.printPreviewError.set('');
+    }
+  }
+
+  private describeError(error: unknown, action: string): string {
+    if (error instanceof HttpErrorResponse) {
+      const body = error.error;
+      const message = body?.message ?? body?.error ?? error.message;
+      if (Array.isArray(message)) return message.join(' · ');
+      if (typeof message === 'string' && message.trim()) return message;
+    }
+    if (error instanceof Error && error.message) return error.message;
+    return `No se pudo ${action} el documento.`;
+  }
+
+  buildPayload(): any | null {
+    const val = this.rawValue();
+
+    if (!val['items'] || val['items'].length === 0) {
+      this.toast.error('Debes agregar al menos una línea a la factura.');
+      return null;
+    }
+
+    let customerPayload: any;
+    if (this.acquirerMode() === 'external') {
+      if (!val['external_legal_name']?.trim() || !val['external_tax_id']?.trim()) {
+        this.toast.error('Completa el nombre o razón social y el NIT/documento del cliente externo.');
+        return null;
+      }
+      const personType = val['external_person_type'] || '1';
+      customerPayload = {
+        kind: 'external',
+        legal_name: val['external_legal_name'].trim(),
+        tax_id: val['external_tax_id'].trim(),
+        tax_id_dv: val['external_tax_id_dv'] || undefined,
+        document_type: val['external_document_type'] || '31',
+        person_type: personType,
+        tax_regime_code: val['external_tax_regime_code'] || '48',
+        // La responsabilidad fiscal se deriva del tipo de persona en vez de
+        // mandar siempre `R-99-PN` («no responsable», persona natural), que
+        // declaraba mal a toda persona jurídica.
+        fiscal_responsibilities: [personType === '1' ? 'O-13' : 'R-99-PN'],
+        email: val['external_email']?.trim() || undefined,
+        phone: val['external_phone']?.trim() || undefined,
+        address: {
+          line: val['external_address_line']?.trim() || undefined,
+          city: val['external_city']?.trim() || undefined,
+          department_code: val['external_department_code']?.trim() || undefined,
+        },
+      };
+    } else {
+      const tenant = val['customer_tenant'] as PlatformAcquirer;
+      if (!tenant) {
+        this.toast.error('Selecciona una tienda, usuario u organización como destinatario.');
+        return null;
+      }
+      // Se manda el tenant_id Y los datos fiscales que quedaron en pantalla.
+      // El backend resuelve la ficha por `tenant_id` y aplica encima lo que
+      // venga en estos campos, que es lo que permite emitirle a una tienda a
+      // la que le falta el NIT o el DV en la base sin tener que editarle la
+      // ficha primero. Si un campo va vacío no se envía: `undefined` significa
+      // «no lo toques», no «bórralo».
+      const trimmed = (key: string): string | undefined => {
+        const raw = String(val[key] ?? '').trim();
+        return raw ? raw : undefined;
+      };
+      const addressLine = trimmed('external_address_line');
+      const addressCity = trimmed('external_city');
+      const addressDepartment = trimmed('external_department_code');
+      customerPayload = {
+        kind: tenant.kind,
+        tenant_id: tenant.tenant_id,
+        legal_name: trimmed('external_legal_name'),
+        tax_id: trimmed('external_tax_id'),
+        tax_id_dv: trimmed('external_tax_id_dv'),
+        // El tipo de documento tiene que viajar: la guarda de DV del backend
+        // sólo exige digito de verificacion cuando el documento es NIT ('31'),
+        // asi que sin este campo una tienda con cedula quedaba imposible de
+        // facturar. Va siempre con el valor que se ve en pantalla, que es el
+        // que `onTenantPicked` normalizo desde la ficha.
+        document_type: trimmed('external_document_type'),
+        person_type: val['external_person_type'] === '2' ? '2' : '1',
+        tax_regime_code: trimmed('external_tax_regime_code'),
+        email: trimmed('external_email'),
+        phone: trimmed('external_phone'),
+        address:
+          addressLine || addressCity || addressDepartment
+            ? {
+                line: addressLine,
+                city: addressCity,
+                department_code: addressDepartment,
+              }
+            : undefined,
+      };
+    }
+
+    const items = (val['items'] as any[]).map((i) => {
+      const financials = this.lineFinancials(i);
+      return {
+        description: i.description,
+        quantity: +i.quantity,
+        unit_price: +i.unit_price,
+        unit_code: i.unit_code || DEFAULT_UNIT_CODE,
+        discount_amount: +i.discount_amount || 0,
+        account_code: i.account_code?.trim() || undefined,
+        // ÚNICO punto de conversión porcentaje → fracción 0–1, que es lo que
+        // valida `MvpV1InvoiceLineTaxDto` (`@Min(0) @Max(1)`).
+        taxes: ((i.taxes || []) as LineTaxSelection[]).map((t, taxIndex) => ({
+          tax_type: (t.tax_type || 'IVA').toUpperCase(),
+          rate: (Number(t.rate) || 0) / 100,
+          is_inclusive: Boolean(t.is_inclusive),
+          taxable_amount: Math.round(financials.base * 100) / 100,
+          tax_amount:
+            Math.round((financials.taxes[taxIndex]?.amount ?? 0) * 100) / 100,
+        })),
+      };
+    });
+
+    const withholdings = (val['withholdings'] as any[])
+      .filter((w) => w?.concept_id)
+      .map((w, index) => ({
+        role: w.role || 'practiced',
+        concept_id: Number(w.concept_id),
+        base_amount: Math.round((Number(w.base) || 0) * 100) / 100,
+        rate: (Number(w.rate) || 0) / 100,
+        amount: Math.round((this.withholdingAmounts()[index] ?? 0) * 100) / 100,
+      }));
+
+    const dto: any = {
+      profile_id: val['profile_id'] || undefined,
+      resolution_id: val['resolution_id'] || undefined,
+      customer: customerPayload,
+      items,
+      operation_type: PlatformInvoiceCreateComponent.OPERATION_TYPE_STANDARD,
+      payment_form: val['payment_form'] || '1',
+      payment_means_code: val['payment_means_code'] || '10',
+      issue_date: val['issue_date'] || undefined,
+      notes: val['notes']?.trim() || undefined,
+      counterpart_account_code: val['counterpart_account_code']?.trim() || undefined,
+    };
+
+    // `due_date` sólo viaja si de verdad hay una fecha: la cadena vacía falla
+    // `@IsISO8601()` y devolvía un 400 en toda factura a crédito.
+    if (val['payment_form'] === '2' && val['due_date']) {
+      dto.due_date = val['due_date'];
+    }
+
+    if (withholdings.length > 0) {
+      dto.withholdings = withholdings;
+    }
+
+    if (val['declare_foreign'] && val['foreign_currency_code']) {
+      dto.currency = {
+        iso_4217: val['foreign_currency_code'],
+        exchange_rate: val['exchange_rate'] ? Number(val['exchange_rate']) : undefined,
+        exchange_rate_date: val['exchange_rate_date'] || undefined,
+      };
+    }
+
+    if (val['save_as_profile_enabled'] && val['save_as_profile_name']?.trim()) {
+      dto.save_as_profile = {
+        name: val['save_as_profile_name'].trim(),
+        is_default: false,
+      };
+    }
+
+    return dto;
+  }
 
   async submit(): Promise<void> {
-    if (!this.canSubmit()) {
-      this.toast.error('Formulario incompleto. Verifica destinatario, resolución y líneas.');
+    // Antes se emitía sin mirar la validez: el selector de resolución era
+    // `Validators.required` y aun así se podía disparar el POST sin ninguna.
+    this.invoiceForm.markAllAsTouched();
+    if (this.invoiceForm.invalid) {
+      this.errorMessage.set(
+        'Revisa los campos marcados: hay datos obligatorios sin completar.',
+      );
+      this.toast.error('El formulario tiene campos obligatorios sin completar.');
       return;
     }
-    const tenant = this.acquirer();
-    if (!tenant) {
-      this.toast.error('Selecciona un destinatario.');
-      return;
-    }
+
+    const dto = this.buildPayload();
+    if (!dto) return;
 
     this.submitting.set(true);
-    this.errorMessage.set(null);
+    this.errorMessage.set('');
 
-    const customer = {
-      kind: tenant.kind,
-      tenant_id: tenant.tenant_id,
-      // overrides inline si el operador los lleno en el form
-      legal_name_override: tenant.legal_name,
-      person_type_override: tenant.person_type ?? '2',
-      tax_regime_code_override: tenant.tax_regime_code,
-    } as any;
-
-    const body =
-      this.documentType() === 'sales_invoice'
-        ? {
-            customer,
-            items: this.lines().map((l) => ({
-              description: l.description,
-              quantity: l.quantity,
-              unit_price: l.unit_price,
-              discount_amount: l.discount_amount || undefined,
-              taxes: l.taxes.length > 0 ? l.taxes : undefined,
-              unit_code: l.unit_code,
-              account_code: l.account_code,
-              aiu_component: l.aiu_component,
-              is_inclusive: l.is_inclusive,
-            })),
-            operation_type: this.operationType(),
-            aiu_contract_object:
-              this.operationType() === '09' ? this.aiuContractObject() : undefined,
-            payment_form: this.paymentForm(),
-            due_date: this.dueDate() || undefined,
-            currency: {
-              iso_4217: this.currencyIso(),
-              exchange_rate: this.exchangeRate() || undefined,
-              exchange_rate_date: this.exchangeRateDate() || undefined,
-            },
-            withholdings:
-              this.withholdings().length > 0
-                ? this.withholdings().map((wh) => ({
-                    role: wh.role,
-                    concept_id: wh.concept_id,
-                    base_amount: wh.base_amount,
-                    rate: wh.rate,
-                    amount: wh.amount,
-                  }))
-                : undefined,
-            global_discount_amount: this.globalDiscountAmount() || undefined,
-            resolution_id: this.resolutionId(),
-          }
-        : {
-            supplier: customer,
-            items: this.lines().map((l) => ({
-              description: l.description,
-              quantity: l.quantity,
-              unit_price: l.unit_price,
-              discount_amount: l.discount_amount || undefined,
-              taxes: l.taxes.length > 0 ? l.taxes : undefined,
-              unit_code: l.unit_code,
-            })),
-            operation_type: this.operationType(),
-            payment_means_code: '10',
-            due_date: this.dueDate() || undefined,
-            currency: {
-              iso_4217: this.currencyIso(),
-              exchange_rate: this.exchangeRate() || undefined,
-              exchange_rate_date: this.exchangeRateDate() || undefined,
-            },
-            global_discount_amount: this.globalDiscountAmount() || undefined,
-            resolution_id: this.resolutionId(),
-          };
-
-    const url =
-      this.documentType() === 'sales_invoice'
-        ? `${this.base}/sales-invoices`
-        : `${this.base}/support-documents`;
+    const url = `${environment.apiUrl}/superadmin/subscriptions/fiscal/sales-invoices`;
 
     try {
       const res = await firstValueFrom(
-        this.http.post<{ success: boolean; data: { invoice_id: number; fiscal_number: string } }>(
-          url,
-          body,
-        ),
+        this.http.post<{
+          success: boolean;
+          data: { invoice_id: number; fiscal_number: string };
+        }>(url, dto),
       );
       if (res.success && res.data?.invoice_id) {
         this.toast.success(
-          `Factura ${res.data.fiscal_number} creada. Redirigiendo al detalle.`,
+          `Factura ${res.data.fiscal_number || ''} emitida exitosamente. Redirigiendo al detalle...`,
         );
+        // `invoice_id` es un `fiscal_transmissions.id`, NO un
+        // `subscription_invoices.id`: la ruta `invoices/:id` resuelve la
+        // secuencia de suscripciones y mostraba el documento equivocado.
         this.router.navigate([
           '/super-admin/fiscal/invoicing/platform-invoices',
           res.data.invoice_id,
         ]);
       } else {
-        this.errorMessage.set('La API no devolvió el resultado esperado.');
+        this.errorMessage.set('La API no devolvió la confirmación esperada.');
       }
-    } catch (error) {
-      const msg =
-        (error instanceof HttpErrorResponse && (error.error?.message ?? error.message)) ||
-        (error instanceof Error ? error.message : null) ||
-        'Error desconocido al crear la factura.';
+    } catch (error: unknown) {
+      const msg = this.describeError(error, 'emitir');
       this.errorMessage.set(msg);
       this.toast.error(msg);
     } finally {
@@ -912,22 +1493,7 @@ export class PlatformInvoiceCreateComponent {
     }
   }
 
-  // ── Utils ────────────────────────────────────────────────────────────
-
-  private makeEmptyLine(): FormLine {
-    return {
-      id: this.uuid(),
-      description: '',
-      quantity: 1,
-      unit_price: 0,
-      discount_amount: 0,
-      taxes: [],
-      unit_code: 'EA',
-      is_inclusive: false,
-    };
-  }
-
-  private uuid(): string {
-    return `l-${Math.random().toString(36).slice(2, 10)}`;
+  onCancel(): void {
+    this.router.navigate(['/super-admin/fiscal/invoicing/invoices']);
   }
 }

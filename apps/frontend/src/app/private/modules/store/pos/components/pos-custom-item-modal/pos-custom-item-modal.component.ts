@@ -185,6 +185,10 @@ export class PosCustomItemModalComponent {
 
     // `total` es el total de la línea CON impuesto y CON el descuento ya
     // restado — lo que el cajero acaba de ver en la previsión del modal.
+    // El borrador de este carril SIEMPRE es un ítem personalizado (`[draft]="null"`
+    // arriba): no hay producto resuelto, así que `price_unit_quantity` viaja
+    // ausente y el divisor de la aritmética cae a 1 — la escala del catálogo
+    // nunca aplica a texto libre.
     const total = computeLineMath(draft).total;
     const description = String(draft.description ?? '').trim();
 

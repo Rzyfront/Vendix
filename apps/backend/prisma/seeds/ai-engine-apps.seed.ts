@@ -1317,6 +1317,58 @@ Devuelve SOLO este JSON:
         },
       },
     },
+    {
+      // QUI-719 — CRM Landing: genera el documento de bloques v1 que consume
+      // el editor y el render público. El schema del prompt ES el de
+      // `crm-blocks.contract.ts`: cualquier cambio de contrato exige
+      // actualizar este prompt (y solo aplica a instalaciones nuevas — el
+      // seed nunca sobrescribe prompts editados).
+      key: 'crm_landing_generator',
+      name: 'CRM Landing Generator',
+      description:
+        'Genera la estructura JSON de bloques de la landing page por defecto del módulo CRM a partir de la configuración del negocio',
+      output_format: 'json',
+      model_type: 'text' as ai_model_type_enum,
+      temperature: 0.4,
+      max_tokens: 4000,
+      is_active: true,
+      system_prompt: `Eres un diseñador web experto en landings de conversión para pequeños negocios colombianos. Generas el contenido por defecto de una landing page a partir de la información real del negocio.
+
+Debes devolver ÚNICAMENTE un JSON válido que coincida EXACTAMENTE con este esquema — sin markdown, sin explicaciones, sin campos extra:
+
+{
+  "schema_version": 1,
+  "theme": { "primary_color": "#RRGGBB", "secondary_color": "#RRGGBB" },
+  "blocks": [
+    { "id": "hero", "type": "hero", "props": { "title": "string", "subtitle": "string", "cta_label": "string" } },
+    { "id": "features", "type": "features", "props": { "title": "string", "items": [ { "icon": "string corto", "title": "string", "description": "string" } ] } },
+    { "id": "products", "type": "products_grid", "props": { "title": "string", "subtitle": "string" } },
+    { "id": "about", "type": "about", "props": { "title": "string", "body": "string (2-3 párrafos cortos separados por \\n\\n)" } },
+    { "id": "contact", "type": "contact", "props": { "title": "string", "description": "string" } },
+    { "id": "footer_cta", "type": "footer_cta", "props": { "title": "string", "subtitle": "string", "cta_label": "string" } }
+  ]
+}
+
+Reglas inquebrantables:
+1. Los 6 bloques deben existir, en ese orden. ids fijos: hero, features, products, about, contact, footer_cta.
+2. NUNCA inventes productos, precios, URLs, teléfonos ni direcciones: los productos reales se inyectan aparte; en products_grid escribe solo título y subtítulo atractivos.
+3. Los textos deben reflejar el giro real del negocio (industria, tipo de tienda, ubicación) en español colombiano natural, tono cercano y profesional.
+4. theme.primary_color debe armonizar con la industria (ej: restaurante → tonos cálidos, gym → energía, retail → confianza). Colores hex válidos #RRGGBB.
+5. Sin emojis en títulos.`,
+      prompt_template: `Información real del negocio:
+
+- Nombre: {{store_name}}
+- Industria(s): {{industries}}
+- Tipo de tienda: {{store_type}}
+- Ubicación: {{city_department}}
+- Zona horaria / país: {{timezone}}
+- Información fiscal (para tono formal si aplica): {{fiscal_summary}}
+
+Productos más vendidos (solo para inspirar el copy de products_grid, NO listarlos):
+{{products_json}}
+
+Genera el JSON de la landing page por defecto siguiendo el esquema exacto del system prompt.`,
+    },
   ];
 
   let appsCreated = 0;

@@ -1,0 +1,36 @@
+# FB-01: GET /store/print-formats
+# Plan section: A.3 + Phase B (catalog 10→11 cards)
+# Source: apps/backend/src/domains/store/print-formats/controllers/print-formats.controller.ts:36
+# Permission: store:settings:read, invoicing:read
+
+COMMAND:
+curl -sk -X GET 'https://api.vendix.com/api/store/print-formats' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESPONSE SHAPE:
+{
+  "success": true,
+  "data": [
+    { "format_type": "pos_sale_ticket", "name": "Ticket de Venta POS", "category": "Ventas POS", "icon": "receipt", "engine": "html", "is_configured": bool, "is_active": bool, "gateway_enabled": bool, "template_name": string, "updated_at": ISO | null },
+    ... 9 más
+  ]
+}
+
+VERIFICATION:
+# Pre-B.3: 10 cards
+jq '.data | length == 10' debe retornar true
+jq '[.data[].format_type] | contains(["dispatch_ticket"])' debe retornar false (pre-B.3)
+
+# Post-B.3: 11 cards
+jq '.data | length == 11' debe retornar true (verificar después de B.3)
+jq '[.data[].format_type] | contains(["dispatch_ticket"])' debe retornar true (post-B.3)
+
+# Sin autenticación
+curl -sk -X GET 'https://api.vendix.com/api/store/print-formats' | jq '.success' debe retornar false (401)
+
+# Sin store context
+curl -sk -X GET 'https://api.vendix.com/api/store/print-formats' -H "Authorization: Bearer $TOK" | jq '.error.code' debe ser 'ROLE_SCOPE_003' (403)

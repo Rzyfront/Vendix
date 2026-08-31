@@ -67,4 +67,39 @@ describe('PrintFiscalValidatorService', () => {
       service.assertFiscalCompliance('fiscal_electronic_invoice', invalidCustomDef),
     ).toThrow(VendixHttpException);
   });
+
+  // CP-DTLP-20260827 (Phase B.6) — dispatch_ticket es NO fiscal: aunque el
+  // usuario suba una custom_template sin {{fiscal.cufe}}, NO debe lanzar
+  // 422. Antes de B.6 la guarda vivía en una comparación explícita de dos
+  // valores; ahora es declarativa via FISCAL_FORMATS.
+  it('should NOT reject dispatch_ticket with custom_template missing CUFE (non-fiscal)', () => {
+    const dispatchCustomDef: PrintFormatDefinition = {
+      paper: { format: 'thermal_80', width_mm: 80, is_roll: true, margin_mm: 0, copies: 1 },
+      sections: [],
+      custom_template: '<div>Despacho de {{customer.name}} sin CUFE (no aplica)</div>',
+    };
+
+    expect(() =>
+      service.assertFiscalCompliance(
+        'dispatch_ticket' as unknown as 'fiscal_electronic_invoice',
+        dispatchCustomDef,
+      ),
+    ).not.toThrow();
+  });
+
+  // CP-DTLP-20260827 (Phase B.6) — quotation ya era no-fiscal antes; este test
+  // fija el invariante de que ningún formato fuera de FISCAL_FORMATS dispara
+  // PRINT_FISCAL_STRUCTURE_VIOLATION_001, sin importar qué tan "vacía" luzca
+  // la custom_template.
+  it('should NOT reject quotation with empty custom_template (non-fiscal baseline)', () => {
+    const quotationEmptyDef: PrintFormatDefinition = {
+      paper: { format: 'letter', width_mm: 216, is_roll: false, margin_mm: 18, copies: 1 },
+      sections: [],
+      custom_template: '',
+    };
+
+    expect(() =>
+      service.assertFiscalCompliance('quotation', quotationEmptyDef),
+    ).not.toThrow();
+  });
 });

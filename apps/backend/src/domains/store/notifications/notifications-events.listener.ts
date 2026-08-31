@@ -24,6 +24,16 @@ import {
 } from '../invoicing/utils/dian-email-subject.util';
 import { tryResolveTenantFiscalIdentity } from '../../../common/helpers/fiscal-identity.helper';
 import { AppointmentQueueService } from '../reservations/appointment-queue/appointment-queue.service';
+import { writeInvoiceDeliveryEvent } from '../invoicing/delivery/invoice-delivery-events.writer';
+// Entrega PRIMARIA normativa. `InvoiceDeliveryService.deliver()` es el único
+// lugar del sistema que arma el `.zip` del Anexo Técnico 1.9 §9.1 (PDF
+// re-renderizado + XML firmado crudo + sobre `AttachedDocument`), y ya está
+// probado contra el XSD. `RequestContextService.runIsolated` abre el contexto de
+// tenant que su `StorePrismaService` necesita — `runIsolated` y no `run`, porque
+// forjar contexto desde un listener con `run` dejaría el tenant en el estático
+// de clase y el siguiente ejecutor fuera del ALS lo adoptaría en silencio.
+import { InvoiceDeliveryService } from '../invoicing/delivery/invoice-delivery.service';
+import { RequestContextService } from '../../../common/context/request-context.service';
 
 @Injectable()
 export class NotificationsEventsListener {
@@ -36,6 +46,7 @@ export class NotificationsEventsListener {
     private readonly s3_service: S3Service,
     private readonly appointment_queue_service: AppointmentQueueService,
     private readonly event_emitter: EventEmitter2,
+    private readonly invoice_delivery_service: InvoiceDeliveryService,
   ) {}
 
   /**
@@ -750,122 +761,72 @@ export class NotificationsEventsListener {
         return;
       }
 
-      // 4. Build organization data
-      const org = invoice.organization as any;
-      const address = org?.addresses?.[0];
-      const store_address = address
-        ? [address.address_line1, address.city, address.state_province]
-            .filter(Boolean)
-            .join(', ')
-        : undefined;
-
-      const customer_name =
-        invoice.customer_name ||
-        (customer
-          ? `${customer.first_name} ${customer.last_name}`
-          : 'Consumidor Final');
-
-      // 5. Build email data
-      const email_data: InvoiceEmailData = {
-        invoice_number: invoice.invoice_number,
-        invoice_type: invoice.invoice_type,
-        customer_name,
-        issue_date: this.formatDate(invoice.issue_date),
-        due_date: invoice.due_date
-          ? this.formatDate(invoice.due_date)
-          : undefined,
-        items: (invoice.invoice_items || []).map((item: any) => ({
-          description: item.description,
-          quantity: Number(item.quantity),
-          unit_price: Number(item.unit_price),
-          tax_amount: Number(item.tax_amount),
-          total_amount: Number(item.total_amount),
-        })),
-        subtotal: Number(invoice.subtotal_amount),
-        discount: Number(invoice.discount_amount),
-        tax: Number(invoice.tax_amount),
-        withholding: Number(invoice.withholding_amount),
-        total: Number(invoice.total_amount),
-        currency: invoice.currency || 'COP',
-        cufe: invoice.cufe || undefined,
-        notes: invoice.notes || undefined,
-        store_name: org?.legal_name || org?.name || 'N/A',
-        store_email: org?.email || undefined,
-        store_phone: org?.phone || undefined,
-        store_address,
-        store_nit: org?.tax_id || undefined,
-      };
-
-      const html = generateInvoiceEmailHtml(email_data);
-      const text = generateInvoiceEmailText(email_data);
-      const subject = this.buildInvoiceEmailSubject(
-        invoice,
-        email_data.store_name,
+      // 4. Entrega normativa — delegada, NO reimplementada.
+      //
+      // Hasta este cambio, la entrega PRIMARIA armaba aquí un `EmailAttachment[]`
+      // con el PDF descargado de S3 y el XML crudo como DOS adjuntos sueltos. Eso
+      // no cumple el Anexo Técnico 1.9 §9.1, que exige UN único `.zip` con un
+      // `AttachedDocument` que embeba el XML firmado y lleve la representación
+      // gráfica. El reenvío de conveniencia (E.6) sí lo cumplía desde
+      // `InvoiceDeliveryService.deliver()`, así que el sistema tenía DOS caminos
+      // de entrega y sólo el manual era normativo — justo al revés de lo que
+      // importa, porque el automático es el que recibe el adquiriente en toda
+      // venta emitida.
+      //
+      // No se duplica la lógica del ZIP: son 500+ líneas ya probadas contra
+      // `UBL-AttachedDocument-2.1.xsd` (F.12). Duplicarlas crearía dos
+      // implementaciones del mismo predicado normativo que divergirían, que es
+      // exactamente el defecto que D.9 tuvo que unificar en la gravabilidad AIU.
+      //
+      // `runIsolated` y no `run`: `deliver()` usa `StorePrismaService`, con
+      // alcance por tienda, y este listener corre fuera del request. Forjar el
+      // contexto con `run` dejaría el tenant en el estático de clase y el
+      // siguiente ejecutor fuera del ALS lo adoptaría en silencio. Mismo patrón
+      // que `pos-sale-completed.listener.ts`. No se pasa `user_id` a propósito:
+      // la entrega automática no la ejecuta ninguna persona, y `deliver()` deja
+      // `created_by: null` al leerlo del contexto.
+      const delivery = await RequestContextService.runIsolated(
+        {
+          organization_id: invoice.organization_id,
+          store_id: invoice.store_id,
+          is_super_admin: false,
+          is_owner: false,
+        },
+        () =>
+          this.invoice_delivery_service.deliver(invoice.id, {
+            email: customer_email,
+          }),
       );
 
-      // 6. Download PDF from S3 for attachment
-      const attachments: EmailAttachment[] = [];
+      // 5. `deliver()` ya escribió su fila en `invoice_delivery_events` con el
+      // escritor compartido, y ya lanzó si el proveedor de correo falló. Aquí no
+      // se repite la traza: dos filas por una sola entrega volverían inútil la
+      // auditoría que E.10 construyó.
+      //
+      // Se conserva la regla de E.10 intacta: «entregado» NO es «el proveedor
+      // aceptó el correo». Si el ZIP no pudo armarse —factura sin `xml_document`,
+      // S3 caído, o el tope de 2 MB descartándolo todo— `deliver()` devuelve
+      // `zip_name: null` y el correo salió sin factura adjunta. Eso no es una
+      // entrega, y no se estampa.
+      const delivered = !!delivery.zip_name;
 
-      try {
-        const pdf_buffer = await this.s3_service.downloadImage(payload.pdf_key);
-        attachments.push({
-          filename: `Factura-${invoice.invoice_number}.pdf`,
-          content: pdf_buffer,
-          contentType: 'application/pdf',
-        });
-      } catch (error) {
-        this.logger.error(
-          `Failed to download PDF for invoice #${invoice.invoice_number}: ${error.message}`,
-        );
-        // Continue sending email without PDF attachment
-      }
-
-      // 7. Optionally attach XML if available
-      if (invoice.xml_document) {
-        try {
-          const xml_buffer = Buffer.from(invoice.xml_document, 'utf-8');
-          attachments.push({
-            filename: `Factura-${invoice.invoice_number}.xml`,
-            content: xml_buffer,
-            contentType: 'application/xml',
-          });
-        } catch {
-          this.logger.warn(
-            `Failed to attach XML for invoice #${invoice.invoice_number}`,
-          );
-        }
-      }
-
-      // 8. Send email
-      const result =
-        attachments.length > 0
-          ? await this.email_service.sendEmailWithAttachments(
-              customer_email,
-              subject,
-              html,
-              attachments,
-              text,
-            )
-          : await this.email_service.sendEmail(
-              customer_email,
-              subject,
-              html,
-              text,
-            );
-
-      if (result.success) {
-        // 9. Update invoice: mark email as sent
+      if (delivered) {
+        // 6. Estampa de idempotencia. Va DESPUÉS de la traza que escribió
+        // `deliver()`, igual que antes: si esto falla, la factura queda sin
+        // `email_sent_at` y el guardia de arriba deja reintentar. Al revés se
+        // reintroduciría una entrega estampada que ninguna fila audita, y esa sí
+        // es irrecuperable.
         await this.global_prisma.invoices.update({
           where: { id: payload.invoice_id },
           data: { email_sent_at: new Date() },
         });
 
         this.logger.log(
-          `Invoice email sent successfully for #${invoice.invoice_number} to ${customer_email}`,
+          `Factura #${invoice.invoice_number} entregada a ${customer_email} — ${delivery.zip_name}`,
         );
       } else {
         this.logger.error(
-          `Failed to send invoice email for #${invoice.invoice_number}: ${result.error}`,
+          `Factura #${invoice.invoice_number}: el correo salió SIN el zip normativo (§9.1) — no se cuenta como entregada`,
         );
       }
     } catch (error) {
@@ -1714,7 +1675,7 @@ export class NotificationsEventsListener {
             <p>Hola ${fullName || ''},</p>
             <p>Tu solicitud de reagenda para la reserva <strong>${event.booking_number}</strong> fue rechazada.</p>
             <p><strong>Razón:</strong> ${event.decision_reason}</p>
-            <p>Si querés elegir otro horario, podés intentarlo de nuevo desde tu cuenta.</p>
+            <p>Si quieres elegir otro horario, puedes intentarlo de nuevo desde tu cuenta.</p>
           </div>`;
         // Appointment redesign phase 2 — send FROM the person who
         // actually decided (the admin/staff in session). If that lookup

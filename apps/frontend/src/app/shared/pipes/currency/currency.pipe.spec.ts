@@ -2,7 +2,6 @@ import {
   ChangeDetectionStrategy,
   Component,
   inject,
-  provideZonelessChangeDetection,
 } from '@angular/core';
 import { TestBed, ComponentFixture } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
@@ -94,7 +93,6 @@ describe('CurrencyFormatService / CurrencyPipe — formato del tenant', () => {
 
     TestBed.configureTestingModule({
       providers: [
-        provideZonelessChangeDetection(),
         provideHttpClient(),
         provideHttpClientTesting(),
         { provide: TenantFacade, useValue: tenantStub },

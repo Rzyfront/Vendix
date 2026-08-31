@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { user_state_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
+import { ResolveCustomerDto } from './dto/resolve-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { AuditResource } from '../../../common/audit/audit.service';
 import * as bcrypt from 'bcrypt';
@@ -42,6 +43,8 @@ const CUSTOMER_PRIVATE_COLUMNS = {
 
 @Injectable()
 export class CustomersService {
+  private readonly logger = new Logger(CustomersService.name);
+
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly eventEmitter: EventEmitter2,
@@ -438,6 +441,312 @@ export class CustomersService {
       was_created: false,
       was_updated: hasUpdates,
     };
+  }
+
+  /**
+   * QUI-723 — POS finalize-sale "resolver cliente" flow.
+   *
+   * Find an existing customer by email (priority) or by exact
+   * (document_type, document_number), and create one only if neither matches.
+   *
+   * Distinct from `resolveGuestCustomerForCheckout`:
+   *   1. Match priority is email-first, then document — NOT email/phone.
+   *      Email wins because it's globally unique per org; document is the
+   *      fallback when the cashier doesn't capture an email.
+   *   2. The match is ORGANIZATION-scoped (mirrors `findByDocumentInOrganization`)
+   *      so customers from sister stores don't collide.
+   *   3. When the customer exists, updates are CONSERVATIVE: only null/empty
+   *      fields on the existing row get filled. We never overwrite data the
+   *      cashier previously confirmed ("si el cliente ya existe simplemente
+   *      no hay que cambiarle nada" — dev lead spec).
+   *   4. When no match is found, we delegate to `create()` so we inherit the
+   *      username-uniqueness retry loop, NIT/DV split, password hashing, and
+   *      the `customer.created` event.
+   *
+   * Returns the customer plus audit flags so the frontend can surface a
+   * "cliente actualizado / creado" toast.
+   */
+  async findOrCreateByEmailOrDocument(
+    storeId: number,
+    dto: ResolveCustomerDto,
+  ): Promise<{
+    customer: any;
+    was_created: boolean;
+    was_updated: boolean;
+    matched_by: 'email' | 'document' | 'name' | null;
+  }> {
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+      select: { id: true, organization_id: true },
+    });
+
+    if (!store) {
+      throw new VendixHttpException(ErrorCodes.STORE_FIND_001);
+    }
+
+    const effectiveEmail = this.resolveCustomerEmail(dto.email);
+    const normalizedDoc = this.normalizeDocument({
+      type: dto.document_type ?? null,
+      number: dto.document_number ?? null,
+    });
+
+    // Match 1 — email first (case-insensitive, org-scoped, archived excluded).
+    let existing: any = null;
+    let matched_by: 'email' | 'document' | 'name' | null = null;
+
+    if (effectiveEmail) {
+      existing = await this.prisma.users.findFirst({
+        where: {
+          email: { equals: effectiveEmail, mode: 'insensitive' },
+          organization_id: store.organization_id,
+          user_roles: { some: { roles: { name: 'customer' } } },
+          state: { not: user_state_enum.archived },
+        },
+        omit: CUSTOMER_PRIVATE_COLUMNS,
+      });
+      if (existing) matched_by = 'email';
+    }
+
+    // Match 2 — exact (document_type, document_number) only if no email match.
+    // The type must match exactly: CC 123 ≠ NIT 123 even when the number
+    // string is identical (DIAN fiscal identity).
+    if (!existing && normalizedDoc.number && normalizedDoc.type) {
+      existing = await this.findByDocumentInOrganization(
+        store.organization_id,
+        normalizedDoc.number,
+        normalizedDoc.type,
+      );
+      if (existing) matched_by = 'document';
+    }
+
+    // Match 3 (QUI-734, B.4) — name-only quick-sale. Only when the cashier
+    // asks for it (`name_only`) and no email/document matched. Priority is
+    // email → document → name. >1 same-name matches is ambiguous → ERR-03 (409).
+    if (
+      !existing &&
+      dto.name_only === true &&
+      (dto.first_name?.trim() || dto.last_name?.trim())
+    ) {
+      const nameMatches = await this.prisma.users.findMany({
+        where: {
+          organization_id: store.organization_id,
+          user_roles: { some: { roles: { name: 'customer' } } },
+          state: { not: user_state_enum.archived },
+          // QUI-734 (auditoria 2026-08-31): igualdad exacta insensible a
+          // mayusculas, NO subcadena. Antes `contains` permitia que
+          // "Rober" matcheara "Roberto", "Ana" matcheara "Mariana",
+          // "Sofi" matcheara "Sofia" — la venta quedaba atada al
+          // cliente equivocado en silencio. Con `equals`, "Rober" ya
+          // no matchea "Roberto": cae a 0 coincidencias y sigue el
+          // camino de creación. El 409 de homonimos reales sigue
+          // disparandose porque `equals` distingue mayusculas pero NO
+          // acentos — "Ana" y "ANA" son la misma fila, "Ana" y
+          // "Anabella" no.
+          ...(dto.first_name?.trim()
+            ? { first_name: { equals: dto.first_name.trim(), mode: 'insensitive' as const } }
+            : {}),
+          ...(dto.last_name?.trim()
+            ? { last_name: { equals: dto.last_name.trim(), mode: 'insensitive' as const } }
+            : {}),
+        },
+        omit: CUSTOMER_PRIVATE_COLUMNS,
+        take: 2,
+      });
+      if (nameMatches.length === 1) {
+        existing = nameMatches[0];
+        matched_by = 'name';
+      } else if (nameMatches.length > 1) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_CONFLICT_001,
+          'Existen varios clientes con ese nombre; usa el email o el documento para identificarlo',
+          { kind: 'name' },
+        );
+      }
+      // 0 matches → fall through to create() with first/last name only.
+    }
+
+    if (existing) {
+      // Overwrite update — see `buildUpdatePayload`. Per dev lead's
+      // clarified spec: matching unique identifier → edit OTHER fields
+      // (first_name, last_name, phone). Email and document pair are
+      // excluded because they're the IDs that drove the match.
+      const updateData = this.buildUpdatePayload(
+        {
+          first_name: existing.first_name,
+          last_name: existing.last_name,
+          phone: existing.phone,
+        },
+        dto,
+      );
+
+      let was_updated = false;
+      if (Object.keys(updateData).length > 0) {
+        // Race-condition note: two cashiers typing the same email
+        // simultaneously could both pass the email lookup, but only one
+        // wins the `users.update` (Prisma serializes the writes). The
+        // loser hits `email` unique-constraint → the global ValidationPipe
+        // surfaces 400, which the frontend already handles. We don't
+        // need an explicit transaction here for that race — Prisma's
+        // unique index is the safety net.
+        //
+        // We DO wrap the update + store-link in a transaction so the
+        // customer row and its store link stay consistent: either both
+        // land or neither does. `store_users.upsert` is idempotent on
+        // the (user_id, store_id) composite key — a re-link throws on
+        // the unique constraint only when the link was inserted by a
+        // concurrent resolve, in which case the cashier already has the
+        // customer in their cart. We log + swallow that race rather than
+        // fail the resolve.
+        try {
+          await this.prisma.$transaction([
+            this.prisma.users.update({
+              where: { id: existing.id },
+              data: updateData,
+            }),
+            this.prisma.store_users.upsert({
+              where: {
+                user_id_store_id: {
+                  user_id: existing.id,
+                  store_id: storeId,
+                },
+              },
+              create: { user_id: existing.id, store_id: storeId },
+              update: {},
+            }),
+          ]);
+          was_updated = true;
+        } catch (linkErr) {
+          this.logger.warn(
+            `findOrCreateByEmailOrDocument: update+link failed for customer ${existing.id} store ${storeId}`,
+            linkErr instanceof Error ? linkErr.stack : String(linkErr),
+          );
+        }
+
+        if (was_updated) {
+          this.eventEmitter.emit('customer.updated', {
+            store_id: store.id,
+            customer_id: existing.id,
+            email: existing.email,
+            first_name: existing.first_name,
+            // The fields the update just wrote — what the email should
+            // highlight as "ahora sabemos esto de vos".
+            updated_fields: Object.keys(updateData),
+          });
+        }
+      } else {
+        // No fields to overwrite — still link to the store (idempotent)
+        // so a customer that exists in the org but isn't yet linked to
+        // THIS store can be used for the sale.
+        try {
+          await this.prisma.store_users.upsert({
+            where: {
+              user_id_store_id: {
+                user_id: existing.id,
+                store_id: storeId,
+              },
+            },
+            create: { user_id: existing.id, store_id: storeId },
+            update: {},
+          });
+        } catch (linkErr) {
+          this.logger.warn(
+            `findOrCreateByEmailOrDocument: store link failed for customer ${existing.id} store ${storeId}`,
+            linkErr instanceof Error ? linkErr.stack : String(linkErr),
+          );
+        }
+      }
+
+      // Merge update data into the returned customer so the response reflects
+      // the POST-resolve state. Without this, the frontend would see a stale
+      // `customer` when `was_updated: true` (the `existing` snapshot was
+      // captured before the update ran).
+      const resolved = was_updated
+        ? ({ ...existing, ...updateData } as any)
+        : existing;
+
+      return {
+        customer: resolved,
+        was_created: false,
+        was_updated,
+        matched_by,
+      };
+    }
+
+    // No match — delegate to `create()` so we inherit all its guards
+    // (username uniqueness, NIT/DV split, password hashing, customer.created event).
+    const created = await this.create(storeId, dto);
+
+    return {
+      customer: created,
+      was_created: true,
+      was_updated: false,
+      matched_by: null,
+    };
+  }
+
+  /**
+   * QUI-723 — Build the update payload for `findOrCreateByEmailOrDocument`.
+   *
+   * Overwrite semantics, scoped to the NON-ID fields. Per the dev lead's
+   * clarified spec: "cédula y correo son como un identificador único; si
+   * encuentras un cliente con esos dos, sobreescribes los demás campos".
+   * Translation: email + (document_type, document_number) ARE the unique
+   * identifiers — they're how the lookup matched the row. The "other
+   * fields" (first_name, last_name, phone) get overwritten with whatever
+   * the cashier typed.
+   *
+   * Email and the document pair are intentionally NOT written back:
+   *   - email: the lookup matched by email (case-insensitive), so the
+   *     strings already coincide. Re-writing would also force a useless
+   *     unique-constraint check.
+   *   - document_type / document_number: these are the OTHER identifier
+   *     the lookup might have matched against. Changing them post-match
+   *     would create a second unique-key collision (the cashier might
+   *     have typed a slightly different number than what's stored, and
+   *     that diff is the "second customer" — not a typo to silently fix).
+   *
+   * DIFF semantics: each incoming value is compared (post-transform for
+   * first_name/last_name) against the stored value. If the post-normalize
+   * result is identical, the field is OMITTED from the payload. This is
+   * critical: `customer.updated` is emitted when the resulting payload is
+   * non-empty, which triggers the email listener. Without the diff, a
+   * cashier retyping the same data in a future sale would fire a
+   * "Actualizamos tus datos" email to a customer whose data didn't
+   * actually change.
+   */
+  private buildUpdatePayload(
+    existing: {
+      first_name: string | null;
+      last_name: string | null;
+      phone: string | null;
+    },
+    incoming: CreateCustomerDto,
+  ): Record<string, unknown> {
+    const data: Record<string, unknown> = {};
+
+    const maybeWrite = (
+      incomingValue: string | null | undefined,
+      field: 'first_name' | 'last_name' | 'phone',
+      transform: ((s: string) => string) | undefined,
+      currentValue: string | null,
+    ) => {
+      if (!incomingValue) return;
+      const trimmed = incomingValue.trim();
+      if (!trimmed) return;
+      const candidate = transform ? transform(trimmed) : trimmed;
+      // Skip writes that wouldn't change the stored value. Treat null as
+      // empty so a previously-unset field gets written on first submit
+      // (candidate !== '') but a previously-set same value does not
+      // (candidate === currentValue).
+      if (candidate === (currentValue ?? '')) return;
+      data[field] = candidate;
+    };
+
+    maybeWrite(incoming.first_name, 'first_name', toTitleCase, existing.first_name);
+    maybeWrite(incoming.last_name, 'last_name', toTitleCase, existing.last_name);
+    maybeWrite(incoming.phone, 'phone', undefined, existing.phone);
+
+    return data;
   }
 
   /**

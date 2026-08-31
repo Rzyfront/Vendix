@@ -920,14 +920,66 @@ export class SubscriptionStateService {
       );
     }
 
+    const now = new Date();
+
+    // Empty route = the row is ALREADY `active`/`trial`, so no hop is needed.
+    // That is NOT the same as "already operational": `state` and
+    // `current_period_end` are two independent truths, and there is a window
+    // where they disagree — from the moment the period lapses until the
+    // `subscription-state-engine` cron (03:00 UTC) degrades the row. A renewal
+    // collected inside that window is the ON-TIME payment, and it used to be
+    // the one this seam threw away: the early `return` sat BEFORE
+    // `applyReactivationWindow`, the single writer of `current_period_*`, so
+    // the invoice went `paid`, the payment `succeeded`, the window stayed
+    // lapsed — and the cron degraded a store that had paid days earlier
+    // (prod: `ENSURE_OPERATIONAL_NOOP store=96 state=active
+    // reason=payment_42_approved`, then `active`->`grace_soft` 3 days later).
+    //
+    // The guard is `isWindowSpent`, the SAME predicate the window writer
+    // consults — not a second copy of it — so the two routes cannot drift
+    // apart on when a collection has to rebuild the cycle.
+    //
+    // It has to be asked BEFORE the call and not left to the writer, because
+    // `applyReactivationWindow` ends in an unconditional row update that also
+    // voids `scheduled_cancel_at` / `suspend_at` / `cancel_at`. On the hop
+    // route that is correct (the store was degraded). On a genuine no-op it
+    // would not be: a duplicate webhook on a healthy store would silently
+    // cancel the user's own scheduled cancellation. A true no-op stays a true
+    // no-op — zero writes, zero audit rows.
     if (!route.length) {
+      const originalPeriodEnd = this.asDate(current.current_period_end);
+      const windowSpent = this.isWindowSpent({
+        originalPeriodEnd,
+        now,
+        requestedPeriodEnd: ctx.periodEnd,
+        // A row with NO window at all is left alone here. Only the hop route
+        // treats `null` as spent, which is where it means "recovering from a
+        // degraded state that never had a cycle". An `active` row with a null
+        // period is not what this fix is about, and minting a cycle for it
+        // would be a behaviour change no incident asked for.
+        missingCountsAsSpent: false,
+      });
+
+      if (windowSpent) {
+        await this.applyReactivationWindow(tx, {
+          subscriptionId: current.id,
+          storeId,
+          now,
+          originalPeriodEnd,
+          scheduledCancelAt: this.asDate(current.scheduled_cancel_at),
+          planId: ctx.planId ?? current.plan_id,
+          ctx,
+          missingWindowCountsAsSpent: false,
+        });
+      }
+
       this.logger.log(
-        `ENSURE_OPERATIONAL_NOOP store=${storeId} state=${fromState} reason=${ctx.reason}`,
+        `ENSURE_OPERATIONAL_NOOP store=${storeId} state=${fromState} ` +
+          `reason=${ctx.reason} window_rebuilt=${windowSpent}`,
       );
       return { finalState: fromState, path: [], fromState };
     }
 
-    const now = new Date();
     const walked: State[] = [];
 
     for (let hop = 0; hop < route.length; hop++) {
@@ -955,6 +1007,9 @@ export class SubscriptionStateService {
       scheduledCancelAt: this.asDate(current.scheduled_cancel_at),
       planId: ctx.planId ?? current.plan_id,
       ctx,
+      // Recovering from a degraded state: a row with no window at all needs
+      // one minted. Pre-existing behaviour, kept explicit.
+      missingWindowCountsAsSpent: true,
     });
 
     // EXIT GUARD — re-read from the database instead of trusting the writes
@@ -1024,6 +1079,39 @@ export class SubscriptionStateService {
    * queda en `false` y la intención del cliente se recuerda en
    * `metadata.auto_renew_intent` para el rearme automático.
    */
+  /**
+   * Has the billing window on the row been spent — i.e. does this collection
+   * have to rebuild the cycle?
+   *
+   * ONE implementation, consulted by both routes of the seam (the hop route
+   * and the already-operational route). It exists as a named predicate
+   * precisely so the two cannot answer differently: the incident that produced
+   * it was a paid renewal whose period was never advanced because the
+   * already-operational route returned before the window writer ever ran.
+   *
+   * `missingCountsAsSpent` is the single axis on which the two routes
+   * legitimately differ, so it is a parameter rather than a second predicate:
+   *  - hop route (`true`): the store was degraded; a row with no window at all
+   *    needs one minted for it.
+   *  - already-operational route (`false`): an `active` row carrying a null
+   *    window is left untouched — minting a cycle there is a behaviour change
+   *    no incident asked for.
+   */
+  private isWindowSpent(params: {
+    originalPeriodEnd: Date | null;
+    now: Date;
+    requestedPeriodEnd?: Date;
+    missingCountsAsSpent: boolean;
+  }): boolean {
+    if (params.requestedPeriodEnd) {
+      return true;
+    }
+    if (params.originalPeriodEnd === null) {
+      return params.missingCountsAsSpent;
+    }
+    return params.originalPeriodEnd.getTime() <= params.now.getTime();
+  }
+
   private async applyReactivationWindow(
     tx: any,
     args: {
@@ -1034,8 +1122,12 @@ export class SubscriptionStateService {
       scheduledCancelAt: Date | null;
       planId: number | null;
       ctx: EnsureOperationalContext;
+      /** See `isWindowSpent`. */
+      missingWindowCountsAsSpent: boolean;
     },
-  ): Promise<void> {
+    // Returns whether the paid window was actually rebuilt, so the callers can
+    // log which of the two outcomes they got.
+  ): Promise<boolean> {
     const { subscriptionId, storeId, now, originalPeriodEnd, planId, ctx } =
       args;
 
@@ -1065,13 +1157,17 @@ export class SubscriptionStateService {
       data.metadata = autoRenew.metadata;
     }
 
-    // Only rebuild the window when the paid one actually lapsed (or the
-    // caller pinned one, or there never was one). A mid-period `blocked`
-    // store recovering must keep the window it already paid for.
-    const lapsed =
-      originalPeriodEnd === null || originalPeriodEnd.getTime() <= now.getTime();
+    // Only rebuild the window when the paid one actually ran out (or the
+    // caller pinned one). A mid-period `blocked` store recovering must keep
+    // the window it already paid for.
+    const rebuildWindow = this.isWindowSpent({
+      originalPeriodEnd,
+      now,
+      requestedPeriodEnd: ctx.periodEnd,
+      missingCountsAsSpent: args.missingWindowCountsAsSpent,
+    });
 
-    if (ctx.periodEnd || lapsed) {
+    if (rebuildWindow) {
       const cycleDays = ctx.periodEnd
         ? DEFAULT_CYCLE_DAYS // unused: an explicit periodEnd is the base
         : await this.resolveCycleDays(tx, planId);
@@ -1086,6 +1182,18 @@ export class SubscriptionStateService {
       data.current_period_start = now;
       data.current_period_end = window.periodEnd;
       data.next_billing_at = window.periodEnd;
+
+      // A rebuilt window voids the dunning clocks: `grace_soft_until`,
+      // `grace_hard_until` and `lock_reason` were all derived from the period
+      // that just got replaced, so leaving them would let the
+      // `subscription-state-engine` degrade a store that has just paid — on
+      // deadlines that no longer describe anything. `transitionInTx` already
+      // applies exactly this policy when it walks into `active`/`trial`; the
+      // no-op route walks no hop, so the clearing has to live here to cover
+      // both callers with one rule instead of two that can drift.
+      data.grace_soft_until = null;
+      data.grace_hard_until = null;
+      data.lock_reason = null;
 
       this.logger.log(
         `ENSURE_OPERATIONAL_WINDOW store=${storeId} ` +
@@ -1109,6 +1217,8 @@ export class SubscriptionStateService {
       where: { id: subscriptionId },
       data,
     });
+
+    return rebuildWindow;
   }
 
   /**

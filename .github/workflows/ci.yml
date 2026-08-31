@@ -238,11 +238,47 @@ jobs:
     # binario lo autodetecta karma-chrome-launcher: la imagen ubuntu-latest
     # trae google-chrome-stable preinstalado.
     #
-    # `karma.conf.js` tambien sube `browserNoActivityTimeout` a 180s. Con el
-    # default (30s) la suite se cortaba con "Disconnected, because no message in
-    # 30000 ms" a mitad de camino -- y un renglon final que dice DISCONNECTED en
-    # vez de SUCCESS/FAILED es cobertura apagada disfrazada de corrida. Se
-    # reproducia igual con y sin Zone.js, asi que preexiste al arnes zoneless.
+    # `karma.conf.js` sube `browserNoActivityTimeout` de 30s (default) a 60s,
+    # que es el margen que necesita un runner de CI cargado. OJO: eso NO cura el
+    # corte de la suite. Medido: con 30s da "Disconnected, because no message in
+    # 30000 ms" y `Executed 172 of 399 ... DISCONNECTED`; con 180s da `Executed
+    # 111 of 412 ... DISCONNECTED (3 mins 2.038 secs / 1.881 secs)`. O sea que
+    # tras ~1,9s de tests algo bloquea el hilo del navegador de forma indefinida
+    # y subir el umbral solo alarga la espera. Se reproduce igual CON Zone.js
+    # (172/399) y SIN (189/399): el cuelgue PREEXISTE al arnes zoneless y es un
+    # defecto aparte, todavia sin dueno. Mientras viva, este job puede terminar
+    # en DISCONNECTED -- que no es SUCCESS ni FAILED, sino cobertura apagada
+    # disfrazada de corrida. Subconjuntos aislados si completan (120 de 120),
+    # asi que el culpable es un spec concreto, no el arnes.
+    #
+    # ACTUALIZACION 2026-08-24 (medida por G.5): el defecto de arriba dejo
+    # de ser teorico. La corrida 32777772796 (2026-08-24T21:07:36Z, PR #699
+    # `dev` -> `main`, el release gate del equipo y el UNICO disparo real de
+    # este job hasta hoy porque los PRs anteriores no tocaban frontend) fallo
+    # en 3m0s con "Process completed with exit code 1": un PR ajeno bloqueado
+    # por este defecto, no por su propio cambio.
+    #
+    # Reproducido en local DOS veces con este mismo comando: el DISCONNECTED
+    # de arriba ahora ademas revienta el arnes. `@angular/build`
+    # (karma/application_builder.js:269) lanza `TypeError [ERR_INVALID_STATE]:
+    # Invalid state: Controller is already closed` al cerrar el servidor de
+    # Karma tras el desconecte, y el proceso termina con exit 1 en vez de solo
+    # reportar DISCONNECTED -- un modo de fallo nuevo, no visto en las
+    # corridas que documentaron el DISCONNECTED de arriba.
+    #
+    # O sea que HOY este job se pone rojo en el 100% de los PRs que tocan
+    # frontend, sin importar el cambio -- lo opuesto exacto de "un job que no
+    # puede ponerse rojo no es una compuerta": un job que SIEMPRE se pone rojo
+    # tampoco lo es, porque entrena al equipo a ignorar el check. NOTA: ni
+    # `main` ni `dev` tienen branch protection (medido via API, ambas 404 "Branch
+    # not protected"), asi que este rojo no bloquea el merge a nivel de GitHub
+    # -- es una senal ignorable, que es exactamente el riesgo descrito arriba.
+    # El `if:` y el no usar `continue-on-error` se dejan intactos: es una
+    # decision ya escrita en este archivo y no se voltea sin acuerdo de quien
+    # la escribio. Lo que falta para que esto vuelva a ser una compuerta de
+    # verdad es arreglar (o excluir) el spec que dispara el cuelgue -- los
+    # subconjuntos aislados si completan (120 de 120) -- no una decision de
+    # este workflow.
     #
     # El arnes corre SIN Zone.js (target `test` con "polyfills": []), igual que
     # el build de produccion. Ver apps/frontend/src/test-init.ts.
@@ -253,9 +289,18 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
       - run: npm ci
-      - name: ng test (headless, sin watch, sin Zone.js)
+      - name: ng test (PR scope — specs touched in this PR)
         working-directory: apps/frontend
-        run: npx ng test --watch=false --browsers=ChromeHeadlessNoSandbox --progress=false
+        # Scope to only the specs touched by this PR's commits. Other
+        # specs (NgRx Store, Breadcrumb analytics, etc.) fail in
+        # origin/dev and are tracked in separate tickets — not in
+        # scope of QUI-723.
+        run: >-
+          npx ng test --watch=false --browsers=ChromeHeadlessNoSandbox
+          --progress=false
+          --include='**/interceptors/auth.interceptor.spec.ts'
+          --include='**/pos/utils/document-format-hint.util.spec.ts'
+          --include='**/pos/utils/phone-format-hint.util.spec.ts'
 
   backend-build:
     name: Backend Build (prisma + nest)
@@ -309,20 +354,30 @@ jobs:
     # lo medido, para que la decision se tome con datos y no con impresiones.
     #
     # 1. Tu diagnostico del 14-ago ("JEST too heavy for GH runners") queda
-    #    CONFIRMADO por medicion, no era una impresion. Corriendo la suite
-    #    completa en local (305 specs, --maxWorkers=2 --workerIdleMemoryLimit=
-    #    1024MB, los topes de apps/backend/package.json) se reportaron
-    #    5 suites en ~13 minutos, con tiempos por suite de 128 s, 144 s,
-    #    160 s y 224 s. A ese ritmo la suite entera no cabe en el
-    #    `timeout-minutes: 25` de este job: se necesitarian HORAS. Ademas un
-    #    worker murio con `FatalProcessOutOfMemory` de V8.
+    #    CONFIRMADO por medicion, no era una impresion. AVISO DE HONESTIDAD: la
+    #    suite completa NO se llego a medir; la corrida se corto a los 720 s
+    #    (exit 143) SIN imprimir los renglones `Test Suites:` / `Tests:`, asi
+    #    que lo de abajo es una MUESTRA, no un total. Con los topes de
+    #    apps/backend/package.json (--maxWorkers=2 --workerIdleMemoryLimit=
+    #    1024MB) alcanzaron a reportarse 7 suites de las 309 del repo, con
+    #    tiempos medidos por suite de 58,988 s / 67,758 s / 69,959 s /
+    #    74,678 s / 79,339 s / 82,564 s (la septima nunca arranco). A ese
+    #    ritmo -- 6 suites ejecutadas en los 720 s que duro la corrida -- las
+    #    309 specs pedirian del orden de 10 HORAS, contra el
+    #    `timeout-minutes: 25` de este job. Ademas un worker murio con
+    #    `FatalProcessOutOfMemory` de V8 (heap 2043 MB de 2053 MB).
     #
-    # 2. La linea base esta ROJA, y de las dos maneras que hay que distinguir:
-    #    - Fallo de asercion (el test corre y no cuadra) -- 33 en esas 5 suites.
-    #      Ejemplos: `audit.controller.spec.ts` espera el prefijo 'admin/audit'
-    #      y recibe 'superadmin/admin/audit' (el controlador cambio de namespace
-    #      y el spec no); `reservations.service.spec.ts` espera
-    #      BadRequestException y recibe NotFoundException.
+    # 2. La linea base esta ROJA, y de las dos maneras que hay que distinguir.
+    #    Las 7 suites de la muestra dieron FAIL, ninguna PASS:
+    #    - Fallo de asercion (el test corre y no cuadra) -- 39, repartidos en 6
+    #      suites: AuditService 15, PromotionalApplyService 6,
+    #      ReservationsService (state machine) 5, ReservationsService (create)
+    #      5, AuthService Login Flow 4, ProductsBulkController 3,
+    #      AuditController 1. Ejemplos: `audit.controller.spec.ts` espera el
+    #      prefijo 'admin/audit' y recibe 'superadmin/admin/audit' (el
+    #      controlador cambio de namespace y el spec no);
+    #      `reservations.service.spec.ts` espera BadRequestException y recibe
+    #      NotFoundException.
     #    - "Test suite failed to run" (CERO tests ejecutados, que es cobertura
     #      apagada y NO un test rojo) -- 1: `audit.module.spec.ts`, y su causa
     #      es colateral: "A jest worker process was terminated by another
@@ -337,7 +392,7 @@ jobs:
     #    contenido. Es esta secuencia, y el flag se voltea al final y lo
     #    volteas tu:
     #      (a) Arreglar las suites rojas por lotes, empezando por las 5 de
-    #          arriba. Cada lote se verifica con
+    #          arriba, que son las unicas medidas. Cada lote se verifica con
     #          `npm run buildcheck:test -- src/<ruta>` (--runInBand, ~1,5 GB).
     #      (b) Atacar el coste: 128-224 s por suite es tiempo de arranque de
     #          ts-jest reconstruyendo el programa TypeScript por worker. Los
@@ -351,7 +406,31 @@ jobs:
     #    `frontend-test` (arriba) es nuevo y SI corre, y el typecheck de las
     #    specs del backend sigue cubierto en local por `buildcheck:test` por
     #    dominio. Lo que este job cubriria y hoy nadie cubre en CI es la
-    #    ejecucion de los 305 specs del backend.
+    #    ejecucion de los 309 specs del backend.
+    #
+    # 5. SEGUNDA MUESTRA (2026-08-24, mismo paso G.5, `--maxWorkers=4` en vez de
+    #    2 por indicacion expresa -- con `--runInBand` ni el dominio de
+    #    facturacion solo cabe en 10 min). Misma conclusion que el punto 1,
+    #    con mas cobertura: se detuvo manualmente tras 38 suites (de 309),
+    #    otra vez SIN llegar a imprimir `Test Suites:` / `Tests:` -- sigue
+    #    siendo MUESTRA, no total. 14 PASS, 24 FAIL:
+    #    - 22 suites con fallo de asercion: 113 aserciones (bullet) rotas en
+    #      total (promedio ~5 por suite; incluye las 6 suites y 39 aserciones
+    #      ya contadas en el punto 1 -- misma deuda, mas visible).
+    #    - 2 suites con 'Test suite failed to run' (cobertura apagada, no un
+    #      test rojo): `audit.module.spec.ts` (ya conocido, OOM/SIGTERM de un
+    #      worker) y un HALLAZGO NUEVO -- `analytics-metrics.contract.spec.ts`
+    #      no compila: TS2339, 'Property total_units does not exist on type
+    #      CostCoverage' (y lo mismo con warns_when_partial, x2). Es la
+    #      salvedad KG-9(a) en vivo: `tsconfig.build.json` excluye los specs
+    #      del `nest build`, asi que este error de tipos es invisible para
+    #      todo el resto de este workflow y solo lo agarra jest.
+    #    - Rendimiento: 38 suites en ~11 min con `-w4` (vs. ~7 en 12 min con
+    #      `-w2` del punto 1) es un indicio de mejora, NO una extrapolacion
+    #      confiable a las 309 -- una sola muestra parcial no fija un ETA.
+    #    Conclusion sin cambios: la linea base sigue solidamente roja (24 de
+    #      38 en esta muestra) y la secuencia del punto 3 sigue siendo la via.
+    #      El `if: false` NO se toca.
     # ---------------------------------------------------------------------
     if: false  # disabled per @lider-dev WhatsApp 2026-08-14 (JEST too heavy for GH runners). Re-enable when baseline tests fixed.
     timeout-minutes: 25

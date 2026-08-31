@@ -3,6 +3,7 @@
   size="lg"
   [title]="title()"
   [showCloseButton]="true"
+  [dialog]="true"
   (cancel)="onCancel()"
 >
   <app-icon slot="header" name="flame" [size]="20" class="text-primary" />
@@ -27,6 +28,18 @@
               }
             </span>
           </header>
+
+          <!--
+            CP-POLLO-ARABE-727 C.4 (QUI-736) — la variante vendida, como sub-línea
+            del plato. Se lee de `order_item.variant_attributes` (pre-fire, el
+            `variant_label` del ticket todavía no existe). sr-only para que el
+            lector de pantalla oiga "Variante: Picante", no "Pollo… Picante".
+          -->
+          @if (item.variant_attributes) {
+            <p class="kc-variant">
+              <span class="sr-only">Variante: </span>{{ item.variant_attributes }}
+            </p>
+          }
 
           <!-- La nota del pedido va ARRIBA del árbol: es lo que el cocinero tiene
                que leer para saber qué desmarcar. Enterrarla abajo la vuelve
@@ -53,7 +66,7 @@
               descontar nada, en silencio.
             -->
             <p class="kc-no-recipe">
-              La receta está activa pero no arroja ingredientes — revisá su
+              La receta está activa pero no arroja ingredientes — revisa su
               rendimiento y su merma (una merma del 100% deja el rendimiento en
               cero). Si se envía así, no se descuenta inventario.
             </p>
@@ -95,6 +108,13 @@
                       [class.is-off]="!isNodeChecked(item.order_item_id, node)"
                       [class.is-partial]="isNodePartial(item.order_item_id, node)"
                       [attr.aria-pressed]="isNodeChecked(item.order_item_id, node)"
+                      [attr.aria-label]="
+                        isNodeChecked(item.order_item_id, node)
+                          ? 'Quitar ' + node.label
+                          : isNodePartial(item.order_item_id, node)
+                            ? 'Resolver inclusión parcial de ' + node.label
+                            : 'Incluir ' + node.label
+                      "
                       (click)="toggleNode(item.order_item_id, node)"
                     >
                       <app-icon
@@ -113,6 +133,12 @@
                       <button
                         type="button"
                         class="kc-collapse"
+                        [attr.aria-expanded]="!isCollapsed(node.key)"
+                        [attr.aria-label]="
+                          isCollapsed(node.key)
+                            ? 'Expandir ingredientes de ' + node.label
+                            : 'Contraer ingredientes de ' + node.label
+                        "
                         (click)="toggleCollapse(node.key)"
                       >
                         <app-icon
@@ -148,6 +174,13 @@
                               [class.is-off]="!isNodeChecked(item.order_item_id, child)"
                               [class.is-partial]="isNodePartial(item.order_item_id, child)"
                               [attr.aria-pressed]="isNodeChecked(item.order_item_id, child)"
+                              [attr.aria-label]="
+                                isNodeChecked(item.order_item_id, child)
+                                  ? 'Quitar ' + child.label
+                                  : isNodePartial(item.order_item_id, child)
+                                    ? 'Resolver inclusión parcial de ' + child.label
+                                    : 'Incluir ' + child.label
+                              "
                               (click)="toggleNode(item.order_item_id, child)"
                             >
                               <app-icon
@@ -200,7 +233,7 @@
           Queda registrado en el ticket, pero el descuento de inventario ya ocurrió
           al enviar a cocina.
         } @else {
-          No se descuentan del inventario ni entran al costo de este envío.
+          No se descuentan del inventario ni se contabilizan en este envío.
         }
       </p>
     }

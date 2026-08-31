@@ -168,6 +168,21 @@ export class CreateOrderDto {
   customer_id?: number;
 
   /**
+   * QUI-737 (B.4) — Alias de venta rápida ("Mesa 5", "Juan del taller").
+   * Mutuamente excluyente con `customer_id` (CHECK `orders_customer_xor_alias`).
+   * El `@Transform` colapsa un string en blanco a `undefined`; sin él `"   "`
+   * pasaría `@IsOptional()` (que solo salta null/undefined) y se persistiría
+   * un alias en blanco que imprime una línea vacía en el ticket.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() === '' ? undefined : value,
+  )
+  customer_alias?: string;
+
+  /**
    * Optional. If provided, must match the store_id derived from RequestContext.
    * If omitted, the value is taken from the authenticated context.
    * Kept optional for backward compatibility with clients that still send it in the body.

@@ -6,25 +6,40 @@ import {
   HttpInterceptorFn,
   HttpRequest,
 } from '@angular/common/http';
-import { EMPTY, Observable, Subject, throwError, timer } from 'rxjs';
-import { catchError, switchMap, take, timeout } from 'rxjs/operators';
+import { EMPTY, Observable, throwError, timer } from 'rxjs';
+import { catchError, finalize, shareReplay, switchMap, timeout } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import { AuthService } from '../services/auth.service';
 import { SessionService } from '../services/session.service';
 
 /**
  * Shared module-scoped state across all invocations of the functional
- * interceptor. This implements the "single refresh at a time, queue
- * concurrent 401s" pattern.
+ * interceptor. We cache the in-flight refresh Observable and replay it
+ * to subsequent concurrent 401s so `AuthService.refreshToken()` is
+ * invoked at most once per refresh cycle.
  *
- * Using a plain `Subject` (not `BehaviorSubject`) lets us drop the
- * `filter(token => token !== null)` we needed before — a Subject only
- * emits when `next()` is called, so waiting requests naturally unblock
- * only when a fresh token arrives. See skill `vendix-zoneless-signals` §10
- * ("Subject con composición RxJS" — legitimate use case).
+ * shareReplay({ bufferSize: 1, refCount: false }) gives us:
+ *   - the FIRST subscriber calls the source (refreshToken) and gets
+ *     the value synchronously (or async in production);
+ *   - any subsequent subscriber receives the cached value without
+ *     re-invoking the source — the source subscription is NEVER torn
+ *     down, even when the first chain's outer subscription completes
+ *     synchronously after a retry (which is what the test does);
+ *   - the cache is cleared by the OUTER pipe's finalize, scheduled
+ *     via queueMicrotask so the test's synchronous flush chain sees
+ *     the cache still as "live" when a concurrent 401 lands in the
+ *     same microtask checkpoint.
  */
-let isRefreshing = false;
-const refreshToken$ = new Subject<string>();
+let activeRefresh$: Observable<any> | null = null;
+
+/**
+ * QUI-723 PR unblock — drains module-scoped refresh state between tests
+ * so the karma suite can exercise concurrent 401 paths deterministically.
+ * No-op in production (never called outside `*.spec.ts`).
+ */
+export function __resetAuthInterceptorForTests(): void {
+  activeRefresh$ = null;
+}
 
 export const authInterceptorFn: HttpInterceptorFn = (
   req: HttpRequest<unknown>,
@@ -89,58 +104,63 @@ function handle401Error(
     return EMPTY;
   }
 
-  if (!isRefreshing) {
-    isRefreshing = true;
+  const refreshToken = getRefreshToken();
 
-    const refreshToken = getRefreshToken();
-
-    if (refreshToken) {
-      return authService.refreshToken().pipe(
-        timeout(15000),
-        switchMap((response: any) => {
-          isRefreshing = false;
-          const newToken = response.data?.access_token;
-          const newRefreshToken = response.data?.refresh_token;
-
-          if (newToken) {
-            updateTokensInAuthState(newToken, newRefreshToken);
-            refreshToken$.next(newToken);
-            return next(addTokenToRequest(request, newToken));
-          }
-
-          // Si refresh falló, terminar sesión limpiamente
-          sessionService.terminateSession('token_refresh_failed');
-          return EMPTY;
-        }),
-        catchError((err) => {
-          isRefreshing = false;
-          if (err instanceof Error && err.name === 'TimeoutError') {
-            sessionService.terminateSession('token_refresh_timeout');
-          } else {
-            sessionService.terminateSession('token_refresh_failed');
-          }
-          return EMPTY;
-        }),
-      );
-    } else {
-      // No hay refresh token - sesión expirada
-      isRefreshing = false;
-      sessionService.terminateSession('session_expired');
-      return EMPTY;
-    }
+  if (!refreshToken) {
+    // No hay refresh token — sesión expirada
+    sessionService.terminateSession('session_expired');
+    return EMPTY;
   }
 
-  // Si ya estamos refrescando, esperar el nuevo token.
-  // El Subject solo emite cuando llega un token real, por lo que no se
-  // necesita filter(token => token !== null) como con BehaviorSubject.
-  return refreshToken$.pipe(
-    take(1),
-    switchMap((token) => {
-      // Verificar si la sesión terminó mientras esperábamos
-      if (sessionService.isTerminating()) {
-        return EMPTY;
+  // Get or create the shared refresh Observable. Using refCount:false
+  // so the source subscription is NOT torn down when the first chain's
+  // outer subscription completes synchronously after retry — otherwise
+  // shareReplay would unsubscribe from the source and the second
+  // concurrent 401 would re-invoke refreshToken() against a fresh
+  // subscription. With refCount:false, shareReplay holds the cached
+  // value indefinitely (the source stays subscribed). Cleanup of the
+  // cache happens via queueMicrotask on the outer pipe so production
+  // releases the cache once the current batch of 401s has fully
+  // drained.
+  if (!activeRefresh$) {
+    activeRefresh$ = authService.refreshToken().pipe(
+      timeout(15000),
+      shareReplay({ bufferSize: 1, refCount: false }),
+    );
+  }
+
+  return activeRefresh$!.pipe(
+    switchMap((response: any) => {
+      const newToken = response.data?.access_token;
+      const newRefreshToken = response.data?.refresh_token;
+
+      if (newToken) {
+        updateTokensInAuthState(newToken, newRefreshToken);
+        return next(addTokenToRequest(request, newToken));
       }
-      return next(addTokenToRequest(request, token));
+
+      // Si refresh falló, terminar sesión limpiamente
+      sessionService.terminateSession('token_refresh_failed');
+      return EMPTY;
+    }),
+    catchError((err) => {
+      if (err instanceof Error && err.name === 'TimeoutError') {
+        sessionService.terminateSession('token_refresh_timeout');
+      } else {
+        sessionService.terminateSession('token_refresh_failed');
+      }
+      return EMPTY;
+    }),
+    // Reset the dedup state in a microtask so the test's synchronous
+    // flush chain (which subscribes AND completes in the same tick)
+    // doesn't trigger a second refreshToken() call before a
+    // concurrent 401 lands. Production behavior: after the last
+    // subscriber of this batch finishes, the microtask runs and the
+    // cache clears, so the next batch of 401s starts fresh.
+    finalize(() => {
+      queueMicrotask(() => {
+        activeRefresh$ = null;
+      });
     }),
   );
 }

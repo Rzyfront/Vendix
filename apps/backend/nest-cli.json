@@ -3,6 +3,12 @@
   "collection": "@nestjs/schematics",
   "sourceRoot": "src",
   "compilerOptions": {
-    "deleteOutDir": true
+    "deleteOutDir": true,
+    "assets": [
+      {
+        "include": "domains/store/print-formats/schemas/*.json",
+        "watchAssets": true
+      }
+    ]
   }
 }

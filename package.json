@@ -4,16 +4,26 @@
     "apps/*",
     "libs/*"
   ],
+  "engines": {
+    "node": "^20.19 || ^22.12 || ^24"
+  },
   "scripts": {
     "// ----- WORKSPACES -----": "",
     "install:all": "npm install -ws",
     "// ----- DEVELOPMENT -----": "",
     "dev": "npm run start:dev -w apps/backend & npm run start -w apps/frontend",
+    "// dev:fe — ng serve NATIVO en macOS. El frontend ya no vive en Docker: nginx (contenedor) proxya vendix.com hacia host.docker.internal:4200. Sin cgroup el heap puede crecer, y sin VirtioFS el watch usa FSEvents en vez de --poll.": "",
+    "dev:fe": "bash scripts/dev-fe.sh",
+    "// dev:fe:lite — misma cosa con presupuesto recortado, para cuando corras algo pesado en paralelo (buildcheck, tests, otro agente).": "",
+    "dev:fe:lite": "bash scripts/dev-fe.sh --lite",
     "mobile:start": "npm run start -w apps/mobile",
     "mobile:ios": "npm run ios -w apps/mobile",
     "mobile:android": "npm run android -w apps/mobile",
     "mobile:web": "npm run web -w apps/mobile",
     "// ----- BUILD -----": "",
+    "// [print-editor-dsk P1.6] Copia libs/print-formats/schemas/page-geometry.json byte-a-byte a las 3 copias locales (backend/frontend/mobile). Se ejecuta via prebuild antes de cualquier build; los shims de cada app importan su copia local, sin este sync los 3 apps divergen silenciosamente.": "",
+    "sync:geometry": "ts-node scripts/sync-print-geometry.ts",
+    "prebuild": "npm run sync:geometry",
     "build": "npm run build -w apps/backend && npm run build:prod -w apps/frontend",
     "// ----- BUILDCHECK (compila y muere: sin servidores, sin huérfanos) -----": "",
     "buildcheck": "bash scripts/buildcheck.sh",

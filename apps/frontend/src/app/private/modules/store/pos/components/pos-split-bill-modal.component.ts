@@ -432,7 +432,7 @@ export class PosSplitBillModalComponent {
 
   // Items-method state
   readonly itemGroupsCount = signal<number[]>([1, 2]);
-  readonly itemGroupSelection = signal<Record<number, number>>({});
+  readonly itemGroupSelection = signal<Record<number, number | undefined>>({});
 
   readonly form: FormGroup;
 
@@ -505,13 +505,18 @@ export class PosSplitBillModalComponent {
   });
 
   readonly assignedCount = computed(
-    () => Object.values(this.itemGroupSelection()).filter((v) => v > 0).length,
+    () =>
+      Object.values(this.itemGroupSelection()).filter(
+        (v): v is number => typeof v === 'number' && v > 0,
+      ).length,
   );
 
   readonly previewSubOrders = computed(() => {
     if (this.method() === 'items') {
       const groups = new Set(
-        Object.values(this.itemGroupSelection()).filter((v) => v > 0),
+        Object.values(this.itemGroupSelection()).filter(
+          (v): v is number => typeof v === 'number' && v > 0,
+        ),
       );
       return groups.size;
     }
@@ -596,7 +601,7 @@ export class PosSplitBillModalComponent {
     const selection = this.itemGroupSelection();
     const groupsByIndex: Record<number, number[]> = {};
     for (const [itemIdStr, group] of Object.entries(selection)) {
-      if (group === 0) continue;
+      if (group === undefined || group === 0) continue;
       const itemId = Number(itemIdStr);
       if (!groupsByIndex[group]) groupsByIndex[group] = [];
       groupsByIndex[group].push(itemId);

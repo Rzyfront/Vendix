@@ -1,0 +1,42 @@
+# ERR-14: PRINT_CLONE_FAILED_001
+# HTTP: 409
+# Source: apps/backend/src/common/errors/error-codes.ts:285-289
+# Emitido cuando: clone conflict (ya existe config para ese template_id en la tienda)
+
+COMMAND (clone conflict, mismo template 2 veces seguidas):
+# Asumiendo template id=1 clonado en primera llamada OK
+curl -sk -X POST 'https://api.vendix.com/api/store/print-formats/library/1/clone' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -w '\nHTTP_CODE: %{http_code}\n'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+EXPECTED HTTP: depends — puede ser 200 (update idempotente) o 409 (conflict)
+
+EXPECTED RESPONSE BODY (409 case):
+{
+  "success": false,
+  "error": {
+    "code": "PRINT_CLONE_FAILED_001",
+    "message": "Cannot clone template due to existing configuration conflict"
+  }
+}
+
+VERIFICATION:
+# Clone duplicado: comportamiento depende de implementación
+# Opción A (idempotente): ambas llamadas retornan 200 con misma data
+curl .../library/1/clone -X POST | jq '.success' debe ser true (ambas llamadas)
+
+# Opción B (conflict): segunda llamada retorna 409
+curl .../library/1/clone -X POST (segunda vez) | jq '.error.code' debe ser 'PRINT_CLONE_FAILED_001'
+
+# Decisión arquitectónica: ¿idempotente o conflict?
+# - Idempotente: mejor UX (refresh, re-click) pero menos explícito
+# - Conflict: explícito pero molesta re-asignaciones intencionales
+# Owner preference: idempotente con logs
+
+# Independentemente: este código existe y debe ser emitido por alguna path
+# (ej: clone de system template a tienda que ya tiene custom override incompatible)
+
+# Frontend behavior: toast "Clonar plantilla falló" o auto-resolver si idempotente

@@ -353,6 +353,36 @@ export class S3Service {
   }
 
   /**
+   * Returns the `Content-Type` and `Content-Length` of an object via a HEAD
+   * request, or `null` if the object does not exist / is unreachable.
+   *
+   * Use when the caller needs metadata without downloading the bytes — e.g.
+   * `getPaymentReceiptUrl` decides whether the FE should preview an image or
+   * render a PDF based on the MIME stored at upload time. Never throws on
+   * missing objects: returns `null` so callers can branch on it cleanly.
+   */
+  async headObject(
+    key: string | null | undefined,
+  ): Promise<{ contentType: string | null; contentLength: number | null } | null> {
+    if (!key || !isSafeS3Key(key)) return null;
+
+    try {
+      const response = await this.s3Client.send(
+        new HeadObjectCommand({ Bucket: this.bucketName, Key: key }),
+      );
+      return {
+        contentType: response.ContentType ?? null,
+        contentLength:
+          response.ContentLength !== undefined
+            ? Number(response.ContentLength)
+            : null,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Drops every derived PWA icon cached under a tenant's base path.
    *
    * `getOrCreatePwaIcon` treats an existing derived object as authoritative and

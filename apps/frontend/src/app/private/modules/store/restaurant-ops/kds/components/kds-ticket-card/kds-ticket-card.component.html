@@ -99,6 +99,19 @@
             </app-badge>
           }
         </div>
+        <!--
+          CP-POLLO-ARABE-727 C.4 (QUI-736) — la variante va como SUB-LÍNEA propia
+          bajo el nombre, NUNCA concatenada (el name es flex:1 sin wrap: "Pollo —
+          Picante" + 2 badges cortaría el nombre o empujaría la urgencia fuera de
+          vista). Mismo patrón que .kds-card__notes, fuera del flex row. El
+          <span class="sr-only"> evita que un lector de pantalla oiga "Pollo…
+          Picante" indistinguible de un segundo plato.
+        -->
+        @if (item.variant_label) {
+          <p class="kds-card__variant">
+            <span class="sr-only">Variante: </span>{{ item.variant_label }}
+          </p>
+        }
         @if (!itemHasRecipe(item)) {
           <!-- Direct shortcut to create the recipe for THIS dish.
                stopPropagation so it never opens the detail modal. -->

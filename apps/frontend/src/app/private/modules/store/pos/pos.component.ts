@@ -66,7 +66,6 @@ import {
 import { PosPaymentService } from './services/pos-payment.service';
 import { PosOrderService } from './services/pos-order.service';
 import { StoreOrdersService } from '../orders/services/store-orders.service';
-import { PosStatsComponent } from './components/pos-stats.component';
 import { PosProductSelectionComponent } from './components/pos-product-selection.component';
 import { PosBarcodeService } from './services/pos-barcode.service';
 import {
@@ -84,6 +83,12 @@ import { PosOrderCreateResult } from './models/order.model';
 import { StoreSettingsService } from '../settings/general/services/store-settings.service';
 import { HttpClient } from '@angular/common/http';
 import { StoreSettingsFacade } from '../../../../core/store/store-settings/store-settings.facade';
+import { DispatchTicketPrintService } from '../dispatch-ticket/services/dispatch-ticket-print.service';
+import type { DispatchTicketData } from '../dispatch-ticket/models/dispatch-ticket-data.model';
+import {
+  shouldAutoPrintDispatchTicket,
+  type ShouldAutoPrintDispatchTicketContext,
+} from '../../../../shared/services/print/dispatch-ticket-autoprint';
 import { PaymentMethodsCatalogService } from '../../../../shared/services/payment-methods-catalog.service';
 import { OrderPaymentModalComponent } from '../orders/components/order-payment-modal/order-payment-modal.component';
 import type { Order } from '../orders/interfaces/order.interface';
@@ -113,7 +118,6 @@ import { PosSessionDetailModalComponent } from './components/pos-session-detail-
 import { PosScheduleIndicatorComponent } from './components/pos-schedule-indicator.component';
 import { PosScheduleModalComponent } from './components/pos-schedule-modal.component';
 import { PosHeaderDropdownComponent } from './components/pos-header-dropdown.component';
-import { ReservationFormModalComponent } from '../reservations/components/reservation-form-modal/reservation-form-modal.component';
 import { BookingSchedulerModalComponent } from '../../../../shared/components/booking-scheduler-modal/booking-scheduler-modal.component';
 import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.component';
 import {
@@ -143,7 +147,6 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
     PosCustomItemModalComponent,
     SpinnerComponent,
     CardComponent,
-    PosStatsComponent,
     PosProductSelectionComponent,
     PosCustomerModalComponent,
     PosCheckoutShellComponent,
@@ -161,7 +164,6 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
     PosScheduleModalComponent,
     PosHeaderDropdownComponent,
     LayawayConfigModalComponent,
-    ReservationFormModalComponent,
     BookingSchedulerModalComponent,
     PosAISummaryModalComponent,
     OrderPaymentModalComponent,
@@ -1218,6 +1220,9 @@ export class PosComponent {
   private readonly paymentMethodsCatalogService = inject(
     PaymentMethodsCatalogService,
   );
+  // CP-DTLP Phase E.2 — disparador POS del tiquete de despacho (cadena
+  // explícita al cierre de venta, defense-in-depth del `maybeAutoPrint`).
+  private readonly dispatchTicketPrint = inject(DispatchTicketPrintService);
 
   readonly canCreateCustomItems = computed(() =>
     this.hasPermission('store:pos:custom_items:create'),
@@ -2507,6 +2512,16 @@ export class PosComponent {
       this.mode.set('create-draft');
       this.checkoutIntent.set('pickup');
     }
+
+    // CP-DTLP Phase E.2 / QUI-764 — encadenar tiquete de despacho
+    // (`'automatic'`) al cierre de venta POS. La bandera de auto es
+    // `print_dispatch_ticket_auto_with_pos` (origen = POS). El predicado
+    // compartido considera además `print_dispatch_ticket_on_counter`
+    // para imprimir también en mostrador/para-llevar.
+    void this.printDispatchTicketIfNeededForOrder(
+      paymentData.order,
+      'auto_with_pos',
+    );
   }
 
   onOrderConfirmationClosed(): void {
@@ -3440,6 +3455,15 @@ export class PosComponent {
       this.paymentFulfillment.set(null);
       this.paymentTableId.set(null);
     }
+
+    // CP-DTLP Phase E.2 / QUI-764 — encadenar tiquete de despacho
+    // (`'automatic'`) al crear la orden con envío en postventa. La bandera
+    // de auto es `print_dispatch_ticket_auto_on_postventa` (origen =
+    // postventa), NO la del POS — son dos flags distintos.
+    void this.printDispatchTicketIfNeededForOrder(
+      shippingData.order,
+      'auto_on_postventa',
+    );
   }
 
   private checkEditMode(): void {
@@ -4323,4 +4347,121 @@ export class PosComponent {
     this.loading.set(false);
   }
 
+  // ── CP-DTLP Phase E.2 — disparador POS del tiquete de despacho ────
+  //
+  // Cadena explícita (`trigger: 'explicit'`) al cierre de la venta con envío.
+  // Defense-in-depth: `pos-order-confirmation` ya encadena su propio
+  // `'automatic'` cuando `maybeAutoPrint` dispara, pero esta cadena aquí cubre
+  // escenarios donde el modal aún no abre (`isOpen()` false) o la venta no es
+  // `derivedIsPaid` (draft) — casos que `maybeAutoPrint` se salta por guard.
+
+  /**
+   * Helper único para los hooks `onPaymentCompleted` y `onShippingCompleted`.
+   * Misma guard que E.2 manual: enabled + envío + NO `direct_delivery`.
+   * El `'automatic'` (que además exige `print_dispatch_ticket_auto_with_pos`)
+   * vive en `pos-order-confirmation.maybeAutoPrint`.
+   */
+  /**
+   * Defense-in-depth para imprimir el tiquete de despacho desde el POS en
+   * los hooks de cierre (`onPaymentCompleted` → venta POS, `onShippingCompleted`
+   * → postventa).
+   *
+   * **QUI-764**: antes esta cadena rechazaba `direct_delivery` con un `return`
+   * HARDCODED (lógica pre-QUI-727), ignorando `print_dispatch_ticket_on_counter`.
+   * Adopta el predicado compartido `shouldAutoPrintDispatchTicket` que ya
+   * entiende el flag del mostrador.
+   *
+   * El parámetro `autoFlagKey` selecciona la llave de auto-impresión del
+   * ORIGEN. Hay dos, no una — los dos callsites tienen semántica distinta:
+   *  - `'auto_with_pos'`     → cierre de venta POS (línea 2517)
+   *  - `'auto_on_postventa'` → cierre de envío en postventa (línea 3456)
+   *
+   * El trigger es `'automatic'` (NO `'explicit'`): esta función corre desde
+   * hooks automáticos. Pasar `'explicit'` saltaría la guarda `trigger ===
+   * 'automatic' && !printDispatchTicketAuto` y el tiquete se imprimiría
+   * aunque el admin haya apagado la auto-impresión — bug peor.
+   *
+   * La deduplicación de la impresión (entre esta cadena y la del modal de
+   * confirmación `pos-order-confirmation.maybeAutoPrint`) vive en
+   * `DispatchTicketPrintService.printDispatchTicket` (singleton) para que
+   * ambos callsites la compartan.
+   */
+  private async printDispatchTicketIfNeededForOrder(
+    order: any,
+    autoFlagKey: 'auto_with_pos' | 'auto_on_postventa',
+  ): Promise<void> {
+    if (!order) return;
+    const receipts = this.settingsFacade.receipts();
+    const enabled = receipts?.print_dispatch_ticket_enabled ?? true;
+    const autoFlag =
+      autoFlagKey === 'auto_with_pos'
+        ? receipts?.print_dispatch_ticket_auto_with_pos ?? false
+        : receipts?.print_dispatch_ticket_auto_on_postventa ?? false;
+    const counterEnabled =
+      receipts?.print_dispatch_ticket_on_counter ?? false;
+
+    const context: ShouldAutoPrintDispatchTicketContext = {
+      printDispatchTicketEnabled: enabled,
+      printDispatchTicketAuto: autoFlag,
+      counterEnabled,
+      deliveryType: order.delivery_type,
+      isShippingSale: (order as any)?.isShippingSale,
+    };
+
+    if (!shouldAutoPrintDispatchTicket('automatic', context)) return;
+
+    const items = (order.items || order.order_items || []).map(
+      (item: any) => ({
+        sku:
+          item.sku ||
+          item.product_sku ||
+          item.variant_sku ||
+          item.products?.sku ||
+          item.product_variants?.sku ||
+          '',
+        productName: item.product_name || item.name || 'Producto',
+        orderedQty: Number(item.quantity || 0),
+        dispatchedQty: Number(item.quantity || 0),
+      }),
+    );
+    const address =
+      order.addresses_orders_shipping_address_idToaddresses ||
+      order.shipping_address_snapshot ||
+      null;
+    const storeName =
+      this.authFacade.getCurrentUser()?.store?.name || 'Vendix';
+    const customerName =
+      order.customer_name ||
+      (order.customer
+        ? `${order.customer.first_name || ''} ${order.customer.last_name || ''}`.trim() ||
+          order.customer.name ||
+          order.customer.business_name ||
+          'Consumidor Final'
+        : 'Consumidor Final');
+
+    const data: DispatchTicketData = {
+      orderId: order.id,
+      orderNumber: order.order_number || order.number || 'N/A',
+      dateFormatted: order.created_at
+        ? new Date(order.created_at).toLocaleString('es-AR')
+        : new Date().toLocaleString('es-AR'),
+      storeName,
+      customer: {
+        name: customerName,
+        addressLine1: address?.address_line1 || '',
+        addressLine2: address?.address_line2,
+        city: address?.city,
+      },
+      items,
+    };
+
+    try {
+      await this.dispatchTicketPrint.printDispatchTicket(data, 'automatic');
+    } catch (err) {
+      console.error(
+        `[QUI-764] Error al imprimir tiquete de despacho (${autoFlagKey}):`,
+        err,
+      );
+    }
+  }
 }

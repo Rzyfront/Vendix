@@ -1,0 +1,38 @@
+# FB-14: PUT /store/print-formats/library/:id
+# Plan section: A.3 + Phase D.9 (library template editor)
+# Source: GAP — endpoint NO EXISTE en apps/backend/src/domains/store/print-formats/controllers/print-templates-library.controller.ts
+#          Solo existe PUT /library/:id/share. UPDATE general pendiente para D.9.
+
+COMMAND:
+curl -sk -X PUT 'https://api.vendix.com/api/store/print-formats/library/1' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "Tiquete Despacho Bodega Sur v2",
+    "definition": { "v": 2, "paper": { "format": "thermal_58" } }
+  }'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+EXPECTED HTTP: 404 Not Found (until D.9 implements this endpoint)
+
+EXPECTED RESPONSE SHAPE (post-D.9):
+{
+  "success": true,
+  "data": { /* PrintTemplate updated */ }
+}
+
+VERIFICATION:
+# Pre-D.9 (current): endpoint no existe
+curl .../library/1 -X PUT | jq '.error.code' debe ser SYS_NOT_FOUND_001 (404) o similar
+# No debe responder 200 con la shape esperada (controller no implementado)
+
+# Post-D.9 (after implementing PUT handler in print-templates-library.controller.ts):
+curl .../library/1 -X PUT | jq '.success' debe ser true
+curl .../library/1 -X PUT | jq '.data.name' debe ser 'Tiquete Despacho Bodega Sur v2'
+
+# System template PUT debe rechazar (ERR-10)
+curl .../library/<system_id> -X PUT -d '{...}' (post-D.9) | jq '.error.code' debe ser 'PRINT_TEMPLATE_SYSTEM_PROTECTED_001' (403)
+
+# Cross-tenant
+curl .../library/<other_org_id> -X PUT (post-D.9) | jq '.error.code' debe ser 'PRINT_TEMPLATE_ACCESS_DENIED_001' (403)

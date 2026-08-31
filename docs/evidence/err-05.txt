@@ -1,0 +1,43 @@
+# ERR-05: PRINT_FISCAL_STRUCTURE_VIOLATION_001
+# HTTP: 422
+# Source: apps/backend/src/common/errors/error-codes.ts:265-269
+# Emitido cuando: custom_template de formato fiscal sin CUFE/QR/fiscal_header obligatorios DIAN
+
+COMMAND:
+curl -sk -X POST 'https://api.vendix.com/api/store/print-formats/fiscal_electronic_invoice/preview' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "overrides": {
+      "custom_template": "Solo imprime {{ store.name }} sin CUFE ni QR"
+    }
+  }' \
+  -w '\nHTTP_CODE: %{http_code}\n'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+EXPECTED HTTP: 422
+
+EXPECTED RESPONSE BODY:
+{
+  "success": false,
+  "error": {
+    "code": "PRINT_FISCAL_STRUCTURE_VIOLATION_001",
+    "message": "Fiscal electronic invoice template violates DIAN mandatory graphic representation requirements"
+  }
+}
+
+VERIFICATION:
+# Fiscal violation
+curl .../fiscal_electronic_invoice/preview -d '{...sin CUFE...}' | jq '.error.code' debe ser 'PRINT_FISCAL_STRUCTURE_VIOLATION_001'
+curl .../fiscal_electronic_invoice/preview -d '{...sin CUFE...}' -w '%{http_code}' | grep -q '422'
+
+# Para fiscal_credit_note: mismo trato
+curl .../fiscal_credit_note/preview -d '{"overrides":{"custom_template":"sin CUDE"}}' | jq '.error.code' debe ser 'PRINT_FISCAL_STRUCTURE_VIOLATION_001'
+
+# Para formatos NO fiscales (post-B.6: dispatch_ticket, sales_order_invoice, etc.):
+# NO debe disparar este error (short-circuit en assertFiscalCompliance)
+curl .../dispatch_ticket/preview -d '{"overrides":{"custom_template":"{{ store.name }}"}}' (post-B.6) | jq '.success' debe ser true
+
+# Frontend behavior esperado: toast error + inline en fiscal editor
+# Log esperado: "[PrintFiscalValidator] Fiscal structure violation in format_type=fiscal_electronic_invoice"

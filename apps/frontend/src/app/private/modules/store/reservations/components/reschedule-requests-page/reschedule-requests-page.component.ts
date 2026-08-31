@@ -24,7 +24,6 @@ import {
 } from '../../../../../../shared/components/sticky-header/sticky-header.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import {
-  ResponsiveDataViewComponent,
   TableColumn,
   TableAction,
   ItemListCardConfig,
@@ -71,7 +70,6 @@ interface RejectModalState {
     StickyHeaderComponent,
     RouterLink,
     StatsComponent,
-    ResponsiveDataViewComponent,
     CardComponent,
     InputsearchComponent,
     OptionsDropdownComponent,

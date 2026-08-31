@@ -48,7 +48,7 @@ export class KdsSessionsService {
   }
 
   async findAll(kdsId?: number) {
-    return this.prisma.kds_sessions.findMany({
+    const sessions = await this.prisma.kds_sessions.findMany({
       where: { ...(kdsId != null && { kds_id: kdsId }) },
       orderBy: { opened_at: 'desc' },
       take: 100,
@@ -58,6 +58,30 @@ export class KdsSessionsService {
         closed_by_user: { select: { id: true, first_name: true, last_name: true } },
       },
     });
+    return sessions.map((s) => ({ ...s, summary: this.stripSummaryCost(s.summary) }));
+  }
+
+  /**
+   * ADR-10: el KDS nunca muestra dinero. El snapshot `summary` persistido al
+   * cerrar un turno ANTES de esta regla puede traer `total_cost`/`unit_cost` en
+   * su JSON. Al servirlo se proyecta sin dinero: se conservan las cantidades por
+   * insumo y se descartan las claves de costo. No borra nada en base — solo deja
+   * de enviarlas en el payload.
+   */
+  private stripSummaryCost(summary: any): any {
+    if (!summary || typeof summary !== 'object') return summary;
+    const clean = { ...summary };
+    delete clean.total_cost;
+    if (Array.isArray(clean.ingredients)) {
+      clean.ingredients = clean.ingredients.map((i: any) => {
+        if (!i || typeof i !== 'object') return i;
+        const copy = { ...i };
+        delete copy.total_cost;
+        delete copy.unit_cost;
+        return copy;
+      });
+    }
+    return clean;
   }
 
   /**
@@ -67,6 +91,17 @@ export class KdsSessionsService {
    * real es el índice único parcial `kds_sessions_one_open_per_kds`: dos
    * operadores concurrentes pasarían ambos este chequeo y dejarían la estación
    * con dos dueños. Por eso el P2002 se traduce, no se propaga crudo.
+   *
+   * NOTA — QUI-760 ya NO hace backfill al abrir. La imputación de
+   * `inventory_transactions` se hace en el momento de la primera ACCIÓN de
+   * gestión sobre un ticket (`start`/`ready`/`delivered`), vía
+   * {@link attributeOpenSessionToTicketConsumption}. Razones del cambio:
+   *  - Si un operador entra por error a la KDS equivocada, cierra y abre
+   *    la suya, el turno viejo no debe quedarse con el consumo de la otra.
+   *  - El responsable del consumo es quien COCINA, no quien ABRE turno.
+   *  - El tablero KDS filtra por `business_date = hoy`, así que el límite
+   *    temporal está puesto por construcción y no necesita una ventana
+   *    propia acá.
    */
   async open(dto: OpenKdsSessionDto) {
     const { storeId, userId } = this.requireContext();
@@ -100,6 +135,116 @@ export class KdsSessionsService {
       throw e;
     }
   }
+
+  /**
+   * QUI-760 — IMPUTA con la sesión abierta de la KDS del ticket las
+   * `inventory_transactions` de ese ticket que sigan con `kds_session_id
+   * IS NULL`.
+   *
+   * Se invoca desde los handlers de `startPreparation`, `markReady` y
+   * `markDelivered` en `kitchen-fire.service.ts` — la primera acción de
+   * gestión sobre un ticket es la que firma el consumo. La guarda
+   * `kds_session_id IS NULL` hace que solo esa primera acción tenga
+   * efecto: llamar el helper desde los tres handlers sale gratis (no
+   * rompe idempotencia) y deja cubierto un cuarto si mañana aparece.
+   *
+   * El routing de KDS NO se rederiva acá. El `kitchen_tickets.kds_id` ya
+   * fue resuelto al disparar el fire (mismo patrón `kdsByProduct.get(...)
+   * ?? defaultKds.id` que `kitchen-fire.service.ts:668-680`), así que el
+   * ticket y todas las `inventory_transactions` que pertenecen a sus
+   * `order_items` van a la misma KDS — basta con estampar a la sesión
+   * abierta de ESE kds_id.
+   *
+   * Comportamiento:
+   *  - Si no hay sesión abierta para la KDS del ticket: 0 filas
+   *    estampadas, sin error. La guardia del tablero ya prohíbe actuar
+   *    sin sesión; este helper es defensivo para ese caso y para
+   *    tickets de un kds_id sin estación activa.
+   *  - Si el ticket no existe en esta tienda: 0 filas estampadas. El
+   *    helper NO rompe el flujo del handler — la búsqueda del ticket
+   *    en el handler previo ya fallaría con su propio error.
+   *
+   * Caso especial `table-sessions` (reverso de un ítem disparado): el
+   * caller en `tables/table-sessions.service.ts:891` (dentro de
+   * `removeItem`) llama `cancelTicketInTx` y, en la MISMA tx, en orden:
+   *  - líneas 893-942: por cada `consumptionTxn` (los originales con
+   *    `order_item_id` y `quantity_change < 0`), crea la reversa de
+   *    stock vía `stockLevelManager.updateStock({ ..., movement_type:
+   *    'return' })` SIN `order_item_id` (la FK `Restrict` sobre el
+   *    `order_items.delete` posterior lo prohíbe).
+   *  - línea 946: `tx.inventory_transactions.deleteMany({ where:
+   *    { order_item_id: orderItemId } })` borra las consumption
+   *    originales. Las reversals (sin `order_item_id`) sobreviven en
+   *    la tabla.
+   *  - línea 974: post-commit, llama `emitTicketCancelledEvent(ticketId)`
+   *    que invoca este imputador.
+   *
+   * Cuando el imputador corre post-commit, su `where: { order_item_id:
+   * { not: null } }` no matchea ninguna fila: las consumption
+   * originales ya NO EXISTEN (el caller las borró), y las reversals
+   * NO TIENEN `order_item_id` por construcción. Resultado: 0
+   * estampadas, sin error. La doble-no-imputación es una INVARIANTE
+   * DEL CALLER, no una garantía del helper — documentado para que el
+   * próximo que lea entienda que si alguien refactoriza
+   * `removeItem` y deja las consumption con `order_item_id`
+   * persistidas, este imputador pasa a estampar la reversión al
+   * turno que la cocinó, lo que YA sería doble conteo de stock
+   * positivo. La invariante la sostiene el caller, no este helper.
+   *
+   * Devuelve el conteo de filas estampadas (útil para logs y para
+   * verificar que la primera acción tuvo efecto).
+   */
+  async attributeOpenSessionToTicketConsumption(ticketId: number): Promise<number> {
+    const { storeId } = this.requireContext();
+
+    // Traer el ticket para conocer su kds_id. Filtro por store_id
+    // explícito: defensa en profundidad contra un ticket creado en otra
+    // tienda por una fuga del scope del backend.
+    const ticket = await this.prisma.kitchen_tickets.findFirst({
+      where: { id: ticketId, store_id: storeId },
+      select: { id: true, kds_id: true },
+    });
+    if (!ticket) return 0;
+
+    // Sesión abierta de esta KDS. Si no hay, no imputamos nada: el
+    // helper es idempotente y el tablero debería bloquear esta acción.
+    const openSession = await this.findOpenByKds(ticket.kds_id);
+    if (!openSession) return 0;
+
+    // Imputación: transactions cuyo order_item está en este ticket y
+    // siguen null. La guarda `kds_session_id IS NULL` es la idempotencia
+    // — la segunda llamada al helper no tiene efecto. El relational scope
+    // de `StorePrismaService` filtra por `products.store_id`, así que
+    // cross-tenant está cubierto por construcción.
+    //
+    // Invariante sobre `type`: este helper NO filtra por `type` y eso
+    // es correcto por construcción. Todo `kitchen_ticket_items.order_item_id`
+    // tiene `inventory_consumed_at_fire = true` — el fire lo flipea
+    // siempre, incluidos los `recipeLessItems` (Fase K Gap 3, líneas
+    // 810-819 de `kitchen-fire.service.ts`). Y el path de pago
+    // (`payments.service.ts:2554`) tiene el guard `if (item.
+    // inventory_consumed_at_fire === true) continue;` antes de generar
+    // un `sale` o `return` para el mismo order_item. Verificado en DB
+    // local: TODOS los movimientos de order_items de kitchen_ticket_items
+    // son `stock_in`/`initial`, cero `sale`/`return`. Filtrar por
+    // `type` agregaría ruido sin cambiar el resultado.
+    const result = await this.prisma.inventory_transactions.updateMany({
+      where: {
+        kds_session_id: null,
+        order_item_id: { not: null },
+        order_items: {
+          kitchen_ticket_items: {
+            some: { kitchen_ticket_id: ticketId },
+          },
+        },
+      },
+      data: { kds_session_id: openSession.id },
+    });
+
+    return result.count;
+  }
+
+
 
   /**
    * Cierra la sesión y persiste el RESUMEN DEL TURNO como snapshot inmutable,
@@ -138,11 +283,10 @@ export class KdsSessionsService {
    * (a) HISTORIAL de consumos — una fila por insumo POR PEDIDO.
    *
    * Es una consulta sobre `inventory_transactions` filtrada por
-   * `kds_session_id`. El costo sale de las columnas `unit_cost`/`total_cost` que
-   * QUI-651 agregó: antes el costo por movimiento no existía en ninguna parte
-   * joineable — no estaba en inventory_transactions ni en inventory_movements, y
-   * el `total_value` de inventory_valuation_snapshots es el valor del stock
-   * ON-HAND posterior al movimiento, no el costo de lo consumido.
+   * `kds_session_id`. ADR-10: el KDS nunca muestra dinero. El historial expone
+   * SOLO cantidades por insumo; `unit_cost`/`total_cost` no se proyectan (vivían
+   * en las columnas que QUI-651 agregó, pero esa información pertenece a la capa
+   * de contabilidad/reportes, nunca a la superficie de cocina).
    */
   async getConsumptionHistory(sessionId: number) {
     const rows = await this.prisma.inventory_transactions.findMany({
@@ -152,8 +296,6 @@ export class KdsSessionsService {
         id: true,
         created_at: true,
         quantity_change: true,
-        unit_cost: true,
-        total_cost: true,
         products: { select: { id: true, name: true, sku: true } },
         order_items: {
           select: {
@@ -172,8 +314,6 @@ export class KdsSessionsService {
       // El fire registra el consumo como cantidad NEGATIVA. Se expone en
       // positivo porque la vista es "cuánto se consumió", no "cuánto varió".
       quantity: Math.abs(r.quantity_change),
-      unit_cost: r.unit_cost,
-      total_cost: r.total_cost,
       ingredient: r.products,
       // El plato que originó el consumo, vía el order_item del fire.
       dish_name: r.order_items?.product_name ?? null,
@@ -226,7 +366,7 @@ export class KdsSessionsService {
     });
 
     if (sessions.length === 0) {
-      return { sessions: [], by_station: [], total_cost: 0 };
+      return { sessions: [], by_station: [] };
     }
 
     // Un solo barrido de movimientos para todo el rango: consultar por sesión
@@ -236,7 +376,6 @@ export class KdsSessionsService {
       select: {
         kds_session_id: true,
         quantity_change: true,
-        total_cost: true,
         products: { select: { id: true, name: true, sku: true } },
       },
     });
@@ -259,8 +398,7 @@ export class KdsSessionsService {
         code: string;
         session_count: number;
         movement_count: number;
-        total_cost: number;
-        ingredients: Map<number, { product_id: number; name: string; sku: string | null; quantity: number; total_cost: number }>;
+        ingredients: Map<number, { product_id: number; name: string; sku: string | null; quantity: number }>;
       }
     >();
 
@@ -272,7 +410,6 @@ export class KdsSessionsService {
         code: station.code,
         session_count: 0,
         movement_count: 0,
-        total_cost: 0,
         ingredients: new Map(),
       };
       acc.session_count += 1;
@@ -286,31 +423,30 @@ export class KdsSessionsService {
       if (!acc || !r.products) continue;
 
       acc.movement_count += 1;
-      const cost = Number(r.total_cost ?? 0);
-      acc.total_cost += cost;
 
       const ing = acc.ingredients.get(r.products.id) ?? {
         product_id: r.products.id,
         name: r.products.name,
         sku: r.products.sku ?? null,
         quantity: 0,
-        total_cost: 0,
       };
       // El consumo se registra negativo; se expone en positivo porque la vista es
       // "cuánto se consumió", no "cuánto varió el stock".
       ing.quantity += Math.abs(r.quantity_change);
-      ing.total_cost += cost;
       acc.ingredients.set(r.products.id, ing);
     }
 
+    // ADR-10: el reporte de consumo de cocina es SOLO cantidades. Sin totales
+    // monetarios — el costo pertenece a la capa de contabilidad/reportes, nunca
+    // a una superficie que el rol `cocina` puede leer.
     const by_station = [...byStation.values()]
       .map((s) => ({
         ...s,
         ingredients: [...s.ingredients.values()].sort(
-          (a, b) => b.total_cost - a.total_cost,
+          (a, b) => b.quantity - a.quantity,
         ),
       }))
-      .sort((a, b) => b.total_cost - a.total_cost);
+      .sort((a, b) => b.movement_count - a.movement_count);
 
     return {
       sessions: sessions.map((s) => ({
@@ -321,7 +457,6 @@ export class KdsSessionsService {
         status: s.status,
       })),
       by_station,
-      total_cost: by_station.reduce((sum, s) => sum + s.total_cost, 0),
     };
   }
 
@@ -350,21 +485,19 @@ export class KdsSessionsService {
         id: true,
         created_at: true,
         quantity_change: true,
-        total_cost: true,
         products: { select: { id: true, name: true } },
       },
       orderBy: { created_at: 'desc' },
       take: 500,
     });
 
+    // ADR-10: sin dinero en el payload de cocina.
     return {
       movement_count: rows.length,
-      total_cost: rows.reduce((s, r) => s + Number(r.total_cost ?? 0), 0),
       movements: rows.map((r) => ({
         transaction_id: r.id,
         consumed_at: r.created_at,
         quantity: Math.abs(r.quantity_change),
-        total_cost: r.total_cost,
         ingredient: r.products,
       })),
     };
@@ -382,7 +515,7 @@ export class KdsSessionsService {
 
     const byIngredient = new Map<
       number,
-      { product_id: number; name: string; sku: string | null; quantity: number; total_cost: number }
+      { product_id: number; name: string; sku: string | null; quantity: number }
     >();
 
     for (const row of history) {
@@ -393,21 +526,18 @@ export class KdsSessionsService {
         name: row.ingredient!.name,
         sku: row.ingredient!.sku ?? null,
         quantity: 0,
-        total_cost: 0,
       };
       acc.quantity += row.quantity;
-      acc.total_cost += Number(row.total_cost ?? 0);
       byIngredient.set(id, acc);
     }
 
-    const ingredients = [...byIngredient.values()].sort(
-      (a, b) => b.total_cost - a.total_cost,
-    );
+    // ADR-10: el resumen del turno es SOLO cantidades por insumo. Sin totales
+    // monetarios — el costo no viaja a la superficie de cocina.
+    const ingredients = [...byIngredient.values()];
 
     return {
       movement_count: history.length,
       distinct_ingredients: ingredients.length,
-      total_cost: ingredients.reduce((s, i) => s + i.total_cost, 0),
       ingredients,
     };
   }

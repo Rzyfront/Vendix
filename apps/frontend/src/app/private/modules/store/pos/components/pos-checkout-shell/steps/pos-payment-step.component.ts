@@ -116,6 +116,15 @@ export class PosPaymentStepComponent implements OnInit {
   /** Anonymous-sale flag owned by the shell (drives collector requireCustomer). */
   readonly isAnonymous = input<boolean>(false);
   /**
+   * QUI-737 (B.4) — modo alias del shell. Junto con {@link isAnonymous} define el
+   * "sin cliente formal": el collector NO exige cliente cuando es anónimo O alias.
+   * Se pasa aparte porque el alias NO es anónimo (la venta se identifica por su
+   * alias, no como Consumidor Final).
+   */
+  readonly isAlias = input<boolean>(false);
+  /** QUI-737 (B.4) — texto del alias de la venta (ej. "Mesa 5"), desde el shell. */
+  readonly customerAlias = input<string>('');
+  /**
    * Payment methods supplied by the shell/parent. When null/empty the step
    * self-loads them (behavior-preserving fallback, mirrors the legacy
    * interface `loadPaymentMethods()`).
@@ -537,7 +546,15 @@ export class PosPaymentStepComponent implements OnInit {
 
     // Non-anonymous sales require a customer (defensive — the collector gates
     // this via requireCustomer).
-    if (!this.isAnonymous() && !this.cartState()!.customer) {
+    // QUI-737 (B.4) — el modo alias es otra salida legítima de "sin cliente":
+    // no requiere customer. Si llega a Cobro sin alias escrito, lo pedimos.
+    if (this.isAlias() && !this.customerAlias().trim()) {
+      this.toastService.info(
+        'Ingresa un nombre o referencia para identificar la venta',
+      );
+      return;
+    }
+    if (!this.isAnonymous() && !this.isAlias() && !this.cartState()!.customer) {
       this.toastService.info('Seleccione un cliente para continuar');
       this.requestCustomer.emit();
       return;
@@ -587,6 +604,14 @@ export class PosPaymentStepComponent implements OnInit {
       cashReceived: submit.amountReceived,
       reference: submit.reference,
       isAnonymousSale: this.isAnonymous(),
+      // QUI-737 (B.4) — el alias viaja con el pago; nunca ''.
+      customer_alias: this.isAlias()
+        ? this.customerAlias().trim() || undefined
+        : undefined,
+      // QUI-728 (E.1) — el selector de cuentas del collector emite bankAccountId;
+      // viaja con el pago para que el POS persista payments.bank_account_id en
+      // processPosPaymentTransaction (CreatePosPaymentDto).
+      bank_account_id: submit.bankAccountId,
     };
 
     if (method.type === 'wallet' && this.walletInfo()) {

@@ -8,6 +8,7 @@ import {
   ParseIntPipe,
   Post,
   Query,
+  Req,
   Res,
   UseGuards,
 } from '@nestjs/common';
@@ -26,6 +27,16 @@ import {
   ValidateNested,
 } from 'class-validator';
 import type { Response } from 'express';
+
+import { enrichAcquirerForStandard } from './acquirer-standard';
+import { PlatformCreditNotesService } from './platform-credit-notes.service';
+import { PlatformDeliveryService } from './platform-delivery.service';
+import { PlatformDianEventsService } from './platform-dian-events.service';
+import { PlatformInvoicePdfService } from './platform-invoice-pdf.service';
+import {
+  PlatformCreateCreditNoteDto,
+  PlatformCreateDebitNoteDto,
+} from './dto/platform-credit-note.dto';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { ResponseService } from '../../../../common/responses/response.service';
@@ -65,8 +76,8 @@ import { SubscriptionFiscalService } from './subscription-fiscal.service';
 
 class SearchTenantsQueryDto {
   @IsOptional()
-  @IsIn(['store', 'organization'])
-  kind?: 'store' | 'organization';
+  @IsIn(['store', 'organization', 'user'])
+  kind?: 'store' | 'organization' | 'user';
 
   @IsOptional()
   @IsString()
@@ -135,6 +146,10 @@ export class PlatformInvoicingController {
     private readonly platformInvoicing: PlatformInvoicingService,
     private readonly tenants: PlatformTenantsService,
     private readonly subscriptionFiscalService: SubscriptionFiscalService,
+    private readonly creditNotes: PlatformCreditNotesService,
+    private readonly delivery: PlatformDeliveryService,
+    private readonly dianEvents: PlatformDianEventsService,
+    private readonly invoicePdf: PlatformInvoicePdfService,
   ) {}
 
   /**
@@ -326,7 +341,19 @@ export class PlatformInvoicingController {
       q: query.q ?? null,
     });
     return this.responseService.success(
-      { data, meta: { q: query.q ?? null, kind: query.kind ?? null } },
+      {
+        // F.4: enriquecer cada resultado con el estandar de identidad fiscal
+        // para que el picker muestre DV/label/municipio sin llamada extra
+        // por fila (N+1 muerto). Mantiene el shape del envelope.
+        // Cast a `any`: TenantSearchResult es estructuralmente compatible con
+        // RawAcquirer (mismo tax_id/tax_id_dv, address opcional con codigos),
+        // pero sus campos no declaran document_type/person_type — `any`
+        // evita el casteo fila-a-fila y deja la validacion al enricher.
+        data: (data as any[]).map((row: any) =>
+          enrichAcquirerForStandard(row),
+        ),
+        meta: { q: query.q ?? null, kind: query.kind ?? null },
+      },
       'Tenants listados',
     );
   }
@@ -356,7 +383,16 @@ export class PlatformInvoicingController {
         `Tenant ${kind}:${id} no encontrado en esta plataforma`,
       );
     }
-    return this.responseService.success(data, 'Tenant retornado');
+    // F.4: enriquecer con el estandar de identidad fiscal del adquiriente
+    // (DV Modulo 11, label dinamico, persona resuelta, municipio DANE).
+    // Cast a `RawAcquirer`: TenantSearchResult es estructuralmente compatible
+    // (mismo tax_id/tax_id_dv, address opcional con codigos), pero sus campos
+    // no declaran document_type/person_type — la validacion corre dentro del
+    // enricher con su propio index signature.
+    return this.responseService.success(
+      enrichAcquirerForStandard(data as any),
+      'Tenant retornado',
+    );
   }
 
   /**
@@ -430,16 +466,10 @@ export class PlatformInvoicingController {
     @Param('id', ParseIntPipe) id: number,
     @Res() res: Response,
   ): Promise<void> {
-    // Phase B.5: invocar invoicePdfService.previewPdf(transmissionId)
-    // Por ahora respondemos 404 con un shape consistente hasta que
-    // B.5 conecte el provider PDF del riel tienda.
-    throw new VendixHttpException(
-      {
-        code: 'PDF_NOT_READY',
-        httpStatus: 503,
-      } as any,
-      `PDF preview para transmision #${id} no disponible todavia — pendiente B.5`,
-    );
+    const buffer = await this.invoicePdf.previewPdf(id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="preview-${id}.pdf"`);
+    res.send(buffer);
   }
 
   /**
@@ -448,16 +478,12 @@ export class PlatformInvoicingController {
    * pega a esta ruta.
    */
   @Get('invoices/:id/pdf')
+  @HttpCode(HttpStatus.OK)
   @Permissions('superadmin:fiscal:invoicing')
   @ApiOperation({ summary: 'Descarga PDF persistido en S3' })
-  async getPdf(
-    @Param('id', ParseIntPipe) id: number,
-    @Res() res: Response,
-  ): Promise<void> {
-    throw new VendixHttpException(
-      { code: 'PDF_NOT_READY', httpStatus: 503 } as any,
-      `PDF persistido para transmision #${id} no disponible todavia — pendiente B.5`,
-    );
+  async getPdf(@Param('id', ParseIntPipe) id: number): Promise<any> {
+    const result = await this.invoicePdf.getPdf(id);
+    return this.responseService.success(result);
   }
 
   /**
@@ -470,9 +496,155 @@ export class PlatformInvoicingController {
   @Permissions('superadmin:fiscal:invoicing')
   @ApiOperation({ summary: 'Regenera el PDF sin reemitir a la DIAN' })
   async regeneratePdf(@Param('id', ParseIntPipe) id: number): Promise<any> {
-    throw new VendixHttpException(
-      { code: 'PDF_NOT_READY', httpStatus: 503 } as any,
-      `Regeneracion PDF para transmision #${id} no disponible — pendiente B.5`,
+    const result = await this.invoicePdf.regeneratePdf(id);
+    return this.responseService.success(result, 'PDF regenerado');
+  }
+
+  // ─── Notas crédito/débito plataforma (C.2 del CP-platform-invoicing-parity) ─
+
+  /**
+   * Crea una `credit_note` del rail plataforma contra una factura plataforma.
+   *
+   * El body exige `related_invoice_id` (la factura que corrige) y
+   * `note_concept_code` (concepto DIAN — ver ERR-09 del plan: bloqueante
+   * si falta). El destinatario se hereda del documento relacionado; el
+   * caller puede override vía `customer` opcional.
+   *
+   * Persistencia delega en `InvoicingService.create()` del riel tienda
+   * dentro de un RequestContext sintetizado org-plataforma, sin tocar el
+   * servicio tienda. El spec tienda SIN modificaciones sigue verde
+   * (compuerta dura de ADR-7).
+   */
+  @Post('credit-notes')
+  @HttpCode(HttpStatus.CREATED)
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({
+    summary: 'Crear nota crédito del rail super-admin contra una factura plataforma',
+  })
+  async createCreditNote(
+    @Body() dto: PlatformCreateCreditNoteDto,
+    @Req() req: Request,
+  ): Promise<any> {
+    const user_id = (req as any).user?.id ?? 0;
+    const result = await this.creditNotes.createCreditNote(dto, user_id);
+    return this.responseService.created(
+      result,
+      'Nota crédito plataforma creada',
     );
+  }
+
+  @Post('debit-notes')
+  @HttpCode(HttpStatus.CREATED)
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({
+    summary: 'Crear nota débito del rail super-admin contra una factura plataforma',
+  })
+  async createDebitNote(
+    @Body() dto: PlatformCreateDebitNoteDto,
+    @Req() req: Request,
+  ): Promise<any> {
+    const user_id = (req as any).user?.id ?? 0;
+    const result = await this.creditNotes.createDebitNote(dto, user_id);
+    return this.responseService.created(
+      result,
+      'Nota débito plataforma creada',
+    );
+  }
+
+  // ─── Reenvío por correo (C.3 del CP-platform-invoicing-parity) ─────────
+
+  /**
+   * Reenvía una factura plataforma a un correo arbitrario. Body:
+   * `{ email: string }`.
+   *
+   * Slice C.3 mínimo viable: valida email + pertenencia + escribe fila
+   * `invoice_delivery_events` con `status='queued'` (store_id NULL).
+   * La pieza de armado del ZIP + envío S3/SMTP es C.3.5 — siguiente slice.
+   */
+  @Post('sales-invoices/:id/deliver')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({
+    summary: 'Reenviar factura plataforma a un correo arbitrario',
+  })
+  async deliverInvoice(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { email: string },
+    @Req() req: Request,
+  ): Promise<any> {
+    const user_id = (req as any).user?.id ?? 0;
+    const result = await this.delivery.deliverInvoice(
+      id,
+      body.email,
+      user_id,
+    );
+    return this.responseService.success(
+      result,
+      'Reenvío plataforma encolado',
+    );
+  }
+
+  // ─── Eventos RADIAN plataforma (C.4 del CP-platform-invoicing-parity) ─
+
+  /**
+   * Lista los eventos RADIAN de una factura plataforma, ordenados por id
+   * descendente (más nuevo primero — mismo orden que el riel tienda).
+   */
+  @Get('sales-invoices/:id/events')
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({
+    summary: 'Listar eventos RADIAN de una factura plataforma',
+  })
+  async listDianEvents(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<any> {
+    const events = await this.dianEvents.listEvents(id);
+    return this.responseService.success(events, 'Eventos RADIAN listados');
+  }
+
+  /**
+   * Registra un evento RADIAN contra una factura plataforma. Persiste la
+   * fila con `status='pending'`; la pieza C.4.5 transmite al proveedor
+   * DIAN via SOAP y actualiza el estado (mismo patrón que el riel tienda).
+   */
+  @Post('sales-invoices/:id/events')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({
+    summary: 'Registrar evento RADIAN contra una factura plataforma',
+  })
+  async registerDianEvent(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: any,
+  ): Promise<any> {
+    const result = await this.dianEvents.registerEvent(id, body);
+    return this.responseService.success(
+      result,
+      'Evento RADIAN registrado (pending transmission)',
+    );
+  }
+
+  /**
+   * Conceptos de retención de la plataforma (organization_id resuelto por
+   * `resolvePlatformIdentity`). El selector del wizard los consume; el
+   * `id` (entero) es el que viaja como `MvpV1InvoiceWithholdingInputDto.concept_id`.
+   *
+   * Filtra `accounting_entity_id IS NULL` para devolver los conceptos
+   * compartidos a nivel organización (aplican a cualquier entidad contable
+   * que la org plataforma cree). Si en el futuro hay conceptos scoped a
+   * una entidad específica, este endpoint se queda como está y se agrega
+   * un `?accounting_entity_id=` con validación.
+   */
+  @Get('withholding-concepts')
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({
+    summary: 'Conceptos de retención activos de la plataforma',
+  })
+  async listWithholdingConcepts(): Promise<any> {
+    const identity = await this.resolvePlatformIdentity();
+    const data = await this.platformInvoicing.listWithholdingConceptsForPlatform(
+      identity.organizationId,
+    );
+    return this.responseService.success(data, 'Conceptos de retencion listados');
   }
 }

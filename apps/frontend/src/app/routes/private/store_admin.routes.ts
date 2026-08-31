@@ -8,6 +8,10 @@ import { subscriptionManagementGuard } from '../../core/guards/subscription-mana
 import { manageUsersGuard } from '../../core/guards/manage-users.guard';
 import { vexiSettingsGuard } from '../../core/guards/vexi-settings.guard';
 import { storeDashboardGuard } from '../../core/guards/store-dashboard.guard'; // QUI-418
+import {
+  panelUiGuard,
+  firstActiveModuleRedirectGuard,
+} from '../../core/guards/panel-ui.guard'; // A.4 + B.1
 import { invoicingReducer } from '../../private/modules/store/invoicing/state/reducers/invoicing.reducer';
 import { InvoicingEffects } from '../../private/modules/store/invoicing/state/effects/invoicing.effects';
 import { couponReducer } from '../../private/modules/store/marketing/coupons/state/reducers/coupon.reducer';
@@ -24,17 +28,32 @@ export const storeAdminRoutes: Routes = [
       import('../../private/layouts/store-admin/store-admin-layout.component').then(
         (c) => c.StoreAdminLayoutComponent,
       ),
-    canActivate: [AuthGuard, onboardingGuard],
+    // A.4: `panelUiGuard` corre DESPUÉS de AuthGuard. Cierra el bypass de URL
+    // directa (deny-by-default): un módulo con `panel_ui=false` rechaza la URL
+    // y redirige al primer módulo activo. Es UX, no autorización (ver el
+    // encuadre en panel-ui.guard.ts).
+    canActivate: [AuthGuard, onboardingGuard, panelUiGuard],
     // canActivateChild re-runs onboardingGuard on EVERY child navigation
     // (including sibling→sibling SPA nav where the parent `admin` stays
     // mounted and its canActivate would NOT re-fire). This is what makes the
     // owner onboarding truly unavoidable, not just on hard reload.
-    canActivateChild: [onboardingGuard],
+    // `panelUiGuard` va también aquí para que la URL-directa de un módulo
+    // oculto bajo el shell ya montado (SPA) tampoco sea accesible.
+    canActivateChild: [onboardingGuard, panelUiGuard],
     children: [
       {
+        // B.1 / QUI-740: el aterrizaje en `/admin` va al primer módulo activo
+        // (CONSUME `firstActiveModuleRoute`; no la crea — la posee A.4). La
+        // guard devuelve siempre un `UrlTree`, así que el componente nunca se
+        // instancia; se mantiene `loadComponent` (dashboard) solo para que la
+        // ruta sea válida.
         path: '',
         pathMatch: 'full',
-        redirectTo: 'dashboard',
+        canActivate: [firstActiveModuleRedirectGuard],
+        loadComponent: () =>
+          import('../../private/modules/store/dashboard/dashboard.component').then(
+            (c) => c.DashboardComponent,
+          ),
       },
       // Owner onboarding host — gated by `onboardingGuard` on the `admin`
       // root. Only an OWNER with `organizations.onboarding !== true` ever
@@ -441,6 +460,14 @@ export const storeAdminRoutes: Routes = [
               import('../../private/modules/store/customers/reviews/reviews.component').then(
                 (c) => c.ReviewsComponent,
               ),
+          },
+          // CRM Landing (QUI-719)
+          {
+            path: 'crm',
+            loadChildren: () =>
+              import(
+                '../../private/modules/store/crm/crm.routes'
+              ).then((m) => m.crmRoutes),
           },
           {
             path: ':id',

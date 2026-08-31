@@ -226,29 +226,95 @@ export function buildNoteTaxes(
 }
 
 /**
- * El texto que queda registrado como motivo de la corrección.
- *
- * El concepto va DELANTE y entre corchetes porque ese texto termina en
- * `cbc:Description` del `cac:DiscrepancyResponse`, que es el lado LEGIBLE del
- * mismo grupo: quien abra el XML o el detalle de la nota lee ahí, en español,
- * qué corrección se hizo.
- *
- * El prefijo sigue puesto AUNQUE el código ya viaje aparte en
- * `note_concept_code` → `cbc:ResponseCode`. No es redundancia inútil: son las
- * dos mitades del mismo grupo UBL —el código lo lee un validador, la
- * descripción la lee una persona— y quitar el prefijo dejaría la descripción
- * sin decir de qué concepto habla.
+ * El concepto DIAN va DELANTE y entre corchetes porque el texto que produce
+ * termina en `cbc:Description`/`cbc:Note` —el lado LEGIBLE de la corrección—,
+ * y el prefijo sigue puesto AUNQUE el código ya viaje aparte en
+ * `note_concept_code` → `cbc:ResponseCode`: son las dos mitades del mismo
+ * grupo UBL, el código lo lee un validador y la descripción la lee una
+ * persona.
  */
-export function buildNoteReason(
+function buildNotePrefixedText(
   conceptCode: string,
   conceptLabel: string,
   reason: string,
 ): string {
   const text = (reason ?? '').trim();
   const prefix = `[Concepto DIAN ${conceptCode} — ${conceptLabel}]`;
-  // 500 es el `@MaxLength` de `reason` en el DTO. Se recorta el texto libre,
-  // nunca el concepto: perder el prefijo es perder el único dato estructurado.
-  return `${prefix} ${text}`.slice(0, 500).trim();
+  return `${prefix} ${text}`.trim();
+}
+
+/**
+ * Por qué estos dos topes son literales locales y NO viven en `CONFIG_LIMITS`
+ * (`core/utils/invoice-profile-config.contract.ts`), pese a que el orquestador
+ * pidió medir si la fuente única los admite (2026-08-25):
+ *
+ * `CONFIG_LIMITS` es el contrato de configuración de UN PERFIL de
+ * facturación — sus 17 campos (`account_code`, `mapping_key`, `header_note`,
+ * …) acotan cómo se ARMA un perfil, no cómo se crea un documento. `reason` y
+ * `notes` de nota crédito/débito no configuran nada: son texto libre de
+ * `CreateCreditNoteDto`/`CreateDebitNoteDto`, un DTO de creación de
+ * documento sin relación de dominio con el de perfiles. Que `header_note`
+ * (tope de `CreateInvoiceDto.notes`, FAD13) también valga 500 es
+ * COINCIDENCIA de cifra, no de origen: son dos `@MaxLength` distintos en dos
+ * clases distintas, que hoy comparten número porque ambos heredan del mismo
+ * ancho de columna, no porque uno derive del otro. Importar
+ * `CONFIG_LIMITS.header_note` aquí ataría el tope de `reason` al día en que
+ * alguien cambie el de las notas de FACTURA sin querer tocar el de nota
+ * crédito/débito — el acoplamiento que se busca evitar, no el que se busca
+ * crear. Se quedan como constantes propias de este archivo, con su fuente
+ * (el DTO real) citada en cada docblock.
+ */
+
+/** Tope de `reason` en el DTO (`@MaxLength(500)`, `create-credit-note.dto.ts`). */
+export const NOTE_REASON_LIMIT = 500;
+
+/**
+ * Tope de `notes` en el DTO desde F.6 (`@MaxLength(5000)`, reglas CAD11/DAD11
+ * de `create-credit-note.dto.ts`).
+ */
+export const NOTE_TEXT_LIMIT = 5000;
+
+/**
+ * El texto que queda registrado como `reason` — el CAMPO CORTO,
+ * `cac:DiscrepancyResponse/cbc:Description`.
+ *
+ * Se recorta a 500: nunca el concepto, siempre el texto libre. Perder el
+ * prefijo sería perder el único dato estructurado que un validador lee.
+ */
+export function buildNoteReason(
+  conceptCode: string,
+  conceptLabel: string,
+  reason: string,
+): string {
+  return buildNotePrefixedText(conceptCode, conceptLabel, reason)
+    .slice(0, NOTE_REASON_LIMIT)
+    .trim();
+}
+
+/**
+ * El texto que queda registrado como `notes` — el CAMPO LARGO, `cbc:Note` del
+ * documento (F.6: 5.000 caracteres, CAD11/DAD11).
+ *
+ * ## Por qué esto existía en el código y nunca se mandaba
+ *
+ * Antes de F.6 sólo existía `reason` (500), así que un motivo de 800
+ * caracteres se recortaba EN SILENCIO a 500 y el sobrante se perdía para
+ * siempre — ni error, ni aviso, sólo una frase cortada a mitad de camino en
+ * el XML firmado. F.6 amplió `notes` a 5.000 en el backend
+ * (`create-credit-note.dto.ts`, commit `e2276653f`), pero el frontend nunca
+ * llegó a mandarlo: `credit-notes.service.ts` ya sabe usar `dto.notes` con
+ * fallback a `dto.reason` (`:303`), y este productor nunca poblaba el
+ * primero. El mismo texto que el usuario tecleó ahora viaja completo por acá
+ * — `reason` sigue yendo aparte, recortado, como resumen estructurado.
+ */
+export function buildNoteText(
+  conceptCode: string,
+  conceptLabel: string,
+  reason: string,
+): string {
+  return buildNotePrefixedText(conceptCode, conceptLabel, reason)
+    .slice(0, NOTE_TEXT_LIMIT)
+    .trim();
 }
 
 /**
@@ -277,9 +343,13 @@ export function buildNotePayload(params: {
     // («Anulación de factura electrónica» / «Gastos por cobrar»), así que una
     // nota por descuento declaraba una anulación.
     note_concept_code: conceptCode,
-    // Y la PROSA, que sigue viajando: alimenta `cbc:Description` del mismo
-    // `cac:DiscrepancyResponse` y el detalle de la nota en el panel.
+    // Y la PROSA CORTA, que sigue viajando: alimenta `cbc:Description` del
+    // mismo `cac:DiscrepancyResponse` y el detalle de la nota en el panel.
     reason: buildNoteReason(conceptCode, conceptLabel, reason),
+    // Y la PROSA COMPLETA (F.6, hasta 5.000): alimenta `cbc:Note` del
+    // documento. Sin esto, un motivo más largo que 500 caracteres se perdía
+    // en silencio — `reason` lo recortaba y nada más lo recogía completo.
+    notes: buildNoteText(conceptCode, conceptLabel, reason),
   };
 
   if (scope === 'total') {

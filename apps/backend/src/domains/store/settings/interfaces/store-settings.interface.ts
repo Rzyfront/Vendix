@@ -672,6 +672,9 @@ export interface BarcodeScannerSettings {
 export interface PosSettings {
   allow_anonymous_sales: boolean;
   anonymous_sales_as_default: boolean;
+  /** QUI-727 (B.4) — ventas por alias (nombre/mesa) sin cliente formal. */
+  allow_alias_sales?: boolean;
+  alias_sales_as_default?: boolean;
   business_hours: Record<string, BusinessHours>;
   schedule_mode?: 'continuous' | 'custom';
   enable_schedule_validation: boolean;
@@ -808,17 +811,18 @@ export const PRINT_DEFAULTS: Record<PrintDocument, PrintDocumentConfig> = {
  * Page geometry per format. `page_size` is the CSS `@page size` rule; without
  * it the browser falls back to its own default and silently ignores the
  * configured paper. `width_mm` is null on roll formats, whose height is `auto`.
+ *
+ * [print-editor-dsk P1.6] Antes de P1.6 este objeto vivía inline en los 3
+ * apps (backend, frontend, mobile) y divergía: `half_letter.width_mm` salía
+ * 216 aquí, 216 en frontend, pero mobile no lo declaraba con la misma
+ * convención; `css_page_size` nunca existía como concepto compartido.
+ *
+ * Ahora la fuente única es `libs/print-formats/schemas/page-geometry.json`,
+ * copiada byte-a-byte a cada app por `scripts/sync-print-geometry.ts`. Este
+ * shim re-exporta el objeto bajo el mismo nombre `PRINT_PAGE_GEOMETRY` para
+ * no romper consumidores (`document-print.service.ts`, `paper-defaults.ts`).
  */
-export const PRINT_PAGE_GEOMETRY: Record<
-  PrintFormat,
-  { page_size: string; width_mm: number; is_roll: boolean }
-> = {
-  letter: { page_size: 'letter', width_mm: 216, is_roll: false },
-  half_letter: { page_size: '216mm 140mm', width_mm: 216, is_roll: false },
-  a4: { page_size: 'A4', width_mm: 210, is_roll: false },
-  thermal_80: { page_size: '80mm auto', width_mm: 80, is_roll: true },
-  thermal_58: { page_size: '58mm auto', width_mm: 58, is_roll: true },
-};
+export { PRINT_PAGE_GEOMETRY } from '../../print-formats/lib/page-geometry';
 
 export interface ReceiptsSettings {
   print_receipt: boolean;
@@ -864,6 +868,31 @@ export interface ReceiptsSettings {
    * never persist. `receipts` is already registered.
    */
   printing?: PrintingSettings;
+  /**
+   * Habilita la impresión del tiquete de despacho (dispatch_ticket).
+   * Si false, los 2 disparadores (POS auto + orden manual) NO imprimen.
+   * ADR-7: flat bajo `receipts` raíz (no en `printing.dispatch_ticket`) para
+   * evitar drop por KNOWN_SECTIONS.
+   */
+  print_dispatch_ticket_enabled?: boolean;
+  /**
+   * Si true y print_dispatch_ticket_enabled=true, el POS encadena auto el
+   * tiquete de despacho junto con ticket POS/factura cuando la venta tiene envío.
+   * Default false (opt-in por admin).
+   */
+  print_dispatch_ticket_auto_with_pos?: boolean;
+  /**
+   * Si true y print_dispatch_ticket_enabled=true, al confirmar una venta
+   * postventa se auto-imprime el tiquete de despacho (dispatch_ticket) junto
+   * con el documento de venta. Default false (opt-in por admin).
+   */
+  print_dispatch_ticket_auto_on_postventa?: boolean;
+  /**
+   * Decisión del usuario 2026-08-31: habilita el tiquete de despacho
+   * como tiquete de reclamo en ventas de mostrador (`direct_delivery`)
+   * y para llevar (`pickup`). Enmienda a ADR-6; default false.
+   */
+  print_dispatch_ticket_on_counter?: boolean;
 }
 
 export interface BusinessHoursBlock {

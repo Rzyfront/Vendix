@@ -1516,14 +1516,26 @@ export class UblCommonBuilder {
    * subtotales, y con los subtotales partidos las dos cifras pueden separarse un
    * céntimo (ver `DianTaxRateBucket`).
    *
-   * ## Lo que esta función NO hace, a propósito
+   * ## FAS01 DECIDIDA: UN grupo de cabecera con TODOS los esquemas (F.7)
    *
-   * Sigue abriendo UN solo `cac:TaxTotal` aunque el documento traiga dos
-   * tributos. FAS01 (pág. 76-77) pide «un bloque para cada código de tributo», y
-   * eso es una divergencia SEPARADA de las de arriba —cardinalidad del GRUPO, no
-   * de sus subtotales— con su propio caso `DIVERGE` en
-   * `ubl-anexo-fas-aiu-sweep.spec.ts` fijando la conducta de hoy. La línea sí
-   * abre un bloque por esquema (FAX01); la cabecera todavía no.
+   * Este método abre UN solo `cac:TaxTotal` aunque el documento traiga varios
+   * tributos, y esa es la forma que el plan (F.7) dejó decidida el 2026-08-25,
+   * no una divergencia pendiente: el rechazo ENUMERADO de FAS01 (pág. 76)
+   * castiga la forma contraria — «si existe más de un grupo con el mismo valor
+   * en …TaxScheme/cbc:ID» — y FAS01b (pág. 428) exige «existe solo un grupo con
+   * información de totales para un mismo tributo». El grupo único multi-esquema
+   * cumple las dos lecturas; los esquemas viajan como `cac:TaxSubtotal`.
+   *
+   * ## Política de redondeo del grupo (decisión escrita, F.7)
+   *
+   * CADA subtotal se cuantifica al centavo con `dianSum` —el mismo cuantizador
+   * de todo el pipeline— y el `cbc:TaxAmount` del grupo es la SUMA EXACTA de
+   * los subtotales YA cuantificados. NUNCA se recalcula el total desde las
+   * filas crudas: agrupar multiplica las llamadas de truncado y un recálculo
+   * aparte puede separar el total de sus propios subtotales en un céntimo
+   * (KG-17), mientras que la identidad que la DIAN ejecuta (FAS02) compara
+   * contra los subtotales. Cumplirla POR CONSTRUCCIÓN es lo único que no
+   * depende de la suerte.
    *
    * ## Un documento SIN tributos no informa el grupo
    *
@@ -1564,9 +1576,10 @@ export class UblCommonBuilder {
     // que es el rechazo de FAS07 (pág. 78-79 / 430) y lo que FAS04 (pág. 78 /
     // 429) y FAS01a (pág. 428) prohíben.
     //
-    // Lo que NO cambia acá: sigue emitiéndose UN solo `cac:TaxTotal` de cabecera
-    // aunque el documento traiga dos tributos. FAS01 pide un bloque por código y
-    // eso es una divergencia SEPARADA, con su propio caso `DIVERGE` fijándola.
+    // UN solo `cac:TaxTotal` de cabecera con TODOS los esquemas como subtotales:
+    // es la forma DECIDIDA de FAS01 (ver el docblock), no una divergencia. El
+    // rechazo enumerado castiga grupos DUPLICADOS del mismo ID, no el grupo
+    // único multi-esquema; FAS02 abajo garantiza el total contra los subtotales.
     const by_scheme = UblCommonBuilder.groupTaxRowsBySchemeAndRate(
       taxes,
       (tax) => {

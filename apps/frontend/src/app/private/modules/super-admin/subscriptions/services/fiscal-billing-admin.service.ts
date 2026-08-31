@@ -10,16 +10,27 @@ import { AsyncJobStatus } from '../../../../../core/utils/async-job-poll.util';
 import { DianProductionReadiness } from '../../../store/invoicing/interfaces/invoice.interface';
 import {
   ApiEnvelope,
+  ClonePlatformProfilePayload,
+  CreatePlatformProfilePayload,
   CreatePlatformResolutionDto,
+  ListPlatformProfilesQuery,
   ListPlatformResolutionsQuery,
   MaskedDianConfiguration,
   PaginatedEnvelope,
   PatchVendorSupportFiscalConfigDto,
+  PlatformInvoiceProfileCatalogEntry,
+  PlatformInvoiceProfileDetail,
+  PlatformInvoiceProfileVersionSummary,
+  PlatformInvoiceProfileVersion,
+  PlatformProfilePageMeta,
+  PlatformProfilePreviewResult,
   PlatformResolution,
+  PreviewPlatformProfilePayload,
   SubscriptionFiscalLastTestResult,
   SubscriptionFiscalQuery,
   SubscriptionFiscalStatus,
   SubscriptionFiscalTransmission,
+  UpdatePlatformProfilePayload,
   UpdatePlatformResolutionDto,
   UpsertSubscriptionFiscalConfigDto,
   VendorSupportFiscalConfig,
@@ -301,6 +312,217 @@ export class FiscalBillingAdminService {
         `${this.inboundBase}/transmissions/${transmissionId}/retry`,
         {},
       )
+      .pipe(map((res) => res.data));
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Platform Invoice Profiles
+  // ─────────────────────────────────────────────────────────
+
+  /**
+   * Listado paginado de perfiles — `GET /profiles?limit=&page=&search=&operation_type=&state=`.
+   *
+   * La respuesta preserva el envelope de paginación del backend con su `meta` para
+   * que el store pueda reusar `PlatformProfilePageMeta` sin redefinirla.
+   */
+  listProfiles(
+    query: ListPlatformProfilesQuery = {},
+  ): Observable<{ data: import('../interfaces/fiscal-billing.interface').PlatformInvoiceProfile[]; meta: PlatformProfilePageMeta }> {
+    let params = new HttpParams();
+    if (query.page) params = params.set('page', String(query.page));
+    if (query.limit) params = params.set('limit', String(query.limit));
+    if (query.search?.trim()) params = params.set('search', query.search.trim());
+    if (query.operation_type) params = params.set('operation_type', query.operation_type);
+    if (query.state) params = params.set('state', query.state);
+
+    return this.http
+      .get<{ success: boolean; data: import('../interfaces/fiscal-billing.interface').PlatformInvoiceProfile[]; meta: PlatformProfilePageMeta }>(
+        `${this.base}/profiles`,
+        { params },
+      );
+  }
+
+  /** Catálogo de perfiles activos para el selector del wizard — `GET /profiles/catalog`. */
+  getProfileCatalog(): Observable<PlatformInvoiceProfileCatalogEntry[]> {
+    return this.http
+      .get<ApiEnvelope<PlatformInvoiceProfileCatalogEntry[]>>(
+        `${this.base}/profiles/catalog`,
+      )
+      .pipe(map((res) => res.data ?? []));
+  }
+
+  /** Plantillas DIAN disponibles — `GET /profiles/templates`. */
+  getProfileTemplates(): Observable<{ success: boolean; data: unknown }> {
+    return this.http
+      .get<{ success: boolean; data: unknown }>(
+        `${this.base}/profiles/templates`,
+      );
+  }
+
+  /** Detalle de un perfil — `GET /profiles/:id`. */
+  getProfile(id: number): Observable<PlatformInvoiceProfileDetail> {
+    return this.http
+      .get<ApiEnvelope<PlatformInvoiceProfileDetail>>(
+        `${this.base}/profiles/${id}`,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /** Historial de versiones — `GET /profiles/:id/versions?limit=`. */
+  getProfileVersions(
+    id: number,
+    limit = 20,
+  ): Observable<{ data: PlatformInvoiceProfileVersionSummary[]; meta: PlatformProfilePageMeta }> {
+    const params = new HttpParams().set('limit', String(limit));
+    return this.http
+      .get<{ success: boolean; data: PlatformInvoiceProfileVersionSummary[]; meta: PlatformProfilePageMeta }>(
+        `${this.base}/profiles/${id}/versions`,
+        { params },
+      );
+  }
+
+  /** Detalle de una versión concreta — `GET /profiles/:id/versions/:version`. */
+  getProfileVersion(
+    id: number,
+    version: number,
+  ): Observable<PlatformInvoiceProfileVersion> {
+    return this.http
+      .get<ApiEnvelope<PlatformInvoiceProfileVersion>>(
+        `${this.base}/profiles/${id}/versions/${version}`,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /**
+   * Crear perfil — `POST /profiles`.
+   *
+   * Devuelve 201 con `PlatformInvoiceProfileDetail`.
+   */
+  createProfile(
+    dto: CreatePlatformProfilePayload,
+  ): Observable<PlatformInvoiceProfileDetail> {
+    return this.http
+      .post<ApiEnvelope<PlatformInvoiceProfileDetail>>(
+        `${this.base}/profiles`,
+        dto,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /**
+   * Actualizar perfil — `PATCH /profiles/:id`.
+   *
+   * IMPORTANTE: usa PATCH, no PUT. El endpoint PUT no existe y usar PUT contra
+   * él produce 404. El editor de tienda ya tiene este bug; este servicio lo evita.
+   */
+  updateProfile(
+    id: number,
+    dto: UpdatePlatformProfilePayload,
+  ): Observable<PlatformInvoiceProfileDetail> {
+    return this.http
+      .patch<ApiEnvelope<PlatformInvoiceProfileDetail>>(
+        `${this.base}/profiles/${id}`,
+        dto,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /** Clonar perfil — `POST /profiles/:id/clone`. */
+  cloneProfile(
+    id: number,
+    dto: ClonePlatformProfilePayload,
+  ): Observable<PlatformInvoiceProfileDetail> {
+    return this.http
+      .post<ApiEnvelope<PlatformInvoiceProfileDetail>>(
+        `${this.base}/profiles/${id}/clone`,
+        dto,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /** Activar perfil — `POST /profiles/:id/activate`. */
+  activateProfile(id: number): Observable<PlatformInvoiceProfileDetail> {
+    return this.http
+      .post<ApiEnvelope<PlatformInvoiceProfileDetail>>(
+        `${this.base}/profiles/${id}/activate`,
+        {},
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /** Desactivar perfil — `POST /profiles/:id/deactivate`. */
+  deactivateProfile(id: number): Observable<PlatformInvoiceProfileDetail> {
+    return this.http
+      .post<ApiEnvelope<PlatformInvoiceProfileDetail>>(
+        `${this.base}/profiles/${id}/deactivate`,
+        {},
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /** Marcar como predeterminado — `POST /profiles/:id/set-default`. */
+  setDefaultProfile(id: number): Observable<PlatformInvoiceProfileDetail> {
+    return this.http
+      .post<ApiEnvelope<PlatformInvoiceProfileDetail>>(
+        `${this.base}/profiles/${id}/set-default`,
+        {},
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /**
+   * Previsualizar perfil — `POST /profiles/:id/preview`.
+   *
+   * Devuelve `not_performed: { numbering_reserved: false, … }` cuando realmente
+   * no se reservó numeración, para que la UI pueda afirmar que no se quemó
+   * consecutivo sin tener que ir a la base.
+   */
+  previewProfile(
+    id: number,
+    dto: PreviewPlatformProfilePayload,
+  ): Observable<PlatformProfilePreviewResult> {
+    return this.http
+      .post<ApiEnvelope<PlatformProfilePreviewResult>>(
+        `${this.base}/profiles/${id}/preview`,
+        dto,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /** Eliminar perfil — `DELETE /profiles/:id`. */
+  deleteProfile(id: number): Observable<{ id: number; deleted: boolean }> {
+    return this.http
+      .delete<ApiEnvelope<{ id: number; deleted: boolean }>>(
+        `${this.base}/profiles/${id}`,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  registerPlatformDianEvent(
+    id: number,
+    dto: { event_code: string },
+  ): Observable<any> {
+    return this.http
+      .post<ApiEnvelope<any>>(`${this.base}/invoices/${id}/events`, dto)
+      .pipe(map((res) => res.data));
+  }
+
+  getInvoice(id: number, kind?: string): Observable<any> {
+    const params = kind ? new HttpParams().set('kind', kind) : undefined;
+    return this.http
+      .get<ApiEnvelope<any>>(`${this.base}/invoices/${id}`, { params })
+      .pipe(map((res) => res.data));
+  }
+
+  listPlatformDianEvents(id: number): Observable<any[]> {
+    return this.http
+      .get<ApiEnvelope<any[]>>(`${this.base}/invoices/${id}/events`)
+      .pipe(map((res) => res.data ?? []));
+  }
+
+  deliverPlatformInvoice(id: number, email: string): Observable<any> {
+    return this.http
+      .post<ApiEnvelope<any>>(`${this.base}/invoices/${id}/deliver`, { email })
       .pipe(map((res) => res.data));
   }
 }

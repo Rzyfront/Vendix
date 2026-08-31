@@ -1,0 +1,44 @@
+# ERR-08: PRINT_TOKEN_SYNTAX_001
+# HTTP: 422
+# Source: apps/backend/src/common/errors/error-codes.ts:239-243
+# Emitido cuando: custom_template con tokens Handlebars mal balanceados ({{ #if x } sin cierre)
+
+COMMAND:
+curl -sk -X POST 'https://api.vendix.com/api/store/print-formats/dispatch_ticket/preview' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "overrides": {
+      "custom_template": "{{ #if customer.name }}Sin cierre"
+    }
+  }' \
+  -w '\nHTTP_CODE: %{http_code}\n'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+EXPECTED HTTP: 422
+
+EXPECTED RESPONSE BODY:
+{
+  "success": false,
+  "error": {
+    "code": "PRINT_TOKEN_SYNTAX_001",
+    "message": "Custom template syntax error or unclosed token tag"
+  }
+}
+
+VERIFICATION:
+# Token sin cierre
+curl .../dispatch_ticket/preview -d '{"overrides":{"custom_template":"{{ #if x }"}}' | jq '.error.code' debe ser 'PRINT_TOKEN_SYNTAX_001'
+curl .../dispatch_ticket/preview -d '{"overrides":{"custom_template":"{{ #if x }"}}' -w '%{http_code}' | grep -q '422'
+
+# Token sin apertura
+curl .../dispatch_ticket/preview -d '{"overrides":{"custom_template":"texto sin cierre }"}' | jq '.error.code' debe ser 'PRINT_TOKEN_SYNTAX_001'
+
+# Helper Handlebars no registrado
+curl .../dispatch_ticket/preview -d '{"overrides":{"custom_template":"{{ unknown_helper x }}"}}' | jq '.error.code' debe ser 'PRINT_TOKEN_SYNTAX_001' o compilar pero devolver vacío
+
+# Token válido debe exit 0
+curl .../dispatch_ticket/preview -d '{"overrides":{"custom_template":"{{ store.name }}"}}' | jq '.success' debe ser true
+
+# Frontend behavior: toast "Sintaxis tokens inválida" + highlight del template editor

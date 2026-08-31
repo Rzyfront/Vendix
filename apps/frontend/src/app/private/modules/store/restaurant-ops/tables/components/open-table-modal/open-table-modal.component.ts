@@ -44,6 +44,7 @@ import { StoreSettingsFacade } from '../../../../../../../core/store/store-setti
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'sm'"
+      [dialog]="true"
       [title]="'Abrir ' + (table()?.name ?? 'mesa')"
       [subtitle]="
         'Cuenta editable en tiempo real. Se creará una orden en estado draft.'

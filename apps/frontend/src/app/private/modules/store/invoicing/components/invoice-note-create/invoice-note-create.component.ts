@@ -29,6 +29,8 @@ import {
 import { extractValidationMessages } from '../../utils/invoicing-errors.util';
 import { findNoteConcept, noteConcepts } from './dian-note-concepts';
 import {
+  NOTE_REASON_LIMIT,
+  NOTE_TEXT_LIMIT,
   NoteLineSelection,
   buildNotePayload,
   buildNoteReason,
@@ -47,6 +49,16 @@ import {
   SelectorOption,
 } from '../../../../../../shared/components/selector/selector.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import { remainingChars, showCharCounter } from '../../utils/char-limit.util';
+
+/**
+ * F.6/defecto 2 (orquestador, 2026-08-25): este campo alimenta DOS DTO —
+ * `reason` (500, resumen estructurado) Y `notes` (5.000, texto completo,
+ * `buildNotePayload` en `invoice-note-payload.util.ts`). El tope que el
+ * USUARIO ve tiene que ser el de `notes`: es el que preserva lo que escribe.
+ * `reason` se sigue recortando puertas adentro, en silencio, como siempre —
+ * eso es un resumen, no una pérdida.
+ */
 
 /**
  * CORREGIR UNA FACTURA YA ACEPTADA POR LA DIAN.
@@ -247,13 +259,62 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
             [helpText]="conceptHelp()"
           ></app-selector>
 
-          <app-textarea
-            label="Motivo"
-            formControlName="reason"
-            [rows]="3"
-            [required]="true"
-            placeholder="Explica qué pasó: qué se devolvió, qué se ajustó, por qué."
-          ></app-textarea>
+          <div>
+            <app-textarea
+              label="Motivo"
+              formControlName="reason"
+              [rows]="3"
+              [required]="true"
+              placeholder="Explica qué pasó: qué se devolvió, qué se ajustó, por qué."
+            ></app-textarea>
+            <!--
+              Orquestador, 2026-08-25: este mismo texto alimenta DOS campos
+              del documento (ver «buildNotePayload»), y quien escribe aquí no
+              tiene forma de saberlo sin este aviso: el motivo declarado ante
+              la DIAN (corto, 500) y las notas completas de la nota (largo,
+              5.000). El tope de abajo es el del campo CORTO porque es el que
+              de verdad limita lo que se puede escribir — el largo nunca
+              recorta más de lo que el corto ya permitió.
+            -->
+            <p class="mt-1 text-[11px] leading-snug text-text-secondary">
+              Este texto queda como el motivo declarado ante la DIAN (máx. 500
+              caracteres) y, sin recortarse más, también como las notas
+              completas de la nota. No hay un campo aparte para un motivo más
+              largo.
+            </p>
+            <!--
+              «app-textarea» no reenvía «maxlength» al «textarea» nativo, así
+              que este contador es la única señal en pantalla del tope real
+              (500) — lo hace cumplir «Validators.maxLength» en el formulario,
+              no el navegador cortando el tecleo.
+            -->
+            @if (showCharCounter(noteForm.get('reason')!.value, reasonLimit)) {
+              <p
+                class="text-[10px] text-right leading-tight"
+                [class.text-destructive]="
+                  remainingChars(noteForm.get('reason')!.value, reasonLimit) <= 0
+                "
+                [class.text-text-secondary]="
+                  remainingChars(noteForm.get('reason')!.value, reasonLimit) > 0
+                "
+              >
+                {{ remainingChars(noteForm.get('reason')!.value, reasonLimit) }}
+                caracteres restantes
+              </p>
+            }
+            <!--
+              F.3 reabierta: contador en rojo y botón apagado no explican NADA.
+              Cuando el control viola el tope, este aviso nombra el campo y la
+              cifra exacta, para que el recorte se entienda escribiendo y no
+              como un formulario que «no hace nada» al pedir Crear.
+            -->
+            @if (reasonExceeded()) {
+              <p class="text-[11px] text-error" role="alert">
+                El campo Motivo supera su tope de {{ reasonLimit }} caracteres
+                (tope DIAN del reason declarado). Recórtalo para crear la nota.
+              </p>
+            }
+          </div>
 
           @if (reasonPreview(); as preview) {
             <div class="rounded-lg border border-border bg-surface-secondary/40 px-3 py-2">
@@ -497,8 +558,44 @@ export class InvoiceNoteCreateComponent {
 
   readonly noteForm = this.fb.group({
     conceptCode: ['', Validators.required],
-    reason: ['', [Validators.required, Validators.minLength(5)]],
+    reason: [
+      '',
+      [Validators.required, Validators.minLength(5), Validators.maxLength(NOTE_REASON_LIMIT)],
+    ],
   });
+
+  /**
+   * Orquestador, 2026-08-25 (corrección sobre F.3/defecto 2): este control
+   * es el ÚNICO textarea que alimenta a la vez `reason` (500,
+   * `cac:DiscrepancyResponse/cbc:Description`) y `notes` (5.000,
+   * `cbc:Note` del documento) vía `buildNotePayload`. El contador y el
+   * `Validators.maxLength` de arriba tienen que medir contra el más CORTO
+   * de los dos: si se midiera contra `NOTE_TEXT_LIMIT` (5.000), el usuario
+   * ve «quedan 4.200» y escribe tranquilo, y `buildNoteReason` recorta su
+   * motivo a 500 en silencio al guardar — exactamente el defecto que esto
+   * reemplaza. Con el tope en 500, un texto más largo queda el formulario
+   * inválido, no aceptado-y-luego-cortado.
+   */
+  readonly reasonLimit = NOTE_REASON_LIMIT;
+
+  /**
+   * F.3 reabierta (2026-08-25): con el contador ya medido contra el tope real
+   * (500), quedaba la otra mitad del defecto — pasarse de largo sólo producía
+   * un contador en rojo y un botón «Crear» deshabilitado sin explicación.
+   * Este computed alimenta el aviso que nombra el campo y la cifra.
+   *
+   * Se lee desde `formValue()` —el toSignal de `valueChanges`— y NO desde
+   * `noteForm.value`: la propiedad plana se congela en el estado inicial
+   * dentro de un `computed` y el aviso nunca aparecería (mismo defecto que
+   * el docblock de `formValue` documenta para el botón).
+   */
+  readonly reasonExceeded = computed(() => {
+    const value = this.formValue().reason ?? '';
+    return value.length > NOTE_REASON_LIMIT;
+  });
+
+  readonly remainingChars = remainingChars;
+  readonly showCharCounter = showCharCounter;
 
   /**
    * `noteForm.value` y `.status` son propiedades planas: leerlas dentro de un

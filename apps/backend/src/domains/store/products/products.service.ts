@@ -510,7 +510,34 @@ export class ProductsService {
         },
       },
     });
-    return records.map((r) => r.promotions);
+    const result = records.map((r) => r.promotions);
+    // QUI-727 (A.1) / ADR-10 — `cocina` no ve dinero. El `value` de la
+    // promoción es el monto del descuento; para cocina se omite (conservando
+    // el resto de la estructura: tipo, estado, fechas).
+    return this.isKitchenRole()
+      ? result.map((p: any) => this.stripPromotionMoneyForCocina(p))
+      : result;
+  }
+
+  /**
+   * QUI-727 (A.1) / ADR-10 — elimina los campos monetarios de una promoción
+   * antes de exponerla a `cocina`. El shape seleccionado por
+   * `getProductPromotions` sólo trae `value` como monto (descuento); se quita
+   * únicamente ese y cualquier otra clave monetaria que llegue a existir
+   * (`discount_value`, `max_discount`, `min_purchase`), conservando el resto
+   * (tipo de descuento, estado, fechas). Idempotente y no destructivo: si la
+   * promoción ya no tiene montos, devuelve el mismo objeto.
+   */
+  private stripPromotionMoneyForCocina(promotion: any): any {
+    if (!promotion || typeof promotion !== 'object') return promotion;
+    const {
+      value: _value,
+      discount_value: _discountValue,
+      max_discount: _maxDiscount,
+      min_purchase: _minPurchase,
+      ...rest
+    } = promotion;
+    return rest;
   }
 
   /**
@@ -1284,6 +1311,7 @@ export class ProductsService {
       requires_booking,
       is_sellable,
       is_batch_produced,
+      is_ingredient,
       ids,
     } = query;
 
@@ -1345,6 +1373,13 @@ export class ProductsService {
       ...(requires_booking !== undefined && { requires_booking }),
       ...(is_sellable !== undefined && { is_sellable }),
       ...(is_batch_produced !== undefined && { is_batch_produced }),
+      // QUI-729 — tri-estado por `is_ingredient`: ausente => sin filtro
+      // ("Todos"), false => solo productos (default del listado admin), true =>
+      // solo insumos. Sin default server-side (ADR-6): el default vive en el
+      // cliente, y `findIds` (selección masiva) hereda exactamente el mismo
+      // conjunto, así que "seleccionar todo" conserva la capacidad de incluir
+      // insumos cuando el parámetro se omite.
+      ...(is_ingredient !== undefined && { is_ingredient }),
       // Hidratación del stack de selección de la edición masiva: el cliente
       // guarda ids que pueden no estar en la página cargada y los pide de golpe.
       // Se combina con el resto de los filtros (no los reemplaza), así que un id
@@ -1385,6 +1420,62 @@ export class ProductsService {
     };
   }
 
+  /**
+   * QUI-727 (A.1) — ADR-10: ninguna superficie de cocina muestra dinero.
+   *
+   * Se usa en `findAll` y `findOne` para recortar el DTO de producto ANTES de
+   * serializarlo cuando el actor autenticado tiene el rol `cocina`. Es la
+   * primera proyección por rol del repo y se decide AQUÍ (en el servicio),
+   * no con un interceptor global: la regla es específica de un rol concreto
+   * sobre la lectura de productos, y meterla en un interceptor la haría
+   * implícita y difícil de auditar frente a otras lecturas que sí deben
+   * mostrar dinero.
+   *
+   * Alcance de A.1: `cost_price`, `profit_margin` y TODO precio de venta
+   * (`base_price`, `sale_price`, `final_price`, `price_override`, promo
+   * activa). `mesero` y `STORE_ADMIN` ven lo de siempre.
+   */
+  private isKitchenRole(): boolean {
+    // QUI-730b — literal renombrado a 'kitchen'. Si se aplica la migración
+    // sin tocar este predicado, el strip de dinero deja de aplicarse y
+    // cocina ve cost_price / profit_margin / precios de venta. ADR-10.
+    return RequestContextService.getRoles().includes('kitchen');
+  }
+
+  /**
+   * QUI-727 (A.1) — ADR-10: el dato monetario no debe viajar en el payload
+   * para `cocina`. Recorta el objeto de producto (y sus variantes) quitando
+   * los campos de dinero. Idempotente y no destructivo para el resto de
+   * campos estructurales (stock, flags, atributos) que cocina sí consume.
+   */
+  private stripCocinaMoney(dto: any): any {
+    if (!dto || typeof dto !== 'object') return dto;
+    const {
+      cost_price,
+      profit_margin,
+      base_price,
+      sale_price,
+      final_price,
+      active_promotion,
+      sale_config_summary,
+      ...rest
+    } = dto;
+    if (Array.isArray(rest.product_variants)) {
+      rest.product_variants = rest.product_variants.map((variant: any) => {
+        if (!variant || typeof variant !== 'object') return variant;
+        const {
+          cost_price: _vCost,
+          profit_margin: _vMargin,
+          sale_price: _vSale,
+          price_override: _vOverride,
+          ...variantRest
+        } = variant;
+        return variantRest;
+      });
+    }
+    return rest;
+  }
+
   async findAll(query: ProductQueryDto) {
     const {
       page = 1,
@@ -1399,6 +1490,9 @@ export class ProductsService {
     // Obtener contexto para aplicar scope automático
     const context = RequestContextService.getContext();
     // store_id check is handled by StorePrismaService
+
+    // QUI-727 (A.1) / ADR-10 — proyección por rol: `cocina` no ve dinero.
+    const isCocina = this.isKitchenRole();
 
     const where = this.buildProductWhere(query);
 
@@ -1715,8 +1809,11 @@ export class ProductsService {
         }
       }
 
+      const data = isCocina
+        ? productsWithSignedImages.map((p) => this.stripCocinaMoney(p))
+        : productsWithSignedImages;
       return {
-        data: productsWithSignedImages,
+        data,
         meta: {
           total,
           page,
@@ -1896,8 +1993,11 @@ export class ProductsService {
       }),
     );
 
+    const data = isCocina
+      ? productsWithStock.map((p) => this.stripCocinaMoney(p))
+      : productsWithStock;
     return {
-      data: productsWithStock,
+      data,
       meta: {
         total,
         page,
@@ -1910,6 +2010,8 @@ export class ProductsService {
   async findOne(id: number) {
     // Obtener contexto para aplicar scope automático
     const context = RequestContextService.getContext();
+    // QUI-727 (A.1) / ADR-10 — proyección por rol: `cocina` no ve dinero.
+    const isCocina = this.isKitchenRole();
 
     const product = await this.prisma.products.findFirst({
       where: {
@@ -2042,7 +2144,7 @@ export class ProductsService {
     );
 
     // Retornar producto con información de stock enriquecida
-    return {
+    const dto = {
       id: product.id,
       name: product.name,
       slug: product.slug,
@@ -2156,6 +2258,7 @@ export class ProductsService {
       stock_levels: product.stock_levels,
       stores: product.stores,
     };
+    return isCocina ? this.stripCocinaMoney(dto) : dto;
   }
 
   /**
@@ -2282,11 +2385,14 @@ export class ProductsService {
 
     await this.signProductImages(product);
 
-    return {
+    const dto = {
       ...product,
       pricing_type: String(product.pricing_type),
       image_url: await this.signProductImage(product),
     };
+    // QUI-727 (A.1) / ADR-10 — `cocina` no ve dinero: recorta precio/costo/
+    // margen (y `price_override` de las variantes incluidas) del objeto final.
+    return this.isKitchenRole() ? this.stripCocinaMoney(dto) : dto;
   }
 
   /**
@@ -3831,7 +3937,7 @@ export class ProductsService {
     });
 
     // Calcular stock totals y firmar imágenes
-    return await Promise.all(
+    const result = await Promise.all(
       products.map(async (product) => {
         const totalStockAvailable = product.stock_levels.reduce(
           (sum, stock) => sum + stock.quantity_available,
@@ -3861,6 +3967,12 @@ export class ProductsService {
         };
       }),
     );
+
+    // QUI-727 (A.1) / ADR-10 — `cocina` no ve dinero: recorta los escalares de
+    // precio/costo/margen de cada producto antes de devolver el listado.
+    return this.isKitchenRole()
+      ? result.map((p) => this.stripCocinaMoney(p))
+      : result;
   }
 
   // Gestión de variantes
@@ -4049,6 +4161,11 @@ export class ProductsService {
         },
       });
 
+      // CP-POLLO-ARABE-727 F.1 — ADR-10: `getProductStats` es alcanzable por
+      // `cocina` vía `store:products:read` (products.controller.ts:554). Los
+      // montos de inventario (`total_value`/`archived_stock_value`) no viajan a
+      // ese rol: se anulan, se conservan las unidades y los conteos.
+      const kitchenStats = this.isKitchenRole();
       return {
         total_products,
         active_products,
@@ -4057,11 +4174,15 @@ export class ProductsService {
         low_stock_products,
         out_of_stock_products,
         products_without_images,
-        total_value,
+        ...(kitchenStats
+          ? { total_value: null }
+          : { total_value }),
         categories_count,
         brands_count,
         /** D.3 — el valor que `total_value` ya NO incluye, para poder mostrarlo aparte. */
-        archived_stock_value,
+        ...(kitchenStats
+          ? { archived_stock_value: null }
+          : { archived_stock_value }),
         archived_stock_units,
       };
     } catch (error) {

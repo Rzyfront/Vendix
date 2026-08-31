@@ -5,6 +5,15 @@ export interface StandardPrintParty {
   phone?: string;
   email?: string;
   address?: string;
+  /**
+   * CP-DTLP-20260827 (Phase B.4): dirección estructurada opcional. La usan los
+   * formatos logísticos (dispatch_ticket, dispatch_note) que necesitan pintar
+   * la dirección en líneas separadas. Cuando esté presente, el compositor la
+   * prefiere sobre `address` (que es un string combinado). OPCIONAL para no
+   * romper los nueve formatos pre-existentes que solo llevan `address`.
+   */
+  address_line1?: string;
+  address_line2?: string;
   city?: string;
   state_province?: string;
   country?: string;
@@ -29,6 +38,13 @@ export interface StandardPrintItem {
   total_price_formatted?: string;
   notes?: string;
   modifiers?: string[];
+  /**
+   * CP-DTLP-20260827 (Phase B.4): cantidad despachada del ítem (logística).
+   * Solo `dispatch_ticket` la usa hoy; los formatos comerciales siguen con
+   * `quantity` como cant. pedida. OPCIONAL para no romper los otros nueve
+   * formatos que no la declaran.
+   */
+  dispatched_qty?: number;
 }
 
 export interface StandardPrintTaxRow {
@@ -75,6 +91,12 @@ export interface StandardPrintDataModel {
     table_number?: string;
     waiter_name?: string;
     guests_count?: number;
+    /**
+     * QUI-737 (B.4) — alias de venta rápida ("Mesa 5"). Se imprime en la
+     * cabecera del ticket junto al número de orden; NO pertenece al bloque
+     * "Datos del Cliente" (`customer`), porque no es un cliente formal.
+     */
+    customer_alias?: string;
   };
   fiscal?: {
     cufe?: string;
@@ -102,6 +124,24 @@ export interface StandardPrintDataModel {
     shipping_total_formatted: string;
     tax_total: number;
     tax_total_formatted: string;
+    /**
+     * Retención en la fuente del documento (`invoices.withholding_amount`).
+     *
+     * E.11 casilla 1 — antes de este campo el mapeador fiscal lo ignoraba y la
+     * retención desaparecería del papel: el PDF legal sí la imprime
+     * (`invoice-pdf.builder.ts` «Retencion:» cuando > 0), así que un HTML sin
+     * ella discrepaba del XML firmado sobre el mismo consecutivo.
+     *
+     * INFORMATIVA, igual que en el PDF: las retenciones NO restan del total
+     * (`invoice-calculator.service.ts`: «Retenciones ... NUNCA restan del
+     * total»). El compositor la pinta como fila propia sólo cuando > 0, con
+     * signo negativo de presentación como hace el builder.
+     *
+     * OPCIONAL a propósito: los otros nueve documentos del dominio no la
+     * declaran y el compositor no cambia su papel.
+     */
+    withholding_total?: number;
+    withholding_total_formatted?: string;
     grand_total: number;
     grand_total_formatted: string;
     /**

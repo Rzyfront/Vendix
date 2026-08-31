@@ -3109,6 +3109,34 @@ export async function seedPermissionsAndRoles(
       method: 'PATCH',
     },
 
+    // ──── Métodos de pago del catálogo de plataforma (QUI-747) ────
+    //
+    // DEFENSA EN PROFUNDIDAD. El servicio `SystemPaymentMethodsService` ya
+    // filtra `is_active=true` para no-super_admin en lecturas y lanza
+    // `ForbiddenException` en escrituras (service.ts:79, 109, 134, 160), así
+    // que el riesgo inmediato era bajo. Pero ese check es blando: depende de
+    // que cada método nuevo del servicio repita la verificación. `PermissionsGuard`
+    // cierra la puerta a nivel de controller, antes de tocar el servicio, con
+    // la misma convención `superadmin:<recurso>:<acción>` que ya usan
+    // `superadmin:stores:*` y `superadmin:roles:*`.
+    //
+    // Se asignan EXCLUSIVAMENTE al rol `super_admin` (ver filtro
+    // `!p.name.startsWith('superadmin:')` en la asignación a owner).
+    {
+      name: 'superadmin:system_payment_methods:read',
+      description:
+        'Leer el catálogo de métodos de pago de plataforma (todos, incluidos inactivos)',
+      path: '/api/system-payment-methods',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:system_payment_methods:write',
+      description:
+        'Crear, actualizar, alternar y eliminar métodos de pago del catálogo de plataforma',
+      path: '/api/system-payment-methods',
+      method: 'POST',
+    },
+
     // ──── Cuentas por Cobrar (Cartera) ────
     {
       name: 'store:accounts_receivable:read',
@@ -3623,6 +3651,43 @@ export async function seedPermissionsAndRoles(
         'Gestionar documentos soporte de proveedor (facturas recibidas): CRUD, aprobar, marcar pagado, anular, subir PDF',
       path: '/api/super-admin/fiscal/invoicing/*',
       method: 'GET',
+    },
+    // ── Perfiles de facturación de la PLATAFORMA (CP-platform-invoicing-parity B.2)
+    //
+    // Mismo espejo que los `invoicing:profiles:*` del riel tienda, pero con el
+    // prefijo superadmin y rutas centinelas no enrutables. El motivo del
+    // centinela es el mismo que `superadmin:tenants:read` arriba: sembrar
+    // `/api/superadmin/subscriptions/fiscal/profiles/*` regalaría TODO el
+    // namespace (incluidos endpoints legacy) a un rol con sólo :read. Cuatro
+    // permisos en lugar de uno para que `set_default` quede separado de
+    // `write` — mismo argumento que el controller de tienda documenta.
+    {
+      name: 'superadmin:fiscal:invoicing:profiles:read',
+      description:
+        'Ver el catálogo y el detalle de perfiles de facturación del riel plataforma (VENDIX_ADMIN)',
+      path: '/api/superadmin/subscriptions/fiscal/profiles/unique-read',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:fiscal:invoicing:profiles:write',
+      description:
+        'Crear, editar, clonar, activar y desactivar perfiles de facturación del riel plataforma',
+      path: '/api/superadmin/subscriptions/fiscal/profiles/unique-write',
+      method: 'POST',
+    },
+    {
+      name: 'superadmin:fiscal:invoicing:profiles:set_default',
+      description:
+        'Marcar un perfil plataforma como predeterminado para su operation_type (transición, no creación)',
+      path: '/api/superadmin/subscriptions/fiscal/profiles/unique-set-default',
+      method: 'POST',
+    },
+    {
+      name: 'superadmin:fiscal:invoicing:profiles:delete',
+      description:
+        'Eliminar perfiles plataforma sin versiones comprometidas (los referenciados se desactivan)',
+      path: '/api/superadmin/subscriptions/fiscal/profiles/unique-delete',
+      method: 'DELETE',
     },
     // ── Consola de tenants del super admin ────────────────────────────────
     //
@@ -4253,6 +4318,21 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/support/pqr/:id/comments',
       method: 'POST',
     },
+
+    // CRM Landing (QUI-719) — módulo hijo de Clientes
+    {
+      name: 'store:crm:read',
+      description: 'Ver el módulo CRM y su landing (draft, publicado, estado)',
+      path: '/api/store/crm/landing',
+      method: 'GET',
+    },
+    {
+      name: 'store:crm:manage',
+      description:
+        'Administrar el módulo CRM: activar/desactivar, guardar draft y publicar la landing',
+      path: '/api/store/crm/landing',
+      method: 'PUT',
+    },
   ];
 
   // Create-only seed: never delete existing permission rows.
@@ -4387,10 +4467,25 @@ export async function seedPermissionsAndRoles(
     'Repartidor',
   );
 
+  // QUI-730b — roles de operación restaurante. Renombrados a inglés
+  // (mesero→waiter, cocina→kitchen) por requisito del dueño del proyecto.
+  // Lista EXPLÍCITA de permisos en el bloque de sync de abajo (ADR-2),
+  // nunca derivada de `cashierPermissions` (que no contiene ninguna clave
+  // tables/table_sessions/kitchen_fire — ver A.1).
+  const waiterRole = await findOrCreateSystemRole(
+    'waiter',
+    'Mesero de tienda (restaurante): sirve mesas, dispara pedidos a cocina y cobra',
+  );
+
+  const kitchenRole = await findOrCreateSystemRole(
+    'kitchen',
+    'Cocina (restaurante): prepara y marca tickets, sin datos de dinero',
+  );
+
   // Create-only seed: system roles are inserted with organization_id=null on
   // their initial upsert; existing roles are never mutated by this seed.
 
-  const rolesCreated = 8;
+  const rolesCreated = 12;
 
   // Assign permissions to roles
   const allPermissions = await client.permissions.findMany();
@@ -4959,6 +5054,188 @@ export async function seedPermissionsAndRoles(
     'carrier',
   );
   assignmentsCreated += carrierSync.added;
+
+  // Assign permissions to waiter (renombrado de `mesero` en QUI-730b).
+  //
+  // Lista EXPLÍCITA (enumerada), nunca "subset de cashier": cashier no tiene
+  // ninguna clave tables/table_sessions/kitchen_fire, así que un subconjunto
+  // suyo dejaría al waiter sin poder abrir mesas ni disparar a cocina. El
+  // subconjunto de LECTURA de productos y clientes refleja el que cashier ya
+  // tiene (listado explícito, no derivado). ADR-2 cierra: el waiter SÍ cobra y
+  // parte cuenta — `store:table_sessions:update` se asigna completo, con sus
+  // cuatro capacidades (add-items, cerrar mesa, confirmar pago, partir cuenta).
+  //
+  // QUI-730b amplió la lista con los permisos que la función central del rol
+  // exige (medido contra el backend vivo, ver ticket QUI-730). Decisiones:
+  //  - SÍ `orders:{create,read,update}` + `orders:order_flow:{create,read}`
+  //    — sin esto el waiter no puede tomar pedidos ni dispararlos a cocina.
+  //  - SÍ `customers:create` — habilita «venta rápida por nombre» (QUI-734).
+  //  - SÍ `tables:update` — marcar mesa como ocupada al abrir sesión.
+  //  - NO `orders:delete` — borrado de órdenes queda para owner/admin.
+  //  - NO `orders:bulk_print`, `orders:bulk_update` — flujo no es del waiter.
+  const waiterPermissionNames: string[] = [
+    // Mesas + cuenta abierta
+    'store:tables:read',
+    'store:tables:update',
+    'store:table_sessions:read',
+    'store:table_sessions:update',
+    // CP-POLLO-ARABE-727 F.1 Round 2 (B1) — abrir mesa: `POST /store/table-sessions`
+    // exige `table_sessions:create` (table-sessions.controller.ts:109). Sin él,
+    // la primera acción del waiter (abrir una mesa disponible) falla con 403.
+    'store:table_sessions:create',
+    // CP-POLLO-ARABE-727 F.1 Round 2 (B2) — cobrar: el cobro de mesa
+    // (`payTableSession` → `POST /store/payments/pos`) exige `store:pos:access`
+    // (payments.controller.ts:245). ADR-2 declara "waiter SÍ cobra y parte
+    // cuenta"; sin este permiso el waiter no puede cerrar el cobro de una mesa.
+    'store:pos:access',
+    // Disparar a cocina — `read` es necesario para `POST /kitchen-fire/preview`
+    // (previewFire, kitchen-fire.controller.ts:82 exige `kitchen_fire:read`),
+    // que el waiter llama ANTES de `fireOrderItems` (`kitchen_fire:create`) al
+    // disparar un plato preparado. Sin `read`, el waiter recibe 403 en el
+    // preview y no puede disparar (GAP-1 detectado en C.2/QUI-730).
+    'store:kitchen_fire:read',
+    'store:kitchen_fire:create',
+    // QUI-730b — pedidos: el waiter crea, lee y actualiza órdenes, y dispara
+    // el flujo de orden (create + read del state machine). order_flow:update
+    // (reactivate/cancel) queda fuera — es acción de owner/admin.
+    'store:orders:create',
+    'store:orders:read',
+    'store:orders:update',
+    'store:orders:order_flow:create',
+    'store:orders:order_flow:read',
+    // QUI-730b — venta rápida por nombre (QUI-734): el waiter crea clientes
+    // sin pasar por la pantalla de Customers; sin :create falla con 403.
+    'store:customers:create',
+    // Lectura de recetas — necesaria para el picker de exclusiones del waiter
+    // (`add-items-modal openRecipePicker` → `GET /recipes/by-product/:id`,
+    // recipes.controller.ts:82 exige `recipes:read`). Sin ella, el picker
+    // falla en silencio y el waiter no puede marcar "sin papas" (GAP-2, C.2).
+    'store:recipes:read',
+    // Lectura de productos (mismo subset read que cashier)
+    'store:products:read',
+    'store:products:read:one',
+    'store:products:read:store',
+    'store:products:read:slug',
+    // Lectura de clientes (mismo subset read que cashier)
+    'store:customers:read',
+  ];
+
+  const waiterPermissions = allPermissions.filter((p) =>
+    waiterPermissionNames.includes(p.name),
+  );
+
+  const waiterSync = await syncRolePermissions(
+    client,
+    waiterRole.id,
+    waiterPermissions.map((p) => p.id),
+    'waiter',
+  );
+  assignmentsCreated += waiterSync.added;
+
+  // 🔴 CP-POLLO-ARABE-727 F.1 Round 4 (H1) — syncRolePermissions es
+  // additive-only (su docstring describe el set-difference, la implementación
+  // solo hace createMany). `waiter` es rol de lista explícita (ADR-2): si
+  // arrastra algún permiso fuera de la canónica (DB sembrada con una lista
+  // intermedia de la épica), queda huérfano. Revocación explícita idempotente
+  // por rol (mismo patrón que owner/admin/manager con `superadmin:*`):
+  // deleteMany sobre el complemento de la lista canónica — no-op en re-runs.
+  const waiterRevokeIds = waiterPermissions.map((p) => p.id);
+  if (waiterRevokeIds.length > 0) {
+    const revokeWaiter = await client.role_permissions.deleteMany({
+      where: {
+        role_id: waiterRole.id,
+        permission_id: { notIn: waiterRevokeIds },
+      },
+    });
+    if (revokeWaiter.count > 0) {
+      console.log(
+        `   🗑️  Revoked ${revokeWaiter.count} non-canonical permissions from waiter (QUI-727 F.1 H1 — ADR-2)`,
+      );
+    }
+  }
+
+  // Assign permissions to cocina — QUI-727 (A.1) / ADR-2 / ADR-10.
+  //
+  // Cocina NO ve dinero: `store:products:read` se le asigna con proyección
+  // reducida (sin cost_price / profit_margin / precio de venta), garantizada en
+  // products.service.ts por rol. `store:kds:*` = todos los permisos kds
+  // existentes (estaciones + turnos de estación).
+  //
+  // 🔴 CP-POLLO-ARABE-727 F.1 — `store:table_sessions:read` NO se asigna:
+  // abre el detalle de cuenta de mesa (grand_total / subtotal / tax /
+  // discount / pagos pendientes), dinero que ADR-10 prohíbe para cocina. El
+  // cocinero no usa esa superficie (su tablero es kds / kitchen_fire /
+  // kds_sessions). `store:tables:read` se conserva: el floor-map es una lista
+  // de mesas sin montos.
+  const kitchenPermissionNames: string[] = [
+    // Tickets de cocina
+    'store:kitchen_fire:read',
+    'store:kitchen_fire:update',
+    // QUI-730b — DELIBERADO: `store:kds:create` y `store:kds:delete` se
+    // QUITAN del rol kitchen. Crear y borrar estaciones KDS es tarea de
+    // admin/owner, no del cocinero (sobre-otorgado histórico). Si un cocinero
+    // reporta 403 al intentar crear/borrar una estación, NO es regresión —
+    // es la decisión de producto documentada en QUI-730b. Cualquier ticket
+    // derivado debe elevar la pregunta a producto, no devolver el permiso.
+    'store:kds:read',
+    'store:kds:update',
+    'store:kds_sessions:read',
+    'store:kds_sessions:create',
+    'store:kds_sessions:update',
+    // Mesas (solo el floor-map, sin montos) — NO table_sessions (ver arriba)
+    'store:tables:read',
+    // Lectura de recetas — CP-POLLO-ARABE-727 F.1 Round 2 (m): el detalle del
+    // ticket en el KDS (`kds-ticket-detail-modal` → `GET /recipes/by-product/:id`,
+    // recipes.controller.ts:80 exige `recipes:read`) necesita ver el árbol de la
+    // receta del plato. Sin él el cocinero ve "receta no disponible" en el detalle.
+    //
+    // ⚠️ Este permiso NO es inocuo por sí solo: la premisa original ("la receta no
+    // lleva montos, solo insumos") fue REFUTADA en F.1 Round 4 (H2). `recipes:read`
+    // también abre `GET /store/recipes` y `GET /store/recipes/:id`, que sí
+    // seleccionan `product.base_price` y `component_product.cost_price`. ADR-10 se
+    // sostiene porque `recipes.service.ts` aplica `stripCocinaRecipeMoney` en
+    // findAll (:221) y findOne (:270) cuando el actor es kitchen; `findByProduct`
+    // —el que usa el KDS— nunca llevó montos. Si ese strip se quita, este permiso
+    // vuelve a exponer dinero a kitchen.
+    'store:recipes:read',
+    // Productos con proyección reducida (sin dinero)
+    'store:products:read',
+  ];
+
+  const kitchenPermissions = allPermissions.filter((p) =>
+    kitchenPermissionNames.includes(p.name),
+  );
+
+  const kitchenSync = await syncRolePermissions(
+    client,
+    kitchenRole.id,
+    kitchenPermissions.map((p) => p.id),
+    'kitchen',
+  );
+  assignmentsCreated += kitchenSync.added;
+
+  // 🔴 CP-POLLO-ARABE-727 F.1 Round 4 (H1) — kitchen perdió
+  // `store:table_sessions:read` en F.1 Round 1 (ADR-10: abre el detalle de
+  // cuenta de mesa — `order.grand_total`). Como syncRolePermissions no revoca,
+  // cualquier DB sembrada con la lista pre-Round-1 conserva el permiso y kitchen
+  // sigue leyendo dinero vía `GET /store/table-sessions/:id`. La revocación
+  // explícita es el complemento de la lista canónica de kitchen: quita
+  // `table_sessions:read` (y cualquier otro resto, incluyendo `kds:create` y
+  // `kds:delete` que se quitaron en QUI-730b) y es no-op en re-runs.
+  const kitchenRevokeIds = kitchenPermissions.map((p) => p.id);
+  if (kitchenRevokeIds.length > 0) {
+    const revokeKitchen = await client.role_permissions.deleteMany({
+      where: {
+        role_id: kitchenRole.id,
+        permission_id: { notIn: kitchenRevokeIds },
+      },
+    });
+    if (revokeKitchen.count > 0) {
+      console.log(
+        `   🗑️  Revoked ${revokeKitchen.count} non-canonical permissions from kitchen (QUI-727 F.1 H1 — ADR-10 + QUI-730b sobre-otorgado)`,
+      );
+    }
+  }
 
   return {
     permissionsCreated,

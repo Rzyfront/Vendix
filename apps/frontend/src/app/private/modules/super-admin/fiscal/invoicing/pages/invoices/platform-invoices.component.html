@@ -1,293 +1,179 @@
-<div class="space-y-6">
-  <!-- Resumen de estado: las 3 cifras que dicen si la emisión va bien. -->
-  <div
-    class="bg-[var(--color-surface)] rounded-card border border-border p-4 md:p-6"
-  >
+<div class="space-y-4">
+  <!-- Top KPI Stats -->
+  <div class="stats-container">
+    <app-stats
+      title="Total transmisiones"
+      [value]="pagination().total"
+      iconName="file-text"
+      iconBgColor="bg-primary/10"
+      iconColor="text-primary"
+    ></app-stats>
+    <app-stats
+      title="Aceptadas DIAN"
+      [value]="store.stats().accepted"
+      iconName="check-circle"
+      iconBgColor="bg-success/10"
+      iconColor="text-success"
+    ></app-stats>
+    <app-stats
+      title="Pendientes / En cola"
+      [value]="store.stats().pending"
+      iconName="clock"
+      iconBgColor="bg-warning/10"
+      iconColor="text-warning"
+    ></app-stats>
+    <app-stats
+      title="Rechazadas / Errores"
+      [value]="store.stats().errors"
+      iconName="alert-circle"
+      iconBgColor="bg-error/10"
+      iconColor="text-error"
+    ></app-stats>
+  </div>
+
+  <!-- Main Transmissions Card -->
+  <app-card [responsive]="true" [padding]="false" overflow="visible">
+    <!-- Header: Sticky on mobile, normal on desktop -->
     <div
-      class="flex flex-col md:flex-row md:items-center md:justify-between gap-4"
+      class="sticky top-[99px] z-10 bg-background px-2 py-1.5 pt-[5px] -mt-[5px] md:mt-0 md:pt-4 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
     >
-      <div class="space-y-1">
-        <div class="flex items-center gap-2">
-          <app-icon name="info" [size]="18" class="text-primary"></app-icon>
-          <h2
-            class="text-sm font-semibold text-text-primary uppercase tracking-wide"
-          >
-            Estado fiscal SaaS
-          </h2>
-        </div>
-        <p class="text-sm text-text-secondary max-w-3xl">
-          La emisión DIAN es independiente del cobro. Si está inactiva o falla,
-          la venta de planes continúa y el cliente conserva su factura SaaS
-          normal.
-        </p>
-      </div>
+      <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
+        <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
+          Facturas de Plataforma
+          @if (pagination().total; as total) {
+            <span class="text-text-secondary font-normal">({{ total }})</span>
+          }
+        </h2>
 
-      <div class="grid grid-cols-3 gap-2 w-full md:w-auto">
-        <div class="rounded-md border border-border px-3 py-2 text-center">
-          <p class="text-xs text-text-secondary">Aceptadas</p>
-          <p class="text-lg font-semibold text-success">
-            {{ store.stats().accepted }}
-          </p>
-        </div>
-        <div class="rounded-md border border-border px-3 py-2 text-center">
-          <p class="text-xs text-text-secondary">Pendientes</p>
-          <p class="text-lg font-semibold text-warning">
-            {{ store.stats().pending }}
-          </p>
-        </div>
-        <div class="rounded-md border border-border px-3 py-2 text-center">
-          <p class="text-xs text-text-secondary">Errores</p>
-          <p class="text-lg font-semibold text-error">
-            {{ store.stats().errors }}
-          </p>
+        <!-- Search and Options -->
+        <div class="flex items-center gap-2 w-full md:w-auto">
+          <app-inputsearch
+            class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+            size="sm"
+            placeholder="Buscar por número, CUFE..."
+            [debounceTime]="300"
+            [ngModel]="search()"
+            (ngModelChange)="onSearchChange($event)"
+          ></app-inputsearch>
+
+          <app-options-dropdown
+            class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+            [filters]="filterConfigs"
+            [filterValues]="filterValues()"
+            [actions]="dropdownActions"
+            [isLoading]="loadingTransmissions()"
+            (filterChange)="onFilterChange($event)"
+            (clearAllFilters)="onClearFilters()"
+            (actionClick)="onDropdownActionClick($event)"
+          ></app-options-dropdown>
         </div>
       </div>
     </div>
-  </div>
 
-  <!-- Emisión manual -->
-  <div
-    class="bg-[var(--color-surface)] rounded-card border border-border p-4 md:p-6"
-  >
-    <div class="flex flex-col lg:flex-row lg:items-end gap-3">
-      <div class="flex-1">
-        <div class="flex items-center gap-2 mb-3">
-          <app-icon name="file-plus" [size]="18" class="text-text-primary"></app-icon>
-          <h2
-            class="text-sm font-semibold text-text-primary uppercase tracking-wide"
-          >
-            Emisión manual
-          </h2>
-        </div>
-        <p class="text-sm text-text-secondary">
-          Úsalo para emitir o reemitir una factura SaaS pagada sin bloquear el
-          proceso de cobro.
-        </p>
-      </div>
-
-      <app-input
-        class="lg:w-64"
-        label="ID factura SaaS"
-        type="number"
-        [formControl]="manualInvoiceIdControl"
-        [control]="manualInvoiceIdControl"
-      ></app-input>
-
-      <app-button
-        type="button"
-        variant="outline"
-        [loading]="issuingInvoice()"
-        [disabled]="issuingInvoice() || !store.configured()"
-        (clicked)="onIssueManualInvoice()"
-      >
-        <app-icon slot="icon" name="send" [size]="16"></app-icon>
-        Emitir
-      </app-button>
-      <a
-        routerLink="/super-admin/fiscal/invoicing/invoices/new"
-        class="px-3 py-1.5 bg-primary-600 text-white text-sm rounded hover:bg-primary-700"
-      >Nueva factura</a>
-    </div>
-
-    @if (!store.configured()) {
-      <p class="text-xs text-warning pt-3">
-        Configura primero las credenciales DIAN en la pestaña «Configuración
-        DIAN».
-      </p>
-    }
-  </div>
-
-  <!-- Registro de transmisiones -->
-  <div
-    class="bg-[var(--color-surface)] rounded-card border border-border p-4 md:p-6 space-y-4"
-  >
-    <div class="flex flex-col lg:flex-row lg:items-end gap-3">
-      <div class="flex-1">
-        <div class="flex items-center gap-2 mb-3">
-          <app-icon name="list-checks" [size]="18" class="text-text-primary"></app-icon>
-          <h2
-            class="text-sm font-semibold text-text-primary uppercase tracking-wide"
-          >
-            Registro de facturación
-          </h2>
-        </div>
-        <app-inputsearch
-          placeholder="Buscar por número, CUFE o error..."
-          [debounceTime]="500"
-          (searchChange)="onSearchChange($event)"
-        />
-      </div>
-
-      <app-selector
-        class="lg:w-56"
-        label="Estado"
-        [formControl]="statusFilterControl"
-        [options]="statusOptions"
-      ></app-selector>
-
-      <app-selector
-        class="lg:w-56"
-        label="Ambiente"
-        [formControl]="environmentFilterControl"
-        [options]="filterEnvironmentOptions"
-      ></app-selector>
-
-      <app-selector
-        class="lg:w-56"
-        label="Origen"
-        [options]="sourceTypeOptions"
-        (valueChange)="sourceTypeFilter.set(($event ?? '').toString())"
-      ></app-selector>
-
-      <app-selector
-        class="lg:w-56"
-        label="Tipo de documento"
-        [options]="documentTypeOptions"
-        (valueChange)="documentTypeFilter.set(($event ?? '').toString())"
-      ></app-selector>
-
-      <app-input
-        class="lg:w-40"
-        label="Desde"
-        type="date"
-        (inputChange)="dateFromFilter.set($event ?? '')"
-      ></app-input>
-
-      <app-input
-        class="lg:w-40"
-        label="Hasta"
-        type="date"
-        (inputChange)="dateToFilter.set($event ?? '')"
-      ></app-input>
-    </div>
-
+    <!-- Loading State -->
     @if (loadingTransmissions()) {
       <div class="p-8 text-center">
-        <div
-          class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-        ></div>
-        <p class="mt-2 text-text-secondary">Cargando registro...</p>
+        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <p class="mt-2 text-text-secondary">Cargando registro fiscal...</p>
       </div>
-    } @else if (filteredTransmissions().length === 0) {
+    }
+
+    <!-- Empty State -->
+    @if (!loadingTransmissions() && transmissions().length === 0) {
       <app-empty-state
         icon="file-text"
-        title="Sin transmisiones"
-        description="Cuando se paguen suscripciones con DIAN activo, aparecerán aquí."
+        title="Sin facturas ni transmisiones"
+        description="Las facturas emitidas o registradas ante la DIAN aparecerán en este registro."
+        actionButtonText="Nueva factura"
+        [showActionButton]="true"
+        [showRefreshButton]="true"
+        (actionClick)="onDropdownActionClick('new_invoice')"
+        (refreshClick)="loadTransmissions()"
       ></app-empty-state>
-    } @else {
-      <div class="overflow-x-auto">
-        <table class="min-w-full text-sm">
-          <thead>
-            <tr class="border-b border-border text-left text-text-secondary">
-              <th class="py-3 pr-4 font-medium">Documento</th>
-              <th class="py-3 pr-4 font-medium">Origen</th>
-              <th class="py-3 pr-4 font-medium">Factura SaaS</th>
-              <th class="py-3 pr-4 font-medium">Estado</th>
-              <th class="py-3 pr-4 font-medium">Ambiente</th>
-              <th class="py-3 pr-4 font-medium text-right">Total</th>
-              <th class="py-3 pr-4 font-medium">Fecha</th>
-              <th class="py-3 font-medium text-right">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (row of filteredTransmissions(); track row.id) {
-              <tr class="border-b border-border/70 last:border-0">
-                <td class="py-3 pr-4">
-                  <div class="font-medium text-text-primary">
-                    {{ row.document_number }}
-                  </div>
-                  @if (row.cufe) {
-                    <div
-                      class="text-xs text-text-secondary truncate max-w-[220px]"
-                    >
-                      CUFE {{ row.cufe }}
-                    </div>
-                  }
-                  @if (row.error_message) {
-                    <div class="text-xs text-error truncate max-w-[260px]">
-                      {{ row.error_message }}
-                    </div>
-                  }
-                </td>
-                <td class="py-3 pr-4">
-                  <span class="inline-flex items-center rounded-full border border-border bg-surface-secondary px-2 py-0.5 text-xs font-mono text-text-secondary">
-                    {{ row.source_type }}
-                  </span>
-                </td>
-                <td class="py-3 pr-4">
-                  <a
-                    [routerLink]="row.source_type === 'platform_invoice' || row.source_type === 'platform_support_document' ? ['/super-admin/fiscal/invoicing/platform-invoices', row.source_id] : ['/super-admin/fiscal/invoicing/invoices', row.source_id]"
-                    class="block hover:bg-surface-muted -m-2 p-2 rounded"
-                  >
-                    <div class="text-text-primary">
-                      {{ row.subscription_invoice?.invoice_number ?? row.source_id }}
-                    </div>
-                    <div class="text-xs text-text-secondary">
-                      ID {{ row.source_id }}
-                    </div>
-                  </a>
-                </td>
-                <td class="py-3 pr-4">
-                  <span
-                    class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium"
-                    [class]="statusBadgeClasses(row.transmission_status)"
-                  >
-                    {{ statusLabel(row.transmission_status) }}
-                  </span>
-                </td>
-                <td class="py-3 pr-4">
-                  {{ environmentLabel(row.dian_configuration?.environment) }}
-                </td>
-                <td class="py-3 pr-4 text-right font-medium text-text-primary">
-                  {{ asNumber(row.subscription_invoice?.total) | currency }}
-                  <span class="text-xs text-text-secondary">
-                    {{ row.subscription_invoice?.currency }}
-                  </span>
-                </td>
-                <td class="py-3 pr-4 text-text-secondary">
-                  {{ row.created_at | date: 'short' }}
-                </td>
-                <td class="py-3 text-right">
-                  <div class="flex justify-end gap-2">
-                    @if (row.pdf_url) {
-                      <a
-                        class="inline-flex items-center justify-center rounded-md border border-border px-2 py-1 text-xs text-text-primary hover:bg-[var(--color-surface-secondary)]"
-                        [href]="row.pdf_url"
-                        target="_blank"
-                        rel="noopener"
-                      >
-                        PDF
-                      </a>
-                    }
-                    <app-button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      [loading]="retryingTransmissionId() === row.id"
-                      [disabled]="!canRetry(row)"
-                      (clicked)="onRetry(row)"
-                    >
-                      <app-icon slot="icon" name="refresh-cw" [size]="14"></app-icon>
-                      Reintentar
-                    </app-button>
-                  </div>
-                </td>
-              </tr>
-            }
-          </tbody>
-        </table>
-      </div>
+    }
 
-      <div class="pt-2 flex justify-center">
-        <app-pagination
-          [currentPage]="pagination().page"
-          [totalPages]="pagination().totalPages"
-          [total]="filteredTransmissions().length"
-          [limit]="pagination().limit"
-          infoStyle="page"
-          (pageChange)="changePage($event)"
-        ></app-pagination>
+    <!-- Responsive Data View -->
+    @if (!loadingTransmissions() && transmissions().length > 0) {
+      <div class="px-2 pb-2 pt-3 md:p-4">
+        <app-responsive-data-view
+          [data]="transmissions()"
+          [columns]="columns"
+          [actions]="tableActions"
+          [cardConfig]="cardConfig"
+          [loading]="loadingTransmissions()"
+          emptyMessage="No hay facturas registradas"
+          emptyIcon="file-text"
+          (rowClick)="onRowClick($event)"
+        ></app-responsive-data-view>
+
+        <!-- Pagination -->
+        @if (pagination().totalPages > 1) {
+          <div class="flex justify-center pt-3 mt-3 border-t border-border">
+            <app-pagination
+              [currentPage]="pagination().page"
+              [totalPages]="pagination().totalPages"
+              [total]="pagination().total"
+              [limit]="pagination().limit"
+              (pageChange)="changePage($event)"
+            ></app-pagination>
+          </div>
+        }
+      </div>
+    }
+  </app-card>
+</div>
+
+<!-- Modal: Emisión Manual de Factura SaaS -->
+<app-modal
+  [(isOpen)]="showManualIssueModal"
+  title="Emisión manual de factura SaaS"
+  size="md"
+>
+  <div class="space-y-4">
+    <p class="text-sm text-text-secondary">
+      Ingresa el ID numérico de la factura de suscripción SaaS ya pagada para emitirla electrónicamente ante la DIAN.
+    </p>
+
+    <app-input
+      label="ID factura SaaS"
+      type="number"
+      placeholder="Ej: 123"
+      [formControl]="manualInvoiceIdControl"
+      [control]="manualInvoiceIdControl"
+    ></app-input>
+
+    @if (!store.configured()) {
+      <div class="rounded-md bg-warning/10 border border-warning/30 p-3 text-xs text-warning">
+        Configura primero las credenciales DIAN en la pestaña «Configuración DIAN» antes de emitir.
       </div>
     }
   </div>
-</div>
+
+  <div slot="footer" class="flex justify-end gap-2">
+    <app-button
+      type="button"
+      variant="outline"
+      (clicked)="showManualIssueModal.set(false)"
+    >
+      Cancelar
+    </app-button>
+    <app-button
+      type="button"
+      variant="primary"
+      [loading]="issuingInvoice()"
+      [disabled]="issuingInvoice() || !store.configured() || manualInvoiceIdControl.invalid"
+      (clicked)="onIssueManualInvoice()"
+    >
+      <app-icon slot="icon" name="send" [size]="16"></app-icon>
+      Emitir ante DIAN
+    </app-button>
+  </div>
+</app-modal>
+
+<!-- Modal: Detalle Completo de Factura Plataforma -->
+<app-platform-invoice-detail-modal
+  [(isOpen)]="showDetailModal"
+  [invoiceId]="selectedInvoiceId()"
+  (closed)="selectedInvoiceId.set(null)"
+></app-platform-invoice-detail-modal>
+

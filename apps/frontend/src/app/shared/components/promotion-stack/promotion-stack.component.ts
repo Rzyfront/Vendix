@@ -385,6 +385,12 @@ export class PromotionStackComponent {
     return `De ${min} a ${item.max_quantity} unidades`;
   }
 
+  /** Monto del descuento formateado con signo negativo (e.g. "-$400.00"). Null si es 0. */
+  formattedValue(item: PromotionStackItem): string | null {
+    if (!item.value || item.value <= 0) return null;
+    return `-${this.currencyFormat.format(item.value)}`;
+  }
+
   /** aria-label de un pill. */
   pillAriaLabel(item: PromotionStackItem): string {
     return `Descuento: ${this.pillText(item)}`;

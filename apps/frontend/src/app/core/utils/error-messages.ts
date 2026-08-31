@@ -105,6 +105,9 @@ export const ERROR_MESSAGES: Record<string, string> = {
   AUTH_VALIDATE_001: 'La validacion de autenticacion fallo.',
   AUTH_DUP_001: 'Ya existe un usuario con este email.',
   AUTH_PERM_001: 'No tiene permisos para realizar esta accion.',
+  BANK_ACCOUNT_NOT_FOUND: 'No se encontro la cuenta bancaria.',
+  PAYMENT_NOT_OWNED: 'No puedes operar este pago: pertenece a otra persona.',
+  PRODUCT_VARIANT_MISMATCH: 'La variante seleccionada no corresponde al producto.',
   AUTH_TOKEN_001: 'Token invalido o expirado.',
   AUTH_CREDENTIALS_001: 'Email o contrasena incorrectos.',
   AUTH_PASSWORD_001: 'La contrasena es incorrecta.',
@@ -513,6 +516,14 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La pasarela aun no fue probada. Pidele al administrador que ejecute una prueba de conexion.',
   SUBSCRIPTION_GATEWAY_003:
     'Pagos no disponibles temporalmente. La pasarela de Vendix no esta activa; contacta al soporte.',
+  SUBSCRIPTION_FISCAL_001:
+    'Por favor ingresa los datos de facturación de tu empresa para continuar con la suscripción.',
+  SUBSCRIPTION_FISCAL_002:
+    'Los datos de facturación ingresados presentan inconsistencias. Por favor revísalos antes de continuar con el pago.',
+  VERIFICATION_DIGIT_NOT_APPLICABLE:
+    'El tipo de documento seleccionado no requiere dígito de verificación.',
+  VERIFICATION_DIGIT_MISMATCH:
+    'El dígito de verificación no coincide con el número de NIT ingresado.',
   PROMO_NOT_ELIGIBLE:
     'El cupon no aplica para esta tienda. Verifica el codigo o las condiciones del cupon.',
 
@@ -891,8 +902,18 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Una línea del AIU entra a la base gravable y no declara impuesto, y no hay perfil de facturación que aporte la tarifa de ese componente. Declara el impuesto en la línea o elige un perfil que defina la tarifa: si se emitiera así, el IVA quedaría por debajo del que corresponde y eso sólo se corrige después con nota crédito.',
   INVOICING_AIU_005:
     'El impuesto de una línea contradice el régimen AIU del documento. La base gravable la determina el régimen —artículo 462-1 grava Administración, Imprevistos y Utilidad; Decreto 1372/1992 grava sólo la Utilidad—, no lo que la línea declare. Revisa el impuesto de la línea o el régimen del perfil: como está, el documento declararía un IVA que sus líneas no respaldan.',
+  // Las bases son TRES, no dos. El texto anterior nombraba sólo las dos
+  // primeras, y ese olvido no era cosmético: este mensaje se muestra justo
+  // cuando el comerciante tiene que elegir una base, así que esconderle
+  // `subtotal` lo empuja a marcar 462-1 o Decreto 1372/1992 para un contrato
+  // que correspondía a subtotal — o sea a declarar el IVA mal, que es
+  // exactamente el daño que este código existe para evitar. El backend ya
+  // nombra las tres (`error-codes.ts`, INVOICING_AIU_006: «none of the THREE
+  // known taxable bases») y el formulario ya ofrece `subtotal`
+  // (`invoice-section-aiu.component.ts`), así que el copy era el único sitio
+  // que seguía contando dos.
   INVOICING_AIU_006:
-    'El documento declara un régimen de AIU que no existe. Los dos válidos son el del artículo 462-1 del Estatuto Tributario y el del Decreto 1372/1992, y no son intercambiables: gravan bases distintas. Elige uno en el perfil de facturación.',
+    'El documento declara una base gravable de AIU que no existe. Las tres válidas son el artículo 462-1 del Estatuto Tributario (grava Administración, Imprevistos y Utilidad, con piso legal del 10 %), el Decreto 1372/1992 (grava sólo la Utilidad, sin piso) y subtotal (renuncia al tratamiento AIU y grava el contrato completo, incluido el costo reembolsable). No son intercambiables: gravan bases distintas. Elige una en el perfil de facturación.',
 
   /**
    * XSD_002 — el descuadre de totales. Lo PRIMERO que hay que decir es lo mismo
@@ -999,7 +1020,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
 
   // Caja registradora — cierre contra un esperado rancio (QUI-572)
   CASH_SESSION_EXPECTED_STALE_001:
-    'El efectivo esperado cambió mientras contabas el arqueo. Revisá el resumen actualizado antes de cerrar la caja.',
+    'El efectivo esperado cambió mientras contabas el arqueo. Revisa el resumen actualizado antes de cerrar la caja.',
 
   // Escáner de facturas de compra (POP). Ninguno estaba mapeado: el modal
   // mostraba el devMessage crudo en inglés («AI OCR response parsed but is

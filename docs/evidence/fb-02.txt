@@ -1,0 +1,42 @@
+# FB-02: GET /store/print-formats/:formatType
+# Plan section: A.3 + Phase B (detail with dispatch_ticket)
+# Source: apps/backend/src/domains/store/print-formats/controllers/print-formats.controller.ts:58
+# Permission: store:settings:read, invoicing:read
+
+COMMAND:
+curl -sk -X GET 'https://api.vendix.com/api/store/print-formats/pos_sale_ticket' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESPONSE SHAPE:
+{
+  "success": true,
+  "data": {
+    "format_type": "pos_sale_ticket",
+    "name": "Ticket de Venta POS",
+    "category": "Ventas POS",
+    "is_active": bool,
+    "gateway_enabled": bool,
+    "is_customized": bool,
+    "template_id": int | null,
+    "template_name": string | null,
+    "definition": { ... JSON PrintFormatDefinition ... },
+    "overrides": { ... } | null,
+    "available_tokens": ["document.number", "store.name", ...]
+  }
+}
+
+VERIFICATION:
+# Pre-B.3: solo 10 formatTypes válidos
+curl .../pos_sale_ticket | jq '.data.format_type' debe ser 'pos_sale_ticket'
+curl .../dispatch_ticket | jq '.success' debe ser false (pre-B.3 — format no existe en enum)
+
+# Post-B.3:
+curl .../dispatch_ticket | jq '.data.format_type' debe ser 'dispatch_ticket'
+curl .../dispatch_ticket | jq '.data.available_tokens | length >= 8'
+
+# Format inválido
+curl .../invalid_format | jq '.error.code' debe ser SYS_NOT_FOUND_001 o PRINT_FORMAT_NOT_FOUND_001 (404)

@@ -52,6 +52,16 @@
   color: var(--color-text-secondary);
 }
 
+/* CP-POLLO-ARABE-727 C.4 (QUI-736) — sub-línea de variante del plato, debajo del
+   nombre. Se distingue de la nota (kc-note, fondo ámbar) y del árbol de
+   ingredientes para que no colisione con el listado de exclusiones. */
+.kc-variant {
+  margin: -0.1rem 0 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
 /* La nota del pedido: resaltada porque es la instrucción que el cocinero traduce
    a exclusiones. Si se ve como texto secundario, se ignora. */
 .kc-note {

@@ -4,6 +4,7 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { QrService } from '../../../../common/services/qr.service';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
+import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import {
@@ -181,5 +182,43 @@ export class FiscalCreditNoteDataProvider implements IDocumentDataProvider {
       { token: '{{document.reference_document_number}}', path: 'document.reference_document_number', description: 'Factura electrónica afectada', example: 'SETP-990001' },
       { token: '{{totals.grand_total}}', path: 'totals.grand_total_formatted', description: 'Monto total acreditado', example: '$595.000' },
     ];
+  }
+
+  /**
+   * [print-editor-dsk P3.1] — Nota crédito fiscal: filtra por
+   * `invoice_type='credit_note'`. La compuerta ya existe en
+   * `fetchDocumentData` y se replica aquí para que el picker no mezcle
+   * facturas con notas y el preview renderice las etiquetas correctas.
+   */
+  async listRecent(
+    storeId: number,
+    limit: number,
+  ): Promise<RecentDocumentSummary[]> {
+    const rows = await this.prisma.invoices.findMany({
+      where: { store_id: storeId, invoice_type: 'credit_note' },
+      orderBy: { issue_date: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        invoice_number: true,
+        issue_date: true,
+        total_amount: true,
+      },
+    });
+    const fmt = new Intl.DateTimeFormat('es-CO', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
+    const cop = new Intl.NumberFormat('es-CO', {
+      style: 'currency',
+      currency: 'COP',
+      maximumFractionDigits: 0,
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      number: String(r.invoice_number),
+      date_formatted: r.issue_date ? fmt.format(new Date(r.issue_date)) : '',
+      total_formatted: cop.format(Number(r.total_amount || 0)),
+    }));
   }
 }

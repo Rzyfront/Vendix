@@ -1,11 +1,12 @@
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ApplicationRef, provideZonelessChangeDetection } from '@angular/core';
+import { ApplicationRef } from '@angular/core';
 import { Subject, of } from 'rxjs';
 
 import { PlatformGatewayView } from '../../interfaces/platform-gateway.interface';
 import { GatewayAdminService } from '../../services/gateway-admin.service';
+import { TenantFacade } from '../../../../../../core/store/tenant/tenant.facade';
 import { GatewayComponent } from './gateway.component';
 
 describe('GatewayComponent', () => {
@@ -50,10 +51,30 @@ describe('GatewayComponent', () => {
     TestBed.configureTestingModule({
       imports: [GatewayComponent],
       providers: [
-        provideZonelessChangeDetection(),
         provideHttpClient(),
         provideHttpClientTesting(),
         { provide: GatewayAdminService, useValue: gatewayServiceSpy },
+        // `GatewayComponent` renderiza `<app-input>`, e `InputComponent`
+        // inyecta `CurrencyFormatService`, que inyecta `TenantFacade`, que
+        // inyecta el `Store` de NgRx. Sin este doble, `createComponent` muere
+        // con `NG0201: No provider found for _Store` ANTES de que corra
+        // cualquier expectativa, y las 5 pruebas que crean el componente
+        // salen rojas por una razón que no tiene nada que ver con lo que
+        // prueban. No es un detalle de este spec: cualquier spec que pinte un
+        // `<app-input>` arrastra la cadena completa hasta el Store.
+        //
+        // El doble es el MISMO que usa `currency.pipe.spec.ts` —los dos
+        // únicos miembros que `CurrencyFormatService` le pide— y no un
+        // `provideMockStore`, porque doblar el Store entero declararía una
+        // dependencia sobre NgRx que este spec no tiene: lo que necesita es la
+        // moneda del tenant, no el estado global.
+        {
+          provide: TenantFacade,
+          useValue: {
+            getCurrentDomainConfig: () => null,
+            getCurrentStoreId: () => null,
+          },
+        },
       ],
     });
 

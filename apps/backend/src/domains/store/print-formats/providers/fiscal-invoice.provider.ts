@@ -4,6 +4,7 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { QrService } from '../../../../common/services/qr.service';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
+import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import {
@@ -150,5 +151,47 @@ export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
       { token: '{{store.legal_name}}', path: 'store.legal_name', description: 'Razón social del emisor fiscal', example: 'Mi Empresa S.A.S.' },
       { token: '{{customer.legal_name}}', path: 'customer.name', description: 'Razón social del adquirente', example: 'Cliente S.A.' },
     ];
+  }
+
+  /**
+   * [print-editor-dsk P3.1] — Factura electrónica: filtra por
+   * `invoice_type='electronic'` (excluye notas crédito). El picker del
+   * Hub debe mostrar SOLO facturas electrónicas; si una nota crédito
+   * se cuela aquí, el preview pintaría la cabecera equivocada porque
+   * `mapFiscalDocumentToPrintData` decide etiquetas según tipo.
+   *
+   * Orden por `issue_date desc` porque es la fecha que aparece en el PDF
+   * y la que el usuario ve al hojear facturas.
+   */
+  async listRecent(
+    storeId: number,
+    limit: number,
+  ): Promise<RecentDocumentSummary[]> {
+    const rows = await this.prisma.invoices.findMany({
+      where: { store_id: storeId, invoice_type: 'electronic' },
+      orderBy: { issue_date: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        invoice_number: true,
+        issue_date: true,
+        total_amount: true,
+      },
+    });
+    const fmt = new Intl.DateTimeFormat('es-CO', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
+    const cop = new Intl.NumberFormat('es-CO', {
+      style: 'currency',
+      currency: 'COP',
+      maximumFractionDigits: 0,
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      number: String(r.invoice_number),
+      date_formatted: r.issue_date ? fmt.format(new Date(r.issue_date)) : '',
+      total_formatted: cop.format(Number(r.total_amount || 0)),
+    }));
   }
 }

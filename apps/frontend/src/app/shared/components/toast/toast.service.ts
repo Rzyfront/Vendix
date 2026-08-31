@@ -2,6 +2,14 @@ import { Injectable, signal } from '@angular/core';
 
 export type ToastVariant = 'default' | 'success' | 'warning' | 'error' | 'info';
 
+export interface ToastAction {
+  /** Texto del botón de acción (ej. "Deshacer", "Reintentar"). */
+  label: string;
+  /** Handler al hacer click. El toast NO se descarta automáticamente —
+   * la acción decide si llama a `toast.dismiss(toast.id)` o no. */
+  onClick: () => void;
+}
+
 export interface Toast {
   id: string;
   title?: string;
@@ -9,6 +17,12 @@ export interface Toast {
   variant: ToastVariant;
   duration: number; // ms
   leaving: boolean; // UI state for exit animation
+  /**
+   * Botón de acción opcional. `undefined` ⇒ el toast se ve igual que antes
+   * (sólo título + descripción + botón Cerrar). Cuando está presente, se
+   * renderiza un botón al lado del Cerrar que ejecuta `onClick`.
+   */
+  action?: ToastAction;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -31,6 +45,7 @@ export class ToastService {
       variant: input.variant ?? 'default',
       duration: input.duration ?? 1750,
       leaving: false,
+      action: input.action,
     };
     this.toastsSig.update((arr) => [toast, ...arr]);
     if (toast.duration > 0) {

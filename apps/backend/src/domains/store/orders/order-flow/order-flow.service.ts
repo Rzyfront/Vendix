@@ -639,7 +639,12 @@ export class OrderFlowService {
       });
       const pos = (settings?.settings as any)?.pos ?? {};
       const allowAnonymous = pos?.allow_anonymous_sales === true;
-      if (!allowAnonymous) {
+      // QUI-737 (B.4) — una orden por alias (customer_id null + customer_alias
+      // poblado) es otra venta legítima de "sin cliente formal": avanzar cuando
+      // el flag POS `allow_alias_sales` está activo y la orden trae alias.
+      const allowAlias = pos?.allow_alias_sales === true;
+      const hasAlias = !!(order as any).customer_alias;
+      if (!allowAnonymous && !(allowAlias && hasAlias)) {
         // Roll back the state claim we just did so the order returns to its
         // pre-attempt state and the cashier can fix the customer field.
         try {
@@ -2612,17 +2617,32 @@ export class OrderFlowService {
       include: { order_installments: true },
     });
 
-    if (!order) throw new NotFoundException('Order not found');
-    if (order.payment_form !== '2')
-      throw new BadRequestException('Not a credit order');
+    if (!order) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_FIND_001,
+        'La orden no existe en este comercio.',
+      );
+    }
+    if (order.payment_form !== '2') {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_VALIDATE_001,
+        'Esta orden no es de tipo crédito. Solo se pueden condonar cuotas en órdenes a crédito.',
+      );
+    }
 
     const installment = order.order_installments.find(
       (i: any) => i.id === installmentId,
     );
-    if (!installment) throw new NotFoundException('Installment not found');
+    if (!installment) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_FIND_001,
+        'La cuota no existe o no pertenece a esta orden.',
+      );
+    }
     if (installment.state === 'paid' || installment.state === 'forgiven') {
-      throw new BadRequestException(
-        `Installment is already ${installment.state}`,
+      throw new VendixHttpException(
+        ErrorCodes.ORD_STATUS_001,
+        `La cuota ya está en estado terminal (${installment.state}) y no se puede condonar.`,
       );
     }
 

@@ -124,3 +124,13 @@
     flex-shrink: 0;
   }
 }
+
+/* ── C.1 (QUI-735) — mobile-first del modal de pago (modo confirm) ────────
+   El footer mantiene la fila (los botones ya son `lg`, 48px); solo se deja
+   que las filas del resumen envuelvan en pantallas estrechas. Bajo 640px.
+   El modo 'pos' delega en `app-payment-modal` (compartido, fuera del scope). */
+@media (max-width: 640px) {
+  .confirm-summary .confirm-row {
+    flex-wrap: wrap;
+  }
+}

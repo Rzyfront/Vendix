@@ -168,7 +168,7 @@ type SuccessInfo =
                   <strong>todavía no se envió</strong>, porque el expediente
                   está incompleto: falta
                   {{ documentLabelList(success.missing) }}. Puedes continuar
-                  con la activación y volver a este paso para adjuntarlo; el
+                  con la activación y volver a este paso para completarlo; el
                   envío ocurre cuando el expediente esté completo. Hasta
                   entonces tu tienda no podrá emitir documentos electrónicos.
                 </p>

@@ -899,6 +899,16 @@ describe('CreateInvoiceDto — las 7 llaves foráneas tienen piso', () => {
         expect(failedPaths(errors)).toEqual([]);
       });
 
+      // F.5 — decimal ≥ 1: @Min(1) por sí solo lo APRUEBA (1.5 ≥ 1), así que
+      // sólo @IsInt lo detiene. Si alguien borra el @IsInt de este campo, este
+      // caso —y sólo este— empieza a pasar donde antes fallaba: es la prueba
+      // de mutación que demuestra que el decorador hace algo.
+      it('rechaza el id decimal 1.5 (F.5 — @IsInt, @Min por sí solo lo aprueba)', async () => {
+        const errors = await validateAsPipe(testCase.build(1.5));
+        expect(failedPaths(errors)).toContain(testCase.path);
+        expect(messagesAt(errors, testCase.path)).toContain('entero');
+      });
+
       it('el mensaje nombra el campo y su límite', async () => {
         const errors = await validateAsPipe(testCase.build(0));
         const message = messagesAt(errors, testCase.path);
@@ -924,13 +934,14 @@ describe('CreateInvoiceDto — las 7 llaves foráneas tienen piso', () => {
 
   /**
    * Cuántas propiedades `@IsNumber` tiene cada clase HOY. Medido, no estimado:
-   * 8 + 6 + 4 = 18. Existe para que la compuerta no pueda pasar en vacío — si
-   * la lectura de metadatos se rompe y devuelve cero propiedades, esto falla
-   * antes de que el «no hay ninguna sin piso» mienta. Y si nace un campo
-   * numérico, obliga a actualizar el número a conciencia.
+   * 9 + 6 + 4 = 19 (C.7 sumó `aiu_minimum_base_percent` a `CreateInvoiceDto`,
+   * con su propio `@Min`/`@Max`). Existe para que la compuerta no pueda pasar
+   * en vacío — si la lectura de metadatos se rompe y devuelve cero
+   * propiedades, esto falla antes de que el «no hay ninguna sin piso» mienta.
+   * Y si nace un campo numérico, obliga a actualizar el número a conciencia.
    */
   const NUMERIC_PROPERTY_COUNT: Record<string, number> = {
-    CreateInvoiceDto: 8,
+    CreateInvoiceDto: 9,
     CreateInvoiceItemDto: 6,
     CreateInvoiceTaxDto: 4,
   };
@@ -1037,5 +1048,185 @@ describe('CreateInvoiceItemDto — unit_code: cota FAV05 (@unitCode, 1-5)', () =
     expect(message).toContain('unit_code');
     expect(message).toContain('5');
     expect(message).toContain('FAV05');
+  });
+});
+
+/**
+ * F.6 — el Anexo Técnico 1.9 fija DOS topes distintos para
+ * `cac:InvoiceLine/cbc:Description` según el documento padre: factura
+ * (FAZ02) 1-300, nota crédito (CAZ02) 1-600. `CreateInvoiceItemDto.description`
+ * tenía un único `@MaxLength(500)` que no era correcto para NINGUNO de los
+ * dos: dejaba pasar 301-500 en factura (que la DIAN rechaza al emitir, ya con
+ * el consecutivo gastado) y no alcanzaba los 600 legales de nota crédito.
+ *
+ * `CreateInvoiceDto.items` usa ahora `CreateFacturaInvoiceItemDto`
+ * (`@Type(() => CreateFacturaInvoiceItemDto)`), que sobreescribe SÓLO
+ * `@MaxLength` a 300. Nota crédito/débito siguen en `CreateInvoiceItemDto`
+ * —techo común de 500, limitado por la columna `invoice_items.description`,
+ * no por la ley— porque su legal (600) excede esa columna y ensancharla es
+ * una migración de `schema.prisma` fuera de este alcance.
+ */
+describe('CreateFacturaInvoiceItemDto — description: cota FAZ02 (cac:InvoiceLine/cbc:Description, 1-300)', () => {
+  it('acepta exactamente 300 caracteres', async () => {
+    const errors = await validateAsPipe(itemWith({ description: chars(300) }));
+    expect(failedPaths(errors)).toEqual([]);
+  });
+
+  it('rechaza 301 caracteres con 400 (vía ValidationPipe)', async () => {
+    const errors = await validateAsPipe(itemWith({ description: chars(301) }));
+    expect(failedPaths(errors)).toContain('items.0.description');
+  });
+
+  it('el mensaje nombra el campo, el tope y la regla FAZ02', async () => {
+    const errors = await validateAsPipe(itemWith({ description: chars(301) }));
+    const message = messagesAt(errors, 'items.0.description');
+    expect(message).toContain('300');
+    expect(message).toContain('FAZ02');
+  });
+
+  it('301-500 caracteres, que el techo COMÚN (500) aprobaría, sigue rechazado en factura', async () => {
+    // Es exactamente el hueco que F.6 cierra: antes de la subclase, 301-500
+    // pasaba `CreateInvoiceItemDto.description` (500) y sólo se descubría al
+    // emitir, con el consecutivo ya gastado.
+    const errors = await validateAsPipe(itemWith({ description: chars(450) }));
+    expect(failedPaths(errors)).toContain('items.0.description');
+  });
+});
+
+/**
+ * C.7 — DESCONGELAR LOS TRES CONTROLES AIU DEL DOCUMENTO.
+ *
+ * Antes de este paso el DTO no declaraba `aiu_taxable_basis`,
+ * `aiu_enforce_minimum_base` ni `aiu_minimum_base_percent`: con
+ * `forbidNonWhitelisted: true` (`main.ts:206`), el frontend no podía siquiera
+ * ENVIAR un apartamiento del perfil sin recibir 400. Este bloque cubre sólo el
+ * FORMATO — la legalidad de negocio (base↔matriz, piso vs. legal) se prueba en
+ * `invoicing.service.aiu-document-overrides.spec.ts`, contra la escritura real
+ * del documento.
+ */
+describe('CreateInvoiceDto — C.7: controles AIU apartables por documento', () => {
+  it('acepta los tres controles juntos', async () => {
+    const errors = await validateAsPipe({
+      ...baseInvoice(),
+      operation_type: '09',
+      aiu_taxable_basis: 'subtotal',
+      aiu_enforce_minimum_base: false,
+      aiu_minimum_base_percent: 12.5,
+    });
+    expect(failedPaths(errors)).toEqual([]);
+  });
+
+  it('ausentes los tres, el documento valida igual que antes de C.7', async () => {
+    const errors = await validateAsPipe({
+      ...baseInvoice(),
+      operation_type: '09',
+    });
+    expect(failedPaths(errors)).toEqual([]);
+  });
+
+  it.each([['aiu'], ['utilidad'], ['subtotal']])(
+    'acepta aiu_taxable_basis %s',
+    async (basis) => {
+      const errors = await validateAsPipe({
+        ...baseInvoice(),
+        aiu_taxable_basis: basis,
+      });
+      expect(failedPaths(errors)).toEqual([]);
+    },
+  );
+
+  it('rechaza un aiu_taxable_basis fuera de aiu/utilidad/subtotal', async () => {
+    const errors = await validateAsPipe({
+      ...baseInvoice(),
+      aiu_taxable_basis: 'total',
+    });
+    expect(failedPaths(errors)).toContain('aiu_taxable_basis');
+  });
+
+  it('trata aiu_taxable_basis vacío como "sin valor", no como valor inválido', async () => {
+    const errors = await validateAsPipe({
+      ...baseInvoice(),
+      aiu_taxable_basis: '',
+    });
+    expect(failedPaths(errors)).toEqual([]);
+  });
+
+  it.each([[true], [false]])(
+    'acepta aiu_enforce_minimum_base %s',
+    async (value) => {
+      const errors = await validateAsPipe({
+        ...baseInvoice(),
+        aiu_enforce_minimum_base: value,
+      });
+      expect(failedPaths(errors)).toEqual([]);
+    },
+  );
+
+  it('rechaza aiu_enforce_minimum_base que no es booleano', async () => {
+    // Un string u objeto escalar NO sirve como contraejemplo: con
+    // `enableImplicitConversion: true` (el pipe global), class-transformer
+    // convierte cualquier escalar truthy a `true` ANTES de que `@IsBoolean()`
+    // corra — 'sí', 42 y {} los tres llegan como `true`. Un arreglo es lo
+    // único que sobrevive la conversión implícita sin volverse booleano.
+    const errors = await validateAsPipe({
+      ...baseInvoice(),
+      aiu_enforce_minimum_base: [],
+    });
+    expect(failedPaths(errors)).toContain('aiu_enforce_minimum_base');
+  });
+
+  it('acepta aiu_minimum_base_percent dentro de 0-100', async () => {
+    const errors = await validateAsPipe({
+      ...baseInvoice(),
+      aiu_minimum_base_percent: 10,
+    });
+    expect(failedPaths(errors)).toEqual([]);
+  });
+
+  it('rechaza aiu_minimum_base_percent negativo', async () => {
+    const errors = await validateAsPipe({
+      ...baseInvoice(),
+      aiu_minimum_base_percent: -1,
+    });
+    expect(failedPaths(errors)).toContain('aiu_minimum_base_percent');
+  });
+
+  it('rechaza aiu_minimum_base_percent por encima de 100', async () => {
+    const errors = await validateAsPipe({
+      ...baseInvoice(),
+      aiu_minimum_base_percent: 100.01,
+    });
+    expect(failedPaths(errors)).toContain('aiu_minimum_base_percent');
+  });
+});
+
+describe('CreateInvoiceDto — D.7: la compuerta del Modelo 1 está abierta', () => {
+  /**
+   * `aiu_accounting_model` valida contra `ENABLED_ACCOUNTING_MODELS`, el mismo
+   * interruptor único que gobierna la escritura del perfil. La apertura del
+   * Modelo 1 (2026-08-25, autorización explícita del dueño) añadió
+   * `'no_sumada'` a esa lista y ESTE spec es el que fija que la puerta del
+   * documento se levantó con ella — no sólo la del perfil.
+   */
+  it.each([['sumada'], ['no_sumada']])(
+    'acepta aiu_accounting_model %s',
+    async (model) => {
+      const errors = await validateAsPipe({
+        ...baseInvoice(),
+        aiu_accounting_model: model,
+      });
+      expect(failedPaths(errors)).toEqual([]);
+    },
+  );
+
+  it('rechaza un modelo que no existe, nombrando los dos admitidos', async () => {
+    const errors = await validateAsPipe({
+      ...baseInvoice(),
+      aiu_accounting_model: 'mitad_y_mitad',
+    });
+    expect(failedPaths(errors)).toContain('aiu_accounting_model');
+    expect(messagesAt(errors, 'aiu_accounting_model')).toContain(
+      'sumada, no_sumada',
+    );
   });
 });

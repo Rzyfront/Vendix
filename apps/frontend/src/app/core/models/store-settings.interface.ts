@@ -541,6 +541,13 @@ export interface BarcodeScannerSettings {
 
 export interface PosSettings {
   allow_anonymous_sales: boolean;
+  /**
+   * Decisión del usuario 2026-08-31 — habilita la opción «Venta con nombre o
+   * referencia» en el wizard del POS (alias de venta rápida, customer_id
+   * queda en `null` y `orders.customer_alias` poblado por ADR-9). Default
+   * `false` (opt-in) porque no todas las tiendas lo necesitan.
+   */
+  allow_alias_sales?: boolean;
   anonymous_sales_as_default: boolean;
   business_hours: Record<string, BusinessHours>;
   schedule_mode?: 'continuous' | 'custom';
@@ -688,17 +695,13 @@ export const PRINT_DEFAULTS: Record<PrintDocument, PrintDocumentConfig> = {
  * Page geometry per format. `page_size` is the CSS `@page size` rule; without it
  * the browser falls back to its own default and silently ignores the configured
  * paper.
+ *
+ * [print-editor-dsk P1.6] Re-exportado del shim local `app/core/lib/page-geometry`
+ * para mantener sincronía byte-a-byte con backend y mobile. La fuente única es
+ * `libs/print-formats/schemas/page-geometry.json` y el script
+ * `scripts/sync-print-geometry.ts` la copia a cada app.
  */
-export const PRINT_PAGE_GEOMETRY: Record<
-  PrintFormat,
-  { page_size: string; width_mm: number; is_roll: boolean }
-> = {
-  letter: { page_size: 'letter', width_mm: 216, is_roll: false },
-  half_letter: { page_size: '216mm 140mm', width_mm: 216, is_roll: false },
-  a4: { page_size: 'A4', width_mm: 210, is_roll: false },
-  thermal_80: { page_size: '80mm auto', width_mm: 80, is_roll: true },
-  thermal_58: { page_size: '58mm auto', width_mm: 58, is_roll: true },
-};
+export { PRINT_PAGE_GEOMETRY } from '../lib/page-geometry';
 
 export interface ReceiptsSettings {
   print_receipt: boolean;
@@ -747,6 +750,31 @@ export interface ReceiptsSettings {
    * answering 200, so a new section would look saved and never persist.
    */
   printing?: PrintingSettings;
+  /**
+   * Habilita la impresión del tiquete de despacho (dispatch_ticket).
+   * Si false, los 2 disparadores (POS auto + orden manual) NO imprimen.
+   * ADR-7: flat bajo `receipts` raíz (no en `printing.dispatch_ticket`) para
+   * evitar drop por KNOWN_SECTIONS.
+   */
+  print_dispatch_ticket_enabled?: boolean;
+  /**
+   * Si true y print_dispatch_ticket_enabled=true, el POS encadena auto el
+   * tiquete de despacho junto con ticket POS/factura cuando la venta tiene envío.
+   * Default false (opt-in por admin).
+   */
+  print_dispatch_ticket_auto_with_pos?: boolean;
+  /**
+   * QUI-727 (A.2) — Si true y print_dispatch_ticket_enabled=true, la
+   * postventa encadena auto el tiquete de despacho al confirmar entrega/pago.
+   * Default false (opt-in por admin).
+   */
+  print_dispatch_ticket_auto_on_postventa?: boolean;
+  /**
+   * Decisión del usuario 2026-08-31: habilita el tiquete de despacho
+   * como tiquete de reclamo en ventas de mostrador (`direct_delivery`)
+   * y para llevar (`pickup`). Enmienda a ADR-6; default false.
+   */
+  print_dispatch_ticket_on_counter?: boolean;
 }
 
 export interface BusinessHoursBlock {

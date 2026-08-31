@@ -1,0 +1,38 @@
+# ERR-02: PRINT_TEMPLATE_NOT_FOUND_001
+# HTTP: 404
+# Source: apps/backend/src/common/errors/error-codes.ts:219-223
+# Emitido cuando: library template id no existe o no pertenece a la org
+
+COMMAND:
+curl -sk -X GET 'https://api.vendix.com/api/store/print-formats/library/9999999' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -w '\nHTTP_CODE: %{http_code}\n'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+EXPECTED HTTP: 404
+
+# Más realista — provocar via clone:
+COMMAND (clone non-existent):
+curl -sk -X POST 'https://api.vendix.com/api/store/print-formats/library/9999999/clone' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -w '\nHTTP_CODE: %{http_code}\n'
+
+EXPECTED RESPONSE BODY:
+{
+  "success": false,
+  "error": {
+    "code": "PRINT_TEMPLATE_NOT_FOUND_001",
+    "message": "Plantilla no encontrada o inaccesible para la organización"
+  }
+}
+
+VERIFICATION:
+curl .../library/9999999/clone -X POST | jq '.error.code' debe ser 'PRINT_TEMPLATE_NOT_FOUND_001'
+curl .../library/9999999/clone -X POST | jq '.success' debe ser false
+curl .../library/9999999/clone -X POST -w '%{http_code}' | grep -q '404'
+
+# Cross-tenant: library/<id_de_otra_org>
+curl .../library/<other_org_template_id>/clone -X POST | jq '.error.code' debe ser 'PRINT_TEMPLATE_NOT_FOUND_001'

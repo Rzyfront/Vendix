@@ -1,0 +1,35 @@
+# DB-05: store_settings (receipts JSON con print_dispatch_ticket_*)
+# Plan section: A.3 + Phase C + Phase E
+# Source: apps/backend/src/domains/store/settings/interfaces/store-settings.interface.ts:672,792
+# Scoping: store_id scoped
+# Invariant: receipts section preserved (KNOWN_SECTIONS no la dropea)
+
+COMMAND (psql):
+psql "$DATABASE_URL" -c "SELECT id, settings->'receipts'->>'print_dispatch_ticket_enabled' AS enabled, settings->'receipts'->>'print_dispatch_ticket_auto_with_pos' AS auto, settings->'receipts'->'printing'->'dispatch_ticket' AS printing_config FROM store_settings WHERE store_id=5;"
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESULT:
+| enabled | auto | printing_config |
+|---------|------|-----------------|
+| true (default post-C.1) | false (default post-C.1) | null OR {format, copies, margin_mm} (legacy) |
+
+VERIFICATION:
+# Pre-C.1: campos no existen en JSON
+psql -c "SELECT settings->'receipts'->>'print_dispatch_ticket_enabled' FROM store_settings WHERE store_id=5;" debe ser null (pre-C.1)
+# Frontend aplica default runtime
+
+# Post-C.1: campos creados (defaults aplicados via seed o migración soft)
+psql -c "SELECT settings->'receipts'->>'print_dispatch_ticket_enabled' FROM store_settings WHERE store_id=5;" debe ser 'true' (post-C.1)
+psql -c "SELECT settings->'receipts'->>'print_dispatch_ticket_auto_with_pos' FROM store_settings WHERE store_id=5;" debe ser 'false' (post-C.1)
+
+# KNOWN_SECTIONS no dropea `receipts` (regression check)
+psql -c "SELECT settings ? 'receipts' FROM store_settings WHERE store_id=5;" debe ser 't' (true) para TODAS las filas
+
+# Update preserva otros campos:
+UPDATE store_settings SET settings = jsonb_set(settings, '{receipts,print_dispatch_ticket_enabled}', 'false') WHERE store_id=5;
+# Verificar que otros campos de settings siguen intactos:
+psql -c "SELECT settings->'fiscal_data' FROM store_settings WHERE store_id=5;" debe seguir no-null
+
+# Legacy printing.dispatch_ticket (preserved por backward compat):
+psql -c "SELECT settings->'receipts'->'printing'->>'dispatch_ticket' FROM store_settings WHERE store_id=5;" debe ser {format:thermal_80, copies:1} (legacy default)

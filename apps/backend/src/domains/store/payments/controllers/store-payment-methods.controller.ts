@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   Get,
   Post,
@@ -25,10 +26,36 @@ import {
   UpdateStorePaymentMethodDto,
   ReorderPaymentMethodsDto,
 } from '../dto';
+import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 
 @ApiTags('Store Payment Methods')
 @Controller('store/payment-methods')
 @ApiBearerAuth()
+/**
+ * A.0 P0 — `PermissionsGuard` a nivel de CLASE + `@Permissions(...)` en cada
+ * handler. Antes la clase no registraba el guard y los 10 handlers quedaban
+ * fail-open: cualquier usuario autenticado de la tienda (mesero/cocina) podía
+ * DELETE/PATCH/reorder los métodos de pago, y tras E.1 eso incluye reescribir
+ * `custom_config.accounts` (a qué cuenta bancaria llega el dinero).
+ *
+ * Permiso por handler:
+ *   - lectura (`getAvailable`, `getEnabled`, `getStats`, `findOne`): `store:settings:read`
+ *   - escritura (`reEnable`, `enable`, `update`, `disable`, `remove`, `reorder`): `store:settings:write`
+ *
+ * No existe fila `store:payment_methods:*` en permissions-roles.seed.ts; las
+ * filas `store:settings:read/write` son las más próximas que owner/admin ya
+ * poseen. `cashier` solo tiene `store:settings:read`, así que los 6 writes
+ * quedan reservados al admin — el cajero no puede tocar los métodos de pago.
+ *
+ * CP-POLLO-ARABE-727 (verificación E2E) — ningún handler devuelve
+ * `responseService.error(...)`: se lanza siempre y el filtro global traduce la
+ * excepción al status HTTP real. `ResponseService.error()` solo escribe el
+ * `statusCode` DENTRO del body y deja la respuesta en HTTP 200/201, así que el
+ * `catchError` del frontend nunca disparaba: guardar `custom_config.accounts`
+ * vacío (ERR-14) se veía como éxito y el método quedaba sin cuentas.
+ */
+@UseGuards(PermissionsGuard)
 export class StorePaymentMethodsController {
   constructor(
     private readonly storePaymentMethodsService: StorePaymentMethodsService,
@@ -36,6 +63,7 @@ export class StorePaymentMethodsController {
   ) {}
 
   @Patch(':methodId/enable')
+  @Permissions('store:settings:write')
   @ApiOperation({ summary: 'Re-enable payment method for store' })
   @ApiResponse({
     status: 200,
@@ -47,7 +75,9 @@ export class StorePaymentMethodsController {
     try {
       const method_id_num = parseInt(methodId);
       if (!method_id_num || isNaN(method_id_num)) {
-        return this.responseService.error('Invalid payment method ID', '', 400);
+        throw new BadRequestException(
+          'Identificador de método de pago inválido.',
+        );
       }
 
       const result =
@@ -57,14 +87,12 @@ export class StorePaymentMethodsController {
         'Payment method enabled successfully',
       );
     } catch (error) {
-      return this.responseService.error(
-        error.message || 'Failed to enable payment method',
-        error,
-      );
+      throw error;
     }
   }
 
   @Get('available')
+  @Permissions('store:settings:read')
   @ApiOperation({ summary: 'Get available payment methods to enable' })
   @ApiResponse({
     status: 200,
@@ -79,14 +107,12 @@ export class StorePaymentMethodsController {
         'Available payment methods retrieved successfully',
       );
     } catch (error) {
-      return this.responseService.error(
-        error.message || 'Failed to retrieve available payment methods',
-        error,
-      );
+      throw error;
     }
   }
 
   @Get()
+  @Permissions('store:settings:read')
   @ApiOperation({ summary: 'Get enabled payment methods for store' })
   @ApiResponse({
     status: 200,
@@ -100,14 +126,12 @@ export class StorePaymentMethodsController {
         'Enabled payment methods retrieved successfully',
       );
     } catch (error) {
-      return this.responseService.error(
-        error.message || 'Failed to retrieve enabled payment methods',
-        error,
-      );
+      throw error;
     }
   }
 
   @Get('stats')
+  @Permissions('store:settings:read')
   @ApiOperation({ summary: 'Get payment method statistics' })
   @ApiResponse({
     status: 200,
@@ -121,14 +145,12 @@ export class StorePaymentMethodsController {
         'Payment method statistics retrieved successfully',
       );
     } catch (error) {
-      return this.responseService.error(
-        error.message || 'Failed to retrieve payment method statistics',
-        error,
-      );
+      throw error;
     }
   }
 
   @Get(':methodId')
+  @Permissions('store:settings:read')
   @ApiOperation({ summary: 'Get single store payment method' })
   @ApiResponse({
     status: 200,
@@ -139,7 +161,9 @@ export class StorePaymentMethodsController {
     try {
       const method_id_num = parseInt(methodId);
       if (!method_id_num || isNaN(method_id_num)) {
-        return this.responseService.error('Invalid payment method ID', '', 400);
+        throw new BadRequestException(
+          'Identificador de método de pago inválido.',
+        );
       }
 
       const result =
@@ -149,14 +173,12 @@ export class StorePaymentMethodsController {
         'Payment method retrieved successfully',
       );
     } catch (error) {
-      return this.responseService.error(
-        error.message || 'Failed to retrieve payment method',
-        error,
-      );
+      throw error;
     }
   }
 
   @Post('enable/:systemMethodId')
+  @Permissions('store:settings:write')
   @ApiOperation({ summary: 'Enable a system payment method for this store' })
   @ApiResponse({
     status: 201,
@@ -171,10 +193,8 @@ export class StorePaymentMethodsController {
     try {
       const system_method_id_num = parseInt(systemMethodId);
       if (!system_method_id_num || isNaN(system_method_id_num)) {
-        return this.responseService.error(
-          'Invalid system payment method ID',
-          '',
-          400,
+        throw new BadRequestException(
+          'Identificador de método de pago del sistema inválido.',
         );
       }
 
@@ -187,14 +207,12 @@ export class StorePaymentMethodsController {
         'Payment method enabled successfully',
       );
     } catch (error) {
-      return this.responseService.error(
-        error.message || 'Failed to enable payment method',
-        error,
-      );
+      throw error;
     }
   }
 
   @Patch(':methodId')
+  @Permissions('store:settings:write')
   @ApiOperation({ summary: 'Update store payment method configuration' })
   @ApiResponse({
     status: 200,
@@ -209,7 +227,9 @@ export class StorePaymentMethodsController {
     try {
       const method_id_num = parseInt(methodId);
       if (!method_id_num || isNaN(method_id_num)) {
-        return this.responseService.error('Invalid payment method ID', '', 400);
+        throw new BadRequestException(
+          'Identificador de método de pago inválido.',
+        );
       }
 
       const result = await this.storePaymentMethodsService.updateStoreMethod(
@@ -221,14 +241,12 @@ export class StorePaymentMethodsController {
         'Payment method updated successfully',
       );
     } catch (error) {
-      return this.responseService.error(
-        error.message || 'Failed to update payment method',
-        error,
-      );
+      throw error;
     }
   }
 
   @Patch(':methodId/disable')
+  @Permissions('store:settings:write')
   @ApiOperation({ summary: 'Disable payment method for store' })
   @ApiResponse({
     status: 200,
@@ -240,7 +258,9 @@ export class StorePaymentMethodsController {
     try {
       const method_id_num = parseInt(methodId);
       if (!method_id_num || isNaN(method_id_num)) {
-        return this.responseService.error('Invalid payment method ID', '', 400);
+        throw new BadRequestException(
+          'Identificador de método de pago inválido.',
+        );
       }
 
       const result =
@@ -250,14 +270,12 @@ export class StorePaymentMethodsController {
         'Payment method disabled successfully',
       );
     } catch (error) {
-      return this.responseService.error(
-        error.message || 'Failed to disable payment method',
-        error,
-      );
+      throw error;
     }
   }
 
   @Delete(':methodId')
+  @Permissions('store:settings:write')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Remove payment method from store' })
   @ApiResponse({
@@ -271,7 +289,9 @@ export class StorePaymentMethodsController {
     try {
       const method_id_num = parseInt(methodId);
       if (!method_id_num || isNaN(method_id_num)) {
-        return this.responseService.error('Invalid payment method ID', '', 400);
+        throw new BadRequestException(
+          'Identificador de método de pago inválido.',
+        );
       }
 
       await this.storePaymentMethodsService.removeFromStore(method_id_num);
@@ -279,14 +299,12 @@ export class StorePaymentMethodsController {
         'Payment method removed successfully',
       );
     } catch (error) {
-      return this.responseService.error(
-        error.message || 'Failed to remove payment method',
-        error,
-      );
+      throw error;
     }
   }
 
   @Post('reorder')
+  @Permissions('store:settings:write')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reorder payment methods display' })
   @ApiResponse({
@@ -303,10 +321,7 @@ export class StorePaymentMethodsController {
         'Payment methods reordered successfully',
       );
     } catch (error) {
-      return this.responseService.error(
-        error.message || 'Failed to reorder payment methods',
-        error,
-      );
+      throw error;
     }
   }
 }

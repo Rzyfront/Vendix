@@ -7,6 +7,7 @@ import { RequestContextService } from '../../../../common/context/request-contex
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 
 import { ProfileCatalogCacheService } from './profile-catalog-cache.service';
+import { ProfileAccountingValidator } from './profile-accounting.validator';
 import { CloneInvoiceProfileDto } from './dto/clone-invoice-profile.dto';
 import { CreateInvoiceProfileDto } from './dto/create-invoice-profile.dto';
 import { normalizeName } from './dto/invoice-profile-name';
@@ -90,6 +91,7 @@ export class ProfilesService {
     private readonly prisma: StorePrismaService,
     private readonly catalog_cache: ProfileCatalogCacheService,
     private readonly audit: AuditService,
+    private readonly accounts: ProfileAccountingValidator,
   ) {}
 
   // ─── Contexto ───────────────────────────────────────────────────────────
@@ -421,6 +423,18 @@ export class ProfilesService {
       operation_type: dto.operation_type,
     });
 
+    // COMPUERTA F.13: los códigos PUC del snapshot deben existir y aceptar
+    // asientos contra el PUC que gobierna el perfil (`organizations.fiscal_scope`
+    // decide cuál). Corre ANTES de la transacción y fuera de ella: es una
+    // comprobación de existencia contra `chart_of_accounts`, no escribe nada, y
+    // fallar temprano deja la base intacta. Ver `ProfileAccountingValidator`.
+    const scope = this.getScope();
+    await this.accounts.assertAccountsUsable(config, {
+      organization_id: scope.organization_id,
+      store_id: scope.store_id,
+      operation_type: dto.operation_type,
+    });
+
     // Comprobación previa: NO es la garantía, es el mensaje. Entre esta lectura
     // y el INSERT cabe otro `create` con el mismo nombre, y en esa carrera gana
     // el índice único. Existe para que el caso normal —el usuario escribe un
@@ -511,6 +525,22 @@ export class ProfilesService {
       normalizeAndAssertProfileConfig(existing, { operation_type, profile_id: id });
     }
 
+    // COMPUERTA F.13, sólo cuando ESTA escritura persiste una versión nueva:
+    // los perfiles con códigos inválidos ya guardados NO se tocan (quedan
+    // marcados por la consulta de DB-07 y se corrigen por edición normal), así
+    // que un PATCH que sólo renombra o cambia el tipo no corre la compuerta —
+    // exigírsela bloquearía para siempre la edición de las filas legadas.
+    // Se valida contra la tienda del PROPIO perfil (`current`), que el cliente
+    // scopeado garantiza igual a la del contexto.
+    if (config) {
+      await this.accounts.assertAccountsUsable(config, {
+        organization_id: current.organization_id,
+        store_id: current.store_id,
+        operation_type,
+        profile_id: id,
+      });
+    }
+
     // Renombrar hacia un nombre tomado viola el mismo índice que crear. El
     // `exclude_id` es el propio perfil: reenviar su nombre sin cambiarlo no es
     // un conflicto consigo mismo.
@@ -596,6 +626,18 @@ export class ProfilesService {
     // origen se guardó con una versión anterior de las reglas fiscales, el clon
     // no puede nacer con una configuración que hoy sería inválida.
     const validated = normalizeAndAssertProfileConfig(config, {
+      operation_type: source.operation_type,
+    });
+
+    // COMPUERTA F.13 también al clonar: el clon persiste una versión NUEVA con
+    // los códigos del origen, así que corre la MISMA compuerta y falla con el
+    // MISMO código — un clon de un perfil inválido no nace roto ni se salva por
+    // ser clon. La tienda es la del CONTEXTO, que es donde nace el clon (y el
+    // cliente scopeado garantiza que el origen vive en ella).
+    const scope = this.getScope();
+    await this.accounts.assertAccountsUsable(validated, {
+      organization_id: scope.organization_id,
+      store_id: scope.store_id,
       operation_type: source.operation_type,
     });
 

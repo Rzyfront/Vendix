@@ -9,7 +9,7 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule, DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { PqrAdminService } from '../../services/pqr-admin.service';
 import { PqrDetail, PqrCommentCreateDto } from '../../models/pqr.model';
 import { PqrStatusPillComponent } from '../../components/pqr-status-pill.component';
@@ -27,7 +27,6 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
   imports: [
     CommonModule,
     FormsModule,
-    RouterLink,
     DatePipe,
     PqrStatusPillComponent,
     IconComponent,

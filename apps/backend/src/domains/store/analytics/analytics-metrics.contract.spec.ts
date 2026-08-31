@@ -161,12 +161,18 @@ describe('Analytics-metrics contract (Anchor regression)', () => {
       expect(computeGrowth(0, 0)).toBeNull();
     });
 
+    // Estas dos esperaban una FRACCIÓN (0.5 / -0.5). `computeGrowth` devuelve un
+    // PORCENTAJE: su propio doc comment lo dice en mayúsculas (`:241`) y el
+    // cuerpo termina en `* 100` (`:254`). El spec estaba escrito contra una API
+    // imaginada, igual que las de `CostCoverage` y `sqlStateList` en este mismo
+    // archivo — y las tres sobrevivieron porque los `TS2339` tumbaban la suite
+    // entera antes de que ninguna aserción llegara a ejecutarse.
     it('returns the percent change when previous > 0', () => {
-      expect(computeGrowth(150, 100)).toBe(0.5);
+      expect(computeGrowth(150, 100)).toBe(50);
     });
 
     it('returns the negative percent change', () => {
-      expect(computeGrowth(50, 100)).toBe(-0.5);
+      expect(computeGrowth(50, 100)).toBe(-50);
     });
   });
 
@@ -183,27 +189,72 @@ describe('Analytics-metrics contract (Anchor regression)', () => {
   });
 
   describe('sqlStateList — safe Prisma.Sql template for IN (...) clauses', () => {
-    it('returns a tagged template object usable in $queryRaw', () => {
+    // La aserción anterior afirmaba que los estados viajan como PARÁMETROS
+    // (`values`), y es falso: `sqlStateList` usa `Prisma.raw` (contrato `:159`),
+    // que INTERPOLA los literales en el texto SQL y deja `values` vacío. Eso es
+    // deliberado y está documentado en `:149-151` — la comparación tiene que
+    // quedar sobre el tipo enum nativo para que los índices
+    // `(store_id, state, created_at)` sigan siendo usables; un
+    // `state::text = ANY($1)` los tiraría.
+    //
+    // Lo importante: si no hay parametrización, lo ÚNICO que separa a esta
+    // función de una inyección SQL es el filtro `SAFE_STATE_REGEX` (`:142`,
+    // `/^[a-z_]+$/`). El spec anterior no lo probaba — afirmaba una seguridad
+    // que venía de otro mecanismo. Aquí se prueba el mecanismo real.
+    it('interpola los literales en el texto, no como parámetros', () => {
       const sql = sqlStateList(COMPLETED_SALE_STATES);
-      // Prisma.Sql is a tagged-template object; we only assert it is not
-      // a plain string (which would be a SQL-injection vector).
       expect(typeof sql).not.toBe('string');
       expect((sql as any).strings).toBeDefined();
-      expect((sql as any).values).toEqual(COMPLETED_SALE_STATES);
+      expect((sql as any).values).toEqual([]);
+      expect(sql.sql).toBe(
+        COMPLETED_SALE_STATES.map((s) => `'${s}'`).join(', '),
+      );
+    });
+
+    it('el filtro de charset descarta un literal con intención de inyección', () => {
+      // Con `'; DROP TABLE orders; --` el filtro lo descarta y, al no quedar
+      // ninguno válido, la función prefiere reventar antes que emitir un `IN ()`
+      // vacío —que en Postgres es error de sintaxis— o, peor, la carga útil.
+      expect(() => sqlStateList(["x'; DROP TABLE orders; --"])).toThrow(
+        'sqlStateList: no valid state literals',
+      );
+      // Y si viene mezclado con uno legítimo, sólo sobrevive el legítimo.
+      const mixto = sqlStateList(['delivered', "x'; DROP TABLE orders; --"]);
+      expect(mixto.sql).toBe("'delivered'");
     });
   });
 
   describe('CostCoverage — emitted whenever COGS is emitted (rule 7 of tz:audit)', () => {
+    // Estas aserciones nombraban `total_units` y `warns_when_partial`, dos
+    // propiedades que `CostCoverage` no tiene ni tuvo: la forma real es
+    // `units_total` / `units_without_cost` / `coverage_ratio` (contrato
+    // `:217-224`). No era una regresión del contrato — el contrato está en uso
+    // productivo y `org-inventory-reports.service.ts:397` y `:457` arman con
+    // esos tres campos el mensaje que ve el usuario cuando la valuación es
+    // parcial. El spec era el equivocado, y el spec hermano
+    // `org-inventory-reports.service.spec.ts` ya usaba los nombres buenos.
+    //
+    // Por qué sobrevivió: dos `TS2339` no producen un fallo de aserción, tumban
+    // la suite entera, y una suite que no compila reporta `Tests: 0 total` y NO
+    // aparece en el conteo de `Tests:`. Encima `nest build` no la ve, porque
+    // `tsconfig.build.json` excluye las specs. Sólo jest sobre la carpeta
+    // completa la delata.
+    //
+    // `warns_when_partial` se traduce a su equivalente real: la cobertura
+    // parcial es exactamente `coverage_ratio < 1`.
     it('buildCostCoverage flags when any unit lacks a snapshot cost', () => {
       const cov: CostCoverage = buildCostCoverage(100, 5);
-      expect(cov.total_units).toBe(100);
+      expect(cov.units_total).toBe(100);
       expect(cov.units_without_cost).toBe(5);
-      expect(cov.warns_when_partial).toBe(true);
+      expect(cov.coverage_ratio).toBeCloseTo(0.95);
+      expect(cov.coverage_ratio).toBeLessThan(1);
     });
 
     it('buildCostCoverage is clean when every unit has a snapshot cost', () => {
       const cov: CostCoverage = buildCostCoverage(100, 0);
-      expect(cov.warns_when_partial).toBe(false);
+      expect(cov.units_total).toBe(100);
+      expect(cov.units_without_cost).toBe(0);
+      expect(cov.coverage_ratio).toBe(1);
     });
   });
 });

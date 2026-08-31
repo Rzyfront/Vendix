@@ -4064,12 +4064,26 @@ export class ProductCreatePageComponent {
         };
 
         // Camino limpio: éxito real "creado/actualizado correctamente".
+        //
+        // ERR-13 (QUI-729): el backend fuerza `is_ingredient` a false cuando el
+        // tipo de negocio de la tienda no admite insumos
+        // (`enforceIngredientCapability`, products.service.ts) SIN lanzar. Si el
+        // admin marcó "Es insumo" y la respuesta vino desmarcada, NO celebres un
+        // campo que no se guardó: avisa con un warning en lugar del toast verde.
         const finish = () => {
-          this.toastService.success(
-            this.isEditMode()
-              ? 'Producto actualizado correctamente'
-              : 'Producto creado correctamente',
-          );
+          const requestedIngredient = !!formValue.is_ingredient;
+          const savedIngredient = !!savedProduct?.is_ingredient;
+          if (requestedIngredient && !savedIngredient) {
+            this.toastService.warning(
+              'Este producto se guardó, pero no se pudo marcar como insumo: el tipo de negocio de esta tienda no lo permite.',
+            );
+          } else {
+            this.toastService.success(
+              this.isEditMode()
+                ? 'Producto actualizado correctamente'
+                : 'Producto creado correctamente',
+            );
+          }
           navigateAfterSave();
         };
 

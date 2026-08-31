@@ -56,16 +56,14 @@ import { PrintTemplate } from '../../../../../../../core/models/print-formats.mo
                   </div>
                 </div>
 
-                <div class="pt-3 border-t border-border/60 flex items-center justify-end gap-2">
-                  <app-button
-                    variant="primary"
-                    size="sm"
-                    (clicked)="applyTemplate(tpl.id)"
-                  >
-                    <app-icon name="download" [size]="14" class="mr-1.5"></app-icon>
-                    Usar esta Plantilla
-                  </app-button>
-                </div>
+                    <app-button
+                      variant="primary"
+                      size="sm"
+                      (clicked)="applyTemplate(tpl.id)"
+                    >
+                      <app-icon slot="icon" name="download" [size]="14"></app-icon>
+                      Usar esta Plantilla
+                    </app-button>
               </div>
             }
           </div>

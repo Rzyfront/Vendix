@@ -59,6 +59,20 @@ const EMPTY_RESULT: ChartAccountSearchResult = {
 };
 
 /**
+ * El valor EFECTIVO que el sistema aplica cuando el control está vacío
+ * (C.9, precarga híbrida).
+ *
+ * Es SOLO PRESENTACIÓN: se pinta con marca «heredado» mientras el control no
+ * tiene valor, y el componente NO lo escribe jamás en el CVA — si lo hiciera,
+ * un formulario abierto y guardado sin tocar convertiría cada heredado en un
+ * override pineado dentro de un snapshot inmutable.
+ */
+export interface InheritedAccountHint {
+  code: string;
+  name: string;
+}
+
+/**
  * PUC account selector with server-side search.
  *
  * - Standalone, OnPush, zoneless + signals.
@@ -142,6 +156,34 @@ const EMPTY_RESULT: ChartAccountSearchResult = {
               <app-icon name="loader-2" [size]="14" [spin]="true" />
               Cargando cuenta...
             </span>
+          } @else if (inherited(); as inheritedAccount) {
+            <!--
+              HEREDADO, no seleccionado. El chip es deliberadamente más tenue que
+              el de una cuenta elegida y no trae botón de quitar: no hay valor
+              que quitar — el control sigue vacío y así viaja.
+            -->
+            <div
+              class="flex min-w-0 items-center gap-2"
+              title="Valor heredado del mapeo contable de la tienda. Elíjalo otra cuenta para sobrescribirlo."
+            >
+              <span
+                class="shrink-0 font-mono text-xs font-semibold text-primary-600/70"
+                >{{ inheritedAccount.code }}</span
+              >
+              <span
+                class="truncate text-sm text-[var(--color-text-secondary)]"
+                >{{ inheritedAccount.name }}</span
+              >
+              <span
+                class="shrink-0 rounded-full border border-border bg-[var(--color-surface-hover)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-text-secondary)]"
+                >heredado</span
+              >
+            </div>
+            <app-icon
+              name="chevron-down"
+              [size]="14"
+              class="shrink-0 text-[var(--color-text-secondary)]"
+            />
           } @else {
             <span class="text-sm text-[var(--color-text-secondary)] truncate">{{
               placeholder()
@@ -289,6 +331,13 @@ export class AccountSelectComponent implements ControlValueAccessor, OnInit {
   readonly placeholder = input<string>('Seleccione cuenta');
   readonly searchPlaceholder = input<string>('Buscar por código o nombre...');
   readonly disabled = input<boolean>(false);
+  /**
+   * El default vigente que el sistema aplicará si este control queda vacío.
+   *
+   * Sólo cambia lo que SE PINTA en reposo: el valor del CVA sigue siendo nulo y
+   * abrir el buscador funciona igual. Ver {@link InheritedAccountHint}.
+   */
+  readonly inherited = input<InheritedAccountHint | null>(null);
   /**
    * Nombre accesible del disparador.
    *

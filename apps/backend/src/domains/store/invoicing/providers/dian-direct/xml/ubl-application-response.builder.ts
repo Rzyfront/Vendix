@@ -264,8 +264,16 @@ export class UblApplicationResponseBuilder {
    * `cac:PartyTaxScheme` with the registration name, the identification and an
    * empty `cac:TaxScheme` (RADIAN does not classify the party's tax scheme —
    * the referenced document already did).
+   *
+   * NO `private`: `UblAttachedDocumentBuilder` reutiliza este mismo método para
+   * sus propios `cac:SenderParty`/`cac:ReceiverParty` — que en `AttachedDocumentType`
+   * resuelven al mismo `PartyType` genérico que aquí (confirmado contra
+   * `dian-ubl-content-model.ts`) y con el mismo propósito: identificar a quien
+   * envía y a quien recibe el intercambio, no repetir los datos comerciales
+   * completos que el documento envuelto ya declaró. Una segunda copia de este
+   * método es exactamente la clase de asimetría que F.8 tuvo que cerrar.
    */
-  private static buildEventParty(
+  static buildEventParty(
     parent: any,
     element: 'SenderParty' | 'ReceiverParty' | 'IssuerParty',
     party: DianEventParty,

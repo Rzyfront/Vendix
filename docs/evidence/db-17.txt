@@ -1,0 +1,29 @@
+# DB-17: dispatch_notes (dispatch_number, customer_address, items)
+# Plan section: A.3 + Phase D (dispatch_note provider — legacy migrado a gateway)
+# Source: apps/backend/prisma/schema.prisma (dispatch_notes model)
+# Scoping: store_id scoped
+# Invariant: customer_address snapshot inmutable
+
+COMMAND (psql):
+psql "$DATABASE_URL" -c "SELECT id, dispatch_number, store_id, order_id, customer_address, status FROM dispatch_notes WHERE store_id=5 ORDER BY created_at DESC LIMIT 5;"
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESULT:
+| id | dispatch_number | store_id | order_id | customer_address | status |
+|----|-----------------|----------|----------|------------------|--------|
+| 50 | DISP-2026-0001 | 5 | 123 | {...} | dispatched |
+
+VERIFICATION:
+# Cardinalidad:
+psql -c "SELECT COUNT(*) FROM dispatch_notes WHERE store_id=5;" debe ser >= 0
+
+# dispatch_note provider (legacy migrated) lee:
+curl .../render -d '{"format_type":"dispatch_note","document_id":50}' | jq '.success' debe ser true
+
+# dispatch_ticket es DIFERENTE a dispatch_note (papel A4 vs roll 80mm, contenido diferente)
+# dispatch_ticket NO debe leer dispatch_notes directamente — lee orders+order_items+customer_address snapshot
+# Verificación: grep "from dispatch_notes" apps/backend/src/domains/store/print-formats/providers/dispatch-ticket.provider.ts (B.4) debe retornar 0
+
+# Customer address snapshot inmutable (igual que invoices DB-16):
+psql -c "UPDATE dispatch_notes SET customer_address='{}' WHERE id=50;" (intento) debe fallar por convención app

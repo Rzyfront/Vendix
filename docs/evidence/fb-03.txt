@@ -1,0 +1,41 @@
+# FB-03: PUT /store/print-formats/:formatType
+# Plan section: A.3 + Phase B (overrides v2 schema) + Phase C (settings)
+# Source: apps/backend/src/domains/store/print-formats/controllers/print-formats.controller.ts:75
+#          apps/backend/src/domains/store/print-formats/dto/print-format-config.dto.ts:5
+# Permission: store:settings:update
+
+COMMAND:
+curl -sk -X PUT 'https://api.vendix.com/api/store/print-formats/pos_sale_ticket' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "is_active": true,
+    "gateway_enabled": true,
+    "overrides": {
+      "v": 2,
+      "paper": { "format": "thermal_80", "width_mm": 80, "is_roll": true, "copies": 1 }
+    }
+  }'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESPONSE SHAPE:
+{
+  "success": true,
+  "message": "Formato de impresión actualizado correctamente.",
+  "data": { /* same as FB-02 */ }
+}
+
+VERIFICATION:
+# Happy path
+curl .../pos_sale_ticket -d '{...}' | jq '.success' debe ser true
+
+# Post-A.4: width_mm=0 debe fallar
+curl .../pos_sale_ticket -d '{"overrides":{"v":2,"paper":{"width_mm":0}}}' | jq '.error.code' debe ser 'PRINT_CONFIG_VALIDATION_001' (422)
+
+# Post-A.4: format enum inválido
+curl .../pos_sale_ticket -d '{"overrides":{"v":2,"paper":{"format":"invalid"}}}' | jq '.error.code' debe ser 'PRINT_CONFIG_VALIDATION_001' (422)
+
+# Fiscal violation: custom_template sin CUFE en fiscal_electronic_invoice
+curl .../fiscal_electronic_invoice -d '{"overrides":{"custom_template":"{{ store.name }}"}}' | jq '.error.code' debe ser 'PRINT_FISCAL_STRUCTURE_VIOLATION_001' (422)

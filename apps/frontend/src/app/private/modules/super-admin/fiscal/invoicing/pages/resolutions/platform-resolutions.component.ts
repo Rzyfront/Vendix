@@ -1,5 +1,12 @@
-import { DatePipe } from '@angular/common';
-import { Component, DestroyRef, inject, signal } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  OnDestroy,
+  OnInit,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   FormBuilder,
@@ -11,15 +18,20 @@ import {
 
 import {
   ButtonComponent,
+  CardComponent,
   ConfirmationModalComponent,
   DianResolutionScanResult,
   DianResolutionScannerModalComponent,
-  EmptyStateComponent,
   IconComponent,
   InputComponent,
+  ItemListCardConfig,
   ModalComponent,
   RESOLUTION_SCAN_FIELD_LABELS,
+  ResponsiveDataViewComponent,
   SelectorComponent,
+  StatsComponent,
+  TableAction,
+  TableColumn,
   ToastService,
 } from '../../../../../../../shared/components';
 import {
@@ -30,6 +42,7 @@ import {
   UpdatePlatformResolutionDto,
 } from '../../../../subscriptions/interfaces/fiscal-billing.interface';
 import { FiscalBillingAdminService } from '../../../../subscriptions/services/fiscal-billing-admin.service';
+import { ModuleShellActionsService } from '../../../../../../../shared/components/module-tabs-shell/module-shell-actions.service';
 import { PlatformInvoicingStore } from '../../platform-invoicing.store';
 import {
   ENVIRONMENT_OPTIONS,
@@ -60,24 +73,57 @@ interface ResolutionFormControls {
   standalone: true,
   imports: [
     ReactiveFormsModule,
-    DatePipe,
     ButtonComponent,
+    CardComponent,
     ConfirmationModalComponent,
     DianResolutionScannerModalComponent,
-    EmptyStateComponent,
     IconComponent,
     InputComponent,
     ModalComponent,
+    ResponsiveDataViewComponent,
     SelectorComponent,
+    StatsComponent,
   ],
   templateUrl: './platform-resolutions.component.html',
 })
-export class PlatformResolutionsComponent {
+export class PlatformResolutionsComponent implements OnInit, OnDestroy {
   private readonly fb = inject(FormBuilder);
+  private readonly shellActions = inject(ModuleShellActionsService);
   private readonly fiscal = inject(FiscalBillingAdminService);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
   protected readonly store = inject(PlatformInvoicingStore);
+
+  /**
+   * Los botones de la pantalla viven en el sticky-header del shell, no en una
+   * barra propia. Antes esta pagina dibujaba su propia cabecera sticky a
+   * `top-[99px]`, justo debajo de la del shell: dos barras pegadas, ambas
+   * fijas, repitiendo el titulo del modulo y robando ~90px de alto util en
+   * movil. El titulo y el conteo ya los da el shell.
+   */
+  ngOnInit(): void {
+    this.shellActions.set([
+      {
+        id: 'scan',
+        label: 'Escanear con IA',
+        variant: 'outline',
+        icon: 'sparkles',
+        title: 'Leer los datos desde una foto o PDF de la resolución',
+        run: () => this.openScanner(),
+      },
+      {
+        id: 'new',
+        label: 'Nueva resolución',
+        variant: 'primary',
+        icon: 'plus',
+        run: () => this.openModal(),
+      },
+    ]);
+  }
+
+  ngOnDestroy(): void {
+    this.shellActions.clear();
+  }
 
   readonly modalOpen = signal(false);
   readonly saving = signal(false);
@@ -97,6 +143,108 @@ export class PlatformResolutionsComponent {
   readonly documentTypeOptions = RESOLUTION_DOCUMENT_TYPE_OPTIONS;
   readonly environmentOptions = ENVIRONMENT_OPTIONS;
   readonly docTypeLabel = resolutionDocTypeLabel;
+
+  readonly totalCount = computed(() => this.store.resolutions().length);
+  readonly activeCount = computed(
+    () => this.store.resolutions().filter((r) => r.is_active).length,
+  );
+  readonly salesCount = computed(
+    () =>
+      this.store.resolutions().filter((r) => r.document_type === 'sales_invoice')
+        .length,
+  );
+  readonly supportCount = computed(
+    () =>
+      this.store.resolutions().filter(
+        (r) => r.document_type === 'support_document',
+      ).length,
+  );
+
+  readonly columns: TableColumn[] = [
+    { key: 'prefix', label: 'Prefijo' },
+    {
+      key: 'document_type',
+      label: 'Tipo',
+      transform: (v) => this.docTypeLabel(v as PlatformResolutionDocumentType),
+    },
+    {
+      key: 'range',
+      label: 'Rango autorizado',
+      transform: (_v, item: PlatformResolution) =>
+        `${item.range_from} – ${item.range_to}`,
+    },
+    {
+      key: 'current_number',
+      label: 'Consecutivo actual',
+      align: 'right',
+      transform: (v) => String(v),
+    },
+    {
+      key: 'validity',
+      label: 'Vigencia',
+      transform: (_v, item: PlatformResolution) => {
+        const from = item.valid_from ? item.valid_from.slice(0, 10) : '—';
+        const to = item.valid_to ? item.valid_to.slice(0, 10) : '—';
+        return `${from} → ${to}`;
+      },
+    },
+    {
+      key: 'is_active',
+      label: 'Estado',
+      badgeConfig: {
+        type: 'custom',
+        colorMap: {
+          true: 'success',
+          false: 'secondary',
+        },
+      },
+      badgeTransform: (v) => (v ? 'Activa' : 'Inactiva'),
+    },
+  ];
+
+  readonly cardConfig: ItemListCardConfig = {
+    titleKey: 'prefix',
+    subtitleKey: 'document_type',
+    subtitleTransform: (v) =>
+      this.docTypeLabel(v as PlatformResolutionDocumentType),
+    badgeKey: 'is_active',
+    badgeConfig: {
+      type: 'custom',
+      colorMap: {
+        true: 'success',
+        false: 'secondary',
+      },
+    },
+    badgeTransform: (v) => (v ? 'Activa' : 'Inactiva'),
+    footerKey: 'current_number',
+    footerLabel: 'Consecutivo actual',
+    footerTransform: (v, item: PlatformResolution) =>
+      `${item.current_number} / ${item.range_to}`,
+  };
+
+  readonly tableActions: TableAction[] = [
+    {
+      label: 'Editar',
+      icon: 'edit',
+      action: (item: PlatformResolution) => this.openEdit(item),
+    },
+    {
+      label: 'Alternar estado',
+      icon: 'power',
+      action: (item: PlatformResolution) => this.toggleActive(item),
+    },
+    {
+      label: 'Eliminar',
+      icon: 'trash-2',
+      variant: 'danger',
+      disabled: (item: PlatformResolution) => this.isLocked(item),
+      action: (item: PlatformResolution) => this.askDelete(item),
+    },
+  ];
+
+  onTableAction(event: { action: TableAction; item: PlatformResolution }): void {
+    event.action.action(event.item);
+  }
 
   readonly form: FormGroup<ResolutionFormControls> =
     this.fb.group<ResolutionFormControls>(

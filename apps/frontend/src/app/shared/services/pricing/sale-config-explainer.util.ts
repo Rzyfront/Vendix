@@ -134,12 +134,12 @@ export function buildSaleConfigExplanation(
         : null;
       lines.push(
         readable
-          ? `Lo vendés a ${money(Number(input.basePrice))} por ${readable} (${num(scale)} ${stock.code}).`
-          : `Lo vendés a ${money(Number(input.basePrice))} por cada ${num(scale)} ${stock.code}.`,
+          ? `Lo vendes a ${money(Number(input.basePrice))} por ${readable} (${num(scale)} ${stock.code}).`
+          : `Lo vendes a ${money(Number(input.basePrice))} por cada ${num(scale)} ${stock.code}.`,
       );
     } else {
       lines.push(
-        `Lo vendés a ${money(Number(input.basePrice))} por ${stock.code}.`,
+        `Lo vendes a ${money(Number(input.basePrice))} por ${stock.code}.`,
       );
     }
   }

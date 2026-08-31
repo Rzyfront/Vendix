@@ -7,6 +7,7 @@ import {
   IsEmail,
   IsEnum,
   IsIn,
+  IsInt,
   IsISO4217CurrencyCode,
   IsNotEmpty,
   IsNotIn,
@@ -30,10 +31,14 @@ import { InvoiceAddressDto, liftInvoiceAddress } from './invoice-address.dto';
 import { IsWithinFiscalIssueDateWindow } from './invoice-issue-date-window.validator';
 import { InvoiceWithholdingInputDto } from './invoice-withholding-input.dto';
 import {
+  AIU_TAXABLE_BASES,
   ENABLED_ACCOUNTING_MODELS,
   accountingModelDisabledReason,
 } from '../profiles/invoice-profile-config.contract';
-import type { AccountingModel } from '../profiles/invoice-profile-config.contract';
+import type {
+  AccountingModel,
+  AiuTaxableBasis,
+} from '../profiles/invoice-profile-config.contract';
 
 /**
  * Códigos DIAN del tipo de identificación del adquiriente (Anexo Técnico 1.9,
@@ -138,6 +143,10 @@ export class CreateInvoiceItemDto {
   /** Piso: ver `foreignKeyFloorMessage`. */
   @IsOptional()
   @IsNumber()
+  @IsInt({
+    message:
+      'product_id debe ser un número entero: los ids de producto no tienen fracciones.',
+  })
   @Type(() => Number)
   @Min(1, {
     message: foreignKeyFloorMessage(
@@ -150,6 +159,10 @@ export class CreateInvoiceItemDto {
   /** Piso: ver `foreignKeyFloorMessage`. */
   @IsOptional()
   @IsNumber()
+  @IsInt({
+    message:
+      'product_variant_id debe ser un número entero: los ids de variante no tienen fracciones.',
+  })
   @Type(() => Number)
   @Min(1, {
     message: foreignKeyFloorMessage(
@@ -173,6 +186,29 @@ export class CreateInvoiceItemDto {
   // El trim es lo que le da dientes al `@IsNotEmpty`: `isNotEmpty` solo compara
   // contra `''`, así que sin recortar antes, una descripción de puros espacios
   // pasaría la validación y saldría en blanco en el `cbc:Description` del XML.
+  //
+  // F.6 — el Anexo Técnico 1.9 fija un tope DISTINTO para `cbc:Description`
+  // según el documento padre: factura (regla FAZ02) 1..300, nota crédito
+  // (CAZ02) 1..600, nota débito (DAZ02) sin confirmar por PDF —ver el
+  // `@MaxLength` de `CreateFacturaInvoiceItemDto`—. Esta clase la comparten
+  // los TRES DTOs (`CreateInvoiceDto`, `CreateCreditNoteDto`,
+  // `CreateDebitNoteDto`), así que el `@MaxLength` de acá es el techo COMÚN,
+  // no el de ninguno de los tres en particular: 500 es la anchura real de
+  // `invoice_items.description` en la base (`VARCHAR(500)`), que es MENOR que
+  // el legal de nota crédito (600) y MAYOR que el de factura (300). Subir este
+  // campo a 600 para que nota crédito alcance su techo legal completo
+  // requeriría ensanchar esa columna —una migración de `schema.prisma`, fuera
+  // de este alcance—; mientras tanto, 500 es seguro para los tres: nunca deja
+  // pasar más de lo que la columna admite.
+  //
+  // Factura SÍ necesita ser más estricta que el DB —300, no 500— porque el
+  // Anexo la rechaza por encima de eso aunque la columna tenga espacio de
+  // sobra: `CreateInvoiceDto.items` usa `CreateFacturaInvoiceItemDto`, que
+  // redeclara `@IsString`/`@IsNotEmpty`/`@MaxLength(300)` completos (no sólo
+  // el `@MaxLength`: ver su propio docblock — class-validator dedupea por
+  // `(propertyName, type)` y las tres comparten `type: 'customValidation'`,
+  // así que redeclarar una sola borraba las otras dos heredadas en
+  // silencio). El `@Transform` de recorte de acá SÍ se hereda intacto.
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString({ message: 'La descripción de la línea debe ser texto.' })
   @IsNotEmpty({
@@ -180,7 +216,8 @@ export class CreateInvoiceItemDto {
       'Cada línea necesita una descripción: es lo que la DIAN publica en `cbc:Description` y lo único que el adquiriente lee en el documento.',
   })
   @MaxLength(500, {
-    message: 'La descripción de la línea no puede superar 500 caracteres.',
+    message:
+      'La descripción de la línea no puede superar 500 caracteres: es el ancho de la columna invoice_items.description en base de datos.',
   })
   description: string;
 
@@ -304,20 +341,78 @@ export class CreateInvoiceItemDto {
    * Las líneas que quedan fuera de la base gravable se emiten SIN
    * `cac:TaxTotal` de línea (Anexo Técnico 1.9 §CAX01), que no es lo mismo que
    * un impuesto exento al 0 % —ese sí se emite—.
+   *
+   * `'contrato'` (D.2/D.4, ADR-6) es distinto de los otros tres: declara que
+   * ESTA línea es el AIU **completo** del contrato (Modelo 1 /
+   * `accounting_model: 'no_sumada'`), en vez de venir partido en tres
+   * renglones (Modelo 2 / `'sumada'`). Es mutuamente excluyente con las otras
+   * tres marcas y con una segunda línea `'contrato'` en el mismo documento —
+   * ver `INVOICING_AIU_007`—. `InvoiceCalculatorService` la explota
+   * internamente en A/I/U según el reparto configurado del perfil.
    */
   @IsOptional()
   @Transform(blankToUndefined)
-  @IsIn(['administracion', 'imprevistos', 'utilidad'], {
+  @IsIn(['administracion', 'imprevistos', 'utilidad', 'contrato'], {
     message:
-      'aiu_component debe ser "administracion", "imprevistos" o "utilidad". Solo aplica en facturas con operation_type="09" (AIU); si no es una factura AIU, omite el campo.',
+      'aiu_component debe ser "administracion", "imprevistos", "utilidad" o "contrato". Solo aplica en facturas con operation_type="09" (AIU); si no es una factura AIU, omite el campo.',
   })
-  aiu_component?: 'administracion' | 'imprevistos' | 'utilidad';
+  aiu_component?: 'administracion' | 'imprevistos' | 'utilidad' | 'contrato';
+}
+
+/**
+ * F.6 — línea de una FACTURA (`CreateInvoiceDto.items`), nunca de una nota.
+ *
+ * Acota `description` de 500 (el techo común de `CreateInvoiceItemDto`, ver su
+ * docblock) a 300, que es el legal para `cac:InvoiceLine/cbc:Description` bajo
+ * el Anexo Técnico 1.9 regla FAZ02.
+ *
+ * OJO — esto NO es «sobreescribe sólo `@MaxLength`, el resto se hereda».
+ * `class-validator` no distingue `IsString`/`IsNotEmpty`/`MaxLength` entre sí:
+ * las tres comparten el mismo `ValidationTypes.CUSTOM_VALIDATION`
+ * (`'customValidation'`), y `MetadataStorage.getTargetValidationMetadatas`
+ * dedupea por el PAR `(propertyName, type)` — no por qué constraint es. En
+ * cuanto la subclase declara CUALQUIER decorador de validación sobre
+ * `description`, las tres metadatas heredadas del padre para esa propiedad
+ * —las tres comparten `type: 'customValidation'`— quedan filtradas por
+ * completo, no sólo la que se redeclaró. Verificado con
+ * `getMetadataStorage().getTargetValidationMetadatas(CreateFacturaInvoiceItemDto, …)`:
+ * declarar sólo `@MaxLength(300)` dejaba UNA metadata para `description` (la
+ * propia), cero heredadas — `@IsString`/`@IsNotEmpty` del padre desaparecían
+ * en silencio, y una descripción vacía o no-string pasaba la validación de
+ * una FACTURA. Por eso las tres viajan explícitas acá, no dos.
+ *
+ * El `@Transform` de recorte SÍ se hereda intacto: class-transformer resuelve
+ * sus propias metadatas por clase+propiedad con `getAncestors()` y concatena
+ * (padre + hijo), sin el dedupe destructivo de class-validator — confirmado
+ * con el mismo repro (`description` llega ya recortado al validador aunque la
+ * subclase no redeclare el `@Transform`).
+ *
+ * Nota crédito y nota débito NO usan esta subclase: sus techos legales
+ * (CAZ02 600, DAZ02 sin confirmar) son mayores o iguales al de factura, así
+ * que el techo común de 500 —limitado por la columna, no por la ley— ya las
+ * cubre sin necesitar una subclase propia.
+ */
+export class CreateFacturaInvoiceItemDto extends CreateInvoiceItemDto {
+  @IsString({ message: 'La descripción de la línea debe ser texto.' })
+  @IsNotEmpty({
+    message:
+      'Cada línea necesita una descripción: es lo que la DIAN publica en `cbc:Description` y lo único que el adquiriente lee en el documento.',
+  })
+  @MaxLength(300, {
+    message:
+      'La descripción de la línea de una factura no puede superar 300 caracteres (Anexo Técnico DIAN 1.9, regla FAZ02 para cac:InvoiceLine/cbc:Description). Acorta el texto: una descripción más larga hace que la DIAN rechace el documento DESPUÉS de haber consumido el consecutivo autorizado.',
+  })
+  description: string;
 }
 
 export class CreateInvoiceTaxDto {
   /** Piso: ver `foreignKeyFloorMessage`. */
   @IsOptional()
   @IsNumber()
+  @IsInt({
+    message:
+      'tax_rate_id debe ser un número entero: los ids del catálogo de tarifas no tienen fracciones.',
+  })
   @Type(() => Number)
   @Min(1, {
     message: foreignKeyFloorMessage(
@@ -428,6 +523,10 @@ export class CreateInvoiceDto {
   /** Piso: ver `foreignKeyFloorMessage`. */
   @IsOptional()
   @IsNumber()
+  @IsInt({
+    message:
+      'customer_id debe ser un número entero: los ids de cliente no tienen fracciones.',
+  })
   @Type(() => Number)
   @Min(1, {
     message: foreignKeyFloorMessage(
@@ -452,6 +551,10 @@ export class CreateInvoiceDto {
   /** Piso: ver `foreignKeyFloorMessage`. */
   @IsOptional()
   @IsNumber()
+  @IsInt({
+    message:
+      'supplier_id debe ser un número entero: los ids de proveedor no tienen fracciones.',
+  })
   @Type(() => Number)
   @Min(1, {
     message: foreignKeyFloorMessage(
@@ -464,6 +567,10 @@ export class CreateInvoiceDto {
   /** Piso: ver `foreignKeyFloorMessage`. */
   @IsOptional()
   @IsNumber()
+  @IsInt({
+    message:
+      'related_invoice_id debe ser un número entero: los ids de factura no tienen fracciones.',
+  })
   @Type(() => Number)
   @Min(1, {
     message: foreignKeyFloorMessage(
@@ -677,6 +784,10 @@ export class CreateInvoiceDto {
    */
   @IsOptional()
   @IsNumber()
+  @IsInt({
+    message:
+      'resolution_id debe ser un número entero: los ids de resolución DIAN no tienen fracciones.',
+  })
   @Type(() => Number)
   @Min(1, {
     message: foreignKeyFloorMessage(
@@ -889,18 +1000,92 @@ export class CreateInvoiceDto {
    * antes de que existiera.
    *
    * La lista contra la que se valida es `ENABLED_ACCOUNTING_MODELS`, no
-   * `ACCOUNTING_MODELS`: es el mismo interruptor único que gobierna la
-   * escritura del perfil, así que `'no_sumada'` se rechaza en la puerta —con el
-   * motivo y su fecha— en vez de tomar consecutivo y que la DIAN devuelva el
-   * documento al firmar. Habilitarlo es añadir el valor a esa constante (paso
-   * D.7), y las dos superficies se levantan a la vez.
+   * `ACCOUNTING_MODELS`: es el mismo interruptor único que gobierna la escritura
+   * del perfil. Mientras `'no_sumada'` estuvo fuera, se rechazaba en la puerta
+   * —con el motivo y su fecha— en vez de tomar consecutivo y que la DIAN devolviera
+   * el documento al firmar; la apertura del Modelo 1 (D.7, 2026-08-25) añadió el
+   * valor a esa constante y las dos superficies se levantaron juntas.
    */
   @IsOptional()
   @Transform(blankToUndefined)
   @IsIn(ENABLED_ACCOUNTING_MODELS as readonly string[], {
-    message: `aiu_accounting_model sólo admite ${ENABLED_ACCOUNTING_MODELS.join(', ')} por ahora. ${accountingModelDisabledReason('no_sumada') ?? ''}`.trim(),
+    message: `aiu_accounting_model sólo admite ${ENABLED_ACCOUNTING_MODELS.join(', ')}. ${accountingModelDisabledReason('no_sumada') ?? ''}`.trim(),
   })
   aiu_accounting_model?: AccountingModel;
+
+  /**
+   * Base gravable AIU de ESTA factura (C.7). Es la excepción, no la regla: la
+   * congela el perfil (`profile_aiu.taxable_basis`) o, sin perfil, la tienda
+   * (`store_settings.invoicing.aiu`) — este campo existe para el contrato que
+   * SÍ se aparta de esa configuración, no para repetirla en cada documento.
+   *
+   * Se declara acá por la misma obligación que `aiu_accounting_model`: con
+   * `forbidNonWhitelisted: true` (`main.ts:206`) una clave no declarada
+   * devuelve 400 antes de que ninguna lógica la mire.
+   *
+   * Opcional, y **la ausencia significa "usa lo que diga el perfil o la
+   * tienda"** — NUNCA `'aiu'` a secas. `resolveAiuContext` resuelve la
+   * ausencia con la MISMA función que usa el perfil,
+   * `resolveAiuTaxableBasis` (`invoice-profile-config.contract.ts:268`), para
+   * no repetir un cuarto punto de decisión: ese archivo ya tiene la regla de
+   * qué hacer si falta (derivar de `regime`, por defecto hacia la base MÁS
+   * ANCHA, nunca `'utilidad'`).
+   *
+   * Los tres valores son iguales de legítimos: `'aiu'` (A+I+U completo, con
+   * piso), `'utilidad'` (sólo Utilidad, sin piso) y `'subtotal'` (se declina
+   * el tratamiento AIU, grava todo el contrato). La columna donde esto se
+   * persiste se llama `aiu_regime` pero NO guarda un régimen legal: guarda
+   * esta base — `'subtotal'` es un valor legítimo ahí sin que exista ningún
+   * régimen al que corresponda. No lo confundas con `AiuVatRegimeLiteral`.
+   */
+  @IsOptional()
+  @Transform(blankToUndefined)
+  @IsIn(AIU_TAXABLE_BASES as readonly string[], {
+    message: `aiu_taxable_basis sólo admite ${AIU_TAXABLE_BASES.join(', ')}.`,
+  })
+  aiu_taxable_basis?: AiuTaxableBasis;
+
+  /**
+   * Exigir el piso legal del 10% (E.T. art. 462-1) en ESTA factura (C.7).
+   * Sólo tiene efecto bajo `taxable_basis` efectivo `'aiu'` — ver
+   * `resolveAiuMinimumPercent`; el Decreto 1372/1992 no fija piso y
+   * `'subtotal'` no tiene AIU que pisar.
+   *
+   * Opcional, y la ausencia significa "lo que diga el perfil o la tienda":
+   * NO se sustituye el respaldo, se le da precedencia. Un documento que no
+   * manda este campo se comporta exactamente igual que uno emitido antes de
+   * que existiera.
+   */
+  @IsOptional()
+  @IsBoolean({
+    message: 'aiu_enforce_minimum_base debe ser verdadero o falso.',
+  })
+  aiu_enforce_minimum_base?: boolean;
+
+  /**
+   * Porcentaje del piso legal AIU de ESTA factura (C.7). Ausente ⇒ el del
+   * perfil o la tienda; ninguno de los dos ⇒ 10 (`DEFAULT_AIU_MINIMUM_PERCENT`).
+   *
+   * Sólo se valida el FORMATO acá (número entre 0 y 100). La legalidad del
+   * valor —que el piso DECLARADO efectivamente cubra la AIU calculada— la
+   * exige `INVOICING_AIU_001` (`checkAiuDivergences`), exactamente igual que
+   * hoy: threading este campo a través de `aiu_context.aiu.minimum_base_percent`
+   * hace que esa puerta ya existente evalúe el piso EFECTIVO en vez del
+   * heredado, sin código nuevo. Lo que este DTO NO cierra —y queda fuera de
+   * C.7, reportado aparte— es que nada impide que ESTE valor, por sí mismo,
+   * se declare por debajo del 10% legal del E.T. art. 462-1: esa compuerta
+   * (`AIU_FLOOR_BELOW_LEGAL`) hoy sólo corre al guardar el PERFIL.
+   */
+  @IsOptional()
+  @IsNumber({}, { message: 'aiu_minimum_base_percent debe ser un número.' })
+  @Type(() => Number)
+  @Min(0, {
+    message: 'aiu_minimum_base_percent no puede ser negativo.',
+  })
+  @Max(100, {
+    message: 'aiu_minimum_base_percent no puede superar 100.',
+  })
+  aiu_minimum_base_percent?: number;
 
   /**
    * Divisa extranjera de la operación, ISO 4217. Acompaña a
@@ -1016,8 +1201,11 @@ export class CreateInvoiceDto {
     message: 'La factura admite máximo 100 líneas.',
   })
   @ValidateNested({ each: true })
-  @Type(() => CreateInvoiceItemDto)
-  items: CreateInvoiceItemDto[];
+  // F.6 — `CreateFacturaInvoiceItemDto`, no la base: acota `description` a
+  // los 300 caracteres de la regla FAZ02, no a los 500 del techo común de
+  // `CreateInvoiceItemDto` (pensado para nota crédito/débito).
+  @Type(() => CreateFacturaInvoiceItemDto)
+  items: CreateFacturaInvoiceItemDto[];
 
   /**
    * Header-aggregated tax rows (one per `(tax_name, rate, type)`). Kept for

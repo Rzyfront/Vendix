@@ -1,0 +1,39 @@
+# ERR-06: PRINT_GATEWAY_RENDER_FAILED_001
+# HTTP: 500
+# Source: apps/backend/src/common/errors/error-codes.ts:270-274
+# Emitido cuando: engine=pdf builder error (PdfBuilder falla)
+
+COMMAND (engine=pdf con formato fiscal + invoice corrupto):
+curl -sk -X POST 'https://api.vendix.com/api/store/print-formats/render' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "format_type": "fiscal_electronic_invoice",
+    "document_id": 99999,
+    "engine": "pdf"
+  }' \
+  -w '\nHTTP_CODE: %{http_code}\n'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+EXPECTED HTTP: 500
+
+EXPECTED RESPONSE BODY:
+{
+  "success": false,
+  "error": {
+    "code": "PRINT_GATEWAY_RENDER_FAILED_001",
+    "message": "Print gateway document render failed"
+  }
+}
+
+VERIFICATION:
+# Engine=pdf con invoice corrupto/inválido
+curl .../render -d '{"format_type":"fiscal_electronic_invoice","document_id":99999,"engine":"pdf"}' | jq '.error.code' debe ser 'PRINT_GATEWAY_RENDER_FAILED_001'
+curl .../render -d '{"format_type":"fiscal_electronic_invoice","document_id":99999,"engine":"pdf"}' -w '%{http_code}' | grep -q '500'
+
+# Engine=pdf con invoice válido: debe exit 0
+curl .../render -d '{"format_type":"fiscal_electronic_invoice","document_id":789,"engine":"pdf"}' | jq '.success' debe ser true
+
+# Frontend behavior: toast "Render PDF falló"
+# Log esperado: "[FiscalInvoicePdfRenderService] PDF render failed for invoice 99999: ..."

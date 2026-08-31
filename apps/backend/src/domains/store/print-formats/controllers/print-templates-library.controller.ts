@@ -32,7 +32,10 @@ export class PrintTemplatesLibraryController {
   ) {}
 
   @Get()
-  @Permissions('organization:settings:read', 'store:settings:read')
+  @Permissions('organization:settings:read', 'store:settings:read', 'invoicing:read')
+  // `invoicing:read` se suma el 2026-08-24: el selector de formato de la
+  // factura (E.1) lista esta biblioteca, y quien factura no siempre tiene
+  // permisos de ajustes de tienda u organización.
   @ApiOperation({ summary: 'List shared print templates available for organization' })
   async listTemplates(@Query('formatType') formatType?: print_format_type_enum) {
     const context = RequestContextService.getContext();

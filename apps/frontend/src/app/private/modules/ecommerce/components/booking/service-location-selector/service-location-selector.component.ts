@@ -10,10 +10,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import {
-  CustomerAddressPickerComponent,
-  CustomerAddressPickerAddress,
-} from '../../../../../../shared/components/customer-address-picker/customer-address-picker.component';
+import type { CustomerAddressPickerAddress } from '../../../../../../shared/components/customer-address-picker/customer-address-picker.component';
 
 export type ServiceLocation = 'home' | 'shop';
 
@@ -48,7 +45,7 @@ export interface StoreAddress {
   selector: 'app-service-location-selector',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, IconComponent, CustomerAddressPickerComponent],
+  imports: [CommonModule, IconComponent],
   templateUrl: './service-location-selector.component.html',
   styleUrls: ['./service-location-selector.component.scss'],
 })

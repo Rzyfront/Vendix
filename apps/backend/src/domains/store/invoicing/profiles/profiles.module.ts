@@ -7,7 +7,15 @@ import { InvoiceCalculatorService } from '../services/invoice-calculator.service
 import { InvoiceNumberGenerator } from '../utils/invoice-number-generator';
 
 import { ProfileCatalogCacheService } from './profile-catalog-cache.service';
-import { ProfilePreviewService } from './profile-preview.service';
+import { ProfileAccountHealthService } from './profile-account-health.service';
+import { ProfileAccountingValidator } from './profile-accounting.validator';
+import { ProfilePreviewService, PROFILE_READER } from './profile-preview.service';
+
+// Re-export so the symbol survives `import { PROFILE_READER } from './profiles.module'`
+// in other modules. Without `export`, the symbol is module-private and TS
+// callers receive `undefined`, which NestJS interprets as a class provider with
+// `metatype = {provide: undefined, useExisting: ...}` → `metatype is not a constructor`.
+export { PROFILE_READER };
 import { ProfileVersionsService } from './profile-versions.service';
 import { PreviewNumberingGuard } from './preview-numbering.guard';
 import { ProfilesService } from './profiles.service';
@@ -68,15 +76,23 @@ import { ProfilesService } from './profiles.service';
     ProfilesService,
     ProfileVersionsService,
     ProfileCatalogCacheService,
+    ProfileAccountingValidator,
+    ProfileAccountHealthService,
     ProfilePreviewService,
     InvoiceCalculatorService,
     { provide: InvoiceNumberGenerator, useClass: PreviewNumberingGuard },
+    // Token para el lector de perfiles del preview — resuelto a ProfilesService
+    // (store-scoped) en el riel tienda, a PlatformProfilesService en el de plataforma.
+    { provide: PROFILE_READER, useExisting: ProfilesService },
   ],
   exports: [
     ProfilesService,
     ProfileVersionsService,
     ProfileCatalogCacheService,
+    ProfileAccountingValidator,
+    ProfileAccountHealthService,
     ProfilePreviewService,
+    PROFILE_READER,
   ],
 })
 export class ProfilesModule {}

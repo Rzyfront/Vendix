@@ -43,6 +43,7 @@ import {
 import {
   computeLineMath,
   lineDiscountExceedsSubtotal,
+  InvoiceLineMathInput,
 } from '../../utils/invoice-line-math';
 
 /**
@@ -64,6 +65,15 @@ export interface InvoiceCustomItemDraft {
   taxes: TaxSelection[];
   account_code: string;
   aiu_component: string;
+  /**
+   * Escala del precio publicado del PRODUCTO resuelto
+   * (`products.price_unit_quantity`, QUI-648). NO se captura aquí: el backend
+   * no lo acepta del request —lo resuelve del catálogo a propósito—, así que
+   * llega como dato adjunto al borrador, igual que `product_name`, y la
+   * previsión de esta pantalla divide por él igual que el servidor.
+   * Ausente (ítem personalizado, que no tiene producto) ⇒ divisor 1.
+   */
+  price_unit_quantity?: number | string | null;
 }
 
 /**
@@ -404,6 +414,18 @@ export class InvoiceCustomItemModalComponent {
     return this.form.getRawValue() as InvoiceCustomItemDraft;
   });
 
+  /**
+   * La línea tal como la consume la aritmética: los valores del formulario MÁS
+   * la escala del producto resuelto. Esa escala NO vive en el formulario a
+   * propósito — el backend no la acepta del request — y llega por el borrador
+   * que el padre pasa al abrir; sin ella, esta previsión enseñaría N veces el
+   * importe que la tabla de líneas (que sí divide) va a declarar.
+   */
+  private readonly mathInput = computed<InvoiceLineMathInput>(() => ({
+    ...this.value(),
+    price_unit_quantity: this.draft()?.price_unit_quantity,
+  }));
+
   readonly isCustom = computed(() => this.value().product_id == null);
   readonly productName = computed(() => this.value().product_name || 'el producto');
 
@@ -413,7 +435,7 @@ export class InvoiceCustomItemModalComponent {
       : 'Nuevo ítem personalizado',
   );
 
-  readonly preview = computed(() => computeLineMath(this.value()));
+  readonly preview = computed(() => computeLineMath(this.mathInput()));
 
   readonly blockers = computed<string[]>(() => {
     const value = this.value();
@@ -432,7 +454,7 @@ export class InvoiceCustomItemModalComponent {
     if (Number(value.discount_amount) < 0) {
       rows.push('El descuento no puede ser negativo.');
     }
-    if (lineDiscountExceedsSubtotal(value)) {
+    if (lineDiscountExceedsSubtotal(this.mathInput())) {
       rows.push(
         'El descuento iguala o supera el subtotal de la línea: quedaría en cero y la factura declararía un renglón que nadie cobra.',
       );
@@ -497,7 +519,7 @@ export class InvoiceCustomItemModalComponent {
   }
 
   discountError(): string | undefined {
-    if (lineDiscountExceedsSubtotal(this.value())) {
+    if (lineDiscountExceedsSubtotal(this.mathInput())) {
       return 'Se come la línea entera.';
     }
     const control = this.form.get('discount_amount');

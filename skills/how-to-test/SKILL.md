@@ -156,7 +156,9 @@ user-accepted risk). Report the matrix as the test result — not a single "it w
 
 ## Local Environment (prerequisite for every test)
 
-The app runs in Docker with an nginx vhost in front. Before any E2E test:
+The app runs **half in Docker, half native**: db, redis, backend and nginx are containers; the
+frontend is a native `ng serve` on macOS (since 2026-08-30 — see `README.md`). nginx sits in front
+of both. Before any E2E test:
 
 1. **`/etc/hosts`** must map the vhosts to localhost:
    ```
@@ -171,23 +173,31 @@ The app runs in Docker with an nginx vhost in front. Before any E2E test:
    detail to `buildcheck-dev`:
    ```bash
    docker compose up -d
-   docker compose ps                            # every vendix_* container Up
+   docker compose ps                            # db, redis, backend, nginx Up
    docker logs --tail 40 vendix_backend         # logs CLEAN — no MODULE_NOT_FOUND / Nest boot crash
-   docker logs --tail 40 vendix_frontend        # expect "Compiled successfully"
    curl -fsS http://localhost:3000/api/health   # backend really answering (not just Up)
+
+   npm run dev:fe                               # frontend, in its own terminal, stays running
+   bash scripts/buildcheck.sh --watch           # ¿vivo? ¿pasó el último ciclo?
+   curl -sk -o /dev/null -w "%{http_code}\n" https://vendix.com/   # 200 once it compiled
    ```
+   Never probe `http://localhost:4200/`. It has no row in `domain_settings`, so the app resolves
+   the wrong `app_type` and boots into the wrong shell — the hostname IS the fixture.
+   There is no `vendix_frontend` container to inspect with `docker logs`. Read the frontend with
+   `bash scripts/buildcheck.sh --watch`, which an agent CAN see — the dev's terminal is not.
+   A `502` on the vhost with `docker ps` green means nginx is up and the native dev server is not.
    A green `docker ps` is **not** enough: a container stays `Up` while its Node process crashes on
    boot, surfacing as nginx `502`. If `/api/health` fails or logs show errors, **stop and fix the
    server first** — every curl / Playwright MCP step below is invalid against a broken server.
 3. **Containers & ports** (`docker-compose.yml`, `nginx.conf`):
 
-   | Container | Port | Vhost |
+   | Process | Port | Vhost |
    | --- | --- | --- |
-   | `vendix_frontend` | 4200 | `vendix.com`, `www.vendix.com` → 443 |
+   | `ng serve` **native on macOS** (`npm run dev:fe`) | 4200 | `vendix.com`, `www.vendix.com` → 443 |
    | `vendix_backend` | 3000 | `api.vendix.com` → 443 |
    | `vendix_postgres` | 5432 | — |
    | `vendix_redis` | 6379 | — |
-   | `vendix_nginx` | 80, 443 | TLS proxy (self-signed wildcard `*.vendix.com`) |
+   | `vendix_nginx` | 80, 443 | TLS proxy (self-signed wildcard `*.vendix.com`); reaches the native frontend through `host.docker.internal:4200` |
 
 4. **SSL:** the cert is a self-signed wildcard. Either trust the CA (`ssl/ca/ca-cert.pem`, see
    `ssl/README-INSTALLATION.md`) or pass curl `-k`; for the E2E browser, launch **Playwright MCP**
@@ -196,8 +206,8 @@ The app runs in Docker with an nginx vhost in front. Before any E2E test:
 5. **Frontend → backend wiring:** the frontend calls `https://api.vendix.com/api` (see
    `apps/frontend/src/environments/environment.development.ts`). Global API prefix is `/api`.
 
-> If Docker is down, containers are missing, or the Step 0 health gate above fails, report the
-> blocker — do **not** claim a flow was verified. `buildcheck-dev` owns bringing the stack back to health.
+> If Docker is down, containers are missing, the native `ng serve` is not running, or the Step 0
+> health gate above fails, report the blocker — do **not** claim a flow was verified. `buildcheck-dev` owns bringing the stack back to health.
 
 ## Credentials (seed accounts)
 

@@ -83,7 +83,6 @@ import {
   SelectorComponent,
   SelectorOption,
 } from '../../../../../../shared/components/selector/selector.component';
-import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
 import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import {
@@ -93,12 +92,24 @@ import {
 import {
   ConfirmationModalComponent,
   DialogService,
+  DianMunicipalitySelectComponent,
+  ModalComponent,
   SaveRequirement,
   SaveRequirementsModalComponent,
   StickyHeaderActionButton,
   StickyHeaderComponent,
 } from '../../../../../../shared/components/index';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+/**
+ * CLIENTE DEL GATEWAY DE IMPRESIÓN (E.2/E.1). El mismo servicio que usa el
+ * Hub de formatos y el editor de perfiles: la previsualización FB-29
+ * (`POST /store/print-formats/:formatType/preview`) devuelve HTML —no un
+ * binario— y no pasa por la compuerta fiscal, así que funciona sin
+ * habilitación DIAN y NO toma consecutivo (medido: `current_number` 107 →
+ * 107 tras tres previews).
+ */
+import { PrintGatewayClientService } from '../../../../../../shared/services/print/print-gateway-client.service';
+import type { StorePrintFormatDetail } from '../../../../../../core/models/print-formats.model';
 /**
  * SELECTOR DE CUENTA PUC CON BÚSQUEDA (5 resultados por página, el resto se
  * alcanza escribiendo). Vive bajo `products` porque nació allí y se importa en
@@ -112,10 +123,8 @@ import {
   formatDateOnlyUTC,
   toLocalDateString,
 } from '../../../../../../shared/utils/date.util';
-import {
-  computeNitDv,
-  isValidNitDv,
-} from '../../../../../../shared/utils/nit.util';
+import { computeNitDv } from '../../../../../../shared/utils/nit.util';
+import type { DianMunicipalityOption } from '../../../../../../shared/services/dian-municipality-lookup.service';
 import {
   FISCAL_RESPONSIBILITIES,
   FISCAL_RESPONSIBILITY_LABELS,
@@ -132,8 +141,6 @@ import { InvoiceProductOption } from '../../services/invoice-product-lookup.serv
 // siguen viviendo en `components/invoice-create/`: son piezas del formulario,
 // no de la página, y el POS u otra superficie podría montarlas sin esta vista.
 import { InvoiceFormSectionComponent } from '../../components/invoice-create/invoice-form-section.component';
-import { InvoiceResolutionBannerComponent } from '../../components/invoice-create/invoice-resolution-banner.component';
-import { InvoiceLineTaxesComponent } from '../../components/invoice-create/invoice-line-taxes.component';
 import { InvoiceItemPickerModalComponent } from '../../components/invoice-create/invoice-item-picker-modal.component';
 import {
   InvoiceCustomItemDraft,
@@ -145,17 +152,78 @@ import { InvoiceOrderSelectComponent } from '../../components/invoice-create/inv
  * los mismos controles en las dos pantallas: lo que cambia es qué significa
  * dejar uno vacío, no qué campos hay. Ver su docblock.
  */
-import { InvoiceSectionAiuComponent } from '../../components/invoice-sections/index';
+import { InvoiceSectionAiuComponent } from '../../../../../../shared/components/invoice-sections/index';
 import {
   asAiuComponentsBasis,
   asAiuTaxableBasis,
   reprojectAiuTaxRules,
-} from '../../components/invoice-sections/index';
+} from '../../../../../../shared/components/invoice-sections/index';
 import type {
   AiuDepartureField,
   AiuSectionPaths,
   AiuTaxRuleValue,
-} from '../../components/invoice-sections/index';
+} from '../../../../../../shared/components/invoice-sections/index';
+/**
+ * SECCIÓN DOCUMENTO COMPARTIDA con el editor de perfiles (B.2). Mismo
+ * componente y mismos controles —resolución, tipo de documento, forma y
+ * medio de pago, fechas y notas de cabecera— en las dos pantallas.
+ */
+import { InvoiceSectionDocumentoComponent } from '../../../../../../shared/components/invoice-sections/index';
+import type {
+  DocumentoSectionErrors,
+  DocumentoSectionNotice,
+  DocumentoSectionPaths,
+} from '../../../../../../shared/components/invoice-sections/index';
+/**
+ * SECCIÓN LÍNEAS COMPARTIDA con «Líneas modelo» del editor de perfiles (B.3).
+ * Es la sección con más asimetría de las dos pantallas —picker de producto,
+ * impuestos por línea y descuento sólo existen acá—, así que el componente
+ * tiene dos plantillas internas por contexto en vez de una sola con banderas
+ * de campo. Ver su docblock.
+ */
+import { InvoiceSectionLineasComponent } from '../../../../../../shared/components/invoice-sections/index';
+import type {
+  LineasRowErrors,
+  LineasRowPaths,
+} from '../../../../../../shared/components/invoice-sections/index';
+/**
+ * SECCIÓN IMPUESTOS COMPARTIDA con la matriz por porción del editor de
+ * perfiles (B.4). En contexto `invoice` sólo pinta el agregado de línea
+ * (`taxBreakdown()`) de solo lectura — la matriz por porción no tiene hoy
+ * fuente de datos propia en la factura, así que no se inventa acá. Ver el
+ * docblock del componente para la razón completa.
+ */
+import { InvoiceSectionImpuestosComponent } from '../../../../../../shared/components/invoice-sections/index';
+/**
+ * SECCIÓN RETENCIONES COMPARTIDA con el editor de perfiles (B.5). El
+ * interruptor de importe manual y su input de monto total NO tienen
+ * equivalente en el perfil —un perfil no emite, sólo precarga conceptos—,
+ * así que se quedan en la página y el componente sólo se monta en la rama
+ * `@else` (sin importe manual). Ver el docblock del componente.
+ */
+import { InvoiceSectionRetencionesComponent } from '../../../../../../shared/components/invoice-sections/index';
+import type { RetencionesRowPaths } from '../../../../../../shared/components/invoice-sections/index';
+/**
+ * SECCIÓN DIVISA COMPARTIDA con el editor de perfiles (B.6). Toda la
+ * consulta a la TRM oficial (`ExchangeRateQuote`, carga, sobre-escritura,
+ * equivalente declarado) es sólo de `invoice`: un perfil no emite, así que
+ * no dispara ninguna consulta. Ver el docblock del componente.
+ */
+import { InvoiceSectionDivisaComponent } from '../../../../../../shared/components/invoice-sections/index';
+import type { DivisaSectionPaths } from '../../../../../../shared/components/invoice-sections/index';
+/**
+ * SECCIÓN FORMATO COMPARTIDA con el editor de perfiles (B.7/E.1). En la
+ * factura no hay controles de plantilla que el DTO declare: lo que se pinta
+ * es CON QUÉ se imprime este documento y el mantenimiento de la plantilla
+ * ACTIVA DE TIENDA contra la biblioteca de la organización. Ver el docblock
+ * del componente.
+ */
+import {
+  FISCAL_INVOICE_FORMAT_TYPE,
+  InvoiceSectionFormatoComponent,
+  InvoiceSectionNotasComponent,
+} from '../../../../../../shared/components/invoice-sections/index';
+import type { FormatoSectionPaths, NotasSectionPaths } from '../../../../../../shared/components/invoice-sections/index';
 import { InvoiceTaxCatalogService } from '../../components/invoice-create/invoice-tax-catalog.service';
 import {
   InvoiceAiuSettings,
@@ -174,6 +242,12 @@ import {
   InvoiceProfileService,
 } from '../../services/invoice-profile.service';
 import type {
+  PreviewProfileLinePayload,
+  PreviewProfilePayload,
+  ProfilePreviewResult,
+} from '../../interfaces/invoice-profile.interface';
+import type {
+  AccountingModel,
   AiuBucket,
   AiuComponentLiteral,
   AiuComponentsBasis,
@@ -187,9 +261,11 @@ import {
   AIU_COMPONENTS,
   AIU_LEGAL_FLOOR_PERCENT_SCALED,
   AIU_TAXABLE_BUCKETS_BY_BASIS,
+  CONFIG_LIMITS,
   formatPercentScaled,
   parsePercentScaled,
   regimeFromTaxableBasis,
+  resolveAccountingModel,
   resolveAiuComponentsBasis,
   resolveAiuTaxableBasis,
 } from '../../../../../../core/utils/invoice-profile-config.contract';
@@ -343,6 +419,7 @@ const PROFILE_PREFILL_LABELS: ReadonlyArray<readonly [string, string]> = [
   // así que nunca pueden estar `dirty`. Advertir de perderlas sería avisar de
   // una pérdida que no ocurre.
   ['aiu.components_basis', 'la unidad de los porcentajes del AIU'],
+  ['aiu.accounting_model', 'el modelo de contabilización del AIU'],
   ['aiu.administracion', 'el reparto de la base AIU'],
   ['aiu.imprevistos', 'el reparto de la base AIU'],
   ['aiu.utilidad', 'el reparto de la base AIU'],
@@ -370,6 +447,29 @@ function escapeHtmlText(value: string): string {
 // ─────────────────────────────────────────────────────────────
 // Contrato de salida
 // ─────────────────────────────────────────────────────────────
+
+/**
+ * Dirección fiscal ESTRUCTURADA del adquiriente (A.8).
+ *
+ * Espejo fiel de `InvoiceAddressDto` (backend,
+ * `invoicing/dto/invoice-address.dto.ts`): el DTO declara `customer_address`
+ * con `@Transform(liftInvoiceAddress)`, así que acepta el string plano que
+ * siempre envió esta pantalla O este objeto desglosado. Los nombres de campo
+ * NO son inventados: son exactamente los que `normalizeAddress()` del provider
+ * DIAN lee para `cac:PhysicalLocation`, y lo que hace que el código DANE de
+ * ciudad —rechazo clásico de la DIAN— por fin viaje en cada factura con
+ * dirección.
+ */
+interface CustomerInvoiceAddressPayload {
+  /** Único obligatorio cuando se envía el objeto (`@IsNotEmpty`). */
+  address_line: string;
+  /** Código DANE de municipio, 5 dígitos (ej. "05001" = Medellín). */
+  city_code?: string;
+  city_name?: string;
+  /** Código DANE de departamento, 2 dígitos: los dos primeros del city_code. */
+  department_code?: string;
+  department_name?: string;
+}
 
 /**
  * Payload REAL que acepta `CreateInvoiceDto` del backend.
@@ -404,7 +504,12 @@ interface InvoiceCreatePayload {
   customer_verification_digit?: string;
   customer_tax_regime?: string;
   customer_fiscal_responsibilities?: string[];
-  customer_address?: string;
+  /**
+   * String plano (sólo la línea de dirección) u objeto desglosado con los
+   * códigos DANE. El backend eleva ambas formas a `InvoiceAddressDto`; ver
+   * {@link CustomerInvoiceAddressPayload}.
+   */
+  customer_address?: string | CustomerInvoiceAddressPayload;
   inline_customer?: CreateCustomerRequest;
   issue_date: string;
   due_date?: string;
@@ -426,6 +531,20 @@ interface InvoiceCreatePayload {
    * un override y rompe la herencia.
    */
   aiu_contract_object?: string;
+  /**
+   * MODELO DE CONTABILIZACIÓN de este documento (D.7).
+   *
+   * `CreateInvoiceDto.aiu_accounting_model` lo valida contra
+   * `ENABLED_ACCOUNTING_MODELS`, así que mandarlo explícito es seguro en los
+   * dos estados de la compuerta: hoy sólo `'sumada'` pasa el `@IsIn`, y el día
+   * que se habilite `'no_sumada'` el valor que eligió el operador en el radio
+   * viaja sin tocar esta pantalla. Omitirlo dejaría la elección en manos del
+   * default del servidor justo cuando el documento tiene una elegida.
+   *
+   * Sólo viaja en operación AIU: fuera de ella el campo no significa nada y un
+   * valor huérfano sería ruido en el payload fiscal.
+   */
+  aiu_accounting_model?: AccountingModel;
   /**
    * Perfil de facturación con el que se timbra ESTE documento.
    *
@@ -491,6 +610,12 @@ interface InvoiceItemFormValue {
   taxes: TaxSelection[];
   account_code: string;
   aiu_component: string;
+  /**
+   * D.10 — escala del precio publicado del producto resuelto. Dato del
+   * CATÁLOGO adjunto a la fila (nunca editable, nunca en el payload:
+   * `buildPayload` mapea los items campo a campo y este control no viaja).
+   */
+  price_unit_quantity?: number | string | null;
 }
 
 /** Una retención declarada en la sección de retenciones (sólo UI). */
@@ -578,6 +703,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     'foreign_total_amount',
   ],
   contabilidad: [],
+  notas_internas: [],
 };
 
 /**
@@ -670,20 +796,26 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     ButtonComponent,
     InputComponent,
     SelectorComponent,
-    TextareaComponent,
     ToggleComponent,
     IconComponent,
     AccountCodeSelectComponent,
     CustomerModalComponent,
+    DianMunicipalitySelectComponent,
     ConfirmationModalComponent,
     SaveRequirementsModalComponent,
     InvoiceFormSectionComponent,
-    InvoiceResolutionBannerComponent,
-    InvoiceLineTaxesComponent,
     InvoiceItemPickerModalComponent,
     InvoiceCustomItemModalComponent,
     InvoiceOrderSelectComponent,
     InvoiceSectionAiuComponent,
+    InvoiceSectionDocumentoComponent,
+    InvoiceSectionLineasComponent,
+    InvoiceSectionImpuestosComponent,
+    InvoiceSectionRetencionesComponent,
+    InvoiceSectionDivisaComponent,
+    InvoiceSectionFormatoComponent,
+    InvoiceSectionNotasComponent,
+    ModalComponent,
   ],
   template: `
     <div class="w-full max-w-[1400px] mx-auto">
@@ -903,34 +1035,33 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               }
 
               @if (profileConfigFailed()) {
-                <div
-                  class="mt-3 flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning-light px-3 py-2.5"
+                <!--
+                  Migrado a «app-alert-banner» (encargo del orquestador,
+                  2026-08-24): el div a mano nunca llevó role=alert, así que un
+                  lector de pantalla no lo anunciaba. El componente compartido
+                  lo trae fijo en su plantilla.
+                -->
+                <app-alert-banner
+                  class="mt-3"
+                  variant="warning"
+                  icon="alert-triangle"
+                  tone="token"
+                  heading="No se pudieron leer las reglas del perfil"
                 >
-                  <app-icon
-                    name="alert-triangle"
-                    [size]="15"
-                    class="mt-0.5 flex-shrink-0 text-warning"
-                  />
-                  <div class="min-w-0">
-                    <p class="text-xs font-semibold text-warning">
-                      No se pudieron leer las reglas del perfil
-                    </p>
-                    <p class="mt-0.5 text-xs leading-relaxed text-warning">
-                      La factura se puede emitir igual: el servidor la timbra
-                      con la versión vigente del perfil, no con lo que muestre
-                      esta pantalla. Lo que falta es el instructivo del AIU —y
-                      no se sustituye por el de la tienda, porque instruiría
-                      sobre otra base gravable—.
-                    </p>
-                    <button
-                      type="button"
-                      class="mt-1.5 text-xs font-semibold text-warning underline underline-offset-2"
-                      (click)="retryProfileConfig()"
-                    >
-                      Reintentar
-                    </button>
-                  </div>
-                </div>
+                  La factura se puede emitir igual: el servidor la timbra con
+                  la versión vigente del perfil, no con lo que muestre esta
+                  pantalla. Lo que falta es el instructivo del AIU —y no se
+                  sustituye por el de la tienda, porque instruiría sobre otra
+                  base gravable—.
+                  <button
+                    bannerActions
+                    type="button"
+                    class="mt-1.5 text-xs font-semibold text-warning underline underline-offset-2"
+                    (click)="retryProfileConfig()"
+                  >
+                    Reintentar
+                  </button>
+                </app-alert-banner>
               }
             } @else {
               <!--
@@ -985,125 +1116,12 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               (expandedChange)="setSection('documento', $event)"
             >
               <!--
-                LA RESOLUCIÓN, DENTRO DE «DOCUMENTO» Y SOBRE FONDO PROPIO.
-
-                Vivía suelta entre la cabecera de la página y el formulario, sin
-                tarjeta detrás y a tamaño «sm». Ahí era el único control de toda
-                la pantalla sin superficie propia, y por eso «casi no se veía»:
-                el problema no era el color del control, era que flotaba.
-
-                Va dentro de la sección Documento porque es un dato de cabecera
-                del documento, y va en un bloque con fondo «--color-background» y
-                no directamente sobre la tarjeta: el control se pinta sobre
-                «--color-surface», así que sobre la propia superficie de la
-                tarjeta sólo lo separaría el borde. Con el fondo de la página
-                debajo, el control queda claro sobre oscuro y se lee de un
-                vistazo.
-
-                Tamaño «md», no «sm»: es el campo que gasta numeración
-                autorizada, y cada número que se toma de un rango se consume
-                aunque la DIAN rechace el documento.
-
-                Sigue enlazado con «[formControl]» y no con «formControlName»
-                aunque ahora esté DENTRO del «form». «resolution_id» tiene un
-                único escritor —«preselectEligibleResolution»— y el enlace
-                directo al control es lo que deja ese hecho a la vista.
+                TIPO DE OPERACIÓN. No vive en «vendix-invoice-section-documento»
+                (B.2): el editor de perfiles lo tiene FUERA de su sección
+                «Documento» porque decide qué secciones aplican, no es un dato
+                del documento en sí. Ver el docblock del componente compartido.
               -->
-              <div
-                class="mb-4 space-y-3 rounded-lg border border-border p-3"
-                [style.background]="'var(--color-background)'"
-              >
-                <app-selector
-                  label="Resolución de numeración"
-                  [formControl]="resolutionControl"
-                  [options]="resolutionOptions()"
-                  [errorText]="fieldError('resolution_id') ?? ''"
-                  [disabled]="resolutionOptions().length === 0"
-                  placeholder="Elige el rango autorizado"
-                  size="md"
-                ></app-selector>
-
-                @if (profileResolutionNotice(); as notice) {
-                  <!--
-                    El perfil pidió un rango y se usó otro. Callarlo dejaría al
-                    operador con una factura numerada distinto de lo que configuró y
-                    sin nada en pantalla que lo relacione con el perfil.
-                  -->
-                  <app-alert-banner
-                    variant="warning"
-                    icon="alert-triangle"
-                    tone="token"
-                  >
-                    {{ notice }}
-                  </app-alert-banner>
-                }
-
-                @if (resolutionEmptyReason(); as reason) {
-                  <!--
-                    Una lista vacía y muda en la pantalla que gasta numeración
-                    autorizada es un callejón sin salida: hay que decir si están
-                    vencidas, agotadas o si no hay ninguna.
-                  -->
-                  <app-alert-banner
-                    variant="danger"
-                    icon="alert-triangle"
-                    tone="token"
-                  >
-                    {{ reason }}
-                  </app-alert-banner>
-                }
-
-                @if (habilitationWarning(); as warning) {
-                  <!--
-                    Va ANTES del aviso de clave técnica: el aviso de clave es una
-                    sospecha sobre un dato ambiguo, y este es un hecho. Una factura
-                    emitida contra el rango de habilitación no es una factura.
-                  -->
-                  <app-alert-banner
-                    variant="danger"
-                    icon="alert-triangle"
-                    tone="token"
-                  >
-                    {{ warning }}
-                  </app-alert-banner>
-                }
-
-                @if (technicalKeyWarning(); as warning) {
-                  <app-alert-banner
-                    variant="warning"
-                    icon="alert-triangle"
-                    tone="token"
-                  >
-                    {{ warning }}
-                  </app-alert-banner>
-                }
-
-                <!-- El selector elige; el banner sigue informando qué se eligió. -->
-                <vendix-invoice-resolution-banner
-                  [resolution]="activeResolution()"
-                  [documentLabel]="documentLabel()"
-                />
-              </div>
-
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <app-selector
-                  label="Tipo de documento"
-                  formControlName="invoice_type"
-                  [options]="invoiceTypeOptions"
-                  [errorText]="fieldError('invoice_type') ?? ''"
-                  size="sm"
-                  (valueChange)="onInvoiceTypeChange()"
-                ></app-selector>
-                <app-input
-                  label="Fecha de emisión"
-                  type="date"
-                  formControlName="issue_date"
-                  [control]="control('issue_date')"
-                  [error]="fieldError('issue_date')"
-                  [required]="true"
-                  size="sm"
-                  (inputChange)="syncDueDate()"
-                ></app-input>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
                 <app-selector
                   label="Tipo de operación"
                   formControlName="operation_type"
@@ -1114,43 +1132,35 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                 ></app-selector>
               </div>
 
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-                <app-selector
-                  label="Forma de pago"
-                  formControlName="payment_form"
-                  [options]="paymentFormOptions"
-                  [errorText]="fieldError('payment_form') ?? ''"
-                  size="sm"
-                  (valueChange)="onPaymentFormChange()"
-                ></app-selector>
-                <app-selector
-                  label="Medio de pago"
-                  formControlName="payment_means_code"
-                  [options]="paymentMeansOptions"
-                  [errorText]="fieldError('payment_means_code') ?? ''"
-                  size="sm"
-                ></app-selector>
-                <app-input
-                  label="Vencimiento"
-                  type="date"
-                  formControlName="due_date"
-                  [control]="control('due_date')"
-                  [error]="dueDateError()"
-                  [required]="isCredit()"
-                  [helperText]="dueDateHelp()"
-                  size="sm"
-                ></app-input>
-              </div>
-
-              <app-textarea
-                class="block mt-3"
-                label="Notas"
-                formControlName="notes"
-                [control]="control('notes')"
-                [error]="fieldError('notes')"
-                placeholder="Observaciones que se imprimen en el documento..."
-                [rows]="2"
-              ></app-textarea>
+              <!--
+                SECCIÓN DOCUMENTO COMPARTIDA CON EL EDITOR DE PERFILES (B.2). Es
+                el mismo componente y los mismos controles en las dos pantallas
+                —resolución, tipo de documento, forma y medio de pago, fechas y
+                notas de cabecera—; lo que cambia es qué significa dejar uno
+                vacío y qué campos no tienen sentido siquiera (las fechas, aquí;
+                ver «invoice-section-documento.component.ts»).
+              -->
+              <vendix-invoice-section-documento
+                context="invoice"
+                [form]="invoiceForm"
+                [paths]="documentoSectionPaths"
+                [invoiceTypeOptions]="invoiceTypeOptions"
+                [paymentFormOptions]="paymentFormOptions"
+                [paymentMeansOptions]="paymentMeansOptions"
+                [resolutionControl]="resolutionControl"
+                [resolutionOptions]="resolutionOptions()"
+                resolutionPlaceholder="Elige el rango autorizado"
+                resolutionSize="md"
+                [activeResolution]="activeResolution()"
+                [documentLabel]="documentLabel()"
+                [notices]="documentoNotices()"
+                [errors]="documentoErrors()"
+                [dueDateRequired]="isCredit()"
+                [dueDateHelp]="dueDateHelp()"
+                (invoiceTypeChanged)="onInvoiceTypeChange()"
+                (paymentFormChanged)="onPaymentFormChange()"
+                (issueDateChanged)="syncDueDate()"
+              ></vendix-invoice-section-documento>
             </vendix-invoice-form-section>
 
             <!-- ── ADQUIRIENTE ───────────────────────────────────── -->
@@ -1237,7 +1247,8 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
 
               <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <app-input
-                  label="Nombre / Razón social"
+                  [label]="customerNameLabel()"
+                  [placeholder]="customerNamePlaceholder()"
                   formControlName="customer_name"
                   [control]="control('customer_name')"
                   [error]="fieldError('customer_name')"
@@ -1269,19 +1280,33 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   formControlName="customer_tax_id"
                   [control]="control('customer_tax_id')"
                   [error]="fieldError('customer_tax_id')"
-                  placeholder="900123456"
+                  [placeholder]="customerTaxIdPlaceholder()"
                   size="sm"
                 ></app-input>
-                <app-input
-                  label="DV"
-                  formControlName="customer_verification_digit"
-                  [control]="control('customer_verification_digit')"
-                  [error]="verificationDigitError()"
-                  [disabled]="!isNitCustomer()"
-                  [maxlength]="1"
-                  helperText="Si lo omites, el servidor lo calcula."
-                  size="sm"
-                ></app-input>
+                <!--
+                  A.8 — el DV NUNCA se digita. Se deriva del número con el
+                  mismo módulo 11 que aplica el backend, en vivo mientras se
+                  teclea, y sólo existe cuando el documento es NIT: una
+                  cédula o un pasaporte no llevan checksum, así que el campo
+                  desaparece por completo (antes estorbaba deshabilitado).
+                  Misma conducta que el checkout de suscripciones.
+                -->
+                @if (isNitCustomer()) {
+                  <label class="flex flex-col gap-1">
+                    <span class="text-xs font-medium text-[var(--color-text-secondary)]">
+                      DV
+                    </span>
+                    <input
+                      type="text"
+                      [value]="computedCustomerDv()"
+                      disabled
+                      aria-readonly="true"
+                      aria-label="Dígito de verificación calculado automáticamente"
+                      title="Calculado con el módulo 11 de la DIAN; no se digita."
+                      class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-[var(--color-surface-secondary)] text-text-secondary cursor-not-allowed"
+                    />
+                  </label>
+                }
                 <app-input
                   label="Teléfono"
                   formControlName="customer_phone"
@@ -1300,6 +1325,24 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   placeholder="Sin declarar"
                   size="sm"
                 ></app-selector>
+                <!--
+                  A.8 - tipo de persona. Solo se pregunta con NIT: una cedula
+                  ES una persona natural y fijarla a mano seria un paso que el
+                  formulario puede dar solo (buildPayload manda NATURAL en
+                  cuanto el documento deja de ser NIT).
+                -->
+                @if (isNitCustomer()) {
+                  <app-selector
+                    label="Tipo de persona"
+                    formControlName="customer_person_type"
+                    [options]="customerPersonTypeOptions"
+                    helpText="Natural con NIT (independiente) o Jurídica (empresa)."
+                    size="sm"
+                  ></app-selector>
+                }
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
                 <app-input
                   label="Dirección fiscal"
                   formControlName="customer_address"
@@ -1307,6 +1350,27 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   [error]="fieldError('customer_address')"
                   size="sm"
                 ></app-input>
+                <!--
+                  A.8 — municipio DANE por NOMBRE. El código de ciudad era el
+                  otro rechazo clásico de la DIAN: aquí ya no se teclea ni se
+                  adivina, se busca contra el catálogo Divipola y el valor del
+                  control es el código de 5 dígitos exacto que exige el XML.
+                -->
+                <div>
+                  <label
+                    class="block text-xs font-medium text-[var(--color-text-secondary)] mb-1"
+                  >
+                    Municipio (DANE)
+                  </label>
+                  <app-dian-municipality-select
+                    formControlName="customer_municipality_code"
+                    placeholder="Busca por nombre o código DANE..."
+                    (municipalitySelected)="onCustomerMunicipality($event)"
+                  />
+                  @if (customerMunicipalityError(); as municipalityErr) {
+                    <p class="mt-1 text-xs text-error">{{ municipalityErr }}</p>
+                  }
+                </div>
               </div>
 
               <!--
@@ -1733,36 +1797,33 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
 
               @if (aiuEffectiveNote(); as note) {
                 @if (!note.valid) {
-                  <div
-                    class="mt-3 flex items-start gap-2.5 rounded-lg border border-error/30 bg-error/5 px-3 py-2.5"
+                  <!--
+                    Migrado a «app-alert-banner» (encargo del orquestador,
+                    2026-08-24): el div a mano nunca llevó role=alert.
+                    Variante «danger», tono «token» — mismo par que ya usan
+                    «aiuUnassigned»/«aiuTaxableWithoutTax» un poco más arriba.
+                  -->
+                  <app-alert-banner
+                    class="mt-3"
+                    variant="danger"
+                    icon="alert-triangle"
+                    tone="token"
+                    [heading]="
+                      note.length > note.max
+                        ? 'El objeto del contrato AIU es demasiado largo'
+                        : 'Falta el objeto del contrato AIU'
+                    "
                   >
-                    <app-icon
-                      name="alert-triangle"
-                      [size]="15"
-                      class="mt-0.5 flex-shrink-0 text-error"
-                    />
-                    <div class="min-w-0">
-                      <p class="text-xs font-semibold text-error">
-                        @if (note.length > note.max) {
-                          El objeto del contrato AIU es demasiado largo
-                        } @else {
-                          Falta el objeto del contrato AIU
-                        }
-                      </p>
-                      <p class="mt-0.5 text-xs leading-relaxed text-error">
-                        La regla CAV03 exige que la línea de Administración
-                        lleve una nota que empiece por «{{
-                          effectiveAiu()?.note_prefix
-                        }}» y mida entre {{ note.min }} y
-                        {{ note.max }} caracteres; la actual mide
-                        {{ note.length }}. Descríbelo arriba, en
-                        <strong>Objeto del contrato</strong>, o —si es siempre
-                        el mismo— en Ajustes → Facturación → AIU. Sin eso la
-                        emisión se rechaza y el documento no llega a tomar
-                        consecutivo.
-                      </p>
-                    </div>
-                  </div>
+                    La regla CAV03 exige que la línea de Administración lleve
+                    una nota que empiece por «{{
+                      effectiveAiu()?.note_prefix
+                    }}» y mida entre {{ note.min }} y {{ note.max }}
+                    caracteres; la actual mide {{ note.length }}. Descríbelo
+                    arriba, en <strong>Objeto del contrato</strong>, o —si es
+                    siempre el mismo— en Ajustes → Facturación → AIU. Sin eso
+                    la emisión se rechaza y el documento no llega a tomar
+                    consecutivo.
+                  </app-alert-banner>
                 }
               }
             </vendix-invoice-form-section>
@@ -1780,235 +1841,35 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               [expanded]="isSectionOpen('lineas')"
               (expandedChange)="setSection('lineas', $event)"
             >
-              <div formArrayName="items" class="space-y-2">
-                @for (item of itemControls(); track rowUid(item); let i = $index) {
-                  <div
-                    [formGroupName]="i"
-                    class="rounded-lg border border-border bg-[var(--color-surface-secondary)] p-2 space-y-2"
-                  >
-                    <div class="grid grid-cols-12 gap-2 items-end">
-                      <div class="col-span-12 md:col-span-4">
-                        <app-input
-                          label="Descripción"
-                          formControlName="description"
-                          [control]="item.get('description')"
-                          [error]="itemError(i, 'description')"
-                          [required]="true"
-                          size="sm"
-                        ></app-input>
-                      </div>
-                      <div class="col-span-6 md:col-span-2">
-                        <app-input
-                          label="Cantidad"
-                          type="number"
-                          formControlName="quantity"
-                          [control]="item.get('quantity')"
-                          [error]="itemError(i, 'quantity')"
-                          [required]="true"
-                          min="0.0001"
-                          step="any"
-                          size="sm"
-                        ></app-input>
-                      </div>
-                      <div class="col-span-6 md:col-span-2">
-                        <app-selector
-                          label="Unidad"
-                          formControlName="unit_code"
-                          [options]="unitCodeOptions"
-                          [errorText]="itemError(i, 'unit_code') ?? ''"
-                          size="sm"
-                        ></app-selector>
-                      </div>
-                      <div class="col-span-6 md:col-span-2">
-                        <app-input
-                          label="Precio unitario"
-                          [currency]="true"
-                          formControlName="unit_price"
-                          [control]="item.get('unit_price')"
-                          [error]="itemError(i, 'unit_price')"
-                          [required]="true"
-                          size="sm"
-                        ></app-input>
-                      </div>
-                      <div class="col-span-6 md:col-span-2">
-                        <app-input
-                          label="Descuento"
-                          [currency]="true"
-                          formControlName="discount_amount"
-                          [control]="item.get('discount_amount')"
-                          [error]="itemError(i, 'discount_amount')"
-                          size="sm"
-                        ></app-input>
-                      </div>
-                    </div>
-
-                    <div class="grid grid-cols-12 gap-2 items-center">
-                      <div class="col-span-12 md:col-span-5">
-                        <button
-                          type="button"
-                          class="w-full flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-md border border-border hover:border-primary-600 transition-colors text-left"
-                          (click)="openProductPicker(item)"
-                        >
-                          <app-icon name="package" [size]="14" />
-                          <span class="flex-1 min-w-0 truncate">
-                            {{ productLabel(item) }}
-                          </span>
-                        </button>
-                      </div>
-
-                      @if (isAiu()) {
-                        <!--
-                          INTERRUPTOR DE BASE AIU POR LÍNEA. Decide si este
-                          renglón entra a la base gravable del régimen o si es
-                          costo reembolsable. Es la misma decisión que antes se
-                          tomaba dejando el selector en blanco — sólo que ahora
-                          se ve que es una decisión.
-                        -->
-                        <div
-                          class="col-span-8 md:col-span-5 flex items-center gap-2"
-                        >
-                          <!--
-                            «app-toggle» y no un «<input type="checkbox">»: es el
-                            control on/off del sistema, con el color del tenant,
-                            foco visible y área táctil. Mismo control que en el
-                            editor de perfiles, para que la decisión fiscal se
-                            vea igual donde se preconfigura y donde se emite.
-                          -->
-                          <div
-                            class="flex shrink-0 items-center"
-                            [title]="
-                              lineCarriesAiu(item)
-                                ? 'Esta línea lleva la base AIU configurada'
-                                : 'Costo reembolsable: no entra a la base AIU'
-                            "
-                          >
-                            <app-toggle
-                              label="AIU"
-                              ariaLabel="Aplicar la base AIU a esta línea"
-                              [checked]="lineCarriesAiu(item)"
-                              (changed)="toggleLineAiu(item, $event)"
-                            ></app-toggle>
-                          </div>
-                          @if (lineCarriesAiu(item)) {
-                            <div class="min-w-0 flex-1">
-                              <app-selector
-                                formControlName="aiu_component"
-                                [options]="aiuComponentOptions"
-                                [errorText]="itemError(i, 'aiu_component') ?? ''"
-                                placeholder="Componente AIU"
-                                size="sm"
-                              ></app-selector>
-                            </div>
-                          } @else {
-                            <span
-                              class="min-w-0 flex-1 truncate text-[11px] text-[var(--color-text-secondary)]"
-                            >
-                              Costo reembolsable — fuera de la base AIU
-                            </span>
-                          }
-                        </div>
-                      } @else {
-                        <div class="col-span-8 md:col-span-5">
-                          <span
-                            class="text-xs text-[var(--color-text-secondary)]"
-                          >
-                            {{ lineSummary(i) }}
-                          </span>
-                        </div>
-                      }
-
-                      <div class="col-span-4 md:col-span-2 flex justify-end gap-1">
-                        <!--
-                          Configuración avanzada de ESTA línea. La tira de la
-                          tabla no da para todo lo que una línea puede declarar
-                          (unidad, varios impuestos, cuenta PUC, componente AIU)
-                          y, sobre todo, no cabe la previsión de la aritmética.
-                        -->
-                        <button
-                          type="button"
-                          (click)="openAdvancedItem(item)"
-                          class="text-[var(--color-text-secondary)] hover:text-primary transition-colors p-1"
-                          title="Configuración avanzada de la línea"
-                          aria-label="Configuración avanzada de la línea"
-                        >
-                          <app-icon name="sliders-horizontal" [size]="16" />
-                        </button>
-                        <button
-                          type="button"
-                          (click)="removeItem(i)"
-                          class="text-[var(--color-text-secondary)] hover:text-error transition-colors p-1"
-                          title="Eliminar línea"
-                          aria-label="Eliminar línea"
-                        >
-                          <app-icon name="x" [size]="16" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <!--
-                      LOS IMPUESTOS OCUPAN SU PROPIA FILA, a ancho completo.
-                      Compartían celda con el selector de producto en cuatro de
-                      doce columnas, y con dos o tres impuestos declarados las
-                      píldoras empujaban el disparador a otro renglón. No es un
-                      adorno al lado del producto: es la afirmación fiscal de la
-                      línea, y necesita el sitio de un campo.
-                    -->
-                    <vendix-invoice-line-taxes
-                      formControlName="taxes"
-                      [taxes]="availableTaxes()"
-                    />
-                  </div>
-                }
-              </div>
-
-              @if (itemCount() === 0) {
-                <p
-                  class="text-center py-4 text-sm text-[var(--color-text-secondary)]"
-                >
-                  Una factura sin líneas no es una factura: quemaría un
-                  consecutivo autorizado para declarar un total de cero.
-                </p>
-              }
-
               <!--
-                TRES caminos a una línea, no uno. El comerciante pidió
-                explícitamente poder «tanto buscar los productos de mi
-                inventario (productos y servicios) como crear un producto
-                personalizado»; la línea en blanco se conserva para quien sólo
-                quiere teclear.
+                B.3: sección compartida con el editor de perfiles
+                («InvoiceSectionLineasComponent»). El «FormArray» de «items»
+                sigue siendo de esta página —el componente sólo LEE sus
+                filas—, así que abrir el picker, el modal de línea avanzada y
+                las tres formas de crear una línea siguen abriendo los mismos
+                modales de siempre; el componente sólo emite la intención.
               -->
-              <div class="flex flex-wrap justify-end gap-2 mt-4">
-                <app-button
-                  variant="outline"
-                  size="sm"
-                  type="button"
-                  (clicked)="openProductPickerForNewLine()"
-                  [disabled]="itemCount() >= 100"
-                >
-                  <app-icon slot="icon" name="search" [size]="14" />
-                  Buscar en inventario
-                </app-button>
-                <app-button
-                  variant="outline"
-                  size="sm"
-                  type="button"
-                  (clicked)="openCustomItemForNewLine()"
-                  [disabled]="itemCount() >= 100"
-                >
-                  <app-icon slot="icon" name="sparkles" [size]="14" />
-                  Ítem personalizado
-                </app-button>
-                <app-button
-                  variant="ghost"
-                  size="sm"
-                  type="button"
-                  (clicked)="addItem()"
-                  [disabled]="itemCount() >= 100"
-                >
-                  <app-icon slot="icon" name="plus" [size]="14" />
-                  Línea en blanco
-                </app-button>
-              </div>
+              <vendix-invoice-section-lineas
+                context="invoice"
+                [rows]="itemControls()"
+                [rowPaths]="lineasRowPaths"
+                [isAiu]="isAiu()"
+                [aiuComponentOptions]="aiuComponentOptions"
+                [unitCodeOptions]="unitCodeOptions"
+                [descriptionLimit]="itemDescriptionLimit"
+                [rowErrors]="lineasRowErrors()"
+                [rowSummaries]="lineasRowSummaries()"
+                [carriesAiu]="lineCarriesAiuBound"
+                [toggleAiu]="toggleLineAiuBound"
+                [availableTaxes]="availableTaxes()"
+                emptyStateText="Una factura sin líneas no es una factura: quemaría un consecutivo autorizado para declarar un total de cero."
+                (openProductPicker)="openProductPicker($event)"
+                (openAdvancedItem)="openAdvancedItem($event)"
+                (addFromPicker)="openProductPickerForNewLine()"
+                (addCustomItem)="openCustomItemForNewLine()"
+                (addBlankLine)="addItem()"
+                (removeLine)="removeItem($event)"
+              ></vendix-invoice-section-lineas>
             </vendix-invoice-form-section>
 
             <!-- ── IMPUESTOS ─────────────────────────────────────── -->
@@ -2029,61 +1890,12 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               [expanded]="isSectionOpen('impuestos')"
               (expandedChange)="setSection('impuestos', $event)"
             >
-              <p class="text-xs text-[var(--color-text-secondary)] mb-2">
-                Los impuestos se declaran POR LÍNEA, en la sección Líneas. Aquí
-                se ve el agregado que el servidor va a recomputar: el importe
-                que se envía es siempre cero y la DIAN recibe el que calcula el
-                motor fiscal, no el que se escriba en pantalla.
-              </p>
-
-              @if (taxBreakdown().length === 0) {
-                <p class="text-sm text-[var(--color-text-secondary)]">
-                  Ninguna línea declara impuesto. Sólo es correcto si la
-                  operación es realmente excluida o exenta.
-                </p>
-              } @else {
-                <div class="overflow-x-auto">
-                  <table class="w-full text-xs">
-                    <thead>
-                      <tr
-                        class="text-left text-[var(--color-text-secondary)] border-b border-border"
-                      >
-                        <th class="py-1 pr-2">Impuesto</th>
-                        <th class="py-1 pr-2">Tarifa</th>
-                        <th class="py-1 pr-2">Aplicación</th>
-                        <th class="py-1 pr-2 text-right">Base</th>
-                        <th class="py-1 text-right">Importe</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @for (row of taxBreakdown(); track row.key) {
-                        <tr class="border-b border-border last:border-0">
-                          <td class="py-1 pr-2 text-text-primary">
-                            {{ row.name }}
-                          </td>
-                          <td class="py-1 pr-2">{{ row.rate }}%</td>
-                          <td class="py-1 pr-2">
-                            {{ row.isInclusive ? 'Incluido' : 'Adicional' }}
-                          </td>
-                          <td class="py-1 pr-2 text-right">
-                            {{ formatCurrency(row.base) }}
-                          </td>
-                          <td class="py-1 text-right font-medium">
-                            {{ formatCurrency(row.amount) }}
-                          </td>
-                        </tr>
-                      }
-                    </tbody>
-                  </table>
-                </div>
-              }
-
-              @if (availableTaxes().length === 0) {
-                <p class="mt-2 text-xs text-warning">
-                  El catálogo de impuestos de la tienda está vacío o no se pudo
-                  cargar. Configúralo en Ajustes → Impuestos.
-                </p>
-              }
+              <vendix-invoice-section-impuestos
+                context="invoice"
+                [breakdown]="taxBreakdown()"
+                [formatCurrency]="formatCurrencyBound"
+                [availableTaxesCount]="availableTaxes().length"
+              ></vendix-invoice-section-impuestos>
             </vendix-invoice-form-section>
 
             <!-- ── RETENCIONES ───────────────────────────────────── -->
@@ -2156,141 +1968,21 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   size="sm"
                 ></app-input>
               } @else {
-                @if (withholdingConcepts().length === 0) {
-                  <app-alert-banner
-                    class="mb-3"
-                    variant="warning"
-                    icon="alert-triangle"
-                    tone="token"
-                  >
-                    No hay conceptos de retención configurados. Créalos en
-                    <span class="font-medium">Contabilidad › Retenciones</span> o
-                    activa el importe manual de arriba: sin concepto, el desglose
-                    no se puede guardar.
-                  </app-alert-banner>
-                }
-
-                <div formArrayName="withholdings" class="space-y-2">
-                  @for (
-                    row of withholdingControls();
-                    track withholdingUid(row);
-                    let i = $index
-                  ) {
-                    <div
-                      [formGroupName]="i"
-                      class="rounded-lg border border-border bg-[var(--color-surface)] p-3"
-                    >
-                      <div class="grid grid-cols-12 gap-2.5">
-                        <div class="col-span-12 md:col-span-7">
-                          <app-selector
-                            label="Concepto"
-                            formControlName="concept_id"
-                            [options]="withholdingConceptOptions()"
-                            [searchable]="true"
-                            placeholder="Busca el concepto de retención…"
-                            size="sm"
-                            (valueChange)="onWithholdingConceptChange(i)"
-                          ></app-selector>
-                        </div>
-                        <div class="col-span-12 md:col-span-5">
-                          <app-selector
-                            label="Lado de la operación"
-                            formControlName="role"
-                            [options]="withholdingRoleOptions"
-                            size="sm"
-                          ></app-selector>
-                        </div>
-                        <div class="col-span-5 md:col-span-3">
-                          <app-input
-                            label="Tarifa %"
-                            type="number"
-                            formControlName="rate"
-                            [control]="row.get('rate')"
-                            min="0"
-                            max="100"
-                            step="any"
-                            size="sm"
-                          ></app-input>
-                        </div>
-                        <div class="col-span-7 md:col-span-5">
-                          <app-input
-                            label="Base gravable"
-                            [currency]="true"
-                            formControlName="base"
-                            [control]="row.get('base')"
-                            size="sm"
-                          ></app-input>
-                        </div>
-                        <div
-                          class="col-span-12 md:col-span-4 flex items-end justify-between gap-2 pb-0.5"
-                        >
-                          <div class="min-w-0">
-                            <span
-                              class="block text-[10px] uppercase tracking-wide text-[var(--color-text-secondary)]"
-                            >
-                              Retenido
-                            </span>
-                            <span
-                              class="block text-sm font-semibold text-text-primary truncate"
-                            >
-                              {{ formatCurrency(withholdingRowAmount(i)) }}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            class="shrink-0 rounded-md p-1.5 text-[var(--color-text-secondary)] transition-colors hover:bg-error-light hover:text-error focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
-                            aria-label="Quitar este concepto de retención"
-                            title="Quitar este concepto de retención"
-                            (click)="removeWithholding(i)"
-                          >
-                            <app-icon name="trash-2" [size]="15" />
-                          </button>
-                        </div>
-                      </div>
-
-                      @if (incompleteWithholdingRow() === i + 1) {
-                        <p
-                          class="mt-3 flex items-center gap-1.5 text-[11px] text-warning"
-                        >
-                          <app-icon name="alert-circle" [size]="12" />
-                          Falta concepto, tarifa o base. La factura no se envía
-                          con una retención a medias.
-                        </p>
-                      }
-                    </div>
-                  } @empty {
-                    <p
-                      class="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-[var(--color-text-secondary)]"
-                    >
-                      Sin retenciones. Agrega una si el documento las lleva.
-                    </p>
-                  }
-                </div>
-
-                <div
-                  class="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <app-button
-                    variant="outline"
-                    size="sm"
-                    type="button"
-                    (clicked)="addWithholding()"
-                  >
-                    <app-icon slot="icon" name="plus" [size]="14" />
-                    Agregar retención
-                  </app-button>
-                  <div
-                    class="flex items-baseline justify-between gap-2 rounded-lg bg-[var(--color-surface-hover)] px-3 py-2 sm:justify-end"
-                  >
-                    <span
-                      class="text-xs text-[var(--color-text-secondary)]"
-                      >Total retenido</span
-                    >
-                    <span class="text-sm font-semibold text-text-primary">
-                      {{ formatCurrency(effectiveWithholding()) }}
-                    </span>
-                  </div>
-                </div>
+                <vendix-invoice-section-retenciones
+                  context="invoice"
+                  [rows]="withholdingControls()"
+                  [rowPaths]="retencionesRowPaths"
+                  [conceptOptions]="withholdingConceptOptions()"
+                  [roleOptions]="withholdingRoleOptions"
+                  [incompleteRowNumber]="incompleteWithholdingRow()"
+                  [rowAmounts]="retencionesRowAmounts()"
+                  [totalWithheld]="effectiveWithholding()"
+                  [formatCurrency]="formatCurrencyBound"
+                  emptyStateText="Sin retenciones. Agrega una si el documento las lleva."
+                  (addWithholding)="addWithholding()"
+                  (removeWithholding)="removeWithholding($event)"
+                  (conceptChange)="onWithholdingConceptChange($event)"
+                ></vendix-invoice-section-retenciones>
               }
             </vendix-invoice-form-section>
 
@@ -2312,135 +2004,42 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               [expanded]="isSectionOpen('divisa')"
               (expandedChange)="setSection('divisa', $event)"
             >
-              <div
-                class="rounded-lg border border-border bg-[var(--color-surface-secondary)] p-2 mb-3 flex items-start gap-2"
-              >
-                <app-icon
-                  name="info"
-                  [size]="14"
-                  class="text-primary shrink-0 mt-0.5"
-                />
-                <p class="text-xs text-text-primary">
-                  <strong>La factura se emite siempre en pesos colombianos.</strong>
-                  La divisa extranjera sólo DECLARA la conversión
-                  (<code>cac:PaymentAlternativeExchangeRate</code>) y no cambia
-                  el importe legal: el valor exigible sigue siendo el total en
-                  COP. Res. DIAN 000042/2020, art. 73.
-                </p>
-              </div>
-
-              <div class="mb-3">
-                <app-toggle
-                  formControlName="use_foreign_currency"
-                  label="Declarar la conversión a una divisa extranjera"
-                  ariaLabel="Declarar la conversión a una divisa extranjera"
-                />
-              </div>
-
-              @if (usesForeignCurrency()) {
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <app-selector
-                    label="Divisa"
-                    formControlName="foreign_currency"
-                    [options]="foreignCurrencyOptions"
-                    [errorText]="fieldError('foreign_currency') ?? ''"
-                    [required]="true"
-                    size="sm"
-                    (valueChange)="onExchangeRateInputsChanged()"
-                  ></app-selector>
-                  <app-input
-                    label="Tasa del día (COP por unidad)"
-                    type="number"
-                    formControlName="exchange_rate"
-                    [control]="control('exchange_rate')"
-                    [error]="fieldError('exchange_rate')"
-                    [required]="true"
-                    min="0"
-                    step="any"
-                    size="sm"
-                  ></app-input>
-                  <app-input
-                    label="Fecha de la TRM"
-                    type="date"
-                    formControlName="exchange_rate_date"
-                    [control]="control('exchange_rate_date')"
-                    [error]="fieldError('exchange_rate_date')"
-                    size="sm"
-                    (inputChange)="onExchangeRateInputsChanged()"
-                  ></app-input>
-                </div>
-
-                <!--
-                  Estado de la consulta a la TRM oficial. Se pinta SIEMPRE que
-                  haya divisa: el silencio sobre de donde salio la tasa es lo
-                  que hacia que un valor tecleado a ojo pareciera verificado.
-                -->
-                <div class="mt-2 min-h-[20px]">
-                  @if (loadingExchangeRate()) {
-                    <p
-                      class="flex items-center gap-1.5 text-[11px] text-[var(--color-text-secondary)]"
-                    >
-                      <app-icon name="loader" [size]="12" class="animate-spin" />
-                      Consultando la TRM oficial…
-                    </p>
-                  } @else if (exchangeRateQuote(); as quote) {
-                    @if (quote.rate) {
-                      <p
-                        class="flex flex-wrap items-center gap-1.5 text-[11px] text-success"
-                      >
-                        <app-icon name="check-circle" [size]="12" />
-                        TRM oficial del {{ quote.date }}:
-                        <span class="font-semibold">{{
-                          formatCurrency(+quote.rate)
-                        }}</span>
-                        @if (quote.trm) {
-                          <span class="text-[var(--color-text-secondary)]">
-                            (rige del {{ quote.trm.valid_from }} al
-                            {{ quote.trm.valid_to }})
-                          </span>
-                        }
-                        @if (exchangeRateOverridden()) {
-                          <button
-                            type="button"
-                            class="underline underline-offset-2 hover:no-underline"
-                            (click)="applyOfficialExchangeRate()"
-                          >
-                            Usar la oficial
-                          </button>
-                        }
-                      </p>
-                    } @else {
-                      <p
-                        class="flex items-start gap-1.5 text-[11px] text-warning"
-                      >
-                        <app-icon
-                          name="alert-circle"
-                          [size]="12"
-                          class="mt-0.5 shrink-0"
-                        />
-                        {{ exchangeRateUnavailableReason() }}
-                      </p>
-                    }
-                  }
-                </div>
-
-                <div
-                  class="mt-3 rounded-lg border border-border p-2 flex items-center justify-between"
-                >
-                  <span class="text-xs text-[var(--color-text-secondary)]">
-                    Equivalente declarado ({{ foreignCurrencyCode() }})
-                  </span>
-                  <span class="text-sm font-semibold text-text-primary">
-                    {{ foreignTotalLabel() }}
-                  </span>
-                </div>
-                @if (fieldError('foreign_total_amount'); as err) {
-                  <p class="mt-1 text-xs text-error">{{ err }}</p>
-                }
-              }
+              <vendix-invoice-section-divisa
+                context="invoice"
+                [form]="invoiceForm"
+                [paths]="divisaSectionPaths"
+                [currencyOptions]="foreignCurrencyOptions"
+                [errors]="divisaErrors()"
+                [usesForeignCurrency]="usesForeignCurrency()"
+                [exchangeRateLoading]="loadingExchangeRate()"
+                [exchangeRateQuote]="exchangeRateQuote()"
+                [exchangeRateOverridden]="exchangeRateOverridden()"
+                [exchangeRateUnavailableReason]="exchangeRateUnavailableReason()"
+                [foreignCurrencyCode]="foreignCurrencyCode()"
+                [foreignTotalLabel]="foreignTotalLabel()"
+                [formatCurrency]="formatCurrencyBound"
+                (exchangeRateInputsChanged)="onExchangeRateInputsChanged()"
+                (applyOfficialExchangeRate)="applyOfficialExchangeRate()"
+              ></vendix-invoice-section-divisa>
             </vendix-invoice-form-section>
 
-            <!-- ── CONTABILIDAD ──────────────────────────────────── -->
+            <!--
+              ── CONTABILIDAD ────────────────────────────────────
+              B.6 evaluó extraer esta sección a un componente compartido y
+              concluyó que NO hay campo en común que extraer: esta pantalla
+              fuerza una cuenta POR DEFECTO más un mapa de overrides POR
+              LÍNEA (porque una factura tiene líneas reales que contabilizar
+              hoy); el perfil (no-AIU) fuerza dos cuentas fijas por BUCKET
+              (porque un perfil no tiene líneas, sólo precarga el mapeo que
+              usará la próxima factura). Cero controles del mismo nombre o
+              forma entre las dos. Lo único genuinamente compartido —las
+              CINCO cuentas AIU— ya vive en «InvoiceSectionAiuComponent»
+              desde una fase anterior al plan, no es trabajo nuevo de B.6.
+              Envolver esto en un componente con dos plantillas habría sido
+              reubicar código, no eliminar duplicación (no hay duplicación
+              que eliminar). Ver el mismo razonamiento en el comentario
+              espejo de «invoice-profile-editor.component.ts».
+            -->
             <vendix-invoice-form-section
               title="Contabilidad"
               [help]="help('contabilidad')"
@@ -2478,6 +2077,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   variant="outline"
                   size="sm"
                   type="button"
+                  aria-label="Aplicar cuenta contable a todas las líneas"
                   (clicked)="applyDefaultAccountCode()"
                 >
                   Aplicar a todas
@@ -2519,6 +2119,51 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               }
             </vendix-invoice-form-section>
           </form>
+
+          <!-- ── FORMATO DE IMPRESIÓN (B.7/E.1) ─────────────────
+               Fuera del «form» a propósito, igual que la sección
+               Previsualización del editor de perfiles: el selector escribe en
+               su FormGroup local y no enlaza ningún control del payload
+               fiscal. La precedencia real (perfil congelado → tienda →
+               sistema) viaja como etiqueta, no como suposición. -->
+          <vendix-invoice-form-section
+            title="Formato de impresión"
+            [help]="help('formato')"
+            icon="printer"
+            [optional]="true"
+            [summary]="formatoSummary()"
+            [expanded]="formatoSectionOpen()"
+            (expandedChange)="formatoSectionOpen.set($event)"
+          >
+            <vendix-invoice-section-formato
+              context="invoice"
+              [form]="printFormatForm"
+              [paths]="formatoSectionPaths"
+              [templateOptions]="printTemplateOptions()"
+              [libraryFailed]="printLibraryFailed()"
+              [effectivePrintLabel]="effectivePrintLabel()"
+              [storeTemplateSaving]="storeTemplateSaving()"
+              (templateSelectionChange)="onStoreTemplateSelected($event)"
+            ></vendix-invoice-section-formato>
+          </vendix-invoice-form-section>
+
+          <!-- ── NOTAS INTERNAS ────────────────────────────────── -->
+          <!-- B.7: misma sustitución — el par Descripción/Nota
+               interna vive ahora en el componente compartido. -->
+          <vendix-invoice-form-section
+            title="Notas internas"
+            [help]="help('notas_internas')"
+            icon="sticky-note"
+            [optional]="true"
+            [expanded]="isSectionOpen('notas_internas')"
+            (expandedChange)="setSection('notas_internas', $event)"
+          >
+            <vendix-invoice-section-notas
+              context="invoice"
+              [form]="invoiceForm"
+              [paths]="notasSectionPaths"
+            ></vendix-invoice-section-notas>
+          </vendix-invoice-form-section>
 
           <!-- Totales: siempre visibles, nunca dentro de una sección plegada -->
           <div
@@ -2691,6 +2336,139 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
       (confirm)="confirmProfileApply()"
       (cancel)="cancelProfileApply()"
     />
+
+    <!--
+      «VER COMO SALDRÁ» ANTES DE EMITIR (E.2 — paso 6 del plan de cierre).
+
+      La previsualización muestra el XML que la factura produciría y las reglas
+      del Anexo Técnico evaluadas sobre él, no el formato de impresión. El
+      acoplamiento entre datos y formato vive en el editor de plantillas (FB-29
+      tiene su propio botón de previsualización con un documento de muestra);
+      acá lo que se valida es el CONTENIDO —la base gravable segregada, la nota
+      CAV03, las identidades de totales, los códigos de tributo— porque es lo
+      que decide si la DIAN acepta o rechaza.
+
+      No descarga nada, no persiste nada y NO toma consecutivo
+      ('PreviewNumberingGuard' lo protege). El número visible es «PREVIEW». El
+      cuerpo del POST es el de la factura tal como está en el formulario: líneas
+      capturadas, adquiriente, base AIU, componentes, objeto del contrato. Si
+      el perfil está fijado, el preview refleja el snapshot VIVO del perfil
+      ('current_config'); si no, refleja el snapshot MANUAL del formulario.
+    -->
+    <app-modal
+      [isOpen]="printPreviewOpen()"
+      (isOpenChange)="closePrintPreview($event)"
+      title="Ver como saldrá"
+      [subtitle]="
+        'Previsualización del XML — ' +
+        (printPreviewProfileId() !== null
+          ? 'perfil #' + printPreviewProfileId()
+          : 'modo manual')
+      "
+      size="xl"
+      [fullScreenOnMobile]="true"
+    >
+      <app-alert-banner
+        variant="warning"
+        icon="alert-triangle"
+        tone="token"
+        class="mb-3 block"
+      >
+        <strong>Número de muestra.</strong> Esta previsualización no emite la
+        factura ni toma consecutivo: usa el marcador «PREVIEW». Lo que SÍ
+        refleja es lo que acabas de capturar — líneas, adquiriente, base AIU.
+      </app-alert-banner>
+
+      @if (printPreviewLoading()) {
+        <div class="flex items-center justify-center gap-2 py-10">
+          <app-icon name="loader" [size]="18" class="animate-spin"></app-icon>
+          <span class="text-sm text-[var(--color-text-secondary)]">
+            Generando la previsualización…
+          </span>
+        </div>
+      } @else if (printPreviewError(); as previewError) {
+        <p class="py-6 text-center text-sm text-error">{{ previewError }}</p>
+      } @else if (printPreviewResult(); as result) {
+        <!--
+          Reglas del anexo evaluadas sobre el XML. Salen ANTES del XML para
+          que el operador lea el veredicto (FAU04, FAX01, AIU-piso) y no
+          tenga que abrirlo para saber si puede emitir.
+        -->
+        <div
+          class="mb-3 max-h-[180px] overflow-auto rounded-lg border border-border bg-surface-secondary p-2 text-xs"
+          role="region"
+          aria-label="Reglas del Anexo Técnico evaluadas"
+        >
+          <p class="mb-1 text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+            Reglas del anexo ({{ result.validations.length }})
+          </p>
+          <ul class="space-y-1">
+            @for (rule of result.validations; track rule.rule) {
+              <li class="flex items-start gap-2">
+                <app-icon
+                  [name]="rule.passed ? 'check-circle' : (rule.severity === 'blocker' ? 'x-circle' : 'alert-circle')"
+                  [size]="12"
+                  class="shrink-0 mt-0.5"
+                  [class.text-success]="rule.passed"
+                  [class.text-error]="!rule.passed && rule.severity === 'blocker'"
+                  [class.text-warning]="!rule.passed && rule.severity !== 'blocker'"
+                ></app-icon>
+                <span class="flex-1 min-w-0">
+                  <strong class="font-mono">{{ rule.rule }}</strong>
+                  <span class="text-text-secondary"> — {{ rule.message }}</span>
+                </span>
+              </li>
+            }
+          </ul>
+        </div>
+
+        <!--
+          Totales del XML proyectado. Sirven de puente entre las reglas
+          (veredicto) y el XML (evidencia): ver las cifras evita tener que
+          parsear el documento a ojo.
+        -->
+        <div
+          class="mb-3 grid grid-cols-2 gap-2 rounded-lg border border-border bg-surface-secondary p-2 text-[11px] sm:grid-cols-5"
+          role="region"
+          aria-label="Totales del XML"
+        >
+          <div>
+            <p class="text-text-secondary">Valor del contrato</p>
+            <p class="font-mono font-semibold">{{ result.breakdown.totals.line_extension_amount }}</p>
+          </div>
+          <div>
+            <p class="text-text-secondary">Base gravable</p>
+            <p class="font-mono font-semibold">{{ result.breakdown.totals.tax_exclusive_amount }}</p>
+          </div>
+          <div>
+            <p class="text-text-secondary">Tributos</p>
+            <p class="font-mono font-semibold">{{ result.breakdown.totals.tax_amount }}</p>
+          </div>
+          <div>
+            <p class="text-text-secondary">Total con tributos</p>
+            <p class="font-mono font-semibold">{{ result.breakdown.totals.tax_inclusive_amount }}</p>
+          </div>
+          <div>
+            <p class="text-text-secondary">A pagar</p>
+            <p class="font-mono font-semibold">{{ result.breakdown.totals.payable_amount }}</p>
+          </div>
+        </div>
+
+        <!--
+          XML crudo. Se pinta en monoespaciado y con scroll horizontal porque
+          el Anexo exige líneas largas; envolverlas deformaría la jerarquía.
+        -->
+        <pre
+          class="max-h-[420px] overflow-auto rounded-lg border border-border bg-slate-950 p-3 text-[11px] leading-tight text-slate-100"
+          role="region"
+          aria-label="XML proyectado"
+        ><code>{{ result.xml }}</code></pre>
+
+        <p class="mt-2 text-right text-[11px] text-[var(--color-text-secondary)]">
+          El XML viaja siempre igual a la DIAN; el formato de impresión se previsualiza en su editor.
+        </p>
+      }
+    </app-modal>
   `,
 })
 export class InvoiceCreatePageComponent implements OnInit {
@@ -2709,6 +2487,7 @@ export class InvoiceCreatePageComponent implements OnInit {
   private readonly exchangeRateService = inject(ExchangeRateService);
   private readonly emitReadinessService = inject(InvoiceEmitReadinessService);
   private readonly profileService = inject(InvoiceProfileService);
+  private readonly printGateway = inject(PrintGatewayClientService);
 
   // ── Catálogos estáticos ─────────────────────────────────────
   readonly invoiceTypeOptions = INVOICE_TYPE_OPTIONS;
@@ -2725,6 +2504,15 @@ export class InvoiceCreatePageComponent implements OnInit {
    * maneras en dos pantallas acaba contradiciéndose.
    */
   readonly help = invoiceHelp;
+
+  /**
+   * F.3: tope de `description` por LÍNEA de factura — FAZ02 (`1-300`), el
+   * mismo que ya aplica `CreateFacturaInvoiceItemDto` en el backend. No es
+   * el mismo tope que el de una nota crédito/débito (500): esa cota vive en
+   * `credit-note-create.component.ts`/`invoice-note-create.component.ts`,
+   * que no comparten esta sección.
+   */
+  readonly itemDescriptionLimit = CONFIG_LIMITS.line_description;
 
   readonly foreignCurrencyOptions = FOREIGN_CURRENCY_OPTIONS;
   readonly fiscalResponsibilities = FISCAL_RESPONSIBILITIES;
@@ -2818,7 +2606,9 @@ export class InvoiceCreatePageComponent implements OnInit {
      * nunca creó uno.
      */
     profile_id: [PROFILE_NONE],
-    notes: [''],
+    // F.3: 500 es FAD13 (`/Invoice/cbc:Note`, `E A 1-500`) — el mismo tope que
+    // `CreateInvoiceDto.notes` en el backend (create-invoice.dto.ts:1101).
+    notes: ['', Validators.maxLength(CONFIG_LIMITS.header_note)],
 
     // AIU. Vacío ⇒ hereda el objeto del contrato de la tienda. Es un campo por
     // documento y no sólo de configuración porque una constructora factura
@@ -2871,6 +2661,11 @@ export class InvoiceCreatePageComponent implements OnInit {
       revenue_imprevistos: [''],
       revenue_utilidad: [''],
       vat_payable_account: [''],
+      // Modelo de contabilización. `'sumada'` por omisión: es el ÚNICO
+      // habilitado (`ENABLED_ACCOUNTING_MODELS`) y lo que el calculador hace
+      // por construcción, así que un documento que abre con este valor no
+      // cambia de comportamiento ni nace `dirty`. C.6.
+      accounting_model: ['sumada' as AccountingModel],
     }),
 
     /**
@@ -2887,11 +2682,29 @@ export class InvoiceCreatePageComponent implements OnInit {
     customer_document_type: [DOCUMENT_TYPE_NIT_CODE],
     customer_tax_id: [''],
     customer_verification_digit: [''],
+    /**
+     * A.8 — tipo de persona del adquiriente NIT. Sólo se PINTA con NIT
+     * (una cédula ES una persona natural, no hay nada que elegir) y el
+     * payload lo fija a `'NATURAL'` por su cuenta cuando el documento no es
+     * NIT. Los valores son los de `CreateCustomerDto.person_type`, porque su
+     * único consumidor real hoy es el `inline_customer` que materializa la
+     * fila del cliente al emitir.
+     */
+    customer_person_type: ['JURIDICA' as 'NATURAL' | 'JURIDICA'],
     customer_tax_regime: [''],
     customer_fiscal_responsibilities: [[] as string[]],
     customer_email: ['', [Validators.email]],
     customer_phone: [''],
     customer_address: [''],
+    /**
+     * A.8 — municipio DANE del adquiriente (Divipola). El control guarda el
+     * CÓDIGO de 5 dígitos vía CVA (`app-dian-municipality-select`) y el
+     * nombre legible viaja aparte para `city_name`; `buildPayload` los sube
+     * dentro de `customer_address` estructurada. Sin este código la DIAN
+     * rechaza el `cbc:ID` de `cac:CityName` DESPUÉS de consumir consecutivo.
+     */
+    customer_municipality_code: [''],
+    customer_city_name: [''],
 
     // Retenciones (los tres primeros son SÓLO UI)
     manual_withholding: [false],
@@ -3050,6 +2863,77 @@ export class InvoiceCreatePageComponent implements OnInit {
   readonly isNitCustomer = computed(
     () => this.rawValue()['customer_document_type'] === DOCUMENT_TYPE_NIT_CODE,
   );
+
+  /**
+   * Número del documento del adquiriente SIN el DV pegado.
+   *
+   * Igual criterio que el checkout: `900123456-8` ya trae el DV, y quitar
+   * todo lo no numérico sin recortar el sufijo daría un «NIT» de diez dígitos
+   * que no es de nadie. Es la base de la que se deriva todo lo demás abajo.
+   */
+  readonly customerTaxIdBase = computed(() => {
+    const rawTaxId = String(this.rawValue()['customer_tax_id'] ?? '').trim();
+    const head = rawTaxId.includes('-') ? rawTaxId.split('-')[0] : rawTaxId;
+    return head.replace(/\D/g, '');
+  });
+
+  /**
+   * A.8 — DV calculado en vivo con el MÓDULO 11 de la DIAN.
+   *
+   * Misma util compartida que consume el checkout (`shared/utils/nit.util`):
+   * nunca se digita, porque un checksum tecleado sólo puede coincidir con el
+   * NIT o estar mal — y estar mal es un rechazo DIAN con consecutivo ya
+   * quemado. Vacío si el documento no es NIT (no hay nada que mostrar ni que
+   * enviar).
+   */
+  readonly computedCustomerDv = computed(() => {
+    if (!this.isNitCustomer()) return '';
+    return computeNitDv(this.customerTaxIdBase()) ?? '';
+  });
+
+  /** Label dinámico: empresa ⇒ razón social; cédula/pasaporte ⇒ nombre. */
+  readonly customerNameLabel = computed(() =>
+    this.isNitCustomer() ? 'Razón social' : 'Nombre completo',
+  );
+
+  readonly customerNamePlaceholder = computed(() =>
+    this.isNitCustomer()
+      ? 'Nombre de la empresa registrado ante la DIAN'
+      : 'Nombre y apellido (ej. Keilin Luz Sierra Toro)',
+  );
+
+  readonly customerTaxIdPlaceholder = computed(() =>
+    this.isNitCustomer() ? '900123456' : '1118860902',
+  );
+
+  /**
+   * A.8 — opciones del tipo de persona. Valores del contrato
+   * `CreateCustomerDto.person_type`; etiquetas según la tabla del dueño.
+   */
+  readonly customerPersonTypeOptions: SelectorOption[] = [
+    { value: 'JURIDICA', label: 'Persona Jurídica' },
+    { value: 'NATURAL', label: 'Persona Natural' },
+  ];
+
+  /**
+   * A.8 — el código DANE es obligatorio cuando hay dirección fiscal.
+   *
+   * No es `Validators.required` del control porque la regla NO es «siempre»:
+   * una venta a consumidor final no declara dirección, y una exportación es
+   * justo el caso donde un catálogo colombiano sobra. Con dirección escrita
+   * y municipio ausente se avisa junto al campo Y en los bloqueadores, antes
+   * de que el rechazo lo descubra con el consecutivo ya consumido.
+   */
+  readonly customerMunicipalityError = computed<string>(() => {
+    if (this.isExportInvoice()) return '';
+    const raw = this.rawValue();
+    const addressLine = String(raw['customer_address'] ?? '').trim();
+    const cityCode = String(raw['customer_municipality_code'] ?? '').trim();
+    if (addressLine && !cityCode) {
+      return 'Con dirección fiscal hace falta el municipio DANE: búscalo por nombre y selecciónalo.';
+    }
+    return '';
+  });
 
   readonly isManualWithholding = computed(
     () => this.rawValue()['manual_withholding'] === true,
@@ -4017,7 +3901,309 @@ export class InvoiceCreatePageComponent implements OnInit {
       costo: 'default_account_code',
     },
     vat_payable_account: 'aiu.vat_payable_account',
+    // C.6: el control ya existe en el grupo `aiu` de arriba; esta ruta es lo
+    // que le faltaba para que la sección compartida deje de pintar los dos
+    // `div` estáticos y pinte un radio real.
+    accounting_model: 'aiu.accounting_model',
   };
+
+  // ── La sección Documento compartida (B.2) ───────────────────
+  //
+  // El formulario de la factura es PLANO: `invoice_type`, `payment_form`,
+  // `payment_means_code`, `issue_date`, `due_date`, `notes` viven en la raíz.
+  // El perfil los anida bajo `dian`. Ver el docblock de
+  // `invoice-section-documento.component.ts` y el ADR-2 del plan.
+  readonly documentoSectionPaths: DocumentoSectionPaths = {
+    invoice_type: 'invoice_type',
+    payment_form: 'payment_form',
+    payment_means_code: 'payment_means_code',
+    issue_date: 'issue_date',
+    due_date: 'due_date',
+    notes: 'notes',
+    header_notes: null,
+  };
+
+  // ── La sección Notas internas compartida (B.7) ─────────────────
+  //
+  // En la factura los controles son `null`: el DTO de creación no declara
+  // `internal_note` ni `description`, así que el componente compartido pinta
+  // el párrafo informativo en lugar de los campos. Ver el docblock de
+  // `invoice-section-notas.component.ts`.
+  readonly notasSectionPaths: NotasSectionPaths = {
+    description: null,
+    internal_note: null,
+  };
+
+  /**
+   * Los avisos de resolución, ya resueltos como lista para el componente
+   * compartido. La LÓGICA de cuándo aparece cada uno sigue siendo de esta
+   * página —depende del perfil activo, el catálogo de resoluciones y el
+   * estado de habilitación DIAN—; el componente sólo pinta el `app-alert-banner`
+   * por entrada, en vez de que cada aviso repita su propio marcado.
+   */
+  readonly documentoNotices = computed<readonly DocumentoSectionNotice[]>(() => {
+    const notices: DocumentoSectionNotice[] = [];
+    const profileNotice = this.profileResolutionNotice();
+    if (profileNotice) notices.push({ variant: 'warning', text: profileNotice });
+    const emptyReason = this.resolutionEmptyReason();
+    if (emptyReason) notices.push({ variant: 'danger', text: emptyReason });
+    const habilitation = this.habilitationWarning();
+    if (habilitation) notices.push({ variant: 'danger', text: habilitation });
+    const technicalKey = this.technicalKeyWarning();
+    if (technicalKey) notices.push({ variant: 'warning', text: technicalKey });
+    const notesOverflow = this.notesOverflowWarning();
+    if (notesOverflow) notices.push({ variant: 'danger', text: notesOverflow });
+    return notices;
+  });
+
+  /**
+   * Defecto 3 (orquestador, 2026-08-25): `applyProfilePrefill` une las
+   * `header_notes` del perfil con `\n` sin medir la unión. Cada nota mide
+   * hasta 500 (`CONFIG_LIMITS.header_note`) y puede haber hasta 10
+   * (`CONFIG_LIMITS.header_notes_count`) — un perfil perfectamente válido
+   * puede producir una unión mucho más larga que el tope real de `notes` en
+   * ESTE documento (500, FAD13). Sin este aviso, quien nunca escribió una
+   * nota ve un 400 que no puede explicarse.
+   *
+   * Se avisa, no se recorta: recortar en silencio es exactamente el defecto
+   * que este mismo encargo corrigió en `buildNoteText` — perder texto sin que
+   * nadie lo note es peor que un formulario inválido que dice por qué.
+   */
+  readonly notesOverflowWarning = computed<string | null>(() => {
+    const notes = String(this.rawValue()['notes'] ?? '');
+    const max = CONFIG_LIMITS.header_note;
+    if (notes.length <= max) return null;
+    return `Las notas de cabecera precargadas de este perfil miden ${notes.length} caracteres; el máximo que admite la factura es ${max} (Anexo Técnico DIAN 1.9, regla FAD13). Recórtalas en el campo Notas antes de emitir, o la DIAN rechaza el documento después de tomar consecutivo.`;
+  });
+
+  /** Errores de campo ya resueltos, para el componente compartido. */
+  readonly documentoErrors = computed<DocumentoSectionErrors>(() => ({
+    resolution: this.fieldError('resolution_id'),
+    invoice_type: this.fieldError('invoice_type'),
+    issue_date: this.fieldError('issue_date'),
+    payment_form: this.fieldError('payment_form'),
+    payment_means_code: this.fieldError('payment_means_code'),
+    due_date: this.dueDateError(),
+    notes: this.fieldError('notes'),
+  }));
+
+  /**
+   * SECCIÓN LÍNEAS COMPARTIDA (B.3). `aiu_field` apunta a `aiu_component`
+   * —así se llama el control en esta pantalla (ADR-2: el nombre que
+   * sobrevive es el del DTO de cada destino)—; el editor de perfiles apunta
+   * el mismo campo canónico a `bucket`, su propio nombre.
+   */
+  readonly lineasRowPaths: LineasRowPaths = {
+    description: 'description',
+    quantity: 'quantity',
+    unit_code: 'unit_code',
+    unit_price: 'unit_price',
+    discount_amount: 'discount_amount',
+    aiu_field: 'aiu_component',
+    taxes: 'taxes',
+  };
+
+  /** Un objeto de errores por línea, en el vocabulario del componente. */
+  readonly lineasRowErrors = computed<readonly LineasRowErrors[]>(() =>
+    this.itemControls().map((_, i) => ({
+      description: this.itemError(i, 'description'),
+      quantity: this.itemError(i, 'quantity'),
+      unit_code: this.itemError(i, 'unit_code'),
+      unit_price: this.itemError(i, 'unit_price'),
+      discount_amount: this.itemError(i, 'discount_amount'),
+      aiu_field: this.itemError(i, 'aiu_component'),
+    })),
+  );
+
+  /** El total de línea que se pinta cuando la línea NO lleva AIU. */
+  readonly lineasRowSummaries = computed<readonly string[]>(() =>
+    this.itemControls().map((_, i) => this.lineSummary(i)),
+  );
+
+  /**
+   * Envoltorios de `lineCarriesAiu`/`toggleLineAiu` con la firma que espera
+   * el componente compartido —`(row, index[, on])`—: esta pantalla identifica
+   * la línea por su CONTROL, no por su índice, así que el índice se ignora.
+   * Son campos de flecha, no métodos, para que `this` quede fijo sin
+   * `.bind()` en la plantilla.
+   */
+  readonly lineCarriesAiuBound = (row: AbstractControl, _index: number): boolean =>
+    this.lineCarriesAiu(row);
+  readonly toggleLineAiuBound = (
+    row: AbstractControl,
+    _index: number,
+    on: boolean,
+  ): void => this.toggleLineAiu(row, on);
+
+  /**
+   * Envoltorio de `formatCurrency` para `vendix-invoice-section-impuestos`
+   * (B.4): el método usa `this.currencyService`, así que pasarlo desnudo
+   * como referencia perdería el `this` al invocarse dentro del componente
+   * compartido. Mismo criterio que los envoltorios de arriba.
+   */
+  readonly formatCurrencyBound = (value: number): string =>
+    this.formatCurrency(value);
+
+  /** Mapa de rutas de «Retenciones» (B.5): la factura sí guarda `base`. */
+  readonly retencionesRowPaths: RetencionesRowPaths = {
+    concept_id: 'concept_id',
+    role: 'role',
+    rate: 'rate',
+    base: 'base',
+  };
+
+  /** «Retenido» por fila, ya calculado — la sección compartida sólo lo pinta. */
+  readonly retencionesRowAmounts = computed<readonly number[]>(() =>
+    this.withholdingControls().map((_, i) => this.withholdingRowAmount(i)),
+  );
+
+  /** Mapa de rutas de «Divisa» (B.6): la factura sí guarda tasa y fecha. */
+  readonly divisaSectionPaths: DivisaSectionPaths = {
+    declare_foreign: 'use_foreign_currency',
+    currency_code: 'foreign_currency',
+    exchange_rate: 'exchange_rate',
+    exchange_rate_date: 'exchange_rate_date',
+  };
+
+  readonly divisaErrors = computed(() => ({
+    currency_code: this.fieldError('foreign_currency'),
+    exchange_rate: this.fieldError('exchange_rate'),
+    exchange_rate_date: this.fieldError('exchange_rate_date'),
+    foreign_total_amount: this.fieldError('foreign_total_amount'),
+  }));
+
+  // ── Formato de impresión y «Ver como saldrá» (B.7 / E.1 / E.2) ──
+
+  /**
+   * Formulario LOCAL del selector de plantilla. NO vive en `invoiceForm` a
+   * propósito: `CreateInvoiceDto` no declara `template_id`, y con
+   * «forbidNonWhitelisted» activo un campo extra del formulario raíz sería un
+   * campo esperando equivocarse y colarse al payload. Un FormGroup propio lo
+   * vuelve estructuralmente imposible.
+   */
+  readonly printFormatForm = this.fb.group({ template_id: [''] });
+
+  /** Rutas del componente compartido: sólo el selector existe en la factura. */
+  readonly formatoSectionPaths: FormatoSectionPaths = {
+    template_id: 'template_id',
+    template_key: null,
+    show_aiu_breakdown: null,
+    display_decimals: null,
+  };
+
+  /**
+   * Estado plegable PROPIO de la sección. No entra en `openSections` porque
+   * ese registro se deriva del orden canónico (`invoice-section-order.ts`),
+   * donde «formato» sigue clasificado como sección de perfil hasta que el
+   * espejo la suba formalmente a las dos pantallas.
+   */
+  readonly formatoSectionOpen = signal(false);
+
+  /** Biblioteca de plantillas de la ORGANIZACIÓN (FB-31). */
+  readonly printTemplates = signal<
+    { id: number; name: string; is_system: boolean }[]
+  >([]);
+  readonly printLibraryFailed = signal(false);
+
+  /** Config activa de la TIENDA para el formato fiscal (GET /:formatType). */
+  private readonly storeFormatDetail = signal<StorePrintFormatDetail | null>(
+    null,
+  );
+  readonly storeTemplateSaving = signal(false);
+
+  readonly printTemplateOptions = computed(() => [
+    { value: '', label: 'Plantilla activa de la tienda' },
+    ...this.printTemplates().map((t) => ({
+      value: String(t.id),
+      label: t.is_system ? `${t.name} (del sistema)` : t.name,
+    })),
+  ]);
+
+  /** Plantilla que congeló el perfil elegido, si opina sobre el diseño. */
+  private readonly profileTemplateId = computed<number | null>(() => {
+    const id = this.profileConfig()?.format?.template_id;
+    return typeof id === 'number' && Number.isInteger(id) && id > 0 ? id : null;
+  });
+
+  /**
+   * La PRECEDENCIA REAL del gateway al imprimir (`resolveProfileTemplateId`):
+   * plantilla congelada por el perfil → plantilla activa de la tienda →
+   * defecto del sistema. El selector y su etiqueta se precargan de aquí.
+   */
+  private readonly effectiveTemplateId = computed<number | null>(
+    () =>
+      this.profileTemplateId() ??
+      this.storeFormatDetail()?.template_id ??
+      null,
+  );
+
+  readonly effectivePrintLabel = computed<string>(() => {
+    const nameFor = (id: number): string => {
+      const found = this.printTemplates().find((template) => template.id === id);
+      return found ? `«${found.name}»` : `#${id}`;
+    };
+    const fromProfile = this.profileTemplateId();
+    if (fromProfile !== null) {
+      const profileName = this.selectedProfile()?.name ?? 'perfil';
+      return `la plantilla ${nameFor(fromProfile)}, congelada por el perfil «${profileName}»`;
+    }
+    const store = this.storeFormatDetail();
+    const fromStore = store?.template_id ?? null;
+    if (fromStore !== null) {
+      return store?.template_name
+        ? `«${store.template_name}» (plantilla activa de la tienda)`
+        : `la plantilla ${nameFor(fromStore)} (activa de la tienda)`;
+    }
+    return 'el defecto del sistema';
+  });
+
+  readonly formatoSummary = computed(() => this.effectivePrintLabel());
+
+  /**
+   * Precarga del selector. Corre como efecto para que cambiar el perfil (o la
+   * config de tienda) reprecargue el valor; se detiene ante lo escrito a mano
+   * (`dirty`), igual que la semilla del resto del formulario.
+   */
+  private readonly syncPrintTemplateControl = effect(() => {
+    const id = this.effectiveTemplateId();
+    const control = this.printFormatForm.get('template_id');
+    if (!control || control.dirty) return;
+    control.setValue(id == null ? '' : String(id), { emitEvent: false });
+  });
+
+  // ── «Ver como saldrá» antes de emitir (E.2) ─────────────────
+
+  readonly printPreviewOpen = signal(false);
+  readonly printPreviewLoading = signal(false);
+  readonly printPreviewHtml = signal('');
+  readonly printPreviewWidthMm = signal(0);
+  readonly printPreviewIsRoll = signal(false);
+  readonly printPreviewError = signal('');
+  /** Resultado del preview con cuerpo, en lugar del HTML del formato. */
+  readonly printPreviewResult = signal<ProfilePreviewResult | null>(null);
+  /** `profile_id` con el que se pidió el preview (o `null` si modo manual). */
+  readonly printPreviewProfileId = signal<number | null>(null);
+
+  /**
+   * Marcador que ve el iframe mientras llega el HTML. Vive como campo y no en
+   * el binding: los literales de plantilla no admiten escapar la comilla que
+   * abriría otro string dentro de la expresión.
+   */
+  private readonly printPreviewPlaceholder =
+    '<div style="font-family:sans-serif;padding:24px;color:#888;text-align:center;">Generando vista previa…</div>';
+
+  readonly printPreviewSrcdoc = computed(
+    () => this.printPreviewHtml() || this.printPreviewPlaceholder,
+  );
+
+  /** Ancho del papel renderizado: rollo a escala real, hoja fija. */
+  readonly printPreviewPaperWidth = computed(() => {
+    if (this.printPreviewIsRoll()) {
+      const mm = this.printPreviewWidthMm();
+      return `${Math.max(mm * 3.78, 300)}px`;
+    }
+    return '600px';
+  });
 
   /**
    * LO QUE ESTE DOCUMENTO NO PUEDE LLEVAR — medido, no supuesto.
@@ -4210,6 +4396,11 @@ export class InvoiceCreatePageComponent implements OnInit {
     };
 
     put('components_basis', resolveAiuComponentsBasis(aiu));
+    // D.7 — el radio de modelo nace con lo que el perfil congeló, no siempre
+    // en «sumada»: `resolveAccountingModel` es el único punto de lectura y
+    // devuelve `'sumada'` cuando el perfil no opina (perfiles anteriores al
+    // campo), así que ningún snapshot viejo cambia de comportamiento al leerse.
+    put('accounting_model', resolveAccountingModel(aiu));
     for (const component of AIU_COMPONENTS) {
       put(component, aiu.components?.[component] ?? '');
     }
@@ -4235,10 +4426,11 @@ export class InvoiceCreatePageComponent implements OnInit {
     for (const rule of reprojectAiuTaxRules(config.taxes?.rules ?? [], basis)) {
       this.aiuTaxesArray.push(
         this.fb.group({
-          bucket: [rule.bucket],
+          bucket: [rule.bucket ?? 'administracion'],
           taxable: [rule.taxable],
           tax_code: [rule.tax_code],
           rate: [rule.rate],
+          taxable_basis: [rule.taxable_basis ?? basis],
         }),
       );
     }
@@ -5075,6 +5267,14 @@ export class InvoiceCreatePageComponent implements OnInit {
       icon: 'x',
     },
     {
+      id: 'preview',
+      label: 'Ver como saldrá',
+      variant: 'outline',
+      icon: 'eye',
+      title:
+        'Previsualización del formato de impresión: no emite ni toma consecutivo.',
+    },
+    {
       id: 'save',
       label:
         this.mode() === 'from_order' ? 'Crear desde pedido' : 'Crear factura',
@@ -5179,6 +5379,10 @@ export class InvoiceCreatePageComponent implements OnInit {
   // ── Ciclo de vida de la página ──────────────────────────────
 
   ngOnInit(): void {
+    // E.1 — biblioteca de la organización y config activa de la tienda para
+    // la sección Formato. Lecturas de otro dominio, pedidas una sola vez.
+    this.loadPrintFormats();
+
     // LAS RESOLUCIONES SE PIDEN AQUÍ. En el modal las traía el contenedor del
     // listado, que vive bajo el shell del módulo; esta vista cuelga FUERA de ese
     // shell, así que nadie más las despacha y el selector llegaría vacío — con
@@ -5956,9 +6160,9 @@ export class InvoiceCreatePageComponent implements OnInit {
     return (item.get('row_uid')?.value as string) ?? '';
   }
 
-  withholdingUid(row: AbstractControl): string {
-    return (row.get('row_uid')?.value as string) ?? '';
-  }
+  // `withholdingUid` se retiró (B.5): `vendix-invoice-section-retenciones`
+  // rastrea cada fila por identidad de control (`track row`), no por su
+  // `row_uid`, mismo criterio que «Líneas» (B.3).
 
   /** El control de cuenta de una línea, para enlazarlo fuera de `items`. */
   accountControl(item: AbstractControl): FormControl {
@@ -6010,24 +6214,6 @@ export class InvoiceCreatePageComponent implements OnInit {
     return undefined;
   }
 
-  /**
-   * Igual que `dueDateError()`: el backend también lo rechaza, pero decirlo
-   * junto al campo evita el viaje y, sobre todo, evita que el usuario lo
-   * descubra cuando la DIAN ya se comió el consecutivo.
-   */
-  verificationDigitError(): string | undefined {
-    const backend = this.fieldError('customer_verification_digit');
-    if (backend) return backend;
-    if (!this.isNitCustomer()) return undefined;
-    const raw = this.rawValue();
-    const taxId = String(raw['customer_tax_id'] ?? '')
-      .trim()
-      .split('-')[0];
-    const dv = String(raw['customer_verification_digit'] ?? '').trim();
-    if (!taxId || !dv || isValidNitDv(taxId, dv)) return undefined;
-    return `No corresponde al NIT ${taxId} (debería ser ${computeNitDv(taxId)})`;
-  }
-
   dueDateHelp(): string {
     return this.isCredit()
       ? 'Obligatorio en venta a crédito.'
@@ -6062,10 +6248,9 @@ export class InvoiceCreatePageComponent implements OnInit {
       : 'bg-[var(--color-surface)] text-text-primary border-border';
   }
 
-  productLabel(item: AbstractControl): string {
-    const name = item.get('product_name')?.value as string;
-    return name || 'Vincular producto';
-  }
+  // `productLabel` se retiró de aquí: ahora vive DENTRO de
+  // `InvoiceSectionLineasComponent` (B.3), que lee `product_name` de la
+  // misma fila sin necesitar esta página como intermediaria.
 
   lineLabel(index: number): string {
     const item = this.itemsValue()[index];
@@ -6194,6 +6379,7 @@ export class InvoiceCreatePageComponent implements OnInit {
       taxes: [[] as TaxSelection[]],
       account_code: [''],
       aiu_component: [''],
+      price_unit_quantity: [null as number | null],
     });
     this.itemsArray.push(group);
     return group;
@@ -6344,11 +6530,28 @@ export class InvoiceCreatePageComponent implements OnInit {
             .filter(Boolean)
             .join(', ')
         : '',
+      // A.8 — el código DANE guardado en la dirección primaria del cliente
+      // hidrata el buscador (el componente resuelve el chip por su cuenta);
+      // si el cliente no lo tiene, queda vacío y la regla de bloqueo avisa.
+      customer_municipality_code: address?.municipality_code ?? '',
+      customer_city_name: address?.city ?? '',
     });
     this.inlineCustomer.set(null);
     this.linkedCustomerLabel.set(this.customerDisplayName(customer));
     this.customerResults.set([]);
     this.customerQuery.set('');
+  }
+
+  /**
+   * A.8 — el buscador DANE publica el municipio completo; el control ya quedó
+   * escrito por el CVA con el código, aquí se conserva el nombre legible para
+   * `city_name` del XML. Se escribe SIN silenciar eventos: `rawValue` deriva
+   * de `valueChanges`, y un patch mudo dejaría el payload con nombres viejos.
+   */
+  onCustomerMunicipality(municipality: DianMunicipalityOption | null): void {
+    this.invoiceForm.patchValue({
+      customer_city_name: municipality?.name ?? '',
+    });
   }
 
   unlinkCustomer(): void {
@@ -6446,6 +6649,10 @@ export class InvoiceCreatePageComponent implements OnInit {
     if (!Number(group.get('unit_price')?.value)) {
       patch['unit_price'] = product.basePrice;
     }
+    // D.10: la escala viaja del catálogo a la fila para que la previsión
+    // divida igual que el servidor. Se repisa en cada elección: cambiar de
+    // producto sobre la misma fila cambia la escala, no la hereda.
+    patch['price_unit_quantity'] = product.priceUnitQuantity ?? null;
     group.patchValue(patch);
   }
 
@@ -6489,6 +6696,7 @@ export class InvoiceCreatePageComponent implements OnInit {
       taxes: Array.isArray(value.taxes) ? [...value.taxes] : [],
       account_code: value.account_code ?? '',
       aiu_component: value.aiu_component ?? '',
+      price_unit_quantity: (value as InvoiceItemFormValue).price_unit_quantity ?? null,
     });
     this.customItemOpen.set(true);
   }
@@ -6518,6 +6726,7 @@ export class InvoiceCreatePageComponent implements OnInit {
       taxes: draft.taxes,
       account_code: draft.account_code,
       aiu_component: draft.aiu_component,
+      price_unit_quantity: draft.price_unit_quantity ?? null,
     });
     this.setSection('lineas', true);
   }
@@ -6603,19 +6812,25 @@ export class InvoiceCreatePageComponent implements OnInit {
     if (!raw['customer_name']) {
       blockers.push('El adquiriente necesita nombre o razón social.');
     }
-    // El DV es un checksum, no un dato: si no cuadra con el NIT, la DIAN
-    // rechaza la identificación del adquiriente DESPUÉS de haber consumido el
-    // consecutivo autorizado, que no se recupera. Se verifica acá con el mismo
-    // módulo-11 que aplica `@NitDvMatches()` en el backend.
-    if (this.isNitCustomer()) {
-      // `900123456-7` ya trae el DV pegado: recortarlo evita un error falso.
-      const taxId = String(raw['customer_tax_id'] ?? '')
-        .trim()
-        .split('-')[0];
-      const dv = String(raw['customer_verification_digit'] ?? '').trim();
-      if (taxId && dv && !isValidNitDv(taxId, dv)) {
+    // A.8 — el DV ya no se verifica aquí porque ya no se DIGITA: la pantalla
+    // lo deriva del NIT con el mismo módulo 11 que `@NitDvMatches()` en el
+    // backend (ver `computedCustomerDv` y `buildPayload`), así que una
+    // incoherencia NIT↔DV es inalcanzable desde este formulario. Verificar el
+    // valor guardado de un cliente vinculado sería un falso bloqueo: el
+    // payload viaja con el derivado, que es el correcto por construcción.
+    //
+    // Lo que SÍ se puede dejar a medias es el código DANE del municipio: es
+    // el otro rechazo clásico y aquí se descubre antes del viaje.
+    if (!this.isExportInvoice()) {
+      const addressLine = String(raw['customer_address'] ?? '').trim();
+      const cityCode = String(raw['customer_municipality_code'] ?? '').trim();
+      if (addressLine && !cityCode) {
         blockers.push(
-          `El dígito de verificación ${dv} no corresponde al NIT ${taxId}: el módulo-11 da ${computeNitDv(taxId)}. Corrígelo antes de emitir.`,
+          'La dirección fiscal necesita su municipio DANE: búscalo por nombre en «Municipio (DANE)» y selecciónalo. Sin ese código la DIAN rechaza el documento.',
+        );
+      } else if (!addressLine && cityCode) {
+        blockers.push(
+          'Hay un municipio DANE elegido pero la dirección fiscal está vacía: escribe la dirección o quita el municipio.',
         );
       }
     }
@@ -6893,6 +7108,19 @@ export class InvoiceCreatePageComponent implements OnInit {
     if (this.isAiu() && aiuContractObject) {
       payload.aiu_contract_object = aiuContractObject;
     }
+    // D.7 — el modelo elegido en el radio de la sección AIU viaja EXPLÍCITO.
+    // `resolveAccountingModel` es el único punto de lectura del contrato: un
+    // control vacío o corrupto cae en `'sumada'`, que es lo que el calculador
+    // hace por construcción, en vez de viajar un valor que el servidor no
+    // entiende. Mientras `ENABLED_ACCOUNTING_MODELS` no incluya
+    // `'no_sumada'`, el radio lo mantiene en `'sumada'` y este envío pasa el
+    // mismo `@IsIn` de siempre; el día que se habilite, la elección del
+    // operador sale sola por aquí.
+    if (this.isAiu()) {
+      payload.aiu_accounting_model = resolveAccountingModel(
+        (raw['aiu'] ?? {}) as { accounting_model?: AccountingModel },
+      );
+    }
     const notes = String(raw['notes'] ?? '').trim();
     if (notes) payload.notes = notes;
 
@@ -6902,7 +7130,17 @@ export class InvoiceCreatePageComponent implements OnInit {
     if (!raw['customer_id'] && inline) {
       // `inline_customer` sólo se manda cuando NO hay `customer_id`: el backend
       // lo ignora si ambos vienen, y mandar los dos esconde cuál mandó.
-      payload.inline_customer = inline;
+      //
+      // A.8 — el tipo de persona que el usuario vio y eligió en la pantalla
+      // manda sobre el que trajera el modal: el selector es la última palabra
+      // visible antes de emitir. Con documento no-NIT se fija NATURAL sin
+      // preguntar (una cédula ES una persona natural).
+      payload.inline_customer = {
+        ...inline,
+        person_type: this.isNitCustomer()
+          ? String(raw['customer_person_type'] || 'JURIDICA')
+          : 'NATURAL',
+      };
     }
     const name = String(raw['customer_name'] ?? '').trim();
     if (name) payload.customer_name = name;
@@ -6915,18 +7153,46 @@ export class InvoiceCreatePageComponent implements OnInit {
     if (raw['customer_document_type']) {
       payload.customer_document_type = String(raw['customer_document_type']);
     }
-    // El DV sólo tiene sentido en NIT; en cualquier otro tipo es un dígito
-    // suelto que el backend valida igual y que no significa nada.
-    const dv = String(raw['customer_verification_digit'] ?? '').trim();
-    if (dv && this.isNitCustomer()) payload.customer_verification_digit = dv;
+    // A.8 — el DV NUNCA viaja tecleado: se deriva del NIT con el módulo 11
+    // (misma util compartida del checkout) y SÓLO en NIT. En cédula o
+    // pasaporte el campo no existe en el payload — condición ya garantizada
+    // por esta rama, que el backend complementa calculándolo si faltara.
+    if (this.isNitCustomer() && taxId) {
+      const dv = computeNitDv(this.customerTaxIdBase());
+      if (dv) payload.customer_verification_digit = dv;
+    }
     const regime = String(raw['customer_tax_regime'] ?? '').trim();
     if (regime) payload.customer_tax_regime = regime;
     const responsibilities = this.responsibilitiesValue();
     if (responsibilities.length > 0) {
       payload.customer_fiscal_responsibilities = responsibilities;
     }
-    const address = String(raw['customer_address'] ?? '').trim();
-    if (address) payload.customer_address = address;
+    // A.8 — dirección fiscal ESTRUCTURADA cuando hay municipio DANE: el
+    // backend eleva este objeto a `InvoiceAddressDto` tal cual (`liftInvoiceAddress`)
+    // y `normalizeAddress()` lo convierte en el `cac:PhysicalLocation` del XML.
+    // Sin municipio se conserva el comportamiento histórico de siempre: el
+    // string plano, que el backend desglosa en `address_line`.
+    const addressLine = String(raw['customer_address'] ?? '').trim();
+    const cityCode = String(raw['customer_municipality_code'] ?? '').trim();
+    const cityName = String(raw['customer_city_name'] ?? '').trim();
+    if (addressLine) {
+      const structuredAddress: CustomerInvoiceAddressPayload = {
+        address_line: addressLine,
+      };
+      if (cityCode) {
+        structuredAddress.city_code = cityCode;
+        // El DTO de dirección define el código de departamento como los DOS
+        // primeros dígitos del de municipio; no hay control aparte a propósito.
+        structuredAddress.department_code = cityCode.slice(0, 2);
+      }
+      if (cityName) structuredAddress.city_name = cityName;
+      payload.customer_address = structuredAddress;
+    } else if (cityCode) {
+      // Alcanzado sólo si el bloqueo correspondiente fue ignorado (no debería
+      // ocurrir): un objeto sin address_line sería un 400 garantizado, así que
+      // se degrada a omitir la dirección antes que enviar basura fiscal.
+      payload.customer_address = undefined;
+    }
 
     // ── Retenciones
     const withholding = round2(this.effectiveWithholding());
@@ -6990,7 +7256,12 @@ export class InvoiceCreatePageComponent implements OnInit {
       if (rateDate) payload.exchange_rate_date = rateDate;
     }
 
-    return payload;
+    // A.8 — el espejo `CreateInvoiceDto` de interfaces/ todavía tipa
+    // customer_address como string; ampliarlo es trabajo de otro dueño (la
+    // misma razón por la que este payload vive en un tipo local). En el cable
+    // viaja el objeto desglosado, que el backend eleva a InvoiceAddressDto con
+    // liftInvoiceAddress — ver CustomerInvoiceAddressPayload.
+    return payload as CreateInvoiceDto;
   }
 
   /**
@@ -7116,6 +7387,40 @@ export class InvoiceCreatePageComponent implements OnInit {
    * desplazarse hasta un nodo que está dentro de un acordeón cerrado no
    * enseña nada. El acceso al DOM va en el siguiente frame porque el nodo no
    * existe hasta que Angular repinta la sección recién abierta.
+   *
+   * DOS DEFECTOS DISTINTOS, CON FECHAS DE NACIMIENTO DISTINTAS (medido por
+   * el orquestador, 2026-08-25, con un parser de etiquetas multilínea sobre
+   * todo `modules/store/invoicing` cruzado contra
+   * `INVOICE_EMIT_REQUIREMENTS_MAP`). No confundir uno con otro ni atribuir
+   * los dos a B.3: si algún día se revierte B.3, el Bug B NO se va con él.
+   *
+   * **Bug A (localización) — lo introdujo B.3 (`517953a4f`), sólo 4 campos
+   * de línea.** `formControlName`/`formArrayName` SÍ son atributos estáticos
+   * que llegan al DOM en minúsculas, pero eso vale para
+   * `formControlName="x"` escrito literal en la plantilla. Los campos de
+   * línea de `invoice-section-lineas.component.ts` ligan con
+   * `[formControl]="rowControl(...)"` (binding de propiedad, sin atributo
+   * DOM alguno) desde que B.3 extrajo la sección compartida, así que para
+   * `items.<i>.<campo>` la consulta de abajo no encontraba NADA — ni un nodo
+   * equivocado, cero nodos. `invoice-section-lineas.component.ts` marca
+   * ahora sus 4 campos requeribles (`description`, `quantity`, `unit_code`,
+   * `discount_amount`) con `[attr.data-control-name]`, un atributo propio —
+   * nunca `[attr.formcontrolname]`, que suplantaría uno que Angular reserva.
+   *
+   * **Bug B (foco) — PRECEDE a B.3, los 10 campos requeribles (6 de
+   * cabecera + los 4 de línea).** Nació cuando estos campos pasaron a
+   * componentes compartidos (`<app-input>`, `<app-selector>`), no cuando se
+   * extrajo la sección de líneas. Medido: los 6 campos de cabecera
+   * requeribles (`customer_email`, `customer_name`, `customer_tax_id`,
+   * `issue_date`, `customer_document_type`, `operation_type`) ligan
+   * `formControlName` sobre el HOST `<app-input>`/`<app-selector>`, no
+   * sobre un `<input>`/`<select>` nativo — y lo mismo, ahora, con
+   * `[data-control-name]` en los 4 de línea. Angular sí refleja el
+   * atributo al host en ambos casos, así que la consulta SÍ encontraba el
+   * nodo y el `scrollIntoView` SÍ funcionaba, pero `node.focus()` sobre un
+   * host no enfocable es un no-op silencioso. Por eso el paso de descender
+   * al control focuseable real, más abajo, no es exclusivo de los campos de
+   * línea: corrige el foco de los 10.
    */
   private revealFormTarget(target: string): void {
     const line = /^items\.(\d+)\.(.+)$/.exec(target);
@@ -7128,16 +7433,28 @@ export class InvoiceCreatePageComponent implements OnInit {
       return;
     }
     window.requestAnimationFrame(() => {
-      // `formControlName` y `formArrayName` son atributos estáticos de la
-      // plantilla, así que llegan al DOM en minúsculas y se pueden consultar.
       const nodes = document.querySelectorAll<HTMLElement>(
-        `[formcontrolname="${controlName}"], [formarrayname="${controlName}"], #${controlName}`,
+        `[formcontrolname="${controlName}"], [formarrayname="${controlName}"], [data-control-name="${controlName}"], #${controlName}`,
       );
-      // Los campos de línea repiten el mismo `formControlName` en cada fila: el
+      // Los campos de línea repiten el mismo control name en cada fila: el
       // índice del hallazgo es lo que distingue la línea 3 de la primera.
       const node = nodes[line ? lineIndex : 0] ?? nodes[0];
       node?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      node?.focus?.();
+      // `[data-control-name]` (y, en cabecera, `formcontrolname`) caen sobre
+      // el elemento HOST del componente compartido (`<app-input>`,
+      // `<app-selector>`), no sobre el `<input>`/`<select>` nativo de
+      // adentro: Angular no reenvía un atributo desconocido al hijo. Sin
+      // descender, `.focus()` es un no-op silencioso porque el host no es
+      // enfocable. Se busca primero el control real dentro del nodo; si el
+      // nodo mismo ya lo es (el fallback `#id`), se usa tal cual.
+      const focusable = node?.matches(
+        'input, select, textarea, button, [tabindex]',
+      )
+        ? node
+        : node?.querySelector<HTMLElement>(
+            'input, select, textarea, button, [tabindex]',
+          );
+      (focusable ?? node)?.focus?.();
     });
   }
 
@@ -7291,11 +7608,14 @@ export class InvoiceCreatePageComponent implements OnInit {
       customer_document_type: DOCUMENT_TYPE_NIT_CODE,
       customer_tax_id: '',
       customer_verification_digit: '',
+      customer_person_type: 'JURIDICA' as 'NATURAL' | 'JURIDICA',
       customer_tax_regime: '',
       customer_fiscal_responsibilities: [],
       customer_email: '',
       customer_phone: '',
       customer_address: '',
+      customer_municipality_code: '',
+      customer_city_name: '',
       manual_withholding: false,
       withholding_amount: 0,
       use_foreign_currency: false,
@@ -7329,8 +7649,248 @@ export class InvoiceCreatePageComponent implements OnInit {
       this.cancel();
       return;
     }
+    if (actionId === 'preview') {
+      this.openPrintPreview();
+      return;
+    }
     if (actionId === 'save') {
       this.onSubmit();
+    }
+  }
+
+  // ── Formato de impresión y previsualización (E.1 / E.2) ─────
+
+  /**
+   * Lee la biblioteca de la organización (FB-31) y la config activa de la
+   * tienda. Falla en silencio DEGREDADO: sin biblioteca el selector queda
+   * con la opción de tienda y la sección avisa; nunca bloquea la emisión.
+   */
+  loadPrintFormats(): void {
+    this.printGateway
+      .listLibraryTemplates(FISCAL_INVOICE_FORMAT_TYPE)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (templates) =>
+          this.printTemplates.set(
+            templates.map((template) => ({
+              id: template.id,
+              name: template.name,
+              is_system: template.is_system,
+            })),
+          ),
+        error: () => this.printLibraryFailed.set(true),
+      });
+
+    this.refreshStoreFormatDetail();
+  }
+
+  private refreshStoreFormatDetail(): void {
+    this.printGateway
+      .getFormatDetail(FISCAL_INVOICE_FORMAT_TYPE)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (detail) => this.storeFormatDetail.set(detail),
+        error: () => this.printLibraryFailed.set(true),
+      });
+  }
+
+  /**
+   * El selector cambió: persiste la plantilla ACTIVA DE TIENDA
+   * (`PUT /store/print-formats/:formatType`), que es la única superficie de
+   * escritura real —el DTO de creación no lleva `template_id` y el gateway
+   * imprime cada documento con la plantilla que su perfil congeló cuando la
+   * tiene—. '' vuelve a «plantilla activa de la tienda» (null).
+   */
+  onStoreTemplateSelected(value: string): void {
+    if (this.storeTemplateSaving()) return;
+    const trimmed = String(value ?? '').trim();
+    const templateId = trimmed === '' ? null : Number(trimmed);
+    if (
+      trimmed !== '' &&
+      (!Number.isFinite(templateId) || (templateId as number) <= 0)
+    ) {
+      return;
+    }
+
+    this.storeTemplateSaving.set(true);
+    this.printGateway
+      .updateFormat(FISCAL_INVOICE_FORMAT_TYPE, { template_id: templateId })
+      .subscribe({
+        next: () => {
+          this.storeTemplateSaving.set(false);
+          this.toastService.success(
+            'Formato de impresión actualizado para toda la tienda.',
+          );
+        },
+        error: () => {
+          this.storeTemplateSaving.set(false);
+          this.toastService.error(
+            'No se pudo guardar la plantilla de impresión.',
+          );
+          // La pantalla no puede quedar enseñando una elección que el
+          // servidor rechazó: se devuelve al valor efectivo.
+          const control = this.printFormatForm.get('template_id');
+          control?.markAsPristine();
+          control?.setValue(
+            this.effectiveTemplateId() == null
+              ? ''
+              : String(this.effectiveTemplateId()),
+            { emitEvent: false },
+          );
+        },
+      });
+  }
+
+  /**
+   * E.2 — abre «Ver como saldrá» SIN persistir ni numerar. FB-29 compone con
+   * DATOS DE MUESTRA del formato fiscal: no pasa por la compuerta DIAN (201
+   * sin habilitación, medido) ni llama a `InvoiceNumberGenerator`, así que el
+   * consecutivo autorizado no se toca. Lo que muestra es el XML que la factura
+   * produciría bajo la configuración del perfil seleccionado (o el reparto
+   * manual si no hay perfil), evaluado por las mismas compuertas del Anexo que
+   * firman la emisión. La pantalla lo declara en el aviso: el número es
+   * «PREVIEW» y los importes sí son los capturados.
+   */
+  openPrintPreview(): void {
+    if (this.printPreviewLoading()) return;
+    this.printPreviewError.set('');
+    this.printPreviewHtml.set('');
+    this.printPreviewResult.set(null);
+
+    const profileId = this.selectedProfileId();
+    if (profileId === PROFILE_NONE) {
+      // Modo manual: sin perfil, no hay endpoint de previsualización que acepte
+      // el cuerpo del documento. La pantalla lo dice en vez de fingir.
+      this.printPreviewError.set(
+        'Selecciona un perfil de facturación para previsualizar el XML. La previsualización refleja la configuración del perfil, no una muestra genérica.',
+      );
+      this.printPreviewOpen.set(true);
+      this.printPreviewProfileId.set(null);
+      return;
+    }
+
+    const payload = this.buildInvoicePreviewBody();
+    if (!payload.lines || payload.lines.length === 0) {
+      this.printPreviewError.set(
+        'La factura no tiene líneas capturadas. Añade al menos una para previsualizar.',
+      );
+      this.printPreviewOpen.set(true);
+      this.printPreviewProfileId.set(profileId);
+      return;
+    }
+
+    this.printPreviewOpen.set(true);
+    this.printPreviewLoading.set(true);
+    this.printPreviewProfileId.set(profileId);
+
+    this.profileService
+      .preview(profileId, payload)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.printPreviewResult.set(response.data);
+          this.printPreviewLoading.set(false);
+        },
+        error: () => {
+          this.printPreviewLoading.set(false);
+          this.printPreviewError.set(
+            'No se pudo generar la previsualización. Revisa que las líneas tengan descripción, cantidad y precio.',
+          );
+        },
+      });
+  }
+
+  /**
+   * Traduce el formulario al `PreviewProfilePayload` que `POST /profiles/:id/preview`
+   * espera. La línea sin `aiu_component` se mapea a `bucket: 'costo'` (no es AIU);
+   * una con `aiu_component` se mapea al bucket del componente. Los importes se
+   * copian TAL CUAL: el calculador y el builder truncan hoja por hoja al
+   * centavo, y un redondeo acá movería el piso legal sobre un perfil
+   * recién creado sin tocar un campo (ver ADR-5).
+   */
+  private buildInvoicePreviewBody(): PreviewProfilePayload {
+    const raw = this.rawValue() ?? {};
+    const aiu = (raw['aiu'] as Record<string, unknown>) ?? {};
+    const items = this.itemsArray.controls
+      .map((control) => control.value as InvoiceItemFormValue)
+      .filter((item) => (item.description ?? '').trim().length > 0);
+
+    const lines: PreviewProfileLinePayload[] = items.map((item) => {
+      const component = (item.aiu_component ?? '').toString().trim();
+      const bucket: AiuBucket = (
+        component === 'administracion' ||
+        component === 'imprevistos' ||
+        component === 'utilidad'
+          ? component
+          : 'costo'
+      ) as AiuBucket;
+      return {
+        bucket,
+        description: item.description,
+        quantity: Number(item.quantity) || 0,
+        unit_price: Number(item.unit_price) || 0,
+        discount_amount: Number(item.discount_amount) || 0,
+        unit_code: item.unit_code || undefined,
+      };
+    });
+
+    const contract_value = lines.reduce(
+      (acc, line) =>
+        acc + line.quantity * line.unit_price - (line.discount_amount ?? 0),
+      0,
+    );
+
+    // Los dos modos del preview son EXCLUYENTES (ver `profile-preview.service.ts`
+    // y el docblock de `PreviewProfileDto`): si mando `lines` Y
+    // `contract_value`, el backend responde `422 INVOICING_PREVIEW_002`. La
+    // pantalla captura líneas explícitas → mando sólo `lines` (y `aiu_value`
+    // cuando AIU). Dejo `contract_value` calculado como diagnóstico local,
+    // pero no en el payload.
+    const lines_explicit = lines.length > 0;
+
+    let aiu_value: number | undefined;
+    if (lines_explicit && this.isAiu()) {
+      const admin = Number(aiu['administracion']) || 0;
+      const imp = Number(aiu['imprevistos']) || 0;
+      const ut = Number(aiu['utilidad']) || 0;
+      aiu_value = admin + imp + ut;
+    }
+
+    const contract_object =
+      (raw['contract_object'] as string | undefined)?.trim() || undefined;
+
+    const customer_name = (raw['customer_name'] as string | undefined)?.trim();
+    const customer_doc = (raw['customer_tax_id'] as string | undefined)?.trim();
+    const customer_doc_type = (raw['customer_document_type'] as string | undefined)?.trim();
+
+    return {
+      ...(lines_explicit
+        ? {}
+        : contract_value > 0
+        ? { contract_value }
+        : {}),
+      ...(typeof aiu_value === 'number' ? { aiu_value } : {}),
+      ...(contract_object ? { contract_object } : {}),
+      ...(lines_explicit ? { lines } : {}),
+      ...(customer_name || customer_doc || customer_doc_type
+        ? {
+            customer: {
+              ...(customer_doc_type ? { document_type: customer_doc_type } : {}),
+              ...(customer_doc ? { document_number: customer_doc } : {}),
+              ...(customer_name ? { legal_name: customer_name } : {}),
+            },
+          }
+        : {}),
+    };
+  }
+
+  closePrintPreview(open: boolean): void {
+    this.printPreviewOpen.set(open);
+    if (!open) {
+      this.printPreviewHtml.set('');
+      this.printPreviewError.set('');
+      this.printPreviewResult.set(null);
+      this.printPreviewProfileId.set(null);
     }
   }
 

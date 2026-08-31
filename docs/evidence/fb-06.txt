@@ -1,0 +1,47 @@
+# FB-06: PATCH /store/settings
+# Plan section: A.3 + Phase C (receipts.print_dispatch_ticket_*) + Phase E (settings persistence)
+# Source: apps/backend/src/domains/store/settings/controllers/store-settings.controller.ts
+# Permission: store:settings:update
+
+COMMAND:
+curl -sk -X PATCH 'https://api.vendix.com/api/store/settings' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "receipts": {
+      "print_dispatch_ticket_enabled": true,
+      "print_dispatch_ticket_auto_with_pos": false
+    }
+  }'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESPONSE SHAPE:
+{
+  "success": true,
+  "data": {
+    "settings": {
+      "receipts": {
+        "print_dispatch_ticket_enabled": true,
+        "print_dispatch_ticket_auto_with_pos": false,
+        "printing": { ... existentes ... }
+      },
+      ... otras secciones
+    }
+  }
+}
+
+VERIFICATION:
+# Happy path (post-C.1):
+curl .../settings -d '{...}' | jq '.data.settings.receipts.print_dispatch_ticket_enabled' debe ser true
+curl .../settings -d '{...}' | jq '.data.settings.receipts.print_dispatch_ticket_auto_with_pos' debe ser false
+
+# Section desconocida debe preservarse (KNOWN_SECTIONS no debe dropear receipts):
+curl .../settings -d '{"receipts":{"unknown_field":"x"}}' | jq '.success' debe ser true
+
+# Pre-C.1: estos campos son ignorados silenciosamente (no validación en DTO)
+# Post-C.1: aparecen en la respuesta y se persisten
+
+# Sin permiso (rol sin store:settings:update):
+curl .../settings -d '{...}' (sin perm) | jq '.error.code' debe ser SYS_FORBIDDEN_001 (403)

@@ -47,6 +47,40 @@ import { RequestContextService } from '../../../common/context/request-context.s
  *
  * Endpoint-by-endpoint permissions stay explicit so the policy lives next to
  * the route, not hidden in a service.
+ *
+ * A.0 P0 — handler→llamador→permiso (CP-POLLO-ARABE-727 / QUI-727).
+ *
+ * `PermissionsGuard` falla ABIERTO solo cuando un handler NO declara
+ * `@Permissions(...)`; el objetivo de A.0 es que NINGÚN endpoint de dinero
+ * quede sin decorar. El permiso se mapea POR LLAMADOR REAL, no por el nombre
+ * semánticamente obvio — `cashier` NO tiene `store:payments:process` (ese permiso
+ * ni siquiera existe como fila en la seed); los flujos del POS se rigen por
+ * `store:pos:access`, que `cashier` sí tiene (permissions-roles.seed.ts:4915).
+ *
+ * | Línea | Handler | Ruta | Permiso | Llamador |
+ * |-------|---------|------|---------|----------|
+ * | :71  | processPayment          | POST /store/payments                                | `store:pos:access`  | cashier POS — pos-api.service.ts:129 (FB-15) |
+ * | :90  | processPaymentWithOrder | POST /store/payments/with-order                     | `store:pos:access`  | cashier POS — pos-api.service.ts:108 |
+ * | :111 | refundPayment           | POST /store/payments/:paymentId/refund              | `store:pos:access`  | cashier POS — pos-api.service.ts:136-138 |
+ * | :131 | getPaymentStatus        | GET /store/payments/:paymentId/status               | `store:pos:access`  | cashier POS / wompi poll — wompi.service.ts:99-110 |
+ * | :146 | confirmPosWompiPayment  | POST /store/payments/pos/confirm-wompi-payment/:id   | `store:pos:access`  | cashier POS — pos-payment.service.ts:1161 (sobreescribe el bucket "admin" del plan: el llamador real es el POS) |
+ * | :168 | findAll                 | GET /store/payments                                 | `store:settings:read`  | admin — listado de pagos |
+ * | :184 | processPosPayment       | POST /store/payments/pos                           | `store:pos:access`  | cashier POS (ya decorado) |
+ * | :413 | getMyStorePaymentMethods| GET /store/payments/payment-methods                 | `store:pos:access`  | cashier/mesero POS — catálogo de métodos de pago en el cobro (QUI-727 F.1 R4 — revertido de `store:settings:read`, ver :453) |
+ * | :437 | findOne                 | GET /store/payments/:paymentId                     | `store:settings:read`  | admin — detalle de un pago |
+ * | :449 | getStorePaymentMethods  | GET /store/payments/stores/:storeId/payment-methods| `store:settings:read`  | admin/settings |
+ * | :469 | createStorePaymentMethod| POST /store/payments/stores/:storeId/payment-methods| `store:settings:write` | admin/settings — bloquea a cashier (cashier NO tiene store:settings:write) |
+ *
+ * Por qué `store:settings:*` para el bucket admin: no existe ninguna fila de
+ * permiso `store:payments:*` ni `store:payment_methods:*` en
+ * `permissions-roles.seed.ts` (los `includes('store:payments:read/process')` de
+ * los filtros casan contra la DB y no corresponden a ninguna fila creada).
+ * `store:settings:read`/`store:settings:write` son las filas más próximas que
+ * owner/admin ya poseen. El cajero solo tiene `store:settings:read` (nunca el
+ * `write`), por eso los writes de :469 (y los de `store-payment-methods`)
+ * quedan reservados al admin y el cajero no puede reescribir a qué cuenta
+ * bancaria llega el dinero. Los reads siguen abiertos al cajero porque los
+ * necesita en el checkout sin riesgo (leer no muta `custom_config.accounts`).
  */
 @ApiTags('Payments')
 @Controller('store/payments')
@@ -69,6 +103,7 @@ export class PaymentsController {
   ) {}
 
   @Post()
+  @Permissions('store:pos:access')
   @ApiOperation({ summary: 'Process payment for existing order' })
   @ApiResponse({ status: 200, description: 'Payment processed successfully' })
   @ApiResponse({ status: 400, description: 'Bad request' })
@@ -88,6 +123,7 @@ export class PaymentsController {
   }
 
   @Post('with-order')
+  @Permissions('store:pos:access')
   @ApiOperation({ summary: 'Create order and process payment' })
   @ApiResponse({
     status: 201,
@@ -109,6 +145,7 @@ export class PaymentsController {
   }
 
   @Post(':paymentId/refund')
+  @Permissions('store:pos:access')
   @ApiOperation({ summary: 'Refund payment' })
   @ApiResponse({ status: 200, description: 'Payment refunded successfully' })
   @ApiResponse({ status: 404, description: 'Payment not found' })
@@ -129,6 +166,7 @@ export class PaymentsController {
   }
 
   @Get(':paymentId/status')
+  @Permissions('store:pos:access')
   @ApiOperation({ summary: 'Get payment status' })
   @ApiResponse({ status: 200, description: 'Payment status retrieved' })
   @ApiResponse({ status: 404, description: 'Payment not found' })
@@ -144,6 +182,7 @@ export class PaymentsController {
   }
 
   @Post('pos/confirm-wompi-payment/:paymentId')
+  @Permissions('store:pos:access')
   @ApiOperation({
     summary:
       'Force-confirm a POS Wompi payment by polling Wompi and applying the canonical state',
@@ -166,6 +205,7 @@ export class PaymentsController {
   }
 
   @Get()
+  @Permissions('store:settings:read')
   @ApiOperation({ summary: 'Get all payments with pagination' })
   @ApiResponse({ status: 200, description: 'Payments retrieved successfully' })
   async findAll(@Query() query: PaymentQueryDto, @Request() req) {
@@ -411,6 +451,16 @@ export class PaymentsController {
   }
 
   @Get('payment-methods')
+  // QUI-727 F.1 Round 4 — este endpoint lo llama tanto el cajero como el
+  // mesero (payment-collector) para cargar el catálogo con
+  // `custom_config.accounts`. `store:settings:read` desatascaba el 403 del
+  // mesero pero, al ser el mismo permiso que gatea 12 controladores de
+  // configuración (tenant-settings, invoicing, bank-accounts, etc.), le abría
+  // superficie que nadie pidió. Se revierte al permiso POS amplio existente
+  // `store:pos:access` (mismo patrón que :245): tanto cashier como mesero ya
+  // lo tienen asignado en la seed, así que el cobro sigue funcionando sin
+  // ampliar el rol.
+  @Permissions('store:pos:access')
   @ApiOperation({ summary: 'Get payment methods for the current user store' })
   @ApiResponse({
     status: 200,
@@ -435,6 +485,7 @@ export class PaymentsController {
   }
 
   @Get(':paymentId')
+  @Permissions('store:settings:read')
   @ApiOperation({ summary: 'Get payment by ID' })
   @ApiResponse({ status: 200, description: 'Payment retrieved successfully' })
   @ApiResponse({ status: 404, description: 'Payment not found' })
@@ -447,6 +498,7 @@ export class PaymentsController {
   }
 
   @Get('stores/:storeId/payment-methods')
+  @Permissions('store:settings:read')
   @ApiOperation({ summary: 'Get payment methods for a store' })
   @ApiResponse({
     status: 200,
@@ -467,6 +519,7 @@ export class PaymentsController {
   }
 
   @Post('stores/:storeId/payment-methods')
+  @Permissions('store:settings:write')
   @ApiOperation({ summary: 'Create payment method for a store' })
   @ApiResponse({
     status: 201,

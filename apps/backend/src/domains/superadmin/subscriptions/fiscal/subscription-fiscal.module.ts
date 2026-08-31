@@ -46,12 +46,20 @@ import { SubscriptionFiscalService } from './subscription-fiscal.service';
  * DI de Nest y seria mas dificil de probar.
  */
 import { InvoicingModule } from '../../../store/invoicing/invoicing.module';
+import { ProfilesModule, PROFILE_READER } from '../../../store/invoicing/profiles/profiles.module';
 import { InvoicingService } from '../../../store/invoicing/invoicing.service';
 import { InvoiceFlowService } from '../../../store/invoicing/invoice-flow/invoice-flow.service';
 import { PlatformTenantsService } from './platform-tenants.service';
 import { PlatformInvoicingPersistenceService } from './platform-invoicing-persistence.service';
 import { PlatformInvoicingService } from './platform-invoicing.service';
 import { PlatformInvoicingController } from './platform-invoicing.controller';
+import { PlatformProfilesService } from './platform-profiles.service';
+import { PlatformProfilesController } from './platform-profiles.controller';
+import { InvoiceCalculatorService } from '../../../store/invoicing/services/invoice-calculator.service';
+import { PlatformCreditNotesService } from './platform-credit-notes.service';
+import { PlatformDeliveryService } from './platform-delivery.service';
+import { PlatformDianEventsService } from './platform-dian-events.service';
+import { PlatformInvoicePdfService } from './platform-invoice-pdf.service';
 
 @Module({
   imports: [
@@ -63,12 +71,25 @@ import { PlatformInvoicingController } from './platform-invoicing.controller';
     // InvoicingModule provee los servicios de aritmetica/validator/UBL
     // del riel tienda. La facade los consume sin copiarlos.
     InvoicingModule,
+    // ProfilesModule provee ProfileCatalogCacheService y
+    // ProfileAccountingValidator que PlatformProfilesService necesita.
+    // InvoicingModule ya lo importa transitivamente, pero Nest exige que
+    // los providers importados via transitivity sean accesibles desde el
+    // módulo que los declara directamente — SubscriptionFiscalModule NO ve
+    // los exports de un módulo dos niveles abajo. Importar ProfilesModule
+    // explícitamente lo resuelve sin abrir el grafo a más ciclos.
+    ProfilesModule,
   ],
   controllers: [
     SubscriptionFiscalController,
     // PlatformInvoicingController expone los nuevos paths MvpV1.
     // Aisla las rutas V1 del legacy para minimizar conflictos.
     PlatformInvoicingController,
+    // PlatformProfilesController expone los 14 endpoints del sistema de
+    // perfiles plataforma (B.2 del CP-platform-invoicing-parity).
+    // Rutas estáticas ANTES de :id, mismo orden de declaración que el
+    // controller de tienda para evitar colisión con ParseIntPipe.
+    PlatformProfilesController,
   ],
   providers: [
     ManualCertificateIssuerAdapter,
@@ -94,6 +115,30 @@ import { PlatformInvoicingController } from './platform-invoicing.controller';
     // Se declara como provider normal (no useFactory) para que Nest resuelva
     // via constructor y no requiera el truco del deps object.
     PlatformInvoicingService,
+    // B.2: motor de perfiles plataforma (ADR-1 fachada, ADR-2 nullable,
+    // ADR-4 ámbito). Reutiliza ProfileCatalogCacheService, ProfileAccountingValidator
+    // y AuditService del riel tienda vía DI (ya provistos por InvoicingModule).
+    PlatformProfilesService,
+    // B.4: preview plataforma org-scoped. ProfilePreviewService del riel tienda
+    // se reutiliza aquí con PROFILE_READER resuelto a PlatformProfilesService
+    // (org-scoped, store_id IS NULL). ProfilesModule ya provee InvoiceCalculatorService
+    // (puro, sin estado) y PreviewNumberingGuard ya activo como sustituto de
+    // InvoiceNumberGenerator. Compuerta dura: store spec pasa sin editarse.
+    { provide: PROFILE_READER, useExisting: PlatformProfilesService },
+    // C.2: notas crédito/débito plataforma (ADR-7). Persiste vía
+    // InvoicingService.create() del riel tienda con RequestContext sintetizado;
+    // NO toca el servicio tienda — compuerta dura verificada por su spec.
+    PlatformCreditNotesService,
+    // C.3: reenvío por correo plataforma (H2 invoice_delivery_events.store_id
+    // ya nullable). C.3.5 pendiente: armado de ZIP + SMTP (siguiente slice).
+    PlatformDeliveryService,
+    // C.4: eventos RADIAN plataforma (H2 dian_document_events.store_id nullable).
+    // C.4.5 pendiente: transmisión SOAP al provider DIAN (siguiente slice).
+    PlatformDianEventsService,
+    // C.5: pipeline PDF plataforma. Stub honesto PLATFORM_PDF_NOT_CONFIGURED
+    // hasta C.5.5 (wrapper org-scoped sobre InvoicePdfBuilder del riel
+    // tienda, con S3 key prefix 'platform/' en vez de 'stores/'). Ver ADR-8.
+    PlatformInvoicePdfService,
   ],
   exports: [SubscriptionFiscalService],
 })

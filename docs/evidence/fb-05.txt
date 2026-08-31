@@ -1,0 +1,45 @@
+# FB-05: POST /store/print-formats/render
+# Plan section: A.3 + Phase D (DispatchTicketPrintService.printViaGateway)
+# Source: apps/backend/src/domains/store/print-formats/controllers/print-formats.controller.ts:172
+#          apps/backend/src/domains/store/print-formats/dto/print-render.dto.ts:4
+# Permission: store:pos:access, store:orders:read, store:settings:read
+
+COMMAND:
+curl -sk -X POST 'https://api.vendix.com/api/store/print-formats/render' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "format_type": "dispatch_ticket",
+    "document_id": 1,
+    "engine": "html"
+  }'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESPONSE SHAPE:
+{
+  "success": true,
+  "data": {
+    "html": "<!DOCTYPE html>...<div class='dispatch-ticket'>...</div>...",
+    "copies": 1,
+    "is_roll": true,
+    "width_mm": 80,
+    "format_type": "dispatch_ticket",
+    "render_ms": 87
+  }
+}
+
+VERIFICATION:
+# Pre-B.4 (no provider registered): debe fallar
+curl .../render -d '{"format_type":"dispatch_ticket","document_id":1}' | jq '.error.code' debe ser 'PRINT_DATA_PROVIDER_MISSING_001' (500)
+
+# Post-B.4 (provider registered + read from order):
+curl .../render -d '{"format_type":"dispatch_ticket","document_id":1}' | jq '.success' debe ser true
+curl .../render -d '{"format_type":"dispatch_ticket","document_id":1}' | jq '.data.html | contains("Cant. despachada")' debe ser true
+
+# Engine inválido
+curl .../render -d '{"format_type":"pos_sale_ticket","engine":"svg"}' | jq '.error.code' debe ser SYS_VALIDATION_001 (422)
+
+# Format inválido
+curl .../render -d '{"format_type":"invalid","document_id":1}' | jq '.error.code' debe ser SYS_VALIDATION_001 (422)

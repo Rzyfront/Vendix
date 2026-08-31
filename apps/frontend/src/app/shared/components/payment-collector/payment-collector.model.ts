@@ -127,6 +127,12 @@ export interface PaymentSubmit {
   change?: number;
   /** Manual reference (card last-4, transfer ref, …). */
   reference?: string;
+  /**
+   * QUI-728 — id de la cuenta bancaria de destino (`bank_accounts.id`) para el
+   * pago por transferencia. Lo elige el cajero en el selector del collector; el
+   * backend lo valida y lo persiste en `payments.bank_account_id`.
+   */
+  bankAccountId?: number;
   /** Optional tip on top of the base. */
   tip?: number;
   /** contado | credito. */
@@ -152,6 +158,53 @@ export interface ManualPaymentMethod {
   value: string;
   label: string;
   icon?: string;
+}
+
+/**
+ * QUI-728 — proyección mínima de una cuenta bancaria para el selector de
+ * transferencia: `{ id, name, bank_name, account_number }`. Nunca debe exponer
+ * `current_balance`, `opening_balance`, `chart_account_id` ni `column_mapping`
+ * (el saldo bancario no es asunto de una pantalla cuyo único propósito es
+ * elegir a qué cuenta pagar). Viene en el `custom_config.accounts` del método
+ * `bank_transfer`.
+ */
+export interface BankAccountOption {
+  id?: number | null;
+  name?: string | null;
+  bank_name?: string;
+  account_number?: string;
+  /**
+   * S3 key persistida de la imagen/logo de la cuenta (sin URL firmada).
+   * La URL firmada de lectura la entrega el backend por separado.
+   */
+  image_s3_key?: string | null;
+  /**
+   * URL firmada (TTL corto) de la imagen de la cuenta, o null si no tiene
+   * imagen. Nunca persiste en BD: la resuelve el backend a cada lectura.
+   */
+  image_url?: string | null;
+}
+
+/**
+ * La misma cuenta, ya normalizada para el `<select>` del cajero.
+ *
+ * Existe por una razón concreta: una entrada migrada por
+ * `20260829095000_bank_transfer_config_accounts` **no tiene**
+ * `bank_accounts.id` — el legado guardaba los datos sueltos en el JSON, sin
+ * fila en la tabla. Con el id como valor de la opción, esa cuenta se pintaba
+ * `value="undefined"`, la selección se coaccionaba a `null` y la compuerta de
+ * cobro no abría nunca: la tienda migrada no podía cobrar por transferencia.
+ * `key` siempre existe; `id` es la FK real o `null`.
+ */
+export interface BankAccountSelectOption extends BankAccountOption {
+  /** Identidad estable dentro del selector: `id:<n>` o `legacy:<índice>`. */
+  key: string;
+  /**
+   * FK a `bank_accounts.id`, o `null` si la entrada es legado. Un `null` viaja
+   * como `bank_account_id` ausente y el pago cae en la pantalla "Pagos sin
+   * asignar" de E.2 para asignación manual — degradación deliberada.
+   */
+  id: number | null;
 }
 
 /**

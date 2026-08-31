@@ -1,0 +1,26 @@
+# DB-14: kitchen_tickets (id, modifiers, items, table_session_id)
+# Plan section: A.3 + Phase B.5 (kitchen_ticket provider — eliminar 501 ERR-04)
+# Source: apps/backend/prisma/schema.prisma (kitchen_tickets model)
+# Scoping: store_id scoped
+# Invariant: idempotent (no duplicate items per ticket)
+
+COMMAND (psql):
+psql "$DATABASE_URL" -c "SELECT id, store_id, order_id, table_session_id, status, created_at FROM kitchen_tickets WHERE store_id=5 ORDER BY created_at DESC LIMIT 5;"
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESULT:
+| id | store_id | order_id | table_session_id | status | created_at |
+|----|----------|----------|------------------|--------|------------|
+| 200 | 5 | 456 | 12 | fired | 2026-08-27 12:30:00 |
+
+VERIFICATION:
+# Erradicar ERR-04 (501) post-B.5:
+curl .../render -d '{"format_type":"kitchen_ticket","document_id":200}' (post-B.5) | jq '.success' debe ser true
+curl .../render -d '{"format_type":"kitchen_ticket","document_id":200}' (pre-B.5) | jq '.error.code' debe ser 'PRINT_DOCUMENT_READER_MISSING_001' (501)
+
+# Cardinalidad:
+psql -c "SELECT COUNT(*) FROM kitchen_tickets WHERE store_id=5 AND status='fired';" debe ser >= 0
+
+# Items y modifiers:
+psql -c "SELECT jsonb_array_length(items::jsonb) FROM kitchen_tickets WHERE id=200;" debe ser >= 1

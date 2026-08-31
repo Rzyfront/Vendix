@@ -1,0 +1,40 @@
+# ERR-10: PRINT_TEMPLATE_SYSTEM_PROTECTED_001
+# HTTP: 403
+# Source: apps/backend/src/common/errors/error-codes.ts:224-228
+# Emitido cuando: PUT/DELETE sobre print_templates.is_system=true (template del sistema protegido)
+
+COMMAND (PUT sobre system template):
+# Asumiendo que el template id=1 es system (post-B.2, SYSTEM_PRINT_TEMPLATES.dispatch_ticket)
+curl -sk -X PUT 'https://api.vendix.com/api/store/print-formats/library/1/share' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{ "is_shared": false }' \
+  -w '\nHTTP_CODE: %{http_code}\n'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+EXPECTED HTTP: 403
+
+EXPECTED RESPONSE BODY:
+{
+  "success": false,
+  "error": {
+    "code": "PRINT_TEMPLATE_SYSTEM_PROTECTED_001",
+    "message": "System master print templates cannot be modified or deleted"
+  }
+}
+
+VERIFICATION:
+# PUT /share sobre system template: rechazado
+curl .../library/<system_template_id>/share -d '{"is_shared":false}' | jq '.error.code' debe ser 'PRINT_TEMPLATE_SYSTEM_PROTECTED_001'
+curl .../library/<system_template_id>/share -d '{"is_shared":false}' -w '%{http_code}' | grep -q '403'
+
+# DELETE sobre system template (post-D.9):
+curl .../library/<system_template_id> -X DELETE (post-D.9) | jq '.error.code' debe ser 'PRINT_TEMPLATE_SYSTEM_PROTECTED_001'
+
+# User-created template PUT/DELETE: debe exit 0
+curl .../library/<user_template_id>/share -d '{"is_shared":true}' | jq '.success' debe ser true
+
+# Identificar system template ids (post-B.2):
+psql -c "SELECT id, name FROM print_templates WHERE is_system=true;" 
+# Cada uno debe rechazar PUT/DELETE

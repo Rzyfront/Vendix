@@ -19,8 +19,15 @@ import {
 import { classifyTier } from './utils/tier-engine';
 import { selectTips } from './utils/tips-rules';
 import { buildSlides } from './utils/slides-builder';
+import {
+  COMPLETED_SALE_STATES,
+  computeOperatingRevenue,
+} from '../analytics/analytics-metrics.contract';
 
-const COMPLETED_ORDER_STATES = ['delivered', 'finished'];
+// QUI-610 propagation: el reporte semanal usa ahora el MISMO set de estados
+// terminales que el resto de la analítica (`COMPLETED_SALE_STATES` del
+// analytics-metrics.contract), no una copia local que pueda divergir si se
+// añade un nuevo estado consumado en el futuro.
 const RECEIVED_PO_STATUS = 'received';
 const COLOMBIA_OFFSET_MIN = -5 * 60;
 
@@ -270,16 +277,29 @@ export class WeeklyReportService {
     const end = window.weekEnd;
 
     // Sales current week
+    //
+    // QUI-610 propagation: cada `_sum: { grand_total: true }` antiguo se
+    // reemplaza por la suma de los TRES componentes que consume
+    // `computeOperatingRevenue` (subtotal, discount, shipping) y se deriva
+    // el ingreso en JS vía el helper del analytics-metrics.contract. Esto
+    // garantiza que `total_revenue` del snapshot semanal coincide, para el
+    // mismo período, con el card "Ingresos Totales" del panel y con el
+    // chart de tendencia — las tres superficies leen ahora la misma
+    // definición operativa (sin IVA).
     const [ordersAgg, itemsAgg, bestDayAgg, channelsAgg, newCustomersCount, topProductAgg, inventoryAgg] =
       await Promise.all([
-        // 1. Sales totals (orders aggregate)
+        // 1. Sales totals (orders aggregate, ex-VAT)
         this.prisma.orders.aggregate({
           where: {
             store_id,
-            state: { in: COMPLETED_ORDER_STATES as any },
+            state: { in: COMPLETED_SALE_STATES as any },
             created_at: { gte: start, lte: end },
           },
-          _sum: { grand_total: true },
+          _sum: {
+            subtotal_amount: true,
+            discount_amount: true,
+            shipping_cost: true,
+          },
           _count: { id: true },
         }),
         // 2. Units sold
@@ -287,32 +307,40 @@ export class WeeklyReportService {
           where: {
             orders: {
               store_id,
-              state: { in: COMPLETED_ORDER_STATES as any },
+              state: { in: COMPLETED_SALE_STATES as any },
               created_at: { gte: start, lte: end },
             },
           },
           _sum: { quantity: true },
         }),
-        // 3. Best day (by revenue)
+        // 3. Best day (by revenue, ex-VAT)
         this.prisma.orders.groupBy({
           by: ['created_at'],
           where: {
             store_id,
-            state: { in: COMPLETED_ORDER_STATES as any },
+            state: { in: COMPLETED_SALE_STATES as any },
             created_at: { gte: start, lte: end },
           },
-          _sum: { grand_total: true },
+          _sum: {
+            subtotal_amount: true,
+            discount_amount: true,
+            shipping_cost: true,
+          },
           _count: { id: true },
         }),
-        // 4. Channels
+        // 4. Channels (ex-VAT)
         this.prisma.orders.groupBy({
           by: ['channel'],
           where: {
             store_id,
-            state: { in: COMPLETED_ORDER_STATES as any },
+            state: { in: COMPLETED_SALE_STATES as any },
             created_at: { gte: start, lte: end },
           },
-          _sum: { grand_total: true },
+          _sum: {
+            subtotal_amount: true,
+            discount_amount: true,
+            shipping_cost: true,
+          },
           _count: { id: true },
         }),
         // 5. New customers (users con rol customer en la tienda, creados en la semana)
@@ -329,7 +357,7 @@ export class WeeklyReportService {
           where: {
             orders: {
               store_id,
-              state: { in: COMPLETED_ORDER_STATES as any },
+              state: { in: COMPLETED_SALE_STATES as any },
               created_at: { gte: start, lte: end },
             },
             product_id: { not: null },
@@ -356,6 +384,10 @@ export class WeeklyReportService {
       ]);
 
     // Best day: tomar el día con revenue máximo.
+    //
+    // QUI-610 propagation: el revenue del "mejor día" también se deriva por
+    // `computeOperatingRevenue` (subtotal − discount + shipping) sobre los
+    // tres componentes que ya llegan en el aggregate; nunca de `grand_total`.
     let bestDay: WeeklyMetricSet['best_day'] = null;
     if (bestDayAgg && bestDayAgg.length > 0) {
       // groupBy por created_at devuelve una fila por timestamp; agrupar por día.
@@ -365,7 +397,12 @@ export class WeeklyReportService {
         const date = new Date(row.created_at);
         const isoDay = toIsoDate(date);
         const prev = byDay.get(isoDay) || { revenue: 0, orders: 0 };
-        prev.revenue += Number(row._sum.grand_total || 0);
+        prev.revenue += computeOperatingRevenue({
+          subtotal: Number(row._sum.subtotal_amount || 0),
+          discounts: Number(row._sum.discount_amount || 0),
+          shipping: Number(row._sum.shipping_cost || 0),
+          tax: 0,
+        });
         prev.orders += row._count.id;
         byDay.set(isoDay, prev);
       }
@@ -394,20 +431,30 @@ export class WeeklyReportService {
       }
     }
 
-    // Channel breakdown
-    const totalChannelRevenue = channelsAgg.reduce(
-      (sum, c) => sum + Number(c._sum.grand_total || 0),
+    // Channel breakdown (ex-VAT). Misma fórmula que
+    // `SalesAnalyticsService.getSalesByChannel` para que la vista de canales
+    // del panel y el breakdown del email semanal coincidan exactamente para
+    // el mismo período.
+    const withChannelRevenue = channelsAgg.map((c) => ({
+      c,
+      revenue: computeOperatingRevenue({
+        subtotal: Number(c._sum.subtotal_amount || 0),
+        discounts: Number(c._sum.discount_amount || 0),
+        shipping: Number(c._sum.shipping_cost || 0),
+        tax: 0,
+      }),
+    }));
+    const totalChannelRevenue = withChannelRevenue.reduce(
+      (sum, row) => sum + row.revenue,
       0,
     );
-    const channel_breakdown = channelsAgg
-      .map((c) => ({
+    const channel_breakdown = withChannelRevenue
+      .map(({ c, revenue }) => ({
         channel: c.channel,
         display_name: c.channel,
-        revenue: Number(c._sum.grand_total || 0),
+        revenue,
         percentage:
-          totalChannelRevenue > 0
-            ? (Number(c._sum.grand_total || 0) / totalChannelRevenue) * 100
-            : 0,
+          totalChannelRevenue > 0 ? (revenue / totalChannelRevenue) * 100 : 0,
       }))
       .sort((a, b) => b.revenue - a.revenue);
 
@@ -423,7 +470,16 @@ export class WeeklyReportService {
       _sum: { quantity_received: true },
     });
 
-    const totalRevenue = Number(ordersAgg._sum!.grand_total || 0);
+    // Total revenue (current week, ex-VAT). Sale del contract, igual que en
+    // `computeSalesSummary`: subtotal − discount + shipping. El IVA se cobra
+    // al cliente pero es pasivo para la tienda, así que no entra como
+    // ingreso propio del período.
+    const totalRevenue = computeOperatingRevenue({
+      subtotal: Number(ordersAgg._sum!.subtotal_amount || 0),
+      discounts: Number(ordersAgg._sum!.discount_amount || 0),
+      shipping: Number(ordersAgg._sum!.shipping_cost || 0),
+      tax: 0,
+    });
     const totalOrders = ordersAgg._count!.id || 0;
 
     return {
@@ -449,17 +505,33 @@ export class WeeklyReportService {
   ): Promise<WeeklyRollingAvg> {
     // 4 semanas previas → 4 buckets por semana (sun 00:00 → sat 23:59 CO).
     // Sumar todas las órdenes completadas en el rango y dividir por 4.
+    //
+    // QUI-610 propagation: el rolling avg se calcula sobre operating
+    // revenue (subtotal − discount + shipping), igual que `computeMetrics`
+    // arriba. Si la semana actual y el rolling usaran bases distintas
+    // (tax-inclusive vs ex-VAT), el tier que decide `classifyTier` saltaría
+    // hacia arriba o hacia abajo solo por el IVA — un sesgo silencioso que
+    // este cambio cierra.
     const orders = await this.prisma.orders.aggregate({
       where: {
         store_id,
-        state: { in: COMPLETED_ORDER_STATES as any },
+        state: { in: COMPLETED_SALE_STATES as any },
         created_at: { gte: rolling.start, lte: rolling.end },
       },
-      _sum: { grand_total: true },
+      _sum: {
+        subtotal_amount: true,
+        discount_amount: true,
+        shipping_cost: true,
+      },
       _count: { id: true },
     });
 
-    const totalRevenue = Number(orders._sum!.grand_total || 0);
+    const totalRevenue = computeOperatingRevenue({
+      subtotal: Number(orders._sum!.subtotal_amount || 0),
+      discounts: Number(orders._sum!.discount_amount || 0),
+      shipping: Number(orders._sum!.shipping_cost || 0),
+      tax: 0,
+    });
     const totalOrders = orders._count!.id || 0;
     const WEEKS = 4;
     return {

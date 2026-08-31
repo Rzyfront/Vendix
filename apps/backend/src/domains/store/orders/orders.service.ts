@@ -2,6 +2,7 @@ import { Injectable, ConflictException, Logger } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import {
   CreateOrderDto,
+  CreateOrderItemDto,
   UpdateOrderDto,
   OrderQueryDto,
   UpdateOrderItemsDto,
@@ -18,6 +19,7 @@ import { OrderStatsDto } from './dto/order-stats.dto';
 import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { resolveCostPrice } from './utils/resolve-cost-price';
+import { assertVariantRequiredForPrepared } from './utils/variant-required.validator';
 import { SettingsService } from '../settings/settings.service';
 import { ScheduleValidationService } from '../settings/schedule-validation.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -38,6 +40,22 @@ import { OrderFlowService } from './order-flow/order-flow.service';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { CouponsService } from '../coupons/coupons.service';
 import { AuditService, AuditAction, AuditResource } from '@common/audit/audit.service';
+
+/**
+ * Mejor `tax_rate` de un producto con impuesto, resuelto en batch desde
+ * `product_tax_assignments → tax_categories → tax_rates`. El DTO del POS
+ * llega con el snapshot agregado por línea (`tax_amount_item`, `tax_rate`),
+ * así que estos campos se derivan aquí para poder construir las filas de
+ * `order_item_taxes` (el resto de flows — checkout y payments POS — ya
+ * reciben el desglose resuelto desde el llamador).
+ */
+type ResolvedLineTax = {
+  id: number;
+  name: string;
+  rate: Prisma.Decimal | number | string;
+  is_compound: boolean | null;
+  tax_type: string | null;
+};
 
 @Injectable()
 export class OrdersService {
@@ -146,6 +164,15 @@ export class OrdersService {
       context,
     );
 
+    // ERR-07 / DB-14 — invariante "prepared + variantes exige variante".
+    // Resuelve los productos una sola vez (batch) y aplica el check. El
+    // mapa devuelto se reutiliza abajo para snapshots de `name` /
+    // `product_type` sin una segunda consulta por línea.
+    const variantCheckProductById = await assertVariantRequiredForPrepared(
+      this.prisma,
+      createOrderDto.items,
+    );
+
     // Precio por N unidades de stock: el producto publica "$5.000 por metro" y
     // la línea llega en milímetros. El total lo recalcula el servidor porque la
     // escala es del producto y el cliente puede traer la aritmética vieja.
@@ -218,6 +245,31 @@ export class OrdersService {
     // F4 — comercio no responsable de IVA no puede cobrar IVA en la venta.
     await this.assertSaleVatAllowed(createOrderDto.items);
 
+    // Persistir desglose de impuestos por línea. checkout y payments POS ya
+    // lo hacen; aquí faltaba, así que los tiquetes de órdenes POS salían
+    // sin desglose de IVA aunque la cabecera trajera `tax_amount`. Espeja
+    // el patrón de checkout.service.ts (createOrderAndCheckout, ~1422) y
+    // payments.service.ts (buildPosOrderItem, ~2791): una fila por
+    // impuesto aplicado a la línea, con `tax_rate` como fracción
+    // (`Decimal(6,5)` → 0.19 para 19%). El DTO del POS solo trae el
+    // snapshot agregado por línea (`tax_amount_item`); los nombres, tipos y
+    // FKs se derivan server-side desde `product_tax_assignments`. Se hace
+    // UN batch lookup (no N+1) y se reusan los mismos `productIds` que ya
+    // pasaron por `assertSaleVatAllowed` arriba.
+    const taxedProductIds = Array.from(
+      new Set(
+        createOrderDto.items
+          .filter(
+            (it) => it.product_id && Number(it.tax_amount_item ?? 0) > 0,
+          )
+          .map((it) => it.product_id as number),
+      ),
+    );
+    const lineTaxByProductId =
+      taxedProductIds.length > 0
+        ? await this.resolveLineTaxesForOrder(taxedProductIds)
+        : new Map<number, ResolvedLineTax>();
+
     let retries = 3;
     while (retries > 0) {
       try {
@@ -238,6 +290,16 @@ export class OrdersService {
         const order = await this.prisma.orders.create({
           data: {
             customer_id: createOrderDto.customer_id ?? null,
+            // QUI-727 (B.4) / ADR-9 — alias↔cliente mutuamente excluyentes
+            // (CHECK orders_customer_xor_alias). Replica el guard de
+            // updateOrderFromEditor/assignCustomer: si vino `customer_id`
+            // explícito, el alias se fuerza a null; si no, se persiste
+            // `customer_alias` (o null). Así una venta "Mesa 5" sin cliente
+            // queda grabada sin romper el CHECK.
+            customer_alias:
+              createOrderDto.customer_id != null
+                ? null
+                : (createOrderDto.customer_alias ?? null),
             store_id: store_id, // Force strict store_id
             order_number: createOrderDto.order_number,
             state: orderState,
@@ -257,12 +319,12 @@ export class OrdersService {
             order_items: {
               create: await Promise.all(
                 createOrderDto.items.map(async (item, index) => {
-                  // Resolve product type for snapshot
+                  // El invariant ERR-07 ya fue enforced por
+                  // `assertVariantRequiredForPrepared` arriba; aquí solo
+                  // reusamos el mapa resuelto para snapshots de `name` /
+                  // `product_type` (evita una segunda consulta por línea).
                   const product = item.product_id
-                    ? await this.prisma.products.findUnique({
-                        where: { id: item.product_id },
-                        select: { product_type: true },
-                      })
+                    ? variantCheckProductById.get(item.product_id) ?? null
                     : null;
                   const itemType =
                     item.item_type === 'product'
@@ -277,6 +339,15 @@ export class OrdersService {
                         where: { id: item.product_variant_id },
                         include: { product_images: true },
                       });
+                    // CP-POLLO-ARABE-727 C.4 — ERR-15: la variante declarada debe
+                    // pertenecer al producto de la línea. Reusa la MISMA consulta
+                    // (no añade roundtrip, solo valida lo que ya se trajo).
+                    if (!variant || variant.product_id !== item.product_id) {
+                      throw new VendixHttpException(
+                        ErrorCodes.PRODUCT_VARIANT_MISMATCH,
+                        `La variante #${item.product_variant_id} no pertenece al producto #${item.product_id}`,
+                      );
+                    }
                     variant_image_url =
                       variant?.product_images?.image_url ?? null;
                   }
@@ -295,6 +366,21 @@ export class OrdersService {
                     total_price: item.total_price,
                     tax_rate: item.tax_rate,
                     tax_amount_item: item.tax_amount_item,
+                    // Desglose por línea (espejo de checkout/payments):
+                    // una fila en `order_item_taxes` por impuesto aplicado
+                    // a la línea, con `tax_rate` como fracción. Si la
+                    // línea no trae impuesto (`tax_amount_item <= 0`), no
+                    // se emite la fila — coincide con checkout y payments.
+                    order_item_taxes:
+                      Number(item.tax_amount_item ?? 0) > 0
+                        ? this.buildOrderItemTaxesCreate(
+                            item,
+                            item.product_id
+                              ? lineTaxByProductId.get(item.product_id) ??
+                                null
+                              : null,
+                          )
+                        : undefined,
                     catalog_unit_price: item.catalog_unit_price,
                     catalog_final_price: item.catalog_final_price,
                     final_unit_price: item.final_unit_price ?? item.unit_price,
@@ -553,6 +639,13 @@ export class OrdersService {
               },
             },
             product_variants: true,
+            // Desglose por línea: el `pos_sale_ticket` y el detalle de
+            // orden necesitan las filas de `order_item_taxes` para
+            // pintar el IVA. Sin esto, la cabecera trae `tax_amount` pero
+            // el render sale en blanco — el mismo síntoma que reportaba
+            // el fix del `create`. Espeja el patrón de
+            // `refund-calculation.service.ts:66`.
+            order_item_taxes: true,
             // Restaurant Suite — Fase K Gap 2: surface the KDS state
             // for every order_item so the order detail can show
             // "Cocina: <estado>" badges per dish. We order by id desc
@@ -602,6 +695,21 @@ export class OrdersService {
           include: {
             store_payment_method: {
               include: { system_payment_method: true },
+            },
+            // QUI-728 (E.2) — cuenta de destino de la transferencia, para que
+            // el detalle de orden responda "¿a qué cuenta entró este dinero?"
+            // sin ir a conciliación. Proyección MÍNIMA a propósito: nunca
+            // `current_balance` / `opening_balance` / `chart_account_id` /
+            // `column_mapping` — el saldo bancario no tiene por qué viajar a
+            // una pantalla cuyo único propósito es identificar la cuenta.
+            // Misma proyección que el selector de cobro del payment-collector.
+            bank_account: {
+              select: {
+                id: true,
+                name: true,
+                bank_name: true,
+                account_number: true,
+              },
             },
           },
           orderBy: { created_at: 'asc' },
@@ -751,7 +859,7 @@ export class OrdersService {
   async getPaymentReceiptUrl(
     orderId: number,
     paymentId: number,
-  ): Promise<{ url: string; expires_at: string; content_type?: string }> {
+  ): Promise<{ url: string; expires_at: string; content_type: string | null }> {
     const payment = await this.prisma.payments.findFirst({
       where: { id: paymentId, order_id: orderId },
       select: {
@@ -771,15 +879,19 @@ export class OrdersService {
     }
 
     const TTL_SECONDS = 300;
-    const url = await this.s3Service.getPresignedUrl(
-      payment.receipt_s3_key,
-      TTL_SECONDS,
-    );
+    const [url, head] = await Promise.all([
+      this.s3Service.getPresignedUrl(payment.receipt_s3_key, TTL_SECONDS),
+      this.s3Service.headObject(payment.receipt_s3_key),
+    ]);
     const expires_at = new Date(
       Date.now() + TTL_SECONDS * 1000,
     ).toISOString();
 
-    return { url, expires_at };
+    // El frontend usa `content_type` para decidir si previsualiza como imagen
+    // (`<img>`) o incrusta como PDF (`<iframe>`/`<embed>`). Se obtiene del HEAD
+    // del objeto S3 — no se persiste en BD para no añadir migración. Si el HEAD
+    // falla (objeto borrado, red) devolvemos `null` y el frontend cae al PDF.
+    return { url, expires_at, content_type: head?.contentType ?? null };
   }
 
   async update(id: number, updateOrderDto: UpdateOrderDto) {
@@ -1008,6 +1120,12 @@ export class OrdersService {
       dto.total_amount ?? subtotal + taxAmount - discountAmount;
 
     return this.prisma.$transaction(async (tx) => {
+      // ERR-07 / DB-14 — invariante "prepared + variantes exige variante".
+      // Único enforcement centralizado (mismo helper que `create` y
+      // `updateOrderFromEditor`); si queda duplicado en dos sitios,
+      // vuelve a divergir como ya pasó (Round 3 minor #15).
+      await assertVariantRequiredForPrepared(tx, dto.items);
+
       // Release old reservations before deleting items
       const existingOrder = await tx.orders.findUnique({
         where: { id },
@@ -1327,7 +1445,13 @@ export class OrdersService {
       });
       const pos = (settings?.settings as any)?.pos ?? {};
       const allowAnonymous = pos?.allow_anonymous_sales === true;
-      if (!allowAnonymous) {
+      // QUI-737 (B.4) — el modo alias es otra salida legítima de "sin cliente":
+      // falta que `customer_alias` viaje en el PATCH. Sin esto, un editor con
+      // `{customer_id:null, customer_alias:'Mesa 5'}` seguiría lanzando
+      // POS_CUSTOMER_REQUIRED_001 aunque la tienda tenga `allow_alias_sales`.
+      const allowAlias = pos?.allow_alias_sales === true;
+      const hasAlias = !!dto.customer_alias;
+      if (!allowAnonymous && !(allowAlias && hasAlias)) {
         throw new VendixHttpException(
           ErrorCodes.POS_CUSTOMER_REQUIRED_001,
         );
@@ -1809,6 +1933,11 @@ export class OrdersService {
     // 13) Transacción atómica: claim + replace items + order_promotions +
     //     cupón + reservas de stock + commit.
     const result = await this.prisma.$transaction(async (tx) => {
+      // 13-pre) ERR-07 / DB-14 — invariante "prepared + variantes exige
+      //        variante". Mismo helper que `create` y `updateOrderItems`:
+      //        una sola definición para que no vuelva a divergir.
+      await assertVariantRequiredForPrepared(tx, dto.items);
+
       // 13a) Claim atómico del estado. Si otro operador cambió la orden
       //      entre el findFirst y acá, count=0 → 409.
       //
@@ -1953,6 +2082,25 @@ export class OrdersService {
         });
         for (const v of variants) {
           variantImageById.set(v.id, v.product_images?.image_url ?? null);
+        }
+        // CP-POLLO-ARABE-727 C.4 — validación de pertenencia variante↔producto
+        // (ERR-15). Un `product_variant_id` ajeno al `product_id` de la línea
+        // dejaría el inventario descuadrado y el ticket de cocina mostrando algo
+        // que no se vendió. Se valida en memoria sobre el MISMO batch (un solo
+        // findMany, sin roundtrips por ítem).
+        const variantProductById = new Map<number, number>(
+          variants.map((v) => [v.id, v.product_id]),
+        );
+        for (const item of dto.items) {
+          if (item.product_id && item.product_variant_id != null) {
+            const variantProductId = variantProductById.get(item.product_variant_id);
+            if (variantProductId === undefined || variantProductId !== item.product_id) {
+              throw new VendixHttpException(
+                ErrorCodes.PRODUCT_VARIANT_MISMATCH,
+                `La variante #${item.product_variant_id} no pertenece al producto #${item.product_id}`,
+              );
+            }
+          }
         }
       }
 
@@ -2418,7 +2566,21 @@ export class OrdersService {
       await tx.orders.update({
         where: { id: orderId },
         data: {
-          customer_id: dto.customer_id,
+          // ADR-9 (CP-POLLO-ARABE-727): alias↔cliente mutuamente excluyentes
+          // (CHECK orders_customer_xor_alias). A.3 escribió este guard cuando el
+          // DTO aún no exponía customer_alias; B.4 lo habilita, así que el guard
+          // debe persistir el alias cuando se envía. El CHECK respondería 500 si
+          // ambos se poblaran en la misma fila — este guard es la 1ª defensa.
+          // Preserva el comportamiento previo: `undefined` (no enviado) no toca
+          // customer_id; solo null/número lo modifican; el alias solo se escribe
+          // cuando se envía (y fuerza customer_id null).
+          ...(dto.customer_id != null
+            ? { customer_id: dto.customer_id, customer_alias: null }
+            : dto.customer_alias != null
+              ? { customer_id: null, customer_alias: dto.customer_alias }
+              : dto.customer_id === null
+                ? { customer_id: null, customer_alias: null }
+                : {}),
           notes: dto.notes ?? existingOrder.notes,
           internal_notes: dto.internal_notes ?? existingOrder.internal_notes,
           delivery_type: dto.delivery_type ?? existingOrder.delivery_type,
@@ -2471,6 +2633,16 @@ export class OrdersService {
             include: {
               store_payment_method: {
                 include: { system_payment_method: true },
+              },
+              // QUI-728 (E.2) — ver la nota de `findOne`: proyección mínima de
+              // la cuenta de destino, sin saldos ni cuenta contable.
+              bank_account: {
+                select: {
+                  id: true,
+                  name: true,
+                  bank_name: true,
+                  account_number: true,
+                },
               },
             },
             orderBy: { created_at: 'asc' },
@@ -2817,6 +2989,21 @@ export class OrdersService {
             store_payment_method: {
               include: { system_payment_method: true },
             },
+            // QUI-728 (E.2) — cuenta de destino de la transferencia, para que
+            // el detalle de orden responda "¿a qué cuenta entró este dinero?"
+            // sin ir a conciliación. Proyección MÍNIMA a propósito: nunca
+            // `current_balance` / `opening_balance` / `chart_account_id` /
+            // `column_mapping` — el saldo bancario no tiene por qué viajar a
+            // una pantalla cuyo único propósito es identificar la cuenta.
+            // Misma proyección que el selector de cobro del payment-collector.
+            bank_account: {
+              select: {
+                id: true,
+                name: true,
+                bank_name: true,
+                account_number: true,
+              },
+            },
           },
           orderBy: { created_at: 'asc' },
         },
@@ -3046,5 +3233,144 @@ export class OrdersService {
       sequence = lastSequence + 1;
     }
     return `${prefix}${sequence.toString().padStart(4, '0')}`;
+  }
+
+  /**
+   * Resuelve el mejor `tax_rate` por producto en UN batch lookup.
+   *
+   * El DTO del POS llega con un snapshot agregado por línea
+   * (`tax_amount_item`, `tax_rate` como fracción) — sin `tax_rate_id`, sin
+   * `tax_name`, sin `tax_type`. Para construir las filas de
+   * `order_item_taxes` que respalden la cabecera del tiquete, consultamos
+   * la mejor `tax_rate` activa del producto (ordenada por `priority` desc,
+   * `take: 1`). Si el producto no tiene asignaciones, el `Map` queda sin
+   * entrada y `buildOrderItemTaxesCreate` cae al fallback del snapshot del
+   * DTO (tax_name='IVA', tax_type='iva', tax_rate_id=null).
+   *
+   * Misma forma de batch lookup que `assertSaleVatAllowed` arriba — sin
+   * N+1 por línea. Las relaciones `product_tax_assignments`,
+   * `tax_categories` y `tax_rates` no requieren scope explícito; el
+   * `StorePrismaService` solo escopea las tablas registradas (products
+   * hereda el filtro por tienda vía `id` que ya viene validado arriba).
+   */
+  private async resolveLineTaxesForOrder(
+    productIds: number[],
+  ): Promise<Map<number, ResolvedLineTax>> {
+    const map = new Map<number, ResolvedLineTax>();
+    if (productIds.length === 0) return map;
+
+    const products = await this.prisma.products.findMany({
+      where: { id: { in: productIds } },
+      select: {
+        id: true,
+        product_tax_assignments: {
+          select: {
+            tax_categories: {
+              select: {
+                tax_type: true,
+                tax_rates: {
+                  select: {
+                    id: true,
+                    name: true,
+                    rate: true,
+                    is_compound: true,
+                    priority: true,
+                  },
+                  orderBy: { priority: 'desc' },
+                  take: 1,
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    for (const p of products) {
+      // CAVEAT (2026-08-30, ampliado QUI-772 / 2026-08-31).
+      // Existe un SEGUNDO resolver de impuesto de línea:
+      // `TaxesService.calculateProductTaxes` (checkout web, WhatsApp, cobro
+      // POS). Divergen en dos ejes:
+      //   1. entre categorías — acá `break` en la primera; allá itera todas.
+      //      El `for` externo no tiene `orderBy`: con 2+ categorías la
+      //      ganadora es la que devuelva Postgres.
+      //   2. dentro de categoría — acá `take: 1` (líneas 3271-3280); allá
+      //      suma TODAS las tasas. Con 1 categoría y 2+ tasas este path
+      //      cobra MENOS. Divergencia de plata, no de conteo.
+      // Ninguno se manifiesta en dev (relación categorías:tasas = 1:1) y
+      // prod no está medido. Al aparecer el primer producto multi-impuesto,
+      // el criterio de desempate es decisión FISCAL del usuario — no se
+      // resuelve agregando `orderBy` ni `take`. Ver QUI-772.
+      for (const assignment of p.product_tax_assignments ?? []) {
+        const rate = assignment.tax_categories?.tax_rates?.[0];
+        if (!rate) continue;
+        map.set(p.id, {
+          id: rate.id,
+          name: rate.name,
+          rate: rate.rate,
+          is_compound: rate.is_compound ?? false,
+          tax_type: assignment.tax_categories?.tax_type ?? null,
+        });
+        break;
+      }
+    }
+    return map;
+  }
+
+  /**
+   * Construye el payload `order_item_taxes: { create: [...] }` para anidar
+   * dentro de `order_items.create`. Espeja checkout.service.ts (~1422,
+   * ~2070) y payments.service.ts (~2791).
+   *
+   * Reglas:
+   *  - `tax_rate` SIEMPRE como fracción (`0.19` para 19%). `Decimal(6,5)`.
+   *  - `tax_amount` viene del snapshot del DTO (`tax_amount_item`); es la
+   *    suma de impuestos de la línea, NO se recalcula — recalcular desde
+   *    `base × tarifa` agrega un céntimo y descuadra la cabecera
+   *    (orders.tax_amount ≠ Σ order_items.tax_amount).
+   *  - Si el producto tiene `tax_rate` resuelto del catálogo, persistimos
+   *    FK + nombre + tipo reales; si NO (producto sin asignaciones),
+   *    fallback al snapshot del DTO con `tax_name='IVA'`, `tax_type='iva'`,
+   *    `tax_rate_id=null` para que el tiquete al menos pinte la línea.
+   */
+  private buildOrderItemTaxesCreate(
+    item: CreateOrderItemDto,
+    resolved: ResolvedLineTax | null,
+  ) {
+    const taxAmount = Number(item.tax_amount_item ?? 0);
+    if (taxAmount <= 0) return undefined;
+
+    if (resolved) {
+      return {
+        create: [
+          {
+            tax_rate_id: resolved.id,
+            tax_name: resolved.name,
+            tax_rate: new Prisma.Decimal(resolved.rate as any),
+            tax_amount: new Prisma.Decimal(item.tax_amount_item as any),
+            tax_type: (resolved.tax_type ?? 'iva') as any,
+            is_compound: resolved.is_compound ?? false,
+          },
+        ],
+      };
+    }
+
+    // Fallback: producto sin `tax_rates` configuradas. Persistimos el
+    // snapshot del DTO con defaults conservadores para que el tiquete
+    // muestre la línea de IVA en vez de salir en blanco.
+    return {
+      create: [
+        {
+          tax_rate_id: null,
+          tax_name: 'IVA',
+          tax_rate: new Prisma.Decimal(
+            item.tax_rate != null ? item.tax_rate : 0,
+          ),
+          tax_amount: new Prisma.Decimal(item.tax_amount_item as any),
+          tax_type: 'iva' as const,
+          is_compound: false,
+        },
+      ],
+    };
   }
 }

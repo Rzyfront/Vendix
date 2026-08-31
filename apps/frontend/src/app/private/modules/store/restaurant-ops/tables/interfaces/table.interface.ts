@@ -135,6 +135,16 @@ export interface TableSessionCustomerRef {
 export interface TableSessionOrderItem {
   id: number;
   product_id: number | null;
+  /**
+   * QUI-736 — snapshot del nombre de la variante en el momento de crear la
+   * línea, NO el nombre vivo de `product_variants`. Si mañana renombran la
+   * variante, la comanda histórica debe seguir diciendo lo que se vendió.
+   * Es la misma columna que el backend manda al KDS; en la pantalla de
+   * mesa faltaba declarar el campo y la línea se pintaba idéntica a la
+   * del mismo producto sin variante.
+   */
+  product_variant_id: number | null;
+  variant_label: string | null;
   product_name: string;
   quantity: number;
   unit_price: number | string;
@@ -288,6 +298,8 @@ export interface PayTableSessionDto {
   payment_reference?: string;
   /** Optional gratuity added on top of the bill (only forwarded when > 0). */
   tip_amount?: number;
+  /** QUI-728 (E.1) — cuenta bancaria elegida para transferencia. */
+  bank_account_id?: number;
 }
 
 /**

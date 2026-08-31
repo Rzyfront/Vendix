@@ -1,0 +1,26 @@
+# DB-10: addresses (line1, line2, city, department)
+# Plan section: A.3 + Phase B.4 (DispatchTicketDataProvider fallback address)
+# Source: apps/backend/prisma/schema.prisma (addresses model)
+# Scoping: store_id scoped
+# Invariant: linked to customer via user_id
+
+COMMAND (psql):
+psql "$DATABASE_URL" -c "SELECT a.id, a.line1, a.line2, a.city, a.department, a.is_default FROM addresses a WHERE a.user_id=456 ORDER BY a.is_default DESC LIMIT 3;"
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESULT:
+| id | line1 | line2 | city | department | is_default |
+|----|-------|-------|------|------------|------------|
+| 789 | Calle 123 #45-67 | Apto 301 | Bogotá | Cundinamarca | true |
+
+VERIFICATION:
+# Cada customer debe tener >= 1 dirección (o customer_address snapshot en order):
+psql -c "SELECT COUNT(DISTINCT user_id) FROM addresses;" debe ser <= SELECT COUNT(*) FROM users WHERE is_guest=false
+
+# dispatch_ticket usa orders.customer_address (snapshot) PRIMERO,
+# fallback a addresses.is_default=true si snapshot es null:
+# (esto es decisión arquitectónica; verificar implementación en B.4)
+
+# Cardinalidad de direcciones por customer:
+psql -c "SELECT user_id, COUNT(*) FROM addresses GROUP BY user_id HAVING COUNT(*) > 5;" debe ser 0 (sanidad)

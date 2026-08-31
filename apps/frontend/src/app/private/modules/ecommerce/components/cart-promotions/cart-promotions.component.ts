@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  effect,
   inject,
   input,
   signal,
@@ -19,7 +20,6 @@ import {
   IncentiveProgressData,
 } from '../../../../../shared/components/gamified-incentive-bar/gamified-incentive-bar.component';
 import {
-  CurrencyPipe,
   CurrencyFormatService,
 } from '../../../../../shared/pipes/currency';
 
@@ -52,7 +52,6 @@ import {
     CommonModule,
     PromotionStackComponent,
     GamifiedIncentiveBarComponent,
-    CurrencyPipe,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -72,18 +71,20 @@ import {
       </div>
     }
 
-    <!-- High-Conversion Gamified Incentive Bar -->
-    @if (incentiveData()) {
-      <app-gamified-incentive-bar
-        [data]="incentiveData()"
-        class="block mb-2.5"
-      />
+    <!-- High-Conversion Gamified Incentive Bar (toggle enable_high_conversion_ui) -->
+    @if (highConversionEnabled() && incentiveData().length > 0) {
+      @for (data of incentiveData(); track $index) {
+        <app-gamified-incentive-bar
+          [data]="data"
+          class="block mb-2.5"
+        />
+      }
     }
 
     @if (inline()) {
       <!-- Modo inline: SOLO el nudge de próximo tramo, como pill compacto
            (para el bannersito del carrito). -->
-      @if (showTier() && tierProgressItems().length > 0) {
+      @if (highConversionEnabled() && showTier() && tierProgressItems().length > 0) {
         <app-promotion-stack
           mode="compact-pills"
           [items]="tierProgressItems()"
@@ -95,14 +96,14 @@ import {
       }
     } @else if (
       (showApplied() && appliedPromotionItems().length > 0) ||
-      (showTier() && tierProgressItems().length > 0)
+      (highConversionEnabled() && showTier() && tierProgressItems().length > 0)
     ) {
       <div
         class="flex flex-col"
         [ngClass]="compact() ? 'gap-2' : 'gap-3'"
         [attr.data-currency]="currencyCode()"
       >
-        <!-- Promociones aplicadas -->
+        <!-- Promociones aplicadas — SIEMPRE visible (info esencial, no afectada por el toggle) -->
         @if (showApplied() && appliedPromotionItems().length > 0) {
           <app-promotion-stack
             mode="expanded-cards"
@@ -114,8 +115,8 @@ import {
           />
         }
 
-        <!-- Próximo tramo (nudge) -->
-        @if (showTier() && tierProgressItems().length > 0) {
+        <!-- Próximo tramo (nudge) — gated por enable_high_conversion_ui -->
+        @if (highConversionEnabled() && showTier() && tierProgressItems().length > 0) {
           <div
             class="border-t border-border/30 pt-2"
             [class.mt-1]="appliedPromotionItems().length > 0"
@@ -145,10 +146,31 @@ export class CartPromotionsComponent {
   readonly showTier = input<boolean>(true);
   /** Inline layout: render ONLY the tier nudge as compact pill(s) — banner use. */
   readonly inline = input<boolean>(false);
+  /**
+   * Respetar el toggle "Experiencia de Alta Conversión (Visualización
+   * Promocional)" del admin. Cuando es false, NO renderizamos las barras
+   * gamificadas (celebraciones + tier nudges) — los montos por promo en
+   * el expanded-cards siguen visibles porque son info esencial.
+   *
+   * Default `true` para no romper consumidores existentes que aún no
+   * pasan el flag explícitamente.
+   */
+  readonly highConversionEnabled = input<boolean>(true);
 
   private readonly currencyFormat = inject(CurrencyFormatService);
   /** Sink for `<app-promotion-stack>` outputs (CP-ECOM-PROMO-UX-001 G.1). */
   private readonly promotionsAnalytics = inject(PromotionsAnalyticsService);
+
+  constructor() {
+    // DEBUG: log cada vez que highConversionEnabled cambia
+    effect(() => {
+      // eslint-disable-next-line no-console
+      console.log(
+        '[PROMO-DEBUG] highConversionEnabled cambió a:',
+        this.highConversionEnabled(),
+      );
+    });
+  }
 
   /**
    * Forward `promotionViewed` from the cart's promotion stacks (applied
@@ -218,40 +240,47 @@ export class CartPromotionsComponent {
   /**
    * Data for the gamified incentive progress bar.
    * Derives real-time progress towards the next reachable tier or highlights unlocked benefits.
+   *
+   * Returns an ARRAY so each applied promo gets its own celebration bar — antes solo
+   * mostraba la primera promo aplicada, lo que hacía que promociones adicionales
+   * (ej. una promo de orden completa sin tiers) quedaran sin notificación visual
+   * aunque sí se aplicaran al carrito.
    */
-  readonly incentiveData = computed<IncentiveProgressData | null>(() => {
+  readonly incentiveData = computed<IncentiveProgressData[]>(() => {
     const currentCart = this.cart();
-    const tiers = currentCart?.tier_progress ?? [];
-    if (tiers.length > 0) {
-      const first = tiers[0];
-      const benefitLabel =
-        first.benefit_type === 'percentage'
-          ? `-${first.benefit_value}% OFF`
-          : `-$${this.currencyFormat.format(first.benefit_value)} OFF`;
-      const remaining = first.remaining_quantity;
-      const targetName = this.resolveProductName(first.target_product_id);
+    const result: IncentiveProgressData[] = [];
 
-      return {
+    // 1) Una celebración por cada promo aplicada (no solo la primera).
+    const applied = currentCart?.applied_promotions ?? [];
+    for (const promo of applied) {
+      result.push({
+        benefit_label: `-${this.currencyFormat.format(promo.discount_amount)} Ahorro`,
+        unlocked: true,
+        progress_percentage: 100,
+      });
+    }
+
+    // 2) Nudges de tier-progress para próximas metas (tiered promos con
+    // cantidad objetivo).
+    const tiers = currentCart?.tier_progress ?? [];
+    for (const tier of tiers) {
+      const benefitLabel =
+        tier.benefit_type === 'percentage'
+          ? `-${tier.benefit_value}% OFF`
+          : `-${this.currencyFormat.format(tier.benefit_value)} OFF`;
+      const remaining = tier.remaining_quantity;
+      const targetName = this.resolveProductName(tier.target_product_id);
+
+      result.push({
         remaining_quantity: remaining,
         benefit_label: benefitLabel,
         target_product_name: targetName,
         progress_percentage: Math.max(15, Math.min(90, 100 - remaining * 20)),
         unlocked: false,
-      };
+      });
     }
 
-    const applied = currentCart?.applied_promotions ?? [];
-    if (applied.length > 0) {
-      const first = applied[0];
-      const benefitLabel = `-$${this.currencyFormat.format(first.discount_amount)} Ahorro`;
-      return {
-        benefit_label: benefitLabel,
-        unlocked: true,
-        progress_percentage: 100,
-      };
-    }
-
-    return null;
+    return result;
   });
 
   // ── Primary projections (Phase E.1) ───────────────────────────────────

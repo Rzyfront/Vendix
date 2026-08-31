@@ -2,6 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
+import { PlatformOrgService } from '../../../../common/services/platform-org.service';
+import { PlatformProfilesService } from './platform-profiles.service';
+import {
+  DIAN_PROFILE_TEMPLATES,
+  findDianProfileTemplate,
+} from '../../../store/invoicing/profiles/dian-profile-templates';
 import { RequestContextService } from '@common/context/request-context.service';
 import { InvoicingService } from '../../../store/invoicing/invoicing.service';
 import { InvoiceFlowService } from '../../../store/invoicing/invoice-flow/invoice-flow.service';
@@ -58,6 +64,8 @@ export class PlatformInvoicingService {
     private readonly persistence: PlatformInvoicingPersistenceService,
     private readonly tenants: PlatformTenantsService,
     private readonly subscriptionFiscalService: SubscriptionFiscalService,
+    private readonly platformOrg: PlatformOrgService,
+    private readonly platformProfiles: PlatformProfilesService,
   ) {}
 
   private get prismaClient(): PrismaClient | Prisma.TransactionClient {
@@ -102,15 +110,110 @@ export class PlatformInvoicingService {
     dian_status: string;
     cufe: string | null;
   }> {
-    const tenant = await this.tenants.getTenantByKindAndId(this.prismaClient, {
-      organizationId: args.organizationId,
-      kind: args.dto.customer.kind,
-      id: args.dto.customer.tenant_id,
-    });
-    if (!tenant) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_TENANT_NOT_FOUND,
-        `No se encontro el destinatario ${args.dto.customer.kind}:${args.dto.customer.tenant_id} en la plataforma.`,
+    let tenant: any;
+    if (args.dto.customer?.kind === 'external') {
+      if (!args.dto.customer.legal_name?.trim() || !args.dto.customer.tax_id?.trim()) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_VALIDATION_001,
+          'El cliente externo requiere nombre o razón social y NIT / documento válido.',
+        );
+      }
+      tenant = {
+        kind: 'external',
+        tenant_id: 0,
+        name: args.dto.customer.legal_name,
+        legal_name: args.dto.customer.legal_name,
+        tax_id: args.dto.customer.tax_id,
+        tax_id_dv: args.dto.customer.tax_id_dv ?? '0',
+        // Default '31' (NIT, código DIAN) — NO 'NIT' (etiqueta). El XML exige
+// el código; una etiqueta donde va código es rechazo silencioso del
+// provider. Si el operador eligió CC/CE/Pasaporte en el form, ese valor
+// ya viaja en `args.dto.customer.document_type` y pisa el default.
+document_type: args.dto.customer.document_type ?? '31',
+        person_type: args.dto.customer.person_type ?? '2',
+        tax_regime_code: args.dto.customer.tax_regime_code ?? '49',
+        fiscal_responsibilities: args.dto.customer.fiscal_responsibilities ?? ['R-99-PN'],
+        email: args.dto.customer.email ?? null,
+        phone: args.dto.customer.phone ?? null,
+        address: {
+          line: args.dto.customer.address?.line ?? null,
+          city: args.dto.customer.address?.city ?? null,
+          department_code: args.dto.customer.address?.department_code ?? null,
+        },
+      };
+    } else {
+      tenant = await this.tenants.getTenantByKindAndId(this.prismaClient, {
+        organizationId: args.organizationId,
+        kind: args.dto.customer.kind,
+        id: args.dto.customer.tenant_id,
+      });
+      if (!tenant) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_TENANT_NOT_FOUND,
+          `No se encontro el destinatario ${args.dto.customer.kind}:${args.dto.customer.tenant_id} en la plataforma.`,
+        );
+      }
+
+      // El formulario puede completar o corregir la ficha del tenant sin
+      // tener que editarla primero (caso típico: tienda sin NIT/DV cargado
+      // en la base). Sólo pisa lo que viene con valor: `undefined`
+      // significa «no lo toques», no «bórralo». Una cadena vacía `''` también
+      // se trata como ausente para no destruir accidentalmente un valor
+      // del tenant cuando el operador borra un campo del form.
+      //
+      // Esto NO toca a `kind === 'external'` (el bloque anterior construye
+      // el tenant desde cero con los datos del form) ni a la validación de
+      // `customer_tax_id + customer_verification_digit` que hace
+      // `mapTenantToCustomerFields` después del `else` — esa validación
+      // ahora ve el NIT/DV efectivo (form + tenant), no sólo el del tenant.
+      const o = args.dto.customer;
+      const pick = <T>(v: T | undefined, fallback: T): T =>
+        v === undefined ? fallback : v;
+      const trimmed = (v: unknown): string | undefined => {
+        if (typeof v !== 'string') return undefined;
+        const t = v.trim();
+        return t === '' ? undefined : t;
+      };
+      tenant = {
+        ...tenant,
+        legal_name: pick(trimmed(o.legal_name), tenant.legal_name),
+        tax_id: pick(trimmed(o.tax_id), tenant.tax_id),
+        tax_id_dv: pick(trimmed(o.tax_id_dv), tenant.tax_id_dv),
+        // `document_type` no estaba en `PlatformInvoiceTenantRefDto` cuando se
+        // escribió este override; el frontend externo manda '31' (NIT) pero
+        // el pipe global lo rechaza con 400 hasta que frank agregue el campo
+        // al DTO. El override se deja escrito: cuando el DTO lo acepte, este
+        // `pick` ya pisa con el valor del form; mientras tanto, `undefined`
+        // cae a `tenant.document_type` (la ficha del store/org).
+        document_type: pick(trimmed(o.document_type), tenant.document_type),
+        person_type: pick(o.person_type, tenant.person_type),
+        tax_regime_code: pick(trimmed(o.tax_regime_code), tenant.tax_regime_code),
+        email: pick(trimmed(o.email), tenant.email),
+        phone: pick(trimmed(o.phone), tenant.phone),
+        address: o.address
+          ? {
+              line: pick(
+                trimmed(o.address.line),
+                tenant.address?.line ?? null,
+              ),
+              city: pick(
+                trimmed(o.address.city),
+                tenant.address?.city ?? null,
+              ),
+              department_code: pick(
+                trimmed(o.address.department_code),
+                tenant.address?.department_code ?? null,
+              ),
+            }
+          : tenant.address,
+      };
+    }
+
+    if (args.dto.profile_id) {
+      await this.assertPlatformProfileMatchesOperation(
+        args.dto.profile_id,
+        args.dto.operation_type,
+        args.organizationId,
       );
     }
 
@@ -122,9 +225,7 @@ export class PlatformInvoicingService {
         validationError,
       );
     }
-    // AR2-R Validation: USD sin exchange_rate > 0 produce 201 con
-    // subtotal en COP sin conversion (legacy ignora exchange_rate).
-    // Forzar 422 INVOICING_TRM_001 con remediacion concreta.
+
     if (args.dto.currency?.iso_4217 === 'USD') {
       const rate = Number(args.dto.currency?.exchange_rate);
       if (!args.dto.currency?.exchange_rate || rate <= 0) {
@@ -141,15 +242,62 @@ export class PlatformInvoicingService {
       }
     }
 
-    // BYPASS Fase B.1: el facade original reusaba `invoicingService.create()`
-    // del riel tienda, pero esa API rechaza el wrapper con metadata platform
-    // (organization_id, store_id, source_type). El flujo legacy
-    // `createPlatformInvoice()` (Phase C.11) escribe directo a prisma con
-    // pg_advisory_xact_lock + provider chain, sin pasar por el riel tienda.
-    // Es la unica via que produce 2xx con datos reales. Mapeamos el MvpV1 DTO
-    // al `CreatePlatformInvoiceDto` legacy y delegamos.
     const legacyDto = this.mapMvpV1ToLegacyCreateDto(args.dto, tenant);
     const legacyResult = await this.subscriptionFiscalService.createPlatformInvoice(legacyDto);
+
+    if (args.dto.save_as_profile?.name) {
+      try {
+        // Delega en `PlatformProfilesService.create`, que es el unico camino que
+        // escribe la fila del perfil y su version 1 en la MISMA transaccion. El
+        // `create` crudo que vivia aqui escribia `invoice_profiles` directo y no
+        // creaba `invoice_profile_versions`, dejando `current_version: 1`
+        // apuntando a una version inexistente — la corrupcion que el comentario
+        // de `current_version` en schema.prisma advierte.
+        //
+        // El snapshot va anidado bajo `dian` porque esa es la forma que
+        // `normalizeAndAssertProfileConfig` conoce; las claves planas que se
+        // pasaban antes se habrian rechazado uno por uno como desconocidas.
+        // El cruce de nombres es deliberado y sigue a UBL:
+        //   · `payment_form` ('1' contado / '2' credito) es `cbc:PaymentMeansCode`
+        //   · `payment_means_code` ('10' efectivo)       es `cbc:PaymentMeansID`
+        // que el contrato nombra `payment_means_code` y `payment_method_code`.
+        // `config` es el snapshot COMPLETO del documento fiscal — diez
+        // secciones —, no las cuatro claves que la emisión conoce. Mandar sólo
+        // `dian` lo hace rechazar por `config_version`,
+        // `format.display_decimals` y `format.show_aiu_breakdown`, y el catch
+        // de abajo lo habría enterrado en un WARN. Por eso se parte de la
+        // plantilla canónica del MISMO `operation_type` — la única fuente que
+        // ya trae las diez secciones válidas — y encima se sobreescribe sólo lo
+        // que la factura sí capturó.
+        const operationType = args.dto.operation_type ?? '10';
+        const template =
+          DIAN_PROFILE_TEMPLATES.find(
+            (t) => t.operation_type === operationType,
+          ) ?? findDianProfileTemplate('dian-standard')!;
+
+        await this.platformProfiles.create({
+          name: args.dto.save_as_profile.name,
+          operation_type: operationType,
+          state: 'active',
+          is_default: args.dto.save_as_profile.is_default ?? false,
+          config: {
+            ...template.config,
+            dian: {
+              ...template.config.dian,
+              resolution_id: args.dto.resolution_id ?? null,
+              payment_means_code: args.dto.payment_form ?? '1',
+              payment_method_code: args.dto.payment_means_code ?? '10',
+              header_notes: args.dto.notes ? [args.dto.notes] : null,
+            },
+          },
+        });
+      } catch (err) {
+        // Guardar el perfil es accesorio a emitir: la factura ya se timbro y no
+        // se puede deshacer, asi que un perfil que no nace no puede tumbar la
+        // respuesta. Queda en WARN a proposito.
+        this.logger.warn(`Error guardando perfil desde factura: ${err}`);
+      }
+    }
 
     return {
       invoice_id: legacyResult.transmission_id,
@@ -472,6 +620,63 @@ export class PlatformInvoicingService {
     );
   }
 
+  /**
+   * Lista los conceptos de retención activos de la organización de la
+   * plataforma (organization_id resuelto por `resolvePlatformIdentity`).
+   *
+   * Los conceptos con `accounting_entity_id` NULL son los "compartidos"
+   * a nivel organización: aplican a cualquier entidad contable que la org
+   * plataforma cree. El selector de retenciones del wizard los consume
+   * con `concept_id` numérico (entero), NO con `code` tipo 'RCO01'.
+   *
+   * Devuelve un envelope plano `{ data: WithholdingConceptDto[] }` que
+   * el controller mete dentro de `responseService.success(...)` igual que
+   * el resto de listados del rail.
+   */
+  async listWithholdingConceptsForPlatform(organizationId: number): Promise<{
+    data: Array<{
+      id: number;
+      code: string;
+      name: string;
+      rate: number;
+      withholding_type: string;
+      account_code: string | null;
+      min_uvt_threshold: number;
+    }>;
+  }> {
+    const rows = await this.prismaClient.withholding_concepts.findMany({
+      where: {
+        organization_id: organizationId,
+        accounting_entity_id: null,
+        is_active: true,
+      },
+      orderBy: [{ withholding_type: 'asc' }, { name: 'asc' }],
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        rate: true,
+        withholding_type: true,
+        account_code: true,
+        min_uvt_threshold: true,
+      },
+    });
+    return {
+      data: rows.map((row: any) => ({
+        id: row.id,
+        code: row.code,
+        name: row.name,
+        // Decimal → number: la regla DIAN no exige mas de 4 decimales y el
+        // campo se persiste como Decimal(7,4) en schema. El frontend opera
+        // en fracción (0..1), consistente con `MvpV1InvoiceWithholdingInputDto.rate`.
+        rate: Number(row.rate),
+        withholding_type: row.withholding_type,
+        account_code: row.account_code ?? null,
+        min_uvt_threshold: Number(row.min_uvt_threshold),
+      })),
+    };
+  }
+
   /* ── Mapper: V1 DTO → CreateInvoiceDto del riel tienda ──────────── */
 
   /**
@@ -661,6 +866,17 @@ export class PlatformInvoicingService {
    * `PlatformTenantsService.getTenantByKindAndId`. Si por algun motivo
    * falta tax_id o DV, el legacy `createPlatformInvoice` rechaza con
    * 400 BadRequest — el facade NO vuelve a validar para evitar drift.
+   *
+   * Propaga TODO lo que el V1 trae al DTO legacy extendido (cabecera y
+   * línea) con fallbacks seguros para que las llamadas legacy existentes
+   * sigan funcionando idéntico:
+   *   - `unit_code ?? 'NIU'` (NO `'EA'` — no existe en UN/ECE Rec. 20)
+   *   - `discount_amount ?? 0`
+   *   - `taxes ?? []` (vacío = línea exenta, igual que antes)
+   *   - `withholdings ?? []`
+   *   - `rate` se mantiene en FRACCIÓN (0..1) — la conversión a porcentaje
+   *     la hace el provider UNA sola vez; nunca recalcular base×tarifa
+   *     en el mapper (FAS02).
    */
   private mapMvpV1ToLegacyCreateDto(dto: any, tenant: any): any {
     return {
@@ -672,15 +888,69 @@ export class PlatformInvoicingService {
         address_line: tenant.address?.line ?? undefined,
         city: tenant.address?.city ?? undefined,
         department_code: tenant.address?.department_code ?? undefined,
+        document_type: tenant.document_type ?? undefined,
+        person_type: tenant.person_type ?? undefined,
+        tax_regime_code: tenant.tax_regime_code ?? undefined,
+        // Stores (la mitad del caso del módulo) devuelven `fiscal_responsibilities: []`
+        // explícitamente, NO `null`. `??` no atrapa `[]`, así que el fallback
+        // `['O-13']` del legacy nunca entra y la DIAN rechaza el `cac:PartyTaxScheme`
+        // sin responsabilidades. Forzamos `undefined` cuando el arreglo está vacío
+        // para que el legacy use su propio default.
+        fiscal_responsibilities:
+          Array.isArray(tenant.fiscal_responsibilities) &&
+          tenant.fiscal_responsibilities.length > 0
+            ? tenant.fiscal_responsibilities
+            : undefined,
       },
       items: (dto.items ?? []).map((line: any) => ({
         description: line.description,
         quantity: Number(line.quantity) || 1,
         unit_price: Number(line.unit_price) || 0,
+        unit_code: line.unit_code ?? 'NIU',
+        discount_amount: line.discount_amount ?? 0,
+        account_code: line.account_code ?? undefined,
+        taxes: (line.taxes ?? []).map((t: any) => ({
+          tax_type: t.tax_type,
+          rate: t.rate,           // fracción 0..1 — NO convertir acá
+          taxable_amount: t.taxable_amount ?? undefined,
+          tax_amount: t.tax_amount ?? undefined,
+          is_inclusive: t.is_inclusive ?? false,
+        })),
       })),
       period_start: dto.period_start ?? undefined,
       period_end: dto.period_end ?? undefined,
+      // `currency` queda como string ISO 4217 para el snapshot y para
+      // callers legacy que ya mandaban `currency: 'USD'` plano — el cambio
+      // a objeto rompería ambos lectores.
       currency: dto.currency?.iso_4217 ?? 'COP',
+      // `exchange_rate_payload` viaja APARTE con el objeto completo para que
+      // el legacy `buildExchangeRate` (subscription-fiscal.service.ts:2482)
+      // emita `cac:PaymentAlternativeExchangeRate` cuando hay TRM. Sin este
+      // campo, el grupo nunca se emite y la sección «Divisa extranjera» del
+      // wizard queda decorativa (el operador marca la casilla, teclea la
+      // TRM y nada de eso llega al XML firmado).
+      exchange_rate_payload: dto.currency ?? undefined,
+      resolution_id: dto.resolution_id ?? undefined,
+      issue_date: dto.issue_date ?? undefined,
+      due_date: dto.due_date ?? undefined,
+      payment_form: dto.payment_form ?? undefined,
+      payment_means_code: dto.payment_means_code ?? undefined,
+      notes: dto.notes ?? undefined,
+      counterpart_account_code: dto.counterpart_account_code ?? undefined,
+      withholdings: (dto.withholdings ?? []).map((w: any) => ({
+        role: w.role,
+        concept_id: w.concept_id,
+        base_amount: w.base_amount,
+        rate: w.rate,
+        amount: w.amount ?? undefined,
+      })),
+      // C.1: profile_id se propaga al legacy DTO para que cuando
+      // createPlatformInvoice extienda su create-data (siguiente slice), las
+      // columnas invoices.profile_id/profile_version/profile_snapshot
+      // queden alimentadas. La validación operation_type-match YA corre
+      // antes (assertPlatformProfileMatchesOperation) — propagar no es un
+      // segundo gate, es la preparación de la persistencia.
+      profile_id: dto.profile_id ?? undefined,
     };
   }
 
@@ -725,5 +995,67 @@ export class PlatformInvoicingService {
       }
     }
     return null;
+  }
+
+  /**
+   * C.1 — Validación de paridad perfil↔documento para el riel plataforma.
+   *
+   * El perfil pertenece a UN `operation_type` y el snapshot que congela
+   * (`invoices.profile_id/profile_version/profile_snapshot`) sólo tiene
+   * sentido para ese tipo. Si el caller envía `profile_id` con un
+   * `operation_type` distinto del perfil, el documento sale firmado bajo
+   * una configuración que NO es la que gobernó el cálculo — la
+   * reproducibilidad fiscal por versión se rompe, y eso es exactamente la
+   * clase de fallo silencioso que `PLATFORM_PROFILE_008` existe para
+   * impedir.
+   *
+   * Mismo argumento que `INVOICING_PROFILE_008` del riel tienda (FB-15
+   * del plan hermano); con prefijo PLATFORM para que el frontend pueda
+   * enrutar el mensaje sin mapear códigos entre namespaces disjuntos.
+   */
+  private async assertPlatformProfileMatchesOperation(
+    profile_id: number,
+    operation_type: string,
+    organization_id: number,
+  ): Promise<void> {
+    const profile = await this.prismaService.withoutScope().invoice_profiles.findFirst({
+      where: {
+        id: profile_id,
+        organization_id,
+        store_id: null,
+      },
+      select: {
+        id: true,
+        name: true,
+        operation_type: true,
+        state: true,
+        current_version: true,
+      },
+    });
+    if (!profile) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_PROFILE_001,
+        `El perfil ${profile_id} no existe en la organización ${organization_id} del riel plataforma.`,
+        { profile_id, organization_id },
+      );
+    }
+    if (profile.operation_type !== operation_type) {
+      throw new VendixHttpException(
+        ErrorCodes.PLATFORM_PROFILE_008,
+        `El perfil «${profile.name}» (operation_type=${profile.operation_type}) no corresponde al operation_type=${operation_type} del documento.`,
+        {
+          profile_id,
+          profile_operation_type: profile.operation_type,
+          document_operation_type: operation_type,
+        },
+      );
+    }
+    if (profile.state !== 'active') {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_PROFILE_006,
+        `El perfil «${profile.name}» está inactivo y no puede usarse para emitir.`,
+        { profile_id, state: profile.state },
+      );
+    }
   }
 }

@@ -15,7 +15,6 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ReservationsService } from '../../services/reservations.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import {
@@ -60,7 +59,6 @@ import {
     FormsModule,
     RouterModule,
     IconComponent,
-    ButtonComponent,
     CardComponent,
     StatsComponent,
     StickyHeaderComponent,

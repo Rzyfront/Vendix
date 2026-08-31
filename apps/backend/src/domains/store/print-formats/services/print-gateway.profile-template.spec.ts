@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrintGatewayService } from './print-gateway.service';
+import { FiscalInvoicePdfRenderService } from './fiscal-invoice-pdf-render.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { DocumentDataProviderRegistry } from '../providers/document-data-provider.registry';
 import { PrintLayoutComposerService } from './print-layout-composer.service';
@@ -82,6 +83,9 @@ describe('PrintGatewayService — plantilla congelada por el perfil', () => {
         { provide: DocumentDataProviderRegistry, useValue: { getProvider: jest.fn() } },
         { provide: PrintLayoutComposerService, useValue: { compose: jest.fn() } },
         { provide: PrintFiscalValidatorService, useValue: { assertFiscalCompliance: jest.fn() } },
+        // E.11 — el motor PDF bajo demanda es dependencia del gateway; estos
+        // casos no lo ejercitan (ver print-gateway.engine-pdf.spec.ts).
+        { provide: FiscalInvoicePdfRenderService, useValue: { renderBuffer: jest.fn() } },
       ],
     }).compile();
     return module.get(PrintGatewayService);
@@ -204,5 +208,120 @@ describe('PrintGatewayService — plantilla congelada por el perfil', () => {
 
     expect(effective.definition.sections[0].id).toBe('de-la-tienda');
     expect(prisma.calls).toHaveLength(0);
+  });
+
+  /**
+   * E.1 — el camino REAL (`renderDocument`), no sólo `resolveEffectiveConfig`.
+   *
+   * La fixture `invoices` de `buildPrisma()` (el parámetro `invoiceTemplateId`)
+   * ya existía en este archivo desde que se escribió, pero ningún `it()` la
+   * ejercitaba: los 6 casos de arriba llaman `resolveEffectiveConfig` con el
+   * override YA resuelto a mano, nunca `renderDocument`, que es lo único que
+   * de verdad llama a `resolveProfileTemplateId` y por lo tanto a
+   * `this.prisma.invoices.findFirst`. Infraestructura de prueba construida y
+   * sin un solo consumidor — el mismo patrón que KG-10 en B.1.
+   */
+  describe('renderDocument — el template_id congelado en el perfil llega al render real', () => {
+    async function buildForRender(prismaStub: unknown) {
+      const composeSpy = jest.fn().mockReturnValue('<html></html>');
+      const fetchDocumentDataSpy = jest.fn().mockResolvedValue({});
+      const getProviderSpy = jest.fn().mockReturnValue({
+        fetchDocumentData: fetchDocumentDataSpy,
+        getSampleData: jest.fn(),
+        getAvailableTokens: jest.fn().mockReturnValue([]),
+      });
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          PrintGatewayService,
+          { provide: StorePrismaService, useValue: prismaStub },
+          { provide: DocumentDataProviderRegistry, useValue: { getProvider: getProviderSpy } },
+          { provide: PrintLayoutComposerService, useValue: { compose: composeSpy } },
+          { provide: PrintFiscalValidatorService, useValue: { assertFiscalCompliance: jest.fn() } },
+          // E.11 — motor PDF bajo demanda, no ejercitado en este archivo.
+          { provide: FiscalInvoicePdfRenderService, useValue: { renderBuffer: jest.fn() } },
+        ],
+      }).compile();
+
+      return { service: module.get(PrintGatewayService) as PrintGatewayService, composeSpy, fetchDocumentDataSpy };
+    }
+
+    it('una factura fiscal con template_id congelado en el perfil se renderiza con ESA plantilla', async () => {
+      const prisma = buildPrisma({
+        storeConfig: {
+          id: 1,
+          is_active: true,
+          gateway_enabled: true,
+          overrides: null,
+          template: { definition: templateDefinition('de-la-tienda') },
+        },
+        invoiceTemplateId: 55,
+        templates: [
+          { id: 55, organization_id: 7, is_system: false, format_type: 'fiscal_electronic_invoice' },
+        ],
+      });
+      const { service, composeSpy } = await buildForRender(prisma.client);
+
+      await service.renderDocument(10, 'fiscal_electronic_invoice', 168);
+
+      expect(composeSpy).toHaveBeenCalledTimes(1);
+      const [definitionArg] = composeSpy.mock.calls[0];
+      expect(definitionArg.sections[0].id).toBe('t55');
+    });
+
+    it('sin template_id en el snapshot del perfil, renderDocument cae a la plantilla activa de la tienda', async () => {
+      const prisma = buildPrisma({
+        storeConfig: {
+          id: 1,
+          is_active: true,
+          gateway_enabled: true,
+          overrides: null,
+          template: { definition: templateDefinition('de-la-tienda') },
+        },
+        invoiceTemplateId: null,
+      });
+      const { service, composeSpy } = await buildForRender(prisma.client);
+
+      await service.renderDocument(10, 'fiscal_electronic_invoice', 168);
+
+      const [definitionArg] = composeSpy.mock.calls[0];
+      expect(definitionArg.sections[0].id).toBe('de-la-tienda');
+    });
+
+    it('un formato que no es factura fiscal nunca consulta `invoices`: el perfil sólo congela plantilla para facturación', async () => {
+      const prisma = buildPrisma({
+        storeConfig: {
+          id: 1,
+          is_active: true,
+          gateway_enabled: true,
+          overrides: null,
+          template: { definition: templateDefinition('de-la-tienda') },
+        },
+        invoiceTemplateId: 55, // presente en el stub; este caso no debe alcanzarlo
+      });
+      const { service } = await buildForRender(prisma.client);
+
+      await service.renderDocument(10, 'quotation', 168);
+
+      expect((prisma.client.invoices.findFirst as jest.Mock)).not.toHaveBeenCalled();
+    });
+
+    it('un documentId no numérico no dispara la consulta de perfil (se descarta antes de tocar la base)', async () => {
+      const prisma = buildPrisma({
+        storeConfig: {
+          id: 1,
+          is_active: true,
+          gateway_enabled: true,
+          overrides: null,
+          template: { definition: templateDefinition('de-la-tienda') },
+        },
+        invoiceTemplateId: 55,
+      });
+      const { service } = await buildForRender(prisma.client);
+
+      await service.renderDocument(10, 'fiscal_electronic_invoice', 'sample-not-a-number');
+
+      expect((prisma.client.invoices.findFirst as jest.Mock)).not.toHaveBeenCalled();
+    });
   });
 });

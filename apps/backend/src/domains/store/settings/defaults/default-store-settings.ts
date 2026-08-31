@@ -109,6 +109,11 @@ export function getDefaultStoreSettings(): StoreSettings {
     pos: {
       allow_anonymous_sales: true,
       anonymous_sales_as_default: true,
+      // QUI-737 (B.4) — alias de venta rápida, opt-in (default false). El par
+      // `alias_sales_as_default` queda false por defecto y la regla cruzada del
+      // DTO garantiza que nunca se guarde true con allow_alias_sales=false.
+      allow_alias_sales: false,
+      alias_sales_as_default: false,
       business_hours: getDefaultBusinessHours(),
       schedule_mode: 'continuous',
       enable_schedule_validation: false,
@@ -174,6 +179,19 @@ export function getDefaultStoreSettings(): StoreSettings {
       // 80 mm mirrors the previous hardcoded POS ticket width.
       pos_ticket_format: 'thermal_80' as const,
       pos_ticket_copies: 1,
+      // ADR-7 / CP-DTLP-20260827 — Tiquete de despacho (dispatch_ticket).
+      // Flat bajo `receipts` raíz (no en `printing.dispatch_ticket`) para que
+      // `KNOWN_SECTIONS` no lo drope silenciosamente. Defaults opt-in para el
+      // POS auto: enabled sí para que la tienda nueva pueda imprimirlo manual,
+      // pero auto_with_pos=false para que el POS no encadene por sorpresa.
+      print_dispatch_ticket_enabled: true,
+      print_dispatch_ticket_auto_with_pos: false,
+      print_dispatch_ticket_auto_on_postventa: false,
+      // Decisión del usuario 2026-08-31: opt-in. El admin que quiera que el
+      // tiquete de despacho funcione como tiquete de reclamo en mostrador
+      // (direct_delivery) y para llevar (pickup) lo prende; por defecto
+      // el comportamiento sigue siendo el de ADR-6.
+      print_dispatch_ticket_on_counter: false,
     },
 
     // Panel UI - Control de módulos disponibles a nivel de tienda

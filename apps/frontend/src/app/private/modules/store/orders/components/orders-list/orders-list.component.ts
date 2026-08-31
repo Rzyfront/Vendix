@@ -6,7 +6,6 @@ import {Component,
   signal,
   computed, effect } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { NgClass } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { forkJoin } from 'rxjs';
@@ -46,7 +45,6 @@ import { OrderPrintService } from '../../services/order-print.service';
   standalone: true,
   imports: [
     FormsModule,
-    NgClass,
     ResponsiveDataViewComponent,
     InputsearchComponent,
     OptionsDropdownComponent,

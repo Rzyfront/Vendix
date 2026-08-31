@@ -45,7 +45,7 @@ export class PlatformTenantsService {
     prisma: any,
     args: {
       organizationId: number;
-      kind?: 'store' | 'organization' | null;
+      kind?: 'store' | 'organization' | 'user' | null;
       q?: string | null;
       limit?: number;
     },
@@ -59,30 +59,28 @@ export class PlatformTenantsService {
     if (args.kind === 'store') {
       return this.searchStores(prisma, { organizationId: args.organizationId, q, limit });
     }
-    // kind undefined — devuelve stores y organizations mezclados.
-    // Limite global por categoria: limit/2 cada una.
-    const half = Math.max(Math.floor(limit / 2), 1);
-    const [stores, orgs] = await Promise.all([
-      this.searchStores(prisma, { organizationId: args.organizationId, q, limit: half }),
-      this.searchOrganizations(prisma, { organizationId: args.organizationId, q, limit: half }),
+    if (args.kind === 'user') {
+      return this.searchUsers(prisma, { q, limit });
+    }
+    // kind undefined — devuelve stores, organizations y users mezclados.
+    const part = Math.max(Math.floor(limit / 3), 1);
+    const [stores, orgs, users] = await Promise.all([
+      this.searchStores(prisma, { organizationId: args.organizationId, q, limit: part }),
+      this.searchOrganizations(prisma, { organizationId: args.organizationId, q, limit: part }),
+      this.searchUsers(prisma, { q, limit: part }),
     ]);
-    return [...stores, ...orgs].slice(0, limit);
+    return [...stores, ...orgs, ...users].slice(0, limit);
   }
 
   /**
    * Lookup directo por id discriminador. Retorna null si no existe o
    * si el id pertenece a otra organization.
-   *
-   * La validación `organization_id` se hace explícita para evitar que un
-   * super-admin de una plataforma busque tenants de OTRA plataforma
-   * (filtro `where` por platform_org_id no es automatizable con scopes
-   * — organizacion derivada).
    */
   async getTenantByKindAndId(
     prisma: any,
     args: {
       organizationId: number;
-      kind: 'store' | 'organization';
+      kind: 'store' | 'organization' | 'user';
       id: number;
     },
   ): Promise<TenantSearchResult | null> {
@@ -90,27 +88,31 @@ export class PlatformTenantsService {
       const row = await prisma.stores.findFirst({
         where: {
           id: args.id,
-          organization_id: args.organizationId,
           is_active: true,
         },
         include: {
           addresses: { where: { type: 'billing' }, take: 1, orderBy: { id: 'desc' } },
+          // model stores declara la relación como `organizations` (Prisma pluraliza
+          // el nombre del modelo destino); `organization` no existe y rompía con
+          // PrismaClientValidationError → HTTP 500 en /customers/search?kind=store
+          // y en /customers/:kind/:id.
+          organizations: { select: { id: true, name: true } },
         },
       });
       return row ? this.storeToTenantResult(row, row.addresses[0] ?? null) : null;
+    }
+    if (args.kind === 'user') {
+      const row = await prisma.users.findFirst({
+        where: {
+          id: args.id,
+        },
+      });
+      return row ? this.userToTenantResult(row) : null;
     }
     const row = await prisma.organizations.findFirst({
       where: {
         id: args.id,
         state: 'active',
-        // Cross-platform guard: una VENDIX_ADMIN solo puede ver
-        // orgs de su propia plataforma. Si el caller tiene un
-        // `organization_id` (orgId del riel super-admin), excluye
-        // las plataformas ajenas (cada Vendix platform tiene su
-        // propio org_id distinto).
-        // AR2-03: el rail plataforma NO factura a si mismo. Excluir
-        // la orgId del caller (Vendix Corp) — las otras orgs son
-        // tenants facturables.
         NOT: args.organizationId
           ? { id: { equals: args.organizationId } }
           : undefined,
@@ -122,6 +124,61 @@ export class PlatformTenantsService {
     return row ? this.organizationToTenantResult(row, row.addresses[0] ?? null) : null;
   }
 
+  private async searchUsers(
+    prisma: any,
+    args: { q: string; limit: number },
+  ): Promise<TenantSearchResult[]> {
+    const where: Prisma.usersWhereInput = {
+      ...(args.q
+        ? {
+            OR: [
+              { first_name: { contains: args.q, mode: 'insensitive' } },
+              { last_name: { contains: args.q, mode: 'insensitive' } },
+              { legal_name: { contains: args.q, mode: 'insensitive' } },
+              { email: { contains: args.q, mode: 'insensitive' } },
+              { username: { contains: args.q, mode: 'insensitive' } },
+              ...(/^\d+$/.test(args.q) ? [{ document_number: { equals: args.q } }] : []),
+            ],
+          }
+        : {}),
+    };
+    const rows = await prisma.users.findMany({
+      where,
+      take: args.limit,
+      orderBy: [{ first_name: 'asc' }, { last_name: 'asc' }],
+    });
+    return rows.map((row: any) => this.userToTenantResult(row));
+  }
+
+  private userToTenantResult(user: any): TenantSearchResult {
+    const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ').trim();
+    return {
+      id: `user:${user.id}`,
+      kind: 'user',
+      tenant_id: user.id,
+      name: fullName || user.username,
+      slug: user.username,
+      legal_name: user.legal_name || fullName || user.username,
+      tax_id: user.document_number ?? null,
+      tax_id_dv: user.verification_digit ?? null,
+      document_type: user.document_type ?? 'CC',
+      person_type: user.person_type === 'JURIDICA' ? '1' : '2',
+      tax_regime_code: user.tax_regime ?? '49',
+      fiscal_responsibilities: Array.isArray(user.fiscal_responsibilities)
+        ? user.fiscal_responsibilities
+        : ['R-99-PN'],
+      email: user.email ?? null,
+      phone: user.phone ?? null,
+      address: {
+        line: null,
+        city: null,
+        department_code: null,
+      },
+      organization: { id: user.organization_id ?? 0, name: null },
+      fiscal_data_complete: Boolean(user.document_number && user.email),
+    };
+  }
+
   // ─────────────────────────────────────────────────────────────────────
 
   private async searchStores(
@@ -129,7 +186,6 @@ export class PlatformTenantsService {
     args: { organizationId: number; q: string; limit: number },
   ): Promise<TenantSearchResult[]> {
     const where: Prisma.storesWhereInput = {
-      organization_id: args.organizationId,
       is_active: true,
       ...(args.q
         ? {
@@ -146,6 +202,10 @@ export class PlatformTenantsService {
       where,
       include: {
         addresses: { where: { type: 'billing' }, take: 1, orderBy: { id: 'desc' } },
+        // model stores declara la relación como `organizations` (Prisma pluraliza
+        // el nombre del modelo destino); `organization` no existe y rompía con
+        // PrismaClientValidationError → HTTP 500 en /customers/search?kind=store.
+        organizations: { select: { id: true, name: true } },
       },
       orderBy: [{ legal_name: 'asc' }, { name: 'asc' }],
       take: args.limit,
@@ -159,6 +219,11 @@ export class PlatformTenantsService {
   ): Promise<TenantSearchResult[]> {
     const where: Prisma.organizationsWhereInput = {
       state: 'active',
+      ...(args.organizationId
+        ? {
+            NOT: { id: { equals: args.organizationId } },
+          }
+        : {}),
       ...(args.q
         ? {
             OR: [
@@ -215,9 +280,12 @@ export class PlatformTenantsService {
       address,
       organization: {
         id: store.organization_id,
-        // No proyectamos la org anidad para no acoplar el detail en este endpoint;
-        // el caller puede re-fetchear con /customers/:id si lo necesita.
-        name: null,
+        // El include ya proyecta `organizations.name` desde la fila cargada;
+        // el campo de salida conserva el nombre `organization` porque ese es
+        // el contrato HTTP que consume el picker del frontend (ADR-7). No es
+        // el mismo nombre que la relación Prisma, y NO hay que renombrarlo
+        // en el shape de respuesta.
+        name: store.organizations?.name ?? null,
       },
       fiscal_data_complete: this.checkStoreFiscalComplete(store, billingAddress),
     };
@@ -320,7 +388,7 @@ export interface TenantSearchResult {
    * como `{kind, tenant_id}` al backend.
    */
   id: string;
-  kind: 'store' | 'organization';
+  kind: 'store' | 'organization' | 'user';
   tenant_id: number;
   name: string;
   slug: string;

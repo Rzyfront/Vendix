@@ -33,6 +33,7 @@ import type {
   FireItemExclusion,
   KdsConsumptionSummary,
   KdsConsumptionHistoryRow,
+  KdsUnattributedConsumption,
 } from '../../interfaces';
 import { KitchenConfirmModalComponent } from '../../components/kitchen-confirm-modal/kitchen-confirm-modal.component';
 import { KdsSessionStatusBarComponent } from '../../components/kds-session-status-bar/kds-session-status-bar.component';
@@ -46,7 +47,11 @@ import {
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
-import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
+import {
+  parseApiError,
+  withApiErrorReference,
+  readApiErrorRequestId,
+} from '../../../../../../../core/utils/parse-api-error';
 import { KdsTicketCardComponent } from '../../components/kds-ticket-card/kds-ticket-card.component';
 import { KdsTicketDetailModalComponent } from '../../components/kds-ticket-detail-modal/kds-ticket-detail-modal.component';
 
@@ -807,6 +812,15 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   readonly sessionSummaryOpen = signal(false);
   readonly sessionSummary = signal<KdsConsumptionSummary | null>(null);
   readonly sessionHistory = signal<KdsConsumptionHistoryRow[]>([]);
+  /**
+   * Movimientos sin sesión atribuida (QUI-760). Antes del backfill crecían
+   * silenciosamente y nadie se enteraba; ahora se imputan al abrir sesión, pero
+   * las ocurrencias previas a la primera apertura siguen sin dueño. La UI las
+   * muestra separadas del resumen del turno, no dentro: el turno del operador
+   * es una cosa, los movimientos que nadie firmó son otra.
+   */
+  readonly unattributed = signal<KdsUnattributedConsumption | null>(null);
+  readonly loadingUnattributed = signal(false);
   readonly loadingSessionSummary = signal(false);
 
   /**
@@ -824,6 +838,8 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
     this.loadingSessionSummary.set(true);
     this.sessionSummary.set(null);
     this.sessionHistory.set([]);
+    this.unattributed.set(null);
+    this.loadingUnattributed.set(true);
 
     this.stationsService
       .getConsumptionSummary(session.id)
@@ -843,10 +859,31 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
         next: (rows) => this.sessionHistory.set(rows),
         error: () => {},
       });
+
+    // QUI-760 — el reporte de movimientos sin sesión atribuida se muestra
+    // junto al resumen del turno para que el cocinero vea si quedó consumo
+    // "huérfano" (de fires ocurridos antes de abrir sesión).
+    this.stationsService
+      .getUnattributedConsumption()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (u) => {
+          this.unattributed.set(u);
+          this.loadingUnattributed.set(false);
+        },
+        error: () => this.loadingUnattributed.set(false),
+      });
   }
 
   closeSessionSummary(): void {
     this.sessionSummaryOpen.set(false);
+    // Limpia los signals: si el cocinero vuelve a abrir el modal en el
+    // mismo turno, no debe ver datos del fetch anterior.
+    this.sessionSummary.set(null);
+    this.sessionHistory.set([]);
+    this.unattributed.set(null);
+    this.loadingSessionSummary.set(false);
+    this.loadingUnattributed.set(false);
   }
 
   onCookCancelled(): void {
@@ -984,6 +1021,53 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
       .subscribe({ error: () => {} });
   }
 
+  /**
+   * El control "Cambiar estación" se habilita solo con 2+ estaciones
+   * activas Y sin turno abierto en esta. La señal vive aquí (no en el
+   * servicio) porque es composición de dos hechos públicos.
+   */
+  readonly canChangeStation = computed<boolean>(
+    () =>
+      this.stationsService.needsStationChoice() &&
+      this.stationsService.openSession() == null,
+  );
+  /**
+   * Con 2+ estaciones pero turno abierto, el control sigue visible pero
+   * deshabilitado y muestra el motivo. El cierre de turno es un acto
+   * propio del operador porque de esa sesión cuelga el consumo firmado
+   * del fire con su costo — el control de cambio de estación NUNCA cierra
+   * el turno por su cuenta.
+   */
+  readonly changeBlockedReason = computed<string | null>(() => {
+    if (
+      this.stationsService.needsStationChoice() &&
+      this.stationsService.openSession() != null
+    ) {
+      return 'Cierra el turno para cambiar de estación';
+    }
+    return null;
+  });
+
+  /**
+   * QUI-739 — volver al selector de estación. Resetea `selectedStationId` a
+   * null en el servicio para que el `@if (needsStationChoice() &&
+   * selectedStationId() === null)` del template vuelva a cumplirse y el
+   * picker reaparezca.
+   *
+   * Solo se invoca cuando el botón está habilitado, o sea con turno
+   * cerrado. No cierra el turno (no hay turno abierto en este camino) y
+   * no toca el servidor más allá del reset.
+   *
+   * Restricción sobre el SSE: el stream es de tienda (no de estación),
+   * así que la suscripción NO se desmonta al pasar por null. `visibleTickets`
+   * se re-evalúa cuando `selectedStationId` cambia y filtra por la nueva
+   * estación al elegirla. Sin estación seleccionada se renderiza el
+   * picker y no hay columnas de tickets en pantalla.
+   */
+  onChangeStation(): void {
+    this.stationsService.clearStation();
+  }
+
   cancelOpenSession(): void {
     this.sessionGateOpen.set(false);
     this.sessionGatePending.set(null);
@@ -1069,14 +1153,18 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
       const { userMessage } = parseApiError({
         error: { error_code: structured.code },
       });
-      this.toastService.error(userMessage);
+      this.toastService.error(
+        withApiErrorReference(userMessage, readApiErrorRequestId(err)),
+      );
       return;
     }
     const message =
       typeof err === 'string'
         ? err
         : (structured?.message ?? 'Error al actualizar el ticket');
-    this.toastService.error(message);
+    this.toastService.error(
+      withApiErrorReference(message, readApiErrorRequestId(err)),
+    );
   }
 
   /**

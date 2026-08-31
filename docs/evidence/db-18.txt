@@ -1,0 +1,28 @@
+# DB-18: purchase_orders (id, supplier_id, items)
+# Plan section: A.3 + Phase D (purchase_order provider)
+# Source: apps/backend/prisma/schema.prisma (purchase_orders model)
+# Scoping: store_id scoped
+# Invariant: idempotent (no duplicate items per PO)
+
+COMMAND (psql):
+psql "$DATABASE_URL" -c "SELECT id, order_number, supplier_id, status, total FROM purchase_orders WHERE store_id=5 ORDER BY created_at DESC LIMIT 5;"
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESULT:
+| id | order_number | supplier_id | status | total |
+|----|--------------|-------------|--------|-------|
+| 30 | PO-2026-0001 | 12 | received | 1500000 |
+
+VERIFICATION:
+# purchase_order provider funcional (legacy migrated):
+curl .../render -d '{"format_type":"purchase_order","document_id":30}' | jq '.success' debe ser true
+
+# Cardinalidad por supplier:
+psql -c "SELECT supplier_id, COUNT(*) FROM purchase_orders WHERE store_id=5 GROUP BY supplier_id ORDER BY COUNT(*) DESC LIMIT 5;"
+
+# Items denormalized:
+psql -c "SELECT COUNT(*) FROM purchase_order_items WHERE purchase_order_id=30;" debe ser >= 1
+
+# PO status lifecycle (valid transitions):
+psql -c "SELECT status, COUNT(*) FROM purchase_orders WHERE store_id=5 GROUP BY status;" debe mostrar distribución de draft, sent, confirmed, received, cancelled

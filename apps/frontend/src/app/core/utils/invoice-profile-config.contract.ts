@@ -290,6 +290,53 @@ export const AIU_TAXABLE_BUCKETS_BY_BASIS: Readonly<
   subtotal: ['administracion', 'imprevistos', 'utilidad', 'costo'],
 };
 
+/**
+ * Componente AIU de una línea, para efectos de gravabilidad. `'contrato'`
+ * (D.2/D.4, ADR-6, Modelo 1) no es un bucket físico: es la declaración de que
+ * la línea ES el AIU completo en un solo renglón, en vez de venir partido en
+ * tres (Modelo 2). Se distingue de {@link AiuBucket} —que sólo describe
+ * PORCIONES— porque `isAiuLineTaxable` necesita poder recibirlo.
+ */
+export type AiuLineComponent = AiuComponentLiteral | 'contrato';
+
+/**
+ * ¿Esta línea entra a la base gravable del IVA bajo la base declarada? Único
+ * punto de decisión — antes de esta función existían DOS implementaciones de
+ * la misma pregunta (`InvoiceCalculatorService.isAiuTaxable` e
+ * `InvoiceFlowService.isAiuComponentTaxable`), escritas a mano y no derivadas
+ * de {@link AIU_TAXABLE_BUCKETS_BY_BASIS}, que divergieron: la del calculador
+ * se corrigió para `'contrato'` bajo `'utilidad'` (D.4) y la del flujo de
+ * emisión no, porque nada las obligaba a moverse juntas. Esa divergencia
+ * producía un ciclo irrompible: el calculador capturaba la línea como
+ * correctamente gravada (`omit_tax_total: false`, con impuesto persistido) y
+ * el flujo de emisión, con su propia respuesta —equivocada— para el mismo
+ * caso, rechazaba con `INVOICING_AIU_005` una factura que nunca podría
+ * corregirse porque el defecto estaba en la lectura, no en el dato.
+ *
+ * Las dos reglas que no se leen directo de la tabla:
+ *
+ * · `component === null` (la porción de COSTO reembolsable) se traduce al
+ *   bucket `'costo'` — no está en {@link AiuComponentLiteral} porque no es
+ *   una porción declarada del AIU, es su ausencia.
+ * · `component === 'contrato'` no es un bucket: es el AIU completo en una
+ *   sola línea, así que grava si CUALQUIERA de sus tres porciones
+ *   (Administración, Imprevistos o Utilidad) grava bajo la base declarada.
+ *   Devolver `false` aquí excluiría la línea ENTERA de la base binario
+ *   0/completo en vez de dejarla entrar con la fracción correcta —el mismo
+ *   razonamiento de D.4, ahora en el único lugar donde vive.
+ */
+export function isAiuLineTaxable(
+  component: AiuLineComponent | null,
+  basis: AiuTaxableBasis,
+): boolean {
+  const taxable_buckets = AIU_TAXABLE_BUCKETS_BY_BASIS[basis];
+  if (component === null) return taxable_buckets.includes('costo');
+  if (component === 'contrato') {
+    return AIU_COMPONENTS.some((bucket) => taxable_buckets.includes(bucket));
+  }
+  return taxable_buckets.includes(component);
+}
+
 // ─── Modelo de contabilización del AIU ────────────────────────────────────
 
 /**
@@ -307,8 +354,8 @@ export const AIU_TAXABLE_BUCKETS_BY_BASIS: Readonly<
  *   introduce y el visto bueno de `dian-totals.validator` sobre los dos
  *   modelos.
  *
- * Ver {@link ENABLED_ACCOUNTING_MODELS}: hoy sólo uno de los dos se puede
- * escribir, y ese es el interruptor único que lo decide.
+ * Ver {@link ENABLED_ACCOUNTING_MODELS}: el interruptor único que decide qué
+ * modelos se pueden escribir. Desde el 2026-08-25 admite los dos.
  */
 export type AccountingModel = 'sumada' | 'no_sumada';
 
@@ -321,20 +368,25 @@ export const ACCOUNTING_MODELS: readonly AccountingModel[] = [
 /**
  * Los modelos que HOY se pueden persistir y emitir. **Interruptor único.**
  *
- * `'no_sumada'` está fuera a propósito: ofrecerlo antes de que el armado del
- * XML esté verificado produce documentos cuyos totales monetarios (FAU02,
- * FAU04, FAU06) no cuadran, y la DIAN los rechaza **al firmar** — o sea, con el
- * consecutivo ya tomado y sin forma de que el operador sepa por qué.
+ * `'no_sumada'` estuvo fuera mientras el armado del XML se verificaba: un
+ * documento cuyos totales monetarios (FAU02, FAU04, FAU06) no cuadran, la DIAN
+ * los rechaza **al firmar** — con el consecutivo ya tomado y sin forma de que
+ * el operador sepa por qué. Esa compuerta humana se levantó el 2026-08-25 con
+ * autorización explícita del dueño («cierra todas las brechas»), con el backend
+ * del Modelo 1 completo y `dian-totals.validator` verde sobre los dos modelos
+ * (D.6).
  *
- * Añadir `'no_sumada'` a esta lista es el paso D.7 del plan y es lo ÚNICO que
- * hace falta tocar para habilitarlo: la compuerta del perfil
+ * La apertura vive SÓLO en esta lista — paso D.7 del plan — porque las tres
+ * superficies leen de acá: la compuerta del perfil
  * ({@link validateInvoiceProfileConfig} vía `AIU_ACCOUNTING_MODEL_NOT_ENABLED`),
  * la del payload del documento (`CreateInvoiceDto.aiu_accounting_model`) y el
- * motivo que la pantalla pinta ({@link accountingModelDisabledReason}) leen
- * todas de acá. Dos listas habrían dejado la UI ofreciendo lo que la escritura
- * rechaza, o al revés.
+ * motivo que la pantalla pinta ({@link accountingModelDisabledReason}). Dos
+ * listas habrían dejado la UI ofreciendo lo que la escritura rechaza, o al revés.
  */
-export const ENABLED_ACCOUNTING_MODELS: readonly AccountingModel[] = ['sumada'];
+export const ENABLED_ACCOUNTING_MODELS: readonly AccountingModel[] = [
+  'sumada',
+  'no_sumada',
+];
 
 /** `true` si el modelo se puede escribir hoy. */
 export function isAccountingModelEnabled(value: unknown): boolean {
@@ -360,18 +412,23 @@ export function resolveAccountingModel(
 }
 
 /**
- * Por qué un modelo no se puede elegir todavía, en español y **fechado**.
+ * Por qué un modelo no se puede elegir, en español. `null` cuando el modelo sí
+ * está habilitado.
  *
  * Vive acá y no en el template porque las DOS pantallas que capturan la sección
  * AIU tienen que decir lo mismo, y porque una insignia «NO DISPONIBLE» sin
- * motivo ni fecha es exactamente el P1 que este texto cierra. `null` cuando el
- * modelo sí está habilitado.
+ * motivo es exactamente el P1 que este texto cierra.
+ *
+ * Desde la apertura del Modelo 1 (D.7, 2026-08-25) los dos valores de
+ * `AccountingModel` están habilitados y la función devuelve `null` SIEMPRE: no
+ * hay razón de deshabilitado que dar. Se conserva como la única costura por la
+ * que una compuerta futura volvería a fecharse sin tocar pantallas ni DTO.
  */
 export function accountingModelDisabledReason(
   model: AccountingModel,
 ): string | null {
   if (isAccountingModelEnabled(model)) return null;
-  return 'Cambia los totales monetarios del XML (FAU02, FAU04, FAU06). Se habilita en la Fase D del plan de facturación, cuando el armado del documento pase la compuerta de totales en los dos modelos; hasta entonces elegirlo produciría facturas rechazadas al firmar, con el consecutivo ya tomado.';
+  return 'Este modelo no está habilitado para escritura.';
 }
 
 // ─── Las 7 secciones del editor ───────────────────────────────────────────
@@ -478,7 +535,7 @@ export interface ProfileAccountingConfig {
  * tarifa que faltaba.
  */
 export interface ProfileTaxRule {
-  bucket: AiuBucket;
+  bucket?: AiuBucket;
   /** Si esta porción entra en la base gravable del documento. */
   taxable: boolean;
   /**
@@ -494,6 +551,27 @@ export interface ProfileTaxRule {
    * casos bloquearía facturas correctas.
    */
   rate: string;
+  /**
+   * Base gravable elegida para esta regla de impuesto (Modelo Siigo).
+   * `'subtotal'` (Contrato completo) | `'aiu'` (AIU completo A+I+U) | `'utilidad'` (Solo Utilidad).
+   * Si no está definida, se deriva de `resolveAiuTaxableBasis(config.aiu)`.
+   */
+  taxable_basis?: AiuTaxableBasis | null;
+}
+
+/**
+ * Resuelve la base gravable efectiva de una regla de impuesto.
+ * Si la regla define su propia base gravable, se usa; de lo contrario, se hereda
+ * la base global del perfil o del régimen legacy.
+ */
+export function resolveRuleTaxableBasis(
+  rule: Pick<ProfileTaxRule, 'taxable_basis' | 'bucket'> | null | undefined,
+  aiu?: Pick<ProfileAiuConfig, 'taxable_basis' | 'regime'> | null | undefined,
+): AiuTaxableBasis {
+  if (rule?.taxable_basis && AIU_TAXABLE_BASES.includes(rule.taxable_basis)) {
+    return rule.taxable_basis;
+  }
+  return resolveAiuTaxableBasis(aiu);
 }
 
 /** Sección 4 — Base de impuestos. */
@@ -1164,7 +1242,7 @@ function validateAiuSection(
       issues.push({
         field: 'aiu.accounting_model',
         code: 'AIU_ACCOUNTING_MODEL_NOT_ENABLED',
-        message: `El modelo «base AIU no sumada al total de la factura» todavía no se puede guardar. ${accountingModelDisabledReason(aiu.accounting_model) ?? ''}`.trim(),
+        message: `El modelo «${String(aiu.accounting_model)}» no está habilitado para guardarse. ${accountingModelDisabledReason(aiu.accounting_model) ?? ''}`.trim(),
       });
     }
   }
@@ -1189,7 +1267,7 @@ function validateTaxSection(
   rules.forEach((rule, index) => {
     const at = `taxes.rules[${index}]`;
 
-    if (!AIU_BUCKETS.includes(rule.bucket)) {
+    if (rule.bucket && !AIU_BUCKETS.includes(rule.bucket)) {
       issues.push({
         field: `${at}.bucket`,
         code: 'TAX_BUCKET_UNKNOWN',
@@ -1197,7 +1275,7 @@ function validateTaxSection(
       });
       return;
     }
-    if (seen.has(rule.bucket)) {
+    if (rule.bucket && seen.has(rule.bucket)) {
       // Dos reglas para la misma porción es una contradicción sin resolución
       // determinista: cuál gana dependería del orden del arreglo.
       issues.push({
@@ -1207,7 +1285,17 @@ function validateTaxSection(
       });
       return;
     }
-    seen.add(rule.bucket);
+    if (rule.bucket) {
+      seen.add(rule.bucket);
+    }
+
+    if (rule.taxable_basis && !AIU_TAXABLE_BASES.includes(rule.taxable_basis)) {
+      issues.push({
+        field: `${at}.taxable_basis`,
+        code: 'TAX_BASIS_INVALID',
+        message: `«${String(rule.taxable_basis)}» no es una base gravable válida. Debe ser subtotal, aiu o utilidad.`,
+      });
+    }
 
     const rate = parsePercentScaled(rule.rate);
     if (rate === null) {
@@ -1661,10 +1749,10 @@ export function buildDefaultAiuProfileConfig(
     },
     taxes: {
       rules: [
-        { bucket: 'administracion', taxable: true, tax_code: '01', rate: '19.00' },
-        { bucket: 'imprevistos', taxable: true, tax_code: '01', rate: '19.00' },
-        { bucket: 'utilidad', taxable: true, tax_code: '01', rate: '19.00' },
-        { bucket: 'costo', taxable: false, tax_code: '01', rate: '0.00' },
+        { bucket: 'administracion', taxable: true, tax_code: '01', rate: '19.00', taxable_basis: 'aiu' },
+        { bucket: 'imprevistos', taxable: true, tax_code: '01', rate: '19.00', taxable_basis: 'aiu' },
+        { bucket: 'utilidad', taxable: true, tax_code: '01', rate: '19.00', taxable_basis: 'aiu' },
+        { bucket: 'costo', taxable: false, tax_code: '01', rate: '0.00', taxable_basis: 'aiu' },
       ],
     },
     model_lines: [],
@@ -1850,7 +1938,7 @@ const ACCOUNTING_KEYS = [
   'mapping_key_overrides',
 ] as const;
 const TAXES_KEYS = ['rules'] as const;
-const TAX_RULE_KEYS = ['bucket', 'taxable', 'tax_code', 'rate'] as const;
+const TAX_RULE_KEYS = ['bucket', 'taxable', 'tax_code', 'rate', 'taxable_basis'] as const;
 const WITHHOLDINGS_KEYS = ['rules'] as const;
 const WITHHOLDING_RULE_KEYS = ['concept_id', 'role', 'rate'] as const;
 const CURRENCY_KEYS = ['declare_foreign', 'code'] as const;

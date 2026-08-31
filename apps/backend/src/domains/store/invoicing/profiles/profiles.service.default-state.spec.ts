@@ -98,7 +98,9 @@ describe('ProfilesService — predeterminado y estado', () => {
     // Doble de la auditoría (C.7). Acá no se afirma sobre ella; su propio spec
     // lo hace. Lo que importa es que ninguna operación dependa de su resultado.
     const audit = { log: jest.fn().mockResolvedValue(undefined) } as any;
-    const service = new ProfilesService(scoped, cache, audit);
+    const service = new ProfilesService(scoped, cache, audit, {
+      assertAccountsUsable: jest.fn().mockResolvedValue(undefined),
+    } as any);
     return { service, tx, scoped, updates, outside: () => outsideCalls, profile };
   }
 

@@ -580,6 +580,7 @@ model organizations {
   payroll_novelties             payroll_novelties[]
   dian_configurations           dian_configurations[]
   dian_document_events          dian_document_events[]
+  invoice_delivery_events invoice_delivery_events[]
   fiscal_transmissions          fiscal_transmissions[]
   fiscal_evidences              fiscal_evidences[]
   fiscal_obligations            fiscal_obligations[]
@@ -842,6 +843,7 @@ model stores {
   payroll_novelties           payroll_novelties[]
   dian_configurations         dian_configurations[]
   dian_document_events        dian_document_events[]
+  invoice_delivery_events invoice_delivery_events[]
   fiscal_transmissions        fiscal_transmissions[]
   fiscal_evidences            fiscal_evidences[]
   fiscal_obligations          fiscal_obligations[]
@@ -962,6 +964,9 @@ model stores {
   // Print Formats Hub
   store_print_format_configs store_print_format_configs[]
 
+  // CRM Landing (QUI-719)
+  crm_landing_page crm_landing_pages?
+
   @@unique([organization_id, slug])
   @@index([onboarding])
 }
@@ -973,6 +978,26 @@ model store_settings {
   created_at DateTime? @default(now()) @db.Timestamp(6)
   updated_at DateTime? @default(now()) @db.Timestamp(6)
   stores     stores    @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+}
+
+/// CRM Landing (QUI-719) — landing generada con IA por tienda.
+/// `content_json` es el draft editable; `published_json` es la copia inmutable servida públicamente.
+model crm_landing_pages {
+  id                    Int                        @id @default(autoincrement())
+  store_id              Int                        @unique
+  enabled               Boolean                    @default(false)
+  content_json          Json?
+  published_json        Json?
+  published_at          DateTime?                  @db.Timestamp(6)
+  version               Int                        @default(0)
+  generation_status     crm_generation_status_enum @default(idle)
+  last_job_id           String?                    @db.VarChar(64)
+  last_generation_error String?                    @db.Text
+  created_at            DateTime                   @default(now()) @db.Timestamp(6)
+  updated_at            DateTime                   @default(now()) @db.Timestamp(6)
+  stores                stores                     @relation(fields: [store_id], references: [id], onDelete: Cascade)
+
+  @@index([enabled])
 }
 
 model domain_settings {
@@ -1413,6 +1438,11 @@ model orders {
   id                                              Int                       @id @default(autoincrement())
   store_id                                        Int
   customer_id                                     Int?
+  // ADR-9 (CP-POLLO-ARABE-727 A.3): alias de cliente en venta anónima/física.
+  // `customer_id` y `customer_alias` son mutuamente excluyentes — el CHECK
+  // `orders_customer_xor_alias` (en la migración add_customer_alias) garantiza
+  // que nunca ambos se pueblen en la misma fila.
+  customer_alias                                  String?                    @db.VarChar(100)
   order_number                                    String                    @db.VarChar(50)
   shipping_address_id                             Int?
   billing_address_id                              Int?
@@ -1586,10 +1616,17 @@ model payments {
   created_at              DateTime?                 @default(now()) @db.Timestamp(6)
   updated_at              DateTime?                 @default(now()) @db.Timestamp(6)
   store_payment_method_id Int?
+  // CP-POLLO-ARABE-727 A.3 / ADR-3: cuenta bancaria de destino del pago.
+  // Nullable; ON DELETE RESTRICT (no SET NULL) por trazabilidad contable —
+  // misma regla que la FK hermana store_payment_method_id. El borrado físico de
+  // una cuenta con pagos asociados no debe ocurrir (status inactive/closed
+  // para retiro lógico).
+  bank_account_id         Int?
   receipt_s3_key          String?                   @db.VarChar(512)
   receipt_uploaded_at     DateTime?                 @db.Timestamp(6)
   orders                  orders                    @relation(fields: [order_id], references: [id], onUpdate: NoAction)
   store_payment_method    store_payment_methods?    @relation(fields: [store_payment_method_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  bank_account            bank_accounts?            @relation(fields: [bank_account_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   refunds                 refunds[]
   cash_register_movements cash_register_movements[]
 
@@ -1687,6 +1724,7 @@ model product_variants {
   inventory_valuation_snapshots inventory_valuation_snapshots[]
   layaway_items                 layaway_items[]
   dispatch_note_items           dispatch_note_items[]
+  kitchen_ticket_items          kitchen_ticket_items[]
 
   // Multi-tarifa overrides (Phase 1: price tiers)
   price_tier_overrides product_price_tier_overrides[]
@@ -3515,6 +3553,8 @@ enum notification_type_enum {
   table_payment_pending
   table_payment_confirmed
   qr_table_scan
+  /// QUI-719 — contacto desde la landing pública del módulo CRM.
+  crm_contact_request
   order_awaiting_carrier
   appointment_upcoming
   appointment_checked_in
@@ -3996,6 +4036,14 @@ enum industry_enum {
   service
   gym
   construction
+}
+
+enum crm_generation_status_enum {
+  idle
+  pending
+  generating
+  ready
+  failed
 }
 
 // ===================== MEMBERSHIPS (industria-genérico, Ola 1) =====================
@@ -5620,6 +5668,7 @@ model invoices {
   withholding_calculations withholding_calculations[]
   invoice_retry_queue      invoice_retry_queue[]
   dian_document_events     dian_document_events[]
+  invoice_delivery_events  invoice_delivery_events[]
   dispatch_notes           dispatch_notes[]
 
   @@unique([accounting_entity_id, invoice_type, invoice_number])
@@ -5847,16 +5896,24 @@ model invoice_resolutions {
 model invoice_profiles {
   id              Int @id @default(autoincrement())
   organization_id Int
-  /// NO nullable, a diferencia de `invoice_resolutions.store_id`.
+  /// Nullable desde la migración 20260826120000, replicando el patrón vivo de
+  /// `dian_configurations` (migración 20260511160000) y de
+  /// `invoice_resolutions.store_id`. Permite perfiles de ámbito organización
+  /// (raíl plataforma VENDIX_ADMIN con su propio NIT) anclados únicamente a
+  /// `organization_id`, sin fragmentar el invariante del módulo.
   ///
-  /// El invariante del módulo es «exactamente un predeterminado por
-  /// (`store_id`, `operation_type`)», y en Postgres dos NULL son DISTINTOS: con
-  /// la columna nullable el índice único parcial admitiría dos perfiles de
-  /// ámbito organización marcados como predeterminados del mismo tipo de
-  /// operación, y el wizard elegiría uno al azar. La sección vive en el menú de
-  /// tienda (`admin/invoicing/profiles`), así que el ámbito de tienda es además
-  /// el que corresponde.
-  store_id        Int
+  /// El invariante «exactamente un predeterminado por ámbito y operation_type»
+  /// lo sostiene la BASE con DOS índices únicos parciales:
+  ///   · `invoice_profiles_store_scope_default_uq` ON (store_id, operation_type)
+  ///     WHERE is_default AND store_id IS NOT NULL  (ámbito tienda)
+  ///   · `invoice_profiles_org_scope_default_uq` ON (organization_id, operation_type)
+  ///     WHERE is_default AND store_id IS NULL       (ámbito organización)
+  /// Postgres trata NULLs como distintos, así que UN solo parcial no cubre
+  /// ambos casos: el ORG-scope es el segundo parcial. Prisma no puede
+  /// representar parciales: viven únicamente en la migración de SQL.
+  /// `store_id` no se queda NULL por capricho — su nulabilidad es gobernada por
+  /// `organizations.fiscal_scope` (STORE ⇒ tienda; ORGANIZATION ⇒ plataforma).
+  store_id        Int?
 
   name String @db.VarChar(150)
   /// Código DIAN de tipo de operación (`09` = AIU, `10` = estándar).
@@ -5876,10 +5933,18 @@ model invoice_profiles {
   /// de Prisma la exigiría por `ALTER TYPE`. La validación vive en el DTO.
   state          String @db.VarChar(20) @default("active")
 
-  /// Predeterminado para su `operation_type`. El único parcial se garantiza con
-  /// un índice `UNIQUE ... WHERE is_default` que Prisma NO puede representar:
-  /// vive únicamente en el SQL de la migración. No lo borres de ahí creyendo que
-  /// el esquema lo cubre.
+  /// Predeterminado para su `operation_type` en su ámbito (STORE u ORG). El
+  /// invariante «un predeterminado por ámbito y operation_type» lo sostienen
+  /// DOS índices únicos parciales en la base (Prisma no puede representar
+  /// parciales): `invoice_profiles_store_scope_default_uq` y
+  /// `invoice_profiles_org_scope_default_uq`, creados en la migración
+  /// 20260826120000_invoice_profiles_relax_store_id_for_org_scope. No los
+  /// borres de ahí creyendo que el esquema los cubre.
+  ///
+  /// El índice de unicidad de nombre por ámbito es simétrico:
+  /// `invoice_profiles_unique_name_per_store` (tienda) y
+  /// `invoice_profiles_unique_name_per_org` (organización, store_id IS NULL),
+  /// este último en la migración 20260826121000.
   is_default Boolean @default(false)
 
   /// Número de la última versión COMPROMETIDA. Arranca en 0, no en 1.
@@ -5907,8 +5972,11 @@ model invoice_profiles {
   /// al perfil y el RESTRICT de las versiones lo bloquearía igual. La cadena
   /// entera es `Restrict` para que la base diga lo que de verdad hace, y para no
   /// añadir un `ON DELETE CASCADE` sobre una tabla padre con datos de negocio.
+  ///
+  /// `store` es opcional (nullable) desde la migración 20260826120000: cuando
+  /// `store_id IS NULL` el perfil vive en el ámbito organización (raíl plataforma).
   organization organizations @relation(fields: [organization_id], references: [id], onDelete: Restrict)
-  store        stores        @relation(fields: [store_id], references: [id], onDelete: Restrict)
+  store        stores?       @relation(fields: [store_id], references: [id], onDelete: Restrict)
   creator      users?        @relation("invoice_profiles_created_by", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: NoAction)
   cloned_from  invoice_profiles?  @relation("invoice_profile_clones", fields: [cloned_from_profile_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   clones       invoice_profiles[] @relation("invoice_profile_clones")
@@ -5916,6 +5984,7 @@ model invoice_profiles {
 
   @@index([store_id, state, operation_type])
   @@index([organization_id])
+  @@index([organization_id, state, operation_type])
   @@index([cloned_from_profile_id])
 }
 
@@ -6682,6 +6751,36 @@ model dian_document_events {
   @@index([invoice_id, event_code])
   @@index([status, created_at])
   @@index([organization_id, store_id])
+}
+
+/// Traza de reenvíos/entregas de una factura ya emitida (E.6, POST /:id/deliver).
+/// Deliberadamente NO reutiliza `dian_document_events`: `event_code` ahí es el
+/// vocabulario normativo RADIAN (Res. 000085/2022: 030/031/032/033/034) y mezclar
+/// una entrega por correo en esa tabla contaminaría el histórico fiscal que el
+/// panel RADIAN lee tal cual. `invoice_id` usa `onDelete: Cascade` a propósito:
+/// `invoices.remove()` sólo permite borrar facturas en `draft`, y esta tabla sólo
+/// se escribe para facturas fuera de `draft` (`INVOICING_DELIVERY_002` bloquea el
+/// reenvío de un borrador) — los dos estados son mutuamente excluyentes, así que
+/// el CASCADE nunca se dispara sobre una fila con historial de entrega real.
+model invoice_delivery_events {
+  id              Int       @id @default(autoincrement())
+  invoice_id      Int
+  organization_id Int
+  store_id        Int?
+  channel         String    @db.VarChar(20)
+  recipient       String    @db.VarChar(320)
+  zip_name        String?   @db.VarChar(255)
+  status          String    @default("sent") @db.VarChar(20)
+  provider_error  String?
+  created_by      Int?
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+
+  invoice      invoices      @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store        stores?       @relation(fields: [store_id], references: [id], onDelete: SetNull)
+
+  @@index([invoice_id, created_at])
+  @@index([status, created_at])
 }
 
 model fiscal_transmissions {
@@ -7684,6 +7783,10 @@ model bank_accounts {
   account_number   String                   @db.VarChar(50)
   bank_name        String                   @db.VarChar(100)
   bank_code        String?                  @db.VarChar(20)
+  // QUI-728 — S3 key del logo/imagen 21:9 de la cuenta. Nullable: las
+  // cuentas existentes y las que no requieren imagen siguen siendo válidas.
+  // La URL firmada se genera en lectura vía `S3Service.getPresignedUrl`.
+  image_s3_key     String?                  @db.VarChar(512)
   currency         String                   @default("COP") @db.VarChar(10)
   opening_balance  Decimal                  @default(0) @db.Decimal(12, 2)
   current_balance  Decimal                  @default(0) @db.Decimal(12, 2)
@@ -7699,6 +7802,8 @@ model bank_accounts {
   bank_transactions    bank_transactions[]
   bank_reconciliations bank_reconciliations[]
   refund_items         refund_items[]
+  // CP-POLLO-ARABE-727 A.3 — pagos asociados a esta cuenta (FK Restrict)
+  payments             payments[]
 
   @@unique([organization_id, account_number])
   @@index([organization_id, store_id])
@@ -9352,6 +9457,16 @@ enum print_format_type_enum {
   fiscal_electronic_invoice
   fiscal_credit_note
   kitchen_ticket
+  dispatch_ticket
+  // [print-editor-dsk P8] — Cuarto lote de formatos para el Hub de impresión:
+  // planilla de ruta DSD + tres certificados de retención (practicada, sufrida,
+  // laboral). La migración 20260827_add_print_format_enum_values los agrega a
+  // Postgres con ADD VALUE IF NOT EXISTS, y `prisma generate` los materializa
+  // en @prisma/client al regenerar.
+  dispatch_route
+  withholding_practiced
+  withholding_suffered
+  withholding_employee_certificate
 }
 
 model print_templates {
@@ -10263,6 +10378,7 @@ model tables {
   sessions      table_sessions[]
   bookings      bookings[]
   table_waiters table_waiters[]
+  kitchen_tickets kitchen_tickets[]
 
   @@unique([store_id, name])
   @@index([store_id, status])
@@ -10317,6 +10433,9 @@ model kitchen_tickets {
   store stores                 @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   order orders                 @relation(fields: [order_id], references: [id], onUpdate: NoAction)
   kds   kds                    @relation(fields: [kds_id], references: [id], onUpdate: NoAction)
+  // CP-POLLO-ARABE-727 A.3 — la columna table_id YA EXISTE (creada en
+  // 20260613000000_restaurant_suite_foundation); aquí solo se le declara la FK.
+  table tables?                @relation(fields: [table_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   items kitchen_ticket_items[]
 
   /// El consecutivo diario es POR ESTACIÓN, no por tienda: cada tablero cuenta
@@ -10339,6 +10458,12 @@ model kitchen_ticket_items {
   kitchen_ticket_id Int
   order_item_id     Int
   product_id        Int
+  // CP-POLLO-ARABE-727 A.3: denormalización de la variante en el ticket de
+  // cocina. product_variant_id es nullable (SET NULL si la variante se borra);
+  // variant_label es un snapshot inmutable al fire (no varía si
+  // product_variants.name cambia después).
+  product_variant_id Int?
+  variant_label      String?                    @db.VarChar(120)
   quantity          Int
   status            kitchen_ticket_item_state_enum @default(pending)
   notes             String?                        @db.Text
@@ -10348,6 +10473,7 @@ model kitchen_ticket_items {
   kitchen_ticket kitchen_tickets                  @relation(fields: [kitchen_ticket_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   order_item     order_items                      @relation(fields: [order_item_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   product        products                         @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  product_variant product_variants?                @relation(fields: [product_variant_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   exclusions     kitchen_ticket_item_exclusions[]
 
   @@index([kitchen_ticket_id])
@@ -10811,4 +10937,5 @@ enum aiu_component_enum {
   administracion
   imprevistos
   utilidad
+  contrato
 }

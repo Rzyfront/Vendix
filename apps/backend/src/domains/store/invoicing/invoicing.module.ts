@@ -39,6 +39,7 @@ import { PosFiscalEmissionService } from './pos/pos-fiscal-emission.service';
 import { PosSaleCompletedListener } from './pos/pos-sale-completed.listener';
 import { ProfilesController } from './profiles/profiles.controller';
 import { ProfilesModule } from './profiles/profiles.module';
+import { InvoiceDeliveryModule } from './delivery/invoice-delivery.module';
 
 @Module({
   imports: [
@@ -55,6 +56,10 @@ import { ProfilesModule } from './profiles/profiles.module';
     // Proveedores de los perfiles de facturación. Su CONTROLLER va en el array
     // de abajo, no acá: ver la nota de `profiles.module.ts`.
     ProfilesModule,
+    // E.6 — reenvío de facturas a otro correo. A diferencia de `ProfilesModule`,
+    // SÍ declara su propio controller (ver `invoice-delivery.controller.ts`):
+    // su ruta de 4 segmentos no colisiona con el `:id` de `InvoicingController`.
+    InvoiceDeliveryModule,
   ],
   controllers: [
     DianConfigController,

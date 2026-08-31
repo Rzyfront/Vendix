@@ -11,6 +11,7 @@ import {
 import { PrintFormatType } from '../../../core/models/print-formats.model';
 import { StoreSettingsFacade } from '../../../core/store/store-settings/store-settings.facade';
 import { PrintGatewayClientService } from './print-gateway-client.service';
+import { MmToPxService } from './mm-to-px.service';
 
 /**
  * Upper bound for the print iframe's `load` event. `document.write` + `close()`
@@ -182,6 +183,7 @@ function legacyMirror(
 export class DocumentPrintService {
   private readonly storeSettings = inject(StoreSettingsFacade);
   private readonly gatewayClient = inject(PrintGatewayClientService);
+  private readonly mmToPx = inject(MmToPxService);
 
   /**
    * Resolves the paper for a document without printing it.
@@ -254,7 +256,7 @@ export class DocumentPrintService {
     return `
       <html>
         <head>
-          <title>${opts?.title ?? 'Documento'}</title>
+          <title>${opts?.title ?? ''}</title>
           <style>
             /* Without an explicit @page size the driver falls back to its own
                default paper and centres an 80 mm ticket on a letter sheet. */
@@ -321,12 +323,17 @@ export class DocumentPrintService {
       );
 
       if (response && response.html) {
+        // [print-editor-dsk P2.3] Use the format from the REQUEST instead of
+        // reverse-engineering it from width_mm. The width-only heuristic could
+        // mis-report a 76mm POS format as thermal_58; the format the gateway
+        // was asked for is the source of truth.
+        const requestedFormat = params.formatType as unknown as PrintFormat;
         await this.sendToPrinter(response.html);
         return {
           documents: 1,
           pages: response.copies || 1,
           copies: response.copies || 1,
-          format: response.is_roll ? (response.width_mm <= 58 ? 'thermal_58' : 'thermal_80') : 'letter',
+          format: requestedFormat,
         };
       }
     } catch (err) {

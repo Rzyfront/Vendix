@@ -19,7 +19,6 @@ import {
 import {
   CurrencyPipe,
   CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
-import { ExportButtonComponent } from '../../../components/export-button/export-button.component';
 
 import { DateRangeFilter } from '../../../interfaces/analytics.interface';
 import {
@@ -47,7 +46,6 @@ import { getViewsByCategory, AnalyticsView } from '../../../config/analytics-reg
     ChartComponent,
     IconComponent,
     OptionsDropdownComponent,
-    ExportButtonComponent,
     CurrencyPipe,
     AnalyticsCardComponent,
   ],
@@ -219,11 +217,14 @@ this.store.dispatch(SalesActions.clearSalesSummaryState());
     this.store.dispatch(SalesActions.setDateRange({ dateRange: defaults }));
   }
 
-  getGrowthText(growth?: number): string {
+  getGrowthText(growth?: number | null): string {
     if (growth === undefined || growth === null) return '';
     const sign = growth >= 0 ? '+' : '';
     // QUI-609: derive the comparison label from the active preset (was the
     // hardcoded "vs período anterior" — defect C9 in the ticket catalog).
+    // QUI-610 widened the type to `number | null`: `computeGrowth` returns
+    // null when the previous period is 0, and the contract renders null as
+    // "—" by NOT printing "+0%" (which would be a fake "sin cambio").
     return `${sign}${growth.toFixed(1)}% vs ${comparisonLabelFor(this.dateRange().preset)}`;
   }
 

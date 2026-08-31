@@ -17,6 +17,21 @@ export const UBL_NAMESPACES = {
    */
   APPLICATION_RESPONSE:
     'urn:oasis:names:specification:ubl:schema:xsd:ApplicationResponse-2',
+  /**
+   * `AttachedDocument` namespace — el «contenedor electrónico» que envuelve el
+   * documento ya validado (factura/nota/documento soporte), su representación
+   * gráfica y la respuesta de validación de la DIAN, para su entrega al
+   * adquiriente (Anexo 1.9 pág. 263 AE01, §8.5 pág. 598/638).
+   *
+   * ✅ CONFIRMADO contra el XSD propio del repositorio:
+   * `schemas/maindoc/UBL-AttachedDocument-2.1.xsd:15`
+   * (`targetNamespace="urn:oasis:names:specification:ubl:schema:xsd:AttachedDocument-2"`),
+   * copia literal de la Caja de Herramientas de la DIAN — no es un valor
+   * buscado en internet sin verificar contra la fuente que ya vive en este
+   * repositorio.
+   */
+  ATTACHED_DOCUMENT:
+    'urn:oasis:names:specification:ubl:schema:xsd:AttachedDocument-2',
   /** Common Aggregate Components */
   CAC: 'urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2',
   /** Common Basic Components */

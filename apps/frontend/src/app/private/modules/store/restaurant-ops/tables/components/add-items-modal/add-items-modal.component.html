@@ -4,6 +4,7 @@
   (cancel)="onCancel()"
   [size]="'lg'"
   [title]="'Agregar a la cuenta'"
+  [dialog]="true"
   subtitle="Selecciona los productos y cantidades para esta mesa"
 >
   <!-- Search -->
@@ -68,25 +69,49 @@
                 {{ +(row.base_price ?? 0) | currency }}
               </span>
             </div>
+            <!--
+              CP-POLLO-ARABE-727 C.4 (QUI-736) — picker de variante para platos
+              variantizados. La base de un producto con variantes no es vendible:
+              hay que elegir una antes de agregar a la cuenta.
+            -->
+            @if (hasVariants(row)) {
+              <div class="variant-picker">
+                <span class="variant-picker__label">Variante</span>
+                <div class="variant-picker__options">
+                  @for (variant of (row.product_variants ?? []); track variant.id) {
+                    <button
+                      type="button"
+                      class="variant-option"
+                      [class.is-on]="selectedVariantOf(row.id) === variant.id"
+                      [attr.aria-pressed]="selectedVariantOf(row.id) === variant.id"
+                      [attr.title]="variantLabel(variant)"
+                      (click)="selectVariant(row, variant.id)"
+                    >
+                      {{ variantLabel(variant) }}
+                    </button>
+                  }
+                </div>
+              </div>
+            }
           </div>
           <div class="qty-controls">
             <app-button
               variant="outline"
-              size="sm"
+              size="lg"
               [disabled]="quantityOf(row.id) <= 0"
               [attr.aria-label]="'Disminuir'"
               (clicked)="decrement(row)"
             >
-              <app-icon slot="icon" name="minus" [size]="14"></app-icon>
+              <app-icon slot="icon" name="minus" [size]="16"></app-icon>
             </app-button>
             <span class="qty">{{ quantityOf(row.id) }}</span>
             <app-button
               variant="outline"
-              size="sm"
+              size="lg"
               [attr.aria-label]="'Aumentar'"
               (clicked)="increment(row)"
             >
-              <app-icon slot="icon" name="plus" [size]="14"></app-icon>
+              <app-icon slot="icon" name="plus" [size]="16"></app-icon>
             </app-button>
           </div>
 
@@ -105,6 +130,11 @@
               class="takeaway-toggle"
               [class.is-on]="isTakeaway(row.id)"
               [attr.aria-pressed]="isTakeaway(row.id)"
+              [attr.aria-label]="
+                isTakeaway(row.id)
+                  ? 'Quitar modo para llevar'
+                  : 'Marcar para llevar'
+              "
               [attr.title]="
                 isTakeaway(row.id)
                   ? 'Se empaca para llevar. Toca para volverlo consumo en la mesa.'
@@ -149,8 +179,9 @@
       <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
       <app-button
         variant="primary"
+        size="lg"
         [loading]="loading()"
-        [disabled]="!hasItems()"
+        [disabled]="!hasItems() || hasMissingVariant()"
         (clicked)="onSubmit()"
       >
         Agregar a la cuenta

@@ -1,0 +1,76 @@
+<app-modal
+  [isOpen]="isOpen()"
+  (isOpenChange)="onOpenChange($event)"
+  (cancel)="onCancel()"
+  [dialog]="true"
+  [title]="'Reenviar a cocina'"
+  [subtitle]="subtitle()"
+  [size]="'sm'"
+>
+  <div class="space-y-3">
+    <p class="text-sm text-text-secondary">
+      ¿Por qué se reenvía este pedido a cocina? Elegí una opción. La cocina
+      va a registrar el resultado según lo que declares acá.
+    </p>
+
+    <div class="flex flex-col gap-2" role="radiogroup" aria-label="Motivo del reenvío">
+      @for (option of options; track option.reason) {
+        <button
+          type="button"
+          role="radio"
+          [attr.aria-checked]="selectedReason() === option.reason"
+          (click)="onSelect(option.reason)"
+          class="text-left rounded-lg border p-3 transition-colors"
+          [class.border-primary]="selectedReason() === option.reason"
+          [class.bg-primary]="selectedReason() === option.reason"
+          [class.bg-opacity-5]="selectedReason() === option.reason"
+          [class.border-border]="selectedReason() !== option.reason"
+          [class.hover:border-primary]="selectedReason() !== option.reason"
+          [disabled]="isSubmitting()"
+        >
+          <div class="flex items-start gap-2">
+            <span
+              class="mt-0.5 inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border-2"
+              [class.border-primary]="selectedReason() === option.reason"
+              [class.border-border]="selectedReason() !== option.reason"
+              aria-hidden="true"
+            >
+              @if (selectedReason() === option.reason) {
+                <span class="h-2 w-2 rounded-full bg-primary"></span>
+              }
+            </span>
+            <div class="flex-1">
+              <p class="text-sm font-semibold text-text-primary">
+                {{ option.label }}
+              </p>
+              <p class="text-xs text-text-secondary mt-1">
+                {{ option.consequence }}
+              </p>
+            </div>
+          </div>
+        </button>
+      }
+    </div>
+  </div>
+
+  <div slot="footer" class="flex justify-end gap-2">
+    <app-button
+      variant="ghost"
+      (clicked)="onCancel()"
+      [disabled]="isSubmitting()"
+    >
+      Cancelar
+    </app-button>
+    <app-button
+      variant="primary"
+      [loading]="isSubmitting()"
+      [disabled]="!canConfirm()"
+      (clicked)="onConfirm()"
+    >
+      @if (!isSubmitting()) {
+        <app-icon slot="icon" name="refresh-cw" [size]="16"></app-icon>
+      }
+      Reenviar a cocina
+    </app-button>
+  </div>
+</app-modal>

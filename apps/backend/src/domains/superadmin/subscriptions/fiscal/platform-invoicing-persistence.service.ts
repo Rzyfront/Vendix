@@ -168,6 +168,12 @@ export class PlatformInvoicingPersistenceService {
           global_discount_amount: args.payload.global_discount_amount ?? 0,
           operation_type: args.payload.operation_type,
           aiur_observation: args.payload.aiur_observation ?? null,
+          // Top-level para que `subscription-fiscal.service.ts` (asiento
+          // contable de frank) los consuma sin tener que conocer la
+          // forma del DTO del rail plataforma.
+          counterpart_account_code: args.payload.counterpart_account_code ?? null,
+          resolution_id: args.payload.resolution_id ?? null,
+          issue_date: args.payload.issue_date ?? null,
           created_by: 'PlatformInvoicingFacade',
         } as Prisma.JsonObject,
       },
@@ -252,6 +258,9 @@ export class PlatformInvoicingPersistenceService {
       withholdings: (meta['withholdings'] as Array<Record<string, unknown>>) ?? [],
       global_discount_amount: (meta['global_discount_amount'] as number) ?? 0,
       operation_type: (meta['operation_type'] as string) ?? '10',
+      counterpart_account_code: (meta['counterpart_account_code'] as string | null) ?? null,
+      resolution_id: (meta['resolution_id'] as number | null) ?? null,
+      issue_date: (meta['issue_date'] as string | null) ?? null,
     };
   }
 }
@@ -287,4 +296,13 @@ export interface PlatformInvoiceSnapshotPayload {
   operation_type: string;
   /** Texto libre AIU (AIU contract object, max 4900 chars DIAN). */
   aiur_observation?: string | null;
+  /**
+   * Cuenta PUC de contrapartida del documento (cabeza). La consume
+   * `subscription-fiscal.service.ts` al emitir el journal entry.
+   */
+  counterpart_account_code?: string | null;
+  /** Resolución DIAN que numeró el documento (si vino explícita del operador). */
+  resolution_id?: number | null;
+  /** Fecha de emisión (YYYY-MM-DD). */
+  issue_date?: string | null;
 }

@@ -304,7 +304,7 @@ interface AddressDtoPayload {
                 customWrapperClass="mt-0"
               ></app-input>
 
-              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div class="grid grid-cols-1 gap-3" [class.sm:grid-cols-3]="document_type() === 'NIT'" [class.sm:grid-cols-2]="document_type() !== 'NIT'">
                 <app-selector
                   formControlName="document_type"
                   label="Tipo doc"
@@ -321,7 +321,7 @@ interface AddressDtoPayload {
                   customWrapperClass="mt-0"
                 ></app-input>
 
-                @if (document_type() === 'NIT' || document_type() === 'CC') {
+                @if (document_type() === 'NIT') {
                   <app-input
                     formControlName="verification_digit"
                     label="DV"
@@ -638,6 +638,12 @@ export class CustomerModalComponent {
       const code = documentTypeValue();
       this.selectedDocumentType.set(findDocumentType(code));
       this.document_type.set(code ?? '');
+      if (code !== 'NIT') {
+        const dvCtrl = this.form.controls['verification_digit'];
+        if (dvCtrl && dvCtrl.value) {
+          dvCtrl.setValue('', { emitEvent: false });
+        }
+      }
     });
 
     // Sincronizar signals derivados.
@@ -909,6 +915,9 @@ export class CustomerModalComponent {
     // se deshabilita cuando no hay tipo seleccionado, pero igual queremos
     // emitir el valor actual del formulario).
     const data = this.form.getRawValue() as CreateCustomerRequest;
+    if (data.document_type !== 'NIT') {
+      data.verification_digit = null;
+    }
     const customer = this.customer();
 
     if (customer) {

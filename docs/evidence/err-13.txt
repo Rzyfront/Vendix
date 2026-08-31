@@ -1,0 +1,40 @@
+# ERR-13: PRINT_PERM_MANAGE_REQUIRED_001
+# HTTP: 403
+# Source: apps/backend/src/common/errors/error-codes.ts:275-279
+# Emitido cuando: operación requiere store:settings:manage o store:print_formats:manage
+
+COMMAND (PUT sin perm):
+curl -sk -X PUT 'https://api.vendix.com/api/store/print-formats/dispatch_ticket' \
+  -H "Authorization: Bearer $USER_WITHOUT_PERM_TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{ "overrides": {} }' \
+  -w '\nHTTP_CODE: %{http_code}\n'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+EXPECTED HTTP: 403
+
+EXPECTED RESPONSE BODY:
+{
+  "success": false,
+  "error": {
+    "code": "PRINT_PERM_MANAGE_REQUIRED_001",
+    "message": "Permission store:settings:manage or store:print_formats:manage required"
+  }
+}
+
+VERIFICATION:
+# User sin perm store:settings:update
+curl .../dispatch_ticket -X PUT -d '{...}' (sin perm) | jq '.error.code' debe ser 'PRINT_PERM_MANAGE_REQUIRED_001' O 'SYS_FORBIDDEN_001'
+# (depende si PermissionsGuard valida ANTES de la lógica de PrintFormatsService)
+
+# User con perm: exit 0
+curl .../dispatch_ticket -X PUT -d '{...}' (con perm) | jq '.success' debe ser true
+
+# Frontend behavior: toast "Permisos insuficientes" + redirect a login o módulo superior
+
+# Diferenciar códigos 403:
+# - SYS_FORBIDDEN_001: genérico auth/role
+# - PRINT_PERM_MANAGE_REQUIRED_001: específico print formats
+# - PRINT_TEMPLATE_SYSTEM_PROTECTED_001: template es del sistema
+# - PRINT_LIBRARY_SHARE_FORBIDDEN_001: share no permitido

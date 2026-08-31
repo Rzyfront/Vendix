@@ -14,7 +14,7 @@ import {
   IsInt,
   Matches,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 
 export class PosOrderItemDto {
   @IsOptional()
@@ -233,6 +233,22 @@ export class CreatePosPaymentDto {
   @Type(() => Number)
   customer_id?: number;
 
+  /**
+   * QUI-737 (B.4) — Alias de venta rápida retail (POST /store/payments/pos, el
+   * camino real que Pollo Árabe más usa). ADR-8: `customer_alias` explícito;
+   * los campos muertos `customer_name/email/phone` de abajo quedan como están
+   * (no se cablean — deuda con ticket propio). Mutuamente excluyente con
+   * `customer_id` (CHECK orders_customer_xor_alias). `@Transform` colapsa
+   * string en blanco a `undefined`.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() === '' ? undefined : value,
+  )
+  customer_alias?: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(255)
@@ -377,6 +393,19 @@ export class CreatePosPaymentDto {
   @Min(1)
   @Type(() => Number)
   store_payment_method_id?: number;
+
+  /**
+   * QUI-728 — cuenta bancaria de destino del pago por transferencia
+   * (`bank_accounts.id`). Lo elige el cajero en el `payment-collector` al cobrar
+   * por `bank_transfer`; el servicio valida que exista, esté `active` y
+   * pertenezca a la organización/tienda del contexto (ADR-3) antes de persistir
+   * `payments.bank_account_id`.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  bank_account_id?: number;
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })

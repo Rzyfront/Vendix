@@ -95,7 +95,15 @@ describe('ProfilesService — auditoría de las 7 acciones', () => {
       }),
     } as any;
 
-    return { service: new ProfilesService(prisma, cache, audit), logged, audit, tx, row };
+    return {
+      service: new ProfilesService(prisma, cache, audit, {
+        assertAccountsUsable: jest.fn().mockResolvedValue(undefined),
+      } as any),
+      logged,
+      audit,
+      tx,
+      row,
+    };
   }
 
   beforeEach(() => {

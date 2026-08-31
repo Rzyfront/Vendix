@@ -99,11 +99,18 @@ export const SYSTEM_PRINT_TEMPLATES: Array<{
           ],
         },
         {
+          id: 'sec_table_info',
+          type: 'table_info',
+          title: 'Mesa, Mesero y Turno',
+          enabled: true,
+          order: 3,
+        },
+        {
           id: 'sec_customer',
           type: 'customer_info',
           title: 'Datos del Cliente',
           enabled: true,
-          order: 3,
+          order: 4,
           fields: [
             { id: 'f_cname', key: 'customer.name', label: 'Cliente', enabled: true, position: 'left' },
             { id: 'f_cnit', key: 'customer.tax_id', label: 'C.C. / NIT', enabled: true, position: 'left' },
@@ -114,14 +121,14 @@ export const SYSTEM_PRINT_TEMPLATES: Array<{
           type: 'items_table',
           title: 'Detalle de Productos',
           enabled: true,
-          order: 4,
+          order: 5,
         },
         {
           id: 'sec_totals',
           type: 'totals_summary',
           title: 'Totales y Pagos',
           enabled: true,
-          order: 5,
+          order: 6,
           fields: [
             { id: 'f_sub', key: 'order.subtotal_amount', label: 'Subtotal', enabled: true, position: 'right' },
             { id: 'f_disc', key: 'order.discount_amount', label: 'Descuento', enabled: true, position: 'right' },
@@ -137,7 +144,7 @@ export const SYSTEM_PRINT_TEMPLATES: Array<{
           type: 'footer',
           title: 'Pie de Ticket',
           enabled: true,
-          order: 6,
+          order: 7,
           fields: [
             { id: 'f_msg', key: 'receipts.receipt_footer', label: 'Mensaje de Despedida', enabled: true, position: 'center' },
             { id: 'f_powered', key: 'system.powered_by', label: 'Firma del Sistema', enabled: true, position: 'center' },
@@ -463,6 +470,206 @@ export const SYSTEM_PRINT_TEMPLATES: Array<{
       columns: [
         { id: 'col_qty', key: 'quantity', label: 'Cant.', enabled: true, width_percent: 25, align: 'center', format: 'number' },
         { id: 'col_desc', key: 'product_name', label: 'Plato / Preparación', enabled: true, width_percent: 75, align: 'left', format: 'text' },
+      ],
+    },
+  },
+  // CP-DTLP-20260827 (Phase B.2) — Tiquete de Despacho. Logística térmica 80mm
+  // courier mono 9pt; cliente, dirección, productos por línea con cantidades
+  // pedida/despachada. Sin totales fiscales, sin QR, sin firma (la firma de
+  // recibido se reserva al despacho remisión que ya existe). ADR-1 Enlace
+  // Universal: este es el undécimo formato del Hub enriquecido y debe reusar
+  // el mismo motor HTML que el resto.
+  // El cast es necesario porque schema.prisma todavía no lista
+  // `dispatch_ticket`; el valor entra a Postgres con la migración
+  // 20260827120000_add_dispatch_ticket_to_enum y `prisma generate` lo
+  // materializará en @prisma/client más adelante.
+  {
+    format_type: 'dispatch_ticket' as unknown as print_format_type_enum,
+    name: 'Tiquete de Despacho Térmico (80mm)',
+    description: 'Ticket logístico con cliente, dirección y cantidades pedida/despachada por línea; rollo 80mm courier mono',
+    definition: {
+      paper: {
+        format: 'thermal_80',
+        width_mm: 80,
+        is_roll: true,
+        margin_mm: 0,
+        copies: 1,
+        orientation: 'portrait',
+      },
+      styles: {
+        font_family: "'Courier New', Courier, monospace",
+        font_size_base_pt: 9,
+        primary_color: '#000000',
+        header_alignment: 'center',
+        show_borders: true,
+        compact_mode: true,
+      },
+      sections: [
+        { id: 'sec_header', type: 'header', title: 'Encabezado Despacho', enabled: true, order: 1 },
+        { id: 'sec_doc_info', type: 'document_info', title: 'Datos de la Orden', enabled: true, order: 2 },
+        { id: 'sec_customer', type: 'customer_info', title: 'Cliente y Dirección de Entrega', enabled: true, order: 3 },
+        { id: 'sec_items', type: 'items_table', title: 'Productos a Despachar', enabled: true, order: 4 },
+        { id: 'sec_footer', type: 'footer', title: 'Despachado por', enabled: true, order: 5 },
+      ],
+      columns: [
+        // [print-editor-dsk P1.5] Las claves deben coincidir con los campos del
+        // StandardPrintItem que `dispatch-ticket.provider.ts` rellena:
+        //   - `variant_sku` (no `sku` — el compositor despacha items[].variant_sku)
+        //   - `quantity`   (cant. pedida — items[].quantity, ya rellenado por el provider)
+        //   - `dispatched_qty` (cant. despachada — items[].dispatched_qty, directo)
+        // Antes P1.5 estas claves leían undefined y la tabla salía vacía.
+        { id: 'col_idx', key: 'index', label: '#', enabled: true, width_percent: 8, align: 'center', format: 'number' },
+        { id: 'col_sku', key: 'variant_sku', label: 'SKU / Código', enabled: true, width_percent: 30, align: 'left', format: 'text' },
+        { id: 'col_desc', key: 'product_name', label: 'Descripción', enabled: true, width_percent: 32, align: 'left', format: 'text' },
+        { id: 'col_qty', key: 'quantity', label: 'Cant. Pedida', enabled: true, width_percent: 15, align: 'center', format: 'number' },
+        { id: 'col_disp', key: 'dispatched_qty', label: 'Cant. Despachada', enabled: true, width_percent: 15, align: 'center', format: 'number' },
+      ],
+    },
+  },
+  // [print-editor-dsk P8] — Plantilla del lote 12: planilla de ruta DSD.
+  // Carta vertical, 1 copia, secciones para vehículo, conductor, transportista
+  // externo (si lo hay) y la secuencia de paradas. Las paradas se pintan en
+  // el cuerpo desde `custom_variables.stops[]` (NO desde `items[]`, porque
+  // una planilla no factura productos — factura paradas).
+  {
+    format_type: 'dispatch_route' as unknown as print_format_type_enum,
+    name: 'Planilla de Ruta DSD Carta',
+    description: 'Documento operativo de ruta de despacho DSD con vehículo, conductor, transportista y secuencia de paradas',
+    definition: {
+      paper: {
+        format: 'letter',
+        width_mm: 216,
+        is_roll: false,
+        margin_mm: 15,
+        copies: 1,
+        orientation: 'portrait',
+      },
+      styles: {
+        font_family: "'Helvetica Neue', Arial, sans-serif",
+        font_size_base_pt: 10,
+        primary_color: '#0f766e',
+        header_alignment: 'left',
+        show_borders: true,
+      },
+      sections: [
+        { id: 'sec_header', type: 'header', title: 'Encabezado Planilla', enabled: true, order: 1 },
+        { id: 'sec_route_meta', type: 'document_info', title: 'Datos de la Ruta', enabled: true, order: 2 },
+        { id: 'sec_vehicle', type: 'custom_notes', title: 'Vehículo y Conductor', enabled: true, order: 3 },
+        { id: 'sec_stops', type: 'items_table', title: 'Paradas', enabled: true, order: 4 },
+        { id: 'sec_totals', type: 'totals_summary', title: 'Recaudo Total', enabled: true, order: 5 },
+        { id: 'sec_signatures', type: 'signatures_box', title: 'Firmas', enabled: true, order: 6 },
+      ],
+      columns: [
+        { id: 'col_seq', key: 'sequence', label: '#', enabled: true, width_percent: 8, align: 'center', format: 'number' },
+        { id: 'col_dnum', key: 'dispatch_number', label: 'Remisión', enabled: true, width_percent: 22, align: 'left', format: 'text' },
+        { id: 'col_cust', key: 'customer', label: 'Cliente', enabled: true, width_percent: 30, align: 'left', format: 'text' },
+        { id: 'col_addr', key: 'address', label: 'Dirección', enabled: true, width_percent: 30, align: 'left', format: 'text' },
+        { id: 'col_status', key: 'status', label: 'Estado', enabled: true, width_percent: 10, align: 'center', format: 'text' },
+      ],
+    },
+  },
+  // [print-editor-dsk P8] — Lote 13: certificado de retención practicada.
+  {
+    format_type: 'withholding_practiced' as unknown as print_format_type_enum,
+    name: 'Certificado de Retención Practicada Carta',
+    description: 'Comprobante de retención en la fuente que la empresa practica a un tercero',
+    definition: {
+      paper: {
+        format: 'letter',
+        width_mm: 216,
+        is_roll: false,
+        margin_mm: 15,
+        copies: 1,
+        orientation: 'portrait',
+      },
+      styles: {
+        font_family: "'Helvetica Neue', Arial, sans-serif",
+        font_size_base_pt: 10,
+        primary_color: '#1e3a8a',
+        header_alignment: 'left',
+        show_borders: true,
+      },
+      sections: [
+        { id: 'sec_header', type: 'header', title: 'Encabezado Certificado', enabled: true, order: 1 },
+        { id: 'sec_counterparty', type: 'parties_info', title: 'Tercero Retenido', enabled: true, order: 2 },
+        { id: 'sec_concept', type: 'custom_notes', title: 'Concepto y Base', enabled: true, order: 3 },
+        { id: 'sec_tax', type: 'fiscal_tax_breakdown', title: 'Detalle de Retención', enabled: true, order: 4 },
+        { id: 'sec_totals', type: 'totals_summary', title: 'Valor Retenido', enabled: true, order: 5 },
+      ],
+      columns: [
+        { id: 'col_concept', key: 'name', label: 'Concepto', enabled: true, width_percent: 60, align: 'left', format: 'text' },
+        { id: 'col_rate', key: 'rate', label: 'Tarifa %', enabled: true, width_percent: 15, align: 'center', format: 'percent' },
+        { id: 'col_base', key: 'base_amount', label: 'Base', enabled: true, width_percent: 25, align: 'right', format: 'currency' },
+      ],
+    },
+  },
+  // [print-editor-dsk P8] — Lote 14: certificado de retención sufrida.
+  {
+    format_type: 'withholding_suffered' as unknown as print_format_type_enum,
+    name: 'Certificado de Retención Sufrida Carta',
+    description: 'Comprobante de retención en la fuente que un tercero practicó a la empresa',
+    definition: {
+      paper: {
+        format: 'letter',
+        width_mm: 216,
+        is_roll: false,
+        margin_mm: 15,
+        copies: 1,
+        orientation: 'portrait',
+      },
+      styles: {
+        font_family: "'Helvetica Neue', Arial, sans-serif",
+        font_size_base_pt: 10,
+        primary_color: '#7c2d12',
+        header_alignment: 'left',
+        show_borders: true,
+      },
+      sections: [
+        { id: 'sec_header', type: 'header', title: 'Encabezado Certificado', enabled: true, order: 1 },
+        { id: 'sec_counterparty', type: 'parties_info', title: 'Tercero que Retuvo', enabled: true, order: 2 },
+        { id: 'sec_concept', type: 'custom_notes', title: 'Concepto y Base', enabled: true, order: 3 },
+        { id: 'sec_tax', type: 'fiscal_tax_breakdown', title: 'Detalle de Retención', enabled: true, order: 4 },
+        { id: 'sec_totals', type: 'totals_summary', title: 'Valor Sufrido', enabled: true, order: 5 },
+      ],
+      columns: [
+        { id: 'col_concept', key: 'name', label: 'Concepto', enabled: true, width_percent: 60, align: 'left', format: 'text' },
+        { id: 'col_rate', key: 'rate', label: 'Tarifa %', enabled: true, width_percent: 15, align: 'center', format: 'percent' },
+        { id: 'col_base', key: 'base_amount', label: 'Base', enabled: true, width_percent: 25, align: 'right', format: 'currency' },
+      ],
+    },
+  },
+  // [print-editor-dsk P8] — Lote 15: certificado laboral al empleado.
+  {
+    format_type: 'withholding_employee_certificate' as unknown as print_format_type_enum,
+    name: 'Certificado Laboral de Retención al Empleado',
+    description: 'Comprobante anual de retención en la fuente sobre ingresos laborales',
+    definition: {
+      paper: {
+        format: 'letter',
+        width_mm: 216,
+        is_roll: false,
+        margin_mm: 15,
+        copies: 1,
+        orientation: 'portrait',
+      },
+      styles: {
+        font_family: "'Helvetica Neue', Arial, sans-serif",
+        font_size_base_pt: 10,
+        primary_color: '#365314',
+        header_alignment: 'left',
+        show_borders: true,
+      },
+      sections: [
+        { id: 'sec_header', type: 'header', title: 'Encabezado Certificado Laboral', enabled: true, order: 1 },
+        { id: 'sec_employee', type: 'parties_info', title: 'Datos del Empleado', enabled: true, order: 2 },
+        { id: 'sec_period', type: 'custom_notes', title: 'Periodo Gravable', enabled: true, order: 3 },
+        { id: 'sec_tax', type: 'fiscal_tax_breakdown', title: 'Detalle de Retención', enabled: true, order: 4 },
+        { id: 'sec_totals', type: 'totals_summary', title: 'Total Retenido al Empleado', enabled: true, order: 5 },
+      ],
+      columns: [
+        { id: 'col_concept', key: 'name', label: 'Concepto', enabled: true, width_percent: 60, align: 'left', format: 'text' },
+        { id: 'col_rate', key: 'rate', label: 'Tarifa %', enabled: true, width_percent: 15, align: 'center', format: 'percent' },
+        { id: 'col_base', key: 'base_amount', label: 'Base', enabled: true, width_percent: 25, align: 'right', format: 'currency' },
       ],
     },
   },

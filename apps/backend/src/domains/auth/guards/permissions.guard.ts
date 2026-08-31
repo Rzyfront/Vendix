@@ -3,6 +3,7 @@ import {
   CanActivate,
   ExecutionContext,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
@@ -11,6 +12,12 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class PermissionsGuard implements CanActivate {
+  // A.0 — el 403 de permisos era estructuralmente invisible: los guards corren
+  // ANTES que AuditInterceptor, así que un rechazo aquí nunca generaba fila en
+  // `audit_logs` ni línea de consola. Este Logger deja rastro forense en cada
+  // rama de rechazo.
+  private readonly logger = new Logger(PermissionsGuard.name);
+
   constructor(private reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
@@ -28,6 +35,7 @@ export class PermissionsGuard implements CanActivate {
     const { method, route } = request;
 
     if (!user) {
+      this.logDenied(requiredPermissions, null, request);
       throw new VendixHttpException(ErrorCodes.AUTH_PERM_001);
     }
 
@@ -37,6 +45,7 @@ export class PermissionsGuard implements CanActivate {
     }
 
     if (!user.permissions || user.permissions.length === 0) {
+      this.logDenied(requiredPermissions, user, request);
       throw new VendixHttpException(ErrorCodes.AUTH_PERM_001);
     }
 
@@ -92,9 +101,37 @@ export class PermissionsGuard implements CanActivate {
     );
 
     if (!hasPermission && !hasNamedPermission) {
+      this.logDenied(requiredPermissions, user, request);
       throw new VendixHttpException(ErrorCodes.AUTH_PERM_001);
     }
 
     return true;
+  }
+
+  /**
+   * A.0 — deja rastro estructurado cuando el guard rechaza. Los guards corren
+   * ANTES que `AuditInterceptor` (app.module.ts:193-194), así que un 403 de
+   * permisos jamás llegaba a `audit_logs`; este warn es la única huella
+   * forense de un intento de explotar un endpoint de dinero.
+   */
+  private logDenied(
+    required: string[] | undefined,
+    user: { id?: unknown; roles?: unknown; store_id?: unknown } | null,
+    request: any,
+  ): void {
+    this.logger.warn(
+      `PERMISSION_DENIED ${JSON.stringify({
+        required: required ?? null,
+        user: user
+          ? {
+              id: user.id ?? null,
+              roles: user.roles ?? null,
+              store_id: user.store_id ?? null,
+            }
+          : null,
+        route: request?.originalUrl ?? request?.url ?? null,
+        method: request?.method ?? null,
+      })}`,
+    );
   }
 }

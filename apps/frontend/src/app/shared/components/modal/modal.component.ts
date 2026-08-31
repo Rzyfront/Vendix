@@ -28,9 +28,11 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl' | 'xxl' | 'full';
           [class]="wrapperClasses()"
           (click)="onWrapperClick($event)"
         >
-        <!-- Backdrop overlay: bg-only, sin backdrop-filter -->
+        <!-- Backdrop overlay: bg-only, sin backdrop-filter.
+             motion-reduce:transition-none respeta prefers-reduced-motion:
+             sin animación de entrada/salida, solo aparición instantánea. -->
         <div
-          class="absolute inset-0 bg-black/50 transition-opacity duration-300 ease-out"
+          class="absolute inset-0 bg-black/50 transition-opacity duration-300 ease-out motion-reduce:transition-none"
           [class.opacity-100]="isOpen()"
           [class.opacity-0]="!isOpen()"
         ></div>
@@ -40,7 +42,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl' | 'xxl' | 'full';
              desde el nodo que recibe el foco. -->
         <div
           #modalContainer
-          class="relative transform transition-[transform,opacity] duration-300 ease-out"
+          class="relative transform transition-[transform,opacity] duration-300 ease-out motion-reduce:transition-none"
           [class]="modalClasses()"
           [class.scale-100]="isOpen()"
           [class.scale-95]="!isOpen()"

@@ -9,6 +9,9 @@
   max-height: 50vh;
   overflow-y: auto;
   padding-right: 0.25rem;
+  /* scroll-safe-area: el teclado virtual / barra de gestos iOS no tapa la
+     última fila del listado dentro del modal. */
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .product-row {
@@ -151,5 +154,92 @@
     background-color: var(--color-warning-100, #fef3c7);
     border-color: var(--color-warning, #fb923c);
     color: var(--color-warning-700, #b45309);
+  }
+}
+
+/* CP-POLLO-ARABE-727 C.4 (QUI-736) — picker de variante de un plato.
+   Botones de pastilla (no un <select>) porque el rango es corto y un toque
+   directo gana a abrir un desplegable con las manos ocupadas en la mesa. */
+.variant-picker {
+  margin-top: 0.4rem;
+
+  .variant-picker__label {
+    display: block;
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    color: var(--color-text-secondary, #6b7280);
+    margin-bottom: 0.25rem;
+  }
+
+  .variant-picker__options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+}
+
+.variant-option {
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 0.75rem;
+  background: transparent;
+  color: var(--color-text-secondary, #6b7280);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+
+  &:hover {
+    border-color: var(--color-primary, #3b82f6);
+    color: var(--color-primary, #3b82f6);
+  }
+
+  &.is-on {
+    background-color: var(--color-primary-50, #eff6ff);
+    border-color: var(--color-primary, #3b82f6);
+    color: var(--color-primary, #3b82f6);
+  }
+}
+
+/* ── C.1 (QUI-735) — mobile-first del modal de agregar items ─────────────
+   En pantallas estrechas la fila (thumb + info + stepper + toggle) no cabe
+   en una sola línea sin desbordar; se deja quebrar en dos filas y se mantiene
+   el stepper a la derecha para el pulgar. Solo aplica bajo 640px. */
+@media (max-width: 640px) {
+  .product-list {
+    max-height: 44vh;
+  }
+
+  .product-row {
+    flex-wrap: wrap;
+    gap: 0.75rem 0.875rem;
+
+    .product-thumb {
+      width: 44px;
+      height: 44px;
+    }
+
+    .info {
+      flex: 1 1 calc(100% - 3.25rem);
+    }
+
+    .qty-controls {
+      flex: 0 0 auto;
+      justify-content: flex-end;
+    }
+  }
+
+  .total-preview {
+    flex-wrap: wrap;
+    gap: 0.375rem 0.75rem;
+
+    span {
+      min-width: 0;
+    }
   }
 }

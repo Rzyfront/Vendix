@@ -150,9 +150,16 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                 [formGroupName]="i"
                 class="border border-border rounded-lg p-3 space-y-2 relative"
               >
+                <!-- A.6(a): único botón icon-only sin nombre accesible del módulo
+                     (barrido mecánico de 204 usos de app-icon). Sin aria-label un
+                     lector de pantalla anuncia «botón» para una acción que
+                     destruye la fila entera capturada.
+                     OJO: sin acentos graves acá — la plantilla ES un literal
+                     delimitado por acentos graves y uno solo la cierra. -->
                 <button
                   type="button"
                   (click)="removeItem(i)"
+                  aria-label="Eliminar ítem"
                   class="absolute top-2 right-2 text-text-secondary hover:text-error transition-colors"
                 >
                   <app-icon name="x" [size]="16"></app-icon>

@@ -28,4 +28,8 @@ export class PrintPreviewRequestDto {
   @IsOptional()
   @IsNumber()
   sample_document_id?: number;
+
+  @IsOptional()
+  @IsEnum(['dummy', 'tokenized', 'real'])
+  render_mode?: 'dummy' | 'tokenized' | 'real';
 }

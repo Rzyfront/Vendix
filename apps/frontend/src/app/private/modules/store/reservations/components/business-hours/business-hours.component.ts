@@ -10,7 +10,6 @@ import { FormsModule } from '@angular/forms';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import {
   ButtonComponent,
-  EmptyStateComponent,
   IconComponent,
 } from '../../../../../../shared/components';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
@@ -51,7 +50,6 @@ interface DayRow {
     FormsModule,
     CardComponent,
     ButtonComponent,
-    EmptyStateComponent,
     IconComponent,
     StatsComponent,
   ],

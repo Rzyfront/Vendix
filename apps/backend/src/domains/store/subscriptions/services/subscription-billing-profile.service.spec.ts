@@ -271,6 +271,23 @@ describe('SubscriptionBillingProfileService fiscal guards', () => {
       ).resolves.toBeUndefined();
     });
 
+    it('deja pasar una identidad con cédula de ciudadanía sin inyectarle dígito de verificación', async () => {
+      const { service } = createService({
+        platform: PLATFORM_LIVE,
+        orgActive: false,
+        org: orgWith({
+          document_type: '13',
+          tax_id: '1118860902',
+          verification_digit: null,
+          person_type: '2',
+        }) as any,
+      });
+
+      await expect(
+        service.ensureCaptured(ORG_ID, profile, { required: true }),
+      ).resolves.toBeUndefined();
+    });
+
     it('corta con 422 cuando el correo del adquiriente no es un correo', async () => {
       const { service } = createService({
         platform: PLATFORM_LIVE,

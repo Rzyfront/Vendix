@@ -15,6 +15,7 @@ import {
   StockSourcingSuggestionQuery,
   StockSourcingSuggestionResponse,
 } from '../models/sourcing.model';
+import { PRODUCT_SAVE_ERROR_MAP } from '../../products/utils/product-save-requirements';
 
 /**
  * Promotional descriptor surfaced on POS product cards. Mirrors the backend
@@ -622,23 +623,40 @@ export class PosProductService {
   }
 
   private handleError(error: any): Observable<never> {
-    // Mensajes de error más descriptivos
-    let errorMessage = 'An error occurred';
+    console.error('PosProductService Error:', error);
 
-    if (error.error?.message) {
+    // Mensajes de error más descriptivos
+    let errorMessage = 'Ocurrió un error';
+
+    // El backend envía `error_code` (VendixHttpException). Si lo conocemos,
+    // usamos el mensaje curado en español del catálogo compartido — así el
+    // texto que recibe la UI (modal de requisitos o toast) explica el
+    // escenario concreto aunque este handler aplane el error a string y
+    // pierda el código. Misma cadena de fallbacks que `products.service.ts:715`
+    // para que las dos superficies digan lo mismo ante el mismo error.
+    const backendCode: string | undefined =
+      error?.error?.error_code ?? error?.error_code;
+
+    if (backendCode && PRODUCT_SAVE_ERROR_MAP[backendCode]) {
+      errorMessage = PRODUCT_SAVE_ERROR_MAP[backendCode].reason;
+    } else if (typeof error === 'string') {
+      errorMessage = error;
+    } else if (error.error?.message) {
       errorMessage = error.error.message;
+    } else if (error.message) {
+      errorMessage = error.message;
     } else if (error.status === 400) {
-      errorMessage = 'Invalid data provided';
+      errorMessage = 'Datos inválidos proporcionados';
     } else if (error.status === 401) {
-      errorMessage = 'Unauthorized access';
+      errorMessage = 'Acceso no autorizado';
     } else if (error.status === 403) {
-      errorMessage = 'Insufficient permissions';
+      errorMessage = 'Permisos insuficientes';
     } else if (error.status === 404) {
-      errorMessage = 'Product not found';
+      errorMessage = 'Producto no encontrado';
     } else if (error.status === 409) {
-      errorMessage = 'Product with this SKU or slug already exists';
+      errorMessage = 'Ya existe un producto con este SKU o slug';
     } else if (error.status >= 500) {
-      errorMessage = 'Server error. Please try again later';
+      errorMessage = 'Error del servidor. Por favor intenta más tarde';
     }
 
     return throwError(() => errorMessage);

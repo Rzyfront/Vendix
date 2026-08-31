@@ -5,6 +5,19 @@ export interface ParsedApiError {
   userMessage: string;
   devMessage: string | null;
   details: any;
+  /**
+   * Correlación best-effort para soporte, no una garantía.
+   *
+   * El filtro de excepciones del backend (`http-exception.filter.ts`) añade
+   * `request_id` a TODOS los cuerpos de error con el propósito de que el
+   * frontend pueda "quotearlo en el mismo toast" — el operador copiaba el
+   * timestamp y el id de orden para que soporte encontrara su request. Es
+   * presente en el body cuando corriste a través del AsyncLocalStorage, pero
+   * el propio comentario del filtro lo advierte: es **best-effort, no una
+   * garantía**. Un error sin id (red, auth, proxy, o un body que el backend no
+   * envolvió) lo deja `undefined`; mostrarlo SOLO cuando existe.
+   */
+  request_id?: string;
 }
 
 /**
@@ -180,7 +193,42 @@ export function parseApiError(error: any): ParsedApiError {
     userMessage: resolveUserMessage(devMessage, details, cannedMessage),
     devMessage,
     details,
+    request_id: readNonEmptyString(body?.request_id) ?? undefined,
   };
+}
+
+/**
+ * Añade la línea de referencia de soporte a un mensaje de error listo para
+ * toast, cuando el error trae `request_id`.
+ *
+ * Es BEST-EFFORT, no una garantía: el backend envuelve `request_id` en los
+ * cuerpos de error que atraviesan el AsyncLocalStorage del filtro, y el propio
+ * filtro lo documenta como correlación, no como promesa. Por eso la función
+ * NO inventa un id ni cambia el copy: si no hay `request_id` (error de red,
+ * auth, proxy, o un body que el backend no envolvió), devuelve el mensaje tal
+ * cual. Consumidores de toasts de error (los que esta épica introduce ya
+ * empiezan con `parseApiError` → `toastService.error`) la usan para que el
+ * operador pueda "quotear el id" sin tener que copiar timestamp + id de orden.
+ */
+export function withApiErrorReference(
+  message: string,
+  requestId?: string | null,
+): string {
+  const id = requestId?.trim();
+  return id ? `${message} · Código de referencia: ${id}` : message;
+}
+
+/**
+ * Lee el `request_id` de un error crudo, de forma best-effort. El backend lo
+ * envuelve en `body.request_id`; según cómo haya viajado puede estar directo,
+ * en `error.error.request_id`, o el servicio lo descartó del todo. Devuelve
+ * `null` cuando no está — nunca inventa un id.
+ */
+export function readApiErrorRequestId(error: unknown): string | null {
+  if (typeof error !== 'object' || error === null) return null;
+  const e = error as Record<string, unknown>;
+  const body = (e['error'] as Record<string, unknown>) ?? null;
+  return readNonEmptyString(body?.['request_id']) ?? readNonEmptyString(e['request_id']);
 }
 
 /** Aplica el orden documentado en {@link parseApiError}. */

@@ -23,12 +23,12 @@ import {
  * Modal de confirmación de envío a cocina — QUI-655.
  *
  * Es el ÚNICO punto obligatorio del flujo: el lugar donde la exclusión se
- * materializa en consumo de inventario y en costo. Los tres caminos de captura
+ * materializa en consumo de inventario. Los tres caminos de captura
  * (exclusión estructurada al pedir, nota de texto libre, o nada) convergen acá, y
  * el modal NO depende de que alguien haya capturado algo antes.
  *
  * Todos los componentes vienen MARCADOS por defecto. Desmarcar excluye del consumo
- * y del costeo.
+ * de insumos.
  *
  * Riesgo de UX que el ticket marcaba: un restaurante con volumen envía a cocina
  * decenas de veces por hora y la mayoría de esas veces no hay nada que excluir. Se
@@ -74,8 +74,8 @@ export class KitchenConfirmModalComponent {
 
   readonly hintText = computed(() =>
     this.mode() === 'cook'
-      ? 'Verificá los ingredientes de cada plato. Lo que quitó quien tomó el pedido ya viene desmarcado; podés quitar más antes de empezar.'
-      : 'Todos los ingredientes vienen marcados. Desmarcá lo que no se va a usar: eso evita su descuento del inventario y su costo.',
+      ? 'Verifica los ingredientes de cada plato. Lo que quitó quien tomó el pedido ya viene desmarcado; puedes quitar más antes de empezar.'
+      : 'Todos los ingredientes vienen marcados. Desmarca lo que no se va a usar: eso evita su descuento del inventario.',
   );
 
   readonly confirmLabel = computed(() => {
@@ -135,7 +135,7 @@ export class KitchenConfirmModalComponent {
 
   readonly hasItems = computed(() => this.items().length > 0);
 
-  /** ¿Alguien desmarcó algo? Decide el texto del botón y el aviso de costo. */
+  /** ¿Alguien desmarcó algo? Decide el texto del botón y el aviso. */
   readonly hasAnyExclusion = computed(() => {
     for (const set of this.excluded().values()) {
       if (set.size > 0) return true;

@@ -4,7 +4,6 @@ import {
   input,
   computed,
   signal,
-  effect,
   viewChild,
   ElementRef,
 } from '@angular/core';
@@ -13,6 +12,7 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { PrintFormatsFacade } from '../../services/print-formats.facade';
 import { DocumentPrintService } from '../../../../../../../shared/services/print/document-print.service';
+import { MmToPxService } from '../../../../../../../shared/services/print/mm-to-px.service';
 
 @Component({
   selector: 'app-print-live-preview',
@@ -81,6 +81,7 @@ import { DocumentPrintService } from '../../../../../../../shared/services/print
           class="transition-transform duration-200 origin-top shadow-2xl rounded-sm"
           [style.transform]="'scale(' + zoomLevel() / 100 + ')'"
           [style.width]="containerWidth()"
+          [style.height]="containerHeight()"
         >
           <div class="bg-white text-slate-900 rounded-sm shadow-lg overflow-hidden min-h-[400px]">
             <iframe
@@ -126,33 +127,31 @@ export class PrintLivePreviewComponent {
 
   readonly facade = inject(PrintFormatsFacade);
   private readonly printService = inject(DocumentPrintService);
+  private readonly mmToPxService = inject(MmToPxService);
 
   readonly previewIframe = viewChild<ElementRef<HTMLIFrameElement>>('previewIframe');
   readonly zoomLevel = signal<number>(100);
 
   readonly containerWidth = computed(() => {
     const isRoll = this.facade.previewIsRoll();
-    const w = this.facade.previewWidthMm();
-    if (isRoll) {
-      return `${Math.max(w * 3.78, 300)}px`;
-    }
-    return '600px';
+    const widthMm = this.facade.previewWidthMm();
+    const box = this.mmToPxService.paperToContainerPx({
+      width_mm: widthMm,
+      is_roll: isRoll,
+    });
+    return `${box.width_px}px`;
   });
 
-  constructor() {
-    effect(() => {
-      const html = this.facade.previewHtml();
-      const iframeRef = this.previewIframe();
-      if (iframeRef && iframeRef.nativeElement) {
-        const doc = iframeRef.nativeElement.contentDocument;
-        if (doc) {
-          doc.open();
-          doc.write(html || '<div style="font-family:sans-serif;padding:20px;color:#888;text-align:center;">Generando vista previa...</div>');
-          doc.close();
-        }
-      }
+  readonly containerHeight = computed(() => {
+    const isRoll = this.facade.previewIsRoll();
+    if (isRoll) return 'auto';
+    const widthMm = this.facade.previewWidthMm();
+    const box = this.mmToPxService.paperToContainerPx({
+      width_mm: widthMm,
+      is_roll: false,
     });
-  }
+    return box.height_px ? `${box.height_px}px` : 'auto';
+  });
 
   zoomIn(): void {
     this.zoomLevel.update((z) => Math.min(z + 10, 160));

@@ -314,6 +314,39 @@ export class ListPlatformResolutionsQueryDto {
  * Cubre los casos típicos: implementación, consultoría, capacitación,
  * servicios de plataforma facturados a nombre de la org 1.
  */
+export class PlatformInvoiceLineTaxDto {
+  // `tax_type` del enum del dominio (IVA, INC, ICUI, RETE_FUENTE, etc).
+  // El legacy mapea `tax_type` → `tax_name` antes de firmar la DIAN.
+  @IsString()
+  @MaxLength(50)
+  tax_type!: string;
+
+  // Fracción entre 0 y 1. La fachada convierte esto a porcentaje
+  // (×100) una sola vez para el provider; el legacy NUNCA debe
+  // recalcular base×tarifa (FAS02).
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 6 })
+  @Min(0)
+  @Max(1)
+  rate!: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  taxable_amount?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  tax_amount?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  is_inclusive?: boolean;
+}
+
 export class PlatformInvoiceLineDto {
   @IsString()
   @MaxLength(500)
@@ -328,6 +361,48 @@ export class PlatformInvoiceLineDto {
   @IsNumber({ maxDecimalPlaces: 4 })
   @Min(0)
   unit_price!: number;
+
+  /**
+   * UN/ECE Rec. 20. La fachada envía `'NIU'` por defecto cuando el V1
+   * no lo trae — `'EA'` no existe en la rec. 20 y ningún selector lo
+   * pinta. El legacy hoy hardcodea `'EA'`; cuando frank extienda la
+   * construcción de `lineItems` en `subscription-fiscal.service.ts:2208`,
+   * va a leer este campo y el valor fluye desde el facade.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  unit_code?: string;
+
+  /**
+   * Descuento POR LÍNEA (en pesos). El mapper aplica fallback `0` cuando
+   * el V1 no lo trae, idéntico a como el legacy ya operaba.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  discount_amount?: number;
+
+  /**
+   * Cuenta PUC de ingreso POR LÍNEA. El listener contable de frank la
+   * lee desde el snapshot para asientos multi-crédito. Si falta, cae al
+   * mapping key `invoice.validated.revenue` (mismo default que el riel tienda).
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  account_code?: string;
+
+  /**
+   * Impuestos por línea. Vacío = línea exenta. El legacy mapea a
+   * `providerData.taxes[]` (ya lo hace para ventas estándar).
+   */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PlatformInvoiceLineTaxDto)
+  taxes?: PlatformInvoiceLineTaxDto[];
 }
 
 export class PlatformInvoiceCustomerDto {
@@ -364,6 +439,80 @@ export class PlatformInvoiceCustomerDto {
   @IsString()
   @MaxLength(2)
   department_code?: string;
+
+  /**
+   * Tipo de documento del destinatario. El legacy hoy hardcodea `'31'`
+   * (NIT); cuando frank extienda `providerData.customer_document_type`,
+   * el valor fluye desde el facade.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  document_type?: string;
+
+  @IsOptional()
+  @IsIn(['1', '2'])
+  person_type?: '1' | '2';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  tax_regime_code?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  fiscal_responsibilities?: string[];
+}
+
+export class CreatePlatformInvoiceWithholdingInputDto {
+  @IsIn(['practiced', 'suffered', 'self'])
+  role!: 'practiced' | 'suffered' | 'self';
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  concept_id!: number;
+
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  base_amount!: number;
+
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 6 })
+  @Min(0)
+  @Max(1)
+  rate!: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  amount?: number;
+}
+
+export class PlatformInvoiceCurrencyDto {
+  // Misma regla que `MvpV1CurrencyDto.iso_4217`: V1 sólo soporta COP y USD.
+  // Si la fachada trae otra moneda, `@IsIn` rechaza con 400 — sin bypass.
+  @IsString()
+  @Length(3, 3)
+  @IsIn(['COP', 'USD'], {
+    message: 'V1 solo soporta COP y USD (multi-moneda es V2)',
+  })
+  iso_4217!: string;
+
+  // TRM. 0 o ausente = «declarar divisa sin tasa» → el grupo
+  // `cac:PaymentAlternativeExchangeRate` NO se emite; la firma sigue en COP.
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 6 })
+  @Min(0)
+  exchange_rate?: number;
+
+  @IsOptional()
+  @IsISO8601()
+  exchange_rate_date?: string;
 }
 
 export class CreatePlatformInvoiceDto {
@@ -389,6 +538,70 @@ export class CreatePlatformInvoiceDto {
   @IsString()
   @MaxLength(10)
   currency?: string;
+
+  // ── Extendidos para que el mapper V1→legacy propague sin perder info ──
+  //
+  // Todos son opcionales. Las llamadas legacy existentes siguen
+  // funcionando idéntico; sólo los callers V1 los pueblan. El legacy
+  // (`subscription-fiscal.service.ts:createPlatformInvoice`) lee estos
+  // campos cuando frank extienda la construcción de `lineItems`,
+  // `providerData`, `taxAmount` y el `metadata` del snapshot.
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'resolution_id debe ser un entero positivo.' })
+  @Min(1, { message: 'resolution_id debe ser un entero positivo.' })
+  resolution_id?: number;
+
+  @IsOptional()
+  @IsISO8601()
+  issue_date?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => (value === '' || value === null ? undefined : value))
+  @IsISO8601()
+  due_date?: string;
+
+  @IsOptional()
+  @IsIn(['1', '2'])
+  payment_form?: '1' | '2';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(3)
+  payment_means_code?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  notes?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  counterpart_account_code?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreatePlatformInvoiceWithholdingInputDto)
+  withholdings?: CreatePlatformInvoiceWithholdingInputDto[];
+
+  /**
+   * Bloque de divisa extranjera completo (`iso_4217`, `exchange_rate`,
+   * `exchange_rate_date`). Se mantiene APARTE del campo `currency` (string)
+   * para no romper a callers legacy que ya mandaban `currency: 'USD'` plano.
+   *
+   * El legacy lo lee en `buildExchangeRate` (subscription-fiscal.service.ts:2482)
+   * para emitir `cac:PaymentAlternativeExchangeRate` cuando hay tasa. Si el
+   * operador sólo eligió la casilla «declarar divisa» sin TRM, este campo
+   * queda con `exchange_rate` null/0 y el grupo NO se emite (firma COP
+   * intacta, no se rechaza el documento).
+   */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PlatformInvoiceCurrencyDto)
+  exchange_rate_payload?: PlatformInvoiceCurrencyDto;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -463,20 +676,118 @@ export class PlatformInvoiceTenantRefOrganization {
   organization_id!: number;
 }
 
+export class PlatformInvoiceExternalCustomerAddressDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  line?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  city?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  city_code?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  department_code?: string;
+}
+
 /**
- * Discriminated union. `class-validator` valida cada rama por separado si
- * `IsIn(['store'])` o `IsIn(['organization'])` discrimina correctamente; el
- * backend re-checka con ValidateNested-or-custom en el servicio.
+ * Discriminated union extendida para soportar:
+ *   - 'store' | 'organization' | 'user' (referenciados por tenant_id)
+ *   - 'external' (cliente manual con todos los datos fiscales legales)
  */
 export class PlatformInvoiceTenantRefDto {
-  // Campo plano que decide la rama. La union en runtime la construye el frontend.
-  @IsIn(['store', 'organization'])
-  kind!: 'store' | 'organization';
+  @IsIn(['store', 'organization', 'user', 'external'])
+  kind!: 'store' | 'organization' | 'user' | 'external';
 
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  tenant_id!: number;
+  tenant_id?: number;
+
+  @IsOptional()
+  @TrimString()
+  @IsString()
+  @MaxLength(255)
+  legal_name?: string;
+
+  @IsOptional()
+  @TrimTaxId()
+  @IsString()
+  tax_id?: string;
+
+  @IsOptional()
+  @TrimString()
+  @IsString()
+  @MaxLength(1)
+  tax_id_dv?: string;
+
+  /**
+   * Código DIAN del tipo de documento del destinatario (NO etiqueta):
+   *   '31' = NIT, '13' = Cédula, '22' = Cédula de extranjería,
+   *   '41' = Pasaporte, etc.
+   *
+   * El frontend normaliza etiqueta→código antes de mandar; el legacy emite
+   * el valor tal cual al XML. Hasta hoy no estaba declarado acá y el pipe
+   * (`whitelist + forbidNonWhitelisted` en main.ts) rechazaba cualquier
+   * factura a cliente externo con un 400 invisible. Sin este campo, ni la
+   * rama externa (que manda '31') ni el override del operador en la rama
+   * tenant pueden fijar el tipo de documento — se emite siempre con el de
+   * la ficha.
+   */
+  @IsOptional()
+  @TrimString()
+  @IsString()
+  @MaxLength(10)
+  document_type?: string;
+
+  @IsOptional()
+  @IsIn(['1', '2'])
+  person_type?: '1' | '2';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  tax_regime_code?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  fiscal_responsibilities?: string[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  phone?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PlatformInvoiceExternalCustomerAddressDto)
+  address?: PlatformInvoiceExternalCustomerAddressDto;
+}
+
+export class SaveAsProfileDto {
+  @TrimString()
+  @IsString()
+  @MaxLength(100)
+  name!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  is_default?: boolean;
 }
 
 // ── Item (line) con taxes + discount + AIU + is_inclusive + unit_code ────────
@@ -657,7 +968,12 @@ export class CreatePlatformSalesInvoiceDto {
   @MaxLength(3)
   payment_means_code?: string;
 
+  // Transform: `''` y `null` se tratan como ausente. Sin esto, `@IsISO8601()`
+  // rechaza string vacío con 400 y bloquea payment_form='2' (crédito) sin
+  // fecha de vencimiento explícita. El frontend ya omite el campo en ese
+  // caso, pero blindamos el DTO para JSON manual.
   @IsOptional()
+  @Transform(({ value }) => (value === '' || value === null ? undefined : value))
   @IsISO8601()
   due_date?: string;
 
@@ -684,6 +1000,86 @@ export class CreatePlatformSalesInvoiceDto {
   @IsString()
   @MaxLength(5000)
   notes?: string;
+
+  /**
+   * Perfil de facturación a aplicar como punto de partida editable.
+   *
+   * ## Por qué en ESTE DTO y no en el legacy CreatePlatformInvoiceDto
+   *
+   * El DTO MvpV1 es la superficie que el frontend del wizard plataforma
+   * construye y la que el controller V1 acepta. El legacy
+   * `CreatePlatformInvoiceDto` es la capa interna de `subscription-fiscal.service`
+   * a la que la fachada traduce (CP-platform-invoicing-parity C.1). Si
+   * añadiéramos `profile_id` sólo al legacy, el frontend nunca podría
+   * pasarlo. Si lo añadimos sólo al MvpV1 sin propagarlo a legacy, queda
+   * muerto en la frontera de la fachada.
+   *
+   * Mismo patrón que el resto del MvpV1: el campo entra por aquí, se valida
+   * (operation_type match con `PLATFORM_PROFILE_008` 409 si difiere), y la
+   * fachada lo propaga al DTO legacy con `profile_version = profile.current_version`
+   * y `profile_snapshot = profile.current_config`. La persistencia final
+   * (`invoices.profile_id`/`profile_version`/`profile_snapshot`) la hace la
+   * `createPlatformInvoice` legacy al reescribirla (TODO C.1 — el servicio
+   * legacy necesita aceptar esos tres campos y la FK compuesta los respeta;
+   * ver H1 del plan).
+   *
+   * Sin `profile_id`, comportamiento byte-idéntico al actual — la migración
+   * de A.1 no cambia filas existentes y el DTO es `IsOptional`.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'profile_id debe ser un entero positivo.' })
+  @Min(1, { message: 'profile_id debe ser un entero positivo.' })
+  profile_id?: number;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SaveAsProfileDto)
+  save_as_profile?: SaveAsProfileDto;
+
+  /**
+   * Resolución DIAN que debe numerar el documento.
+   *
+   * Sin este campo, `InvoicingService.create` (riel tienda) selecciona la
+   * resolución más reciente vigente del accounting entity. Si el operador
+   * eligió una específica en el selector del frontend, ese id viaja acá
+   * y la fachada lo respeta (`platform-invoicing.service.ts` lo propaga
+   * al riel tienda en `resolution_id`).
+   *
+   * El DTO MvpV1 NO declaraba este campo — `forbidNonWhitelisted:true`
+   * en el ValidationPipe global lo rechazaba con 400, y el selector del
+   * frontend se perdía en silencio.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'resolution_id debe ser un entero positivo.' })
+  @Min(1, { message: 'resolution_id debe ser un entero positivo.' })
+  resolution_id?: number;
+
+  /**
+   * Fecha de emisión del documento (YYYY-MM-DD o ISO 8601 completo).
+   *
+   * Si el operador la omite, la fachada usa `new Date().toISOString().slice(0,10)`
+   * (regla vigente en `mapToStoreCreateInvoiceDto`).
+   */
+  @IsOptional()
+  @IsISO8601()
+  issue_date?: string;
+
+  /**
+   * Cuenta PUC de contrapartida del documento, una sola por documento
+   * (cabeza). Se persiste top-level en `fiscal_evidences.metadata` para
+   * que `subscription-fiscal.service.ts` (asiento contable de frank) la
+   * consuma al emitir el journal entry.
+   *
+   * Por línea NO se admite: abrir esa puerta permitiría asientos
+   * descuadrados en `accounting_entries`. El débito global del documento
+   * lleva esta única cuenta; los créditos siguen saliendo por línea.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  counterpart_account_code?: string;
 }
 
 // ── V1: CreatePlatformSupportDocumentDto ────────────────────────────────────
@@ -744,5 +1140,22 @@ export class CreatePlatformSupportDocumentDto {
   @IsString()
   @MaxLength(5000)
   notes?: string;
+
+  /**
+   * Perfil de facturación a aplicar como punto de partida editable (mismo
+   * contrato que `CreatePlatformSalesInvoiceDto.profile_id`).
+   *
+   * El DSA raramente lleva AIU ni perfiles exóticos —el `operation_type` del
+   * DSA siempre será uno de los códigos de soporte, y los perfiles plataforma
+   * se crean con cualquier operation_type— pero se admite el campo para que
+   * el frontend tenga UNA firma de DTO consistente entre `sales_invoice` y
+   * `support_document`. La validación de operation_type-match vive en el
+   * servicio de la fachada (C.1).
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'profile_id debe ser un entero positivo.' })
+  @Min(1, { message: 'profile_id debe ser un entero positivo.' })
+  profile_id?: number;
 }
 

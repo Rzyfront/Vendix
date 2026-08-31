@@ -1,0 +1,35 @@
+# FB-16: PUT /store/print-formats/library/:id/share
+# Plan section: A.3 + Phase D (org-level share toggle)
+# Source: apps/backend/src/domains/store/print-formats/controllers/print-templates-library.controller.ts:92
+#          apps/backend/src/domains/store/print-formats/dto/print-template.dto.ts:42
+# Permission: organization:settings:update, store:settings:update
+
+COMMAND:
+curl -sk -X PUT 'https://api.vendix.com/api/store/print-formats/library/1/share' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{ "is_shared": true }'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESPONSE SHAPE:
+{
+  "success": true,
+  "message": "Estado de visibilidad de plantilla actualizado.",
+  "data": { /* PrintTemplate updated with new is_shared */ }
+}
+
+VERIFICATION:
+# Happy path
+curl .../library/1/share -d '{"is_shared":true}' | jq '.data.is_shared' debe ser true
+curl .../library/1/share -d '{"is_shared":false}' | jq '.data.is_shared' debe ser false
+
+# System template share: rechazado (ERR-10)
+curl .../library/<system_id>/share -d '{"is_shared":true}' | jq '.error.code' debe ser 'PRINT_TEMPLATE_SYSTEM_PROTECTED_001' (403)
+
+# Sin permisos de org
+curl .../library/1/share -d '{"is_shared":true}' (sin organization:settings:update) | jq '.error.code' debe ser 'PRINT_LIBRARY_SHARE_FORBIDDEN_001' (403)
+
+# Template de otra org
+curl .../library/<other_org_id>/share -d '{"is_shared":true}' | jq '.error.code' debe ser 'PRINT_TEMPLATE_NOT_FOUND_001' (404) o 'PRINT_TEMPLATE_ACCESS_DENIED_001' (403)

@@ -19,7 +19,6 @@ import {
 import {
   CurrencyPipe,
   CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
-import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 import {
   CustomersSummary,
   CustomerTrend,
@@ -46,7 +45,6 @@ import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/
     StatsComponent,
     ChartComponent,
     IconComponent,
-    ExportButtonComponent,
     CurrencyPipe,
     AnalyticsCardComponent,
     OptionsDropdownComponent,

@@ -24,6 +24,13 @@ import {
   formatQuantityInSaleUnit,
   resolveSaleUnitCodes,
 } from '../../products/services/sale-unit-display.util';
+import {
+  COMPLETED_SALE_STATES,
+  computeOperatingRevenue,
+  computeGrowth,
+  OPERATING_REVENUE_SQL,
+  round2,
+} from '../analytics-metrics.contract';
 
 // Aggregated sales summary tolerates 1-2 min of staleness → short TTL (ms).
 const SALES_SUMMARY_CACHE_TTL_MS = 120_000;
@@ -114,8 +121,11 @@ export class SalesAnalyticsService {
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
-  // States that count as completed sales
-  private readonly COMPLETED_STATES = ['delivered', 'finished'];
+  // States that count as completed sales — sourced from the metrics contract
+  // (single owner of "what counts as a sale"). Hard-coding here is the
+  // regression: a service adding a new consummated state to the contract
+  // would silently NOT pick it up at this call site.
+  private readonly COMPLETED_STATES = COMPLETED_SALE_STATES;
 
   /**
    * Resolves the current request's store timezone (single source of truth).
@@ -136,10 +146,14 @@ export class SalesAnalyticsService {
     // Only cache when a tenant is in scope; a store-less key could leak data
     // across tenants. store_id isolates the tenant; the date-range inputs plus
     // the channel filter capture the period/filter.
+    //
+    // v2: switched from grand_total to operating-revenue derivation. Old v1
+    // cache entries are stale (would under-report when tax > 0) — bump the
+    // version segment to invalidate during deploy.
     if (!storeId) {
       return this.computeSalesSummary(query);
     }
-    const cacheKey = `analytics:sales:summary:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}:${query.channel ?? '_'}`;
+    const cacheKey = `analytics:sales:summary:v2:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}:${query.channel ?? '_'}`;
     const cached =
       await this.cache.get<
         Awaited<ReturnType<SalesAnalyticsService['computeSalesSummary']>>
@@ -171,7 +185,11 @@ export class SalesAnalyticsService {
             },
           },
           _sum: {
-            grand_total: true,
+            subtotal_amount: true,
+            discount_amount: true,
+            shipping_cost: true,
+            tax_amount: true,
+            tip_amount: true,
           },
           _count: {
             id: true,
@@ -187,7 +205,11 @@ export class SalesAnalyticsService {
             },
           },
           _sum: {
-            grand_total: true,
+            subtotal_amount: true,
+            discount_amount: true,
+            shipping_cost: true,
+            tax_amount: true,
+            tip_amount: true,
           },
           _count: {
             id: true,
@@ -218,30 +240,41 @@ export class SalesAnalyticsService {
               lte: endDate,
             },
             customer_id: {
-              not: undefined,
+              not: null,
             },
           },
         }),
       ]);
 
-    const totalRevenue = Number(currentPeriod._sum.grand_total || 0);
+    const totalRevenue = computeOperatingRevenue({
+      subtotal: Number(currentPeriod._sum.subtotal_amount || 0),
+      discounts: Number(currentPeriod._sum.discount_amount || 0),
+      shipping: Number(currentPeriod._sum.shipping_cost || 0),
+      tax: Number(currentPeriod._sum.tax_amount || 0),
+    });
+    const totalTaxes = Number(currentPeriod._sum.tax_amount || 0);
+    const totalTips = Number(currentPeriod._sum.tip_amount || 0);
     const totalOrders = currentPeriod._count.id || 0;
-    const previousRevenue = Number(previousPeriod._sum.grand_total || 0);
+    const previousRevenue = computeOperatingRevenue({
+      subtotal: Number(previousPeriod._sum.subtotal_amount || 0),
+      discounts: Number(previousPeriod._sum.discount_amount || 0),
+      shipping: Number(previousPeriod._sum.shipping_cost || 0),
+      tax: Number(previousPeriod._sum.tax_amount || 0),
+    });
     const previousOrders = previousPeriod._count.id || 0;
 
-    const revenueGrowth =
-      previousRevenue > 0
-        ? ((totalRevenue - previousRevenue) / previousRevenue) * 100
-        : 0;
-    const ordersGrowth =
-      previousOrders > 0
-        ? ((totalOrders - previousOrders) / previousOrders) * 100
-        : 0;
+    // null convention: previous=0 → null (not 0%), which is what `computeGrowth`
+    // returns and what the panel renders as "—" instead of a fake "sin cambio".
+    const revenueGrowth = computeGrowth(totalRevenue, previousRevenue);
+    const ordersGrowth = computeGrowth(totalOrders, previousOrders);
 
     return {
       total_revenue: totalRevenue,
+      total_taxes: totalTaxes,
+      total_tips: totalTips,
       total_orders: totalOrders,
-      average_order_value: totalOrders > 0 ? totalRevenue / totalOrders : 0,
+      average_order_value:
+        totalOrders > 0 ? round2(totalRevenue / totalOrders) : 0,
       total_units_sold: Number(unitsSold._sum.quantity || 0),
       total_customers: customers.length,
       revenue_growth: revenueGrowth,
@@ -679,6 +712,12 @@ export class SalesAnalyticsService {
 
     // withoutScope() needed: $queryRaw is not available on the scoped client.
     // storeId is validated above and used in the WHERE clause.
+    //
+    // QUI-610 review (propagation): revenue here MUST follow the same
+    // operating-revenue formula as `computeSalesSummary` (subtotal −
+    // discounts + shipping, ex-VAT) — the contract's `OPERATING_REVENUE_SQL`
+    // is the single source of truth so the panel card and the trend chart
+    // reconcile to the same number for the same period.
     const results = await (this.prisma.withoutScope() as any).$queryRaw<
       Array<{
         period: string;
@@ -689,7 +728,7 @@ export class SalesAnalyticsService {
     >`
       SELECT
         ${periodSql} AS period,
-        COALESCE(SUM(o.grand_total), 0) AS revenue,
+        COALESCE(SUM(${OPERATING_REVENUE_SQL}), 0) AS revenue,
         COUNT(DISTINCT o.id) AS order_count,
         COALESCE(SUM(oi.units), 0) AS units_sold
       FROM orders o
@@ -752,7 +791,7 @@ export class SalesAnalyticsService {
     >`
       SELECT
         EXTRACT(HOUR FROM (o.created_at AT TIME ZONE 'UTC' AT TIME ZONE ${tzSql}))::int AS hour_local,
-        COALESCE(SUM(o.grand_total), 0) AS revenue,
+        COALESCE(SUM(${OPERATING_REVENUE_SQL}), 0) AS revenue,
         COUNT(DISTINCT o.id) AS order_count,
         COALESCE(SUM(oi.units), 0) AS units_sold
       FROM orders o
@@ -943,6 +982,12 @@ export class SalesAnalyticsService {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
 
+    // QUI-610 review (propagation): revenue MUST be operating revenue
+    // (subtotal − discounts + shipping, ex-VAT) so the channel breakdown
+    // reconciles with `computeSalesSummary` and the XLSX export. Derive
+    // from the three order-level monetary components and feed them to
+    // `computeOperatingRevenue` (the contract helper) instead of summing
+    // `grand_total`, which carries VAT and inflates the figure ~19 %.
     const results = await this.prisma.orders.groupBy({
       by: ['channel'],
       where: {
@@ -953,7 +998,9 @@ export class SalesAnalyticsService {
         },
       },
       _sum: {
-        grand_total: true,
+        subtotal_amount: true,
+        discount_amount: true,
+        shipping_cost: true,
       },
       _count: {
         id: true,
@@ -968,19 +1015,25 @@ export class SalesAnalyticsService {
       marketplace: 'Marketplace',
     };
 
-    const total = results.reduce(
-      (sum, r) => sum + Number(r._sum.grand_total || 0),
-      0,
-    );
+    const withRevenue = results.map((r) => {
+      const revenue = computeOperatingRevenue({
+        subtotal: Number(r._sum.subtotal_amount || 0),
+        discounts: Number(r._sum.discount_amount || 0),
+        shipping: Number(r._sum.shipping_cost || 0),
+        tax: 0,
+      });
+      return { r, revenue };
+    });
 
-    const allResults = results
-      .map((r) => ({
+    const total = withRevenue.reduce((sum, row) => sum + row.revenue, 0);
+
+    const allResults = withRevenue
+      .map(({ r, revenue }) => ({
         channel: r.channel,
         display_name: labels[r.channel] || r.channel,
         order_count: r._count.id,
-        revenue: Number(r._sum.grand_total || 0),
-        percentage:
-          total > 0 ? (Number(r._sum.grand_total || 0) / total) * 100 : 0,
+        revenue,
+        percentage: total > 0 ? (revenue / total) * 100 : 0,
       }))
       .sort((a, b) => b.revenue - a.revenue);
 
@@ -1018,6 +1071,11 @@ export class SalesAnalyticsService {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
 
+    // QUI-610 review (propagation): same ex-VAT derivation as
+    // `getSalesByChannel` (subtotal − discounts + shipping). Without this
+    // fix, the XLSX download reported VAT-inclusive figures while the
+    // panel card reported ex-VAT, and the export would not reconcile with
+    // the screen for the same period.
     const results = await this.prisma.orders.groupBy({
       by: ['channel'],
       where: {
@@ -1028,7 +1086,11 @@ export class SalesAnalyticsService {
         },
         ...(query.channel && { channel: query.channel }),
       },
-      _sum: { grand_total: true },
+      _sum: {
+        subtotal_amount: true,
+        discount_amount: true,
+        shipping_cost: true,
+      },
       _count: { id: true },
     });
 
@@ -1040,20 +1102,25 @@ export class SalesAnalyticsService {
       marketplace: 'Marketplace',
     };
 
-    const total = results.reduce(
-      (sum, r) => sum + Number(r._sum.grand_total || 0),
-      0,
-    );
+    const withRevenue = results.map((r) => ({
+      r,
+      revenue: computeOperatingRevenue({
+        subtotal: Number(r._sum.subtotal_amount || 0),
+        discounts: Number(r._sum.discount_amount || 0),
+        shipping: Number(r._sum.shipping_cost || 0),
+        tax: 0,
+      }),
+    }));
+    const total = withRevenue.reduce((sum, row) => sum + row.revenue, 0);
 
-    return results
-      .map((r) => ({
+    return withRevenue
+      .map(({ r, revenue }) => ({
         channel: r.channel,
         display_name: labels[r.channel] || r.channel,
         order_count: r._count.id,
-        revenue: Math.round(Number(r._sum.grand_total || 0) * 100) / 100,
-        percentage: total > 0
-          ? Math.round((Number(r._sum.grand_total || 0) / total) * 10000) / 100
-          : 0,
+        revenue: Math.round(revenue * 100) / 100,
+        percentage:
+          total > 0 ? Math.round((revenue / total) * 10000) / 100 : 0,
       }))
       .sort((a, b) => b.revenue - a.revenue);
   }
@@ -1095,7 +1162,8 @@ export class SalesAnalyticsService {
     const { startDate, endDate } = parseDateRange(query, tz);
 
     const states: order_state_enum[] =
-      options?.states ?? (this.COMPLETED_STATES as order_state_enum[]);
+      options?.states ??
+      ([...this.COMPLETED_STATES] as unknown as order_state_enum[]);
 
     // Product-level filter reused for both the order membership predicate and
     // the item-include narrowing.

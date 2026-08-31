@@ -86,7 +86,7 @@ export class PrintTemplateCompilerService {
   /**
    * Compila una plantilla con un modelo de datos seguro
    */
-  compile(template: string, data: any): CompilationResult {
+  compile(template: string, data: any, mode: 'dummy' | 'tokenized' = 'dummy'): CompilationResult {
     if (!template) return { compiled: '', usedTokens: [] };
 
     const validation = this.validateSyntax(template);
@@ -106,6 +106,9 @@ export class PrintTemplateCompilerService {
       usedTokens.push(`each:${collectionPath}`);
       const collection = this.resolvePath(data, collectionPath);
       if (!Array.isArray(collection) || collection.length === 0) {
+        if (mode === 'tokenized') {
+          return `<div class="vendix-token-each" data-token="each:${collectionPath}"><span class="vendix-token-pill">#each ${collectionPath}</span>${this.compileInner(innerTemplate, { '@index': 0, '@number': 1 }, usedTokens, mode)}</div>`;
+        }
         return '';
       }
 
@@ -119,7 +122,7 @@ export class PrintTemplateCompilerService {
             '@number': index + 1,
             ...item,
           };
-          return this.compileInner(innerTemplate, itemContext, usedTokens);
+          return this.compileInner(innerTemplate, itemContext, usedTokens, mode);
         })
         .join('');
     });
@@ -128,7 +131,7 @@ export class PrintTemplateCompilerService {
     result = this.processConditionals(result, data, usedTokens);
 
     // 3. Procesar tokens simples y helpers
-    result = this.processTokens(result, data, usedTokens);
+    result = this.processTokens(result, data, usedTokens, mode);
 
     // 4. Sanitizar HTML contra inyecciones de scripts y handlers maliciosos
     result = this.sanitizeHtml(result);
@@ -148,9 +151,9 @@ export class PrintTemplateCompilerService {
       .replace(/javascript:/gi, '');
   }
 
-  private compileInner(template: string, data: any, usedTokens: string[]): string {
+  private compileInner(template: string, data: any, usedTokens: string[], mode: 'dummy' | 'tokenized' = 'dummy'): string {
     let res = this.processConditionals(template, data, usedTokens);
-    res = this.processTokens(res, data, usedTokens);
+    res = this.processTokens(res, data, usedTokens, mode);
     return res;
   }
 
@@ -186,11 +189,14 @@ export class PrintTemplateCompilerService {
     });
   }
 
-  private processTokens(template: string, data: any, usedTokens: string[]): string {
+  private processTokens(template: string, data: any, usedTokens: string[], mode: 'dummy' | 'tokenized' = 'dummy'): string {
     // Soportar {{#raw}}...{{/raw}} o triple llave {{{raw_html}}} para contenido HTML explícito (ej: QR svg o base64 image tag)
     const rawTokenRegex = /\{\{\{([@a-zA-Z0-9_.]+)\}\}\}/g;
     let res = template.replace(rawTokenRegex, (_, tokenPath) => {
       usedTokens.push(tokenPath);
+      if (mode === 'tokenized') {
+        return `<span class="vendix-token-pill" data-token="${tokenPath}">&#123;&#123;{ ${tokenPath} }&#125;&#125;</span>`;
+      }
       const val = this.resolvePath(data, tokenPath);
       return val !== undefined && val !== null ? String(val) : '';
     });
@@ -199,6 +205,9 @@ export class PrintTemplateCompilerService {
     const helperRegex = /\{\{(money|date|upper|lower|raw)\s+([@a-zA-Z0-9_.]+)\}\}/g;
     res = res.replace(helperRegex, (_, helperName, tokenPath) => {
       usedTokens.push(`${helperName}:${tokenPath}`);
+      if (mode === 'tokenized') {
+        return `<span class="vendix-token-pill" data-token="${tokenPath}">&#123;&#123; ${helperName} ${tokenPath} &#125;&#125;</span>`;
+      }
       const rawVal = this.resolvePath(data, tokenPath);
       if (rawVal === undefined || rawVal === null) return '';
 
@@ -226,6 +235,9 @@ export class PrintTemplateCompilerService {
     const standardTokenRegex = /\{\{([@a-zA-Z0-9_.]+)\}\}/g;
     res = res.replace(standardTokenRegex, (_, tokenPath) => {
       usedTokens.push(tokenPath);
+      if (mode === 'tokenized') {
+        return `<span class="vendix-token-pill" data-token="${tokenPath}">&#123;&#123; ${tokenPath} &#125;&#125;</span>`;
+      }
       const val = this.resolvePath(data, tokenPath);
       return this.escapeHtml(val);
     });

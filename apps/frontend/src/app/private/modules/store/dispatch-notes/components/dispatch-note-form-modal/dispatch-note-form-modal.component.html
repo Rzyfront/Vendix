@@ -1,5 +1,6 @@
 <app-modal
   [isOpen]="is_open()"
+  [dialog]="true"
   [title]="is_edit_mode() ? 'Editar Remision' : 'Nueva Remision'"
   size="lg"
   (closed)="handleClose()"

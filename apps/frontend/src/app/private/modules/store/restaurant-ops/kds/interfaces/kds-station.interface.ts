@@ -54,19 +54,22 @@ export interface KdsSession {
   closed_by_user?: KdsSessionUserRef | null;
 }
 
-/** Una fila del RESUMEN: un insumo, colapsando todos los pedidos del turno. */
+/**
+ * Una fila del RESUMEN: un insumo, colapsando todos los pedidos del turno.
+ *
+ * ADR-10: el KDS nunca muestra dinero — en cocina solo cantidades de insumos.
+ * Sin `total_cost`: el costo no viaja a esta superficie.
+ */
 export interface KdsConsumptionIngredient {
   product_id: number;
   name: string;
   sku: string | null;
   quantity: number;
-  total_cost: number;
 }
 
 export interface KdsConsumptionSummary {
   movement_count: number;
   distinct_ingredients: number;
-  total_cost: number;
   ingredients: KdsConsumptionIngredient[];
 }
 
@@ -79,11 +82,31 @@ export interface KdsConsumptionHistoryRow {
   transaction_id: number;
   consumed_at: string;
   quantity: number;
-  unit_cost: number | string | null;
-  total_cost: number | string | null;
   ingredient: { id: number; name: string; sku: string | null } | null;
   /** Plato preparado que originó el consumo. */
   dish_name: string | null;
   order_id: number | null;
   order_number: string | null;
+}
+
+/**
+ * Movimiento de consumo SIN sesión atribuida (QUI-760).
+ *
+ * Aparece cuando el fire se ejecutó mientras ninguna estación tenía turno
+ * abierto. Antes del backfill estos movimientos quedaban huérfanos para
+ * siempre; ahora se imputan retroactivamente al abrir sesión, pero los
+ * **previos a la primera sesión abierta de la tienda** siguen sin dueño y se
+ * exponen acá. Mismo payload que el historial del turno: una fila por
+ * insumo POR PEDIDO. ADR-10 — sin dinero en el payload.
+ */
+export interface KdsUnattributedConsumptionRow {
+  transaction_id: number;
+  consumed_at: string;
+  quantity: number;
+  ingredient: { id: number; name: string; sku: string | null } | null;
+}
+
+export interface KdsUnattributedConsumption {
+  movement_count: number;
+  movements: KdsUnattributedConsumptionRow[];
 }

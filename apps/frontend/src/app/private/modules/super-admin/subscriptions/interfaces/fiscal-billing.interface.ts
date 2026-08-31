@@ -427,3 +427,208 @@ export interface VendorSupportFiscalQuery {
   environment?: SubscriptionFiscalEnvironment;
   search?: string;
 }
+
+// ─────────────────────────────────────────────────────────
+// Platform Invoice Profiles
+// ─────────────────────────────────────────────────────────
+
+/**
+ * Fila del listado de perfiles — `GET /superadmin/subscriptions/fiscal/profiles`.
+ *
+ * Mismo contrato que `InvoiceProfile` del riel tienda; la diferencia es que
+ * `organization_id` es fijo (el de la plataforma) y `store_id` es NULL.
+ */
+export interface PlatformInvoiceProfile {
+  id: number;
+  organization_id: number;
+  /** Siempre NULL en el ámbito plataforma. */
+  store_id: number | null;
+  name: string;
+  operation_type: string;
+  state: 'active' | 'inactive';
+  is_default: boolean;
+  current_version: number;
+  cloned_from_profile_id: number | null;
+  cloned_from_version: number | null;
+  created_by: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Entrada del catálogo de perfiles activos — `GET /superadmin/subscriptions/fiscal/profiles/catalog`. */
+export interface PlatformInvoiceProfileCatalogEntry {
+  id: number;
+  name: string;
+  operation_type: string;
+  is_default: boolean;
+  current_version: number;
+}
+
+/** Versión de perfil con su snapshot — `GET /profiles/:id/versions/:v`. */
+export interface PlatformInvoiceProfileVersion {
+  id: number;
+  version: number;
+  created_at: string;
+  created_by: number | null;
+  creator: { id: number; first_name: string; last_name: string } | null;
+  config: Record<string, unknown>;
+}
+
+/** Autor de una versión — `GET /profiles/:id/versions`. */
+export interface PlatformInvoiceProfileVersionSummary {
+  id: number;
+  version: number;
+  created_at: string;
+  created_by: number | null;
+  creator: { id: number; first_name: string; last_name: string } | null;
+}
+
+/**
+ * Detalle de perfil — `GET /profiles/:id`.
+ *
+ * Trae `version` (fila completa con config) y `current_config` (atajo al snapshot
+ * vigente). La vista consume `current_config`.
+ */
+export interface PlatformInvoiceProfileDetail extends PlatformInvoiceProfile {
+  version: PlatformInvoiceProfileVersion | null;
+  current_config: Record<string, unknown> | null;
+}
+
+/** Filtros del listado — `GET /profiles?limit=&page=&search=&operation_type=&state=`. */
+export interface ListPlatformProfilesQuery {
+  search?: string;
+  operation_type?: string;
+  state?: 'active' | 'inactive';
+  page?: number;
+  limit?: number;
+}
+
+/** `meta` de paginación. */
+export interface PlatformProfilePageMeta {
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+/**
+ * Cuerpo para crear un perfil — `POST /superadmin/subscriptions/fiscal/profiles`.
+ *
+ * `config` es `Record<string, unknown>` a propósito: el servicio reenvía el snapshot
+ * sin reinterpretarlo. El tipo exacto vive en `InvoiceProfileConfig` del contrato
+ * compartido (`core/utils/invoice-profile-config.contract.ts`), que es la misma
+ * fuente que el backend.
+ */
+export interface CreatePlatformProfilePayload {
+  name: string;
+  operation_type: string;
+  state?: 'active' | 'inactive';
+  is_default?: boolean;
+  config: Record<string, unknown>;
+}
+
+/**
+ * Edición de un perfil — `PATCH /superadmin/subscriptions/fiscal/profiles/:id`.
+ *
+ * Mismo criterio que `UpdateInvoiceProfilePayload`: mandar `config` crea versión
+ * nueva; omitirlo cuando solo se renombró evita inflar el historial con versiones
+ * idénticas.
+ */
+export interface UpdatePlatformProfilePayload {
+  name?: string;
+  operation_type?: string;
+  config?: Record<string, unknown>;
+}
+
+/** Clonación — `POST /superadmin/subscriptions/fiscal/profiles/:id/clone`. */
+export interface ClonePlatformProfilePayload {
+  name: string;
+  source_version?: number;
+}
+
+/** Preview de perfil — `POST /superadmin/subscriptions/fiscal/profiles/:id/preview`. */
+export interface PreviewPlatformProfilePayload {
+  contract_value?: number;
+  aiu_value?: number;
+  contract_object?: string;
+  issue_date?: string;
+  lines?: {
+    bucket: string;
+    description?: string;
+    quantity: number;
+    unit_price: number;
+    discount_amount?: number;
+    unit_code?: string;
+  }[];
+  customer?: {
+    legal_name?: string;
+    document_number?: string;
+    document_type?: string;
+  };
+}
+
+/**
+ * Resultado de previsualización.
+ *
+ * Mismo contrato que `ProfilePreviewResult` del riel tienda; se redefine aquí
+ * para mantener la autonomía del módulo y porque el backend delega en la misma
+ * implementación (así que el tipo sería idéntico de todas formas).
+ */
+export interface PlatformProfilePreviewResult {
+  profile: { id: number; name: string; operation_type: string; version: number };
+  not_performed: {
+    numbering_reserved: boolean;
+    signed: boolean;
+    transmitted: boolean;
+    persisted: boolean;
+  };
+  xml: string;
+  breakdown: {
+    lines: {
+      index: number;
+      bucket: string;
+      description: string;
+      unit_code: string;
+      quantity: string;
+      unit_price: string;
+      discount_amount: string;
+      line_extension_amount: string;
+      omit_tax_total: boolean;
+      tax_amount: string;
+      total_amount: string;
+      taxes: {
+        dian_tax_code: string;
+        tax_name: string;
+        tax_rate: string;
+        taxable_amount: string;
+        tax_amount: string;
+      }[];
+      note: string | null;
+    }[];
+    totals: {
+      line_extension_amount: string;
+      discount_amount: string;
+      tax_exclusive_amount: string;
+      tax_amount: string;
+      tax_inclusive_amount: string;
+      payable_amount: string;
+    };
+  };
+  aiu_summary: {
+    taxable_basis: string;
+    regime?: string | null;
+    contract_value: string;
+    aiu_value: string;
+    taxable_base: string;
+    minimum_base: string;
+    note: string | null;
+  } | null;
+  validations: {
+    rule: string;
+    passed: boolean;
+    severity: 'blocker' | 'warning' | 'info';
+    code: string | null;
+    message: string;
+    details?: Record<string, unknown>;
+  }[];
+}

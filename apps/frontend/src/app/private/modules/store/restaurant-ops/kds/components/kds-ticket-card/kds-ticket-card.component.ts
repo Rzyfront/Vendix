@@ -153,9 +153,11 @@ export class KdsTicketCardComponent {
 
   // ─── Restaurant Suite — per-dish urgency ───────────────────────────
   /**
-   * Per-dish preparation time in minutes (product-level; the ticket item
-   * carries no variant FK). Missing/0/negative ⇒ default 10 min, matching
-   * the ticket-level `smallestPrepMinutes` rule.
+   * Per-dish preparation time in minutes (product-level; `variant_label` /
+   * `product_variant_id` ya viajan en el item — C.4 QUI-736 — pero el tiempo de
+   * preparación se sigue leyendo del PRODUCTO, no de la variante). Missing/0/
+   * negative ⇒ default 10 min, matching the ticket-level `smallestPrepMinutes`
+   * rule.
    */
   itemPrepMinutes(item: KitchenTicketItem): number {
     const DEFAULT_MIN = 10;

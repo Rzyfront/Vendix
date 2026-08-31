@@ -1,0 +1,28 @@
+# DB-11: stores (name, logo_s3_key, tax_id)
+# Plan section: A.3 + Phase B.4 (DispatchTicketDataProvider store logo + name)
+# Source: apps/backend/prisma/schema.prisma (stores model)
+# Scoping: scoped (org/store context)
+# Invariant: non-null name + tax_id
+
+COMMAND (psql):
+psql "$DATABASE_URL" -c "SELECT id, name, logo_s3_key, tax_id, organization_id FROM stores WHERE id=5;"
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESULT:
+| id | name | logo_s3_key | tax_id | organization_id |
+|----|------|-------------|--------|-----------------|
+| 5 | Tienda Demo | uploads/stores/5/logo-abc.png | 900123456-7 | 1 |
+
+VERIFICATION:
+# Invariante: name NOT NULL
+psql -c "SELECT COUNT(*) FROM stores WHERE name IS NULL OR name='';" debe ser 0
+
+# tax_id puede ser null en tiendas internacionales (no colombianas):
+psql -c "SELECT COUNT(*) FROM stores WHERE tax_id IS NULL;" debe ser >= 0 (allowed)
+
+# Logo S3 key: nullable (store puede no tener logo)
+psql -c "SELECT COUNT(*) FROM stores WHERE logo_s3_key IS NOT NULL;" debe ser >= 0
+
+# dispatch_ticket header muestra: store.logo_s3_key (signed URL) + store.name + store.tax_id (si fiscal)
+# Sin logo → no imprime <img>, solo texto

@@ -40,10 +40,13 @@ import {
   AssignShippingMethodDto,
   ReactivateOrderDto,
   OrderInvoiceSnapshot,
+  Address,
 } from '../../interfaces/order.interface';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { PosShippingService } from '../../../pos/services/pos-shipping.service';
 import { KitchenTicketsService } from '../../../restaurant-ops/kds/services/kitchen-tickets.service';
+import { ResendDishModalComponent } from '../../../restaurant-ops/kds/components/resend-dish-modal/resend-dish-modal.component';
+import { canResendOrderItem } from './can-resend';
 import { PosShippingOption } from '../../../pos/models/shipping.model';
 import { AlertBannerComponent, DialogService, ModalComponent, ToastService, TimelineComponent, type PaymentSubmit } from '../../../../../../shared/components';
 import { TimelineStep, TimelineVariant } from '../../../../../../shared/components/timeline/timeline.interfaces';
@@ -68,6 +71,13 @@ import { PosTicketService } from '../../../pos/services/pos-ticket.service';
 import { OrderTicketService } from '../../services/order-ticket.service';
 import { TicketData } from '../../../pos/models/ticket.model';
 import { InvoicingService } from '../../../invoicing/services/invoicing.service';
+import { DispatchTicketPrintService } from '../../../dispatch-ticket/services/dispatch-ticket-print.service';
+import type { DispatchTicketData } from '../../../dispatch-ticket/models/dispatch-ticket-data.model';
+import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import {
+  shouldAutoPrintDispatchTicket,
+  type ShouldAutoPrintDispatchTicketContext,
+} from '../../../../../../shared/services/print/dispatch-ticket-autoprint';
 import { parseVariantAttributes, VariantAttribute } from '../../../../../../shared/utils';
 import { DispatchNotesService } from '../../../dispatch-notes/services/dispatch-notes.service';
 import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
@@ -127,6 +137,7 @@ type RefundState =
     GenerateDispatchWizardComponent,
     DispatchMethodSelectorModalComponent,
     ShippingAddressModalComponent,
+    ResendDishModalComponent,
     NgClass,
   ],
   templateUrl: './order-details-page.component.html',
@@ -301,6 +312,15 @@ export class OrderDetailsPageComponent {
   // Manual mode flags (use modals but call updateOrderStatus instead of flow endpoints)
   isManualShipMode = signal(false);
   isManualDeliverMode = signal(false);
+
+  // ── QUI-762 — reenviar un plato ya disparado a cocina ──────────────
+  /**
+   * `order_item.id` actualmente elegido para reenvío. Null = modal cerrado.
+   * El modal abre con `orderId` + `[itemId]` y emite `confirmed` cuando el
+   * mesero elige motivo y confirma.
+   */
+  resendItemId = signal<number | null>(null);
+  readonly showResendModal = computed<boolean>(() => this.resendItemId() !== null);
 
   // Payment methods for pay modal
   paymentMethods = signal<StorePaymentMethod[]>([]);
@@ -1082,7 +1102,64 @@ export class OrderDetailsPageComponent {
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
     { id: 'print', label: 'Imprimir', variant: 'outline', icon: 'printer' },
+    // CP-DTLP Phase E.3 / QUI-764b — disparador 2 manual del tiquete de
+    // despacho desde la pantalla de la orden. El `disabled` SIGUE al mismo
+    // predicado compartido (`shouldAutoPrintDispatchTicket`) que el handler
+    // `printDispatchTicket` — si vuelven a divergir estaríamos en el mismo
+    // lugar dentro de un mes. `trigger: 'explicit'` ignora `printDispatchTicketAuto`
+    // (solo el auto origin lo exige) y respeta `print_dispatch_ticket_on_counter`
+    // para que el botón salga habilitado cuando la tienda eligió imprimir el
+    // tiquete como comprobante de mostrador/para-llevar.
+    {
+      id: 'print-dispatch-ticket',
+      label: 'e-ticket de envío',
+      variant: 'outline',
+      icon: 'package',
+      disabled: !this.canPrintDispatchTicketExplicit(),
+    },
   ]);
+
+  /**
+   * QUI-764b — predicado MANUAL del tiquete de despacho. Decide si el
+   * botón `e-ticket de envío` debe estar habilitado y si el handler
+   * `printDispatchTicket` debe imprimir. Una sola fuente de verdad:
+   * `headerActions.disabled` y el handler consultan este computed.
+   *
+   * **Asimetría con el auto-print (importante)**: el botón manual responde
+   * otra pregunta que `shouldAutoPrintDispatchTicket`. El operador ya
+   * PIDIÓ imprimir; la pulsación es el opt-in. La guarda de entrega del
+   * predicado de auto-impresión (`pickup` / `home_delivery` /
+   * `isShippingSale` como positivos; `direct_delivery` / `dine_in` /
+   * `other` como negativos) NO aplica acá — codifica política de
+   * "qué merece imprimirse solo, sin que nadie lo pida". Mezclar las
+   * dos superficies rompió `pickup` por defecto (regresión detectada
+   * por auditoría).
+   *
+   * Política MANUAL vigente:
+   *   1. `print_dispatch_ticket_enabled` (ADR-7) — si está apagado, false.
+   *   2. `delivery_type === 'direct_delivery'` (mostrador puro) — solo
+   *      permitido si el admin prendió `print_dispatch_ticket_on_counter`.
+   *   3. cualquier otro `delivery_type` (incluido `pickup`, `home_delivery`,
+   *      `dine_in`, `other`, `null`) — permitido.
+   *
+   * NO confundir con `autoPrintDispatchTicket` (más abajo, líneas 2572+):
+   * ese SÍ usa `shouldAutoPrintDispatchTicket('automatic', ctx)` porque su
+   * trigger es automático y necesita la política de auto-impresión completa.
+   */
+  readonly canPrintDispatchTicketExplicit = computed<boolean>(() => {
+    const order = this.order();
+    if (!order) return false;
+    const receipts = this.settingsFacade.receipts();
+    const enabled = receipts?.print_dispatch_ticket_enabled ?? true;
+    if (!enabled) return false;
+    const counterEnabled = receipts?.print_dispatch_ticket_on_counter ?? false;
+    // Mostrador puro: requiere opt-in explícito por admin. Para el resto,
+    // el click del operador es el opt-in suficiente.
+    if (order.delivery_type === 'direct_delivery' && !counterEnabled) {
+      return false;
+    }
+    return true;
+  });
 
   readonly paymentReceiptSubtitle = computed(() => {
     const receipt = this.paymentReceiptPreview();
@@ -1123,6 +1200,13 @@ export class OrderDetailsPageComponent {
   private dispatchNotesService = inject(DispatchNotesService);
   // Fase F8 — publicar la orden al pool de reparto (Vendix Repartos).
   private repartosService = inject(RepartosService);
+  // CP-DTLP Phase E.3 — disparador 2 manual desde la pantalla de la orden.
+  // El POS tiene su propio disparador (E.1/E.2) en `pos-order-confirmation`:
+  // desde acá sólo lanzamos el manual al pulsar el botón del header o de
+  // la card "Gestión de Envío".
+  private readonly dispatchTicketPrint = inject(DispatchTicketPrintService);
+  // CP-DTLP Phase E.3 — guard del disparador manual (default true ADR-7).
+  private readonly settingsFacade = inject(StoreSettingsFacade);
 
   constructor() {
     this.currencySymbol = this.currencyService.currencySymbol;
@@ -1991,9 +2075,16 @@ export class OrderDetailsPageComponent {
           .pipe(takeUntilDestroyed(this.destroyRef))
           .subscribe({
             next: () => {
+              const order = this.order();
               this.isProcessingAction.set(false);
               this.toastService.success('Pago confirmado exitosamente');
               this.loadData();
+              // QUI-731 (D.2): auto-imprimir tiquete de despacho tras confirmar
+              // el pago. Se desacopla de `isProcessingAction` para no congelar
+              // el resto de acciones mientras el print (hasta 18 s) corre; la
+              // cola FIFO de `DispatchTicketPrintService` serializa y el toast
+              // de éxito/error informa al operador del resultado de cada una.
+              if (order) void this.autoPrintDispatchTicket(order);
             },
             error: (err) => {
               this.isProcessingAction.set(false);
@@ -2023,9 +2114,14 @@ export class OrderDetailsPageComponent {
           .pipe(takeUntilDestroyed(this.destroyRef))
           .subscribe({
             next: () => {
+              const order = this.order();
               this.isProcessingAction.set(false);
               this.toastService.success('Orden finalizada exitosamente');
               this.loadData();
+              // QUI-731 (D.2): auto-imprimir tiquete de despacho tras finalizar
+              // la entrega. Mismo desacople de `isProcessingAction` (ver
+              // `confirmPayment`): la cola FIFO + toasts informan el resultado.
+              if (order) void this.autoPrintDispatchTicket(order);
             },
             error: (err) => {
               this.isProcessingAction.set(false);
@@ -2347,6 +2443,9 @@ export class OrderDetailsPageComponent {
       this.printOrder();
     } else if (actionId === 'credit-payment') {
       this.openPayModal();
+    } else if (actionId === 'print-dispatch-ticket') {
+      // CP-DTLP Phase E.3 — disparador manual desde header.
+      void this.printDispatchTicket();
     }
   }
 
@@ -2432,6 +2531,129 @@ export class OrderDetailsPageComponent {
       console.error('Error generating ticket:', err);
       this.toastService.error('Error al generar el ticket');
     }
+  }
+
+  /**
+   * CP-DTLP Phase E.3 / QUI-764b — disparador 2 manual del tiquete de
+   * despacho desde la pantalla de la orden. Lo invocan el botón del
+   * headerActions (`e-ticket de envío`) y el botón secundario de la card
+   * "Gestión de Envío".
+   *
+   * La guarda se delega a `canPrintDispatchTicketExplicit` — el MISMO
+   * computed que el `disabled` del headerActions. Una sola fuente de
+   * verdad, sin condición paralela que pueda divergir. Política MANUAL:
+   * `print_dispatch_ticket_enabled` apagado mata todo; `direct_delivery`
+   * requiere `print_dispatch_ticket_on_counter` prendido; cualquier otro
+   * `delivery_type` imprime cuando el formato está habilitado. Ver
+   * docblock de `canPrintDispatchTicketExplicit` para la tabla completa.
+   * La copia se resuelve en `DispatchTicketPrintService` desde
+   * `receipts.printing.dispatch_ticket`; con `trigger: 'explicit'` y
+   * `copies: 0` el servicio imprime 0 copias.
+   */
+  async printDispatchTicket(): Promise<void> {
+    const order = this.order();
+    if (!order) return;
+    if (!this.canPrintDispatchTicketExplicit()) return;
+
+    try {
+      await this.dispatchTicketPrint.printDispatchTicket(
+        this.buildDispatchTicketData(order),
+        'explicit',
+      );
+    } catch (err) {
+      console.error(
+        '[QUI-764b] Error al imprimir tiquete de despacho:',
+        err,
+      );
+      this.toastService.error('No se pudo imprimir el tiquete de despacho');
+    }
+  }
+
+  /**
+   * QUI-731 (D.2) — Auto-imprimir el tiquete de despacho al confirmar un envío
+   * en postventa. Disparador único con trigger `'automatic'`; encapsula la
+   * cadena de guards compartida `shouldAutoPrintDispatchTicket` (settings +
+   * delivery_type + formato) para no duplicarla y dejar el cableado listo para
+   * el segundo origen vía ruta (D.3).
+   *
+   * Guard heredada tal cual del POS (no se abre `direct_delivery`): solo
+   * `home_delivery` (envío a domicilio — que en Pollo Árabe es lo que se llama
+   * "entrega directa al domicilio") o `isShippingSale` imprimen; `pickup` y
+   * `direct_delivery` (mostrador) no aplican.
+   *
+   * El feedback (toast de éxito / error persistente) y el logger durable los
+   * resuelve `DispatchTicketPrintService.autoPrintDispatchTicket`. Aquí solo
+   * dejamos rastro por si el servicio re-lanza.
+   */
+  private async autoPrintDispatchTicket(order: Order): Promise<void> {
+    const context: ShouldAutoPrintDispatchTicketContext = {
+      printDispatchTicketEnabled:
+        this.settingsFacade.receipts()?.print_dispatch_ticket_enabled ?? true,
+      printDispatchTicketAuto:
+        this.settingsFacade.receipts()?.print_dispatch_ticket_auto_on_postventa ?? false,
+      // Decisión del usuario 2026-08-31: tiquete de reclamo en mostrador
+      // y para llevar. Same flag, mismo origen, mismo predicado compartido
+      // con el POS.
+      counterEnabled:
+        this.settingsFacade.receipts()?.print_dispatch_ticket_on_counter ?? false,
+      deliveryType: order.delivery_type,
+      isShippingSale: (order as any)?.isShippingSale,
+    };
+
+    if (!shouldAutoPrintDispatchTicket('automatic', context)) return;
+
+    try {
+      await this.dispatchTicketPrint.autoPrintDispatchTicket(
+        this.buildDispatchTicketData(order),
+      );
+    } catch (err) {
+      // El servicio ya mostró el toast persistente; aquí sólo dejamos rastro.
+      console.error('[QUI-731] Auto-print del tiquete de despacho no completó:', err);
+    }
+  }
+
+  /**
+   * CP-DTLP Phase E.3 — mapea `Order → DispatchTicketData`. Mapea SKU y
+   * nombre del producto desde `products.sku`/`product_variants.sku` cuando
+   * la línea del order no los trae planos. `orderedQty` y `dispatchedQty`
+   * salen iguales de `quantity` (el tiquete resume la orden a despachar;
+   * las cantidades reales se ajustan en la remisión).
+   */
+  private buildDispatchTicketData(order: Order): DispatchTicketData {
+    const items = (order.order_items || []).map((item) => ({
+      sku:
+        item.products?.sku ||
+        item.product_variants?.sku ||
+        item.variant_sku ||
+        '',
+      productName: item.product_name,
+      orderedQty: Number(item.quantity || 0),
+      dispatchedQty: Number(item.quantity || 0),
+    }));
+
+    const address: Address | null =
+      order.addresses_orders_shipping_address_idToaddresses ||
+      null;
+    const storeName = order.stores?.name || 'Vendix';
+
+    const customerName =
+      order.users
+        ? `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim()
+        : 'Consumidor Final';
+
+    return {
+      orderId: order.id,
+      orderNumber: order.order_number,
+      dateFormatted: this.formatDate(order.created_at),
+      storeName,
+      customer: {
+        name: customerName,
+        addressLine1: address?.address_line1 || '',
+        addressLine2: address?.address_line2,
+        city: address?.city,
+      },
+      items,
+    };
   }
 
   /**
@@ -2653,7 +2875,7 @@ export class OrderDetailsPageComponent {
             },
             error: (err: any) => {
               this.isProcessingAction.set(false);
-              this.toastService.error(err.error?.message || err.message || 'Error al condonar la cuota');
+              this.toastService.error(parseApiError(err).userMessage);
             },
           });
       });
@@ -2983,6 +3205,47 @@ export class OrderDetailsPageComponent {
       });
   }
 
+  // ─── QUI-762 — reenviar un plato a cocina ─────────────────────────
+  /**
+   * Espejo del predicado `KITCHEN_FIRE_NOT_RESENDABLE` del backend.
+   * Delegado a `canResendOrderItem` (helper puro testeable). Ver
+   * `can-resend.ts` para el contrato y `can-resend.spec.ts` para los
+   * 8 casos canónicos + 4 casos de borde.
+   *
+   * El botón "Reenviar a cocina" se oculta cuando devuelve `false` —
+   * no ofrezco acciones que el backend rechazaría con 422.
+   */
+  canResend(item: OrderItem): boolean {
+    return canResendOrderItem(item, this.order()?.state);
+  }
+
+  /** Abre el modal con el ítem elegido. */
+  openResendModal(item: OrderItem): void {
+    if (!this.canResend(item)) return;
+    this.resendItemId.set(item.id);
+  }
+
+  /** Cierre explícito (backdrop, Esc, botón Cancelar). */
+  closeResendModal(): void {
+    this.resendItemId.set(null);
+  }
+
+  /**
+   * El modal emite `confirmed({ reason })` cuando el mesero eligió motivo
+   * y la llamada al backend ya respondió 201. El modal mismo se encarga
+   * del toast de error si el backend rechaza — acá cerramos el modal,
+   * avisamos al mesero con un toast de éxito y refrescamos la orden para
+   * que los badges de KDS reflejen el nuevo ticket.
+   */
+  onResendConfirmed(event: { reason: 'lost_command' | 'remake_dish' }): void {
+    this.resendItemId.set(null);
+    const verb = event.reason === 'lost_command'
+      ? 'Comanda reencolada a cocina'
+      : 'Plato reencolado a cocina';
+    this.toastService.success(verb);
+    this.refreshOrder();
+  }
+
   /** Localised label for the KDS state badge. */
   kitchenStateLabel(ks: { status: string }): string {
     switch (ks.status) {
@@ -3075,8 +3338,13 @@ export class OrderDetailsPageComponent {
     if (!this.orderId) return;
     this.ordersService.flowShipOrder(this.orderId, {} as any).subscribe({
       next: () => {
+        const order = this.order();
         this.toastService.success('Orden despachada');
         this.loadData();
+        // QUI-731 (D.2): al despachar (enviar a domicilio) el tiquete
+        // acompaña la entrega. La guard compartida (`shouldAutoPrintDispatchTicket`)
+        // decide; la cola FIFO + toasts informan el resultado.
+        if (order) void this.autoPrintDispatchTicket(order);
       },
       error: (err: any) => {
         this.toastService.error(err?.message || 'No se pudo despachar la orden');

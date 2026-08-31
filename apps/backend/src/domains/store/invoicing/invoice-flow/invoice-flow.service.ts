@@ -5,6 +5,7 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { FiscalGateService } from '../../../../common/services/fiscal-gate.service';
 import { TechnicalKeyVaultService } from '../../../../common/services/technical-key-vault.service';
+import { RESOLUTION_PUBLIC_SELECT } from '../utils/technical-key.util';
 import {
   VendixHttpException,
   ErrorCodes,
@@ -44,6 +45,14 @@ import type {
   AiuSettings,
   AiuVatRegime,
 } from '../../settings/interfaces/store-settings.interface';
+import {
+  isAiuLineTaxable,
+  taxableBasisFromRegime,
+} from '../profiles/invoice-profile-config.contract';
+import type {
+  AiuLineComponent,
+  AiuTaxableBasis,
+} from '../profiles/invoice-profile-config.contract';
 import { InvoiceProviderResolver } from '../providers/invoice-provider-resolver.service';
 import { InvoiceRetryQueueService } from '../services/invoice-retry-queue.service';
 import { FiscalTransmissionLedgerService } from '../services/fiscal-transmission-ledger.service';
@@ -400,28 +409,18 @@ const LINE_TAX_MAX_CANDIDATES = 6;
 const ONE_CENT = '0.01';
 
 /**
- * LA RESOLUCIÓN SIN SU CLAVE TÉCNICA.
- *
- * Gemela de la de `invoicing.service.ts` — la misma lista, a propósito: las dos
- * alimentan las mismas pantallas y una que se quede corta reabriría la fuga por
- * el otro lado. Si se añade una columna pública a `invoice_resolutions`, va en
- * las dos.
- *
- * `resolution: true` publicaba la fila entera en toda respuesta de este
- * servicio (`PATCH :id/validate`, `PATCH :id/send`, `accept`, `void`,
- * contingencia, rechazo…), y con ella las TRES columnas de clave técnica:
- * `technical_key` (la ClTec en claro, 14.ª entrada del hash del CUFE),
- * `technical_key_encrypted` (ciphertext atacable fuera de línea) y
- * `technical_key_fingerprint` (SHA-256 sin llave — índice ciego que correlaciona
- * resoluciones entre tenants).
- *
- * Es lista BLANCA, no exclusión: lo que se añada mañana a la tabla no se
- * publica solo.
+ * `RESOLUTION_PUBLIC_SELECT` se importa de `../utils/technical-key.util` (E.9,
+ * 2026-08-25) en vez de declararse aquí: era la TERCERA copia idéntica —junto
+ * a la canónica y a la que tenía `invoicing.service.ts` antes de este mismo
+ * cambio—, las 16 claves y el mismo orden en las tres, sin nada que lo
+ * garantizara. La razón de la lista blanca (y qué tres columnas de clave
+ * técnica excluye y por qué) está documentada una sola vez allá.
  *
  * A DIFERENCIA DE `invoicing.service.ts`, ESTE SERVICIO SÍ NECESITA LA ClTec —
- * sin ella no hay CUFE—. No viaja acá: se lee aparte, por su id y sólo con las
- * dos columnas del vault, en `revealResolutionTechnicalKey()`, que es el único
- * punto del archivo donde el secreto entra en memoria.
+ * sin ella no hay CUFE—. No viaja en `RESOLUTION_PUBLIC_SELECT`: se lee aparte,
+ * por su id y sólo con las dos columnas del vault, en
+ * `revealResolutionTechnicalKey()`, que es el único punto de este archivo donde
+ * el secreto entra en memoria.
  *
  * Lo que el emisor SÍ resuelve desde estos campos públicos es el bloque
  * `sts:InvoiceControl` (`resolveInvoiceControl`, que consume `resolution_number`,
@@ -430,24 +429,6 @@ const ONE_CENT = '0.01';
  * silencioso en cualquiera de ellos vuelve a producir el bloque de autorización
  * vacío del 14/08/2026, que quemó un consecutivo autorizado irrecuperable.
  */
-const RESOLUTION_PUBLIC_SELECT = {
-  id: true,
-  organization_id: true,
-  store_id: true,
-  accounting_entity_id: true,
-  document_type: true,
-  resolution_number: true,
-  resolution_date: true,
-  prefix: true,
-  range_from: true,
-  range_to: true,
-  current_number: true,
-  valid_from: true,
-  valid_to: true,
-  is_active: true,
-  created_at: true,
-  updated_at: true,
-} as const;
 
 const INVOICE_INCLUDE = {
   invoice_items: true,
@@ -2222,26 +2203,29 @@ export class InvoiceFlowService {
   /**
    * ¿La línea entra a la base gravable del IVA bajo el régimen declarado?
    *
-   * Espeja `InvoiceCalculatorService.isAiuTaxable`, que es el que produjo los
-   * importes persistidos. Las TRES respuestas son legales y la diferencia es
-   * toda la base gravable: `et_462_1` grava el AIU completo,
-   * `decreto_1372_1992` grava sólo la Utilidad, y `subtotal` declina el
-   * tratamiento AIU y grava el contrato entero.
+   * D.9 — deja de tener lógica propia: convierte `regime` a
+   * `AiuTaxableBasis` (`taxableBasisFromRegime`, o `'subtotal'` directo,
+   * que no es un régimen) y delega en `isAiuLineTaxable`
+   * (`invoice-profile-config.contract.ts`), la MISMA función que usa
+   * `InvoiceCalculatorService.isAiuTaxable` —el que produjo los importes
+   * persistidos que este método verifica al emitir.
    *
-   * Una línea SIN componente —la porción de COSTO reembolsable— no grava bajo
-   * los dos primeros, pero **sí bajo `subtotal`**, y ahí está toda la diferencia
-   * entre gravar el 10 % del contrato y gravar el 100 %.
+   * Este docblock decía «espeja» al calculador cuando en realidad era una
+   * segunda implementación escrita a mano: D.4 corrigió el calculador para
+   * `component === 'contrato'` bajo `'utilidad'` y esta función se quedó
+   * atrás, devolviendo `false` para el mismo caso. La factura entraba
+   * correctamente gravada (impuesto persistido) y este método, en la última
+   * compuerta antes de firmar, la rechazaba con `INVOICING_AIU_005` — un
+   * ciclo irrompible porque el defecto estaba en la LECTURA, no en el dato.
+   * Con una sola función no hay una segunda lectura que pueda quedarse atrás.
    */
   private isAiuComponentTaxable(
     component: string | null,
     regime: AiuRegimeSnapshot,
   ): boolean {
-    // Bajo «subtotal» se declina el tratamiento AIU: TODAS las porciones
-    // gravan, incluida la de costo reembolsable (component === null) — es
-    // exactamente lo que distingue esta base de las otras dos.
-    if (regime === 'subtotal') return true;
-    if (!component) return false;
-    return regime === 'et_462_1' ? true : component === 'utilidad';
+    const basis: AiuTaxableBasis =
+      regime === 'subtotal' ? 'subtotal' : taxableBasisFromRegime(regime);
+    return isAiuLineTaxable(component as AiuLineComponent | null, basis);
   }
 
   /**

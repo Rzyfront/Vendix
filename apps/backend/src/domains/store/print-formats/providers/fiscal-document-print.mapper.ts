@@ -1,6 +1,7 @@
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { RESOLUTION_PUBLIC_SELECT } from '../../invoicing/utils/technical-key.util';
 import { amountToSpanishWords } from '@common/utils/amount-in-words.util';
+import { resolveFiscalIssuerForPrint } from '../services/fiscal-issuer-identity';
 
 /**
  * UNA sola proyección `invoices` → modelo de impresión, compartida por los dos
@@ -16,21 +17,102 @@ import { amountToSpanishWords } from '@common/utils/amount-in-words.util';
  * implementaciones del mismo contrato, que es exactamente el patrón que ya
  * produjo divergencias medidas en este dominio.
  */
+/**
+ * Los campos de cada relación abajo son EXACTAMENTE los que el mapeador lee
+ * más abajo — no una lista adivinada. Medido leyendo el `return` completo de
+ * `mapFiscalDocumentToPrintData` (E.9, 2026-08-25): antes, `organization` y
+ * `store` entraban con `include` completo (36 y 23 columnas para leer 7 y 6)
+ * y `customer` era `true` — la relación es `customer users?` (comprobado en
+ * `schema.prisma`), o sea las **31 columnas de `users`, incluidas `password`
+ * y `two_factor_secret`**, en cada render fiscal, para leer 4. Hoy no era una
+ * fuga (`StandardPrintDataModel` es una proyección explícita de 4 campos y no
+ * hay `console.`/`logger.`/`JSON.stringify` del objeto crudo en estos
+ * proveedores — comprobado con `grep`), pero el hash quedaba en el montón de
+ * un proceso que compone HTML, a un `logger.debug(invoice)` futuro de
+ * convertirse en fuga real. `resolution` ya usaba `select` con
+ * `RESOLUTION_PUBLIC_SELECT` — el idioma correcto ya vivía en este mismo
+ * archivo, sólo en dos de las cuatro relaciones.
+ *
+ * Verificado contra los TRES consumidores de este `include`
+ * (`fiscal-invoice.provider.ts`, `credit-note.provider.ts`,
+ * `fiscal-credit-note.provider.ts`): ninguno toca `organization`/`store`/
+ * `customer` por su cuenta, todos pasan el `invoice`/`note` completo a este
+ * mapeador. Angostar aquí no les rompe nada; si alguno empieza a leer un
+ * campo nuevo de estas relaciones, el `select` de abajo es lo primero que hay
+ * que tocar, no lo último.
+ */
 export const FISCAL_DOCUMENT_PRINT_INCLUDE = {
   invoice_items: true,
   invoice_taxes: true,
   resolution: { select: RESOLUTION_PUBLIC_SELECT },
   organization: {
-    include: {
-      addresses: { take: 1 },
+    select: {
+      name: true,
+      legal_name: true,
+      tax_id: true,
+      phone: true,
+      email: true,
+      logo_url: true,
+      // E.11 casilla 1 — campos que `resolveFiscalIssuerForPrint` necesita para
+      // alimentar el resolvedor único de identidad fiscal: el alcance decide
+      // de qué settings sale `fiscal_data`, y las columnas son el respaldo.
+      fiscal_scope: true,
+      document_type: true,
+      person_type: true,
+      organization_settings: { select: { settings: true } },
+      addresses: {
+        take: 1,
+        select: {
+          address_line1: true,
+          city: true,
+          state_province: true,
+          municipality_code: true,
+          postal_code: true,
+          phone_number: true,
+        },
+      },
     },
   },
+  // `stores` NO tiene columnas `phone` ni `email` — comprobado contra
+  // `schema.prisma` (el modelo no las declara) tras un 500
+  // (`PrismaClientValidationError`) al pedirlas en `select`. Con el `include`
+  // completo anterior ya salían `undefined` en silencio por la misma razón
+  // (Prisma sólo devuelve columnas que existen); el mapeador ya asume esa
+  // ausencia con `store.phone || org.phone` y `store.email || org.email`, así
+  // que el `select` no cambia ningún dato mostrado — sólo hace explícito lo
+  // que ya era cierto.
   store: {
-    include: {
-      addresses: { take: 1 },
+    select: {
+      name: true,
+      legal_name: true,
+      tax_id: true,
+      logo_url: true,
+      // E.11 casilla 1 — bajo `fiscal_scope = 'STORE'` la identidad que firmó
+      // el XML vive aquí (`settings.fiscal_data`).
+      store_settings: { select: { settings: true } },
+      addresses: {
+        orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
+        take: 1,
+        select: {
+          address_line1: true,
+          city: true,
+          state_province: true,
+          municipality_code: true,
+          postal_code: true,
+          phone_number: true,
+        },
+      },
     },
   },
-  customer: true,
+  customer: {
+    select: {
+      first_name: true,
+      last_name: true,
+      document_number: true,
+      phone: true,
+      email: true,
+    },
+  },
 } as const;
 
 export interface FiscalDocumentPrintOptions {
@@ -88,22 +170,42 @@ export function mapFiscalDocumentToPrintData(
   const subtotal = Number(invoice.subtotal_amount || 0);
   const discount = Number(invoice.discount_amount || 0);
   const tax = Number(invoice.tax_amount || 0);
+  // E.11 casilla 1 — la retención viaja al papel. INFORMATIVA: no resta del
+  // total (`invoice-calculator.service.ts`: «Retenciones ... NUNCA restan del
+  // total»), igual que la fila «Retencion:» del builder PDF.
+  const withholding = Number(invoice.withholding_amount || 0);
   const total = Number(invoice.total_amount || subtotal - discount + tax);
 
   const accepted = invoice.dian_status === 'accepted';
 
+  // E.11 casilla 1 — el emisor ya NO es `org.tax_id` crudo: pasa por el
+  // resolvedor único de identidad fiscal con la MISMA asimetría estricta que
+  // `generatePdf` (documento electrónico → estricto; recibo interno o borrador
+  // → permisivo). Si el resolvedor falla para un documento electrónico, el
+  // carril del PDF legal también falla hoy: el HTML deja de imprimir un NIT
+  // divergente y falla IGUAL — paridad por construcción.
+  const issuer = resolveFiscalIssuerForPrint(
+    org,
+    store,
+    invoice.dian_status !== 'not_applicable',
+  );
+
   return {
     store: {
-      name: store.name || org.name || 'Vendix',
-      legal_name: store.legal_name || org.legal_name,
-      tax_id: org.tax_id,
-      phone: store.phone || org.phone,
-      email: store.email || org.email,
-      address:
-        store.addresses?.[0]?.address_line1 ||
-        org.addresses?.[0]?.address_line1,
-      city: store.addresses?.[0]?.city || org.addresses?.[0]?.city,
+      // Nombre comercial: el del dueño del alcance, como el trade_name del PDF.
+      name:
+        issuer.trade_name || store.name || org.name || issuer.legal_name || 'Vendix',
+      legal_name: issuer.legal_name || store.legal_name || org.legal_name,
+      tax_id: issuer.nit_display !== 'N/A' ? issuer.nit_display : undefined,
+      phone: issuer.phone,
+      email: issuer.email,
+      address: issuer.fiscal_address || undefined,
+      city: issuer.city || undefined,
       logo_url: store.logo_url || org.logo_url,
+      tax_regime: issuer.tax_regime,
+      fiscal_responsibilities: issuer.tax_responsibilities.length
+        ? issuer.tax_responsibilities
+        : undefined,
     },
     customer: {
       name:
@@ -171,6 +273,8 @@ export function mapFiscalDocumentToPrintData(
       shipping_total_formatted: '$0',
       tax_total: tax,
       tax_total_formatted: money(tax),
+      withholding_total: withholding,
+      withholding_total_formatted: money(withholding),
       grand_total: total,
       grand_total_formatted: money(total),
       // Mismo `total` que la fila en cifras: una segunda fuente aquí sería una

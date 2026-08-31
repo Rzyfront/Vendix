@@ -292,6 +292,14 @@ export class PosPaymentService {
         ),
       ),
       payment_reference: request.reference || '',
+      // QUI-728 (E.1) — la cuenta de destino elegida en el collector viaja con
+      // el pago. Se omite la clave cuando no hay cuenta (transferencia legacy
+      // sin FK, o método distinto de bank_transfer): `undefined` explícito
+      // dispararía el `forbidNonWhitelisted` en ningún caso, pero omitirla
+      // deja el payload idéntico al de hoy para el resto de métodos.
+      ...(request.bank_account_id != null
+        ? { bank_account_id: request.bank_account_id }
+        : {}),
       wompi_payment_method: (request.paymentMethod?.original as any)?.system_payment_method?.type === 'wompi'
         ? request.metadata?.wompiPaymentMethod
         : undefined,
@@ -374,9 +382,11 @@ export class PosPaymentService {
 
     // Check if anonymous sale is allowed
     const isAnonymousSale = paymentRequest.isAnonymousSale === true;
+    // QUI-737 (B.4) — el alias es otra vía legítima de "sin cliente formal".
+    const customerAlias = (paymentRequest as any).customer_alias;
 
-    // For non-anonymous sales, customer is required
-    if (!isAnonymousSale && !cartState.customer) {
+    // For non-anonymous sales, customer is required (salvo alias).
+    if (!isAnonymousSale && !customerAlias && !cartState.customer) {
       return throwError(
         () => new Error('Debe seleccionar un cliente para procesar la venta.'),
       );
@@ -414,6 +424,15 @@ export class PosPaymentService {
         ).toFixed(2),
       ),
       payment_reference: paymentRequest.reference || '',
+      // QUI-728 (E.1) — el selector de cuentas del collector emite
+      // `bankAccountId`; `pos-payment-step` lo pasa como `bank_account_id` y
+      // aquí viaja al backend, que lo valida y lo persiste en
+      // `payments.bank_account_id` (`processPosPaymentTransaction`). Omitir la
+      // clave cuando no hay cuenta: un `bank_account_id` ausente deja el pago
+      // en "Pagos sin asignar" (E.2), que es la degradación deliberada.
+      ...(paymentRequest.bank_account_id != null
+        ? { bank_account_id: paymentRequest.bank_account_id }
+        : {}),
       wompi_payment_method: (paymentRequest.paymentMethod?.original as any)?.system_payment_method?.type === 'wompi'
         ? paymentRequest.metadata?.wompiPaymentMethod
         : undefined,
@@ -442,6 +461,8 @@ export class PosPaymentService {
 
     // For anonymous sales, use "Consumidor Final" as customer name
     // For regular sales, include customer fields
+    // For alias (QUI-737 B.4): customer_id queda null y se manda customer_alias
+    // (mutuamente excluyentes — CHECK orders_customer_xor_alias).
     if (isAnonymousSale) {
       sale_data.customer_name = 'Consumidor Final';
     } else if (cartState.customer) {
@@ -449,6 +470,8 @@ export class PosPaymentService {
       sale_data.customer_name = `${cartState.customer.first_name} ${cartState.customer.last_name}`;
       sale_data.customer_email = cartState.customer.email;
       sale_data.customer_phone = cartState.customer.phone;
+    } else if (customerAlias) {
+      sale_data.customer_alias = customerAlias;
     }
 
     return this.http.post<any>(this.apiUrl, sale_data).pipe(
@@ -594,6 +617,10 @@ export class PosPaymentService {
         ).toFixed(2),
       );
       sale_data['payment_reference'] = paymentRequest.reference || '';
+      // QUI-728 (E.1) — misma cuenta de destino en la venta con envío.
+      if (paymentRequest.bank_account_id != null) {
+        sale_data['bank_account_id'] = paymentRequest.bank_account_id;
+      }
     }
 
     return this.http.post<any>(this.apiUrl, sale_data).pipe(
@@ -804,7 +831,11 @@ export class PosPaymentService {
   /**
    * Guardar borrador de orden
    */
-  saveDraft(cartState: CartState, createdBy: string): Observable<any> {
+  saveDraft(
+    cartState: CartState,
+    createdBy: string,
+    customerAlias?: string,
+  ): Observable<any> {
     // Drafts are NOT transactional — no cash register session required.
     const user_id = this.storeContextService.getUserId();
     if (!user_id) {
@@ -818,12 +849,16 @@ export class PosPaymentService {
     // `customer` is optional — POS drafts can be anonymous (Consumidor
     // Final). When present, link to the customer row; when missing, the
     // backend stores the order with `customer_id = null`.
+    // QUI-737 (B.4) — el alias es una tercera identidad ("sin cliente formal"):
+    // mutuamente excluyente con customer_id; nunca ''.
     const customer = cartState.customer;
+    const effectiveAlias = (customerAlias ?? '').trim() || undefined;
     const draft_data: Record<string, any> = {
       ...(customer?.id ? { customer_id: customer.id } : {}),
+      ...(effectiveAlias && !customer?.id ? { customer_alias: effectiveAlias } : {}),
       customer_name: customer
         ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim()
-        : 'Consumidor Final',
+        : (effectiveAlias ? undefined : 'Consumidor Final'),
       ...(customer?.email ? { customer_email: customer.email } : {}),
       ...(customer?.phone ? { customer_phone: customer.phone } : {}),
       store_id: this.getStoreId(),
@@ -992,6 +1027,13 @@ export class PosPaymentService {
       customerId: cartState.customer?.id
         ? Number(cartState.customer.id)
         : undefined,
+      // QUI-728 (E.1) — `CreatePaymentDto` declara `bank_account_id` en
+      // snake_case (el resto del DTO es camelCase); `forbidNonWhitelisted` lo
+      // acepta solo con ese nombre exacto. Va a nivel raíz, no en `metadata`,
+      // porque el gateway lo resuelve y valida antes de invocar al processor.
+      ...(paymentRequest.bank_account_id != null
+        ? { bank_account_id: paymentRequest.bank_account_id }
+        : {}),
       // Hotfix post-PR-576: la firma del helper ignoraba tableSessionId
       // y tableId, así que los pagos sobre órdenes adoptadas con mesa
       // abierta nunca cerraban la mesa en backend. Propagamos ambos.

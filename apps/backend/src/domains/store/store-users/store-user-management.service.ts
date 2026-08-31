@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
+import { mergePanelUiByAppType } from '@common/utils/panel-ui.util';
 import { StaffProvisioningService } from '../../../common/services/staff-provisioning.service';
 import { UserRoleAssignmentService } from '@common/services/user-role-assignment.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -584,9 +585,13 @@ export class StoreUserManagementService {
     });
 
     const existingConfig = existing?.config || {};
+    // Deep-merge por `app_type`: NO sobrescribir `panel_ui` entero. Este
+    // endpoint comparte `user_settings.config.panel_ui` con
+    // `organization/users.updateConfiguration`; sobrescribir toda la clave
+    // borra la configuración por app que el otro guardó (B.3).
     const newConfig = {
       ...existingConfig,
-      panel_ui: dto.panel_ui,
+      panel_ui: mergePanelUiByAppType(existingConfig.panel_ui, dto.panel_ui),
     };
 
     if (existing) {

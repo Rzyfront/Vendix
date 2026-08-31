@@ -14,7 +14,12 @@ import {
 } from '../providers/dian-direct/constants/dian-tax-codes';
 import { UblCommonBuilder } from '../providers/dian-direct/xml/ubl-common.builder';
 import type { ProviderInvoiceTax } from '../providers/invoice-provider.interface';
-import type { AiuTaxableBasis } from '../profiles/invoice-profile-config.contract';
+import { isAiuLineTaxable } from '../profiles/invoice-profile-config.contract';
+import type {
+  AiuComponentLiteral,
+  AiuComponentsBasis,
+  AiuTaxableBasis,
+} from '../profiles/invoice-profile-config.contract';
 
 /**
  * MOTOR ARITMÉTICO ÚNICO DE UN DOCUMENTO FISCAL DIAN.
@@ -153,8 +158,22 @@ export interface InvoiceCalculatorTaxInput {
   rate_basis?: InvoiceTaxRateBasis;
 }
 
-/** Componente AIU de una línea. Espeja `aiu_component_enum` de Prisma. */
-export type AiuComponent = 'administracion' | 'imprevistos' | 'utilidad';
+/**
+ * Componente AIU de una línea. Espeja `aiu_component_enum` de Prisma.
+ *
+ * `'contrato'` (D.2/D.4, ADR-6) es distinto de los otros tres: NO es una
+ * porción física del AIU, es la declaración de que la línea ES el AIU
+ * COMPLETO (Modelo 1 / `accounting_model: 'no_sumada'`) en vez de venir
+ * partido en tres renglones (Modelo 2 / `'sumada'`, el único habilitado hoy).
+ * `calculateLine` la explota internamente en A/I/U —ver
+ * `explodeAiuContratoLine`— para poder decidir cuánto de su propio importe
+ * entra a la base gravable bajo `taxable_basis: 'utilidad'`.
+ */
+export type AiuComponent =
+  | 'administracion'
+  | 'imprevistos'
+  | 'utilidad'
+  | 'contrato';
 
 /**
  * Declaración de que el DOCUMENTO se factura bajo la modalidad AIU
@@ -184,6 +203,27 @@ export interface InvoiceCalculatorAiuInput {
   enforce_minimum_base?: boolean;
   /** Porcentaje del piso. Ausente ⇒ 10. */
   minimum_base_percent?: DianNumericInput;
+  /**
+   * Reparto A/I/U configurado en el perfil (D.4). Sólo lo usa una línea
+   * `aiu_component: 'contrato'` bajo `taxable_basis: 'utilidad'` —es lo único
+   * que necesita saber CUÁNTO de su propio importe es Utilidad—. Ausente en
+   * un documento sin líneas `'contrato'`, y también a salvo si falta: ver
+   * `explodeAiuContratoLine` (cae todo en Utilidad, el lado que nunca
+   * sub-declara IVA).
+   */
+  components?: Readonly<Partial<Record<AiuComponentLiteral, DianNumericInput>>>;
+  /**
+   * Unidad de `components` — ver {@link AiuComponentsBasis} y
+   * `resolveAiuComponentsBasis`. `explodeAiuContratoLine` normaliza por la
+   * SUMA de los tres porcentajes, así que el reparto INTERNO de la línea
+   * `'contrato'` da el mismo resultado midan 'contract' o 'aiu': la unidad
+   * sólo cambia qué representa la suma (el AIU completo, o su fracción del
+   * contrato), nunca la proporción entre Administración/Imprevistos/Utilidad.
+   * Se conserva el campo para que la intención quede explícita y para no
+   * tener que reabrir esta interfaz si algún caso futuro sí necesita
+   * distinguir la unidad.
+   */
+  components_basis?: AiuComponentsBasis | null;
 }
 
 /** Una línea del documento. */
@@ -331,8 +371,31 @@ export interface CalculatedLine {
    * `cac:TaxTotal` con `cbc:Percent` en 0,00 —exento no es excluido—. Colapsar
    * los dos casos en «no tiene impuestos» borraría la diferencia justo donde
    * cambia el resultado.
+   *
+   * **Derivado de `taxable_amount`, no un dato independiente**: es
+   * exactamente el caso `taxable_amount === '0.00'`. Se conserva como campo
+   * propio — y no como getter — porque los consumidores existentes ya leen
+   * `omit_tax_total` y no tienen por qué cambiar (ADR-7, D.3).
    */
   omit_tax_total: boolean;
+  /**
+   * **Base gravable declarada de ESTA línea** — de donde sale
+   * `cbc:TaxableAmount` en el armado UBL (ADR-7). Ausente hasta D.3; con este
+   * campo, `omit_tax_total` deja de ser la única fuente de la gravabilidad de
+   * línea.
+   *
+   * Hoy (modelo `'sumada'`, el único habilitado — ver `ENABLED_ACCOUNTING_
+   * MODELS`) coincide siempre con `line_extension_amount` cuando la línea
+   * grava, y es `'0.00'` cuando `omit_tax_total` es `true`: el AIU sigue
+   * siendo LÍNEAS del documento, así que la base de cada línea es su propio
+   * importe entero o nada.
+   *
+   * El Modelo 1 (`'no_sumada'`, D.4-D.7) es lo que vuelve este campo capaz de
+   * declarar una base MENOR que `line_extension_amount` — una línea que ES el
+   * contrato entero pero cuya base gravable es sólo la fracción AIU —, sin que
+   * `omit_tax_total` deje de significar lo mismo que siempre significó.
+   */
+  taxable_amount: string;
 }
 
 /** Agregado por esquema DIAN — exactamente los `ValImp` del CUFE. */
@@ -425,7 +488,24 @@ export type InvoiceCalculatorDivergenceScope =
    * declara menos IVA del que la ley exige, que la DIAN acepta sin chistar y
    * que sólo se corrige con nota crédito.
    */
-  | 'aiu_base_below_minimum';
+  | 'aiu_base_below_minimum'
+  /**
+   * D.4 — un documento mezcló el Modelo 1 (`aiu_component: 'contrato'`) con el
+   * Modelo 2 (líneas `administracion`/`imprevistos`/`utilidad`), o declaró
+   * MÁS de una línea `'contrato'`.
+   *
+   * Las dos formas son mutuamente excluyentes por construcción (ADR-6): una
+   * línea `'contrato'` YA ES el AIU completo del contrato, así que una
+   * segunda línea de cualquiera de los dos tipos duplicaría —o
+   * contradiría— cuánto vale el AIU que `summarizeAiu` usa para el piso legal
+   * del 10 % (E.T. art. 462-1). No hay lectura razonable que reconcilie las
+   * dos declaraciones sin adivinar cuál de las dos miente, así que este
+   * servicio no intenta arbitrar: informa, y `InvoicingService` bloquea con
+   * `INVOICING_AIU_007` antes de gastar numeración. `line_index` señala la
+   * primera línea 'contrato' cuando hay más de una, o la primera línea que
+   * mezcla componentes cuando el documento combina los dos modelos.
+   */
+  | 'aiu_contrato_mutually_exclusive';
 
 export interface InvoiceCalculatorDivergence {
   scope: InvoiceCalculatorDivergenceScope;
@@ -583,6 +663,11 @@ export class InvoiceCalculatorService {
         ),
       );
     });
+
+    // D.4 — estructural, no monetario: se corre ANTES de `summarizeAiu` para
+    // que el piso legal nunca alcance a leer un `aiu_value` construido sobre
+    // una mezcla de modelos.
+    this.checkAiuContratoMutualExclusion(lines, divergences);
 
     const aiu = this.summarizeAiu(lines, input.aiu, divergences);
 
@@ -789,15 +874,29 @@ export class InvoiceCalculatorService {
     );
     const base = toDecimal(line_extension_amount);
 
+    // D.4 — Modelo 1: una línea 'contrato' bajo `taxable_basis: 'utilidad'`
+    // sólo tributa su porción Utilidad, no el AIU completo que declara
+    // `line_extension_amount`. El resto de combinaciones (`'aiu'`,
+    // `'subtotal'`, o cualquier componente que no sea `'contrato'`) no
+    // explota nada y sigue el binario 0/completo de siempre.
+    const contrato_split =
+      aiu && aiu_component === 'contrato' && aiu.taxable_basis === 'utilidad'
+        ? this.explodeAiuContratoLine(base, aiu.components)
+        : null;
+    const contrato_taxable_base = contrato_split
+      ? toDecimal(contrato_split.utilidad)
+      : base;
+
     const taxes: CalculatedTax[] = document_taxes.map((tax) => {
       const rate_basis = this.resolveRateBasis(tax);
       const fraction = this.rateFraction(tax.tax_rate, rate_basis);
       // Base propia si el llamador la declaró (AIU, bases disímiles); si no, la
-      // base neta de la línea. El IVA y el INC de un mismo renglón comparten
-      // base salvo que se diga lo contrario.
+      // base neta de la línea — o, en una línea 'contrato' bajo 'utilidad', su
+      // fracción Utilidad (`contrato_taxable_base`). El IVA y el INC de un
+      // mismo renglón comparten base salvo que se diga lo contrario.
       const taxable = this.hasTaxableBase(tax.taxable_amount)
         ? toDecimal(dianAmount(tax.taxable_amount))
-        : base;
+        : contrato_taxable_base;
       const amount = taxable.times(fraction);
       const computed = dianAmount(amount);
 
@@ -847,6 +946,21 @@ export class InvoiceCalculatorService {
 
     const tax_amount = dianSum(taxes.map((tax) => tax.tax_amount));
 
+    // ADR-7 / D.3, actualizado por D.4: la base gravable de la línea es cero
+    // cuando `omit_tax_total` la excluye, su propio importe entero cuando
+    // grava completa (todo Modelo 2 / `'sumada'`, y 'contrato' bajo 'aiu' o
+    // 'subtotal'), y una FRACCIÓN cuando es una línea 'contrato' bajo
+    // 'utilidad' — la porción Utilidad que `explodeAiuContratoLine` calculó
+    // arriba. Es exactamente el tercer valor que el comentario anterior decía
+    // que no existía todavía: el Modelo 1 (D.4) lo introduce AQUÍ, no en el
+    // llamador, porque sólo este método conoce `line_extension_amount` antes
+    // de truncar y el reparto porcentual que lo explota.
+    const taxable_amount = omit_tax_total
+      ? dianAmount(0)
+      : contrato_split
+        ? contrato_split.utilidad
+        : line_extension_amount;
+
     return {
       index,
       description: item.description,
@@ -860,42 +974,150 @@ export class InvoiceCalculatorService {
       is_inclusive: line_is_inclusive,
       aiu_component,
       omit_tax_total,
+      taxable_amount,
     };
   }
 
   // --- AIU ---
 
   /**
+   * D.4 — un documento no puede mezclar Modelo 1 (`'contrato'`) con Modelo 2
+   * (líneas por componente), ni declarar dos líneas `'contrato'`. Ver el
+   * docblock del scope `'aiu_contrato_mutually_exclusive'` para el porqué.
+   *
+   * `expected`/`received`/`difference` no llevan dinero aquí — son un conteo
+   * de líneas en conflicto — porque `InvoiceCalculatorDivergence` no tiene un
+   * canal separado para divergencias estructurales. `InvoicingService` sólo
+   * lee `line_index` y el `scope` para decidir el 422; los tres importes
+   * quedan para quien quiera loguear cuántas líneas chocaron.
+   */
+  private checkAiuContratoMutualExclusion(
+    lines: CalculatedLine[],
+    divergences: InvoiceCalculatorDivergence[],
+  ): void {
+    const contrato_indices = lines
+      .filter((line) => line.aiu_component === 'contrato')
+      .map((line) => line.index);
+    const component_indices = lines
+      .filter(
+        (line) => line.aiu_component !== null && line.aiu_component !== 'contrato',
+      )
+      .map((line) => line.index);
+
+    if (contrato_indices.length > 1) {
+      divergences.push({
+        scope: 'aiu_contrato_mutually_exclusive',
+        line_index: contrato_indices[1],
+        expected: dianAmount(1),
+        received: dianAmount(contrato_indices.length),
+        difference: dianAmount(contrato_indices.length - 1),
+      });
+      return;
+    }
+
+    if (contrato_indices.length === 1 && component_indices.length > 0) {
+      divergences.push({
+        scope: 'aiu_contrato_mutually_exclusive',
+        line_index: component_indices[0],
+        expected: dianAmount(0),
+        received: dianAmount(component_indices.length),
+        difference: dianAmount(component_indices.length),
+      });
+    }
+  }
+
+  /**
    * ¿La línea entra a la base gravable del IVA bajo la base declarada?
    *
-   * Las TRES respuestas son legales y la diferencia es toda la base gravable:
-   *
-   * · `'aiu'` (espejo de `et_462_1`, E.T. art. 462-1 — aseo y cafetería,
-   *   vigilancia autorizada, servicios temporales de empleo, CTA): grava el
-   *   AIU **completo**, o sea las tres componentes.
-   * · `'utilidad'` (espejo de `decreto_1372_1992`, art. 3 — contratos de
-   *   construcción de bien inmueble): grava **sólo la Utilidad**.
-   * · `'subtotal'`: se declina el tratamiento AIU y grava el contrato
-   *   **completo**, costo reembolsable incluido — no tiene régimen legal
-   *   asociado porque es, precisamente, la ausencia de uno.
-   *
-   * Una línea SIN componente nunca grava bajo `'aiu'` ni `'utilidad'`: es la
-   * porción de COSTO reembolsable del contrato. En un contrato de aseo de
-   * $100M con AIU de $10M, esos $90M de nómina e insumos son justamente esas
-   * líneas, y gravarlos multiplicaría por diez el IVA de la operación. Bajo
-   * `'subtotal'` esa protección no aplica a propósito: ahí no hay AIU que
-   * proteger, el contrato entero es la base.
+   * D.9 — deja de tener lógica propia: delega en
+   * `isAiuLineTaxable` (`invoice-profile-config.contract.ts`), la única
+   * derivación de {@link AIU_TAXABLE_BUCKETS_BY_BASIS}. Antes de este cambio
+   * esta era una de DOS implementaciones manuales de la misma pregunta —la
+   * otra en `InvoiceFlowService.isAiuComponentTaxable`— y divergieron: D.4
+   * corrigió acá el caso `component === 'contrato'` bajo `'utilidad'` sin
+   * tocar la del flujo de emisión, produciendo un ciclo irrompible
+   * (`INVOICING_AIU_005` sobre una línea que este método ya capturaba como
+   * correctamente gravada). Ver `isAiuLineTaxable` para las tres bases y las
+   * dos reglas que no se leen directo de la tabla (`component === null` y
+   * `component === 'contrato'`).
    */
   private isAiuTaxable(
     component: AiuComponent | null,
     aiu: InvoiceCalculatorAiuInput,
   ): boolean {
-    // Bajo «subtotal» se declina el tratamiento AIU: TODA línea graba,
-    // incluida la de costo reembolsable (`component === null`) — es
-    // exactamente lo que distingue esta base de las otras dos.
-    if (aiu.taxable_basis === 'subtotal') return true;
-    if (component === null) return false;
-    return aiu.taxable_basis === 'aiu' ? true : component === 'utilidad';
+    return isAiuLineTaxable(component, aiu.taxable_basis);
+  }
+
+  /**
+   * Explota el importe de una línea `aiu_component: 'contrato'` (Modelo 1,
+   * ADR-6/D.2) en sus tres porciones Administración/Imprevistos/Utilidad.
+   *
+   * ## Por qué el reparto no depende de `components_basis`
+   *
+   * `ProfileAiuConfig.components` mide los tres porcentajes contra el AIU
+   * (`'aiu'`, suman 100) o contra el CONTRATO (`'contract'`, su suma ES el
+   * AIU y el resto hasta 100 % es costo reembolsable) — ver
+   * `resolveAiuComponentsBasis` y `validateAiuSection`. Una línea `'contrato'`
+   * es, por definición (ADR-6), el AIU completo: `line_amount` YA ES el
+   * subconjunto que esos tres porcentajes describen, mida lo que mida su
+   * SUMA. Por eso normalizar cada porcentaje por la suma de los tres
+   * (`pct_i / Σpct`) da la fracción CORRECTA de `line_amount` sin importar la
+   * unidad: si se midieron contra el contrato, `Σpct` es qué fracción del
+   * contrato es AIU y `pct_i/Σpct` sigue siendo la proporción interna de ese
+   * AIU. La unidad cambia qué representa la suma, nunca el reparto entre los
+   * tres.
+   *
+   * ## Por qué Utilidad absorbe el residuo
+   *
+   * Administración e Imprevistos se truncan a 2 decimales de forma
+   * independiente (Anexo Técnico 1.9 §11.2, truncar-hoja-antes-de-sumar).
+   * Sumar sus dos truncamientos y restárselos a `line_amount` para obtener
+   * Utilidad —en vez de truncar los tres por separado— es lo único que
+   * garantiza el CIERRE EXACTO exigido por D.4: las tres porciones deben
+   * sumar EXACTAMENTE `line_amount`, nunca un centavo de más o de menos.
+   *
+   * Sin porcentajes configurados (perfil manual sin sección AIU, o un
+   * `contrato` capturado fuera de un perfil), no hay nada que repartir: el
+   * lado seguro es declarar TODO el importe como Utilidad —el mismo
+   * resultado que ya producía el binario 0/completo anterior a D.4— y nunca
+   * un reparto que sub-declare IVA por defecto.
+   */
+  private explodeAiuContratoLine(
+    line_amount: Prisma.Decimal,
+    components:
+      | Readonly<Partial<Record<AiuComponentLiteral, DianNumericInput>>>
+      | undefined,
+  ): { administracion: string; imprevistos: string; utilidad: string } {
+    const percentOf = (component: AiuComponentLiteral): Prisma.Decimal =>
+      this.hasValue(components?.[component])
+        ? toDecimal(components![component] as DianNumericInput)
+        : new Prisma.Decimal(0);
+
+    const admin_pct = percentOf('administracion');
+    const imprevistos_pct = percentOf('imprevistos');
+    const utilidad_pct = percentOf('utilidad');
+    const sum_pct = admin_pct.plus(imprevistos_pct).plus(utilidad_pct);
+
+    if (sum_pct.lessThanOrEqualTo(0)) {
+      return {
+        administracion: dianAmount(0),
+        imprevistos: dianAmount(0),
+        utilidad: dianAmount(line_amount),
+      };
+    }
+
+    const administracion = dianAmount(
+      line_amount.times(admin_pct).dividedBy(sum_pct),
+    );
+    const imprevistos = dianAmount(
+      line_amount.times(imprevistos_pct).dividedBy(sum_pct),
+    );
+    // Residuo, no tercer truncamiento: ver docblock de este método.
+    const utilidad = dianAmount(
+      line_amount.minus(toDecimal(administracion)).minus(toDecimal(imprevistos)),
+    );
+
+    return { administracion, imprevistos, utilidad };
   }
 
   /**
@@ -951,11 +1173,14 @@ export class InvoiceCalculatorService {
         .filter((line) => line.aiu_component !== null)
         .map((line) => line.line_extension_amount),
     );
-    const taxable_base = dianSum(
-      lines
-        .filter((line) => !line.omit_tax_total)
-        .map((line) => line.line_extension_amount),
-    );
+    // D.4: se suma `line.taxable_amount`, no `line_extension_amount` filtrado
+    // por `omit_tax_total`. Para TODA línea binaria (Modelo 2, o 'contrato'
+    // bajo 'aiu'/'subtotal') `taxable_amount` YA vale exactamente 0 o el
+    // importe completo de la línea — son la MISMA suma, cero regresión—. La
+    // diferencia sólo aparece en una línea 'contrato' bajo 'utilidad', donde
+    // `taxable_amount` es la fracción Utilidad: sumar el importe completo ahí
+    // declararía una base gravable mayor a la que el impuesto realmente grava.
+    const taxable_base = dianSum(lines.map((line) => line.taxable_amount));
 
     const enforce =
       aiu.taxable_basis === 'aiu' && aiu.enforce_minimum_base !== false;

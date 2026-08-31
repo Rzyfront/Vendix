@@ -1,6 +1,16 @@
 <div class="md:space-y-4">
   <!-- Lista de Productos -->
   <app-card [responsive]="true" [padding]="false" overflow="visible" customClasses="md:min-h-[600px]">
+    <!--
+      QUI-729 — el filtro tri-estado Productos / Insumos / Todos y el banner
+      informativo que lo acompañaba se quitaron de la barra y de la cabecera
+      de la tarjeta. El filtro vive ahora dentro de `app-options-dropdown`
+      como una entrada más de `filterConfigs` (label "Productos e insumos"),
+      distinto de "Tipo de Producto". El badge del dropdown (que cuenta como
+      activo todo `select` con valor no vacío) hace de aviso: marca 1 desde
+      el primer render porque el default 'products' no está vacío.
+    -->
+
     <!-- Search/Filter Bar: sticky title + search + filters on mobile, full row on desktop -->
     <div
       class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
@@ -10,8 +20,8 @@
           Productos <span class="font-normal text-text-secondary/50 md:font-semibold md:text-text-primary">({{ paginationData().total || products().length }})</span>
         </h2>
 
-        <!-- Search + Filters grouped in a single row (dropdown escapes: no competing z-index in the cards region) -->
-        <div class="flex items-center gap-2 w-full md:w-auto">
+        <!-- Search + Filters grouped in a single row (dropdown escapes: no competing z-index in the cards region). `flex-wrap` deja que el control baje a su propia línea en móvil; en desktop nada envuelve. -->
+        <div class="flex flex-wrap items-center gap-2 w-full md:w-auto">
           <app-inputsearch class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
             size="sm" placeholder="Buscar productos..." [debounceTime]="1000" [ngModel]="searchTerm"
             (ngModelChange)="onSearchChange($event)"></app-inputsearch>
@@ -29,7 +39,7 @@
           }
 
           <app-options-dropdown class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-            [filters]="filterConfigs" [filterValues]="filterValues" [actions]="dropdownActions()" [isLoading]="isLoading()"
+            [filters]="filterConfigs()" [filterValues]="filterValues" [actions]="dropdownActions()" [isLoading]="isLoading()"
             (filterChange)="onFilterChange($event)" (clearAllFilters)="clearFilters()"
             (actionClick)="onActionClick($event)"></app-options-dropdown>
         </div>

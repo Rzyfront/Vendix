@@ -17,7 +17,7 @@
       [initialMode]="defaultPaymentForm()"
       [showKeypad]="showOnscreenKeypad()"
       [customer]="collectorCustomer()"
-      [requireCustomer]="!isAnonymous()"
+      [requireCustomer]="!isAnonymous() && !isAlias()"
       [walletInfo]="collectorWalletInfo()"
       (submit)="onCollectorSubmit($event)"
       (requestCustomer)="requestCustomer.emit()"

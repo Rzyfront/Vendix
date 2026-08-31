@@ -1,0 +1,32 @@
+# FB-09: POST /store/print-formats/:formatType/deactivate
+# Plan section: A.3 + Phase B (rollback gateway)
+# Source: apps/backend/src/domains/store/print-formats/controllers/print-formats.controller.ts:156
+# Permission: store:settings:update
+
+COMMAND:
+curl -sk -X POST 'https://api.vendix.com/api/store/print-formats/dispatch_ticket/deactivate' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESPONSE SHAPE:
+{
+  "success": true,
+  "message": "Print Gateway desactivado (modo estándar activo).",
+  "data": { "format_type": "dispatch_ticket", "gateway_enabled": false }
+}
+
+VERIFICATION:
+# Happy path (después de FB-08 activate)
+curl .../dispatch_ticket/deactivate | jq '.data.gateway_enabled' debe ser false
+curl .../dispatch_ticket/deactivate | jq '.data.format_type' debe ser 'dispatch_ticket'
+
+# Cuando nunca fue activado (no row en store_print_format_configs):
+# Debe crear la row con gateway_enabled=false (no error)
+curl .../pos_sale_ticket/deactivate (primera vez) | jq '.success' debe ser true
+curl .../pos_sale_ticket/deactivate | jq '.data.gateway_enabled' debe ser false
+
+# Sin permisos
+curl .../dispatch_ticket/deactivate (sin store:settings:update) | jq '.error.code' debe ser SYS_FORBIDDEN_001 (403)

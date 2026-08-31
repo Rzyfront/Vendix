@@ -53,6 +53,23 @@ function assertValidStoreId(store_id: number): asserts store_id is number {
   }
 }
 
+/**
+ * El `organization_id` del riel plataforma entra en la clave con un SUFIJO
+ * distinto (`org`) para que la clave nunca choque con la de una tienda por
+ * colisión numérica: `inv:profiles:catalog:1` puede ser tienda 1 u
+ * organización 1 sin el sufijo. El validador exige entero positivo igual
+ * que el de tienda.
+ */
+function assertValidOrgId(organization_id: number): asserts organization_id is number {
+  if (
+    !Number.isInteger(organization_id) ||
+    organization_id <= 0 ||
+    organization_id > Number.MAX_SAFE_INTEGER
+  ) {
+    throw new Error(`organization_id inválido para la clave de caché: ${organization_id}`);
+  }
+}
+
 @Injectable()
 export class ProfileCatalogCacheService {
   private readonly logger = new Logger(ProfileCatalogCacheService.name);
@@ -61,6 +78,10 @@ export class ProfileCatalogCacheService {
 
   private cacheKey(store_id: number): string {
     return `${CACHE_PREFIX}:${store_id}`;
+  }
+
+  private orgCacheKey(organization_id: number): string {
+    return `${CACHE_PREFIX}:org:${organization_id}`;
   }
 
   /**
@@ -126,6 +147,64 @@ export class ProfileCatalogCacheService {
     } catch (error) {
       this.logger.warn(
         `Fallo al invalidar el catálogo de la tienda ${store_id}: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * Variante por organización para el riel plataforma (VENDIX_ADMIN).
+   *
+   * Misma forma, misma TTL, misma semántica de invalidación que la de tienda;
+   * sólo cambia la clave (sufijo `org`) para no colisionar con la de una tienda
+   * cuyo `id` numérico coincida con el `organization_id` de la plataforma. Sin
+   * el sufijo, `inv:profiles:catalog:1` podría ser tienda 1 u organización 1 y
+   * serviría estados cruzados bajo NIT equivocado. Misma razón de seguridad
+   * documentada arriba.
+   */
+  async readOrg(organization_id: number): Promise<CatalogEntry[] | null> {
+    assertValidOrgId(organization_id);
+    try {
+      const raw = await this.redis.get(this.orgCacheKey(organization_id));
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed) || !parsed.every(isCatalogEntry)) {
+        this.logger.warn(
+          `Catálogo plataforma en caché con forma inesperada para org ${organization_id}: se descarta`,
+        );
+        return null;
+      }
+      return parsed;
+    } catch (error) {
+      this.logger.warn(
+        `Fallo al leer el catálogo plataforma en caché (org ${organization_id}): ${(error as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  async writeOrg(organization_id: number, entries: CatalogEntry[]): Promise<void> {
+    assertValidOrgId(organization_id);
+    try {
+      await this.redis.set(
+        this.orgCacheKey(organization_id),
+        JSON.stringify(entries),
+        'EX',
+        CACHE_TTL_SECONDS,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Fallo al escribir el catálogo plataforma en caché (org ${organization_id}): ${(error as Error).message}`,
+      );
+    }
+  }
+
+  async invalidateOrg(organization_id: number): Promise<void> {
+    try {
+      assertValidOrgId(organization_id);
+      await this.redis.del(this.orgCacheKey(organization_id));
+    } catch (error) {
+      this.logger.warn(
+        `Fallo al invalidar el catálogo plataforma (org ${organization_id}): ${(error as Error).message}`,
       );
     }
   }

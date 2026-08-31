@@ -1,6 +1,7 @@
 import { NgTemplateOutlet } from '@angular/common';
 import {
     Component,
+    DestroyRef,
     ElementRef,
     computed,
     effect,
@@ -27,8 +28,10 @@ import {
 import type { InvoiceProfile } from '../../interfaces/invoice-profile.interface';
 import { operationTypeLabel } from '../../interfaces/invoice-profile.interface';
 import type { InvoiceProfileTemplate } from '../../services/invoice-profile.service';
+import { InvoiceProfileService } from '../../services/invoice-profile.service';
+import type { InvoiceProfileAccountHealthRow } from '../../services/invoice-profile.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import * as ProfileActions from '../../state/actions/invoice-profile.actions';
 import {
     selectProfiles,
@@ -75,6 +78,36 @@ const TEMPLATE_BY_INDUSTRY: Readonly<Record<string, string>> = {
 const FALLBACK_TEMPLATE_KEY = 'dian-standard';
 
 /**
+ * Código de issue del panel de salud → frase para el operador.
+ *
+ * Son los DOS valores estables que manda `account-health` —los mismos del 422
+ * `INVOICING_PROFILE_010`—, y se arreglan distinto: el primero pide elegir una
+ * cuenta que exista en el PUC; el segundo pide una cuenta de MOVIMIENTO y no
+ * una agrupación. Un código que el backend traiga mañana cae al literal y el
+ * panel no se rompe.
+ */
+const ACCOUNT_HEALTH_ISSUE_LABELS: Readonly<Record<string, string>> = {
+    ACCOUNT_NOT_IN_CHART: 'la cuenta no existe en el plan de cuentas',
+    ACCOUNT_DOES_NOT_ACCEPT_ENTRIES:
+        'la cuenta es de agrupación y no acepta movimientos',
+};
+
+/**
+ * Mismo criterio de focuseables que `ModalComponent`, copiado a propósito:
+ * dos definiciones de «qué se puede tabular» harían que la trampa del borrado
+ * duro y la de los modales compartidos se comportaran distinto para el mismo
+ * usuario en la misma pantalla.
+ */
+const DELETE_DIALOG_FOCUSABLE_SELECTOR = [
+    'a[href]',
+    'button:not([disabled])',
+    'input:not([disabled])',
+    'select:not([disabled])',
+    'textarea:not([disabled])',
+    '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
+/**
  * Perfiles de facturación — listado.
  *
  * Un perfil es la configuración fiscal con la que se timbra: régimen AIU,
@@ -98,6 +131,7 @@ const FALLBACK_TEMPLATE_KEY = 'dian-standard';
     standalone: true,
     imports: [
         NgTemplateOutlet,
+        RouterLink,
         CardComponent,
         ConfirmationModalComponent,
         StatsComponent,
@@ -108,6 +142,17 @@ const FALLBACK_TEMPLATE_KEY = 'dian-standard';
     ],
     template: `
         <div class="w-full">
+            <!--
+              A.6(b): fondo del diálogo de borrado. Mientras el diálogo vive,
+              este wrapper recibe el atributo inert: el contenido queda fuera
+              del árbol de accesibilidad y no acepta foco ni clic, que es lo
+              que su aria-modal="true" promete y lo que la trampa de Tab por sí
+              sola no garantiza (un lector en modo exploración, o un punto de
+              foco que empiece fuera, alcanzaría la página atenuada).
+              Los tres diálogos viven FUERA de este wrapper a propósito:
+              inertizarlos a ellos mismos los haría inoperables.
+            -->
+            <div [attr.inert]="pending_delete() ? '' : null">
             <!-- Stats: sticky en móvil, estáticas en escritorio -->
             <div
                 class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
@@ -252,6 +297,110 @@ const FALLBACK_TEMPLATE_KEY = 'dian-standard';
                 </div>
 
                 <div class="relative p-2 md:p-4">
+                    <!--
+                      PANEL DE SALUD F.13 — GET /store/invoicing/profiles/account-health.
+                      Lista los perfiles cuya versión VIGENTE lleva cuentas PUC
+                      inválidas: la compuerta del backend rechaza con 422 todo
+                      guardado de esos perfiles —aunque se editen por otro
+                      motivo—, así que sin este aviso el usuario descubriría el
+                      bloqueo a mitad de un cambio ajeno. La corrección es la vía
+                      normal: editar y guardar, que crea versión nueva. El fallo
+                      de la consulta NO bloquea la página; sólo avisa.
+                    -->
+                    @if (!account_health_loading()) {
+                        @if (account_health_failed()) {
+                            <div
+                                class="mb-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2 text-xs text-warning md:text-sm"
+                                role="alert"
+                                data-testid="account-health-error"
+                            >
+                                No se pudo consultar la salud contable de los
+                                perfiles (cuentas PUC). El listado sigue
+                                disponible; recarga la página para reintentar.
+                            </div>
+                        } @else if (account_health().length > 0) {
+                            <div
+                                class="mb-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2.5 text-warning"
+                                role="alert"
+                                data-testid="account-health-banner"
+                            >
+                                <p class="text-xs font-semibold md:text-sm">
+                                    {{ account_health().length }}
+                                    {{
+                                        account_health().length === 1
+                                            ? 'perfil tiene cuentas contables que el plan de cuentas no puede asentar'
+                                            : 'perfiles tienen cuentas contables que el plan de cuentas no puede asentar'
+                                    }}. Guardar cualquiera de ellos será
+                                    rechazado hasta corregir la cuenta.
+                                </p>
+                                <ul class="mt-2 space-y-2">
+                                    @for (
+                                        row of account_health();
+                                        track row.profile_id
+                                    ) {
+                                        <li data-testid="account-health-row">
+                                            <div
+                                                class="flex flex-wrap items-center gap-x-2 gap-y-1"
+                                            >
+                                                <strong
+                                                    class="text-text-primary"
+                                                    >{{ row.name }}</strong
+                                                >
+                                                <span
+                                                    class="rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide"
+                                                >
+                                                    v{{ row.version }} ·
+                                                    {{
+                                                        row.state === 'active'
+                                                            ? 'Activo'
+                                                            : 'Inactivo'
+                                                    }}
+                                                </span>
+                                            </div>
+                                            <ul class="mt-1 space-y-0.5 pl-4">
+                                                @for (
+                                                    issue of row.issues;
+                                                    track issue.field
+                                                ) {
+                                                    <li class="list-disc">
+                                                        <code
+                                                            class="rounded bg-warning/10 px-1 text-[11px]"
+                                                            >{{
+                                                                issue.field
+                                                            }}</code
+                                                        >
+                                                        —
+                                                        {{
+                                                            accountHealthIssueLabel(
+                                                                issue.code
+                                                            )
+                                                        }}
+                                                        <span
+                                                            class="text-[10px] opacity-70"
+                                                            >({{
+                                                                issue.code
+                                                            }})</span
+                                                        >
+                                                    </li>
+                                                }
+                                            </ul>
+                                            <a
+                                                [routerLink]="[
+                                                    '/admin/invoicing/profiles',
+                                                    row.profile_id,
+                                                    'edit',
+                                                ]"
+                                                class="mt-1 inline-block text-xs font-semibold underline underline-offset-2 hover:opacity-80 md:text-[13px]"
+                                            >
+                                                Corregir en el editor →
+                                            </a>
+                                        </li>
+                                    }
+                                </ul>
+                            </div>
+                        }
+                    }
+
                     <!-- El error se pinta ARRIBA de la tabla y no sustituye a
                          los datos: dejar la lista anterior visible con el aviso
                          es más honesto que un «no hay perfiles», que sería una
@@ -360,7 +509,7 @@ const FALLBACK_TEMPLATE_KEY = 'dian-standard';
                     }
                 </div>
             </app-card>
-
+            </div>
 
             <!-- Confirmación de activar / desactivar -->
             @if (pending_toggle(); as row) {
@@ -392,9 +541,22 @@ const FALLBACK_TEMPLATE_KEY = 'dian-standard';
                 ></app-confirmation-modal>
             }
 
-            <!-- Borrado con confirmación DURA: hay que escribir el nombre -->
+            <!-- Borrado con confirmación DURA: hay que escribir el nombre.
+                 A.6(b): decisión escrita — NO se migra a app-modal ni a
+                 app-confirmation-modal; se le añade trampa de foco
+                 (Tab/Shift+Tab vía listener de documento, réplica de la
+                 convención probada de ModalComponent) + inertización del fondo.
+                 Razón: ConfirmationModalComponent no proyecta contenido — sólo
+                 acepta message string— así que la salvaguarda «escribe el
+                 nombre» no cabe ahí sin tocar un componente compartido fuera
+                 del alcance del paso; y migrar a app-modal reconstruiría el
+                 marcado de la ÚNICA salvaguarda contra un borrado duro
+                 accidental justo cuando la verificación de navegador queda
+                 para el orquestador (blast radius del propio plan). El marcado
+                 del diálogo queda intacto salvo la referencia deleteDialogRoot. -->
             @if (pending_delete(); as row) {
                 <div
+                    #deleteDialogRoot
                     class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
                     role="dialog"
                     aria-modal="true"
@@ -646,6 +808,17 @@ export class InvoiceProfilesPageComponent {
         { initialValue: null as string | null },
     );
 
+    private readonly profile_service = inject(InvoiceProfileService);
+
+    // ── Panel de salud F.13 (`GET …/profiles/account-health`).
+    // Estado local a propósito y NO store: el panel es un aviso de esta
+    // página, no estado compartido — ningún otro consumidor lo lee.
+    readonly account_health = signal<InvoiceProfileAccountHealthRow[]>([]);
+    readonly account_health_failed = signal(false);
+    readonly account_health_loading = signal(true);
+    /** Firma de la última consulta: lista+versiones+estados, para reconsultar cuando algo cambió. */
+    private readonly health_fetched_key = signal<string | null>(null);
+
     /** El selector de plantillas está desplegado. */
     readonly template_picker = signal(false);
 
@@ -856,6 +1029,19 @@ export class InvoiceProfilesPageComponent {
     private readonly delete_confirm_input =
         viewChild<ElementRef<HTMLInputElement>>('deleteConfirmInput');
 
+    // Contenedor del diálogo de borrado: la trampa de foco necesita la RAÍZ
+    // (no sólo el input) para calcular el primer/último focuseable del diálogo
+    // completo — botones Cancelar/Eliminar incluidos.
+    private readonly delete_dialog_root =
+        viewChild<ElementRef<HTMLDivElement>>('deleteDialogRoot');
+
+    // Listener de Tab de la trampa. Vive mientras el diálogo vive: el efecto
+    // lo instala al aparecer `#deleteDialogRoot` y lo desinstala al desaparecer,
+    // y DestroyRef lo recoge si el componente se destruye con el diálogo abierto.
+    private delete_tab_listener: ((event: KeyboardEvent) => void) | null = null;
+
+    private readonly destroy_ref = inject(DestroyRef);
+
     // El elemento que abrió el diálogo, para devolverle el foco al cerrarlo.
     // Sin esto, cerrar con Escape deja el foco en `<body>` y la siguiente
     // tabulación reinicia el recorrido desde el principio de la página.
@@ -865,6 +1051,33 @@ export class InvoiceProfilesPageComponent {
         // Carga inicial. En el constructor y no en `ngOnInit`: el componente es
         // standalone y lazy, así que se instancia cuando la ruta se activa.
         this.store.dispatch(ProfileActions.loadProfiles({}));
+
+        // PANEL DE SALUD F.13 — primera consulta y reconsultas.
+        // El disparador es la FIRMA del listado (id:versión:estado por perfil):
+        // activar, borrar o volver de una edición cambia la versión vigente o
+        // la existencia de filas, y el aviso que nombra perfiles «por corregir»
+        // no puede sobrevivir stale a ninguna de las tres. Con el listado vacío
+        // no hay nada que enfermar: se vacía sin llamar. La primera pasada
+        // espera (`loading`): pedir salud sobre un store aún vacío sería
+        // preguntar dos veces lo mismo.
+        effect(() => {
+            const profiles = this.profiles();
+            if (this.loading()) return;
+            const key = profiles.length
+                ? profiles
+                      .map((p) => `${p.id}:${p.current_version}:${p.state}`)
+                      .join('|')
+                : '<empty>';
+            if (key === this.health_fetched_key()) return;
+            this.health_fetched_key.set(key);
+            if (profiles.length === 0) {
+                this.account_health.set([]);
+                this.account_health_failed.set(false);
+                this.account_health_loading.set(false);
+                return;
+            }
+            this.fetchAccountHealth();
+        });
 
         // El texto de confirmación se limpia al cerrar el modal, no al abrirlo:
         // si se limpiara al abrir, un `pending_delete` que cambia de fila
@@ -884,6 +1097,75 @@ export class InvoiceProfilesPageComponent {
             const input = this.delete_confirm_input();
             if (input) input.nativeElement.focus();
         });
+
+        // A.6(b) — Trampa de foco: mientras el diálogo vive, Tab y Shift+Tab
+        // ciclan dentro de él. Antes sólo había escape, autofoco y restauración:
+        // tabular pasado el último control soltaba el foco en la página de
+        // fondo, atenuada pero operable, con un borrado duro a un Enter de
+        // distancia. Réplica literal del keydown-listener de ModalComponent.
+        effect(() => {
+            const root = this.delete_dialog_root()?.nativeElement ?? null;
+            this.detachDeleteTabListener();
+            if (!root) return;
+            const listener = (event: KeyboardEvent) => {
+                if (event.key !== 'Tab') return;
+                const focusables = Array.from(
+                    root.querySelectorAll<HTMLElement>(
+                        DELETE_DIALOG_FOCUSABLE_SELECTOR,
+                    ),
+                ).filter((el) => !el.hasAttribute('disabled') && el.tabIndex !== -1);
+                if (focusables.length === 0) {
+                    event.preventDefault();
+                    return;
+                }
+                const first = focusables[0];
+                const last = focusables[focusables.length - 1];
+                const active = document.activeElement as HTMLElement | null;
+                const inside = active !== null && root.contains(active);
+                if (event.shiftKey) {
+                    if (active === first || !inside) {
+                        event.preventDefault();
+                        last.focus();
+                    }
+                } else if (active === last || !inside) {
+                    event.preventDefault();
+                    first.focus();
+                }
+            };
+            this.delete_tab_listener = listener;
+            document.addEventListener('keydown', listener);
+        });
+
+        this.destroy_ref.onDestroy(() => this.detachDeleteTabListener());
+    }
+
+    /**
+     * Consulta el panel de salud. El fallo nunca bloquea la página: es un
+     * aviso, no una puerta — la tabla vive con o sin él.
+     */
+    private fetchAccountHealth(): void {
+        this.account_health_loading.set(true);
+        this.account_health_failed.set(false);
+        this.profile_service.accountHealth().subscribe({
+            next: (response) => {
+                this.account_health.set(response.data ?? []);
+                this.account_health_loading.set(false);
+            },
+            error: () => {
+                this.account_health.set([]);
+                this.account_health_failed.set(true);
+                this.account_health_loading.set(false);
+            },
+        });
+    }
+
+    /**
+     * Frase del issue para el operador, con caída al código crudo si el
+     * backend trajera mañana un valor que este archivo no conoce: mostrar
+     * «código X» sigue siendo más útil que un hueco en la lista.
+     */
+    accountHealthIssueLabel(code: string): string {
+        return ACCOUNT_HEALTH_ISSUE_LABELS[code] ?? `problema de cuenta (${code})`;
     }
 
     onSearch(term: string): void {
@@ -993,6 +1275,14 @@ export class InvoiceProfilesPageComponent {
     cancelDelete(): void {
         this.pending_delete.set(null);
         this.restoreDeleteFocus();
+    }
+
+    /** Desinstala el listener de Tab de la trampa, si está instalado. */
+    private detachDeleteTabListener(): void {
+        if (this.delete_tab_listener) {
+            document.removeEventListener('keydown', this.delete_tab_listener);
+            this.delete_tab_listener = null;
+        }
     }
 
     /**

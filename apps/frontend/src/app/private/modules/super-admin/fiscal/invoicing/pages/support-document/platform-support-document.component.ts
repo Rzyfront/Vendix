@@ -1,4 +1,3 @@
-import { DatePipe } from '@angular/common';
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
@@ -10,10 +9,15 @@ import {
 
 import {
   ButtonComponent,
-  EmptyStateComponent,
+  CardComponent,
   IconComponent,
+  ItemListCardConfig,
   PaginationComponent,
+  ResponsiveDataViewComponent,
   SelectorComponent,
+  StatsComponent,
+  TableAction,
+  TableColumn,
   ToastService,
   ToggleComponent,
 } from '../../../../../../../shared/components';
@@ -53,12 +57,13 @@ interface VendorSupportFiscalFormControls {
   standalone: true,
   imports: [
     ReactiveFormsModule,
-    DatePipe,
     ButtonComponent,
-    EmptyStateComponent,
+    CardComponent,
     IconComponent,
     PaginationComponent,
+    ResponsiveDataViewComponent,
     SelectorComponent,
+    StatsComponent,
     ToggleComponent,
   ],
   templateUrl: './platform-support-document.component.html',
@@ -83,6 +88,69 @@ export class PlatformSupportDocumentComponent {
   readonly environmentOptions = ENVIRONMENT_OPTIONS;
   readonly statusLabel = transmissionStatusLabel;
   readonly statusBadgeClasses = transmissionStatusBadgeClasses;
+
+  readonly columns: TableColumn[] = [
+    {
+      key: 'document_number',
+      label: 'Documento',
+      transform: (v, item: VendorSupportFiscalTransmission) =>
+        item.document_number || `ID #${item.id}`,
+    },
+    {
+      key: 'cuds',
+      label: 'CUDS',
+      transform: (v) => (v ? String(v).slice(0, 16) + '…' : '—'),
+    },
+    {
+      key: 'transmitted_at',
+      label: 'Fecha transmisión',
+      transform: (v) => (v ? String(v).slice(0, 16).replace('T', ' ') : '—'),
+    },
+    {
+      key: 'transmission_status',
+      label: 'Estado DIAN',
+      badgeConfig: {
+        type: 'custom',
+        colorMap: {
+          accepted: 'success',
+          rejected: 'error',
+          pending: 'warning',
+          processing: 'warning',
+        },
+      },
+      badgeTransform: (v) => transmissionStatusLabel(v as any),
+    },
+  ];
+
+  readonly cardConfig: ItemListCardConfig = {
+    titleKey: 'document_number',
+    subtitleKey: 'cuds',
+    subtitleTransform: (v) => (v ? `CUDS: ${String(v).slice(0, 16)}…` : 'Sin CUDS'),
+    badgeKey: 'transmission_status',
+    badgeConfig: {
+      type: 'custom',
+      colorMap: {
+        accepted: 'success',
+        rejected: 'error',
+        pending: 'warning',
+        processing: 'warning',
+      },
+    },
+    badgeTransform: (v) => transmissionStatusLabel(v as any),
+  };
+
+  readonly tableActions: TableAction[] = [
+    {
+      label: 'Reintentar',
+      icon: 'refresh-cw',
+      show: (item: VendorSupportFiscalTransmission) => this.canRetry(item),
+      action: (item: VendorSupportFiscalTransmission) => this.onRetry(item),
+    },
+  ];
+
+  onTableAction(event: { action: TableAction; item: VendorSupportFiscalTransmission }): void {
+    event.action.action(event.item);
+  }
 
   readonly form: FormGroup<VendorSupportFiscalFormControls> =
     this.fb.group<VendorSupportFiscalFormControls>({

@@ -17,7 +17,9 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { AccountSelectComponent } from '../../../../../shared/components/account-select/account-select.component';
+import type { InheritedAccountHint } from '../../../../../shared/components/account-select/account-select.component';
 import { ChartAccountLookupService } from '../../../../../shared/services/chart-account-lookup.service';
+import type { ChartAccountScope } from '../../../../../shared/services/chart-account-lookup.service';
 
 /**
  * Espejo de `PUC_ACCOUNT_CODE_REGEX` del backend
@@ -73,7 +75,28 @@ const PUC_ACCOUNT_CODE_REGEX = /^[0-9]{4,20}$/;
       [placeholder]="placeholder()"
       [ariaLabel]="ariaLabel() || label()"
       [acceptsEntriesOnly]="true"
+      [scope]="scope()"
+      [inherited]="inheritedAccount()"
     />
+
+    @if (inheritedAccount(); as inherited) {
+      @if (code()) {
+        <!--
+          OVERRIDE EXPLÍCITO ⇒ salida de vuelta. Sólo se ofrece cuando hay
+          herencia a la que volver: sin default vigente, «volver al sistema»
+          sería vaciar el campo y llamarlo sistema.
+        -->
+        <button
+          type="button"
+          class="mt-1 text-left text-xs text-[var(--color-text-secondary)] underline underline-offset-2 transition-colors hover:text-[var(--color-primary)]"
+          aria-label="Volver al valor del sistema"
+          [title]="'Restaura el valor heredado del mapeo contable de la tienda (' + inherited.code + ')'"
+          (click)="restoreInherited($event)"
+        >
+          Volver al valor del sistema
+        </button>
+      }
+    }
 
     @if (error(); as message) {
       <p class="mt-1 text-xs text-error">{{ message }}</p>
@@ -109,6 +132,23 @@ export class AccountCodeSelectComponent implements ControlValueAccessor {
   readonly disabled = input<boolean>(false);
 
   /**
+   * Qué controlador responde el lookup del PUC.
+   *
+   * Por defecto `'store'`, que es como nació y como lo siguen usando los
+   * formularios de producto. La consola de plataforma pasa
+   * `'super-admin/fiscal'`: allí NO hay tienda, y una lectura con el scope de
+   * tienda devolvería vacío —el selector se pintaría sin cuentas y sin decir
+   * por qué—.
+   *
+   * Se propaga a las DOS resoluciones internas además de al selector: si sólo
+   * viajara al hijo, `resolveByCode` (hidratación de un código ya guardado) y
+   * `resolveById` (traducción de la cuenta elegida a su código) seguirían
+   * preguntando por el plan de cuentas equivocado, y el control quedaría
+   * mudo justo al releer lo que acaba de guardar.
+   */
+  readonly scope = input<ChartAccountScope>('store');
+
+  /**
    * Etiqueta visible, y también el nombre accesible del disparador.
    *
    * Opcional para no cambiar nada donde ya se pinta la etiqueta por fuera. La
@@ -142,6 +182,16 @@ export class AccountCodeSelectComponent implements ControlValueAccessor {
   /** Ayuda breve. Se calla cuando hay error: el error es lo urgente. */
   readonly helperText = input<string>('');
 
+  /**
+   * El default vigente del sistema para este campo (C.9, híbrido).
+   *
+   * Mientras el control está vacío, `app-account-select` pinta este código con
+   * marca «heredado». ESCRIBIRLO JAMÁS: la precarga vive fuera del control, así
+   * que guardar sin tocar sigue produciendo `null` — el perfil o la factura
+   * siguen heredando el mapeo de la tienda aunque éste cambie mañana.
+   */
+  readonly inheritedAccount = input<InheritedAccountHint | null>(null);
+
   /** Control interno que habla ids: es lo que consume `app-account-select`. */
   readonly idControl = new FormControl<number | null>(null);
 
@@ -161,8 +211,11 @@ export class AccountCodeSelectComponent implements ControlValueAccessor {
    */
   readonly malformedCode = signal<string | null>(null);
 
-  /** Valor hacia afuera (el código PUC). */
-  private readonly code = signal<string | null>(null);
+  /**
+   * Valor hacia afuera (el código PUC). Protegido y no privado porque la
+   * plantilla lo lee para decidir si ofrece «volver al valor del sistema».
+   */
+  protected readonly code = signal<string | null>(null);
   /** Deshabilitado escrito por el formulario reactivo vía `setDisabledState`. */
   private readonly formDisabled = signal<boolean>(false);
   /**
@@ -212,7 +265,11 @@ export class AccountCodeSelectComponent implements ControlValueAccessor {
       // puede apuntar a una cuenta que ya no pasa los filtros del selector, y
       // pintarlo vacío sería peor que pintarlo — un "Guardar" a ciegas lo
       // borraría.
-      .resolveByCode(next, { acceptsEntriesOnly: false, activeOnly: false })
+      .resolveByCode(next, {
+        scope: this.scope(),
+        acceptsEntriesOnly: false,
+        activeOnly: false,
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((account) => {
         if (token !== this.resolutionToken) return;
@@ -237,6 +294,24 @@ export class AccountCodeSelectComponent implements ControlValueAccessor {
     this.formDisabled.set(isDisabled);
   }
 
+  /**
+   * «Volver al valor del sistema»: acción del USUARIO, y por eso sí pasa por
+   * `onChange` — es exactamente lo que un override necesita para deshacerse.
+   *
+   * Se limpia el estado interno ANTES de avisar: tras `onChange(null)` Angular
+   * devuelve `writeValue(null)` y su guarda de «ya estoy en ese valor» haría un
+   * retorno temprano dejando el selector interno pintando la cuenta vieja.
+   */
+  restoreInherited(event: Event): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.resolutionToken += 1;
+    this.unresolvedCode.set(null);
+    this.malformedCode.set(null);
+    this.idControl.setValue(null, { emitEvent: false });
+    this.commit(null);
+  }
+
   // ── internos ──────────────────────────────────────────────────────────
   private onAccountPicked(id: number | null): void {
     this.unresolvedCode.set(null);
@@ -250,7 +325,11 @@ export class AccountCodeSelectComponent implements ControlValueAccessor {
     }
 
     this.lookup
-      .resolveById(id, { acceptsEntriesOnly: false, activeOnly: false })
+      .resolveById(id, {
+        scope: this.scope(),
+        acceptsEntriesOnly: false,
+        activeOnly: false,
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((account) => {
         if (token !== this.resolutionToken) return;

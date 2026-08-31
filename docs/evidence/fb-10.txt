@@ -1,0 +1,33 @@
+# FB-10: DELETE /store/print-formats/:formatType
+# Plan section: A.3 + Phase B (reset to system defaults)
+# Source: apps/backend/src/domains/store/print-formats/controllers/print-formats.controller.ts:99
+# Permission: store:settings:update
+
+COMMAND:
+curl -sk -X DELETE 'https://api.vendix.com/api/store/print-formats/pos_sale_ticket' \
+  -H "Authorization: Bearer $TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+
+EXPECTED RESPONSE SHAPE:
+{
+  "success": true,
+  "data": { "success": true, "message": "Configuración restablecida a los valores por defecto del sistema." }
+}
+
+VERIFICATION:
+# Happy path (existed custom config)
+curl .../pos_sale_ticket -X DELETE | jq '.data.success' debe ser true
+
+# Idempotencia (no row existe)
+curl .../pos_sale_ticket -X DELETE (segunda vez) | jq '.success' debe ser true (no error si no hay row)
+
+# Post-reset: GET debe mostrar gateway_enabled=false (legacy) o template_id=null
+curl .../pos_sale_ticket | jq '.data.gateway_enabled' debe ser false (legacy por default post-reset)
+curl .../pos_sale_ticket | jq '.data.template_id' debe ser null
+curl .../pos_sale_ticket | jq '.data.is_customized' debe ser false
+
+# Sin permisos
+curl .../pos_sale_ticket -X DELETE (sin store:settings:update) | jq '.error.code' debe ser SYS_FORBIDDEN_001 (403)

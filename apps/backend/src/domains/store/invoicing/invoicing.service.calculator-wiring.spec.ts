@@ -117,6 +117,17 @@ describe('InvoicingService · cableado del motor aritmético', () => {
         isAreaEnabled: jest.fn().mockResolvedValue(true),
         isSubflowEnabled: jest.fn().mockResolvedValue(true),
       } as any,
+      // Compuerta de emisión extraída a `InvoiceEmissionGateService` en el
+      // commit `9cb5aff05`: `InvoicingService` ya no lleva el predicado, lo
+      // delega. Se pasa permisiva porque ninguno de estos casos prueba la
+      // compuerta en sí — la prueban `invoice-emission-gate.service.spec.ts`
+      // y sus propios casos. Omitirla no da un fallo de aserción, da un
+      // `TS2554` que tumba la suite entera y no aparece en el conteo de
+      // `Tests:`, que es como pasó desapercibida.
+      {
+        assertAreaActive: jest.fn().mockResolvedValue(undefined),
+        assertElectronicEmissionLive: jest.fn().mockResolvedValue(undefined),
+      } as any,
       {
         evaluate: jest.fn().mockResolvedValue({
           enforced: false,

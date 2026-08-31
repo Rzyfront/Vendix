@@ -319,6 +319,12 @@ export class SplitOrderService {
         productId: number;
         productName: string;
         quantity: number;
+        // CP-POLLO-ARABE-727 A.6 — el split reenvía lo que `fireOrderItemsInTx`
+        // resolvió, así que el snapshot ya arrastra la variante vendida. Sin estos
+        // dos campos el callback `emitKitchenFiredAfterCommit` (que ahora los
+        // exige) no compila.
+        productVariantId: number | null;
+        variantLabel: string | null;
       }>;
       cogsTotal: number;
       consumedLineCount: number;

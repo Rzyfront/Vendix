@@ -1,0 +1,37 @@
+# ERR-12: PRINT_LIBRARY_SHARE_FORBIDDEN_001
+# HTTP: 403
+# Source: apps/backend/src/common/errors/error-codes.ts:280-284
+# Emitido cuando: solo org admins pueden compartir templates, sin perm lanza este código
+
+COMMAND (compartir sin organization:settings:update):
+curl -sk -X PUT 'https://api.vendix.com/api/store/print-formats/library/<user_template_id>/share' \
+  -H "Authorization: Bearer $USER_WITHOUT_ORG_PERM_TOK" \
+  -H 'x-store-id: 5' \
+  -H 'Content-Type: application/json' \
+  -d '{ "is_shared": true }' \
+  -w '\nHTTP_CODE: %{http_code}\n'
+
+STATUS: pending_runtime_check (backend unhealthy 2026-08-27 — otro agente en watch reload)
+EXPECTED HTTP: 403
+
+EXPECTED RESPONSE BODY:
+{
+  "success": false,
+  "error": {
+    "code": "PRINT_LIBRARY_SHARE_FORBIDDEN_001",
+    "message": "Solo los administradores de la organización pueden compartir plantillas con otras tiendas"
+  }
+}
+
+VERIFICATION:
+# User sin perm intenta compartir
+curl .../library/<template_id>/share -d '{"is_shared":true}' (sin perm) | jq '.error.code' debe ser 'PRINT_LIBRARY_SHARE_FORBIDDEN_001'
+curl .../library/<template_id>/share -d '{"is_shared":true}' (sin perm) -w '%{http_code}' | grep -q '403'
+
+# Org admin: exit 0
+curl .../library/<template_id>/share -d '{"is_shared":true}' (con organization:settings:update) | jq '.success' debe ser true
+
+# Diferenciar de SYS_FORBIDDEN_001:
+# - SYS_FORBIDDEN_001: genérico, sin mensaje específico
+# - PRINT_LIBRARY_SHARE_FORBIDDEN_001: mensaje específico sobre compartir templates
+# Frontend debe mostrar mensaje específico del código PRINT_LIBRARY_SHARE_FORBIDDEN_001

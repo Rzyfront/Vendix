@@ -830,6 +830,137 @@ describe('SubscriptionStateService', () => {
       },
     );
 
+    // ---- `active` with a LAPSED period: the on-time renewal --------------
+    //
+    // `state` and `current_period_end` are two independent truths. Between the
+    // moment a period runs out and the `subscription-state-engine` cron that
+    // degrades the row, a subscription sits `active` with a spent window — and
+    // a renewal collected in that gap is the PUNCTUAL payment. The seam used
+    // to return before the window writer for any `active` row, so the invoice
+    // went `paid`, the payment `succeeded`, the window stayed spent, and the
+    // cron degraded a store that had already paid.
+    //
+    // Regression source: store 96 / subscription 57, paid 2026-08-26, degraded
+    // to `grace_soft` 2026-08-29 on a `current_period_end` of 2026-08-25.
+
+    it('advances the window when already active but the period LAPSED (paid renewal)', async () => {
+      primeRoute({
+        from: 'active',
+        hops: [],
+        planId: 7,
+        currentPeriodEnd: new Date(Date.now() - 3 * DAY_MS),
+      });
+      prismaMock.subscription_plans.findUnique.mockResolvedValue({
+        billing_cycle: 'monthly',
+      });
+
+      const result = await service.ensureOperational(STORE_ID, {
+        reason: 'payment_42_approved',
+      });
+
+      // Still a no-op as far as the STATE machine goes: no hop, no audit row.
+      expect(result.finalState).toBe('active');
+      expect(result.path).toEqual([]);
+      expect(prismaMock.subscription_events.create).not.toHaveBeenCalled();
+
+      // But the WINDOW was rebuilt — this is the whole point.
+      const data = lastUpdateData();
+      expect(data.current_period_end).toBeInstanceOf(Date);
+      expect(data.current_period_end.getTime()).toBeGreaterThan(Date.now());
+      // 30-day cycle minus the 3 consumed days, so the store is not gifted the
+      // time it spent past its own due date.
+      const expectedEnd = Date.now() + 27 * DAY_MS;
+      expect(data.current_period_end.getTime()).toBeGreaterThan(
+        expectedEnd - 10_000,
+      );
+      expect(data.current_period_end.getTime()).toBeLessThan(
+        expectedEnd + 10_000,
+      );
+      expect(data.next_billing_at).toEqual(data.current_period_end);
+    });
+
+    it('voids the dunning clocks when the window is rebuilt on the no-op route', async () => {
+      primeRoute({
+        from: 'active',
+        hops: [],
+        planId: 7,
+        currentPeriodEnd: new Date(Date.now() - 3 * DAY_MS),
+      });
+      prismaMock.subscription_plans.findUnique.mockResolvedValue({
+        billing_cycle: 'monthly',
+      });
+
+      await service.ensureOperational(STORE_ID, {
+        reason: 'payment_42_approved',
+      });
+
+      // Deadlines derived from the period that was just replaced describe
+      // nothing any more. Left in place, the state engine degrades a store
+      // that has just paid — which is exactly what happened in production.
+      const data = lastUpdateData();
+      expect(data.grace_soft_until).toBeNull();
+      expect(data.grace_hard_until).toBeNull();
+      expect(data.lock_reason).toBeNull();
+    });
+
+    it('honours an explicit ctx.periodEnd on the no-op route (pins the invoice window)', async () => {
+      const requested = new Date(Date.now() + 26 * DAY_MS);
+      primeRoute({
+        from: 'active',
+        hops: [],
+        planId: 7,
+        currentPeriodEnd: new Date(Date.now() - 4 * DAY_MS),
+      });
+
+      await service.ensureOperational(STORE_ID, {
+        reason: 'manual_payment',
+        periodEnd: requested,
+      });
+
+      const data = lastUpdateData();
+      expect(data.current_period_end.getTime()).toBe(
+        requested.getTime() - 4 * DAY_MS,
+      );
+      expect(prismaMock.subscription_plans.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('writes NOTHING when already active with an unexpired period (duplicate webhook)', async () => {
+      primeRoute({
+        from: 'active',
+        hops: [],
+        planId: 7,
+        currentPeriodEnd: new Date(Date.now() + 20 * DAY_MS),
+      });
+
+      const result = await service.ensureOperational(STORE_ID, {
+        reason: 'duplicate_webhook',
+      });
+
+      expect(result.path).toEqual([]);
+      // The window writer ends in an UNCONDITIONAL row update that also voids
+      // `scheduled_cancel_at` / `suspend_at` / `cancel_at`. Reaching it on a
+      // healthy store would silently cancel the user's own scheduled
+      // cancellation, so the spent-window guard is asked BEFORE the call.
+      expect(prismaMock.store_subscriptions.update).not.toHaveBeenCalled();
+      expect(prismaMock.subscription_events.create).not.toHaveBeenCalled();
+    });
+
+    it('leaves an active row with a NULL period alone (no cycle minted)', async () => {
+      primeRoute({
+        from: 'active',
+        hops: [],
+        planId: 7,
+        currentPeriodEnd: null,
+      });
+
+      await service.ensureOperational(STORE_ID, { reason: 'duplicate_webhook' });
+
+      // `null` counts as spent only on the hop route, where it means
+      // "recovering from a degraded state that never had a cycle". Minting one
+      // for a healthy `active` row is a behaviour change no incident asked for.
+      expect(prismaMock.store_subscriptions.update).not.toHaveBeenCalled();
+    });
+
     // ---- One entry route per degraded state -----------------------------
 
     it.each([

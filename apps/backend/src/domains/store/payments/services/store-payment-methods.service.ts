@@ -465,6 +465,14 @@ export class StorePaymentMethodsService {
     providerType: string,
     config: Record<string, any>,
   ): void {
+    // QUI-728 — validación propia del shape `{ accounts: BankAccountRef[] }`.
+    // No hay un validator class en CONFIG_VALIDATORS para `bank_transfer` porque
+    // el shape es un array de refs a `bank_accounts`, no un mapa plano.
+    if (providerType === 'bank_transfer') {
+      this.validateBankTransferConfig(config);
+      return;
+    }
+
     const ValidatorClass = CONFIG_VALIDATORS[providerType];
     if (!ValidatorClass) return; // No validator for this type, skip
 
@@ -479,6 +487,56 @@ export class StorePaymentMethodsService {
         .map((e) => Object.values(e.constraints || {}).join(', '))
         .join('; ');
       throw new BadRequestException(`Configuración inválida: ${messages}`);
+    }
+  }
+
+  /**
+   * QUI-728 — valida `custom_config.accounts` del método `bank_transfer`.
+   * Un método de transferencia sin cuentas configuradas es un estado inválido:
+   * el cajero no tendría a dónde dirigir el pago. No se exige `id` para permitir
+   * refs legacy (auto-migrada sin vínculo a `bank_accounts`), pero sí `bank_name`
+   * y `account_number`.
+   */
+  private validateBankTransferConfig(config: Record<string, any>): void {
+    const accounts = config?.accounts;
+
+    if (accounts === undefined || accounts === null) {
+      throw new BadRequestException(
+        'Configuración inválida: Se requiere al menos una cuenta bancaria (campo "accounts").',
+      );
+    }
+    if (!Array.isArray(accounts)) {
+      throw new BadRequestException(
+        'Configuración inválida: "accounts" debe ser una lista de cuentas bancarias.',
+      );
+    }
+    if (accounts.length === 0) {
+      throw new BadRequestException(
+        'Configuración inválida: agrega al menos una cuenta bancaria para transferencia.',
+      );
+    }
+
+    for (const acc of accounts) {
+      if (!acc || typeof acc !== 'object') {
+        throw new BadRequestException(
+          'Configuración inválida: cada cuenta de "accounts" debe ser un objeto.',
+        );
+      }
+      if (acc.id !== undefined && (typeof acc.id !== 'number' || acc.id < 1)) {
+        throw new BadRequestException(
+          'Configuración inválida: cada cuenta requiere un id numérico válido.',
+        );
+      }
+      if (!acc.bank_name) {
+        throw new BadRequestException(
+          'Configuración inválida: cada cuenta requiere un nombre de banco (bank_name).',
+        );
+      }
+      if (!acc.account_number) {
+        throw new BadRequestException(
+          'Configuración inválida: cada cuenta requiere un número de cuenta (account_number).',
+        );
+      }
     }
   }
 }

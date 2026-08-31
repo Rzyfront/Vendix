@@ -31,6 +31,7 @@ import { PaymentCreditFieldsComponent } from './payment-credit-fields.component'
 import { StepsLineComponent, type StepsLineItem } from '../steps-line/steps-line.component';
 import {
   DEFAULT_CONFIG_BY_CONTEXT,
+  type BankAccountSelectOption,
   type CreditTerms,
   type ManualPaymentMethod,
   type PaymentCollectorConfig,
@@ -168,6 +169,22 @@ export class PaymentCollectorComponent implements OnInit {
   readonly creditTerms = signal<CreditTerms | null>(null);
   private readonly loadedMethods = signal<PaymentMethod[] | null>(null);
 
+  // ── QUI-728 — multi-cuenta bancaria para transferencia ───────────────────
+  /**
+   * Cuentas bancarias configuradas para el método `bank_transfer` seleccionado.
+   * Se derivan del `custom_config.accounts` del propio método (shape nuevo
+   * `{ accounts: BankAccountRef[] }`), nunca de un endpoint contable.
+   */
+  readonly bankAccounts = signal<BankAccountSelectOption[]>([]);
+  /**
+   * Clave estable de la cuenta elegida ({@link BankAccountSelectOption.key}). Es lo
+   * que gobierna el `<select>` y la compuerta de cobro, NUNCA el id: una cuenta
+   * migrada del legado no tiene id y con el id como valor quedaba inelegible.
+   */
+  readonly selectedBankAccountKey = signal<string | null>(null);
+  /** FK `bank_accounts.id` de la cuenta elegida; `null` si la entrada es legado. */
+  readonly selectedBankAccountId = signal<number | null>(null);
+
   /**
    * True once the operator manually edits the tendered cash (keypad / typing),
    * so the re-seed effect stops overwriting their amount. Reset on method change
@@ -245,6 +262,16 @@ export class PaymentCollectorComponent implements OnInit {
           return cfg.allowWompi;
         case PaymentMethodType.CASH:
           return cfg.allowCash;
+        case PaymentMethodType.BANK_TRANSFER:
+          // QUI-728 — destado vacío: solo ocultamos la opción cuando CONOCEMOS
+          // el `accounts` del método y está vacío. Si la lista no está
+          // disponible (método sin `original`, back-compat), se muestra y el
+          // destado vacío se maneja inline al seleccionarlo.
+          {
+            const accounts = (m.original as any)?.custom_config?.accounts;
+            if (Array.isArray(accounts) && accounts.length === 0) return false;
+            return true;
+          }
         default:
           return true;
       }
@@ -286,6 +313,22 @@ export class PaymentCollectorComponent implements OnInit {
   readonly isCashSelected = computed(() => this.selectedMethod()?.type === PaymentMethodType.CASH);
   readonly isWalletSelected = computed(() => this.selectedMethod()?.type === PaymentMethodType.WALLET);
   readonly isWompiSelected = computed(() => this.selectedMethod()?.type === PaymentMethodType.WOMPI);
+  readonly isBankTransferSelected = computed(
+    () => this.selectedMethod()?.type === PaymentMethodType.BANK_TRANSFER,
+  );
+
+  /**
+   * Cuentas configuradas del método `bank_transfer` en uso (seleccionado). Cada
+   * método trae su propio `custom_config.accounts`; solo interesa el del método
+   * activo.
+   */
+  readonly selectedBankAccounts = computed<BankAccountSelectOption[]>(() =>
+    this.bankAccounts(),
+  );
+  /** Conocimiento de que el método `bank_transfer` activo tiene >= 1 cuenta. */
+  readonly bankTransferConfigured = computed<boolean>(
+    () => this.selectedBankAccounts().length > 0,
+  );
 
   readonly change = computed<number>(() =>
     this.isCashSelected() ? Math.max(0, (this.cashReceived() || 0) - this.effectiveTotal()) : 0,
@@ -392,6 +435,14 @@ export class PaymentCollectorComponent implements OnInit {
       // Pago contra entrega: la orden queda pending; el processor backend
       // devuelve 'pending'. No exige monto recibido ni referencia.
       return true;
+    }
+
+    if (type === PaymentMethodType.BANK_TRANSFER) {
+      // QUI-728 — sin cuentas configuradas el cobro debe bloquearse (destado
+      // vacío), y aun con cuentas el cajero debe elegir una. Se suma a la
+      // referencia: ambas se exigen.
+      if (this.selectedBankAccounts().length === 0) return false;
+      if (this.selectedBankAccountKey() == null) return false;
     }
 
     if (this.needsReference()) {
@@ -523,6 +574,11 @@ export class PaymentCollectorComponent implements OnInit {
     // Reset per-method slices so a previous method never leaks state.
     this.wompiSlice.set(null);
     this.referenceControl.setValue('');
+    // QUI-728 — la cuenta bancaria elegida pertenece al método activo; al cambiar
+    // de método se limpia y se recarga desde el `custom_config.accounts` del nuevo.
+    this.selectedBankAccountKey.set(null);
+    this.selectedBankAccountId.set(null);
+    this.bankAccounts.set(this.bankAccountsFor(method));
     // A method switch clears any prior manual cash override.
     this.manuallyEditedCash.set(false);
 
@@ -559,6 +615,64 @@ export class PaymentCollectorComponent implements OnInit {
 
   isManual(method: PaymentMethod): boolean {
     return typeof method.id === 'string' && method.id.startsWith('manual:');
+  }
+
+  /**
+   * QUI-728 — extrae las cuentas bancarias del `custom_config.accounts` del
+   * método. El método `bank_transfer` (shape nuevo `{ accounts: [...] }`) trae
+   * su propia lista; si el método no expone `original` o el shape es legacy,
+   * devuelve [].
+   */
+  bankAccountsFor(method: PaymentMethod | null): BankAccountSelectOption[] {
+    const cfg = (method?.original as any)?.custom_config;
+    const list = Array.isArray(cfg?.accounts) ? cfg.accounts : [];
+    return list
+      .filter((a: any) => a && typeof a === 'object')
+      .map((raw: any, index: number) => this.normalizeBankAccount(raw, index));
+  }
+
+  /**
+   * Aplana las TRES formas que conviven en `custom_config.accounts` a una sola
+   * opción con `key` estable:
+   *
+   * 1. `{ bank_account_id, … }` — la forma nueva, con FK real.
+   * 2. `{ legacy: { bank_name, account_number, … } }` — la que declara DB-04.
+   * 3. `{ bank_name, account_number, legacy: true }` — la que la migración
+   *    dejó realmente en producción: objeto PLANO, sin anidar y sin id.
+   *
+   * La tercera es la que rompía el selector: sin `id`, la opción se pintaba con
+   * `value="undefined"`, la selección se coaccionaba a `null` y la compuerta de
+   * cobro no abría nunca. Se resuelve aquí, sin migración de datos: una entrada
+   * sin FK se cobra igual y el pago aparece en "Pagos sin asignar" (E.2).
+   */
+  private normalizeBankAccount(raw: any, index: number): BankAccountSelectOption {
+    const nested =
+      raw.legacy && typeof raw.legacy === 'object' ? raw.legacy : raw;
+    const rawId = raw.bank_account_id ?? raw.id ?? nested.bank_account_id ?? nested.id;
+    const id = Number(rawId);
+    const hasId = Number.isFinite(id) && id > 0;
+    return {
+      key: hasId ? `id:${id}` : `legacy:${index}`,
+      id: hasId ? id : null,
+      name: nested.name ?? nested.account_holder ?? null,
+      bank_name: nested.bank_name,
+      account_number: nested.account_number,
+    };
+  }
+
+  onBankAccountSelect(event: Event): void {
+    const key = (event.target as HTMLSelectElement).value;
+    const match = this.selectedBankAccounts().find((a) => a.key === key);
+    this.selectedBankAccountKey.set(match ? match.key : null);
+    this.selectedBankAccountId.set(match?.id ?? null);
+  }
+
+  /** Etiqueta visible de una cuenta; nunca cae en `undefined · undefined`. */
+  bankAccountLabel(account: BankAccountSelectOption): string {
+    const parts = [account.bank_name, account.account_number, account.name].filter(
+      (p): p is string => typeof p === 'string' && p.trim().length > 0,
+    );
+    return parts.length ? parts.join(' · ') : 'Cuenta bancaria';
   }
 
   iconFor(method: PaymentMethod): IconName {
@@ -643,6 +757,23 @@ export class PaymentCollectorComponent implements OnInit {
       return { section: 'cash', message: 'El efectivo recibido no cubre el total' };
     }
 
+    // QUI-728 — destado vacío del cajero: método habilitado pero sin cuentas
+    // configuradas. Nunca un `<select>` vacío sin explicación.
+    if (this.isBankTransferSelected()) {
+      if (this.selectedBankAccounts().length === 0) {
+        return {
+          section: 'reference',
+          message: 'Sin cuentas configuradas. Contacta al administrador.',
+        };
+      }
+      if (this.selectedBankAccountKey() == null) {
+        return {
+          section: 'reference',
+          message: 'Selecciona la cuenta bancaria de destino.',
+        };
+      }
+    }
+
     if (this.needsReference() && this.referenceValue().trim().length < 1) {
       return { section: 'reference', message: 'Ingresa la referencia del pago' };
     }
@@ -710,6 +841,10 @@ export class PaymentCollectorComponent implements OnInit {
     this.tipControl.setValue(0);
     this.amountOverrideControl.setValue(null);
     this.referenceControl.setValue('');
+    // QUI-728 — limpiar el estado de cuenta bancaria al resetear el collector.
+    this.selectedBankAccountKey.set(null);
+    this.selectedBankAccountId.set(null);
+    this.bankAccounts.set([]);
     const pre = this.preSelectedInstallment();
     const preId = pre == null ? null : Number((pre as any)?.id ?? pre);
     if (preId && preId > 0) {
@@ -760,6 +895,14 @@ export class PaymentCollectorComponent implements OnInit {
       out.change = this.change();
     }
     if (this.needsReference()) out.reference = this.referenceValue().trim();
+    // QUI-728 — cuenta bancaria de destino (bank_transfer). El padre lo traduce
+    // a `CreatePosPaymentDto.bank_account_id` / `CreatePaymentDto.bank_account_id`.
+    if (method.type === PaymentMethodType.BANK_TRANSFER) {
+      // Solo viaja cuando hay FK real. Una cuenta legado (sin fila en
+      // `bank_accounts`) se cobra igual y el pago queda sin asignar: mandar un
+      // id inventado lo rechazaría el gateway con ERR-04.
+      out.bankAccountId = this.selectedBankAccountId() ?? undefined;
+    }
     if (method.type === PaymentMethodType.WOMPI && this.wompiSlice()) {
       out.wompi = this.wompiSlice()!;
     }
