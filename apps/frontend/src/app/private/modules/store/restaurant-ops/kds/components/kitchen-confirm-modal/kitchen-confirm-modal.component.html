@@ -108,6 +108,13 @@
                       [class.is-off]="!isNodeChecked(item.order_item_id, node)"
                       [class.is-partial]="isNodePartial(item.order_item_id, node)"
                       [attr.aria-pressed]="isNodeChecked(item.order_item_id, node)"
+                      [attr.aria-label]="
+                        isNodeChecked(item.order_item_id, node)
+                          ? 'Quitar ' + node.label
+                          : isNodePartial(item.order_item_id, node)
+                            ? 'Resolver inclusión parcial de ' + node.label
+                            : 'Incluir ' + node.label
+                      "
                       (click)="toggleNode(item.order_item_id, node)"
                     >
                       <app-icon
@@ -126,6 +133,12 @@
                       <button
                         type="button"
                         class="kc-collapse"
+                        [attr.aria-expanded]="!isCollapsed(node.key)"
+                        [attr.aria-label]="
+                          isCollapsed(node.key)
+                            ? 'Expandir ingredientes de ' + node.label
+                            : 'Contraer ingredientes de ' + node.label
+                        "
                         (click)="toggleCollapse(node.key)"
                       >
                         <app-icon
@@ -161,6 +174,13 @@
                               [class.is-off]="!isNodeChecked(item.order_item_id, child)"
                               [class.is-partial]="isNodePartial(item.order_item_id, child)"
                               [attr.aria-pressed]="isNodeChecked(item.order_item_id, child)"
+                              [attr.aria-label]="
+                                isNodeChecked(item.order_item_id, child)
+                                  ? 'Quitar ' + child.label
+                                  : isNodePartial(item.order_item_id, child)
+                                    ? 'Resolver inclusión parcial de ' + child.label
+                                    : 'Incluir ' + child.label
+                              "
                               (click)="toggleNode(item.order_item_id, child)"
                             >
                               <app-icon
