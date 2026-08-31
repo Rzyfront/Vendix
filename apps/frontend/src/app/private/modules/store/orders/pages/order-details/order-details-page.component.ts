@@ -45,6 +45,7 @@ import {
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { PosShippingService } from '../../../pos/services/pos-shipping.service';
 import { KitchenTicketsService } from '../../../restaurant-ops/kds/services/kitchen-tickets.service';
+import { ResendDishModalComponent } from '../../../restaurant-ops/kds/components/resend-dish-modal/resend-dish-modal.component';
 import { PosShippingOption } from '../../../pos/models/shipping.model';
 import { AlertBannerComponent, DialogService, ModalComponent, ToastService, TimelineComponent, type PaymentSubmit } from '../../../../../../shared/components';
 import { TimelineStep, TimelineVariant } from '../../../../../../shared/components/timeline/timeline.interfaces';
@@ -135,6 +136,7 @@ type RefundState =
     GenerateDispatchWizardComponent,
     DispatchMethodSelectorModalComponent,
     ShippingAddressModalComponent,
+    ResendDishModalComponent,
     NgClass,
   ],
   templateUrl: './order-details-page.component.html',
@@ -309,6 +311,15 @@ export class OrderDetailsPageComponent {
   // Manual mode flags (use modals but call updateOrderStatus instead of flow endpoints)
   isManualShipMode = signal(false);
   isManualDeliverMode = signal(false);
+
+  // ── QUI-762 — reenviar un plato ya disparado a cocina ──────────────
+  /**
+   * `order_item.id` actualmente elegido para reenvío. Null = modal cerrado.
+   * El modal abre con `orderId` + `[itemId]` y emite `confirmed` cuando el
+   * mesero elige motivo y confirma.
+   */
+  resendItemId = signal<number | null>(null);
+  readonly showResendModal = computed<boolean>(() => this.resendItemId() !== null);
 
   // Payment methods for pay modal
   paymentMethods = signal<StorePaymentMethod[]>([]);
@@ -3135,6 +3146,57 @@ export class OrderDetailsPageComponent {
         },
         error: () => undefined,
       });
+  }
+
+  // ─── QUI-762 — reenviar un plato a cocina ─────────────────────────
+  /**
+   * Espejo del predicado `KITCHEN_FIRE_NOT_RESENDABLE` del backend:
+   *  - El item fue consumido al disparar (`inventory_consumed_at_fire`).
+   *  - La orden NO está en estado terminal (cancelled / refunded).
+   *  - Ningún `kitchen_ticket_item` del item está `delivered` — la cocina
+   *    ya entregó el plato y reenviarlo sería cocinar dos veces lo mismo
+   *    que el cliente ya tiene.
+   *
+   * Devuelve `false` para items que el backend rechazaría con 422; el
+   * botón "Reenviar a cocina" se oculta en esos casos en vez de ofrecer
+   * una acción que siempre falla.
+   */
+  canResend(item: OrderItem): boolean {
+    if (!item.inventory_consumed_at_fire) return false;
+    const order = this.order();
+    if (!order) return false;
+    const terminal: OrderState[] = ['cancelled', 'refunded'];
+    if (terminal.includes(order.state as OrderState)) return false;
+    const items = item.kitchen_ticket_items ?? [];
+    if (items.some((k) => k.status === 'delivered')) return false;
+    return true;
+  }
+
+  /** Abre el modal con el ítem elegido. */
+  openResendModal(item: OrderItem): void {
+    if (!this.canResend(item)) return;
+    this.resendItemId.set(item.id);
+  }
+
+  /** Cierre explícito (backdrop, Esc, botón Cancelar). */
+  closeResendModal(): void {
+    this.resendItemId.set(null);
+  }
+
+  /**
+   * El modal emite `confirmed({ reason })` cuando el mesero eligió motivo
+   * y la llamada al backend ya respondió 201. El modal mismo se encarga
+   * del toast de error si el backend rechaza — acá cerramos el modal,
+   * avisamos al mesero con un toast de éxito y refrescamos la orden para
+   * que los badges de KDS reflejen el nuevo ticket.
+   */
+  onResendConfirmed(event: { reason: 'lost_command' | 'remake_dish' }): void {
+    this.resendItemId.set(null);
+    const verb = event.reason === 'lost_command'
+      ? 'Comanda reencolada a cocina'
+      : 'Plato reencolado a cocina';
+    this.toastService.success(verb);
+    this.refreshOrder();
   }
 
   /** Localised label for the KDS state badge. */

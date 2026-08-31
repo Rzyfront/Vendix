@@ -23,6 +23,17 @@ export interface FireOrderItemsResult {
   ticket?: KitchenTicket;
 }
 
+/** Result of `POST /store/kitchen-fire/resend` (QUI-762). */
+export interface ResendOrderItemsResult {
+  ticketId?: number;
+  ticketIds?: number[];
+  firedItemIds?: number[];
+  cancelledTicketIds?: number[];
+}
+
+/** Motivo declarado al reenviar un plato a cocina. QUI-762. */
+export type ResendReason = 'lost_command' | 'remake_dish';
+
 /**
  * Structured error thrown by ticket mutations. Unlike the snapshot/fire
  * paths (which throw a plain string), mutations preserve the backend
@@ -182,6 +193,32 @@ export class KitchenTicketsService {
     return this.http
       .post<ApiResponse<FireOrderItemsResult>>(
         `${this.apiUrl}${this.basePath}`,
+        payload,
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /**
+   * QUI-762 — reenviar un plato ya enviado a cocina, declarando el motivo.
+   *
+   * El backend OBLIGA a `reason` (`lost_command` o `remake_dish`); sin valor
+   * o con uno no enumerado, responde 400 con `SYS_VALIDATION_001` y el detalle
+   * de los valores aceptados. El 422 `KITCHEN_FIRE_NOT_RESENDABLE` indica que
+   * el ítem no está en condición de reenviarse — el modal lo muestra tal cual
+   * (regla 4 del spec). Esta capa no reescribe mensajes: deja pasar el
+   * `parseApiError` con la `userMessage` curada por el backend.
+   */
+  resendOrderItems(payload: {
+    order_id: number;
+    order_item_ids: number[];
+    reason: ResendReason;
+  }): Observable<ResendOrderItemsResult> {
+    return this.http
+      .post<ApiResponse<ResendOrderItemsResult>>(
+        `${this.apiUrl}${this.basePath}/resend`,
         payload,
       )
       .pipe(
