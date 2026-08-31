@@ -1,8 +1,13 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { CloseKdsSessionDto, OpenKdsSessionDto } from '../dto';
+import {
+  assertSafeTimezone,
+  zonedWallClockToUtc,
+} from 'src/common/utils/store-timezone.util';
 
 /**
  * KdsSessionsService — turnos de estación (QUI-651).
@@ -92,53 +97,59 @@ export class KdsSessionsService {
    * operadores concurrentes pasarían ambos este chequeo y dejarían la estación
    * con dos dueños. Por eso el P2002 se traduce, no se propaga crudo.
    *
-   * QUI-760 — BACKFILL en la misma transacción: al abrir turno se RECLAMAN los
-   * `inventory_transactions` previos cuyo `kds_session_id` quedó NULL porque
-   * el fire ocurrió antes de que el operador abriera sesión. Si no se hacen
-   * aquí, `close()` los ignora para siempre (su `buildConsumptionSummary`
-   * filtra por `kds_session_id = sessionId`) y el cocinero firma consumo que
-   * nunca aparece en su turno. El `updateMany` corre dentro del MISMO
-   * `prisma.$transaction` que el `create`, así que un fallo en el backfill
-   * también aborta la apertura — no hay sesión huérfana.
+   * QUI-760 — BACKFILL en la misma transacción. El fire firma el consumo al
+   * DISPARAR, no al abrir turno. Si la cocina recibe un fire antes de que su
+   * operador abra sesión, los `inventory_transactions` quedan con
+   * `kds_session_id = NULL`. Cerrar el turno después ignora ese consumo para
+   * siempre (su `buildConsumptionSummary` filtra por `kds_session_id`), y
+   * el reporte por estación deja de cuadrar contra el COGS total.
+   *
+   * La regla de imputación es: el consumo que ocurrió en el HUECO entre
+   * turnos de ESTA estación — desde el cierre de la última sesión cerrada
+   * (o, si nunca hubo, desde el inicio del día de negocio en curso de la
+   * tienda). El backfill se hace en la MISMA `prisma.$transaction` que el
+   * `create`: un fallo aborta la apertura y no hay sesión huérfana.
+   *
+   * Por qué el piso temporal y no solo "ticket vivo": la máquina de estados
+   * de `kitchen_tickets` no caduca — un ticket se queda `pending` para
+   * siempre si nadie lo cancela. Filtrar solo por `status NOT IN
+   * ('delivered','cancelled')` reclamaba dos meses y medio de consumo
+   * abandonado a la primera apertura de hoy. El piso `lowerBound` recorta
+   * ese pasado a "lo que pasó desde que el último turno cerró".
+   *
+   * Caso borde: primera sesión de la historia en una estación. No hay
+   * `closed_at` previo y un piso `null` re-imputaría todo. Se acota al
+   * inicio del día de negocio en curso de la tienda, mismo corte que
+   * `resolveLocalDateRange` aplica al resto de analytics. La elección se
+   * documenta porque cambia el comportamiento de cada apertura temprana.
    *
    * Filtros:
    *  - `kds_session_id IS NULL`: la razón de existir del backfill.
+   *  - `inventory_transactions.created_at > lowerBound`: piso temporal;
+   *    sin esto, la primera apertura del día reclama todo lo viejo.
    *  - `order_item_id IS NOT NULL` + `inventory_consumed_at_fire=true`: solo el
-   *    consumo disparado al fire; las ventas, ajustes y transferencias no
-   *    son elegibles.
-   *  - Routing KDS: el mismo patrón que `kitchen-fire.service.ts:668-680` —
-   *    cada `inventory_transaction` se imputa a `products.kds_id ?? defaultKds`.
-   *    Si esta sesión es el defaultKds de la tienda, los productos SIN `kds_id`
-   *    propio le pertenecen; si es OTRA estación, solo los productos con
+   *    consumo disparado al fire; ventas, ajustes y transferencias no son
+   *    elegibles.
+   *  - Routing KDS espejo de `kitchen-fire.service.ts:668-680`: cada tx se
+   *    imputa a `products.kds_id ?? defaultKds`. Si esta sesión es la
+   *    defaultKds de la tienda, los productos SIN `kds_id` propio le
+   *    pertenecen; si es OTRA estación, solo los productos con
    *    `products.kds_id = dto.kds_id`.
-   *  - `kitchen_tickets.status NOT IN ('delivered','cancelled')`. Un ticket ya
-   *    entregado/cancelado NO entra — el consumo ya pasó, firmarlo a
-   *    posteriori inventaría responsabilidad donde no la hay.
-   *  - `store_id` por tienda: filtramos por `orders.store_id` directamente,
-   *    y Prisma aplica también el relational scope de
-   *    `inventory_transactions` por `products.store_id`. Defensa en
-   *    profundidad: una sesión en tienda A jamás estampa filas de tienda B
-   *    (criterio 7 de QUI-760).
+   *  - `kitchen_tickets.status NOT IN ('delivered','cancelled')`. Un ticket
+   *    ya entregado/cancelado NO entra — su consumo ya pasó.
+   *  - `orders.store_id = ctx.store_id` (defensa explícita; el relational
+   *    scope de `StorePrismaService` ya filtra por `products.store_id`).
    *
    * Implementación: dos pasos dentro de la MISMA tx para evitar el nested
-   * filter `inventory_transactions.where.order_items` (Prisma lo rechaza
-   * porque el back-relation desde `order_items` se llama
-   * `inventory_transactions[]` y el forward se llama `order_items?` — el
-   * `updateMany` solo conoce los argumentos directos). Primero se resuelve
-   * la lista de `order_items` candidatos por la relación `inventory_transactions`
-   * desde el lado donde Prisma SÍ la expone, después se hace
-   * `inventory_transactions.updateMany({ where: { order_item_id: { in } } })`.
-   * La condición `kds_session_id IS NULL` se repite en los dos pasos para
-   * asegurar idempotencia (una transacción candidata estampada por otra
-   * sesión ya no cuenta).
-   *
-   * Los 45 huérfanos históricos del ticket no se tocan — están en tickets
-   * entregados/cancelados y dejarán de aparecer por el filtro, no por una
-   * migración retroactiva.
-   *
-   * Los 45 huérfanos históricos del ticket no se tocan — están en tickets
-   * entregados/cancelados y dejarán de aparecer por el filtro, no por una
-   * migración retroactiva.
+   * filter `inventory_transactions.where.order_items` (Prisma lo rechaza:
+   * el back-relation desde `order_items` se llama `inventory_transactions[]`
+   * y el `updateMany` solo conoce argumentos directos). Primero se resuelve
+   * la lista de `order_items` candidatos por la relación
+   * `inventory_transactions` desde el lado donde Prisma SÍ la expone,
+   * después se hace `inventory_transactions.updateMany({ where:
+   * { order_item_id: { in } } })`. La condición `kds_session_id IS NULL` se
+   * repite en los dos pasos para idempotencia: una transacción estampada
+   * por otra sesión abierta en paralelo no se vuelve a tomar.
    */
   async open(dto: OpenKdsSessionDto) {
     const { storeId, userId } = this.requireContext();
@@ -155,73 +166,152 @@ export class KdsSessionsService {
     }
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
-        const session = await tx.kds_sessions.create({
-          data: {
-            kds_id: dto.kds_id,
-            store_id: storeId,
-            opened_by: userId,
-            status: 'open',
-            opened_at: new Date(),
-            updated_at: new Date(),
-          },
-        });
+      // Timeout explícito de la tx interactiva. Prisma 7 por defecto aborta
+      // una `$transaction` interactiva a los 5 s; con el `findMany` +
+      // `updateMany` adentro del backfill y una tienda con volumen de
+      // inventario, ese techo es demasiado bajo — un cocinero vería un 500
+      // al abrir turno sin entender por qué. 15 s es generoso para el
+      // backfill real (decenas de filas) y todavía se siente como un error
+      // operativo si algo se cuelga. QUI-760: documentar este valor al lado
+      // de la regla, no en un comentario perdido.
+      return await this.prisma.$transaction(
+        async (tx) => {
+          const session = await tx.kds_sessions.create({
+            data: {
+              kds_id: dto.kds_id,
+              store_id: storeId,
+              opened_by: userId,
+              status: 'open',
+              opened_at: new Date(),
+              updated_at: new Date(),
+            },
+          });
 
-        // Mismo routing que `kitchen-fire.service.ts:668-680`: producto con
-        // `kds_id` propio va a esa estación; producto sin `kds_id` va al
-        // default de su tienda. Si esta sesión es el default, los productos
-        // huérfanos de KDS también le pertenecen.
-        const defaultStation = await tx.kds.findFirst({
-          where: { store_id: storeId, is_default: true, is_active: true },
-          select: { id: true },
-        });
-        const isDefaultSession = defaultStation?.id === dto.kds_id;
+          // Mismo routing que `kitchen-fire.service.ts:668-680`: producto con
+          // `kds_id` propio va a esa estación; producto sin `kds_id` va al
+          // default de su tienda. Si esta sesión es el default, los productos
+          // huérfanos de KDS también le pertenecen.
+          const defaultStation = await tx.kds.findFirst({
+            where: { store_id: storeId, is_default: true, is_active: true },
+            select: { id: true },
+          });
+          const isDefaultSession = defaultStation?.id === dto.kds_id;
 
-        // Resolver candidatos por el lado de `order_items`, donde Prisma SÍ
-        // expone la relación `inventory_transactions`. La guarda `some:
-        // { kds_session_id: null }` ya descarta filas con sesión atribuida
-        // por una apertura anterior.
-        const candidateOis = await tx.order_items.findMany({
-          where: {
-            inventory_consumed_at_fire: true,
-            orders: { store_id: storeId },
-            inventory_transactions: { some: { kds_session_id: null } },
-            kitchen_ticket_items: {
-              some: {
-                kitchen_ticket: {
-                  status: { notIn: ['delivered', 'cancelled'] },
+          // Piso temporal del backfill: el HUECO entre turnos. Si esta
+          // estación ya cerró alguna sesión, tomamos el `closed_at` más
+          // reciente. Si es la primera de la historia, no hay piso y un
+          // `null` reclamaría meses de consumo abandonado — acotamos al
+          // inicio del día de negocio en curso de la tienda. Misma elección
+          // de corte que `resolveLocalDateRange` aplica al resto de
+          // analytics.
+          const lastClosed = await tx.kds_sessions.findFirst({
+            where: {
+              kds_id: dto.kds_id,
+              store_id: storeId,
+              status: 'closed',
+            },
+            orderBy: { closed_at: 'desc' },
+            select: { closed_at: true },
+          });
+          const lowerBound =
+            lastClosed?.closed_at ??
+            (await this.getBusinessDayStart(tx, storeId));
+
+          // Resolver candidatos por el lado de `order_items`, donde Prisma SÍ
+          // expone la relación `inventory_transactions`. La guarda
+          // `created_at > lowerBound` recorta el pasado al hueco entre turnos
+          // y evita la primera-apertura-reclama-todo. La guarda `kds_session_id:
+          // null` descarta filas con sesión atribuida por una apertura anterior.
+          const candidateOis = await tx.order_items.findMany({
+            where: {
+              inventory_consumed_at_fire: true,
+              orders: { store_id: storeId },
+              inventory_transactions: {
+                some: {
+                  kds_session_id: null,
+                  created_at: { gt: lowerBound },
                 },
               },
+              kitchen_ticket_items: {
+                some: {
+                  kitchen_ticket: {
+                    status: { notIn: ['delivered', 'cancelled'] },
+                  },
+                },
+              },
+              ...(isDefaultSession
+                ? // defaultKds: productos mapeados a esta + productos huérfanos
+                  {
+                    OR: [
+                      { products: { kds_id: dto.kds_id } },
+                      { products: { kds_id: null } },
+                    ],
+                  }
+                : { products: { kds_id: dto.kds_id } }),
             },
-            ...(isDefaultSession
-              ? // defaultKds: productos mapeados a esta + productos huérfanos
-                { OR: [{ products: { kds_id: dto.kds_id } }, { products: { kds_id: null } }] }
-              : { products: { kds_id: dto.kds_id } }),
-          },
-          select: { id: true },
-        });
-
-        const oiIds = candidateOis.map((o) => o.id);
-        if (oiIds.length > 0) {
-          await tx.inventory_transactions.updateMany({
-            where: {
-              order_item_id: { in: oiIds },
-              // Doble guarda: si otra tx estampó estas filas entre el
-              // findMany y el updateMany, el `IS NULL` las preserva.
-              kds_session_id: null,
-            },
-            data: { kds_session_id: session.id },
+            select: { id: true },
           });
-        }
 
-        return session;
-      });
+          const oiIds = candidateOis.map((o) => o.id);
+          if (oiIds.length > 0) {
+            await tx.inventory_transactions.updateMany({
+              where: {
+                order_item_id: { in: oiIds },
+                // Doble guarda de piso: si otra tx estampó estas filas entre
+                // el findMany y el updateMany, el `IS NULL` las preserva.
+                // El `created_at` repite el corte temporal como defensa
+                // contra una carrera con un backfill concurrente.
+                kds_session_id: null,
+                created_at: { gt: lowerBound },
+              },
+              data: { kds_session_id: session.id },
+            });
+          }
+
+          return session;
+        },
+        { timeout: 15_000, maxWait: 5_000 },
+      );
     } catch (e: any) {
       if (e?.code === 'P2002') {
         throw new VendixHttpException(ErrorCodes.KDS_SESSION_ALREADY_OPEN);
       }
       throw e;
     }
+  }
+
+  /**
+   * Inicio del día de negocio en curso para la tienda, en el huso del
+   * `store_settings.settings.general.timezone` (fallback `America/Bogota`).
+   * Mismo corte que usa `resolveLocalDateRange` para analytics.
+   *
+   * Es el piso de backfill cuando una estación NUNCA cerró sesión: si la
+   * cocina arrancó hoy sin turnos previos, reclamamos desde 00:00 local de
+   * la tienda, no desde el inicio de los tiempos. Caso borde explícito y
+   * documentado en `open()`.
+   */
+  private async getBusinessDayStart(
+    tx: Prisma.TransactionClient,
+    storeId: number,
+    now: Date = new Date(),
+  ): Promise<Date> {
+    const store = await tx.stores.findFirst({
+      where: { id: storeId },
+      select: { store_settings: { select: { settings: true } } },
+    });
+    const rawTz =
+      (store?.store_settings?.settings as { general?: { timezone?: string } })
+        ?.general?.timezone ?? 'America/Bogota';
+    const tz = assertSafeTimezone(rawTz);
+
+    const dtf = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const [y, m, d] = dtf.format(now).split('-').map(Number);
+    return zonedWallClockToUtc(y, m, d, 0, 0, 0, 0, tz);
   }
 
   /**
