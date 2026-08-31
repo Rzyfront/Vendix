@@ -532,12 +532,21 @@ export class CustomersService {
           organization_id: store.organization_id,
           user_roles: { some: { roles: { name: 'customer' } } },
           state: { not: user_state_enum.archived },
-          // Coincidencia case-insensitive por nombre (ILIKE en PG).
+          // QUI-734 (auditoria 2026-08-31): igualdad exacta insensible a
+          // mayusculas, NO subcadena. Antes `contains` permitia que
+          // "Rober" matcheara "Roberto", "Ana" matcheara "Mariana",
+          // "Sofi" matcheara "Sofia" — la venta quedaba atada al
+          // cliente equivocado en silencio. Con `equals`, "Rober" ya
+          // no matchea "Roberto": cae a 0 coincidencias y sigue el
+          // camino de creación. El 409 de homonimos reales sigue
+          // disparandose porque `equals` distingue mayusculas pero NO
+          // acentos — "Ana" y "ANA" son la misma fila, "Ana" y
+          // "Anabella" no.
           ...(dto.first_name?.trim()
-            ? { first_name: { contains: dto.first_name.trim(), mode: 'insensitive' as const } }
+            ? { first_name: { equals: dto.first_name.trim(), mode: 'insensitive' as const } }
             : {}),
           ...(dto.last_name?.trim()
-            ? { last_name: { contains: dto.last_name.trim(), mode: 'insensitive' as const } }
+            ? { last_name: { equals: dto.last_name.trim(), mode: 'insensitive' as const } }
             : {}),
         },
         omit: CUSTOMER_PRIVATE_COLUMNS,
