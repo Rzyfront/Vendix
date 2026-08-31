@@ -503,7 +503,7 @@ export class ProductListComponent {
     // QUI-729 vino a matar).
     this.filterValues = { ...PRODUCT_LIST_DEFAULT_FILTER_VALUES };
     this.search.emit('');
-    this.filter.emit({ is_ingredient: false });
+    this.filter.emit({ ...PRODUCT_LIST_DEFAULT_QUERY });
   }
 
   onActionClick(action: string): void {
