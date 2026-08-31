@@ -2160,13 +2160,20 @@ export class SubscriptionFiscalService {
     if (!/^\d+$/.test(dto.customer.tax_id)) {
       throw new BadRequestException('El destinatario requiere tax_id numérico');
     }
-    // customer_document_type va fijo en '31' (NIT) en este riel y la DIAN
-    // exige DV para NIT. El DTO ya lo declara requerido y regex, pero un
-    // cliente que mande el campo `undefined` (por ejemplo un retry de una
-    // plataforma vieja) lo colaría: re-validamos aquí también. Sin DV la
-    // DIAN rechaza por Anexo 19 después de quemar el consecutivo, y ese
-    // número no vuelve.
-    if (!/^\d$/.test(dto.customer.tax_id_dv ?? '')) {
+    // DV exigido SÓLO cuando el documento es NIT (Anexo Técnico 19, DIAN).
+    // Cédula (13), Cédula de Extranjería (22) y Pasaporte (41) NO llevan DV:
+    // el selector del frontend ya las distingue, y exigir DV rompe un caso
+    // real (facturar a persona natural). El default del lado del servicio
+    // sigue siendo '31' porque `document_type` todavía no fluye desde el
+    // DTO V1 (bloqueador en PlatformInvoiceTenantRefDto) — cuando sume el
+    // campo, este bloque ya está listo para leerlo.
+    const customerDocumentType = dto.customer.document_type ?? '31';
+    const isNit =
+      customerDocumentType === '31' || customerDocumentType === 'NIT';
+    if (
+      isNit &&
+      !/^\d$/.test(dto.customer.tax_id_dv ?? '')
+    ) {
       throw new BadRequestException(
         'El destinatario requiere DV (NIT, tipo 31): un solo dígito numérico.',
       );
