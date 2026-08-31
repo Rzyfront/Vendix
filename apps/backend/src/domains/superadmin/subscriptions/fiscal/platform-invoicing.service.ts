@@ -833,7 +833,16 @@ export class PlatformInvoicingService {
         document_type: tenant.document_type ?? undefined,
         person_type: tenant.person_type ?? undefined,
         tax_regime_code: tenant.tax_regime_code ?? undefined,
-        fiscal_responsibilities: tenant.fiscal_responsibilities ?? undefined,
+        // Stores (la mitad del caso del módulo) devuelven `fiscal_responsibilities: []`
+        // explícitamente, NO `null`. `??` no atrapa `[]`, así que el fallback
+        // `['O-13']` del legacy nunca entra y la DIAN rechaza el `cac:PartyTaxScheme`
+        // sin responsabilidades. Forzamos `undefined` cuando el arreglo está vacío
+        // para que el legacy use su propio default.
+        fiscal_responsibilities:
+          Array.isArray(tenant.fiscal_responsibilities) &&
+          tenant.fiscal_responsibilities.length > 0
+            ? tenant.fiscal_responsibilities
+            : undefined,
       },
       items: (dto.items ?? []).map((line: any) => ({
         description: line.description,
