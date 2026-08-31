@@ -405,14 +405,18 @@ export async function seedRestaurantE2E(
   const hashedPassword = await bcrypt.hash('1125634q', 10);
 
   const meseroRole = await client.roles.findFirst({
-    where: { name: 'mesero', organization_id: null, store_id: null },
+    // QUI-730b — renombrado a `waiter`. Si la migración no se aplicó todavía,
+    // este findFirst devuelve null y el seed lanza con la guía de re-correrla.
+    where: { name: 'waiter', organization_id: null, store_id: null },
   });
   const cocinaRole = await client.roles.findFirst({
-    where: { name: 'cocina', organization_id: null, store_id: null },
+    // QUI-730b — renombrado a `kitchen`.
+    where: { name: 'kitchen', organization_id: null, store_id: null },
   });
   if (!meseroRole || !cocinaRole) {
     throw new Error(
-      "seedRestaurantE2E: roles de sistema 'mesero'/'cocina' no encontrados. Corre permissions-roles.seed.ts primero (QUI-727 A.1).",
+      // QUI-730b — mensaje de error actualizado con los nombres nuevos.
+      "seedRestaurantE2E: roles de sistema 'waiter'/'kitchen' no encontrados. Aplica la migración QUI-730b y corre permissions-roles.seed.ts primero.",
     );
   }
 
@@ -529,18 +533,21 @@ export async function seedRestaurantE2E(
   const meseroId = await ensureE2EUser(
     'mesero.e2e.roku',
     'mesero.e2e@roku.test',
+    // QUI-730b — renombrado a `waiter`. El email del usuario seed se conserva
+    // para no romper dependencias de tests E2E que referencian este correo.
     'Mesero',
     'E2E',
     meseroRole.id,
-    'mesero',
+    'waiter',
   );
   const cocinaId = await ensureE2EUser(
     'cocina.e2e.roku',
     'cocina.e2e@roku.test',
+    // QUI-730b — renombrado a `kitchen`.
     'Cocina',
     'E2E',
     cocinaRole.id,
-    'cocina',
+    'kitchen',
   );
 
   return {

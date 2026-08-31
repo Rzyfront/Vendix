@@ -143,7 +143,10 @@ export class RecipesService {
    * `products.service.ts` (`isKitchenRole` / `stripCocinaMoney`).
    */
   private isKitchenRole(): boolean {
-    return RequestContextService.getRoles().includes('cocina');
+    // QUI-730b — ver products.service.ts. ADR-10 strip de dinero depende
+    // de este predicado. Si la migración se aplica sin tocar este archivo,
+    // cocina ve el campo `product.base_price` y `component_product.cost_price`.
+    return RequestContextService.getRoles().includes('kitchen');
   }
 
   private stripCocinaRecipeMoney<T>(recipe: T): T {

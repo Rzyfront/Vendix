@@ -212,7 +212,8 @@ Ambos son no-op en re-runs: si no hay filas fuera de la canónica, el
    SELECT r.name, COUNT(rp.*) AS total_permisos
    FROM roles r
    JOIN role_permissions rp ON rp.role_id = r.id
-   WHERE r.name = 'cocina'  -- o 'mesero'
+   -- QUI-730b — renombrados a `kitchen` y `waiter`.
+   WHERE r.name = 'kitchen'  -- o 'waiter'
    GROUP BY r.name;
 
    -- Filas fuera de la lista canónica (debe devolver 0 filas)
@@ -220,7 +221,7 @@ Ambos son no-op en re-runs: si no hay filas fuera de la canónica, el
    FROM role_permissions rp
    JOIN permissions p ON p.id = rp.permission_id
    JOIN roles r ON r.id = rp.role_id
-   WHERE r.name = 'cocina'  -- o 'mesero'
+   WHERE r.name = 'kitchen'  -- o 'waiter'
      AND p.name NOT IN (
        -- pegar aquí la lista canónica vigente del seed, ej.:
        'store:kitchen_fire:read', 'store:kitchen_fire:update',

@@ -1436,7 +1436,10 @@ export class ProductsService {
    * activa). `mesero` y `STORE_ADMIN` ven lo de siempre.
    */
   private isKitchenRole(): boolean {
-    return RequestContextService.getRoles().includes('cocina');
+    // QUI-730b — literal renombrado a 'kitchen'. Si se aplica la migración
+    // sin tocar este predicado, el strip de dinero deja de aplicarse y
+    // cocina ve cost_price / profit_margin / precios de venta. ADR-10.
+    return RequestContextService.getRoles().includes('kitchen');
   }
 
   /**

@@ -442,7 +442,8 @@ describe('RolesService', () => {
       expect(
         canAssignRole(
           {
-            name: 'mesero',
+            // QUI-730b — renombrado a `waiter`.
+            name: 'waiter',
             is_system_role: true,
             organization_id: null,
             store_id: null,
@@ -452,11 +453,12 @@ describe('RolesService', () => {
       ).toBe(true);
     });
 
-    it('should allow assigning the cocina system role to a store user', () => {
+    it('should allow assigning the kitchen system role to a store user', () => {
       expect(
         canAssignRole(
           {
-            name: 'cocina',
+            // QUI-730b — renombrado a `kitchen`.
+            name: 'kitchen',
             is_system_role: true,
             organization_id: null,
             store_id: null,
