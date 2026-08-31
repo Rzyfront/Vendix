@@ -208,10 +208,29 @@ export class PosTicketService {
       delay(1500),
       switchMap(async () => {
         if (printOptions.printReceipt) {
-          const html = await this.generateTicketHTML(ticketData);
-          // Awaited so the emitted `true` means "the document reached the print
-          // dialog with its images decoded", not "the iframe was created".
-          await this.printHTML(html, printOptions.copies);
+          let printedViaGateway = false;
+          const candidateDocId =
+            ticketData.orderId ??
+            (Number.isInteger(Number(ticketData.id)) && Number(ticketData.id) > 0
+              ? Number(ticketData.id)
+              : null);
+
+          if (candidateDocId) {
+            const result = await this.documentPrint.printViaGateway({
+              formatType: 'pos_sale_ticket',
+              documentId: candidateDocId,
+            });
+            if (result) {
+              printedViaGateway = true;
+            }
+          }
+
+          if (!printedViaGateway) {
+            const html = await this.generateTicketHTML(ticketData);
+            // Awaited so the emitted `true` means "the document reached the print
+            // dialog with its images decoded", not "the iframe was created".
+            await this.printHTML(html, printOptions.copies);
+          }
         }
 
         if (printOptions.openCashDrawer) {
@@ -655,6 +674,23 @@ export class PosTicketService {
     const total = tickets.length;
     if (!total) {
       return { rendered: 0, pages: 0 };
+    }
+
+    if (tickets.length === 1) {
+      const candidateDocId =
+        tickets[0].orderId ??
+        (Number.isInteger(Number(tickets[0].id)) && Number(tickets[0].id) > 0
+          ? Number(tickets[0].id)
+          : null);
+      if (candidateDocId) {
+        const result = await this.documentPrint.printViaGateway({
+          formatType: 'pos_sale_ticket',
+          documentId: candidateDocId,
+        });
+        if (result) {
+          return { rendered: 1, pages: result.pages };
+        }
+      }
     }
 
     // Before the first `currencyService.format()` call, or every amount on every

@@ -87,6 +87,7 @@ export class OrderTicketService {
 
     return {
       id: order.order_number || 'N/A',
+      orderId: order.id,
       date: new Date(order.created_at || Date.now()),
       items,
       subtotal: Number(order.subtotal_amount) || 0,
