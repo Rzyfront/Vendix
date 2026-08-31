@@ -58,6 +58,31 @@
 
         <div class="setting-cell">
           <app-setting-toggle
+            [formControl]="allowAliasSalesControl"
+            label="Venta con nombre o referencia"
+            description="Habilita el tercer modo del wizard: el cajero identifica la venta con un texto libre (ej. «Mesa 5», «Juan del taller») sin registrar un cliente completo"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+          <div class="setting-cell__meta">
+            <app-badge variant="info" size="xsm" badgeStyle="outline">
+              Sin datos fiscales
+            </app-badge>
+            <app-tooltip
+              content="La venta se persiste con customer_id en null y orders.customer_alias poblado (ADR-9). El tiquete de despacho y el recibo de venta muestran el alias como nombre del cliente. No bloquea una factura electrónica posterior (el cliente se pide recién al facturar)."
+              position="top"
+              size="sm"
+              color="default"
+            >
+              <span class="help-chip">
+                <app-icon name="help-circle" size="12"></app-icon>
+                Cuándo aplica
+              </span>
+            </app-tooltip>
+          </div>
+        </div>
+
+        <div class="setting-cell">
+          <app-setting-toggle
             [formControl]="anonymousSalesAsDefaultControl"
             label="Anónimas por Defecto"
             description="El POS abre cada venta como anónima; el cajero elige cliente sólo cuando hace falta"

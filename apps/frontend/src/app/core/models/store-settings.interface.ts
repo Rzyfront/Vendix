@@ -541,6 +541,13 @@ export interface BarcodeScannerSettings {
 
 export interface PosSettings {
   allow_anonymous_sales: boolean;
+  /**
+   * Decisión del usuario 2026-08-31 — habilita la opción «Venta con nombre o
+   * referencia» en el wizard del POS (alias de venta rápida, customer_id
+   * queda en `null` y `orders.customer_alias` poblado por ADR-9). Default
+   * `false` (opt-in) porque no todas las tiendas lo necesitan.
+   */
+  allow_alias_sales?: boolean;
   anonymous_sales_as_default: boolean;
   business_hours: Record<string, BusinessHours>;
   schedule_mode?: 'continuous' | 'custom';

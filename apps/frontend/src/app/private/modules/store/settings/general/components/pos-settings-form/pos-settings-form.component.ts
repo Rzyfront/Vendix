@@ -97,6 +97,9 @@ export class PosSettingsForm implements OnInit {
 
   form: FormGroup = new FormGroup({
     allow_anonymous_sales: new FormControl<boolean | null>(null),
+    // Decisión del usuario 2026-08-31 — habilita «Venta con nombre o
+    // referencia» en el wizard del POS (alias, customer_id=null).
+    allow_alias_sales: new FormControl<boolean | null>(null),
     anonymous_sales_as_default: new FormControl<boolean | null>(null),
     business_hours: new FormControl<Record<string, BusinessHours> | null>(null),
     schedule_mode: new FormControl<'continuous' | 'custom'>('continuous'),
@@ -158,6 +161,10 @@ export class PosSettingsForm implements OnInit {
   // Typed getters for FormControls
   get allowAnonymousSalesControl(): FormControl<boolean> {
     return this.form.get('allow_anonymous_sales') as FormControl<boolean>;
+  }
+
+  get allowAliasSalesControl(): FormControl<boolean> {
+    return this.form.get('allow_alias_sales') as FormControl<boolean>;
   }
 
   get anonymousSalesAsDefaultControl(): FormControl<boolean> {
