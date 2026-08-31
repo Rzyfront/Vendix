@@ -85,6 +85,10 @@ import { HttpClient } from '@angular/common/http';
 import { StoreSettingsFacade } from '../../../../core/store/store-settings/store-settings.facade';
 import { DispatchTicketPrintService } from '../dispatch-ticket/services/dispatch-ticket-print.service';
 import type { DispatchTicketData } from '../dispatch-ticket/models/dispatch-ticket-data.model';
+import {
+  shouldAutoPrintDispatchTicket,
+  type ShouldAutoPrintDispatchTicketContext,
+} from '../../../../shared/services/print/dispatch-ticket-autoprint';
 import { PaymentMethodsCatalogService } from '../../../../shared/services/payment-methods-catalog.service';
 import { OrderPaymentModalComponent } from '../orders/components/order-payment-modal/order-payment-modal.component';
 import type { Order } from '../orders/interfaces/order.interface';
@@ -2509,12 +2513,15 @@ export class PosComponent {
       this.checkoutIntent.set('pickup');
     }
 
-    // CP-DTLP Phase E.2 — encadenar tiquete de despacho (`'explicit'`)
-    // al cierre de venta con envío. Defense-in-depth del
-    // `maybeAutoPrint` interno: corre aún si el modal de confirmación
-    // no abre por guard (draft / modal cerrado) o si el auto con POS
-    // está desactivado.
-    void this.printDispatchTicketIfNeededForOrder(paymentData.order);
+    // CP-DTLP Phase E.2 / QUI-764 — encadenar tiquete de despacho
+    // (`'automatic'`) al cierre de venta POS. La bandera de auto es
+    // `print_dispatch_ticket_auto_with_pos` (origen = POS). El predicado
+    // compartido considera además `print_dispatch_ticket_on_counter`
+    // para imprimir también en mostrador/para-llevar.
+    void this.printDispatchTicketIfNeededForOrder(
+      paymentData.order,
+      'auto_with_pos',
+    );
   }
 
   onOrderConfirmationClosed(): void {
@@ -3449,11 +3456,14 @@ export class PosComponent {
       this.paymentTableId.set(null);
     }
 
-    // CP-DTLP Phase E.2 — encadenar tiquete de despacho (`'explicit'`)
-    // al crear la orden con envío. La guard interna exige `isShippingSale`,
-    // así que `onShippingCompleted` solo imprime cuando el flujo fue de
-    // envío (no para `pickup`/`direct_delivery`).
-    void this.printDispatchTicketIfNeededForOrder(shippingData.order);
+    // CP-DTLP Phase E.2 / QUI-764 — encadenar tiquete de despacho
+    // (`'automatic'`) al crear la orden con envío en postventa. La bandera
+    // de auto es `print_dispatch_ticket_auto_on_postventa` (origen =
+    // postventa), NO la del POS — son dos flags distintos.
+    void this.printDispatchTicketIfNeededForOrder(
+      shippingData.order,
+      'auto_on_postventa',
+    );
   }
 
   private checkEditMode(): void {
@@ -4351,17 +4361,54 @@ export class PosComponent {
    * El `'automatic'` (que además exige `print_dispatch_ticket_auto_with_pos`)
    * vive en `pos-order-confirmation.maybeAutoPrint`.
    */
+  /**
+   * Defense-in-depth para imprimir el tiquete de despacho desde el POS en
+   * los hooks de cierre (`onPaymentCompleted` → venta POS, `onShippingCompleted`
+   * → postventa).
+   *
+   * **QUI-764**: antes esta cadena rechazaba `direct_delivery` con un `return`
+   * HARDCODED (lógica pre-QUI-727), ignorando `print_dispatch_ticket_on_counter`.
+   * Adopta el predicado compartido `shouldAutoPrintDispatchTicket` que ya
+   * entiende el flag del mostrador.
+   *
+   * El parámetro `autoFlagKey` selecciona la llave de auto-impresión del
+   * ORIGEN. Hay dos, no una — los dos callsites tienen semántica distinta:
+   *  - `'auto_with_pos'`     → cierre de venta POS (línea 2517)
+   *  - `'auto_on_postventa'` → cierre de envío en postventa (línea 3456)
+   *
+   * El trigger es `'automatic'` (NO `'explicit'`): esta función corre desde
+   * hooks automáticos. Pasar `'explicit'` saltaría la guarda `trigger ===
+   * 'automatic' && !printDispatchTicketAuto` y el tiquete se imprimiría
+   * aunque el admin haya apagado la auto-impresión — bug peor.
+   *
+   * La deduplicación de la impresión (entre esta cadena y la del modal de
+   * confirmación `pos-order-confirmation.maybeAutoPrint`) vive en
+   * `DispatchTicketPrintService.printDispatchTicket` (singleton) para que
+   * ambos callsites la compartan.
+   */
   private async printDispatchTicketIfNeededForOrder(
     order: any,
+    autoFlagKey: 'auto_with_pos' | 'auto_on_postventa',
   ): Promise<void> {
     if (!order) return;
-    const enabled =
-      this.settingsFacade.receipts()?.print_dispatch_ticket_enabled ?? true;
-    if (!enabled) return;
-    if (order.delivery_type === 'direct_delivery') return;
-    const hasShipping =
-      order.delivery_type === 'home_delivery' || !!order.isShippingSale;
-    if (!hasShipping) return;
+    const receipts = this.settingsFacade.receipts();
+    const enabled = receipts?.print_dispatch_ticket_enabled ?? true;
+    const autoFlag =
+      autoFlagKey === 'auto_with_pos'
+        ? receipts?.print_dispatch_ticket_auto_with_pos ?? false
+        : receipts?.print_dispatch_ticket_auto_on_postventa ?? false;
+    const counterEnabled =
+      receipts?.print_dispatch_ticket_on_counter ?? false;
+
+    const context: ShouldAutoPrintDispatchTicketContext = {
+      printDispatchTicketEnabled: enabled,
+      printDispatchTicketAuto: autoFlag,
+      counterEnabled,
+      deliveryType: order.delivery_type,
+      isShippingSale: (order as any)?.isShippingSale,
+    };
+
+    if (!shouldAutoPrintDispatchTicket('automatic', context)) return;
 
     const items = (order.items || order.order_items || []).map(
       (item: any) => ({
@@ -4409,9 +4456,12 @@ export class PosComponent {
     };
 
     try {
-      await this.dispatchTicketPrint.printDispatchTicket(data, 'explicit');
+      await this.dispatchTicketPrint.printDispatchTicket(data, 'automatic');
     } catch (err) {
-      console.error('[CP-DTLP] Error al imprimir tiquete de despacho:', err);
+      console.error(
+        `[QUI-764] Error al imprimir tiquete de despacho (${autoFlagKey}):`,
+        err,
+      );
     }
   }
 }

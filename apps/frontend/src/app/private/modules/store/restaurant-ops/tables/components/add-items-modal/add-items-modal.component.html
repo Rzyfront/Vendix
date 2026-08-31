@@ -130,6 +130,11 @@
               class="takeaway-toggle"
               [class.is-on]="isTakeaway(row.id)"
               [attr.aria-pressed]="isTakeaway(row.id)"
+              [attr.aria-label]="
+                isTakeaway(row.id)
+                  ? 'Quitar modo para llevar'
+                  : 'Marcar para llevar'
+              "
               [attr.title]="
                 isTakeaway(row.id)
                   ? 'Se empaca para llevar. Toca para volverlo consumo en la mesa.'

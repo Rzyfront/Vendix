@@ -116,6 +116,11 @@
               class="summary-toggle"
               (click)="summaryExpanded.set(!summaryExpanded())"
               [attr.aria-expanded]="summaryExpanded()"
+              [attr.aria-label]="
+                summaryExpanded()
+                  ? 'Ocultar detalle de la cuenta'
+                  : 'Ver detalle de la cuenta'
+              "
             >
               {{ summaryExpanded() ? 'Ocultar detalle de la cuenta' : 'Ver detalle de la cuenta' }}
               <app-icon
