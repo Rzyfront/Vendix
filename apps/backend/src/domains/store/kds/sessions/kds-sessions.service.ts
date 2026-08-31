@@ -165,17 +165,31 @@ export class KdsSessionsService {
    *    en el handler previo ya fallaría con su propio error.
    *
    * Caso especial `table-sessions` (reverso de un ítem disparado): el
-   * caller en `tables/table-sessions.service.ts:891` llama
-   * `cancelTicketInTx` y dentro de la MISMA tx BORRA las
-   * `inventory_transactions` del ítem y crea la reversa de stock con
-   * `quantity_change` positivo pero SIN `order_item_id`. Cuando este
-   * helper corre post-commit vía `emitTicketCancelledEvent`, su
-   * `where: { order_item_id: { not: null } }` no matchea ninguna fila —
-   * la reversa ya no tiene order_item_id. Resultado: 0 estampadas,
-   * sin error. Está limpio POR CONSTRUCCIÓN DEL CALLER, no porque
-   * este helper haga algo especial — documentado para que el próximo
-   * que lea el código entienda que la doble-no-imputación no es un
-   * olvido, es una invariante del flujo de reverso de mesa.
+   * caller en `tables/table-sessions.service.ts:891` (dentro de
+   * `removeItem`) llama `cancelTicketInTx` y, en la MISMA tx, en orden:
+   *  - líneas 893-942: por cada `consumptionTxn` (los originales con
+   *    `order_item_id` y `quantity_change < 0`), crea la reversa de
+   *    stock vía `stockLevelManager.updateStock({ ..., movement_type:
+   *    'return' })` SIN `order_item_id` (la FK `Restrict` sobre el
+   *    `order_items.delete` posterior lo prohíbe).
+   *  - línea 946: `tx.inventory_transactions.deleteMany({ where:
+   *    { order_item_id: orderItemId } })` borra las consumption
+   *    originales. Las reversals (sin `order_item_id`) sobreviven en
+   *    la tabla.
+   *  - línea 974: post-commit, llama `emitTicketCancelledEvent(ticketId)`
+   *    que invoca este imputador.
+   *
+   * Cuando el imputador corre post-commit, su `where: { order_item_id:
+   * { not: null } }` no matchea ninguna fila: las consumption
+   * originales ya NO EXISTEN (el caller las borró), y las reversals
+   * NO TIENEN `order_item_id` por construcción. Resultado: 0
+   * estampadas, sin error. La doble-no-imputación es una INVARIANTE
+   * DEL CALLER, no una garantía del helper — documentado para que el
+   * próximo que lea entienda que si alguien refactoriza
+   * `removeItem` y deja las consumption con `order_item_id`
+   * persistidas, este imputador pasa a estampar la reversión al
+   * turno que la cocinó, lo que YA sería doble conteo de stock
+   * positivo. La invariante la sostiene el caller, no este helper.
    *
    * Devuelve el conteo de filas estampadas (útil para logs y para
    * verificar que la primera acción tuvo efecto).
