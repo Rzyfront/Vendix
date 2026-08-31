@@ -490,6 +490,12 @@ export class PosOrderConfirmationComponent {
     }
     if (d.customer?.name) return d.customer.name;
     if (d.customer?.business_name) return d.customer.business_name;
+    // ADR-9: `customer_alias` es etiqueta de venta rápida (cliente no formal,
+    // sin documento fiscal). Coexiste con `customer_id = null` por CHECK en
+    // DB, así que las ramas de arriba no se dispararon. Va ANTES del
+    // fallback «Consumidor Final» para que el tiquete de despacho diga
+    // el nombre con el que el cliente reclama en el mostrador.
+    if (d.customer_alias) return d.customer_alias;
     return 'Consumidor Final';
   });
   readonly derivedCustomerEmail = computed(() => this.orderData()?.customer_email || this.orderData()?.customer?.email || '');

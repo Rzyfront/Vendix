@@ -309,6 +309,15 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
         state: order.state,
         state_label: order.state,
         notes: order.notes || undefined,
+        // ADR-9 / dec. usuario 2026-08-31 — etiqueta de venta rápida con la
+        // que el cliente reclama en el mostrador. Spread condicional para
+        // no romper el tipo estricto de `StandardPrintDataModel['document']`
+        // (mismo patrón que `pos-sale-ticket.provider.ts:298-299`). NO
+        // fabrica un bloque `customer` falso a partir del alias: el alias
+        // no es un cliente formal, no tiene dirección ni documento.
+        ...(order.customer_alias
+          ? { customer_alias: order.customer_alias }
+          : {}),
       },
       items,
       taxes: [],

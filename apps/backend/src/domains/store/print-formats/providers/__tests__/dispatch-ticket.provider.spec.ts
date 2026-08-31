@@ -113,3 +113,119 @@ describe('DispatchTicketDataProvider (CP-DTLP-20260827 Phase B.4)', () => {
     });
   });
 });
+
+/**
+ * ADR-9 / dec. usuario 2026-08-31 — `customer_alias` debe llegar al
+ * documento del tiquete de despacho en los dos caminos:
+ *  - `pos-order-confirmation.component.ts` (auto-print POS), y
+ *  - `dispatch-ticket.provider.ts` (render backend).
+ *
+ * Tres sondas que el bug del pasado cazaba con un «responde 201»: el HTML
+ * se ve bien formado aunque el alias no aparezca. La verificación tiene
+ * que contar el alias en el modelo devuelto, no quedarse en el status.
+ */
+describe('DispatchTicketDataProvider — customer_alias (ADR-9 / 2026-08-31)', () => {
+  /**
+   * Helper que arma una orden mock con el shape mínimo que
+   * `mapOrderToDispatchTicket` consume. Mantener el mock cerca del test
+   * para que cuando el provider agregue un nuevo campo se note acá.
+   */
+  function makeOrder(overrides: {
+    customer_alias?: string | null;
+    customer?: any | null;
+  }): any {
+    return {
+      id: 1000,
+      order_number: 'ORD-1000',
+      created_at: new Date('2026-08-31T12:00:00Z'),
+      state: 'confirmed',
+      notes: null,
+      customer_alias: overrides.customer_alias ?? null,
+      stores: {
+        name: 'Tienda 10',
+        nit: '900123456',
+        phone: '+57 1 234 5678',
+        email: null,
+        logo_url: null,
+        addresses: [{ address_line1: 'Cra 1', address_line2: null }],
+        organizations: { name: 'Org 10' },
+      },
+      users: overrides.customer ?? null,
+      order_items: [
+        {
+          id: 1,
+          order_id: 1000,
+          product_name: 'Pollo Asado',
+          product_id: 1,
+          product_variant_id: null,
+          quantity: 1,
+          variant_sku: 'POLLO-A',
+          notes: null,
+        },
+      ],
+      dispatch_notes: [],
+    };
+  }
+
+  it('7. orden con SOLO alias (sin cliente) → document.customer_alias presente, customer undefined', async () => {
+    const order = makeOrder({ customer_alias: 'jorge', customer: null });
+    const prisma = {
+      orders: { findFirst: jest.fn().mockResolvedValue(order) },
+    } as any;
+    const p = new DispatchTicketDataProvider(prisma);
+
+    const data = await p.fetchDocumentData(10, 1000);
+
+    // El alias llega al documento (es lo que el compositor pinta en
+    // `sec_doc_info` con data-token="document.customer_alias").
+    expect(data.document.customer_alias).toBe('jorge');
+    // El bloque de cliente formal NO se fabrica a partir del alias
+    // (el alias no tiene dirección ni documento). customer queda undefined.
+    expect(data.customer).toBeUndefined();
+  });
+
+  it('8. orden con cliente real (sin alias) → customer poblado, sin customer_alias', async () => {
+    const order = makeOrder({
+      customer: {
+        id: 42, // el provider gatea el bloque customer por `customer.id`
+        first_name: 'María',
+        last_name: 'García',
+        document_number: '52123456',
+        phone: '+57 300 1234567',
+        email: 'maria@example.com',
+      },
+    });
+    const prisma = {
+      orders: { findFirst: jest.fn().mockResolvedValue(order) },
+    } as any;
+    const p = new DispatchTicketDataProvider(prisma);
+
+    const data = await p.fetchDocumentData(10, 1000);
+
+    // Sin alias en el documento: el spread condicional lo deja fuera.
+    expect(data.document.customer_alias).toBeUndefined();
+    // El bloque de cliente formal sale igual que hoy.
+    expect(data.customer).toBeDefined();
+    expect(data.customer!.name).toBe('María García');
+    expect(data.customer!.tax_id).toBe('52123456');
+  });
+
+  it('9. orden sin alias ni cliente → ni customer ni customer_alias; sin separador huérfano', async () => {
+    const order = makeOrder({ customer: null });
+    const prisma = {
+      orders: { findFirst: jest.fn().mockResolvedValue(order) },
+    } as any;
+    const p = new DispatchTicketDataProvider(prisma);
+
+    const data = await p.fetchDocumentData(10, 1000);
+
+    expect(data.document.customer_alias).toBeUndefined();
+    expect(data.customer).toBeUndefined();
+    // Si el spread hubiera sido siempre-truthy (p. ej. `customer_alias: ''`
+    // en vez de spread condicional), document.customer_alias sería string
+    // vacío y el compositor pintaría un separador/divisor sin texto.
+    // Esa regresión queda cazada: la propiedad tiene que NO existir en el
+    // modelo, no existir como string vacío.
+    expect('customer_alias' in data.document).toBe(false);
+  });
+});
