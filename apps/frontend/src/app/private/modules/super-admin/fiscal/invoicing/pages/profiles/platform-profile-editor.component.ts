@@ -189,14 +189,29 @@ type SectionId =
                 helperText="Único por organización y tipo de operación."
                 size="sm"
               ></app-input>
-              <app-selector
-                label="Tipo de operación"
-                formControlName="operation_type"
-                [options]="operation_options"
-                [disabled]="isEdit()"
-                size="sm"
-                [helpText]="isEdit() ? 'No se cambia después de crear.' : 'Determina qué secciones aplican.'"
-              ></app-selector>
+              <!--
+                La consola de plataforma emite UNA sola operación: factura de
+                venta estándar, la 10. No hay selector porque no hay elección:
+                ofrecer AIU, mandato o consorcio sería ofrecer perfiles que
+                esta superficie nunca va a poder emitir. El control sigue en el
+                formulario —el backend exige operation_type— pero fijo.
+              -->
+              <div class="space-y-1">
+                <label class="text-xs font-medium text-text-secondary">Tipo de operación</label>
+                <div
+                  class="flex items-center gap-2 h-9 px-3 rounded-lg border border-border bg-surface-secondary/50"
+                >
+                  <span class="px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[11px] font-semibold">
+                    10
+                  </span>
+                  <span class="text-xs text-text-primary">
+                    {{ operationTypeLabel() }}
+                  </span>
+                </div>
+                <p class="text-[11px] text-text-secondary">
+                  La plataforma sólo emite factura de venta estándar.
+                </p>
+              </div>
             </div>
           </div>
 
@@ -488,6 +503,14 @@ export class PlatformProfileEditorComponent {
   readonly saving = signal(false);
   readonly loading = signal(false);
 
+  /** Etiqueta legible de la única operación que emite la plataforma. */
+  readonly operationTypeLabel = computed(
+    () =>
+      (PLATFORM_OPERATION_LABELS as Record<string, string>)[
+        this.operationType()
+      ] ?? 'Factura de venta',
+  );
+
   readonly operation_options: SelectorOption[] = (Object.entries(PLATFORM_OPERATION_LABELS) as [string, string][]).map(
     ([value, label]) => ({ value, label }),
   );
@@ -660,7 +683,14 @@ export class PlatformProfileEditorComponent {
   // ─── Form ────────────────────────────────────────────────────────
   readonly form: FormGroup = this.fb.group({
     name: ['', [Validators.required, Validators.maxLength(120)]],
-    operation_type: ['09', Validators.required],
+    operation_type: [
+      // La plataforma sólo emite factura de venta estándar. El default era
+      // '09' (AIU), así que un perfil creado sin tocar nada nacía con una
+      // operación que esta consola no puede emitir y que el creador de
+      // facturas después filtraba de la lista: invisible al minuto de nacer.
+      '10',
+      Validators.required,
+    ],
     general: this.fb.group({ description: [''], internal_note: [''] }),
     aiu: this.fb.group({
       taxable_basis: ['aiu' as AiuTaxableBasis],
@@ -763,8 +793,33 @@ export class PlatformProfileEditorComponent {
   readonly blockers = computed(() => blockingIssues(this.issues()));
   readonly warnings = computed(() => this.issues().filter((i) => !isBlockingIssue(i)));
 
+  /**
+   * Prefijo del CONTRATO que corresponde a cada sección visual.
+   *
+   * El identificador de la sección en pantalla y el nombre del campo que
+   * emite el validador no coinciden en ningún caso salvo `aiu`: la sección
+   * «documento» agrupa issues de `dian.*`, «impuestos» los de `taxes.*`,
+   * «formato» los de `format.*`. Comparar el id visual contra `field` con un
+   * `startsWith` directo devolvía cero para todas las secciones excepto AIU,
+   * así que el contador de errores estaba apagado justo donde importaba.
+   */
+  private static readonly SECTION_ISSUE_PREFIXES: Record<string, string> = {
+    documento: 'dian.',
+    aiu: 'aiu',
+    lineas: 'model_lines',
+    impuestos: 'taxes.',
+    retenciones: 'withholdings',
+    divisa: 'currency.',
+    contabilidad: 'accounting.',
+    formato: 'format.',
+    notas_internas: 'general.',
+  };
+
   sectionErrorCount(section: string): number {
-    return this.issues().filter((i) => i.field.startsWith(section)).length;
+    const prefix =
+      PlatformProfileEditorComponent.SECTION_ISSUE_PREFIXES[section];
+    if (!prefix) return 0;
+    return this.issues().filter((i) => i.field.startsWith(prefix)).length;
   }
 
   // ─── Page metadata ───────────────────────────────────────────────
@@ -1035,8 +1090,48 @@ export class PlatformProfileEditorComponent {
     if (actionId === 'save') this.save();
   }
 
+  /**
+   * Ruta del primer control inválido, en notación de puntos. Recorre grupos y
+   * arreglos porque el formulario del perfil anida nueve secciones y el
+   * campo que bloquea casi nunca está en la raíz.
+   */
+  private firstInvalidControlLabel(): string | null {
+    const walk = (control: AbstractControl, path: string): string | null => {
+      if (control instanceof FormGroup) {
+        for (const [key, child] of Object.entries(control.controls)) {
+          const found = walk(child, path ? `${path}.${key}` : key);
+          if (found) return found;
+        }
+        return null;
+      }
+      if (control instanceof FormArray) {
+        for (let i = 0; i < control.length; i++) {
+          const found = walk(control.at(i), `${path}[${i}]`);
+          if (found) return found;
+        }
+        return null;
+      }
+      return control.invalid ? path : null;
+    };
+    return walk(this.form, '');
+  }
+
   save(): void {
-    if (this.form.invalid) return;
+    if (this.form.invalid) {
+      // Antes era un `return` mudo: el operador pulsaba «Guardar», no pasaba
+      // nada y no había forma de saber por qué. Marcar los controles es lo
+      // que hace aparecer los mensajes de error, y el toast nombra el primero
+      // para que no haya que ir buscándolo por las nueve secciones.
+      this.form.markAllAsTouched();
+      const first = this.firstInvalidControlLabel();
+      this.server_error.set(
+        first
+          ? `Revisa el formulario: ${first} no es válido.`
+          : 'Revisa el formulario: hay campos obligatorios sin completar.',
+      );
+      this.toast.error('No se pudo guardar', 'Hay campos inválidos en el perfil.');
+      return;
+    }
     this.saving.set(true);
     this.server_error.set(null);
 
@@ -1055,7 +1150,11 @@ export class PlatformProfileEditorComponent {
           id === null ? 'Perfil creado' : 'Cambios guardados',
           v.name,
         );
-        this.router.navigate(['../'], { relativeTo: this.route });
+        // Ruta ABSOLUTA: `['../']` relativo resuelve distinto en alta
+        // (`profiles/new` → `profiles`) que en edición (`profiles/7/edit` →
+        // `profiles/7`, que no existe y deja al operador en un 404 después de
+        // haber guardado bien.
+        this.router.navigate(['/super-admin/fiscal/invoicing/profiles']);
       },
       error: (err: any) => {
         this.saving.set(false);

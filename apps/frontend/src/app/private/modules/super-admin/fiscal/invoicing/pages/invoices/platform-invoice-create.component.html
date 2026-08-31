@@ -111,6 +111,8 @@
             [paymentMeansOptions]="paymentMeansOptions"
             [resolutionControl]="resolutionControl"
             [resolutionOptions]="resolutionOptions()"
+            [dueDateRequired]="isCredit()"
+            dueDateHelp="Obligatoria cuando la forma de pago es a crédito."
             resolutionPlaceholder="Selecciona una resolución DIAN activa"
           ></vendix-invoice-section-documento>
         </app-platform-section-wrapper>
@@ -231,7 +233,7 @@
                 </div>
               </div>
 
-              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
                 <div class="sm:col-span-2 space-y-1">
                   <app-input
                     label="Dirección fiscal"
@@ -245,6 +247,14 @@
                     formControlName="external_city"
                     placeholder="Bogotá, Medellín, Cali..."
                   ></app-input>
+                </div>
+                <div class="space-y-1">
+                  <label class="text-xs font-medium text-text-secondary">Departamento</label>
+                  <app-selector
+                    [options]="departmentOptions"
+                    formControlName="external_department_code"
+                    [searchable]="true"
+                  ></app-selector>
                 </div>
               </div>
             </div>
@@ -262,20 +272,151 @@
             context="invoice"
             [rows]="itemControls()"
             [rowPaths]="lineasRowPaths"
-            [rowErrors]="rowErrors"
+            [rowErrors]="lineasRowErrors()"
+            [rowSummaries]="lineasRowSummaries()"
+            [unitCodeOptions]="unitCodeOptions"
+            [availableTaxes]="availableTaxes"
             [isAiu]="false"
             [carriesAiu]="carriesAiu"
-            [aiuComponentOptions]="aiuComponentOptions"
+            [aiuComponentOptions]="[]"
             [toggleAiu]="toggleAiu"
-            emptyStateText="No hay líneas agregadas. Haz clic en «Agregar línea manual» para ingresar los conceptos a facturar."
+            [showProductActions]="false"
+            emptyStateText="No hay líneas agregadas. Usa «Agregar línea manual» para capturarla con impuesto, o «Agregar línea en blanco» para teclearla directo en la rejilla."
             (addCustomItem)="openLineModal()"
+            (addBlankLine)="addBlankLine()"
             (removeLine)="removeLine($event)"
           ></vendix-invoice-section-lineas>
         </app-platform-section-wrapper>
 
-        <!-- 5. Notas y Observaciones -->
+        <!-- 5. Impuestos (agregado por tarifa) -->
         <app-platform-section-wrapper
-          title="5. Notas y términos legales"
+          title="5. Impuestos"
+          icon="percent"
+          [expanded]="sectionExpanded()['impuestos']"
+          (expandedChange)="toggleSection('impuestos', $event)"
+        >
+          <vendix-invoice-section-impuestos
+            context="invoice"
+            [breakdown]="taxBreakdown()"
+            [formatCurrency]="formatCurrencyBound"
+            [availableTaxesCount]="availableTaxes.length"
+          ></vendix-invoice-section-impuestos>
+        </app-platform-section-wrapper>
+
+        <!-- 6. Retenciones (opcional) -->
+        <app-platform-section-wrapper
+          title="6. Retenciones (opcional)"
+          icon="scale"
+          [expanded]="sectionExpanded()['retenciones']"
+          (expandedChange)="toggleSection('retenciones', $event)"
+        >
+          <vendix-invoice-section-retenciones
+            context="invoice"
+            [rows]="withholdingControls()"
+            [rowPaths]="retencionesRowPaths"
+            [conceptOptions]="withholdingConceptOptions()"
+            [roleOptions]="withholdingRoleOptions"
+            [rowErrors]="retencionesRowErrors()"
+            [catalogRateFor]="catalogRateForBound"
+            [rowAmounts]="withholdingAmounts()"
+            [totalWithheld]="totalWithheld()"
+            [formatCurrency]="formatCurrencyBound"
+            emptyStateText="Sin retenciones. Agrégalas sólo si el adquiriente es agente retenedor o si la plataforma se autorretiene."
+            (addWithholding)="addWithholding()"
+            (removeWithholding)="removeWithholding($event)"
+            (conceptChange)="onWithholdingConceptChange($event)"
+          ></vendix-invoice-section-retenciones>
+        </app-platform-section-wrapper>
+
+        <!-- 7. Contabilidad (opcional) -->
+        <app-platform-section-wrapper
+          title="7. Contabilidad (opcional)"
+          icon="book-open"
+          [expanded]="sectionExpanded()['contabilidad']"
+          (expandedChange)="toggleSection('contabilidad', $event)"
+        >
+          <div class="space-y-4">
+            <p class="text-xs text-text-secondary">
+              Si se dejan vacías, el asiento automático usa las cuentas por defecto
+              del mapeo contable de la plataforma. Al indicarlas aquí, el asiento
+              acredita la cuenta de cada línea y debita la contrapartida.
+            </p>
+
+            <div class="max-w-md">
+              <app-account-code-select
+                label="Cuenta de contrapartida (débito)"
+                scope="super-admin/fiscal"
+                [formControl]="counterpartControl"
+                placeholder="Ej. 130505 — Clientes nacionales"
+                helperText="Normalmente Clientes (13) al crédito, o Caja/Bancos (11) si la factura se cobra de contado."
+              ></app-account-code-select>
+            </div>
+
+            @if (itemControls().length === 0) {
+              <p class="text-xs text-text-secondary">
+                Agrega líneas para asignarles cuenta de ingreso.
+              </p>
+            } @else {
+              <div class="space-y-2">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-xs font-semibold text-text-primary">
+                    Cuenta de ingreso por línea (crédito)
+                  </span>
+                  @if (itemControls().length > 1) {
+                    <app-button
+                      type="button"
+                      variant="ghost"
+                      size="xsm"
+                      (clicked)="applyAccountToAllLines()"
+                    >
+                      <app-icon slot="icon" name="copy" [size]="14"></app-icon>
+                      Aplicar la de la primera a todas
+                    </app-button>
+                  }
+                </div>
+
+                @for (row of itemControls(); track row; let i = $index) {
+                  <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+                    <div class="sm:col-span-5 min-w-0">
+                      <p class="text-xs text-text-primary truncate">
+                        {{ i + 1 }}. {{ row.get('description')?.value || 'Línea sin descripción' }}
+                      </p>
+                    </div>
+                    <div class="sm:col-span-7">
+                      <app-account-code-select
+                        scope="super-admin/fiscal"
+                        [formControl]="accountControl(row)"
+                        placeholder="Cuenta por defecto del mapeo"
+                      ></app-account-code-select>
+                    </div>
+                  </div>
+                }
+              </div>
+            }
+          </div>
+        </app-platform-section-wrapper>
+
+        <!-- 8. Divisa extranjera (opcional) -->
+        <app-platform-section-wrapper
+          title="8. Divisa extranjera (opcional)"
+          icon="banknote"
+          [expanded]="sectionExpanded()['divisa']"
+          (expandedChange)="toggleSection('divisa', $event)"
+        >
+          <vendix-invoice-section-divisa
+            context="invoice"
+            [form]="invoiceForm"
+            [paths]="divisaSectionPaths"
+            [currencyOptions]="currencyOptions"
+            [usesForeignCurrency]="usesForeignCurrency()"
+            [foreignCurrencyCode]="rawValue()['foreign_currency_code'] || ''"
+            [formatCurrency]="formatCurrencyBound"
+          ></vendix-invoice-section-divisa>
+        </app-platform-section-wrapper>
+
+        <!-- 9. Notas y Observaciones -->
+        <app-platform-section-wrapper
+          title="9. Notas y términos legales"
           icon="sticky-note"
           [expanded]="sectionExpanded()['notas']"
           (expandedChange)="toggleSection('notas', $event)"
@@ -287,7 +428,7 @@
           ></vendix-invoice-section-notas>
         </app-platform-section-wrapper>
 
-        <!-- 6. Guardar como Perfil -->
+        <!-- 10. Guardar como Perfil -->
         <div class="p-4 rounded-xl border border-border bg-surface-secondary/30 space-y-3">
           <div class="flex items-center gap-2">
             <input
@@ -347,15 +488,38 @@
               <dd class="font-medium text-text-primary">{{ totals().taxableBase | currency }}</dd>
             </div>
 
+            @for (row of taxBreakdown(); track row.key) {
+              <div class="flex items-center justify-between text-text-secondary">
+                <dt>{{ row.name }}{{ row.isInclusive ? ' (incl.)' : '' }}:</dt>
+                <dd class="font-medium text-text-primary">{{ row.amount | currency }}</dd>
+              </div>
+            }
+
             <div class="flex items-center justify-between text-text-secondary">
-              <dt>Total IVA:</dt>
+              <dt>Total impuestos:</dt>
               <dd class="font-medium text-text-primary">{{ totals().totalIva | currency }}</dd>
             </div>
 
             <div class="flex items-center justify-between border-t border-border pt-3 text-sm font-bold text-text-primary">
-              <dt>Total a pagar:</dt>
+              <dt>Total factura:</dt>
               <dd class="text-base text-primary font-extrabold">{{ totals().total | currency }}</dd>
             </div>
+
+            <!--
+              Las retenciones NO restan del total facturado: la DIAN recibe el
+              total del documento y la retención sólo cambia lo que el cliente
+              gira. Por eso el neto va aparte y en gris, nunca en lugar del total.
+            -->
+            @if (totals().totalWithheld > 0) {
+              <div class="flex items-center justify-between text-warning">
+                <dt>Retenciones:</dt>
+                <dd class="font-medium">- {{ totals().totalWithheld | currency }}</dd>
+              </div>
+              <div class="flex items-center justify-between text-text-secondary">
+                <dt>Neto a girar:</dt>
+                <dd class="font-semibold text-text-primary">{{ totals().netPayable | currency }}</dd>
+              </div>
+            }
           </dl>
 
           <div class="pt-2 space-y-2">
@@ -412,7 +576,7 @@
       [required]="true"
     ></app-input>
 
-    <div class="grid grid-cols-2 gap-3">
+    <div class="grid grid-cols-3 gap-3">
       <app-input
         label="Cantidad"
         type="number"
@@ -420,6 +584,15 @@
         (inputChange)="updateNewLine({ quantity: +$event || 1 })"
         [required]="true"
       ></app-input>
+      <div class="space-y-1">
+        <label class="text-xs font-medium text-text-secondary">Unidad de medida</label>
+        <app-selector
+          [options]="unitCodeOptions"
+          [searchable]="true"
+          [ngModel]="newLine().unit_code"
+          (ngModelChange)="updateNewLine({ unit_code: $event || '' })"
+        ></app-selector>
+      </div>
       <app-input
         label="Precio unitario"
         type="number"
@@ -431,11 +604,11 @@
 
     <div class="grid grid-cols-2 gap-3">
       <div class="space-y-1">
-        <label class="text-xs font-medium text-text-secondary">Tarifa de IVA</label>
+        <label class="text-xs font-medium text-text-secondary">Impuesto</label>
         <app-selector
           [options]="taxRateOptions"
-          [ngModel]="newLine().tax_rate.toString()"
-          (ngModelChange)="updateNewLine({ tax_rate: +$event || 0 })"
+          [ngModel]="newLine().tax_rate_id.toString()"
+          (ngModelChange)="updateNewLine({ tax_rate_id: +$event || 0 })"
         ></app-selector>
       </div>
       <app-input
@@ -448,8 +621,8 @@
 
     <div class="p-3 rounded-lg bg-surface-secondary/60 border border-border flex items-center justify-between">
       <div>
-        <p class="text-xs font-semibold text-text-primary">IVA incluido en el precio</p>
-        <p class="text-[11px] text-text-secondary">El precio ingresado ya contiene el valor del IVA.</p>
+        <p class="text-xs font-semibold text-text-primary">Impuesto incluido en el precio</p>
+        <p class="text-[11px] text-text-secondary">El precio ingresado ya contiene el impuesto; la base se despeja al calcular.</p>
       </div>
       <input
         type="checkbox"

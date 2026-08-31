@@ -162,6 +162,20 @@ interface SearchResponse {
                   <app-icon name="loader-2" [size]="16" class="animate-spin text-primary" />
                   Buscando clientes...
                 </div>
+              } @else if (searchError(); as err) {
+                <div class="p-4 space-y-2">
+                  <div class="flex items-start gap-2 text-xs text-danger">
+                    <app-icon name="alert-triangle" [size]="16" class="shrink-0 mt-0.5" />
+                    <span>{{ err }}</span>
+                  </div>
+                  <button
+                    type="button"
+                    class="text-xs font-semibold text-primary hover:underline"
+                    (click)="triggerSearch()"
+                  >
+                    Reintentar
+                  </button>
+                </div>
               } @else if (results().length === 0) {
                 <div class="p-4 text-center text-xs text-text-secondary">
                   @if (searchQuery().trim().length > 0) {
@@ -227,6 +241,8 @@ export class TenantPickerComponent implements OnInit {
   readonly selectedKind = signal<string>('');
   readonly results = signal<PlatformAcquirer[]>([]);
   readonly loading = signal<boolean>(false);
+  /** Motivo por el que la última búsqueda falló. Vacío mientras vaya bien. */
+  readonly searchError = signal<string>('');
   readonly isOpen = signal<boolean>(false);
   readonly selectedTenant = signal<PlatformAcquirer | null>(null);
 
@@ -245,7 +261,10 @@ export class TenantPickerComponent implements OnInit {
       .pipe(
         debounceTime(250),
         distinctUntilChanged((prev, curr) => prev.q === curr.q && prev.kind === curr.kind),
-        tap(() => this.loading.set(true)),
+        tap(() => {
+          this.loading.set(true);
+          this.searchError.set('');
+        }),
         switchMap(({ q, kind }) => {
           let params = new HttpParams();
           if (q) params = params.set('q', q);
@@ -256,19 +275,30 @@ export class TenantPickerComponent implements OnInit {
               { params },
             )
             .pipe(
-              catchError(() =>
-                of({
-                  success: false,
-                  data: { data: [] },
-                }),
-              ),
+              // Un fallo del buscador NO puede disfrazarse de «cero
+              // resultados»: durante meses el endpoint devolvió 500 por una
+              // relación mal nombrada en Prisma y la pantalla decía «No hay
+              // registros disponibles», que es exactamente lo que se ve
+              // cuando la búsqueda funciona y no hay coincidencias. El
+              // operador no tenía forma de distinguir un catálogo vacío de un
+              // backend caído. El error se guarda y se pinta.
+              catchError((err: unknown) => {
+                this.searchError.set(this.describeSearchError(err));
+                return of({ success: false, data: { data: [] } } as SearchResponse);
+              }),
             );
         }),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((res) => {
         this.loading.set(false);
-        const rows = res?.data?.data ?? [];
+        const payload: any = res?.data;
+        // El sobre del backend anida `data.data`, pero algunos handlers
+        // devuelven el arreglo directo. Se aceptan las dos formas antes que
+        // mostrar vacío por una capa de más o de menos.
+        const rows: PlatformAcquirer[] = Array.isArray(payload)
+          ? payload
+          : (payload?.data ?? []);
         this.results.set(rows);
       });
 
@@ -315,7 +345,26 @@ export class TenantPickerComponent implements OnInit {
     this.triggerSearch();
   }
 
-  private triggerSearch(): void {
+  /**
+   * Motivo legible del fallo. Se prefiere el mensaje del backend sobre uno
+   * inventado: es el que nombra el error real (`INVOICING_*`, validación de
+   * Prisma) y el que sirve para reportarlo.
+   */
+  private describeSearchError(err: unknown): string {
+    const e = err as any;
+    const backend = e?.error?.message ?? e?.error?.error?.message;
+    const detail = Array.isArray(backend) ? backend.join(' · ') : backend;
+    if (detail) return `No se pudo buscar clientes: ${detail}`;
+    if (e?.status === 0) {
+      return 'No se pudo buscar clientes: el servidor no respondió.';
+    }
+    if (e?.status) {
+      return `No se pudo buscar clientes (HTTP ${e.status}).`;
+    }
+    return 'No se pudo buscar clientes.';
+  }
+
+  triggerSearch(): void {
     this.searchSubject$.next({
       q: this.searchQuery().trim(),
       kind: this.selectedKind(),

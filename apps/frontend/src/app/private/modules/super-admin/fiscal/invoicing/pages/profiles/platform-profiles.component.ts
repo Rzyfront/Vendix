@@ -354,7 +354,11 @@ export class PlatformProfilesComponent {
     {
       label: 'Editar',
       icon: 'pencil',
-      action: (p: PlatformInvoiceProfile) => this.router.navigate(['profiles', p.id, 'edit']),
+      action: (p: PlatformInvoiceProfile) => this.router.navigate([
+        '/super-admin/fiscal/invoicing/profiles',
+        p.id,
+        'edit',
+      ]),
     },
     {
       label: 'Clonar',
@@ -449,7 +453,11 @@ export class PlatformProfilesComponent {
       next: (cloned) => {
         this.toast.success('Perfil clonado', name);
         this.store.loadProfiles(true);
-        this.router.navigate(['profiles', (cloned as any).id, 'edit']);
+        this.router.navigate([
+          '/super-admin/fiscal/invoicing/profiles',
+          (cloned as any).id,
+          'edit',
+        ]);
       },
       error: (err: any) => {
         this.toast.error(`${err?.error_code ?? 'ERR'}: ${err?.message ?? 'Error al clonar'}`, '');

@@ -188,20 +188,22 @@ export interface LineasRowErrors {
             </div>
 
             <div class="grid grid-cols-12 gap-2 items-center">
-              <div class="col-span-12 md:col-span-5">
-                <button
-                  type="button"
-                  class="w-full flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-md border border-border hover:border-primary-600 transition-colors text-left"
-                  (click)="openProductPicker.emit(row)"
-                  title="Elegir producto para esta línea"
-                  aria-label="Elegir producto para esta línea"
-                >
-                  <app-icon name="package" [size]="14" />
-                  <span class="flex-1 min-w-0 truncate">
-                    {{ productLabel(row) }}
-                  </span>
-                </button>
-              </div>
+              @if (showProductActions()) {
+                <div class="col-span-12 md:col-span-5">
+                  <button
+                    type="button"
+                    class="w-full flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-md border border-border hover:border-primary-600 transition-colors text-left"
+                    (click)="openProductPicker.emit(row)"
+                    title="Elegir producto para esta línea"
+                    aria-label="Elegir producto para esta línea"
+                  >
+                    <app-icon name="package" [size]="14" />
+                    <span class="flex-1 min-w-0 truncate">
+                      {{ productLabel(row) }}
+                    </span>
+                  </button>
+                </div>
+              }
 
               @if (isAiu()) {
                 <div class="col-span-8 md:col-span-5 flex items-center gap-2">
@@ -247,15 +249,17 @@ export interface LineasRowErrors {
               }
 
               <div class="col-span-4 md:col-span-2 flex justify-end gap-1">
-                <button
-                  type="button"
-                  (click)="openAdvancedItem.emit(row)"
-                  class="text-[var(--color-text-secondary)] hover:text-primary transition-colors p-1"
-                  title="Configuración avanzada de la línea"
-                  aria-label="Configuración avanzada de la línea"
-                >
-                  <app-icon name="sliders-horizontal" [size]="16" />
-                </button>
+                @if (showProductActions()) {
+                  <button
+                    type="button"
+                    (click)="openAdvancedItem.emit(row)"
+                    class="text-[var(--color-text-secondary)] hover:text-primary transition-colors p-1"
+                    title="Configuración avanzada de la línea"
+                    aria-label="Configuración avanzada de la línea"
+                  >
+                    <app-icon name="sliders-horizontal" [size]="16" />
+                  </button>
+                }
                 <app-button
                   variant="outline-danger"
                   size="sm"
@@ -402,17 +406,23 @@ export interface LineasRowErrors {
           TRES caminos a una línea, no uno — el comerciante pidió poder tanto
           buscar en su inventario como crear un producto personalizado; la
           línea en blanco queda para quien sólo quiere teclear.
+
+          El primero se oculta cuando la superficie no tiene inventario detrás
+          (showProductActions): un botón «Buscar en inventario» que no puede
+          buscar nada es peor que no tenerlo.
         -->
-        <app-button
-          variant="outline"
-          size="sm"
-          type="button"
-          (clicked)="addFromPicker.emit()"
-          [disabled]="rows().length >= maxLines()"
-        >
-          <app-icon slot="icon" name="search" [size]="14" />
-          Buscar en inventario
-        </app-button>
+        @if (showProductActions()) {
+          <app-button
+            variant="outline"
+            size="sm"
+            type="button"
+            (clicked)="addFromPicker.emit()"
+            [disabled]="rows().length >= maxLines()"
+          >
+            <app-icon slot="icon" name="search" [size]="14" />
+            Buscar en inventario
+          </app-button>
+        }
         <app-button
           variant="outline"
           size="sm"
@@ -481,6 +491,17 @@ export class InvoiceSectionLineasComponent {
 
   /** Sólo se consume en contexto `invoice`. */
   readonly availableTaxes = input<TaxOption[]>([]);
+
+  /**
+   * Si la superficie tiene un INVENTARIO detrás del que elegir la línea.
+   *
+   * `true` por defecto —el riel de tienda, que nació con esto— y `false` en la
+   * consola de plataforma: allí no hay productos, así que el botón «Buscar en
+   * inventario», el disparador de producto por fila y la configuración
+   * avanzada de la línea no tienen a dónde llevar. Se ocultan en vez de
+   * quedarse pintados sin manejador, que es como estaban.
+   */
+  readonly showProductActions = input<boolean>(true);
 
   readonly maxLines = input<number>(100);
   readonly emptyStateText = input.required<string>();
