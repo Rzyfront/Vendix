@@ -1063,23 +1063,6 @@ export class PosCheckoutShellComponent {
     }
   }
 
-  /**
-   * QUI-739 (B.2) — handler del "Cambiar tipo de servicio" del paso Consumo.
-   * DIFERENTE del "Anterior"/"← Atrás" del footer: éste BORRA a propósito la
-   * elección de fulfillment + la mesa (vía `resetFulfillment()` del child)
-   * antes de volver al paso "Tipo". El rótulo del botón ("Cambiar tipo de
-   * servicio") anuncia el reset antes de tocarlo; el footer conserva la
-   * semántica QUI-482 (preserva estado). Dos controles, dos comportamientos.
-   *
-   * `prevStep()` es un no-op cuando Consumo es el paso 0 (el caso normal:
-   * Consumo abre el stepper), pero se mantiene por simetría con la
-   * navegación y porque la matriz de sub-pasos puede recolocar Consumo.
-   */
-  onConsumoBack(): void {
-    this.consumoStep()?.resetFulfillment();
-    this.prevStep();
-  }
-
   /** Navigate by step key; no-op when the key is not part of the current flow. */
   private goToStepKey(key: string): void {
     const index = this.stepKeys().indexOf(key);

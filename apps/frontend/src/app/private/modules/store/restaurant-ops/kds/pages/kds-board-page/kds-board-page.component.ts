@@ -988,6 +988,53 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
       .subscribe({ error: () => {} });
   }
 
+  /**
+   * El control "Cambiar estación" se habilita solo con 2+ estaciones
+   * activas Y sin turno abierto en esta. La señal vive aquí (no en el
+   * servicio) porque es composición de dos hechos públicos.
+   */
+  readonly canChangeStation = computed<boolean>(
+    () =>
+      this.stationsService.needsStationChoice() &&
+      this.stationsService.openSession() == null,
+  );
+  /**
+   * Con 2+ estaciones pero turno abierto, el control sigue visible pero
+   * deshabilitado y muestra el motivo. El cierre de turno es un acto
+   * propio del operador porque de esa sesión cuelga el consumo firmado
+   * del fire con su costo — el control de cambio de estación NUNCA cierra
+   * el turno por su cuenta.
+   */
+  readonly changeBlockedReason = computed<string | null>(() => {
+    if (
+      this.stationsService.needsStationChoice() &&
+      this.stationsService.openSession() != null
+    ) {
+      return 'Cierra el turno para cambiar de estación';
+    }
+    return null;
+  });
+
+  /**
+   * QUI-739 — volver al selector de estación. Resetea `selectedStationId` a
+   * null en el servicio para que el `@if (needsStationChoice() &&
+   * selectedStationId() === null)` del template vuelva a cumplirse y el
+   * picker reaparezca.
+   *
+   * Solo se invoca cuando el botón está habilitado, o sea con turno
+   * cerrado. No cierra el turno (no hay turno abierto en este camino) y
+   * no toca el servidor más allá del reset.
+   *
+   * Restricción sobre el SSE: el stream es de tienda (no de estación),
+   * así que la suscripción NO se desmonta al pasar por null. `visibleTickets`
+   * se re-evalúa cuando `selectedStationId` cambia y filtra por la nueva
+   * estación al elegirla. Sin estación seleccionada se renderiza el
+   * picker y no hay columnas de tickets en pantalla.
+   */
+  onChangeStation(): void {
+    this.stationsService.clearStation();
+  }
+
   cancelOpenSession(): void {
     this.sessionGateOpen.set(false);
     this.sessionGatePending.set(null);

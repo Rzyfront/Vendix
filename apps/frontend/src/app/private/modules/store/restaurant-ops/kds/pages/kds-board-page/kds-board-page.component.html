@@ -128,9 +128,12 @@
     [session]="stationsService.openSession()"
     [station]="stationsService.selectedStation()"
     [canExitFullscreen]="isFullscreen()"
+    [canChangeStation]="canChangeStation()"
+    [changeBlockedReason]="changeBlockedReason()"
     (closeClicked)="onHeaderAction('close-session')"
     (detailClicked)="openSessionSummary()"
     (exitFullscreenClicked)="exitFullscreen()"
+    (changeStationClicked)="onChangeStation()"
   />
 
   @if (lastError()) {

@@ -56,6 +56,27 @@ export class KdsStationsService {
     return id == null ? null : (this.stations().find((s) => s.id === id) ?? null);
   });
 
+  // ─── station switching (QUI-739) ──────────────────────────────────────────
+  /**
+   * Devuelve la elección de estación a null y limpia la sesión en memoria.
+   *
+   * No cierra el turno de la estación anterior — el turno es un registro del
+   * servidor por estación (`GET /store/kds-sessions/open/:kdsId`) y de él
+   * cuelga el consumo firmado del fire con su costo. Si lo cerráramos al
+   * cambiar de vista destruiríamos datos reales de operación. El turno abierto
+   * queda intacto en el servidor y `refreshOpenSession(oldId)` lo resuelve de
+   * nuevo si el usuario vuelve a la estación original.
+   *
+   * El stream SSE es de tienda, no de estación (ver `KdsSseService`), así
+   * que la suscripción NO se desmonta al pasar por null: los tickets del SSE
+   * siguen llegando y `visibleTickets` los filtra por la estación actual
+   * cuando el usuario elige una nueva.
+   */
+  clearStation(): void {
+    this.selectedStationId.set(null);
+    this.openSession.set(null);
+  }
+
   /** ¿Se puede gestionar un ticket? Solo con turno abierto en esta estación. */
   readonly canManageTickets = computed(() => this.openSession() != null);
 

@@ -48,6 +48,34 @@ import type { KdsSession, KdsStation } from '../../interfaces';
 
         <span class="kds-bar__spacer"></span>
 
+        <!--
+          QUI-739 — volver al selector de estación. Solo se renderiza cuando
+          hay 2+ estaciones activas. Con turno abierto el botón está DESHABILITADO
+          (no cerrado por nosotros) y muestra el motivo: el cierre de turno es
+          un acto propio del operador, porque de esa sesión cuelga el consumo
+          firmado del fire. Sin turno abierto el botón se habilita.
+        -->
+        @if (canChangeStation()) {
+          <button
+            type="button"
+            class="kds-bar__btn"
+            (click)="changeStationClicked.emit()"
+          >
+            <app-icon name="repeat" [size]="12" />
+            Cambiar estación
+          </button>
+        } @else if (changeBlockedReason()) {
+          <span
+            class="kds-bar__btn kds-bar__btn--disabled"
+            role="note"
+            [attr.aria-label]="changeBlockedReason()"
+          >
+            <app-icon name="repeat" [size]="12" />
+            Cambiar estación
+            <span class="kds-bar__btn-hint">{{ changeBlockedReason() }}</span>
+          </span>
+        }
+
         <button type="button" class="kds-bar__btn" (click)="detailClicked.emit()">
           <app-icon name="receipt" [size]="12" />
           Ver turno
@@ -94,6 +122,29 @@ import type { KdsSession, KdsStation } from '../../interfaces';
           no habría ningún control visible para volver, y eso es dejar al operador
           encerrado.
         -->
+        @if (canChangeStation()) {
+          <span class="kds-bar__spacer"></span>
+          <button
+            type="button"
+            class="kds-bar__btn"
+            (click)="changeStationClicked.emit()"
+          >
+            <app-icon name="repeat" [size]="12" />
+            Cambiar estación
+          </button>
+        } @else if (changeBlockedReason()) {
+          <span class="kds-bar__spacer"></span>
+          <span
+            class="kds-bar__btn kds-bar__btn--disabled"
+            role="note"
+            [attr.aria-label]="changeBlockedReason()"
+          >
+            <app-icon name="repeat" [size]="12" />
+            Cambiar estación
+            <span class="kds-bar__btn-hint">{{ changeBlockedReason() }}</span>
+          </span>
+        }
+
         @if (canExitFullscreen()) {
           <span class="kds-bar__spacer"></span>
           <button
@@ -184,6 +235,23 @@ import type { KdsSession, KdsStation } from '../../interfaces';
         color: var(--color-error, #ef4444);
       }
 
+      /*
+       * QUI-739 — variante deshabilitada del control de cambio de estación.
+       * Mantiene el icono y el rótulo pero baja la opacidad para que el
+       * operador vea QUE existe un control ahí, sin que pueda dispararlo.
+       * El hint a la derecha explica por qué.
+       */
+      .kds-bar__btn--disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+
+      .kds-bar__btn-hint {
+        margin-left: 0.4rem;
+        font-weight: 500;
+        opacity: 0.85;
+      }
+
       /* Solo icono: es un control de VISTA, no una acción del turno, y en una
          pantalla de cocina compite por el mismo espacio que los tickets. Cuadrado
          con el mismo lado que el alto de la fila, para que no quede ni mas bajo ni
@@ -204,10 +272,33 @@ export class KdsSessionStatusBarComponent {
    * dibuja, así que esta barra pasa a ser el único sitio desde donde volver.
    */
   readonly canExitFullscreen = input(false);
+  /**
+   * ¿Hay más de una estación activa y NO hay turno abierto? Mientras es
+   * false con `changeBlockedReason` también false, el botón no se
+   * muestra: con una sola estación activa, el servicio la autoselecciona
+   * y no hay adónde ir. Gate combinado
+   * `needsStationChoice() && openSession() == null` desde el padre.
+   */
+  readonly canChangeStation = input(false);
+  /**
+   * Mensaje a mostrar junto al control deshabilitado cuando el cambio
+   * está bloqueado por un turno abierto. `null` deshabilita el mensaje.
+   * El padre pasa `null` cuando no hay turno, y la cadena "Cierra el
+   * turno para cambiar de estación" cuando SÍ hay turno. Así el control
+   * es siempre visible cuando hay 2+ estaciones activas (con turno o
+   * sin turno), pero su estado y el motivo van juntos.
+   */
+  readonly changeBlockedReason = input<string | null>(null);
 
   readonly closeClicked = output<void>();
   readonly detailClicked = output<void>();
   readonly exitFullscreenClicked = output<void>();
+  /**
+   * QUI-739 — el operador pide volver al selector de estación. No cierra
+   * el turno abierto: solo resetea `selectedStationId` a null para que la
+   * condición del selector se vuelva a cumplir.
+   */
+  readonly changeStationClicked = output<void>();
 
   operatorName(): string {
     const u = this.session()?.opened_by_user;
