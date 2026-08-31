@@ -149,6 +149,53 @@ export class PlatformInvoicingService {
           `No se encontro el destinatario ${args.dto.customer.kind}:${args.dto.customer.tenant_id} en la plataforma.`,
         );
       }
+
+      // El formulario puede completar o corregir la ficha del tenant sin
+      // tener que editarla primero (caso típico: tienda sin NIT/DV cargado
+      // en la base). Sólo pisa lo que viene con valor: `undefined`
+      // significa «no lo toques», no «bórralo». Una cadena vacía `''` también
+      // se trata como ausente para no destruir accidentalmente un valor
+      // del tenant cuando el operador borra un campo del form.
+      //
+      // Esto NO toca a `kind === 'external'` (el bloque anterior construye
+      // el tenant desde cero con los datos del form) ni a la validación de
+      // `customer_tax_id + customer_verification_digit` que hace
+      // `mapTenantToCustomerFields` después del `else` — esa validación
+      // ahora ve el NIT/DV efectivo (form + tenant), no sólo el del tenant.
+      const o = args.dto.customer;
+      const pick = <T>(v: T | undefined, fallback: T): T =>
+        v === undefined ? fallback : v;
+      const trimmed = (v: unknown): string | undefined => {
+        if (typeof v !== 'string') return undefined;
+        const t = v.trim();
+        return t === '' ? undefined : t;
+      };
+      tenant = {
+        ...tenant,
+        legal_name: pick(trimmed(o.legal_name), tenant.legal_name),
+        tax_id: pick(trimmed(o.tax_id), tenant.tax_id),
+        tax_id_dv: pick(trimmed(o.tax_id_dv), tenant.tax_id_dv),
+        person_type: pick(o.person_type, tenant.person_type),
+        tax_regime_code: pick(trimmed(o.tax_regime_code), tenant.tax_regime_code),
+        email: pick(trimmed(o.email), tenant.email),
+        phone: pick(trimmed(o.phone), tenant.phone),
+        address: o.address
+          ? {
+              line: pick(
+                trimmed(o.address.line),
+                tenant.address?.line ?? null,
+              ),
+              city: pick(
+                trimmed(o.address.city),
+                tenant.address?.city ?? null,
+              ),
+              department_code: pick(
+                trimmed(o.address.department_code),
+                tenant.address?.department_code ?? null,
+              ),
+            }
+          : tenant.address,
+      };
     }
 
     if (args.dto.profile_id) {
