@@ -730,6 +730,25 @@ export class PlatformInvoiceTenantRefDto {
   @MaxLength(1)
   tax_id_dv?: string;
 
+  /**
+   * Código DIAN del tipo de documento del destinatario (NO etiqueta):
+   *   '31' = NIT, '13' = Cédula, '22' = Cédula de extranjería,
+   *   '41' = Pasaporte, etc.
+   *
+   * El frontend normaliza etiqueta→código antes de mandar; el legacy emite
+   * el valor tal cual al XML. Hasta hoy no estaba declarado acá y el pipe
+   * (`whitelist + forbidNonWhitelisted` en main.ts) rechazaba cualquier
+   * factura a cliente externo con un 400 invisible. Sin este campo, ni la
+   * rama externa (que manda '31') ni el override del operador en la rama
+   * tenant pueden fijar el tipo de documento — se emite siempre con el de
+   * la ficha.
+   */
+  @IsOptional()
+  @TrimString()
+  @IsString()
+  @MaxLength(10)
+  document_type?: string;
+
   @IsOptional()
   @IsIn(['1', '2'])
   person_type?: '1' | '2';

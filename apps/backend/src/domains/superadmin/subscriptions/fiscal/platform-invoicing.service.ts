@@ -125,7 +125,11 @@ export class PlatformInvoicingService {
         legal_name: args.dto.customer.legal_name,
         tax_id: args.dto.customer.tax_id,
         tax_id_dv: args.dto.customer.tax_id_dv ?? '0',
-        document_type: args.dto.customer.document_type ?? 'NIT',
+        // Default '31' (NIT, código DIAN) — NO 'NIT' (etiqueta). El XML exige
+// el código; una etiqueta donde va código es rechazo silencioso del
+// provider. Si el operador eligió CC/CE/Pasaporte en el form, ese valor
+// ya viaja en `args.dto.customer.document_type` y pisa el default.
+document_type: args.dto.customer.document_type ?? '31',
         person_type: args.dto.customer.person_type ?? '2',
         tax_regime_code: args.dto.customer.tax_regime_code ?? '49',
         fiscal_responsibilities: args.dto.customer.fiscal_responsibilities ?? ['R-99-PN'],
@@ -175,6 +179,13 @@ export class PlatformInvoicingService {
         legal_name: pick(trimmed(o.legal_name), tenant.legal_name),
         tax_id: pick(trimmed(o.tax_id), tenant.tax_id),
         tax_id_dv: pick(trimmed(o.tax_id_dv), tenant.tax_id_dv),
+        // `document_type` no estaba en `PlatformInvoiceTenantRefDto` cuando se
+        // escribió este override; el frontend externo manda '31' (NIT) pero
+        // el pipe global lo rechaza con 400 hasta que frank agregue el campo
+        // al DTO. El override se deja escrito: cuando el DTO lo acepte, este
+        // `pick` ya pisa con el valor del form; mientras tanto, `undefined`
+        // cae a `tenant.document_type` (la ficha del store/org).
+        document_type: pick(trimmed(o.document_type), tenant.document_type),
         person_type: pick(o.person_type, tenant.person_type),
         tax_regime_code: pick(trimmed(o.tax_regime_code), tenant.tax_regime_code),
         email: pick(trimmed(o.email), tenant.email),
