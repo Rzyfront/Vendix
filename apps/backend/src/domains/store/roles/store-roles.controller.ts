@@ -50,6 +50,8 @@ export class StoreRolesController {
   }
 
   @Get()
+  @UseGuards(PermissionsGuard)
+  @Permissions('store:users:read')
   @ApiOperation({ summary: 'List all roles (org + system)' })
   @ApiResponse({ status: 200, description: 'Roles retrieved successfully' })
   async findAll() {
@@ -69,6 +71,8 @@ export class StoreRolesController {
   }
 
   @Get('stats')
+  @UseGuards(PermissionsGuard)
+  @Permissions('store:users:read')
   @ApiOperation({ summary: 'Dashboard stats for roles' })
   @ApiResponse({ status: 200, description: 'Stats retrieved successfully' })
   async getStats() {
@@ -88,6 +92,8 @@ export class StoreRolesController {
   }
 
   @Get('permissions/available')
+  @UseGuards(PermissionsGuard)
+  @Permissions('store:users:read')
   @ApiOperation({ summary: 'List available store:* permissions' })
   @ApiResponse({
     status: 200,
@@ -110,6 +116,8 @@ export class StoreRolesController {
   }
 
   @Get(':id')
+  @UseGuards(PermissionsGuard)
+  @Permissions('store:users:read')
   @ApiOperation({ summary: 'Get a role by ID' })
   @ApiResponse({ status: 200, description: 'Role found' })
   @ApiResponse({ status: 404, description: 'Role not found' })
@@ -127,6 +135,8 @@ export class StoreRolesController {
   }
 
   @Get(':id/permissions')
+  @UseGuards(PermissionsGuard)
+  @Permissions('store:users:read')
   @ApiOperation({ summary: 'Get permission IDs of a role' })
   @ApiResponse({
     status: 200,
