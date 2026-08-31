@@ -34,11 +34,16 @@ export class OrderPrintService {
   private readonly documentPrint = inject(DocumentPrintService);
 
   async printOrder(order: Order): Promise<void> {
-    await this.documentPrint.print({
-      document: 'sales_order',
-      body: this.generateOrderBody(order),
+    await this.documentPrint.printViaGateway({
+      formatType: 'sales_order_invoice',
+      documentId: order.id,
       title: `Orden de Venta #${order.order_number}`,
-      styles: ORDER_PRINT_STYLES,
+      fallbackRequest: {
+        document: 'sales_order',
+        body: this.generateOrderBody(order),
+        title: `Orden de Venta #${order.order_number}`,
+        styles: ORDER_PRINT_STYLES,
+      },
     });
   }
 

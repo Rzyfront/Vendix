@@ -848,7 +848,8 @@ private authFacade = inject(AuthFacade);
 
     // Create TicketData from orderData
     const ticketData: any = {
-      id: this.derivedOrderNumber(),
+      orderId: this.orderId,
+      id: String(this.orderId || this.derivedOrderNumber() || 'N/A'),
       date: new Date(this.orderData().created_at || new Date()),
       items: this.derivedOrderItems().map((item: any) => ({
         id: item.id || item.name,

@@ -33,6 +33,7 @@ export interface TicketItem {
 
 export interface TicketData {
   id: string;
+  orderId?: number;
   date: Date;
   items: TicketItem[];
   subtotal: number;
