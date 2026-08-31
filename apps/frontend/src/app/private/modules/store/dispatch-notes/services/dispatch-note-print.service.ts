@@ -35,11 +35,16 @@ export class DispatchNotePrintService {
   private readonly documentPrint = inject(DocumentPrintService);
 
   async printDispatchNote(dispatch_note: DispatchNote): Promise<void> {
-    await this.documentPrint.print({
-      document: 'dispatch_note',
-      body: this.generateDispatchNoteBody(dispatch_note),
+    await this.documentPrint.printViaGateway({
+      formatType: 'dispatch_note',
+      documentId: dispatch_note.id,
       title: `Remision ${dispatch_note.dispatch_number}`,
-      styles: DISPATCH_NOTE_PRINT_STYLES,
+      fallbackRequest: {
+        document: 'dispatch_note',
+        body: this.generateDispatchNoteBody(dispatch_note),
+        title: `Remision ${dispatch_note.dispatch_number}`,
+        styles: DISPATCH_NOTE_PRINT_STYLES,
+      },
     });
   }
 
