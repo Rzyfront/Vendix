@@ -2399,7 +2399,7 @@ export class SubscriptionFiscalService {
       //    documenta esto en `prisma_transaction_returns_committed_handle`.
       const result = await this.prisma.$transaction(async (tx) => {
         // 1.a) Asignar número con el lock consultivo.
-        const allocated = await this.allocateFiscalNumber(tx, settings);
+        const allocated = await this.allocateFiscalNumber(tx, settings, dto.resolution_id);
         const fiscalNumber = allocated.invoice_number;
         const resolution = allocated.resolution;
 
@@ -2612,7 +2612,7 @@ export class SubscriptionFiscalService {
                 amount: w.amount != null ? Number(w.amount) : Math.round(Number(w.base_amount) * Number(w.rate) * 100) / 100,
               })),
               counterpart_account_code: dto.counterpart_account_code ?? null,
-              resolution_id: dto.resolution_id ?? resolution.id,
+              resolution_id: resolution.id,
               issue_date: issueAtLocal,
               created_by: 'createPlatformInvoice',
             },
@@ -4401,6 +4401,7 @@ export class SubscriptionFiscalService {
   private async allocateFiscalNumber(
     tx: any,
     settings: SubscriptionFiscalSettings,
+    preferredResolutionId?: number,
   ): Promise<{
     invoice_number: string;
     resolution_id: number;
@@ -4426,9 +4427,18 @@ export class SubscriptionFiscalService {
     // throws P2010 UnsupportedNativeDataType when this runs through $queryRaw.
     await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', lockKey);
 
+    // F1 (auditoría vendix-db): el caller puede pedir una resolución concreta
+    // vía `dto.resolution_id`. Si la pide, ESA se usa — siempre que pase el
+    // resto del filtro (entidad contable, tipo de documento, activa, dentro
+    // de la ventana de vigencia). Si NO pasa el filtro, error EXPLÍCITO
+    // nombrando la resolución pedida: caer en silencio a la del setting
+    // emitiría contra otra autorización sin avisar y el operador creería
+    // que está emitiendo contra la que eligió.
+    const resolutionIdToFind =
+      preferredResolutionId ?? settings.invoice_resolution_id;
     const resolution = await tx.invoice_resolutions.findFirst({
       where: {
-        id: settings.invoice_resolution_id,
+        id: resolutionIdToFind,
         accounting_entity_id: settings.accounting_entity_id,
         document_type: 'sales_invoice',
         is_active: true,
@@ -4437,6 +4447,14 @@ export class SubscriptionFiscalService {
       },
     });
     if (!resolution) {
+      if (
+        preferredResolutionId !== undefined &&
+        preferredResolutionId !== settings.invoice_resolution_id
+      ) {
+        throw new BadRequestException(
+          `La resolución #${preferredResolutionId} pedida para esta factura no está activa, está vencida, no pertenece a la entidad contable ${settings.accounting_entity_id} o no es de ventas (sales_invoice). Verificá su estado antes de emitir.`,
+        );
+      }
       throw new BadRequestException('No active DIAN sales invoice resolution found');
     }
 
