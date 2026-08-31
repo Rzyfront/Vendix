@@ -46,6 +46,7 @@ import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { PosShippingService } from '../../../pos/services/pos-shipping.service';
 import { KitchenTicketsService } from '../../../restaurant-ops/kds/services/kitchen-tickets.service';
 import { ResendDishModalComponent } from '../../../restaurant-ops/kds/components/resend-dish-modal/resend-dish-modal.component';
+import { canResendOrderItem } from './can-resend';
 import { PosShippingOption } from '../../../pos/models/shipping.model';
 import { AlertBannerComponent, DialogService, ModalComponent, ToastService, TimelineComponent, type PaymentSubmit } from '../../../../../../shared/components';
 import { TimelineStep, TimelineVariant } from '../../../../../../shared/components/timeline/timeline.interfaces';
@@ -3150,26 +3151,16 @@ export class OrderDetailsPageComponent {
 
   // ─── QUI-762 — reenviar un plato a cocina ─────────────────────────
   /**
-   * Espejo del predicado `KITCHEN_FIRE_NOT_RESENDABLE` del backend:
-   *  - El item fue consumido al disparar (`inventory_consumed_at_fire`).
-   *  - La orden NO está en estado terminal (cancelled / refunded).
-   *  - Ningún `kitchen_ticket_item` del item está `delivered` — la cocina
-   *    ya entregó el plato y reenviarlo sería cocinar dos veces lo mismo
-   *    que el cliente ya tiene.
+   * Espejo del predicado `KITCHEN_FIRE_NOT_RESENDABLE` del backend.
+   * Delegado a `canResendOrderItem` (helper puro testeable). Ver
+   * `can-resend.ts` para el contrato y `can-resend.spec.ts` para los
+   * 8 casos canónicos + 4 casos de borde.
    *
-   * Devuelve `false` para items que el backend rechazaría con 422; el
-   * botón "Reenviar a cocina" se oculta en esos casos en vez de ofrecer
-   * una acción que siempre falla.
+   * El botón "Reenviar a cocina" se oculta cuando devuelve `false` —
+   * no ofrezco acciones que el backend rechazaría con 422.
    */
   canResend(item: OrderItem): boolean {
-    if (!item.inventory_consumed_at_fire) return false;
-    const order = this.order();
-    if (!order) return false;
-    const terminal: OrderState[] = ['cancelled', 'refunded'];
-    if (terminal.includes(order.state as OrderState)) return false;
-    const items = item.kitchen_ticket_items ?? [];
-    if (items.some((k) => k.status === 'delivered')) return false;
-    return true;
+    return canResendOrderItem(item, this.order()?.state);
   }
 
   /** Abre el modal con el ítem elegido. */
