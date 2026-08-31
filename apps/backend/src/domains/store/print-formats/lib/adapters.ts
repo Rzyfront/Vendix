@@ -40,7 +40,15 @@ export const POS_SALE_TICKET_ADAPTER = freezeAdapter({
   label: 'Ticket de Venta POS',
   category: 'Ventas POS',
   defaultPaper: 'thermal_80',
-  availableRegions: ['header', 'logo', 'items-table', 'totals', 'footer'],
+  availableRegions: [
+    'header',
+    'logo',
+    'company-block',
+    'customer-info',
+    'items-table',
+    'totals',
+    'footer',
+  ],
   fiscal: false,
   requiredFields: [],
 } as FormatAdapter);
