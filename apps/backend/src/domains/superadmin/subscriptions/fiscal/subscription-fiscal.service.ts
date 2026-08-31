@@ -2469,31 +2469,30 @@ export class SubscriptionFiscalService {
           // divisa», lo que se declara es la CONVERSIÓN
           // (`cac:PaymentAlternativeExchangeRate`), NO la moneda.
           currency: 'COP',
-          // Extracción defensiva de la tasa alternativa. La legacy
-          // `CreatePlatformInvoiceDto.currency` es `string` y por hoy no
-          // carga exchange_rate — el mapper V1→legacy de elon sólo propaga
-          // el iso_4217 como string. Esto está escrito para cuando la
-          // extensión del DTO legacy (o un nuevo campo `exchange_rate`)
-          // empiece a traer el bloque. Si dto.currency es un objeto con
-          // `exchange_rate` y `exchange_rate_date`, sale por
-          // `cac:PaymentAlternativeExchangeRate` (ubl-invoice.builder.ts:218);
-          // si NO, el grupo no se emite y el documento sale sin
-          // declaración de divisa.
+          // Extracción de la tasa alternativa desde el campo tipado del
+          // DTO legacy. El mapper V1→legacy de elon
+          // (`platform-invoicing.service.ts:mapMvpV1ToLegacyCreateDto`)
+          // escribe `exchange_rate_payload?: PlatformInvoiceCurrencyDto`
+          // con la TRM y su fecha — los tres del bloque
+          // `iso_4217/exchange_rate/exchange_rate_date` están tipados por
+          // la clase y `tsc` los valida sin cast.
+          //
+          // El bloque se auto-desactiva cuando el caller no marca
+          // «declarar divisa»: `exchange_rate_payload` queda undefined y
+          // `cac:PaymentAlternativeExchangeRate` no se emite.
           ...(function buildExchangeRate() {
-            const c: any = dto.currency;
-            if (!c || typeof c !== 'object') return {};
-            const foreign = typeof c.iso_4217 === 'string' ? c.iso_4217 : null;
-            const rateRaw = Number(c.exchange_rate);
-            if (!foreign || foreign === 'COP') return {};
+            const cur = dto.exchange_rate_payload;
+            if (!cur) return {};
+            const foreign = cur.iso_4217;
+            if (!foreign || foreign.toUpperCase() === 'COP') return {};
+            const rateRaw = Number(cur.exchange_rate);
             if (!Number.isFinite(rateRaw) || rateRaw <= 0) return {};
             return {
               exchange_rate: {
                 foreign_currency: foreign.toUpperCase(),
                 // TRM = pesos por una unidad de la divisa (FAR06).
                 rate: dianAmount(rateRaw),
-                date: typeof c.exchange_rate_date === 'string'
-                  ? c.exchange_rate_date
-                  : issueAtLocal,
+                date: cur.exchange_rate_date ?? issueAtLocal,
               },
             };
           })(),
