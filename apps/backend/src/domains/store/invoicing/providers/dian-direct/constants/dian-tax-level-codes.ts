@@ -141,19 +141,24 @@ export function toDianTaxLevelCode(
 }
 
 /**
- * HUECO CONOCIDO EN EL CATÁLOGO DEL RUT (no se corrige desde aquí).
+ * HUECO DE `O-23` CERRADO — QUEDA ABIERTA LA UNIFICACIÓN DE CATÁLOGOS.
  *
- * `O-23` (Agente de retención IVA) SÍ está en la enumeración de
- * `cbc:TaxLevelCode`, pero NO está en `FISCAL_RESPONSIBILITIES`
+ * `O-23` (Agente de retención IVA) ya está también en `FISCAL_RESPONSIBILITIES`
  * (`apps/backend/src/common/constants/fiscal-responsibilities.ts` y su espejo
- * del frontend). Consecuencia práctica: un comerciante que ES agente de
- * retención de IVA no puede marcarlo en la ficha del cliente, así que ese
- * `O-23` nunca llega a `toDianTaxLevelCode` y el documento lo omite.
+ * del frontend): un comerciante que ES agente de retención de IVA puede
+ * marcarlo en la ficha del cliente, y desde ahí llega a `toDianTaxLevelCode` y
+ * al `cbc:TaxLevelCode` del XML. La condición de agente de retención se
+ * declara así, por la casilla del RUT del cliente — nunca derivada de
+ * `users.is_withholding_agent`, que sigue siendo una bandera operativa de
+ * Vendix sin relación con este elemento.
  *
- * Sí aparece, en cambio, en `FISCAL_RESPONSIBILITIES_CATALOG`
+ * Lo que SIGUE sin resolverse: hay tres listas de responsabilidades fiscales
+ * en el backend y ninguna contiene a las otras. `FISCAL_RESPONSIBILITIES`
+ * (13 códigos, ficha de cliente) y esta enumeración (5 códigos,
+ * `cbc:TaxLevelCode`) ahora comparten `O-23`, pero la tercera —
+ * `FISCAL_RESPONSIBILITIES_CATALOG`
  * (`domains/fiscal-operations/constants/fiscal-responsibilities.catalog.ts`),
- * que es un TERCER catálogo de responsabilidades con 7 entradas y otro contenido.
- * Es decir: hay tres listas de responsabilidades fiscales en el backend y
- * ninguna contiene a las otras. Unificarlas toca archivos fuera del alcance de
- * este catálogo; queda documentado aquí para que el siguiente lector lo vea.
+ * con 7 entradas y otro contenido— sigue siendo independiente. Unificarlas
+ * toca archivos fuera del alcance de este catálogo; queda documentado aquí
+ * para que el siguiente lector lo vea.
  */

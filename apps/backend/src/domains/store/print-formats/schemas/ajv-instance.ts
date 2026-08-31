@@ -49,11 +49,17 @@
  * ## Schema loading
  *
  * The schema is loaded with `fs.readFileSync` rather than
- * `import ... from './definition-v2.schema.json'` because
- * `apps/backend/tsconfig.json` does NOT enable `resolveJsonModule` — and
- * adding it would force a tsconfig change that ripples through every
- * other test in the module. fs.readFileSync keeps the schema as data,
- * not as code.
+ * `import ... from './definition-v2.schema.json'`.
+ *
+ * OJO: la razón original que daba este bloque ya no es cierta. Decía que
+ * `apps/backend/tsconfig.json` no habilitaba `resolveJsonModule`; sí lo
+ * habilita desde `print-editor-dsk P1.6`. La ruta del import está disponible,
+ * pero no se tomó: el vecino que la intentó (`../lib/page-geometry.ts`) dice
+ * que su JSON se copiaría «next to this file at build time» y ese archivo no
+ * existe ni en `src/` ni en `dist/` — terminó resolviéndose por
+ * `geometry-data.ts`, con los datos inlineados en TS. Mientras nadie pruebe
+ * el import contra los DOS builders (tsc en `nest build`, SWC en
+ * `nest start --watch`), la ruta del asset es la que está verificada.
  *
  * Precio de esa decisión: el `.json` tiene que viajar al contenedor. Lo
  * declara `nest-cli.json` como asset, y ese asset lleva `"outDir": "dist/src"`
@@ -69,6 +75,15 @@
  * datos en TS: ver `../lib/geometry-data.ts` y
  * `../../invoicing/providers/dian-direct/constants/dian-ubl-content-model.ts`.
  * Si algún día hay que mover o duplicar este lector, esa es la salida barata.
+ *
+ * Y el `dist/src` de arriba es inferido, no declarado: lo fija `prisma.config.ts`
+ * en la raíz del paquete, que entra al programa de `tsconfig.build.json` y
+ * empuja la raíz común un nivel arriba de `src/`. Ese layout YA se mudó una vez
+ * (`15eb47c19` cambió el CMD de `dist/main.js` a `dist/src/main.js`). Si alguien
+ * saca ese archivo de la raíz, se mueven a la vez el CMD del Dockerfile,
+ * `start:prod` y este asset. La cura de fondo es declarar `rootDir` explícito
+ * en el tsconfig y alinear los tres a la vez; es un cambio coordinado, no un
+ * parche de deploy.
  */
 import * as fs from 'fs';
 import * as path from 'path';
