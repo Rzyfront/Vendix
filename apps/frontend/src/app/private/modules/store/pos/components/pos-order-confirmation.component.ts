@@ -34,6 +34,10 @@ import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invo
 import { PosFiscalStatusComponent } from './pos-fiscal-status.component';
 import { PosFiscalStatus } from '../services/pos-fiscal.service';
 import { DispatchTicketPrintService } from '../../dispatch-ticket/services/dispatch-ticket-print.service';
+import {
+  shouldAutoPrintDispatchTicket,
+  type ShouldAutoPrintDispatchTicketContext,
+} from '../../../../../shared/services/print/dispatch-ticket-autoprint';
 import { DispatchTicketData } from '../../dispatch-ticket/models/dispatch-ticket-data.model';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 
@@ -641,6 +645,17 @@ private authFacade = inject(AuthFacade);
   );
 
   /**
+   * Decisión del usuario 2026-08-31: opt-in por admin para que el tiquete
+   * de despacho funcione como tiquete de reclamo en ventas de mostrador
+   * (`direct_delivery`) y para llevar (`pickup`). Enmienda al ADR-6;
+   * default false. Pasado al predicado compartido en
+   * `shouldAutoPrintDispatchTicket`.
+   */
+  readonly printDispatchTicketOnCounter = computed<boolean>(
+    () => this.settingsFacade.receipts()?.print_dispatch_ticket_on_counter ?? false,
+  );
+
+  /**
    * Espejo de `showSubtotal` en `PosTicketService`: sin desglose de IVA un
    * subtotal que no suma al total deja la diferencia huérfana en pantalla.
    * Getter y no `computed` porque `orderTax` es una propiedad plana, no un
@@ -1091,26 +1106,12 @@ private authFacade = inject(AuthFacade);
   }
 
   // ── CP-DTLP Phase E.1/E.2 — Helpers del disparador POS del tiquete de despacho ─
-
-  /**
-   * `direct_delivery` NO emite tiquete de despacho (ADR-6): la entrega es en
-   * mostrador, no hay envío que Despachar.
-   */
-  private isDirectDeliveryOrder(): boolean {
-    return this.orderData()?.delivery_type === 'direct_delivery';
-  }
-
-  /**
-   * El tiquete de despacho solo aplica a ventas con envío a domicilio
-   * (`home_delivery`) o con la marca explícita del POS (`isShippingSale`).
-   * `pickup` (retiro en tienda) y `direct_delivery` (mostrador) NO imprimen.
-   */
-  private hasShippingOrder(): boolean {
-    const d = this.orderData();
-    if (!d) return false;
-    if (d.delivery_type === 'home_delivery') return true;
-    return !!d.isShippingSale;
-  }
+  //
+  // `isDirectDeliveryOrder` y `hasShippingOrder` se consolidaron en el
+  // predicado compartido `shouldAutoPrintDispatchTicket`
+  // (`shared/services/print/dispatch-ticket-autoprint.ts`). El contexto
+  // que arma `printDispatchTicketIfNeeded` pasa `deliveryType`,
+  // `isShippingSale` y `counterEnabled`; el predicado decide.
 
   /**
    * Construye el `DispatchTicketData` desde el `orderData` actual. La dirección
@@ -1172,10 +1173,20 @@ private authFacade = inject(AuthFacade);
   ): Promise<void> {
     const order = this.orderData();
     if (!order) return;
-    if (!this.printDispatchTicketEnabled()) return;
-    if (trigger === 'automatic' && !this.printDispatchTicketAutoWithPos()) return;
-    if (this.isDirectDeliveryOrder()) return;
-    if (!this.hasShippingOrder()) return;
+    // Construye el contexto UNA vez y delega la cadena de guards al predicado
+    // compartido con el detalle de orden. Mismo flag, misma lógica,
+    // misma fuente (settings.receipts).
+    const context: ShouldAutoPrintDispatchTicketContext = {
+      printDispatchTicketEnabled: this.printDispatchTicketEnabled(),
+      printDispatchTicketAuto:
+        trigger === 'automatic' ? this.printDispatchTicketAutoWithPos() : undefined,
+      // Decisión del usuario 2026-08-31: tiquete de reclamo en mostrador
+      // y para llevar. Mismo flag, mismo origen que el detalle de orden.
+      counterEnabled: this.printDispatchTicketOnCounter(),
+      deliveryType: order.delivery_type,
+      isShippingSale: order.isShippingSale,
+    };
+    if (!shouldAutoPrintDispatchTicket(trigger, context)) return;
 
     try {
       await this.dispatchTicketPrint.printDispatchTicket(

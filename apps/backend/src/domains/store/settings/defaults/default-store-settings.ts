@@ -187,6 +187,11 @@ export function getDefaultStoreSettings(): StoreSettings {
       print_dispatch_ticket_enabled: true,
       print_dispatch_ticket_auto_with_pos: false,
       print_dispatch_ticket_auto_on_postventa: false,
+      // Decisión del usuario 2026-08-31: opt-in. El admin que quiera que el
+      // tiquete de despacho funcione como tiquete de reclamo en mostrador
+      // (direct_delivery) y para llevar (pickup) lo prende; por defecto
+      // el comportamiento sigue siendo el de ADR-6.
+      print_dispatch_ticket_on_counter: false,
     },
 
     // Panel UI - Control de módulos disponibles a nivel de tienda

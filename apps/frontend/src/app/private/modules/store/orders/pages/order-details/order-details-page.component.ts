@@ -2540,6 +2540,11 @@ export class OrderDetailsPageComponent {
         this.settingsFacade.receipts()?.print_dispatch_ticket_enabled ?? true,
       printDispatchTicketAuto:
         this.settingsFacade.receipts()?.print_dispatch_ticket_auto_on_postventa ?? false,
+      // Decisión del usuario 2026-08-31: tiquete de reclamo en mostrador
+      // y para llevar. Same flag, mismo origen, mismo predicado compartido
+      // con el POS.
+      counterEnabled:
+        this.settingsFacade.receipts()?.print_dispatch_ticket_on_counter ?? false,
       deliveryType: order.delivery_type,
       isShippingSale: (order as any)?.isShippingSale,
     };
