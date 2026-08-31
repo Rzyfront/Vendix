@@ -301,6 +301,37 @@
             }
           </ul>
         }
+
+        <!--
+          QUI-760 — consumo SIN sesión atribuida. Antes del backfill estos
+          movimientos crecían silenciosamente y nadie los veía. Ahora el
+          backfill los imputa al abrir sesión, pero los previos a la primera
+          apertura de la tienda siguen sin dueño. Se muestran separados del
+          resumen del turno: el turno del operador es una cosa, lo que nadie
+          firmó es otra. ADR-10: solo cantidades, nunca dinero.
+        -->
+        @if (loadingUnattributed()) {
+          <p class="kds-sum-empty">Buscando consumo sin sesión…</p>
+        } @else if (unattributed(); as u) {
+          @if (u.movement_count > 0) {
+            <h4 class="kds-sum-title">Sin sesión atribuida</h4>
+            <p class="kds-sum-empty">
+              {{ u.movement_count }} movimiento(s) de fires pasados sin turno
+              abierto. Quedaron sin firmar — el de tu turno ya está acá abajo.
+            </p>
+            <ul class="kds-sum-list">
+              @for (m of u.movements; track m.transaction_id) {
+                <li>
+                  <span>
+                    {{ m.ingredient?.name ?? '—' }} ·
+                    {{ m.consumed_at | date: 'short' }}
+                  </span>
+                  <span>{{ m.quantity }}</span>
+                </li>
+              }
+            </ul>
+          }
+        }
       }
     }
 

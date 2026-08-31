@@ -88,3 +88,25 @@ export interface KdsConsumptionHistoryRow {
   order_id: number | null;
   order_number: string | null;
 }
+
+/**
+ * Movimiento de consumo SIN sesión atribuida (QUI-760).
+ *
+ * Aparece cuando el fire se ejecutó mientras ninguna estación tenía turno
+ * abierto. Antes del backfill estos movimientos quedaban huérfanos para
+ * siempre; ahora se imputan retroactivamente al abrir sesión, pero los
+ * **previos a la primera sesión abierta de la tienda** siguen sin dueño y se
+ * exponen acá. Mismo payload que el historial del turno: una fila por
+ * insumo POR PEDIDO. ADR-10 — sin dinero en el payload.
+ */
+export interface KdsUnattributedConsumptionRow {
+  transaction_id: number;
+  consumed_at: string;
+  quantity: number;
+  ingredient: { id: number; name: string; sku: string | null } | null;
+}
+
+export interface KdsUnattributedConsumption {
+  movement_count: number;
+  movements: KdsUnattributedConsumptionRow[];
+}

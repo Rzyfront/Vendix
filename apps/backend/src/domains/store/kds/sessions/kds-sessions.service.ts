@@ -91,6 +91,54 @@ export class KdsSessionsService {
    * real es el índice único parcial `kds_sessions_one_open_per_kds`: dos
    * operadores concurrentes pasarían ambos este chequeo y dejarían la estación
    * con dos dueños. Por eso el P2002 se traduce, no se propaga crudo.
+   *
+   * QUI-760 — BACKFILL en la misma transacción: al abrir turno se RECLAMAN los
+   * `inventory_transactions` previos cuyo `kds_session_id` quedó NULL porque
+   * el fire ocurrió antes de que el operador abriera sesión. Si no se hacen
+   * aquí, `close()` los ignora para siempre (su `buildConsumptionSummary`
+   * filtra por `kds_session_id = sessionId`) y el cocinero firma consumo que
+   * nunca aparece en su turno. El `updateMany` corre dentro del MISMO
+   * `prisma.$transaction` que el `create`, así que un fallo en el backfill
+   * también aborta la apertura — no hay sesión huérfana.
+   *
+   * Filtros:
+   *  - `kds_session_id IS NULL`: la razón de existir del backfill.
+   *  - `order_item_id IS NOT NULL` + `inventory_consumed_at_fire=true`: solo el
+   *    consumo disparado al fire; las ventas, ajustes y transferencias no
+   *    son elegibles.
+   *  - Routing KDS: el mismo patrón que `kitchen-fire.service.ts:668-680` —
+   *    cada `inventory_transaction` se imputa a `products.kds_id ?? defaultKds`.
+   *    Si esta sesión es el defaultKds de la tienda, los productos SIN `kds_id`
+   *    propio le pertenecen; si es OTRA estación, solo los productos con
+   *    `products.kds_id = dto.kds_id`.
+   *  - `kitchen_tickets.status NOT IN ('delivered','cancelled')`. Un ticket ya
+   *    entregado/cancelado NO entra — el consumo ya pasó, firmarlo a
+   *    posteriori inventaría responsabilidad donde no la hay.
+   *  - `store_id` por tienda: filtramos por `orders.store_id` directamente,
+   *    y Prisma aplica también el relational scope de
+   *    `inventory_transactions` por `products.store_id`. Defensa en
+   *    profundidad: una sesión en tienda A jamás estampa filas de tienda B
+   *    (criterio 7 de QUI-760).
+   *
+   * Implementación: dos pasos dentro de la MISMA tx para evitar el nested
+   * filter `inventory_transactions.where.order_items` (Prisma lo rechaza
+   * porque el back-relation desde `order_items` se llama
+   * `inventory_transactions[]` y el forward se llama `order_items?` — el
+   * `updateMany` solo conoce los argumentos directos). Primero se resuelve
+   * la lista de `order_items` candidatos por la relación `inventory_transactions`
+   * desde el lado donde Prisma SÍ la expone, después se hace
+   * `inventory_transactions.updateMany({ where: { order_item_id: { in } } })`.
+   * La condición `kds_session_id IS NULL` se repite en los dos pasos para
+   * asegurar idempotencia (una transacción candidata estampada por otra
+   * sesión ya no cuenta).
+   *
+   * Los 45 huérfanos históricos del ticket no se tocan — están en tickets
+   * entregados/cancelados y dejarán de aparecer por el filtro, no por una
+   * migración retroactiva.
+   *
+   * Los 45 huérfanos históricos del ticket no se tocan — están en tickets
+   * entregados/cancelados y dejarán de aparecer por el filtro, no por una
+   * migración retroactiva.
    */
   async open(dto: OpenKdsSessionDto) {
     const { storeId, userId } = this.requireContext();
@@ -107,15 +155,66 @@ export class KdsSessionsService {
     }
 
     try {
-      return await this.prisma.kds_sessions.create({
-        data: {
-          kds_id: dto.kds_id,
-          store_id: storeId,
-          opened_by: userId,
-          status: 'open',
-          opened_at: new Date(),
-          updated_at: new Date(),
-        },
+      return await this.prisma.$transaction(async (tx) => {
+        const session = await tx.kds_sessions.create({
+          data: {
+            kds_id: dto.kds_id,
+            store_id: storeId,
+            opened_by: userId,
+            status: 'open',
+            opened_at: new Date(),
+            updated_at: new Date(),
+          },
+        });
+
+        // Mismo routing que `kitchen-fire.service.ts:668-680`: producto con
+        // `kds_id` propio va a esa estación; producto sin `kds_id` va al
+        // default de su tienda. Si esta sesión es el default, los productos
+        // huérfanos de KDS también le pertenecen.
+        const defaultStation = await tx.kds.findFirst({
+          where: { store_id: storeId, is_default: true, is_active: true },
+          select: { id: true },
+        });
+        const isDefaultSession = defaultStation?.id === dto.kds_id;
+
+        // Resolver candidatos por el lado de `order_items`, donde Prisma SÍ
+        // expone la relación `inventory_transactions`. La guarda `some:
+        // { kds_session_id: null }` ya descarta filas con sesión atribuida
+        // por una apertura anterior.
+        const candidateOis = await tx.order_items.findMany({
+          where: {
+            inventory_consumed_at_fire: true,
+            orders: { store_id: storeId },
+            inventory_transactions: { some: { kds_session_id: null } },
+            kitchen_ticket_items: {
+              some: {
+                kitchen_ticket: {
+                  status: { notIn: ['delivered', 'cancelled'] },
+                },
+              },
+            },
+            ...(isDefaultSession
+              ? // defaultKds: productos mapeados a esta + productos huérfanos
+                { OR: [{ products: { kds_id: dto.kds_id } }, { products: { kds_id: null } }] }
+              : { products: { kds_id: dto.kds_id } }),
+          },
+          select: { id: true },
+        });
+
+        const oiIds = candidateOis.map((o) => o.id);
+        if (oiIds.length > 0) {
+          await tx.inventory_transactions.updateMany({
+            where: {
+              order_item_id: { in: oiIds },
+              // Doble guarda: si otra tx estampó estas filas entre el
+              // findMany y el updateMany, el `IS NULL` las preserva.
+              kds_session_id: null,
+            },
+            data: { kds_session_id: session.id },
+          });
+        }
+
+        return session;
       });
     } catch (e: any) {
       if (e?.code === 'P2002') {

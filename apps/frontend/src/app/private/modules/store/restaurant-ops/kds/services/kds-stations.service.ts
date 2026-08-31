@@ -8,6 +8,7 @@ import {
   KdsConsumptionSummary,
   KdsSession,
   KdsStation,
+  KdsUnattributedConsumption,
 } from '../interfaces';
 
 interface ApiResponse<T> {
@@ -268,6 +269,35 @@ export class KdsStationsService {
       .pipe(
         map((res) => res.data),
         catchError((err) => this.fail(err, 'No se pudo cargar el reporte')),
+      );
+  }
+
+  /**
+   * Consumo SIN sesión atribuida (QUI-760): movimientos del fire cuya estación
+   * no tenía turno abierto al disparar. Antes del backfill siempre crecía
+   * silenciosamente; ahora se reduce conforme se abren sesiones, pero las
+   * ocurrencias previas a la primera apertura quedan aquí. El cocinero las ve
+   * en el modal de su turno para saber que la cocina corrió consumo no
+   * firmado. ADR-10 — sin dinero en el payload.
+   */
+  getUnattributedConsumption(params: {
+    from?: string;
+    to?: string;
+  } = {}): Observable<KdsUnattributedConsumption> {
+    let httpParams = new HttpParams();
+    if (params.from) httpParams = httpParams.set('from', params.from);
+    if (params.to) httpParams = httpParams.set('to', params.to);
+
+    return this.http
+      .get<ApiResponse<KdsUnattributedConsumption>>(
+        `${this.apiUrl}/store/kds-sessions/report/unattributed`,
+        { params: httpParams },
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError((err) =>
+          this.fail(err, 'No se pudo cargar el consumo sin sesión'),
+        ),
       );
   }
 

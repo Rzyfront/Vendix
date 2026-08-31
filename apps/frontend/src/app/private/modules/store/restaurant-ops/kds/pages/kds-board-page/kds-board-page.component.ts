@@ -33,6 +33,7 @@ import type {
   FireItemExclusion,
   KdsConsumptionSummary,
   KdsConsumptionHistoryRow,
+  KdsUnattributedConsumption,
 } from '../../interfaces';
 import { KitchenConfirmModalComponent } from '../../components/kitchen-confirm-modal/kitchen-confirm-modal.component';
 import { KdsSessionStatusBarComponent } from '../../components/kds-session-status-bar/kds-session-status-bar.component';
@@ -811,6 +812,15 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   readonly sessionSummaryOpen = signal(false);
   readonly sessionSummary = signal<KdsConsumptionSummary | null>(null);
   readonly sessionHistory = signal<KdsConsumptionHistoryRow[]>([]);
+  /**
+   * Movimientos sin sesión atribuida (QUI-760). Antes del backfill crecían
+   * silenciosamente y nadie se enteraba; ahora se imputan al abrir sesión, pero
+   * las ocurrencias previas a la primera apertura siguen sin dueño. La UI las
+   * muestra separadas del resumen del turno, no dentro: el turno del operador
+   * es una cosa, los movimientos que nadie firmó son otra.
+   */
+  readonly unattributed = signal<KdsUnattributedConsumption | null>(null);
+  readonly loadingUnattributed = signal(false);
   readonly loadingSessionSummary = signal(false);
 
   /**
@@ -828,6 +838,8 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
     this.loadingSessionSummary.set(true);
     this.sessionSummary.set(null);
     this.sessionHistory.set([]);
+    this.unattributed.set(null);
+    this.loadingUnattributed.set(true);
 
     this.stationsService
       .getConsumptionSummary(session.id)
@@ -847,10 +859,31 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
         next: (rows) => this.sessionHistory.set(rows),
         error: () => {},
       });
+
+    // QUI-760 — el reporte de movimientos sin sesión atribuida se muestra
+    // junto al resumen del turno para que el cocinero vea si quedó consumo
+    // "huérfano" (de fires ocurridos antes de abrir sesión).
+    this.stationsService
+      .getUnattributedConsumption()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (u) => {
+          this.unattributed.set(u);
+          this.loadingUnattributed.set(false);
+        },
+        error: () => this.loadingUnattributed.set(false),
+      });
   }
 
   closeSessionSummary(): void {
     this.sessionSummaryOpen.set(false);
+    // Limpia los signals: si el cocinero vuelve a abrir el modal en el
+    // mismo turno, no debe ver datos del fetch anterior.
+    this.sessionSummary.set(null);
+    this.sessionHistory.set([]);
+    this.unattributed.set(null);
+    this.loadingSessionSummary.set(false);
+    this.loadingUnattributed.set(false);
   }
 
   onCookCancelled(): void {
