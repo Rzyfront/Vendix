@@ -931,9 +931,13 @@ export class PlatformProfileEditorComponent {
         aiu['minimum_base_percent'] ?? formatPercentScaled(AIU_LEGAL_FLOOR_PERCENT_SCALED),
       );
       this.form.get('aiu.components_basis')?.setValue(aiu['components_basis'] ?? 'contract');
-      this.form.get('aiu.administracion')?.setValue(aiu['administracion'] ?? '5.00');
-      this.form.get('aiu.imprevistos')?.setValue(aiu['imprevistos'] ?? '2.00');
-      this.form.get('aiu.utilidad')?.setValue(aiu['utilidad'] ?? '3.00');
+      // Los tres porcentajes viven bajo `components`, no sueltos en `aiu`. Con
+      // la lectura plana volvían siempre los valores por omisión y guardar
+      // reescribia 5/2/3 sobre el reparto real del contrato.
+      const comps = (aiu['components'] as Record<string, unknown> | null) ?? {};
+      this.form.get('aiu.administracion')?.setValue(comps['administracion'] ?? '5.00');
+      this.form.get('aiu.imprevistos')?.setValue(comps['imprevistos'] ?? '2.00');
+      this.form.get('aiu.utilidad')?.setValue(comps['utilidad'] ?? '3.00');
       this.form.get('aiu.accounting_model')?.setValue(aiu['accounting_model'] ?? 'sumada');
     }
     const accounting = cfg['accounting'] as Record<string, unknown> | null;
@@ -959,10 +963,23 @@ export class PlatformProfileEditorComponent {
     }
     const modelLines = cfg['model_lines'] as Record<string, unknown>[] | null;
     if (modelLines?.length) modelLines.forEach((l) => this.addModelLine(l));
-    const taxes = cfg['taxes'] as Record<string, unknown>[] | null;
-    if (taxes?.length) taxes.forEach((t) => this.addTaxRule(t));
-    const withholdings = cfg['withholdings'] as Record<string, unknown>[] | null;
-    if (withholdings?.length) withholdings.forEach((w) => this.addWithholding(w));
+
+    // `taxes` y `withholdings` se guardan como { rules: [...] }, no como
+    // arreglo suelto: es la forma que impone `invoice-profile-config.contract`
+    // y la que devuelve el backend después de normalizar. Esto leía
+    // `cfg['taxes']` como arreglo, y `.length` sobre un objeto es undefined:
+    // el bucle no corría NUNCA. Reabrir un perfil mostraba cero tarifas y cero
+    // retenciones aunque las tuviera, y al guardar se escribía `rules: []`
+    // encima — cada edición borraba la matriz de impuestos del perfil sin
+    // decir nada. Se aceptan las dos formas porque hay snapshots viejos con el
+    // arreglo suelto.
+    const rulesOf = (raw: unknown): Record<string, unknown>[] => {
+      if (Array.isArray(raw)) return raw as Record<string, unknown>[];
+      const nested = (raw as Record<string, unknown> | null)?.['rules'];
+      return Array.isArray(nested) ? (nested as Record<string, unknown>[]) : [];
+    };
+    rulesOf(cfg['taxes']).forEach((t) => this.addTaxRule(t));
+    rulesOf(cfg['withholdings']).forEach((w) => this.addWithholding(w));
   }
 
   // ─── Form helpers ─────────────────────────────────────────────
@@ -1041,15 +1058,26 @@ export class PlatformProfileEditorComponent {
         description: v.general?.description ?? null,
         internal_note: v.general?.internal_note ?? null,
       },
+      // Forma canónica del contrato: `regime` obligatorio y los tres
+      // porcentajes bajo `components`. Sueltos, el normalizador del backend los
+      // descarta por clave desconocida y el perfil queda con el reparto por
+      // omisión. `regime` se deriva de la base gravable declarada — es la
+      // misma equivalencia de `aiuRegimeForTaxableBasis` del contrato.
       aiu: this.isAiu() ? {
+        regime:
+          (v.aiu?.taxable_basis ?? 'aiu') === 'utilidad'
+            ? 'decreto_1372_1992'
+            : 'et_462_1',
         taxable_basis: v.aiu?.taxable_basis ?? 'aiu',
-        contract_object: v.aiu?.contract_object ?? null,
+        contract_object: v.aiu?.contract_object ?? '',
         enforce_minimum_base: v.aiu?.enforce_minimum_base ?? true,
-        minimum_base_percent: v.aiu?.minimum_base_percent ?? null,
+        minimum_base_percent: v.aiu?.minimum_base_percent ?? '10.00',
         components_basis: v.aiu?.components_basis ?? 'contract',
-        administracion: v.aiu?.administracion ?? '5.00',
-        imprevistos: v.aiu?.imprevistos ?? '2.00',
-        utilidad: v.aiu?.utilidad ?? '3.00',
+        components: {
+          administracion: v.aiu?.administracion ?? '5.00',
+          imprevistos: v.aiu?.imprevistos ?? '2.00',
+          utilidad: v.aiu?.utilidad ?? '3.00',
+        },
         accounting_model: v.aiu?.accounting_model ?? 'sumada',
       } : null,
       accounting: {
@@ -1083,17 +1111,25 @@ export class PlatformProfileEditorComponent {
         header_notes: v.dian?.header_notes ?? [],
         resolution_id: v.dian?.resolution_id ?? null,
       },
-      taxes: (v.taxes ?? []).map((t: Record<string, unknown>) => ({
-        tax_code: t['tax_code'] ?? '01',
-        taxable: t['taxable'] ?? true,
-        rate: t['rate'] ?? '',
-        bucket: t['bucket'] ?? 'administracion',
-      })),
-      withholdings: (v.withholdings ?? []).map((w: Record<string, unknown>) => ({
-        concept_id: w['concept_id'] ?? '',
-        role: w['role'] ?? 'practiced',
-        rate: w['rate'] ?? '',
-      })),
+      // `{ rules: [...] }`, no arreglo suelto. El backend normaliza a esta forma
+      // igual, pero mandar el arreglo hacía que el editor leyera de vuelta algo
+      // distinto de lo que escribió — y esa asimetría es la que borraba la
+      // matriz en cada guardado.
+      taxes: {
+        rules: (v.taxes ?? []).map((t: Record<string, unknown>) => ({
+          tax_code: t['tax_code'] ?? '01',
+          taxable: t['taxable'] ?? true,
+          rate: t['rate'] ?? '',
+          bucket: t['bucket'] ?? 'administracion',
+        })),
+      },
+      withholdings: {
+        rules: (v.withholdings ?? []).map((w: Record<string, unknown>) => ({
+          concept_id: Number(w['concept_id']) || 0,
+          role: w['role'] ?? 'practiced',
+          rate: w['rate'] ?? '',
+        })),
+      },
       currency: {
         declare_foreign: v.currency?.declare_foreign ?? false,
         code: v.currency?.code ?? null,

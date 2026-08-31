@@ -1084,8 +1084,17 @@ export class PlatformInvoiceCreateComponent implements OnInit {
 
     if (Object.keys(patch).length > 0) this.invoiceForm.patchValue(patch);
 
-    this.applyProfileWithholdings(cfg['withholdings']);
-    this.applyProfileModelLines(cfg['model_lines'], cfg['taxes']);
+    // `taxes` y `withholdings` viajan como `{ rules: [...] }` — es la forma
+    // canónica de `invoice-profile-config.contract`. Se acepta también el
+    // arreglo suelto por snapshots viejos.
+    this.applyProfileWithholdings(this.configRules(cfg['withholdings']));
+    this.applyProfileModelLines(cfg['model_lines'], this.configRules(cfg['taxes']));
+  }
+
+  private configRules(raw: unknown): Record<string, any>[] {
+    if (Array.isArray(raw)) return raw as Record<string, any>[];
+    const nested = (raw as Record<string, any> | null)?.['rules'];
+    return Array.isArray(nested) ? (nested as Record<string, any>[]) : [];
   }
 
   /**
@@ -1132,7 +1141,14 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       .filter((t: any) => t?.taxable !== false)
       .map((t: any) => {
         const rate = Number(t?.rate) || 0;
-        const catalog = this.availableTaxes.find((c) => c.rate === rate);
+        // `tax_code` es el código de tributo del anexo (13.2.2): '01' IVA,
+        // '04' INC. Se busca primero por código+tarifa y sólo se cae a la
+        // tarifa sola cuando el perfil no lo trae, porque dos tributos pueden
+        // compartir porcentaje y quedarían intercambiados en el XML.
+        const type = t?.tax_code === '04' ? 'INC' : t?.tax_code === '01' ? 'IVA' : null;
+        const catalog =
+          (type && this.availableTaxes.find((c) => c.tax_type === type && c.rate === rate)) ||
+          this.availableTaxes.find((c) => c.rate === rate);
         return {
           tax_rate_id: catalog?.id ?? 0,
           name: catalog?.name ?? `Impuesto ${rate}%`,
