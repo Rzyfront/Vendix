@@ -552,6 +552,29 @@ export class PlatformProfilesService {
         );
       }
 
+      // Desligar a los CLONES antes de borrar, anulando el PAR completo.
+      //
+      // La FK `cloned_from` es de una sola columna (`cloned_from_profile_id`)
+      // y está declarada `onDelete: SetNull`, pero la procedencia son DOS
+      // columnas y un CHECK las ata:
+      //
+      //   invoice_profiles_clone_pair_complete
+      //     CHECK ((cloned_from_profile_id IS NULL) = (cloned_from_version IS NULL))
+      //
+      // Postgres, al aplicar el SET NULL, anula únicamente la columna de la FK
+      // y deja `cloned_from_version` con su valor: el par queda a medias y el
+      // CHECK rechaza la fila. El síntoma no menciona al clon ni al borrado —
+      // sale un 500 con «new row for relation "invoice_profiles" violates
+      // check constraint» sobre una tabla que uno no estaba escribiendo.
+      //
+      // Anular el par a mano es además el patrón seguro de la regla 6.2: se
+      // desapunta a los hijos ANTES de tocar al padre, con WHERE explícito,
+      // en vez de confiar en una regla ON DELETE que no ve la mitad del dato.
+      await tx.invoice_profiles.updateMany({
+        where: { cloned_from_profile_id: id },
+        data: { cloned_from_profile_id: null, cloned_from_version: null },
+      });
+
       // Sin facturas detrás, el historial del perfil no le sirve a nadie más
       // que al propio perfil. Se borra explícitamente porque la FK de
       // `invoice_profile_versions.profile` es `onDelete: Restrict`: sin este
