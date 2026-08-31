@@ -71,7 +71,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
         <app-stats
           title="Productos Totales"
           [value]="stats().total_products"
-          smallText="Catálogo completo"
+          smallText="Catálogo completo, incluye insumos"
           iconName="package"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-600"
