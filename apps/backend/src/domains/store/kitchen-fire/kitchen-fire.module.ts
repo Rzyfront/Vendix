@@ -4,6 +4,7 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { RecipesModule } from '../recipes/recipes.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { KdsModule } from '../kds/kds.module';
 import { KitchenFireController } from './kitchen-fire.controller';
 import { KitchenFireService } from './kitchen-fire.service';
 
@@ -20,6 +21,8 @@ import { KitchenFireService } from './kitchen-fire.service';
  *   - RecipesModule:      RecipesService.explodeBom (BOM with merma/yield)
  *   - NotificationsModule: NotificationsSseService (per-store Subject)
  *     — reused for the KDS `kitchen:{store_id}` event channel.
+ *   - KdsModule:          KdsSessionsService — QUI-760 imputa el consumo a
+ *     la sesión abierta desde los handlers de gestión de ticket.
  *
  * Exports KitchenFireService for other domains that want to peek at
  * kitchen tickets.
@@ -31,6 +34,7 @@ import { KitchenFireService } from './kitchen-fire.service';
     InventoryModule,
     RecipesModule,
     NotificationsModule,
+    KdsModule,
   ],
   controllers: [KitchenFireController],
   providers: [KitchenFireService],

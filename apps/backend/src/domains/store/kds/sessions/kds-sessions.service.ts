@@ -1,13 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { CloseKdsSessionDto, OpenKdsSessionDto } from '../dto';
-import {
-  assertSafeTimezone,
-  zonedWallClockToUtc,
-} from 'src/common/utils/store-timezone.util';
 
 /**
  * KdsSessionsService — turnos de estación (QUI-651).
@@ -97,59 +92,16 @@ export class KdsSessionsService {
    * operadores concurrentes pasarían ambos este chequeo y dejarían la estación
    * con dos dueños. Por eso el P2002 se traduce, no se propaga crudo.
    *
-   * QUI-760 — BACKFILL en la misma transacción. El fire firma el consumo al
-   * DISPARAR, no al abrir turno. Si la cocina recibe un fire antes de que su
-   * operador abra sesión, los `inventory_transactions` quedan con
-   * `kds_session_id = NULL`. Cerrar el turno después ignora ese consumo para
-   * siempre (su `buildConsumptionSummary` filtra por `kds_session_id`), y
-   * el reporte por estación deja de cuadrar contra el COGS total.
-   *
-   * La regla de imputación es: el consumo que ocurrió en el HUECO entre
-   * turnos de ESTA estación — desde el cierre de la última sesión cerrada
-   * (o, si nunca hubo, desde el inicio del día de negocio en curso de la
-   * tienda). El backfill se hace en la MISMA `prisma.$transaction` que el
-   * `create`: un fallo aborta la apertura y no hay sesión huérfana.
-   *
-   * Por qué el piso temporal y no solo "ticket vivo": la máquina de estados
-   * de `kitchen_tickets` no caduca — un ticket se queda `pending` para
-   * siempre si nadie lo cancela. Filtrar solo por `status NOT IN
-   * ('delivered','cancelled')` reclamaba dos meses y medio de consumo
-   * abandonado a la primera apertura de hoy. El piso `lowerBound` recorta
-   * ese pasado a "lo que pasó desde que el último turno cerró".
-   *
-   * Caso borde: primera sesión de la historia en una estación. No hay
-   * `closed_at` previo y un piso `null` re-imputaría todo. Se acota al
-   * inicio del día de negocio en curso de la tienda, mismo corte que
-   * `resolveLocalDateRange` aplica al resto de analytics. La elección se
-   * documenta porque cambia el comportamiento de cada apertura temprana.
-   *
-   * Filtros:
-   *  - `kds_session_id IS NULL`: la razón de existir del backfill.
-   *  - `inventory_transactions.created_at > lowerBound`: piso temporal;
-   *    sin esto, la primera apertura del día reclama todo lo viejo.
-   *  - `order_item_id IS NOT NULL` + `inventory_consumed_at_fire=true`: solo el
-   *    consumo disparado al fire; ventas, ajustes y transferencias no son
-   *    elegibles.
-   *  - Routing KDS espejo de `kitchen-fire.service.ts:668-680`: cada tx se
-   *    imputa a `products.kds_id ?? defaultKds`. Si esta sesión es la
-   *    defaultKds de la tienda, los productos SIN `kds_id` propio le
-   *    pertenecen; si es OTRA estación, solo los productos con
-   *    `products.kds_id = dto.kds_id`.
-   *  - `kitchen_tickets.status NOT IN ('delivered','cancelled')`. Un ticket
-   *    ya entregado/cancelado NO entra — su consumo ya pasó.
-   *  - `orders.store_id = ctx.store_id` (defensa explícita; el relational
-   *    scope de `StorePrismaService` ya filtra por `products.store_id`).
-   *
-   * Implementación: dos pasos dentro de la MISMA tx para evitar el nested
-   * filter `inventory_transactions.where.order_items` (Prisma lo rechaza:
-   * el back-relation desde `order_items` se llama `inventory_transactions[]`
-   * y el `updateMany` solo conoce argumentos directos). Primero se resuelve
-   * la lista de `order_items` candidatos por la relación
-   * `inventory_transactions` desde el lado donde Prisma SÍ la expone,
-   * después se hace `inventory_transactions.updateMany({ where:
-   * { order_item_id: { in } } })`. La condición `kds_session_id IS NULL` se
-   * repite en los dos pasos para idempotencia: una transacción estampada
-   * por otra sesión abierta en paralelo no se vuelve a tomar.
+   * NOTA — QUI-760 ya NO hace backfill al abrir. La imputación de
+   * `inventory_transactions` se hace en el momento de la primera ACCIÓN de
+   * gestión sobre un ticket (`start`/`ready`/`delivered`), vía
+   * {@link attributeOpenSessionToTicketConsumption}. Razones del cambio:
+   *  - Si un operador entra por error a la KDS equivocada, cierra y abre
+   *    la suya, el turno viejo no debe quedarse con el consumo de la otra.
+   *  - El responsable del consumo es quien COCINA, no quien ABRE turno.
+   *  - El tablero KDS filtra por `business_date = hoy`, así que el límite
+   *    temporal está puesto por construcción y no necesita una ventana
+   *    propia acá.
    */
   async open(dto: OpenKdsSessionDto) {
     const { storeId, userId } = this.requireContext();
@@ -166,112 +118,16 @@ export class KdsSessionsService {
     }
 
     try {
-      // Timeout explícito de la tx interactiva. Prisma 7 por defecto aborta
-      // una `$transaction` interactiva a los 5 s; con el `findMany` +
-      // `updateMany` adentro del backfill y una tienda con volumen de
-      // inventario, ese techo es demasiado bajo — un cocinero vería un 500
-      // al abrir turno sin entender por qué. 15 s es generoso para el
-      // backfill real (decenas de filas) y todavía se siente como un error
-      // operativo si algo se cuelga. QUI-760: documentar este valor al lado
-      // de la regla, no en un comentario perdido.
-      return await this.prisma.$transaction(
-        async (tx) => {
-          const session = await tx.kds_sessions.create({
-            data: {
-              kds_id: dto.kds_id,
-              store_id: storeId,
-              opened_by: userId,
-              status: 'open',
-              opened_at: new Date(),
-              updated_at: new Date(),
-            },
-          });
-
-          // Mismo routing que `kitchen-fire.service.ts:668-680`: producto con
-          // `kds_id` propio va a esa estación; producto sin `kds_id` va al
-          // default de su tienda. Si esta sesión es el default, los productos
-          // huérfanos de KDS también le pertenecen.
-          const defaultStation = await tx.kds.findFirst({
-            where: { store_id: storeId, is_default: true, is_active: true },
-            select: { id: true },
-          });
-          const isDefaultSession = defaultStation?.id === dto.kds_id;
-
-          // Piso temporal del backfill: el HUECO entre turnos. Si esta
-          // estación ya cerró alguna sesión, tomamos el `closed_at` más
-          // reciente. Si es la primera de la historia, no hay piso y un
-          // `null` reclamaría meses de consumo abandonado — acotamos al
-          // inicio del día de negocio en curso de la tienda. Misma elección
-          // de corte que `resolveLocalDateRange` aplica al resto de
-          // analytics.
-          const lastClosed = await tx.kds_sessions.findFirst({
-            where: {
-              kds_id: dto.kds_id,
-              store_id: storeId,
-              status: 'closed',
-            },
-            orderBy: { closed_at: 'desc' },
-            select: { closed_at: true },
-          });
-          const lowerBound =
-            lastClosed?.closed_at ??
-            (await this.getBusinessDayStart(tx, storeId));
-
-          // Resolver candidatos por el lado de `order_items`, donde Prisma SÍ
-          // expone la relación `inventory_transactions`. La guarda
-          // `created_at > lowerBound` recorta el pasado al hueco entre turnos
-          // y evita la primera-apertura-reclama-todo. La guarda `kds_session_id:
-          // null` descarta filas con sesión atribuida por una apertura anterior.
-          const candidateOis = await tx.order_items.findMany({
-            where: {
-              inventory_consumed_at_fire: true,
-              orders: { store_id: storeId },
-              inventory_transactions: {
-                some: {
-                  kds_session_id: null,
-                  created_at: { gt: lowerBound },
-                },
-              },
-              kitchen_ticket_items: {
-                some: {
-                  kitchen_ticket: {
-                    status: { notIn: ['delivered', 'cancelled'] },
-                  },
-                },
-              },
-              ...(isDefaultSession
-                ? // defaultKds: productos mapeados a esta + productos huérfanos
-                  {
-                    OR: [
-                      { products: { kds_id: dto.kds_id } },
-                      { products: { kds_id: null } },
-                    ],
-                  }
-                : { products: { kds_id: dto.kds_id } }),
-            },
-            select: { id: true },
-          });
-
-          const oiIds = candidateOis.map((o) => o.id);
-          if (oiIds.length > 0) {
-            await tx.inventory_transactions.updateMany({
-              where: {
-                order_item_id: { in: oiIds },
-                // Doble guarda de piso: si otra tx estampó estas filas entre
-                // el findMany y el updateMany, el `IS NULL` las preserva.
-                // El `created_at` repite el corte temporal como defensa
-                // contra una carrera con un backfill concurrente.
-                kds_session_id: null,
-                created_at: { gt: lowerBound },
-              },
-              data: { kds_session_id: session.id },
-            });
-          }
-
-          return session;
+      return await this.prisma.kds_sessions.create({
+        data: {
+          kds_id: dto.kds_id,
+          store_id: storeId,
+          opened_by: userId,
+          status: 'open',
+          opened_at: new Date(),
+          updated_at: new Date(),
         },
-        { timeout: 15_000, maxWait: 5_000 },
-      );
+      });
     } catch (e: any) {
       if (e?.code === 'P2002') {
         throw new VendixHttpException(ErrorCodes.KDS_SESSION_ALREADY_OPEN);
@@ -281,38 +137,75 @@ export class KdsSessionsService {
   }
 
   /**
-   * Inicio del día de negocio en curso para la tienda, en el huso del
-   * `store_settings.settings.general.timezone` (fallback `America/Bogota`).
-   * Mismo corte que usa `resolveLocalDateRange` para analytics.
+   * QUI-760 — IMPUTA con la sesión abierta de la KDS del ticket las
+   * `inventory_transactions` de ese ticket que sigan con `kds_session_id
+   * IS NULL`.
    *
-   * Es el piso de backfill cuando una estación NUNCA cerró sesión: si la
-   * cocina arrancó hoy sin turnos previos, reclamamos desde 00:00 local de
-   * la tienda, no desde el inicio de los tiempos. Caso borde explícito y
-   * documentado en `open()`.
+   * Se invoca desde los handlers de `startPreparation`, `markReady` y
+   * `markDelivered` en `kitchen-fire.service.ts` — la primera acción de
+   * gestión sobre un ticket es la que firma el consumo. La guarda
+   * `kds_session_id IS NULL` hace que solo esa primera acción tenga
+   * efecto: llamar el helper desde los tres handlers sale gratis (no
+   * rompe idempotencia) y deja cubierto un cuarto si mañana aparece.
+   *
+   * El routing de KDS NO se rederiva acá. El `kitchen_tickets.kds_id` ya
+   * fue resuelto al disparar el fire (mismo patrón `kdsByProduct.get(...)
+   * ?? defaultKds.id` que `kitchen-fire.service.ts:668-680`), así que el
+   * ticket y todas las `inventory_transactions` que pertenecen a sus
+   * `order_items` van a la misma KDS — basta con estampar a la sesión
+   * abierta de ESE kds_id.
+   *
+   * Comportamiento:
+   *  - Si no hay sesión abierta para la KDS del ticket: 0 filas
+   *    estampadas, sin error. La guardia del tablero ya prohíbe actuar
+   *    sin sesión; este helper es defensivo para ese caso y para
+   *    tickets de un kds_id sin estación activa.
+   *  - Si el ticket no existe en esta tienda: 0 filas estampadas. El
+   *    helper NO rompe el flujo del handler — la búsqueda del ticket
+   *    en el handler previo ya fallaría con su propio error.
+   *
+   * Devuelve el conteo de filas estampadas (útil para logs y para
+   * verificar que la primera acción tuvo efecto).
    */
-  private async getBusinessDayStart(
-    tx: Prisma.TransactionClient,
-    storeId: number,
-    now: Date = new Date(),
-  ): Promise<Date> {
-    const store = await tx.stores.findFirst({
-      where: { id: storeId },
-      select: { store_settings: { select: { settings: true } } },
-    });
-    const rawTz =
-      (store?.store_settings?.settings as { general?: { timezone?: string } })
-        ?.general?.timezone ?? 'America/Bogota';
-    const tz = assertSafeTimezone(rawTz);
+  async attributeOpenSessionToTicketConsumption(ticketId: number): Promise<number> {
+    const { storeId } = this.requireContext();
 
-    const dtf = new Intl.DateTimeFormat('en-CA', {
-      timeZone: tz,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
+    // Traer el ticket para conocer su kds_id. Filtro por store_id
+    // explícito: defensa en profundidad contra un ticket creado en otra
+    // tienda por una fuga del scope del backend.
+    const ticket = await this.prisma.kitchen_tickets.findFirst({
+      where: { id: ticketId, store_id: storeId },
+      select: { id: true, kds_id: true },
     });
-    const [y, m, d] = dtf.format(now).split('-').map(Number);
-    return zonedWallClockToUtc(y, m, d, 0, 0, 0, 0, tz);
+    if (!ticket) return 0;
+
+    // Sesión abierta de esta KDS. Si no hay, no imputamos nada: el
+    // helper es idempotente y el tablero debería bloquear esta acción.
+    const openSession = await this.findOpenByKds(ticket.kds_id);
+    if (!openSession) return 0;
+
+    // Imputación: transactions cuyo order_item está en este ticket y
+    // siguen null. La guarda `kds_session_id IS NULL` es la idempotencia
+    // — la segunda llamada al helper no tiene efecto. El relational scope
+    // de `StorePrismaService` filtra por `products.store_id`, así que
+    // cross-tenant está cubierto por construcción.
+    const result = await this.prisma.inventory_transactions.updateMany({
+      where: {
+        kds_session_id: null,
+        order_item_id: { not: null },
+        order_items: {
+          kitchen_ticket_items: {
+            some: { kitchen_ticket_id: ticketId },
+          },
+        },
+      },
+      data: { kds_session_id: openSession.id },
+    });
+
+    return result.count;
   }
+
+
 
   /**
    * Cierra la sesión y persiste el RESUMEN DEL TURNO como snapshot inmutable,

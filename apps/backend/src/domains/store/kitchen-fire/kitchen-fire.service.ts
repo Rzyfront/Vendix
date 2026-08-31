@@ -9,6 +9,7 @@ import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
 import { FireOrderItemsDto, KitchenTicketQueryDto } from './dto';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
+import { KdsSessionsService } from '../kds/sessions/kds-sessions.service';
 
 /**
  * Single source of truth for the kitchen-ticket payload shape returned to
@@ -206,6 +207,7 @@ export class KitchenFireService {
     private readonly stockLevelManager: StockLevelManager,
     private readonly eventEmitter: EventEmitter2,
     private readonly sseService: NotificationsSseService,
+    private readonly kdsSessionsService: KdsSessionsService,
   ) {}
 
   /** Fecha de negocio 'YYYY-MM-DD' en tz de la tienda, desplazada por la hora de corte (default 3 AM → un ticket a la 1 AM cuenta para el día anterior). Configurable vía store_settings.settings.operations.ticket_closing_hour (con fallback legado a restaurant_ops.business_day_cutoff_hour). */
@@ -1705,6 +1707,10 @@ export class KitchenFireService {
     });
 
     const full = await this.getTicketForStore(ticketId);
+    // QUI-760 — imputa las inventory_transactions del ticket a la sesión
+    // abierta de la KDS. Idempotente: la guarda `kds_session_id IS NULL`
+    // hace que solo la primera acción de gestión tenga efecto.
+    await this.kdsSessionsService.attributeOpenSessionToTicketConsumption(ticketId);
     this.pushKitchenEvent(store_id, {
       type: 'ticket.started',
       ticket: full.ticket,
@@ -1770,6 +1776,10 @@ export class KitchenFireService {
     });
 
     const full = await this.getTicketForStore(ticketId);
+    // QUI-760 — ver nota en `startPreparation`. La guarda `kds_session_id`
+    // IS NULL garantiza que este helper no haga nada si el ticket ya fue
+    // firmado por `start`.
+    await this.kdsSessionsService.attributeOpenSessionToTicketConsumption(ticketId);
     this.pushKitchenEvent(store_id, {
       type: 'ticket.ready',
       ticket: full.ticket,
@@ -1895,6 +1905,10 @@ export class KitchenFireService {
     }
 
     const full = await this.getTicketForStore(ticketId);
+    // QUI-760 — ver nota en `startPreparation`. Mismo helper, mismo
+    // invariante de idempotencia: si el ticket ya fue firmado por `start`
+    // o `ready`, este llamado no estampa nada.
+    await this.kdsSessionsService.attributeOpenSessionToTicketConsumption(ticketId);
     this.pushKitchenEvent(store_id, {
       type: 'ticket.delivered',
       ticket: full.ticket,
