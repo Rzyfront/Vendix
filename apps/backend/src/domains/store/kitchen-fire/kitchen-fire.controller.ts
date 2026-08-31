@@ -23,6 +23,7 @@ import { KitchenFireService } from './kitchen-fire.service';
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
 import {
   FireOrderItemsDto,
+  ResendOrderItemsDto,
   KitchenTicketQueryDto,
   KdsSnapshotQueryDto,
 } from './dto';
@@ -104,6 +105,44 @@ export class KitchenFireController {
       // el body, así que el frontend recibe un 2xx con `success:false` y su
       // `catchError` nunca dispara (res.data === undefined). Rethrowing deja que
       // `AllExceptionsFilter` emita el status HTTP real (422/404/…) + error_code.
+      throw error;
+    }
+  }
+
+  // ------------------------------------------------------------ QUI-762 resend
+  /**
+   * Reenviar un plato a cocina creando un ticket NUEVO sin volver a consumir
+   * insumos. Caso de uso: un ticket anterior caducó o se perdió y la orden
+   * sigue vigente. Mismo body que `fire` (`FireOrderItemsDto`) para no
+   * inventar un DTO paralelo. Mismo permiso — la operación es gemela del
+   * fire, solo cambia el efecto contable.
+   *
+   * NO toca stock. NO crea `inventory_transactions`. NO emite `kitchen.fired`
+   * (ese evento es de consumo; el resend no consume). Sí emite `ticket.created`
+   * en el SSE para que el KDS reciba el ticket nuevo.
+   *
+   * Validaciones devuelven 422 con `KITCHEN_FIRE_NOT_RESENDABLE` si:
+   *  - la orden está cancelada o devuelta,
+   *  - algún item no tiene `inventory_consumed_at_fire=true` (en ese caso
+   *    el cliente debe disparar un fire normal),
+   *  - algún item ya tiene un `kitchen_ticket_item` con `status='delivered'`.
+   */
+  @Post('resend')
+  @Permissions('store:kitchen_fire:create')
+  async resend(@Body() dto: ResendOrderItemsDto) {
+    try {
+      const result = await this.kitchenFireService.resendOrderItems(dto);
+      const cancelledSuffix =
+        result.cancelledTicketIds.length > 0
+          ? `, cancelados #${result.cancelledTicketIds.join(',#')}`
+          : '';
+      return this.responseService.created(
+        result,
+        `Reenvio ejecutado: ticket #${result.ticketId} (sin consumo nuevo${cancelledSuffix}).`,
+      );
+    } catch (error) {
+      // Mismo comentario que en `fire` arriba: rethrow para que el
+      // `AllExceptionsFilter` emita el status HTTP real + error_code.
       throw error;
     }
   }

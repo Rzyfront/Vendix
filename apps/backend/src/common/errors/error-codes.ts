@@ -5090,6 +5090,21 @@ export const ErrorCodes = {
     devMessage:
       'La tienda no tiene un KDS por defecto activo al cual rutear el ticket',
   },
+  // QUI-762 — el reenvio de un plato a cocina solo aplica a items que ya
+  // fueron consumidos (inventory_consumed_at_fire=true). Si el item no
+  // tiene la bandera, el camino correcto es el fire normal (no el
+  // resend), porque disparar resend sobre un item sin consumir lo
+  // crearia con cero consumo y dejaria el flag apagado, rompiendo la
+  // invariante anti-doble-descuento del pago. Ademas, no se reenvian
+  // items ya entregados (kitchen_ticket_item.status='delivered').
+  KITCHEN_FIRE_NOT_RESENDABLE: {
+    code: 'KITCHEN_FIRE_NOT_RESENDABLE',
+    httpStatus: 422,
+    devMessage:
+      'El item no es elegible para reenvio: o no fue consumido al disparar, ' +
+      'o la orden esta cancelada o devuelta, o el item ya fue entregado. ' +
+      'Si nunca se disparo a cocina, use el fire normal en lugar de reenviar.',
+  },
   // QUI-655 — el cliente no puede excluir un producto arbitrario del consumo:
   // el componente tiene que pertenecer al BOM explotado de ESE plato, o el
   // consumo dejaría de reflejar la receta y el costeo se volvería inauditable.

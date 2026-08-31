@@ -7,7 +7,7 @@ import { StockLevelManager } from '../inventory/shared/services/stock-level-mana
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
-import { FireOrderItemsDto, KitchenTicketQueryDto } from './dto';
+import { FireOrderItemsDto, KitchenTicketQueryDto, ResendOrderItemsDto } from './dto';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
 import { KdsSessionsService } from '../kds/sessions/kds-sessions.service';
 
@@ -1014,6 +1014,385 @@ export class KitchenFireService {
    * `components: []`: el ticket pide que aparezcan en el modal aunque no haya nada
    * que desglosar, para que el cocinero los vea y los envíe igual.
    */
+  // ---------------------------------------------------------------- resend
+  /**
+   * QUI-762 — reenviar un plato a cocina SIN volver a consumir insumos.
+   *
+   * Caso de uso: un ticket caduca o se pierde (red, cocinero cerró la ventana,
+   * etc.) y la orden sigue vigente. El camino obvio —volver a disparar el fire—
+   * no funciona: `fireOrderItems` empuja los items con `inventory_consumed_at_fire`
+   * a `skippedItemIds` (líneas 323-327 y 1344-1348 del archivo), así que
+   * re-disparar produce un ticket vacío. Y resetear la bandera para re-disparar
+   * sería peor: el fire volvería a explotar el BOM y a descontar los insumos por
+   * segunda vez.
+   *
+   * Este método es un gemelo de `fireOrderItemsInTx` que SOLO crea el ticket y sus
+   * items. No toca stock, no llama `RecipesService.explodeBom`, no llama
+   * `StockLevelManager.updateStock`, no crea `inventory_transactions`, no crea
+   * `inventory_movements`, no emite `kitchen.fired` (ese evento es de consumo;
+   * el resend no consume). Sí emite `ticket.created` después del commit para que
+   * el KDS reciba el SSE.
+   *
+   * Interacción con QUI-760 (imputador de consumo por sesión de turno):
+   * las `inventory_transactions` del consumo original ya tienen (o no) un
+   * `kds_session_id`. La guarda `kds_session_id IS NULL` del helper de QUI-760
+   * protege el caso "ya imputado": el resend NO las mueve porque no crea
+   * transactions nuevas. Si estaban huérfanas, el turno que cocine el nuevo
+   * ticket las imputa al hacer `start/ready/delivered`. El resend es transparente
+   * al imputador — un ticket nuevo, no duplica consumo.
+   */
+  async resendOrderItems(
+    dto: ResendOrderItemsDto,
+  ): Promise<{
+    /** Ticket primario (estacion de menor id). */
+    ticketId: number;
+    /** Un id por estacion involucrada (mismo shape que el fire normal). */
+    ticketIds: number[];
+    /** Items reenviados. */
+    firedItemIds: number[];
+    /** Tickets viejos cancelados por este resend (solo `lost_command`). */
+    cancelledTicketIds: number[];
+  }> {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    // Gate al igual que el fire normal: un resend en tienda no-restaurante no
+    // tiene sentido (no hay KDS adonde rutear).
+    const storeIndustries = await this.prisma.stores.findUnique({
+      where: { id: store_id },
+      select: { industries: true },
+    });
+    if (!storeIsRestaurant(storeIndustries?.industries)) {
+      throw new VendixHttpException(ErrorCodes.RESTAURANT_NOT_ENABLED);
+    }
+
+    if (!dto.order_item_ids || dto.order_item_ids.length === 0) {
+      throw new VendixHttpException(ErrorCodes.KITCHEN_FIRE_NO_ITEMS);
+    }
+
+    // 1. Cargar la orden y los items solicitados, scope-safe.
+    const order = await this.prisma.orders.findFirst({
+      where: { id: dto.order_id, store_id },
+      select: {
+        id: true,
+        store_id: true,
+        // C.3 QUI-733 — la mesa se estampa al ticket via la sesión
+        // ABIERTA del pedido (`table_sessions.order_id`). `orders` no
+        // tiene `table_id` directo; la relación vive en table_sessions.
+        // El fire normal usa el mismo patrón (líneas 278-283).
+        table_sessions: {
+          where: { closed_at: null },
+          orderBy: { opened_at: 'desc' },
+          take: 1,
+          select: { id: true, table_id: true },
+        },
+        order_items: {
+          where: { id: { in: dto.order_item_ids } },
+          select: {
+            id: true,
+            product_id: true,
+            product_name: true,
+            product_variant_id: true,
+            quantity: true,
+            notes: true,
+            // La bandera es la primera guarda del resend: si el item NUNCA
+            // fue consumido al disparar, no es reenviable — es un fire
+            // inicial. Lo mandamos al fire normal en lugar de inventar
+            // un ticket con consumo cero.
+            inventory_consumed_at_fire: true,
+            products: {
+              select: {
+                id: true,
+                kds_id: true,
+              },
+            },
+            product_variants: {
+              select: { id: true, name: true, product_id: true },
+            },
+          },
+        },
+      },
+    });
+    if (!order) {
+      throw new VendixHttpException(ErrorCodes.KITCHEN_FIRE_ORDER_NOT_FOUND);
+    }
+    if (!order.order_items || order.order_items.length === 0) {
+      throw new VendixHttpException(ErrorCodes.KITCHEN_FIRE_ITEM_NOT_FOUND);
+    }
+
+    // 2. Validar estado de la orden. cancelled y refunded nunca reciben resend;
+    //    cualquier otro estado (created, processing, delivered, finished) es
+    //    legítimo porque un ticket se puede perder en cualquier momento de la
+    //    cadena mientras la orden siga activa.
+    const orderState = await this.prisma.orders.findUnique({
+      where: { id: order.id },
+      select: { state: true },
+    });
+    if (
+      orderState?.state === 'cancelled' ||
+      orderState?.state === 'refunded'
+    ) {
+      throw new VendixHttpException(ErrorCodes.KITCHEN_FIRE_NOT_RESENDABLE);
+    }
+
+    // 3. Validar que CADA item está consumido y pertenece a la orden. Si
+    //    alguno no cumple, rechaza — el cliente puede entonces decidir si
+    //    dispara un fire normal o elimina ese id del payload.
+    for (const item of order.order_items) {
+      if (!item.inventory_consumed_at_fire) {
+        throw new VendixHttpException(
+          ErrorCodes.KITCHEN_FIRE_NOT_RESENDABLE,
+          `El item #${item.id} nunca fue consumido al disparar a cocina. ` +
+            `Use el fire normal en lugar del resend para items sin consumir.`,
+        );
+      }
+    }
+
+    // 4. Validar que ninguno de los items ya fue entregado al cliente. Un
+    //    ticket de un item entregado no se reenvía: la cocina ya cocinó el
+    //    plato y el cliente ya lo tiene. Si la operación humana insiste, el
+    //    operador edita el pedido o crea uno nuevo.
+    const deliveredRows = await this.prisma.kitchen_ticket_items.findMany({
+      where: {
+        order_item_id: { in: order.order_items.map((it) => it.id) },
+        status: 'delivered',
+      },
+      select: { order_item_id: true },
+    });
+    if (deliveredRows.length > 0) {
+      const ids = Array.from(
+        new Set(deliveredRows.map((r) => r.order_item_id)),
+      ).join(', ');
+      throw new VendixHttpException(
+        ErrorCodes.KITCHEN_FIRE_NOT_RESENDABLE,
+        `Los items #${ids} ya fueron entregados y no se reenvían. ` +
+          `Cree un nuevo pedido si el cliente quiere repetir el plato.`,
+      );
+    }
+
+    // 5. Resolver KDS por item — mismo patrón que `fireOrderItemsInTx`. Si los
+    //    items enrutan a estaciones distintas, son tickets distintos. El
+    //    `UNIQUE (store_id, kds_id, business_date, daily_number)` exige
+    //    poblar `kds_id` y `business_date` (los NULL no colisionan en
+    //    Postgres), y un resend en NULL podría insertar duplicados sin
+    //    que el P2002 nos avisara. Por eso los populamos explícitamente.
+    const defaultKds = await this.prisma.kds.findFirst({
+      where: { store_id, is_default: true, is_active: true },
+      select: { id: true },
+    });
+    if (!defaultKds) {
+      throw new VendixHttpException(ErrorCodes.KITCHEN_FIRE_NO_DEFAULT_KDS);
+    }
+
+    const kdsByProduct = new Map<number, number>();
+    for (const item of order.order_items) {
+      if (item.product_id) {
+        kdsByProduct.set(
+          item.product_id,
+          item.products?.kds_id ?? defaultKds.id,
+        );
+      }
+    }
+
+    const businessDate = await this.getBusinessDate(store_id);
+    const businessDateAsDate = new Date(`${businessDate}T00:00:00.000Z`);
+
+    // 6. Crear los tickets en transacción. Mismo advisory lock + count +
+    //    daily_number que el fire normal, agrupando por kds_id cuando los
+    //    items enrutan a estaciones distintas.
+    const snapshotsByKds = new Map<
+      number,
+      Array<{
+        orderItemId: number;
+        productId: number;
+        productName: string;
+        quantity: number;
+        productVariantId: number | null;
+        variantLabel: string | null;
+        notes: string | null;
+      }>
+    >();
+    for (const item of order.order_items) {
+      if (!item.product_id) continue;
+      const kdsId = kdsByProduct.get(item.product_id) ?? defaultKds.id;
+      const snap = {
+        orderItemId: item.id,
+        productId: item.product_id,
+        productName: item.product_name,
+        quantity: Number(item.quantity || 0),
+        productVariantId: item.product_variant_id ?? null,
+        variantLabel: this.variantLabelFor(item),
+        notes: item.notes ?? null,
+      };
+      const bucket = snapshotsByKds.get(kdsId);
+      if (bucket) bucket.push(snap);
+      else snapshotsByKds.set(kdsId, [snap]);
+    }
+
+    const createdTickets: Array<{ id: number; kds_id: number }> = [];
+
+    // 6b. Tickets viejos candidatos a cancelacion (solo en `lost_command`).
+    //
+    // Buscamos TODOS los tickets previos que tengan AL MENOS UN item de los
+    // reenviados, sin importar el estado del item, PERO limitamos la
+    // cancelacion a los que NO estan en estado terminal (`delivered`): un
+    // ticket cuyo item ya fue entregado no se cancela retroactivamente — ya
+    // cuenta como coccion real para el reporte historico.
+    //
+    // Si reason='remake_dish', esta lista queda vacia y el comportamiento es
+    // el viejo (dos tickets vivos apuntando al mismo item, ambos reales).
+    const oldTicketIdsToCancel: number[] =
+      dto.reason === 'lost_command'
+        ? Array.from(
+            new Set(
+              (
+                await this.prisma.kitchen_ticket_items.findMany({
+                  where: {
+                    order_item_id: { in: order.order_items.map((it) => it.id) },
+                    status: { in: ['pending', 'in_preparation'] },
+                    // Acotar al mismo `business_date` del reenvío: un
+                    // pendiente de hace semanas es problema de QUI-761
+                    // (caducidad por dia), no del resend. Cancelar
+                    // tickets historicos como efecto colateral de una
+                    // accion sobre datos de hoy es una escritura sobre
+                    // datos que nadie pidio cambiar.
+                    kitchen_ticket: {
+                      business_date: businessDateAsDate,
+                    },
+                  },
+                  select: { kitchen_ticket_id: true },
+                })
+              ).map((row) => row.kitchen_ticket_id),
+            ),
+          )
+        : [];
+
+    const ticketIds: number[] = await this.prisma.$transaction(
+      async (tx) => {
+        const ids: number[] = [];
+
+        // 6b.i Cancelar los tickets viejos en la MISMA transaccion. Solo
+        // se invoca si la razon es `lost_command` — si el operador eligio
+        // `remake_dish`, oldTicketIdsToCancel viene vacio y este bloque es
+        // no-op. El helper `cancelTicketInTx` flipea el ticket a 'cancelled'
+        // y a sus items pendientes/preparacion a 'cancelled' tambien
+        // (ignora `delivered` y `ready`, que ya cuentan como coccion real).
+        //
+        // Contexto de inventario: la cancelacion aqui es de TICKET, no de
+        // INVENTARIO. La merma ya se firmo al disparar el primer fire y
+        // `payments.updateInventoryFromOrder:2554` ya protege contra doble
+        // descuento via `if (item.inventory_consumed_at_fire === true)
+        // continue;`. Cancelar la reimpresion no devuelve nada al stock
+        // (la fila `kitchen_ticket_items` vieja pasa a cancelled; el row
+        // de `inventory_transactions` del consumo original sigue intacto y
+        // estampado al turno de QUI-760 si corresponde).
+        for (const oldTicketId of oldTicketIdsToCancel) {
+          await this.cancelTicketInTx(tx, oldTicketId);
+        }
+
+        // Orden estable por kds_id: mismo shape que el fire normal.
+        for (const kdsId of [...snapshotsByKds.keys()].sort((a, b) => a - b)) {
+          const snaps = snapshotsByKds.get(kdsId)!;
+
+          // El lock y el count son POR ESTACION y POR DIA — un restaurante
+          // con dos tickets #1 simultáneos en dos cocinas distintas es lo
+          // que este lock evita. Mismo patrón que `fireOrderItemsInTx:875`.
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(${store_id}::int, hashtext(${businessDate} || ':' || ${kdsId}::text)::int)`;
+          const sameDayCount = await tx.kitchen_tickets.count({
+            where: {
+              store_id,
+              kds_id: kdsId,
+              business_date: businessDateAsDate,
+            },
+          });
+
+          const ticket = await tx.kitchen_tickets.create({
+            data: {
+              store_id,
+              order_id: order.id,
+              // Misma mesa que el fire normal (vía el snapshot del order):
+              // NULL para mostrador / delivery. El resend hereda la mesa
+              // del pedido original, no del ticket anterior.
+              table_id: order.table_sessions?.[0]?.table_id ?? null,
+              kds_id: kdsId,
+              status: 'pending',
+              daily_number: sameDayCount + 1,
+              business_date: businessDateAsDate,
+              fired_at: new Date(),
+              items: {
+                create: snaps.map((snap) => ({
+                  order_item_id: snap.orderItemId,
+                  product_id: snap.productId,
+                  quantity: snap.quantity,
+                  status: 'pending',
+                  // El snapshot del variant_label viaja igual que en el
+                  // fire normal — inmutable a cambios posteriores del
+                  // nombre de la variante.
+                  product_variant_id: snap.productVariantId,
+                  variant_label: snap.variantLabel,
+                  notes: snap.notes,
+                })),
+              },
+            },
+            include: { items: true },
+          });
+          ids.push(ticket.id);
+          createdTickets.push({ id: ticket.id, kds_id: kdsId });
+        }
+        return ids;
+      },
+    );
+
+    // 7. Emitir `ticket.created` por cada uno (igual que el fire normal:
+    //    después del commit, best-effort). El tipo es `ticket.created`
+    //    según el union declarado en el frontend
+    //    (`kitchen-ticket.interface.ts:136`). NO `kitchen.ticket.created`.
+    try {
+      const tickets = await this.prisma.kitchen_tickets.findMany({
+        where: { id: { in: ticketIds }, store_id },
+        include: KITCHEN_TICKET_INCLUDE,
+      });
+      for (const ticket of tickets) {
+        this.pushKitchenEvent(store_id, {
+          type: 'ticket.created',
+          ticket,
+          ts: Date.now(),
+        });
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Failed to push SSE for resend tickets ${ticketIds.join(', ')}: ${
+          (err as Error).message
+        }`,
+      );
+    }
+
+    // 8. Emitir `ticket.cancelled` por cada viejo cancelado (solo si
+    //    `lost_command`). Usamos `emitTicketCancelledEvent` que ya invoca
+    //    el imputador de QUI-760
+    //    (`KdsSessionsService.attributeOpenSessionToTicketConsumption`) en
+    //    post-commit — la guarda `kds_session_id IS NULL` deja quietas
+    //    las inventory_transactions del consumo original que ya estan
+    //    estampadas. Si hay filas sin estampar, se imputan al turno
+    //    actual. El resend no las altera.
+    for (const oldTicketId of oldTicketIdsToCancel) {
+      await this.emitTicketCancelledEvent(oldTicketId);
+    }
+
+    // El primario es el de menor kds_id (mismo criterio que el fire
+    // normal). Aquí ya tenemos `createdTickets` ordenada por kds_id, así
+    // que el primero es el primario.
+    return {
+      ticketId: ticketIds[0],
+      ticketIds,
+      firedItemIds: order.order_items.map((it) => it.id),
+      cancelledTicketIds: oldTicketIdsToCancel,
+    };
+  }
+
   async previewFire(
     orderId: number,
     candidateOrderItemIds: number[],
