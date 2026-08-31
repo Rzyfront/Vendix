@@ -162,23 +162,39 @@ watch_status() {
   mtime=$(stat -f %m "$log" 2>/dev/null || stat -c %Y "$log" 2>/dev/null || echo "$ahora")
   edad=$(( ahora - mtime ))
 
+  # El log lleva secuencias ANSI, y esbuild las mete ENTRE el corchete y la
+  # palabra: '\e[43;33m[\e[43;30mWARNING\e[43;33m]'. Por eso un patrón
+  # '\[ERROR\]' sobre el crudo casa cero veces y un ciclo roto se lee limpio.
+  # Todo lo que sigue grepea sobre la copia sin color.
+  local plano
+  plano="$(sed $'s/\033\\[[0-9;]*[a-zA-Z]//g' "$log")"
+
   if [ "$puerto_ok" -eq 0 ]; then
     printf 'último ciclo  RANCIO — la bitácora es de hace %ss y el proceso ya no está\n' "$edad"
-  elif grep -q 'bundle generation failed' "$log"; then
+  elif printf '%s\n' "$plano" | grep -q 'bundle generation failed'; then
     printf 'último ciclo  FALLÓ hace %ss\n' "$edad"
-  elif grep -q 'bundle generation complete' "$log"; then
+  elif printf '%s\n' "$plano" | grep -qE 'bundle generation complete|Watch mode enabled'; then
+    # El arranque en frío no imprime 'bundle generation complete': termina con
+    # 'Watch mode enabled. Watching for file changes...'. Sin este marcador el
+    # primer ciclo se lee EN CURSO para siempre y nadie da el frontend por sano.
     printf 'último ciclo  OK hace %ss\n' "$edad"
   else
     printf 'último ciclo  EN CURSO (%ss desde la última línea)\n' "$edad"
   fi
 
-  local errores
-  errores="$(grep -nE '\[ERROR\]|error TS[0-9]+|NG[0-9]{4}|Could not resolve' "$log" | head -20)"
+  # Sólo errores. 'NG[0-9]{4}' a secas casaba también los NG8113/NG8102 de
+  # aviso, así que un ciclo limpio se reportaba con 20 'errores' inexistentes.
+  local errores avisos
+  errores="$(printf '%s\n' "$plano" | grep -nE '\[ERROR\]|error TS[0-9]+|Could not resolve|Failed to resolve import|Internal server error' | head -20)"
+  avisos="$(printf '%s\n' "$plano" | grep -cE '\[WARNING\]' | tr -d ' ')"
   if [ -n "$errores" ]; then
     printf 'errores\n'
     printf '%s\n' "$errores" | sed 's/^/              /'
   else
     printf 'errores       ninguno en el último ciclo\n'
+  fi
+  if [ "${avisos:-0}" -gt 0 ]; then
+    printf 'avisos        %s [WARNING] en el ciclo (no bloquean)\n' "$avisos"
   fi
 
   printf '\nbitácora      %s (%s bytes, sólo el ciclo actual)\n' "$log" "$(wc -c < "$log" | tr -d ' ')"
