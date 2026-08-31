@@ -2260,13 +2260,14 @@ export class SubscriptionFiscalService {
         for (const tax of taxes) {
           const rate = Number(tax.rate || 0);
           if (rate <= 0) continue;
-          // El frontend puede mandar `tax_amount` explícito; si NO, lo
-          // calculamos sobre la base despejada. Esto preserva el caso
-          // donde el V1 ya viene con el monto pre-calculado.
+          // El frontend PUEDE mandar `tax_amount` calculado, pero un navegador
+          // es un origen que se puede manipular: si el monto que inyecta no
+          // cuadra con `base × tarifa`, la DIAN lo rechaza con FAS02 firmando
+          // con NUESTRO certificado. El monto que va al XML sale SIEMPRE de
+          // nuestro cálculo sobre la base despejada; el del cliente, si llega,
+          // se descarta (peer rule de vendix-db).
           let taxAmount: number;
-          if (tax.tax_amount != null) {
-            taxAmount = Number(tax.tax_amount);
-          } else if (tax.is_inclusive) {
+          if (tax.is_inclusive) {
             taxAmount = Math.round(lineBaseForInclusiveTaxes * rate * 100) / 100;
           } else {
             taxAmount = Math.round(lineBaseForExclusiveTaxes * rate * 100) / 100;
@@ -2349,11 +2350,18 @@ export class SubscriptionFiscalService {
       // Withholdings: suman al campo withholding_amount del provider (asset
       // debit en el listener — ver onInvoiceValidated caso 2). Si el caller
       // no envía, queda `[]` y el campo se emite en 0.
+      //
+      // `rate` llega en FRACCIÓN 0..1 desde el DTO (elon NO divide por 100);
+      // la conversión a porcentaje la hace el provider UNA sola vez al firmar
+      // el XML. Acá sólo calculamos `amount` para `withholding_amount`, sin
+      // confiar en lo que mande el cliente — mismo razonamiento que para
+      // `tax_amount`: un navegador se puede manipular.
       const withholdings = Array.isArray(dto.withholdings) ? dto.withholdings : [];
-      const withholdingAmount = withholdings.reduce(
-        (acc, w) => acc + (w.amount != null ? Number(w.amount) : Math.round(Number(w.base_amount) * Number(w.rate) * 100) / 100),
-        0,
-      );
+      const withholdingAmount = withholdings.reduce((acc, w) => {
+        const base = Number(w.base_amount) || 0;
+        const rate = Number(w.rate) || 0;
+        return acc + Math.round(base * rate * 100) / 100;
+      }, 0);
 
       // 0.c) Idempotencia por contenido. Doble click en el botón =
       //     mismo tax_id + mismas items + mismo período → misma key.
@@ -2403,7 +2411,7 @@ export class SubscriptionFiscalService {
           (customerRegime === '49' ? ['O-13'] : [customerRegime]);
 
         // Notas. La nota de exclusión art. 476 num. 21 SÓLO se incluye
-        // cuando la factura no lleva ningún impuesto. Con хотя бы один
+        // cuando la factura no lleva ningún impuesto. Con al menos un
         // impuesto presente, declarar exclusión sería falso y la DIAN lo
         // rechaza. Si el caller trae `notes`, gana su contenido.
         const defaultNotes = hasAnyTax
@@ -2452,9 +2460,45 @@ export class SubscriptionFiscalService {
           tax_amount: taxAmount.toFixed(2),
           withholding_amount: withholdingAmount.toFixed(2),
           total_amount: total.toFixed(2),
-          currency: dto.currency ?? 'COP',
+          // peer rule (vendix-db) — la moneda del documento es SIEMPRE COP.
+          // El XML builder (ubl-invoice.builder.ts:151) emite
+          // `cbc:DocumentCurrencyCode` con este valor. Una factura en USD
+          // sale denominada en dólares y la convierte automáticamente a COP
+          // al cobro, contradiciendo el objetivo 6 del plan («sin bloquear
+          // la emisión en COP»). Cuando el operador marca «declarar
+          // divisa», lo que se declara es la CONVERSIÓN
+          // (`cac:PaymentAlternativeExchangeRate`), NO la moneda.
+          currency: 'COP',
+          // Extracción defensiva de la tasa alternativa. La legacy
+          // `CreatePlatformInvoiceDto.currency` es `string` y por hoy no
+          // carga exchange_rate — el mapper V1→legacy de elon sólo propaga
+          // el iso_4217 como string. Esto está escrito para cuando la
+          // extensión del DTO legacy (o un nuevo campo `exchange_rate`)
+          // empiece a traer el bloque. Si dto.currency es un objeto con
+          // `exchange_rate` y `exchange_rate_date`, sale por
+          // `cac:PaymentAlternativeExchangeRate` (ubl-invoice.builder.ts:218);
+          // si NO, el grupo no se emite y el documento sale sin
+          // declaración de divisa.
+          ...(function buildExchangeRate() {
+            const c: any = dto.currency;
+            if (!c || typeof c !== 'object') return {};
+            const foreign = typeof c.iso_4217 === 'string' ? c.iso_4217 : null;
+            const rateRaw = Number(c.exchange_rate);
+            if (!foreign || foreign === 'COP') return {};
+            if (!Number.isFinite(rateRaw) || rateRaw <= 0) return {};
+            return {
+              exchange_rate: {
+                foreign_currency: foreign.toUpperCase(),
+                // TRM = pesos por una unidad de la divisa (FAR06).
+                rate: dianAmount(rateRaw),
+                date: typeof c.exchange_rate_date === 'string'
+                  ? c.exchange_rate_date
+                  : issueAtLocal,
+              },
+            };
+          })(),
           items: lineItems,
-          // peer rule 2 — taxes de cabecera presente SÓLO si хотя бы una
+          // peer rule 2 — taxes de cabecera presente SÓLO si al menos una
           // línea trae taxes. Legacy sin taxes: `taxes: []`.
           taxes: hasAnyTax ? lineItems.flatMap((l) => l.taxes ?? []) : [],
           notes: notesText,
@@ -2466,7 +2510,7 @@ export class SubscriptionFiscalService {
             document_type: 'sales_invoice',
           }),
           // peer rule 2 — payment_form/payment_means honran el DTO cuando
-          // está presente; caen a defaults legacy ('1'/'42') cuando нет.
+          // está presente; caen a defaults legacy ('1'/'42') cuando no.
           payment_form: dto.payment_form ?? '1',
           payment_means: dto.payment_means_code ?? '42',
           payment_method: null,
