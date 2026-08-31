@@ -189,6 +189,18 @@ export class KdsSessionsService {
     // — la segunda llamada al helper no tiene efecto. El relational scope
     // de `StorePrismaService` filtra por `products.store_id`, así que
     // cross-tenant está cubierto por construcción.
+    //
+    // Invariante sobre `type`: este helper NO filtra por `type` y eso
+    // es correcto por construcción. Todo `kitchen_ticket_items.order_item_id`
+    // tiene `inventory_consumed_at_fire = true` — el fire lo flipea
+    // siempre, incluidos los `recipeLessItems` (Fase K Gap 3, líneas
+    // 810-819 de `kitchen-fire.service.ts`). Y el path de pago
+    // (`payments.service.ts:2554`) tiene el guard `if (item.
+    // inventory_consumed_at_fire === true) continue;` antes de generar
+    // un `sale` o `return` para el mismo order_item. Verificado en DB
+    // local: TODOS los movimientos de order_items de kitchen_ticket_items
+    // son `stock_in`/`initial`, cero `sale`/`return`. Filtrar por
+    // `type` agregaría ruido sin cambiar el resultado.
     const result = await this.prisma.inventory_transactions.updateMany({
       where: {
         kds_session_id: null,

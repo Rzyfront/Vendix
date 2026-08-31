@@ -1708,14 +1708,26 @@ export class KitchenFireService {
 
     const full = await this.getTicketForStore(ticketId);
     // QUI-760 — imputa las inventory_transactions del ticket a la sesión
-    // abierta de la KDS. Idempotente: la guarda `kds_session_id IS NULL`
-    // hace que solo la primera acción de gestión tenga efecto.
-    await this.kdsSessionsService.attributeOpenSessionToTicketConsumption(ticketId);
+    // abierta de la KDS. Va DESPUÉS del pushKitchenEvent y envuelto en
+    // try/catch: la imputación es un side-effect contable; si falla, NO
+    // debe tumbar el handler (el cambio de estado ya está commiteado) NI
+    // bloquear la difusión SSE — un efecto contable no puede tener poder
+    // de veto sobre la difusión operativa. La guarda `kds_session_id IS
+    // NULL` del helper hace que solo la primera acción tenga efecto;
+    // llamarlo desde los tres sale gratis y no rompe idempotencia.
     this.pushKitchenEvent(store_id, {
       type: 'ticket.started',
       ticket: full.ticket,
       ts: Date.now(),
     });
+    try {
+      await this.kdsSessionsService.attributeOpenSessionToTicketConsumption(ticketId);
+    } catch (err) {
+      this.logger.error(
+        `QUI-760: failed to attribute ticket ${ticketId} consumption to KDS session`,
+        err as Error,
+      );
+    }
     return full.ticket;
   }
 
@@ -1778,13 +1790,21 @@ export class KitchenFireService {
     const full = await this.getTicketForStore(ticketId);
     // QUI-760 — ver nota en `startPreparation`. La guarda `kds_session_id`
     // IS NULL garantiza que este helper no haga nada si el ticket ya fue
-    // firmado por `start`.
-    await this.kdsSessionsService.attributeOpenSessionToTicketConsumption(ticketId);
+    // firmado por `start`. Mismo orden push-primero-try-catch-después:
+    // la difusión operativa no puede depender de un efecto contable.
     this.pushKitchenEvent(store_id, {
       type: 'ticket.ready',
       ticket: full.ticket,
       ts: Date.now(),
     });
+    try {
+      await this.kdsSessionsService.attributeOpenSessionToTicketConsumption(ticketId);
+    } catch (err) {
+      this.logger.error(
+        `QUI-760: failed to attribute ticket ${ticketId} consumption to KDS session`,
+        err as Error,
+      );
+    }
     return full.ticket;
   }
 
@@ -1907,13 +1927,22 @@ export class KitchenFireService {
     const full = await this.getTicketForStore(ticketId);
     // QUI-760 — ver nota en `startPreparation`. Mismo helper, mismo
     // invariante de idempotencia: si el ticket ya fue firmado por `start`
-    // o `ready`, este llamado no estampa nada.
-    await this.kdsSessionsService.attributeOpenSessionToTicketConsumption(ticketId);
+    // o `ready`, este llamado no estampa nada. Mismo orden push-primero-
+    // try-catch-después: la difusión operativa no puede depender de un
+    // efecto contable.
     this.pushKitchenEvent(store_id, {
       type: 'ticket.delivered',
       ticket: full.ticket,
       ts: Date.now(),
     });
+    try {
+      await this.kdsSessionsService.attributeOpenSessionToTicketConsumption(ticketId);
+    } catch (err) {
+      this.logger.error(
+        `QUI-760: failed to attribute ticket ${ticketId} consumption to KDS session`,
+        err as Error,
+      );
+    }
 
     // Restaurant lifecycle bridge: once EVERY kitchen ticket of this order is
     // in a terminal state (delivered/cancelled) and at least one was actually
