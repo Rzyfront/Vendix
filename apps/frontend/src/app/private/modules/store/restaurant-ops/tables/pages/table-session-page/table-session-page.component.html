@@ -22,9 +22,10 @@
           <span
             dropdown-trigger
             class="header-more-trigger"
-            aria-label="Más acciones"
+            aria-label="Opciones"
           >
-            <app-icon name="more-horizontal" [size]="18"></app-icon>
+            <app-icon name="more-horizontal" [size]="16"></app-icon>
+            <span>Opciones</span>
           </span>
           @for (action of secondaryActions(); track action.id) {
             <button

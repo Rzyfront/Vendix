@@ -9,6 +9,7 @@ import {
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   ButtonComponent,
@@ -73,6 +74,7 @@ export type QuickStatusTable = Pick<Table, 'id' | 'name'> & {
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
     ModalComponent,
     ButtonComponent,
     SelectorComponent,
@@ -110,6 +112,9 @@ export type QuickStatusTable = Pick<Table, 'id' | 'name'> & {
             label="Nuevo estado"
             placeholder="Selecciona un estado"
             [options]="availableOptions()"
+            [value]="selectedStatus()"
+            [ngModel]="selectedStatus()"
+            (ngModelChange)="onStatusChange($event)"
             (valueChange)="onStatusChange($event)"
           />
         }
@@ -250,10 +255,11 @@ export class QuickStatusModalComponent {
   });
 
   constructor() {
-    // Sync the selection whenever the modal target table changes (also
+    // Sync the selection whenever the modal target table or open state changes (also
     // covers open/close cycles that swap from a different table).
     effect(() => {
       this.table();
+      this.isOpen();
       this.selectedStatus.set(null);
     });
   }

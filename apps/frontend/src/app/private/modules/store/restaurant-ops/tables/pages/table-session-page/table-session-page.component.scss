@@ -914,8 +914,11 @@
 .header-more-trigger {
   display: inline-flex;
   align-items: center;
+  gap: 0.375rem;
   justify-content: center;
-  color: var(--color-text-secondary);
+  color: var(--color-text-primary);
+  font-size: 0.85rem;
+  font-weight: 600;
 }
 
 .header-more-item {

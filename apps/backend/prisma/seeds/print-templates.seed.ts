@@ -99,11 +99,18 @@ export const SYSTEM_PRINT_TEMPLATES: Array<{
           ],
         },
         {
+          id: 'sec_table_info',
+          type: 'table_info',
+          title: 'Mesa, Mesero y Turno',
+          enabled: true,
+          order: 3,
+        },
+        {
           id: 'sec_customer',
           type: 'customer_info',
           title: 'Datos del Cliente',
           enabled: true,
-          order: 3,
+          order: 4,
           fields: [
             { id: 'f_cname', key: 'customer.name', label: 'Cliente', enabled: true, position: 'left' },
             { id: 'f_cnit', key: 'customer.tax_id', label: 'C.C. / NIT', enabled: true, position: 'left' },
@@ -114,14 +121,14 @@ export const SYSTEM_PRINT_TEMPLATES: Array<{
           type: 'items_table',
           title: 'Detalle de Productos',
           enabled: true,
-          order: 4,
+          order: 5,
         },
         {
           id: 'sec_totals',
           type: 'totals_summary',
           title: 'Totales y Pagos',
           enabled: true,
-          order: 5,
+          order: 6,
           fields: [
             { id: 'f_sub', key: 'order.subtotal_amount', label: 'Subtotal', enabled: true, position: 'right' },
             { id: 'f_disc', key: 'order.discount_amount', label: 'Descuento', enabled: true, position: 'right' },
@@ -137,7 +144,7 @@ export const SYSTEM_PRINT_TEMPLATES: Array<{
           type: 'footer',
           title: 'Pie de Ticket',
           enabled: true,
-          order: 6,
+          order: 7,
           fields: [
             { id: 'f_msg', key: 'receipts.receipt_footer', label: 'Mensaje de Despedida', enabled: true, position: 'center' },
             { id: 'f_powered', key: 'system.powered_by', label: 'Firma del Sistema', enabled: true, position: 'center' },
