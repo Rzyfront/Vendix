@@ -24,6 +24,20 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
   selector: 'app-platform-section-wrapper',
   standalone: true,
   imports: [BadgeComponent, IconComponent],
+  // `display: block` en el host, o las secciones salen PEGADAS.
+  //
+  // Un elemento propio como `app-platform-section-wrapper` es desconocido para
+  // el navegador y su display por defecto es `inline`. Los contenedores que
+  // apilan estas secciones usan `space-y-6`, que aplica `margin-top` a los
+  // hermanos — y `margin-top` NO tiene efecto sobre un elemento inline. El
+  // hueco se pedia, se escribia en el padre y el navegador lo descartaba en
+  // silencio. Se notaba porque un `<div>` normal en la misma pila (el bloque
+  // de «Guardar como perfil») si quedaba separado: ese es block.
+  //
+  // Va en el host y no en cada uso: asi vale para las 9 secciones de la
+  // creacion de facturas y para el editor de perfiles a la vez, y ningun uso
+  // futuro puede olvidarse de ponerlo.
+  host: { class: 'block' },
   template: `
     <!--
       Sin overflow-hidden.
