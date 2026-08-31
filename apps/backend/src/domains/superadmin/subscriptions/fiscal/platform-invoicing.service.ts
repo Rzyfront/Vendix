@@ -562,6 +562,63 @@ export class PlatformInvoicingService {
     );
   }
 
+  /**
+   * Lista los conceptos de retención activos de la organización de la
+   * plataforma (organization_id resuelto por `resolvePlatformIdentity`).
+   *
+   * Los conceptos con `accounting_entity_id` NULL son los "compartidos"
+   * a nivel organización: aplican a cualquier entidad contable que la org
+   * plataforma cree. El selector de retenciones del wizard los consume
+   * con `concept_id` numérico (entero), NO con `code` tipo 'RCO01'.
+   *
+   * Devuelve un envelope plano `{ data: WithholdingConceptDto[] }` que
+   * el controller mete dentro de `responseService.success(...)` igual que
+   * el resto de listados del rail.
+   */
+  async listWithholdingConceptsForPlatform(organizationId: number): Promise<{
+    data: Array<{
+      id: number;
+      code: string;
+      name: string;
+      rate: number;
+      withholding_type: string;
+      account_code: string | null;
+      min_uvt_threshold: number;
+    }>;
+  }> {
+    const rows = await this.prismaClient.withholding_concepts.findMany({
+      where: {
+        organization_id: organizationId,
+        accounting_entity_id: null,
+        is_active: true,
+      },
+      orderBy: [{ withholding_type: 'asc' }, { name: 'asc' }],
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        rate: true,
+        withholding_type: true,
+        account_code: true,
+        min_uvt_threshold: true,
+      },
+    });
+    return {
+      data: rows.map((row: any) => ({
+        id: row.id,
+        code: row.code,
+        name: row.name,
+        // Decimal → number: la regla DIAN no exige mas de 4 decimales y el
+        // campo se persiste como Decimal(7,4) en schema. El frontend opera
+        // en fracción (0..1), consistente con `MvpV1InvoiceWithholdingInputDto.rate`.
+        rate: Number(row.rate),
+        withholding_type: row.withholding_type,
+        account_code: row.account_code ?? null,
+        min_uvt_threshold: Number(row.min_uvt_threshold),
+      })),
+    };
+  }
+
   /* ── Mapper: V1 DTO → CreateInvoiceDto del riel tienda ──────────── */
 
   /**
@@ -751,6 +808,17 @@ export class PlatformInvoicingService {
    * `PlatformTenantsService.getTenantByKindAndId`. Si por algun motivo
    * falta tax_id o DV, el legacy `createPlatformInvoice` rechaza con
    * 400 BadRequest — el facade NO vuelve a validar para evitar drift.
+   *
+   * Propaga TODO lo que el V1 trae al DTO legacy extendido (cabecera y
+   * línea) con fallbacks seguros para que las llamadas legacy existentes
+   * sigan funcionando idéntico:
+   *   - `unit_code ?? 'NIU'` (NO `'EA'` — no existe en UN/ECE Rec. 20)
+   *   - `discount_amount ?? 0`
+   *   - `taxes ?? []` (vacío = línea exenta, igual que antes)
+   *   - `withholdings ?? []`
+   *   - `rate` se mantiene en FRACCIÓN (0..1) — la conversión a porcentaje
+   *     la hace el provider UNA sola vez; nunca recalcular base×tarifa
+   *     en el mapper (FAS02).
    */
   private mapMvpV1ToLegacyCreateDto(dto: any, tenant: any): any {
     return {
@@ -762,15 +830,43 @@ export class PlatformInvoicingService {
         address_line: tenant.address?.line ?? undefined,
         city: tenant.address?.city ?? undefined,
         department_code: tenant.address?.department_code ?? undefined,
+        document_type: tenant.document_type ?? undefined,
+        person_type: tenant.person_type ?? undefined,
+        tax_regime_code: tenant.tax_regime_code ?? undefined,
+        fiscal_responsibilities: tenant.fiscal_responsibilities ?? undefined,
       },
       items: (dto.items ?? []).map((line: any) => ({
         description: line.description,
         quantity: Number(line.quantity) || 1,
         unit_price: Number(line.unit_price) || 0,
+        unit_code: line.unit_code ?? 'NIU',
+        discount_amount: line.discount_amount ?? 0,
+        account_code: line.account_code ?? undefined,
+        taxes: (line.taxes ?? []).map((t: any) => ({
+          tax_type: t.tax_type,
+          rate: t.rate,           // fracción 0..1 — NO convertir acá
+          taxable_amount: t.taxable_amount ?? undefined,
+          tax_amount: t.tax_amount ?? undefined,
+          is_inclusive: t.is_inclusive ?? false,
+        })),
       })),
       period_start: dto.period_start ?? undefined,
       period_end: dto.period_end ?? undefined,
       currency: dto.currency?.iso_4217 ?? 'COP',
+      resolution_id: dto.resolution_id ?? undefined,
+      issue_date: dto.issue_date ?? undefined,
+      due_date: dto.due_date ?? undefined,
+      payment_form: dto.payment_form ?? undefined,
+      payment_means_code: dto.payment_means_code ?? undefined,
+      notes: dto.notes ?? undefined,
+      counterpart_account_code: dto.counterpart_account_code ?? undefined,
+      withholdings: (dto.withholdings ?? []).map((w: any) => ({
+        role: w.role,
+        concept_id: w.concept_id,
+        base_amount: w.base_amount,
+        rate: w.rate,
+        amount: w.amount ?? undefined,
+      })),
       // C.1: profile_id se propaga al legacy DTO para que cuando
       // createPlatformInvoice extienda su create-data (siguiente slice), las
       // columnas invoices.profile_id/profile_version/profile_snapshot

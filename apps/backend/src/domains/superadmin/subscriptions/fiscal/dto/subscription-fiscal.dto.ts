@@ -314,6 +314,39 @@ export class ListPlatformResolutionsQueryDto {
  * Cubre los casos típicos: implementación, consultoría, capacitación,
  * servicios de plataforma facturados a nombre de la org 1.
  */
+export class PlatformInvoiceLineTaxDto {
+  // `tax_type` del enum del dominio (IVA, INC, ICUI, RETE_FUENTE, etc).
+  // El legacy mapea `tax_type` → `tax_name` antes de firmar la DIAN.
+  @IsString()
+  @MaxLength(50)
+  tax_type!: string;
+
+  // Fracción entre 0 y 1. La fachada convierte esto a porcentaje
+  // (×100) una sola vez para el provider; el legacy NUNCA debe
+  // recalcular base×tarifa (FAS02).
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 6 })
+  @Min(0)
+  @Max(1)
+  rate!: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  taxable_amount?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  tax_amount?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  is_inclusive?: boolean;
+}
+
 export class PlatformInvoiceLineDto {
   @IsString()
   @MaxLength(500)
@@ -328,6 +361,48 @@ export class PlatformInvoiceLineDto {
   @IsNumber({ maxDecimalPlaces: 4 })
   @Min(0)
   unit_price!: number;
+
+  /**
+   * UN/ECE Rec. 20. La fachada envía `'NIU'` por defecto cuando el V1
+   * no lo trae — `'EA'` no existe en la rec. 20 y ningún selector lo
+   * pinta. El legacy hoy hardcodea `'EA'`; cuando frank extienda la
+   * construcción de `lineItems` en `subscription-fiscal.service.ts:2208`,
+   * va a leer este campo y el valor fluye desde el facade.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  unit_code?: string;
+
+  /**
+   * Descuento POR LÍNEA (en pesos). El mapper aplica fallback `0` cuando
+   * el V1 no lo trae, idéntico a como el legacy ya operaba.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  discount_amount?: number;
+
+  /**
+   * Cuenta PUC de ingreso POR LÍNEA. El listener contable de frank la
+   * lee desde el snapshot para asientos multi-crédito. Si falta, cae al
+   * mapping key `invoice.validated.revenue` (mismo default que el riel tienda).
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  account_code?: string;
+
+  /**
+   * Impuestos por línea. Vacío = línea exenta. El legacy mapea a
+   * `providerData.taxes[]` (ya lo hace para ventas estándar).
+   */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PlatformInvoiceLineTaxDto)
+  taxes?: PlatformInvoiceLineTaxDto[];
 }
 
 export class PlatformInvoiceCustomerDto {
@@ -364,6 +439,57 @@ export class PlatformInvoiceCustomerDto {
   @IsString()
   @MaxLength(2)
   department_code?: string;
+
+  /**
+   * Tipo de documento del destinatario. El legacy hoy hardcodea `'31'`
+   * (NIT); cuando frank extienda `providerData.customer_document_type`,
+   * el valor fluye desde el facade.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  document_type?: string;
+
+  @IsOptional()
+  @IsIn(['1', '2'])
+  person_type?: '1' | '2';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  tax_regime_code?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  fiscal_responsibilities?: string[];
+}
+
+export class CreatePlatformInvoiceWithholdingInputDto {
+  @IsIn(['practiced', 'suffered', 'self'])
+  role!: 'practiced' | 'suffered' | 'self';
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  concept_id!: number;
+
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  base_amount!: number;
+
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 6 })
+  @Min(0)
+  @Max(1)
+  rate!: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  amount?: number;
 }
 
 export class CreatePlatformInvoiceDto {
@@ -389,6 +515,54 @@ export class CreatePlatformInvoiceDto {
   @IsString()
   @MaxLength(10)
   currency?: string;
+
+  // ── Extendidos para que el mapper V1→legacy propague sin perder info ──
+  //
+  // Todos son opcionales. Las llamadas legacy existentes siguen
+  // funcionando idéntico; sólo los callers V1 los pueblan. El legacy
+  // (`subscription-fiscal.service.ts:createPlatformInvoice`) lee estos
+  // campos cuando frank extienda la construcción de `lineItems`,
+  // `providerData`, `taxAmount` y el `metadata` del snapshot.
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'resolution_id debe ser un entero positivo.' })
+  @Min(1, { message: 'resolution_id debe ser un entero positivo.' })
+  resolution_id?: number;
+
+  @IsOptional()
+  @IsISO8601()
+  issue_date?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => (value === '' || value === null ? undefined : value))
+  @IsISO8601()
+  due_date?: string;
+
+  @IsOptional()
+  @IsIn(['1', '2'])
+  payment_form?: '1' | '2';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(3)
+  payment_means_code?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  notes?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  counterpart_account_code?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreatePlatformInvoiceWithholdingInputDto)
+  withholdings?: CreatePlatformInvoiceWithholdingInputDto[];
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -736,7 +910,12 @@ export class CreatePlatformSalesInvoiceDto {
   @MaxLength(3)
   payment_means_code?: string;
 
+  // Transform: `''` y `null` se tratan como ausente. Sin esto, `@IsISO8601()`
+  // rechaza string vacío con 400 y bloquea payment_form='2' (crédito) sin
+  // fecha de vencimiento explícita. El frontend ya omite el campo en ese
+  // caso, pero blindamos el DTO para JSON manual.
   @IsOptional()
+  @Transform(({ value }) => (value === '' || value === null ? undefined : value))
   @IsISO8601()
   due_date?: string;
 
@@ -799,6 +978,50 @@ export class CreatePlatformSalesInvoiceDto {
   @ValidateNested()
   @Type(() => SaveAsProfileDto)
   save_as_profile?: SaveAsProfileDto;
+
+  /**
+   * Resolución DIAN que debe numerar el documento.
+   *
+   * Sin este campo, `InvoicingService.create` (riel tienda) selecciona la
+   * resolución más reciente vigente del accounting entity. Si el operador
+   * eligió una específica en el selector del frontend, ese id viaja acá
+   * y la fachada lo respeta (`platform-invoicing.service.ts` lo propaga
+   * al riel tienda en `resolution_id`).
+   *
+   * El DTO MvpV1 NO declaraba este campo — `forbidNonWhitelisted:true`
+   * en el ValidationPipe global lo rechazaba con 400, y el selector del
+   * frontend se perdía en silencio.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'resolution_id debe ser un entero positivo.' })
+  @Min(1, { message: 'resolution_id debe ser un entero positivo.' })
+  resolution_id?: number;
+
+  /**
+   * Fecha de emisión del documento (YYYY-MM-DD o ISO 8601 completo).
+   *
+   * Si el operador la omite, la fachada usa `new Date().toISOString().slice(0,10)`
+   * (regla vigente en `mapToStoreCreateInvoiceDto`).
+   */
+  @IsOptional()
+  @IsISO8601()
+  issue_date?: string;
+
+  /**
+   * Cuenta PUC de contrapartida del documento, una sola por documento
+   * (cabeza). Se persiste top-level en `fiscal_evidences.metadata` para
+   * que `subscription-fiscal.service.ts` (asiento contable de frank) la
+   * consuma al emitir el journal entry.
+   *
+   * Por línea NO se admite: abrir esa puerta permitiría asientos
+   * descuadrados en `accounting_entries`. El débito global del documento
+   * lleva esta única cuenta; los créditos siguen saliendo por línea.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  counterpart_account_code?: string;
 }
 
 // ── V1: CreatePlatformSupportDocumentDto ────────────────────────────────────
