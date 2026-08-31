@@ -54,6 +54,21 @@
  * adding it would force a tsconfig change that ripples through every
  * other test in the module. fs.readFileSync keeps the schema as data,
  * not as code.
+ *
+ * Precio de esa decisión: el `.json` tiene que viajar al contenedor. Lo
+ * declara `nest-cli.json` como asset, y ese asset lleva `"outDir": "dist/src"`
+ * a propósito. `tsconfig.json` fija `outDir: "./dist"` sin `rootDir`, así que
+ * TS infiere la raíz común en el paquete y conserva el segmento `src/`: el JS
+ * sale en `dist/src/...`. Los assets, en cambio, se copian relativos a
+ * `sourceRoot` sobre la raíz del `outDir`, o sea `dist/...`. Sin el `outDir`
+ * por asset el esquema aterriza un nivel arriba del `__dirname` de este
+ * archivo y el arranque muere con ENOENT — con el build en verde, porque nada
+ * de esto lo ve el compilador. Ya pasó en producción (deploy del 31 ago 2026).
+ *
+ * Los dos vecinos que enfrentaron la misma trampa la esquivaron inlineando los
+ * datos en TS: ver `../lib/geometry-data.ts` y
+ * `../../invoicing/providers/dian-direct/constants/dian-ubl-content-model.ts`.
+ * Si algún día hay que mover o duplicar este lector, esa es la salida barata.
  */
 import * as fs from 'fs';
 import * as path from 'path';
