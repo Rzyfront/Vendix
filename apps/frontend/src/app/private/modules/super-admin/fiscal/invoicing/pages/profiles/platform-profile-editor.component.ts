@@ -16,13 +16,11 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
-import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { map } from 'rxjs/operators';
 
 import {
   AlertBannerComponent,
-  ButtonComponent,
-  IconComponent,
   InputComponent,
   SelectorComponent,
   StickyHeaderActionButton,
@@ -38,6 +36,7 @@ import {
   formatPercentScaled,
 } from '../../../../../../../core/utils/invoice-profile-config.contract';
 import type { ProfileConfigIssue, AiuTaxableBasis, AiuComponentsBasis, AccountingModel } from '../../../../../../../core/utils/invoice-profile-config.contract';
+import { ModuleShellActionsService } from '../../../../../../../shared/components/module-tabs-shell/module-shell-actions.service';
 import { PlatformInvoicingStore } from '../../platform-invoicing.store';
 
 /**
@@ -106,11 +105,8 @@ type SectionId =
   standalone: true,
   imports: [
     ReactiveFormsModule,
-    RouterLink,
     PlatformSectionWrapperComponent,
     AlertBannerComponent,
-    ButtonComponent,
-    IconComponent,
     InputComponent,
     SelectorComponent,
     InvoiceSectionAiuComponent,
@@ -126,49 +122,20 @@ type SectionId =
   ],
   template: `
     <div class="w-full max-w-[1400px] mx-auto">
-      <!-- Cabecera de la página (alineada al shell sin duplicar sticky header) -->
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 mb-4 border-b border-border">
-        <div class="flex items-center gap-3">
-          <a
-            routerLink="/super-admin/fiscal/invoicing/profiles"
-            class="flex items-center justify-center w-9 h-9 rounded-lg border border-border bg-surface hover:bg-surface-secondary text-text-secondary hover:text-text-primary transition-colors shrink-0"
-            title="Volver a perfiles"
-          >
-            <app-icon name="arrow-left" [size]="18"></app-icon>
-          </a>
-          <div>
-            <h1 class="text-xl font-bold text-text-primary tracking-tight">{{ pageTitle() }}</h1>
-            <p class="text-xs text-text-secondary">{{ pageSubtitle() }}</p>
-          </div>
-        </div>
+      <!--
+        Sin cabecera de pagina y sin barra de acciones al pie.
 
-        <div class="flex items-center gap-2 self-end sm:self-auto">
-          @if (saveHint()) {
-            <span class="text-xs text-text-secondary hidden sm:inline mr-2">{{ saveHint() }}</span>
-          }
-          <app-button
-            type="button"
-            variant="outline"
-            size="sm"
-            (clicked)="onHeaderAction('cancel')"
-          >
-            <app-icon slot="icon" name="x" [size]="16"></app-icon>
-            Cancelar
-          </app-button>
-          <app-button
-            type="button"
-            variant="primary"
-            size="sm"
-            [loading]="saving()"
-            [disabled]="saving()"
-            (clicked)="onHeaderAction('save')"
-          >
-            <app-icon slot="icon" name="save" [size]="16"></app-icon>
-            Guardar perfil
-          </app-button>
-        </div>
-      </div>
+        Los dos bloques repetian el titulo que ya pinta el sticky-header del
+        shell y duplicaban Cancelar / Guardar: tres sitios distintos para el
+        mismo par de botones. Ahora se publican UNA vez en el header del shell
+        via ModuleShellActionsService (ver el effect del constructor), que es
+        el unico camino posible porque el contenido de un router-outlet no se
+        puede proyectar hacia el template del shell.
 
+        OJO: nada de backticks en este comentario. Esta dentro del template
+        literal del @Component, asi que un backtick lo CIERRA y el compilador
+        reporta el error en la linea del @Component, no aqui.
+      -->
       <div class="px-2 md:px-4 pb-6 space-y-4">
         @if (loading() && isEdit() && !hydrated()) {
           <div class="rounded-lg border border-border bg-surface-secondary px-3 py-6 text-center text-sm text-text-secondary">
@@ -453,21 +420,6 @@ type SectionId =
           </app-alert-banner>
         }
 
-        <!-- Pie -->
-        <div class="flex flex-col gap-3 rounded-lg border border-border bg-surface-secondary p-3 sm:flex-row sm:items-center sm:justify-between">
-          <span class="min-w-0 truncate text-xs text-text-secondary">{{ saveHint() }}</span>
-          <div class="flex flex-col gap-2 sm:flex-row">
-            <app-button variant="outline" (clicked)="cancel()">Cancelar</app-button>
-            <app-button
-              variant="primary"
-              [disabled]="saving() || blockers().length > 0"
-              (clicked)="save()"
-            >
-              <app-icon slot="icon" name="save" [size]="16"></app-icon>
-              {{ isEdit() ? 'Guardar cambios' : 'Crear perfil' }}
-            </app-button>
-          </div>
-        </div>
       </div>
     </div>
   `,
@@ -477,6 +429,7 @@ export class PlatformProfileEditorComponent {
   private readonly fiscal = inject(FiscalBillingAdminService);
   private readonly fb = inject(FormBuilder);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly shellActions = inject(ModuleShellActionsService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly toast = inject(ToastService);
@@ -833,14 +786,6 @@ export class PlatformProfileEditorComponent {
   }
 
   // ─── Page metadata ───────────────────────────────────────────────
-  readonly pageTitle = computed(() =>
-    this.isEdit() ? 'Editar perfil de facturación' : 'Nuevo perfil de facturación',
-  );
-  readonly pageSubtitle = computed(() => {
-    if (!this.isEdit()) return 'Preconfigura el documento';
-    const id = this.profileId();
-    return 'Perfil plataforma · ' + (id ? '#' + id : '');
-  });
   readonly saveHint = computed(() => {
     const blocked = this.blockers().length;
     if (blocked > 0) {
@@ -875,6 +820,25 @@ export class PlatformProfileEditorComponent {
     // no había forma de dejarle una resolución fija al perfil: la pantalla
     // ofrecía el campo y el campo no tenía opciones.
     this.store.loadResolutions();
+
+    // Cancelar / Guardar viven en el sticky-header del shell, no en la pagina.
+    //
+    // Va en un `effect` y no en un `set` de una sola vez porque los botones
+    // cambian solos: `saving()` los pone en loading y `blockers()` deshabilita
+    // Guardar. Publicarlos una vez dejaba un boton que nunca reflejaba el
+    // estado del formulario.
+    effect(() => {
+      this.shellActions.set(
+        this.headerActions().map((button) => ({
+          ...button,
+          run: () => this.onHeaderAction(button.id),
+        })),
+      );
+    });
+
+    // Obligatorio: sin esto los botones sobreviven al cambio de pestana y
+    // disparan callbacks de un componente ya destruido.
+    this.destroyRef.onDestroy(() => this.shellActions.clear());
 
     effect(() => {
       const id = this.profileId();
@@ -1105,7 +1069,17 @@ export class PlatformProfileEditorComponent {
       },
       dian: {
         document_type: v.dian?.document_type ?? null,
-        operation_type: v.operation_type,
+        // `operation_type` NO va dentro de `dian`.
+        //
+        // Es una COLUMNA de `invoice_profiles`, no una clave del JSON de
+        // configuracion: viaja aparte, al nivel raiz del payload (ver el
+        // `save()` de mas abajo). Mandarla aqui tambien hacia que
+        // `normalizeAndAssertProfileConfig` la rechazara con 422
+        // INVOICING_PROFILE_005 / UNKNOWN_KEY en `dian.operation_type` — o sea
+        // que ningun perfil se podia guardar. El contrato
+        // (`ProfileDianConfig`) solo admite document_type,
+        // payment_means_code, payment_method_code, header_notes y
+        // resolution_id.
         payment_method_code: v.dian?.payment_method_code ?? null,
         payment_means_code: v.dian?.payment_means_code ?? null,
         header_notes: v.dian?.header_notes ?? [],
