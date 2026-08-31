@@ -54,7 +54,7 @@ const COSTING_EFFECTS: Record<'cpp' | 'fifo', string> = {
 
 const POS_SCOPE_EFFECTS: Record<InventoryScope, string> = {
   main_location:
-    'El POS muestra las existencias de la bodega principal. Es lo recomendado cuando atendés desde un solo punto: el vendedor ve el número que puede tocar.',
+    'El POS muestra las existencias de la bodega principal. Es lo recomendado cuando atiendes desde un solo punto: el vendedor ve el número que puede tocar.',
   all_locations:
     'El POS muestra las existencias sumadas de todas las bodegas vendibles. El vendedor ve más stock del que tiene a mano, y puede prometer unidades que están en otra sede.',
 };

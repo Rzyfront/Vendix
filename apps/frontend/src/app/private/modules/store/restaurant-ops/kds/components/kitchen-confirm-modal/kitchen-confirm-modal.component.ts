@@ -74,8 +74,8 @@ export class KitchenConfirmModalComponent {
 
   readonly hintText = computed(() =>
     this.mode() === 'cook'
-      ? 'Verificá los ingredientes de cada plato. Lo que quitó quien tomó el pedido ya viene desmarcado; podés quitar más antes de empezar.'
-      : 'Todos los ingredientes vienen marcados. Desmarcá lo que no se va a usar: eso evita su descuento del inventario.',
+      ? 'Verifica los ingredientes de cada plato. Lo que quitó quien tomó el pedido ya viene desmarcado; puedes quitar más antes de empezar.'
+      : 'Todos los ingredientes vienen marcados. Desmarca lo que no se va a usar: eso evita su descuento del inventario.',
   );
 
   readonly confirmLabel = computed(() => {

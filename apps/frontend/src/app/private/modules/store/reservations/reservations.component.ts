@@ -454,7 +454,7 @@ export class ReservationsComponent {
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     if (event.date < today) {
       this.toastService.warning(
-        'No podés agendar en un horario que ya pasó. Hacé click en un slot de hoy o del futuro.',
+        'No puedes agendar en un horario que ya pasó. Haz clic en un slot de hoy o del futuro.',
       );
       return;
     }

@@ -266,7 +266,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                punto de entrada era un botón del pie condicionado a
                «status === 'accepted'», y en una tienda sin facturas aceptadas
                ese botón no se pintaba jamás. Una función que solo aparece
-               cuando ya sabés que existe no está descubierta por nadie.
+               cuando ya sabes que existe no está descubierta por nadie.
 
                Ahora los dos botones se muestran siempre; cuando todavía no
                aplican van APAGADOS y con el motivo escrito al lado. Y la regla

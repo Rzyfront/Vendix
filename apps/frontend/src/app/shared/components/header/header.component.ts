@@ -136,7 +136,7 @@ import { AuthFacade } from '../../../core/store/auth/auth.facade';
                  lo usa). El nombre del módulo no es título de página;
                  dejarlo como <h1> duplicaba el landmark en todas las
                  vistas y rompía la regla "una sola H1 por página".
-                 Si querés revertirlo, primero agregale un H1 propio a
+                 Si quieres revertirlo, primero agrégale un H1 propio a
                  cada vista privada que NO use sticky-header (ej. las
                  páginas de price-tiers) — antes el shell tapaba esa
                  ausencia pero a costa de un heading semánticamente

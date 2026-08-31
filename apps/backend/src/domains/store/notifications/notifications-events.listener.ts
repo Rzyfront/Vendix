@@ -1675,7 +1675,7 @@ export class NotificationsEventsListener {
             <p>Hola ${fullName || ''},</p>
             <p>Tu solicitud de reagenda para la reserva <strong>${event.booking_number}</strong> fue rechazada.</p>
             <p><strong>Razón:</strong> ${event.decision_reason}</p>
-            <p>Si querés elegir otro horario, podés intentarlo de nuevo desde tu cuenta.</p>
+            <p>Si quieres elegir otro horario, puedes intentarlo de nuevo desde tu cuenta.</p>
           </div>`;
         // Appointment redesign phase 2 — send FROM the person who
         // actually decided (the admin/staff in session). If that lookup

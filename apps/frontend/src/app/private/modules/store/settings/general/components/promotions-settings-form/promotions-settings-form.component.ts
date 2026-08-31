@@ -48,7 +48,7 @@ const DEFAULTS: PromotionsSettings = {
             Modo de Evaluación de Promociones
           </label>
           <p class="text-xs text-text-secondary mb-1">
-            Elegí <strong>un solo modo</strong> — seleccionar otro modo reemplaza el actual.
+            Elige <strong>un solo modo</strong> — seleccionar otro modo reemplaza el actual.
           </p>
           <p class="text-xs text-text-secondary mb-3">
             Define cómo el motor resuelve el caso en que un carrito califica para varias promociones simultáneamente.

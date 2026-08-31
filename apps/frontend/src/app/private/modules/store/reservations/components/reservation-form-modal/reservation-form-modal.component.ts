@@ -535,7 +535,7 @@ export class ReservationFormModalComponent {
       // toast and refuse to advance.
       if (this.selectedDate() < this.todayString) {
         this.toastService.warning(
-          'No podés agendar en una fecha que ya pasó. Elegí hoy o una fecha futura.',
+          'No puedes agendar en una fecha que ya pasó. Elige hoy o una fecha futura.',
         );
         return;
       }
@@ -676,7 +676,7 @@ export class ReservationFormModalComponent {
           });
           if (!hasFuture) {
             this.toastService.warning(
-              'Hoy ya no hay horarios disponibles. Elegí otra fecha.',
+              'Hoy ya no hay horarios disponibles. Elige otra fecha.',
             );
             return;
           }

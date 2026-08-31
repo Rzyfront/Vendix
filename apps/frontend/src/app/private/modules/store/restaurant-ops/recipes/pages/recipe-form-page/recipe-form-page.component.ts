@@ -344,12 +344,12 @@ export class RecipeFormPageComponent implements OnInit {
       // rather than a generic "review the fields" hint.
       const errors: string[] = [];
       if (itemsCount === 0) {
-        errors.push('Agregá al menos un componente a la receta.');
+        errors.push('Agrega al menos un componente a la receta.');
       } else if (itemsInvalid) {
-        errors.push('Revisá los componentes: cada uno necesita un insumo y cantidad mayor a 0.');
+        errors.push('Revisa los componentes: cada uno necesita un insumo y cantidad mayor a 0.');
       }
       if (formInvalid) {
-        errors.push('Completá los campos obligatorios del encabezado.');
+        errors.push('Completa los campos obligatorios del encabezado.');
       }
       const composedMessage = errors.join(' ');
       this.submitError.set(composedMessage);
@@ -364,7 +364,7 @@ export class RecipeFormPageComponent implements OnInit {
       if (this.isSubmitting()) {
         this.isSubmitting.set(false);
         this.toastService.warning(
-          'La solicitud tardó demasiado. Verificá tu conexión e intentá de nuevo.',
+          'La solicitud tardó demasiado. Verifica tu conexión e intenta de nuevo.',
         );
       }
     }, 30000);
@@ -403,7 +403,7 @@ export class RecipeFormPageComponent implements OnInit {
           // instead of 409) bypasses catchError and reaches `next` with
           // `recipe` undefined. Treat it as an error.
           if (!recipe || recipe.id == null) {
-            const msg = 'Respuesta inválida del servidor. Intentá de nuevo.';
+            const msg = 'Respuesta inválida del servidor. Intenta de nuevo.';
             this.submitError.set(msg);
             this.toastService.error(msg, 'No se pudo guardar la receta', 6000);
             this.isSubmitting.set(false);

@@ -1101,7 +1101,7 @@
                       <app-selector
                         formControlName="stock_uom_id"
                         label="El inventario se cuenta en"
-                        helpText="La unidad más pequeña que vendés. Déjalo vacío si vendés por pieza."
+                        helpText="La unidad más pequeña que vendes. Déjalo vacío si vendes por pieza."
                         [options]="stockUomOptions()"
                         placeholder="Ej. Milímetro, Gramo, Mililitro..."
                         (valueChange)="onStockUomChange()"
@@ -1112,7 +1112,7 @@
                           formControlName="price_unit_quantity"
                           label="El precio de venta es"
                           [helpText]="
-                            'El precio que escribís arriba cubre esta cantidad de ' +
+                            'El precio que escribes arriba cubre esta cantidad de ' +
                             stockUom.code + '.'
                           "
                           [options]="priceScaleOptions()"
@@ -2773,7 +2773,7 @@
               formControlName="kds_id"
               placeholder="KDS por defecto de la tienda"
               [options]="kdsStationOptions()"
-              tooltipText="Tablero de cocina al que se envía este plato al hacer fire. Si lo dejás vacío, cae en la estación por defecto."
+              tooltipText="Tablero de cocina al que se envía este plato al hacer fire. Si lo dejas vacío, cae en la estación por defecto."
             ></app-selector>
           }
         </div>

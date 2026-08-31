@@ -1020,7 +1020,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
 
   // Caja registradora — cierre contra un esperado rancio (QUI-572)
   CASH_SESSION_EXPECTED_STALE_001:
-    'El efectivo esperado cambió mientras contabas el arqueo. Revisá el resumen actualizado antes de cerrar la caja.',
+    'El efectivo esperado cambió mientras contabas el arqueo. Revisa el resumen actualizado antes de cerrar la caja.',
 
   // Escáner de facturas de compra (POP). Ninguno estaba mapeado: el modal
   // mostraba el devMessage crudo en inglés («AI OCR response parsed but is
