@@ -1,20 +1,43 @@
--- QUI-730b — renombrar roles de sistema `mesero` → `waiter` y `cocina` → `kitchen`.
+-- QUI-730b (FIX P0) — renombrar roles de sistema `mesero` → `waiter` y
+-- `cocina` → `kitchen`. Corregido el criterio de WHERE: pasa de `WHERE id IN (32, 33)`
+-- (portable-bug: el `id` es autoincrement por entorno y no es estable entre
+-- DB local / staging / prod) a `WHERE name=old AND organization_id IS NULL
+-- AND store_id IS NULL` (estable e identifica roles de sistema sin chocar con
+-- `mesero`/`cocina` de organización como el de prod id=67, org=82, store=105
+-- que NO debe ser renombrado — el requisito del usuario es sobre los roles
+-- del sistema, no de cada comercio que reuse el nombre).
 --
 -- DATA IMPACT:
 --   Tables affected: roles
---   Expected row changes: 2 filas en `roles` (id=32, id=33)
---   Destructive operations: none (UPDATE no destructivo)
---   FK/cascade risk: roles.name se referencia desde role_permissions.user_role (?), user_roles.user_role
---     y tests/docs. Las pruebas y código que comparan el literal 'mesero'/'cocina' se
---     actualizan EN EL MISMO COMMIT que esta migración (ver lista de archivos tocados).
---   Idempotency: guard con WHERE name=old_name para que re-aplicar sea no-op.
---   Approval: autorizado por el usuario para el cierre de QUI-730 (per-fixarabe 2026-08-31).
+--   Expected row changes:
+--     - En DB local (seed actual): 2 filas (id=32, id=33, ambas con
+--       organization_id=NULL, store_id=NULL — son los roles de sistema).
+--     - En prod al momento del fix: 0 filas (medido por fixarabe: `mesero`
+--       existe solo como rol de organización id=67, org=82, store=105; los
+--       roles de sistema `mesero`/`cocina` no están sembrados en prod).
+--       Cuando se siembren, esta migración los renombrará — la próxima
+--       corrida del seed los crea ya como waiter/kitchen directamente, pero
+--       esta migración cubre cualquier DB que tenga los roles viejos.
+--   Destructive operations: none (UPDATE no destructivo).
+--   FK/cascade risk: roles.name se referencia desde role_permissions (vía
+--     role_id, no name — sin riesgo), user_roles (idem), tests/docs. Las
+--     pruebas y código que comparan el literal 'mesero'/'cocina' se
+--     actualizan EN EL MISMO COMMIT que esta migración.
+--   Idempotency: guard `WHERE name=old_name AND organization_id IS NULL AND
+--     store_id IS NULL` para que re-aplicar sea no-op (la fila ya no matchea).
+--   Approval: autorizado por el usuario para el cierre de QUI-730
+--     (per-fixarabe 2026-08-31). Corrección P0 reportada por fixarabe el
+--     mismo día tras auditar la versión inicial con `WHERE id IN (32, 33)`.
 --
--- Migración NO destructiva: el índice único compuesto
---   roles_organization_id_store_id_name_key (organization_id, store_id, name)
---   con NULLS NOT DISTINCT permite que coexistan filas con name distinto, pero el
---   cambio de name NO inserta fila nueva — actualiza la misma fila (id estable).
---   Sin chocar con el índice.
+-- Por qué el doble scope (organization_id IS NULL AND store_id IS NULL):
+--   El índice único compuesto
+--     roles_organization_id_store_id_name_key (organization_id, store_id, name)
+--     con NULLS NOT DISTINCT aplica a roles de sistema SIN org/store Y a
+--     roles de organización/tienda. El requisito del usuario dice «los
+--     roles del sistema deben llevar nombres en inglés» — eso es
+--     (organization_id=NULL, store_id=NULL), no (organization_id=X, store_id=NULL)
+--     que sería el rol de una organización. El `WHERE` debe excluir el rol
+--     id=67 de prod (org=82, store=105) que reutiliza el nombre.
 --
 -- ADR-10 (CRÍTICO): los 6 sitios de código que comparan el literal 'cocina'
 -- para el strip de dinero se actualizan EN EL MISMO COMMIT:
@@ -30,14 +53,22 @@
 
 BEGIN;
 
--- Renombrar `mesero` → `waiter` (id=32, system role, organization_id=NULL, store_id=NULL)
+-- Renombrar roles de sistema `mesero` → `waiter`. Criterio estable:
+-- organization_id IS NULL (rol de sistema, no de una org) AND store_id IS NULL
+-- (rol de sistema, no de una tienda). Esto cubre cualquier DB donde exista
+-- la fila (local, staging, prod futuro sembrado) y la deja intacta en prod
+-- si solo existe el id=67 con org=82/store=105 (rol de organización).
 UPDATE "roles"
 SET "name" = 'waiter', "updated_at" = NOW()
-WHERE "id" = 32 AND "name" = 'mesero';
+WHERE "name" = 'mesero'
+  AND "organization_id" IS NULL
+  AND "store_id" IS NULL;
 
--- Renombrar `cocina` → `kitchen` (id=33)
+-- Renombrar roles de sistema `cocina` → `kitchen` con el mismo criterio.
 UPDATE "roles"
 SET "name" = 'kitchen', "updated_at" = NOW()
-WHERE "id" = 33 AND "name" = 'cocina';
+WHERE "name" = 'cocina'
+  AND "organization_id" IS NULL
+  AND "store_id" IS NULL;
 
 COMMIT;
