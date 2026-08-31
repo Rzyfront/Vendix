@@ -1349,6 +1349,12 @@ export class PlatformInvoiceCreateComponent implements OnInit {
         legal_name: trimmed('external_legal_name'),
         tax_id: trimmed('external_tax_id'),
         tax_id_dv: trimmed('external_tax_id_dv'),
+        // El tipo de documento tiene que viajar: la guarda de DV del backend
+        // sólo exige digito de verificacion cuando el documento es NIT ('31'),
+        // asi que sin este campo una tienda con cedula quedaba imposible de
+        // facturar. Va siempre con el valor que se ve en pantalla, que es el
+        // que `onTenantPicked` normalizo desde la ficha.
+        document_type: trimmed('external_document_type'),
         person_type: val['external_person_type'] === '2' ? '2' : '1',
         tax_regime_code: trimmed('external_tax_regime_code'),
         email: trimmed('external_email'),
