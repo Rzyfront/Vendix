@@ -1776,6 +1776,14 @@
       "sessions": 32,
       "memories": 47,
       "prompts": 1
+    },
+    {
+      "id": "cd7a20bb",
+      "created_by": "rzy",
+      "created_at": "2026-08-31T00:55:21Z",
+      "sessions": 0,
+      "memories": 5,
+      "prompts": 0
     }
   ]
 }
