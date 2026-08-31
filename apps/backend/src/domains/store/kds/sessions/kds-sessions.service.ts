@@ -164,6 +164,19 @@ export class KdsSessionsService {
    *    helper NO rompe el flujo del handler — la búsqueda del ticket
    *    en el handler previo ya fallaría con su propio error.
    *
+   * Caso especial `table-sessions` (reverso de un ítem disparado): el
+   * caller en `tables/table-sessions.service.ts:891` llama
+   * `cancelTicketInTx` y dentro de la MISMA tx BORRA las
+   * `inventory_transactions` del ítem y crea la reversa de stock con
+   * `quantity_change` positivo pero SIN `order_item_id`. Cuando este
+   * helper corre post-commit vía `emitTicketCancelledEvent`, su
+   * `where: { order_item_id: { not: null } }` no matchea ninguna fila —
+   * la reversa ya no tiene order_item_id. Resultado: 0 estampadas,
+   * sin error. Está limpio POR CONSTRUCCIÓN DEL CALLER, no porque
+   * este helper haga algo especial — documentado para que el próximo
+   * que lea el código entienda que la doble-no-imputación no es un
+   * olvido, es una invariante del flujo de reverso de mesa.
+   *
    * Devuelve el conteo de filas estampadas (útil para logs y para
    * verificar que la primera acción tuvo efecto).
    */
