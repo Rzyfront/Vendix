@@ -48,6 +48,33 @@ export class DispatchTicketPrintService {
    */
   private printChain: Promise<void> = Promise.resolve();
 
+  /**
+   * Deduplicación de impresiones automáticas (QUI-764).
+   *
+   * El tiquete de despacho puede dispararse desde dos cadenas distintas
+   * para la misma orden (POS):
+   *   1. `pos-order-confirmation.maybeAutoPrint` → al abrir el modal de
+   *      confirmación, encadena `printDispatchTicket('automatic')`.
+   *   2. `pos.component.printDispatchTicketIfNeededForOrder` → en los hooks
+   *      `onPaymentCompleted` y `onShippingCompleted`, encadena la cadena
+   *      defense-in-depth (también `'automatic'`).
+   *
+   * Cuando `pos.auto_print_receipt` está ON y el admin activa además
+   * `print_dispatch_ticket_on_counter`, AMBAS cadenas pasan el predicado
+   * y emiten impresión → tiquete duplicado en la misma venta.
+   *
+   * Esta deduplicación vive en el servicio (singleton) para que ambas
+   * cadenas compartan el mismo registro sin acoplamiento de componentes.
+   * Se aplica SOLO a `trigger === 'automatic'`; el reprint manual (botón
+   * "Imprimir") sigue siendo siempre permitido.
+   *
+   * Ventana: 30 segundos. Es holgada para cubrir el ciclo
+   * `onPaymentCompleted → modal abre → maybeAutoPrint` sin afectar
+   * reimpresiones legítimas separadas por más tiempo.
+   */
+  private static readonly AUTO_DEDUP_WINDOW_MS = 30_000;
+  private recentAutoPrints = new Map<string | number, number>();
+
   private enqueuePrint<T>(job: () => Promise<T>): Promise<T> {
     const result = this.printChain.then(() => job());
     // La cadena nunca se envenena: un job que falla no impide correr el
@@ -63,6 +90,15 @@ export class DispatchTicketPrintService {
     data: DispatchTicketData,
     trigger: PrintTrigger = 'explicit',
   ): Promise<PrintResult | null> {
+    // QUI-764 — deduplicación automática. Solo aplica al trigger automático;
+    // un reprint manual del cajero siempre debe poder ejecutarse.
+    if (trigger === 'automatic' && this.isDuplicateAutoPrint(data.orderId)) {
+      console.info(
+        '[QUI-764] Tiquete de despacho duplicado suprimido',
+        this.logContext(data, trigger),
+      );
+      return null;
+    }
     return this.enqueuePrint(async () => {
       const fallbackRequest = {
         document: 'dispatch_ticket' as const,
@@ -90,6 +126,31 @@ export class DispatchTicketPrintService {
         throw err;
       }
     });
+  }
+
+  /**
+   * Devuelve `true` si el mismo `orderId` ya pasó por la cola automática
+   * dentro de la ventana de dedup. Registra el primer hit para que el
+   * segundo sea rechazado. Limpia entradas oportunistamente si el mapa
+   * crece demasiado para que no acumule memoria entre ventas.
+   */
+  private isDuplicateAutoPrint(orderId: string | number | undefined): boolean {
+    if (orderId == null) return false;
+    const now = Date.now();
+    const last = this.recentAutoPrints.get(orderId);
+    if (last !== undefined && now - last < DispatchTicketPrintService.AUTO_DEDUP_WINDOW_MS) {
+      return true;
+    }
+    this.recentAutoPrints.set(orderId, now);
+
+    // Limpieza oportunista: si la map supera 200 entradas, podar las viejas.
+    if (this.recentAutoPrints.size > 200) {
+      const cutoff = now - DispatchTicketPrintService.AUTO_DEDUP_WINDOW_MS;
+      for (const [k, t] of this.recentAutoPrints) {
+        if (t < cutoff) this.recentAutoPrints.delete(k);
+      }
+    }
+    return false;
   }
 
   /**
