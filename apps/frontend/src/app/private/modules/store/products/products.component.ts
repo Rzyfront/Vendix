@@ -34,6 +34,10 @@ import {
 
 // Components
 import { ProductListComponent } from './components/product-list/product-list.component';
+// QUI-729 — default unico del modulo. Sin esta constante el padre
+// (`ProductsComponent`) y el hijo (`ProductListComponent`) escribian
+// el mismo literal en sus archivos, y desincronizarse era trivial.
+import { PRODUCT_LIST_DEFAULT_QUERY } from './components/product-list/product-list.constants';
 import { ProductCreateModalComponent } from './components/product-create-modal.component';
 import { BulkUploadModalComponent } from './components/bulk-upload-modal/bulk-upload-modal.component';
 import { BulkImageUploadModalComponent } from './components/bulk-image-upload-modal/bulk-image-upload-modal.component';
@@ -208,7 +212,11 @@ export class ProductsComponent {
 
   // Queries
   searchTerm = '';
-  currentFilters: Partial<ProductQueryDto> = {};
+  // QUI-729 — inicializar con el default para que la PRIMERA peticion
+  // ya llegue filtrada (`is_ingredient=false`). El hijo
+  // (`ProductListComponent`) ya no necesita reemitir tras el render, asi
+  // que no hay carrera contra esta carga.
+  currentFilters: Partial<ProductQueryDto> = { ...PRODUCT_LIST_DEFAULT_QUERY };
 
   // Modal State
   isCreateModalOpen = false;

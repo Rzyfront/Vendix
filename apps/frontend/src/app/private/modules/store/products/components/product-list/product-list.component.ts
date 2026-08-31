@@ -6,7 +6,6 @@ import {
   effect,
   signal,
   computed,
-  afterNextRender,
 } from '@angular/core';
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -18,6 +17,10 @@ import {
   ProductCategory,
   Brand,
 } from '../../interfaces';
+import {
+  PRODUCT_LIST_DEFAULT_FILTER_VALUES,
+  PRODUCT_LIST_DEFAULT_QUERY,
+} from './product-list.constants';
 
 // Import shared components
 import {
@@ -108,8 +111,18 @@ export class ProductListComponent {
   readonly selectedImageProduct = signal<Product | null>(null);
   readonly imagePreviewOpen = signal(false);
 
-  // Filter configuration for the options dropdown
-  filterConfigs: FilterConfig[] = [
+  // Filter configuration for the options dropdown.
+  //
+  // QUI-729 (signal) — `filterConfigs` es un signal, no un campo plano.
+  // Antes era `filterConfigs: FilterConfig[] = [...]` con un truco de
+  // reasignacion `[...this.filterConfigs]` (:416) para forzar el re-render
+  // del dropdown despues de que `updateFilterOptions()` mutaba los options
+  // de category/brand. En Zoneless eso no marca sucio al consumidor
+  // porque `[filters]="filterConfigs"` lee el campo una vez; sin un signal
+  // detras, el dropdown queda con la referencia inicial aunque el effect
+  // del constructor haya mutado los options. Convertirlo a signal elimina
+  // el truco y hace que la mutacion + el re-render sean lo mismo.
+  readonly filterConfigs = signal<FilterConfig[]>([
     {
       key: 'state',
       label: 'Estado',
@@ -165,13 +178,14 @@ export class ProductListComponent {
         { value: 'all', label: 'Todos' },
       ],
     },
-  ];
+  ]);
 
-  // Current filter values. Inicia con `is_ingredient: 'products'` para que el
-  // primer render ya llegue filtrado al backend y el badge del dropdown
-  // muestre 1 desde el inicio (eso sustituye al banner que quitamos: el
-  // badge avisa al usuario que hay un filtro puesto que oculta los insumos).
-  filterValues: FilterValues = { is_ingredient: 'products' };
+  // Current filter values. Inicia con el default unico del modulo de
+  // productos para que el primer render ya llegue filtrado al backend
+  // y el badge del dropdown muestre 1 desde el inicio (eso sustituye al
+  // banner que quitamos: el badge avisa al usuario que hay un filtro
+  // puesto que oculta los insumos).
+  filterValues: FilterValues = { ...PRODUCT_LIST_DEFAULT_FILTER_VALUES };
 
   // Dropdown actions for the filter/options dropdown.
   //
@@ -368,53 +382,54 @@ export class ProductListComponent {
       this.brands();
       this.updateFilterOptions();
     });
-
-    // QUI-729 — el default del listado (solo productos, sin insumos) vive en el
-    // CLIENTE y se emite tras el primer render, de modo que la carga inicial ya
-    // llegue filtrada a `is_ingredient=false`.
-    afterNextRender(() => this.emitQuery());
   }
 
   private updateFilterOptions(): void {
     const cats = this.categories();
     const brnds = this.brands();
 
-    // Update category options
-    const categoryFilter = this.filterConfigs.find(
-      (f) => f.key === 'category_id',
+    // `update()` no rastrea la lectura: si leyéramos `filterConfigs()`
+    // acá, el signal sería dependencia del effect que lo escribe y el
+    // effect se reprogramaría en bucle. Construimos el nuevo arreglo
+    // de forma inmutable — sin mutar el objeto de adentro — y la
+    // asignación del signal dispara el re-render del dropdown.
+    this.filterConfigs.update((cfgs) =>
+      cfgs.map((f) => {
+        if (f.key === 'category_id') {
+          return {
+            ...f,
+            options: [
+              { value: '', label: 'Todas las Categorías' },
+              ...cats.map((cat) => ({
+                value: cat.id.toString(),
+                label: cat.name,
+              })),
+            ],
+            disabled: cats.length === 0,
+            helpText:
+              cats.length === 0
+                ? 'No hay categorías disponibles'
+                : undefined,
+          };
+        }
+        if (f.key === 'brand_id') {
+          return {
+            ...f,
+            options: [
+              { value: '', label: 'Todas las Marcas' },
+              ...brnds.map((brand) => ({
+                value: brand.id.toString(),
+                label: brand.name,
+              })),
+            ],
+            disabled: brnds.length === 0,
+            helpText:
+              brnds.length === 0 ? 'No hay marcas disponibles' : undefined,
+          };
+        }
+        return f;
+      }),
     );
-    if (categoryFilter) {
-      categoryFilter.options = [
-        { value: '', label: 'Todas las Categorías' },
-        ...cats.map((cat) => ({
-          value: cat.id.toString(),
-          label: cat.name,
-        })),
-      ];
-      categoryFilter.disabled = cats.length === 0;
-      categoryFilter.helpText =
-        cats.length === 0
-          ? 'No hay categorías disponibles'
-          : undefined;
-    }
-
-    // Update brand options
-    const brandFilter = this.filterConfigs.find((f) => f.key === 'brand_id');
-    if (brandFilter) {
-      brandFilter.options = [
-        { value: '', label: 'Todas las Marcas' },
-        ...brnds.map((brand) => ({
-          value: brand.id.toString(),
-          label: brand.name,
-        })),
-      ];
-      brandFilter.disabled = brnds.length === 0;
-      brandFilter.helpText =
-        brnds.length === 0 ? 'No hay marcas disponibles' : undefined;
-    }
-
-    // Force re-render by creating new array reference
-    this.filterConfigs = [...this.filterConfigs];
   }
 
   // Event Handlers
@@ -465,7 +480,7 @@ export class ProductListComponent {
     // del primer render (ADR-6).
     const ingredient: ProductTypeFilterValue =
       (this.filterValues['is_ingredient'] as ProductTypeFilterValue) ||
-      'products';
+      PRODUCT_LIST_DEFAULT_FILTER_VALUES.is_ingredient;
     if (ingredient === 'products') {
       query.is_ingredient = false;
     } else if (ingredient === 'ingredients') {
@@ -482,10 +497,11 @@ export class ProductListComponent {
     this.selectedBrand = '';
     this.selectedProductType = '';
     // "Limpiar todo" vuelve al default del listado: solo productos, sin
-    // insumos. Restauramos `filterValues` a su estado inicial, no a `{}`,
-    // porque el "Limpiar todo" genérico del dropdown emitiría `''` y la lista
-    // pasaría a mostrar 105 (regresión silenciosa que QUI-729 vino a matar).
-    this.filterValues = { is_ingredient: 'products' };
+    // insumos. Restauramos `filterValues` al mismo default unico del modulo,
+    // no a `{}`, porque el "Limpiar todo" genérico del dropdown emitiría
+    // `''` y la lista pasaría a mostrar 106 (regresión silenciosa que
+    // QUI-729 vino a matar).
+    this.filterValues = { ...PRODUCT_LIST_DEFAULT_FILTER_VALUES };
     this.search.emit('');
     this.filter.emit({ is_ingredient: false });
   }
