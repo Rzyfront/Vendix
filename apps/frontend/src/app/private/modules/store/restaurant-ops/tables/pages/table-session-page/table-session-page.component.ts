@@ -477,6 +477,7 @@ export class TableSessionPageComponent implements OnInit {
       },
       { id: 'table-status', label: 'Cambiar estado de mesa', icon: 'table' },
       { id: 'history', label: 'Historial de estados', icon: 'clock' },
+      { id: 'close', label: 'Cerrar mesa', icon: 'lock', danger: true },
     );
 
     return actions;
