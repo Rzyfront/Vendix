@@ -7,6 +7,7 @@ import {
   Matches,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { IsSafeS3Key } from '@common/decorators/is-safe-s3-key.decorator';
 
 /**
  * QUI-728 — proyección mínima de una cuenta bancaria que viaja a la UI de
@@ -60,12 +61,13 @@ export class CreateBankAccountDto {
 
   /**
    * QUI-728 — S3 key del logo/imagen 21:9 de la cuenta. Opcional; validado
-   * solo por longitud y tipo. La firma de la URL pre-firmada ocurre en
-   * lectura, no en escritura.
+   * por longitud, tipo y ausencia de path traversal (`@IsSafeS3Key`). La
+   * firma de la URL pre-firmada ocurre en lectura, no en escritura.
    */
   @IsOptional()
   @IsString()
   @MaxLength(512)
+  @IsSafeS3Key()
   image_s3_key?: string;
 
   @IsOptional()
@@ -104,11 +106,13 @@ export class UpdateBankAccountDto {
 
   /**
    * QUI-728 — S3 key del logo/imagen 21:9. Aceptado tanto en create como en
-   * update; null/undefined ⇒ no se modifica.
+   * update; null/undefined ⇒ no se modifica. Validado por longitud, tipo y
+   * ausencia de path traversal (`@IsSafeS3Key`).
    */
   @IsOptional()
   @IsString()
   @MaxLength(512)
+  @IsSafeS3Key()
   image_s3_key?: string;
 }
 
