@@ -76,6 +76,13 @@ export class TaxesService {
    * reponerlo a mano. Sin `client`, el scoping automático sigue aplicando y el
    * filtro extra es redundante pero inocuo.
    */
+  // CAVEAT (QUI-772 / 2026-08-31). Este resolver SUMA todas las tasas de
+  // todas las categorías. El otro camino,
+  // `OrdersService.resolveLineTaxesForOrder` (venta fresca POS), elige
+  // UNA y descarta el resto (`break` + `take: 1`). Para el mismo producto
+  // multi-impuesto los dos persisten `order_item_taxes` distintos y este
+  // cobra más. Antes de tocar la política de acá, mirá el CAVEAT de allá:
+  // cambiar uno solo ensancha la grieta. Ver QUI-772.
   async calculateProductTaxes(
     productId: number,
     basePrice: number,

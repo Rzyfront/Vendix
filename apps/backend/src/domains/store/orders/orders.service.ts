@@ -3287,23 +3287,20 @@ export class OrdersService {
     });
 
     for (const p of products) {
-      // Prisma ya devuelve `tax_rates` ordenadas por `priority` desc; el
-      // primer match de cualquier asignación es la mejor tasa del producto.
-      //
-      // CAVEAT (auditoría 2026-08-30): el `for` externo recorre
-      // `product_tax_assignments` en el orden que Postgres las devuelva
-      // — sin `orderBy`, sin criterio. Con una sola categoría por
-      // producto (caso actual) el resultado es estable y da igual. Con
-      // dos o más categorías (futuro: IVA + INC, o múltiples impuestos
-      // por industria), la tasa elegida puede cambiar entre llamadas
-      // según el plan de query. NO es bug hoy — los productos del
-      // dominio POS rara vez tienen más de una categoría — pero el día
-      // que aparezca un producto multi-impuesto la "primera" asignación
-      // ganadora será arbitraria. Cuando llegue ese caso, hay que
-      // agregar `orderBy: { tax_category_id: 'asc' }` (o un criterio
-      // explícito de prioridad a nivel de categoría) y backfillear las
-      // `order_item_taxes` históricas para que el render del tiquete no
-      // salte entre tasas para el mismo producto.
+      // CAVEAT (2026-08-30, ampliado QUI-772 / 2026-08-31).
+      // Existe un SEGUNDO resolver de impuesto de línea:
+      // `TaxesService.calculateProductTaxes` (checkout web, WhatsApp, cobro
+      // POS). Divergen en dos ejes:
+      //   1. entre categorías — acá `break` en la primera; allá itera todas.
+      //      El `for` externo no tiene `orderBy`: con 2+ categorías la
+      //      ganadora es la que devuelva Postgres.
+      //   2. dentro de categoría — acá `take: 1` (líneas 3271-3280); allá
+      //      suma TODAS las tasas. Con 1 categoría y 2+ tasas este path
+      //      cobra MENOS. Divergencia de plata, no de conteo.
+      // Ninguno se manifiesta en dev (relación categorías:tasas = 1:1) y
+      // prod no está medido. Al aparecer el primer producto multi-impuesto,
+      // el criterio de desempate es decisión FISCAL del usuario — no se
+      // resuelve agregando `orderBy` ni `take`. Ver QUI-772.
       for (const assignment of p.product_tax_assignments ?? []) {
         const rate = assignment.tax_categories?.tax_rates?.[0];
         if (!rate) continue;
