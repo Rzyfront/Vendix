@@ -1498,8 +1498,11 @@ export class CheckoutService {
       resolved_bank_account_id = resolved.id;
     }
 
-    // store_id y customer_id se inyectan automáticamente
-    await this.prisma.payments.create({
+    // store_id y customer_id se inyectan automáticamente.
+    // QUI-728 — capturamos el `id` del pago recién creado para devolverlo al
+    // comprador en la respuesta y permitirle releer su comprobante más tarde
+    // (solo si subió archivo — sin `receipt_s3_key` no hay qué re-leer).
+    const created_payment = await this.prisma.payments.create({
       data: {
         order_id: order.id,
         amount: grand_total,
@@ -1510,7 +1513,11 @@ export class CheckoutService {
         receipt_uploaded_at,
         bank_account_id: resolved_bank_account_id,
       },
+      select: { id: true },
     });
+    const payment_id_with_receipt: number | null = receipt_s3_key
+      ? created_payment.id
+      : null;
 
     // Bucle POR ÍNDICE: dos líneas del mismo producto en presentaciones
     // distintas son dos reservas independientes, y la suma de ambas es lo que
@@ -1620,11 +1627,65 @@ export class CheckoutService {
       coupon_discount: discountResult.coupon_discount,
       shipping_cost,
       state: order.state,
+      // QUI-728 — ancla para que el comprador pueda releer su comprobante
+      // mediante `GET /ecommerce/payments/:paymentId/receipt-url`. Solo se
+      // devuelve cuando el comprador efectivamente subió un archivo; sin
+      // `receipt_s3_key` no hay comprobante que re-leer.
+      payment_id: payment_id_with_receipt,
       public_order_token: guestArtifacts?.invoice_data_token ?? null,
       invoice_data_token: guestArtifacts?.invoice_data_token ?? null,
       invoice_id: guestArtifacts?.invoice_id ?? invoice_id,
       message: 'Order placed successfully',
     };
+  }
+
+  /**
+   * QUI-728 — devuelve una URL prefirmada (TTL 5 min) al comprobante de
+   * transferencia/voucher subido por el comprador en el checkout. Solo el
+   * dueño del pago puede releerlo: el `EcommercePrismaService` inyecta
+   * automáticamente `customer_id = user_id` desde ALS en `payments`, así que
+   * un `findFirst` sin `where` adicional ya está acotado al comprador
+   * autenticado. Si el `id` no le pertenece, devuelve null y el handler
+   * lanza 404 sin distinguir «no existe» de «no es tuyo» (mismo shape que
+   * el patrón admin en `OrdersService.getPaymentReceiptUrl`).
+   *
+   * Sin migración: `content_type` no se persiste en BD; se obtiene del
+   * `HEAD` del objeto S3 en cada lectura (objetos borrados → null → el
+   * frontend cae al PDF como fallback).
+   */
+  async getPaymentReceiptUrl(paymentId: number): Promise<{
+    url: string;
+    expires_at: string;
+    content_type: string | null;
+  }> {
+    const payment = await this.prisma.payments.findFirst({
+      where: { id: paymentId },
+      select: {
+        id: true,
+        order_id: true,
+        receipt_s3_key: true,
+        receipt_uploaded_at: true,
+      },
+    });
+
+    if (!payment) {
+      throw new VendixHttpException(ErrorCodes.PAY_FIND_001);
+    }
+
+    if (!payment.receipt_s3_key) {
+      throw new VendixHttpException(ErrorCodes.PAY_RECEIPT_NOT_FOUND_001);
+    }
+
+    const TTL_SECONDS = 300;
+    const [url, head] = await Promise.all([
+      this.s3Service.getPresignedUrl(payment.receipt_s3_key, TTL_SECONDS),
+      this.s3Service.headObject(payment.receipt_s3_key),
+    ]);
+    const expires_at = new Date(
+      Date.now() + TTL_SECONDS * 1000,
+    ).toISOString();
+
+    return { url, expires_at, content_type: head?.contentType ?? null };
   }
 
   async whatsappCheckout(dto: WhatsappCheckoutDto) {

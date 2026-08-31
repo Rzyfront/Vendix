@@ -117,6 +117,32 @@ export class CheckoutController {
   }
 
   /**
+   * QUI-728 — devuelve una URL prefirmada (TTL 5 min) al comprobante de
+   * transferencia/voucher del comprador autenticado. El control de acceso
+   * está delegado al scope de `EcommercePrismaService.payments`: la query
+   * aplica `customer_id = req.user.id` automáticamente, y si el `id` no
+   * pertenece al comprador el `findFirst` devuelve null → 404 indistinguible
+   * de «no existe» (mismo shape que la versión admin en
+   * `OrdersController.getPaymentReceiptUrl`).
+   *
+   * Distinto del endpoint admin en dos puntos:
+   *  - Auth: `JwtAuthGuard` sin `@OptionalAuth()` — el comprobante requiere
+   *    comprador identificado. Un guest no subió comprobante (no llega a
+   *    este pago porque la subida exige user_id en el flujo de upload).
+   *  - Path: `/ecommerce/payments/:paymentId/receipt-url` (no
+   *    `/ecommerce/orders/:id/payments/:paymentId/...`) — el comprador no
+   *    conoce su `order_id` y no debería tener que navegarlo.
+   */
+  @Get('payments/:paymentId/receipt-url')
+  @UseGuards(JwtAuthGuard)
+  async getPaymentReceiptUrl(
+    @Param('paymentId', ParseIntPipe) paymentId: number,
+  ) {
+    const data = await this.checkout_service.getPaymentReceiptUrl(paymentId);
+    return { success: true, data };
+  }
+
+  /**
    * Resolve and validate the CheckoutDto from a hybrid body shape:
    *  - multipart: a `data` field carrying the DTO as a JSON string.
    *  - JSON: the body itself is already the DTO.

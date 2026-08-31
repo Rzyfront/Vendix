@@ -239,9 +239,12 @@ export class CheckoutService {
    * `@OptionalAuth()` y resuelve el tenant a partir del header `x-store-id`
    * que ya inyecta `getHeaders()` desde el `TenantFacade`.
    *
-   * Devuelve `[]` cuando:
-   * - el tenant no tiene cuentas activas para ese método, o
-   * - el `x-store-id` no resuelve a una tienda (404 silencioso a `[]`).
+   * Devuelve `[]` cuando el tenant no tiene cuentas activas para ese método
+   * Y la API devolvió un 2xx con cuerpo JSON válido. Si la respuesta NO es
+   * JSON (típico cuando un vhost sirviendo la SPA contesta con el
+   * `index.html` y status 200), lanza error ruidosamente — antes el bug era
+   * tragar cualquier fallo como `[]` y el comprador terminaba con la lista
+   * vacía sin error visible.
    */
   getBankAccountsForMethod(
     methodId: number,
@@ -249,9 +252,29 @@ export class CheckoutService {
     return this.http
       .get<{ success: boolean; data: BankAccountOption[] }>(
         `${this.api_url}/payment-methods/${methodId}/bank-accounts`,
-        { headers: this.getHeaders() },
+        { headers: this.getHeaders(), observe: 'response' },
       )
-      .pipe(map((r) => r?.data ?? []));
+      .pipe(
+        map((resp) => {
+          const contentType = (resp.headers.get('Content-Type') ?? '').toLowerCase();
+          if (!contentType.includes('application/json')) {
+            throw new Error(
+              `API devolvió Content-Type=${contentType || '(vacío)'} en lugar de JSON — probablemente el vhost sirvió el SPA en vez de la API`,
+            );
+          }
+          const body = resp.body;
+          if (
+            !body ||
+            body.success !== true ||
+            !Array.isArray(body.data)
+          ) {
+            throw new Error(
+              `API devolvió cuerpo JSON malformado: ${JSON.stringify(body).slice(0, 120)}`,
+            );
+          }
+          return body.data;
+        }),
+      );
   }
 
   checkout(

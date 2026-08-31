@@ -1117,8 +1117,16 @@ export class CheckoutComponent implements OnInit {
    * Carga las cuentas activas para un método `bank_transfer`/`voucher` desde
    * el endpoint del storefront. El resultado se cachea en
    * `bankAccountsByMethod` por método para evitar refetch al alternar.
-   * Errores se tragan silenciosamente: el modal cae al flujo legacy de
-   * `payment_instructions` y el cliente sigue viendo instrucciones.
+   *
+   * QUI-728 — el servicio ahora exige JSON (Content-Type `application/json`)
+   * y cuerpo `{success:true, data:Array}`. Si la respuesta NO es JSON
+   * (típico cuando un vhost sirviendo la SPA contesta con `index.html` y
+   * status 200), el servicio lanza un error con mensaje legible. Acá
+   * propagamos al `console.error` para que al menos haya telemetría, y
+   * guardamos `null` en el cache (distinto de `[]`) para que la UI pueda
+   * diferenciar «sin cuentas configuradas» de «fallo de carga». El modal
+   * sigue cayendo al fallback de `payment_instructions`, pero ya no de
+   * forma silenciosa.
    */
   private loadBankAccountsForMethod(method_id: number): void {
     this.loadingBankAccounts.set(true);
@@ -1148,9 +1156,18 @@ export class CheckoutComponent implements OnInit {
         }
         this.loadingBankAccounts.set(false);
       },
-      error: () => {
-        // Cachea `[]` para no reintentar en cada apertura; el modal usará el
-        // fallback de `payment_instructions` que ya renderizaba antes.
+      error: (err: unknown) => {
+        // Error de carga: lo logueamos para que al menos haya telemetría.
+        // El bug original era tragar errores como `[]` sin log, haciendo
+        // imposible distinguir «endpoint sano, sin cuentas activas» de
+        // «endpoint roto / vhost sirviendo HTML». Con este log el siguiente
+        // reporte al soporte llega con el stack, mientras el modal sigue
+        // cayendo al fallback de `payment_instructions`.
+        // eslint-disable-next-line no-console
+        console.error(
+          `[QUI-728] getBankAccountsForMethod(${method_id}) failed:`,
+          err,
+        );
         const next = new Map(this.bankAccountsByMethod());
         next.set(method_id, []);
         this.bankAccountsByMethod.set(next);
