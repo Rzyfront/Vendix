@@ -1102,17 +1102,64 @@ export class OrderDetailsPageComponent {
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
     { id: 'print', label: 'Imprimir', variant: 'outline', icon: 'printer' },
-    // CP-DTLP Phase E.3 — disparador 2 manual del tiquete de despacho desde
-    // la pantalla de la orden. `direct_delivery` (mostrador) NO imprime — la
-    // entrega es inmediata, no hay envío que Despachar.
+    // CP-DTLP Phase E.3 / QUI-764b — disparador 2 manual del tiquete de
+    // despacho desde la pantalla de la orden. El `disabled` SIGUE al mismo
+    // predicado compartido (`shouldAutoPrintDispatchTicket`) que el handler
+    // `printDispatchTicket` — si vuelven a divergir estaríamos en el mismo
+    // lugar dentro de un mes. `trigger: 'explicit'` ignora `printDispatchTicketAuto`
+    // (solo el auto origin lo exige) y respeta `print_dispatch_ticket_on_counter`
+    // para que el botón salga habilitado cuando la tienda eligió imprimir el
+    // tiquete como comprobante de mostrador/para-llevar.
     {
       id: 'print-dispatch-ticket',
       label: 'e-ticket de envío',
       variant: 'outline',
       icon: 'package',
-      disabled: this.order()?.delivery_type === 'direct_delivery',
+      disabled: !this.canPrintDispatchTicketExplicit(),
     },
   ]);
+
+  /**
+   * QUI-764b — predicado MANUAL del tiquete de despacho. Decide si el
+   * botón `e-ticket de envío` debe estar habilitado y si el handler
+   * `printDispatchTicket` debe imprimir. Una sola fuente de verdad:
+   * `headerActions.disabled` y el handler consultan este computed.
+   *
+   * **Asimetría con el auto-print (importante)**: el botón manual responde
+   * otra pregunta que `shouldAutoPrintDispatchTicket`. El operador ya
+   * PIDIÓ imprimir; la pulsación es el opt-in. La guarda de entrega del
+   * predicado de auto-impresión (`pickup` / `home_delivery` /
+   * `isShippingSale` como positivos; `direct_delivery` / `dine_in` /
+   * `other` como negativos) NO aplica acá — codifica política de
+   * "qué merece imprimirse solo, sin que nadie lo pida". Mezclar las
+   * dos superficies rompió `pickup` por defecto (regresión detectada
+   * por auditoría).
+   *
+   * Política MANUAL vigente:
+   *   1. `print_dispatch_ticket_enabled` (ADR-7) — si está apagado, false.
+   *   2. `delivery_type === 'direct_delivery'` (mostrador puro) — solo
+   *      permitido si el admin prendió `print_dispatch_ticket_on_counter`.
+   *   3. cualquier otro `delivery_type` (incluido `pickup`, `home_delivery`,
+   *      `dine_in`, `other`, `null`) — permitido.
+   *
+   * NO confundir con `autoPrintDispatchTicket` (más abajo, líneas 2572+):
+   * ese SÍ usa `shouldAutoPrintDispatchTicket('automatic', ctx)` porque su
+   * trigger es automático y necesita la política de auto-impresión completa.
+   */
+  readonly canPrintDispatchTicketExplicit = computed<boolean>(() => {
+    const order = this.order();
+    if (!order) return false;
+    const receipts = this.settingsFacade.receipts();
+    const enabled = receipts?.print_dispatch_ticket_enabled ?? true;
+    if (!enabled) return false;
+    const counterEnabled = receipts?.print_dispatch_ticket_on_counter ?? false;
+    // Mostrador puro: requiere opt-in explícito por admin. Para el resto,
+    // el click del operador es el opt-in suficiente.
+    if (order.delivery_type === 'direct_delivery' && !counterEnabled) {
+      return false;
+    }
+    return true;
+  });
 
   readonly paymentReceiptSubtitle = computed(() => {
     const receipt = this.paymentReceiptPreview();
@@ -2487,25 +2534,26 @@ export class OrderDetailsPageComponent {
   }
 
   /**
-   * CP-DTLP Phase E.3 — disparador 2 manual del tiquete de despacho desde
-   * la pantalla de la orden. Lo invocan el botón del headerActions
-   * (`e-ticket de envío`) y el botón secundario de la card "Gestión de Envío".
+   * CP-DTLP Phase E.3 / QUI-764b — disparador 2 manual del tiquete de
+   * despacho desde la pantalla de la orden. Lo invocan el botón del
+   * headerActions (`e-ticket de envío`) y el botón secundario de la card
+   * "Gestión de Envío".
    *
-   * Guard: enabled (default true ADR-7) + `direct_delivery` skip (la
-   * entrega es en mostrador, no hay envío que Despachar). La copia se
-   * resuelve en `DispatchTicketPrintService` desde
-   * `receipts.printing.dispatch_ticket` (config del gateway); con
-   * `trigger: 'explicit'` y `copies: 0` el servicio imprime 0 copias y
-   * devuelve silenciosamente.
+   * La guarda se delega a `canPrintDispatchTicketExplicit` — el MISMO
+   * computed que el `disabled` del headerActions. Una sola fuente de
+   * verdad, sin condición paralela que pueda divergir. Política MANUAL:
+   * `print_dispatch_ticket_enabled` apagado mata todo; `direct_delivery`
+   * requiere `print_dispatch_ticket_on_counter` prendido; cualquier otro
+   * `delivery_type` imprime cuando el formato está habilitado. Ver
+   * docblock de `canPrintDispatchTicketExplicit` para la tabla completa.
+   * La copia se resuelve en `DispatchTicketPrintService` desde
+   * `receipts.printing.dispatch_ticket`; con `trigger: 'explicit'` y
+   * `copies: 0` el servicio imprime 0 copias.
    */
   async printDispatchTicket(): Promise<void> {
     const order = this.order();
     if (!order) return;
-    if (order.delivery_type === 'direct_delivery') return;
-
-    const enabled =
-      this.settingsFacade.receipts()?.print_dispatch_ticket_enabled ?? true;
-    if (!enabled) return;
+    if (!this.canPrintDispatchTicketExplicit()) return;
 
     try {
       await this.dispatchTicketPrint.printDispatchTicket(
@@ -2513,7 +2561,10 @@ export class OrderDetailsPageComponent {
         'explicit',
       );
     } catch (err) {
-      console.error('[CP-DTLP] Error al imprimir tiquete de despacho:', err);
+      console.error(
+        '[QUI-764b] Error al imprimir tiquete de despacho:',
+        err,
+      );
       this.toastService.error('No se pudo imprimir el tiquete de despacho');
     }
   }
