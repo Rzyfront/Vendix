@@ -123,6 +123,27 @@ export class ProductListComponent {
   // del constructor haya mutado los options. Convertirlo a signal elimina
   // el truco y hace que la mutacion + el re-render sean lo mismo.
   readonly filterConfigs = signal<FilterConfig[]>([
+    // QUI-729 — filtro tri-estado Productos / Insumos / Todos. Va PRIMERO a
+    // proposito: `.filters-body` corta en `max-height: 40vh` con scroll
+    // interno y sin indicio visual, asi que la quinta seccion quedaba fuera
+    // de vista y el filtro se leia como inexistente. Es ademas el unico
+    // filtro activo por defecto (el badge marca 1 por el), asi que encabezar
+    // la lista es lo coherente.
+    //
+    // Distinto de "Tipo de Producto": esa dimension es `product_type`
+    // (Fisico / Servicio); esta es `is_ingredient`. El default 'products'
+    // vive en el CLIENTE (ADR-6) y se manda como `is_ingredient: false`, no
+    // como `undefined`, para que la carga inicial ya llegue filtrada.
+    {
+      key: 'is_ingredient',
+      label: 'Productos e insumos',
+      type: 'select',
+      options: [
+        { value: 'products', label: 'Productos' },
+        { value: 'ingredients', label: 'Insumos' },
+        { value: 'all', label: 'Todos' },
+      ],
+    },
     {
       key: 'state',
       label: 'Estado',
@@ -159,23 +180,6 @@ export class ProductListComponent {
         { value: '', label: 'Todos los Tipos' },
         { value: 'physical', label: 'Producto Físico' },
         { value: 'service', label: 'Servicio' },
-      ],
-    },
-    // QUI-729 — filtro tri-estado Productos / Insumos / Todos. Vive DENTRO
-    // del dropdown (no en la barra). Distinto de "Tipo de Producto" arriba
-    // porque esa dimensión es sobre `product_type` (Físico / Servicio);
-    // esta es sobre `is_ingredient`. El default 'products' vive en el
-    // CLIENTE (ADR-6), por eso el initialValue abajo — no se manda al
-    // backend con `is_ingredient: undefined`, se manda como `is_ingredient:
-    // false` y la carga inicial ya llega filtrada.
-    {
-      key: 'is_ingredient',
-      label: 'Productos e insumos',
-      type: 'select',
-      options: [
-        { value: 'products', label: 'Productos' },
-        { value: 'ingredients', label: 'Insumos' },
-        { value: 'all', label: 'Todos' },
       ],
     },
   ]);
