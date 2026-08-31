@@ -2187,35 +2187,179 @@ export class SubscriptionFiscalService {
       const issuedAt = new Date();
       const issuedAtLocal = localDateString(issuedAt, PLATFORM_TIMEZONE);
       const issuedAtTime = localTimeString(issuedAt, PLATFORM_TIMEZONE);
-      const dueAt = new Date(issuedAt.getTime() + 7 * 24 * 60 * 60 * 1000);
-      const dueAtLocal = localDateString(dueAt, PLATFORM_TIMEZONE);
+      // due_date: el caller puede sobreescribirla (DTO). Default legacy:
+      // emisión + 7 días. ISO8601 → YYYY-MM-DD local.
+      const dueAt = dto.due_date
+        ? localDateString(new Date(dto.due_date), PLATFORM_TIMEZONE)
+        : localDateString(
+            new Date(issuedAt.getTime() + 7 * 24 * 60 * 60 * 1000),
+            PLATFORM_TIMEZONE,
+          );
+      // issue_date: idem, default = emisión.
+      const issueAtLocal = dto.issue_date
+        ? localDateString(new Date(dto.issue_date), PLATFORM_TIMEZONE)
+        : issuedAtLocal;
 
-      // 0.b) Subtotal: redondeo POR LÍNEA, después suma. Coincide con la
-      //     convención `LineExtensionAmount` de la DIAN; una suma de
-      //     floats sin redondeo intermedio puede dar FAU04 al cuadrar con
-      //     TaxExclusiveAmount.
-      const lineItems = dto.items.map((item, i) => {
+      // 0.b) Cálculo por línea. Construye `lineItems` (forma que firma la
+      //     DIAN) Y `snapshotItems` (forma del snapshot contable que lee el
+      //     listener de auto-asientos vía `loadInvoiceSnapshot`).
+      //
+      //     Regla de cuadre FAS02 (peer rule 3): `tax_amount` de cabecera
+      //     es SIEMPRE la suma de los impuestos por línea — NUNCA base×tarifa
+      //     recalculada sobre el subtotal. Recalcular da un céntimo de
+      //     diferencia y lo rechaza la DIAN.
+      //
+      //     Regla de impuesto incluido (peer rule 4): cuando una línea trae
+      //     `taxes[].is_inclusive=true`, su base gravable es
+      //     `neto / (1 + Σ tarifas_inclusivas)`. Cada impuesto exclusivo
+      //     usa esa misma base despejada. El frontend manda `rate` en
+      //     fracción 0–1.
+      //
+      //     Backward compat (peer rule 2): si NINGUNA línea trae `taxes`,
+      //     `tax_amount = 0` y se conserva la nota de exclusión art. 476
+      //     num. 21 ET. Si AL MENOS una línea trae `taxes`, la nota de
+      //     exclusión NO se emite (sería una declaración falsa) y la
+      //     cabecera lleva `taxes[]`.
+      let hasAnyTax = false;
+      let totalTaxAmount = 0;
+      const lineItems: any[] = [];
+      const snapshotItems: any[] = [];
+
+      for (let i = 0; i < dto.items.length; i++) {
+        const item = dto.items[i];
         const qty = Number(item.quantity);
         const price = Number(item.unit_price);
-        const lineTotal = Math.round(qty * price * 100) / 100;
-        return {
+        const discount = Number(item.discount_amount ?? 0);
+        // Redondeo POR LÍNEA, después suma. Coincide con la convención
+        // `LineExtensionAmount` de la DIAN; una suma de floats sin
+        // redondeo intermedio puede dar FAU04 al cuadrar con
+        // TaxExclusiveAmount.
+        const gross = Math.round((qty * price - discount) * 100) / 100;
+
+        const taxes = Array.isArray(item.taxes) ? item.taxes : [];
+        const inclusiveRateSum = taxes
+          .filter((t) => t.is_inclusive === true)
+          .reduce((acc, t) => acc + Number(t.rate || 0), 0);
+
+        let lineBaseForExclusiveTaxes: number;
+        let lineBaseForInclusiveTaxes: number;
+        if (inclusiveRateSum > 0) {
+          // gross = base * (1 + Σ inclusive). Despejamos.
+          lineBaseForInclusiveTaxes = Math.round((gross / (1 + inclusiveRateSum)) * 100) / 100;
+          // La base para exclusivos comparte el mismo neto despejado: ambos
+          // tipos tributan sobre el valor sin impuesto (post-disc, pre-tax).
+          lineBaseForExclusiveTaxes = lineBaseForInclusiveTaxes;
+        } else {
+          lineBaseForExclusiveTaxes = gross;
+          lineBaseForInclusiveTaxes = gross;
+        }
+
+        const providerTaxes: any[] = [];
+        const taxBreakdownSnapshot: any[] = [];
+        let lineTaxTotal = 0;
+        for (const tax of taxes) {
+          const rate = Number(tax.rate || 0);
+          if (rate <= 0) continue;
+          // El frontend puede mandar `tax_amount` explícito; si NO, lo
+          // calculamos sobre la base despejada. Esto preserva el caso
+          // donde el V1 ya viene con el monto pre-calculado.
+          let taxAmount: number;
+          if (tax.tax_amount != null) {
+            taxAmount = Number(tax.tax_amount);
+          } else if (tax.is_inclusive) {
+            taxAmount = Math.round(lineBaseForInclusiveTaxes * rate * 100) / 100;
+          } else {
+            taxAmount = Math.round(lineBaseForExclusiveTaxes * rate * 100) / 100;
+          }
+          lineTaxTotal += taxAmount;
+          providerTaxes.push({
+            tax_type: tax.tax_type,
+            tax_name: tax.tax_type, // el mapper legacy renombra según enum
+            rate: tax.is_inclusive ? rate : rate,
+            // `is_inclusive` no es un campo del provider: el provider modela
+            // un único `rate`. La fachada legacy convierte inclusivos a
+            // exclusivos antes de firmar; acá sólo propagamos los datos
+            // necesarios para que el mapper haga esa conversión.
+            taxable_amount: tax.taxable_amount ?? null,
+            tax_amount: taxAmount.toFixed(2),
+            is_inclusive: !!tax.is_inclusive,
+          });
+          taxBreakdownSnapshot.push({
+            tax_type: tax.tax_type,
+            rate,
+            tax_amount: taxAmount,
+            is_inclusive: !!tax.is_inclusive,
+            taxable_amount: tax.taxable_amount ?? null,
+          });
+          hasAnyTax = true;
+        }
+
+        // Default unit_code: 'NIU' (UN/ECE Rec. 20). 'EA' no está en la rec.
+        // y ningún selector del front lo puede pintar — el legacy lo
+        // hardcodeaba por bug histórico.
+        const unit_code = item.unit_code ?? 'NIU';
+
+        lineItems.push({
           position: i + 1,
           description: item.description,
           quantity: qty,
           unit_price: price,
-          line_total: lineTotal.toFixed(2),
+          line_total: gross.toFixed(2),
+          // Si la línea no trae descuento lo emitimos como 0 explícito
+          // para que el snapshot refleje el cálculo real; si lo trae, fluye.
+          discount_amount: discount.toFixed(2),
           item_code: null,
-          unit_code: 'EA',
-          omit_tax_total: true,
-        };
-      });
+          unit_code,
+          // `omit_tax_total: true` SÓLO cuando la línea no trae taxes (legacy).
+          // Con taxes presentes la línea SÍ tributa y la DIAN debe incluirla
+          // en TaxSubtotal.
+          omit_tax_total: taxes.length === 0,
+          // Si la línea trae taxes, propagamos al provider; el mapper los
+          // aplana al array `taxes` de cabecera. Si NO trae taxes, no
+          // emitimos `taxes` por línea — el legacy así lo hacía.
+          ...(taxes.length > 0 ? { taxes: providerTaxes } : {}),
+        });
+
+        snapshotItems.push({
+          position: i + 1,
+          description: item.description,
+          quantity: qty,
+          unit_price: price,
+          line_total: gross,
+          discount_amount: discount,
+          unit_code,
+          taxes: taxBreakdownSnapshot,
+          // Peer rule: cuenta PUC de ingreso por línea. Si falta, queda
+          // null en el snapshot; el listener cae al mapping legacy
+          // `invoice.validated.revenue`.
+          account_code: item.account_code ?? null,
+          // Para asiento multi-crédito futuro: la línea PUEDE llevar
+          // también un centro de costo / descripción adicional, pero el
+          // DTO V1 no lo trae — se omite.
+        });
+
+        totalTaxAmount += lineTaxTotal;
+      }
+
       const subtotal =
         Math.round(lineItems.reduce((acc, l) => acc + Number(l.line_total), 0) * 100) / 100;
-      const taxAmount = 0; // Excluido de IVA art. 476 num. 21 ET
-      const total = subtotal + taxAmount;
+      const taxAmount = Math.round(totalTaxAmount * 100) / 100;
+      const total = Math.round((subtotal + taxAmount) * 100) / 100;
+
+      // Withholdings: suman al campo withholding_amount del provider (asset
+      // debit en el listener — ver onInvoiceValidated caso 2). Si el caller
+      // no envía, queda `[]` y el campo se emite en 0.
+      const withholdings = Array.isArray(dto.withholdings) ? dto.withholdings : [];
+      const withholdingAmount = withholdings.reduce(
+        (acc, w) => acc + (w.amount != null ? Number(w.amount) : Math.round(Number(w.base_amount) * Number(w.rate) * 100) / 100),
+        0,
+      );
 
       // 0.c) Idempotencia por contenido. Doble click en el botón =
       //     mismo tax_id + mismas items + mismo período → misma key.
+      //     Peer rule 7: con impuestos y retenciones variables, dos
+      //     facturas que difieren sólo en la tarifa colisionarían.
+      //     Sumamos `taxes`, `withholdings` y `total` al hash.
       //     La UNIQUE (accounting_entity_id, document_type, idempotency_key)
       //     en fiscal_transmissions rechaza la segunda.
       const idempotencyKey = this.hash({
@@ -2224,6 +2368,12 @@ export class SubscriptionFiscalService {
         items: lineItems,
         period_start: dto.period_start ?? null,
         period_end: dto.period_end ?? null,
+        // peer rule 7
+        taxes: lineItems.flatMap((l) => l.taxes ?? []),
+        withholdings,
+        total,
+        counterpart_account_code: dto.counterpart_account_code ?? null,
+        resolution_id: dto.resolution_id ?? null,
       });
 
       // 1) TODO dentro de UNA transacción. `pg_advisory_xact_lock` se
@@ -2239,19 +2389,44 @@ export class SubscriptionFiscalService {
         const resolution = allocated.resolution;
 
         // 1.b) Construir el ProviderInvoiceData.
+        //
+        // Customer fiscal fields: si el DTO trae `document_type`,
+        // `person_type`, `tax_regime_code` o `fiscal_responsibilities`,
+        // fluyen; si NO, caen a los defaults legacy exentos (NIT/31,
+        // juridica/2, régimen 49, responsabilidad O-13). El legado queda
+        // idéntico para callers que no envíen esos campos.
+        const customerDocumentType = dto.customer.document_type ?? '31';
+        const customerPersonType = dto.customer.person_type ?? '2';
+        const customerRegime = dto.customer.tax_regime_code ?? '49';
+        const customerResponsibilities =
+          dto.customer.fiscal_responsibilities ??
+          (customerRegime === '49' ? ['O-13'] : [customerRegime]);
+
+        // Notas. La nota de exclusión art. 476 num. 21 SÓLO se incluye
+        // cuando la factura no lleva ningún impuesto. Con хотя бы один
+        // impuesto presente, declarar exclusión sería falso y la DIAN lo
+        // rechaza. Si el caller trae `notes`, gana su contenido.
+        const defaultNotes = hasAnyTax
+          ? [`Factura de servicios generada desde super-admin el ${issueAtLocal}`]
+          : [
+              `Factura de servicios generada desde super-admin el ${issueAtLocal}`,
+              'Servicio excluido de IVA — art. 476 num. 21 del Estatuto Tributario',
+            ];
+        const notesText = dto.notes ?? defaultNotes.join('\n');
+
         const providerData = {
           invoice_number: fiscalNumber,
           invoice_type: 'sales_invoice',
-          issue_date: issuedAtLocal,
+          issue_date: issueAtLocal,
           issue_time: issuedAtTime,
-          due_date: dueAtLocal,
+          due_date: dueAt,
           invoice_period: {
             start_date: dto.period_start
               ? localDateString(new Date(dto.period_start), PLATFORM_TIMEZONE)
-              : issuedAtLocal,
+              : issueAtLocal,
             end_date: dto.period_end
               ? localDateString(new Date(dto.period_end), PLATFORM_TIMEZONE)
-              : issuedAtLocal,
+              : issueAtLocal,
           },
           customer_name: dto.customer.legal_name,
           customer_tax_id: dto.customer.tax_id,
@@ -2264,26 +2439,25 @@ export class SubscriptionFiscalService {
                 country_code: 'CO',
               }
             : null,
-          // 31 = NIT. El DTO acepta DV opcional; el resto de campos
-          // (person_type, regime) son los que el riel SaaS usa para
-          // servicios exentos — coincide.
-          customer_document_type: '31',
+          customer_document_type: customerDocumentType,
           customer_verification_digit: dto.customer.tax_id_dv ?? null,
-          customer_person_type: '2',
-          customer_regime: '49',
-          customer_tax_responsibilities: ['O-13'],
+          customer_person_type: customerPersonType,
+          customer_regime: customerRegime,
+          customer_tax_responsibilities: customerResponsibilities,
           subtotal_amount: subtotal.toFixed(2),
-          discount_amount: '0.00',
+          discount_amount: dto.items
+            .reduce((acc, it) => acc + Number(it.discount_amount ?? 0), 0)
+            .toFixed(2),
+          // peer rule 3 — header tax_amount = suma de impuestos de línea.
           tax_amount: taxAmount.toFixed(2),
-          withholding_amount: '0.00',
+          withholding_amount: withholdingAmount.toFixed(2),
           total_amount: total.toFixed(2),
           currency: dto.currency ?? 'COP',
           items: lineItems,
-          taxes: [],
-          notes: [
-            `Factura de servicios generada desde super-admin el ${issuedAtLocal}`,
-            'Servicio excluido de IVA — art. 476 num. 21 del Estatuto Tributario',
-          ].join('\n'),
+          // peer rule 2 — taxes de cabecera presente SÓLO si хотя бы una
+          // línea trae taxes. Legacy sin taxes: `taxes: []`.
+          taxes: hasAnyTax ? lineItems.flatMap((l) => l.taxes ?? []) : [],
+          notes: notesText,
           order_reference: null,
           resolution_number: resolution.resolution_number,
           technical_key: this.technicalKeyVault.reveal(resolution),
@@ -2291,8 +2465,10 @@ export class SubscriptionFiscalService {
             resolution_id: resolution.id,
             document_type: 'sales_invoice',
           }),
-          payment_form: '1',
-          payment_means: '42',
+          // peer rule 2 — payment_form/payment_means honran el DTO cuando
+          // está presente; caen a defaults legacy ('1'/'42') cuando нет.
+          payment_form: dto.payment_form ?? '1',
+          payment_means: dto.payment_means_code ?? '42',
           payment_method: null,
         } as unknown as ProviderInvoiceData;
 
@@ -2356,6 +2532,11 @@ export class SubscriptionFiscalService {
         //     semánticamente un "documento de soporte interno" que
         //     respalda el documento fiscal. La lectura al detalle es por
         //     `metadata.kind`, no por `evidence_type`.
+        //
+        //     peer rule 6 — el metadata AHORA lleva `counterpart_account_code`,
+        //     `resolution_id`, `issue_date` y `account_code` dentro de cada
+        //     item para que `emitInvoiceAccepted` los pueda releer sin
+        //     recalcular.
         await tx.fiscal_evidences.create({
           data: {
             organization_id: settings.platform_organization_id!,
@@ -2368,11 +2549,21 @@ export class SubscriptionFiscalService {
             metadata: {
               kind: 'platform_invoice_snapshot',
               customer: dto.customer,
-              items: lineItems,
+              items: snapshotItems,
               totals: { subtotal, tax_amount: taxAmount, total },
               period_start: dto.period_start ?? null,
               period_end: dto.period_end ?? null,
               currency: dto.currency ?? 'COP',
+              withholdings: withholdings.map((w) => ({
+                role: w.role,
+                concept_id: w.concept_id,
+                base_amount: Number(w.base_amount),
+                rate: Number(w.rate),
+                amount: w.amount != null ? Number(w.amount) : Math.round(Number(w.base_amount) * Number(w.rate) * 100) / 100,
+              })),
+              counterpart_account_code: dto.counterpart_account_code ?? null,
+              resolution_id: dto.resolution_id ?? resolution.id,
+              issue_date: issueAtLocal,
               created_by: 'createPlatformInvoice',
             },
           },
