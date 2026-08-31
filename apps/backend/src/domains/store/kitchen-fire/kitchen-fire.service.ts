@@ -2035,11 +2035,26 @@ export class KitchenFireService {
     });
 
     const full = await this.getTicketForStore(ticketId);
+    // QUI-760 — imputa las inventory_transactions del ticket a la sesión
+    // abierta de la KDS. El insumo YA se gastó al cocinar: cancelar el
+    // ticket no lo devuelve al stock (la acción no distingue «no se llegó
+    // a preparar» de «se cocinó y se canceló»), y la merma queda cargada
+    // al turno que la produjo. Coherente con la regla "atribución es de
+    // quien cocina". Mismo patrón push-primero-try-catch-después que los
+    // otros tres handlers: la difusión operativa no depende del helper.
     this.pushKitchenEvent(store_id, {
       type: 'ticket.cancelled',
       ticket: full.ticket,
       ts: Date.now(),
     });
+    try {
+      await this.kdsSessionsService.attributeOpenSessionToTicketConsumption(ticketId);
+    } catch (err) {
+      this.logger.error(
+        `QUI-760: failed to attribute ticket ${ticketId} consumption to KDS session`,
+        err as Error,
+      );
+    }
     return full.ticket;
   }
 
@@ -2056,7 +2071,21 @@ export class KitchenFireService {
    *
    * The caller MUST have already validated tenancy + the `pending` precondition
    * (this helper performs the raw writes only).
+   *
+   * QUI-760 — esta vía NO imputa consumo al cerrar la tx. La imputación
+   * (`attributeOpenSessionToTicketConsumption`) hace su propio
+   * `updateMany` con scope por tienda y no se puede meter adentro de una
+   * tx ajena sin correr dos riesgos: contaminar la semántica de la tx
+   * del llamador (un fallo de imputación podría hacer rollback de
+   * cancelación que ya estaba decidida) y bloquear el commit de ese
+   * flujo por un efecto contable. La imputación viaja con el SSE: el
+   * `emitTicketCancelledEvent` post-commit ya invoca el helper además
+   * del push. Si el caller invoca `cancelTicketInTx` y olvida el
+   * `emitTicketCancelledEvent`, el ticket queda cancelado pero su
+   * consumo NO se imputa — mismo hueco que ya existía para el SSE, la
+   * imputación lo hereda. Documentado para que no parezca un olvido.
    */
+
   async cancelTicketInTx(
     tx: Prisma.TransactionClient,
     ticketId: number,
@@ -2089,6 +2118,22 @@ export class KitchenFireService {
     } catch (err) {
       this.logger.warn(
         `Failed to emit ticket.cancelled for ticket ${ticketId}: ${
+          (err as Error).message
+        }`,
+      );
+    }
+    // QUI-760 — imputación post-commit, después de empujar el SSE (o de
+    // intentar empujarlo). Mismo patrón que `cancelTicket` directo: el
+    // insumo ya se gastó al cocinar y la merma queda cargada al turno.
+    // Se intenta imputar incluso si el push falló arriba — la imputación
+    // es independiente del SSE. Best-effort: si el helper tira, se
+    // loguea y se continúa (el caller ya invocó este helper asumiendo
+    // post-commit, no propagamos error).
+    try {
+      await this.kdsSessionsService.attributeOpenSessionToTicketConsumption(ticketId);
+    } catch (err) {
+      this.logger.warn(
+        `QUI-760: failed to attribute cancelled ticket ${ticketId} consumption: ${
           (err as Error).message
         }`,
       );
