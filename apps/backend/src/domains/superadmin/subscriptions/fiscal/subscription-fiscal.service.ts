@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import {
   dianAmount,
@@ -104,6 +105,7 @@ import {
   InvoiceLineItem,
   SubscriptionInvoiceMetadata,
 } from '../../../store/subscriptions/types/billing.types';
+import { PlatformInvoicingPersistenceService } from './platform-invoicing-persistence.service';
 import {
   buildSubscriptionItemCode,
   buildSubscriptionInvoiceNotes,
@@ -387,6 +389,16 @@ export class SubscriptionFiscalService {
     // el otro carril, para que actualizar una regla actualice los dos.
     private readonly identityValidator: CustomerFiscalIdentityValidator,
     private readonly documentValidator: FiscalDocumentValidator,
+    // Para releer el snapshot del documento (kind='platform_invoice_snapshot')
+    // tras la aceptación y emitir `invoice.accepted` con los totales e importes
+    // que la DIAN acaba de firmar. LaDIAN ya aceptó: el evento es el contrato
+    // que dispara el asiento contable automático contra el accounting_entity de
+    // la plataforma, igual que el riel de tienda pero con `store_id` ausente.
+    private readonly persistence: PlatformInvoicingPersistenceService,
+    // Único bus de eventos de Nest. La factura de plataforma emite
+    // `invoice.accepted` y `AccountingEventsListener` resuelve el subflujo
+    // `invoicing` + las cuentas PUC; no usamos el `EventEmitter` de Node.
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async getStatus() {
@@ -4880,6 +4892,108 @@ export class SubscriptionFiscalService {
       },
     });
     await this.createEvidences(updated, response);
+    await this.emitInvoiceAccepted(updated);
+  }
+
+  /**
+   * Emite `invoice.accepted` para que `AccountingEventsListener` genere el
+   * asiento contable de la factura de plataforma. El contrato del listener es
+   * el mismo del riel tienda (DR CxC / CR revenue + tax_payable), solo que acá
+   * `store_id` es undefined y `organization_id` es la organización plataforma
+   * (id=1 hoy). El subflujo `invoicing` se rige por el área fiscal maestra del
+   * mismo nombre, NO por `module_flows.accounting.*`, así que basta con que
+   * `fiscal_status.invoicing.state` esté en ACTIVE/LOCKED.
+   *
+   * Total/subtotal/tax_amount vienen del snapshot `platform_invoice_snapshot`
+   * que escribió `createEvidences` (escrito apenas arriba, en esta misma tx).
+   * Si el snapshot no existe (algo falló aguas arriba) NO emitimos — un asiento
+   * con totales en cero no representa la venta. El error se loguea: la factura
+   * quedó aceptada por la DIAN, pero sin asiento; el caller debe enterarse.
+   *
+   * `counterpart_account_code` y `items[].account_code` son la regla de
+   * precedencia del operador sobre el mapeo automático — se leen top-level del
+   * metadata del snapshot. Si no están (campo aún no agregado al snapshot),
+   * `AutoEntryService` cae al default 1305 / `invoice.validated.revenue`,
+   * idéntico al riel tienda.
+   */
+  private async emitInvoiceAccepted(transmission: {
+    id: number;
+    organization_id: number;
+    store_id: number | null;
+    accounting_entity_id: number | null;
+    document_number: string;
+    created_by_user_id: number | null;
+  }): Promise<void> {
+    try {
+      const snapshot = await this.persistence.loadInvoiceSnapshot(
+        this.prisma.withoutScope(),
+        transmission.id,
+      );
+      if (!snapshot) {
+        this.logger.error(
+          `Cannot emit invoice.accepted for platform transmission #${transmission.id}: ` +
+            `no platform_invoice_snapshot evidence found. The DIAN accepted the invoice ` +
+            `but no accounting entry will be posted.`,
+        );
+        return;
+      }
+
+      const counterpart_account_code =
+        (snapshot as any).counterpart_account_code ?? null;
+
+      const items = Array.isArray(snapshot.items) ? snapshot.items : [];
+      const item_account_codes = items
+        .map((it) => (it as any)?.account_code ?? null)
+        .filter((c): c is string => typeof c === 'string');
+
+      const withholding_breakdown = Array.isArray(snapshot.withholdings)
+        ? (snapshot.withholdings as unknown as Array<{
+            tax_type?: string;
+            amount?: number;
+            [k: string]: unknown;
+          }>)
+        : undefined;
+
+      // `tax_breakdown` por línea no existe todavía en el snapshot V1; el
+      // listener y `AutoEntryService` toleran su ausencia cayendo al mapping key
+      // legacy `invoice.validated.vat_payable` (suma simple). El contrato
+      // formal de `tax_breakdown` se completará cuando `elon` lo agregue al
+      // snapshot — el campo es optional en el listener.
+      const payload = {
+        invoice_id: transmission.id,
+        invoice_number: transmission.document_number,
+        organization_id: transmission.organization_id,
+        store_id: transmission.store_id ?? undefined,
+        accounting_entity_id: transmission.accounting_entity_id ?? undefined,
+        subtotal_amount: Number(snapshot.totals?.subtotal ?? 0),
+        tax_amount: Number(snapshot.totals?.tax_amount ?? 0),
+        total_amount: Number(snapshot.totals?.total ?? 0),
+        withholding_breakdown,
+        user_id: transmission.created_by_user_id ?? undefined,
+        customer: snapshot.customer as { id: number; name?: string; tax_id?: string } | undefined,
+        // Regla de precedencia: cuenta del operador > mapeo automático.
+        counterpart_account_code,
+        // Lista de cuentas de ingreso declaradas por línea (para asientos
+        // multi-crédito). Vacío hoy = cae a `invoice.validated.revenue`.
+        item_account_codes,
+      };
+
+      this.eventEmitter.emit('invoice.accepted', payload);
+      this.logger.log(
+        `Emitted invoice.accepted for platform transmission #${transmission.id} ` +
+          `(invoice ${transmission.document_number}, ` +
+          `subtotal=${payload.subtotal_amount} tax=${payload.tax_amount} ` +
+          `total=${payload.total_amount}` +
+          (counterpart_account_code ? `, counterpart=${counterpart_account_code}` : '') +
+          `)`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to emit invoice.accepted for platform transmission #${transmission.id}: ` +
+          `${(error as Error).message}`,
+        (error as Error).stack,
+      );
+    }
   }
 
   private async markRejected(
