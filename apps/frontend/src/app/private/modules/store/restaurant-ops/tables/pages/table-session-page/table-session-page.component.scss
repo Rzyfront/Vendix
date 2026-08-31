@@ -651,6 +651,21 @@
     white-space: nowrap;
   }
 
+  /*
+   * QUI-736 — sub-línea de variante. Mismo tratamiento visual que la
+   * comanda de cocina (`.kds-card__variant` en el KDS) para que salón
+   * y cocina lean la variante igual: peso 600, tamaño más chico que
+   * el nombre, color secundario. Se mantiene el nombre de clase del KDS
+   * a propósito: si un dev busca "kds-card__variant" lo encuentra acá
+   * también, y un cambio futuro en uno lo unificamos en el otro.
+   */
+  .kds-card__variant {
+    margin: 0.125rem 0 0 0;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--color-text-secondary, #4b5563);
+  }
+
   .item-meta {
     font-size: 0.78rem;
     font-weight: 600;

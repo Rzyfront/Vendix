@@ -389,6 +389,26 @@
                             </span>
                           }
                         </div>
+                        <!--
+                          QUI-736 — variante como SUB-LÍNEA propia, NO
+                          concatenada al nombre. `product_name` es un
+                          snapshot inmutable de la línea: escribir sobre él
+                          rompería la comparación con lo que se imprimió.
+                          Usamos `variant_label` (snapshot del nombre de
+                          variante al crear la línea), no `product_variants`
+                          en vivo — si mañana renombran la variante, la
+                          comanda histórica debe seguir diciendo lo que
+                          se vendió. Mismo patrón que KDS
+                          (`kds-ticket-card.component.html:103`, clase
+                          `kds-card__variant` + `sr-only`) para que cocina
+                          y salón se lean igual; la línea sin variante
+                          queda byte por byte como hoy.
+                        -->
+                        @if (item.variant_label) {
+                          <p class="kds-card__variant">
+                            <span class="sr-only">Variante: </span>{{ item.variant_label }}
+                          </p>
+                        }
                         <!-- El unitario sólo aporta cuando hay más de una
                              unidad: con cantidad 1 repite literalmente el
                              importe de la derecha y añade una línea entera
