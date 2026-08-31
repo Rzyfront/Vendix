@@ -2165,18 +2165,35 @@ export class SubscriptionFiscalService {
         PLATFORM_TIMEZONE,
       );
 
-      // Resolución: la misma que se usó en el primer intento (settings
-      // no debería cambiarla entre tanto, pero leemos de la fila por
-      // defensa).
+      // Resolución: la MISMA que se usó en el primer intento. La fuente
+      // correcta es el snapshot persistido en `createPlatformInvoice`
+      // (metadata.resolution_id), NO el setting. Antes de F1 siempre
+      // coincidían — el setting resolvía todo, así que la lectura del
+      // setting era legítima «por defensa». Ahora que `dto.resolution_id`
+      // sí elige, un primer intento pudo haber usado otra resolución y el
+      // reintento debe reconstruir `resolution_number`, `technical_key` y
+      // `control` contra ESA, no contra la del setting: cualquier valor
+      // distinto rompe el CUFE recalculado y la DIAN rechaza.
+      const originalResolutionId =
+        typeof m.resolution_id === 'number'
+          ? (m.resolution_id as number)
+          : null;
+      if (originalResolutionId === null) {
+        throw new BadRequestException(
+          'El snapshot del origen no registra resolution_id — la factura original no se emitió por createPlatformInvoice (no se puede reintentar).',
+        );
+      }
       const resolution = await this.prisma.withoutScope().invoice_resolutions.findFirst({
         where: {
-          id: settings.invoice_resolution_id!,
+          id: originalResolutionId,
           accounting_entity_id: settings.accounting_entity_id!,
           document_type: 'sales_invoice',
         },
       });
       if (!resolution) {
-        throw new BadRequestException('No se encontró la resolución original de la factura de plataforma');
+        throw new BadRequestException(
+          `No se encontró la resolución #${originalResolutionId} que la factura original usó; el reintento no puede firmar contra otra autorización.`,
+        );
       }
 
       const providerData = {
@@ -2551,11 +2568,24 @@ export class SubscriptionFiscalService {
       //      resolución cuyo cursor derivó a 0 sondearía el número 1 y
       //      la regla de rango denunciaría un falso positivo que la
       //      asignación real ya corrige.
+      //
+      //      La guarda `if (!dto.resolution_id && !settings.invoice_resolution_id)`
+      //      vive en `allocateFiscalNumber` (línea ~4571) — acá propagamos
+      //      el mismo criterio sin `!` no-null assertion, para no colar
+      //      `undefined` al SQL cuando el caller no eligió y el setting
+      //      está vacío.
+      const probeResolutionId =
+        dto.resolution_id ?? settings.invoice_resolution_id;
+      if (!probeResolutionId) {
+        throw new BadRequestException(
+          'No hay resolución de numeración seleccionada: elegí una en el formulario o configurá el default de la plataforma.',
+        );
+      }
       const probeResolution = await this.prisma
         .withoutScope()
         .invoice_resolutions.findFirst({
           where: {
-            id: dto.resolution_id ?? settings.invoice_resolution_id!,
+            id: probeResolutionId,
             accounting_entity_id: settings.accounting_entity_id!,
             document_type: 'sales_invoice',
             is_active: true,
@@ -4568,7 +4598,7 @@ export class SubscriptionFiscalService {
     resolution_id: number;
     resolution: PlatformInvoiceResolution;
   }> {
-    if (!settings.invoice_resolution_id) {
+    if (!preferredResolutionId && !settings.invoice_resolution_id) {
       throw new BadRequestException('A DIAN invoice resolution is required');
     }
     // Llave unificada con el riel de tienda. Antes la plataforma usaba un
