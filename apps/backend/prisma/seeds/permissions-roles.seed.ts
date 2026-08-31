@@ -4468,11 +4468,11 @@ export async function seedPermissionsAndRoles(
   );
 
   // QUI-730b — roles de operación restaurante. Renombrados a inglés
-// (mesero→waiter, cocina→kitchen) por requisito del dueño del proyecto.
-// Lista EXPLÍCITA de permisos en el bloque de sync de abajo (ADR-2),
-// nunca derivada de `cashierPermissions` (que no contiene ninguna clave
-// tables/table_sessions/kitchen_fire — ver A.1).
-const waiterRole = await findOrCreateSystemRole(
+  // (mesero→waiter, cocina→kitchen) por requisito del dueño del proyecto.
+  // Lista EXPLÍCITA de permisos en el bloque de sync de abajo (ADR-2),
+  // nunca derivada de `cashierPermissions` (que no contiene ninguna clave
+  // tables/table_sessions/kitchen_fire — ver A.1).
+  const waiterRole = await findOrCreateSystemRole(
     'waiter',
     'Mesero de tienda (restaurante): sirve mesas, dispara pedidos a cocina y cobra',
   );
@@ -5171,9 +5171,12 @@ const waiterRole = await findOrCreateSystemRole(
     // Tickets de cocina
     'store:kitchen_fire:read',
     'store:kitchen_fire:update',
-    // QUI-730b — KDS: lectura + update solamente. `store:kds:create` y
-    // `store:kds:delete` se QUITAN: crear y borrar estaciones KDS es tarea
-    // de admin/owner, no del cocinero. Sobre-otorgado histórico.
+    // QUI-730b — DELIBERADO: `store:kds:create` y `store:kds:delete` se
+    // QUITAN del rol kitchen. Crear y borrar estaciones KDS es tarea de
+    // admin/owner, no del cocinero (sobre-otorgado histórico). Si un cocinero
+    // reporta 403 al intentar crear/borrar una estación, NO es regresión —
+    // es la decisión de producto documentada en QUI-730b. Cualquier ticket
+    // derivado debe elevar la pregunta a producto, no devolver el permiso.
     'store:kds:read',
     'store:kds:update',
     'store:kds_sessions:read',
