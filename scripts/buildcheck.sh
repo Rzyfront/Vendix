@@ -58,6 +58,7 @@ DEEP=0
 MODE_REAP=0
 REAP_HARD=0
 MODE_TOP=0
+MODE_WATCH=0
 FORCE=0
 EXPLICIT_TARGET=0
 PASSTHRU=""
@@ -78,6 +79,10 @@ Uso: bash scripts/buildcheck.sh [opciones]
       --reap         No compila: barre procesos de build/serve/jest huérfanos y sale
       --reap-hard    Igual que --reap pero también mata procesos esbuild sueltos
       --top          Lista procesos node de >300MB con su comando (diagnóstico)
+      --watch        No compila: informa del estado del `ng serve` NATIVO
+                     (:4200 + veredicto del último ciclo). Es el sustituto de
+                     `docker logs vendix_frontend`, que dejó de existir cuando
+                     el frontend salió de Docker. Léelo desde un agente.
       --force        Ignora el preflight de memoria libre
       --timeout N    Segundos antes de matar un paso (default 900)
   -h, --help         Esta ayuda
@@ -101,6 +106,7 @@ while [ $# -gt 0 ]; do
     --reap)        MODE_REAP=1 ;;
     --reap-hard)   MODE_REAP=1; REAP_HARD=1 ;;
     --top)         MODE_TOP=1 ;;
+    --watch)       MODE_WATCH=1 ;;
     --force)       FORCE=1 ;;
     --timeout)     shift; TIMEOUT="${1:-900}" ;;
     -h|--help)     usage; exit 0 ;;
@@ -116,6 +122,71 @@ done
 if [ "$EXPLICIT_TARGET" -eq 0 ]; then
   TARGET_BE=1
   TARGET_FE=1
+fi
+
+# ---------------------------------------------------------------------------
+# --watch — estado del `ng serve` NATIVO, para agentes
+# ---------------------------------------------------------------------------
+# Desde que el frontend salió de Docker (2026-08-30) ya no hay
+# `docker logs vendix_frontend`. Su salida vive en la terminal del dev, que
+# ningún agente puede leer. Esto la sustituye.
+#
+# La bitácora que escribe scripts/dev-fe.sh contiene SÓLO el ciclo en curso,
+# así que aquí no hay que recortar nada: leer el archivo entero ya es leer el
+# último ciclo. Eso cierra por construcción la trampa de dar por vigente un
+# error de un ciclo anterior.
+watch_status() {
+  local log="$ROOT/.dev/frontend-watch.log"
+  local pid puerto_ok=0
+
+  pid="$(lsof -nP -iTCP:4200 -sTCP:LISTEN -t 2>/dev/null | head -1)"
+  [ -n "$pid" ] && puerto_ok=1
+
+  if [ "$puerto_ok" -eq 1 ]; then
+    printf 'ng serve      ACTIVO (pid %s, :4200 escuchando)\n' "$pid"
+  else
+    printf 'ng serve      CAÍDO (nadie escucha en :4200)\n'
+    printf '              arráncalo con: npm run dev:fe\n'
+  fi
+
+  if [ ! -s "$log" ]; then
+    printf 'último ciclo  SIN DATOS (no hay bitácora en .dev/frontend-watch.log)\n'
+    [ "$puerto_ok" -eq 1 ] && printf '              el proceso corre pero no pasó por scripts/dev-fe.sh\n'
+    return 0
+  fi
+
+  # Antigüedad de la bitácora. Un log intacto con el proceso muerto es la
+  # trampa que hace leer como sano un dev server que se cayó hace media hora.
+  local edad ahora mtime
+  ahora=$(date +%s)
+  mtime=$(stat -f %m "$log" 2>/dev/null || stat -c %Y "$log" 2>/dev/null || echo "$ahora")
+  edad=$(( ahora - mtime ))
+
+  if [ "$puerto_ok" -eq 0 ]; then
+    printf 'último ciclo  RANCIO — la bitácora es de hace %ss y el proceso ya no está\n' "$edad"
+  elif grep -q 'bundle generation failed' "$log"; then
+    printf 'último ciclo  FALLÓ hace %ss\n' "$edad"
+  elif grep -q 'bundle generation complete' "$log"; then
+    printf 'último ciclo  OK hace %ss\n' "$edad"
+  else
+    printf 'último ciclo  EN CURSO (%ss desde la última línea)\n' "$edad"
+  fi
+
+  local errores
+  errores="$(grep -nE '\[ERROR\]|error TS[0-9]+|NG[0-9]{4}|Could not resolve' "$log" | head -20)"
+  if [ -n "$errores" ]; then
+    printf 'errores\n'
+    printf '%s\n' "$errores" | sed 's/^/              /'
+  else
+    printf 'errores       ninguno en el último ciclo\n'
+  fi
+
+  printf '\nbitácora      %s (%s bytes, sólo el ciclo actual)\n' "$log" "$(wc -c < "$log" | tr -d ' ')"
+}
+
+if [ "$MODE_WATCH" -eq 1 ]; then
+  watch_status
+  exit 0
 fi
 
 # ---------------------------------------------------------------------------

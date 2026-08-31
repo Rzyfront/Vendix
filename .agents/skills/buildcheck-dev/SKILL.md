@@ -2,7 +2,7 @@
 name: buildcheck-dev
 description: >
   Build and runtime verification steps for Vendix development.
-  Trigger: Verifying Build, checking Docker watch-mode logs, checking current development app status, or confirming development changes do not introduce compile/runtime errors.
+  Trigger: Verifying Build, checking watch-mode output (Docker logs for the backend, `buildcheck.sh --watch` for the native frontend), checking current development app status, or confirming development changes do not introduce compile/runtime errors.
 license: MIT
 metadata:
   author: rzyfront
@@ -11,6 +11,9 @@ metadata:
   auto_invoke:
     - "Verifying Build"
     - "Checking Docker development logs after code changes"
+    - "Checking the state of the frontend watch / native ng serve"
+    - "Reading frontend compile errors without a vendix_frontend container"
+    - "Checking whether the dev server is alive and whether the last rebuild passed"
     - "Checking current development app status"
     - "Verifying that code compiles without starting any server"
     - "Running a production compilation check without leaving orphan processes"
@@ -32,7 +35,7 @@ output comes from two places, because the frontend no longer runs in Docker:
 
 | Surface | Where it runs | Where you read it |
 | --- | --- | --- |
-| Frontend | **native `ng serve` on macOS** (`npm run dev:fe`) | the terminal running it |
+| Frontend | **native `ng serve` on macOS** (`npm run dev:fe`) | `bash scripts/buildcheck.sh --watch` |
 | Backend, Postgres, Redis, Nginx | Docker | `docker logs` |
 
 Never run `tsc`, `ngc`, `ng build`, `npm run build`, `npm run build:prod`, or any
@@ -74,12 +77,37 @@ docker logs --tail 80 vendix_postgres
 docker logs --tail 80 vendix_redis
 ```
 
-There is no `vendix_frontend` container any more. For the frontend, read the terminal where
-`npm run dev:fe` is running — the healthy signal is `Application bundle generation complete`.
-To confirm it is up at all without touching its terminal:
+There is no `vendix_frontend` container any more, so there is no `docker logs vendix_frontend`.
+Its replacement — and the ONLY frontend check an agent can perform — is:
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}\n" http://localhost:4200/
+bash scripts/buildcheck.sh --watch
+```
+
+It reports three things in one shot: whether `ng serve` is alive on `:4200`, the verdict of the
+LAST compile cycle, and the errors of that cycle. It compiles nothing and starts nothing.
+
+It reads `.dev/frontend-watch.log`, which `scripts/dev-fe.sh` keeps trimmed to the **current cycle
+only** (hard ceiling 16 KB — it is rewritten on every cycle, never appended). That is deliberate:
+reading a whole build log is how an error that was already fixed gets reported as live. Since the
+file IS the last cycle, a reader cannot make that mistake.
+
+Two answers that mean "do not trust this":
+
+- `RANCIO` — the log survived but nothing listens on `:4200`. The watcher died; the last verdict
+  is history, not the state of the code. This is the failure a plain log read would report as
+  healthy.
+- `SIN DATOS ... el proceso corre pero no pasó por scripts/dev-fe.sh` — someone started
+  `ng serve` by hand. There is no log. Ask them to restart with `npm run dev:fe`.
+
+Do NOT tell a human to "read the terminal where `npm run dev:fe` runs": an agent cannot see it,
+and neither can a second agent working the same tree.
+
+To confirm the app answers at all, use the vhost — never `localhost:4200`, which has no row in
+`domain_settings` and makes the app resolve the wrong `app_type`:
+
+```bash
+curl -sk -o /dev/null -w "%{http_code}\n" https://vendix.com/
 ```
 
 3. Run lightweight HTTP checks only after containers are running:
@@ -114,7 +142,7 @@ Use the commands that match the files changed:
 | Change Area | Required Check |
 | --- | --- |
 | Backend | `docker logs --tail 40 vendix_backend` |
-| Frontend | terminal of `npm run dev:fe` → `Application bundle generation complete` |
+| Frontend | `bash scripts/buildcheck.sh --watch` → `último ciclo  OK` |
 | Database/Prisma | `docker logs --tail 40 vendix_postgres` |
 | Redis/queues/cache | `docker logs --tail 40 vendix_redis` |
 | Nginx/domain routing | `docker logs --tail 40 vendix_nginx` |

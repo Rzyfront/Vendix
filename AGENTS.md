@@ -135,6 +135,8 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Checking current development app status | `buildcheck-dev` |
 | Checking if a Vendix Linear issue already exists | `linear-issues` |
 | Checking production resource locations, IPs, distributions, buckets, ECR, RDS, Route53, or Secrets Manager metadata | `vendix-cloud-operations` |
+| Checking the state of the frontend watch / native ng serve | `buildcheck-dev` |
+| Checking whether the dev server is alive and whether the last rebuild passed | `buildcheck-dev` |
 | Choosing Playwright MCP for frontend E2E verification in a plan step | `how-to-plan` |
 | Choosing between viable architectural approaches | `how-to-plan` |
 | Choosing test credentials from seeds or asking the user | `how-to-test` |
@@ -330,6 +332,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Rate-limiting by calendar period (not sliding window) | `vendix-redis-quota` |
 | Re-developing solutions identified by a code review below 80% | `pr-code-review` |
 | Reaching the app via the local vhost vendix.com instead of localhost | `how-to-test` |
+| Reading frontend compile errors without a vendix_frontend container | `buildcheck-dev` |
 | Recovering from a missing or invalid LINEAR_API_KEY in the Vendix repo | `linear-connect` |
 | Regenerate AGENTS.md Auto-invoke tables (sync.sh) | `skill-sync` |
 | Registering a component as a VexiUiHost | `vendix-vexi-agent` |

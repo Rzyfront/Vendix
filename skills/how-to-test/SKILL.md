@@ -178,11 +178,14 @@ of both. Before any E2E test:
    curl -fsS http://localhost:3000/api/health   # backend really answering (not just Up)
 
    npm run dev:fe                               # frontend, in its own terminal, stays running
-   curl -s -o /dev/null -w "%{http_code}\n" http://localhost:4200/   # 200 once it compiled
+   bash scripts/buildcheck.sh --watch           # ¿vivo? ¿pasó el último ciclo?
+   curl -sk -o /dev/null -w "%{http_code}\n" https://vendix.com/   # 200 once it compiled
    ```
-   There is no `vendix_frontend` container to inspect with `docker logs`: the healthy signal is
-   `Application bundle generation complete` in the terminal running `npm run dev:fe`. If the port
-   answers but the vhost 502s, nginx is up while the native dev server is not.
+   Never probe `http://localhost:4200/`. It has no row in `domain_settings`, so the app resolves
+   the wrong `app_type` and boots into the wrong shell — the hostname IS the fixture.
+   There is no `vendix_frontend` container to inspect with `docker logs`. Read the frontend with
+   `bash scripts/buildcheck.sh --watch`, which an agent CAN see — the dev's terminal is not.
+   A `502` on the vhost with `docker ps` green means nginx is up and the native dev server is not.
    A green `docker ps` is **not** enough: a container stays `Up` while its Node process crashes on
    boot, surfacing as nginx `502`. If `/api/health` fails or logs show errors, **stop and fix the
    server first** — every curl / Playwright MCP step below is invalid against a broken server.
