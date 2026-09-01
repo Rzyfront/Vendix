@@ -120,7 +120,13 @@ export class OrdersListComponent {
    * QUI-599: afordancia del item "Operaciones masivas". El permiso lo lee el
    * componente de página (`orders.component.ts:canBulkOrderOperations`) y baja
    * como input, igual que `canBulkEdit` en `product-list.component.ts:80`.
-   * Este componente es presentacional: no consulta `AuthFacade`.
+   *
+   * AuthFacade: este componente consume la canónica SOLO para el gate de
+   * industria (`isRestaurant` reusado por `columns` y `cardConfig`, T10 B3);
+   * no la consulta para permisos, roles ni scopes — esos siguen llegando
+   * por inputs desde el componente de página. La excepción al límite
+   * "presentacional" anterior está documentada en el comentario de la
+   * inyección (:77-82).
    */
   readonly canBulkOperations = input(false);
 
