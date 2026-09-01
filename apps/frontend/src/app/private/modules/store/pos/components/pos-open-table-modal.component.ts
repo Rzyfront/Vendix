@@ -529,7 +529,16 @@ export class PosOpenTableModalComponent {
         },
         error: (err) => {
           this.submitting.set(false);
-          this.toastService.error(extractApiErrorMessage(err));
+          const rawMsg = extractApiErrorMessage(err);
+          this.toastService.warning(
+            rawMsg.toLowerCase().includes('abierta') ||
+              rawMsg.toLowerCase().includes('open') ||
+              rawMsg.toLowerCase().includes('ocupad')
+              ? 'Esta mesa ya fue abierta por otro mesero.'
+              : rawMsg,
+          );
+          this.selectedTableId.set(null);
+          this.loadTables();
         },
       });
   }
