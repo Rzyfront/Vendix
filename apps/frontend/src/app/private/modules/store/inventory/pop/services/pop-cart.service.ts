@@ -1,4 +1,4 @@
-import {Injectable, signal, DestroyRef, inject} from '@angular/core';
+import { Injectable, signal, DestroyRef, inject, effect } from '@angular/core';
 import { Observable, of, throwError } from 'rxjs';
 import {toObservable, takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import {
@@ -90,6 +90,9 @@ const INITIAL_STATE: PopCartState = {
   providedIn: 'root',
 })
 export class PopCartService {
+  private static readonly STORAGE_PREFIX = 'vendix_pop_cart_';
+  private static readonly TTL_MS = 4 * 60 * 60 * 1000; // 4 horas
+
   private destroyRef = inject(DestroyRef);
   private withholdingService = inject(WithholdingTaxService);
   private authFacade = inject(AuthFacade);
@@ -100,6 +103,101 @@ export class PopCartService {
 
   constructor() {
     this.initWithholdingPreview();
+    this.initPersistence();
+  }
+
+  private initPersistence(): void {
+    // Hidratar cuando la tienda activa esté lista
+    effect(() => {
+      const store = this.authFacade.userStore();
+      if (store?.id && this._cartState().items.length === 0) {
+        const saved = this.loadFromStorage();
+        if (saved && saved.items && saved.items.length > 0) {
+          this._cartState.set(saved);
+        }
+      }
+    });
+
+    // Guardar automáticamente cambios en el carrito
+    this.cartState$
+      .pipe(
+        debounceTime(250),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((state) => {
+        this.saveToStorage(state);
+      });
+  }
+
+  private getStorageKey(): string | null {
+    const storeId = this.authFacade.userStore()?.id;
+    if (!storeId) return null;
+    return `${PopCartService.STORAGE_PREFIX}${storeId}`;
+  }
+
+  private saveToStorage(state: PopCartState): void {
+    if (typeof localStorage === 'undefined') return;
+    const key = this.getStorageKey();
+    if (!key) return;
+
+    if (!state.items || state.items.length === 0) {
+      localStorage.removeItem(key);
+      return;
+    }
+
+    try {
+      const payload = {
+        state,
+        savedAt: Date.now(),
+        storeId: this.authFacade.userStore()?.id,
+      };
+      localStorage.setItem(key, JSON.stringify(payload));
+    } catch {
+      // Ignorar fallos de cuota o deserialización
+    }
+  }
+
+  private loadFromStorage(): PopCartState | null {
+    if (typeof localStorage === 'undefined') return null;
+    const key = this.getStorageKey();
+    if (!key) return null;
+
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || !parsed.state || !parsed.savedAt) return null;
+
+      // Validar TTL de expiración
+      if (Date.now() - parsed.savedAt > PopCartService.TTL_MS) {
+        localStorage.removeItem(key);
+        return null;
+      }
+
+      // Validar coincidencia de tienda
+      const currentStoreId = this.authFacade.userStore()?.id;
+      if (currentStoreId && parsed.storeId && parsed.storeId !== currentStoreId) {
+        return null;
+      }
+
+      return {
+        ...parsed.state,
+        orderDate: parsed.state.orderDate ? new Date(parsed.state.orderDate) : new Date(),
+        expectedDate: parsed.state.expectedDate ? new Date(parsed.state.expectedDate) : new Date(),
+        createdAt: parsed.state.createdAt ? new Date(parsed.state.createdAt) : new Date(),
+        updatedAt: parsed.state.updatedAt ? new Date(parsed.state.updatedAt) : new Date(),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  public clearStorage(): void {
+    if (typeof localStorage === 'undefined') return;
+    const key = this.getStorageKey();
+    if (key) {
+      localStorage.removeItem(key);
+    }
   }
 
   /**
@@ -270,6 +368,7 @@ export class PopCartService {
       })),
       tap((newState) => {
         this._cartState.set(newState);
+        this.clearStorage();
         this._loading.set(false);
       }),
     );

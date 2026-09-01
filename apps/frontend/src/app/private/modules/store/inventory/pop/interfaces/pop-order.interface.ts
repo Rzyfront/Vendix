@@ -47,6 +47,7 @@ export interface PurchaseOrderItemRequest {
   // New fields for prebulk items
   product_name?: string;
   sku?: string;
+  barcode?: string;
   product_description?: string;
   product_type?: string;
   track_inventory?: boolean;
@@ -199,6 +200,7 @@ export function cartToPurchaseOrderRequest(
       if (item.is_prebulk && item.prebulk_data) {
         requestItem.product_name = item.prebulk_data.name;
         requestItem.sku = item.prebulk_data.code;
+        requestItem.barcode = item.prebulk_data.barcode;
         requestItem.product_description = item.prebulk_data.description;
         requestItem.product_type = item.prebulk_data.product_type;
         requestItem.track_inventory = item.prebulk_data.track_inventory;

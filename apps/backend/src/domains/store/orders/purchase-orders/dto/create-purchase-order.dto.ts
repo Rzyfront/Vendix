@@ -322,6 +322,12 @@ export class PurchaseOrderItemDto {
   @IsOptional()
   sku?: string;
 
+  @ApiProperty({ description: 'Product Barcode (for new products)' })
+  @IsString()
+  @IsOptional()
+  @MaxLength(64)
+  barcode?: string;
+
   @ApiProperty({ description: 'Product Description (for new products)' })
   @IsString()
   @IsOptional()
