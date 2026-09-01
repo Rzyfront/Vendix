@@ -221,21 +221,27 @@ export class PosTicketService {
                 : null;
 
           if (candidateDocId) {
-            const hasElectronicInvoice = Boolean(
-              ticketData.electronicInvoice ||
-              ticketData.invoiceDataToken ||
-              ticketData.invoiceDataQrUrl,
-            );
-            const formatType: PrintFormatType = hasElectronicInvoice
+            // La única evidencia de que existe factura electrónica es el id de
+            // la factura emitida. `invoiceDataToken` / `invoiceDataQrUrl` NO
+            // sirven: son el token de *solicitud* que el backend devuelve como
+            // `{ invoice_data_token, invoice_id: number | null }`, y existen
+            // justamente cuando todavía no se emitió nada — es el QR de
+            // "Solicite su factura electrónica" que se imprime junto al texto
+            // "Este documento no es una factura electrónica".
+            //
+            // Usarlos como condición mandaba toda venta con ese QR a
+            // `pos_electronic_invoice`; el provider no encontraba fila en
+            // `invoices`, el gateway devolvía PRINT_DOCUMENT_NOT_FOUND_001 y
+            // `printViaGateway` caía al emisor legacy en silencio, perdiendo
+            // también el gateway del ticket normal.
+            const invoiceId = (ticketData.electronicInvoice as any)?.id;
+            const formatType: PrintFormatType = invoiceId
               ? 'pos_electronic_invoice'
               : 'pos_sale_ticket';
 
-            const invoiceId = (ticketData.electronicInvoice as any)?.id;
-            const docIdToPrint = hasElectronicInvoice && invoiceId ? invoiceId : candidateDocId;
-
             const result = await this.documentPrint.printViaGateway({
               formatType,
-              documentId: docIdToPrint,
+              documentId: invoiceId ?? candidateDocId,
             });
             if (result) {
               printedViaGateway = true;
