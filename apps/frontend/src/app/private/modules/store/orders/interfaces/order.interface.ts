@@ -418,6 +418,10 @@ export interface OrderQuery {
   status?: OrderState;
   channel?: OrderChannel;
   customer_id?: number;
+  // Carril B - B2: filtra órdenes con table_session apuntando a esta mesa
+  // (incluye sesiones cerradas porque la orden pudo migrar entre mesas).
+  // Coincide con OrderQueryDto.table_id en backend (orders.service.ts).
+  table_id?: number;
   store_id?: number;
   payment_status?: PaymentStatus;
   date_range?: string;

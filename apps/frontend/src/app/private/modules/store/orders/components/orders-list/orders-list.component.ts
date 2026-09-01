@@ -246,6 +246,21 @@ export class OrdersListComponent {
       sortable: true,
       priority: 2,
     },
+    // Carril B - B2: columna Mesa. El backend ya devuelve
+    // `table_sessions[0].table.name` desde ventana 1 (findAll include con
+    // take:1 orderBy id desc). Si la orden no tiene sesión, celda vacía
+    // — sin guion/N/A para no ensuciar la lectura.
+    {
+      key: 'mesa',
+      label: 'Mesa',
+      sortable: false,
+      priority: 2,
+      transform: (value: unknown, row?: Order) => {
+        const ts = row?.table_sessions?.[0];
+        if (!ts?.table?.name) return '';
+        return ts.table.zone ? `${ts.table.name} (${ts.table.zone})` : ts.table.name;
+      },
+    },
     {
       key: 'channel',
       label: 'Canal',
@@ -369,6 +384,20 @@ export class OrdersListComponent {
         transform: (value: any) => this.formatChannel(value),
         infoIconTransform: (value: any) => this.getChannelIcon(value),
         infoIconVariantTransform: (value: any) => this.getChannelVariant(value),
+      },
+      // Carril B - B2: badge Mesa en mobile card. Solo si hay sesión;
+      // sin guion/N/A cuando no.
+      {
+        key: 'mesa',
+        label: 'Mesa',
+        transform: (_value: unknown, item?: any) => {
+          const ts = item?.table_sessions?.[0];
+          if (!ts?.table?.name) return '';
+          return ts.table.zone ? `${ts.table.name} (${ts.table.zone})` : ts.table.name;
+        },
+        infoIconTransform: (_value: unknown, item?: any) =>
+          item?.table_sessions?.[0]?.table?.name ? 'utensils' : undefined,
+        infoIconVariant: 'amber',
       },
       {
         key: 'created_at',
@@ -608,11 +637,13 @@ export class OrdersListComponent {
                   const customerMap = new Map(customers.map((c) => [c.id, c]));
                   this.orders.set(normalizedOrders.map((order: any) => ({
                     ...order,
-                    // Show "Consumidor Final" for anonymous sales (no customer_id), otherwise show customer name
-                    customer_name: order.customer_id
-                      ? `${customerMap.get(order.customer_id)?.first_name || ''} ${customerMap.get(order.customer_id)?.last_name || ''}`.trim() ||
-                        'N/A'
-                      : 'Consumidor Final',
+                    // Carril B - B1: prioridad alias > customer.first+last > 'Consumidor Final'.
+                    // Mismo orden que el detalle y el ticket de despacho.
+                    customer_name: order.customer_alias?.trim()
+                      || (order.customer_id
+                        ? `${customerMap.get(order.customer_id)?.first_name || ''} ${customerMap.get(order.customer_id)?.last_name || ''}`.trim() ||
+                          'N/A'
+                        : 'Consumidor Final'),
                   })));
                   this.loading.set(false);
                 },
@@ -620,18 +651,17 @@ export class OrdersListComponent {
                   console.error('Error loading customers:', error);
                   this.orders.set(normalizedOrders.map((order: any) => ({
                     ...order,
-                    customer_name: order.customer_id
-                      ? 'N/A'
-                      : 'Consumidor Final',
+                    customer_name: order.customer_alias?.trim()
+                      || (order.customer_id ? 'N/A' : 'Consumidor Final'),
                   })));
                   this.loading.set(false);
                 },
               });
           } else {
-            // No customer IDs to fetch, show "Consumidor Final" for orders without customer
+            // Carril B - B1: sin customers a fetchear, la unica fuente es alias.
             this.orders.set(normalizedOrders.map((order: any) => ({
               ...order,
-              customer_name: order.customer_id ? 'N/A' : 'Consumidor Final',
+              customer_name: order.customer_alias?.trim() || 'Consumidor Final',
             })));
             this.loading.set(false);
           }
