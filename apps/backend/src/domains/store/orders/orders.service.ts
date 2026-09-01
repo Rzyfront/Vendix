@@ -514,6 +514,7 @@ export class OrdersService {
       search,
       status,
       customer_id,
+      table_id,
       // store_id removed: StorePrismaService auto-scopes /store/* queries.
       sort_by,
       sort_order,
@@ -528,19 +529,27 @@ export class OrdersService {
     // Auto-scoped query
     const where: Prisma.ordersWhereInput = {
       ...(search && {
-        // Search by order number OR by customer (first_name, last_name, email).
-        // Customer is reached via orders.users (customer_id). Guest orders
-        // (customer_id null) are not matched by this branch — their name lives
-        // in shipping_address_snapshot JSON (search fragile, out of scope).
+        // Search by order number OR by customer (first_name, last_name, email)
+        // OR by customer_alias (carril B — B1). Customer is reached via
+        // orders.users (customer_id). Guest orders (customer_id null) without
+        // an alias still fall through to shipping_address_snapshot JSON
+        // (search fragile, out of scope).
         OR: [
           { order_number: { contains: search, mode: 'insensitive' } },
           { users: { first_name: { contains: search, mode: 'insensitive' } } },
           { users: { last_name: { contains: search, mode: 'insensitive' } } },
           { users: { email: { contains: search, mode: 'insensitive' } } },
+          { customer_alias: { contains: search, mode: 'insensitive' } },
         ],
       }),
       ...(status && { state: status }),
       ...(customer_id && { customer_id }),
+      // Carril B — B2: filtra órdenes que tengan al menos una table_session
+      // apuntando a la mesa solicitada (incluye sesiones ya cerradas; la orden
+      // pudo haber migrado entre mesas durante su vida).
+      ...(table_id && {
+        table_sessions: { some: { table_id } },
+      }),
       ...(channel && { channel }),
       ...(query.missing_shipping_method && {
         shipping_method_id: null,
@@ -599,6 +608,23 @@ export class OrdersService {
           // (customer_id null) traen users=null y caen al fallback.
           users: {
             select: { id: true, first_name: true, last_name: true },
+          },
+          // Carril B — B2: badge Mesa en el listado. Mismo shape que findOne
+          // (:821-847) pero con take:1 + orderBy id desc para quedarnos con
+          // la sesión más reciente (la que define la mesa visible hoy).
+          table_sessions: {
+            take: 1,
+            orderBy: { id: 'desc' },
+            select: {
+              id: true,
+              table_id: true,
+              opened_at: true,
+              closed_at: true,
+              guest_count: true,
+              table: {
+                select: { id: true, name: true, zone: true },
+              },
+            },
           },
         },
       }),
