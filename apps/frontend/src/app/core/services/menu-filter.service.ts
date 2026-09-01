@@ -941,7 +941,14 @@ export class MenuFilterService {
    * es el catálogo y no un array vacío.
    */
   currentMenuTree(): MenuItem[] {
-    return this.menuTree ?? this.catalogMenuTree();
+    // C2-fix A (c1-b real, segunda fuga): el llamador de este método
+    // (`panel-ui.guard.ts`, `store-dashboard.guard.ts`) lo pasa directo a
+    // `firstActiveModuleRoute(modules)`. Si el layout aún no montó el árbol,
+    // `null` debe distinguirse de "cero módulos visibles" — devolver el
+    // catálogo aquí era la segunda vía por la que un no-owner acababa en
+    // /admin/ecommerce con panel_ui vacío. Devolvemos `[]` y dejamos que
+    // `firstActiveModuleRoute` haga su propia cascada.
+    return this.menuTree ?? [];
   }
 
   /** El layout registra su árbol real (con `alwaysVisible`, badges, etc.). */
@@ -1028,7 +1035,13 @@ export class MenuFilterService {
    * `/admin/pos` hardcodeado.
    */
   firstActiveModuleRoute(modules: MenuItem[]): string {
-    const tree = modules?.length ? modules : this.catalogMenuTree();
+    // C2-fix A (c1-b real): `[]` y `undefined` SON diferentes. `[]` significa
+    // explícitamente "cero módulos visibles" y debe caer al terminal; sólo
+    // cuando el llamador no pasa nada (null/undefined) usamos el catálogo
+    // crudo como punto de partida. La condición `modules?.length` original
+    // colapsa los dos casos — exactamente el bug que mandaba al waiter a
+    // /admin/ecommerce. `??` solo no alcanza porque `[] ?? X` retorna `[]`.
+    const tree = modules && modules.length > 0 ? modules : this.catalogMenuTree();
     const route = this.firstVisibleRoute(tree);
     if (route) return route;
     if (this.authFacade.isOwner()) return PANEL_UI_TERMINAL_ROUTE;
