@@ -127,6 +127,23 @@
               deliveryConfig().label
             }}</span>
           </div>
+          @if (tableName()) {
+            <span class="w-px h-3.5 bg-border"></span>
+            <div class="flex items-center gap-1.5 text-text-primary font-medium">
+              <app-icon
+                name="utensils"
+                size="14"
+                class="text-amber-500"
+              ></app-icon>
+              <span>Mesa:</span>
+              <span class="font-semibold text-amber-600">{{
+                tableName()
+              }}</span>
+              @if (tableSession()?.table?.zone) {
+                <span class="text-[10px] text-text-secondary">({{ tableSession()?.table?.zone }})</span>
+              }
+            </div>
+          }
           @if (isCreditOrder()) {
             <span class="w-px h-3.5 bg-border"></span>
             <div class="flex items-center gap-1.5">
@@ -399,8 +416,52 @@
             </div>
           </app-card>
 
+          <!-- 1.4. MESA DE RESTAURANTE -->
+          @if (tableSession(); as session) {
+            <app-card shadow="sm" [responsivePadding]="true">
+              <div slot="header" class="flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <app-icon name="utensils" [size]="18" class="text-amber-500"></app-icon>
+                  <h3 class="text-base sm:text-lg font-semibold text-[var(--color-text-primary)]">
+                    Mesa de Restaurante
+                  </h3>
+                </div>
+                <span
+                  class="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded"
+                  [ngClass]="session.closed_at ? 'bg-gray-100 text-gray-700' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'"
+                >
+                  {{ session.closed_at ? 'Sesión Cerrada' : 'Mesa Ocupada / Abierta' }}
+                </span>
+              </div>
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                <div class="p-2.5 rounded-lg bg-[var(--color-surface)] border border-border">
+                  <span class="text-text-secondary block text-[10px] uppercase tracking-wider font-semibold">Mesa</span>
+                  <span class="text-sm font-bold text-text-primary">{{ session.table?.name || 'Mesa #' + session.table_id }}</span>
+                </div>
+                @if (session.table?.zone) {
+                  <div class="p-2.5 rounded-lg bg-[var(--color-surface)] border border-border">
+                    <span class="text-text-secondary block text-[10px] uppercase tracking-wider font-semibold">Zona / Salón</span>
+                    <span class="text-sm font-bold text-text-primary">{{ session.table?.zone }}</span>
+                  </div>
+                }
+                @if (session.guest_count) {
+                  <div class="p-2.5 rounded-lg bg-[var(--color-surface)] border border-border">
+                    <span class="text-text-secondary block text-[10px] uppercase tracking-wider font-semibold">Comensales</span>
+                    <span class="text-sm font-bold text-text-primary">{{ session.guest_count }} personas</span>
+                  </div>
+                }
+                @if (session.opener) {
+                  <div class="p-2.5 rounded-lg bg-[var(--color-surface)] border border-border">
+                    <span class="text-text-secondary block text-[10px] uppercase tracking-wider font-semibold">Abierto por</span>
+                    <span class="text-sm font-bold text-text-primary">{{ session.opener.first_name }} {{ session.opener.last_name || '' }}</span>
+                  </div>
+                }
+              </div>
+            </app-card>
+          }
+
           <!-- 1.5. NOTA DE LA ORDEN (pública — escrita por el cashier desde el POS) -->
-          @if (orderData.notes) {
+          @if (cleanOrderNotes()) {
             <app-card shadow="sm" [responsivePadding]="true">
               <div slot="header" class="flex items-center gap-2">
                 <app-icon name="sticky-note" [size]="18" class="text-amber-500"></app-icon>
@@ -412,17 +473,25 @@
                 >
                   Pública
                 </span>
+                @if (tableName()) {
+                  <span
+                    class="text-[10px] sm:text-[11px] font-semibold text-amber-800 bg-amber-100/70 border border-amber-300/60 px-2 py-0.5 rounded ml-auto flex items-center gap-1"
+                  >
+                    <app-icon name="utensils" [size]="12"></app-icon>
+                    {{ tableName() }}
+                  </span>
+                }
               </div>
               <p
                 class="text-sm text-[var(--color-text-primary)] whitespace-pre-line leading-relaxed"
               >
-                {{ orderData.notes }}
+                {{ cleanOrderNotes() }}
               </p>
             </app-card>
           }
 
           <!-- 1.6. NOTA INTERNA DEL STAFF (solo visible al equipo interno) -->
-          @if (orderData.internal_notes && !flowMetadata().internal_notes_as_json) {
+          @if (cleanInternalNotes() && !flowMetadata().internal_notes_as_json) {
             <app-card shadow="sm" [responsivePadding]="true">
               <div slot="header" class="flex items-center gap-2">
                 <app-icon name="message-square" [size]="18" class="text-rose-500"></app-icon>
@@ -434,11 +503,19 @@
                 >
                   Solo interno
                 </span>
+                @if (tableName()) {
+                  <span
+                    class="text-[10px] sm:text-[11px] font-semibold text-amber-800 bg-amber-100/70 border border-amber-300/60 px-2 py-0.5 rounded ml-auto flex items-center gap-1"
+                  >
+                    <app-icon name="utensils" [size]="12"></app-icon>
+                    {{ tableName() }}
+                  </span>
+                }
               </div>
               <p
                 class="text-sm text-[var(--color-text-primary)] whitespace-pre-line leading-relaxed"
               >
-                {{ orderData.internal_notes }}
+                {{ cleanInternalNotes() }}
               </p>
             </app-card>
           }

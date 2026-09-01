@@ -225,6 +225,9 @@ describe('OrdersService', () => {
         name: true,
         discount_type: true,
       });
+
+      expect(args.include.table_sessions).toBeDefined();
+      expect(args.include.table_sessions.select.table).toBeDefined();
     });
 
     it('returns the persisted promotion + coupon snapshots untouched (no recalculation)', async () => {

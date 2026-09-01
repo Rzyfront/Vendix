@@ -123,6 +123,8 @@ export class OrderPrintService {
       : '';
 
     const fmt = (n: number) => this.currencyService.format(n);
+    const cleanNotes = this.extractCleanNote(order.notes);
+    const cleanInternalNotes = this.extractCleanNote(order.internal_notes);
 
     const items = order.order_items || [];
     const itemsHtml =
@@ -227,16 +229,16 @@ export class OrderPrintService {
       </div>
     </div>
 
-    ${order.notes ? `
+    ${cleanNotes ? `
     <div style="background: #fffbeb; border-left: 3px solid #f59e0b; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px;">
-      <h3 style="margin: 0 0 6px; font-size: 11px; font-weight: 700; color: #92400e; text-transform: uppercase;">Nota del Staff (solo interno)</h3>
-      <p style="margin: 0; font-size: 13px; color: #374151; white-space: pre-wrap;">${order.notes}</p>
+      <h3 style="margin: 0 0 6px; font-size: 11px; font-weight: 700; color: #92400e; text-transform: uppercase;">Nota de la orden</h3>
+      <p style="margin: 0; font-size: 13px; color: #374151; white-space: pre-wrap;">${cleanNotes}</p>
     </div>` : ''}
 
-    ${order.internal_notes ? `
+    ${cleanInternalNotes ? `
     <div style="background: #f9fafb; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
       <h3 style="margin: 0 0 8px; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase;">Notas Internas</h3>
-      <p style="margin: 0; font-size: 13px; color: #374151; white-space: pre-wrap;">${order.internal_notes}</p>
+      <p style="margin: 0; font-size: 13px; color: #374151; white-space: pre-wrap;">${cleanInternalNotes}</p>
     </div>` : ''}
 
     <!-- Footer -->
@@ -246,5 +248,16 @@ export class OrderPrintService {
       </p>
     </div>
   </div>`;
+  }
+
+  private extractCleanNote(raw?: string | null): string {
+    if (!raw) return '';
+    try {
+      const parsed = JSON.parse(raw);
+      const text = parsed?.notes || parsed?._flow_metadata?.original_notes || parsed?.original_notes || '';
+      return typeof text === 'string' ? text.trim() : '';
+    } catch {
+      return raw.trim();
+    }
   }
 }

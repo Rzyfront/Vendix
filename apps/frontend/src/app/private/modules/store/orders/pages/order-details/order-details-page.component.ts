@@ -40,6 +40,7 @@ import {
   AssignShippingMethodDto,
   ReactivateOrderDto,
   OrderInvoiceSnapshot,
+  OrderTableSession,
   Address,
 } from '../../interfaces/order.interface';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
@@ -365,9 +366,46 @@ export class OrderDetailsPageComponent {
     const order = this.order();
     if (!order?.internal_notes) return {};
     try {
-      return JSON.parse(order.internal_notes) as OrderFlowMetadata;
+      const parsed = JSON.parse(order.internal_notes);
+      if (parsed && typeof parsed === 'object') {
+        return (parsed._flow_metadata ? { ...parsed._flow_metadata, ...parsed } : parsed) as OrderFlowMetadata;
+      }
+      return {};
     } catch {
       return {};
+    }
+  });
+
+  readonly tableSession = computed<OrderTableSession | null>(() => {
+    const sessions = this.order()?.table_sessions;
+    return sessions && sessions.length > 0 ? sessions[0] : null;
+  });
+
+  readonly tableName = computed<string | null>(() => {
+    return this.tableSession()?.table?.name || null;
+  });
+
+  readonly cleanInternalNotes = computed<string>(() => {
+    const raw = this.order()?.internal_notes;
+    if (!raw) return '';
+    try {
+      const parsed = JSON.parse(raw);
+      const text = parsed?.notes || parsed?._flow_metadata?.original_notes || parsed?.original_notes || parsed?.staff_notes || '';
+      return typeof text === 'string' ? text.trim() : '';
+    } catch {
+      return raw.trim();
+    }
+  });
+
+  readonly cleanOrderNotes = computed<string>(() => {
+    const raw = this.order()?.notes;
+    if (!raw) return '';
+    try {
+      const parsed = JSON.parse(raw);
+      const text = parsed?.notes || parsed?._flow_metadata?.original_notes || parsed?.original_notes || '';
+      return typeof text === 'string' ? text.trim() : '';
+    } catch {
+      return raw.trim();
     }
   });
 
