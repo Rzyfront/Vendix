@@ -105,9 +105,13 @@ export class PosTicketService {
       // print still get one, so clamp to at least 1 here.
       copies: Math.max(1, paper.copies),
       // `pos.auto_print_receipt` already models this and is already editable in
-      // the POS settings form; a second key under `receipts` would be a second
-      // source of truth for the same fact. The Recibos section edits this one.
-      autoPrint: this.storeSettings.pos()?.auto_print_receipt ?? false,
+      // the POS settings form; receipts.print_pos_ticket and receipts.print_receipt
+      // also indicate the merchant expects receipt printing.
+      autoPrint: Boolean(
+        this.storeSettings.pos()?.auto_print_receipt ||
+        this.storeSettings.receipts()?.print_pos_ticket ||
+        this.storeSettings.receipts()?.print_receipt
+      ),
     };
   }
 
@@ -205,15 +209,15 @@ export class PosTicketService {
     const printOptions = { ...this.getDefaultPrintOptions(), ...options };
 
     return of(ticketData).pipe(
-      delay(1500),
       switchMap(async () => {
         if (printOptions.printReceipt) {
           let printedViaGateway = false;
           const candidateDocId =
-            ticketData.orderId ??
-            (Number.isInteger(Number(ticketData.id)) && Number(ticketData.id) > 0
-              ? Number(ticketData.id)
-              : null);
+            ticketData.orderId != null && !isNaN(Number(ticketData.orderId))
+              ? Number(ticketData.orderId)
+              : Number.isInteger(Number(ticketData.id)) && Number(ticketData.id) > 0
+                ? Number(ticketData.id)
+                : null;
 
           if (candidateDocId) {
             const result = await this.documentPrint.printViaGateway({
