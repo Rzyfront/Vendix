@@ -30,6 +30,11 @@ import {
 } from '../../../../../../shared/components/index';
 import { StoreOrdersService } from '../../services/store-orders.service';
 import { CustomersService } from '../../../../store/customers/services/customers.service';
+// Carril B - B2: el dropdown del filtro por mesa se llena con
+// GET /store/tables via TablesService. Si la tienda no tiene mesas,
+// el filtro no se pinta (mayoria de tiendas de Vendix no son restaurante).
+import { TablesService } from '../../../restaurant-ops/tables/services/tables.service';
+import { Table } from '../../../restaurant-ops/tables/interfaces/table.interface';
 import {
   Order,
   OrderQuery,
@@ -62,6 +67,7 @@ export class OrdersListComponent {
   private printService = inject(OrderPrintService);
   private ordersService = inject(StoreOrdersService);
   private customersService = inject(CustomersService);
+  private tablesService = inject(TablesService);
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
   private destroyRef = inject(DestroyRef);
@@ -87,6 +93,13 @@ export class OrdersListComponent {
   readonly selectedPaymentStatus = signal('');
   readonly selectedDateRange = signal('');
   readonly dispatchableFilter = signal(false);
+  // Carril B - B2: mesa seleccionada (string para empatar con FilterValues;
+  // '' = sin filtro, sino el id de la mesa). El numero viaja al backend
+  // como table_id en _filters; '' NO viaja porque OrderQueryDto.table_id
+  // valida con @IsInt() @Min(1) y un vacio da 400.
+  readonly selectedTable = signal('');
+  /** Mesas de la tienda; se cargan al init y solo si hay >=1 pintamos el filtro. */
+  readonly tables = signal<Table[]>([]);
 
   // Outputs
   readonly create = output<void>();
@@ -140,7 +153,13 @@ export class OrdersListComponent {
   };
 
   // Filter configuration for the options dropdown
-  filterConfigs: FilterConfig[] = [
+  // Carril B - B2: filterConfigs es computed (no campo plano) porque la
+  // entrada "table_id" solo aparece si la tienda tiene mesas. Si la lista
+  // de mesas carga vacia (mayoria de tiendas de Vendix no son restaurantes)
+  // el filtro no se pinta — mismo criterio que la columna Mesa, que deja
+  // la celda vacia en vez de guion/N/A.
+  readonly filterConfigs = computed<FilterConfig[]>(() => {
+    const configs: FilterConfig[] = [
     {
       key: 'status',
       label: 'Estado',
@@ -198,7 +217,27 @@ export class OrdersListComponent {
         { value: 'lastYear', label: 'Año Pasado' },
       ],
     },
-  ];
+    ];
+    const ts = this.tables();
+    if (ts.length > 0) {
+      configs.push({
+        key: 'table_id',
+        label: 'Mesa',
+        type: 'select',
+        options: [
+          { value: '', label: 'Todas las Mesas' },
+          ...ts
+            .slice()
+            .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+            .map((t) => ({
+              value: String(t.id),
+              label: t.zone ? `${t.name} (${t.zone})` : t.name,
+            })),
+        ],
+      });
+    }
+    return configs;
+  });
 
   // Current filter values
   readonly filterValues = signal<FilterValues>({});
@@ -446,6 +485,16 @@ export class OrdersListComponent {
     });
 
     this.loadSeen();
+    // Carril B - B2: carga mesas de la tienda. Si falla, el filtro no se
+    // pinta (computed filterConfigs arriba depende de tables().length > 0).
+    // Fire-and-forget con takeUntilDestroyed.
+    this.tablesService
+      .list()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (resp) => this.tables.set(resp.data ?? []),
+        error: () => this.tables.set([]),
+      });
   }
 
   private loadSeen(): void {
@@ -473,7 +522,8 @@ export class OrdersListComponent {
       this.selectedChannel() ||
       this.selectedPaymentStatus() ||
       this.selectedDateRange() ||
-      this.dispatchableFilter()
+      this.dispatchableFilter() ||
+      this.selectedTable()
     ),
   );
 
@@ -503,6 +553,10 @@ export class OrdersListComponent {
     this.selectedChannel.set((values['channel'] as string) || '');
     this.selectedPaymentStatus.set((values['payment_status'] as string) || '');
     this.selectedDateRange.set((values['date_range'] as string) || '');
+    // Carril B - B2: '' = sin filtro (viaja undefined al backend para no
+    // romper el @IsInt() @Min(1) del DTO). Cualquier otro valor es el id
+    // de la mesa como string.
+    this.selectedTable.set((values['table_id'] as string) || '');
 
     this._filters.status = this.selectedStatus()
       ? (this.selectedStatus() as OrderState)
@@ -514,6 +568,9 @@ export class OrdersListComponent {
       ? (this.selectedPaymentStatus() as PaymentStatus)
       : undefined;
     this._filters.date_range = this.selectedDateRange() || undefined;
+    this._filters.table_id = this.selectedTable()
+      ? Number(this.selectedTable())
+      : undefined;
     this._filters.page = 1;
 
     this.loadOrders();
@@ -526,6 +583,7 @@ export class OrdersListComponent {
     this.selectedPaymentStatus.set('');
     this.selectedDateRange.set('');
     this.dispatchableFilter.set(false);
+    this.selectedTable.set('');
     this.filterValues.set({});
 
     this._filters.search = '';
@@ -534,6 +592,7 @@ export class OrdersListComponent {
     this._filters.payment_status = undefined;
     this._filters.date_range = undefined;
     this._filters.dispatchable = undefined;
+    this._filters.table_id = undefined;
     this._filters.page = 1;
 
     this.loadOrders();
