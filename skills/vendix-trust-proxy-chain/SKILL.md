@@ -187,6 +187,38 @@ curl -s -H 'X-Forwarded-For: 6.6.6.6' https://api.vendix.online/api/health | pyt
 
 **B es la que importa.** A puede pasar con un valor demasiado alto; sólo B lo delata.
 
+### En local la sonda B NO significa lo mismo (trampa)
+
+Contra el backend de desarrollo, `curl -H 'X-Forwarded-For: 6.6.6.6' localhost:3000/api/health`
+**devuelve `6.6.6.6`, y eso está bien**. En macOS (Docker Desktop / Colima) todo lo que sale
+del host llega al contenedor SNAT'd por el gateway del bridge (`172.18.0.1`), que es una
+dirección **privada** — o sea, ocupa exactamente la posición de nginx. El predicado confía en
+ese salto 0 y camina la cadena, como debe.
+
+Consecuencia: **el golpe directo de producción (salto 0 público) no se puede reproducir desde
+el host en macOS.** No lo intentes y no leas ese `6.6.6.6` como un agujero.
+
+Lo que SÍ discrimina en local es una cadena de **dos** entradas:
+
+```bash
+curl -s -H 'X-Forwarded-For: 1.1.1.1, 2.2.2.2' localhost:3000/api/health \
+  | python3 -c "import sys,json; print(json.load(sys.stdin).get('client_ip'))"
+# esperado con hops=1: 2.2.2.2  (la ÚLTIMA entrada)
+# si devuelve 1.1.1.1 → el valor efectivo es `true`: el cliente manda. Emergencia.
+```
+
+Las dos garantías del caso directo de producción se verifican por otro lado:
+
+1. **Docker preserva la IP de origen en el puerto publicado** — regla `DNAT ... 0.0.0.0/0
+   → 172.18.0.3:3000` en la EC2; los `MASQUERADE` cubren sólo el tráfico *saliente* de las
+   subredes Docker. Un atacante externo llega al contenedor con su IP pública real.
+   ```bash
+   ssh -i keys/vendix-production-key.pem ec2-user@<EIP> \
+     'sudo iptables -t nat -L DOCKER -n | grep 3000; sudo iptables -t nat -L POSTROUTING -n'
+   ```
+2. **El predicado rechaza un salto 0 público** — cubierto por `client-ip.util.spec.ts` contra
+   la librería `proxy-addr` real, la misma que usa Express por dentro.
+
 ## Reglas de código
 
 **Nunca leas `X-Forwarded-For` a mano.** Es una cabecera que escribe el cliente; leerla
