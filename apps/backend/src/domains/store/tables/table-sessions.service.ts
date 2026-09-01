@@ -1013,12 +1013,69 @@ export class TableSessionsService {
     // transition — the idempotent short-circuit above already returned, so a
     // second close never re-emits). Post-commit: a rollback must not leave a
     // phantom `session_closed`.
-    this.emitSessionClosed(session.store_id, sessionId, session.table_id);
+    this.emitSessionClosed(
+      session.store_id,
+      sessionId,
+      session.table_id,
+      session.order_id,
+    );
 
     this.logger.log(
       `Table session closed: session=${sessionId} table=${session.table_id} order=${session.order_id}`,
     );
     return this.findOne(sessionId);
+  }
+
+  // --------------------------------------------------------------- mark paid
+  /**
+   * carril D / lina — D1 / QUI: marca la sesión de mesa como pagada.
+   *
+   * La mesa SIGUE `occupied` y la sesión SIGUE ABIERTA; este flag es la
+   * fuente de verdad del estado "ocupada pagada" que el frontend de mesa
+   * y el floor-map usan para colorear la fila sin necesidad de JOIN contra
+   * `payments`.
+   *
+   * Comportamiento:
+   *  - Idempotente sobre `paid_at`: si ya está pagado, no vuelve a escribir
+   *    y retorna el row actual (un segundo cobro POS contra la misma mesa
+   *    se bloquea aguas arriba por el guard `POS_TABLE_SESSION_ALREADY_CHARGED`
+   *    en `applyPosPaymentToTableSession`, pero igual defendemos aquí).
+   *  - Acepta `tx` opcional para ejecutarse dentro de la transacción del
+   *    pago POS; sin tx abre una propia.
+   *
+   * El SSE `session_paid` NO se emite desde aquí: vive en
+   * `PaymentsService.processPosPayment` post-commit, junto al `order.paid`
+   * que keilis está esperando.
+   */
+  async markSessionPaid(
+    sessionId: number,
+    paymentId: number | null,
+    tx?: any,
+  ): Promise<{ id: number; paid_at: Date | null; order_id: number }> {
+    const run = async (client: any) => {
+      const existing = await client.table_sessions.findUnique({
+        where: { id: sessionId },
+        select: { id: true, paid_at: true, order_id: true },
+      });
+      if (!existing) {
+        throw new VendixHttpException(ErrorCodes.TABLE_SESSION_NOT_FOUND);
+      }
+      if (existing.paid_at) {
+        // Ya pagada — no reescribir el timestamp (auditoría de cuándo fue
+        // el primer pago, no el último).
+        return existing;
+      }
+      const updated = await client.table_sessions.update({
+        where: { id: sessionId },
+        data: { paid_at: new Date(), updated_at: new Date() },
+        select: { id: true, paid_at: true, order_id: true },
+      });
+      this.logger.log(
+        `Table session marked paid: session=${sessionId} order=${updated.order_id} payment=${paymentId ?? 'n/a'}`,
+      );
+      return updated;
+    };
+    return tx ? run(tx) : this.prisma.$transaction(run);
   }
 
   /**
@@ -1037,6 +1094,7 @@ export class TableSessionsService {
     storeId: number,
     sessionId: number,
     tableId?: number,
+    orderId?: number,
   ): void {
     try {
       this.notificationsSseService.push(storeId, {
@@ -1046,6 +1104,10 @@ export class TableSessionsService {
         body: 'La cuenta de la mesa fue cerrada',
         data: {
           table_session_id: sessionId,
+          // carril D / lina — keilis pidió `data.order_id` en el payload de
+          // mesa para refrescar el detalle de orden sin un GET adicional.
+          // Optional para tolerar callers legacy que aún no lo propagan.
+          ...(orderId != null ? { order_id: orderId } : {}),
           ...(tableId != null ? { table_id: tableId } : {}),
         },
         created_at: new Date().toISOString(),
@@ -1053,6 +1115,46 @@ export class TableSessionsService {
     } catch (err) {
       this.logger.warn(
         `Failed to push session_closed for session ${sessionId}: ${
+          (err as Error).message
+        }`,
+      );
+    }
+  }
+
+  /**
+   * Push the canonical `session_paid` SSE event on the per-store subject.
+   * Mirror of `emitSessionClosed` — emitted by the POS close-out path when
+   * a payment succeeds against an open table session. The mesa stays
+   * `occupied`; this is the lightweight signal the staff dashboard and
+   * comensal stream use to flip the row to "Pagada" without re-reading the
+   * session from the DB.
+   *
+   * Best-effort — SSE failures must never break the (already committed)
+   * payment. Consumers filter by `data.table_session_id` (whitelisted in
+   * `TableSessionsController.STAFF_EVENT_WHITELIST`).
+   */
+  emitSessionPaid(
+    storeId: number,
+    sessionId: number,
+    orderId: number,
+    paymentId?: number,
+  ): void {
+    try {
+      this.notificationsSseService.push(storeId, {
+        id: 0,
+        type: 'session_paid',
+        title: 'Mesa pagada',
+        body: 'La cuenta de la mesa fue pagada',
+        data: {
+          table_session_id: sessionId,
+          order_id: orderId,
+          ...(paymentId != null ? { payment_id: paymentId } : {}),
+        },
+        created_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Failed to push session_paid for session ${sessionId}: ${
           (err as Error).message
         }`,
       );

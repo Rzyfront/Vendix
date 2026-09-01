@@ -1692,6 +1692,11 @@ export class PaymentsService {
           // close-out (null when a digital payment deferred the close). Used
           // AFTER commit to emit `session_closed` to staff + comensal streams.
           closed_session_id: orderCreation.closedSessionId ?? null,
+          // carril D / lina — D1: id de la sesión de mesa PAGADA (≠ cerrada)
+          // por este cobro. Null cuando el pago no aplica a mesa o cuando
+          // la mesa ya estaba pagada (idempotencia). Consumido por el caller
+          // (`processPosPayment` post-commit) para emitir `session_paid` SSE.
+          paid_session_id: orderCreation.paidSessionId ?? null,
           applied_promotions: appliedPromotionsResponse,
           applied_coupons: appliedCouponsResponse,
           payment: payment
@@ -1769,6 +1774,44 @@ export class PaymentsService {
           ctxStoreId,
           result.closed_session_id,
         );
+      }
+
+      // carril D / lina — D1: emitir `order.paid` (carril keilis lo consume)
+      // y `session_paid` SSE (consumido por mesa y POS) DESPUÉS del commit.
+      // El EventEmitter2 transporta `order.paid` al `OrderSseService` que
+      // keilis mantiene; el `notificationsSseService.push` directo cubre
+      // el staff floor-map y el POS cobro, que filtran por `order_id`.
+      //
+      // Idempotencia: si un pago ya había marcado `paid_at`, `paidSessionId`
+      // sería null en este call (guard de `applyPosPaymentToTableSession`),
+      // por lo que `session_paid` se omite y `order.paid` se sigue emitiendo
+      // una sola vez por orden pagada.
+      const orderPaidId = result.order?.id;
+      if (orderPaidId) {
+        try {
+          this.eventEmitter.emit('order.paid', {
+            store_id: ctxStoreId,
+            order_id: orderPaidId,
+            payment_id: payment?.id ?? null,
+            paid_session_id: result.paid_session_id ?? null,
+            grand_total: Number(result.order.grand_total || 0),
+            currency: result.order.currency,
+          });
+        } catch (err) {
+          this.logger.error(
+            `Failed to emit order.paid for order #${orderPaidId}: ${
+              (err as Error).message
+            }`,
+          );
+        }
+        if (result.paid_session_id) {
+          this.tableSessionsService.emitSessionPaid(
+            ctxStoreId,
+            result.paid_session_id,
+            orderPaidId,
+            payment?.id ?? null,
+          );
+        }
       }
 
       // Process digital payments AFTER transaction commit (order is now visible)
@@ -2881,6 +2924,13 @@ export class PaymentsService {
     // awaiting webhook) or nothing was closed. The caller emits `session_closed`
     // post-commit only when this is non-null.
     closedSessionId: number | null;
+    // carril D / lina — D1: id de la sesión de mesa PAGADA por este pago,
+    // o null cuando no hay sesión (venta fresca sin mesa) o la mesa ya
+    // estaba pagada (idempotencia). El caller emite `session_paid` SSE
+    // post-commit solo cuando es no-null. El mark paid ocurre dentro del
+    // propio tx para que la marca sea atómica con el pago; un rollback
+    // del pago nunca deja un paid_at fantasma.
+    paidSessionId: number | null;
   }> {
     const tableSessionId = dto.table_session_id!;
 
@@ -3066,6 +3116,27 @@ export class PaymentsService {
     });
 
     // ----------------------------------------------------------------
+    // carril D / lina — D1: marca la sesión de mesa como PAGADA dentro
+    // del mismo `$transaction` del pago. La marca es atómica con el
+    // update del order: un rollback del pago NUNCA deja un `paid_at`
+    // fantasma. `markSessionPaid` es idempotente sobre `paid_at` (no
+    // reescribe el primer timestamp), así que un retry del POS no corre
+    // el riesgo de "pagar dos veces" contablemente.
+    //
+    // Se hace aquí, antes del auto-fire, para que la cocina ya sepa que
+    // la mesa está pagada cuando vea el ticket (el KDS usa
+    // `session_paid` SSE post-commit para refrescar el header).
+    let paidSessionId: number | null = null;
+    if (!session.closed_at) {
+      const marked = await this.tableSessionsService.markSessionPaid(
+        tableSessionId,
+        null, // payment.id aún no existe; el flag paid_at no lo requiere.
+        tx,
+      );
+      paidSessionId = marked.id;
+    }
+
+    // ----------------------------------------------------------------
     // Plan KDS fire-flows (B6): auto-fire the pending `prepared` items
     // of the table's draft order to the kitchen BEFORE the session is
     // closed. Same core as B5 (`processPosPayment`) and B7
@@ -3190,6 +3261,7 @@ export class PaymentsService {
       couponInfo,
       kitchenFire,
       closedSessionId,
+      paidSessionId,
     };
   }
 

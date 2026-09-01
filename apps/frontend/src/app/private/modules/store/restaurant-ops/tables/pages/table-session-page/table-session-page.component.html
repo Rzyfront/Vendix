@@ -90,16 +90,29 @@
               </div>
 
               <div class="payment-badges">
-                <app-badge
-                  [variant]="isClosed() ? 'success' : 'warning'"
-                  size="sm"
-                >
-                  <app-icon
-                    [name]="isClosed() ? 'circle-check' : 'clock'"
-                    [size]="12"
-                  ></app-icon>
-                  {{ isClosed() ? 'Pagada / Cerrada' : 'Pago pendiente' }}
-                </app-badge>
+                <!--
+                  carril D / lina — D1: tres estados distinguibles:
+                    - Pagada y cerrada (sesión cerrada explícitamente).
+                    - Pagada pero ocupada (cobrada en POS, mesa sin cerrar
+                      → el mesero aún no la liberó).
+                    - Pendiente (aún sin pagar).
+                -->
+                @if (isClosed()) {
+                  <app-badge variant="success" size="sm">
+                    <app-icon name="circle-check" [size]="12"></app-icon>
+                    Pagada / Cerrada
+                  </app-badge>
+                } @else if (isPaid()) {
+                  <app-badge variant="info" size="sm">
+                    <app-icon name="circle-check" [size]="12"></app-icon>
+                    Pagada
+                  </app-badge>
+                } @else {
+                  <app-badge variant="warning" size="sm">
+                    <app-icon name="clock" [size]="12"></app-icon>
+                    Pago pendiente
+                  </app-badge>
+                }
                 @if (isMixedOrder()) {
                   <app-badge variant="warning" size="sm">
                     <app-icon name="shopping-bag" [size]="12"></app-icon>
@@ -134,11 +147,16 @@
               <div class="meta-chips">
                 <span class="meta-chip">
                   <app-icon name="user-check" [size]="13"></app-icon>
-                  @if (customerName(); as name) {
-                    <span [title]="name">{{ name }}</span>
-                  } @else {
-                    <span class="muted">Anónimo</span>
-                  }
+                  <!--
+                    carril D / lina — D1: `customerName` ahora siempre devuelve
+                    string (cliente formal → nombre; alias → alias solo;
+                    ninguno → "Consumidor Final"). El alias REEMPLAZA al
+                    CF, no se muestra al lado. El título expone el alias
+                    crudo cuando existe para depurar en hover.
+                  -->
+                  <span [title]="customerAlias() ?? customerName()">
+                    {{ customerName() }}
+                  </span>
                 </span>
                 <span class="meta-chip">
                   <app-icon name="users" [size]="13"></app-icon>

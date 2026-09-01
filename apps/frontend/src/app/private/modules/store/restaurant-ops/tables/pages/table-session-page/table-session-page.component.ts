@@ -264,10 +264,32 @@ export class TableSessionPageComponent implements OnInit {
 
   readonly customer = computed(() => this.session()?.order?.customer ?? null);
 
+  /**
+   * carril D / lina — D1: alias del cliente cuando la venta es anónima pero
+   * etiquetada (ej. "Mesa 5", "Para llevar"). Persistido en
+   * `orders.customer_alias` (schema.prisma:1445, XOR con `customer_id`).
+   * Se renderiza SOLO (sin etiqueta "CF" adyacente) en lugar del nombre
+   * del cliente cuando este último está ausente, exactamente como pidió
+   * el dueño: el alias existe precisamente para que el mesero no vea una
+   * fila anónima.
+   */
+  readonly customerAlias = computed(
+    () => this.session()?.order?.customer_alias ?? null,
+  );
+
   readonly customerName = computed(() => {
     const c = this.customer();
-    if (!c) return null;
-    return `${c.first_name} ${c.last_name}`.trim();
+    if (c) {
+      // Hay cliente formal: gana el nombre sobre cualquier alias.
+      return `${c.first_name} ${c.last_name}`.trim();
+    }
+    const alias = this.customerAlias();
+    if (alias && alias.trim()) {
+      // Sin cliente formal pero con alias: alias solo, sin "CF".
+      return alias.trim();
+    }
+    // Sin cliente ni alias: consumidor final explícito.
+    return 'Consumidor Final';
   });
 
   readonly selectedItems = computed(() => {
@@ -295,6 +317,19 @@ export class TableSessionPageComponent implements OnInit {
   readonly hasUnfiredItems = computed(() => this.pendingPreparedItems().length > 0);
 
   readonly isClosed = computed(() => !!this.session()?.closed_at);
+
+  /**
+   * carril D / lina — D1: la mesa fue pagada en POS (cobrada) pero NO
+   * cerrada todavía. La fuente de verdad es `table_sessions.paid_at`
+   * (migration `20260901120000_table_session_paid_at`); se persiste
+   * dentro del `$transaction` del pago para que un rollback no deje
+   * un `paid_at` fantasma.
+   *
+   * La mesa sigue `occupied` hasta que el mesero ejecute `closeSession`
+   * (canónico), pero el frontend de mesa y el floor-map pintan el badge
+   * "Pagada" sin esperar al cierre explícito.
+   */
+  readonly isPaid = computed(() => !!this.session()?.paid_at);
 
   /** Reads `restaurant.enable_table_checkout` (loose JSON slice). */
   readonly checkoutEnabled = computed(
