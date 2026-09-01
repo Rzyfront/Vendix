@@ -30,7 +30,13 @@
    alinean entre sí, las con extras alinean entre sí. */
 .product-row {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) auto;
+  /* T4b (reverso de Nancy): el track de `qty` va fijo en `minmax(0, 108px)`.
+     Antes era `auto`, y como CSS Grid dimensiona `auto` al max-content del
+     contenido ANTES de repartir el `1fr`, los botones del stepper (50×48 en
+     `size="lg"`) se quedaban con 130px y el nombre se quedaba con 59px —
+     insuficiente para cualquier nombre de plato. Track fijo = el stepper
+     tiene su pista reservada y el nombre tiene su `1fr` sin competencias. */
+  grid-template-columns: 44px minmax(0, 1fr) minmax(0, 108px);
   grid-template-areas:
     "thumb info   qty"
     "thumb picker qty";
@@ -265,10 +271,11 @@
   }
 }
 
-/* ── C.1 (QUI-735) + T4 — mobile-first refinements for 375px (iPhone SE) ─
-   375px - padding (1.5rem) - thumb (40px) - qty (~110px) - gaps ≈ 175px
-   para nombre+meta. Truncamos con ellipsis y dejamos que el precio se
-   alinee a la derecha dentro de `.meta` con margin-left: auto. */
+/* ── C.1 (QUI-735) + T4b — mobile-first refinements for 375px (iPhone SE) ─
+   Track `qty` también fijo a 108px en mobile: el botón del stepper sigue
+   siendo 40px en lugar de 48px (override de `h-12` que pone Tailwind desde
+   `app-button size="lg"`). 40×40 deja 8px de margen y respeta WCAG/iOS HIG
+   (target táctil ≥ 40pt sin desperdiciar ancho). */
 @media (max-width: 640px) {
   .product-list {
     max-height: 44vh;
@@ -278,7 +285,7 @@
     padding: 0.625rem 0.75rem;
     column-gap: 0.625rem;
     row-gap: 0.4rem;
-    grid-template-columns: 40px minmax(0, 1fr) auto;
+    grid-template-columns: 40px minmax(0, 1fr) minmax(0, 108px);
 
     .product-thumb {
       width: 40px;
@@ -287,10 +294,22 @@
 
     .qty-controls {
       gap: 0.3rem;
+      justify-content: flex-end;
 
       .qty {
         min-width: 1.25rem;
         font-size: 0.9rem;
+      }
+
+      /* Override de `app-button size="lg"` (h-12 / 48px en mobile por
+         Tailwind). En 375px un stepper de 50×48 se come el nombre; en
+         40×40 el nombre tiene sitio suficiente. Selector por host element
+         del child component; respeta la encapsulación del SCSS. */
+      app-button {
+        height: 2.5rem; /* 40px */
+        width: 2.5rem;
+        min-width: 2.5rem;
+        padding: 0;
       }
     }
   }
