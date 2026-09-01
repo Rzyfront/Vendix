@@ -436,7 +436,7 @@ export class OrdersListComponent {
         },
         infoIconTransform: (_value: unknown, item?: any) =>
           item?.table_sessions?.[0]?.table?.name ? 'utensils' : undefined,
-        infoIconVariant: 'amber',
+        infoIconVariant: 'warning',
       },
       {
         key: 'created_at',
@@ -487,12 +487,16 @@ export class OrdersListComponent {
     this.loadSeen();
     // Carril B - B2: carga mesas de la tienda. Si falla, el filtro no se
     // pinta (computed filterConfigs arriba depende de tables().length > 0).
-    // Fire-and-forget con takeUntilDestroyed.
+    // Fire-and-forget con takeUntilDestroyed. TablesService.getFloorMap()
+    // devuelve Observable<Table[]> (el plano completo, sin paginar) - lo
+    // que necesita un dropdown de filtro. listPaginated() obligaria a
+    // paginar un desplegable, sin sentido para un restaurante con decenas
+    // de mesas.
     this.tablesService
-      .list()
+      .getFloorMap()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (resp) => this.tables.set(resp.data ?? []),
+        next: (tables: Table[]) => this.tables.set(tables ?? []),
         error: () => this.tables.set([]),
       });
   }
