@@ -10,7 +10,7 @@ import {
   KdsStation,
   KdsUnattributedConsumption,
 } from '../interfaces';
-import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
 interface ApiResponse<T> {
   success?: boolean;
