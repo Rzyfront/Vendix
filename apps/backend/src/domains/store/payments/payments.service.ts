@@ -1799,14 +1799,26 @@ export class PaymentsService {
       // sería null en este call (guard de `applyPosPaymentToTableSession`),
       // por lo que `session_paid` se omite y `order.paid` se sigue emitiendo
       // una sola vez por orden pagada.
+      //
+      // P0 fix (auditoría nancy): `payment` vive dentro del closure del
+      // `$transaction` y NO está disponible aquí. La fuente post-commit
+      // del id de pago es `result.payment`, que ya queda construido
+      // dentro del callback (línea 1717). Cast a `any` solo en este
+      // bloque defensivo — el contrato del `result` cambia entre
+      // ramas (mesa vs retail) y el typecheck de la unión se quejaba.
       const orderPaidId = result.order?.id;
+      const paymentIdResolved =
+        (result.payment as { id?: number } | undefined)?.id ?? null;
+      const paidSessionIdResolved =
+        (result as { paid_session_id?: number | null }).paid_session_id ??
+        null;
       if (orderPaidId) {
         try {
           this.eventEmitter.emit('order.paid', {
             store_id: ctxStoreId,
             order_id: orderPaidId,
-            payment_id: payment?.id ?? null,
-            paid_session_id: result.paid_session_id ?? null,
+            payment_id: paymentIdResolved,
+            paid_session_id: paidSessionIdResolved,
             grand_total: Number(result.order.grand_total || 0),
             currency: result.order.currency,
           });
@@ -1817,12 +1829,12 @@ export class PaymentsService {
             }`,
           );
         }
-        if (result.paid_session_id) {
+        if (paidSessionIdResolved) {
           this.tableSessionsService.emitSessionPaid(
             ctxStoreId,
-            result.paid_session_id,
+            paidSessionIdResolved,
             orderPaidId,
-            payment?.id ?? null,
+            paymentIdResolved,
           );
         }
       }

@@ -917,7 +917,12 @@ export class TableSessionsService {
     // que no pasa por el DTO.
     if (!reason || reason.trim().length < 3) {
       throw new VendixHttpException(
-        ErrorCodes.VALIDATION_FAILED,
+        // Reusar el código de dominio ya proyectado para input inválido
+        // sobre la mesa (verificado: `VALIDATION_FAILED` no existe en el
+        // catálogo `error-codes.ts`; `TABLE_SESSION_ADD_ITEMS_INVALID`
+        // ya cubre el caso de input del usuario sobre la mesa y es la
+        // elección coherente con el resto del archivo).
+        ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
         'Debes proporcionar un motivo de cancelación (mínimo 3 caracteres)',
       );
     }
@@ -1495,6 +1500,15 @@ export class TableSessionsService {
                 // solo aplica a los platos preparados.
                 delivered_at: true,
                 delivered_by_user_id: true,
+                // carril D / lina — D2: soft cancel por línea. Estos campos
+                // son la fuente de verdad del estado cancelado (no hay
+                // columna `state` enum). Si NO se proyectan aquí, la guarda
+                // de idempotencia en `cancelOrderItem` (`:894`) ve siempre
+                // `undefined` y reescribe `cancelled_at` en cada intento,
+                // pisando la fecha original de la primera cancelación.
+                cancelled_at: true,
+                cancellation_reason: true,
+                cancellation_type: true,
                 // KDS state per dish — same include shape as
                 // orders.service.findOne (Gap 2). Ordered desc by id so
                 // the most recent ticket-item leads the array.
