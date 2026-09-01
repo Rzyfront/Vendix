@@ -111,6 +111,7 @@ model users {
   cash_register_sessions_closed cash_register_sessions[]         @relation("cash_register_sessions_closed_by")
   kds_sessions_opened           kds_sessions[]                   @relation("kds_sessions_opened_by")
   kds_sessions_closed           kds_sessions[]                   @relation("kds_sessions_closed_by")
+  kds_sessions_force_taken      kds_sessions[]                   @relation("kds_sessions_force_taken_by")
   order_items_delivered         order_items[]                    @relation("order_items_delivered_by")
   order_item_exclusions_created order_item_exclusions[]          @relation("order_item_exclusions_created_by")
   kti_exclusions_excluded       kitchen_ticket_item_exclusions[] @relation("kti_exclusions_excluded_by")

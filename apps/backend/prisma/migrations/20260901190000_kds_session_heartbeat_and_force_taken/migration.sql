@@ -15,9 +15,13 @@
 --   1. Columnas nullable, sin DEFAULT, sin ENUM nuevo.
 --   2. FK explícita `force_taken_by_user_id REFERENCES users(id) ON DELETE SET NULL`
 --      para que borrar el usuario tomador no rompa la auditoría.
---   3. Índice nuevo `kds_sessions_last_seen_at_idx` para sweeps futuros sin
---      tocar el partial unique `kds_sessions_one_open_per_kds` (que sigue
---      garantizando una sola sesión ABIERTA por KDS).
+--   3. Índice compuesto nuevo `kds_sessions_kds_id_last_seen_at_idx` para
+--      sweeps futuros sin tocar el partial unique
+--      `kds_sessions_one_open_per_kds` (que sigue garantizando una sola
+--      sesión ABIERTA por KDS). El nombre y el orden de columnas deben
+--      coincidir exactamente con el `@@index([kds_id, last_seen_at])` de
+--      `schema.prisma` o el próximo `migrate dev` de otro carril genera
+--      drift (regla aprendida en el ajuste A1 del plan).
 --   4. La toma forzada cierra la sesión anterior y abre la nueva en la MISMA
 --      transacción, en ese orden — el partial unique protege la ventana
 --      concurrente.
