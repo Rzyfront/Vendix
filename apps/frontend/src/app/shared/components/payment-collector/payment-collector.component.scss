@@ -774,3 +774,99 @@
     font-size: 13px;
   }
 }
+
+// T1 — bloque de propina dentro de la pc-card. Mobile-first: los dos
+// chips del toggle caben a 375px sin desbordar; el input + sufijo van
+// en una fila que se envuelve si el viewport es muy estrecho. Tokens
+// del sistema (--color-primary / --color-surface / --color-text-* /
+// --color-border / --radius-md) consistentes con el resto del panel.
+.pc-tip-mode {
+  display: flex;
+  gap: 0.375rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.pc-tip-mode-btn {
+  flex: 1 1 auto;
+  min-height: 36px;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-secondary, #6b7280);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+
+  &:hover {
+    background: var(--color-background);
+    color: var(--color-text-primary);
+  }
+
+  // Mismo patron que .tab-btn/.pc-flash-target: tinte + borde + texto
+  // en el color de marca. No pintar el fondo entero con primary —
+  // compite visualmente con el CTA principal del footer.
+  &.is-active {
+    background: color-mix(
+      in srgb,
+      var(--color-primary) 12%,
+      var(--color-surface)
+    );
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+  }
+}
+
+.pc-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+
+  // El input ocupa el resto; el sufijo NO se encoge. min-width:0
+  // para que el input pueda bajar al ancho del contenedor en 375px
+  // sin inflar la fila (mismo patron que summary/items columns
+  // en la mesa, donde min-width:0 evita overflow horizontal).
+  > .pc-input {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
+
+.pc-tip-suffix {
+  flex: 0 0 auto;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #6b7280);
+  min-width: 1.25rem;
+  text-align: center;
+}
+
+.pc-tip-waiter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #6b7280);
+
+  > span {
+    // El label hereda el color muted, pero la cifra del input tiene
+    // que leerse como dato activo — mismo patron que .totals-label.
+    color: color-mix(
+      in srgb,
+      var(--color-text-primary) 78%,
+      transparent
+    );
+  }
+
+  > .pc-input {
+    min-width: 0;
+  }
+}
+

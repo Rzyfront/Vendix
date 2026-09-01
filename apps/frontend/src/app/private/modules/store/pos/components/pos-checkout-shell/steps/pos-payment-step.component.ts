@@ -19,10 +19,6 @@ import {
   PaymentCollectorComponent,
   IconComponent,
 } from '../../../../../../../shared/components';
-import {
-  CurrencyFormatService,
-  CurrencyPipe,
-} from '../../../../../../../shared/pipes/index';
 import type {
   PaymentSubmit,
   CreditTerms,
@@ -73,22 +69,12 @@ import type { BusinessHours } from '../../../../../../../core/models/store-setti
     SpinnerComponent,
     ButtonComponent,
     PaymentCollectorComponent,
-    IconComponent,
-    CurrencyPipe,
   ],
   templateUrl: './pos-payment-step.component.html',
   styleUrl: './pos-payment-step.component.scss',
 })
 export class PosPaymentStepComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
-  /**
-   * carril D / lina — D3: símbolo de la moneda configurada en la tienda.
-   * Misma fuente que el modal de mesa (table-payment-modal): se inyecta
-   * CurrencyFormatService para que el símbolo cambie según la moneda del
-   * tenant, no según el locale del browser.
-   */
-  private readonly currencyService = inject(CurrencyFormatService);
-  readonly currencySymbol = this.currencyService.currencySymbol;
 
   // ── Inputs (from shell) ──────────────────────────────────────────────────
   readonly cartState = input<CartState | null>(null);
@@ -280,52 +266,6 @@ export class PosPaymentStepComponent implements OnInit {
   readonly effectiveAmount = computed<number>(
     () => this.amountOverride() ?? (this.cartState()?.summary?.total || 0),
   );
-
-  // ── D3: propina al cobrar (POS retail caja) ────────────────────────────
-  /**
-   * carril D / lina — D3: misma sección de propina que el modal de mesa,
-   * replicada aquí para el cobro de caja. Reglas del dueno:
-   *  - Opcional de verdad (sin valor presugerido, sin obligatoriedad).
-   *  - Preguntada DESPUÉS del total, antes del submit del cobro.
-   *  - NO entra en la base gravable: el accounting la separa como
-   *    pasivo custodio (CR propinas por pagar) en payments.service.ts.
-   *  - El % se calcula sobre el SUBTOTAL de venta (nadie da propina
-   *    sobre el IVA) y se guarda resuelto a monto.
-   *  - El mesero es opcional: un mostrador sin meseros puede cobrar
-   *    sin ese dato.
-   */
-  readonly tipType = signal<'percentage' | 'fixed'>('fixed');
-  readonly tipInput = signal<number>(0);
-  readonly tipWaiterId = signal<number | null>(null);
-  /**
-   * Monto final de la propina que viajara al backend:
-   *  - percentage → subtotal de venta * tipInput / 100
-   *  - fixed → tipInput directo
-   * El subtotal aqui es el `summary.total` del cart (que excluye
-   * propinas previas); ese es el "consumido" sobre el que aplica
-   * el %.
-   */
-  readonly tipAmount = computed<number>(() => {
-    const raw = this.tipInput();
-    if (!Number.isFinite(raw) || raw <= 0) return 0;
-    if (this.tipType() === 'percentage') {
-      const subtotal = this.cartState()?.summary?.total ?? 0;
-      return Math.round(subtotal * raw * 100) / 100 / 100;
-    }
-    return Math.round(raw * 100) / 100;
-  });
-
-  onTipTypeChange(type: 'percentage' | 'fixed'): void {
-    this.tipType.set(type);
-  }
-  onTipInputChange(value: string | number): void {
-    const n = Number(value);
-    this.tipInput.set(Number.isFinite(n) && n > 0 ? n : 0);
-  }
-  onTipWaiterIdChange(value: string | number): void {
-    const n = Number(value);
-    this.tipWaiterId.set(Number.isFinite(n) && n > 0 ? n : null);
-  }
 
   // ── Footer-facing collector projections (read by the shell) ──────────────
   readonly mode = computed<PaymentMode | undefined>(() => this.collector()?.mode());
@@ -584,49 +524,28 @@ export class PosPaymentStepComponent implements OnInit {
   }
 
   // ── The single collector submit handler (all POS gates preserved) ────────
+  //
   onCollectorSubmit(submit: PaymentSubmit): void {
     if (!this.cartState()) return;
 
-    // carril D / lina — D3: si la sección de propina del step tiene un
-    // valor, sobrescribimos el tip del collector con el monto calculado
-    // aquí (regla del dueno: la propina se pregunta DESPUÉS del total,
-    // opcional, sin valor presugerido). El collector sigue pudiendo
-    // emitir su propio tip si la sección quedó en 0, pero cuando el
-    // step trae un valor, ese valor gana.
-    //
-    // Además del monto, propagamos los metadatos D3 al backend
-    // (tip_type, tip_value, tip_waiter_id) vía un wrapper sobre el
-    // submit. El PaymentSubmit del collector shared no tiene esos
-    // campos, pero `processSaleWithPayment`/`runCreditSale` los pasan
-    // al DTO si están presentes. Cast a `any` solo en el wrapper.
-    const localTip = this.tipAmount();
-    const overriddenSubmit: PaymentSubmit & Record<string, unknown> =
-      localTip > 0
-        ? {
-            ...submit,
-            tip: localTip,
-            // Persistir tipo y waiter para auditoría (D3). El backend
-            // persiste el porcentaje resuelto a monto (regla del
-            // dueno: si mañana cambia el subtotal, la propina ya
-            // pactada no puede moverse sola).
-            tip_type: this.tipType(),
-            tip_value: localTip,
-            tip_waiter_id: this.tipWaiterId(),
-          }
-        : (submit as PaymentSubmit & Record<string, unknown>);
+    // T1 — la propina (monto + tipo + valor + mesero) ya viene
+    // en el payload del collector (`tip`, `tipType`, `tipValue`,
+    // `tipWaiterId`); este step NO la sobrescribe. La tarjeta
+    // única de propina es la del collector.
+
 
     // Deferred execution (delivery pay-now): don't process here. Emit the raw
     // payload so the shipping step folds it into a single processShippingSale.
     // Business-hours / cash-register gates are intentionally skipped — the
     // legacy shipping flow (confirmShipping) never enforced them.
     if (!this.autoExecute()) {
-      this.paymentReady.emit(overriddenSubmit as PaymentSubmit);
+      this.paymentReady.emit(submit);
       return;
     }
 
     // Credito plan creation.
-    if (overriddenSubmit.mode === 'credito') {
-      this.runCreditSale(overriddenSubmit.credit ?? null);
+    if (submit.mode === 'credito') {
+      this.runCreditSale(submit.credit ?? null);
       return;
     }
 
@@ -788,11 +707,6 @@ export class PosPaymentStepComponent implements OnInit {
         },
       });
   }
-
-  /**
-   * Creates a credit sale from the collector's {@link CreditTerms}. Routes by
-   * `terms.type`: 'free' → fiado libre; 'installments' → financed plan.
-   */
   private runCreditSale(terms: CreditTerms | null): void {
     if (!this.cartState() || !this.cartState()!.customer) {
       this.toastService.info('Seleccione un cliente para continuar');
