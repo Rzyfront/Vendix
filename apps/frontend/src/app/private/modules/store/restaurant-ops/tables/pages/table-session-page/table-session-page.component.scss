@@ -918,10 +918,17 @@
   // Usa variant="outline-danger" del sistema (btn-outline-danger-border) para
   // que el color/borde/hover queden centralizados en ButtonComponent, idéntico
   // en desktop y mobile. Aquí sólo se fija el tamaño táctil 44×44 (HIG iOS).
+  // El `button` interno hereda la altura para que el borde/hover del variant
+  // (outline-danger / success) ocupe todo el área táctil y quede simétrico
+  // con "Marcar entregado" (misma altura, mismo gap).
   .item-remove-btn {
     flex: 0 0 44px;
     width: 44px;
     min-height: 44px;
+    // El `<button>` interno se dimensiona via `customClasses="!h-11 !w-11
+    // !px-0"` en el HTML. La encapsulación Emulated de Angular NO deja
+    // llegar al inner button desde el SCSS del padre — el :where(button)
+    // anterior no aplicaba y los !important no salvaban nada.
   }
 
   // Texto del nombre y del importe legibles sin zoom a 375px. La densidad
