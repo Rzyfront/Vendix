@@ -62,6 +62,21 @@ export function resolveTip(
     value = amount;
   }
 
+  if (amount > 0 && type === 'percentage') {
+    // El monto directo YA ganó sobre el porcentaje (la rama de arriba no
+    // corrió porque `amount` no era 0). Si dejáramos `type='percentage'` con
+    // el `tip_value` crudo, la fila mentiría: un auditor leería "50%" sobre un
+    // subtotal de 28.000 y calcularía 14.000 cuando se cobraron 3.000. El
+    // porcentaje no describe nada de lo que pasó, así que se ancla igual que
+    // en la rama de resolución: 'fixed' con el monto realmente cobrado.
+    //
+    // Este hueco venía del POS (donde se escribió esta lógica) y era invisible
+    // porque nadie mandaba `tip_amount` y `tip_type='percentage'` a la vez.
+    // Se cierra aquí, y el POS lo hereda por compartir esta función.
+    type = 'fixed';
+    value = amount;
+  }
+
   if (type == null && amount > 0) {
     // Hubo monto pero el operador no marcó modo: asumimos 'fixed'. La
     // auditoría verá 'fixed' cuando en realidad fue escrito directo, pero
