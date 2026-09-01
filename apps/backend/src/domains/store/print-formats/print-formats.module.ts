@@ -19,6 +19,11 @@ import { PrintGatewayService } from './services/print-gateway.service';
 import { PrintTemplateCompilerService } from './services/print-template-compiler.service';
 import { PrintLayoutComposerService } from './services/print-layout-composer.service';
 import { PrintFiscalValidatorService } from './services/print-fiscal-validator.service';
+// [print-fiscal-gate] — Predicado canónico "ticket vs FE" para el motor de
+// impresión. Reutiliza `FiscalProductionReadinessService`; vive en este
+// módulo para que el controller `print-formats.controller.ts` lo inyecte sin
+// acoplar `invoicing/*` hacia afuera.
+import { PrintFiscalGateService } from './services/print-fiscal-gate.service';
 // E.11 casilla 4 — motor PDF bajo demanda del gateway (builder pdfkit, sin S3).
 import { FiscalInvoicePdfRenderService } from './services/fiscal-invoice-pdf-render.service';
 // [print-editor-dsk P2.2] — Single render path service (replaces the
@@ -75,6 +80,11 @@ import { DispatchRouteDataProvider } from './providers/dispatch-route.provider';
 import { WithholdingPracticedDataProvider } from './providers/withholding-practiced.provider';
 import { WithholdingSufferedDataProvider } from './providers/withholding-suffered.provider';
 import { WithholdingEmployeeCertificateDataProvider } from './providers/withholding-employee.provider';
+// [print-fiscal-gate] — `FiscalProductionReadinessService` se aloja en
+// `invoicing/providers` y se exporta vía `InvoiceProviderModule`. Sin este
+// import, Nest no resuelve la inyección de `PrintFiscalGateService` en este
+// módulo y el booteo falla con `UnknownDependenciesException`.
+import { InvoiceProviderModule } from '../invoicing/providers/invoice-provider.module';
 
 @Module({
   imports: [
@@ -82,6 +92,9 @@ import { WithholdingEmployeeCertificateDataProvider } from './providers/withhold
     // E.11 casilla 4 — el render PDF bajo demanda descarga el logo del emisor
     // desde S3 (best-effort), igual que hace `generatePdf` en invoicing.
     S3Module,
+    // [print-fiscal-gate] — ver import arriba. Aporta
+    // `FiscalProductionReadinessService` al grafo de DI del módulo de impresión.
+    InvoiceProviderModule,
   ],
   // ORDEN DELIBERADO. `PrintTemplatesLibraryController` sirve
   // `store/print-formats/library`; `PrintFormatsController` sirve
@@ -100,6 +113,7 @@ import { WithholdingEmployeeCertificateDataProvider } from './providers/withhold
     PrintTemplateCompilerService,
     PrintLayoutComposerService,
     PrintFiscalValidatorService,
+    PrintFiscalGateService,
     FiscalInvoicePdfRenderService,
     // [print-editor-dsk P9] — Prometheus service. No DI dependencies; the
     // gateway injects it via constructor (see `print-gateway.service.ts`).
