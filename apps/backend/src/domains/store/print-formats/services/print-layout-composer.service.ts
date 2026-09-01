@@ -121,13 +121,20 @@ export class PrintLayoutComposerService {
     const store = data.store || ({} as any);
     const runtimeLogo = store.logo_url as string | undefined;
     const defLogoBlock = definition.logo;
-    const fallbackLogoUrl = !runtimeLogo && defLogoBlock?.url ? defLogoBlock.url : undefined;
+    // [print-fiscal-gate P6] — El logo DISEÑADO en el módulo de formatos gana
+    // sobre `store.logo_url`. Antes el orden era `runtimeLogo || defLogoBlock.url`,
+    // lo que dejaba el logo configurado como fallback: una tienda que diseñó su
+    // logo en el Hub veía en el tiquete el logo genérico de la cuenta. Aquí
+    // gana el configurado; `store.logo_url` queda como fallback cuando el Hub
+    // no define uno propio.
+    const designedLogoUrl = defLogoBlock?.url;
+    const fallbackLogoUrl = runtimeLogo && !designedLogoUrl ? runtimeLogo : undefined;
     const defaultMonochromeLogo = '/vlogomono.png';
     const isLogoExplicitlyDisabled = defLogoBlock && (defLogoBlock as any).enabled === false;
 
     const logoUrl = isLogoExplicitlyDisabled
       ? undefined
-      : runtimeLogo || fallbackLogoUrl || defaultMonochromeLogo;
+      : designedLogoUrl || fallbackLogoUrl || defaultMonochromeLogo;
 
     let logo = '';
     if (logoUrl || mode === 'tokenized') {
@@ -146,7 +153,12 @@ export class PrintLayoutComposerService {
       if (mode === 'tokenized') {
         logo = `<div class="store-logo" style="${alignStyle}" data-element-id="f_logo" data-section-id="sec_header" data-token="store.logo_url"><span class="vendix-token-pill" data-token="store.logo_url">&#123;&#123; store.logo_url &#125;&#125;</span></div>`;
       } else if (logoUrl) {
-        logo = `<div class="store-logo" style="${alignStyle}" data-element-id="f_logo" data-section-id="sec_header" data-token="store.logo_url"><img src="${this.compiler.escapeHtml(logoUrl)}" alt="Logo" style="${styleParts.join('; ')}; object-fit: contain;" /></div>`;
+        // [print-fiscal-gate P6] — `data-image-preset="logo-print"` marca la
+        // imagen para que el driver de la térmica (o el navegador) la imprima
+        // al ancho nativo del papel y, cuando exista una versión monocroma en
+        // S3, la prefiera. Sin este hint, las impresoras térmicas reescalan
+        // el logo al límite de píxeles que el navegador decida y sale borroso.
+        logo = `<div class="store-logo" style="${alignStyle}" data-element-id="f_logo" data-section-id="sec_header" data-token="store.logo_url"><img src="${this.compiler.escapeHtml(logoUrl)}" alt="Logo" data-image-preset="logo-print" style="${styleParts.join('; ')}; object-fit: contain; image-rendering: -webkit-optimize-contrast;" /></div>`;
       }
     }
 
