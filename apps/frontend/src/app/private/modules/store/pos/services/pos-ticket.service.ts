@@ -807,11 +807,108 @@ export class PosTicketService {
     }
 
     const separator = '<div style="break-after: page; page-break-after: always;"></div>';
-    const concatenated = succeeded.map((r) => r.body).join(`\n${separator}\n`);
+
+    // [print-fiscal-gate P7.2 — fix b052e30fc] — El primer tiquete del lote
+    // se vuelve a renderizar con `body_only=false` para conservar su `<head>`
+    // y su `<style>` (el aspecto real del composer vive ahí). Los demás
+    // cuerpos, ya extraídos con `body_only=true`, se inyectan antes del
+    // `</body>` del primero. NO copiamos CSS al frontend: una copia se
+    // desincroniza apenas alguien toca el composer. El envoltorio del
+    // primero es la fuente de verdad.
+    //
+    // Si sólo UN ticket resolvió, ese va por el camino unitario
+    // (`body_only=false` completo, sin re-ensamblado) — un "lote de un
+    // solo elemento sin envoltorio" sería peor que el bug original.
+    if (succeeded.length === 1) {
+      const only = succeeded[0];
+      try {
+        const result = await this.documentPrint.resolveAndPrint({
+          documentType: 'pos_order',
+          documentId: only.orderId ?? 0,
+        });
+        if (failed.length > 0) {
+          const detail = failed
+            .map((f) => `doc ${f.orderId ?? '?'}: ${f.error}`)
+            .join('; ');
+          console.warn(
+            `printTicketsBatch: ${failed.length} tiquete(s) no se imprimieron — ${detail}`,
+          );
+        }
+        return { rendered: 1, pages: result.pages };
+      } catch (err) {
+        // Re-render del único también falló: mismo error que tendríamos si
+        // forzáramos el path de lote, lo dejamos subir.
+        throw err;
+      }
+    }
+
+    // Re-render del primer tiquete con `body_only=false` para traer su
+    // `<head>` y `<style>` al envoltorio. El resto ya están en `body`.
+    const first = succeeded[0];
+    let firstFullDoc: string;
+    try {
+      const firstResolved = await firstValueFrom(
+        this.gatewayClient.resolveDocument(
+          'pos_order',
+          first.orderId ?? 0,
+          'html',
+        ),
+      );
+      const firstRendered = await firstValueFrom(
+        this.gatewayClient.renderDocument(
+          firstResolved.format_type,
+          firstResolved.document_id,
+          firstResolved.engine,
+          /* bodyOnly */ false,
+        ),
+      );
+      if (!firstRendered?.html) {
+        throw new Error(
+          `Gateway devolvió respuesta sin HTML para el envoltorio (${firstResolved.format_type} doc ${firstResolved.document_id})`,
+        );
+      }
+      firstFullDoc = firstRendered.html;
+    } catch (err) {
+      // Si el re-render del envoltorio falla, también lo subimos — el lote
+      // no es viable sin un wrapper con CSS real.
+      throw err;
+    }
+
+    // Inyectar los cuerpos 2..N antes del `</body>` del primero. El composer
+    // emite exactamente un `</body>` de cierre; `lastIndexOf` lo localiza
+    // sin regex, y `slice` preserva el orden de inserción del lote.
+    //
+    // Estructura del insertion: `${separator}${body2}${separator}${body3}`.
+    // El slice `[:bodyCloseIdx]` del primer doc termina exactamente donde
+    // arranca `</body>`, así que el primer separator queda pegado al final
+    // del contenido del ticket 1 — un page-break antes del ticket 2, sin
+    // separadores duplicados ni huecos.
+    const restBodies = succeeded.slice(1).map((r) => r.body);
+    // Estructura del insertion: `${separator}${body2}${separator}${body3}`.
+    // El slice `[:bodyCloseIdx]` del primer doc termina justo después del
+    // contenido del ticket 1, así que el primer `separator` queda pegado
+    // a ese cierre — un page-break antes del ticket 2 sin separadores
+    // duplicados ni huecos. Reduce explícito (no `[...].join`): un join
+    // metería el separador ENTRE elementos, no antes de cada uno.
+    let insertion = '';
+    for (const body of restBodies) {
+      insertion += separator + body;
+    }
+    const bodyCloseIdx = firstFullDoc.lastIndexOf('</body>');
+    if (bodyCloseIdx < 0) {
+      // El composer debería emitir siempre un </body>; si falta, lanzamos
+      // en vez de imprimir un documento malformado.
+      throw new Error(
+        'printTicketsBatch: el envoltorio del primer tiquete no contiene </body>; imposible ensamblar el lote sin él.',
+      );
+    }
+    const assembled = firstFullDoc.slice(0, bodyCloseIdx) +
+      insertion +
+      firstFullDoc.slice(bodyCloseIdx);
 
     const job = await this.documentPrint.print({
       document: 'pos_ticket',
-      body: concatenated,
+      body: assembled,
       title: total === 1 ? 'Ticket' : `Tiquetes (${total})`,
       styles: TICKET_PRINT_STYLES,
       overrides: {
