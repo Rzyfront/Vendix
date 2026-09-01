@@ -2189,6 +2189,26 @@ export class KitchenFireService {
       ticket: full.ticket,
       ts: Date.now(),
     });
+    // T9 — paso 2: listo de cocina produce notificación de tienda. Va
+    // DESPUÉS del push operativo y envuelto en try/catch porque la difusión
+    // del sonido no puede depender de un efecto secundario (mismo patrón que
+    // la imputación contable QUI-760 de abajo). `@OnEvent` tiene
+    // `suppressErrors` en true por defecto en este repo, así que un fallo
+    // dentro del listener se traga solo: registramos explícito para que el
+    // guardia del sonido no se vuelva silencio inexplicable.
+    try {
+      this.eventEmitter.emit('kitchen.ticket_ready', {
+        store_id,
+        ticket_id: ticketId,
+        order_id: full.ticket.order_id,
+        order_number: (full.ticket as any).order?.order_number ?? null,
+      });
+    } catch (err) {
+      this.logger.error(
+        `[kitchen.ticket_ready] failed to emit for ticket #${ticketId}: ${(err as Error).message}`,
+        (err as Error).stack,
+      );
+    }
     try {
       await this.kdsSessionsService.attributeOpenSessionToTicketConsumption(ticketId);
     } catch (err) {

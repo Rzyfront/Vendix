@@ -3626,6 +3626,11 @@ enum notification_type_enum {
   vexi_task_failed
   auto_renew_disabled_no_credential
   auto_renew_charge_failed
+  /// T9 — listo de cocina (KDS → mesero). El puente de entrega
+  /// (`kitchen.order_all_delivered`) NO usa este tipo porque entregado
+  /// ya no es una alerta para el operador; lo silencia el listener de
+  /// `order.status_changed` cuando `source === 'kitchen_bridge'`.
+  kitchen_ticket_ready
 }
 
 model notifications {

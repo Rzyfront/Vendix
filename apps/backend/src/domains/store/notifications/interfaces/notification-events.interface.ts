@@ -13,6 +13,15 @@ export interface OrderStatusChangedEvent {
   order_number: string;
   old_state: string;
   new_state: string;
+  /**
+   * T9 — paso 3: marca el origen del cambio. Solo `kitchen_bridge`
+   * (puente KDS → orden desde `markKitchenOrderDelivered`) se silencia
+   * en el listener — entregado no es una alerta para el operador. Si
+   * el campo falta, se asume un cambio normal y se notifica igual que
+   * antes. Mantener opcional preserva TODOS los emisores existentes
+   * sin tocar su código.
+   */
+  source?: 'kitchen_bridge' | string;
 }
 
 export interface PaymentReceivedEvent {
