@@ -1834,7 +1834,11 @@ export class PaymentsService {
             ctxStoreId,
             paidSessionIdResolved,
             orderPaidId,
-            paymentIdResolved,
+            // `emitSessionPaid` declara `paymentId?: number` (opcional =
+            // undefined). `paymentIdResolved` es `number | null` por la
+            // union mesa/retail; coalescemos null a undefined para no
+            // cambiar la firma y no romper a los otros callers.
+            paymentIdResolved ?? undefined,
           );
         }
       }
@@ -3752,6 +3756,14 @@ export class PaymentsService {
           // Fresh sales never close a table session — only the table close-out
           // branch (`applyPosPaymentToTableSession`) can. Keep the shape aligned.
           closedSessionId: null as number | null,
+          // carril D / lina — D1: rama retail nunca marca `paid_at` en una
+          // session de mesa (no hay session asociada). Devolvemos null
+          // explícito para ESTRECHAR la unión con la rama mesa (que sí
+          // devuelve `paidSessionId: number | null`) y que el typecheck
+          // vea el campo en ambas ramas. Sin esto, el caller cae en
+          // union-typed y `orderCreation.paidSessionId` queda fuera de
+          // tipo — bug detectado por typecheck consolidado.
+          paidSessionId: null as number | null,
         };
       } catch (error) {
         if (

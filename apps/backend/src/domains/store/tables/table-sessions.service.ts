@@ -85,6 +85,14 @@ export interface TableSessionView {
       // fila de la mesa muestra las dos dimensiones por separado.
       delivered_at: Date | null;
       delivered_by_user_id: number | null;
+      // carril D / lina — D2: soft cancel por línea. NO es columna
+      // monetaria — fuente de verdad del estado cancelado (`cancelled_at`
+      // IS NOT NULL) sin pasar por enum `state`. El comentario ADR-10
+      // ("sin ningún campo monetario") sigue vigente: estos tres son
+      // texto/datetime, no afectan el reporte que cocina lee.
+      cancelled_at: Date | null;
+      cancellation_reason: string | null;
+      cancellation_type: 'before_fire' | 'after_fire_waste' | null;
       // KDS state per dish (Restaurant Suite — Gap 2 pattern, mirrors
       // orders.service.findOne). Ordered desc by id so the most recent
       // ticket-item wins; empty for items never fired to the kitchen.
