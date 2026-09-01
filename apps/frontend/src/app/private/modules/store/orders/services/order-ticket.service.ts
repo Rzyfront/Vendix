@@ -85,6 +85,14 @@ export class OrderTicketService {
       ? { number: invoice.invoice_number, cufe: invoice.cufe ?? undefined }
       : undefined;
 
+    // [print-fiscal-gate] — El alias vive en `customer_alias` (columna del
+    // modelo `orders` introducida por keilis en el payload de listado/detalle).
+    // Si está presente, el renderer del tiquete lo prefiere sobre el nombre
+    // del cliente. Va por separado de `customer` porque el alias NO es
+    // identificación fiscal — no debe leerse como nombre del cliente a efectos
+    // del QR de FE ni del encabezado fiscal.
+    const customerAlias = order.customer_alias ?? null;
+
     return {
       id: order.order_number || 'N/A',
       orderId: order.id,
@@ -105,8 +113,9 @@ export class OrderTicketService {
             email: order.users.email,
             phone: order.users.phone,
             shippingAddress,
+            customerAlias,
           }
-        : { name: 'Consumidor Final', shippingAddress },
+        : { name: 'Consumidor Final', shippingAddress, customerAlias },
       store: order.stores
         ? {
             name: order.stores.name,

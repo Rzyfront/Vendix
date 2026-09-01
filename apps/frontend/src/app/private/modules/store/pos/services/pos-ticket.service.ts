@@ -428,12 +428,26 @@ export class PosTicketService {
     `;
 
     if (ticketData.customer) {
-      // Show customer name, or "Consumidor Final" if empty/undefined (anonymous sale)
-      const displayName = ticketData.customer.name || 'Consumidor Final';
+      // [print-fiscal-gate] — Precedencia: alias > nombre del cliente >
+      // 'Consumidor Final' (placeholder de venta anónima). El alias es lo
+      // que el cajero capturó al cierre ("Mesa 5", "Cliente mostrador") y
+      // suele ser lo que el cliente revisa al pagar. El distintivo de
+      // "Consumidor Final" se pinta al lado cuando el alias coincide con el
+      // placeholder, para que el tiquete siga marcando el hecho fiscal aún
+      // cuando el cajero eligió no identificar al cliente.
+      const alias = (ticketData.customer.customerAlias || '').trim();
+      const name = (ticketData.customer.name || '').trim();
+      const customerFinalBadge = 'Consumidor Final';
+      const isAnonymousAlias =
+        alias.length > 0 && alias.toLowerCase() === customerFinalBadge.toLowerCase();
+      const primaryName = alias || name || customerFinalBadge;
+      const showFinalBadge =
+        (alias || name) && (isAnonymousAlias || !name || !alias);
+      const displayName = showFinalBadge
+        ? `${primaryName} <span style="font-size: 10px; color: #6b7280;">(${customerFinalBadge})</span>`
+        : primaryName;
       // For anonymous sales (empty name), show "000" as tax ID
-      const displayTaxId = ticketData.customer.name
-        ? ticketData.customer.taxId || ''
-        : '000';
+      const displayTaxId = name ? ticketData.customer.taxId || '' : '000';
       // Delivery address line, only rendered when present (counter POS sales
       // have no shipping address and must not show an empty line).
       const shippingAddress = ticketData.customer.shippingAddress;
