@@ -77,7 +77,7 @@
           <div class="qty-controls">
             <app-button
               variant="outline"
-              size="lg"
+              size="md"
               [disabled]="quantityOf(row.id) <= 0"
               [attr.aria-label]="'Disminuir'"
               (clicked)="decrement(row)"
@@ -87,7 +87,7 @@
             <span class="qty">{{ quantityOf(row.id) }}</span>
             <app-button
               variant="outline"
-              size="lg"
+              size="md"
               [attr.aria-label]="'Aumentar'"
               (clicked)="increment(row)"
             >
