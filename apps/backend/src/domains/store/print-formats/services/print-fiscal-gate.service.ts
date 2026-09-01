@@ -36,12 +36,16 @@ export interface PrintTarget {
   documentId: number;
   /**
    * Por qué se eligió este destino. Útil para logs del gateway, para la UI de
-   * preview del Hub y para distinguir en auditoría entre "el documento ya era
-   * una FE" y "la tienda tiene FE activa".
+   * preview del Hub y para distinguir en auditoría.
+   *
+   * `fe_pending_emission` reemplaza al antiguo `store_has_fe_production`: la
+   * tienda TIENE FE activa, pero imprimir no la emite. La razón devuelta por
+   * el gate describe lo que el motor de impresión va a renderizar, no el
+   * estado fiscal del tenant.
    */
   reason:
     | 'electronic_invoice_already_issued'
-    | 'store_has_fe_production'
+    | 'fe_pending_emission'
     | 'no_fiscal_activation';
   /**
    * TRUE cuando el caller debe emitir la FE antes de llamar al renderer.
@@ -49,8 +53,11 @@ export interface PrintTarget {
    * PRINT_DOCUMENT_NOT_FOUND_001 si no existe — esta señal le indica al
    * orquestador del flujo que primero debe gatillar la emisión.
    *
-   * NO se implementa la emisión en este sprint (es carril del del
-   * `invoicing/*`); el gate solo expone la decisión.
+   * Imprimir NO emite FE: una emisión fiscal ante la DIAN es irreversible y
+   * consume consecutivo de resolución; que la dispare un clic de reimpresión
+   * es exactamente el modo de fallo que se evita. La emisión le corresponde
+   * al flujo de venta, arriba. Si la venta no la emitió, este flag deja el
+   * hecho registrado para quien tome ese carril.
    */
   requiresInvoiceEmission: boolean;
 }
@@ -70,10 +77,20 @@ export class PrintFiscalGateService {
    *
    * Precedencia:
    *  1. `invoiceId` provisto por el caller → FE con ese id (reimpresión).
-   *  2. La orden ya tiene factura emitida → FE con el id de esa factura.
-   *  3. La tienda tiene FE de producción activa para su entidad contable
-     → FE con `orderId` y `requiresInvoiceEmission: true`.
-   *  4. Ninguna de las anteriores → ticket común con `orderId`.
+   *  2. La orden ya produjo FE → FE con el id de esa factura.
+   *  3. La tienda tiene FE de producción activa → TICKET común con el
+     *     `orderId`, y `requiresInvoiceEmission: true` para que el flujo de
+     *     venta (arriba) la emita. NO se imprime FE aquí.
+   *  4. Ninguna de las anteriores → ticket común.
+   *
+   * Bajo `pos_electronic_invoice` el `documentId` es SIEMPRE un id de la
+   * tabla `invoices` — nunca un id de orden. El provider
+   * `PosElectronicInvoiceDataProvider.fetchDocumentData` busca por id de
+   * factura primero y por `order_id` después, y los dos espacios de id
+   * pueden colisionar en una misma tienda (orden 4312 y factura 4312
+   * coexisten). Pasar un id de orden bajo formato FE es un riesgo de
+   * imprimir la factura electrónica de otra venta. Por construcción del
+   * gate, ese caso nunca se presenta.
    */
   async resolvePosPrintTarget(params: {
     storeId: number;
@@ -92,13 +109,18 @@ export class PrintFiscalGateService {
     }
 
     // 2. La orden ya produjo FE — usar esa fila.
+    //
+    // `invoice_number` es NOT NULL en el esquema (`invoices.invoice_number String
+    // @db.VarChar(50)` sin `?`), así que cualquier `where: { not: null }` es
+    // redundante y Prisma 7 lo rechaza como `Argument 'not' must not be null`.
+    // Se filtra en JS: una factura DRAFT sin número asignado no cuenta como
+    // "FE emitida", sólo la que trae número válido.
     if (params.orderId) {
       const order = await this.storePrisma.orders.findFirst({
         where: { id: params.orderId, store_id: params.storeId },
         select: {
           id: true,
           invoices: {
-            where: { invoice_number: { not: null } },
             select: { id: true, invoice_number: true },
             take: 1,
             orderBy: { created_at: 'desc' },
@@ -117,8 +139,13 @@ export class PrintFiscalGateService {
       }
     }
 
-    // 3. ¿La tienda PUEDE emitir FE en producción? Si sí, marcamos que el
-    //    orquestador debe emitirla antes de pedir el render.
+    // 3. ¿La tienda PUEDE emitir FE en producción? Si sí, el destino ES
+    //    tiquete, no FE. Imprimir no puede disparar una emisión fiscal: una
+    //    FE es irreversible y consume consecutivo de resolución, así que un
+    //    botón de reimpresión accidental NO debe emitir nada. La emisión le
+    //    corresponde al flujo de venta, arriba. Si la venta no la emitió,
+    //    este flag se lo elide al orquestador para que la gestione; mientras
+    //    tanto, el tiquete es la salida honesta.
     if (params.orderId) {
       const canEmit = await this.storeCanEmitFeInProduction(
         params.storeId,
@@ -126,9 +153,9 @@ export class PrintFiscalGateService {
       );
       if (canEmit) {
         return {
-          formatType: 'pos_electronic_invoice' as print_format_type_enum,
+          formatType: 'pos_sale_ticket' as print_format_type_enum,
           documentId: params.orderId,
-          reason: 'store_has_fe_production',
+          reason: 'fe_pending_emission',
           requiresInvoiceEmission: true,
         };
       }
