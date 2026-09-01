@@ -94,6 +94,14 @@ export interface TableSession {
   opened_by: number;
   opened_at: string | Date;
   closed_at: string | Date | null;
+  /**
+   * carril D / lina — D1: instante en que la mesa fue pagada en POS
+   * pero NO cerrada todavía. Fuente de verdad: `table_sessions.paid_at`
+   * (migration `20260901120000_table_session_paid_at`). Distingue
+   * "ocupada pagada" de "ocupada sin pagar". La mesa sigue `occupied`
+   * hasta que el mesero ejecute `closeSession`.
+   */
+  paid_at?: string | Date | null;
   guest_count: number | null;
   order?: TableSessionOrder;
   table?: {
@@ -117,6 +125,15 @@ export interface TableSessionOrder {
    * contract (no "Cliente General" sentinel — true anonymous is `null`).
    */
   customer?: TableSessionCustomerRef | null;
+  /**
+   * carril D / lina — D1: alias de la venta cuando es anónima pero
+   * etiquetada (ej. "Mesa 5", "Para llevar"). Persistido en
+   * `orders.customer_alias` (schema.prisma:1445, XOR con `customer_id`).
+   * Cuando existe, el frontend muestra el alias en lugar de
+   * "Consumidor Final" (regla del dueño: el alias REEMPLAZA al CF,
+   * no se muestra al lado).
+   */
+  customer_alias?: string | null;
   /**
    * QUI-653 — la orden tiene items para consumo en la mesa Y items para llevar.
    * Es DERIVADO en el backend a partir de las líneas, no una columna: así no

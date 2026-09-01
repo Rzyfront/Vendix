@@ -50,6 +50,17 @@ export interface TablePaymentSubmit {
   payment_reference?: string;
   /** Optional gratuity added on top of the bill (only sent when > 0). */
   tip_amount?: number;
+  /**
+   * carril D / lina — D3: modo de la propina. 'percentage' → `tip_value`
+   * es el % (0-100). 'fixed' → `tip_value` es el monto libre (en ese
+   * caso coincide con `tip_amount`). Si el operador solo escribe el
+   * monto, dejamos que el backend asuma 'fixed'.
+   */
+  tip_type?: 'percentage' | 'fixed';
+  /** Base value of the tip — % si percentage, monto si fixed. */
+  tip_value?: number;
+  /** Waiter that receives the tip (atribución para informes). */
+  tip_waiter_id?: number;
   /** QUI-728 (E.1) — cuenta bancaria elegida para transferencia. */
   bank_account_id?: number;
 }
@@ -59,6 +70,10 @@ export interface TablePaymentConfirmSubmit {
   payment_id: number;
   /** Optional gratuity echo-back (only sent when > 0). */
   tip_amount?: number;
+  /** Misma metadata que TablePaymentSubmit, propagada al confirm. */
+  tip_type?: 'percentage' | 'fixed';
+  tip_value?: number;
+  tip_waiter_id?: number;
 }
 
 export type TablePaymentMode = 'pos' | 'confirm';
@@ -109,6 +124,22 @@ export class TablePaymentModalComponent {
   // ── State ───────────────────────────────────────────────────────────
   /** Gratuity added on top of the bill (confirm mode). */
   readonly tip = signal<number>(0);
+  /**
+   * carril D / lina — D3: modo de la propina. 'percentage' significa
+   * que `tip` representa un % (0-100); 'fixed' significa monto libre.
+   * Si el operador escribe un monto sin elegir modo, el backend
+   * asume 'fixed' por default (criterio del operador puede tipear
+   * libremente sin obligarle a marcar).
+   */
+  readonly tipType = signal<'percentage' | 'fixed'>('fixed');
+  /**
+   * Waiter que recibe la propina. Atribución para informes (no se
+   * reparte ni liquida en esta iteración). UI: input numérico
+   * simple — el cajero sabe el ID del mesero; un selector con
+   * dropdown del listado de users del store queda como mejora
+   * futura cuando nancy apruebe el alcance.
+   */
+  readonly tipWaiterId = signal<number | null>(null);
 
   readonly currencySymbol = this.currencyService.currencySymbol;
 
@@ -150,6 +181,17 @@ export class TablePaymentModalComponent {
     this.tip.set(Number.isFinite(value) && value > 0 ? value : 0);
   }
 
+  /** D3: cambia el modo de la propina (% vs monto libre). */
+  onTipTypeChange(type: 'percentage' | 'fixed'): void {
+    this.tipType.set(type);
+  }
+
+  /** D3: cambia el mesero que recibe la propina. */
+  onTipWaiterIdChange(value: string): void {
+    const n = Number(value);
+    this.tipWaiterId.set(Number.isFinite(n) && n > 0 ? n : null);
+  }
+
   /**
    * Map the shared collector's normalized {@link PaymentSubmit} into the
    * table settlement DTO and emit `pay`. Keeps the exact contract the page
@@ -162,7 +204,15 @@ export class TablePaymentModalComponent {
         ? { amount_received: submit.amountReceived }
         : {}),
       ...(submit.reference ? { payment_reference: submit.reference } : {}),
-      ...(submit.tip && submit.tip > 0 ? { tip_amount: submit.tip } : {}),
+      // D3 — propina: collector manda `tip` (monto). El modo 'fixed'
+      // es el default natural (monto escrito directo). El tip_amount
+      // se manda solo si > 0 — el backend lo acepta como monto fijo.
+      ...(submit.tip && submit.tip > 0
+        ? { tip_amount: submit.tip, tip_type: 'fixed' as const, tip_value: submit.tip }
+        : {}),
+      ...(this.tipWaiterId() != null
+        ? { tip_waiter_id: this.tipWaiterId() ?? undefined }
+        : {}),
       // QUI-728 (E.1) — el selector de cuentas del collector emite bankAccountId.
       ...(submit.bankAccountId != null
         ? { bank_account_id: submit.bankAccountId }
@@ -175,9 +225,19 @@ export class TablePaymentModalComponent {
   submit(): void {
     const p = this.pendingPayment();
     if (!p || !this.canProcess()) return;
+    const tipVal = this.tip();
     const payload: TablePaymentConfirmSubmit = {
       payment_id: p.id,
-      ...(this.tip() > 0 ? { tip_amount: this.tip() } : {}),
+      ...(tipVal > 0
+        ? {
+            tip_amount: tipVal,
+            tip_type: this.tipType(),
+            tip_value: tipVal, // En confirm el monto y el valor coinciden (input libre).
+          }
+        : {}),
+      ...(this.tipWaiterId() != null
+        ? { tip_waiter_id: this.tipWaiterId() ?? undefined }
+        : {}),
     };
     this.confirmPayment.emit(payload);
   }
@@ -193,5 +253,7 @@ export class TablePaymentModalComponent {
 
   private resetState(): void {
     this.tip.set(0);
+    this.tipType.set('fixed');
+    this.tipWaiterId.set(null);
   }
 }
