@@ -120,11 +120,12 @@ export class PrintGatewayClientService {
     formatType: PrintFormatType,
     documentId: number | string,
     engine: 'html' | 'pdf' = 'html',
+    bodyOnly: boolean = false,
   ): Observable<RenderPrintDocumentResponse> {
     return this.http
       .post<{ success: boolean; data: RenderPrintDocumentResponse }>(
         `${this.baseUrl}/render`,
-        { format_type: formatType, document_id: documentId, engine },
+        { format_type: formatType, document_id: documentId, engine, body_only: bodyOnly },
       )
       .pipe(map((res) => res.data));
   }

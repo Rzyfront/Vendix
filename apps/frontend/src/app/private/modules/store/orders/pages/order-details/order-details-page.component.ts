@@ -2612,6 +2612,14 @@ export class OrderDetailsPageComponent {
    * no `@page size` rule and ignored `receipts.pos_ticket_copies`, and the
    * service now waits for images to decode before `print()` and removes the
    * iframe on `afterprint`.
+   *
+   * [print-fiscal-gate P7.1] — Para un solo ticket `printTicketsBatch`
+   * delega en `DocumentPrintService.resolveAndPrint`, que consulta
+   * `/resolve-for-document` (gate fiscal del backend) y luego `/render`.
+   * El formato y el `documentId` los decide el backend según el estado
+   * fiscal de la tienda, no la presencia póstuma de `electronicInvoice`
+   * que el switch legacy miraba. Si el gateway falla, el error se eleva
+   * al caller — no más fallback silencioso al emisor local.
    */
   async printOrder(): Promise<void> {
     const orderData = this.order();

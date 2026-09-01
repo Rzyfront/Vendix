@@ -215,6 +215,7 @@ export class PrintFormatsController {
       dto.format_type as unknown as print_format_type_enum,
       dto.document_id,
       dto.engine,
+      dto.body_only ?? false,
     );
     return this.responseService.success(result);
   }

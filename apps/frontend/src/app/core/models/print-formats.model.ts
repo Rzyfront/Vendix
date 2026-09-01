@@ -239,6 +239,13 @@ export interface PrintPreviewResponse {
 export interface RenderPrintDocumentResponse {
   format_type: PrintFormatType;
   html?: string;
+  /**
+   * [print-fiscal-gate P7.2] — Eco del flag enviado al renderer: cuando
+   * `body_only=true`, `html` contiene solo el contenido interior del
+   * `<body>`, sin `<!DOCTYPE>`, `<head>` ni `<html>`. El batch de impresión
+   * aprovecha este modo para concatenar N cuerpos bajo un único `<html>`.
+   */
+  body_only?: boolean;
   copies: number;
   is_roll: boolean;
   width_mm: number;

@@ -28,6 +28,14 @@ export interface RenderResult {
   format_type: print_format_type_enum;
   html?: string;
   /**
+   * [print-fiscal-gate P7.2] — Cuando el caller pidió `body_only=true`,
+   * `html`` contiene SOLO el contenido interior del `<body>`. Cuando pidió
+   * `body_only=false` (default), contiene el documento HTML completo.
+   * Misma key para no romper el shape histórico; el caller decide cómo
+   * envolver.
+   */
+  body_only?: boolean;
+  /**
    * PDF bajo demanda — E.11 casilla 4, slice 1. Declarado desde el día uno y
    * JAMÁS lleno hasta ahora: `engine:'pdf'` se aceptaba en el DTO y el cuerpo
    * lo ignoraba.
@@ -234,6 +242,7 @@ export class PrintGatewayService {
     formatType: print_format_type_enum,
     documentId: number | string,
     engine: 'html' | 'pdf' = 'html',
+    bodyOnly: boolean = false,
   ): Promise<RenderResult> {
     const start = Date.now();
     if (
@@ -344,12 +353,38 @@ export class PrintGatewayService {
 
     return {
       format_type: formatType,
-      html,
+      html: bodyOnly ? this.extractBodyContent(html) : html,
       pdf_buffer,
+      body_only: bodyOnly,
       copies: effective.definition.paper.copies || 1,
       is_roll: effective.definition.paper.is_roll,
       width_mm: effective.definition.paper.width_mm,
     };
+  }
+
+  /**
+   * [print-fiscal-gate P7.2] — Extrae SOLO el contenido interior del `<body>`
+   * de un documento renderizado por el composer. El composer devuelve un
+   * `<!DOCTYPE html><html ...><head>...</head><body>CONTENIDO</body></html>`
+   * completo; el batch de impresión necesita los cuerpos por separado para
+   * concatenarlos con `break-after: page` y envolver UNA vez con un único
+   * `<html>`.
+   *
+   * La extracción es robusta frente a los dos formatos que produce el
+   * composer: con y sin `<!DOCTYPE>`, con y sin espacio entre atributos.
+   * Si el regex no casa, devolvemos el HTML crudo: preferible eso a lanzar
+   * un 500 en mitad de un lote, y el caller puede diagnosticar el documento
+   * malformado por separado.
+   */
+  private extractBodyContent(html: string): string {
+    const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+    if (!bodyMatch) {
+      this.logger.warn(
+        'PrintGateway: extractBodyContent no encontró <body>; se devuelve el HTML crudo.',
+      );
+      return html;
+    }
+    return bodyMatch[1];
   }
 
   /**

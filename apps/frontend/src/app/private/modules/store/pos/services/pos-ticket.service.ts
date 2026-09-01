@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { Observable, from, of } from 'rxjs';
+import { Observable, firstValueFrom, from, of } from 'rxjs';
 import { delay, map, switchMap } from 'rxjs/operators';
 import {
   TicketData,
@@ -12,6 +12,7 @@ import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { PrintFormat } from '../../../../../core/models/store-settings.interface';
 import { PrintFormatType } from '../../../../../core/models/print-formats.model';
 import { DocumentPrintService } from '../../../../../shared/services/print';
+import { PrintGatewayClientService } from '../../../../../shared/services/print/print-gateway-client.service';
 
 /**
  * Ticket-specific CSS handed to `DocumentPrintService`. The `@page` rule is NOT
@@ -70,6 +71,10 @@ export class PosTicketService {
   private storeSettings = inject(StoreSettingsFacade);
   private authFacade = inject(AuthFacade);
   private documentPrint = inject(DocumentPrintService);
+  // [print-fiscal-gate P7.2] — Necesario para `body_only=true` en el batch
+  // multi-ticket; `DocumentPrintService.printViaGateway` (y por tanto
+  // `resolveAndPrint`) no expone esa flag.
+  private gatewayClient = inject(PrintGatewayClientService);
 
   private defaultPrinterConfig: PrinterConfig = {
     name: 'Default Thermal Printer',
@@ -430,19 +435,20 @@ export class PosTicketService {
     if (ticketData.customer) {
       // [print-fiscal-gate] — Precedencia: alias > nombre del cliente >
       // 'Consumidor Final' (placeholder de venta anónima). El alias es lo
-      // que el cajero capturó al cierre ("Mesa 5", "Cliente mostrador") y
-      // suele ser lo que el cliente revisa al pagar. El distintivo de
-      // "Consumidor Final" se pinta al lado cuando el alias coincide con el
-      // placeholder, para que el tiquete siga marcando el hecho fiscal aún
-      // cuando el cajero eligió no identificar al cliente.
+      // que el cajero capturó al cierre ("Mesa 5", "Cliente mostrador").
+      //
+      // Distintivo (Consumidor Final) SOLO cuando el alias es exactamente el
+      // placeholder. Un alias real ("mesa 3 señor de azul") va solo, sin
+      // etiqueta: el dueño pidió el alias EN LUGAR de CF, no acompañado. Si
+      // no hay alias, mostramos el nombre del cliente sin distintivo (el
+      // nombre ya es el identificador real).
       const alias = (ticketData.customer.customerAlias || '').trim();
       const name = (ticketData.customer.name || '').trim();
       const customerFinalBadge = 'Consumidor Final';
-      const isAnonymousAlias =
+      const isAliasPlaceholder =
         alias.length > 0 && alias.toLowerCase() === customerFinalBadge.toLowerCase();
       const primaryName = alias || name || customerFinalBadge;
-      const showFinalBadge =
-        (alias || name) && (isAnonymousAlias || !name || !alias);
+      const showFinalBadge = isAliasPlaceholder;
       const displayName = showFinalBadge
         ? `${primaryName} <span style="font-size: 10px; color: #6b7280;">(${customerFinalBadge})</span>`
         : primaryName;
@@ -715,49 +721,114 @@ export class PosTicketService {
       }
     }
 
-    // Before the first `currencyService.format()` call, or every amount on every
-    // ticket prints with the en-US `$` fallback.
-    await this.ensureCurrencyLoaded();
-
-    // Resolved once for the whole batch: the format/copies come from the store's
-    // settings (or the override the backend read from the DB) and the session
-    // overlay from localStorage.
+    // [print-fiscal-gate P7.2] — Batch >1: el motor nuevo imprime SIEMPRE.
+    // Resolvemos y renderizamos por gateway CADA ticket con `body_only=true`,
+    // concatenamos los `<body>` resultantes con `break-after: page` entre
+    // ellos y abrimos UNA sola diálogo de impresión. Sin fallback al emisor
+    // local: si un ticket del lote falla, NO se tumba el lote — se imprime
+    // lo que sí resolvió y se reportan los ids fallidos. Un lote de 20 que
+    // imprime 19 y reporta 1 es preferible a uno que imprime 0.
     const printer = this.currentPrinterConfig(options?.formatOverride);
-    const overlay = this.resolveSessionStore();
 
-    const bodies: string[] = [];
-    let rendered = 0;
+    const results: Array<{
+      orderId: number | null;
+      body: string | null;
+      error?: string;
+    }> = [];
 
+    let done = 0;
     for (const ticket of tickets) {
-      // One body per ticket; the copies and the page breaks between them are
-      // laid out by `DocumentPrintService`, which owns that rule for every
-      // document in the app.
-      bodies.push(await this.renderTicketBody(ticket, printer, overlay));
+      const candidateDocId =
+        ticket.orderId ??
+        (Number.isInteger(Number(ticket.id)) && Number(ticket.id) > 0
+          ? Number(ticket.id)
+          : null);
 
-      rendered++;
-      options?.onProgress?.(rendered, total);
+      if (!candidateDocId) {
+        results.push({
+          orderId: null,
+          body: null,
+          error: 'sin orderId ni id numérico',
+        });
+        done++;
+        options?.onProgress?.(done, total);
+        continue;
+      }
 
-      // Rendering is synchronous string work; without this the main thread never
-      // gets a frame and the progress bar stays frozen at 0 for seconds.
-      if (rendered % BATCH_YIELD_EVERY === 0 && rendered < total) {
+      try {
+        const resolved = await firstValueFrom(
+          this.gatewayClient.resolveDocument('pos_order', candidateDocId, 'html'),
+        );
+        const rendered = await firstValueFrom(
+          this.gatewayClient.renderDocument(
+            resolved.format_type,
+            resolved.document_id,
+            resolved.engine,
+            /* bodyOnly */ true,
+          ),
+        );
+        if (!rendered?.html) {
+          throw new Error(
+            `Gateway devolvió respuesta sin HTML para ${resolved.format_type} doc ${resolved.document_id}`,
+          );
+        }
+        results.push({ orderId: candidateDocId, body: rendered.html });
+      } catch (err) {
+        results.push({
+          orderId: candidateDocId,
+          body: null,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      done++;
+      options?.onProgress?.(done, total);
+
+      // Yield al main thread para que la barra de progreso no se congele.
+      if (done % BATCH_YIELD_EVERY === 0 && done < total) {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
     }
 
+    // Type guard explícito: tras el filtro, `r.body` es `string` (no `string | null`).
+    // Sin él, TS mantiene el tipo ancho y `r.body!` se necesitaría más abajo.
+    type ResultWithBody = { orderId: number | null; body: string; error?: string };
+    const succeeded = results.filter(
+      (r): r is ResultWithBody => r.body !== null,
+    );
+    const failed = results.filter((r) => r.body === null);
+
+    if (succeeded.length === 0) {
+      // Ninguno resolvió: nada que imprimir. Reportamos y salimos.
+      const detail = failed
+        .map((f) => `doc ${f.orderId ?? '?'}: ${f.error}`)
+        .join('; ');
+      throw new Error(`Lote sin tiquetes imprimibles: ${detail}`);
+    }
+
+    const separator = '<div style="break-after: page; page-break-after: always;"></div>';
+    const concatenated = succeeded.map((r) => r.body).join(`\n${separator}\n`);
+
     const job = await this.documentPrint.print({
       document: 'pos_ticket',
-      body: bodies,
+      body: concatenated,
       title: total === 1 ? 'Ticket' : `Tiquetes (${total})`,
       styles: TICKET_PRINT_STYLES,
       overrides: {
-        // Already resolved above, so the render's paper width and the printed
-        // `@page` cannot disagree.
         format: printer.format,
         copies: options?.copiesOverride,
       },
     });
 
-    return { rendered, pages: rendered * job.copies };
+    if (failed.length > 0) {
+      // No tiramos el lote (ya se imprimió lo bueno); sólo informamos.
+      const detail = failed
+        .map((f) => `doc ${f.orderId ?? '?'}: ${f.error}`)
+        .join('; ');
+      console.warn(`printTicketsBatch: ${failed.length} tiquete(s) no se imprimieron — ${detail}`);
+    }
+
+    return { rendered: succeeded.length, pages: succeeded.length * job.copies };
   }
 
   private async printHTML(html: string, copies?: number): Promise<void> {
