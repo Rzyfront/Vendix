@@ -3368,6 +3368,79 @@ export class OrderDetailsPageComponent {
     this.refreshOrder();
   }
 
+  // ─── T9p6 — entregar un ítem desde el detalle de la orden ────────────
+  /**
+   * Ítem actualmente en tránsito de entrega (PATCH en vuelo). `null`
+   * cuando ninguna entrega está pendiente. Misma forma que `resendItemId`:
+   * un solo ítem a la vez por modalidad; lo usamos para deshabilitar el
+   * botón y mostrar "Entregando…" mientras la promesa del backend corre.
+   */
+  readonly deliveringItemId = signal<number | null>(null);
+
+  /**
+   * Espejo del predicado `DELIVER_ORDER_ITEM_NOT_DELIVERABLE` del backend.
+   * Ofrece la acción "Entregar" SOLO si:
+   *  - El ítem NO está entregado todavía (`delivered_at` IS NULL).
+   *  - La orden NO está en estado terminal. Lista reusada del predicado
+   *    `canResend` (:556): shipped / delivered / finished / cancelled /
+   *    refunded. NO se ofrece si la orden ya está cancelada, devuelta,
+   *    enviada como domicilio o marcada como entregada globalmente.
+   *  - Si el ítem pasó por cocina, su `kitchen_ticket_items[0].status`
+   *    debe ser `ready`. En cualquier otro estado el backend responde 422;
+   *    no ofrezco un botón que sé que va a fallar.
+   *  - Si el ítem NUNCA pasó por cocina (cerveza, retail, etc.) es
+   *    entregable directo. Este es el caso que cubre T9p6: una orden
+   *    POS / para llevar / domicilio que NO tiene sesión de mesa no
+   *    tenía superficie de entrega hasta hoy.
+   */
+  canDeliver(item: OrderItem): boolean {
+    if (item.delivered_at) return false;
+    const order = this.order();
+    if (!order) return false;
+    const terminalStates: OrderState[] = [
+      'shipped',
+      'delivered',
+      'finished',
+      'cancelled',
+      'refunded',
+    ];
+    if (terminalStates.includes(order.state as OrderState)) return false;
+    const ks = this.kitchenStateFor(item);
+    if (ks == null) return true;
+    return ks.status === 'ready';
+  }
+
+  /**
+   * Acción: marca el ítem como entregado vía
+   * PATCH /store/orders/:id/flow/items/:itemId/deliver. El seam es
+   * idempotente — si el ítem ya estaba entregado, el backend responde
+   * 200 sin mover `delivered_at`, así que re-clicks no rompen nada.
+   * Tras éxito, toast + refreshOrder() (mismo patrón que `fireSelectedToKitchen`
+   * :3291 / `onResendConfirmed` :3362) para que el badge "Entregado" se
+   * pinte con la fecha real devuelta por el backend.
+   */
+  deliverItem(item: OrderItem): void {
+    if (!this.canDeliver(item)) return;
+    const orderId = this.order()?.id;
+    if (!orderId) return;
+    this.deliveringItemId.set(item.id);
+    this.ordersFlowService
+      .deliverOrderItem(orderId, item.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.deliveringItemId.set(null);
+          this.toastService.success('Ítem entregado');
+          this.refreshOrder();
+        },
+        error: (err: unknown) => {
+          this.deliveringItemId.set(null);
+          this.toastService.error('No se pudo marcar como entregado');
+          console.error('Deliver item failed', err);
+        },
+      });
+  }
+
   /** Localised label for the KDS state badge. */
   kitchenStateLabel(ks: { status: string }): string {
     switch (ks.status) {

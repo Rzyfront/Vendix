@@ -236,6 +236,21 @@ export interface OrderItem {
       fired_at?: string | Date | null;
     };
   }>;
+  /**
+   * QUI-T9p6 — entrega a nivel de ítem (NO del KDS: ese vive en
+   * `kitchen_ticket_items[].status='delivered'`). Diferente y ortogonal:
+   * la entrega es un hecho de SERVICIO (la comida llegó al cliente), no
+   * de cocina. Se estampa al ejecutar
+   * PATCH /api/store/orders/:orderId/flow/items/:itemId/deliver.
+   *
+   * `null` (o ausente) = no entregado. Una fecha = entregado.
+   * `orders.service.ts:710 findOne` usa `include` sin `select`, así que
+   * Prisma devuelve todas las columnas escalares de `order_items`
+   * (`schema.prisma:1427-1428`) — el campo YA viaja por el cable.
+   * Esta declaración es declarar lo que ya llega.
+   */
+  delivered_at?: string | null;
+  delivered_by_user_id?: number | null;
 }
 
 export interface Address {
