@@ -299,6 +299,13 @@ export class AccountService {
           quantity: item.quantity,
           unit_price: item.unit_price,
           total_price: item.total_price,
+          // [resid-fiscal] — Aditivo. La línea cancelada sigue presente
+          // en la respuesta (no la quitamos: el cliente la pidió, debe
+          // verla tachada con el motivo). El FE la renderiza tachada con
+        //   distintivo "Cancelado" cuando `cancelled_at != null`. El total
+        //   agregado ya excluye cancelados (`orders.grand_total`).
+          cancelled_at: item.cancelled_at ?? null,
+          cancellation_reason: item.cancellation_reason ?? null,
           image_url: item.products?.product_images?.[0]?.image_url
             ? await this.s3Service.signUrl(
                 item.products.product_images[0].image_url,
