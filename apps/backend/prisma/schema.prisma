@@ -1358,6 +1358,25 @@ model order_items {
   /// a cocina (queda como merma); puede ser NULL en items no disparados.
   /// `cancellation_type` clasifica el efecto contable: 'before_fire'
   /// revierte stock, 'after_fire_waste' registra merma sin reversión.
+  ///
+  /// ── CONTRATO CRÍTICO PARA FUTUROS CONSUMIDORES ─────────────────────
+  /// TODO consumidor backend que sume dinero (facturación electrónica,
+  /// impresión masiva de tiquetes, asientos contables, reportes de
+  /// ventas, exportación PDF a nivel organización, ecommerce checkout)
+  /// DEBE filtrar por `cancelled_at IS NULL` cuando relee líneas.
+  /// El `orders.subtotal_amount` / `tax_amount` / `grand_total` ya
+  /// queda recalculado en el momento del soft cancel y es la fuente
+  /// primaria para totales agregados; pero cualquier `include` o
+  /// `findMany` que recorra `order_items` y vuelva a sumar DEBE
+  /// excluir cancelados, o el ítem cancelado aparece como línea
+  /// fantasma (en XML DIAN, en un PDF de despacho, en un asiento
+  /// contable) y descuadra la igualdad header tax = Σ line taxes.
+  ///
+  /// Consumidores que SÍ muestran los cancelados (no filtran):
+  ///  - `kitchen_ticket_items` derivado: auditoría de merma.
+  ///  - Detalle de orden en pantalla (UI).
+  ///  - Listado de órdenes: la cancelación se ve como badge, no como
+  ///    línea de venta.
   cancelled_at                    DateTime?                @db.Timestamp(6)
   cancellation_reason             String?
   cancellation_type               String?                  @db.VarChar(20)

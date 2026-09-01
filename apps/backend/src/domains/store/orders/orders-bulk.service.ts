@@ -598,7 +598,17 @@ export class OrdersBulkService {
         // Sin join con `products`: el tiquete imprime `product_name`, que es
         // columna de la LÍNEA (el nombre en el momento de vender), no del
         // catálogo actual — que es además lo correcto en un comprobante.
-        order_items: { orderBy: { id: 'asc' } },
+        order_items: {
+          orderBy: { id: 'asc' },
+          // carril D / lina — D2: filtrar ítems cancelados. La impresión
+          // masiva NO debe imprimir líneas canceladas como si fueran
+          // cobrables: el operador quiere ver el tiquete con lo que
+          // efectivamente se cobró. (El detalle de orden en pantalla
+          // sigue mostrando TODAS las líneas, tachadas, vía
+          // `order-detail-page` — son dos consumidores distintos, este
+          // filtro aplica solo a la impresión del comprobante.)
+          where: { cancelled_at: null },
+        },
         // El identificador fiscal del cliente en `users` es `document_number`
         // (+ `document_type`), no `tax_id` — `tax_id` solo existe en
         // `organizations` (schema.prisma). `phone` va porque el bloque de

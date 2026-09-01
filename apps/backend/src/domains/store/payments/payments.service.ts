@@ -1364,7 +1364,16 @@ export class PaymentsService {
           // type (IVA → 2408, INC → 2436, ICA → 241205) instead of collapsing to
           // 2408. Read from the persisted, typed order_item_taxes rows.
           const orderItemsWithTaxes = await tx.order_items.findMany({
-            where: { order_id: order.id },
+            where: {
+              order_id: order.id,
+              // carril D / lina — D2: un ítem cancelado (soft cancel vía
+              // `cancelled_at IS NOT NULL`) NO debe aportar al
+              // `tax_breakdown` del asiento contable. Si entra, el DR
+              // iva/reteiva queda inflado por un impuesto que el
+              // cliente nunca pagó. El grand_total ya excluye el item,
+              // así que esto sólo cierra la grieta del breakdown.
+              cancelled_at: null,
+            },
             select: {
               order_item_taxes: { select: { tax_type: true, tax_amount: true } },
             },
