@@ -1221,6 +1221,10 @@ export class PaymentsService {
                 product_id: { not: null },
                 inventory_consumed_at_fire: false,
                 products: { product_type: 'prepared' },
+                // [resid-fiscal] — No re-disparar ítems cancelados (D2). Si
+                // entra al fire, KDS recibe un plato fantasma que el cliente
+                // no pidió y el cocinero cobraría como desperdicio.
+                cancelled_at: null,
               },
               select: { id: true, product_id: true },
             });

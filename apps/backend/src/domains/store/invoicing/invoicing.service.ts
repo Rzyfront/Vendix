@@ -1372,7 +1372,20 @@ export class InvoicingService {
     const order = await this.prisma.orders.findFirst({
       where: { id: order_id },
       include: {
+        // [print-fiscal-gate / resid-fiscal] — Filtramos líneas canceladas
+        // (soft cancel de lina, D2) antes de armar las líneas de la factura.
+        // `orders.subtotal_amount`/`tax_amount`/`grand_total` ya excluyen
+        // cancelados, pero este `include` relee las líneas y las vuelve a
+        // sumar — sin el filtro, el plato cancelado salía como línea
+        // fantasma en el XML DIAN y rompía la igualdad header tax = Σ
+        // line taxes. Una factura así o se rechaza o se emite con un
+        // documento legalmente incorrecto que YA consumió consecutivo de
+        // resolución — irreversible ante la DIAN. Filtrar aquí evita
+        // ambos escenarios. `order_item_taxes` viaja colgado de la línea
+        // cancelada, así que el filtro en cascada es correcto: ningún
+        // impuesto de línea cancelada entra al cálculo.
         order_items: {
+          where: { cancelled_at: null },
           include: {
             products: true,
             product_variants: true,
