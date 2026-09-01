@@ -273,17 +273,12 @@ export class AuthFacade {
    * of truth is `store_settings.settings.general.industries`. Defaults to
    * `false` when no industries are loaded yet.
    */
-  readonly isGym = computed<boolean>(() => {
-    const fromSettings = (this.storeSettings() as any)?.general?.industries as
-      | string[]
-      | undefined;
-    const fromLogin = this.userIndustries();
-    const industries =
-      fromSettings ||
-      (Array.isArray(fromLogin) ? fromLogin : null) ||
-      [];
-    return industries.includes('gym');
-  });
+  // T10 A2: delega en la misma cascada que `isRestaurant` (`storeIndustries`).
+  // Antes reimplantaba la cascada `fromSettings || fromLogin || []` en línea
+  // — mismo patrón del que A1 y A2 nos estan limpiando.
+  readonly isGym = computed<boolean>(() =>
+    this.storeIndustries().includes('gym'),
+  );
   readonly storeSettings = toSignal(this.storeSettings$, { initialValue: null as any });
   readonly fiscalStatus = toSignal(this.fiscalStatus$, { initialValue: null as any });
   readonly activeFiscalAreas = toSignal(this.activeFiscalAreas$, { initialValue: [] as FiscalArea[] });
