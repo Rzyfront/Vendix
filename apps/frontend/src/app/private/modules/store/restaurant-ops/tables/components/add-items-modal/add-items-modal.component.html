@@ -158,7 +158,7 @@
                 <textarea
                   class="note-field__input"
                   rows="2"
-                  maxlength="500"
+                  maxlength="200"
                   [value]="notesFor(row.id)"
                   (input)="setNotes(row.id, $any($event.target).value)"
                   [attr.aria-label]="'Nota de preparacion para ' + row.name"
