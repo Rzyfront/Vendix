@@ -16,6 +16,11 @@ import {
 // `ordersFlowService` so we don't shadow the existing `ordersService`
 // injection (used everywhere else on the page for store-order CRUD).
 import { OrdersService } from '../../services/orders.service';
+// Carril B - B3: cliente SSE para refrescar el detalle cuando el backend
+// emite eventos del dominio orders (order.created, order.items.updated,
+// order.status_changed, order.shipping_assigned). Filtramos por
+// `payload.data.order_id` en el cliente.
+import { OrderDetailSseService } from '../../services/order-detail-sse.service';
 import { AddressPayload } from '../../../../../../shared/components';
 import { GenerateDispatchWizardComponent } from '../../components/generate-dispatch-wizard/generate-dispatch-wizard.component';
 import { ShippingAddressModalComponent } from '../../components/shipping-address-modal/shipping-address-modal.component';
@@ -1258,6 +1263,11 @@ export class OrderDetailsPageComponent {
   // dispatch them from this page).
   private kitchenTicketsService = inject(KitchenTicketsService);
   private sanitizer = inject(DomSanitizer);
+  // Carril B - B3: SSE del detalle. connect(orderId) en el init del page,
+  // disconnect via DestroyRef cuando el componente se destruye. Un effect
+  // reacciona a `lastRelevantEvent()` y dispara `loadData()` para
+  // re-hidratar el detalle con la nueva foto del backend.
+  private readonly orderDetailSse = inject(OrderDetailSseService);
   // Bug 4 — traceability order → dispatch note → route.
   private dispatchNotesService = inject(DispatchNotesService);
   // Fase F8 — publicar la orden al pool de reparto (Vendix Repartos).
@@ -1331,6 +1341,10 @@ export class OrderDetailsPageComponent {
     this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
       this.orderId = params.get('id');
       if (this.orderId) {
+        // Carril B - B3: abre el SSE del detalle filtrado por esta orden.
+        // Idempotente: si navegamos a otra orden, connect() cierra la
+        // anterior y abre una nueva.
+        this.orderDetailSse.connect(Number(this.orderId));
         this.loadData();
       }
     });
@@ -1350,6 +1364,24 @@ export class OrderDetailsPageComponent {
       ) {
         this.fastTrackForm.get('payment')?.patchValue({ payment_method_id: methods[0].id });
       }
+    });
+
+    // Carril B - B3: cuando llega un evento relevante al SSE, re-hidrata el
+    // detalle. `lastRelevantEvent()` ya filtra por order_id en el cliente;
+    // el effect solo dispara si el signal cambia. Sin debounce: el detalle
+    // del backend es barato y queremos consistencia inmediata.
+    effect(() => {
+      const evt = this.orderDetailSse.lastRelevantEvent();
+      if (evt && this.orderId) {
+        this.loadData();
+      }
+    });
+
+    // Cleanup: cierra el SSE cuando el componente se destruye (navegacion
+    // fuera del detalle). `OrderDetailSseService` es providedIn:'root'
+    // asi que sobrevive entre ordenes, pero igual cortamos la conexion.
+    this.destroyRef.onDestroy(() => {
+      this.orderDetailSse.disconnect();
     });
   }
 
