@@ -366,6 +366,7 @@
                     class="item-row"
                     [class.is-selected]="isSelected(item.id)"
                     [class.is-fired]="isItemFired(item)"
+                    [class.is-cancelled]="!!item.cancelled_at"
                     [class.selectable]="
                       selectionMode() &&
                       !isClosed() &&
@@ -412,7 +413,35 @@
                               Para llevar
                             </span>
                           }
+                          <!--
+                            carril D / lina — D2: badge de cancelado en la
+                            línea. El ítem queda visible con su motivo
+                            persistido y la marca contable
+                            (before_fire = stock revertido; after_fire_waste
+                            = merma). El backend ya excluye este ítem del
+                            subtotal/tax/grand_total.
+                          -->
+                          @if (item.cancelled_at) {
+                            <span
+                              class="item-cancelled-badge"
+                              [title]="
+                                'Cancelado: ' +
+                                (item.cancellation_reason ?? 'sin motivo')
+                              "
+                            >
+                              <app-icon name="ban" [size]="11"></app-icon>
+                              Cancelado
+                              @if (item.cancellation_type === 'after_fire_waste') {
+                                · merma
+                              }
+                            </span>
+                          }
                         </div>
+                        @if (item.cancelled_at && item.cancellation_reason) {
+                          <p class="item-cancelled-reason">
+                            Motivo: {{ item.cancellation_reason }}
+                          </p>
+                        }
                         <!--
                           QUI-736 — variante como SUB-LÍNEA propia, NO
                           concatenada al nombre. `product_name` es un

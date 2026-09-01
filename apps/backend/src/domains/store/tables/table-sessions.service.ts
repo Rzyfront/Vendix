@@ -819,9 +819,11 @@ export class TableSessionsService {
    * runs in ONE `$transaction`; the `ticket.cancelled` SSE is emitted only
    * AFTER the commit.
    */
-  async removeItem(
+  async cancelOrderItem(
     sessionId: number,
     orderItemId: number,
+    reason: string,
+    cancellationType?: 'before_fire' | 'after_fire_waste',
   ): Promise<TableSessionView> {
     // Mirror addItems: only store context is required (the POS controller path
     // is already gated by @Permissions('store:table_sessions:update')).
@@ -834,13 +836,41 @@ export class TableSessionsService {
     if (!session.order) {
       throw new VendixHttpException(ErrorCodes.TABLE_SESSION_NOT_FOUND);
     }
-    if (session.order.state !== 'draft') {
+
+    // ── CORRECCIÓN 1 del GO (carril D) ─────────────────────────────────
+    // El bug entero reportado por el dueño: el guard `state === 'draft'`
+    // bloqueaba la cancelación de cualquier plato en cuanto la orden salía
+    // del estado de borrador (disparar a cocina, etc.), justamente cuando
+    // el mesero más necesita cancelar un plato equivocado.
+    //
+    // Regla nueva: la cancelación se permite mientras la orden NO esté
+    // cobrada ni cerrada. Bloquea solo cuando `payment_status='paid'`
+    // o `state ∈ {completed, cancelled, refunded}`. La distinción
+    // `before_fire` / `after_fire_waste` (más abajo) hace seguro
+    // levantar la guarda: antes de disparar se revierte stock, después se
+    // registra merma.
+    //
+    // Las constantes deben mantenerse alineadas con la lógica equivalente
+    // en cualquier futuro cancelador a nivel de orden — son las mismas
+    // tres salidas terminales.
+    const BLOCKED_STATES = ['completed', 'cancelled', 'refunded'] as const;
+    const isPaid =
+      (session.order as any).payment_status === 'paid' ||
+      (session.order as any).payment_status === 'succeeded';
+    if (isPaid) {
       throw new VendixHttpException(
-        ErrorCodes.TABLE_SESSION_ORDER_NOT_DRAFT,
+        ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
+        'No se puede cancelar un ítem de una orden ya cobrada',
+      );
+    }
+    if (BLOCKED_STATES.includes(session.order.state as any)) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
+        `No se puede cancelar un ítem en estado '${session.order.state}'`,
       );
     }
 
-    // Locate the item within the session's own draft order (this is also the
+    // Locate the item within the session's own order (this is also the
     // ownership guard — findOne is store-scoped).
     const orderItem = session.order.order_items.find(
       (it) => it.id === orderItemId,
@@ -852,51 +882,94 @@ export class TableSessionsService {
       );
     }
 
-    // Resolve the kitchen state. `kitchen_ticket_items` comes ordered desc by
-    // id from findOne, so [0] is the most recent ticket-item for this line.
-    const activeKti = orderItem.kitchen_ticket_items[0] ?? null;
-    const ticketStatus = activeKti?.kitchen_ticket?.status ?? null;
-    const ticketId = activeKti?.kitchen_ticket?.id ?? null;
+    // Idempotencia: si ya está cancelado, devolver el snapshot actual sin
+    // reescribir campos (auditoría: `cancelled_at` queda fijo en la primera
+    // cancelación, no se actualiza en reintentos).
+    if (orderItem.cancelled_at) {
+      return this.findOne(sessionId);
+    }
 
-    // "Fired" = the line was sent to the KDS at some point (flag flipped) OR it
-    // currently has a kitchen_ticket_item. Non-fired lines are Tier 1.
-    const wasFired =
-      orderItem.inventory_consumed_at_fire === true || activeKti != null;
-    const isPendingTicket = wasFired && ticketStatus === 'pending';
+    // Derivar el tipo de cancelación si el caller no lo proveyó:
+    //  - fired (inventory_consumed_at_fire=true) → `after_fire_waste`
+    //  - no fired                                  → `before_fire`
+    //
+    // El `cancellation_type` se persiste aparte de la decisión del KDS
+    // porque ya hay líneas fired con ticket en estado `delivered` o
+    // `cancelled` (no `pending`) que NO se pueden revertir de stock
+    // (la cocina ya consumió o ya cerró la orden del KDS), pero SÍ se
+    // deben poder cancelar contablemente como merma.
+    const wasFired = orderItem.inventory_consumed_at_fire === true;
+    const resolvedType: 'before_fire' | 'after_fire_waste' =
+      cancellationType ?? (wasFired ? 'after_fire_waste' : 'before_fire');
 
-    // Removable only if: not fired (Tier 1) OR fired with a pending ticket
-    // (Tier 2). Anything else (in_preparation/ready/delivered/cancelled) → 409.
-    if (wasFired && !isPendingTicket) {
+    // Regla de motivo obligatorio: si el ítem ya consumió inventario a
+    // fuego, la cancelación es una merma y debe quedar registro escrito
+    // de por qué. Antes de disparar (before_fire) el motivo también es
+    // obligatorio porque el DTO lo exige, pero la diferencia operativa
+    // es nula: el DTO ya lo trae. Esta validación queda como defensa
+    // en profundidad por si alguien invoca este método desde un punto
+    // que no pasa por el DTO.
+    if (!reason || reason.trim().length < 3) {
       throw new VendixHttpException(
-        ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
+        ErrorCodes.VALIDATION_FAILED,
+        'Debes proporcionar un motivo de cancelación (mínimo 3 caracteres)',
       );
     }
 
+    // Resolve the kitchen state. `kitchen_ticket_items` viene ordenado
+    // desc por id desde findOne, así que [0] es el más reciente.
+    const activeKti = orderItem.kitchen_ticket_items[0] ?? null;
+    const ticketStatus = activeKti?.kitchen_ticket?.status ?? null;
+    const ticketId = activeKti?.kitchen_ticket?.id ?? null;
+    const isPendingTicket = wasFired && ticketStatus === 'pending';
+
+    // Tier 3 (KDS ya pasó de `pending`): no bloqueamos la cancelación
+    // contable — el ítem queda como merma y el KDS conserva su ticket
+    // en el estado en que esté (no lo tocamos). Antes este era 409;
+    // ahora es la regla del bug entero levantado.
+    //
+    // Decisión consciente: NO revertir el ticket KDS si ya pasó `pending`.
+    // El cocinero ya cocinó (o está cocinando); revertir su ticket sería
+    // un bug peor que el original. La cancelación queda como merma
+    // (`cancellation_type=after_fire_waste`) y el cocinero ve el ítem
+    // marcado como cancelado vía el listado de orden si necesita
+    // conciliación.
+
+    let cancelledTicketId: number | null = null;
+
     await this.prisma.$transaction(async (tx) => {
-      // Tier 2 — cancel the pending ticket + reverse the fire's stock.
+      // Cancelar el ticket KDS SOLO si está en `pending`. Esto evita
+      // pisar el trabajo del cocinero cuando el plato ya está en
+      // preparación, listo o entregado.
       if (isPendingTicket && ticketId != null) {
-        // TOCTOU guard: the kitchen may have advanced the ticket between the
-        // findOne read and this transaction. Re-read + re-validate inside tx.
+        // TOCTOU guard: el cocinero puede haber avanzado el ticket entre
+        // el findOne y este tx. Releer y revalidar dentro del tx.
         const freshTicket = await tx.kitchen_tickets.findFirst({
           where: { id: ticketId },
           select: { status: true },
         });
-        if (!freshTicket || freshTicket.status !== 'pending') {
-          throw new VendixHttpException(
-            ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
-          );
+        if (freshTicket && freshTicket.status === 'pending') {
+          await this.kitchenFireService.cancelTicketInTx(tx, ticketId);
+          cancelledTicketId = ticketId;
         }
+        // Si el ticket ya no está pending al iniciar el tx, no lo
+        // cancelamos pero la cancelación del ítem sigue adelante
+        // (registrada como merma). El log advertirá abajo.
+      }
 
-        // Cancel the ticket rows in-tx (no SSE here — emitted post-commit).
-        await this.kitchenFireService.cancelTicketInTx(tx, ticketId);
-
-        // Reverse the leaf-ingredient consumption recorded at fire time.
-        // inventory_movements has NO order_item_id; inventory_transactions
-        // does. Idempotency: negative consumption txns only exist for
-        // track_inventory ingredients — if there are none, there is nothing to
-        // reverse (e.g. recipe-less / non-tracked ingredients).
+      // Reversión de stock SOLO en before_fire (no fired). En
+      // after_fire_waste NO se revierte — el inventario se consumió a
+      // fuego y la cancelación queda como merma. El movimiento de stock
+      // para merma se haría en otro flujo (no en este commit).
+      if (resolvedType === 'before_fire' && wasFired) {
+        // Esto no debería ocurrir (si `wasFired` es true, resolvedType
+        // sería `after_fire_waste`), pero defendemos igual por si el
+        // caller envía un type explícito inconsistente.
         const consumptionTxns = await tx.inventory_transactions.findMany({
-          where: { order_item_id: orderItemId, quantity_change: { lt: 0 } },
+          where: {
+            order_item_id: orderItemId,
+            quantity_change: { lt: 0 },
+          },
           select: {
             product_id: true,
             product_variant_id: true,
@@ -916,10 +989,10 @@ export class TableSessionsService {
               location_id: locationId,
               quantity_change: Math.abs(ct.quantity_change),
               movement_type: 'return',
-              reason: 'Reversa fire — borrado de ítem de mesa',
-              source_module: 'kitchen_fire_reversal',
-              // NO order_item_id: the reversal must not create a child row that
-              // re-blocks the order_item delete below (FK onDelete: Restrict).
+              reason: 'Reversa cancelación ítem mesa — antes de disparar',
+              source_module: 'order_item_cancellation',
+              // NO order_item_id: la reversa no debe crear un hijo que
+              // apunte al order_item cancelado (FK onDelete: Restrict).
               create_movement: true,
               validate_availability: false,
             },
@@ -928,32 +1001,34 @@ export class TableSessionsService {
         }
       }
 
-      // Purge FK children (all onDelete: Restrict) BEFORE the hard delete, in
-      // dependency order. Applies to every tier — even a non-fired line can
-      // carry order_item_taxes (POS-created lines do).
-      await tx.inventory_transactions.deleteMany({
-        where: { order_item_id: orderItemId },
-      });
-      await tx.kitchen_ticket_items.deleteMany({
-        where: { order_item_id: orderItemId },
-      });
-      await tx.order_item_taxes.deleteMany({
-        where: { order_item_id: orderItemId },
+      // ── Soft cancel: NO hard delete ──────────────────────────────
+      // El ítem queda VISIBLE en la cuenta con marca de cancelado, pero
+      // EXCLUIDO de los totales (filtramos por `cancelled_at IS NULL` en
+      // el recálculo). El motivo y el tipo contable quedan persistidos
+      // para auditoría y para que el KDS / listado de orden pueda
+      // mostrarlos.
+      await tx.order_items.update({
+        where: { id: orderItemId },
+        data: {
+          cancelled_at: new Date(),
+          cancellation_reason: reason.trim(),
+          cancellation_type: resolvedType,
+          updated_at: new Date(),
+        },
       });
 
-      await tx.order_items.delete({ where: { id: orderItemId } });
-
-      // Recompute totals — EXACT mirror of addItems (subtotal = Σ total_price,
-      // tax = Σ tax_amount_item, grand_total = subtotal + tax; no promo/coupon).
-      const allItems = await tx.order_items.findMany({
-        where: { order_id: session.order_id },
+      // Recompute totals — espejo EXACTO de addItems, pero filtrando
+      // `cancelled_at IS NULL`. Los ítems cancelados NO suman a
+      // subtotal ni tax ni grand_total.
+      const activeItems = await tx.order_items.findMany({
+        where: { order_id: session.order_id, cancelled_at: null },
         select: { total_price: true, tax_amount_item: true },
       });
-      const subtotal = allItems.reduce(
+      const subtotal = activeItems.reduce(
         (acc, it) => acc + Number(it.total_price),
         0,
       );
-      const tax = allItems.reduce(
+      const tax = activeItems.reduce(
         (acc, it) => acc + Number(it.tax_amount_item ?? 0),
         0,
       );
@@ -968,18 +1043,49 @@ export class TableSessionsService {
       });
     });
 
-    // Post-commit: emit the KDS `ticket.cancelled` SSE (Tier 2 only). Never
-    // inside the tx — a rollback must not leave a phantom cancellation event.
-    if (isPendingTicket && ticketId != null) {
-      await this.kitchenFireService.emitTicketCancelledEvent(ticketId);
+    // Post-commit: emitir el SSE `ticket.cancelled` SOLO si cancelamos
+    // un ticket que efectivamente estaba en `pending`. Si el ticket ya
+    // había avanzado, NO emitimos — el cocinero no debe ver un evento
+    // fantasma de un ticket que sigue abierto en su tablero.
+    if (cancelledTicketId != null) {
+      try {
+        await this.kitchenFireService.emitTicketCancelledEvent(
+          cancelledTicketId,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `Failed to emit ticket.cancelled for ticket #${cancelledTicketId}: ${
+            (err as Error).message
+          }`,
+        );
+      }
     }
 
     this.logger.log(
-      `Table session item removed: session=${sessionId} order=${session.order_id} item=${orderItemId} tier=${
-        isPendingTicket ? 'pending-reversal' : 'simple'
-      }`,
+      `Table session item cancelled: session=${sessionId} order=${session.order_id} item=${orderItemId} type=${resolvedType} fired=${wasFired} ticketCancelled=${cancelledTicketId != null}`,
     );
     return this.findOne(sessionId);
+  }
+
+  /**
+   * @deprecated en favor de {@link cancelOrderItem}. Conservado
+   * temporalmente para no romper callers externos durante la migración
+   * del frontend; delegará al nuevo método y se eliminará cuando el
+   * frontend de mesa y POS estén en el nuevo flujo.
+   */
+  async removeItem(
+    sessionId: number,
+    orderItemId: number,
+  ): Promise<TableSessionView> {
+    // Wrapper de compatibilidad. La firma antigua no traía motivo; el
+    // nuevo método lo exige. Por compat le pasamos un motivo genérico
+    // marcado con prefijo `legacy:` para que sea fácil distinguirlo en
+    // auditoría de los motivos reales que ya manda el frontend nuevo.
+    return this.cancelOrderItem(
+      sessionId,
+      orderItemId,
+      'legacy: cancelación vía removeItem',
+    );
   }
 
   // --------------------------------------------------------------- close

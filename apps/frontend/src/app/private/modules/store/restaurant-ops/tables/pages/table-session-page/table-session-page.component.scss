@@ -563,6 +563,25 @@
     background: color-mix(in srgb, var(--color-success) 4%, var(--color-surface));
   }
 
+  /*
+   * carril D / lina — D2: la fila se atenúa cuando el ítem fue
+   * cancelado (soft cancel). El backend ya excluye este ítem del
+   * subtotal/tax/grand_total; aquí solo es presentación.
+   */
+  &.is-cancelled {
+    background: color-mix(in srgb, var(--color-error) 4%, var(--color-surface));
+    opacity: 0.7;
+
+    .name {
+      text-decoration: line-through;
+      text-decoration-color: color-mix(
+        in srgb,
+        var(--color-error) 50%,
+        transparent
+      );
+    }
+  }
+
   &.selectable {
     cursor: pointer;
 
@@ -776,6 +795,28 @@
   font-weight: 600;
   white-space: nowrap;
   vertical-align: middle;
+}
+
+/* Cancelled pill — D2 soft cancel */
+.item-cancelled-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background-color: color-mix(in srgb, var(--color-error) 15%, var(--color-surface));
+  color: var(--color-error, #b91c1c);
+  font-size: 0.68rem;
+  font-weight: 600;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.item-cancelled-reason {
+  margin: 0.25rem 0 0;
+  font-size: 0.72rem;
+  color: var(--color-text-secondary, #6b7280);
+  font-style: italic;
 }
 
 @media (max-width: 640px) {

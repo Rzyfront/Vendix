@@ -1349,6 +1349,19 @@ model order_items {
   // el flujo existente (retail, ecommerce, POS).
   inventory_committed              Boolean                  @default(false)
   inventory_committed_at           DateTime?                @db.Timestamp(6)
+  /// carril D / lina — D2: cancelación suave (soft cancel) por línea.
+  /// NO hay columna `state` enum: "cancelado" se modela con
+  /// `cancelled_at IS NOT NULL`. Permite dejar el item VISIBLE marcado
+  /// como cancelado pero EXCLUIDO del total (el backend filtra por
+  /// `cancelled_at IS NULL` al recalcular subtotal/tax/grand_total).
+  /// `cancellation_reason` es obligatorio cuando el ítem ya se disparó
+  /// a cocina (queda como merma); puede ser NULL en items no disparados.
+  /// `cancellation_type` clasifica el efecto contable: 'before_fire'
+  /// revierte stock, 'after_fire_waste' registra merma sin reversión.
+  cancelled_at                    DateTime?                @db.Timestamp(6)
+  cancellation_reason             String?
+  cancellation_type               String?                  @db.VarChar(20)
+  @@index([order_id, cancelled_at])
   // Restaurant Suite Fase K / Plan KDS fire-flows: marca persistida de la intencion
   // del cajero al aniadir el item al carrito ("usar stock" en pos-prepared-choice-modal).
   // - skip_kds=true: el item NO se enviara a cocina; su stock se descuenta en el

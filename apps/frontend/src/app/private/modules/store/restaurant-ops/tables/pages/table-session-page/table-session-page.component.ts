@@ -904,10 +904,28 @@ export class TableSessionPageComponent implements OnInit {
   // ── Remove item (Frente 2) ───────────────────────────────────────────
 
   /**
-   * Remove a single line from the open check. Confirms first (the message
-   * warns about the kitchen-ticket cancel + stock return when the item was
-   * already fired-pending), then calls the backend and replaces the local
-   * session with the recalculated snapshot it returns.
+   * Cancel a single line from the open check (soft cancel).
+   *
+   * carril D / lina — D2: flujo nuevo. Antes era un hard delete
+   * (`removeItem` DELETE legacy) que rompía la orden cuando el plato
+   * ya estaba disparado a cocina o la orden salía de `draft`. Ahora:
+   *  - Motivo obligatorio siempre (mín 3 chars). Se persiste en
+   *    `order_items.cancellation_reason` para auditoría y para que el
+   *    KDS y el listado de ordenes puedan mostrarlo.
+   *  - El ítem NO se borra: queda VISIBLE marcado como cancelado pero
+   *    EXCLUIDO del subtotal/tax/grand_total (filtro `cancelled_at IS
+   *    NULL` en el recálculo del backend).
+   *  - Stock: `before_fire` revierte; `after_fire_waste` queda como
+   *    merma sin reversión (backend decide según
+   *    `inventory_consumed_at_fire`).
+   *  - KDS: si el ticket está en `pending`, se cancela in-tx y se emite
+   *    `ticket.cancelled` SSE post-commit. Si ya avanzó de `pending`,
+   *    no se toca el ticket del cocinero.
+   *
+   * UX: usamos `window.prompt` para capturar el motivo (lo más
+   * sencillo posible pero funcional, criterio del dueño). El modal
+   * dedicado con textarea queda como deuda técnica a mejorar; hoy
+   * `DialogService` solo expone `confirm`, no tiene input prompt.
    */
   onRemoveItem(item: TableSessionOrderItem): void {
     const sessionId = this.session()?.id;
@@ -917,31 +935,52 @@ export class TableSessionPageComponent implements OnInit {
       this.isItemFired(item) && this.kitchenStatusFor(item) === 'pending';
     this.dialogService
       .confirm({
-        title: 'Eliminar plato',
+        title: 'Cancelar plato',
         message: firedPending
-          ? `¿Eliminar "${item.product_name}" de la cuenta? Se cancelará su ticket de cocina y se devolverá el inventario consumido.`
-          : `¿Eliminar "${item.product_name}" de la cuenta?`,
-        confirmText: 'Eliminar',
-        cancelText: 'Cancelar',
+          ? `¿Cancelar "${item.product_name}" de la cuenta? Se cancelará su ticket de cocina. Si el ticket ya pasó a preparación, queda como merma sin reversión de stock.`
+          : `¿Cancelar "${item.product_name}" de la cuenta? El plato queda visible marcado como cancelado, pero se excluye del total.`,
+        confirmText: 'Continuar',
+        cancelText: 'Atrás',
         confirmVariant: 'danger',
       })
       .then((confirmed) => {
         if (!confirmed) return;
+        // Motivo obligatorio: window.prompt es la captura más simple
+        // mientras no haya un DialogService con input. Devuelve null si
+        // el usuario cancela el prompt.
+        const reasonInput = window.prompt(
+          firedPending
+            ? 'Motivo de cancelación (mín 3 caracteres). Quedará registrado como merma.'
+            : 'Motivo de cancelación (mín 3 caracteres):',
+        );
+        const reason = (reasonInput ?? '').trim();
+        if (reason.length < 3) {
+          this.toastService.error(
+            reason.length === 0
+              ? 'Cancelación abortada'
+              : 'El motivo debe tener al menos 3 caracteres',
+          );
+          return;
+        }
         this.removingItemId.set(item.id);
         this.tablesService
-          .removeItem(sessionId, item.id)
+          .cancelOrderItem(sessionId, item.id, { reason })
           .pipe(takeUntilDestroyed(this.destroyRef))
           .subscribe({
             next: (s) => {
               this.removingItemId.set(null);
               this.session.set(s);
               this.seedKitchenStateFromOrder(s);
-              this.toastService.success('Plato eliminado de la cuenta');
+              this.toastService.success(
+                firedPending
+                  ? 'Plato cancelado como merma'
+                  : 'Plato cancelado de la cuenta',
+              );
             },
             error: (err: unknown) => {
               this.removingItemId.set(null);
               this.toastService.error(
-                typeof err === 'string' ? err : 'Error al eliminar el plato',
+                typeof err === 'string' ? err : 'Error al cancelar el plato',
               );
             },
           });

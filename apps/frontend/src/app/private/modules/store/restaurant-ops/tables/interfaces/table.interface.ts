@@ -168,6 +168,20 @@ export interface TableSessionOrderItem {
   delivered_at: string | null;
   delivered_by_user_id: number | null;
   /**
+   * carril D / lina — D2: soft cancel por línea. El ítem NO se borra:
+   * queda VISIBLE marcado como cancelado pero EXCLUIDO del total
+   * (filtro `cancelled_at IS NULL` en el recálculo del backend).
+   * `cancelled_at` es la fuente de verdad (no hay columna `state` enum);
+   * `cancellation_reason` queda persistido para auditoría y para que
+   * el KDS / listado de ordenes puedan mostrarlo.
+   * `cancellation_type` clasifica el efecto contable:
+   *   - 'before_fire'      → stock revertido.
+   *   - 'after_fire_waste' → merma, stock NO revertido.
+   */
+  cancelled_at: string | null;
+  cancellation_reason: string | null;
+  cancellation_type: 'before_fire' | 'after_fire_waste' | null;
+  /**
    * Snapshot of `products.product_type` taken at order creation by the
    * backend (see `table-sessions.service.ts:addItems`). The table
    * session UI uses this to gate the kitchen control: only items with
