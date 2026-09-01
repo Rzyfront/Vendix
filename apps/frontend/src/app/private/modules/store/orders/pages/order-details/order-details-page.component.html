@@ -211,14 +211,17 @@
                   <div class="customer-name-block">
                     <span class="customer-eyebrow">Cliente</span>
                     <h2>
-                      @if (
-                        orderData.users?.first_name ||
-                        orderData.users?.last_name
+                      {{ customerDisplayName() }}
+                      @if (isConsumidorFinal() && !customerDisplayName().length) {
+                        <!-- si no hay alias ni nombre, customerDisplayName ya cae a "Consumidor Final"; el badge CF refuerza la marca fiscal -->
+                      } @else if (
+                        orderData.customer_alias?.trim() &&
+                        !(orderData.users?.first_name || orderData.users?.last_name)
                       ) {
-                        {{ orderData.users?.first_name }}
-                        {{ orderData.users?.last_name }}
-                      } @else {
-                        Consumidor Final
+                        <span
+                          class="cf-badge"
+                          title="La orden sigue siendo consumidor final a nivel fiscal"
+                        >CF</span>
                       }
                     </h2>
                     <div class="customer-data-pills">

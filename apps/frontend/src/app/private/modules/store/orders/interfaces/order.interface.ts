@@ -33,6 +33,11 @@ export interface ShippingRate {
 export interface Order {
   id: number;
   customer_id: number;
+  // Carril B - B1: alias de venta para consumidor final. Persiste en
+  // orders.customer_alias (schema.prisma:1445, XOR con customer_id).
+  // El operador lo ve en lugar del nombre del cliente y conserva la
+  // marca "CF" al lado para no perder que sigue siendo consumidor final.
+  customer_alias?: string | null;
   store_id: number;
   order_number: string;
   state: OrderState;

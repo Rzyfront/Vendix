@@ -385,6 +385,30 @@ export class OrderDetailsPageComponent {
     return this.tableSession()?.table?.name || null;
   });
 
+  /**
+   * Carril B - B1: nombre visible del cliente con prioridad al alias.
+   * Prioridad: alias (si existe y no esta vacio) > users.first+last > "Consumidor Final".
+   * `isConsumidorFinal` permite al template pintar el badge "CF" sin perder
+   * que la orden sigue siendo anonima fiscalmente.
+   */
+  readonly customerDisplayName = computed<string>(() => {
+    const o = this.order();
+    if (!o) return '';
+    const alias = o.customer_alias?.trim();
+    if (alias) return alias;
+    if (o.users?.first_name || o.users?.last_name) {
+      return `${o.users.first_name || ''} ${o.users.last_name || ''}`.trim();
+    }
+    return 'Consumidor Final';
+  });
+
+  readonly isConsumidorFinal = computed<boolean>(() => {
+    const o = this.order();
+    if (!o) return false;
+    if (o.customer_alias?.trim()) return false;
+    return !(o.users?.first_name || o.users?.last_name);
+  });
+
   readonly cleanInternalNotes = computed<string>(() => {
     const raw = this.order()?.internal_notes;
     if (!raw) return '';
@@ -2674,8 +2698,14 @@ export class OrderDetailsPageComponent {
       null;
     const storeName = order.stores?.name || 'Vendix';
 
-    const customerName =
-      order.users
+    // Carril B - B1: prioridad alias > users.first+last > "Consumidor Final".
+    // Mismo orden que customerDisplayName en el detalle para que el ticket de
+    // despacho refleje lo que el operador ve en pantalla. Cristian renderiza el
+    // ticket impreso final en order-ticket.service.ts (fuera de mi scope).
+    const alias = order.customer_alias?.trim();
+    const customerName = alias
+      ? alias
+      : order.users
         ? `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim()
         : 'Consumidor Final';
 
