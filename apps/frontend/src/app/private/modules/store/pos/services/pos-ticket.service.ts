@@ -212,7 +212,13 @@ export class PosTicketService {
     return of(ticketData).pipe(
       switchMap(async () => {
         if (printOptions.printReceipt) {
-          let printedViaGateway = false;
+          // [print-fiscal-gate P4] — El switch client-side formato/documentId
+          // se elimina: hoy lo decide el backend en `/resolve-for-document`.
+          // Si el gateway falla, el error se eleva al caller (no más caída
+          // silenciosa al emisor legacy). `renderTicketBody` y
+          // `generateTicketHTML` quedan en el archivo, marcados
+          // `@deprecated`, para defensa contra regresión (ver regla del
+          // dueño: nunca borrar sin permiso).
           const candidateDocId =
             ticketData.orderId != null && !isNaN(Number(ticketData.orderId))
               ? Number(ticketData.orderId)
@@ -221,38 +227,10 @@ export class PosTicketService {
                 : null;
 
           if (candidateDocId) {
-            // La única evidencia de que existe factura electrónica es el id de
-            // la factura emitida. `invoiceDataToken` / `invoiceDataQrUrl` NO
-            // sirven: son el token de *solicitud* que el backend devuelve como
-            // `{ invoice_data_token, invoice_id: number | null }`, y existen
-            // justamente cuando todavía no se emitió nada — es el QR de
-            // "Solicite su factura electrónica" que se imprime junto al texto
-            // "Este documento no es una factura electrónica".
-            //
-            // Usarlos como condición mandaba toda venta con ese QR a
-            // `pos_electronic_invoice`; el provider no encontraba fila en
-            // `invoices`, el gateway devolvía PRINT_DOCUMENT_NOT_FOUND_001 y
-            // `printViaGateway` caía al emisor legacy en silencio, perdiendo
-            // también el gateway del ticket normal.
-            const invoiceId = (ticketData.electronicInvoice as any)?.id;
-            const formatType: PrintFormatType = invoiceId
-              ? 'pos_electronic_invoice'
-              : 'pos_sale_ticket';
-
-            const result = await this.documentPrint.printViaGateway({
-              formatType,
-              documentId: invoiceId ?? candidateDocId,
+            await this.documentPrint.resolveAndPrint({
+              documentType: 'pos_order',
+              documentId: candidateDocId,
             });
-            if (result) {
-              printedViaGateway = true;
-            }
-          }
-
-          if (!printedViaGateway) {
-            const html = await this.generateTicketHTML(ticketData);
-            // Awaited so the emitted `true` means "the document reached the print
-            // dialog with its images decoded", not "the iframe was created".
-            await this.printHTML(html, printOptions.copies);
           }
         }
 
@@ -277,11 +255,13 @@ export class PosTicketService {
    * `formatOverride` lets the settings preview render a format the merchant is
    * still choosing, before it is saved to `receipts.pos_ticket_format`.
    *
-   * Thin wrapper over `renderTicketBody`, kept with its original signature
-   * because the POS confirmation, the order detail page and the receipts
-   * settings preview all call it. A batch must NOT loop over this method:
-   * `printTicketsBatch` resolves the printer, the session overlay and the
-   * currency once and then calls `renderTicketBody` per ticket.
+   * @deprecated [print-fiscal-gate P4] — El motor único de impresión es el
+   *   Print Gateway del backend; este helper produce HTML local que se queda
+   *   ciego a los `definition.logo`, `company_block`, `sections`, `columns`,
+   *   `styles` y `tokens` configurados en el Hub. Sólo lo invoca el path
+   *   batch >1 de `printTicketsBatch` mientras no exista render por gateway
+   *   que conserve el "una sola diálogo para N tickets" — ver backlog.
+   *   NO borrar (regla del dueño: nada sin permiso explícito).
    */
   async generateTicketHTML(
     ticketData: TicketData,
@@ -361,6 +341,10 @@ export class PosTicketService {
    * The ticket itself (the `.ticket` element), without the page wrapper. Every
    * consumer goes through here — single sale, settings preview and batch — so
    * the three documents cannot drift apart.
+   *
+   * @deprecated [print-fiscal-gate P4] — Ver `generateTicketHTML`. El motor
+   *   único es el gateway; este método queda como soporte del batch >1
+   *   mientras no exista render equivalente en backend. NO borrar.
    */
   private async renderTicketBody(
     ticketData: TicketData,
@@ -706,13 +690,14 @@ export class PosTicketService {
           ? Number(tickets[0].id)
           : null);
       if (candidateDocId) {
-        const result = await this.documentPrint.printViaGateway({
-          formatType: 'pos_sale_ticket',
+        // [print-fiscal-gate P4] — El batch unitario pasa por el gate como
+        // cualquier impresión individual: `resolveAndPrint` decide formato +
+        // documentId y eleva el error si el gateway falla (no hay red legacy).
+        const result = await this.documentPrint.resolveAndPrint({
+          documentType: 'pos_order',
           documentId: candidateDocId,
         });
-        if (result) {
-          return { rendered: 1, pages: result.pages };
-        }
+        return { rendered: 1, pages: result.pages };
       }
     }
 

@@ -352,6 +352,52 @@ export class DocumentPrintService {
   }
 
   /**
+   * [print-fiscal-gate P3] — Single entry FE para imprimir un documento POS.
+   *
+   * 1. Consulta `/resolve-for-document` para que el backend decida formato y
+   *    documentId según el estado fiscal real de la tienda (no la presencia
+   *    póstuma de una factura en la orden, como hacía el switch legacy).
+   * 2. Llama a `/render` con esa decisión y entrega el HTML al motor de impresión.
+   * 3. SIN fallback silencioso: si el gateway falla, eleva el error al caller.
+   *
+   * Reemplaza los call-sites previos que decidían formato client-side
+   * (`pos-ticket.service.ts:238`, `order-ticket.service.ts:83`).
+   */
+  async resolveAndPrint(params: {
+    documentType: 'pos_order' | 'pos_invoice';
+    documentId: number;
+    title?: string;
+    trigger?: PrintTrigger;
+  }): Promise<PrintResult> {
+    const resolved = await firstValueFrom(
+      this.gatewayClient.resolveDocument(params.documentType, params.documentId, 'html'),
+    );
+
+    const response = await firstValueFrom(
+      this.gatewayClient.renderDocument(
+        resolved.format_type,
+        resolved.document_id,
+        resolved.engine,
+      ),
+    );
+
+    if (!response?.html) {
+      throw new Error(
+        `Print gateway devolvió respuesta sin HTML para ${resolved.format_type} doc ${resolved.document_id}`,
+      );
+    }
+
+    const requestedFormat = resolved.format_type as unknown as PrintFormat;
+    await this.sendToPrinter(response.html);
+    return {
+      documents: 1,
+      pages: response.copies || 1,
+      copies: response.copies || 1,
+      format: requestedFormat,
+    };
+  }
+
+  /**
    * Imprime directamente un HTML completo compilado por el Print Gateway (ej: preview o render directo)
    */
   async printGatewayHtml(documentHtml: string): Promise<void> {

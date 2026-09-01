@@ -11,6 +11,8 @@ import {
   RenderPrintDocumentResponse,
   PrintTemplate,
   PrintRecentDocument,
+  ResolvedPrintDocument,
+  ResolveDocumentType,
 } from '../../../core/models/print-formats.model';
 
 @Injectable({
@@ -123,6 +125,28 @@ export class PrintGatewayClientService {
       .post<{ success: boolean; data: RenderPrintDocumentResponse }>(
         `${this.baseUrl}/render`,
         { format_type: formatType, document_id: documentId, engine },
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /**
+   * [print-fiscal-gate P3] — Resuelve el destino de impresión de un documento
+   * POS antes de imprimir. El FE consulta este endpoint una vez por venta;
+   * con la respuesta decide `formatType` + `documentId` para `renderDocument`.
+   *
+   * Reemplaza los switches duplicados en `pos-ticket.service.ts:238` y
+   * `order-ticket.service.ts:83` que decidían por `electronicInvoice?.id`
+   * (existencia póstuma) y no por el estado fiscal real de la tienda.
+   */
+  resolveDocument(
+    documentType: ResolveDocumentType,
+    documentId: number,
+    engine: 'html' | 'pdf' = 'html',
+  ): Observable<ResolvedPrintDocument> {
+    return this.http
+      .post<{ success: boolean; data: ResolvedPrintDocument }>(
+        `${this.baseUrl}/resolve-for-document`,
+        { document_type: documentType, document_id: documentId, engine },
       )
       .pipe(map((res) => res.data));
   }
