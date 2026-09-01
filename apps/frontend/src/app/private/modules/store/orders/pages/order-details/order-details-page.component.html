@@ -127,7 +127,14 @@
               deliveryConfig().label
             }}</span>
           </div>
-          @if (tableName()) {
+          <!-- T10 B2 — la sección "Mesa" sólo aparece en tiendas restaurante
+               Y si la orden trae sesión de mesa. Hoy se pintaba con sólo
+               `tableName()`, sin preguntar la industria: una orden anómala
+               con sesión en una tienda no-restaurante mostraba "Mesa: X".
+               La industria decide si la sección tiene sentido (canónica:
+               `AuthFacade.isRestaurant` vía `isRestaurant()` computed en
+               .ts:301); la sesión decide si hay dato que mostrar. -->
+          @if (isRestaurant() && tableName()) {
             <span class="w-px h-3.5 bg-border"></span>
             <div class="flex items-center gap-1.5 text-text-primary font-medium">
               <app-icon

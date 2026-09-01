@@ -35,6 +35,7 @@ import { CustomersService } from '../../../../store/customers/services/customers
 // el filtro no se pinta (mayoria de tiendas de Vendix no son restaurante).
 import { TablesService } from '../../../restaurant-ops/tables/services/tables.service';
 import { Table } from '../../../restaurant-ops/tables/interfaces/table.interface';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import {
   Order,
   OrderQuery,
@@ -73,6 +74,15 @@ export class OrdersListComponent {
   private destroyRef = inject(DestroyRef);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
+  // T10 B3 — predicado único de industria (canónica: AuthFacade.isRestaurant).
+  // Antes este componente era "presentacional: no consulta AuthFacade"; ese
+  // límite se rompe porque la columna Mesa debe responder a la industria del
+  // tenant, no solo a si hay datos. Si en el futuro hay que re-evaluar si
+  // este componente debe seguir siendo presentacional, la respuesta sigue
+  // siendo la misma: consultar la canónica, no escribir un duplic.
+  private authFacade = inject(AuthFacade);
+  /** T10 B3 — gate de industria reusado por `columns` y `cardConfig`. */
+  readonly isRestaurant = computed<boolean>(() => this.authFacade.isRestaurant());
 
   /** Timestamp (epoch ms) del momento en que se cargó la lista actual. */
   private loadedAt = 0;
@@ -277,12 +287,18 @@ export class OrdersListComponent {
   });
 
   // Table configuration
-  // Carril B - B2: columns ahora es computed. La entrada Mesa solo aparece
-  // cuando la tienda tiene mesas cargadas (tables().length > 0). Tienda sin
-  // mesas ⇒ columna invisible ⇒ no más "No data". ZONELESS: el template
-  // debe invocar columns() — la columna se re-evalúa cuando tables() cambia.
+  // T10 B3 — columns ahora es computed. La entrada Mesa solo aparece cuando:
+  //   - la tienda es restaurante (gate de industria: AuthFacade.isRestaurant,
+  //     arranca en false durante la carga de settings — aceptamos el parpadeo
+  //     porque es una superficie informativa, no operativa), Y
+  //   - la tienda tiene mesas cargadas (gate de datos: tables().length > 0).
+  // Tienda no-restaurante con mesas creadas por error o importación: NO
+  // muestra la columna. Restaurante sin mesas configuradas: NO muestra
+  // la columna (caso real que no queremos romper). ZONELESS: el template
+  // debe invocar columns() — la columna se re-evalúa cuando isRestaurant()
+  // o tables() cambia.
   readonly columns = computed<TableColumn[]>(() => {
-    const hasTables = this.tables().length > 0;
+    const hasTables = this.isRestaurant() && this.tables().length > 0;
     const base: TableColumn[] = [
       { key: 'order_number', label: 'Order ID', sortable: true, priority: 1 },
       {
@@ -394,11 +410,13 @@ export class OrdersListComponent {
   ];
 
   // Card configuration for mobile
-  // Carril B - B2: cardConfig ahora es computed. detailKeys incluye Mesa
-  // solo cuando tables().length > 0. ZONELESS: el template debe invocar
-  // cardConfig() — la card se re-evalúa cuando tables() cambia.
+  // T10 B3 — cardConfig ahora es computed. detailKeys incluye Mesa solo
+  // cuando la tienda es restaurante Y tiene mesas (mismo gate que `columns`
+  // arriba). Sin esto la tarjeta móvil pinta "Mesa: —" en tiendas que no
+  // son restaurante — residuo visible que miente sobre una capacidad que
+  // la tienda no tiene. ZONELESS: el template debe invocar cardConfig().
   readonly cardConfig = computed<ItemListCardConfig>(() => {
-    const hasTables = this.tables().length > 0;
+    const hasTables = this.isRestaurant() && this.tables().length > 0;
     const detailKeys: ItemListCardConfig['detailKeys'] = [
       {
         key: 'channel',
