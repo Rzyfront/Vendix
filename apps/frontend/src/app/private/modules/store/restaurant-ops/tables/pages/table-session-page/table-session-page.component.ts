@@ -922,10 +922,9 @@ export class TableSessionPageComponent implements OnInit {
    *    `ticket.cancelled` SSE post-commit. Si ya avanzó de `pending`,
    *    no se toca el ticket del cocinero.
    *
-   * UX: usamos `window.prompt` para capturar el motivo (lo más
-   * sencillo posible pero funcional, criterio del dueño). El modal
-   * dedicado con textarea queda como deuda técnica a mejorar; hoy
-   * `DialogService` solo expone `confirm`, no tiene input prompt.
+   * UX: el motivo se pide con `DialogService.prompt` (PromptModalComponent
+   * del design system) tras un `confirm` previo. Distinto copy entre
+   * `firedPending` (merma) y resto (exclusión del total).
    */
   onRemoveItem(item: TableSessionOrderItem): void {
     const sessionId = this.session()?.id;
@@ -945,44 +944,56 @@ export class TableSessionPageComponent implements OnInit {
       })
       .then((confirmed) => {
         if (!confirmed) return;
-        // Motivo obligatorio: window.prompt es la captura más simple
-        // mientras no haya un DialogService con input. Devuelve null si
-        // el usuario cancela el prompt.
-        const reasonInput = window.prompt(
-          firedPending
-            ? 'Motivo de cancelación (mín 3 caracteres). Quedará registrado como merma.'
-            : 'Motivo de cancelación (mín 3 caracteres):',
-        );
-        const reason = (reasonInput ?? '').trim();
-        if (reason.length < 3) {
-          this.toastService.error(
-            reason.length === 0
-              ? 'Cancelación abortada'
-              : 'El motivo debe tener al menos 3 caracteres',
-          );
-          return;
-        }
-        this.removingItemId.set(item.id);
-        this.tablesService
-          .cancelOrderItem(sessionId, item.id, { reason })
-          .pipe(takeUntilDestroyed(this.destroyRef))
-          .subscribe({
-            next: (s) => {
-              this.removingItemId.set(null);
-              this.session.set(s);
-              this.seedKitchenStateFromOrder(s);
-              this.toastService.success(
-                firedPending
-                  ? 'Plato cancelado como merma'
-                  : 'Plato cancelado de la cuenta',
-              );
-            },
-            error: (err: unknown) => {
-              this.removingItemId.set(null);
+        // Motivo obligatorio vía `DialogService.prompt` (PromptModalComponent
+        // del design system). Resuelve `undefined` si el usuario cancela el
+        // modal; el string con trim si confirma. Sustituye a `window.prompt`
+        // nativo — mismo dato, modal compartido del design system.
+        this.dialogService
+          .prompt({
+            title: 'Motivo de cancelación',
+            message: firedPending
+              ? 'Quedará registrado como merma.'
+              : 'Quedará registrado en el pedido.',
+            placeholder: 'Describe el motivo (mínimo 3 caracteres)',
+            confirmText: 'Cancelar plato',
+            cancelText: 'Atrás',
+          })
+          .then((reasonInput) => {
+            if (reasonInput === undefined) {
+              this.toastService.error('Cancelación abortada');
+              return;
+            }
+            const reason = reasonInput.trim();
+            if (reason.length < 3) {
               this.toastService.error(
-                typeof err === 'string' ? err : 'Error al cancelar el plato',
+                'El motivo debe tener al menos 3 caracteres',
               );
-            },
+              return;
+            }
+            this.removingItemId.set(item.id);
+            this.tablesService
+              .cancelOrderItem(sessionId, item.id, { reason })
+              .pipe(takeUntilDestroyed(this.destroyRef))
+              .subscribe({
+                next: (s) => {
+                  this.removingItemId.set(null);
+                  this.session.set(s);
+                  this.seedKitchenStateFromOrder(s);
+                  this.toastService.success(
+                    firedPending
+                      ? 'Plato cancelado como merma'
+                      : 'Plato cancelado de la cuenta',
+                  );
+                },
+                error: (err: unknown) => {
+                  this.removingItemId.set(null);
+                  this.toastService.error(
+                    typeof err === 'string'
+                      ? err
+                      : 'Error al cancelar el plato',
+                  );
+                },
+              });
           });
       });
   }
