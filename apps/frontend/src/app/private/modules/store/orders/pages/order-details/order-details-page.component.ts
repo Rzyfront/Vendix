@@ -1,5 +1,5 @@
 import { Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
-import { NgClass } from '@angular/common';
+import { NgClass, DatePipe } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, FormGroup, FormControl, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
@@ -135,6 +135,11 @@ type RefundState =
     CardComponent,
     IconComponent,
     StickyHeaderComponent,
+    // T9p6 — `item.delivered_at | date:'short'` en el template requiere el
+    // pipe explícito en `imports:`. Es standalone: meter CommonModule
+    // arrastra todo el módulo y este componente no lo necesita para nada
+    // más. NG8004 sale si falta.
+    DatePipe,
     ModalComponent,
     CurrencyPipe,
     OrderPaymentModalComponent,
