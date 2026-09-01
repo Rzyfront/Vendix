@@ -5205,6 +5205,17 @@ export const ErrorCodes = {
     devMessage:
       'El plato preparado debe estar listo en cocina antes de marcarse entregado',
   },
+  // T9 / QUI-652 — variante de la regla para orden-scope (POS, take-away,
+  // domicilio). Misma semantica: `item_type='prepared'` exige cocina en
+  // 'ready'; cualquier otro tipo se entrega directo. La forma del codigo
+  // cambia porque ya no estamos en una sesion de mesa; el mensaje al
+  // cliente sigue diciendo QUE plato y en QUE estado de cocina esta.
+  ORDER_ITEM_NOT_DELIVERABLE: {
+    code: 'ORDER_ITEM_NOT_DELIVERABLE',
+    httpStatus: 409,
+    devMessage:
+      'El plato preparado debe estar listo en cocina antes de marcarse entregado',
+  },
   KITCHEN_FIRE_NO_RECIPE: {
     code: 'KITCHEN_FIRE_NO_RECIPE',
     httpStatus: 422,

@@ -12,6 +12,7 @@ import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../cash-registers/movements/movements.service';
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { OrderFlowService } from '../orders/order-flow/order-flow.service';
 import { OpenTableSessionDto, AddItemsToTableSessionDto } from './dto';
 
 /**
@@ -209,6 +210,12 @@ export class TableSessionsService {
     // StockLevelManager reverses the fire's inventory consumption.
     private readonly kitchenFireService: KitchenFireService,
     private readonly stockLevelManager: StockLevelManager,
+    // T9 / QUI-652 — entrega de item a nivel de orden. La mesa delega al
+    // seam compartido para que la compuerta `ready` (item preparado) y la
+    // idempotencia vivan en un solo sitio. La firma del endpoint de mesa
+    // (`PATCH /store/tables/sessions/:id/items/:orderItemId/deliver`) NO
+    // cambia — sigue siendo un seam de UI → servicio → seam de flujo.
+    private readonly orderFlowService: OrderFlowService,
   ) {}
 
   // ------------------------------------------------------------------ helpers
@@ -1658,18 +1665,35 @@ export class TableSessionsService {
    * Idempotent: re-marking an already-delivered item returns the session
    * unchanged instead of moving `delivered_at` forward. The first delivery is
    * the one that happened.
+   *
+   * T9 — el sello de `delivered_at` + `delivered_by_user_id`, la compuerta
+   * `item_type='prepared'` exige `ready`, y la idempotencia viven en el seam
+   * compartido `OrderFlowService.deliverOrderItem` (ver orden-scope
+   * `PATCH /store/orders/:orderId/flow/items/:orderItemId/deliver`). Este
+   * metodo queda como el shim de mesa: valida lo que es PROPIO de mesa
+   * (sesion abierta + que el item sea de ESTA cuenta) y delega el resto.
+   * Asi no queda una segunda copia de la compuerta ni de la idempotencia:
+   * cualquier cambio futuro a la regla de entrega pasa por un solo sitio.
+   *
+   * La firma del endpoint publico (`PATCH /store/tables/sessions/:id/items
+   * /:orderItemId/deliver`, permiso `store:table_sessions:update`) NO
+   * cambia — `table-session-page.component.ts` (carril keilis) sigue
+   * leyendo la misma respuesta de tipo `TableSessionView`.
    */
   async markItemDelivered(
     sessionId: number,
     orderItemId: number,
   ): Promise<TableSessionView> {
-    const { userId } = this.requireContext();
-
     const session = await this.findOne(sessionId);
     if (session.closed_at) {
       throw new VendixHttpException(ErrorCodes.TABLE_SESSION_CLOSED);
     }
 
+    // Lo unico de mesa que el seam no puede checar por si solo: que este
+    // item sea de ESTA cuenta. El seam valida que el item sea de la orden,
+    // y que esa orden sea de la tienda del contexto, pero una mesa puede
+    // tener varios items en la misma orden — la pertenencia a la sesion es
+    // un check local a este servicio.
     const item = session.order?.order_items.find((it) => it.id === orderItemId);
     if (!item) {
       throw new VendixHttpException(
@@ -1678,29 +1702,13 @@ export class TableSessionsService {
       );
     }
 
-    // Idempotencia: la primera entrega es la que ocurrio.
-    if (item.delivered_at) return session;
-
-    if (item.item_type === 'prepared') {
-      // `kitchen_ticket_items` viene ordenado desc por id, asi que el primero es
-      // el estado de cocina vigente.
-      const kitchenStatus = item.kitchen_ticket_items?.[0]?.status ?? null;
-      if (kitchenStatus !== 'ready') {
-        throw new VendixHttpException(
-          ErrorCodes.TABLE_SESSION_ITEM_NOT_DELIVERABLE,
-          `El plato "${item.product_name}" todavia no esta listo en cocina (estado: ${kitchenStatus ?? 'sin enviar'})`,
-        );
-      }
-    }
-
-    await this.prisma.order_items.updateMany({
-      where: { id: orderItemId, order_id: session.order_id },
-      data: {
-        delivered_at: new Date(),
-        delivered_by_user_id: userId ?? null,
-        updated_at: new Date(),
-      },
-    });
+    // Delegar al seam compartido: idempotencia + compuerta prepared/ready
+    // + stamp de `delivered_at` / `delivered_by_user_id`. Su return es la
+    // vista de la orden (forma `getOrder`), que descartamos — al caller de
+    // mesa le interesa la vista de la sesion, que recargamos con
+    // `findOne(sessionId)` para que vea el `order_items[].delivered_at`
+    // nuevo.
+    await this.orderFlowService.deliverOrderItem(session.order_id, orderItemId);
 
     return this.findOne(sessionId);
   }
