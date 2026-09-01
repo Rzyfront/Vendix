@@ -125,6 +125,12 @@ jobs:
           NODE_ENV=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; print(json.load(sys.stdin).get('NODE_ENV', 'production'))")
           CORS_ORIGIN=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('CORS_ORIGIN', ''))")
           ADDITIONAL_CORS_ORIGINS=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('ADDITIONAL_CORS_ORIGINS', ''))")
+          # Proxies propios delante del backend (nginx + CloudFront = 2 en prod).
+          # .get(...,'') es tolerante: si la clave todavía no está en el secreto,
+          # llega vacía y el backend cae a su default documentado de 1 (no rompe
+          # el deploy). Agregar la clave una vez hace que todo deploy futuro la
+          # inyecte solo.
+          TRUST_PROXY_HOPS=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('TRUST_PROXY_HOPS', ''))")
 
           echo "🔧 Ensuring Redis env vars are in /opt/vendix/.env..."
           sudo grep -q '^REDIS_HOST=' /opt/vendix/.env || echo 'REDIS_HOST=vendix-redis' | sudo tee -a /opt/vendix/.env > /dev/null
@@ -228,6 +234,7 @@ jobs:
               -e NODE_ENV="\$NODE_ENV" \\
               -e CORS_ORIGIN="\$CORS_ORIGIN" \\
               -e ADDITIONAL_CORS_ORIGINS="\$ADDITIONAL_CORS_ORIGINS" \\
+              -e TRUST_PROXY_HOPS="\$TRUST_PROXY_HOPS" \\
               $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           }
 
