@@ -722,6 +722,12 @@ export class TableSessionsService {
             // siendo de la mesa y `orders.delivery_type` no se toca, para no
             // arrastrarla a los flujos de remision.
             is_takeaway: item.is_takeaway ?? false,
+            // C3 / keilis — nota libre por línea. Cadena vacía se
+            // normaliza a NULL: un '' guardado pintaría un espacio
+            // vacío en el ticket de cocina (peor que no tener nota).
+            // El KDS la lee vía `kitchen-fire.service.ts` que ya
+            // propaga `order_items.notes` a `kitchen_ticket_items.notes`.
+            notes: item.notes?.trim() || null,
             updated_at: new Date(),
           },
         });
