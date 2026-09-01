@@ -220,9 +220,21 @@ export class PosTicketService {
                 : null;
 
           if (candidateDocId) {
+            const hasElectronicInvoice = Boolean(
+              ticketData.electronicInvoice ||
+              ticketData.invoiceDataToken ||
+              ticketData.invoiceDataQrUrl,
+            );
+            const formatType: PrintFormatType = hasElectronicInvoice
+              ? 'pos_electronic_invoice'
+              : 'pos_sale_ticket';
+
+            const invoiceId = (ticketData.electronicInvoice as any)?.id;
+            const docIdToPrint = hasElectronicInvoice && invoiceId ? invoiceId : candidateDocId;
+
             const result = await this.documentPrint.printViaGateway({
-              formatType: 'pos_sale_ticket',
-              documentId: candidateDocId,
+              formatType,
+              documentId: docIdToPrint,
             });
             if (result) {
               printedViaGateway = true;

@@ -89,7 +89,23 @@ import * as fs from 'fs';
 import * as path from 'path';
 import Ajv, { ValidateFunction } from 'ajv';
 
-const SCHEMA_PATH = path.join(__dirname, 'definition-v2.schema.json');
+const resolveSchemaPath = (): string => {
+  const candidates = [
+    path.join(__dirname, 'definition-v2.schema.json'),
+    path.join(__dirname, '../../../../src/domains/store/print-formats/schemas/definition-v2.schema.json'),
+    path.join(process.cwd(), 'src/domains/store/print-formats/schemas/definition-v2.schema.json'),
+    path.join(process.cwd(), 'apps/backend/src/domains/store/print-formats/schemas/definition-v2.schema.json'),
+    path.join('/app/src/domains/store/print-formats/schemas/definition-v2.schema.json'),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return candidates[0];
+};
+
+const SCHEMA_PATH = resolveSchemaPath();
 const definitionV2Schema = JSON.parse(
   fs.readFileSync(SCHEMA_PATH, 'utf-8'),
 ) as Record<string, unknown>;

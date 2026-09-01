@@ -70,6 +70,10 @@
           "maximum": 10,
           "description": "Número de copias a imprimir. 0 usa el default del sistema (1 para la mayoría). Máx 10 por protección anti-DoS."
         },
+        "auto_print": {
+          "type": "boolean",
+          "description": "True para disparar impresión automática al finalizar la operación (ej. venta POS). False para requerir clic manual."
+        },
         "orientation": {
           "type": "string",
           "enum": ["portrait", "landscape"],

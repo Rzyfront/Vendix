@@ -55,6 +55,7 @@ import { FormatAdapterRegistryService } from './services/format-adapter-registry
 import { DocumentIndexService } from './services/document-index.service';
 import { DocumentDataProviderRegistry } from './providers/document-data-provider.registry';
 import { PosSaleTicketDataProvider } from './providers/pos-sale-ticket.provider';
+import { PosElectronicInvoiceDataProvider } from './providers/pos-electronic-invoice.provider';
 import { SalesOrderInvoiceDataProvider } from './providers/sales-order-invoice.provider';
 import { DispatchNoteDataProvider } from './providers/dispatch-note.provider';
 import { QuotationDataProvider } from './providers/quotation.provider';
@@ -117,6 +118,7 @@ import { WithholdingEmployeeCertificateDataProvider } from './providers/withhold
     // a tener su `listRecent` disponible a través del servicio.
     DocumentIndexService,
     PosSaleTicketDataProvider,
+    PosElectronicInvoiceDataProvider,
     SalesOrderInvoiceDataProvider,
     DispatchNoteDataProvider,
     QuotationDataProvider,
@@ -155,6 +157,7 @@ export class PrintFormatsModule implements OnModuleInit {
   constructor(
     private readonly registry: DocumentDataProviderRegistry,
     private readonly posSaleTicketProvider: PosSaleTicketDataProvider,
+    private readonly posElectronicInvoiceProvider: PosElectronicInvoiceDataProvider,
     private readonly salesOrderInvoiceProvider: SalesOrderInvoiceDataProvider,
     private readonly dispatchNoteProvider: DispatchNoteDataProvider,
     private readonly quotationProvider: QuotationDataProvider,
@@ -178,6 +181,7 @@ export class PrintFormatsModule implements OnModuleInit {
 
   onModuleInit() {
     this.registry.register(this.posSaleTicketProvider);
+    this.registry.register(this.posElectronicInvoiceProvider);
     this.registry.register(this.salesOrderInvoiceProvider);
     this.registry.register(this.dispatchNoteProvider);
     this.registry.register(this.quotationProvider);
