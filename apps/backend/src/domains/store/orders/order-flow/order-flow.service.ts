@@ -9,6 +9,7 @@ import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { order_state_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
+import { resolveTip } from '@common/utils/tip.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
   PayOrderDto,
@@ -789,6 +790,82 @@ export class OrderFlowService {
       throw this.wrapPaymentFailure('payment_method_not_found', {
         store_payment_method_id: dto.store_payment_method_id,
       });
+    }
+
+    // -- Propina (T3) ------------------------------------------------------
+    // El cobro desde el detalle de orden acepta propina igual que el POS y el
+    // cierre de mesa. La resolucion vive en `resolveTip`
+    // (common/utils/tip.util.ts), compartida con
+    // `PaymentsService.applyPosPaymentToTableSession`: dos implementaciones de
+    // la misma regla divergen, y una propina que se calcula distinto segun por
+    // donde cobro el operador es un descuadre que nadie ve hasta la
+    // conciliacion.
+    //
+    // Convencion heredada del POS: la propina es ADITIVA al `grand_total` y
+    // queda FUERA de `subtotal_amount` y `tax_amount` -- no es ingreso ni base
+    // gravable. Se persiste aparte en `orders.tip_amount` y la contabilidad la
+    // reconoce como pasivo custodio (propinas por pagar).
+    //
+    // Se persiste ANTES de cualquier cargo y `order` se recarga, para que los
+    // TRES sitios de cobro de abajo lean un `grand_total` ya con la propina
+    // incluida. Tocarlos uno por uno es como se consigue que dos de los tres
+    // cobren la cifra correcta.
+    const roundTipMoney = (value: number) =>
+      Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+    if (dto.tip_amount != null || dto.tip_type != null) {
+      const incomingTip = resolveTip(
+        dto,
+        Number(order.subtotal_amount || 0),
+        roundTipMoney,
+      );
+      // Una propina sobre un abono de credito descuadra el plan de cuotas ya
+      // calculado: el `grand_total` subiria DESPUES de que las cuotas fijaron
+      // sus montos, y la ultima cuota quedaria corta sin que nada avise. Se
+      // rechaza en voz alta; ignorar el campo en silencio es peor.
+      if (incomingTip.amount > 0 && dto.installment_id != null) {
+        try {
+          await this.prisma.orders.update({
+            where: { id: orderId },
+            data: { state: 'created', updated_at: new Date() },
+          });
+        } catch (rollbackErr) {
+          this.logger.error(
+            `[payOrder tip rollback failed] order=${orderId}: ${(rollbackErr as Error).message}`,
+          );
+        }
+        throw this.wrapPaymentFailure('tip_not_allowed_on_installment', {
+          message:
+            'No se puede registrar propina en el abono de una cuota: alteraria el plan de cuotas ya calculado.',
+          order_id: orderId,
+          installment_id: dto.installment_id,
+          tip_amount: incomingTip.amount,
+        });
+      }
+      // Idempotente: `grand_total` ya incluye cualquier propina persistida en
+      // un intento anterior, asi que se descuenta antes de sumar la nueva. Sin
+      // esto, un reintento tras un cargo fallido cobra la propina dos veces.
+      const previousTip = Number((order as any).tip_amount || 0);
+      const baseTotal = roundTipMoney(
+        Number(order.grand_total || 0) - previousTip,
+      );
+      const newGrandTotal = roundTipMoney(baseTotal + incomingTip.amount);
+      if (
+        incomingTip.amount !== previousTip ||
+        newGrandTotal !== Number(order.grand_total || 0)
+      ) {
+        await this.prisma.orders.update({
+          where: { id: orderId },
+          data: {
+            tip_amount: incomingTip.amount,
+            tip_type: incomingTip.type,
+            tip_value: incomingTip.value,
+            tip_waiter_id: dto.tip_waiter_id ?? null,
+            grand_total: newGrandTotal,
+            updated_at: new Date(),
+          },
+        });
+        order = await this.getOrder(orderId); // recarga: grand_total con propina
+      }
     }
 
     // Shipped orders: register payment without changing state

@@ -74,6 +74,7 @@ import type { WithholdingResolution } from '../withholding-tax/withholding-flow.
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
 import { TableSessionsService } from '../tables/table-sessions.service';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
+import { resolveTip } from '../../../common/utils/tip.util';
 import { SerialNumberEnforcementService } from '../inventory/serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../inventory/serial-numbers/inventory-serial-numbers.service';
 import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-threshold.service';
@@ -3111,34 +3112,17 @@ export class PaymentsService {
     //    percentage; o el que vino cuando fue 'fixed' directo. La
     //    auditoría ve la decisión original del operador en una
     //    columna y el monto anclado en otra.
-    let tip = this.roundMoney(dto.tip_amount || 0);
-    let resolvedTipType: 'percentage' | 'fixed' | null = dto.tip_type ?? null;
-    let resolvedTipValue: number | null =
-      dto.tip_value != null ? this.roundMoney(dto.tip_value) : null;
-    if (
-      tip === 0 &&
-      resolvedTipType === 'percentage' &&
-      resolvedTipValue != null &&
-      resolvedTipValue > 0
-    ) {
-      // Base: subtotal de venta, NO total con impuestos. Nadie da
-      // propina sobre el IVA — convención contable colombiana.
-      tip = this.roundMoney((newSubtotal * resolvedTipValue) / 100);
-      // Resuelto a monto: la propina ya está pactada.
-      resolvedTipType = 'fixed';
-      resolvedTipValue = tip;
-    }
-    if (resolvedTipType == null && tip > 0) {
-      // Default razonable: si hubo monto pero el operador no marcó
-      // modo, asumimos 'fixed'. La auditoría verá 'fixed' cuando en
-      // realidad fue escrito directo, pero el monto es exacto.
-      resolvedTipType = 'fixed';
-    }
-    if (resolvedTipType === 'fixed' && resolvedTipValue == null && tip > 0) {
-      // Si fue 'fixed' pero el operador solo mandó tip_amount, el
-      // valor coincide con el monto. Persistimos para auditoría.
-      resolvedTipValue = tip;
-    }
+    // Las reglas viven en `resolveTip` (common/utils/tip.util.ts). Se
+    // extrajeron de aquí cuando el pago desde el detalle de orden necesitó las
+    // mismas: dos implementaciones de la misma regla divergen, y una propina
+    // que se calcula distinto según por dónde cobró el operador es un
+    // descuadre que nadie ve hasta la conciliación.
+    const resolvedTip = resolveTip(dto, newSubtotal, (v) =>
+      this.roundMoney(v),
+    );
+    const tip = resolvedTip.amount;
+    const resolvedTipType = resolvedTip.type;
+    const resolvedTipValue = resolvedTip.value;
     // Re-evaluate promotions + coupons over the merged subtotal so the
     // final total stays consistent with the fresh path.
     const promotionQuote = await this.calculatePosPromotionQuote(dto);

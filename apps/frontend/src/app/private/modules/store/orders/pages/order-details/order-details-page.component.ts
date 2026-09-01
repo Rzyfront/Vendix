@@ -1610,6 +1610,20 @@ export class OrderDetailsPageComponent {
       if (submit.installmentId != null) dto.installment_id = submit.installmentId;
     }
 
+    // Propina (T3). El collector la trae ya resuelta a monto en `tip`, mas los
+    // metadatos de auditoria (`tipType`, `tipValue`, `tipWaiterId`). Solo se
+    // adjunta fuera del credito: una propina sobre el abono de una cuota
+    // alteraria el plan ya calculado, y el backend la rechaza con
+    // `tip_not_allowed_on_installment` en vez de aceptarla en silencio. El
+    // modal ya apaga la seccion con `[allowTip]="!isCreditOrder()"`; este guard
+    // es la segunda linea, porque un submit puede venir de un estado anterior.
+    if (!isCredit && submit.tip != null && submit.tip > 0) {
+      dto.tip_amount = submit.tip;
+      if (submit.tipType != null) dto.tip_type = submit.tipType;
+      if (submit.tipValue != null) dto.tip_value = submit.tipValue;
+      if (submit.tipWaiterId != null) dto.tip_waiter_id = submit.tipWaiterId;
+    }
+
     this.isProcessingAction.set(true);
 
     const request$ = isCredit

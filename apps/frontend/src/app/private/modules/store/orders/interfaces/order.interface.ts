@@ -646,6 +646,15 @@ export interface PayOrderDto {
   amount?: number;
   installment_id?: number;
   payment_reference?: string;
+  // Propina (T3). Mismos nombres que `CreatePosPaymentDto` y que el
+  // `PayOrderDto` del backend: el collector es uno solo para POS, mesa y
+  // detalle de orden, asi que el contrato tiene que ser identico en los tres
+  // destinos. Un nombre distinto aqui no se ignora: `forbidNonWhitelisted`
+  // lo convierte en un 400.
+  tip_amount?: number;
+  tip_type?: 'percentage' | 'fixed';
+  tip_value?: number;
+  tip_waiter_id?: number;
 }
 
 export interface ShipOrderDto {
