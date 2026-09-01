@@ -277,92 +277,97 @@ export class OrdersListComponent {
   });
 
   // Table configuration
-  columns: TableColumn[] = [
-    { key: 'order_number', label: 'Order ID', sortable: true, priority: 1 },
-    {
-      key: 'customer_name',
-      label: 'Customer',
-      sortable: true,
-      priority: 2,
-    },
-    // Carril B - B2: columna Mesa. El backend ya devuelve
-    // `table_sessions[0].table.name` desde ventana 1 (findAll include con
-    // take:1 orderBy id desc). Si la orden no tiene sesión, celda vacía
-    // — sin guion/N/A para no ensuciar la lectura.
-    {
-      key: 'mesa',
-      label: 'Mesa',
-      sortable: false,
-      priority: 2,
-      transform: (value: unknown, row?: Order) => {
-        const ts = row?.table_sessions?.[0];
-        if (!ts?.table?.name) return '';
-        return ts.table.zone ? `${ts.table.name} (${ts.table.zone})` : ts.table.name;
+  // Carril B - B2: columns ahora es computed. La entrada Mesa solo aparece
+  // cuando la tienda tiene mesas cargadas (tables().length > 0). Tienda sin
+  // mesas ⇒ columna invisible ⇒ no más "No data". ZONELESS: el template
+  // debe invocar columns() — la columna se re-evalúa cuando tables() cambia.
+  readonly columns = computed<TableColumn[]>(() => {
+    const hasTables = this.tables().length > 0;
+    const base: TableColumn[] = [
+      { key: 'order_number', label: 'Order ID', sortable: true, priority: 1 },
+      {
+        key: 'customer_name',
+        label: 'Customer',
+        sortable: true,
+        priority: 2,
       },
-    },
-    {
-      key: 'channel',
-      label: 'Canal',
-      sortable: true,
-      badge: true,
-      priority: 2,
-      badgeConfig: {
-        type: 'custom',
-        size: 'sm',
-        colorMap: {
-          pos: '#6366f1',
-          ecommerce: '#10b981',
-          agent: '#8b5cf6',
-          whatsapp: '#22c55e',
-          marketplace: '#f59e0b',
+      {
+        key: 'channel',
+        label: 'Canal',
+        sortable: true,
+        badge: true,
+        priority: 2,
+        badgeConfig: {
+          type: 'custom',
+          size: 'sm',
+          colorMap: {
+            pos: '#6366f1',
+            ecommerce: '#10b981',
+            agent: '#8b5cf6',
+            whatsapp: '#22c55e',
+            marketplace: '#f59e0b',
+          },
+        },
+        transform: (value: any) => this.formatChannel(value),
+      },
+      {
+        key: 'state',
+        label: 'Status',
+        sortable: true,
+        badge: true,
+        priority: 1,
+        badgeConfig: {
+          type: 'custom',
+          size: 'sm',
+          colorMap: {
+            draft: '#9ca3af',
+            created: '#6b7280',
+            pending_payment: '#f59e0b',
+            processing: '#3b82f6',
+            shipped: '#06b6d4',
+            delivered: '#10b981',
+            cancelled: '#ef4444',
+            refunded: '#f97316',
+            finished: '#8b5cf6',
+          },
+        },
+        transform: (value: any) => this.formatStatus(value),
+      },
+      {
+        key: 'grand_total',
+        label: 'Total',
+        sortable: true,
+        priority: 1,
+        transform: (value: any) => this.currencyService.format(value || 0),
+      },
+      {
+        key: 'created_at',
+        label: 'Date',
+        sortable: true,
+        priority: 3,
+        transform: (value: any) => {
+          if (!value) return 'N/A';
+          const date = new Date(value);
+          return isNaN(date.getTime())
+            ? 'Invalid Date'
+            : date.toLocaleDateString();
         },
       },
-      transform: (value: any) => this.formatChannel(value),
-    },
-    {
-      key: 'state',
-      label: 'Status',
-      sortable: true,
-      badge: true,
-      priority: 1,
-      badgeConfig: {
-        type: 'custom',
-        size: 'sm',
-        colorMap: {
-          draft: '#9ca3af',
-          created: '#6b7280',
-          pending_payment: '#f59e0b',
-          processing: '#3b82f6',
-          shipped: '#06b6d4',
-          delivered: '#10b981',
-          cancelled: '#ef4444',
-          refunded: '#f97316',
-          finished: '#8b5cf6',
-        },
-      },
-      transform: (value: any) => this.formatStatus(value),
-    },
-    {
-      key: 'grand_total',
-      label: 'Total',
-      sortable: true,
-      priority: 1,
-      transform: (value: any) => this.currencyService.format(value || 0),
-    },
-    {
-      key: 'created_at',
-      label: 'Date',
-      sortable: true,
-      priority: 3,
-      transform: (value: any) => {
-        if (!value) return 'N/A';
-        const date = new Date(value);
-        return isNaN(date.getTime())
-          ? 'Invalid Date'
-          : date.toLocaleDateString();
-      },
-    },
-  ];
+    ];
+    if (hasTables) {
+      // Mesa: lee el campo plano precomputado en loadOrders() (mesa string
+      // o null). defaultValue cubre la celda vacía → '—' en lugar de
+      // confundir null/'' con dato.
+      base.push({
+        key: 'mesa',
+        label: 'Mesa',
+        sortable: false,
+        priority: 2,
+        defaultValue: '—',
+      });
+    }
+    return base;
+  });
 
   actions: TableAction[] = [
     {
@@ -389,34 +394,12 @@ export class OrdersListComponent {
   ];
 
   // Card configuration for mobile
-  cardConfig: ItemListCardConfig = {
-    titleKey: 'order_number',
-    titleTransform: (item) => `#${item.order_number}`,
-    subtitleKey: 'customer_name',
-    avatarFallbackIcon: 'shopping-bag',
-    avatarShape: 'circle',
-    badgeKey: 'state',
-    badgeConfig: {
-      type: 'custom',
-      size: 'sm',
-      colorMap: {
-        draft: '#9ca3af',
-        created: '#6b7280',
-        pending_payment: '#f59e0b',
-        processing: '#3b82f6',
-        shipped: '#06b6d4',
-        delivered: '#10b981',
-        cancelled: '#ef4444',
-        refunded: '#f97316',
-        finished: '#8b5cf6',
-      },
-    },
-    badgeTransform: (value: any) => this.formatStatus(value),
-    footerKey: 'grand_total',
-    footerLabel: 'Total',
-    footerStyle: 'prominent',
-    footerTransform: (value: any) => this.currencyService.format(Number(value) || 0),
-    detailKeys: [
+  // Carril B - B2: cardConfig ahora es computed. detailKeys incluye Mesa
+  // solo cuando tables().length > 0. ZONELESS: el template debe invocar
+  // cardConfig() — la card se re-evalúa cuando tables() cambia.
+  readonly cardConfig = computed<ItemListCardConfig>(() => {
+    const hasTables = this.tables().length > 0;
+    const detailKeys: ItemListCardConfig['detailKeys'] = [
       {
         key: 'channel',
         label: 'Canal',
@@ -424,33 +407,62 @@ export class OrdersListComponent {
         infoIconTransform: (value: any) => this.getChannelIcon(value),
         infoIconVariantTransform: (value: any) => this.getChannelVariant(value),
       },
-      // Carril B - B2: badge Mesa en mobile card. Solo si hay sesión;
-      // sin guion/N/A cuando no.
-      {
+    ];
+    if (hasTables) {
+      // Mesa: lee el campo plano precomputado en loadOrders() (mesa string
+      // o null). infoIcon coherente con el texto: icono ⇔ mesa presente.
+      detailKeys.push({
         key: 'mesa',
         label: 'Mesa',
-        transform: (_value: unknown, item?: any) => {
-          const ts = item?.table_sessions?.[0];
-          if (!ts?.table?.name) return '';
-          return ts.table.zone ? `${ts.table.name} (${ts.table.zone})` : ts.table.name;
-        },
-        infoIconTransform: (_value: unknown, item?: any) =>
-          item?.table_sessions?.[0]?.table?.name ? 'utensils' : undefined,
+        transform: (value: unknown) =>
+          value == null || value === '' ? '—' : (value as string),
+        infoIconTransform: (value: unknown) =>
+          value == null || value === '' ? undefined : 'utensils',
         infoIconVariant: 'warning',
+      });
+    }
+    detailKeys.push({
+      key: 'created_at',
+      label: 'Fecha',
+      transform: (value: any) => {
+        if (!value) return 'N/A';
+        const date = new Date(value);
+        return isNaN(date.getTime())
+          ? 'Invalid Date'
+          : date.toLocaleDateString();
       },
-      {
-        key: 'created_at',
-        label: 'Fecha',
-        transform: (value: any) => {
-          if (!value) return 'N/A';
-          const date = new Date(value);
-          return isNaN(date.getTime())
-            ? 'Invalid Date'
-            : date.toLocaleDateString();
+    });
+    return {
+      titleKey: 'order_number',
+      titleTransform: (item) => `#${item.order_number}`,
+      subtitleKey: 'customer_name',
+      avatarFallbackIcon: 'shopping-bag',
+      avatarShape: 'circle',
+      badgeKey: 'state',
+      badgeConfig: {
+        type: 'custom',
+        size: 'sm',
+        colorMap: {
+          draft: '#9ca3af',
+          created: '#6b7280',
+          pending_payment: '#f59e0b',
+          processing: '#3b82f6',
+          shipped: '#06b6d4',
+          delivered: '#10b981',
+          cancelled: '#ef4444',
+          refunded: '#f97316',
+          finished: '#8b5cf6',
         },
       },
-    ],
-  };
+      badgeTransform: (value: any) => this.formatStatus(value),
+      footerKey: 'grand_total',
+      footerLabel: 'Total',
+      footerStyle: 'prominent',
+      footerTransform: (value: any) =>
+        this.currencyService.format(Number(value) || 0),
+      detailKeys,
+    };
+  });
 
   constructor() {
     // Pre-filter from URL (ref 2026-06-25 — feature/orders-pending-dispatch).
@@ -648,9 +660,20 @@ export class OrdersListComponent {
           const rawOrders = paginatedData.data || paginatedData || [];
 
           // Normalize numeric strings to numbers
-          const normalizedOrders = rawOrders.map((order: any) => ({
-            ...order,
-            customer_id:
+          const normalizedOrders = rawOrders.map((order: any) => {
+            // Carril B - B2: precomputar mesa plana para que la columna/celda
+            // lean el string y el template pinte '—' cuando falta (null),
+            // no '' (cadena vacía) que el gate del shared confunde con dato.
+            const ts = order?.table_sessions?.[0];
+            const mesa = ts?.table?.name
+              ? ts.table.zone
+                ? `${ts.table.name} (${ts.table.zone})`
+                : ts.table.name
+              : null;
+            return {
+              ...order,
+              mesa,
+              customer_id:
               typeof order.customer_id === 'string'
                 ? parseInt(order.customer_id)
                 : order.customer_id,
@@ -674,7 +697,8 @@ export class OrdersListComponent {
               typeof order.discount_amount === 'string'
                 ? parseFloat(order.discount_amount)
                 : order.discount_amount,
-          }));
+            };
+          });
 
           // Get pagination info safely
           const paginationInfo = paginatedData.pagination || {
