@@ -36,8 +36,19 @@ export class DefaultPanelUIService {
   private readonly UNIFIED_TEMPLATE_NAME = 'user_settings_default';
 
   /**
-   * Configuraciones de panel UI por tipo de aplicación (FALLBACK)
+   * Configuraciones de panel UI por tipo de aplicación (FALLBACK).
    * Estas configuraciones se usan solo si la base de datos falla.
+   *
+   * **CONTRATO — whitelist efectivo:** este mapa es el whitelist real que
+   * valida `PanelUiKeysWhitelist` (`apps/backend/src/common/utils/panel-ui.util.ts`).
+   * Toda clave nueva que se agregue al catálogo del frontend
+   * (`APP_MODULES` en `apps/frontend/src/app/shared/constants/app-modules.constant.ts`
+   * o `store-module-catalog.constant.ts`) DEBE agregarse también aquí, o
+   * `PATCH /store/users/management/:id/panel-ui` devolverá HTTP 400 con
+   * `SYS_VALIDATION_001` y el dueño o admin no podrá guardar la
+   * configuración del usuario (QUI-XXX, captura: "no puedo configurar los
+   * módulos"). El catalog del frontend puede ser superconjunto sin romper
+   * nada; lo que rompe es lo inverso.
    */
   private readonly PANEL_UI_FALLBACK: Record<string, Record<string, boolean>> =
     {
@@ -193,6 +204,12 @@ export class DefaultPanelUIService {
         settings_users: true,
         settings_roles: true,
         settings_cash_registers: true,
+        // `settings_print_formats`: módulo real del carril de impresión (cristian).
+        // Se agrega al whitelist backend porque existía en `APP_MODULES.STORE_ADMIN`
+        // del frontend (catalog + editor de panel_ui), pero NO aquí; eso hacía que
+        // cualquier guardado de `panel_ui` de un usuario que tuviera ese árbol completo
+        // disparara `SYS_VALIDATION_001` desde `PanelUiKeysWhitelist`.
+        settings_print_formats: true,
         settings_fiscal_management: true,
         accounting_withholding_tax: true,
         accounting_exogenous: true,

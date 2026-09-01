@@ -1,0 +1,73 @@
+// Pantalla "sin acceso al panel". Mobile-first; el `store-admin-layout`
+// que la envuelve ya limita el ancho útil con sus reglas responsivas.
+
+:host {
+  display: block;
+  width: 100%;
+}
+
+.no-access-shell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(24px, 5vw, 64px);
+  min-height: calc(100vh - 64px);
+}
+
+.no-access-card {
+  background-color: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e4e4e7);
+  border-radius: 16px;
+  padding: clamp(24px, 4vw, 40px);
+  max-width: 480px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+
+.no-access-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 16px;
+  background-color: var(--surface-muted, #f4f4f5);
+  color: var(--text-secondary, #71717a);
+  border-radius: 50%;
+}
+
+.no-access-title {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-primary, #18181b);
+  margin: 0 0 8px;
+}
+
+.no-access-subtitle {
+  font-size: 14px;
+  color: var(--text-secondary, #52525b);
+  margin: 0 0 20px;
+  line-height: 1.5;
+}
+
+.no-access-detail {
+  font-size: 13px;
+  color: var(--text-secondary, #71717a);
+  margin: 0 0 28px;
+  line-height: 1.6;
+}
+
+.no-access-path {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  background-color: var(--surface-muted, #f4f4f5);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--text-primary, #18181b);
+}
+
+.no-access-actions {
+  display: flex;
+  justify-content: center;
+}

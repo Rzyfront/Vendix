@@ -1,0 +1,34 @@
+<div class="no-access-shell">
+  <div class="no-access-card">
+    <div class="no-access-icon" aria-hidden="true">
+      <app-icon name="lock" [size]="32" />
+    </div>
+
+    <h1 class="no-access-title">Sin acceso al panel</h1>
+
+    <p class="no-access-subtitle">
+      @if (displayName(); as name) {
+        Hola, <strong>{{ name }}</strong>.
+      }
+      Tu usuario no tiene módulos activos en este momento
+      @if (storeName(); as store) {
+        en <strong>{{ store }}</strong>.
+      } @else {
+        en la tienda.
+      }
+    </p>
+
+    <p class="no-access-detail">
+      Pídele al propietario o a un administrador de la tienda que active los
+      módulos que necesitas desde
+      <span class="no-access-path">Configuración → General → Módulos del Panel</span>
+      (o desde la edición de tu usuario en <span class="no-access-path">Usuarios</span>).
+    </p>
+
+    <div class="no-access-actions">
+      <app-button variant="primary" size="md" (clicked)="onSignOut()">
+        Cerrar sesión
+      </app-button>
+    </div>
+  </div>
+</div>

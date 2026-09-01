@@ -4,7 +4,11 @@ import { RouterTestingModule } from '@angular/router/testing';
 import { panelUiGuard, firstActiveModuleRedirectGuard } from './panel-ui.guard';
 import { MenuFilterService } from '../services/menu-filter.service';
 import { ToastService } from '../../shared/components/toast/toast.service';
-import { PANEL_UI_TERMINAL_ROUTE } from '../services/menu-filter.service';
+import {
+  PANEL_UI_NO_ACCESS_ROUTE,
+  PANEL_UI_TERMINAL_ROUTE,
+} from '../services/menu-filter.service';
+import { AuthFacade } from '../store/auth/auth.facade';
 
 const ERR_10 =
   'Ese módulo no está disponible para tu usuario. Si crees que deberías tenerlo, pídele a tu administrador que lo active.';
@@ -25,6 +29,7 @@ const visible = {
 describe('panelUiGuard', () => {
   let menuFilter: jasmine.SpyObj<MenuFilterService>;
   let toast: jasmine.SpyObj<ToastService>;
+  let authFacade: jasmine.SpyObj<AuthFacade>;
   let router: Router;
 
   beforeEach(() => {
@@ -40,17 +45,21 @@ describe('panelUiGuard', () => {
       'error',
       'success',
     ]);
+    authFacade = jasmine.createSpyObj('AuthFacade', ['isOwner']);
 
     menuFilter.resolveKeysForRoute.and.returnValue([]);
     menuFilter.currentMenuTree.and.returnValue([]);
     menuFilter.firstActiveModuleRoute.and.returnValue('/admin/dashboard');
     menuFilter.diagnoseModule.and.returnValue(visible);
+    // Default: el actor NO es owner; los tests que necesitan owner lo sobreescriben.
+    authFacade.isOwner.and.returnValue(false);
 
     TestBed.configureTestingModule({
       imports: [RouterTestingModule],
       providers: [
         { provide: MenuFilterService, useValue: menuFilter },
         { provide: ToastService, useValue: toast },
+        { provide: AuthFacade, useValue: authFacade },
       ],
     });
 
@@ -99,6 +108,26 @@ describe('panelUiGuard', () => {
 
     expect(result).toBeTrue();
     expect(toast.info).not.toHaveBeenCalled();
+  });
+
+  it('deja pasar la ruta "no-access" para no entrar en bucle de redirect (C.1(2))', () => {
+    const result = runGuard(PANEL_UI_NO_ACCESS_ROUTE);
+
+    expect(result).toBeTrue();
+    expect(toast.info).not.toHaveBeenCalled();
+    expect(router.navigateByUrl).not.toHaveBeenCalled();
+  });
+
+  it('owner pasa siempre aunque el módulo esté bloqueado por user_panel_ui (C.1(2))', () => {
+    authFacade.isOwner.and.returnValue(true);
+    menuFilter.resolveKeysForRoute.and.returnValue(['pos']);
+    menuFilter.diagnoseModule.and.returnValue(hidden);
+
+    const result = runGuard('/admin/pos');
+
+    expect(result).toBeTrue();
+    expect(toast.info).not.toHaveBeenCalled();
+    expect(router.navigateByUrl).not.toHaveBeenCalled();
   });
 
   it('respeta el apagado a nivel tienda (store_panel_ui) igual que el del usuario', () => {
