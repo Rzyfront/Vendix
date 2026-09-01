@@ -264,10 +264,32 @@ export class TableSessionPageComponent implements OnInit {
 
   readonly customer = computed(() => this.session()?.order?.customer ?? null);
 
+  /**
+   * carril D / lina — D1: alias del cliente cuando la venta es anónima pero
+   * etiquetada (ej. "Mesa 5", "Para llevar"). Persistido en
+   * `orders.customer_alias` (schema.prisma:1445, XOR con `customer_id`).
+   * Se renderiza SOLO (sin etiqueta "CF" adyacente) en lugar del nombre
+   * del cliente cuando este último está ausente, exactamente como pidió
+   * el dueño: el alias existe precisamente para que el mesero no vea una
+   * fila anónima.
+   */
+  readonly customerAlias = computed(
+    () => this.session()?.order?.customer_alias ?? null,
+  );
+
   readonly customerName = computed(() => {
     const c = this.customer();
-    if (!c) return null;
-    return `${c.first_name} ${c.last_name}`.trim();
+    if (c) {
+      // Hay cliente formal: gana el nombre sobre cualquier alias.
+      return `${c.first_name} ${c.last_name}`.trim();
+    }
+    const alias = this.customerAlias();
+    if (alias && alias.trim()) {
+      // Sin cliente formal pero con alias: alias solo, sin "CF".
+      return alias.trim();
+    }
+    // Sin cliente ni alias: consumidor final explícito.
+    return 'Consumidor Final';
   });
 
   readonly selectedItems = computed(() => {
@@ -295,6 +317,19 @@ export class TableSessionPageComponent implements OnInit {
   readonly hasUnfiredItems = computed(() => this.pendingPreparedItems().length > 0);
 
   readonly isClosed = computed(() => !!this.session()?.closed_at);
+
+  /**
+   * carril D / lina — D1: la mesa fue pagada en POS (cobrada) pero NO
+   * cerrada todavía. La fuente de verdad es `table_sessions.paid_at`
+   * (migration `20260901120000_table_session_paid_at`); se persiste
+   * dentro del `$transaction` del pago para que un rollback no deje
+   * un `paid_at` fantasma.
+   *
+   * La mesa sigue `occupied` hasta que el mesero ejecute `closeSession`
+   * (canónico), pero el frontend de mesa y el floor-map pintan el badge
+   * "Pagada" sin esperar al cierre explícito.
+   */
+  readonly isPaid = computed(() => !!this.session()?.paid_at);
 
   /** Reads `restaurant.enable_table_checkout` (loose JSON slice). */
   readonly checkoutEnabled = computed(
@@ -869,10 +904,27 @@ export class TableSessionPageComponent implements OnInit {
   // ── Remove item (Frente 2) ───────────────────────────────────────────
 
   /**
-   * Remove a single line from the open check. Confirms first (the message
-   * warns about the kitchen-ticket cancel + stock return when the item was
-   * already fired-pending), then calls the backend and replaces the local
-   * session with the recalculated snapshot it returns.
+   * Cancel a single line from the open check (soft cancel).
+   *
+   * carril D / lina — D2: flujo nuevo. Antes era un hard delete
+   * (`removeItem` DELETE legacy) que rompía la orden cuando el plato
+   * ya estaba disparado a cocina o la orden salía de `draft`. Ahora:
+   *  - Motivo obligatorio siempre (mín 3 chars). Se persiste en
+   *    `order_items.cancellation_reason` para auditoría y para que el
+   *    KDS y el listado de ordenes puedan mostrarlo.
+   *  - El ítem NO se borra: queda VISIBLE marcado como cancelado pero
+   *    EXCLUIDO del subtotal/tax/grand_total (filtro `cancelled_at IS
+   *    NULL` en el recálculo del backend).
+   *  - Stock: `before_fire` revierte; `after_fire_waste` queda como
+   *    merma sin reversión (backend decide según
+   *    `inventory_consumed_at_fire`).
+   *  - KDS: si el ticket está en `pending`, se cancela in-tx y se emite
+   *    `ticket.cancelled` SSE post-commit. Si ya avanzó de `pending`,
+   *    no se toca el ticket del cocinero.
+   *
+   * UX: el motivo se pide con `DialogService.prompt` (PromptModalComponent
+   * del design system) tras un `confirm` previo. Distinto copy entre
+   * `firedPending` (merma) y resto (exclusión del total).
    */
   onRemoveItem(item: TableSessionOrderItem): void {
     const sessionId = this.session()?.id;
@@ -882,33 +934,66 @@ export class TableSessionPageComponent implements OnInit {
       this.isItemFired(item) && this.kitchenStatusFor(item) === 'pending';
     this.dialogService
       .confirm({
-        title: 'Eliminar plato',
+        title: 'Cancelar plato',
         message: firedPending
-          ? `¿Eliminar "${item.product_name}" de la cuenta? Se cancelará su ticket de cocina y se devolverá el inventario consumido.`
-          : `¿Eliminar "${item.product_name}" de la cuenta?`,
-        confirmText: 'Eliminar',
-        cancelText: 'Cancelar',
+          ? `¿Cancelar "${item.product_name}" de la cuenta? Se cancelará su ticket de cocina. Si el ticket ya pasó a preparación, queda como merma sin reversión de stock.`
+          : `¿Cancelar "${item.product_name}" de la cuenta? El plato queda visible marcado como cancelado, pero se excluye del total.`,
+        confirmText: 'Continuar',
+        cancelText: 'Atrás',
         confirmVariant: 'danger',
       })
       .then((confirmed) => {
         if (!confirmed) return;
-        this.removingItemId.set(item.id);
-        this.tablesService
-          .removeItem(sessionId, item.id)
-          .pipe(takeUntilDestroyed(this.destroyRef))
-          .subscribe({
-            next: (s) => {
-              this.removingItemId.set(null);
-              this.session.set(s);
-              this.seedKitchenStateFromOrder(s);
-              this.toastService.success('Plato eliminado de la cuenta');
-            },
-            error: (err: unknown) => {
-              this.removingItemId.set(null);
+        // Motivo obligatorio vía `DialogService.prompt` (PromptModalComponent
+        // del design system). Resuelve `undefined` si el usuario cancela el
+        // modal; el string con trim si confirma. Sustituye a `window.prompt`
+        // nativo — mismo dato, modal compartido del design system.
+        this.dialogService
+          .prompt({
+            title: 'Motivo de cancelación',
+            message: firedPending
+              ? 'Quedará registrado como merma.'
+              : 'Quedará registrado en el pedido.',
+            placeholder: 'Describe el motivo (mínimo 3 caracteres)',
+            confirmText: 'Cancelar plato',
+            cancelText: 'Atrás',
+          })
+          .then((reasonInput) => {
+            if (reasonInput === undefined) {
+              this.toastService.error('Cancelación abortada');
+              return;
+            }
+            const reason = reasonInput.trim();
+            if (reason.length < 3) {
               this.toastService.error(
-                typeof err === 'string' ? err : 'Error al eliminar el plato',
+                'El motivo debe tener al menos 3 caracteres',
               );
-            },
+              return;
+            }
+            this.removingItemId.set(item.id);
+            this.tablesService
+              .cancelOrderItem(sessionId, item.id, { reason })
+              .pipe(takeUntilDestroyed(this.destroyRef))
+              .subscribe({
+                next: (s) => {
+                  this.removingItemId.set(null);
+                  this.session.set(s);
+                  this.seedKitchenStateFromOrder(s);
+                  this.toastService.success(
+                    firedPending
+                      ? 'Plato cancelado como merma'
+                      : 'Plato cancelado de la cuenta',
+                  );
+                },
+                error: (err: unknown) => {
+                  this.removingItemId.set(null);
+                  this.toastService.error(
+                    typeof err === 'string'
+                      ? err
+                      : 'Error al cancelar el plato',
+                  );
+                },
+              });
           });
       });
   }

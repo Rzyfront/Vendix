@@ -127,7 +127,14 @@
               deliveryConfig().label
             }}</span>
           </div>
-          @if (tableName()) {
+          <!-- T10 B2 — la sección "Mesa" sólo aparece en tiendas restaurante
+               Y si la orden trae sesión de mesa. Hoy se pintaba con sólo
+               `tableName()`, sin preguntar la industria: una orden anómala
+               con sesión en una tienda no-restaurante mostraba "Mesa: X".
+               La industria decide si la sección tiene sentido (canónica:
+               `AuthFacade.isRestaurant` vía `isRestaurant()` computed en
+               .ts:301); la sesión decide si hay dato que mostrar. -->
+          @if (isRestaurant() && tableName()) {
             <span class="w-px h-3.5 bg-border"></span>
             <div class="flex items-center gap-1.5 text-text-primary font-medium">
               <app-icon
@@ -211,14 +218,17 @@
                   <div class="customer-name-block">
                     <span class="customer-eyebrow">Cliente</span>
                     <h2>
-                      @if (
-                        orderData.users?.first_name ||
-                        orderData.users?.last_name
+                      {{ customerDisplayName() }}
+                      @if (isConsumidorFinal() && !customerDisplayName().length) {
+                        <!-- si no hay alias ni nombre, customerDisplayName ya cae a "Consumidor Final"; el badge CF refuerza la marca fiscal -->
+                      } @else if (
+                        orderData.customer_alias?.trim() &&
+                        !(orderData.users?.first_name || orderData.users?.last_name)
                       ) {
-                        {{ orderData.users?.first_name }}
-                        {{ orderData.users?.last_name }}
-                      } @else {
-                        Consumidor Final
+                        <span
+                          class="cf-badge"
+                          title="La orden sigue siendo consumidor final a nivel fiscal"
+                        >CF</span>
                       }
                     </h2>
                     <div class="customer-data-pills">
@@ -689,6 +699,46 @@
                           <app-icon name="flame" [size]="10" />
                           Enviar a cocina
                         </label>
+                      }
+                      <!-- T9p6 — entregar ítem desde el detalle de la orden.
+                           Sister del bloque `canResend` para que la jerarquía
+                           visual sea: estado KDS (si aplica) → acción sobre
+                           el ítem. Aplica a TODO ítem no terminal: los
+                           platos disparados a cocina solo cuando el ticket
+                           está 'ready' (controlado en `canDeliver`), y los
+                           ítems de retail directo sin pasar por cocina —
+                           ese es el caso que el ticket vino a cubrir.
+
+                           Si el ítem YA fue entregado se muestra la fecha
+                           que viene del payload (`delivered_at` poblado
+                           por el findOne del backend). El control es
+                           `app-button` del sistema de diseño, no un botón
+                           plano: `xsm` ≈ 28px para alinear con los badges
+                           de 10px que viven arriba. -->
+                      @if (item.delivered_at) {
+                        <span
+                          class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 ml-1 bg-sky-100 text-sky-800 border border-sky-200"
+                          [title]="'Entregado el ' + (item.delivered_at | date: 'short')"
+                        >
+                          <app-icon name="check" [size]="10" />
+                          Entregado
+                        </span>
+                      } @else if (canDeliver(item)) {
+                        <app-button
+                          variant="outline"
+                          size="xsm"
+                          customClasses="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 ml-1 bg-sky-50 text-sky-700 border border-sky-200 disabled:opacity-50"
+                          title="Marcar este ítem como entregado al cliente"
+                          [disabled]="deliveringItemId() === item.id"
+                          (clicked)="deliverItem(item)"
+                        >
+                          <app-icon slot="icon" name="check" [size]="10" />
+                          @if (deliveringItemId() === item.id) {
+                            Entregando…
+                          } @else {
+                            Entregar
+                          }
+                        </app-button>
                       }
                       @if (parseVariantAttributes(item.variant_attributes); as attrs) {
                         @if (attrs.length) {

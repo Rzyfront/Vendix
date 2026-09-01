@@ -29,7 +29,16 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         // no existe la relación `order_taxes`. Antes del fix esto compilaba
         // porque TypeScript no valida nombres de `include` contra Prisma, pero
         // la 1ª llamada runtime hubiera sido `PrismaClientValidationError` 500.
-        order_items: { include: { order_item_taxes: true } },
+        //
+        // [resid-fiscal] — Filtramos líneas canceladas (D2). El
+        // `aggregateTaxes` que sigue más abajo sumaba sus impuestos y los
+        // imprimía en el breakdown; el `order.tax_amount` ya los excluye,
+        // así que el tiquete salía con un desglose que NO cuadraba con el
+        // total agregado — inconsistencia visible para el cliente.
+        order_items: {
+          where: { cancelled_at: null },
+          include: { order_item_taxes: true },
+        },
         users: true,
         stores: {
           include: {

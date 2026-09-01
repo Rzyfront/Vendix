@@ -25,7 +25,7 @@ import type { KdsSession, KdsStation } from '../../interfaces';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (session(); as s) {
-      <div class="kds-bar kds-bar--open">
+      <div class="kds-bar" [class.kds-bar--open]="!heldByOther()" [class.kds-bar--held]="heldByOther()">
         <span class="kds-bar__group">
           <app-icon name="chef-hat" [size]="14" />
           <strong>{{ s.kds?.name ?? station()?.name ?? 'Estación' }}</strong>
@@ -39,6 +39,24 @@ import type { KdsSession, KdsStation } from '../../interfaces';
           <app-icon name="user" [size]="12" />
           {{ operatorName() }}
         </span>
+
+        <!-- QUI-XXX: lock de estación. Cuando la sesión la abrió otro operador
+             el badge cambia de "desde HH:MM" a "Reclamada por X" y se pinta
+             la barra en ámbar. El board hace la mutación de tickets en modo
+             SOLO LECTURA para este caller hasta que el dueño cierre, expire
+             por inactividad (5min) o un admin tome el control. -->
+        @if (heldByOther()) {
+          <span class="kds-bar__sep">·</span>
+          <span class="kds-bar__group kds-bar__group--warn">
+            <app-icon name="lock" [size]="12" />
+            Estación reclamada por {{ operatorName() }} — sólo lectura
+          </span>
+        } @else {
+          <span class="kds-bar__sep">·</span>
+          <span class="kds-bar__muted">
+            desde {{ s.opened_at | date: 'shortTime' }}
+          </span>
+        }
 
         <span class="kds-bar__sep">·</span>
 
@@ -80,14 +98,43 @@ import type { KdsSession, KdsStation } from '../../interfaces';
           <app-icon name="receipt" [size]="12" />
           Ver turno
         </button>
+
+        <!-- Cerrar turno propio. Cuando el turno NO es nuestro, el dueño actual
+             es el único que puede cerrarlo y la UI se lo impide: el botón se
+             deshabilita con tooltip explicando quién debe cerrarlo. -->
         <button
           type="button"
           class="kds-bar__btn kds-bar__btn--danger"
           (click)="closeClicked.emit()"
+          [disabled]="heldByOther()"
+          [attr.aria-label]="
+            heldByOther()
+              ? 'Cerrar turno deshabilitado: lo abrió ' + operatorName()
+              : 'Cerrar mi turno'
+          "
         >
           <app-icon name="lock" [size]="12" />
           Cerrar turno
         </button>
+
+        <!-- QUI-XXX: botón explícito de toma forzada. Sólo aparece cuando el
+             caller tiene rol privilegiado y hay sesión abierta ajena. El
+             cierre del turno ajeno lo hace el backend en la misma
+             transacción que abre el nuevo. -->
+        @if (canForceTake()) {
+          <button
+            type="button"
+            class="kds-bar__btn kds-bar__btn--danger"
+            (click)="forceTakeClicked.emit()"
+            [attr.aria-label]="
+              'Tomar control de la estación (cierra el turno de ' +
+              operatorName() + ')'
+            "
+          >
+            <app-icon name="shield" [size]="12" />
+            Tomar control
+          </button>
+        }
 
         <!--
           En pantalla completa el sticky header está oculto, y con él el botón por
@@ -186,6 +233,22 @@ import type { KdsSession, KdsStation } from '../../interfaces';
         background-color: var(--color-success-100, #dcfce7);
         border-color: var(--color-success, #22c55e);
         color: var(--color-success-700, #15803d);
+      }
+
+      /* Ámbar = turno abierto por otro operador (lectura para nosotros).
+         Mismo tono del banner "Reclamada por X" para que la barra entera
+         cambie de verde a ámbar cuando entramos a un tablero ajeno. */
+      .kds-bar--held {
+        background-color: var(--color-warning-100, #fef3c7);
+        border-color: var(--color-warning, #f59e0b);
+        color: var(--color-warning-700, #b45309);
+      }
+
+      /* Etiqueta "Reclamada por X" — sin fondo, hereda color del contenedor
+         '--held'. Vive dentro del flujo '.kds-bar__group' para mantener la
+         alineación con el icono del operador. */
+      .kds-bar__group--warn {
+        font-weight: 600;
       }
 
       .kds-bar--closed {
@@ -289,6 +352,15 @@ export class KdsSessionStatusBarComponent {
    * sin turno), pero su estado y el motivo van juntos.
    */
   readonly changeBlockedReason = input<string | null>(null);
+  // ── QUI-XXX: lock de estación ───────────────────────────────────────────────
+  /** True cuando `session.opened_by` NO coincide con el caller — la sesión
+   *  está en manos de otro operador y las mutaciones de cocina son SOLO
+   *  LECTURA para nosotros. (El padre computa esto desde
+   *  `stationsService.sessionHeldByOther()`.) */
+  readonly heldByOther = input(false);
+  /** True cuando el caller es owner/admin/super_admin — el padre expone el
+   *  botón "Tomar control" sólo si esto coincide con `heldByOther`. */
+  readonly canForceTake = input(false);
 
   readonly closeClicked = output<void>();
   readonly detailClicked = output<void>();
@@ -299,6 +371,10 @@ export class KdsSessionStatusBarComponent {
    * condición del selector se vuelva a cumplir.
    */
   readonly changeStationClicked = output<void>();
+  /** QUI-XXX: el caller privilegiado pide el control de la estación ajena.
+   *  El backend cierra la sesión ajena y abre una nueva para el caller,
+   *  en una sola transacción. El padre invoca `stationsService.forceTake()`. */
+  readonly forceTakeClicked = output<void>();
 
   operatorName(): string {
     const u = this.session()?.opened_by_user;

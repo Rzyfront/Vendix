@@ -7,6 +7,7 @@ import {
   ArrayMinSize,
   IsDateString,
   IsIn,
+  IsEnum,
   Min,
   Max,
   MaxLength,
@@ -475,12 +476,56 @@ export class CreatePosPaymentDto {
    * GAP-6 (QR mesa dine-in) — Propina opcional. Aditiva al grand_total igual
    * que shipping_cost, PERO sin IVA: NO entra a subtotal_amount ni tax_amount.
    * Se contabiliza como pasivo custodio (propinas por pagar), no como ingreso.
+   *
+   * El operador puede mandar `tip_amount` directo (monto fijo) o dejar que
+   * el backend lo calcule a partir de `tip_type='percentage'` + `tip_value`
+   * (porcentaje 0-100 sobre el subtotal). Si llega `tip_type='percentage'`
+   * y NO llega `tip_amount` directo, el backend calcula y persiste.
+   * Si llegan ambos, gana `tip_amount` directo (criterio del operador
+   * siempre puede fijar el monto libremente, ignorando el % sugerido).
    */
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   @Type(() => Number)
   tip_amount?: number;
+
+  /**
+   * carril D / lina — D3: modo de la propina. 'percentage' → `tip_value`
+   * es el % aplicado (0-100). 'fixed' → `tip_value` es el monto libre
+   * (en ese caso coincide con `tip_amount`).
+   *
+   * Si no llega, el backend asume 'fixed' y persiste `tip_value` igual
+   * a `tip_amount` para que la auditoría vea cómo se calculó.
+   */
+  @IsOptional()
+  @IsEnum(['percentage', 'fixed'])
+  tip_type?: 'percentage' | 'fixed';
+
+  /**
+   * carril D / lina — D3: valor base de la propina. Si tip_type='percentage',
+   * el % (0-100). Si tip_type='fixed', el monto (en ese caso coincide con
+   * tip_amount). DECIMAL(14,2) en DB (no en este DTO: el cliente puede
+   * mandar hasta 2 decimales; el casteo a Decimal(14,2) lo hace Prisma
+   * al persistir). Si no llega, se persiste igual a tip_amount.
+   */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Type(() => Number)
+  tip_value?: number;
+
+  /**
+   * carril D / lina — D3: mesero que recibe la propina. Atribución para
+   * informes y futura liquidación; esta iteración NO reparte ni liquida.
+   * FK a users.id (ON DELETE SET NULL en DB, así si borran al mesero
+   * la propina queda registrada pero sin atribución).
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  tip_waiter_id?: number;
 
   @IsOptional()
   shipping_address_snapshot?: Record<string, any>;

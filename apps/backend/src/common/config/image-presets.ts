@@ -11,6 +11,14 @@ export enum ImageContext {
   PRODUCT = 'product',
   AVATAR = 'avatar',
   LOGO = 'logo',
+  // [print-fiscal-gate P6] — preset dedicado al logo en impresión térmica.
+  // No downscale agresivo (la térmica imprime en 203/300 dpi nativos sobre
+  // 80mm de ancho: ~8 píxeles/mm a 203 dpi) y exige monocromo porque las
+  // impresoras térmicas de recibo NO reproducen color. Sin esta distinción,
+  // el logo subía por el preset LOGO (maxWidth 400, calidad 90) y la térmica
+  // lo recibía suavizado y en gris continuo, que en una Epson TM-T20 sale
+  // como mancha gris en vez de marca.
+  LOGO_PRINT = 'logo-print',
   CATEGORY = 'category',
   MARKETING_AD = 'marketing_ad',
   RECEIPT = 'receipt',
@@ -63,6 +71,16 @@ export const IMAGE_PRESETS: Record<ImageContext, ImagePreset> = {
     quality: 90,
     fit: 'inside',
     skipIfAlreadyOptimized: true,
+  },
+  // [print-fiscal-gate P6] — ver comentario en ImageContext.LOGO_PRINT.
+  // Sin `maxWidth` agresivo (la térmica usa ancho nativo del papel) y con
+  // monocromo activado para que la conversión la haga el upload pipeline.
+  [ImageContext.LOGO_PRINT]: {
+    maxWidth: 1600,
+    maxHeight: 800,
+    quality: 100,
+    fit: 'inside',
+    skipIfAlreadyOptimized: false,
   },
   [ImageContext.CATEGORY]: {
     maxWidth: 800,

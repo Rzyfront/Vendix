@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { Observable, from, of } from 'rxjs';
+import { Observable, firstValueFrom, from, of } from 'rxjs';
 import { delay, map, switchMap } from 'rxjs/operators';
 import {
   TicketData,
@@ -12,6 +12,7 @@ import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { PrintFormat } from '../../../../../core/models/store-settings.interface';
 import { PrintFormatType } from '../../../../../core/models/print-formats.model';
 import { DocumentPrintService } from '../../../../../shared/services/print';
+import { PrintGatewayClientService } from '../../../../../shared/services/print/print-gateway-client.service';
 
 /**
  * Ticket-specific CSS handed to `DocumentPrintService`. The `@page` rule is NOT
@@ -70,6 +71,10 @@ export class PosTicketService {
   private storeSettings = inject(StoreSettingsFacade);
   private authFacade = inject(AuthFacade);
   private documentPrint = inject(DocumentPrintService);
+  // [print-fiscal-gate P7.2] — Necesario para `body_only=true` en el batch
+  // multi-ticket; `DocumentPrintService.printViaGateway` (y por tanto
+  // `resolveAndPrint`) no expone esa flag.
+  private gatewayClient = inject(PrintGatewayClientService);
 
   private defaultPrinterConfig: PrinterConfig = {
     name: 'Default Thermal Printer',
@@ -212,7 +217,13 @@ export class PosTicketService {
     return of(ticketData).pipe(
       switchMap(async () => {
         if (printOptions.printReceipt) {
-          let printedViaGateway = false;
+          // [print-fiscal-gate P4] — El switch client-side formato/documentId
+          // se elimina: hoy lo decide el backend en `/resolve-for-document`.
+          // Si el gateway falla, el error se eleva al caller (no más caída
+          // silenciosa al emisor legacy). `renderTicketBody` y
+          // `generateTicketHTML` quedan en el archivo, marcados
+          // `@deprecated`, para defensa contra regresión (ver regla del
+          // dueño: nunca borrar sin permiso).
           const candidateDocId =
             ticketData.orderId != null && !isNaN(Number(ticketData.orderId))
               ? Number(ticketData.orderId)
@@ -221,38 +232,10 @@ export class PosTicketService {
                 : null;
 
           if (candidateDocId) {
-            // La única evidencia de que existe factura electrónica es el id de
-            // la factura emitida. `invoiceDataToken` / `invoiceDataQrUrl` NO
-            // sirven: son el token de *solicitud* que el backend devuelve como
-            // `{ invoice_data_token, invoice_id: number | null }`, y existen
-            // justamente cuando todavía no se emitió nada — es el QR de
-            // "Solicite su factura electrónica" que se imprime junto al texto
-            // "Este documento no es una factura electrónica".
-            //
-            // Usarlos como condición mandaba toda venta con ese QR a
-            // `pos_electronic_invoice`; el provider no encontraba fila en
-            // `invoices`, el gateway devolvía PRINT_DOCUMENT_NOT_FOUND_001 y
-            // `printViaGateway` caía al emisor legacy en silencio, perdiendo
-            // también el gateway del ticket normal.
-            const invoiceId = (ticketData.electronicInvoice as any)?.id;
-            const formatType: PrintFormatType = invoiceId
-              ? 'pos_electronic_invoice'
-              : 'pos_sale_ticket';
-
-            const result = await this.documentPrint.printViaGateway({
-              formatType,
-              documentId: invoiceId ?? candidateDocId,
+            await this.documentPrint.resolveAndPrint({
+              documentType: 'pos_order',
+              documentId: candidateDocId,
             });
-            if (result) {
-              printedViaGateway = true;
-            }
-          }
-
-          if (!printedViaGateway) {
-            const html = await this.generateTicketHTML(ticketData);
-            // Awaited so the emitted `true` means "the document reached the print
-            // dialog with its images decoded", not "the iframe was created".
-            await this.printHTML(html, printOptions.copies);
           }
         }
 
@@ -277,11 +260,13 @@ export class PosTicketService {
    * `formatOverride` lets the settings preview render a format the merchant is
    * still choosing, before it is saved to `receipts.pos_ticket_format`.
    *
-   * Thin wrapper over `renderTicketBody`, kept with its original signature
-   * because the POS confirmation, the order detail page and the receipts
-   * settings preview all call it. A batch must NOT loop over this method:
-   * `printTicketsBatch` resolves the printer, the session overlay and the
-   * currency once and then calls `renderTicketBody` per ticket.
+   * @deprecated [print-fiscal-gate P4] — El motor único de impresión es el
+   *   Print Gateway del backend; este helper produce HTML local que se queda
+   *   ciego a los `definition.logo`, `company_block`, `sections`, `columns`,
+   *   `styles` y `tokens` configurados en el Hub. Sólo lo invoca el path
+   *   batch >1 de `printTicketsBatch` mientras no exista render por gateway
+   *   que conserve el "una sola diálogo para N tickets" — ver backlog.
+   *   NO borrar (regla del dueño: nada sin permiso explícito).
    */
   async generateTicketHTML(
     ticketData: TicketData,
@@ -361,6 +346,10 @@ export class PosTicketService {
    * The ticket itself (the `.ticket` element), without the page wrapper. Every
    * consumer goes through here — single sale, settings preview and batch — so
    * the three documents cannot drift apart.
+   *
+   * @deprecated [print-fiscal-gate P4] — Ver `generateTicketHTML`. El motor
+   *   único es el gateway; este método queda como soporte del batch >1
+   *   mientras no exista render equivalente en backend. NO borrar.
    */
   private async renderTicketBody(
     ticketData: TicketData,
@@ -444,12 +433,27 @@ export class PosTicketService {
     `;
 
     if (ticketData.customer) {
-      // Show customer name, or "Consumidor Final" if empty/undefined (anonymous sale)
-      const displayName = ticketData.customer.name || 'Consumidor Final';
+      // [print-fiscal-gate] — Precedencia: alias > nombre del cliente >
+      // 'Consumidor Final' (placeholder de venta anónima). El alias es lo
+      // que el cajero capturó al cierre ("Mesa 5", "Cliente mostrador").
+      //
+      // Distintivo (Consumidor Final) SOLO cuando el alias es exactamente el
+      // placeholder. Un alias real ("mesa 3 señor de azul") va solo, sin
+      // etiqueta: el dueño pidió el alias EN LUGAR de CF, no acompañado. Si
+      // no hay alias, mostramos el nombre del cliente sin distintivo (el
+      // nombre ya es el identificador real).
+      const alias = (ticketData.customer.customerAlias || '').trim();
+      const name = (ticketData.customer.name || '').trim();
+      const customerFinalBadge = 'Consumidor Final';
+      const isAliasPlaceholder =
+        alias.length > 0 && alias.toLowerCase() === customerFinalBadge.toLowerCase();
+      const primaryName = alias || name || customerFinalBadge;
+      const showFinalBadge = isAliasPlaceholder;
+      const displayName = showFinalBadge
+        ? `${primaryName} <span style="font-size: 10px; color: #6b7280;">(${customerFinalBadge})</span>`
+        : primaryName;
       // For anonymous sales (empty name), show "000" as tax ID
-      const displayTaxId = ticketData.customer.name
-        ? ticketData.customer.taxId || ''
-        : '000';
+      const displayTaxId = name ? ticketData.customer.taxId || '' : '000';
       // Delivery address line, only rendered when present (counter POS sales
       // have no shipping address and must not show an empty line).
       const shippingAddress = ticketData.customer.shippingAddress;
@@ -706,59 +710,222 @@ export class PosTicketService {
           ? Number(tickets[0].id)
           : null);
       if (candidateDocId) {
-        const result = await this.documentPrint.printViaGateway({
-          formatType: 'pos_sale_ticket',
+        // [print-fiscal-gate P4] — El batch unitario pasa por el gate como
+        // cualquier impresión individual: `resolveAndPrint` decide formato +
+        // documentId y eleva el error si el gateway falla (no hay red legacy).
+        const result = await this.documentPrint.resolveAndPrint({
+          documentType: 'pos_order',
           documentId: candidateDocId,
         });
-        if (result) {
-          return { rendered: 1, pages: result.pages };
-        }
+        return { rendered: 1, pages: result.pages };
       }
     }
 
-    // Before the first `currencyService.format()` call, or every amount on every
-    // ticket prints with the en-US `$` fallback.
-    await this.ensureCurrencyLoaded();
-
-    // Resolved once for the whole batch: the format/copies come from the store's
-    // settings (or the override the backend read from the DB) and the session
-    // overlay from localStorage.
+    // [print-fiscal-gate P7.2] — Batch >1: el motor nuevo imprime SIEMPRE.
+    // Resolvemos y renderizamos por gateway CADA ticket con `body_only=true`,
+    // concatenamos los `<body>` resultantes con `break-after: page` entre
+    // ellos y abrimos UNA sola diálogo de impresión. Sin fallback al emisor
+    // local: si un ticket del lote falla, NO se tumba el lote — se imprime
+    // lo que sí resolvió y se reportan los ids fallidos. Un lote de 20 que
+    // imprime 19 y reporta 1 es preferible a uno que imprime 0.
     const printer = this.currentPrinterConfig(options?.formatOverride);
-    const overlay = this.resolveSessionStore();
 
-    const bodies: string[] = [];
-    let rendered = 0;
+    const results: Array<{
+      orderId: number | null;
+      body: string | null;
+      error?: string;
+    }> = [];
 
+    let done = 0;
     for (const ticket of tickets) {
-      // One body per ticket; the copies and the page breaks between them are
-      // laid out by `DocumentPrintService`, which owns that rule for every
-      // document in the app.
-      bodies.push(await this.renderTicketBody(ticket, printer, overlay));
+      const candidateDocId =
+        ticket.orderId ??
+        (Number.isInteger(Number(ticket.id)) && Number(ticket.id) > 0
+          ? Number(ticket.id)
+          : null);
 
-      rendered++;
-      options?.onProgress?.(rendered, total);
+      if (!candidateDocId) {
+        results.push({
+          orderId: null,
+          body: null,
+          error: 'sin orderId ni id numérico',
+        });
+        done++;
+        options?.onProgress?.(done, total);
+        continue;
+      }
 
-      // Rendering is synchronous string work; without this the main thread never
-      // gets a frame and the progress bar stays frozen at 0 for seconds.
-      if (rendered % BATCH_YIELD_EVERY === 0 && rendered < total) {
+      try {
+        const resolved = await firstValueFrom(
+          this.gatewayClient.resolveDocument('pos_order', candidateDocId, 'html'),
+        );
+        const rendered = await firstValueFrom(
+          this.gatewayClient.renderDocument(
+            resolved.format_type,
+            resolved.document_id,
+            resolved.engine,
+            /* bodyOnly */ true,
+          ),
+        );
+        if (!rendered?.html) {
+          throw new Error(
+            `Gateway devolvió respuesta sin HTML para ${resolved.format_type} doc ${resolved.document_id}`,
+          );
+        }
+        results.push({ orderId: candidateDocId, body: rendered.html });
+      } catch (err) {
+        results.push({
+          orderId: candidateDocId,
+          body: null,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      done++;
+      options?.onProgress?.(done, total);
+
+      // Yield al main thread para que la barra de progreso no se congele.
+      if (done % BATCH_YIELD_EVERY === 0 && done < total) {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
     }
 
+    // Type guard explícito: tras el filtro, `r.body` es `string` (no `string | null`).
+    // Sin él, TS mantiene el tipo ancho y `r.body!` se necesitaría más abajo.
+    type ResultWithBody = { orderId: number | null; body: string; error?: string };
+    const succeeded = results.filter(
+      (r): r is ResultWithBody => r.body !== null,
+    );
+    const failed = results.filter((r) => r.body === null);
+
+    if (succeeded.length === 0) {
+      // Ninguno resolvió: nada que imprimir. Reportamos y salimos.
+      const detail = failed
+        .map((f) => `doc ${f.orderId ?? '?'}: ${f.error}`)
+        .join('; ');
+      throw new Error(`Lote sin tiquetes imprimibles: ${detail}`);
+    }
+
+    const separator = '<div style="break-after: page; page-break-after: always;"></div>';
+
+    // [print-fiscal-gate P7.2 — fix b052e30fc] — El primer tiquete del lote
+    // se vuelve a renderizar con `body_only=false` para conservar su `<head>`
+    // y su `<style>` (el aspecto real del composer vive ahí). Los demás
+    // cuerpos, ya extraídos con `body_only=true`, se inyectan antes del
+    // `</body>` del primero. NO copiamos CSS al frontend: una copia se
+    // desincroniza apenas alguien toca el composer. El envoltorio del
+    // primero es la fuente de verdad.
+    //
+    // Si sólo UN ticket resolvió, ese va por el camino unitario
+    // (`body_only=false` completo, sin re-ensamblado) — un "lote de un
+    // solo elemento sin envoltorio" sería peor que el bug original.
+    if (succeeded.length === 1) {
+      const only = succeeded[0];
+      try {
+        const result = await this.documentPrint.resolveAndPrint({
+          documentType: 'pos_order',
+          documentId: only.orderId ?? 0,
+        });
+        if (failed.length > 0) {
+          const detail = failed
+            .map((f) => `doc ${f.orderId ?? '?'}: ${f.error}`)
+            .join('; ');
+          console.warn(
+            `printTicketsBatch: ${failed.length} tiquete(s) no se imprimieron — ${detail}`,
+          );
+        }
+        return { rendered: 1, pages: result.pages };
+      } catch (err) {
+        // Re-render del único también falló: mismo error que tendríamos si
+        // forzáramos el path de lote, lo dejamos subir.
+        throw err;
+      }
+    }
+
+    // Re-render del primer tiquete con `body_only=false` para traer su
+    // `<head>` y `<style>` al envoltorio. El resto ya están en `body`.
+    const first = succeeded[0];
+    let firstFullDoc: string;
+    try {
+      const firstResolved = await firstValueFrom(
+        this.gatewayClient.resolveDocument(
+          'pos_order',
+          first.orderId ?? 0,
+          'html',
+        ),
+      );
+      const firstRendered = await firstValueFrom(
+        this.gatewayClient.renderDocument(
+          firstResolved.format_type,
+          firstResolved.document_id,
+          firstResolved.engine,
+          /* bodyOnly */ false,
+        ),
+      );
+      if (!firstRendered?.html) {
+        throw new Error(
+          `Gateway devolvió respuesta sin HTML para el envoltorio (${firstResolved.format_type} doc ${firstResolved.document_id})`,
+        );
+      }
+      firstFullDoc = firstRendered.html;
+    } catch (err) {
+      // Si el re-render del envoltorio falla, también lo subimos — el lote
+      // no es viable sin un wrapper con CSS real.
+      throw err;
+    }
+
+    // Inyectar los cuerpos 2..N antes del `</body>` del primero. El composer
+    // emite exactamente un `</body>` de cierre; `lastIndexOf` lo localiza
+    // sin regex, y `slice` preserva el orden de inserción del lote.
+    //
+    // Estructura del insertion: `${separator}${body2}${separator}${body3}`.
+    // El slice `[:bodyCloseIdx]` del primer doc termina exactamente donde
+    // arranca `</body>`, así que el primer separator queda pegado al final
+    // del contenido del ticket 1 — un page-break antes del ticket 2, sin
+    // separadores duplicados ni huecos.
+    const restBodies = succeeded.slice(1).map((r) => r.body);
+    // Estructura del insertion: `${separator}${body2}${separator}${body3}`.
+    // El slice `[:bodyCloseIdx]` del primer doc termina justo después del
+    // contenido del ticket 1, así que el primer `separator` queda pegado
+    // a ese cierre — un page-break antes del ticket 2 sin separadores
+    // duplicados ni huecos. Reduce explícito (no `[...].join`): un join
+    // metería el separador ENTRE elementos, no antes de cada uno.
+    let insertion = '';
+    for (const body of restBodies) {
+      insertion += separator + body;
+    }
+    const bodyCloseIdx = firstFullDoc.lastIndexOf('</body>');
+    if (bodyCloseIdx < 0) {
+      // El composer debería emitir siempre un </body>; si falta, lanzamos
+      // en vez de imprimir un documento malformado.
+      throw new Error(
+        'printTicketsBatch: el envoltorio del primer tiquete no contiene </body>; imposible ensamblar el lote sin él.',
+      );
+    }
+    const assembled = firstFullDoc.slice(0, bodyCloseIdx) +
+      insertion +
+      firstFullDoc.slice(bodyCloseIdx);
+
     const job = await this.documentPrint.print({
       document: 'pos_ticket',
-      body: bodies,
+      body: assembled,
       title: total === 1 ? 'Ticket' : `Tiquetes (${total})`,
       styles: TICKET_PRINT_STYLES,
       overrides: {
-        // Already resolved above, so the render's paper width and the printed
-        // `@page` cannot disagree.
         format: printer.format,
         copies: options?.copiesOverride,
       },
     });
 
-    return { rendered, pages: rendered * job.copies };
+    if (failed.length > 0) {
+      // No tiramos el lote (ya se imprimió lo bueno); sólo informamos.
+      const detail = failed
+        .map((f) => `doc ${f.orderId ?? '?'}: ${f.error}`)
+        .join('; ');
+      console.warn(`printTicketsBatch: ${failed.length} tiquete(s) no se imprimieron — ${detail}`);
+    }
+
+    return { rendered: succeeded.length, pages: succeeded.length * job.copies };
   }
 
   private async printHTML(html: string, copies?: number): Promise<void> {

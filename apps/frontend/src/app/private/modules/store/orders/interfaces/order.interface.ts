@@ -33,6 +33,11 @@ export interface ShippingRate {
 export interface Order {
   id: number;
   customer_id: number;
+  // Carril B - B1: alias de venta para consumidor final. Persiste en
+  // orders.customer_alias (schema.prisma:1445, XOR con customer_id).
+  // El operador lo ve en lugar del nombre del cliente y conserva la
+  // marca "CF" al lado para no perder que sigue siendo consumidor final.
+  customer_alias?: string | null;
   store_id: number;
   order_number: string;
   state: OrderState;
@@ -231,6 +236,21 @@ export interface OrderItem {
       fired_at?: string | Date | null;
     };
   }>;
+  /**
+   * QUI-T9p6 — entrega a nivel de ítem (NO del KDS: ese vive en
+   * `kitchen_ticket_items[].status='delivered'`). Diferente y ortogonal:
+   * la entrega es un hecho de SERVICIO (la comida llegó al cliente), no
+   * de cocina. Se estampa al ejecutar
+   * PATCH /api/store/orders/:orderId/flow/items/:itemId/deliver.
+   *
+   * `null` (o ausente) = no entregado. Una fecha = entregado.
+   * `orders.service.ts:710 findOne` usa `include` sin `select`, así que
+   * Prisma devuelve todas las columnas escalares de `order_items`
+   * (`schema.prisma:1427-1428`) — el campo YA viaja por el cable.
+   * Esta declaración es declarar lo que ya llega.
+   */
+  delivered_at?: string | null;
+  delivered_by_user_id?: number | null;
 }
 
 export interface Address {
@@ -413,6 +433,10 @@ export interface OrderQuery {
   status?: OrderState;
   channel?: OrderChannel;
   customer_id?: number;
+  // Carril B - B2: filtra órdenes con table_session apuntando a esta mesa
+  // (incluye sesiones cerradas porque la orden pudo migrar entre mesas).
+  // Coincide con OrderQueryDto.table_id en backend (orders.service.ts).
+  table_id?: number;
   store_id?: number;
   payment_status?: PaymentStatus;
   date_range?: string;
@@ -637,6 +661,15 @@ export interface PayOrderDto {
   amount?: number;
   installment_id?: number;
   payment_reference?: string;
+  // Propina (T3). Mismos nombres que `CreatePosPaymentDto` y que el
+  // `PayOrderDto` del backend: el collector es uno solo para POS, mesa y
+  // detalle de orden, asi que el contrato tiene que ser identico en los tres
+  // destinos. Un nombre distinto aqui no se ignora: `forbidNonWhitelisted`
+  // lo convierte en un 400.
+  tip_amount?: number;
+  tip_type?: 'percentage' | 'fixed';
+  tip_value?: number;
+  tip_waiter_id?: number;
 }
 
 export interface ShipOrderDto {

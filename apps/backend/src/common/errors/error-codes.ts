@@ -5185,11 +5185,33 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'La sesión de estación ya está cerrada',
   },
+  // QUI-XXX — turno abierto por otro operador y todavía "fresco" (<5min desde
+  // `last_seen_at`). El caller no es el dueño ni tiene rol privilegiado
+  // (owner/admin/super_admin). La acción que disparó el chequeo es de
+  // SOLO LECTURA para ese caller hasta que el dueño libere el turno,
+  // expire por inactividad, o un admin tome el control.
+  KDS_STATION_LOCKED: {
+    code: 'KDS_STATION_LOCKED',
+    httpStatus: 403,
+    devMessage:
+      'La estación está siendo gestionada por otro operador. Solo el dueño del turno o un administrador pueden actuar sobre sus tickets.',
+  },
   // QUI-652 — la entrega es un hecho de servicio y aplica a todo item, pero un
   // plato preparado sigue exigiendo estado 'ready' en cocina: dejar que el
   // mesero marque entregado un plato sin cocinar haria mentir al KDS.
   TABLE_SESSION_ITEM_NOT_DELIVERABLE: {
     code: 'TABLE_SESSION_ITEM_NOT_DELIVERABLE',
+    httpStatus: 409,
+    devMessage:
+      'El plato preparado debe estar listo en cocina antes de marcarse entregado',
+  },
+  // T9 / QUI-652 — variante de la regla para orden-scope (POS, take-away,
+  // domicilio). Misma semantica: `item_type='prepared'` exige cocina en
+  // 'ready'; cualquier otro tipo se entrega directo. La forma del codigo
+  // cambia porque ya no estamos en una sesion de mesa; el mensaje al
+  // cliente sigue diciendo QUE plato y en QUE estado de cocina esta.
+  ORDER_ITEM_NOT_DELIVERABLE: {
+    code: 'ORDER_ITEM_NOT_DELIVERABLE',
     httpStatus: 409,
     devMessage:
       'El plato preparado debe estar listo en cocina antes de marcarse entregado',

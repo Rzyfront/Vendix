@@ -46,7 +46,11 @@
   } @else {
     <div class="product-list">
       @for (row of currentProducts(); track trackById($index, row)) {
-        <div class="product-row">
+        <div
+          class="product-row"
+          [class.has-picker]="hasVariants(row)"
+          [class.has-extras]="quantityOf(row.id) > 0"
+        >
           <div class="product-thumb">
             @if (row.image_url) {
               <img
@@ -69,35 +73,11 @@
                 {{ +(row.base_price ?? 0) | currency }}
               </span>
             </div>
-            <!--
-              CP-POLLO-ARABE-727 C.4 (QUI-736) — picker de variante para platos
-              variantizados. La base de un producto con variantes no es vendible:
-              hay que elegir una antes de agregar a la cuenta.
-            -->
-            @if (hasVariants(row)) {
-              <div class="variant-picker">
-                <span class="variant-picker__label">Variante</span>
-                <div class="variant-picker__options">
-                  @for (variant of (row.product_variants ?? []); track variant.id) {
-                    <button
-                      type="button"
-                      class="variant-option"
-                      [class.is-on]="selectedVariantOf(row.id) === variant.id"
-                      [attr.aria-pressed]="selectedVariantOf(row.id) === variant.id"
-                      [attr.title]="variantLabel(variant)"
-                      (click)="selectVariant(row, variant.id)"
-                    >
-                      {{ variantLabel(variant) }}
-                    </button>
-                  }
-                </div>
-              </div>
-            }
           </div>
           <div class="qty-controls">
             <app-button
               variant="outline"
-              size="lg"
+              size="md"
               [disabled]="quantityOf(row.id) <= 0"
               [attr.aria-label]="'Disminuir'"
               (clicked)="decrement(row)"
@@ -106,8 +86,8 @@
             </app-button>
             <span class="qty">{{ quantityOf(row.id) }}</span>
             <app-button
-              variant="outline"
-              size="lg"
+              variant="outline-success"
+              size="md"
               [attr.aria-label]="'Aumentar'"
               (clicked)="increment(row)"
             >
@@ -116,35 +96,104 @@
           </div>
 
           <!--
-            QUI-653 — "Para llevar" por línea. Solo aparece cuando el producto ya
-            está en la selección: ofrecerlo antes de elegir cantidad sugeriría que
-            marcarlo agrega el producto, que no es el caso.
+            CP-POLLO-ARABE-727 C.4 (QUI-736) — picker de variante para platos
+            variantizados. La base de un producto con variantes no es vendible:
+            hay que elegir una antes de agregar a la cuenta. Vive en su propia
+            celda de la grid (`.has-picker`) para no inflar `.info` y romper la
+            simetría con los platos sin variantes.
+          -->
+          @if (hasVariants(row)) {
+            <div class="variant-picker">
+              <span class="variant-picker__label">Variante</span>
+              <div class="variant-picker__options">
+                @for (variant of (row.product_variants ?? []); track variant.id) {
+                  <button
+                    type="button"
+                    class="variant-option"
+                    [class.is-on]="selectedVariantOf(row.id) === variant.id"
+                    [attr.aria-pressed]="selectedVariantOf(row.id) === variant.id"
+                    [attr.title]="variantLabel(variant)"
+                    (click)="selectVariant(row, variant.id)"
+                  >
+                    {{ variantLabel(variant) }}
+                  </button>
+                }
+              </div>
+            </div>
+          }
 
-            El flag aplica a TODA la línea. Marcar solo algunas unidades de una
-            línea con cantidad > 1 exige partir la línea, que es el eje de
-            QUI-655 y no de este ticket.
+          <!--
+            QUI-653 + C3 — "Para llevar" + nota del mesero viven dentro de
+            `.extras`, una sola fila que cruza las 3 columnas del grid cuando
+            hay cantidad > 0. La clase `.has-extras` en la fila activa la
+            tercera fila del grid-template-areas; sin cantidad la fila no
+            existe y la tarjeta queda compacta.
+
+            Solo aparece cuando el producto ya está en la selección: ofrecerlo
+            antes de elegir cantidad sugeriría que marcarlo agrega el producto,
+            que no es el caso. El flag aplica a TODA la línea; partir la línea
+            por unidades marcadas es QUI-655, fuera de este ticket.
           -->
           @if (quantityOf(row.id) > 0) {
-            <button
-              type="button"
-              class="takeaway-toggle"
-              [class.is-on]="isTakeaway(row.id)"
-              [attr.aria-pressed]="isTakeaway(row.id)"
-              [attr.aria-label]="
-                isTakeaway(row.id)
-                  ? 'Quitar modo para llevar'
-                  : 'Marcar para llevar'
-              "
-              [attr.title]="
-                isTakeaway(row.id)
-                  ? 'Se empaca para llevar. Toca para volverlo consumo en la mesa.'
-                  : 'Marcar para llevar (se empaca)'
-              "
-              (click)="toggleTakeaway(row)"
-            >
-              <app-icon name="shopping-bag" [size]="12"></app-icon>
-              Para llevar
-            </button>
+            <div class="extras">
+              <button
+                type="button"
+                class="takeaway-toggle"
+                [class.is-on]="isTakeaway(row.id)"
+                [attr.aria-pressed]="isTakeaway(row.id)"
+                [attr.aria-label]="
+                  isTakeaway(row.id)
+                    ? 'Quitar modo para llevar'
+                    : 'Marcar para llevar'
+                "
+                [attr.title]="
+                  isTakeaway(row.id)
+                    ? 'Se empaca para llevar. Toca para volverlo consumo en la mesa.'
+                    : 'Marcar para llevar (se empaca)'
+                "
+                (click)="toggleTakeaway(row)"
+              >
+                <app-icon name="shopping-bag" [size]="12"></app-icon>
+                Para llevar
+              </button>
+
+              @if (isNotesOpen(row.id)) {
+                <div class="note-field">
+                  <textarea
+                    class="note-field__input"
+                    rows="2"
+                    maxlength="200"
+                    [value]="notesFor(row.id)"
+                    (input)="setNotes(row.id, $any($event.target).value)"
+                    [attr.aria-label]="'Nota de preparacion para ' + row.name"
+                    [attr.placeholder]="
+                      'Nota para cocina (ej. sin cebolla, termino medio). Opcional.'
+                    "
+                  ></textarea>
+                  <button
+                    type="button"
+                    class="note-field__close"
+                    (click)="toggleNotes(row.id)"
+                    [attr.aria-label]="'Cerrar nota'"
+                    title="Cerrar"
+                  >
+                    <app-icon name="x" [size]="12"></app-icon>
+                  </button>
+                </div>
+              } @else {
+                <button
+                  type="button"
+                  class="note-toggle"
+                  (click)="toggleNotes(row.id)"
+                  [attr.aria-label]="'Agregar nota para ' + row.name"
+                  [attr.aria-pressed]="false"
+                  title="Agregar nota de preparacion (opcional)"
+                >
+                  <app-icon name="message-square" [size]="12"></app-icon>
+                  {{ notesFor(row.id) ? 'Editar nota' : 'Agregar nota' }}
+                </button>
+              }
+            </div>
           }
         </div>
       }

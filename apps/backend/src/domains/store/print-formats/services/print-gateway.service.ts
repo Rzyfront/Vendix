@@ -28,6 +28,14 @@ export interface RenderResult {
   format_type: print_format_type_enum;
   html?: string;
   /**
+   * [print-fiscal-gate P7.2] — Cuando el caller pidió `body_only=true`,
+   * `html`` contiene SOLO el contenido interior del `<body>`. Cuando pidió
+   * `body_only=false` (default), contiene el documento HTML completo.
+   * Misma key para no romper el shape histórico; el caller decide cómo
+   * envolver.
+   */
+  body_only?: boolean;
+  /**
    * PDF bajo demanda — E.11 casilla 4, slice 1. Declarado desde el día uno y
    * JAMÁS lleno hasta ahora: `engine:'pdf'` se aceptaba en el DTO y el cuerpo
    * lo ignoraba.
@@ -95,7 +103,7 @@ export class PrintGatewayService {
     is_customized: boolean;
   }> {
     // 1. Buscar configuración guardada de la tienda
-    const storeConfig = await this.prisma.store_print_format_configs.findFirst({
+    let storeConfig = await this.prisma.store_print_format_configs.findFirst({
       where: {
         store_id: storeId,
         format_type: formatType,
@@ -104,6 +112,22 @@ export class PrintGatewayService {
         template: true,
       },
     });
+
+    // 1.b. Auto-siembra — primera vez que la tienda renderiza un formato que
+    //     nunca configuró en el Hub. Sin esto, una tienda que abre sin tocar
+    //     la pantalla de impresión recibe PRINT_FORMAT_NOT_FOUND_001 al primer
+    //     tiquete de la primera venta — un 500 silencioso disfrazado de error
+    //     de aplicación. La fila se crea en estado por-defecto del sistema:
+    //     `is_active=true`, `gateway_enabled=false` (= usa plantilla del
+    //     sistema, NO legacy), `overrides=null`. El motor nuevo es el único
+    //     que imprime; el flag ya no decide "qué motor", sólo "qué plantilla".
+    //
+    //     `templateIdOverride` BYPASA la auto-siembra: si el caller pasó una
+    //     plantilla específica, esa fila debe existir primero (la crea el Hub),
+    //     y sembrar una por defecto competiría con la elección explícita.
+    if (!storeConfig && !templateIdOverride) {
+      storeConfig = await this.ensureStorePrintConfig(storeId, formatType);
+    }
 
     let baseDefinition: PrintFormatDefinition | null = null;
     let templateFound = false;
@@ -218,6 +242,7 @@ export class PrintGatewayService {
     formatType: print_format_type_enum,
     documentId: number | string,
     engine: 'html' | 'pdf' = 'html',
+    bodyOnly: boolean = false,
   ): Promise<RenderResult> {
     const start = Date.now();
     if (
@@ -328,12 +353,38 @@ export class PrintGatewayService {
 
     return {
       format_type: formatType,
-      html,
+      html: bodyOnly ? this.extractBodyContent(html) : html,
       pdf_buffer,
+      body_only: bodyOnly,
       copies: effective.definition.paper.copies || 1,
       is_roll: effective.definition.paper.is_roll,
       width_mm: effective.definition.paper.width_mm,
     };
+  }
+
+  /**
+   * [print-fiscal-gate P7.2] — Extrae SOLO el contenido interior del `<body>`
+   * de un documento renderizado por el composer. El composer devuelve un
+   * `<!DOCTYPE html><html ...><head>...</head><body>CONTENIDO</body></html>`
+   * completo; el batch de impresión necesita los cuerpos por separado para
+   * concatenarlos con `break-after: page` y envolver UNA vez con un único
+   * `<html>`.
+   *
+   * La extracción es robusta frente a los dos formatos que produce el
+   * composer: con y sin `<!DOCTYPE>`, con y sin espacio entre atributos.
+   * Si el regex no casa, devolvemos el HTML crudo: preferible eso a lanzar
+   * un 500 en mitad de un lote, y el caller puede diagnosticar el documento
+   * malformado por separado.
+   */
+  private extractBodyContent(html: string): string {
+    const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+    if (!bodyMatch) {
+      this.logger.warn(
+        'PrintGateway: extractBodyContent no encontró <body>; se devuelve el HTML crudo.',
+      );
+      return html;
+    }
+    return bodyMatch[1];
   }
 
   /**
@@ -366,6 +417,71 @@ export class PrintGatewayService {
     });
 
     return template?.definition ?? null;
+  }
+
+  /**
+   * Auto-siembra de la configuración por defecto de la tienda.
+   *
+   * Devuelve la fila creada (o `null` si no hay plantilla del sistema que sembrar
+   * — en ese caso el caller recibe el PRINT_FORMAT_NOT_FOUND_001 honesto, que
+   * ya no es "el merchant nunca configuró" sino "el operador de plataforma no
+   * sembró la plantilla del sistema para este formato", un error de datos que
+   * requiere acción de Vendix, no del merchant).
+   *
+   * El `try/catch` alrededor del `create` cubre la carrera entre dos renders
+   * concurrentes que llegan al auto-seed a la vez: el primero crea, el segundo
+   * cae en P2002 por el `@@unique([store_id, format_type])` y relee el ya
+   * existente. NO se eleva como error al caller: el resultado funcional es el
+   * mismo (la fila existe), y un fallo aquí dejaría a una tienda sin poder
+   * imprimir durante una ventana de milisegundos que ningún operador humano
+   * notaría pero que sí se notaría en métricas.
+   */
+  private async ensureStorePrintConfig(
+    storeId: number,
+    formatType: print_format_type_enum,
+  ) {
+    const systemTemplate = await this.prisma.print_templates.findFirst({
+      where: { is_system: true, format_type: formatType },
+      select: { id: true },
+    });
+    if (!systemTemplate) {
+      return null;
+    }
+
+    const store = await this.prisma.stores.findFirst({
+      where: { id: storeId },
+      select: { organization_id: true },
+    });
+    if (!store?.organization_id) {
+      return null;
+    }
+
+    try {
+      return await this.prisma.store_print_format_configs.create({
+        data: {
+          store_id: storeId,
+          organization_id: store.organization_id,
+          format_type: formatType,
+          is_active: true,
+          // gateway_enabled=false ⇒ usa plantilla del sistema (la única sembrada
+          // aquí). El motor nuevo sigue siendo el que imprime; este flag ya no
+          // decide "qué motor", sólo "qué plantilla".
+          gateway_enabled: false,
+          template_id: systemTemplate.id,
+          overrides: undefined,
+        },
+        include: { template: true },
+      });
+    } catch (err) {
+      // P2002 = otro render ganó la carrera. Releer y devolver la fila existente.
+      this.logger.debug(
+        `PrintGateway: carrera de auto-siembra para store=${storeId} format=${formatType}; releyendo fila existente (${(err as { code?: string })?.code ?? 'unknown'}).`,
+      );
+      return this.prisma.store_print_format_configs.findFirst({
+        where: { store_id: storeId, format_type: formatType },
+        include: { template: true },
+      });
+    }
   }
 
   /**

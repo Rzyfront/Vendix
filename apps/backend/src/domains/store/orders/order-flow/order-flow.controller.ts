@@ -283,6 +283,36 @@ export class OrderFlowController {
     return this.responseService.success(order, 'Order delivered successfully');
   }
 
+  // T9 / QUI-652 — entrega a NIVEL DE ITEM (un plato, una cerveza, etc).
+  // Antes solo existía el endpoint nivel-sesion
+  // (`PATCH /store/tables/sessions/:id/items/:orderItemId/deliver`),
+  // inaccesible para ordenes sin mesa (POS / take-away / domicilio). Esta
+  // ruta abre ese hueco y usa el mismo permiso de flujo de orden que el
+  // resto del namespace `store/orders/:orderId/flow`, para que un mesero
+  // con `order_flow:create` pueda entregar items en cualquier orden de su
+  // tienda sin escalar privilegio.
+  //
+  // Va acá (no en `orders.controller.ts`) porque el `@Controller` del
+  // namespace de flow ya agrupa las acciones de progreso de la orden
+  // (`ship`, `deliver`, `confirm-delivery`, `finish`, ...); el CRUD plano
+  // de orden queda para lo que es (lectura, edicion de borrador).
+  @Patch('items/:orderItemId/deliver')
+  @Permissions('store:orders:order_flow:create')
+  @HttpCode(HttpStatus.OK)
+  async deliverOrderItem(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Param('orderItemId', ParseIntPipe) orderItemId: number,
+  ) {
+    const order = await this.orderFlowService.deliverOrderItem(
+      orderId,
+      orderItemId,
+    );
+    return this.responseService.success(
+      order,
+      'Order item delivered successfully',
+    );
+  }
+
   @Post('confirm-delivery')
   @Permissions('store:orders:order_flow:create')
   @HttpCode(HttpStatus.OK)

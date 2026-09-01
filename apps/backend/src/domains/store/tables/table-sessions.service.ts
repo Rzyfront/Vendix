@@ -12,6 +12,7 @@ import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../cash-registers/movements/movements.service';
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { OrderFlowService } from '../orders/order-flow/order-flow.service';
 import { OpenTableSessionDto, AddItemsToTableSessionDto } from './dto';
 
 /**
@@ -85,6 +86,14 @@ export interface TableSessionView {
       // fila de la mesa muestra las dos dimensiones por separado.
       delivered_at: Date | null;
       delivered_by_user_id: number | null;
+      // carril D / lina — D2: soft cancel por línea. NO es columna
+      // monetaria — fuente de verdad del estado cancelado (`cancelled_at`
+      // IS NOT NULL) sin pasar por enum `state`. El comentario ADR-10
+      // ("sin ningún campo monetario") sigue vigente: estos tres son
+      // texto/datetime, no afectan el reporte que cocina lee.
+      cancelled_at: Date | null;
+      cancellation_reason: string | null;
+      cancellation_type: 'before_fire' | 'after_fire_waste' | null;
       // KDS state per dish (Restaurant Suite — Gap 2 pattern, mirrors
       // orders.service.findOne). Ordered desc by id so the most recent
       // ticket-item wins; empty for items never fired to the kitchen.
@@ -201,6 +210,12 @@ export class TableSessionsService {
     // StockLevelManager reverses the fire's inventory consumption.
     private readonly kitchenFireService: KitchenFireService,
     private readonly stockLevelManager: StockLevelManager,
+    // T9 / QUI-652 — entrega de item a nivel de orden. La mesa delega al
+    // seam compartido para que la compuerta `ready` (item preparado) y la
+    // idempotencia vivan en un solo sitio. La firma del endpoint de mesa
+    // (`PATCH /store/tables/sessions/:id/items/:orderItemId/deliver`) NO
+    // cambia — sigue siendo un seam de UI → servicio → seam de flujo.
+    private readonly orderFlowService: OrderFlowService,
   ) {}
 
   // ------------------------------------------------------------------ helpers
@@ -722,6 +737,12 @@ export class TableSessionsService {
             // siendo de la mesa y `orders.delivery_type` no se toca, para no
             // arrastrarla a los flujos de remision.
             is_takeaway: item.is_takeaway ?? false,
+            // C3 / keilis — nota libre por línea. Cadena vacía se
+            // normaliza a NULL: un '' guardado pintaría un espacio
+            // vacío en el ticket de cocina (peor que no tener nota).
+            // El KDS la lee vía `kitchen-fire.service.ts` que ya
+            // propaga `order_items.notes` a `kitchen_ticket_items.notes`.
+            notes: item.notes?.trim() || null,
             updated_at: new Date(),
           },
         });
@@ -819,9 +840,11 @@ export class TableSessionsService {
    * runs in ONE `$transaction`; the `ticket.cancelled` SSE is emitted only
    * AFTER the commit.
    */
-  async removeItem(
+  async cancelOrderItem(
     sessionId: number,
     orderItemId: number,
+    reason: string,
+    cancellationType?: 'before_fire' | 'after_fire_waste',
   ): Promise<TableSessionView> {
     // Mirror addItems: only store context is required (the POS controller path
     // is already gated by @Permissions('store:table_sessions:update')).
@@ -834,13 +857,41 @@ export class TableSessionsService {
     if (!session.order) {
       throw new VendixHttpException(ErrorCodes.TABLE_SESSION_NOT_FOUND);
     }
-    if (session.order.state !== 'draft') {
+
+    // ── CORRECCIÓN 1 del GO (carril D) ─────────────────────────────────
+    // El bug entero reportado por el dueño: el guard `state === 'draft'`
+    // bloqueaba la cancelación de cualquier plato en cuanto la orden salía
+    // del estado de borrador (disparar a cocina, etc.), justamente cuando
+    // el mesero más necesita cancelar un plato equivocado.
+    //
+    // Regla nueva: la cancelación se permite mientras la orden NO esté
+    // cobrada ni cerrada. Bloquea solo cuando `payment_status='paid'`
+    // o `state ∈ {completed, cancelled, refunded}`. La distinción
+    // `before_fire` / `after_fire_waste` (más abajo) hace seguro
+    // levantar la guarda: antes de disparar se revierte stock, después se
+    // registra merma.
+    //
+    // Las constantes deben mantenerse alineadas con la lógica equivalente
+    // en cualquier futuro cancelador a nivel de orden — son las mismas
+    // tres salidas terminales.
+    const BLOCKED_STATES = ['completed', 'cancelled', 'refunded'] as const;
+    const isPaid =
+      (session.order as any).payment_status === 'paid' ||
+      (session.order as any).payment_status === 'succeeded';
+    if (isPaid) {
       throw new VendixHttpException(
-        ErrorCodes.TABLE_SESSION_ORDER_NOT_DRAFT,
+        ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
+        'No se puede cancelar un ítem de una orden ya cobrada',
+      );
+    }
+    if (BLOCKED_STATES.includes(session.order.state as any)) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
+        `No se puede cancelar un ítem en estado '${session.order.state}'`,
       );
     }
 
-    // Locate the item within the session's own draft order (this is also the
+    // Locate the item within the session's own order (this is also the
     // ownership guard — findOne is store-scoped).
     const orderItem = session.order.order_items.find(
       (it) => it.id === orderItemId,
@@ -852,51 +903,99 @@ export class TableSessionsService {
       );
     }
 
-    // Resolve the kitchen state. `kitchen_ticket_items` comes ordered desc by
-    // id from findOne, so [0] is the most recent ticket-item for this line.
-    const activeKti = orderItem.kitchen_ticket_items[0] ?? null;
-    const ticketStatus = activeKti?.kitchen_ticket?.status ?? null;
-    const ticketId = activeKti?.kitchen_ticket?.id ?? null;
+    // Idempotencia: si ya está cancelado, devolver el snapshot actual sin
+    // reescribir campos (auditoría: `cancelled_at` queda fijo en la primera
+    // cancelación, no se actualiza en reintentos).
+    if (orderItem.cancelled_at) {
+      return this.findOne(sessionId);
+    }
 
-    // "Fired" = the line was sent to the KDS at some point (flag flipped) OR it
-    // currently has a kitchen_ticket_item. Non-fired lines are Tier 1.
-    const wasFired =
-      orderItem.inventory_consumed_at_fire === true || activeKti != null;
-    const isPendingTicket = wasFired && ticketStatus === 'pending';
+    // Derivar el tipo de cancelación si el caller no lo proveyó:
+    //  - fired (inventory_consumed_at_fire=true) → `after_fire_waste`
+    //  - no fired                                  → `before_fire`
+    //
+    // El `cancellation_type` se persiste aparte de la decisión del KDS
+    // porque ya hay líneas fired con ticket en estado `delivered` o
+    // `cancelled` (no `pending`) que NO se pueden revertir de stock
+    // (la cocina ya consumió o ya cerró la orden del KDS), pero SÍ se
+    // deben poder cancelar contablemente como merma.
+    const wasFired = orderItem.inventory_consumed_at_fire === true;
+    const resolvedType: 'before_fire' | 'after_fire_waste' =
+      cancellationType ?? (wasFired ? 'after_fire_waste' : 'before_fire');
 
-    // Removable only if: not fired (Tier 1) OR fired with a pending ticket
-    // (Tier 2). Anything else (in_preparation/ready/delivered/cancelled) → 409.
-    if (wasFired && !isPendingTicket) {
+    // Regla de motivo obligatorio: si el ítem ya consumió inventario a
+    // fuego, la cancelación es una merma y debe quedar registro escrito
+    // de por qué. Antes de disparar (before_fire) el motivo también es
+    // obligatorio porque el DTO lo exige, pero la diferencia operativa
+    // es nula: el DTO ya lo trae. Esta validación queda como defensa
+    // en profundidad por si alguien invoca este método desde un punto
+    // que no pasa por el DTO.
+    if (!reason || reason.trim().length < 3) {
       throw new VendixHttpException(
-        ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
+        // Reusar el código de dominio ya proyectado para input inválido
+        // sobre la mesa (verificado: `VALIDATION_FAILED` no existe en el
+        // catálogo `error-codes.ts`; `TABLE_SESSION_ADD_ITEMS_INVALID`
+        // ya cubre el caso de input del usuario sobre la mesa y es la
+        // elección coherente con el resto del archivo).
+        ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+        'Debes proporcionar un motivo de cancelación (mínimo 3 caracteres)',
       );
     }
 
+    // Resolve the kitchen state. `kitchen_ticket_items` viene ordenado
+    // desc por id desde findOne, así que [0] es el más reciente.
+    const activeKti = orderItem.kitchen_ticket_items[0] ?? null;
+    const ticketStatus = activeKti?.kitchen_ticket?.status ?? null;
+    const ticketId = activeKti?.kitchen_ticket?.id ?? null;
+    const isPendingTicket = wasFired && ticketStatus === 'pending';
+
+    // Tier 3 (KDS ya pasó de `pending`): no bloqueamos la cancelación
+    // contable — el ítem queda como merma y el KDS conserva su ticket
+    // en el estado en que esté (no lo tocamos). Antes este era 409;
+    // ahora es la regla del bug entero levantado.
+    //
+    // Decisión consciente: NO revertir el ticket KDS si ya pasó `pending`.
+    // El cocinero ya cocinó (o está cocinando); revertir su ticket sería
+    // un bug peor que el original. La cancelación queda como merma
+    // (`cancellation_type=after_fire_waste`) y el cocinero ve el ítem
+    // marcado como cancelado vía el listado de orden si necesita
+    // conciliación.
+
+    let cancelledTicketId: number | null = null;
+
     await this.prisma.$transaction(async (tx) => {
-      // Tier 2 — cancel the pending ticket + reverse the fire's stock.
+      // Cancelar el ticket KDS SOLO si está en `pending`. Esto evita
+      // pisar el trabajo del cocinero cuando el plato ya está en
+      // preparación, listo o entregado.
       if (isPendingTicket && ticketId != null) {
-        // TOCTOU guard: the kitchen may have advanced the ticket between the
-        // findOne read and this transaction. Re-read + re-validate inside tx.
+        // TOCTOU guard: el cocinero puede haber avanzado el ticket entre
+        // el findOne y este tx. Releer y revalidar dentro del tx.
         const freshTicket = await tx.kitchen_tickets.findFirst({
           where: { id: ticketId },
           select: { status: true },
         });
-        if (!freshTicket || freshTicket.status !== 'pending') {
-          throw new VendixHttpException(
-            ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
-          );
+        if (freshTicket && freshTicket.status === 'pending') {
+          await this.kitchenFireService.cancelTicketInTx(tx, ticketId);
+          cancelledTicketId = ticketId;
         }
+        // Si el ticket ya no está pending al iniciar el tx, no lo
+        // cancelamos pero la cancelación del ítem sigue adelante
+        // (registrada como merma). El log advertirá abajo.
+      }
 
-        // Cancel the ticket rows in-tx (no SSE here — emitted post-commit).
-        await this.kitchenFireService.cancelTicketInTx(tx, ticketId);
-
-        // Reverse the leaf-ingredient consumption recorded at fire time.
-        // inventory_movements has NO order_item_id; inventory_transactions
-        // does. Idempotency: negative consumption txns only exist for
-        // track_inventory ingredients — if there are none, there is nothing to
-        // reverse (e.g. recipe-less / non-tracked ingredients).
+      // Reversión de stock SOLO en before_fire (no fired). En
+      // after_fire_waste NO se revierte — el inventario se consumió a
+      // fuego y la cancelación queda como merma. El movimiento de stock
+      // para merma se haría en otro flujo (no en este commit).
+      if (resolvedType === 'before_fire' && wasFired) {
+        // Esto no debería ocurrir (si `wasFired` es true, resolvedType
+        // sería `after_fire_waste`), pero defendemos igual por si el
+        // caller envía un type explícito inconsistente.
         const consumptionTxns = await tx.inventory_transactions.findMany({
-          where: { order_item_id: orderItemId, quantity_change: { lt: 0 } },
+          where: {
+            order_item_id: orderItemId,
+            quantity_change: { lt: 0 },
+          },
           select: {
             product_id: true,
             product_variant_id: true,
@@ -916,10 +1015,10 @@ export class TableSessionsService {
               location_id: locationId,
               quantity_change: Math.abs(ct.quantity_change),
               movement_type: 'return',
-              reason: 'Reversa fire — borrado de ítem de mesa',
-              source_module: 'kitchen_fire_reversal',
-              // NO order_item_id: the reversal must not create a child row that
-              // re-blocks the order_item delete below (FK onDelete: Restrict).
+              reason: 'Reversa cancelación ítem mesa — antes de disparar',
+              source_module: 'order_item_cancellation',
+              // NO order_item_id: la reversa no debe crear un hijo que
+              // apunte al order_item cancelado (FK onDelete: Restrict).
               create_movement: true,
               validate_availability: false,
             },
@@ -928,32 +1027,34 @@ export class TableSessionsService {
         }
       }
 
-      // Purge FK children (all onDelete: Restrict) BEFORE the hard delete, in
-      // dependency order. Applies to every tier — even a non-fired line can
-      // carry order_item_taxes (POS-created lines do).
-      await tx.inventory_transactions.deleteMany({
-        where: { order_item_id: orderItemId },
-      });
-      await tx.kitchen_ticket_items.deleteMany({
-        where: { order_item_id: orderItemId },
-      });
-      await tx.order_item_taxes.deleteMany({
-        where: { order_item_id: orderItemId },
+      // ── Soft cancel: NO hard delete ──────────────────────────────
+      // El ítem queda VISIBLE en la cuenta con marca de cancelado, pero
+      // EXCLUIDO de los totales (filtramos por `cancelled_at IS NULL` en
+      // el recálculo). El motivo y el tipo contable quedan persistidos
+      // para auditoría y para que el KDS / listado de orden pueda
+      // mostrarlos.
+      await tx.order_items.update({
+        where: { id: orderItemId },
+        data: {
+          cancelled_at: new Date(),
+          cancellation_reason: reason.trim(),
+          cancellation_type: resolvedType,
+          updated_at: new Date(),
+        },
       });
 
-      await tx.order_items.delete({ where: { id: orderItemId } });
-
-      // Recompute totals — EXACT mirror of addItems (subtotal = Σ total_price,
-      // tax = Σ tax_amount_item, grand_total = subtotal + tax; no promo/coupon).
-      const allItems = await tx.order_items.findMany({
-        where: { order_id: session.order_id },
+      // Recompute totals — espejo EXACTO de addItems, pero filtrando
+      // `cancelled_at IS NULL`. Los ítems cancelados NO suman a
+      // subtotal ni tax ni grand_total.
+      const activeItems = await tx.order_items.findMany({
+        where: { order_id: session.order_id, cancelled_at: null },
         select: { total_price: true, tax_amount_item: true },
       });
-      const subtotal = allItems.reduce(
+      const subtotal = activeItems.reduce(
         (acc, it) => acc + Number(it.total_price),
         0,
       );
-      const tax = allItems.reduce(
+      const tax = activeItems.reduce(
         (acc, it) => acc + Number(it.tax_amount_item ?? 0),
         0,
       );
@@ -968,18 +1069,49 @@ export class TableSessionsService {
       });
     });
 
-    // Post-commit: emit the KDS `ticket.cancelled` SSE (Tier 2 only). Never
-    // inside the tx — a rollback must not leave a phantom cancellation event.
-    if (isPendingTicket && ticketId != null) {
-      await this.kitchenFireService.emitTicketCancelledEvent(ticketId);
+    // Post-commit: emitir el SSE `ticket.cancelled` SOLO si cancelamos
+    // un ticket que efectivamente estaba en `pending`. Si el ticket ya
+    // había avanzado, NO emitimos — el cocinero no debe ver un evento
+    // fantasma de un ticket que sigue abierto en su tablero.
+    if (cancelledTicketId != null) {
+      try {
+        await this.kitchenFireService.emitTicketCancelledEvent(
+          cancelledTicketId,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `Failed to emit ticket.cancelled for ticket #${cancelledTicketId}: ${
+            (err as Error).message
+          }`,
+        );
+      }
     }
 
     this.logger.log(
-      `Table session item removed: session=${sessionId} order=${session.order_id} item=${orderItemId} tier=${
-        isPendingTicket ? 'pending-reversal' : 'simple'
-      }`,
+      `Table session item cancelled: session=${sessionId} order=${session.order_id} item=${orderItemId} type=${resolvedType} fired=${wasFired} ticketCancelled=${cancelledTicketId != null}`,
     );
     return this.findOne(sessionId);
+  }
+
+  /**
+   * @deprecated en favor de {@link cancelOrderItem}. Conservado
+   * temporalmente para no romper callers externos durante la migración
+   * del frontend; delegará al nuevo método y se eliminará cuando el
+   * frontend de mesa y POS estén en el nuevo flujo.
+   */
+  async removeItem(
+    sessionId: number,
+    orderItemId: number,
+  ): Promise<TableSessionView> {
+    // Wrapper de compatibilidad. La firma antigua no traía motivo; el
+    // nuevo método lo exige. Por compat le pasamos un motivo genérico
+    // marcado con prefijo `legacy:` para que sea fácil distinguirlo en
+    // auditoría de los motivos reales que ya manda el frontend nuevo.
+    return this.cancelOrderItem(
+      sessionId,
+      orderItemId,
+      'legacy: cancelación vía removeItem',
+    );
   }
 
   // --------------------------------------------------------------- close
@@ -1013,12 +1145,69 @@ export class TableSessionsService {
     // transition — the idempotent short-circuit above already returned, so a
     // second close never re-emits). Post-commit: a rollback must not leave a
     // phantom `session_closed`.
-    this.emitSessionClosed(session.store_id, sessionId, session.table_id);
+    this.emitSessionClosed(
+      session.store_id,
+      sessionId,
+      session.table_id,
+      session.order_id,
+    );
 
     this.logger.log(
       `Table session closed: session=${sessionId} table=${session.table_id} order=${session.order_id}`,
     );
     return this.findOne(sessionId);
+  }
+
+  // --------------------------------------------------------------- mark paid
+  /**
+   * carril D / lina — D1 / QUI: marca la sesión de mesa como pagada.
+   *
+   * La mesa SIGUE `occupied` y la sesión SIGUE ABIERTA; este flag es la
+   * fuente de verdad del estado "ocupada pagada" que el frontend de mesa
+   * y el floor-map usan para colorear la fila sin necesidad de JOIN contra
+   * `payments`.
+   *
+   * Comportamiento:
+   *  - Idempotente sobre `paid_at`: si ya está pagado, no vuelve a escribir
+   *    y retorna el row actual (un segundo cobro POS contra la misma mesa
+   *    se bloquea aguas arriba por el guard `POS_TABLE_SESSION_ALREADY_CHARGED`
+   *    en `applyPosPaymentToTableSession`, pero igual defendemos aquí).
+   *  - Acepta `tx` opcional para ejecutarse dentro de la transacción del
+   *    pago POS; sin tx abre una propia.
+   *
+   * El SSE `session_paid` NO se emite desde aquí: vive en
+   * `PaymentsService.processPosPayment` post-commit, junto al `order.paid`
+   * que keilis está esperando.
+   */
+  async markSessionPaid(
+    sessionId: number,
+    paymentId: number | null,
+    tx?: any,
+  ): Promise<{ id: number; paid_at: Date | null; order_id: number }> {
+    const run = async (client: any) => {
+      const existing = await client.table_sessions.findUnique({
+        where: { id: sessionId },
+        select: { id: true, paid_at: true, order_id: true },
+      });
+      if (!existing) {
+        throw new VendixHttpException(ErrorCodes.TABLE_SESSION_NOT_FOUND);
+      }
+      if (existing.paid_at) {
+        // Ya pagada — no reescribir el timestamp (auditoría de cuándo fue
+        // el primer pago, no el último).
+        return existing;
+      }
+      const updated = await client.table_sessions.update({
+        where: { id: sessionId },
+        data: { paid_at: new Date(), updated_at: new Date() },
+        select: { id: true, paid_at: true, order_id: true },
+      });
+      this.logger.log(
+        `Table session marked paid: session=${sessionId} order=${updated.order_id} payment=${paymentId ?? 'n/a'}`,
+      );
+      return updated;
+    };
+    return tx ? run(tx) : this.prisma.$transaction(run);
   }
 
   /**
@@ -1037,6 +1226,7 @@ export class TableSessionsService {
     storeId: number,
     sessionId: number,
     tableId?: number,
+    orderId?: number,
   ): void {
     try {
       this.notificationsSseService.push(storeId, {
@@ -1046,6 +1236,10 @@ export class TableSessionsService {
         body: 'La cuenta de la mesa fue cerrada',
         data: {
           table_session_id: sessionId,
+          // carril D / lina — keilis pidió `data.order_id` en el payload de
+          // mesa para refrescar el detalle de orden sin un GET adicional.
+          // Optional para tolerar callers legacy que aún no lo propagan.
+          ...(orderId != null ? { order_id: orderId } : {}),
           ...(tableId != null ? { table_id: tableId } : {}),
         },
         created_at: new Date().toISOString(),
@@ -1053,6 +1247,46 @@ export class TableSessionsService {
     } catch (err) {
       this.logger.warn(
         `Failed to push session_closed for session ${sessionId}: ${
+          (err as Error).message
+        }`,
+      );
+    }
+  }
+
+  /**
+   * Push the canonical `session_paid` SSE event on the per-store subject.
+   * Mirror of `emitSessionClosed` — emitted by the POS close-out path when
+   * a payment succeeds against an open table session. The mesa stays
+   * `occupied`; this is the lightweight signal the staff dashboard and
+   * comensal stream use to flip the row to "Pagada" without re-reading the
+   * session from the DB.
+   *
+   * Best-effort — SSE failures must never break the (already committed)
+   * payment. Consumers filter by `data.table_session_id` (whitelisted in
+   * `TableSessionsController.STAFF_EVENT_WHITELIST`).
+   */
+  emitSessionPaid(
+    storeId: number,
+    sessionId: number,
+    orderId: number,
+    paymentId?: number,
+  ): void {
+    try {
+      this.notificationsSseService.push(storeId, {
+        id: 0,
+        type: 'session_paid',
+        title: 'Mesa pagada',
+        body: 'La cuenta de la mesa fue pagada',
+        data: {
+          table_session_id: sessionId,
+          order_id: orderId,
+          ...(paymentId != null ? { payment_id: paymentId } : {}),
+        },
+        created_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Failed to push session_paid for session ${sessionId}: ${
           (err as Error).message
         }`,
       );
@@ -1281,6 +1515,15 @@ export class TableSessionsService {
                 // solo aplica a los platos preparados.
                 delivered_at: true,
                 delivered_by_user_id: true,
+                // carril D / lina — D2: soft cancel por línea. Estos campos
+                // son la fuente de verdad del estado cancelado (no hay
+                // columna `state` enum). Si NO se proyectan aquí, la guarda
+                // de idempotencia en `cancelOrderItem` (`:894`) ve siempre
+                // `undefined` y reescribe `cancelled_at` en cada intento,
+                // pisando la fecha original de la primera cancelación.
+                cancelled_at: true,
+                cancellation_reason: true,
+                cancellation_type: true,
                 // KDS state per dish — same include shape as
                 // orders.service.findOne (Gap 2). Ordered desc by id so
                 // the most recent ticket-item leads the array.
@@ -1422,18 +1665,35 @@ export class TableSessionsService {
    * Idempotent: re-marking an already-delivered item returns the session
    * unchanged instead of moving `delivered_at` forward. The first delivery is
    * the one that happened.
+   *
+   * T9 — el sello de `delivered_at` + `delivered_by_user_id`, la compuerta
+   * `item_type='prepared'` exige `ready`, y la idempotencia viven en el seam
+   * compartido `OrderFlowService.deliverOrderItem` (ver orden-scope
+   * `PATCH /store/orders/:orderId/flow/items/:orderItemId/deliver`). Este
+   * metodo queda como el shim de mesa: valida lo que es PROPIO de mesa
+   * (sesion abierta + que el item sea de ESTA cuenta) y delega el resto.
+   * Asi no queda una segunda copia de la compuerta ni de la idempotencia:
+   * cualquier cambio futuro a la regla de entrega pasa por un solo sitio.
+   *
+   * La firma del endpoint publico (`PATCH /store/tables/sessions/:id/items
+   * /:orderItemId/deliver`, permiso `store:table_sessions:update`) NO
+   * cambia — `table-session-page.component.ts` (carril keilis) sigue
+   * leyendo la misma respuesta de tipo `TableSessionView`.
    */
   async markItemDelivered(
     sessionId: number,
     orderItemId: number,
   ): Promise<TableSessionView> {
-    const { userId } = this.requireContext();
-
     const session = await this.findOne(sessionId);
     if (session.closed_at) {
       throw new VendixHttpException(ErrorCodes.TABLE_SESSION_CLOSED);
     }
 
+    // Lo unico de mesa que el seam no puede checar por si solo: que este
+    // item sea de ESTA cuenta. El seam valida que el item sea de la orden,
+    // y que esa orden sea de la tienda del contexto, pero una mesa puede
+    // tener varios items en la misma orden — la pertenencia a la sesion es
+    // un check local a este servicio.
     const item = session.order?.order_items.find((it) => it.id === orderItemId);
     if (!item) {
       throw new VendixHttpException(
@@ -1442,29 +1702,13 @@ export class TableSessionsService {
       );
     }
 
-    // Idempotencia: la primera entrega es la que ocurrio.
-    if (item.delivered_at) return session;
-
-    if (item.item_type === 'prepared') {
-      // `kitchen_ticket_items` viene ordenado desc por id, asi que el primero es
-      // el estado de cocina vigente.
-      const kitchenStatus = item.kitchen_ticket_items?.[0]?.status ?? null;
-      if (kitchenStatus !== 'ready') {
-        throw new VendixHttpException(
-          ErrorCodes.TABLE_SESSION_ITEM_NOT_DELIVERABLE,
-          `El plato "${item.product_name}" todavia no esta listo en cocina (estado: ${kitchenStatus ?? 'sin enviar'})`,
-        );
-      }
-    }
-
-    await this.prisma.order_items.updateMany({
-      where: { id: orderItemId, order_id: session.order_id },
-      data: {
-        delivered_at: new Date(),
-        delivered_by_user_id: userId ?? null,
-        updated_at: new Date(),
-      },
-    });
+    // Delegar al seam compartido: idempotencia + compuerta prepared/ready
+    // + stamp de `delivered_at` / `delivered_by_user_id`. Su return es la
+    // vista de la orden (forma `getOrder`), que descartamos — al caller de
+    // mesa le interesa la vista de la sesion, que recargamos con
+    // `findOne(sessionId)` para que vea el `order_items[].delivered_at`
+    // nuevo.
+    await this.orderFlowService.deliverOrderItem(session.order_id, orderItemId);
 
     return this.findOne(sessionId);
   }

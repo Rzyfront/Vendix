@@ -29,7 +29,13 @@ export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
         // no existe la relación `order_taxes`. Antes del fix esto compilaba
         // porque TypeScript no valida nombres de `include` contra Prisma, pero
         // la 1ª llamada runtime hubiera sido `PrismaClientValidationError` 500.
-        order_items: { include: { order_item_taxes: true } },
+        order_items: {
+      // [resid-fiscal] — Mismo criterio que pos-sale-ticket: la factura
+      // comercial también agrega impuestos por línea y debe cuadrar con
+      // el `order.tax_amount`, que ya excluye cancelados.
+      where: { cancelled_at: null },
+      include: { order_item_taxes: true },
+    },
         users: true,
         addresses_orders_shipping_address_idToaddresses: true,
         stores: {

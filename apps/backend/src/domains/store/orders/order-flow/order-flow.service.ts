@@ -9,6 +9,7 @@ import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { order_state_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
+import { resolveTip } from '@common/utils/tip.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
   PayOrderDto,
@@ -236,6 +237,7 @@ export class OrderFlowService {
     orderId: number,
     newState: OrderState,
     metadata: Record<string, any> = {},
+    opts?: { source?: 'kitchen_bridge' | string },
   ) {
     // Filter out non-schema fields and store them in internal_notes as JSON metadata
     const schemaFields: Record<string, any> = {
@@ -354,6 +356,7 @@ export class OrderFlowService {
           order_number: previous_order?.order_number || '',
           old_state: previous_order?.state || '',
           new_state: newState,
+          ...(opts?.source ? { source: opts.source } : {}),
         });
 
         if (commit.totalCost > 0) {
@@ -402,6 +405,7 @@ export class OrderFlowService {
       order_number: previous_order?.order_number || '',
       old_state: previous_order?.state || '',
       new_state: newState,
+      ...(opts?.source ? { source: opts.source } : {}),
     });
 
     return updated_order;
@@ -789,6 +793,82 @@ export class OrderFlowService {
       throw this.wrapPaymentFailure('payment_method_not_found', {
         store_payment_method_id: dto.store_payment_method_id,
       });
+    }
+
+    // -- Propina (T3) ------------------------------------------------------
+    // El cobro desde el detalle de orden acepta propina igual que el POS y el
+    // cierre de mesa. La resolucion vive en `resolveTip`
+    // (common/utils/tip.util.ts), compartida con
+    // `PaymentsService.applyPosPaymentToTableSession`: dos implementaciones de
+    // la misma regla divergen, y una propina que se calcula distinto segun por
+    // donde cobro el operador es un descuadre que nadie ve hasta la
+    // conciliacion.
+    //
+    // Convencion heredada del POS: la propina es ADITIVA al `grand_total` y
+    // queda FUERA de `subtotal_amount` y `tax_amount` -- no es ingreso ni base
+    // gravable. Se persiste aparte en `orders.tip_amount` y la contabilidad la
+    // reconoce como pasivo custodio (propinas por pagar).
+    //
+    // Se persiste ANTES de cualquier cargo y `order` se recarga, para que los
+    // TRES sitios de cobro de abajo lean un `grand_total` ya con la propina
+    // incluida. Tocarlos uno por uno es como se consigue que dos de los tres
+    // cobren la cifra correcta.
+    const roundTipMoney = (value: number) =>
+      Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+    if (dto.tip_amount != null || dto.tip_type != null) {
+      const incomingTip = resolveTip(
+        dto,
+        Number(order.subtotal_amount || 0),
+        roundTipMoney,
+      );
+      // Una propina sobre un abono de credito descuadra el plan de cuotas ya
+      // calculado: el `grand_total` subiria DESPUES de que las cuotas fijaron
+      // sus montos, y la ultima cuota quedaria corta sin que nada avise. Se
+      // rechaza en voz alta; ignorar el campo en silencio es peor.
+      if (incomingTip.amount > 0 && dto.installment_id != null) {
+        try {
+          await this.prisma.orders.update({
+            where: { id: orderId },
+            data: { state: 'created', updated_at: new Date() },
+          });
+        } catch (rollbackErr) {
+          this.logger.error(
+            `[payOrder tip rollback failed] order=${orderId}: ${(rollbackErr as Error).message}`,
+          );
+        }
+        throw this.wrapPaymentFailure('tip_not_allowed_on_installment', {
+          message:
+            'No se puede registrar propina en el abono de una cuota: alteraria el plan de cuotas ya calculado.',
+          order_id: orderId,
+          installment_id: dto.installment_id,
+          tip_amount: incomingTip.amount,
+        });
+      }
+      // Idempotente: `grand_total` ya incluye cualquier propina persistida en
+      // un intento anterior, asi que se descuenta antes de sumar la nueva. Sin
+      // esto, un reintento tras un cargo fallido cobra la propina dos veces.
+      const previousTip = Number((order as any).tip_amount || 0);
+      const baseTotal = roundTipMoney(
+        Number(order.grand_total || 0) - previousTip,
+      );
+      const newGrandTotal = roundTipMoney(baseTotal + incomingTip.amount);
+      if (
+        incomingTip.amount !== previousTip ||
+        newGrandTotal !== Number(order.grand_total || 0)
+      ) {
+        await this.prisma.orders.update({
+          where: { id: orderId },
+          data: {
+            tip_amount: incomingTip.amount,
+            tip_type: incomingTip.type,
+            tip_value: incomingTip.value,
+            tip_waiter_id: dto.tip_waiter_id ?? null,
+            grand_total: newGrandTotal,
+            updated_at: new Date(),
+          },
+        });
+        order = await this.getOrder(orderId); // recarga: grand_total con propina
+      }
     }
 
     // Shipped orders: register payment without changing state
@@ -1493,10 +1573,21 @@ export class OrderFlowService {
     }
 
     this.validateTransition(order.state as OrderState, 'delivered');
-    const updatedOrder = await this.updateOrderState(orderId, 'delivered', {
-      delivered_at: new Date(),
-      kitchen_all_delivered: true,
-    });
+    // T9 — paso 3: este `order.status_changed` viene del puente de cocina
+    // (todos los tickets terminales y al menos uno entregado). El listener
+    // de notificaciones silencia `source === 'kitchen_bridge'` porque
+    // entregado NO es una alerta — el LISTO ya sonó vía
+    // `kitchen.ticket_ready`. Pasar source aquí preserva el resto de
+    // transiciones de estado notificando igual que antes.
+    const updatedOrder = await this.updateOrderState(
+      orderId,
+      'delivered',
+      {
+        delivered_at: new Date(),
+        kitchen_all_delivered: true,
+      },
+      { source: 'kitchen_bridge' },
+    );
 
     this.logger.log(
       `Order #${orderId} moved to 'delivered' (all kitchen tickets delivered)`,
@@ -1520,6 +1611,111 @@ export class OrderFlowService {
    * fuerza una transición inválida. La transición delivered -> processing está
    * habilitada en VALID_TRANSITIONS.
    */
+
+  /**
+   * T9 / QUI-652 — Entrega de UN item a nivel de ORDEN.
+   *
+   * Seam canónico para estampar `delivered_at` + `delivered_by_user_id` en
+   * una fila de `order_items`. Reemplaza la copia que vivía en
+   * `TableSessionsService.markItemDelivered`, que solo servía cuando el item
+   * vivía dentro de una cuenta de mesa. Una orden de POS, take-away o
+   * domicilio no tiene `table_session_id` y antes no podía marcarse
+   * entregada: este seam cubre ese hueco sin obligar al frontend a saltar
+   * por la cuenta de mesa.
+   *
+   * Reglas (las tres son NO negociables; copiadas verbatim del método de
+   * mesa):
+   *
+   *   1. IDEMPOTENCIA — si el item ya tiene `delivered_at`, se devuelve la
+   *      vista de la orden tal cual. La primera entrega es la que ocurrió:
+   *      un re-delivery NUNCA mueve la fecha hacia adelante.
+   *   2. COMPUERTA DE COCINA — solo si `item_type === 'prepared'` se exige
+   *      que `kitchen_ticket_items[0].status` sea `ready` (ordenadas desc
+   *      por id, la primera fila es el estado vigente). Cualquier otro
+   *      `item_type` (`physical`, combo sin preparar, etc.) se entrega
+   *      directo: nunca pasa por cocina, no hay estado que esperar.
+   *   3. MENSAJE DE ERROR — el code nuevo (`ORDER_ITEM_NOT_DELIVERABLE`,
+   *      scope orden) lleva en su mensaje el nombre del plato y el estado
+   *      actual de cocina. Sin nombre y sin estado, el mesero no sabe qué
+   *      pasó.
+   *
+   * Scope multi-tenant: `StorePrismaService` filtra por la tienda del
+   * contexto. La verificación de pertenencia se hace con un `updateMany`
+   * cuya `where` exige `id: orderItemId AND order_id: orderId`: si el item
+   * existe pero es de otra orden, el `updateMany` no toca filas y la
+   * respuesta es 404 sin filtrar nada del otro tenant.
+   *
+   * Devuelve la vista básica de la orden (misma forma que `getOrder`,
+   * `shipOrder`, `markKitchenOrderDelivered`) para que el frontend
+   * reemplace su estado sin una segunda llamada al detalle.
+   */
+  async deliverOrderItem(orderId: number, orderItemId: number) {
+    // 1. Orden debe existir en la tienda del contexto. `getOrder` lanza 404
+    //    si no la encuentra o no pertenece al scope.
+    await this.getOrder(orderId);
+
+    const item = await this.prisma.order_items.findFirst({
+      where: { id: orderItemId, order_id: orderId },
+      select: {
+        id: true,
+        order_id: true,
+        product_name: true,
+        item_type: true,
+        delivered_at: true,
+        kitchen_ticket_items: {
+          orderBy: { id: 'desc' },
+          take: 1,
+          select: { id: true, status: true },
+        },
+      },
+    });
+
+    if (!item) {
+      throw new NotFoundException(
+        `Order item #${orderItemId} not found on order #${orderId}`,
+      );
+    }
+
+    // 2. Idempotencia: la primera entrega es la que ocurrió.
+    if (item.delivered_at) {
+      return this.getOrder(orderId);
+    }
+
+    // 3. Compuerta de cocina para items preparados.
+    if (item.item_type === 'prepared') {
+      const kitchenStatus = item.kitchen_ticket_items[0]?.status ?? null;
+      if (kitchenStatus !== 'ready') {
+        throw new VendixHttpException(
+          ErrorCodes.ORDER_ITEM_NOT_DELIVERABLE,
+          `El plato "${item.product_name}" todavia no esta listo en cocina (estado: ${kitchenStatus ?? 'sin enviar'})`,
+        );
+      }
+    }
+
+    // 4. Stamp de entrega — la `where` con `order_id: orderId` es la barrera
+    //    de scope: si alguien intenta entregar el item de otra orden, el
+    //    updateMany no toca filas.
+    const now = new Date();
+    const userId = RequestContextService.getUserId() ?? null;
+
+    await this.prisma.order_items.updateMany({
+      where: { id: orderItemId, order_id: orderId },
+      data: {
+        delivered_at: now,
+        delivered_by_user_id: userId,
+        updated_at: now,
+      },
+    });
+
+    this.logger.log(
+      `Order item #${orderItemId} of order #${orderId} delivered by user #${userId}`,
+    );
+
+    // 5. Devolver la vista de la orden actualizada (forma `getOrder`,
+    //    igual que `shipOrder` / `markKitchenOrderDelivered`).
+    return this.getOrder(orderId);
+  }
+
   async revertKitchenOrderDelivery(orderId: number) {
     const order = await this.prisma.orders.findFirst({
       where: { id: orderId },

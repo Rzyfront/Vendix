@@ -242,6 +242,43 @@ export class TablesService {
   }
 
   /**
+   * carril D / lina — D2: cancela (soft cancel) un ítem de la cuenta de
+   * mesa. El ítem NO se borra: queda visible marcado como cancelado pero
+   * EXCLUIDO del subtotal/tax/grand_total (el backend filtra por
+   * `cancelled_at IS NULL` al recalcular).
+   *
+   * Diferencias con {@link removeItem} (DELETE legacy):
+   *  - Levanta la guarda `state === 'draft'`: bloquea solo si la orden
+   *    está cobrada o en estado terminal. Acepta cancelación en
+   *    `draft`, `created`, `pending_payment`, `processing`. ES EL BUG
+   *    reportado por el dueño (no se podía cancelar un plato tras
+   *    disparar a cocina).
+   *  - Motivo obligatorio siempre (mín 3 caracteres). En ítems ya
+   *    disparados a cocina el motivo queda como merma en
+   *    `order_items.cancellation_reason`.
+   *  - Stock: `before_fire` revierte, `after_fire_waste` registra merma
+   *    sin reversión. El backend decide según `inventory_consumed_at_fire`.
+   *
+   * El endpoint es DEFINITIVO en `TableSessionsController`
+   * (`POST /api/store/table-sessions/:id/items/:orderItemId/cancel`).
+   */
+  cancelOrderItem(
+    sessionId: number,
+    orderItemId: number,
+    body: { reason: string; cancellation_type?: 'before_fire' | 'after_fire_waste' },
+  ): Observable<TableSession> {
+    return this.http
+      .post<ApiResponse<TableSession>>(
+        `${this.apiUrl}/store/table-sessions/${sessionId}/items/${orderItemId}/cancel`,
+        body,
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /**
    * QUI-652 — marca un item de la cuenta como entregado al cliente.
    *
    * La entrega es un hecho de SERVICIO, no de cocina, así que este endpoint

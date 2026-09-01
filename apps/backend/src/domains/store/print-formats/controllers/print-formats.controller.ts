@@ -32,6 +32,12 @@ import {
   PrintPreviewRequestDto,
 } from '../dto/print-format-config.dto';
 import { RenderPrintDocumentDto } from '../dto/print-render.dto';
+import {
+  ResolvePrintDocumentDto,
+  ResolvedPrintDocumentDto,
+  ResolveDocumentTypeEnum,
+} from '../dto/print-resolve.dto';
+import { PrintFiscalGateService } from '../services/print-fiscal-gate.service';
 
 @ApiTags('Store Print Formats Hub')
 @Controller('store/print-formats')
@@ -46,6 +52,10 @@ export class PrintFormatsController {
     // gateway: el gateway sigue llamando `fetchDocumentData` cuando el
     // usuario ya eligió un documento.
     private readonly documentIndexService: DocumentIndexService,
+    // [print-fiscal-gate] — el predicado "ticket vs FE". Vive aquí para que
+    // el controller lo exponga como `POST /resolve-for-document` sin
+    // acoplarse a `invoicing/*` desde el cliente.
+    private readonly fiscalGate: PrintFiscalGateService,
   ) {}
 
   @Get()
@@ -205,8 +215,61 @@ export class PrintFormatsController {
       dto.format_type as unknown as print_format_type_enum,
       dto.document_id,
       dto.engine,
+      dto.body_only ?? false,
     );
     return this.responseService.success(result);
+  }
+
+  /**
+   * Resuelve el destino de impresión de un documento POS antes de imprimir.
+   *
+   * Devuelve `{format_type, document_id, engine}` ya decididos por el
+   * `PrintFiscalGateService`, más `reason` y `requires_invoice_emission` para
+   * que el cliente decida si debe disparar la emisión de la FE antes de
+   * llamar a `/render`.
+   *
+   * El frontend usa este endpoint como single entry para imprimir (Paso 3
+   * del plan: `DocumentPrintService.resolveAndPrint`). Antes de este
+   * endpoint, la decisión "¿ticket o FE?" vivía duplicada en
+   * `pos-ticket.service.ts:238` y `order-ticket.service.ts:83`; aquí vive
+   * una sola vez.
+   */
+  @Post('resolve-for-document')
+  @Permissions('store:pos:access', 'store:orders:read')
+  @ApiOperation({
+    summary:
+      'Resolve the print target (format_type + document_id) for a POS document',
+  })
+  async resolveForDocument(@Body() dto: ResolvePrintDocumentDto) {
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+    const orgId = context?.organization_id;
+
+    if (!storeId || !orgId) {
+      throw new VendixHttpException(ErrorCodes.ROLE_SCOPE_003);
+    }
+
+    const target =
+      dto.document_type === ResolveDocumentTypeEnum.POS_INVOICE
+        ? await this.fiscalGate.resolvePosPrintTarget({
+            storeId,
+            organizationId: orgId,
+            invoiceId: dto.document_id,
+          })
+        : await this.fiscalGate.resolvePosPrintTarget({
+            storeId,
+            organizationId: orgId,
+            orderId: dto.document_id,
+          });
+
+    const payload: ResolvedPrintDocumentDto = {
+      format_type: target.formatType,
+      document_id: target.documentId,
+      engine: dto.engine ?? 'html',
+      reason: target.reason,
+      requires_invoice_emission: target.requiresInvoiceEmission,
+    };
+    return this.responseService.success(payload);
   }
 
   /**

@@ -22,7 +22,7 @@
 
           <app-options-dropdown
             class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-            [filters]="filterConfigs"
+            [filters]="filterConfigs()"
             [filterValues]="filterValues()"
             [actions]="dropdownActions()"
             [isLoading]="loading()"
@@ -80,9 +80,9 @@
       <div class="px-2 pb-2 pt-3 md:p-4">
         <app-responsive-data-view
           [data]="orders()"
-          [columns]="columns"
+          [columns]="columns()"
           [actions]="actions"
-          [cardConfig]="cardConfig"
+          [cardConfig]="cardConfig()"
           [loading]="loading()"
           [sortable]="true"
           [rowClass]="rowClassFn"

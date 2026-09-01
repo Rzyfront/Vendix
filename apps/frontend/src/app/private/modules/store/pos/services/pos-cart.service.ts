@@ -1,4 +1,4 @@
-import { Injectable, signal, computed, inject, DestroyRef } from '@angular/core';
+import { Injectable, signal, computed, inject, DestroyRef, effect } from '@angular/core';
 import { Observable, of, throwError, forkJoin } from 'rxjs';
 import {
   catchError,
@@ -10,6 +10,7 @@ import {
   switchMap,
 } from 'rxjs/operators';
 import { toObservable, takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import {
   CartItem,
   CartSummary,
@@ -68,6 +69,9 @@ export interface PromotionTierProgress {
   providedIn: 'root',
 })
 export class PosCartService {
+  private static readonly STORAGE_PREFIX = 'vendix_pos_cart_';
+  private static readonly TTL_MS = 4 * 60 * 60 * 1000; // 4 horas
+
   readonly cartState = signal<CartState>(this.getInitialState());
   readonly loading = signal<boolean>(false);
 
@@ -77,6 +81,7 @@ export class PosCartService {
   private invoicingService = inject(InvoicingService);
   private saleUnitService = inject(PosSaleUnitService);
   private priceTierCache = inject(PriceTierCacheService);
+  private authFacade = inject(AuthFacade);
 
   /**
    * Techo de 5 UVT para el documento equivalente POS (Art. 616-1 ET / Res.
@@ -110,6 +115,99 @@ export class PosCartService {
   ) {
     this.initWithholdingPreview();
     this.loadUvtThreshold();
+    this.initPersistence();
+  }
+
+  private initPersistence(): void {
+    // Hidratar cuando la tienda activa esté lista
+    effect(() => {
+      const store = this.authFacade.userStore();
+      if (store?.id && this.cartState().items.length === 0) {
+        const saved = this.loadFromStorage();
+        if (saved && saved.items && saved.items.length > 0) {
+          this.cartState.set(saved);
+        }
+      }
+    });
+
+    // Guardar automáticamente cambios en el carrito
+    toObservable(this.cartState)
+      .pipe(
+        debounceTime(250),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((state) => {
+        this.saveToStorage(state);
+      });
+  }
+
+  private getStorageKey(): string | null {
+    const storeId = this.authFacade.userStore()?.id;
+    if (!storeId) return null;
+    return `${PosCartService.STORAGE_PREFIX}${storeId}`;
+  }
+
+  private saveToStorage(state: CartState): void {
+    if (typeof localStorage === 'undefined') return;
+    const key = this.getStorageKey();
+    if (!key) return;
+
+    if (!state.items || state.items.length === 0) {
+      localStorage.removeItem(key);
+      return;
+    }
+
+    try {
+      const payload = {
+        state,
+        savedAt: Date.now(),
+        storeId: this.authFacade.userStore()?.id,
+      };
+      localStorage.setItem(key, JSON.stringify(payload));
+    } catch {
+      // Ignorar fallos de cuota o serialización
+    }
+  }
+
+  private loadFromStorage(): CartState | null {
+    if (typeof localStorage === 'undefined') return null;
+    const key = this.getStorageKey();
+    if (!key) return null;
+
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || !parsed.state || !parsed.savedAt) return null;
+
+      // Validar TTL de expiración
+      if (Date.now() - parsed.savedAt > PosCartService.TTL_MS) {
+        localStorage.removeItem(key);
+        return null;
+      }
+
+      // Validar coincidencia de tienda
+      const currentStoreId = this.authFacade.userStore()?.id;
+      if (currentStoreId && parsed.storeId && parsed.storeId !== currentStoreId) {
+        return null;
+      }
+
+      return {
+        ...parsed.state,
+        createdAt: parsed.state.createdAt ? new Date(parsed.state.createdAt) : new Date(),
+        updatedAt: parsed.state.updatedAt ? new Date(parsed.state.updatedAt) : new Date(),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  public clearStorage(): void {
+    if (typeof localStorage === 'undefined') return;
+    const key = this.getStorageKey();
+    if (key) {
+      localStorage.removeItem(key);
+    }
   }
 
   /**
@@ -400,7 +498,10 @@ export class PosCartService {
 
     const reset$ = of(null).pipe(
       map(() => this.getInitialState()),
-      tap((newState) => this.cartState.set(newState)),
+      tap((newState) => {
+        this.cartState.set(newState);
+        this.clearStorage();
+      }),
     );
 
     if (adoptedId == null) {

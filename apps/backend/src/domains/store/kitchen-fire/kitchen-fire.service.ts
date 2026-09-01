@@ -1997,6 +1997,15 @@ export class KitchenFireService {
   async startPreparation(ticketId: number) {
     const { ticket, store_id } = await this.getTicketForStore(ticketId);
 
+    // QUI-XXX — station-lock guard. Si el turno abierto de la KDS del ticket
+    // lo posée otro operador y todavía está fresco (<5min sin `last_seen_at`),
+    // el helper lanza KDS_STATION_LOCKED antes de cualquier mutación de
+    // estado. Lazy inactividad: si el turno está vencido lo cierra en
+    // silencio y deja pasar. Owner/admin pueden actuar aunque el turno sea
+    // ajeno, pero el "Tomar control" explícito vive en el botón del status
+    // bar — esta mutación NO estampa `force_taken_by_user_id` por sí sola.
+    await this.kdsSessionsService.assertCanMutateStationTicket(ticket.kds_id);
+
     if (ticket.status === 'cancelled') {
       throw new VendixHttpException(
         ErrorCodes.KITCHEN_TICKET_ALREADY_CANCELLED,
@@ -2121,6 +2130,10 @@ export class KitchenFireService {
   async markReady(ticketId: number) {
     const { ticket, store_id } = await this.getTicketForStore(ticketId);
 
+    // Ver `startPreparation` — station-lock guard uniforme en todas las
+    // mutaciones de cocina.
+    await this.kdsSessionsService.assertCanMutateStationTicket(ticket.kds_id);
+
     if (ticket.status === 'cancelled') {
       throw new VendixHttpException(
         ErrorCodes.KITCHEN_TICKET_ALREADY_CANCELLED,
@@ -2176,6 +2189,26 @@ export class KitchenFireService {
       ticket: full.ticket,
       ts: Date.now(),
     });
+    // T9 — paso 2: listo de cocina produce notificación de tienda. Va
+    // DESPUÉS del push operativo y envuelto en try/catch porque la difusión
+    // del sonido no puede depender de un efecto secundario (mismo patrón que
+    // la imputación contable QUI-760 de abajo). `@OnEvent` tiene
+    // `suppressErrors` en true por defecto en este repo, así que un fallo
+    // dentro del listener se traga solo: registramos explícito para que el
+    // guardia del sonido no se vuelva silencio inexplicable.
+    try {
+      this.eventEmitter.emit('kitchen.ticket_ready', {
+        store_id,
+        ticket_id: ticketId,
+        order_id: full.ticket.order_id,
+        order_number: (full.ticket as any).order?.order_number ?? null,
+      });
+    } catch (err) {
+      this.logger.error(
+        `[kitchen.ticket_ready] failed to emit for ticket #${ticketId}: ${(err as Error).message}`,
+        (err as Error).stack,
+      );
+    }
     try {
       await this.kdsSessionsService.attributeOpenSessionToTicketConsumption(ticketId);
     } catch (err) {
@@ -2212,6 +2245,9 @@ export class KitchenFireService {
    */
   async markDelivered(ticketId: number) {
     const { ticket, store_id } = await this.getTicketForStore(ticketId);
+
+    // Ver `startPreparation` — station-lock guard uniforme.
+    await this.kdsSessionsService.assertCanMutateStationTicket(ticket.kds_id);
 
     if (ticket.status === 'cancelled') {
       throw new VendixHttpException(
@@ -2375,6 +2411,9 @@ export class KitchenFireService {
    */
   async cancelTicket(ticketId: number) {
     const { ticket, store_id } = await this.getTicketForStore(ticketId);
+
+    // Ver `startPreparation` — station-lock guard uniforme.
+    await this.kdsSessionsService.assertCanMutateStationTicket(ticket.kds_id);
 
     if (ticket.status === 'cancelled') {
       throw new VendixHttpException(
@@ -2543,6 +2582,9 @@ export class KitchenFireService {
    */
   async revertTicket(ticketId: number) {
     const { ticket, store_id } = await this.getTicketForStore(ticketId);
+
+    // Ver `startPreparation` — station-lock guard uniforme.
+    await this.kdsSessionsService.assertCanMutateStationTicket(ticket.kds_id);
 
     // Mapa de retroceso un-paso. `pending` no tiene estado previo.
     const REVERT_MAP: Record<string, string | null> = {

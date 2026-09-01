@@ -37,6 +37,11 @@ import { ProductsAnalyticsService } from '../analytics/services/products-analyti
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { DispatchNotesService } from '../dispatch-notes/dispatch-notes.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+// Carril B - B3: NotificationsSseService es el hub compartido por tienda que
+// el endpoint `@Sse('orders/stream')` consume. OrderSseService lo envuelve
+// con un payload tipado para el dominio `orders`.
+import { NotificationsModule } from '../notifications/notifications.module';
+import { OrderSseService } from './services/order-sse.service';
 
 @Module({
   imports: [
@@ -58,6 +63,8 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
     CashRegistersModule,
     PromotionsModule,
     CouponsModule,
+    // Carril B - B3: necesario para inyectar NotificationsSseService.
+    NotificationsModule,
   ],
   controllers: [OrdersController, OrdersBulkController],
   providers: [
@@ -67,6 +74,8 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
     SellableStockAllocator,
     InventoryTransactionsService,
     OrderEtaService,
+    // Carril B - B3: hub tipado de eventos de orden para SSE.
+    OrderSseService,
   ],
   exports: [OrdersService, OrderFlowModule, OrderEtaService],
 })

@@ -1,5 +1,5 @@
 import { Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
-import { NgClass } from '@angular/common';
+import { NgClass, DatePipe } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, FormGroup, FormControl, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
@@ -16,6 +16,11 @@ import {
 // `ordersFlowService` so we don't shadow the existing `ordersService`
 // injection (used everywhere else on the page for store-order CRUD).
 import { OrdersService } from '../../services/orders.service';
+// Carril B - B3: cliente SSE para refrescar el detalle cuando el backend
+// emite eventos del dominio orders (order.created, order.items.updated,
+// order.status_changed, order.shipping_assigned). Filtramos por
+// `payload.data.order_id` en el cliente.
+import { OrderDetailSseService } from '../../services/order-detail-sse.service';
 import { AddressPayload } from '../../../../../../shared/components';
 import { GenerateDispatchWizardComponent } from '../../components/generate-dispatch-wizard/generate-dispatch-wizard.component';
 import { ShippingAddressModalComponent } from '../../components/shipping-address-modal/shipping-address-modal.component';
@@ -130,6 +135,11 @@ type RefundState =
     CardComponent,
     IconComponent,
     StickyHeaderComponent,
+    // T9p6 — `item.delivered_at | date:'short'` en el template requiere el
+    // pipe explícito en `imports:`. Es standalone: meter CommonModule
+    // arrastra todo el módulo y este componente no lo necesita para nada
+    // más. NG8004 sale si falta.
+    DatePipe,
     ModalComponent,
     CurrencyPipe,
     OrderPaymentModalComponent,
@@ -383,6 +393,30 @@ export class OrderDetailsPageComponent {
 
   readonly tableName = computed<string | null>(() => {
     return this.tableSession()?.table?.name || null;
+  });
+
+  /**
+   * Carril B - B1: nombre visible del cliente con prioridad al alias.
+   * Prioridad: alias (si existe y no esta vacio) > users.first+last > "Consumidor Final".
+   * `isConsumidorFinal` permite al template pintar el badge "CF" sin perder
+   * que la orden sigue siendo anonima fiscalmente.
+   */
+  readonly customerDisplayName = computed<string>(() => {
+    const o = this.order();
+    if (!o) return '';
+    const alias = o.customer_alias?.trim();
+    if (alias) return alias;
+    if (o.users?.first_name || o.users?.last_name) {
+      return `${o.users.first_name || ''} ${o.users.last_name || ''}`.trim();
+    }
+    return 'Consumidor Final';
+  });
+
+  readonly isConsumidorFinal = computed<boolean>(() => {
+    const o = this.order();
+    if (!o) return false;
+    if (o.customer_alias?.trim()) return false;
+    return !(o.users?.first_name || o.users?.last_name);
   });
 
   readonly cleanInternalNotes = computed<string>(() => {
@@ -1234,6 +1268,11 @@ export class OrderDetailsPageComponent {
   // dispatch them from this page).
   private kitchenTicketsService = inject(KitchenTicketsService);
   private sanitizer = inject(DomSanitizer);
+  // Carril B - B3: SSE del detalle. connect(orderId) en el init del page,
+  // disconnect via DestroyRef cuando el componente se destruye. Un effect
+  // reacciona a `lastRelevantEvent()` y dispara `loadData()` para
+  // re-hidratar el detalle con la nueva foto del backend.
+  private readonly orderDetailSse = inject(OrderDetailSseService);
   // Bug 4 — traceability order → dispatch note → route.
   private dispatchNotesService = inject(DispatchNotesService);
   // Fase F8 — publicar la orden al pool de reparto (Vendix Repartos).
@@ -1307,6 +1346,10 @@ export class OrderDetailsPageComponent {
     this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
       this.orderId = params.get('id');
       if (this.orderId) {
+        // Carril B - B3: abre el SSE del detalle filtrado por esta orden.
+        // Idempotente: si navegamos a otra orden, connect() cierra la
+        // anterior y abre una nueva.
+        this.orderDetailSse.connect(Number(this.orderId));
         this.loadData();
       }
     });
@@ -1326,6 +1369,24 @@ export class OrderDetailsPageComponent {
       ) {
         this.fastTrackForm.get('payment')?.patchValue({ payment_method_id: methods[0].id });
       }
+    });
+
+    // Carril B - B3: cuando llega un evento relevante al SSE, re-hidrata el
+    // detalle. `lastRelevantEvent()` ya filtra por order_id en el cliente;
+    // el effect solo dispara si el signal cambia. Sin debounce: el detalle
+    // del backend es barato y queremos consistencia inmediata.
+    effect(() => {
+      const evt = this.orderDetailSse.lastRelevantEvent();
+      if (evt && this.orderId) {
+        this.loadData();
+      }
+    });
+
+    // Cleanup: cierra el SSE cuando el componente se destruye (navegacion
+    // fuera del detalle). `OrderDetailSseService` es providedIn:'root'
+    // asi que sobrevive entre ordenes, pero igual cortamos la conexion.
+    this.destroyRef.onDestroy(() => {
+      this.orderDetailSse.disconnect();
     });
   }
 
@@ -1552,6 +1613,20 @@ export class OrderDetailsPageComponent {
     if (isCredit) {
       dto.amount = submit.amount;
       if (submit.installmentId != null) dto.installment_id = submit.installmentId;
+    }
+
+    // Propina (T3). El collector la trae ya resuelta a monto en `tip`, mas los
+    // metadatos de auditoria (`tipType`, `tipValue`, `tipWaiterId`). Solo se
+    // adjunta fuera del credito: una propina sobre el abono de una cuota
+    // alteraria el plan ya calculado, y el backend la rechaza con
+    // `tip_not_allowed_on_installment` en vez de aceptarla en silencio. El
+    // modal ya apaga la seccion con `[allowTip]="!isCreditOrder()"`; este guard
+    // es la segunda linea, porque un submit puede venir de un estado anterior.
+    if (!isCredit && submit.tip != null && submit.tip > 0) {
+      dto.tip_amount = submit.tip;
+      if (submit.tipType != null) dto.tip_type = submit.tipType;
+      if (submit.tipValue != null) dto.tip_value = submit.tipValue;
+      if (submit.tipWaiterId != null) dto.tip_waiter_id = submit.tipWaiterId;
     }
 
     this.isProcessingAction.set(true);
@@ -2556,6 +2631,14 @@ export class OrderDetailsPageComponent {
    * no `@page size` rule and ignored `receipts.pos_ticket_copies`, and the
    * service now waits for images to decode before `print()` and removes the
    * iframe on `afterprint`.
+   *
+   * [print-fiscal-gate P7.1] — Para un solo ticket `printTicketsBatch`
+   * delega en `DocumentPrintService.resolveAndPrint`, que consulta
+   * `/resolve-for-document` (gate fiscal del backend) y luego `/render`.
+   * El formato y el `documentId` los decide el backend según el estado
+   * fiscal de la tienda, no la presencia póstuma de `electronicInvoice`
+   * que el switch legacy miraba. Si el gateway falla, el error se eleva
+   * al caller — no más fallback silencioso al emisor local.
    */
   async printOrder(): Promise<void> {
     const orderData = this.order();
@@ -2674,8 +2757,14 @@ export class OrderDetailsPageComponent {
       null;
     const storeName = order.stores?.name || 'Vendix';
 
-    const customerName =
-      order.users
+    // Carril B - B1: prioridad alias > users.first+last > "Consumidor Final".
+    // Mismo orden que customerDisplayName en el detalle para que el ticket de
+    // despacho refleje lo que el operador ve en pantalla. Cristian renderiza el
+    // ticket impreso final en order-ticket.service.ts (fuera de mi scope).
+    const alias = order.customer_alias?.trim();
+    const customerName = alias
+      ? alias
+      : order.users
         ? `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim()
         : 'Consumidor Final';
 
@@ -3282,6 +3371,79 @@ export class OrderDetailsPageComponent {
       : 'Plato reencolado a cocina';
     this.toastService.success(verb);
     this.refreshOrder();
+  }
+
+  // ─── T9p6 — entregar un ítem desde el detalle de la orden ────────────
+  /**
+   * Ítem actualmente en tránsito de entrega (PATCH en vuelo). `null`
+   * cuando ninguna entrega está pendiente. Misma forma que `resendItemId`:
+   * un solo ítem a la vez por modalidad; lo usamos para deshabilitar el
+   * botón y mostrar "Entregando…" mientras la promesa del backend corre.
+   */
+  readonly deliveringItemId = signal<number | null>(null);
+
+  /**
+   * Espejo del predicado `DELIVER_ORDER_ITEM_NOT_DELIVERABLE` del backend.
+   * Ofrece la acción "Entregar" SOLO si:
+   *  - El ítem NO está entregado todavía (`delivered_at` IS NULL).
+   *  - La orden NO está en estado terminal. Lista reusada del predicado
+   *    `canResend` (:556): shipped / delivered / finished / cancelled /
+   *    refunded. NO se ofrece si la orden ya está cancelada, devuelta,
+   *    enviada como domicilio o marcada como entregada globalmente.
+   *  - Si el ítem pasó por cocina, su `kitchen_ticket_items[0].status`
+   *    debe ser `ready`. En cualquier otro estado el backend responde 422;
+   *    no ofrezco un botón que sé que va a fallar.
+   *  - Si el ítem NUNCA pasó por cocina (cerveza, retail, etc.) es
+   *    entregable directo. Este es el caso que cubre T9p6: una orden
+   *    POS / para llevar / domicilio que NO tiene sesión de mesa no
+   *    tenía superficie de entrega hasta hoy.
+   */
+  canDeliver(item: OrderItem): boolean {
+    if (item.delivered_at) return false;
+    const order = this.order();
+    if (!order) return false;
+    const terminalStates: OrderState[] = [
+      'shipped',
+      'delivered',
+      'finished',
+      'cancelled',
+      'refunded',
+    ];
+    if (terminalStates.includes(order.state as OrderState)) return false;
+    const ks = this.kitchenStateFor(item);
+    if (ks == null) return true;
+    return ks.status === 'ready';
+  }
+
+  /**
+   * Acción: marca el ítem como entregado vía
+   * PATCH /store/orders/:id/flow/items/:itemId/deliver. El seam es
+   * idempotente — si el ítem ya estaba entregado, el backend responde
+   * 200 sin mover `delivered_at`, así que re-clicks no rompen nada.
+   * Tras éxito, toast + refreshOrder() (mismo patrón que `fireSelectedToKitchen`
+   * :3291 / `onResendConfirmed` :3362) para que el badge "Entregado" se
+   * pinte con la fecha real devuelta por el backend.
+   */
+  deliverItem(item: OrderItem): void {
+    if (!this.canDeliver(item)) return;
+    const orderId = this.order()?.id;
+    if (!orderId) return;
+    this.deliveringItemId.set(item.id);
+    this.ordersFlowService
+      .deliverOrderItem(orderId, item.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.deliveringItemId.set(null);
+          this.toastService.success('Ítem entregado');
+          this.refreshOrder();
+        },
+        error: (err: unknown) => {
+          this.deliveringItemId.set(null);
+          this.toastService.error('No se pudo marcar como entregado');
+          console.error('Deliver item failed', err);
+        },
+      });
   }
 
   /** Localised label for the KDS state badge. */

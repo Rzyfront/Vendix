@@ -90,16 +90,29 @@
               </div>
 
               <div class="payment-badges">
-                <app-badge
-                  [variant]="isClosed() ? 'success' : 'warning'"
-                  size="sm"
-                >
-                  <app-icon
-                    [name]="isClosed() ? 'circle-check' : 'clock'"
-                    [size]="12"
-                  ></app-icon>
-                  {{ isClosed() ? 'Pagada / Cerrada' : 'Pago pendiente' }}
-                </app-badge>
+                <!--
+                  carril D / lina — D1: tres estados distinguibles:
+                    - Pagada y cerrada (sesión cerrada explícitamente).
+                    - Pagada pero ocupada (cobrada en POS, mesa sin cerrar
+                      → el mesero aún no la liberó).
+                    - Pendiente (aún sin pagar).
+                -->
+                @if (isClosed()) {
+                  <app-badge variant="success" size="sm">
+                    <app-icon name="circle-check" [size]="12"></app-icon>
+                    Pagada / Cerrada
+                  </app-badge>
+                } @else if (isPaid()) {
+                  <app-badge variant="info" size="sm">
+                    <app-icon name="circle-check" [size]="12"></app-icon>
+                    Pagada
+                  </app-badge>
+                } @else {
+                  <app-badge variant="warning" size="sm">
+                    <app-icon name="clock" [size]="12"></app-icon>
+                    Pago pendiente
+                  </app-badge>
+                }
                 @if (isMixedOrder()) {
                   <app-badge variant="warning" size="sm">
                     <app-icon name="shopping-bag" [size]="12"></app-icon>
@@ -134,11 +147,16 @@
               <div class="meta-chips">
                 <span class="meta-chip">
                   <app-icon name="user-check" [size]="13"></app-icon>
-                  @if (customerName(); as name) {
-                    <span [title]="name">{{ name }}</span>
-                  } @else {
-                    <span class="muted">Anónimo</span>
-                  }
+                  <!--
+                    carril D / lina — D1: `customerName` ahora siempre devuelve
+                    string (cliente formal → nombre; alias → alias solo;
+                    ninguno → "Consumidor Final"). El alias REEMPLAZA al
+                    CF, no se muestra al lado. El título expone el alias
+                    crudo cuando existe para depurar en hover.
+                  -->
+                  <span [title]="customerAlias() ?? customerName()">
+                    {{ customerName() }}
+                  </span>
                 </span>
                 <span class="meta-chip">
                   <app-icon name="users" [size]="13"></app-icon>
@@ -348,6 +366,7 @@
                     class="item-row"
                     [class.is-selected]="isSelected(item.id)"
                     [class.is-fired]="isItemFired(item)"
+                    [class.is-cancelled]="!!item.cancelled_at"
                     [class.selectable]="
                       selectionMode() &&
                       !isClosed() &&
@@ -394,7 +413,35 @@
                               Para llevar
                             </span>
                           }
+                          <!--
+                            carril D / lina — D2: badge de cancelado en la
+                            línea. El ítem queda visible con su motivo
+                            persistido y la marca contable
+                            (before_fire = stock revertido; after_fire_waste
+                            = merma). El backend ya excluye este ítem del
+                            subtotal/tax/grand_total.
+                          -->
+                          @if (item.cancelled_at) {
+                            <span
+                              class="item-cancelled-badge"
+                              [title]="
+                                'Cancelado: ' +
+                                (item.cancellation_reason ?? 'sin motivo')
+                              "
+                            >
+                              <app-icon name="ban" [size]="11"></app-icon>
+                              Cancelado
+                              @if (item.cancellation_type === 'after_fire_waste') {
+                                · merma
+                              }
+                            </span>
+                          }
                         </div>
+                        @if (item.cancelled_at && item.cancellation_reason) {
+                          <p class="item-cancelled-reason">
+                            Motivo: {{ item.cancellation_reason }}
+                          </p>
+                        }
                         <!--
                           QUI-736 — variante como SUB-LÍNEA propia, NO
                           concatenada al nombre. `product_name` es un
@@ -490,6 +537,7 @@
                             <app-button
                               variant="outline-warning"
                               size="sm"
+                              customClasses="!h-11"
                               [loading]="isFiring() && firingItemId() === item.id"
                               (clicked)="fireItem(item)"
                             >
@@ -500,6 +548,7 @@
                             <app-button
                               variant="success"
                               size="sm"
+                              customClasses="!h-11"
                               [loading]="
                                 deliveringItemId() === item.id ||
                                 (deliveringTicketId() != null &&
@@ -517,8 +566,9 @@
                           @if (canRemoveItem(item)) {
                             <app-button
                               class="item-remove-btn"
-                              variant="ghost"
+                              variant="outline-danger"
                               size="sm"
+                              customClasses="!h-11 !w-11 !px-0"
                               [loading]="removingItemId() === item.id"
                               [attr.title]="'Eliminar de la cuenta'"
                               [attr.aria-label]="'Eliminar ' + item.product_name"

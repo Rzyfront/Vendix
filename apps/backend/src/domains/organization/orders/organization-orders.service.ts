@@ -323,7 +323,15 @@ export class OrganizationOrdersService {
       discount_amount: Number(order.discount_amount),
       currency: order.currency,
       order_date: order.created_at?.toISOString(),
-      items: order.order_items.map((item) => ({
+      // carril D / lina — D2: filtrar ítems cancelados antes de mapear.
+      // Un item cancelado NO debe llegar al reporte de ventas de la
+      // organización como línea contable — es merma o reversión, no
+      // ingreso. La fuente primaria de totales (`orders.subtotal_amount`,
+      // `tax_amount`, `grand_total`) ya excluye cancelados, pero este
+      // map relee las líneas y las vuelve a sumar.
+      items: order.order_items
+        .filter((item: any) => !item.cancelled_at)
+        .map((item: any) => ({
         id: item.id.toString(),
         product_id: item.product_id?.toString() || '',
         product_name: item.product_name,
@@ -496,7 +504,12 @@ export class OrganizationOrdersService {
       customer_email: order.users?.email,
       store_name: order.stores.name,
       currency: order.currency || 'COP',
-      items: order.order_items.map((item) => ({
+      // carril D / lina — D2: filtrar cancelados también en este map
+      // (PDF de orden a nivel organización). Sin filtro, un item
+      // cancelado se imprime como línea cobrable en el PDF.
+      items: order.order_items
+        .filter((item: any) => !item.cancelled_at)
+        .map((item: any) => ({
         description: item.product_name || item.products?.name || 'Product',
         quantity: item.quantity,
         unit_price: Number(item.unit_price),

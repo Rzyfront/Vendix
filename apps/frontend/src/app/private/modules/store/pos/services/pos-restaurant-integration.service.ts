@@ -11,6 +11,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
 import { environment } from '../../../../../../environments/environment';
 import { selectStoreSettings } from '../../../../../core/store/auth/auth.selectors';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { MenusService } from '../../restaurant-ops/menus/services/menus.service';
 import type { MenuFull } from '../../restaurant-ops/menus/interfaces';
 import type {
@@ -123,23 +124,25 @@ export class PosRestaurantIntegrationService {
   private readonly store = inject(Store);
   private readonly destroyRef = inject(DestroyRef);
   private readonly menusService = inject(MenusService);
+  // T10 A2: el predicado de industria delega en el canónico de AuthFacade.
+  // El facade cubre la cascada completa (settings → login → []) y la ventana
+  // de arranque (storeSettings$ null mientras el store hidrata) que el signal
+  // privado anterior NO cubría. Una sola fuente de verdad de la industria
+  // en todo el frontend; el próximo que llegue a copiar el predicado debe
+  // leer este comentario antes.
+  private readonly auth = inject(AuthFacade);
 
   private readonly apiUrl = environment.apiUrl;
 
-  /** Reactive view of the current store industries. */
-  private readonly industries = signal<string[]>([]);
-
   /** `true` only when the active store is tagged with the `restaurant` industry. */
-  readonly isRestaurantMode = computed(() =>
-    this.industries().includes('restaurant'),
-  );
+  readonly isRestaurantMode = computed(() => this.auth.isRestaurant());
   /**
    * Fase 0: ingredient capacity flag for the same store industries. Today
    * identical to `isRestaurantMode`, but routed through the shared resolver
    * so future industries can opt in without touching call sites.
    */
   readonly storeSupportsIngredients = computed(() =>
-    industriesSupportIngredients(this.industries()),
+    industriesSupportIngredients(this.auth.storeIndustries()),
   );
 
   /** Active menu snapshot used by the POS product picker to group items. */
@@ -180,13 +183,16 @@ export class PosRestaurantIntegrationService {
   }
 
   constructor() {
+    // T10 A2: la suscripcion a `selectStoreSettings` YA NO alimenta un
+    // signal privado — el predicado viene del facade. La suscripcion
+    // queda para el efecto secundario de refrescar/limpiar `activeMenu`
+    // cuando cambia la industria. Se ve huerfana (sin asignacion), pero
+    // NO la borres: romperias el menu activo del POS sin que el
+    // typecheck se queje. El switch por industria depende de este trigger.
     this.store
       .select(selectStoreSettings)
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((settings: any) => {
-        const next =
-          (settings?.general?.industries as string[] | undefined) ?? [];
-        this.industries.set(Array.isArray(next) ? next : []);
+      .subscribe(() => {
         if (this.isRestaurantMode()) {
           this.refreshActiveMenu();
         } else {

@@ -445,6 +445,53 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
         this.pendingDeepLinkTicketId.set(null);
       });
     });
+
+    // QUI-XXX — HEARTBEAT.
+    //
+    // El board envía un heartbeat POST /kds-sessions/:id/heartbeat cada 60s
+    // mientras hay una sesión abierta QUE ES NUESTRA. El servidor refresca
+    // `last_seen_at` mientras esté fresca; cuando expira (>5min sin
+    // actividad), el guard de mutación cierra la sesión silenciosamente y
+    // libera la estación.
+    //
+    // NO envía heartbeat cuando la sesión la abrió otro operador: el caller
+    // no es dueño y el backend rechazaría con KDS_STATION_LOCKED. En ese
+    // estado el board queda en modo SOLO LECTURA y lo refleja la barra
+    // con el badge "Reclamada por".
+    //
+    // El ciclo de vida del `setInterval` queda dentro del contexto del
+    // effect: cuando la sesión cambia a null (cierre manual, lazy-expiry
+    // o cambio de estación), `destroyRef` o el reseteo natural del effect
+    // limpia el timer. No necesito cancelar manualmente.
+    let heartbeatHandle: ReturnType<typeof setInterval> | null = null;
+    effect(() => {
+      const session = this.stationsService.openSession();
+      const mine = this.stationsService.sessionOpenedByMe();
+      const kdsId = this.stationsService.selectedStationId();
+
+      if (heartbeatHandle != null) {
+        clearInterval(heartbeatHandle);
+        heartbeatHandle = null;
+      }
+
+      if (session == null || mine !== true || kdsId == null) return;
+
+      const sessionId = session.id;
+      heartbeatHandle = setInterval(() => {
+        this.stationsService
+          .heartbeat(sessionId)
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe({
+            error: () => {
+              // El heartbeat falla cuando la sesión se cerró entre un ciclo
+              // y el siguiente (lazy expiry o cierre remoto). El próximo
+              // `refreshOpenSession` desde el padre la verá null y la UI
+              // bajará al estado "sin turno". No hace falta reintentar: el
+              // error ya es señal de cierre.
+            },
+          });
+      }, 60_000);
+    });
   }
 
   ngOnInit(): void {
@@ -520,6 +567,44 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   refresh(): void {
     this.kdsSse.reset();
     this.kdsSse.connect(120);
+  }
+
+  /**
+   * QUI-XXX — toma forzada del control de la estación cuando la sesión la
+   * abrió otro operador y el caller es owner/admin/super_admin.
+   *
+   * Refleja la decisión de Nancy: la toma es EXPLÍCITA, nunca implícita en
+   * una mutación de ticket. La razón es preservar el rastro de auditoría
+   * (`force_taken_by_user_id` sobre la sesión cerrada): si la toma es
+   * perezosa en `assertCanMutateStationTicket`, el caller la sufre sin ver
+   * que está tomándole el turno a otro, y la sesión cerrada del dueño
+   * anterior queda con la huella correcta — pero el comportamiento en la
+   * UI queda raro. Hacerla explícita vía botón es más transparente.
+   *
+   * El backend cierra la sesión ajena y abre la nueva en una sola
+   * transacción (`kds-sessions.service.forceTake`), el partial unique
+   * `kds_sessions_one_open_per_kds` queda protegido. La señal
+   * `openSession` queda apuntando a la sesión nueva vía el `tap` del
+   * servicio.
+   */
+  onForceTake(): void {
+    const stationId = this.stationsService.selectedStationId();
+    if (stationId == null) return;
+
+    this.stationsService
+      .forceTake(stationId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (session) => {
+          this.toastService.success(
+            `Control de ${session.kds?.name ?? 'la estación'} transferido a tu usuario.`,
+          );
+        },
+        error: (err: unknown) =>
+          this.toastService.error(
+            typeof err === 'string' ? err : 'No se pudo tomar el control de la estación',
+          ),
+      });
   }
 
   onHeaderAction(id: string): void {

@@ -45,6 +45,16 @@ export class OrderQueryDto {
   @Min(1)
   customer_id?: number;
 
+  // Carril B — B2: filtro por mesa en el listado de órdenes. Coincide con
+  // cualquier table_session asociada a la orden (incluye sesiones ya cerradas,
+  // porque la orden pudo migrar entre mesas). El frontend arma el dropdown
+  // contra /store/tables.
+  @IsOptional()
+  @Transform(({ value }) => parseInt(value))
+  @IsInt()
+  @Min(1)
+  table_id?: number;
+
   // store_id deprecated (phase3-round2): scope is derived from RequestContextService
   // for /store/* endpoints. Use /organization/* with breakdown for cross-store views.
 

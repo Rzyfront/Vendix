@@ -2241,6 +2241,12 @@ export class CheckoutService {
         quantity: oi.quantity,
         unit_price: Number(oi.unit_price),
         total_price: Number(oi.total_price),
+        // [resid-fiscal] — Aditivo. El FE pinta la línea tachada con
+        // distintivo "Cancelado" cuando `cancelled_at != null` y oculta
+        // precio/impuestos en ese caso. Camino principal en restaurante:
+        // el comensal cancela desde el QR ANTES de confirmar.
+        cancelled_at: oi.cancelled_at ?? null,
+        cancellation_reason: oi.cancellation_reason ?? null,
       })),
       state: order.state,
       customer: customer_data,

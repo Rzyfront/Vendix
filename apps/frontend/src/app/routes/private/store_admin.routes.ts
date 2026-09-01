@@ -55,6 +55,19 @@ export const storeAdminRoutes: Routes = [
             (c) => c.DashboardComponent,
           ),
       },
+      // C.1(2): "sin acceso al panel". Terminal de la cadena de fallback
+      // cuando el usuario autenticado no tiene NINGÚN módulo activo del
+      // sidebar. El `panelUiGuard` lo deja pasar por bypass explícito de
+      // `PANEL_UI_NO_ACCESS_ROUTE` (ver `core/guards/panel-ui.guard.ts`); de
+      // lo contrario el redirect crearía un bucle infinito. El componente
+      // muestra un CTA de "Cerrar sesión" porque no hay nada más a donde ir.
+      {
+        path: 'no-access',
+        loadComponent: () =>
+          import(
+            '../../private/modules/store/no-access/no-access-page.component'
+          ).then((c) => c.NoAccessPageComponent),
+      },
       // Owner onboarding host — gated by `onboardingGuard` on the `admin`
       // root. Only an OWNER with `organizations.onboarding !== true` ever
       // resolves here; everyone else is bounced to the dashboard.

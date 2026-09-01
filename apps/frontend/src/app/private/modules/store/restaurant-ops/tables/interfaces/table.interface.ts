@@ -94,6 +94,14 @@ export interface TableSession {
   opened_by: number;
   opened_at: string | Date;
   closed_at: string | Date | null;
+  /**
+   * carril D / lina — D1: instante en que la mesa fue pagada en POS
+   * pero NO cerrada todavía. Fuente de verdad: `table_sessions.paid_at`
+   * (migration `20260901120000_table_session_paid_at`). Distingue
+   * "ocupada pagada" de "ocupada sin pagar". La mesa sigue `occupied`
+   * hasta que el mesero ejecute `closeSession`.
+   */
+  paid_at?: string | Date | null;
   guest_count: number | null;
   order?: TableSessionOrder;
   table?: {
@@ -117,6 +125,15 @@ export interface TableSessionOrder {
    * contract (no "Cliente General" sentinel — true anonymous is `null`).
    */
   customer?: TableSessionCustomerRef | null;
+  /**
+   * carril D / lina — D1: alias de la venta cuando es anónima pero
+   * etiquetada (ej. "Mesa 5", "Para llevar"). Persistido en
+   * `orders.customer_alias` (schema.prisma:1445, XOR con `customer_id`).
+   * Cuando existe, el frontend muestra el alias en lugar de
+   * "Consumidor Final" (regla del dueño: el alias REEMPLAZA al CF,
+   * no se muestra al lado).
+   */
+  customer_alias?: string | null;
   /**
    * QUI-653 — la orden tiene items para consumo en la mesa Y items para llevar.
    * Es DERIVADO en el backend a partir de las líneas, no una columna: así no
@@ -167,6 +184,20 @@ export interface TableSessionOrderItem {
    */
   delivered_at: string | null;
   delivered_by_user_id: number | null;
+  /**
+   * carril D / lina — D2: soft cancel por línea. El ítem NO se borra:
+   * queda VISIBLE marcado como cancelado pero EXCLUIDO del total
+   * (filtro `cancelled_at IS NULL` en el recálculo del backend).
+   * `cancelled_at` es la fuente de verdad (no hay columna `state` enum);
+   * `cancellation_reason` queda persistido para auditoría y para que
+   * el KDS / listado de ordenes puedan mostrarlo.
+   * `cancellation_type` clasifica el efecto contable:
+   *   - 'before_fire'      → stock revertido.
+   *   - 'after_fire_waste' → merma, stock NO revertido.
+   */
+  cancelled_at: string | null;
+  cancellation_reason: string | null;
+  cancellation_type: 'before_fire' | 'after_fire_waste' | null;
   /**
    * Snapshot of `products.product_type` taken at order creation by the
    * backend (see `table-sessions.service.ts:addItems`). The table
@@ -257,6 +288,14 @@ export interface TableSessionAddItem {
    * flujos de remisión, donde no tiene nada que hacer.
    */
   is_takeaway?: boolean;
+  /**
+   * C3 (Carril B) — nota libre del mesero para el cocinero ("sin cebolla",
+   * "término medio"). Viaja a `order_items.notes` y de ahi a
+   * `kitchen_ticket_items.notes` cuando se dispara a cocina
+   * (`kitchen-fire.service.ts:843-933`). Solo se envia si trae texto; el
+   * default del backend es null.
+   */
+  notes?: string;
 }
 
 export type SplitMode = 'equal' | 'custom';

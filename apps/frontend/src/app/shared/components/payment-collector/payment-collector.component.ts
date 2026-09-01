@@ -17,7 +17,7 @@ import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { IconComponent } from '../icon/icon.component';
 import type { IconName } from '../icon/icons.registry';
 import { CurrencyInputDirective } from '../../directives/currency-input.directive';
-import { CurrencyPipe } from '../../pipes/currency';
+import { CurrencyFormatService, CurrencyPipe } from '../../pipes/currency';
 import {
   PaymentMethodType,
   requiresReferenceFor,
@@ -88,6 +88,15 @@ interface PaymentValidationError {
 export class PaymentCollectorComponent implements OnInit {
   private readonly catalog = inject(PaymentMethodsCatalogService);
   private readonly destroyRef = inject(DestroyRef);
+  /**
+   * T1 — símbolo de la moneda del tenant (no del locale del browser).
+   * Mismo origen que el resto del repo: el CurrencyFormatService
+   * resuelve primero la moneda del dominio y luego la de la tienda.
+   * El sufijo visible del input de propina lo consume la plantilla
+   * via el computed `tipSuffix` (no cableamos `$` aquí).
+   */
+  private readonly currencyFormat = inject(CurrencyFormatService);
+  readonly currencySymbol = this.currencyFormat.currencySymbol;
 
   // ── Data inputs ────────────────────────────────────────────────────────
   readonly amount = input.required<number>();
@@ -148,6 +157,59 @@ export class PaymentCollectorComponent implements OnInit {
   readonly tipControl = new FormControl<number>(0, { nonNullable: true });
   readonly amountOverrideControl = new FormControl<number | null>(null);
   readonly referenceControl = new FormControl<string>('', { nonNullable: true });
+
+  // T1 — metadatos de la propina. `tipControl` lleva el monto crudo
+  // que tipea el operador; `tipType` decide si ese valor se interpreta
+  // como porcentaje (0-100) o como monto libre. `tipWaiterId` es
+  // opcional: el mostrador sin meseros puede cobrar sin este dato.
+  // Los tres viven como signals independientes (zoneless) y se
+  // serializan al PaymentSubmit via `buildSubmit` con camelCase
+  // (tipType / tipValue / tipWaiterId); el consumidor los traduce
+  // a snake_case al backend.
+  readonly tipType = signal<'percentage' | 'fixed'>('fixed');
+  readonly tipWaiterId = signal<number | null>(null);
+  /**
+   * Monto final que viaja en `PaymentSubmit.tip` (y se espeja en
+   * `tipValue` cuando es 'fixed'). Cuando `tipType='percentage'`,
+   * el porcentaje se resuelve contra `effectiveBase()` — la base
+   * gravable real (override ?? restante ?? amount) — y el resultado
+   * redondeado a 2 decimales es el monto que se persiste. El %
+   * crudo se descarta después del cálculo (regla del dueño: la
+   * propina pactada no puede moverse si cambia el subtotal).
+   */
+  readonly tipAmount = computed<number>(() => {
+    const raw = this.tip() || 0;
+    if (raw <= 0) return 0;
+    if (this.tipType() === 'percentage') {
+      return Math.round((this.effectiveBase() * raw) / 100 * 100) / 100;
+    }
+    return Math.round(raw * 100) / 100;
+  });
+  /**
+   * Texto que muestra el input según el modo. En 'percentage' el
+   * placeholder es `0 %`; en 'fixed' queda `0`. El sufijo visible
+   * al lado del input (`%` vs símbolo de moneda) lo consume la
+   * plantilla via computed.
+   */
+  readonly tipSuffix = computed<string>(() =>
+    this.tipType() === 'percentage' ? '%' : this.currencySymbol(),
+  );
+
+  /**
+   * T1 — cambio del id del mesero desde el input. Acepta string
+   * crudo del DOM (`$any($event.target).value`) y normaliza a
+   * `number | null`: vacío → null, valor no-numérico → null,
+   * valor <= 0 → null. El mesero es opcional, por lo que un valor
+   * inválido NO bloquea el submit; simplemente queda sin atribución.
+   */
+  onTipWaiterInput(value: string | number | null | undefined): void {
+    if (value === null || value === undefined || value === '') {
+      this.tipWaiterId.set(null);
+      return;
+    }
+    const n = Number(value);
+    this.tipWaiterId.set(Number.isFinite(n) && n > 0 ? n : null);
+  }
 
   // ── Independent state slices (signals) ──────────────────────────────────
   readonly selectedMethod = signal<PaymentMethod | null>(null);
@@ -839,6 +901,12 @@ export class PaymentCollectorComponent implements OnInit {
     this.creditTerms.set(null);
     this.setCashProgrammatic(0);
     this.tipControl.setValue(0);
+    // T1 — resetear los metadatos de propina junto con el monto.
+    // Si no, un cambio de contexto dejaba `tipType` y `tipWaiterId`
+    // colgados del cobro anterior y el siguiente submit los enviaba
+    // al backend sin que el operador los hubiera pedido.
+    this.tipType.set('fixed');
+    this.tipWaiterId.set(null);
     this.amountOverrideControl.setValue(null);
     this.referenceControl.setValue('');
     // QUI-728 — limpiar el estado de cuenta bancaria al resetear el collector.
@@ -889,7 +957,21 @@ export class PaymentCollectorComponent implements OnInit {
       method,
     };
 
-    if (cfg.allowTip && (this.tip() || 0) > 0) out.tip = this.tip();
+    if (cfg.allowTip && (this.tip() || 0) > 0) {
+      // T1 — el monto de la propina que viaja al backend es el RESUELTO
+      // (porcentaje → monto calculado), no el % crudo. El consumidor
+      // (pos-payment-step, table-payment-modal) traduce camelCase → snake_case
+      // al DTO. `tipValue` lleva el mismo monto que `tip` cuando el
+      // modo es 'fixed'; cuando el operador eligió porcentaje, también
+      // lleva el monto resuelto (regla del dueño: la propina pactada
+      // no puede moverse si cambia el subtotal).
+      const tipResolved = this.tipAmount();
+      out.tip = tipResolved;
+      out.tipType = this.tipType();
+      out.tipValue = tipResolved;
+      const waiter = this.tipWaiterId();
+      if (waiter != null) out.tipWaiterId = waiter;
+    }
     if (method.type === PaymentMethodType.CASH) {
       out.amountReceived = this.cashReceived() || 0;
       out.change = this.change();
