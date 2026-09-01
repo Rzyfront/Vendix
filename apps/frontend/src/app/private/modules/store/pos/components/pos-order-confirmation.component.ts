@@ -299,68 +299,6 @@ import { StoreSettingsFacade } from '../../../../../core/store/store-settings/st
         background-size: 20px 20px;
         background-color: var(--color-surface);
       }
-
-      @media print {
-        /* Hide everything by default */
-        body * {
-          visibility: hidden !important;
-        }
-        
-        /* Show only the ticket */
-        .receipt-container, .receipt-container * {
-          visibility: visible !important;
-          color: #000 !important;
-          background: none !important;
-          box-shadow: none !important;
-          font-family: 'Courier New', Courier, monospace !important;
-          text-shadow: none !important;
-        }
-
-        .receipt-container {
-          position: fixed !important;
-          left: 0 !important;
-          top: 0 !important;
-          width: 300px !important; /* Standard POS width approx */
-          margin: 0 !important;
-          padding: 10px !important;
-          border: none !important;
-        }
-
-        /* Simplify layout for print */
-        .receipt-container .border-t, 
-        .receipt-container .border-b,
-        .receipt-container .border-t-2 {
-          border-color: #000 !important;
-          border-style: dashed !important;
-          border-width: 1px 0 0 0 !important;
-        }
-
-        .receipt-container [class*="text-primary"],
-        .receipt-container [class*="text-text-secondary"] {
-          color: #000 !important;
-        }
-
-        .receipt-container [class*="bg-muted"] {
-          background: none !important;
-          border-top: 1px dashed #000 !important;
-        }
-        
-        .receipt-container .text-2xl,
-        .receipt-container .text-lg {
-          font-size: 14pt !important;
-          font-weight: bold !important;
-        }
-
-        /* Hide icons for print */
-        app-icon {
-          display: none !important;
-        }
-
-        @page {
-          margin: 0;
-          size: auto;
-        }
-      }
     `,
   ] })
 /**
@@ -847,8 +785,10 @@ private authFacade = inject(AuthFacade);
     this.printing = true;
 
     // Create TicketData from orderData
+    const docId = Number(this.orderId || this.orderData()?.id);
     const ticketData: any = {
-      id: this.derivedOrderNumber(),
+      orderId: !isNaN(docId) && docId > 0 ? docId : undefined,
+      id: String(this.orderId || this.orderData()?.id || this.derivedOrderNumber() || 'N/A'),
       date: new Date(this.orderData().created_at || new Date()),
       items: this.derivedOrderItems().map((item: any) => ({
         id: item.id || item.name,
