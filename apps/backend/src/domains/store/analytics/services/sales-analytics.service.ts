@@ -746,6 +746,10 @@ export class SalesAnalyticsService {
       LEFT JOIN (
         SELECT order_id, SUM(quantity) AS units
         FROM order_items
+        -- [resid-fiscal] — Excluir cancelados del trend de unidades
+        -- vendidas por período (los dos queries que comparten este
+        -- LEFT JOIN — trend bucketed y trend intradía).
+        WHERE cancelled_at IS NULL
         GROUP BY order_id
       ) oi ON oi.order_id = o.id
       WHERE o.store_id = ${storeId}
@@ -809,6 +813,10 @@ export class SalesAnalyticsService {
       LEFT JOIN (
         SELECT order_id, SUM(quantity) AS units
         FROM order_items
+        -- [resid-fiscal] — Excluir cancelados del trend de unidades
+        -- vendidas por período (los dos queries que comparten este
+        -- LEFT JOIN — trend bucketed y trend intradía).
+        WHERE cancelled_at IS NULL
         GROUP BY order_id
       ) oi ON oi.order_id = o.id
       WHERE o.store_id = ${storeId}
