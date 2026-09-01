@@ -17,7 +17,12 @@ import {
   SpinnerComponent,
   ButtonComponent,
   PaymentCollectorComponent,
+  IconComponent,
 } from '../../../../../../../shared/components';
+import {
+  CurrencyFormatService,
+  CurrencyPipe,
+} from '../../../../../../../shared/pipes/index';
 import type {
   PaymentSubmit,
   CreditTerms,
@@ -68,12 +73,22 @@ import type { BusinessHours } from '../../../../../../../core/models/store-setti
     SpinnerComponent,
     ButtonComponent,
     PaymentCollectorComponent,
+    IconComponent,
+    CurrencyPipe,
   ],
   templateUrl: './pos-payment-step.component.html',
   styleUrl: './pos-payment-step.component.scss',
 })
 export class PosPaymentStepComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
+  /**
+   * carril D / lina — D3: símbolo de la moneda configurada en la tienda.
+   * Misma fuente que el modal de mesa (table-payment-modal): se inyecta
+   * CurrencyFormatService para que el símbolo cambie según la moneda del
+   * tenant, no según el locale del browser.
+   */
+  private readonly currencyService = inject(CurrencyFormatService);
+  readonly currencySymbol = this.currencyService.currencySymbol;
 
   // ── Inputs (from shell) ──────────────────────────────────────────────────
   readonly cartState = input<CartState | null>(null);
