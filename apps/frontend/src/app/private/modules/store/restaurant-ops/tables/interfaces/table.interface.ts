@@ -271,6 +271,14 @@ export interface TableSessionAddItem {
    * flujos de remisión, donde no tiene nada que hacer.
    */
   is_takeaway?: boolean;
+  /**
+   * C3 (Carril B) — nota libre del mesero para el cocinero ("sin cebolla",
+   * "término medio"). Viaja a `order_items.notes` y de ahi a
+   * `kitchen_ticket_items.notes` cuando se dispara a cocina
+   * (`kitchen-fire.service.ts:843-933`). Solo se envia si trae texto; el
+   * default del backend es null.
+   */
+  notes?: string;
 }
 
 export type SplitMode = 'equal' | 'custom';

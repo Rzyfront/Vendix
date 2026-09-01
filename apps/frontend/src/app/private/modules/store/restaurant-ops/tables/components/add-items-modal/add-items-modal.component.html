@@ -145,6 +145,50 @@
               <app-icon name="shopping-bag" [size]="12"></app-icon>
               Para llevar
             </button>
+            <!--
+              C3 — nota del mesero para el cocinero. Toggle discreto: el 90%
+              de los pedidos no llevan nota y un textarea siempre-visible
+              ensucia el modal. Cuando el toggle esta abierto se ve un
+              textarea con placeholder + maxlength alineado al DTO backend.
+              El valor persiste aunque el toggle se cierre, para no perder
+              lo escrito si el mesero cambia de opinion.
+            -->
+            @if (isNotesOpen(row.id)) {
+              <div class="note-field">
+                <textarea
+                  class="note-field__input"
+                  rows="2"
+                  maxlength="500"
+                  [value]="notesFor(row.id)"
+                  (input)="setNotes(row.id, $any($event.target).value)"
+                  [attr.aria-label]="'Nota de preparacion para ' + row.name"
+                  [attr.placeholder]="
+                    'Nota para cocina (ej. sin cebolla, termino medio). Opcional.'
+                  "
+                ></textarea>
+                <button
+                  type="button"
+                  class="note-field__close"
+                  (click)="toggleNotes(row.id)"
+                  [attr.aria-label]="'Cerrar nota'"
+                  title="Cerrar"
+                >
+                  <app-icon name="x" [size]="12"></app-icon>
+                </button>
+              </div>
+            } @else {
+              <button
+                type="button"
+                class="note-toggle"
+                (click)="toggleNotes(row.id)"
+                [attr.aria-label]="'Agregar nota para ' + row.name"
+                [attr.aria-pressed]="false"
+                title="Agregar nota de preparacion (opcional)"
+              >
+                <app-icon name="message-square" [size]="12"></app-icon>
+                {{ notesFor(row.id) ? 'Editar nota' : 'Agregar nota' }}
+              </button>
+            }
           }
         </div>
       }
