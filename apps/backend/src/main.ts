@@ -26,6 +26,7 @@ import { resolveTenantHostname } from '@common/utils/tenant-hostname.util';
 import {
   extractClientIp,
   resolveTrustProxySetting,
+  createTrustProxyPredicate,
 } from '@common/utils/client-ip.util';
 import { DynamicCorsService } from './common/cors/dynamic-cors.service';
 import {
@@ -178,13 +179,24 @@ async function bootstrapApi(role: VendixProcessRole) {
   // propios delante del backend, NUNCA `true`: `true` haría que Express tome
   // el primer elemento de `X-Forwarded-For`, que es el que escribe el cliente,
   // y cualquiera podría falsificar su IP para evadir todos los límites.
+  //
+  // Tampoco basta el número pelado: el contenedor publica `-p 3000:3000` y el
+  // security group de EC2 abre ese puerto a `0.0.0.0/0`, así que se le puede
+  // hablar al backend saltándose nginx. Con `trust proxy: N` esa conexión
+  // directa cuenta igual como salto de confianza y el `X-Forwarded-For` que
+  // traiga se acepta sin más. Por eso el valor de `set()` es el predicado
+  // `createTrustProxyPredicate` (ver su docblock en `client-ip.util.ts` para
+  // la lógica completa), no `trustProxyHops` directo.
   const trustProxyHops = resolveTrustProxySetting();
   // Vía `getInstance()` y no `app.set(...)`: `NestFactory.create` devuelve
   // `INestApplication`, que no expone `set`. Tiparlo como
   // `NestExpressApplication` obligaría a cambiar la firma del create y arrastra
   // el tipo por el resto del arranque; esto toca la instancia de Express, que
   // es justo lo que hay que configurar.
-  app.getHttpAdapter().getInstance().set('trust proxy', trustProxyHops);
+  app
+    .getHttpAdapter()
+    .getInstance()
+    .set('trust proxy', createTrustProxyPredicate(trustProxyHops));
   new Logger('Bootstrap').log(
     `Trust proxy: ${trustProxyHops} salto(s) — req.ip se resuelve desde X-Forwarded-For`,
   );
