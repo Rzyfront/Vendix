@@ -116,6 +116,14 @@ model users {
   order_item_exclusions_created order_item_exclusions[]          @relation("order_item_exclusions_created_by")
   kti_exclusions_excluded       kitchen_ticket_item_exclusions[] @relation("kti_exclusions_excluded_by")
   cash_register_movements       cash_register_movements[]
+  // carril D / lina — D3: contraparte de orders.tip_waiter_id.
+  // La FK lleva ON DELETE SET NULL: si un mesero se da de baja, sus
+  // propinas históricas sobreviven en la orden; solo se pierde la
+  // atribución. Elegir mesero NO es obligatorio para cobrar (regla
+  // del dueno): el mostrador sin meseros o el caso "mesero ya se
+  // fue" deben poder cerrar el cobro sin este dato. El nombre del
+  // @relation debe coincidir EXACTAMENTE con la punta de orders.
+  orders_tip_waiter             orders[]                         @relation("orders_tip_waiter_idTousers")
 
   // Promotions
   order_promotions_customer order_promotions[]       @relation("order_promotions_customer")

@@ -3078,7 +3078,51 @@ export class PaymentsService {
     // NO se suma a subtotal_amount ni tax_amount (no es ingreso ni base
     // gravable). Se persiste aparte en orders.tip_amount y la contabilidad
     // la reconoce como pasivo custodio (propinas por pagar).
-    const tip = this.roundMoney(dto.tip_amount || 0);
+    //
+    // carril D / lina — D3: cálculo y metadatos de la propina.
+    //  - Si llega `tip_amount` directo, gana sobre cualquier porcentaje.
+    //  - Si NO llega `tip_amount` y llega `tip_type='percentage'`, se
+    //    calcula sobre `newSubtotal` (la base gravable): un % sobre
+    //    envío/envío + propina es absurdo, la convención contable
+    //    colombiana es "% sobre lo consumido". Si `tip_value` falta o
+    //    es <= 0, no se calcula nada (propina 0, no obligatoria).
+    //  - El % se guarda RESUELTO A MONTO (no como porcentaje crudo):
+    //    si mañana cambia el subtotal de esa orden, la propina ya
+    //    pactada no puede moverse sola. Persistimos `tip_value` con
+    //    el monto final y `tip_type='fixed'`, porque el operador ya
+    //    eligió la cifra que va a pagar el cliente.
+    //  - El `tip_type` que persiste es 'fixed' cuando se calculó desde
+    //    percentage; o el que vino cuando fue 'fixed' directo. La
+    //    auditoría ve la decisión original del operador en una
+    //    columna y el monto anclado en otra.
+    let tip = this.roundMoney(dto.tip_amount || 0);
+    let resolvedTipType: 'percentage' | 'fixed' | null = dto.tip_type ?? null;
+    let resolvedTipValue: number | null =
+      dto.tip_value != null ? this.roundMoney(dto.tip_value) : null;
+    if (
+      tip === 0 &&
+      resolvedTipType === 'percentage' &&
+      resolvedTipValue != null &&
+      resolvedTipValue > 0
+    ) {
+      // Base: subtotal de venta, NO total con impuestos. Nadie da
+      // propina sobre el IVA — convención contable colombiana.
+      tip = this.roundMoney((newSubtotal * resolvedTipValue) / 100);
+      // Resuelto a monto: la propina ya está pactada.
+      resolvedTipType = 'fixed';
+      resolvedTipValue = tip;
+    }
+    if (resolvedTipType == null && tip > 0) {
+      // Default razonable: si hubo monto pero el operador no marcó
+      // modo, asumimos 'fixed'. La auditoría verá 'fixed' cuando en
+      // realidad fue escrito directo, pero el monto es exacto.
+      resolvedTipType = 'fixed';
+    }
+    if (resolvedTipType === 'fixed' && resolvedTipValue == null && tip > 0) {
+      // Si fue 'fixed' pero el operador solo mandó tip_amount, el
+      // valor coincide con el monto. Persistimos para auditoría.
+      resolvedTipValue = tip;
+    }
     // Re-evaluate promotions + coupons over the merged subtotal so the
     // final total stays consistent with the fresh path.
     const promotionQuote = await this.calculatePosPromotionQuote(dto);
@@ -3120,7 +3164,12 @@ export class PaymentsService {
         grand_total: grandTotal,
         shipping_cost: shippingCost,
         // GAP-6 — propina persistida aparte (no entra a subtotal/tax).
+        // carril D / D3: tip_amount + metadatos (tip_type, tip_value,
+        // tip_waiter_id). Los metadatos quedan en NULL si no llegaron.
         tip_amount: tip,
+        tip_type: resolvedTipType,
+        tip_value: resolvedTipValue,
+        tip_waiter_id: dto.tip_waiter_id ?? null,
         updated_at: new Date(),
         // The table's own order already carries `channel=pos` from the
         // session creation; we keep that and just refresh totals.
@@ -3531,13 +3580,41 @@ export class PaymentsService {
           promotionQuote.total_discount + couponInfo.discount_amount,
         );
         const shippingCost = this.roundMoney(dto.shipping_cost || 0);
+
+        // carril D / lina — D3: cálculo y metadatos de la propina
+        // (rama retail / POS caja). Misma regla que mesa: el % se
+        // calcula sobre el subtotal (no sobre total con impuestos) y
+        // se guarda RESUELTO A MONTO, no como porcentaje crudo. Si
+        // llega tip_amount directo, gana sobre cualquier porcentaje.
+        let tip = this.roundMoney(dto.tip_amount || 0);
+        let resolvedTipType: 'percentage' | 'fixed' | null = dto.tip_type ?? null;
+        let resolvedTipValue: number | null =
+          dto.tip_value != null ? this.roundMoney(dto.tip_value) : null;
+        if (
+          tip === 0 &&
+          resolvedTipType === 'percentage' &&
+          resolvedTipValue != null &&
+          resolvedTipValue > 0
+        ) {
+          tip = this.roundMoney((calculatedSubtotal * resolvedTipValue) / 100);
+          resolvedTipType = 'fixed';
+          resolvedTipValue = tip;
+        }
+        if (resolvedTipType == null && tip > 0) {
+          resolvedTipType = 'fixed';
+        }
+        if (resolvedTipType === 'fixed' && resolvedTipValue == null && tip > 0) {
+          resolvedTipValue = tip;
+        }
+
         const grandTotal = this.roundMoney(
           Math.max(
             0,
             calculatedSubtotal +
               calculatedTaxAmount -
               totalDiscount +
-              shippingCost,
+              shippingCost +
+              tip,
           ),
         );
 
@@ -3578,6 +3655,15 @@ export class PaymentsService {
             ? null
             : dto.payment_form || (dto.requires_payment ? '1' : '2'),
           shipping_cost: shippingCost,
+          // GAP-6 — propina persistida aparte (no entra a subtotal/tax).
+          // carril D / D3: tip_amount + metadatos (tip_type, tip_value,
+          // tip_waiter_id). Los metadatos quedan en NULL si no llegaron.
+          // En el flujo retail (POS caja) aplica la misma regla que en
+          // mesa: el % se resuelve a monto antes de persistir.
+          tip_amount: tip,
+          tip_type: resolvedTipType,
+          tip_value: resolvedTipValue,
+          tip_waiter_id: dto.tip_waiter_id ?? null,
           shipping_address_snapshot: dto.shipping_address_snapshot || undefined,
           order_items: {
             create: orderItems,
