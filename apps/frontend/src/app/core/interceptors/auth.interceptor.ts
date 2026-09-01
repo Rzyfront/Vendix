@@ -33,12 +33,87 @@ import { SessionService } from '../services/session.service';
 let activeRefresh$: Observable<any> | null = null;
 
 /**
+ * Instante (epoch ms) hasta el que NO se vuelve a pedir refresco de sesión.
+ *
+ * Lo fija un 429 del backend en `auth/refresh`. Ver `handleRefreshFailure`
+ * para el porqué: sin esta compuerta, cada 401 que llega durante el bloqueo
+ * dispararía otra petición de refresco condenada al mismo 429, alimentando
+ * justo la avalancha que el rate limit intenta frenar.
+ */
+let refreshBlockedUntilMs = 0;
+
+/** Techo del enfriamiento. Ver `readRetryAfterSeconds`. */
+const MAX_REFRESH_COOLDOWN_SECONDS = 15 * 60;
+
+/**
  * QUI-723 PR unblock — drains module-scoped refresh state between tests
  * so the karma suite can exercise concurrent 401 paths deterministically.
  * No-op in production (never called outside `*.spec.ts`).
  */
 export function __resetAuthInterceptorForTests(): void {
   activeRefresh$ = null;
+  refreshBlockedUntilMs = 0;
+}
+
+/**
+ * Segundos de espera que pide el backend en un 429.
+ *
+ * `retryAfter` (segundos, en la raíz del cuerpo) es el contrato que emiten los
+ * middlewares de rate limit del backend; la cabecera estándar `Retry-After` es
+ * el respaldo por si el 429 viene de nginx o de CloudFront, que no conocen ese
+ * cuerpo. El techo evita que un valor absurdo deje la sesión sin poder
+ * renovarse durante horas.
+ */
+function readRetryAfterSeconds(error: HttpErrorResponse): number {
+  const fromBody = (error.error as { retryAfter?: unknown } | null)?.retryAfter;
+  if (typeof fromBody === 'number' && fromBody > 0) {
+    return Math.min(fromBody, MAX_REFRESH_COOLDOWN_SECONDS);
+  }
+  const fromHeader = Number(error.headers?.get('Retry-After'));
+  if (Number.isFinite(fromHeader) && fromHeader > 0) {
+    return Math.min(fromHeader, MAX_REFRESH_COOLDOWN_SECONDS);
+  }
+  return 60;
+}
+
+/**
+ * Decide qué hacer cuando falla el refresco de sesión.
+ *
+ * ## Por qué un 429 NO termina la sesión
+ *
+ * Ésta es la pieza que rompía la cadena del apagón global. El backend
+ * limitaba `auth/refresh` a diez peticiones por ventana sobre una clave que
+ * —sin `trust proxy`— era la misma para todos los usuarios del planeta. Al
+ * superarla, cualquier renovación automática en segundo plano recibía un 429,
+ * y acá se trataba idéntico a un refresh token inválido: `terminateSession`.
+ * O sea, un límite de tasa expulsaba a la plataforma entera de golpe, y la
+ * avalancha de reintentos de login que venía detrás agotaba el límite de
+ * `auth/login` y remataba con el modal de bloqueo de quince minutos.
+ *
+ * Un 429 no dice nada sobre la validez de la sesión: dice «ahora no». Así que
+ * se propaga el error a quien hizo la petición, se abre un enfriamiento para
+ * no insistir, y los tokens se quedan donde están. Cuando la ventana vence, el
+ * siguiente 401 renueva y el usuario nunca se enteró.
+ *
+ * El backend ya no debería llegar a este caso con las cubetas por sesión, pero
+ * esta compuerta es la única que corta el efecto dominó desde el lado del
+ * cliente, así que se queda como defensa en profundidad.
+ */
+function handleRefreshFailure(
+  error: unknown,
+  sessionService: SessionService,
+): Observable<never> {
+  if (error instanceof HttpErrorResponse && error.status === 429) {
+    refreshBlockedUntilMs = Date.now() + readRetryAfterSeconds(error) * 1000;
+    return throwError(() => error);
+  }
+
+  if (error instanceof Error && error.name === 'TimeoutError') {
+    sessionService.terminateSession('token_refresh_timeout');
+  } else {
+    sessionService.terminateSession('token_refresh_failed');
+  }
+  return EMPTY;
 }
 
 export const authInterceptorFn: HttpInterceptorFn = (
@@ -75,7 +150,7 @@ export const authInterceptorFn: HttpInterceptorFn = (
           return throwError(() => error);
         }
 
-        return handle401Error(req, next, authService, sessionService);
+        return handle401Error(req, next, authService, sessionService, error);
       }
       return throwError(() => error);
     }),
@@ -98,10 +173,18 @@ function handle401Error(
   next: HttpHandlerFn,
   authService: AuthService,
   sessionService: SessionService,
+  originalError: HttpErrorResponse,
 ): Observable<HttpEvent<unknown>> {
   // Si la sesión ya se está terminando, no procesar más
   if (sessionService.isTerminating()) {
     return EMPTY;
+  }
+
+  // Enfriamiento tras un 429 en `auth/refresh`: se devuelve el 401 original al
+  // llamante sin tocar la sesión. Insistir sólo sumaría peticiones a la cubeta
+  // ya agotada, y terminar la sesión es precisamente lo que este cambio evita.
+  if (Date.now() < refreshBlockedUntilMs) {
+    return throwError(() => originalError);
   }
 
   const refreshToken = getRefreshToken();
@@ -135,22 +218,17 @@ function handle401Error(
       const newRefreshToken = response.data?.refresh_token;
 
       if (newToken) {
+        refreshBlockedUntilMs = 0;
         updateTokensInAuthState(newToken, newRefreshToken);
         return next(addTokenToRequest(request, newToken));
       }
 
-      // Si refresh falló, terminar sesión limpiamente
+      // Respuesta 2xx pero sin token: la sesión no se puede renovar y no hay
+      // nada que esperar, así que sí se termina.
       sessionService.terminateSession('token_refresh_failed');
       return EMPTY;
     }),
-    catchError((err) => {
-      if (err instanceof Error && err.name === 'TimeoutError') {
-        sessionService.terminateSession('token_refresh_timeout');
-      } else {
-        sessionService.terminateSession('token_refresh_failed');
-      }
-      return EMPTY;
-    }),
+    catchError((err) => handleRefreshFailure(err, sessionService)),
     // Reset the dedup state in a microtask so the test's synchronous
     // flush chain (which subscribes AND completes in the same tick)
     // doesn't trigger a second refreshToken() call before a

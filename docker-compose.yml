@@ -58,10 +58,19 @@ services:
       CHOKIDAR_USEPOLLING: "true"
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      # QUI-489: en dev el límite de 10 intentos de login estorba al probar
-      # flujos de auth. Este compose es sólo de desarrollo (NODE_ENV arriba lo
-      # fija), así que el 30 vive acá y prod queda con el default seguro de 10.
+      # QUI-489: en dev el límite por IP estorba al probar flujos de auth. Este
+      # compose es sólo de desarrollo (NODE_ENV arriba lo fija), así que el 30
+      # vive acá. Ojo: desde el arreglo del rate limit esta variable gobierna
+      # la cubeta por IP REAL (default 50, red anti-inundación); el freno de
+      # fuerza bruta por cuenta es LOGIN_RATE_LIMIT_MAX_PER_ACCOUNT (10).
       LOGIN_RATE_LIMIT_MAX_ATTEMPTS: ${LOGIN_RATE_LIMIT_MAX_ATTEMPTS:-30}
+      # Saltos de proxy propios delante del backend, para que `req.ip` sea la
+      # IP real del cliente y los rate limits dejen de compartir una sola
+      # cubeta global. Acá la cadena es navegador -> nginx -> backend, o sea 1.
+      # En producción hay CloudFront delante de nginx: ese entorno debe fijar
+      # TRUST_PROXY_HOPS=2 en /opt/vendix/.env. Verificable con
+      # `curl .../api/health` -> campo `client_ip`. Ver client-ip.util.ts.
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
     depends_on:
       - db
       - redis
