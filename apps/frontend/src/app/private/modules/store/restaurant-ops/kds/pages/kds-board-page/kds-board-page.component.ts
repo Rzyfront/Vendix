@@ -935,23 +935,6 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
           this.loadingSessionSummary.set(false);
         },
         error: () => this.loadingSessionSummary.set(false),
-
-    this.sessionSummaryOpen.set(true);
-    this.loadingSessionSummary.set(true);
-    this.sessionSummary.set(null);
-    this.sessionHistory.set([]);
-    this.unattributed.set(null);
-    this.loadingUnattributed.set(true);
-
-    this.stationsService
-      .getConsumptionSummary(session.id)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (sum) => {
-          this.sessionSummary.set(sum);
-          this.loadingSessionSummary.set(false);
-        },
-        error: () => this.loadingSessionSummary.set(false),
       });
 
     this.stationsService

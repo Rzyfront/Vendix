@@ -245,7 +245,7 @@ import type { KdsSession, KdsStation } from '../../interfaces';
       }
 
       /* Etiqueta "Reclamada por X" — sin fondo, hereda color del contenedor
-         `--held`. Vive dentro del flujo `.kds-bar__group` para mantener la
+         '--held'. Vive dentro del flujo '.kds-bar__group' para mantener la
          alineación con el icono del operador. */
       .kds-bar__group--warn {
         font-weight: 600;
