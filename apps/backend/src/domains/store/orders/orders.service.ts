@@ -18,6 +18,8 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { OrderStatsDto } from './dto/order-stats.dto';
 import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { OnEvent } from '@nestjs/event-emitter';
+import { OrderSseService } from './services/order-sse.service';
 import { resolveCostPrice } from './utils/resolve-cost-price';
 import { assertVariantRequiredForPrepared } from './utils/variant-required.validator';
 import { SettingsService } from '../settings/settings.service';
@@ -131,7 +133,75 @@ export class OrdersService {
     private promotionEngine: PromotionEngineService,
     private couponsService: CouponsService,
     private auditService: AuditService,
+    // Carril B - B3: hub tipado que empuja eventos del dominio orders al SSE
+    // compartido. Se invoca desde @OnEvent handlers abajo y desde el post-commit
+    // de updateOrderFromEditor.
+    private orderSse: OrderSseService,
   ) {}
+
+  // === Carril B - B3: listeners de EventEmitter que empujan al SSE =========
+  // El hub es por store_id; el cliente del detalle de orden discrimina por
+  // data.order_id. Si nadie escucha, `push` es no-op.
+
+  @OnEvent('order.created')
+  onOrderCreated(payload: {
+    store_id: number;
+    order_id: number;
+    order_number?: string;
+    grand_total?: number;
+    currency?: string;
+  }) {
+    this.orderSse.pushOrderEvent(
+      payload.store_id,
+      payload.order_id,
+      'order.created',
+      {
+        order_number: payload.order_number,
+        grand_total: payload.grand_total,
+        currency: payload.currency,
+      },
+    );
+  }
+
+  @OnEvent('order.status_changed')
+  onOrderStatusChanged(payload: {
+    store_id: number;
+    order_id: number;
+    order_number?: string;
+    old_state?: string;
+    new_state?: string;
+  }) {
+    this.orderSse.pushOrderEvent(
+      payload.store_id,
+      payload.order_id,
+      'order.status_changed',
+      {
+        order_number: payload.order_number,
+        old_state: payload.old_state,
+        new_state: payload.new_state,
+      },
+    );
+  }
+
+  @OnEvent('order.shipping_assigned')
+  onOrderShippingAssigned(payload: {
+    store_id: number;
+    order_id: number;
+    shipping_method_id?: number;
+    delivery_type?: string;
+  }) {
+    this.orderSse.pushOrderEvent(
+      payload.store_id,
+      payload.order_id,
+      'order.shipping_assigned',
+      {
+        shipping_method_id: payload.shipping_method_id,
+        delivery_type: payload.delivery_type,
+      },
+    );
+  }
+
+  // === Fin listeners SSE ====================================================
 
   async create(createOrderDto: CreateOrderDto, creatingUser: any) {
     // Enforce store context
@@ -2890,6 +2960,21 @@ export class OrdersService {
         `[editor] audit event failed: ${(err as Error).message}`,
       );
     }
+
+    // 17) Carril B - B3: empuja al SSE del store DESPUES del commit + audit.
+    // Si nadie escucha, no-op. Los handlers @OnEvent ya cubren order.created,
+    // order.status_changed y order.shipping_assigned; este evento es propio
+    // del editor (cambios en items, totales, cupón, shipping, notas).
+    this.orderSse.pushOrderEvent(
+      storeId,
+      orderId,
+      'order.items.updated',
+      {
+        order_number: result?.order_number,
+        item_count: dto.items.length,
+        is_draft: isDraft,
+      },
+    );
 
     return result;
   }
