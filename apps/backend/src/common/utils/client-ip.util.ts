@@ -120,3 +120,75 @@ export function resolveTrustProxySetting(
   if (!Number.isInteger(parsed) || parsed < 0) return 1;
   return parsed;
 }
+
+/**
+ * Rangos privados de los que puede venir un proxy nuestro.
+ *
+ * La lógica es una sola: nuestro nginx SIEMPRE conecta desde una dirección
+ * privada (la red `vendix-net` de Docker, o loopback si comparte host).
+ * Cualquier dirección pública en el salto más cercano es, por definición,
+ * alguien hablándole al backend por fuera de nuestra cadena de proxies.
+ */
+function isPrivateAddress(addr: string): boolean {
+  const ip = addr.trim().toLowerCase().replace(/^::ffff:/, '');
+
+  if (ip === '::1' || ip === '::') return true;
+  // fc00::/7 (unique local) y fe80::/10 (link local).
+  if (/^f[cd][0-9a-f]{2}:/.test(ip)) return true;
+  if (/^fe[89ab][0-9a-f]:/.test(ip)) return true;
+
+  const octets = ip.split('.');
+  if (octets.length !== 4) return false;
+  const [a, b] = octets.map(Number);
+  if (!Number.isInteger(a) || !Number.isInteger(b)) return false;
+
+  if (a === 127) return true; // 127.0.0.0/8  loopback
+  if (a === 10) return true; // 10.0.0.0/8   privada
+  if (a === 192 && b === 168) return true; // 192.168.0.0/16
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12 (bridge Docker)
+  if (a === 169 && b === 254) return true; // 169.254.0.0/16 link local
+  return false;
+}
+
+/**
+ * Predicado de `trust proxy` para Express.
+ *
+ * ## Por qué una función y no el número pelado
+ *
+ * `trust proxy: N` confía a ciegas en los N saltos más cercanos a la app, sin
+ * mirar QUIÉN es ese salto. Eso basta cuando el único camino hasta el backend
+ * pasa por nuestro nginx — pero en Vendix el contenedor publica `-p 3000:3000`
+ * y el grupo de seguridad de EC2 abre ese puerto a `0.0.0.0/0`. Es decir, se
+ * le puede hablar al backend DIRECTAMENTE desde internet, saltándose nginx y
+ * CloudFront. Con el número pelado, esa conexión directa cuenta como «primer
+ * salto de confianza» y Express se cree el `X-Forwarded-For` que traiga:
+ * cualquiera estrena cubeta de rate limit en cada petición y evade todos los
+ * límites por IP. Verificado en local: `curl -H 'X-Forwarded-For: 6.6.6.6'`
+ * contra el puerto 3000 devolvía `client_ip: 6.6.6.6`.
+ *
+ * ## Qué hace
+ *
+ * Express recorre `[socket.remoteAddress, ...xff.reverse()]` y se queda con la
+ * primera dirección para la que este predicado devuelve `false`.
+ *
+ *  - Salto 0 (quien abrió el socket): se confía SÓLO si es una dirección
+ *    privada, o sea si de verdad es un proxy nuestro. Un golpe directo desde
+ *    internet cae acá y `req.ip` termina siendo la IP real del atacante, con
+ *    su `X-Forwarded-For` ignorado por completo.
+ *  - Saltos siguientes: se confía por conteo (`TRUST_PROXY_HOPS`), que es lo
+ *    que permite atravesar CloudFront —cuya IP es pública y no se puede
+ *    reconocer por rango— y llegar a la IP real del cliente.
+ *
+ * Cadena legítima en producción con `hops = 2`:
+ *   [nginx (privada, confiada), CloudFront (salto 1 < 2, confiado), CLIENTE]
+ *   -> `req.ip` = cliente.
+ *
+ * Golpe directo al puerto 3000 con cabecera falsificada:
+ *   [atacante (pública, NO confiada)] -> `req.ip` = atacante.
+ */
+export function createTrustProxyPredicate(
+  hops: number = resolveTrustProxySetting(),
+): (addr: string, hop: number) => boolean {
+  return (addr: string, hop: number) =>
+    hop === 0 ? isPrivateAddress(addr) : hop < hops;
+}
