@@ -18,7 +18,7 @@
 import { FormatAdapterRegistryService } from '../format-adapter-registry.service';
 import { POS_SALE_TICKET_ADAPTER } from '../../lib/adapters';
 
-describe('FormatAdapterRegistryService (P7 — DI lookup over the 11 adapters, [print-editor-dsk P8] +4 to 15)', () => {
+describe('FormatAdapterRegistryService (P7 — DI lookup over the 11 adapters, [print-editor-dsk P8] +4 to 15, +pos_electronic_invoice to 16)', () => {
   const registry = new FormatAdapterRegistryService();
 
   it('1. get("pos_sale_ticket") returns the POS adapter', () => {
@@ -77,13 +77,13 @@ describe('FormatAdapterRegistryService (P7 — DI lookup over the 11 adapters, [
     expect(registry.get('not_a_real_format')).toBeUndefined();
   });
 
-  it('5. list() returns 15 entries and a fresh array (mutating it does not affect the registry)', () => {
+  it('5. list() returns 16 entries and a fresh array (mutating it does not affect the registry)', () => {
     const before = registry.list();
-    expect(before).toHaveLength(15);
+    expect(before).toHaveLength(16);
 
     // Caller mutates the returned array — registry must remain pristine.
     (before as unknown as { length: number }).length = 0;
-    expect(registry.list()).toHaveLength(15);
+    expect(registry.list()).toHaveLength(16);
   });
 
   it('6. defaultPaper("pos_sale_ticket") === "thermal_80" (and falls back for unknowns)', () => {

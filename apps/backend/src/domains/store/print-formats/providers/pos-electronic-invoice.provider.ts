@@ -132,21 +132,25 @@ export class PosElectronicInvoiceDataProvider implements IDocumentDataProvider {
         resolution_prefix: 'SETP',
         resolution_range_from: 1,
         resolution_range_to: 100000,
-        resolution_date_from: '2026-01-01',
-        resolution_date_to: '2027-01-01',
-        technical_key_fingerprint: '3a8f9c1b',
-        dian_environment: 'production',
-        tax_breakdown: [
-          {
-            tax_type: 'IVA',
-            rate: 19,
-            base_amount: 75000,
-            base_amount_formatted: '$75.000',
-            tax_amount: 14250,
-            tax_amount_formatted: '$14.250',
-          },
-        ],
+        resolution_valid_from: '2026-01-01',
+        resolution_valid_to: '2027-01-01',
+        technical_key: '3a8f9c1b',
+        environment: 'production',
       },
+      // La discriminación de impuestos vive en `taxes` a nivel raíz, no dentro
+      // de `fiscal`: es el arreglo que `print-layout-composer` recorre para la
+      // sección `fiscal_tax_breakdown`, y los otros diez formatos del dominio
+      // lo alimentan por ahí.
+      taxes: [
+        {
+          name: 'IVA 19%',
+          rate: 19,
+          base_amount: 75000,
+          tax_amount: 14250,
+          base_formatted: '$75.000',
+          tax_formatted: '$14.250',
+        },
+      ],
       items: [
         {
           index: 1,
@@ -174,12 +178,16 @@ export class PosElectronicInvoiceDataProvider implements IDocumentDataProvider {
       totals: {
         subtotal: 75000,
         subtotal_formatted: '$75.000',
-        taxes_total: 14250,
-        taxes_total_formatted: '$14.250',
-        total: 89250,
-        total_formatted: '$89.250',
-        total_in_words: 'OCHENTA Y NUEVE MIL DOSCIENTOS CINCUENTA PESOS M/CTE',
-        items_count: 3,
+        discount_total: 0,
+        discount_total_formatted: '$0',
+        shipping_total: 0,
+        shipping_total_formatted: '$0',
+        tax_total: 14250,
+        tax_total_formatted: '$14.250',
+        grand_total: 89250,
+        grand_total_formatted: '$89.250',
+        grand_total_in_words:
+          'OCHENTA Y NUEVE MIL DOSCIENTOS CINCUENTA PESOS M/CTE',
       },
     };
   }
@@ -211,19 +219,19 @@ export class PosElectronicInvoiceDataProvider implements IDocumentDataProvider {
 
   getAvailableTokens(): PrintTokenDefinition[] {
     return [
-      { key: 'fiscal.cufe', label: 'CUFE (Factura Electrónica)', category: 'fiscal', sample_value: 'c3f1e5a8...' },
-      { key: 'fiscal.qr_code_content', label: 'Contenido QR DIAN', category: 'fiscal', sample_value: 'NumFac:POS-FE-001...' },
-      { key: 'fiscal.resolution_number', label: 'Número de Resolución DIAN', category: 'fiscal', sample_value: '18764000001234' },
-      { key: 'fiscal.resolution_prefix', label: 'Prefijo de Resolución', category: 'fiscal', sample_value: 'SETP' },
-      { key: 'fiscal.resolution_range_from', label: 'Rango Desde', category: 'fiscal', sample_value: '1' },
-      { key: 'fiscal.resolution_range_to', label: 'Rango Hasta', category: 'fiscal', sample_value: '100000' },
-      { key: 'fiscal.resolution_date_from', label: 'Vigencia Desde', category: 'fiscal', sample_value: '2026-01-01' },
-      { key: 'fiscal.resolution_date_to', label: 'Vigencia Hasta', category: 'fiscal', sample_value: '2027-01-01' },
-      { key: 'fiscal.tax_breakdown', label: 'Discriminación de Impuestos', category: 'fiscal', sample_value: '[IVA 19%]' },
-      { key: 'store.name', label: 'Nombre Comercial de Tienda', category: 'store', sample_value: 'Vendix POS Express' },
-      { key: 'store.tax_id', label: 'NIT / Identificación Fiscal', category: 'store', sample_value: '901.555.333-2' },
-      { key: 'customer.name', label: 'Nombre del Cliente', category: 'customer', sample_value: 'Consumidor Final' },
-      { key: 'totals.total_formatted', label: 'Total Formateado', category: 'totals', sample_value: '$89.250' },
+      { token: '{{fiscal.cufe}}', path: 'fiscal.cufe', description: 'CUFE de la factura electrónica', example: 'c3f1e5a8...' },
+      { token: '{{fiscal.qr_code_content}}', path: 'fiscal.qr_code_content', description: 'Contenido del QR DIAN', example: 'NumFac:POS-FE-001...' },
+      { token: '{{fiscal.resolution_number}}', path: 'fiscal.resolution_number', description: 'Número de resolución DIAN', example: '18764000001234' },
+      { token: '{{fiscal.resolution_prefix}}', path: 'fiscal.resolution_prefix', description: 'Prefijo de la resolución', example: 'SETP' },
+      { token: '{{fiscal.resolution_range_from}}', path: 'fiscal.resolution_range_from', description: 'Rango autorizado desde', example: '1' },
+      { token: '{{fiscal.resolution_range_to}}', path: 'fiscal.resolution_range_to', description: 'Rango autorizado hasta', example: '100000' },
+      { token: '{{fiscal.resolution_valid_from}}', path: 'fiscal.resolution_valid_from', description: 'Vigencia de la resolución desde', example: '2026-01-01' },
+      { token: '{{fiscal.resolution_valid_to}}', path: 'fiscal.resolution_valid_to', description: 'Vigencia de la resolución hasta', example: '2027-01-01' },
+      { token: '{{taxes}}', path: 'taxes', description: 'Discriminación de impuestos', example: 'IVA 19% — $14.250' },
+      { token: '{{store.name}}', path: 'store.name', description: 'Nombre comercial de la tienda', example: 'Vendix POS Express' },
+      { token: '{{store.tax_id}}', path: 'store.tax_id', description: 'NIT o identificación fiscal', example: '901.555.333-2' },
+      { token: '{{customer.name}}', path: 'customer.name', description: 'Nombre del cliente', example: 'Consumidor Final' },
+      { token: '{{totals.grand_total}}', path: 'totals.grand_total_formatted', description: 'Total a pagar con formato', example: '$89.250' },
     ];
   }
 }

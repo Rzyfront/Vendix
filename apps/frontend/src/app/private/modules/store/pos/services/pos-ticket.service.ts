@@ -10,6 +10,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { PrintFormat } from '../../../../../core/models/store-settings.interface';
+import { PrintFormatType } from '../../../../../core/models/print-formats.model';
 import { DocumentPrintService } from '../../../../../shared/services/print';
 
 /**
