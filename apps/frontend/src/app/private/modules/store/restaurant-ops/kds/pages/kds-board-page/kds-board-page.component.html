@@ -130,10 +130,13 @@
     [canExitFullscreen]="isFullscreen()"
     [canChangeStation]="canChangeStation()"
     [changeBlockedReason]="changeBlockedReason()"
+    [heldByOther]="stationsService.sessionHeldByOther()"
+    [canForceTake]="stationsService.canForceTakeCurrentStation()"
     (closeClicked)="onHeaderAction('close-session')"
     (detailClicked)="openSessionSummary()"
     (exitFullscreenClicked)="exitFullscreen()"
     (changeStationClicked)="onChangeStation()"
+    (forceTakeClicked)="onForceTake()"
   />
 
   @if (lastError()) {

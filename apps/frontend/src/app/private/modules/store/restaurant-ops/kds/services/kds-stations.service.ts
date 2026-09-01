@@ -10,6 +10,7 @@ import {
   KdsStation,
   KdsUnattributedConsumption,
 } from '../interfaces';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 
 interface ApiResponse<T> {
   success?: boolean;
@@ -27,6 +28,7 @@ interface ApiResponse<T> {
 @Injectable({ providedIn: 'root' })
 export class KdsStationsService {
   private readonly http = inject(HttpClient);
+  private readonly authFacade = inject(AuthFacade);
   private readonly apiUrl = environment.apiUrl;
 
   readonly stations = signal<KdsStation[]>([]);
@@ -56,6 +58,40 @@ export class KdsStationsService {
     const id = this.selectedStationId();
     return id == null ? null : (this.stations().find((s) => s.id === id) ?? null);
   });
+
+  // ── QUI-XXX: helpers de "estación reclamada" ──────────────────────────────
+  /** ID del usuario autenticado. Null cuando la sesión de Auth aún no hidrató. */
+  readonly currentUserId = computed<number | null>(() => this.authFacade.userId() ?? null);
+
+  /** True si el turno abierto lo abrió el caller. Null cuando no hay turno. */
+  readonly sessionOpenedByMe = computed<boolean | null>(() => {
+    const session = this.openSession();
+    const me = this.currentUserId();
+    if (session == null || me == null) return null;
+    return session.opened_by === me;
+  });
+
+  /** True si el turno abierto pertenece a otro operador (badge "Reclamada por"). */
+  readonly sessionHeldByOther = computed<boolean>(() => {
+    const owned = this.sessionOpenedByMe();
+    const session = this.openSession();
+    return session != null && owned === false;
+  });
+
+  /** Roles privilegiados en el cliente — espejo de los KDS_FORCE_TAKE_ROLES del
+   *  backend. Ver `kds-sessions.service.ts`. La regla está duplicada para
+   *  decidir visibilidad del botón "Tomar control" sin un round-trip. */
+  readonly callerIsPrivileged = computed<boolean>(() => {
+    const roles = this.authFacade.userRoles() ?? [];
+    return roles.includes('owner') || roles.includes('admin') || roles.includes('super_admin');
+  });
+
+  /** El botón "Tomar control" sólo aparece si hay sesión abierta ajena y el
+   *  caller tiene rol privilegiado. Owner/admin/super_admin ven el botón en
+   *  cualquier sesión que no sea la propia; los demás roles no lo ven jamás. */
+  readonly canForceTakeCurrentStation = computed<boolean>(
+    () => this.sessionHeldByOther() && this.callerIsPrivileged(),
+  );
 
   // ─── station switching (QUI-739) ──────────────────────────────────────────
   /**
@@ -210,6 +246,49 @@ export class KdsStationsService {
         map((res) => res.data),
         tap(() => this.openSession.set(null)),
         catchError((err) => this.fail(err, 'No se pudo cerrar el turno')),
+      );
+  }
+
+  /**
+   * Heartbeat — refresca `last_seen_at` del turno abierto. El board lo invoca
+   * en un `setInterval` de 60 segundos mientras `openSession() != null`. El
+   * backend refresca el campo y rechaza con `KDS_STATION_LOCKED` si el caller
+   * no es el dueño del turno ni un rol privilegiado; en ese caso la UI
+   * detecta el lock y deja de mandar heartbeats hasta que se libere la sesión
+   * (auto-cierre por inactividad o toma manual).
+   */
+  heartbeat(sessionId: number): Observable<void> {
+    return this.http
+      .post<ApiResponse<void>>(
+        `${this.apiUrl}/store/kds-sessions/${sessionId}/heartbeat`,
+        {},
+      )
+      .pipe(
+        map(() => undefined),
+        catchError((err) => this.fail(err, 'No se pudo registrar el heartbeat')),
+      );
+  }
+
+  /**
+   * Toma forzada — cierra el turno abierto por otro operador y abre uno nuevo
+   * para el caller. Disponible sólo para owner / admin / super_admin
+   * (`canForceTakeCurrentStation`). Refresca `openSession` con la sesión nueva.
+   *
+   * Cierra y abre en la misma transacción del backend para no violar el
+   * índice parcial `kds_sessions_one_open_per_kds` ni por un instante. El
+   * rastro de auditoría (`force_taken_by_user_id`) queda en la sesión CERRADA;
+   * la nueva es legítima del tomador y no lleva marca.
+   */
+  forceTake(kdsId: number): Observable<KdsSession> {
+    return this.http
+      .post<ApiResponse<KdsSession>>(
+        `${this.apiUrl}/store/kds-sessions/force-take/${kdsId}`,
+        {},
+      )
+      .pipe(
+        map((res) => res.data),
+        tap((session) => this.openSession.set(session)),
+        catchError((err) => this.fail(err, 'No se pudo tomar el control de la estación')),
       );
   }
 

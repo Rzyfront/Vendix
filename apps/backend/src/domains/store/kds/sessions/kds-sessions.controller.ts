@@ -73,6 +73,31 @@ export class KdsSessionsController {
   }
 
   /**
+   * Heartbeat — el frontend lo llama una vez por minuto mientras el
+   * operador mantiene la sesión abierta. Refresca `last_seen_at`; sólo
+   * el dueño del turno o un rol privilegiado pueden invocarlo.
+   */
+  @Post(':id/heartbeat')
+  @Permissions('store:kds_sessions:update')
+  async heartbeat(@Param('id', ParseIntPipe) id: number) {
+    await this.sessionsService.heartbeat(id);
+    return this.responseService.success({ id }, 'Heartbeat registrado');
+  }
+
+  /**
+   * Toma forzada — cierra el turno abierto de otro operador y abre uno
+   * nuevo para el caller. Sólo roles `owner`/`admin`/`super_admin`. La
+   * validación de permisos finos vive en el servicio (chequea el rol, no
+   * una fila de `permissions`).
+   */
+  @Post('force-take/:kdsId')
+  @Permissions('store:kds_sessions:create')
+  async forceTake(@Param('kdsId', ParseIntPipe) kdsId: number) {
+    const result = await this.sessionsService.forceTake(kdsId);
+    return this.responseService.success(result, 'Control de la estación transferido');
+  }
+
+  /**
    * (a) Historial de consumos: una fila por insumo POR PEDIDO, con la cantidad
    * consumida. ADR-10: el KDS no transporta dinero. Permite navegar del resumen
    * al detalle.

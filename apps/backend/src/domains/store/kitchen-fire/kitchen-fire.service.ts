@@ -1997,6 +1997,15 @@ export class KitchenFireService {
   async startPreparation(ticketId: number) {
     const { ticket, store_id } = await this.getTicketForStore(ticketId);
 
+    // QUI-XXX — station-lock guard. Si el turno abierto de la KDS del ticket
+    // lo posée otro operador y todavía está fresco (<5min sin `last_seen_at`),
+    // el helper lanza KDS_STATION_LOCKED antes de cualquier mutación de
+    // estado. Lazy inactividad: si el turno está vencido lo cierra en
+    // silencio y deja pasar. Owner/admin pueden actuar aunque el turno sea
+    // ajeno, pero el "Tomar control" explícito vive en el botón del status
+    // bar — esta mutación NO estampa `force_taken_by_user_id` por sí sola.
+    await this.kdsSessionsService.assertCanMutateStationTicket(ticket.kds_id);
+
     if (ticket.status === 'cancelled') {
       throw new VendixHttpException(
         ErrorCodes.KITCHEN_TICKET_ALREADY_CANCELLED,
@@ -2121,6 +2130,10 @@ export class KitchenFireService {
   async markReady(ticketId: number) {
     const { ticket, store_id } = await this.getTicketForStore(ticketId);
 
+    // Ver `startPreparation` — station-lock guard uniforme en todas las
+    // mutaciones de cocina.
+    await this.kdsSessionsService.assertCanMutateStationTicket(ticket.kds_id);
+
     if (ticket.status === 'cancelled') {
       throw new VendixHttpException(
         ErrorCodes.KITCHEN_TICKET_ALREADY_CANCELLED,
@@ -2212,6 +2225,9 @@ export class KitchenFireService {
    */
   async markDelivered(ticketId: number) {
     const { ticket, store_id } = await this.getTicketForStore(ticketId);
+
+    // Ver `startPreparation` — station-lock guard uniforme.
+    await this.kdsSessionsService.assertCanMutateStationTicket(ticket.kds_id);
 
     if (ticket.status === 'cancelled') {
       throw new VendixHttpException(
@@ -2375,6 +2391,9 @@ export class KitchenFireService {
    */
   async cancelTicket(ticketId: number) {
     const { ticket, store_id } = await this.getTicketForStore(ticketId);
+
+    // Ver `startPreparation` — station-lock guard uniforme.
+    await this.kdsSessionsService.assertCanMutateStationTicket(ticket.kds_id);
 
     if (ticket.status === 'cancelled') {
       throw new VendixHttpException(
@@ -2543,6 +2562,9 @@ export class KitchenFireService {
    */
   async revertTicket(ticketId: number) {
     const { ticket, store_id } = await this.getTicketForStore(ticketId);
+
+    // Ver `startPreparation` — station-lock guard uniforme.
+    await this.kdsSessionsService.assertCanMutateStationTicket(ticket.kds_id);
 
     // Mapa de retroceso un-paso. `pending` no tiene estado previo.
     const REVERT_MAP: Record<string, string | null> = {

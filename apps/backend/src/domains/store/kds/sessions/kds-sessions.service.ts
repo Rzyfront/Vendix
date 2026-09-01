@@ -5,6 +5,23 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { CloseKdsSessionDto, OpenKdsSessionDto } from '../dto';
 
 /**
+ * Roles que pueden actuar sobre cualquier turno abierto de KDS sin importar
+ * quién es el dueño del turno. Espejo lógico de `PRIVILEGED_ROLE_NAMES` del
+ * backend (ver `apps/backend/src/common/utils/privileged-roles.util.ts`),
+ * replicado acá porque el KDS necesita denegar al cook normal, no operar
+ * permisos abstractos sobre endpoints administrativos.
+ */
+const KDS_FORCE_TAKE_ROLES = new Set(['owner', 'admin', 'super_admin']);
+
+/**
+ * Inactividad máxima de un turno abierto antes de que el helper
+ * `assertCanMutateStationTicket` lo considere vencido y libere la estación
+ * para el siguiente operador. 5 minutos — el chef que se levanta sin
+ * cerrar deja el turno accesible para el relevo sin pedir acción.
+ */
+const KDS_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
  * KdsSessionsService — turnos de estación (QUI-651).
  *
  * Espejo de `cash-registers/sessions`, con una diferencia sustantiva: la sesión
@@ -31,6 +48,17 @@ export class KdsSessionsService {
       throw new VendixHttpException(ErrorCodes.AUTH_CONTEXT_001);
     }
     return { storeId: ctx.store_id, userId: ctx.user_id };
+  }
+
+  /** Roles efectivos del caller como set — útil para chequeos rápidos. */
+  private callerRoles(): Set<string> {
+    return new Set(RequestContextService.getContext()?.roles ?? []);
+  }
+
+  /** True si el caller está en `KDS_FORCE_TAKE_ROLES` (owner/admin/super_admin). */
+  isCallerPrivileged(): boolean {
+    const r = this.callerRoles();
+    return r.has('owner') || r.has('admin') || r.has('super_admin');
   }
 
   /** Sesión abierta de una estación, o null. Lo consulta el fire y la UI. */
@@ -118,14 +146,26 @@ export class KdsSessionsService {
     }
 
     try {
+      const now = new Date();
       return await this.prisma.kds_sessions.create({
         data: {
           kds_id: dto.kds_id,
           store_id: storeId,
           opened_by: userId,
           status: 'open',
-          opened_at: new Date(),
-          updated_at: new Date(),
+          opened_at: now,
+          // `last_seen_at` se inicializa al mismo instante que `opened_at`
+          // para que el primer heartbeat llegue desde el frontend (1 min
+          // después) sin que el helper de inactividad lo considere vencido.
+          last_seen_at: now,
+          updated_at: now,
+        },
+        include: {
+          // Mismo `include` que `findOpenByKds` para que la UI del status
+          // bar pueda pintar nombre de estación y operador desde el
+          // snapshot del POST, sin un GET extra.
+          kds: { select: { id: true, name: true, code: true } },
+          opened_by_user: { select: { id: true, first_name: true, last_name: true } },
         },
       });
     } catch (e: any) {
@@ -540,5 +580,229 @@ export class KdsSessionsService {
       distinct_ingredients: ingredients.length,
       ingredients,
     };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // QUI-XXX — LOCK DE ESTACIÓN + HEARTBEAT + TOMA FORZADA
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Heartbeat: refresca `last_seen_at` sobre la sesión indicada. El frontend lo
+   * llama una vez por minuto mientras el operador tiene la sesión abierta, y
+   * los handlers de `kitchen-fire` lo actualizan de manera lazy (sólo si han
+   * pasado más de `KDS_HEARTBEAT_MIN_INTERVAL_MS` desde el último valor), para
+   * no escribir en una fila caliente en cada mutación de hora pico.
+   *
+   * El chequeo de propiedad es deliberado: un tercero NO puede inflar el
+   * contador de otro (con eso podría evitar que la sesión expire). Owner /
+   * admin / super_admin SÍ pueden refrescar aunque no sean dueños — los chefs
+   * reciben override cuando un admin está mirando el tablero.
+   */
+  async heartbeat(sessionId: number): Promise<void> {
+    const { userId } = this.requireContext();
+
+    const session = await this.prisma.kds_sessions.findFirst({
+      where: { id: sessionId, status: 'open' },
+      select: { id: true, opened_by: true, last_seen_at: true, kds_id: true },
+    });
+    if (!session) {
+      // La sesión puede haberse cerrado por la ventana de inactividad entre
+      // el heartbeat anterior y este. No es un error de cliente — el frontend
+      // deja de mandarlos en cuanto el snapshot le devuelva `null`.
+      return;
+    }
+
+    const isOwner = session.opened_by === userId;
+    if (!isOwner && !this.isCallerPrivileged()) {
+      throw new VendixHttpException(ErrorCodes.KDS_STATION_LOCKED, undefined, {
+        kds_id: session.kds_id,
+        opened_by: session.opened_by,
+        hint: 'Sólo el dueño del turno o un administrador pueden refrescar este heartbeat.',
+      });
+    }
+
+    await this.refreshLastSeen(session, /* minIntervalMs */ 0);
+  }
+
+  /**
+   * Toma forzada de la estación: cierra el turno abierto por otro operador y
+   * abre uno nuevo para el caller, en la MISMA transacción. Cierra primero
+   * y abre después para que el índice parcial `kds_sessions_one_open_per_kds`
+   * jamás vea dos filas abiertas en la misma KDS, ni siquiera bajo
+   * concurrencia entre los dos PATCH.
+   *
+   * El `force_taken_by_user_id` se estampa sobre la SESIÓN CERRADA (la del
+   * dueño anterior) para que el rastro sobreviva al cierre. La sesión nueva
+   * NO lleva marca: el tomador es legítimo del turno que abrió, no lo
+   * "tomó".
+   *
+   * Sólo roles `KDS_FORCE_TAKE_ROLES` pueden invocar; un chef normal que
+   * intenta tomar la estación de un compañero recibe 403.
+   */
+  async forceTake(kdsId: number) {
+    const { storeId, userId } = this.requireContext();
+
+    if (!this.isCallerPrivileged()) {
+      throw new VendixHttpException(ErrorCodes.AUTH_PERM_001, undefined, {
+        hint: 'Sólo owner/admin/super_admin pueden tomar el control de una estación manualmente.',
+      });
+    }
+
+    const station = await this.prisma.kds.findFirst({
+      where: { id: kdsId, is_active: true },
+      select: { id: true },
+    });
+    if (!station) throw new VendixHttpException(ErrorCodes.KDS_NOT_FOUND);
+
+    const now = new Date();
+    const result = await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.kds_sessions.findFirst({
+        where: { kds_id: kdsId, status: 'open' },
+        select: { id: true, opened_by: true },
+      });
+
+      if (existing) {
+        // Cierra primero — con la fila cerrada el índice parcial libera la
+        // KDS antes del INSERT.
+        await tx.kds_sessions.updateMany({
+          where: { id: existing.id, status: 'open' },
+          data: {
+            status: 'closed',
+            closed_at: now,
+            closed_by: userId,
+            closing_notes: 'tomada por el control manual',
+            // Rastro: el tomador queda en la sesión cerrada. Si el tomador
+            // se borra después, la FK con ON DELETE SET NULL lo deja NULL,
+            // que el reporte lee como "toma registrada pero tomador
+            // removido".
+            force_taken_by_user_id: userId,
+            updated_at: now,
+          },
+        });
+      }
+
+      try {
+        return await tx.kds_sessions.create({
+          data: {
+            kds_id: kdsId,
+            store_id: storeId,
+            opened_by: userId,
+            status: 'open',
+            opened_at: now,
+            last_seen_at: now,
+            updated_at: now,
+          },
+          // El `include` debe coincidir con `findOpenByKds` para que el
+          // frontend no pierda el nombre de la estación ni el del operador
+          // cuando la toma forzada abre la nueva sesión.
+          include: {
+            kds: { select: { id: true, name: true, code: true } },
+            opened_by_user: { select: { id: true, first_name: true, last_name: true } },
+          },
+        });
+      } catch (e: any) {
+        if (e?.code === 'P2002') {
+          throw new VendixHttpException(ErrorCodes.KDS_SESSION_ALREADY_OPEN);
+        }
+        throw e;
+      }
+    });
+
+    return result;
+  }
+
+  /**
+   * Guard para `kitchen-fire.service.ts` — sólo se consume desde las
+   * mutaciones `start`/`ready`/`delivered`/`cancel`/`revert`. Decisión
+   * basada en la regla de Nancy:
+   *
+   *  1. Si no hay sesión abierta → la mutación pasa (mismo comportamiento
+   *     de hoy: el fire nunca se bloquea por falta de sesión).
+   *  2. Si hay sesión abierta y la posée el caller → mutación pasa.
+   *  3. Si hay sesión ABIERTA poseída por otro y el caller NO es
+   *     privilegiado:
+   *     - `last_seen_at` reciente (<5min) → 403 KDS_STATION_LOCKED. El caller
+   *       no es el dueño ni tiene override de rol; el turno está activo.
+   *     - `last_seen_at` viejo (>=5min) → cierra la sesión en silencio (lazy
+   *       inactividad) y deja pasar la mutación. NO abre una nueva: el
+   *       operador actual no la pidió.
+   *  4. Si hay sesión ABIERTA poseída por otro y el caller ES privilegiado →
+   *     mutación pasa (registra `force_taken_by_user_id` si quiere, pero
+   *     eso es acción explícita del botón "Tomar control" — la mutación no
+   *     fuerza el rastro por sí sola para no contaminar la sesión del
+   *     dueño actual sin su voluntad).
+   *
+   * Refresca `last_seen_at` lazy: sólo si han pasado más de 60s desde la
+   * última marca. Cocina en hora pico dispara decenas de mutaciones por
+   * minuto — un UPDATE por cada una contendía la fila y no aportaba
+   * precisión útil.
+   */
+  async assertCanMutateStationTicket(ticketKdsId: number): Promise<void> {
+    const { userId } = this.requireContext();
+
+    const session = await this.findOpenByKds(ticketKdsId);
+    if (!session) return; // caso 1
+
+    // caso 2: dueño. Refresca lazy.
+    if (session.opened_by === userId) {
+      await this.refreshLastSeen(session, 60_000);
+      return;
+    }
+
+    const lastSeen = (session.last_seen_at ?? session.opened_at).getTime();
+    const ageMs = Date.now() - lastSeen;
+    const isStale = ageMs >= KDS_IDLE_TIMEOUT_MS;
+    const privileged = this.isCallerPrivileged();
+
+    // caso 3: sesión fresca, caller no-dueño y no-privilegiado → bloquea.
+    if (!isStale && !privileged) {
+      throw new VendixHttpException(ErrorCodes.KDS_STATION_LOCKED, undefined, {
+        kds_id: ticketKdsId,
+        opened_by: session.opened_by,
+        hint: 'La estación está siendo gestionada por otro operador. Pídele que cierre el turno o espera a que expire por inactividad.',
+      });
+    }
+
+    // caso 3.stale / caso 4: libera la estación silenciosamente y pasa.
+    // El privileged que quiera un rastro explícito usa el botón
+    // "Tomar control", que llama `forceTake()` y deja la huella en la fila
+    // cerrada con `closing_notes: tomada por el control manual`.
+    if (isStale) {
+      await this.prisma.kds_sessions.updateMany({
+        where: { id: session.id, status: 'open' },
+        data: {
+          status: 'closed',
+          closed_at: new Date(),
+          closed_by: userId,
+          closing_notes: 'liberada por inactividad',
+          updated_at: new Date(),
+        },
+      });
+      return;
+    }
+
+    // Privilegiado contra sesión fresca ajena: pasa y refresca lazy.
+    await this.refreshLastSeen(session, 60_000);
+  }
+
+  /**
+   * Refresh de `last_seen_at` con throttle. Si el último valor tiene menos
+   * de `minIntervalMs` milisegundos, omite el UPDATE. Usado por heartbeat
+   * explícito (minIntervalMs=0) y por el guard de mutación (60s) para no
+   * escribir en una fila caliente en cada cambio de estado de ticket.
+   */
+  private async refreshLastSeen(
+    session: { id: number; last_seen_at: Date | null },
+    minIntervalMs: number,
+  ): Promise<void> {
+    const now = new Date();
+    if (minIntervalMs > 0 && session.last_seen_at) {
+      const age = now.getTime() - session.last_seen_at.getTime();
+      if (age < minIntervalMs) return;
+    }
+    await this.prisma.kds_sessions.updateMany({
+      where: { id: session.id, status: 'open' },
+      data: { last_seen_at: now, updated_at: now },
+    });
   }
 }
