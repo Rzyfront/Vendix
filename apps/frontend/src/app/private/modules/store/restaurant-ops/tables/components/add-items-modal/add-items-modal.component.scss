@@ -30,13 +30,25 @@
    alinean entre sí, las con extras alinean entre sí. */
 .product-row {
   display: grid;
-  /* T4b (reverso de Nancy): el track de `qty` va fijo en `minmax(0, 108px)`.
-     Antes era `auto`, y como CSS Grid dimensiona `auto` al max-content del
-     contenido ANTES de repartir el `1fr`, los botones del stepper (50×48 en
-     `size="lg"`) se quedaban con 130px y el nombre se quedaba con 59px —
-     insuficiente para cualquier nombre de plato. Track fijo = el stepper
-     tiene su pista reservada y el nombre tiene su `1fr` sin competencias. */
-  grid-template-columns: 44px minmax(0, 1fr) minmax(0, 108px);
+  /* T8 (reverso de Nancy): el track de `qty` usa `min-content` para
+     reservar EXACTAMENTE lo que el stepper necesita y recalibrarse solo
+     si alguien cambia `[size]` o el icono del botón en el futuro.
+
+     Historia corta del bug:
+       - Original (T4): `auto` → max-content ganaba al `1fr`, el stepper
+         absorbía 130px y el nombre se quedaba con 59px. ❌
+       - T4b: lo fijé en `minmax(0, 108px)` para bloquear el max-content.
+         Funcionó, pero era un número mágico calibrado a `size="lg"`
+         (botones 50×48). Cuando T4c bajó a `size="md"` (botones 40×44
+         en desktop, 40×40 en mobile), el cap de 108px quedó corto: el
+         `<button>` interno lleva `min-w-0` en Tailwind y en vez de
+         desbordar se COMPRIME por debajo de su contenido. Botón roto.
+       - T8: `min-content` resuelve los dos casos — reserva lo justo
+         sin depender de un número mágico. NO vuelvo a `auto`: ese es
+         el bug del T4. Si hace falta más angosto en PC, se cambia el
+         `[size]` del componente, no se pelea la encapsulación con CSS.
+  */
+  grid-template-columns: 44px minmax(0, 1fr) min-content;
   grid-template-areas:
     "thumb info   qty"
     "thumb picker qty";
