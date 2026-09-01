@@ -44,9 +44,15 @@ describe('TablesService — CRUD + floor map (Fase E smoke)', () => {
       .spyOn(RequestContextService, 'getContext')
       .mockReturnValue(context);
 
-    service = new TablesService(prismaMock as any, {
-      generateDataUrl: jest.fn(),
-    } as any);
+    service = new TablesService(
+      prismaMock as any,
+      {
+        generateDataUrl: jest.fn(),
+      } as any,
+      {
+        push: jest.fn(),
+      } as any,
+    );
   });
 
   afterEach(() => jest.clearAllMocks());

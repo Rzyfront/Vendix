@@ -100,6 +100,8 @@ export interface Order {
    * frontend must not re-derive it from a laxer condition.
    */
   invoices?: OrderInvoiceSnapshot[];
+  /** Table session if order was placed at a restaurant table */
+  table_sessions?: OrderTableSession[];
 }
 
 /**
@@ -123,6 +125,26 @@ export interface Order {
 export interface OrderInvoiceSnapshot {
   invoice_number: string;
   cufe?: string | null;
+}
+
+export interface OrderTableSession {
+  id: number;
+  table_id: number;
+  guest_count?: number | null;
+  opened_at?: string;
+  closed_at?: string | null;
+  table?: {
+    id: number;
+    name: string;
+    zone?: string | null;
+    capacity?: number | null;
+    status?: string;
+  };
+  opener?: {
+    id: number;
+    first_name?: string | null;
+    last_name?: string | null;
+  } | null;
 }
 
 export interface OrderPromotionSnapshot {

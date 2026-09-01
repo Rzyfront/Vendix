@@ -127,6 +127,23 @@
               deliveryConfig().label
             }}</span>
           </div>
+          @if (tableName()) {
+            <span class="w-px h-3.5 bg-border"></span>
+            <div class="flex items-center gap-1.5 text-text-primary font-medium">
+              <app-icon
+                name="utensils"
+                size="14"
+                class="text-amber-500"
+              ></app-icon>
+              <span>Mesa:</span>
+              <span class="font-semibold text-amber-600">{{
+                tableName()
+              }}</span>
+              @if (tableSession()?.table?.zone) {
+                <span class="text-[10px] text-text-secondary">({{ tableSession()?.table?.zone }})</span>
+              }
+            </div>
+          }
           @if (isCreditOrder()) {
             <span class="w-px h-3.5 bg-border"></span>
             <div class="flex items-center gap-1.5">
@@ -399,47 +416,89 @@
             </div>
           </app-card>
 
-          <!-- 1.5. NOTA DE LA ORDEN (pública — escrita por el cashier desde el POS) -->
-          @if (orderData.notes) {
+          <!-- 1.4. MESA Y NOTAS DE LA ORDEN (Sección compacta y unificada) -->
+          @if (tableSession() || cleanOrderNotes() || (cleanInternalNotes() && !flowMetadata().internal_notes_as_json)) {
             <app-card shadow="sm" [responsivePadding]="true">
-              <div slot="header" class="flex items-center gap-2">
-                <app-icon name="sticky-note" [size]="18" class="text-amber-500"></app-icon>
-                <h3 class="text-base sm:text-lg font-semibold text-[var(--color-text-primary)]">
-                  Nota de la orden
-                </h3>
-                <span
-                  class="text-[10px] sm:text-[11px] font-medium uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded"
-                >
-                  Pública
-                </span>
-              </div>
-              <p
-                class="text-sm text-[var(--color-text-primary)] whitespace-pre-line leading-relaxed"
-              >
-                {{ orderData.notes }}
-              </p>
-            </app-card>
-          }
+              <div class="flex flex-col gap-2.5">
+                <!-- Información de Mesa (si aplica) -->
+                @if (tableSession(); as session) {
+                  <div
+                    class="flex flex-wrap items-center justify-between gap-2.5"
+                    [class.pb-2.5]="cleanOrderNotes() || (cleanInternalNotes() && !flowMetadata().internal_notes_as_json)"
+                    [class.border-b]="cleanOrderNotes() || (cleanInternalNotes() && !flowMetadata().internal_notes_as_json)"
+                    [class.border-border]="cleanOrderNotes() || (cleanInternalNotes() && !flowMetadata().internal_notes_as_json)"
+                  >
+                    <div class="flex items-center gap-2.5 min-w-0">
+                      <div
+                        class="w-7 h-7 rounded-lg bg-amber-500/10 border border-amber-500/25 text-amber-600 flex items-center justify-center shrink-0"
+                      >
+                        <app-icon name="utensils" [size]="14"></app-icon>
+                      </div>
+                      <div class="flex items-center gap-2 flex-wrap min-w-0">
+                        <span class="font-bold text-xs sm:text-sm text-[var(--color-text-primary)]">
+                          {{ session.table?.name || 'Mesa #' + session.table_id }}
+                        </span>
+                        @if (session.table?.zone) {
+                          <span
+                            class="text-[11px] font-medium px-2 py-0.5 rounded-md bg-[var(--color-background)] border border-border text-text-secondary"
+                          >
+                            {{ session.table?.zone }}
+                          </span>
+                        }
+                        @if (session.guest_count) {
+                          <span class="text-[11px] text-text-secondary flex items-center gap-1">
+                            <app-icon name="users" [size]="12"></app-icon>
+                            {{ session.guest_count }} comensales
+                          </span>
+                        }
+                        @if (session.opener) {
+                          <span class="text-[11px] text-text-secondary flex items-center gap-1">
+                            <app-icon name="user" [size]="12"></app-icon>
+                            {{ session.opener.first_name }} {{ session.opener.last_name || '' }}
+                          </span>
+                        }
+                      </div>
+                    </div>
 
-          <!-- 1.6. NOTA INTERNA DEL STAFF (solo visible al equipo interno) -->
-          @if (orderData.internal_notes && !flowMetadata().internal_notes_as_json) {
-            <app-card shadow="sm" [responsivePadding]="true">
-              <div slot="header" class="flex items-center gap-2">
-                <app-icon name="message-square" [size]="18" class="text-rose-500"></app-icon>
-                <h3 class="text-base sm:text-lg font-semibold text-[var(--color-text-primary)]">
-                  Nota del staff
-                </h3>
-                <span
-                  class="text-[10px] sm:text-[11px] font-medium uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded"
-                >
-                  Solo interno
-                </span>
+                    <span
+                      class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0"
+                      [ngClass]="session.closed_at ? 'bg-gray-100 text-gray-600' : 'bg-emerald-50 text-emerald-700 border border-emerald-200/80'"
+                    >
+                      {{ session.closed_at ? 'Sesión Cerrada' : 'Mesa Ocupada' }}
+                    </span>
+                  </div>
+                }
+
+                <!-- Nota pública de la orden -->
+                @if (cleanOrderNotes()) {
+                  <div class="flex items-start gap-2 text-xs">
+                    <span
+                      class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-800 font-semibold uppercase text-[10px] shrink-0 mt-0.5"
+                    >
+                      <app-icon name="sticky-note" [size]="11" class="text-amber-600"></app-icon>
+                      Nota
+                    </span>
+                    <p class="text-text-primary text-xs leading-relaxed flex-1 whitespace-pre-line m-0">
+                      {{ cleanOrderNotes() }}
+                    </p>
+                  </div>
+                }
+
+                <!-- Nota interna de Staff -->
+                @if (cleanInternalNotes() && !flowMetadata().internal_notes_as_json) {
+                  <div class="flex items-start gap-2 text-xs">
+                    <span
+                      class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-50 border border-rose-200 text-rose-800 font-semibold uppercase text-[10px] shrink-0 mt-0.5"
+                    >
+                      <app-icon name="message-square" [size]="11" class="text-rose-600"></app-icon>
+                      Staff
+                    </span>
+                    <p class="text-text-primary text-xs leading-relaxed flex-1 whitespace-pre-line m-0">
+                      {{ cleanInternalNotes() }}
+                    </p>
+                  </div>
+                }
               </div>
-              <p
-                class="text-sm text-[var(--color-text-primary)] whitespace-pre-line leading-relaxed"
-              >
-                {{ orderData.internal_notes }}
-              </p>
             </app-card>
           }
 

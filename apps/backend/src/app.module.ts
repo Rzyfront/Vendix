@@ -6,7 +6,8 @@ import {
 } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
-import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { VendixThrottlerGuard } from './common/guards/vendix-throttler.guard';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './domains/auth/auth.module';
@@ -111,6 +112,23 @@ export function isKnownVendixProcessRole(
   );
 }
 
+/**
+ * Lee un entero positivo del entorno para la configuración del throttler.
+ *
+ * Rechaza 0 y los negativos a propósito: `limit: 0` en `@nestjs/throttler`
+ * significa «rechaza todo», y llegar a eso por una variable de entorno mal
+ * escrita apagaría la API entera sin un solo error en los logs.
+ */
+function resolveThrottleSetting(
+  raw: string | undefined,
+  fallback: number,
+): number {
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
 @Module({
   imports: [
     SecretsModule,
@@ -118,7 +136,18 @@ export function isKnownVendixProcessRole(
       isGlobal: true,
       envFilePath: '.env',
     }),
-    ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
+    // Techo global anti-inundación, llaveado por IP real vía
+    // `VendixThrottlerGuard` (abajo). El límite se lee del entorno porque su
+    // valor correcto depende de cuántos usuarios comparten una IP pública:
+    // el 100 fijo anterior se agotaba con dos o tres paneles abiertos en la
+    // misma oficina, ya que cargar un panel dispara decenas de peticiones en
+    // paralelo.
+    ThrottlerModule.forRoot([
+      {
+        ttl: resolveThrottleSetting(process.env.THROTTLE_TTL_MS, 60_000),
+        limit: resolveThrottleSetting(process.env.THROTTLE_LIMIT, 300),
+      },
+    ]),
     EventEmitterModule.forRoot(),
     AuthModule,
     PrismaModule,
@@ -159,7 +188,7 @@ export function isKnownVendixProcessRole(
     },
     {
       provide: APP_GUARD,
-      useClass: ThrottlerGuard,
+      useClass: VendixThrottlerGuard,
     },
     {
       provide: APP_GUARD,

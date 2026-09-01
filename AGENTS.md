@@ -61,6 +61,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-saas-billing` |
 | -- | `vendix-settings-system` |
 | -- | `vendix-subscription-gate` |
+| -- | `vendix-trust-proxy-chain` |
 | -- | `vendix-vexi-agent` |
 | -- | `vendix-zoneless-signals` |
 | Accruing partner commissions or running partner payout batches | `vendix-saas-billing` |
@@ -110,6 +111,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding tool-use to AI features | `vendix-ai-agent-tools` |
 | Adding/removing workspaces | `vendix-monorepo-workspaces` |
 | After creating/modifying a skill | `skill-sync` |
+| Agregando una regla, cuota o auditoría llaveada por IP | `vendix-trust-proxy-chain` |
 | Allocating invoice numbers with advisory locks | `vendix-saas-billing` |
 | Analyzing or comparing a web feature/module/flow against the mobile app | `mobile-parity-audit` |
 | Applying @RequireAIFeature decorator + AiAccessGuard to controllers | `vendix-subscription-gate` |
@@ -127,6 +129,8 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Bulk-printing documents respecting store_settings.receipts format | `vendix-bulk-operations` |
 | Business analysis for changes that directly affect the app economic activity | `vendix-business-analysis` |
 | Caching frontend HTTP/dashboard/report data | `vendix-frontend-cache` |
+| Cambiando TRUST_PROXY_HOPS o el valor de trust proxy de Express | `vendix-trust-proxy-chain` |
+| Cambiando la topología de red de producción (nginx, Route53, CloudFront) | `vendix-trust-proxy-chain` |
 | Changing COGS, CPP, FIFO, inventory_cost_layers, or inventory valuation snapshots | `vendix-inventory-valuation` |
 | Changing fiscal scope behavior | `vendix-fiscal-scope` |
 | Changing onboarding account_type behavior | `vendix-operating-scope` |
@@ -211,6 +215,8 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Deciding which order or expense states count for a period | `vendix-analytics-metrics` |
 | Decisive business-rule analysis before planning revenue, billing, subscriptions, pricing, commissions, checkout, inventory, accounting, or payments changes | `vendix-business-analysis` |
 | Declaring MCP servers, CLI commands, or web research alongside skills in a plan | `how-to-plan` |
+| Depurando un rate limit que bloquea a todos los usuarios a la vez | `vendix-trust-proxy-chain` |
+| Depurando un rate limit que no frena a un atacante | `vendix-trust-proxy-chain` |
 | Depurar un error cuyo síntoma no señala su causa | `vendix-known-errors` |
 | Deriving a mobile implementation plan/backlog from an existing web module | `mobile-parity-audit` |
 | Designing UI screens, mobile-first layouts, accessibility review, landing pages, UX patterns | `vendix-ui-ux` |
@@ -292,6 +298,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Invalidating the sub:features:{storeId} Redis cache | `vendix-subscription-gate` |
 | Invoking an ai_engine_applications vision app as a sub-agent from the agent loop | `vendix-vexi-agent` |
 | Killing orphan ng serve, ng build, prerender or nest start processes | `buildcheck-dev` |
+| Leyendo la IP del cliente en un controlador, guard, middleware o log | `vendix-trust-proxy-chain` |
 | Linking a PR to its Linear issue when opening a PR to dev | `git-workflow` |
 | Linking a Vexi attachment to the record it originated | `vendix-vexi-agent` |
 | Listing Vendix issues in Linear | `linear-issues` |
@@ -301,6 +308,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Mapping store_subscription_state_enum to allow/warn/block | `vendix-subscription-gate` |
 | Migrating an OCR/image scanner to async (202 + job_id + poll) | `vendix-ai-queue` |
 | Migrating legacy Angular patterns (BehaviorSubject, take(1).subscribe) to Signals | `vendix-zoneless-signals` |
+| Modificando client-ip.util.ts o la configuración de trust proxy en main.ts | `vendix-trust-proxy-chain` |
 | Modifying StockLevelManager service | `vendix-inventory-stock` |
 | Modifying auto-entry event handlers | `vendix-auto-entries` |
 | Modifying cash_variance or declared_cash logic | `vendix-dispatch-routes` |
@@ -320,6 +328,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Period-keyed counters YYYYMM / YYYYMMDD | `vendix-redis-quota` |
 | Picking concrete verification mechanisms (curl, build, audit, log inspection) per step | `how-to-plan` |
 | Planning structural changes, multi-file changes, broad refactors, or new features | `how-to-plan` |
+| Poniendo un gateway, CDN, ALB o WAF delante del backend | `vendix-trust-proxy-chain` |
 | Preparing a bulk product upload file for a Vendix store | `product-catalog-normalizer` |
 | Printing documents with date fields | `vendix-date-timezone` |
 | Producing a strategic gap map of what mobile has vs what it lacks relative to web | `mobile-parity-audit` |

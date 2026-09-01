@@ -5,6 +5,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { RequestContextService } from '@common/context/request-context.service';
 import { QrService } from '@common/services/qr.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { NotificationsSseService } from '../notifications/notifications-sse.service';
 import {
   CreateTableDto,
   UpdateTableDto,
@@ -82,6 +83,7 @@ export class TablesService {
   constructor(
     private prisma: StorePrismaService,
     private readonly qrService: QrService,
+    private readonly notificationsSseService?: NotificationsSseService,
   ) {}
 
   // ------------------------------------------------------------------ helpers
@@ -239,6 +241,32 @@ export class TablesService {
     });
   }
 
+  private emitTableEvent(
+    storeId: number,
+    type:
+      | 'table_status_changed'
+      | 'table_updated'
+      | 'table_created'
+      | 'table_deleted',
+    data: Record<string, unknown>,
+  ): void {
+    if (!this.notificationsSseService) return;
+    try {
+      this.notificationsSseService.push(storeId, {
+        id: 0,
+        type,
+        title: 'Mesa actualizada',
+        body: 'El plano de mesas ha sido actualizado',
+        data,
+        created_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Failed to push table event (${type}): ${(err as Error).message}`,
+      );
+    }
+  }
+
   // ----------------------------------------------------------------- CRUD
   async create(dto: CreateTableDto) {
     const storeId = this.requireStoreId();
@@ -258,7 +286,7 @@ export class TablesService {
     }
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      const created = await this.prisma.$transaction(async (tx) => {
         const table = await tx.tables.create({
           data: {
             store_id: storeId,
@@ -277,6 +305,14 @@ export class TablesService {
 
         return table;
       });
+
+      this.emitTableEvent(storeId, 'table_created', {
+        table_id: created.id,
+        status: created.status,
+        name: created.name,
+      });
+
+      return created;
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -454,11 +490,20 @@ export class TablesService {
     };
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
-        const updated = await tx.tables.update({ where: { id }, data });
+      const updated = await this.prisma.$transaction(async (tx) => {
+        const row = await tx.tables.update({ where: { id }, data });
         await this.syncTableWaiters(tx, id, dto.waiter_user_ids);
-        return updated;
+        return row;
       });
+
+      this.emitTableEvent(storeId, 'table_status_changed', {
+        table_id: updated.id,
+        status: updated.status,
+        name: updated.name,
+        zone: updated.zone,
+      });
+
+      return updated;
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -478,6 +523,7 @@ export class TablesService {
    * replacement — the audit trail of who sat at the table is preserved.
    */
   async remove(id: number) {
+    const storeId = this.requireStoreId();
     await this.getById(id);
     const sessions = await this.prisma.table_sessions.count({
       where: { table_id: id },
@@ -489,6 +535,9 @@ export class TablesService {
       );
     }
     await this.prisma.tables.delete({ where: { id } });
+
+    this.emitTableEvent(storeId, 'table_deleted', { table_id: id });
+
     return { deleted: true };
   }
 

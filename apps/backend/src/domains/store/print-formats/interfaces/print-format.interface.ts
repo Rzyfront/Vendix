@@ -38,6 +38,7 @@ export interface PrintPaperConfig {
   /** [print-editor-dsk P1.2] — v2 NEW. Margen izquierdo en mm. */
   margin_left_mm?: number;
   copies: number;
+  auto_print?: boolean;
   /** [print-editor-dsk P1.2] — v2 NEW. Orientación de hoja. */
   orientation?: 'portrait' | 'landscape';
 }

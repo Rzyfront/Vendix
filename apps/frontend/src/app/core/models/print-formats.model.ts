@@ -1,5 +1,6 @@
 export type PrintFormatType =
   | 'pos_sale_ticket'
+  | 'pos_electronic_invoice'
   | 'sales_order_invoice'
   | 'dispatch_note'
   | 'dispatch_ticket'
@@ -49,6 +50,7 @@ export interface PrintPaperConfig {
   /** [print-editor-dsk P1.2] — v2 NEW. Margen izquierdo en mm. */
   margin_left_mm?: number;
   copies: number;
+  auto_print?: boolean;
   /** [print-editor-dsk P1.2] — v2 NEW. */
   orientation?: 'portrait' | 'landscape';
 }

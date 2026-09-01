@@ -818,6 +818,33 @@ export class OrdersService {
           },
           orderBy: { date: 'asc' },
         },
+        table_sessions: {
+          select: {
+            id: true,
+            table_id: true,
+            opened_at: true,
+            closed_at: true,
+            guest_count: true,
+            table: {
+              select: {
+                id: true,
+                name: true,
+                zone: true,
+                capacity: true,
+                status: true,
+              },
+            },
+            opener: {
+              select: {
+                id: true,
+                first_name: true,
+                last_name: true,
+              },
+            },
+          },
+          orderBy: { id: 'desc' },
+          take: 1,
+        },
       },
     });
 

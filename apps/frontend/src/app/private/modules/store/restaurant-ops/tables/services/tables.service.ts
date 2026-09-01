@@ -1,7 +1,7 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
-import { catchError, map, switchMap } from 'rxjs/operators';
+import { catchError, map, switchMap, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
 import {
   parseApiError,
@@ -61,6 +61,12 @@ export class TablesService {
   private readonly apiUrl = environment.apiUrl;
   private readonly http = inject(HttpClient);
 
+  /**
+   * Reactive single source of truth for the floor tables.
+   * Auto-refreshed whenever getFloorMap() resolves (manual load, polling fallback, or SSE push).
+   */
+  readonly floorTables = signal<Table[]>([]);
+
   // ─── Tables ────────────────────────────────────────────────────────
 
   listPaginated(
@@ -84,7 +90,8 @@ export class TablesService {
     return this.http
       .get<ApiResponse<Table[]>>(`${this.apiUrl}/store/tables/floor-map`)
       .pipe(
-        map((res) => res.data),
+        map((res) => res.data ?? []),
+        tap((tables) => this.floorTables.set(tables)),
         catchError(this.handleError),
       );
   }

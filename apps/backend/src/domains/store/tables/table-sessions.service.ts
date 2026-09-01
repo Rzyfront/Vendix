@@ -661,7 +661,7 @@ export class TableSessionsService {
       // de inventario va contra la fila sin variante (invariante DB-14).
       if (
         p.product_type === 'prepared' &&
-        p.product_variants.length > 0 &&
+        (p.product_variants?.length ?? 0) > 0 &&
         item.product_variant_id == null
       ) {
         throw new VendixHttpException(
@@ -1013,7 +1013,7 @@ export class TableSessionsService {
     // transition — the idempotent short-circuit above already returned, so a
     // second close never re-emits). Post-commit: a rollback must not leave a
     // phantom `session_closed`.
-    this.emitSessionClosed(session.store_id, sessionId);
+    this.emitSessionClosed(session.store_id, sessionId, session.table_id);
 
     this.logger.log(
       `Table session closed: session=${sessionId} table=${session.table_id} order=${session.order_id}`,
@@ -1033,14 +1033,21 @@ export class TableSessionsService {
    * which closes the session directly inside its payment transaction and thus
    * cannot rely on `closeSession`'s own emit.
    */
-  emitSessionClosed(storeId: number, sessionId: number): void {
+  emitSessionClosed(
+    storeId: number,
+    sessionId: number,
+    tableId?: number,
+  ): void {
     try {
       this.notificationsSseService.push(storeId, {
         id: 0,
         type: 'session_closed',
         title: 'Mesa cerrada',
         body: 'La cuenta de la mesa fue cerrada',
-        data: { table_session_id: sessionId },
+        data: {
+          table_session_id: sessionId,
+          ...(tableId != null ? { table_id: tableId } : {}),
+        },
         created_at: new Date().toISOString(),
       });
     } catch (err) {

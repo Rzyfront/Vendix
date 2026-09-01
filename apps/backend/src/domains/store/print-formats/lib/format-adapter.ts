@@ -37,6 +37,7 @@ import { PrintFormatTypeEnum } from '../enums/print-format.enum';
  */
 export type PrintFormatType =
   | 'pos_sale_ticket'
+  | 'pos_electronic_invoice'
   | 'sales_order_invoice'
   | 'dispatch_note'
   | 'dispatch_ticket'
@@ -60,6 +61,7 @@ export type PrintFormatType =
 // without updating the union above, this assignment fails.
 const _DRIFT_CHECK: Record<PrintFormatTypeEnum, true> = {
   pos_sale_ticket: true,
+  pos_electronic_invoice: true,
   sales_order_invoice: true,
   dispatch_note: true,
   dispatch_ticket: true,

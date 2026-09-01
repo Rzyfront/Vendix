@@ -13,7 +13,7 @@
  *     tocan.
  *  4. Una definición normalizada (una plantilla de sistema real) pasa
  *     `validatePrintFormatDefinition()` sin errores — incluyendo, como
- *     comprobación exhaustiva, las 15 plantillas de sistema de
+ *     comprobación exhaustiva, las 16 plantillas de sistema de
  *     `apps/backend/prisma/seeds/print-templates.seed.ts` normalizadas una
  *     por una (17 filas existen en `print_templates` en desarrollo; 2 no son
  *     de sistema y no viven en este seed — ver el comentario junto al
@@ -208,22 +208,22 @@ describe('normalizeDefinition() + validatePrintFormatDefinition() — fixture re
   });
 });
 
-describe('normalizeDefinition() + validatePrintFormatDefinition() — las 15 plantillas de sistema del seed', () => {
+describe('normalizeDefinition() + validatePrintFormatDefinition() — las 16 plantillas de sistema del seed', () => {
   // Comprobación exhaustiva: cargar las plantillas de sistema desde el seed
   // (no desde la base de datos), pasar cada una por `normalizeDefinition()`
   // y luego por `validatePrintFormatDefinition()`, y CONTAR cuántas validan
   // sin errores. Nada de afirmar "todas validan" sin haber corrido una
   // validación por plantilla.
   //
-  // Son 15, no 17: `print_templates` tiene 17 filas en la base de datos de
-  // desarrollo, pero 2 de ellas son plantillas creadas a mano en pruebas
-  // anteriores (`is_system = false`). El seed declara las 15 de sistema, que
-  // son las que este contrato debe garantizar.
-  it('el seed declara exactamente 15 plantillas de sistema', () => {
-    expect(SYSTEM_PRINT_TEMPLATES.length).toBe(15);
+  // El conteo cuenta plantillas de SISTEMA, no filas: la base de datos de
+  // desarrollo tiene además plantillas creadas a mano en pruebas anteriores
+  // (`is_system = false`) que el seed no declara. Subió de 15 a 16 con
+  // `pos_electronic_invoice`.
+  it('el seed declara exactamente 16 plantillas de sistema', () => {
+    expect(SYSTEM_PRINT_TEMPLATES.length).toBe(16);
   });
 
-  it('las 15 plantillas normalizadas validan sin errores', () => {
+  it('las 16 plantillas normalizadas validan sin errores', () => {
     expect(SYSTEM_PRINT_TEMPLATES.length).toBeGreaterThan(0);
 
     const results = SYSTEM_PRINT_TEMPLATES.map((tpl) => {

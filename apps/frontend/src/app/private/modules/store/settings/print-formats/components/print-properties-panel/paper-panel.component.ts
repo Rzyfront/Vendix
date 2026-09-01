@@ -190,7 +190,27 @@ function lookupGeometry(format: PrintPaperFormat) {
               (ngModelChange)="setCopies($event)"
               class="w-20 px-2 py-1 bg-surface-secondary border border-border rounded text-xs text-text-primary focus:border-primary-500 focus:outline-none"
             />
-            <span class="text-[10px] text-text-tertiary">0–10</span>
+            <span class="text-[10px] text-text-tertiary">0–10 (0 = default 1)</span>
+          </div>
+        </div>
+
+        <!-- Auto-impresión -->
+        <div class="pt-2 border-t border-border/50">
+          <div class="flex items-center justify-between">
+            <div>
+              <label class="block text-[11px] font-medium text-text-primary">
+                Auto-impresión
+              </label>
+              <p class="text-[10px] text-text-tertiary">
+                Disparar impresión al finalizar la acción (ej. venta POS)
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              [ngModel]="paper().auto_print !== false"
+              (ngModelChange)="setAutoPrint($event)"
+              class="w-4 h-4 rounded text-primary-600 bg-surface-secondary border-border focus:ring-primary-500 cursor-pointer"
+            />
           </div>
         </div>
       </div>
@@ -319,6 +339,14 @@ export class PrintPaperPanelComponent {
     const paper: PrintFormatDefinition['paper'] = {
       ...this.paper(),
       copies,
+    };
+    this.emit({ ...this.definition(), paper });
+  }
+
+  setAutoPrint(auto_print: boolean): void {
+    const paper: PrintFormatDefinition['paper'] = {
+      ...this.paper(),
+      auto_print,
     };
     this.emit({ ...this.definition(), paper });
   }

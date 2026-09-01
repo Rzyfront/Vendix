@@ -9448,6 +9448,7 @@ model email_templates {
 
 enum print_format_type_enum {
   pos_sale_ticket
+  pos_electronic_invoice
   sales_order_invoice
   dispatch_note
   quotation

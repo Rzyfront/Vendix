@@ -60,6 +60,11 @@ const STAFF_EVENT_WHITELIST = (type: string): boolean => {
   // Mesa abierta (POS open / QR `open_tab` / `confirmStaff`) — el floor-map
   // refresca la mesa a `occupied` con sesión activa en vivo.
   if (type === 'session_opened') return true;
+  // Transiciones y cambios en mesas (limpieza, disponible, reservada, creada, eliminada)
+  if (type === 'table_status_changed') return true;
+  if (type === 'table_updated') return true;
+  if (type === 'table_created') return true;
+  if (type === 'table_deleted') return true;
   if (type.startsWith('kitchen.')) return true;
   // The synthetic channels emitted by THIS SSE (snapshot / heartbeat) are
   // allowed through here too — they're emitted as their own typed
