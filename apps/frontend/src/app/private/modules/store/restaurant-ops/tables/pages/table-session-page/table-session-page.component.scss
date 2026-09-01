@@ -888,40 +888,23 @@
       "status status action";
   }
 
-  /*
-   * Alineada a la derecha, no a lo ancho: un botón de borde a borde es
-   * justo la "exageración de tamaño" que había que quitar. 40px de alto
-   * mantiene el objetivo táctil cómodo sin dominar la fila.
-   */
+  // ── T6 (unificado) — Fila simétrica 44pt (HIG iOS): botón
+  // principal flex:1 centrado + papelera 44×44 danger-outline.
+  // Un solo bloque evita la colisión de especificidad que antes
+  // duplicaba `.item-action`. Simetría = misma altura (44px), mismo
+  // gap (0.375rem) y borde/hover idéntico en desktop/mobile porque
+  // el color lo aporta variant="outline-danger" / "success".
   .item-action {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
     justify-content: flex-end;
-
-    app-button {
-      min-height: 40px;
-    }
+    gap: 0.375rem;
+    width: 100%;
 
     &:empty {
       display: none;
     }
-  }
-
-  .item-remove-btn {
-    min-height: 40px;
-    width: 40px;
-  }
-
-  // ── T6 — Rafael revirtió la columna a fila: se recupera altura y el
-  // distintivo rojo sostiene la separación entre controles (no la
-  // distancia física). Un solo bloque: `.item-action` en row con el
-  // botón principal flex:1 y la papelera como cuadrado 1×1 pegada al
-  // final. 44pt para ambos (HIG iOS). El distintivo destructivo del
-  // bloque D4 se mantiene — es lo que evita que un mesero con prisa
-  // cancele un plato creyendo que lo marca entregado.
-  .item-action {
-    flex-direction: row;
-    align-items: stretch;
-    gap: 0.375rem;
-    width: 100%;
 
     > app-button:not(.item-remove-btn) {
       flex: 1 1 auto;
@@ -931,21 +914,14 @@
     }
   }
 
-  // Destructive — cuadrado 44×44 pegado al principal, con borde y fondo
-  // tinted en `--color-error` (color-mix). Antes era 40x40 ghost (solo
-  // icono trash) que se confundía con un botón más del row.
+  // Destructive — cuadrado 44×44 pegado al principal.
+  // Usa variant="outline-danger" del sistema (btn-outline-danger-border) para
+  // que el color/borde/hover queden centralizados en ButtonComponent, idéntico
+  // en desktop y mobile. Aquí sólo se fija el tamaño táctil 44×44 (HIG iOS).
   .item-remove-btn {
     flex: 0 0 44px;
     width: 44px;
     min-height: 44px;
-    border: 1px solid color-mix(in srgb, var(--color-error) 50%, transparent);
-    background: color-mix(in srgb, var(--color-error) 6%, var(--color-surface));
-    color: var(--color-error, #dc2626);
-    border-radius: var(--radius-md, 8px);
-
-    &:hover:not(:disabled) {
-      background: color-mix(in srgb, var(--color-error) 12%, var(--color-surface));
-    }
   }
 
   // Texto del nombre y del importe legibles sin zoom a 375px. La densidad
@@ -1081,21 +1057,28 @@
   }
 }
 
-/* ── Sticky-cta móvil: [···] [Agregar items] [Cobrar] ───────────────────── */
+/* ── Sticky-cta móvil: [···] [Agregar items] [Cobrar] ─────────────────────
+ * Fixed (no sticky): queda pegado al viewport sin importar el alto del
+ * contenido ni el tipo de celular. `env(safe-area-inset-bottom)` cubre
+ * iPhone con barra de gestos; `padding-bottom` en `.session-body` evita
+ * que la última fila quede tapada por la barra.
+ */
 .session-cta {
   display: none;
 }
 
 @media (max-width: 640px) {
   .session-cta {
-    position: sticky;
+    position: fixed;
     bottom: 0;
+    left: 0;
+    right: 0;
     z-index: 30;
     display: flex;
     align-items: center;
     gap: 0.5rem;
     width: 100%;
-    margin-top: 1.25rem;
+    margin-top: 0;
     padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom));
     background: var(--color-surface, #fff);
     border-top: 1px solid var(--color-border, #e5e7eb);
@@ -1119,7 +1102,7 @@
   }
 
   .session-body {
-    padding-bottom: 2rem;
+    padding-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
   }
 }
 
@@ -1140,9 +1123,11 @@
    * Gutter de página estrecho: el gutter que importa ahora es el de la
    * tarjeta (`p-4` = 1rem), y es el que alinea etiquetas, importes, filas,
    * chips y la barra inferior sobre el mismo eje.
+   * Bottom incluye altura de la barra fija + safe-area para que la última
+   * fila nunca quede tapada, sin importar el alto del viewport.
    */
   .session-body {
-    padding: 0.75rem 0.75rem 1rem;
+    padding: 0.75rem 0.75rem calc(4.5rem + env(safe-area-inset-bottom, 0px));
   }
 
   /* ── Resumen ───────────────────────────────────────────────────────── */
