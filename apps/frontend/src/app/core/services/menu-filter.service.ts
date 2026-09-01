@@ -941,14 +941,7 @@ export class MenuFilterService {
    * es el catálogo y no un array vacío.
    */
   currentMenuTree(): MenuItem[] {
-    // C2-fix A (c1-b real, segunda fuga): el llamador de este método
-    // (`panel-ui.guard.ts`, `store-dashboard.guard.ts`) lo pasa directo a
-    // `firstActiveModuleRoute(modules)`. Si el layout aún no montó el árbol,
-    // `null` debe distinguirse de "cero módulos visibles" — devolver el
-    // catálogo aquí era la segunda vía por la que un no-owner acababa en
-    // /admin/ecommerce con panel_ui vacío. Devolvemos `[]` y dejamos que
-    // `firstActiveModuleRoute` haga su propia cascada.
-    return this.menuTree ?? [];
+    return this.menuTree ?? this.catalogMenuTree();
   }
 
   /** El layout registra su árbol real (con `alwaysVisible`, badges, etc.). */
@@ -968,7 +961,17 @@ export class MenuFilterService {
     const byKey = new Map<string, MenuItem>();
 
     for (const entry of STORE_MODULE_CATALOG) {
-      const node: MenuItem = { label: entry.label, icon: '', route: entry.route };
+      // `panelUiKey` deja al filtro de panel_ui trabajar sobre este nodo
+      // aunque venga del catálogo (cuyos labels no resuelven en
+      // `moduleKeyMap`, el índice por label del sidebar). Sin esto, el
+      // árbol crudo es infiltrable y un no-owner con cero módulos acaba en
+      // la primera ruta del catálogo en vez del no-access (C1-b real).
+      const node: MenuItem = {
+        label: entry.label,
+        icon: '',
+        route: entry.route,
+        panelUiKey: entry.key,
+      };
       byKey.set(entry.key, node);
       if (entry.parentKey && byKey.has(entry.parentKey)) {
         const parent = byKey.get(entry.parentKey)!;
@@ -1035,13 +1038,13 @@ export class MenuFilterService {
    * `/admin/pos` hardcodeado.
    */
   firstActiveModuleRoute(modules: MenuItem[]): string {
-    // C2-fix A (c1-b real): `[]` y `undefined` SON diferentes. `[]` significa
-    // explícitamente "cero módulos visibles" y debe caer al terminal; sólo
-    // cuando el llamador no pasa nada (null/undefined) usamos el catálogo
-    // crudo como punto de partida. La condición `modules?.length` original
-    // colapsa los dos casos — exactamente el bug que mandaba al waiter a
-    // /admin/ecommerce. `??` solo no alcanza porque `[] ?? X` retorna `[]`.
-    const tree = modules && modules.length > 0 ? modules : this.catalogMenuTree();
+    // QUI-XXX (c1-b): el árbol del catálogo ahora es filtrable (cada nodo
+    // lleva `panelUiKey`), por lo que `[]` y `undefined` siguen el flujo
+    // original de esta función: o el caller pasa el árbol y el filtro lo
+    // despuja a cero, o el caller no pasa nada y caemos al catálogo —
+    // que ahora pasa por el mismo filtro. El terminal correcto (NO_ACCESS
+    // para no-owner, TERMINAL para owner) sale sin condicional nuevo.
+    const tree = modules?.length ? modules : this.catalogMenuTree();
     const route = this.firstVisibleRoute(tree);
     if (route) return route;
     if (this.authFacade.isOwner()) return PANEL_UI_TERMINAL_ROUTE;
@@ -1078,6 +1081,11 @@ export class MenuFilterService {
 
   /** Normalizes `moduleKeyMap`'s `string | string[] | undefined` to an array. */
   private moduleKeysFor(item: MenuItem): string[] {
+    // QUI-XXX (c1-b): los nodos del catálogo llevan `panelUiKey` y el
+    // `moduleKeyMap` está indexado por label del sidebar. Si una clave
+    // viene del catálogo, no del sidebar, usar el label devuelve `[]` y el
+    // árbol se vuelve infiltrable. La clave explícita gana siempre.
+    if (item.panelUiKey) return [item.panelUiKey];
     const mapped = this.moduleKeyMap[item.label];
     if (!mapped) return [];
     return Array.isArray(mapped) ? mapped : [mapped];
