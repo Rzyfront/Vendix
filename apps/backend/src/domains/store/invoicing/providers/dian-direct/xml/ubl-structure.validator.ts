@@ -4,6 +4,7 @@ import {
   UBL_ELEMENT_TYPES,
   UBL_ROOT_TYPES,
 } from '../constants/dian-ubl-content-model';
+import { getProfileRestriction } from '../constants/dian-profile-restrictions';
 
 /**
  * Valida el XML construido contra el modelo de contenido de los XSD oficiales
@@ -40,6 +41,16 @@ import {
  * Los nodos se recorren como `any`, igual que en `xades-epes-builder.ts`: el DOM
  * de `@xmldom/xmldom` no es estructuralmente el `Element` de `lib.dom`, y forzar
  * la equivalencia con casts sólo añade ruido sin ganar comprobación real.
+ *
+ * RESTRICCIONES DEL PERFIL DIAN SOBRE EL MODELO GENERADO
+ * --------------------------------------------------------
+ * El modelo generado describe UBL 2.1 genérico, y en varios puntos es más
+ * laxo que lo que la DIAN acepta — el caso que motivó esto es
+ * `CustomerPartyType.cbc:AdditionalAccountID`, `0..*` en el XSD y `1..1` en el
+ * perfil DIAN. Esas diferencias viven en `dian-profile-restrictions.ts`, NUNCA
+ * dentro de `dian-ubl-content-model.ts` (que se regenera desde los XSD), y se
+ * consultan aquí con `getProfileRestriction()` al resolver cardinalidad
+ * (`'too-many'`) y valores permitidos (`'bad-value'`).
  */
 
 /** Namespace → prefijo canónico, el mismo que usa el modelo generado. */
@@ -59,7 +70,8 @@ export type UblViolationKind =
   | 'unknown-child'
   | 'missing'
   | 'too-many'
-  | 'malformed';
+  | 'malformed'
+  | 'bad-value';
 
 export interface UblStructureViolation {
   /** Ruta al elemento, estilo XPath simplificado: `Invoice/cac:TaxTotal[2]`. */
@@ -220,18 +232,41 @@ export class UblStructureValidator {
       const occurrence = (counts.get(qname) ?? 0) + 1;
       counts.set(qname, occurrence);
 
+      const child_path =
+        model[position].max === 1
+          ? `${path}/${qname}`
+          : `${path}/${qname}[${occurrence}]`;
+
+      // Valores permitidos del PERFIL DIAN. Se comprueba aquí, no dentro de
+      // `walk()` recursivo, porque el elemento restringido hoy (`cbc:*`) es
+      // un tipo simple: no está en `UBL_ELEMENT_TYPES`, así que nunca se
+      // recorre y su `textContent` sólo es legible desde el padre que sí se
+      // recorre.
+      const restriction = getProfileRestriction(type_name, qname);
+      if (restriction?.allowedValues) {
+        const value = String(node.textContent ?? '').trim();
+        if (!restriction.allowedValues.includes(value)) {
+          violations.push({
+            path: child_path,
+            kind: 'bad-value',
+            message:
+              `«${qname}» tiene el valor «${value}» en «${type_name}», y el ` +
+              `perfil DIAN sólo admite: ${restriction.allowedValues.join(', ')}.`,
+          });
+        }
+      }
+
       const child_type = UBL_ELEMENT_TYPES[qname];
       if (child_type) {
-        const child_path =
-          model[position].max === 1
-            ? `${path}/${qname}`
-            : `${path}/${qname}[${occurrence}]`;
         this.walk(node, child_type, child_path, violations);
       }
     }
 
     for (const child of model) {
       const seen = counts.get(child.ref) ?? 0;
+      const restriction = getProfileRestriction(type_name, child.ref);
+      const effective_max = this.effectiveMax(child.max, restriction?.max);
+
       if (seen < child.min) {
         violations.push({
           path: `${path}/${child.ref}`,
@@ -240,16 +275,33 @@ export class UblStructureValidator {
             `Falta «${child.ref}» en «${type_name}»: el esquema lo exige al menos ` +
             `${child.min} vez${child.min === 1 ? '' : 'es'} y no se emitió ninguna.`,
         });
-      } else if (child.max !== -1 && seen > child.max) {
+      } else if (effective_max !== -1 && seen > effective_max) {
         violations.push({
           path: `${path}/${child.ref}`,
           kind: 'too-many',
           message:
-            `«${child.ref}» aparece ${seen} veces en «${type_name}» y el esquema ` +
-            `admite como máximo ${child.max}.`,
+            `«${child.ref}» aparece ${seen} veces en «${type_name}» y el ` +
+            (restriction?.max !== undefined
+              ? `perfil DIAN admite como máximo ${effective_max}.`
+              : `esquema admite como máximo ${effective_max}.`),
         });
       }
     }
+  }
+
+  /**
+   * El más estricto entre el `max` del modelo generado (XSD) y el del
+   * override del perfil DIAN, tratando `-1` (`unbounded`) como el valor menos
+   * restrictivo posible. Un override nunca RELAJA un límite que el XSD ya
+   * puso más bajo.
+   */
+  private static effectiveMax(
+    model_max: number,
+    override_max: number | undefined,
+  ): number {
+    if (override_max === undefined) return model_max;
+    if (model_max === -1) return override_max;
+    return Math.min(model_max, override_max);
   }
 
   private static childElements(element: any): any[] {

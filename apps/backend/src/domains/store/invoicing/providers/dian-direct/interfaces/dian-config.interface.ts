@@ -122,16 +122,19 @@ export interface DianCustomerData {
   phone?: string;
   email?: string;
   /**
-   * DIAN party account type ('1' Persona Jurídica / '2' Persona Natural). Now
-   * derived from `person_type` and the retenedor markers in the builder; kept
-   * on the data shape for backward compatibility with the issuer side.
+   * DIAN party account type ('1' Persona Jurídica / '2' Persona Natural). Se
+   * deriva de `person_type` en el builder, y de nada más: los marcadores de
+   * retenedor que antes se sumaban aquí producían un segundo
+   * `cbc:AdditionalAccountID` y la DIAN rechazó por él (FVJL7/FVJL8). El
+   * elemento es 1..1 con dominio `TipoOrganizacion-2.1.gc`. Se conserva en la
+   * forma del dato por compatibilidad con el lado del emisor.
    */
   tax_regime?: string;
   /**
    * Full list of fiscal responsibilities (RUT codes) for `cac:TaxScheme/
    * cbc:TaxLevelCode`. Joined with `;` per Anexo 19. `R-99-PN` is the
    * "ninguna de las anteriores" fallback; absent/empty maps to it via
-   * `UblCommonBuilder.toTaxLevelCode`.
+   * `toDianTaxLevelCode` (`constants/dian-tax-level-codes.ts`).
    */
   tax_responsibilities: string[];
   /**

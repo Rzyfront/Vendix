@@ -1,7 +1,11 @@
 import { create } from 'xmlbuilder2';
 import { UBL_NAMESPACES, UBL_CONSTANTS } from './xml-namespaces';
 import { DIAN_TAX_CODES, DIAN_TAX_NAMES } from '../constants/dian-tax-codes';
-import { DIAN_ID_TYPES } from '../constants/dian-document-types';
+import {
+  DIAN_ID_TYPES,
+  DIAN_ORGANIZATION_TYPES,
+} from '../constants/dian-document-types';
+import { toDianTaxLevelCode } from '../constants/dian-tax-level-codes';
 import {
   DianIssuerData,
   DianCustomerData,
@@ -391,48 +395,6 @@ export class UblCommonBuilder {
     'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)';
 
   /**
-   * Responsabilidades ACEPTADAS por `cbc:TaxLevelCode` (Anexo 1.9).
-   *
-   * NO es el catálogo de la casilla 53 del RUT. Son dos listas distintas y ese es
-   * el defecto que esto cierra: una migración escribió las responsabilidades del
-   * RUT (`O-05, O-07, O-14, O-42, O-48`) en el campo que alimenta este elemento, y
-   * la DIAN respondió FAJ26 «Responsabilidad informada por emisor no valida según
-   * lista». Antes declaraba `O-13;O-47`, que sí están en la enumeración — por eso
-   * FAJ26 no aparecía.
-   *
-   * `R-99-PN` es el valor «ninguna de las anteriores» de la propia lista, y es el
-   * respaldo correcto: un contribuyente cuyas responsabilidades del RUT no caen en
-   * ninguna de estas categorías no declara ninguna, no inventa una.
-   */
-  private static readonly TAX_LEVEL_CODES = new Set([
-    'O-13', // Gran contribuyente
-    'O-15', // Autorretenedor
-    'O-23', // Agente de retención IVA
-    'O-47', // Régimen simple de tributación
-    'R-99-PN', // No responsable / ninguna de las anteriores
-  ]);
-
-  /** Valor «ninguna de las anteriores» de la lista de responsabilidades. */
-  static readonly TAX_LEVEL_CODE_NONE = 'R-99-PN';
-
-  /**
-   * Filtra a la enumeración de `cbc:TaxLevelCode`.
-   *
-   * Acepta la forma con punto y coma que el anexo permite (`'O-13;O-15'`), descarta
-   * lo que no pertenece a la lista, y devuelve `R-99-PN` cuando no queda nada.
-   * Nunca propaga un código del RUT que la DIAN rechazaría.
-   */
-  static toTaxLevelCode(value?: string | null): string {
-    const kept = String(value ?? '')
-      .split(';')
-      .map((code) => code.trim())
-      .filter((code) => UblCommonBuilder.TAX_LEVEL_CODES.has(code));
-    return kept.length
-      ? kept.join(';')
-      : UblCommonBuilder.TAX_LEVEL_CODE_NONE;
-  }
-
-  /**
    * Builds the UBLExtensions element with the full DIAN `sts:DianExtensions`
    * block that DIAN validates, in the mandated order:
    *   1. InvoiceControl  (InvoiceAuthorization, AuthorizationPeriod, AuthorizedInvoices)
@@ -691,7 +653,7 @@ export class UblCommonBuilder {
     const tax_level = tax_scheme.ele(UBL_NAMESPACES.CBC, 'TaxLevelCode');
     tax_level
       .att('listName', 'No aplica')
-      .txt(UblCommonBuilder.toTaxLevelCode(issuer.tax_scheme));
+      .txt(toDianTaxLevelCode(issuer.tax_scheme));
 
     UblCommonBuilder.buildRegistrationAddress(tax_scheme, issuer, 'emisor');
 
@@ -795,9 +757,19 @@ export class UblCommonBuilder {
    *       NATURAL   → `cac:Person` with `cbc:FirstName` + `cbc:FamilyName` +
    *                   `cbc:ID`.
    *       null      → derive from `document_type` (NIT → JURIDICA, else NATURAL).
-   *   - Multiple `cbc:AdditionalAccountID` siblings: person-type code (1/2) +
-   *     retenedor markers (gran contribuyente=1 if O-13, autorretenedor=2 if
-   *     O-15, agente de retención=3 if is_withholding_agent).
+   *   - `cbc:AdditionalAccountID` es 1..1 en el perfil DIAN: UN solo código de
+   *     tipo de persona/organización ('1' jurídica / '2' natural), tomado de
+   *     `DIAN_ORGANIZATION_TYPES` — su dominio es la lista oficial
+   *     `TipoOrganizacion-2.1.gc`, que tiene exactamente dos filas. La versión
+   *     anterior emitía además hermanos extra como si el elemento aceptara
+   *     1..N (gran contribuyente=1 si O-13, autorretenedor=2 si O-15, agente
+   *     de retención=3 si `is_withholding_agent`), y un documento con dos
+   *     `cbc:AdditionalAccountID` fue rechazado en producción con «Receptor
+   *     debe ser persona natural o jurídica
+   *     (cac:AccountingCustomerParty/cbc:AdditionalAccountID)» (FVJL7/FVJL8).
+   *     Gran contribuyente, autorretenedor y agente de retención se declaran
+   *     en `cbc:TaxLevelCode` (códigos O-13 / O-15 / O-23), NUNCA en este
+   *     elemento.
    *   - `cbc:IndustryClassificationCode` emitted when `ciiu_code` is present.
    *   - El número de documento viaja DESNUDO en `cbc:CompanyID`/`cbc:ID`; el
    *     DV va en `@schemeID`. La forma `<NIT>-<DV>` que se usó antes rompía el
@@ -818,26 +790,24 @@ export class UblCommonBuilder {
     const dian_scheme_id =
       DIAN_ID_TYPES[customer.document_type] || customer.document_type;
 
-    // First `cbc:AdditionalAccountID` = person type ('1' Jurídica / '2'
-    // Natural). The retenedor markers follow as siblings.
-    const person_code = resolved_person_type === 'JURIDICA' ? '1' : '2';
-    customer_party.ele(UBL_NAMESPACES.CBC, 'AdditionalAccountID').txt(person_code);
+    // `cbc:AdditionalAccountID` del adquiriente — tipo de persona/organización
+    // ÚNICAMENTE. El elemento es 1..1 en el perfil DIAN; su dominio es la lista
+    // oficial `TipoOrganizacion-2.1.gc` (dos filas: '1' jurídica, '2' natural —
+    // ver `DIAN_ORGANIZATION_TYPES`). Gran contribuyente (O-13), autorretenedor
+    // (O-15) y agente de retención (O-23) se declaran más abajo en
+    // `cbc:TaxLevelCode`, nunca como hermanos extra de este elemento (ver el
+    // JSDoc del método).
+    const person_code =
+      resolved_person_type === 'JURIDICA'
+        ? DIAN_ORGANIZATION_TYPES.LEGAL_ENTITY
+        : DIAN_ORGANIZATION_TYPES.NATURAL_PERSON;
+    customer_party
+      .ele(UBL_NAMESPACES.CBC, 'AdditionalAccountID')
+      .txt(person_code);
 
-    // Retenedor markers per Anexo 19 — emitted only when applicable. Each is an
-    // OWN `cbc:AdditionalAccountID` sibling; the cardinality 1..N allows this.
+    // Responsabilidades fiscales del adquiriente (RUT) — se consumen más abajo
+    // para `cbc:TaxLevelCode`, no aquí.
     const responsibilities = customer.tax_responsibilities ?? [];
-    if (responsibilities.includes('O-13')) {
-      // Gran contribuyente
-      customer_party.ele(UBL_NAMESPACES.CBC, 'AdditionalAccountID').txt('1');
-    }
-    if (responsibilities.includes('O-15')) {
-      // Autorretenedor
-      customer_party.ele(UBL_NAMESPACES.CBC, 'AdditionalAccountID').txt('2');
-    }
-    if (customer.is_withholding_agent) {
-      // Agente de retención
-      customer_party.ele(UBL_NAMESPACES.CBC, 'AdditionalAccountID').txt('3');
-    }
 
     const party = customer_party.ele(UBL_NAMESPACES.CAC, 'Party');
 
@@ -930,13 +900,15 @@ export class UblCommonBuilder {
     // cbc:TaxLevelCode — fiscal responsibilities of the acquirer; the
     // @listName is the literal 'No aplica' per the DIAN annex. A consumidor
     // final / natural person reports 'R-99-PN'. ALL responsibilities are
-    // concatenated with `;`; `toTaxLevelCode` enforces the closed enumeration
-    // and falls back to 'R-99-PN' when the list is empty or invalid.
+    // concatenated with `;`; `toDianTaxLevelCode` enforces the closed
+    // enumeration and falls back to 'R-99-PN' when the list is empty or
+    // invalid. This is also where O-23 (agente de retención IVA) flows when
+    // the customer's RUT carries it — never through AdditionalAccountID.
     const tax_level = tax_scheme.ele(UBL_NAMESPACES.CBC, 'TaxLevelCode');
     tax_level
       .att('listName', 'No aplica')
       .txt(
-        UblCommonBuilder.toTaxLevelCode(
+        toDianTaxLevelCode(
           responsibilities.length ? responsibilities.join(';') : 'R-99-PN',
         ),
       );
