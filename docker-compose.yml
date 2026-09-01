@@ -54,7 +54,15 @@ services:
       # node:24-alpine (subido desde node:20-alpine por EOL de Node 20, 2026-04-30):
       # el mismo grafo de rutas/DI necesita más heap para bootear sin OOM que en
       # Node 20 — 1536 chocaba justo al terminar RouterExplorer.
-      NODE_OPTIONS: "--max-old-space-size=2048"
+      # nancy 2026-09-01: bajado 2048 -> 1792. El techo del contenedor es
+      # 2560m y el RSS total = heap + nativo + compilador swc + source maps.
+      # Con heap 2048 el proceso llegaba a 2.44 GiB (97,9% del cgroup) y el
+      # kernel lo mataba con SIGKILL en la segunda peticion; en el log se lee
+      # como "npm error signal SIGKILL", que NO parece un problema de memoria.
+      # Con 1792 V8 recolecta antes en vez de morir: una pausa de GC es
+      # preferible a un bucle de reinicios. No se toca `mem_limit` porque
+      # subirlo agranda la huella de la VM en el host, y el host va justo.
+      NODE_OPTIONS: "--max-old-space-size=1792"
       CHOKIDAR_USEPOLLING: "true"
       REDIS_HOST: redis
       REDIS_PORT: 6379
