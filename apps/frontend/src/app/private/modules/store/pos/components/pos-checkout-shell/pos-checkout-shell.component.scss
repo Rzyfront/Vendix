@@ -555,6 +555,36 @@
   gap: 10px;
 }
 
+/* «Facturar a nombre de» — enlace secundario bajo "Venta Anónima". Es
+   deliberadamente discreto (no un `.sale-type-btn`): no es una cuarta opción
+   del radiogroup, es un despliegue dentro de la opción anónima ya elegida. */
+.invoice-capture-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  margin-left: 4px;
+  padding: 4px 2px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-primary);
+  transition: opacity 0.15s ease;
+}
+
+.invoice-capture-toggle:hover {
+  opacity: 0.75;
+  text-decoration: underline;
+}
+
+.invoice-capture-toggle:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
 .sale-type-btn {
   display: flex;
   align-items: center;

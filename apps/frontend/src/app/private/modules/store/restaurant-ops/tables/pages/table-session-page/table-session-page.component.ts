@@ -48,6 +48,7 @@ import {
   KitchenMutationError,
 } from '../../../kds/services';
 import type {
+  FireConfirmPayload,
   FireItemExclusion,
   FirePreview,
 } from '../../../kds/interfaces';
@@ -1132,12 +1133,14 @@ export class TableSessionPageComponent implements OnInit {
       });
   }
 
-  /** Confirma el envio con las exclusiones que dejo el modal. */
-  onKitchenConfirmed(exclusions: FireItemExclusion[]): void {
+  /** Confirma el envio con las exclusiones y notas que dejo el modal. */
+  onKitchenConfirmed(event: FireConfirmPayload | FireItemExclusion[]): void {
     const ids = this.pendingFireIds();
     if (ids.length === 0) return;
     this.kitchenConfirmOpen.set(false);
-    this.executeFire(ids, this.pendingFireSingleId(), exclusions);
+    const exclusions = Array.isArray(event) ? event : (event?.exclusions ?? []);
+    const itemNotes = Array.isArray(event) ? undefined : event?.item_notes;
+    this.executeFire(ids, this.pendingFireSingleId(), exclusions, itemNotes);
   }
 
   /** Cancelar no consume inventario ni crea tickets: el modal abre ANTES de escribir. */
@@ -1152,6 +1155,7 @@ export class TableSessionPageComponent implements OnInit {
     orderItemIds: number[],
     singleItemId: number | null,
     exclusions: FireItemExclusion[],
+    itemNotes?: Array<{ order_item_id: number; notes: string }>,
   ): void {
     const order = this.session()?.order;
     if (!order) return;
@@ -1164,6 +1168,7 @@ export class TableSessionPageComponent implements OnInit {
         // Solo se manda cuando hay algo excluido: el backend trata la ausencia
         // como "todos los componentes marcados", que es el camino rapido.
         ...(exclusions.length > 0 && { exclusions }),
+        ...(itemNotes && itemNotes.length > 0 && { item_notes: itemNotes }),
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({

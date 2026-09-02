@@ -1,17 +1,26 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { S3Service } from '../../../../common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
 import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
+import { signStoreLogoUrl } from '../lib/print-logo.util';
 
 @Injectable()
 export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
   readonly formatType: print_format_type_enum = 'sales_order_invoice';
+  private readonly logger = new Logger(SalesOrderInvoiceDataProvider.name);
 
-  constructor(private readonly prisma: StorePrismaService) {}
+  // `s3Service` opcional en la firma por la misma razón que en
+  // `pos-sale-ticket.provider.ts`: specs que instancian con un solo
+  // argumento no deben romper; Nest siempre lo inyecta en runtime.
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly s3Service?: S3Service,
+  ) {}
 
   async fetchDocumentData(
     storeId: number,
@@ -83,6 +92,7 @@ export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
     const tax = Number(order.tax_amount || 0);
     const shipping = Number(order.shipping_cost || 0);
     const grandTotal = Number(order.grand_total || subtotal - discount + tax + shipping);
+    const signedLogoUrl = await signStoreLogoUrl(this.s3Service, store.logo_url, this.logger);
 
     return {
       store: {
@@ -93,7 +103,7 @@ export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
         email: store.email,
         address: storeAddr.address_line1 ? `${storeAddr.address_line1} ${storeAddr.address_line2 || ''}`.trim() : undefined,
         city: storeAddr.city,
-        logo_url: store.logo_url,
+        logo_url: signedLogoUrl,
       },
       customer: user.id
         ? {

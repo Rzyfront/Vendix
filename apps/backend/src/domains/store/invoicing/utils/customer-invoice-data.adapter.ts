@@ -17,6 +17,39 @@ import { ProviderInvoiceData } from '../providers/invoice-provider.interface';
  * since Step 1 so the UBL builder can emit `<cbc:ID>NIT-DV</cbc:ID>` per Anexo
  * 19 without re-deriving it from a concatenated string.
  */
+/**
+ * El `select` de Prisma que produce EXACTAMENTE un {@link CustomerForInvoice}.
+ *
+ * Vive junto al tipo que describe, y no junto a la consulta que lo usa, porque
+ * ya lo usan DOS consultas: la que carga la factura para emitir
+ * (`INVOICE_INCLUDE` en `invoice-flow.service.ts`) y la que proyecta un
+ * borrador para validarlo antes de numerar
+ * (`InvoicingService.buildDraftProjection`). Cuando cada una llevaba su propia
+ * lista, la segunda cargaba cuatro campos —id, nombre, apellido, correo— y la
+ * puerta de identidad juzgaba a un adquiriente sin documento, sin régimen y sin
+ * responsabilidades fiscales: aprobaba borradores que la emisión rechaza.
+ *
+ * `addresses` trae SÓLO la principal: es la única que el adaptador copia a
+ * `customer_address`, y pedir más sería alcance desperdiciado en cada `send()`.
+ */
+export const CUSTOMER_FOR_INVOICE_SELECT = {
+  id: true,
+  first_name: true,
+  last_name: true,
+  legal_name: true,
+  email: true,
+  phone: true,
+  document_type: true,
+  document_number: true,
+  verification_digit: true,
+  tax_regime: true,
+  person_type: true,
+  fiscal_responsibilities: true,
+  ciiu_code: true,
+  is_withholding_agent: true,
+  addresses: { take: 1, orderBy: { is_primary: 'desc' } },
+} as const;
+
 export interface CustomerForInvoice {
   id: number;
   first_name: string | null;

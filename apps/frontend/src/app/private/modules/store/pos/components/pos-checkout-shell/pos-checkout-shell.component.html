@@ -147,6 +147,35 @@
                             cliente con dirección.</span
                           >
                         </p>
+                      } @else if (isAnonymousSale()) {
+                        <!-- Paso 9 — «Facturar a nombre de»: on-demand, sin
+                             abandonar "Venta Anónima". Captura los 5 campos
+                             mínimos para una factura nominativa (documento,
+                             nombres, apellidos, email) reutilizando el mismo
+                             selector/resolver que "Con Cliente", en modo
+                             reducido (`minimalInvoiceMode`). -->
+                        <button
+                          type="button"
+                          class="invoice-capture-toggle"
+                          [attr.aria-expanded]="showAnonymousInvoiceCapture()"
+                          aria-label="Mostrar u ocultar los datos de facturación"
+                          (click)="toggleAnonymousInvoiceCapture()"
+                        >
+                          <app-icon name="file-text" [size]="14"></app-icon>
+                          {{
+                            showAnonymousInvoiceCapture()
+                              ? 'Ocultar datos de facturación'
+                              : 'Facturar a nombre de'
+                          }}
+                        </button>
+                        @if (showAnonymousInvoiceCapture()) {
+                          <app-pos-customer-selector
+                            [selectedCustomer]="null"
+                            [allowAnonymous]="false"
+                            [minimalInvoiceMode]="true"
+                            (customerSelected)="selectCustomer($event)"
+                          ></app-pos-customer-selector>
+                        }
                       }
                     }
 

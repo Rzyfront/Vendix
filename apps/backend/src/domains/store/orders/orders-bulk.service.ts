@@ -670,9 +670,15 @@ export class OrdersBulkService {
         // es entonces la señal correcta para que el frontend imprima el
         // desglose de IVA y el pie de "este documento no es una factura
         // electrónica".
+        // `dian_status` viaja aunque el `where` ya lo fije a `accepted`: el
+        // mapper del tiquete (`OrderTicketService.toTicketData`) también sirve
+        // al detalle de orden, cuyo `findOne` NO pre-filtra, así que decide la
+        // aceptación leyendo la columna. Mandarla aquí —redundante para esta
+        // consulta— es lo que le permite exigirla en vez de tratar su ausencia
+        // como "aceptada", que sería afirmar validación DIAN por defecto.
         invoices: {
           where: { dian_status: 'accepted' },
-          select: { invoice_number: true, cufe: true },
+          select: { invoice_number: true, cufe: true, dian_status: true },
           orderBy: { id: 'desc' },
           take: 1,
         },

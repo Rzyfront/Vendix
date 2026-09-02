@@ -139,6 +139,10 @@ export interface PreExplodedFireContext {
    * marcados", que es el comportamiento previo al ticket.
    */
   exclusionsByOrderItem?: Map<number, number[]>;
+  /**
+   * Notas de preparación actualizadas por `order_item_id` al confirmar el envío.
+   */
+  itemNotesByOrderItem?: Map<number, string>;
 }
 
 /**
@@ -481,6 +485,24 @@ export class KitchenFireService {
           e.component_product_ids ?? [],
         ]),
       ),
+      itemNotesByOrderItem: (() => {
+        const notesMap = new Map<number, string>();
+        if (dto.item_notes && Array.isArray(dto.item_notes)) {
+          for (const n of dto.item_notes) {
+            if (typeof n.order_item_id === 'number') {
+              notesMap.set(n.order_item_id, (n.notes ?? '').trim());
+            }
+          }
+        }
+        if (dto.exclusions && Array.isArray(dto.exclusions)) {
+          for (const e of dto.exclusions) {
+            if (typeof e.order_item_id === 'number' && e.notes !== undefined) {
+              notesMap.set(e.order_item_id, (e.notes ?? '').trim());
+            }
+          }
+        }
+        return notesMap;
+      })(),
     };
     const result = await this.prisma.$transaction(async (tx) =>
       this.fireOrderItemsInTx(tx, store_id, preComputed),
@@ -839,6 +861,17 @@ export class KitchenFireService {
     // en la estacion y desmarca en consecuencia. Se lee de la fuente de verdad
     // (`order_items.notes`) y no del DTO, porque la nota se escribio al pedir y
     // no al confirmar el envio.
+    // Persistir notas actualizadas de ítems enviadas en la confirmación de cocina
+    const itemNotesByOrderItem = preComputed.itemNotesByOrderItem;
+    if (itemNotesByOrderItem && itemNotesByOrderItem.size > 0) {
+      for (const [orderItemId, noteText] of itemNotesByOrderItem) {
+        await tx.order_items.updateMany({
+          where: { id: orderItemId },
+          data: { notes: noteText.trim() || null, updated_at: new Date() },
+        });
+      }
+    }
+
     const firedOrderItemIds = firedItemSnapshots.map((s) => s.orderItemId);
     const notesByOrderItem = new Map<number, string>();
     if (firedOrderItemIds.length > 0) {
@@ -848,6 +881,16 @@ export class KitchenFireService {
       });
       for (const row of noted) {
         if (row.notes) notesByOrderItem.set(row.id, row.notes);
+      }
+    }
+    // Sobrescribir con las notas recién enviadas en el confirm para sincronía inmediata
+    if (itemNotesByOrderItem) {
+      for (const [itemId, noteText] of itemNotesByOrderItem) {
+        if (noteText.trim()) {
+          notesByOrderItem.set(itemId, noteText.trim());
+        } else {
+          notesByOrderItem.delete(itemId);
+        }
       }
     }
 

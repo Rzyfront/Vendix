@@ -188,6 +188,12 @@ export class KitchenTicketsService {
     exclusions?: Array<{
       order_item_id: number;
       component_product_ids: number[];
+      applies_to_units?: number;
+      notes?: string;
+    }>;
+    item_notes?: Array<{
+      order_item_id: number;
+      notes: string;
     }>;
   }): Observable<FireOrderItemsResult> {
     return this.http

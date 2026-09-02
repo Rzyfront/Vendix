@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { S3Service } from '../../../../common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
 import { RecentDocumentSummary } from '../interfaces/document-index.interface';
@@ -9,6 +10,7 @@ import {
   StandardPrintItem,
 } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
+import { signStoreLogoUrl } from '../lib/print-logo.util';
 
 /**
  * CP-DTLP-20260827 — Tiquete de Despacho (dispatch_ticket).
@@ -32,7 +34,14 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
 
   private readonly logger = new Logger(DispatchTicketDataProvider.name);
 
-  constructor(private readonly prisma: StorePrismaService) {}
+  // `s3Service` opcional en la firma: los specs de este provider lo
+  // instancian con un solo argumento (`new DispatchTicketDataProvider(prisma)`)
+  // y en runtime Nest siempre lo inyecta (`print-formats.module.ts` importa
+  // `S3Module`).
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly s3Service?: S3Service,
+  ) {}
 
   async fetchDocumentData(
     storeId: number,
@@ -80,7 +89,10 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
       );
     }
 
-    return this.mapOrderToDispatchTicket(order);
+    // Firmado acá (única llamada async del flujo) — `mapOrderToDispatchTicket`
+    // es un mapeador puro y síncrono, no puede tener un `await` adentro.
+    const signedLogoUrl = await signStoreLogoUrl(this.s3Service, order.stores?.logo_url, this.logger);
+    return this.mapOrderToDispatchTicket(order, signedLogoUrl);
   }
 
   async getSampleData(_storeId?: number): Promise<StandardPrintDataModel> {
@@ -220,7 +232,7 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
   // Mapeo interno
   // ============================================================
 
-  private mapOrderToDispatchTicket(order: any): StandardPrintDataModel {
+  private mapOrderToDispatchTicket(order: any, signedLogoUrl?: string): StandardPrintDataModel {
     const store = order.stores || {};
     const org = store.organizations || {};
     const storeAddr = store.addresses?.[0] || {};
@@ -275,7 +287,7 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
         address_line1: storeAddr.address_line1,
         address_line2: storeAddr.address_line2,
         city: storeAddr.city,
-        logo_url: store.logo_url,
+        logo_url: signedLogoUrl,
       },
       customer: customer.id
         ? {

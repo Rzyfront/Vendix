@@ -59,6 +59,24 @@ export class FireItemExclusionDto {
   @Min(1)
   @Type(() => Number)
   applies_to_units?: number;
+
+  /**
+   * Nota libre actualizada para este ítem específico al confirmar el envío a cocina.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  notes?: string;
+}
+
+export class ItemNoteDto {
+  @IsInt()
+  @Type(() => Number)
+  order_item_id!: number;
+
+  @IsString()
+  @MaxLength(200)
+  notes!: string;
 }
 
 export class FireOrderItemsDto {
@@ -89,6 +107,16 @@ export class FireOrderItemsDto {
   @ValidateNested({ each: true })
   @Type(() => FireItemExclusionDto)
   exclusions?: FireItemExclusionDto[];
+
+  /**
+   * Notas actualizadas por item al confirmar el envío a cocina.
+   * Se persisten en order_items.notes y se propagan a kitchen_ticket_items.notes.
+   */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ItemNoteDto)
+  item_notes?: ItemNoteDto[];
 }
 
 /**

@@ -95,17 +95,26 @@ export class PrintLayoutComposerService {
       // llenaran `document.table_number`/`document.waiter_name`.
       case 'table_info':
         return this.renderTableInfoSection(section, data, mode);
-      // Los siguientes 5 tipos no tienen un layout propio en ninguna
+      // Mismo defecto que `table_info`, ahora para la cotización: la
+      // plantilla sembrada de `quotation` declara `sec_terms` (custom_notes)
+      // y `sec_validity` (validity_banner) SIN `fields`, así que el
+      // `default` las devolvía vacías y la nota, los términos y la vigencia
+      // guardados no llegaban nunca al papel. Ambas conservan la ruta
+      // genérica cuando la plantilla SÍ trae `fields` configurados desde el
+      // editor de formatos: ahí manda lo que configuró la tienda.
+      case 'custom_notes':
+        return this.renderNotesSection(section, data, mode);
+      case 'validity_banner':
+        return this.renderValiditySection(section, data, mode);
+      // Los siguientes 3 tipos no tienen un layout propio en ninguna
       // plantilla sembrada hoy — se listan explícitamente (en vez de dejarlos
       // caer al `default`) para que el switch documente el universo cerrado
       // de `section.type` (ver `PrintSectionTypeEnum` en
       // `enums/print-format.enum.ts`). Un tipo que el compositor ignora en
       // silencio es pérdida de datos, no tolerancia.
-      case 'custom_notes':
       case 'document_reference':
       case 'locations_info':
       case 'shipping_info':
-      case 'validity_banner':
         return this.renderGenericFieldsSection(section, data, mode);
       default:
         return this.renderGenericFieldsSection(section, data, mode);
@@ -129,7 +138,18 @@ export class PrintLayoutComposerService {
     // no define uno propio.
     const designedLogoUrl = defLogoBlock?.url;
     const fallbackLogoUrl = runtimeLogo && !designedLogoUrl ? runtimeLogo : undefined;
-    const defaultMonochromeLogo = '/vlogomono.png';
+    // Antes: '/vlogomono.png', ruta relativa a la RAÍZ DEL BACKEND que
+    // ensambla este HTML. El archivo real vive en `apps/frontend/public/`, o
+    // sea que sólo resuelve si el documento se sirve desde el origen del
+    // frontend con esa ruta montada — y el carril real de impresión
+    // (`document-print.service.ts` en el frontend) inyecta este HTML en un
+    // iframe oculto vía `document.write`, sin `<base>` ni garantía de
+    // heredar el origen del padre. Ruta relativa rota == mismo defecto que
+    // el logo de tienda sin firmar: 404 → `alt="Logo"` literal. Absoluta
+    // contra `FRONTEND_URL` (mismo patrón que `auth.service.ts` y
+    // `email-templates.ts` para links salientes) resuelve sin importar
+    // dónde se abra el documento.
+    const defaultMonochromeLogo = `${process.env.FRONTEND_URL || 'http://localhost:4200'}/vlogomono.png`;
     const isLogoExplicitlyDisabled = defLogoBlock && (defLogoBlock as any).enabled === false;
 
     const logoUrl = isLogoExplicitlyDisabled
@@ -138,7 +158,14 @@ export class PrintLayoutComposerService {
 
     let logo = '';
     if (logoUrl || mode === 'tokenized') {
-      const pos = defLogoBlock?.position || 'left';
+      // El defecto SIN posición explícita depende del papel: en rollo
+      // térmico (`paper.is_roll`) el logo es el encabezado del tiquete y va
+      // centrado, igual que el resto del header (`header_alignment` por
+      // defecto ya cae a `center` en rollo, ver `renderStyles`). En hoja
+      // (carta/A4) el defecto sigue siendo izquierda, como antes. Un
+      // `position` explícito en la definición SIEMPRE gana — esto sólo
+      // decide qué pasa cuando la plantilla no lo declaró.
+      const pos = defLogoBlock?.position || (definition.paper?.is_roll ? 'center' : 'left');
       const sizeMm = typeof defLogoBlock?.size_mm === 'number' ? defLogoBlock.size_mm : 14;
       const opacity = typeof defLogoBlock?.opacity === 'number' ? defLogoBlock.opacity : 100;
       const maxPx = pos === 'full' ? '100%' : `${Math.max(8, Math.min(64, Math.round(sizeMm * 3.78)))}px`;
@@ -455,7 +482,7 @@ export class PrintLayoutComposerService {
       tbodyRows = `<tr>${tds}</tr>`;
     } else {
       if (items.length === 0) {
-        tbodyRows = `<tr><td colspan="${columns.length}" style="text-align:center;padding:8px;color:#888;">Sin ítems registrados</td></tr>`;
+        tbodyRows = `<tr><td colspan="${columns.length}" class="items-empty">Sin ítems registrados</td></tr>`;
       } else {
         tbodyRows = items
           .map((item, idx) => {
@@ -478,10 +505,10 @@ export class PrintLayoutComposerService {
                       sublines += `<br><small class="item-note">Nota: ${this.compiler.escapeHtml(item.notes)}</small>`;
                     }
                     if (showItemDiscounts && item.discount_amount && Number(item.discount_amount) > 0) {
-                      sublines += `<br><small class="item-sub item-discount" style="color: #ef4444;">Desc: -${item.discount_formatted || `$${Number(item.discount_amount).toLocaleString('es-CO')}`}</small>`;
+                      sublines += `<br><small class="item-sub item-discount">Desc: -${item.discount_formatted || `$${Number(item.discount_amount).toLocaleString('es-CO')}`}</small>`;
                     }
                     if (showItemTaxes && item.tax_rate !== undefined && Number(item.tax_rate) > 0) {
-                      sublines += `<br><small class="item-sub item-tax" style="color: #6b7280;">IVA: ${item.tax_rate}%</small>`;
+                      sublines += `<br><small class="item-sub item-tax">IVA: ${item.tax_rate}%</small>`;
                     }
                     val = `${this.compiler.escapeHtml(item.product_name)}${sublines}`;
                     return `<td data-column-id="${col.id}" data-element-id="col_${col.id}" style="text-align: ${col.align};">${val}</td>`;
@@ -666,12 +693,12 @@ export class PrintLayoutComposerService {
 
     const qrImg = fiscal?.qr_code_png_base64
       ? `<img src="data:image/png;base64,${fiscal.qr_code_png_base64}" alt="QR Fiscal" style="width: 110px; height: 110px;" />`
-      : `<div style="display:inline-block;width:100px;height:100px;border:1px dashed #3b82f6;line-height:100px;font-size:10px;color:#3b82f6;"><span class="vendix-token-pill" data-token="fiscal.qr_code">&#123;&#123; QR Fiscal &#125;&#125;</span></div>`;
+      : `<div class="qr-placeholder"><span class="vendix-token-pill" data-token="fiscal.qr_code">&#123;&#123; QR Fiscal &#125;&#125;</span></div>`;
 
     return `
       <div class="print-section section-qr-fiscal" data-section-id="sec_qr" style="text-align: center; margin-top: 10px;">
         ${qrImg}
-        <div style="font-size: 8pt; color: #666; margin-top: 4px;">Validación DIAN de Documento Electrónico</div>
+        <div class="qr-caption">Validación DIAN de Documento Electrónico</div>
       </div>
     `;
   }
@@ -716,8 +743,14 @@ export class PrintLayoutComposerService {
     const doc = data.document || ({} as any);
     const items = data.items || [];
 
+    // `store.logo_url` ya llega firmado desde `dispatch-ticket.provider.ts`
+    // (nunca la KEY desnuda de S3). El `text-align: center` inline es
+    // redundante con `.section-dispatch-ticket .dt-header { text-align:
+    // center }` de más abajo, pero se deja explícito aquí — igual que en
+    // `renderHeaderSection` — para no depender silenciosamente de un ancestro
+    // que otro cambio de CSS podría mover.
     const logo = store.logo_url
-      ? `<div class="dt-logo"><img src="${this.compiler.escapeHtml(store.logo_url)}" alt="Logo" /></div>`
+      ? `<div class="dt-logo" style="text-align: center;"><img src="${this.compiler.escapeHtml(store.logo_url)}" alt="Logo" /></div>`
       : '';
     const header = `
       <div class="dt-header">
@@ -825,6 +858,109 @@ export class PrintLayoutComposerService {
     return `<div class="print-section section-table-info" data-section-id="${section.id || section.type}">${rows}</div>`;
   }
 
+  /**
+   * `custom_notes` — nota al cliente y términos y condiciones, en prosa.
+   *
+   * La plantilla declara la sección sin `fields` (así la siembra
+   * `print-templates.seed.ts` para `quotation`), de modo que sin este render
+   * la nota guardada en `quotations.notes` y la letra pequeña de
+   * `terms_and_conditions` desaparecían del papel sin error ni log.
+   *
+   * No usa `field-row` (`Etiqueta: valor` en una línea) como la sección
+   * genérica: una nota es un párrafo, puede traer saltos de línea escritos
+   * por el vendedor, y en una línea etiquetada se colapsan. De ahí
+   * `white-space: pre-wrap` en el cuerpo.
+   *
+   * Si la plantilla SÍ trae `fields` configurados desde el editor, manda esa
+   * configuración y la sección vuelve a la ruta genérica. Y si no hay ningún
+   * dato que pintar no emite nada — ni el título — para que una cotización
+   * sin nota no saque un recuadro vacío.
+   */
+  private renderNotesSection(section: any, data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {
+    if ((section.fields || []).length > 0) {
+      return this.renderGenericFieldsSection(section, data, mode);
+    }
+
+    const doc = data.document || ({} as any);
+    const notes = doc.notes;
+    const terms = doc.terms_and_conditions;
+
+    if (mode !== 'tokenized' && !notes && !terms) return '';
+
+    const blocks: string[] = [];
+
+    if (notes || mode === 'tokenized') {
+      const val = mode === 'tokenized'
+        ? '<span class="vendix-token-pill" data-token="document.notes">&#123;&#123; document.notes &#125;&#125;</span>'
+        : this.compiler.escapeHtml(notes);
+      blocks.push(
+        `<div class="notes-block" data-element-id="f_notes" data-token="document.notes"><div class="notes-label">Notas</div><div class="notes-body">${val}</div></div>`,
+      );
+    }
+
+    if (terms || mode === 'tokenized') {
+      const val = mode === 'tokenized'
+        ? '<span class="vendix-token-pill" data-token="document.terms_and_conditions">&#123;&#123; document.terms_and_conditions &#125;&#125;</span>'
+        : this.compiler.escapeHtml(terms);
+      blocks.push(
+        `<div class="notes-block" data-element-id="f_terms" data-token="document.terms_and_conditions"><div class="notes-label">Términos y Condiciones</div><div class="notes-body">${val}</div></div>`,
+      );
+    }
+
+    if (blocks.length === 0) return '';
+
+    // El `section.title` de la plantilla NO se pinta aquí: la sembrada se
+    // llama "Términos y Condiciones", que es exactamente la etiqueta del
+    // segundo bloque, y usarla como encabezado dejaba el título repetido dos
+    // veces y rotulaba la nota del cliente como si fuera la letra pequeña.
+    // Cada bloque lleva su propia etiqueta, que es lo que el lector necesita.
+    return `<div class="print-section section-notes" data-section-id="${section.id || section.type}">${blocks.join('')}</div>`;
+  }
+
+  /**
+   * `validity_banner` — vigencia de la oferta y estado del documento.
+   *
+   * Misma razón de existir que `renderNotesSection`: la plantilla de
+   * cotización declara `sec_validity` sin `fields`, y una cotización cuyo
+   * papel no dice hasta cuándo valen los precios no es una oferta, es un
+   * listado. `valid_until_formatted` lo produce el proveedor (ya en zona
+   * horaria de presentación); aquí no se vuelve a formatear ninguna fecha.
+   */
+  private renderValiditySection(section: any, data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {
+    if ((section.fields || []).length > 0) {
+      return this.renderGenericFieldsSection(section, data, mode);
+    }
+
+    const doc = data.document || ({} as any);
+    const validUntil = doc.valid_until_formatted;
+    const stateLabel = doc.state_label;
+
+    if (mode !== 'tokenized' && !validUntil && !stateLabel) return '';
+
+    const rows: string[] = [];
+
+    if (validUntil || mode === 'tokenized') {
+      const val = mode === 'tokenized'
+        ? '<span class="vendix-token-pill" data-token="document.valid_until_formatted">&#123;&#123; document.valid_until_formatted &#125;&#125;</span>'
+        : this.compiler.escapeHtml(validUntil);
+      rows.push(
+        `<div class="field-row" data-element-id="f_valid_until" data-token="document.valid_until_formatted"><span class="field-label">Oferta válida hasta:</span> <span class="field-val">${val}</span></div>`,
+      );
+    }
+
+    if (stateLabel || mode === 'tokenized') {
+      const val = mode === 'tokenized'
+        ? '<span class="vendix-token-pill" data-token="document.state_label">&#123;&#123; document.state_label &#125;&#125;</span>'
+        : this.compiler.escapeHtml(stateLabel);
+      rows.push(
+        `<div class="field-row" data-element-id="f_state" data-token="document.state_label"><span class="field-label">Estado:</span> <span class="field-val">${val}</span></div>`,
+      );
+    }
+
+    if (rows.length === 0) return '';
+    return `<div class="print-section section-validity" data-section-id="${section.id || section.type}">${rows.join('')}</div>`;
+  }
+
   private renderGenericFieldsSection(section: any, data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {
     const fields = (section.fields || []).filter((f: any) => f.enabled);
     if (fields.length === 0) return '';
@@ -849,11 +985,34 @@ export class PrintLayoutComposerService {
   ): string {
     const paper = definition.paper;
     const styles = definition.styles || {};
-    const primaryColor = styles.primary_color || '#111827';
-    const font = styles.font_family || "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    // La térmica de 80mm no imprime color: quema puntos. Un gris o un azul de
+    // marca se resuelve como trama y el papel térmico barato se la come, así
+    // que en rollo el color de marca deja de tener efecto aunque la plantilla
+    // lo traiga configurado — el fallback cae a negro pleno en vez de al
+    // "casi negro" #111827 que usan las hojas. El bloque al final de esta
+    // hoja de estilos (ver más abajo) es la garantía real; esto es defensa en
+    // profundidad para cuando ese bloque no alcanza a una regla (p. ej. si
+    // alguien lo retira sin querer).
+    const isRoll = !!paper.is_roll;
+    const primaryColor = isRoll ? '#000000' : (styles.primary_color || '#111827');
+    const bodyTextColor = isRoll ? '#000000' : '#111827';
+    // En rollo se ignora styles.font_family aunque la plantilla lo traiga
+    // configurado (hoy casi todas traen 'Courier New', Courier, monospace):
+    // una monoespaciada de asta fina se rasteriza a puntos discontinuos en
+    // el cabezal térmico y se lee peor que una sans de palo grueso. En hoja
+    // el comportamiento no cambia: gana styles.font_family si viene, con el
+    // mismo fallback de siempre.
+    const font = isRoll
+      ? 'Arial, Helvetica, sans-serif'
+      : (styles.font_family || "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif");
     const fontSize = styles.font_size_base_pt || (paper.is_roll ? 9 : 10);
 
-    const defaultMm = paper.is_roll ? 0 : 10;
+    // A 0mm el cabezal recorta el primer y último carácter de cada línea en
+    // la mayoría de las térmicas de 80mm: el margen mínimo seguro es 1.5mm.
+    // Este default sólo aplica cuando la plantilla NO trae margin_mm ni los
+    // per-side de abajo — una plantilla con margin_mm: 0 explícito sigue
+    // dando 0 (ese dato lo corrige la capa 2, no este código).
+    const defaultMm = paper.is_roll ? 1.5 : 10;
     const mTop = paper.margin_top_mm ?? paper.margin_mm ?? defaultMm;
     const mRight = paper.margin_right_mm ?? paper.margin_mm ?? defaultMm;
     const mBottom = paper.margin_bottom_mm ?? paper.margin_mm ?? defaultMm;
@@ -895,7 +1054,7 @@ export class PrintLayoutComposerService {
     body {
       font-family: ${font};
       font-size: ${fontSize}pt;
-      color: #111827;
+      color: ${bodyTextColor};
       margin: 0;
       padding: ${mTop}mm ${mRight}mm ${mBottom}mm ${mLeft}mm;
       background: #fff;
@@ -921,10 +1080,32 @@ export class PrintLayoutComposerService {
       margin-right: 4px;
     }
     .company-block .value {
-      color: #111827;
+      color: ${bodyTextColor};
     }
     .print-section {
       margin-bottom: 8px;
+    }
+    /* Nota al cliente y términos (sección custom_notes). El cuerpo conserva
+       los saltos de línea que escribió el vendedor: una nota de dos párrafos
+       impresa en una sola línea deja de ser legible. En rollo no se pinta
+       fondo ni borde de color —la térmica los resuelve como trama— y se marca
+       con una línea punteada, igual que el resto de bloques de tirilla. */
+    .section-notes {
+      ${isRoll ? 'border-top: 1px dashed #000; padding-top: 4px;' : `border-left: 3px solid ${primaryColor}; padding: 6px 0 6px 8px;`}
+    }
+    .notes-block + .notes-block {
+      margin-top: 5px;
+    }
+    .notes-label {
+      font-weight: 600;
+      font-size: ${fontSize - 1}pt;
+      color: ${primaryColor};
+      margin-bottom: 2px;
+    }
+    .notes-body {
+      white-space: pre-wrap;
+      line-height: 1.35;
+      color: ${bodyTextColor};
     }
     .section-header {
       text-align: ${styles.header_alignment || (paper.is_roll ? 'center' : 'left')};
@@ -992,6 +1173,36 @@ export class PrintLayoutComposerService {
       font-size: ${fontSize}pt;
       font-weight: 600;
       color: ${primaryColor};
+    }
+    /* [tirilla-80mm-negro] — color de las sublíneas de ítem y del placeholder
+       de tabla vacía: antes vivían pegados al atributo style del elemento,
+       lo que le habría exigido !important al bloque de negro de rollo (ver
+       final de esta hoja) para poder alcanzarlos. Sacados a clase, el bloque
+       de rollo los gana por cascada sin tocar el atributo style. */
+    .item-discount {
+      color: #ef4444;
+    }
+    .item-tax {
+      color: #6b7280;
+    }
+    .items-empty {
+      text-align: center;
+      padding: 8px;
+      color: #888;
+    }
+    .qr-placeholder {
+      display: inline-block;
+      width: 100px;
+      height: 100px;
+      border: 1px dashed #3b82f6;
+      line-height: 100px;
+      font-size: 10px;
+      color: #3b82f6;
+    }
+    .qr-caption {
+      font-size: 8pt;
+      color: #666;
+      margin-top: 4px;
     }
     .section-footer {
       text-align: center;
@@ -1131,9 +1342,71 @@ export class PrintLayoutComposerService {
       outline: 1.5px dashed #3b82f6 !important;
       outline-offset: 1px;
     }
+    ${isRoll ? `
+    /* [tirilla-80mm-negro] — Bloque único de negro absoluto para rollo
+       térmico, al final de la hoja para ganar por orden de cascada. La
+       térmica de 80mm quema puntos: no tiene tonos, así que cualquier gris o
+       color de marca que llegue aquí se imprime como trama sucia y el papel
+       térmico barato termina de comérsela. Este bloque es el ÚNICO lugar del
+       archivo con !important nuevo — a propósito: tiene que ganar sobre
+       CUALQUIER regla de arriba, incluida una sección que alguien agregue
+       mañana con un gris heredado de un formato de hoja (ver Objetivo
+       específico 4 del plan). No compite con ningún atributo style: esos
+       ya se sacaron a clases más arriba, así que este !important no se
+       esparce por el archivo, vive sólo aquí.
+       La jerarquía que antes sostenía el color (nombre de tienda, número de
+       documento, gran total, títulos de sección, encabezados de tabla) pasa
+       a sostenerla el peso: 700 para esos, 600 para rótulos y sublíneas.
+       Los formatos de hoja (carta/A4) no entran a este bloque — is_roll los
+       deja fuera y conservan su color de marca intacto. */
+    body.print-roll,
+    body.print-roll * {
+      color: #000 !important;
+      background-color: #fff !important;
+      border-color: #000 !important;
+      /* Base legible por defecto: semibold + sin antialiasing subpixel.
+         La térmica de 80mm rasteriza a puntos discontinuos; un peso normal
+         (400) se lava y el suavizado subpixel del renderer de Chromium
+         agrega grises que el cabezal no reproduce, dejando un trazo sucio.
+         Es la BASE, no la última palabra: su especificidad es (0,1,1) y la
+         lista de 700 de abajo es (0,2,1), así que la jerarquía sigue ganando
+         y los títulos salen en bold. El orden en la hoja NO es lo que
+         decide, de modo que esta regla puede vivir antes o después sin
+         cambiar el resultado; se deja primero por legibilidad (base
+         primero, refinamientos después). */
+      font-weight: 600 !important;
+      -webkit-font-smoothing: none;
+    }
+    body.print-roll .store-name,
+    body.print-roll .doc-number,
+    body.print-roll .grand-total,
+    body.print-roll .section-label,
+    body.print-roll .party-title,
+    body.print-roll .dt-section-label,
+    body.print-roll th {
+      font-weight: 700 !important;
+    }
+    /* Esta lista quedó redundante frente al font-weight: 600 !important de
+       la regla base de arriba (mismo valor, especificidad (0,2,1) > (0,1,1)
+       así que de todas formas ganaría). Se conserva a propósito: nombra
+       explícitamente qué elementos el diseño quiere en semibold, así que si
+       mañana alguien cambia el peso de la regla base a otro valor, estos
+       elementos NO degradan en silencio con él. */
+    body.print-roll .field-label,
+    body.print-roll .item-sub,
+    body.print-roll .total-label,
+    body.print-roll .customer-name,
+    body.print-roll .dt-customer-name,
+    body.print-roll .doc-cashier,
+    body.print-roll .doc-terminal,
+    body.print-roll .cufe-label,
+    body.print-roll .total-in-words-label {
+      font-weight: 600 !important;
+    }
+    ` : ''}
   </style>
 </head>
-<body>
+<body class="${isRoll ? 'print-roll' : 'print-sheet'}">
   ${bodyContent}
   <script>
     document.addEventListener('click', function(e) {

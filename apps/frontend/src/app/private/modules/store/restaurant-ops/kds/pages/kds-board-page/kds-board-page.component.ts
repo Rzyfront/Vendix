@@ -29,6 +29,7 @@ import {
   KitchenTicketItem,
 } from '../../interfaces';
 import type {
+  FireConfirmPayload,
   FirePreview,
   FireItemExclusion,
   KdsConsumptionSummary,
@@ -780,7 +781,7 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   readonly cookSeed = signal<Map<number, number[]> | null>(null);
   private readonly cookTicketId = signal<number | null>(null);
 
-  onCookConfirmed(exclusions: FireItemExclusion[]): void {
+  onCookConfirmed(_event: FireConfirmPayload | FireItemExclusion[]): void {
     const ticketId = this.cookTicketId();
     this.cookConfirmOpen.set(false);
     if (ticketId == null) return;

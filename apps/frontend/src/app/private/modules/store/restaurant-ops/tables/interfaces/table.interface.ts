@@ -168,6 +168,10 @@ export interface TableSessionOrderItem {
   total_price: number | string;
   inventory_consumed_at_fire: boolean;
   /**
+   * C3 — nota de preparación por línea
+   */
+  notes?: string | null;
+  /**
    * QUI-653 — el item se empaca y el cliente se lo lleva, aunque siga
    * perteneciendo a la cuenta de esta mesa. La cabecera marca "pedido mixto"
    * cuando la orden tiene items de los dos tipos.

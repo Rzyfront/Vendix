@@ -484,6 +484,16 @@ export class PosCheckoutShellComponent {
 
   readonly isAnonymousSale = computed(() => this.saleMode() === 'anonymous');
   readonly userOverrideAnonymous = signal<boolean | null>(null);
+  /**
+   * Paso 9 — «Facturar a nombre de»: link secundario bajo "Venta Anónima" que
+   * despliega inline los 5 campos mínimos de facturación nominativa (sin
+   * pasar por "Con Cliente" ni por el buscador general). Al resolver un
+   * cliente aquí, `selectCustomer()` sigue el mismo camino que "Con Cliente"
+   * (el backend no distingue el origen de la captura); esto solo evita que
+   * el cajero navegue por un flujo pensado para búsqueda de CRM cuando lo
+   * único que quiere es poner un nombre en la factura.
+   */
+  readonly showAnonymousInvoiceCapture = signal(false);
   /** Guard: apply the config-driven anonymous default only on the first render. */
   private readonly anonymousDefaultSynced = signal(false);
 
@@ -1470,11 +1480,25 @@ export class PosCheckoutShellComponent {
   toggleAnonymousSale(enabled: boolean): void {
     this.userOverrideAnonymous.set(enabled);
     this.saleMode.set(enabled ? 'anonymous' : 'customer');
+    // Al salir de anónima, colapsa "Facturar a nombre de" para no dejarlo
+    // abierto detrás de la opción "Con Cliente" cuando el cajero vuelva.
+    if (!enabled) this.showAnonymousInvoiceCapture.set(false);
+  }
+
+  /**
+   * Paso 9 — abre/cierra el mini-formulario de 5 campos bajo "Venta Anónima".
+   * No toca `saleMode`: sigue siendo una venta anónima hasta que el cajero
+   * efectivamente resuelva un cliente (entonces `selectCustomer()` la
+   * convierte en 'customer', igual que si hubiera entrado por "Con Cliente").
+   */
+  toggleAnonymousInvoiceCapture(): void {
+    this.showAnonymousInvoiceCapture.update((v) => !v);
   }
 
   /** Cliente elegido/creado en el selector inline. */
   selectCustomer(customer: PosCustomer): void {
     this.userOverrideAnonymous.set(false);
+    this.showAnonymousInvoiceCapture.set(false);
     this.saleMode.set('customer');
     // QUI-737 (B.4) — un cliente real gana: cualquier alias previo se limpia.
     this.customerAlias.set('');

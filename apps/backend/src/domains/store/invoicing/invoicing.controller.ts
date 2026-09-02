@@ -156,6 +156,39 @@ export class InvoicingController {
     );
   }
 
+  /**
+   * ¿ESTO VA A PASAR? — el veredicto ANTES de gastar el consecutivo.
+   *
+   * Recibe el MISMO `CreateInvoiceDto` que `POST /store/invoicing` y contesta
+   * lo mismo que `GET /:id/emit-readiness`, salvo `invoice_id`,
+   * `invoice_number` y `status`: no hay documento del que declararlos.
+   *
+   * NO ESCRIBE Y NO NUMERA. `buildDraftProjection` se detiene exactamente donde
+   * `create()` llamaría a `generateNextNumber`, y el número que lleva la
+   * proyección se calcula por lectura. Ésta es la respuesta a que hasta ahora
+   * la única forma de saber si una factura podía emitirse fuera crearla — y si
+   * no podía, el consecutivo autorizado ya estaba quemado y no se recupera.
+   *
+   * `@HttpCode(OK)`: es una consulta. Un 201 anunciaría un recurso creado.
+   *
+   * Permiso de ESCRITURA y no de lectura, al contrario que
+   * `:id/emit-readiness`: acá el cuerpo es un documento por emitir, no una
+   * factura existente, y quien no puede facturar no tiene por qué poder
+   * ensayar contra la configuración fiscal de la tienda.
+   */
+  @Post('validate-draft')
+  @Permissions('invoicing:write')
+  @HttpCode(HttpStatus.OK)
+  async validateDraft(@Body() create_dto: CreateInvoiceDto) {
+    const { invoice, resolution_secret } =
+      await this.invoicing_service.buildDraftProjection(create_dto);
+    const result = await this.invoice_flow_service.getDraftEmitReadiness(
+      invoice,
+      { resolution_secret },
+    );
+    return this.response_service.success(result);
+  }
+
   @Post('from-order/:orderId')
   @Permissions('invoicing:write')
   @HttpCode(HttpStatus.CREATED)

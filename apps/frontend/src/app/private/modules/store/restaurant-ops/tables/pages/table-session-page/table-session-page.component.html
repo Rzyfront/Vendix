@@ -462,6 +462,12 @@
                             <span class="sr-only">Variante: </span>{{ item.variant_label }}
                           </p>
                         }
+                        @if (item.notes) {
+                          <p class="item-comanda-note">
+                            <app-icon name="message-square" [size]="11"></app-icon>
+                            {{ item.notes }}
+                          </p>
+                        }
                         <!-- El unitario sólo aporta cuando hay más de una
                              unidad: con cantidad 1 repite literalmente el
                              importe de la derecha y añade una línea entera

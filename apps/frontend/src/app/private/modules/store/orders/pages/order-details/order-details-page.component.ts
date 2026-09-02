@@ -77,6 +77,19 @@ import { PosTicketService } from '../../../pos/services/pos-ticket.service';
 import { OrderTicketService } from '../../services/order-ticket.service';
 import { TicketData } from '../../../pos/models/ticket.model';
 import { InvoicingService } from '../../../invoicing/services/invoicing.service';
+import { Actions, ofType } from '@ngrx/effects';
+import { Invoice } from '../../../invoicing/interfaces/invoice.interface';
+import * as InvoicingActions from '../../../invoicing/state/actions/invoicing.actions';
+import { InvoiceDetailComponent } from '../../../invoicing/components/invoice-detail/invoice-detail.component';
+import {
+  FiscalStatusCell,
+  fiscalStatusCells,
+  invoiceStatusLabel,
+  invoiceStatusTone,
+  toneClasses,
+} from '../../../invoicing/components/invoice-detail/invoice-fiscal-status.util';
+import { DocumentPrintService } from '../../../../../../shared/services/print/document-print.service';
+import { DianConfigApiService } from '../../../../../../shared/services/dian';
 import { DispatchTicketPrintService } from '../../../dispatch-ticket/services/dispatch-ticket-print.service';
 import type { DispatchTicketData } from '../../../dispatch-ticket/models/dispatch-ticket-data.model';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
@@ -144,6 +157,7 @@ type RefundState =
     CurrencyPipe,
     OrderPaymentModalComponent,
     OrderRefundModalComponent,
+    InvoiceDetailComponent,
     TimelineComponent,
     GenerateDispatchWizardComponent,
     DispatchMethodSelectorModalComponent,
@@ -1261,6 +1275,26 @@ export class OrderDetailsPageComponent {
   // `sales_invoice` aceptada — reintentar una emisión gastaría un consecutivo
   // autorizado ante la DIAN.
   private invoicingService = inject(InvoicingService);
+  private documentPrintService = inject(DocumentPrintService);
+  /**
+   * `GET store/invoicing/dian-config/emission-status` — la ÚNICA fuente para
+   * decidir si esta tienda está emitiendo facturas electrónicas de verdad.
+   *
+   * No se deriva de `fiscal_status.invoicing`: ese flag sólo dice que el
+   * wizard fiscal se completó, así que una tienda con el set de pruebas en
+   * curso lo pasaría y vería un botón que el backend rechaza con
+   * `INVOICING_ENABLEMENT_001` — el consecutivo no se quema, pero el operador
+   * ya hizo clic esperando una factura. El predicado es el mismo que aplica
+   * `InvoiceEmissionGateService.assertElectronicEmissionLive`:
+   * `environment === 'production' && enablement_status === 'enabled'`.
+   */
+  private readonly dianConfigApi = inject(DianConfigApiService);
+  /**
+   * `Actions` del feature `invoicing` que la ruta `orders/:id` provee. Se usa
+   * SÓLO para saber si el modal reutilizado mutó la factura — ver
+   * `invoiceMutatedInModal`.
+   */
+  private readonly invoicingActions$ = inject(Actions);
   // Plan KDS fire-flows (F3): manual selective fire for online orders
   // with `prepared` items that were never auto-fired (the auto-fire
   // runs in the payment $transaction; for orders paid before this
@@ -1342,6 +1376,44 @@ export class OrderDetailsPageComponent {
         delivery_notes: this.fb.control<string>(''),
       }),
     });
+
+    // Una sola lectura por montaje del detalle: `is_live` cambia cuando el
+    // comerciante promueve a producción desde Configuración fiscal, no
+    // mientras mira una orden.
+    this.dianConfigApi
+      .getDianEmissionStatus()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) =>
+          this.electronicEmissionLive.set(response?.data?.is_live === true),
+        error: () => this.electronicEmissionLive.set(false),
+      });
+
+    // Mismas trece acciones que `InvoicingEffects.mutationSuccess$` trata como
+    // mutación. No se duplica la lista por gusto: no hay un símbolo exportado
+    // que la contenga, y derivarla por convención de nombre ('…Success')
+    // dejaría entrar `loadInvoiceSuccess`, que no muta nada y volvería la
+    // recarga incondicional otra vez.
+    this.invoicingActions$
+      .pipe(
+        ofType(
+          InvoicingActions.createInvoiceSuccess,
+          InvoicingActions.createFromOrderSuccess,
+          InvoicingActions.createFromSalesOrderSuccess,
+          InvoicingActions.updateInvoiceSuccess,
+          InvoicingActions.deleteInvoiceSuccess,
+          InvoicingActions.validateInvoiceSuccess,
+          InvoicingActions.sendInvoiceSuccess,
+          InvoicingActions.createCreditNoteSuccess,
+          InvoicingActions.createDebitNoteSuccess,
+          InvoicingActions.acceptInvoiceSuccess,
+          InvoicingActions.rejectInvoiceSuccess,
+          InvoicingActions.cancelInvoiceSuccess,
+          InvoicingActions.voidInvoiceSuccess,
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe(() => this.invoiceMutatedInModal.set(true));
 
     this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
       this.orderId = params.get('id');
@@ -3579,25 +3651,301 @@ export class OrderDetailsPageComponent {
   }
 
   /**
-   * LA FACTURA ELECTRÓNICA ACEPTADA DE ESTA ORDEN, O `null`.
+   * LA ÚLTIMA FACTURA DE ESTA ORDEN, EN CUALQUIER ESTADO, O `null`.
    *
-   * `order.invoices` llega ya filtrado por el backend a `dian_status:
-   * 'accepted'` con `take: 1` (`orders.service.ts:574-579`), así que la sola
-   * presencia del elemento ES la respuesta. No se re-deriva nada.
-   *
-   * La versión anterior preguntaba `invoices.some(i => i.invoice_type ===
-   * 'sales_invoice')`. La proyección del backend sólo trae `invoice_number` y
-   * `cufe` — `invoice_type` no viaja —, así que ese predicado era SIEMPRE
-   * falso: el botón «Emitir factura electrónica» nunca se escondía, ni después
-   * de una emisión aceptada. Y como el backend tampoco tenía guarda de
-   * duplicado, cada clic tomaba un consecutivo autorizado nuevo. Los dos huecos
-   * están cerrados: acá el predicado, y allá `INVOICING_CREATE_002`.
+   * `order.invoices` dejó de venir filtrado por el backend a `dian_status:
+   * 'accepted'` (`orders.service.ts`, método `findOne`): la orden es dueña de
+   * la relación con su factura y la tarjeta necesita poder abrirla también
+   * rechazada, pendiente o en contingencia. Alimenta la tarjeta y el stub del
+   * modal (`invoiceStub`); `acceptedInvoice`, abajo, es quien deriva «¿esta
+   * factura fue aceptada por la DIAN?» para lo poco que sí necesita esa
+   * pregunta exacta.
    */
-  acceptedInvoice = computed<OrderInvoiceSnapshot | null>(
+  orderInvoice = computed<OrderInvoiceSnapshot | null>(
     () => this.order()?.invoices?.[0] ?? null,
   );
 
+  /**
+   * LA FACTURA DE ESTA ORDEN, SÓLO SI LA DIAN YA LA ACEPTÓ. `null` en
+   * cualquier otro caso, incluida la ausencia de factura.
+   *
+   * Antes esto era la proyección entera: el backend filtraba por `dian_status:
+   * 'accepted'`, así que la sola presencia de un elemento en `invoices` YA
+   * significaba «aceptada» y no hacía falta preguntar nada más. Con la
+   * proyección sin filtrar (arriba) esa garantía desapareció, así que ahora se
+   * deriva acá — el único sitio que de verdad necesita distinguir «aceptada»
+   * de «existe pero rechazada/pendiente/en contingencia»: el guard de
+   * `createInvoiceFromOrder` (no se emite una segunda vez sobre una orden ya
+   * facturada y aceptada) y el bloque de la tarjeta que muestra número + CUFE
+   * como registro fiscal fijo.
+   */
+  acceptedInvoice = computed<OrderInvoiceSnapshot | null>(() => {
+    const invoice = this.orderInvoice();
+    return invoice?.dian_status === 'accepted' ? invoice : null;
+  });
+
   hasSalesInvoice = computed(() => this.acceptedInvoice() !== null);
+
+  /**
+   * ¿PUEDE esta orden volver a facturarse, según el mismo criterio que aplica
+   * el backend?
+   *
+   * `InvoicingService.assertNotAlreadyInvoiced` bloquea la emisión cuando
+   * existe una `sales_invoice` de la orden con `status` fuera de
+   * `['voided','cancelled']` — es decir: anular o cancelar la factura LIBERA
+   * la orden. La proyección de la orden trae una sola fila (`take: 1`, la
+   * última), así que este predicado es el espejo de esa regla sobre la
+   * información disponible: sin factura, o con la última anulada/cancelada,
+   * se ofrece emitir.
+   *
+   * No es exacto en un caso: si la última está cancelada pero una anterior
+   * sigue aceptada, el backend bloquea y este predicado ofrece el botón. Ese
+   * clic termina en el 409 `INVOICING_CREATE_002`, que explica la ruta a
+   * seguir y NO consume consecutivo. Se prefiere ese error explícito a la
+   * alternativa —esconder el botón en cuanto exista cualquier fila—, que deja
+   * sin salida a quien canceló una factura equivocada y necesita re-emitir.
+   */
+  private readonly reinvoiceable = computed(() => {
+    const invoice = this.orderInvoice();
+    return (
+      !invoice ||
+      invoice.status === 'cancelled' ||
+      invoice.status === 'voided'
+    );
+  });
+
+  /**
+   * Visibilidad del botón «Emitir factura electrónica»: la orden admite
+   * factura Y la tienda está emitiendo en producción. Las dos condiciones,
+   * porque ofrecer el botón a una tienda que el backend va a rechazar
+   * (`INVOICING_ENABLEMENT_001`) es prometer lo que no se puede cumplir.
+   */
+  readonly canEmitInvoice = computed(
+    () => this.reinvoiceable() && this.electronicEmissionLive(),
+  );
+
+  /**
+   * ¿Esta tienda está habilitada para emitir facturación electrónica EN
+   * PRODUCCIÓN, ahora mismo?
+   *
+   * Arranca en `false` y sólo sube a `true` cuando el backend lo confirma:
+   * fail-closed. Si la lectura falla (403 por falta de `invoicing:read`, red
+   * caída, tienda sin configuración DIAN) la tarjeta no aparece, que es el
+   * comportamiento correcto — ofrecer «Emitir factura electrónica» a quien no
+   * puede emitirla es prometer algo que el backend va a negar.
+   */
+  private readonly electronicEmissionLive = signal(false);
+
+  /**
+   * Visibilidad de la tarjeta FACTURA ELECTRÓNICA del sidebar.
+   *
+   * Dos razones para mostrarla, y sólo dos:
+   *
+   * 1. La orden tiene factura ACEPTADA por la DIAN. El número y el CUFE son
+   *    registro fiscal: existen ante la DIAN y ante el adquiriente, así que no
+   *    se esconden por el estado de habilitación de la tienda.
+   * 2. La tienda está emitiendo en producción (`is_live`). Sólo entonces el
+   *    botón de emitir corresponde a algo que el backend va a aceptar, y sólo
+   *    entonces tiene sentido ofrecer acceso rápido al documento.
+   *
+   * Deliberadamente NO basta con que exista una factura en cualquier estado.
+   * Una tienda todavía en el set de pruebas SÍ produce facturas —pendientes,
+   * de prueba— sobre sus órdenes; mostrarle la tarjeta por eso la haría
+   * aparecer justo en el estado que se pidió excluir. Para ella el documento
+   * sigue siendo alcanzable por el módulo de Facturación, que es donde vive el
+   * trabajo de habilitación. Dentro de una tienda `is_live`, en cambio, la
+   * tarjeta muestra la factura EN CUALQUIER ESTADO (`orderInvoice`), rechazada
+   * y en contingencia incluidas: ahí es donde el operador necesita entrar a
+   * ver qué pasó.
+   */
+  readonly showElectronicInvoiceCard = computed(
+    () => this.acceptedInvoice() !== null || this.electronicEmissionLive(),
+  );
+
+  /**
+   * STUB de `Invoice` para alimentar `vendix-invoice-detail` y
+   * `fiscalStatusCells()` — las mismas funciones que usa el módulo de
+   * facturación, sin reimplementarlas.
+   *
+   * Sólo se rellenan con datos reales los campos que la proyección de la
+   * orden trae (`OrderInvoiceSnapshot`). El resto de los campos requeridos
+   * por `Invoice` (montos, ids de organización/tienda, timestamps de
+   * auditoría) llevan un valor neutro: nunca se pintan, porque
+   * `InvoiceDetailComponent` se autohidrata al abrir (`loadInvoice({id})`) y
+   * su `detail()` fusiona la fila completa de `GET :id` sobre este stub antes
+   * de que el usuario alcance a ver nada. `invoice_type` es el único campo
+   * cuyo tipo real (nueve valores, `OrderInvoiceType`) es más ancho que el
+   * `InvoiceType` que declara el módulo de facturación (cinco): de ahí el
+   * `as unknown as Invoice` en vez de un objeto literal tipado como `Invoice`
+   * directamente.
+   */
+  readonly invoiceStub = computed<Invoice | null>(() => {
+    const invoice = this.orderInvoice();
+    // `id` es opcional en `OrderInvoiceSnapshot` porque la consulta de
+    // impresión masiva no lo proyecta. Este detalle sí lo recibe, pero sin
+    // `id` no hay nada que hidratar ni PDF que pedir, así que se exige en vez
+    // de asumirlo.
+    if (!invoice?.id) return null;
+    return {
+      id: invoice.id,
+      organization_id: 0,
+      store_id: 0,
+      invoice_number: invoice.invoice_number,
+      invoice_type: invoice.invoice_type,
+      status: invoice.status,
+      cufe: invoice.cufe ?? undefined,
+      subtotal_amount: 0,
+      discount_amount: 0,
+      tax_amount: 0,
+      withholding_amount: 0,
+      total_amount: 0,
+      transmission_status: invoice.transmission_status,
+      dian_status: invoice.dian_status,
+      send_status: invoice.send_status,
+      issue_date: invoice.issue_date,
+      created_at: invoice.issue_date,
+      updated_at: invoice.issue_date,
+    } as unknown as Invoice;
+  });
+
+  /**
+   * Chips de estado fiscal de la tarjeta — misma función pura que pinta el
+   * modal (`fiscalStatusCells`, `invoice-fiscal-status.util.ts`), nunca una
+   * segunda lectura del estado. Sin request propio: `invoiceStub()` ya trae
+   * las columnas que esta función necesita desde la proyección de la orden.
+   */
+  readonly invoiceFiscalCells = computed<FiscalStatusCell[]>(() => {
+    const invoice = this.invoiceStub();
+    return invoice ? fiscalStatusCells(invoice) : [];
+  });
+
+  /** Tono → clases del badge. Mismo mapa que el modal; se expone así porque
+   *  la plantilla no puede invocar una función importada suelta. */
+  readonly toneClasses = toneClasses;
+
+  /**
+   * Chip del `status` del documento, aparte de los tres del ciclo fiscal.
+   *
+   * `fiscalStatusCells()` no lo cubre: sin él, una factura CANCELADA se
+   * presentaba con «Transmisión: Borrador · DIAN: Sin transmitir» —cierto y
+   * engañoso, porque el operador no veía en ningún lado que ya no sirve.
+   */
+  readonly invoiceStatusChip = computed<FiscalStatusCell | null>(() => {
+    const invoice = this.orderInvoice();
+    if (!invoice?.status) return null;
+    return {
+      label: 'Documento',
+      text: invoiceStatusLabel(invoice.status),
+      tone: invoiceStatusTone(invoice.status),
+      hint: null,
+    };
+  });
+
+  /** Visibilidad del modal completo de detalle de factura reutilizado del
+   *  módulo de facturación. */
+  showInvoiceDetailModal = signal(false);
+
+  /**
+   * ¿El modal mutó la factura mientras estuvo abierto?
+   *
+   * La escribe la suscripción de más abajo, que escucha las MISMAS trece
+   * acciones de éxito que `InvoicingEffects.mutationSuccess$` considera
+   * mutación. Existe para que cerrar el modal después de sólo MIRAR la factura
+   * no cueste una recarga de la orden (`loadData()` son tres peticiones:
+   * detalle, timeline y reembolsos). Abrir y cerrar es el gesto más frecuente
+   * de un acceso rápido; pagar tres peticiones por cada ojeada es justo lo que
+   * un acceso rápido no debería costar.
+   */
+  private readonly invoiceMutatedInModal = signal(false);
+
+  openInvoiceDetail(): void {
+    if (this.invoiceStub()) {
+      this.invoiceMutatedInModal.set(false);
+      this.showInvoiceDetailModal.set(true);
+    }
+  }
+
+  /**
+   * Al cerrar el modal se recarga la orden SÓLO si por dentro hubo mutación
+   * (validar, enviar, anular, nota crédito/débito…): entonces el estado con el
+   * que se pintó la tarjeta —y el pie del tiquete, que depende de
+   * `dian_status`— quedó rancio. Sin mutación no hay nada que recargar.
+   */
+  onInvoiceDetailModalChange(open: boolean): void {
+    this.showInvoiceDetailModal.set(open);
+    if (!open && this.invoiceMutatedInModal()) {
+      this.invoiceMutatedInModal.set(false);
+      this.loadData();
+    }
+  }
+
+  readonly invoicePdfLoading = signal(false);
+
+  /**
+   * Descarga directa del PDF desde la tarjeta, sin pasar por el modal. Mismo
+   * endpoint que `InvoiceDetailComponent.downloadPdf()` (`GET :id/pdf`, URL
+   * FIRMADA): `invoices.pdf_url` guarda la llave S3, no una URL abrible.
+   */
+  downloadInvoicePdf(): void {
+    // `invoiceStub()` y no `orderInvoice()`: es el que ya exigió el `id`.
+    const invoice = this.invoiceStub();
+    if (!invoice || this.invoicePdfLoading()) return;
+    this.invoicePdfLoading.set(true);
+    this.invoicingService
+      .getInvoicePdfUrl(invoice.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.invoicePdfLoading.set(false);
+          const url = response?.data?.url;
+          if (!url) {
+            this.toastService.error('El servidor no devolvió la URL del PDF');
+            return;
+          }
+          const opened = window.open(url, '_blank', 'noopener');
+          if (!opened) {
+            this.toastService.warning(
+              'El navegador bloqueó la ventana del documento. Permite las ventanas emergentes para este sitio.',
+            );
+          }
+        },
+        error: (err: unknown) => {
+          this.invoicePdfLoading.set(false);
+          this.toastService.error(parseApiError(err).userMessage);
+        },
+      });
+  }
+
+  readonly invoicePrinting = signal(false);
+
+  /**
+   * Imprime la factura por el Print Gateway. Mismo criterio que
+   * `InvoiceDetailComponent.printInvoice()`: sin plantilla propia ni fallback
+   * local — el servidor resuelve el snapshot fiscal congelado del documento.
+   */
+  printInvoiceDocument(): void {
+    const invoice = this.invoiceStub();
+    if (!invoice || this.invoicePrinting()) return;
+    this.invoicePrinting.set(true);
+    void this.documentPrintService
+      .printViaGateway({
+        formatType: 'fiscal_electronic_invoice',
+        documentId: invoice.id,
+        title: invoice.invoice_number,
+      })
+      .then((result) => {
+        this.invoicePrinting.set(false);
+        if (!result) {
+          this.toastService.error(
+            'No se pudo imprimir: revisa el formato «Factura Electrónica (DIAN)» en el Hub de formatos de impresión.',
+          );
+        }
+      })
+      .catch((err: unknown) => {
+        this.invoicePrinting.set(false);
+        this.toastService.error(parseApiError(err).userMessage);
+      });
+  }
 
   isEmittingInvoice = signal(false);
 

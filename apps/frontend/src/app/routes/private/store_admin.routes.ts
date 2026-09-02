@@ -376,6 +376,17 @@ export const storeAdminRoutes: Routes = [
           },
           {
             path: ':id',
+            // El detalle de orden reutiliza `vendix-invoice-detail` (el modal
+            // completo del módulo de facturación) para su tarjeta "Factura
+            // Electrónica" en vez de duplicar sus acciones. Ese modal despacha
+            // contra el feature `invoicing`, así que esta rama tiene que
+            // proveerlo igual que ya lo hace `pos` — mismo patrón, acotado a
+            // `orders/:id` para que el listado de órdenes no cargue reducer ni
+            // effects que no usa.
+            providers: [
+              provideState({ name: 'invoicing', reducer: invoicingReducer }),
+              provideEffects(InvoicingEffects),
+            ],
             loadComponent: () =>
               import('../../private/modules/store/orders/pages/order-details/order-details-page.component').then(
                 (c) => c.OrderDetailsPageComponent,

@@ -16,6 +16,8 @@ import { PrintDocumentRendererService } from './print-document-renderer.service'
 // owns the timer and the `organization_id` resolution so the metric line
 // and the existing logger line stay co-located.
 import { PrintGatewayMetricsService } from './print-gateway.metrics';
+import { S3Service } from '../../../../common/services/s3.service';
+import { signStoreLogoUrl } from '../lib/print-logo.util';
 import {
   PrintColumnDefinition,
   PrintFormatDefinition,
@@ -86,6 +88,11 @@ export class PrintGatewayService {
     // register the provider via the module.
     @Optional()
     private readonly metrics?: PrintGatewayMetricsService,
+    // Firma el logo en `enrichDataWithStoreIdentity` (preview del Hub). Sin
+    // esto el preview pisaba el `logo_url` YA firmado que devolvía el
+    // provider con la KEY cruda de S3 (ver `signStoreLogoUrl`).
+    @Optional()
+    private readonly s3Service?: S3Service,
   ) {}
 
   /**
@@ -604,7 +611,13 @@ export class PrintGatewayService {
         },
       });
       if (store) {
-        const storeLogo = store.logo_url || store.organizations?.logo_url || undefined;
+        const rawStoreLogo = store.logo_url || store.organizations?.logo_url || undefined;
+        // `store.logo_url`/`organizations.logo_url` son la KEY desnuda de S3
+        // (vendix-s3-storage: nunca se persiste firmada). Sin firmar acá el
+        // preview del Hub pisaba el `logo_url` que el provider YA había
+        // firmado con esta misma key cruda — mismo defecto que en los
+        // providers, pero en el carril de "enriquecer con datos reales".
+        const storeLogo = await signStoreLogoUrl(this.s3Service, rawStoreLogo, this.logger);
         const addr = store.addresses?.[0];
         const addressLine = addr?.address_line1 || undefined;
         const city = addr?.city || undefined;

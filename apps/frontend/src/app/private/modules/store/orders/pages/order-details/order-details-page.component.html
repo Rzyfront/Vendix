@@ -1465,73 +1465,164 @@
           </app-card>
 
           <!-- 5. FACTURA ELECTRÓNICA -->
-          <app-card shadow="sm" [responsivePadding]="true">
-            <h2
-              class="text-xs sm:text-sm font-bold text-gray-900 uppercase tracking-wider mb-3 sm:mb-4"
-            >
-              Factura Electrónica
-            </h2>
-            @if (acceptedInvoice(); as invoice) {
-              <!--
-                La factura ya existe: lo que el operador necesita acá no es que
-                se lo cuenten, es el NÚMERO —para buscarla en Facturación— y el
-                CUFE, que es lo que el adquiriente usa para verificarla en el
-                portal de la DIAN. Un párrafo que dice «ya tiene factura» y no
-                dice cuál obliga a salir de la pantalla a averiguarlo.
-              -->
-              <div
-                class="rounded-lg border border-success/30 bg-success-light p-3"
+          <!-- Acceso rápido a la factura de esta orden con la misma capacidad
+               que el módulo de Facturación: los chips de abajo salen de
+               `fiscalStatusCells()`, la misma función pura que pinta el modal
+               reutilizado (`vendix-invoice-detail`, montado más abajo), y
+               "Ver detalle" abre ESE modal — nunca una reimplementación. Sólo
+               para quien está emitiendo en producción ante la DIAN, o para una
+               orden con factura YA ACEPTADA (número y CUFE son registro fiscal
+               y no se esconden). Dentro de una tienda en producción la tarjeta
+               muestra la factura en cualquier estado —rechazada, pendiente o
+               en contingencia—, que es cuando más falta hace entrar a mirarla.
+               Set de pruebas, habilitación en trámite o tienda sin
+               configuración DIAN y sin factura aceptada: la tarjeta no
+               existe. -->
+          @if (showElectronicInvoiceCard()) {
+            <app-card shadow="sm" [responsivePadding]="true">
+              <h2
+                class="text-xs sm:text-sm font-bold text-gray-900 uppercase tracking-wider mb-3 sm:mb-4"
               >
-                <div class="flex items-start gap-2.5">
-                  <app-icon
-                    name="check-circle"
-                    [size]="16"
-                    class="text-success shrink-0 mt-0.5"
-                  />
-                  <div class="min-w-0 flex-1">
-                    <p
-                      class="text-[11px] font-semibold text-success uppercase tracking-wide"
-                    >
-                      Validada por la DIAN
-                    </p>
-                    <p
-                      class="text-sm sm:text-base font-bold text-gray-900 mt-1 break-all"
-                    >
-                      {{ invoice.invoice_number }}
-                    </p>
-                    @if (invoice.cufe) {
+                Factura Electrónica
+              </h2>
+              @if (orderInvoice(); as invoice) {
+                <!--
+                  La factura ya existe: lo que el operador necesita acá no es que
+                  se lo cuenten, es el NÚMERO —para buscarla en Facturación— y el
+                  CUFE, que es lo que el adquiriente usa para verificarla en el
+                  portal de la DIAN. Los chips de estado (transmisión, DIAN,
+                  envío) dicen en qué va SIN que haya que abrir el modal para
+                  saberlo.
+                -->
+                <div class="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <div class="flex items-start gap-2.5">
+                    <app-icon
+                      name="receipt"
+                      [size]="16"
+                      class="text-gray-500 shrink-0 mt-0.5"
+                    />
+                    <div class="min-w-0 flex-1">
                       <p
-                        class="text-[10px] font-mono text-gray-500 mt-1.5 break-all leading-snug"
-                        [title]="invoice.cufe"
+                        class="text-sm sm:text-base font-bold text-gray-900 break-all"
                       >
-                        <span class="font-sans font-semibold text-gray-600"
-                          >CUFE</span
-                        >
-                        {{ invoice.cufe }}
+                        {{ invoice.invoice_number }}
                       </p>
-                    }
+                      @if (invoice.cufe) {
+                        <p
+                          class="text-[10px] font-mono text-gray-500 mt-1 break-all leading-snug"
+                          [title]="invoice.cufe"
+                        >
+                          <span class="font-sans font-semibold text-gray-600"
+                            >CUFE</span
+                          >
+                          {{ invoice.cufe }}
+                        </p>
+                      }
+                      @if (invoiceFiscalCells().length || invoiceStatusChip()) {
+                        <div class="flex flex-wrap gap-1.5 mt-2">
+                          @if (invoiceStatusChip(); as statusChip) {
+                            <span
+                              class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                              [class]="toneClasses(statusChip.tone)"
+                            >
+                              {{ statusChip.label }}: {{ statusChip.text }}
+                            </span>
+                          }
+                          @for (
+                            cell of invoiceFiscalCells();
+                            track cell.label
+                          ) {
+                            <span
+                              class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                              [class]="toneClasses(cell.tone)"
+                              [title]="cell.hint || ''"
+                            >
+                              {{ cell.label }}: {{ cell.text }}
+                            </span>
+                          }
+                        </div>
+                      }
+                    </div>
                   </div>
+
+                  <!-- Los tres botones necesitan el `id` de la factura, que
+                       `invoiceStub()` es quien garantiza. Sin él se muestran
+                       número, CUFE y chips —que sí son legibles— y no botones
+                       que no harían nada. -->
+                  @if (invoiceStub()) {
+                    <div class="flex flex-wrap gap-2 mt-3">
+                      <app-button
+                        variant="outline"
+                        size="sm"
+                        (clicked)="openInvoiceDetail()"
+                      >
+                        <app-icon slot="icon" name="eye" [size]="14" />
+                        Ver detalle
+                      </app-button>
+                      <app-button
+                        variant="outline"
+                        size="sm"
+                        [loading]="invoicePdfLoading()"
+                        [disabled]="invoicePdfLoading()"
+                        (clicked)="downloadInvoicePdf()"
+                      >
+                        <app-icon slot="icon" name="download" [size]="14" />
+                        PDF
+                      </app-button>
+                      <app-button
+                        variant="outline"
+                        size="sm"
+                        [loading]="invoicePrinting()"
+                        [disabled]="invoicePrinting()"
+                        (clicked)="printInvoiceDocument()"
+                      >
+                        <app-icon slot="icon" name="printer" [size]="14" />
+                        Imprimir
+                      </app-button>
+                    </div>
+                  }
                 </div>
-              </div>
-            } @else {
-              <p class="text-xs sm:text-sm text-gray-700 mb-3">
-                Emite la factura electrónica de venta con los datos de esta
-                orden. Cada emisión consume un consecutivo autorizado ante la
-                DIAN que no se recupera, así que el botón desaparece en cuanto
-                la orden tenga su factura aceptada.
-              </p>
-              <app-button
-                variant="primary"
-                size="md"
-                [loading]="isEmittingInvoice()"
-                [disabled]="isEmittingInvoice()"
-                (clicked)="createInvoiceFromOrder()"
-              >
-                <app-icon slot="icon" name="receipt" [size]="14" />
-                Emitir factura electrónica
-              </app-button>
+              }
+              <!-- El botón NO es el `@else` del bloque de arriba: una factura
+                   anulada o cancelada deja ver su registro Y habilita volver a
+                   emitir, que es justo lo que hace el backend
+                   (`assertNotAlreadyInvoiced` excluye `voided`/`cancelled`).
+                   Como `@else`, cancelar una factura equivocada dejaba la
+                   orden sin salida. -->
+              @if (canEmitInvoice()) {
+                <div [class.mt-3]="orderInvoice() !== null">
+                  <app-button
+                    variant="primary"
+                    size="md"
+                    [loading]="isEmittingInvoice()"
+                    [disabled]="isEmittingInvoice()"
+                    (clicked)="createInvoiceFromOrder()"
+                  >
+                    <app-icon slot="icon" name="receipt" [size]="14" />
+                    Emitir factura electrónica
+                  </app-button>
+                </div>
+              }
+            </app-card>
+          }
+
+          <!-- Modal de detalle de factura reutilizado tal cual del módulo de
+               Facturación: se autohidrata al abrir (`loadInvoice({id})` +
+               `loadDianEvents`) sobre el stub de arriba, así que las 18
+               acciones del módulo (validar, enviar, reintentar, anular, nota
+               crédito/débito, copiar CUFE, QR, PDF, XML, eventos RADIAN…) son
+               las MISMAS del módulo, no una copia. Depende del feature NgRx
+               `invoicing` que la ruta `orders/:id` provee
+               (`store_admin.routes.ts`). -->
+          @defer (when showInvoiceDetailModal()) {
+            @if (showInvoiceDetailModal()) {
+              <vendix-invoice-detail
+                [isOpen]="showInvoiceDetailModal()"
+                [invoice]="invoiceStub()"
+                (isOpenChange)="onInvoiceDetailModalChange($event)"
+              />
             }
-          </app-card>
+          }
 
           <!-- 6. FLOW METADATA CARDS -->
 

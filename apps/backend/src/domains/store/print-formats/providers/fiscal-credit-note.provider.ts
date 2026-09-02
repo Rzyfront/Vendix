@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { QrService } from '../../../../common/services/qr.service';
+import { S3Service } from '../../../../common/services/s3.service';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
 import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
@@ -10,7 +11,9 @@ import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import {
   FISCAL_DOCUMENT_PRINT_INCLUDE,
   mapFiscalDocumentToPrintData,
+  resolveRawLogoKey,
 } from './fiscal-document-print.mapper';
+import { signStoreLogoUrl } from '../lib/print-logo.util';
 
 /**
  * Tipos de `invoices.invoice_type` que ESTE formato puede imprimir.
@@ -28,10 +31,15 @@ const CREDIT_NOTE_TYPES = ['credit_note'] as const;
 @Injectable()
 export class FiscalCreditNoteDataProvider implements IDocumentDataProvider {
   readonly formatType: print_format_type_enum = 'fiscal_credit_note';
+  private readonly logger = new Logger(FiscalCreditNoteDataProvider.name);
 
+  // `s3Service` opcional: `real-print-path.spec.ts` y `document-number-format.spec.ts`
+  // instancian este provider con 2 argumentos; Nest inyecta el tercero en
+  // runtime (`print-formats.module.ts` importa `S3Module`).
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly qrService: QrService,
+    private readonly s3Service?: S3Service,
   ) {}
 
   /**
@@ -97,11 +105,14 @@ export class FiscalCreditNoteDataProvider implements IDocumentDataProvider {
       }
     }
 
+    const signedLogoUrl = await signStoreLogoUrl(this.s3Service, resolveRawLogoKey(note), this.logger);
+
     return mapFiscalDocumentToPrintData(note, {
       qrBase64,
       acceptedLabel: 'Nota crédito aprobada por DIAN',
       pendingLabel: 'Nota crédito pendiente',
       referenceDocumentNumber,
+      signedLogoUrl,
     });
   }
 

@@ -766,22 +766,40 @@ export class OrdersService {
             },
           },
         },
-        // Solo la factura ACEPTADA por la DIAN, y solo la última (QUI-604).
+        // La última factura de la orden, EN CUALQUIER ESTADO (QUI-604 la trajo
+        // filtrada por `dian_status: 'accepted'`; dejó de estarlo).
         //
-        // El tiquete que se imprime desde el detalle de orden la necesita para
-        // saber si es el documento fiscal o una copia informativa: sin esta fila
-        // `OrderTicketService.toTicketData` deja `electronicInvoice` vacío,
-        // `PosTicketService.shouldShowTaxes` cae a `printsVatBreakdown()`, y una
-        // orden YA facturada sale con desglose de IVA y el pie "Este documento
-        // no es una factura electrónica". Mismo criterio que
-        // `OrdersBulkService.bulkPrint`.
+        // El detalle de orden usa esta fila para dos cosas que necesitan
+        // audiencias distintas:
         //
-        // `accepted` y no `pending`: el pie afirma literalmente "validada por la
-        // DIAN", así que la AUSENCIA de fila es la señal correcta para no
-        // afirmarlo.
+        //  1. El tiquete que se imprime desde la orden, que sólo puede afirmar
+        //     "validada por la DIAN" de una factura ACEPTADA. Esa derivación
+        //     ahora vive en el frontend (`OrderTicketService`), no acá: filtrar
+        //     en la consulta escondía justo los casos — rechazada, pendiente,
+        //     en contingencia — en los que el operador más necesita ver la
+        //     factura para entender qué pasó.
+        //  2. La tarjeta "Factura Electrónica" del detalle de orden, que ahora
+        //     es un acceso rápido al modal completo de facturación y necesita
+        //     poder abrir la factura exista o no aceptación de la DIAN.
+        //
+        // `invoice_type`, `transmission_status`, `send_status` se suman a lo
+        // que ya viajaba porque `fiscalStatusCells()` (el pintor de chips que
+        // la tarjeta reutiliza del módulo de facturación) omite cada celda
+        // cuya columna no venga, y su rama `dian_status === 'not_applicable'`
+        // necesita `invoice_type` para no decir "no es electrónica" de una
+        // factura de venta recién creada que todavía no se transmitió.
         invoices: {
-          where: { dian_status: 'accepted' },
-          select: { invoice_number: true, cufe: true },
+          select: {
+            id: true,
+            invoice_number: true,
+            invoice_type: true,
+            cufe: true,
+            status: true,
+            dian_status: true,
+            transmission_status: true,
+            send_status: true,
+            issue_date: true,
+          },
           orderBy: { id: 'desc' },
           take: 1,
         },

@@ -78,6 +78,8 @@ export interface TableSessionView {
       // UI to know whether an order_item is a `prepared` dish (kitchen
       // flow) or a non-dish like bottled water (no kitchen control).
       item_type: string | null;
+      // C3 — nota libre por línea
+      notes?: string | null;
       // QUI-653 — para llevar, por item. La mesa muestra un badge en la fila y
       // la cabecera marca "pedido mixto" cuando hay items de los dos tipos.
       is_takeaway: boolean;
@@ -1506,6 +1508,8 @@ export class TableSessionsService {
                 // Read-only projection: lets the table-session UI hide
                 // the kitchen controls for non-dish items.
                 item_type: true,
+                // C3 — nota libre por línea
+                notes: true,
                 // QUI-653 — el item se empaca y el cliente se lo lleva. El
                 // derivado "pedido mixto" se calcula sobre estas lineas, no se
                 // persiste, para que no pueda desincronizarse de ellas.
