@@ -129,7 +129,18 @@ export class PrintLayoutComposerService {
     // no define uno propio.
     const designedLogoUrl = defLogoBlock?.url;
     const fallbackLogoUrl = runtimeLogo && !designedLogoUrl ? runtimeLogo : undefined;
-    const defaultMonochromeLogo = '/vlogomono.png';
+    // Antes: '/vlogomono.png', ruta relativa a la RAÍZ DEL BACKEND que
+    // ensambla este HTML. El archivo real vive en `apps/frontend/public/`, o
+    // sea que sólo resuelve si el documento se sirve desde el origen del
+    // frontend con esa ruta montada — y el carril real de impresión
+    // (`document-print.service.ts` en el frontend) inyecta este HTML en un
+    // iframe oculto vía `document.write`, sin `<base>` ni garantía de
+    // heredar el origen del padre. Ruta relativa rota == mismo defecto que
+    // el logo de tienda sin firmar: 404 → `alt="Logo"` literal. Absoluta
+    // contra `FRONTEND_URL` (mismo patrón que `auth.service.ts` y
+    // `email-templates.ts` para links salientes) resuelve sin importar
+    // dónde se abra el documento.
+    const defaultMonochromeLogo = `${process.env.FRONTEND_URL || 'http://localhost:4200'}/vlogomono.png`;
     const isLogoExplicitlyDisabled = defLogoBlock && (defLogoBlock as any).enabled === false;
 
     const logoUrl = isLogoExplicitlyDisabled
@@ -138,7 +149,14 @@ export class PrintLayoutComposerService {
 
     let logo = '';
     if (logoUrl || mode === 'tokenized') {
-      const pos = defLogoBlock?.position || 'left';
+      // El defecto SIN posición explícita depende del papel: en rollo
+      // térmico (`paper.is_roll`) el logo es el encabezado del tiquete y va
+      // centrado, igual que el resto del header (`header_alignment` por
+      // defecto ya cae a `center` en rollo, ver `renderStyles`). En hoja
+      // (carta/A4) el defecto sigue siendo izquierda, como antes. Un
+      // `position` explícito en la definición SIEMPRE gana — esto sólo
+      // decide qué pasa cuando la plantilla no lo declaró.
+      const pos = defLogoBlock?.position || (definition.paper?.is_roll ? 'center' : 'left');
       const sizeMm = typeof defLogoBlock?.size_mm === 'number' ? defLogoBlock.size_mm : 14;
       const opacity = typeof defLogoBlock?.opacity === 'number' ? defLogoBlock.opacity : 100;
       const maxPx = pos === 'full' ? '100%' : `${Math.max(8, Math.min(64, Math.round(sizeMm * 3.78)))}px`;
@@ -716,8 +734,14 @@ export class PrintLayoutComposerService {
     const doc = data.document || ({} as any);
     const items = data.items || [];
 
+    // `store.logo_url` ya llega firmado desde `dispatch-ticket.provider.ts`
+    // (nunca la KEY desnuda de S3). El `text-align: center` inline es
+    // redundante con `.section-dispatch-ticket .dt-header { text-align:
+    // center }` de más abajo, pero se deja explícito aquí — igual que en
+    // `renderHeaderSection` — para no depender silenciosamente de un ancestro
+    // que otro cambio de CSS podría mover.
     const logo = store.logo_url
-      ? `<div class="dt-logo"><img src="${this.compiler.escapeHtml(store.logo_url)}" alt="Logo" /></div>`
+      ? `<div class="dt-logo" style="text-align: center;"><img src="${this.compiler.escapeHtml(store.logo_url)}" alt="Logo" /></div>`
       : '';
     const header = `
       <div class="dt-header">

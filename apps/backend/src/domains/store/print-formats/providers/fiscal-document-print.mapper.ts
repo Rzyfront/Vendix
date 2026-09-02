@@ -128,6 +128,29 @@ export interface FiscalDocumentPrintOptions {
    * referencia no es verificable contra nada.
    */
   referenceDocumentNumber?: string;
+  /**
+   * URL YA FIRMADA del logo (o `undefined` si no hay logo / la firma falló).
+   * Este mapeador es una función pura sin DI, así que no puede llamar a
+   * `S3Service` por su cuenta — cada provider llamante resuelve la key cruda
+   * con `resolveRawLogoKey()` (abajo) y la firma antes de invocar
+   * `mapFiscalDocumentToPrintData`, igual que ya hacía con `qrBase64`. Sin
+   * este campo, el `logo_url` que llega al compositor sería la KEY desnuda
+   * de S3, el `<img>` daría 404 y el papel mostraría `alt="Logo"` literal.
+   */
+  signedLogoUrl?: string;
+}
+
+/**
+ * Key cruda de S3 del logo del emisor: tienda primero, organización como
+ * fallback — misma prioridad que usaba el `logo_url` de abajo antes de que
+ * la firma se moviera al provider. Exportada para que cada provider pueda
+ * resolverla, firmarla con `S3Service`, y pasar el resultado como
+ * `signedLogoUrl`.
+ */
+export function resolveRawLogoKey(invoice: any): string | undefined {
+  const store = invoice?.store || {};
+  const org = invoice?.organization || {};
+  return store.logo_url || org.logo_url || undefined;
 }
 
 const money = (n: number) => `$${n.toLocaleString('es-CO')}`;
@@ -201,7 +224,7 @@ export function mapFiscalDocumentToPrintData(
       email: issuer.email,
       address: issuer.fiscal_address || undefined,
       city: issuer.city || undefined,
-      logo_url: store.logo_url || org.logo_url,
+      logo_url: options.signedLogoUrl,
       tax_regime: issuer.tax_regime,
       fiscal_responsibilities: issuer.tax_responsibilities.length
         ? issuer.tax_responsibilities

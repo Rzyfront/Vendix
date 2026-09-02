@@ -23,6 +23,7 @@ import {
   resolveDianMunicipality,
 } from '../constants/dian-geography';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { DIAN_FINAL_CONSUMER_NAME } from '../../../validators/customer-fiscal-identity.validator';
 import { createHash } from 'crypto';
 import {
   DianNumericInput,
@@ -869,7 +870,7 @@ export class UblCommonBuilder {
         customer.trade_name ||
           customer.legal_name ||
           `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() ||
-          'Consumidor Final',
+          DIAN_FINAL_CONSUMER_NAME,
       );
 
     // Physical location

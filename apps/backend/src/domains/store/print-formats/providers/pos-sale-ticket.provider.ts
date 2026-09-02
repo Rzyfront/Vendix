@@ -1,17 +1,27 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { S3Service } from '../../../../common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
 import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
+import { signStoreLogoUrl } from '../lib/print-logo.util';
 
 @Injectable()
 export class PosSaleTicketDataProvider implements IDocumentDataProvider {
   readonly formatType: print_format_type_enum = 'pos_sale_ticket';
+  private readonly logger = new Logger(PosSaleTicketDataProvider.name);
 
-  constructor(private readonly prisma: StorePrismaService) {}
+  // `s3Service` es opcional en la firma (no `@Optional()`) para no romper los
+  // specs que instancian el provider a mano con un solo argumento
+  // (`new PosSaleTicketDataProvider(prisma)`); en runtime Nest siempre lo
+  // inyecta porque `print-formats.module.ts` ya importa `S3Module`.
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly s3Service?: S3Service,
+  ) {}
 
   async fetchDocumentData(
     storeId: number,
@@ -79,7 +89,12 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       throw new VendixHttpException(ErrorCodes.PRINT_DOCUMENT_NOT_FOUND_001);
     }
 
-    return this.mapOrderToStandardModel(order);
+    // El logo se firma acá (única llamada `async` de este flujo) porque
+    // `mapOrderToStandardModel` es un mapeador puro y síncrono que también
+    // usan otros callers de este provider — no podíamos meterle un `await`
+    // sin volverlo async y arrastrar ese cambio a todos sus usos.
+    const signedLogoUrl = await signStoreLogoUrl(this.s3Service, order.stores?.logo_url, this.logger);
+    return this.mapOrderToStandardModel(order, signedLogoUrl);
   }
 
   async getSampleData(storeId?: number): Promise<StandardPrintDataModel> {
@@ -219,7 +234,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     }));
   }
 
-  private mapOrderToStandardModel(order: any): StandardPrintDataModel {
+  private mapOrderToStandardModel(order: any, signedLogoUrl?: string): StandardPrintDataModel {
     const store = order.stores || {};
     const org = store.organizations || {};
     const addr = store.addresses?.[0] || {};
@@ -274,7 +289,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         email: store.email,
         address: addr.address_line1 ? `${addr.address_line1} ${addr.address_line2 || ''}`.trim() : undefined,
         city: addr.city,
-        logo_url: store.logo_url,
+        logo_url: signedLogoUrl,
       },
       customer: user.id
         ? {

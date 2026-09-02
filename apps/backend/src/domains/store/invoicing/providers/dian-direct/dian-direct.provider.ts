@@ -2398,6 +2398,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       declared_address: address,
       declared_number,
       invoice_number: invoice_data.invoice_number,
+      sale_rail: invoice_data.sale_rail,
       fallback,
     });
 
@@ -2464,10 +2465,16 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     declared_address: AcquirerAddressCandidate | undefined;
     declared_number: string;
     invoice_number: string;
+    sale_rail?: 'on_demand' | 'advanced';
     fallback?: { issuer: DianIssuerData; config: DianConfigDecrypted };
   }): Promise<ResolvedAcquirerAddress | null> {
-    const { declared_address, declared_number, invoice_number, fallback } =
-      params;
+    const {
+      declared_address,
+      declared_number,
+      invoice_number,
+      sale_rail,
+      fallback,
+    } = params;
 
     const store_address = fallback
       ? {
@@ -2509,6 +2516,38 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       // No hay nada que reprocharle al usuario porque no se intentó ninguna
       // cascada.
       if (!fallback) return null;
+
+      // EXENCIÓN DEL CARRIL RÁPIDO — una venta bajo demanda no se cae por una
+      // dirección.
+      //
+      // El grupo de dirección del adquiriente es OMISIBLE: FAK09-FAK12
+      // declaran los cuatro elementos Divipola `0..1`, y `buildCustomerParty`
+      // ya no emite `cac:PhysicalLocation` cuando no hay `city_code`. Es el
+      // mismo XML que sale hoy en cada documento a Consumidor Final, que la
+      // DIAN acepta. Así que aquí no se está evitando un rechazo: se está
+      // convirtiendo un campo opcional ausente en una emisión fallida.
+      //
+      // Y falla en el peor sitio posible. Este punto es POSTERIOR a
+      // `generateNextNumber`: el consecutivo autorizado ya se tomó, y Vendix no
+      // tiene forma de explicarle a la DIAN un hueco de numeración —no existe
+      // tabla, columna ni reporte de anulación—. Un mostrador que capturó lo
+      // que se le pide capturar (tipo, número, nombres, apellidos, correo; sin
+      // dirección, por diseño) quedaría con la venta cobrada, el consecutivo
+      // gastado y ninguna factura.
+      //
+      // El carril avanzado CONSERVA la caída: ahí el cliente se crea completo
+      // en el módulo de clientes, el operador tiene dónde corregir, y la
+      // prevalidación se lo dice antes de numerar. La exigencia fuerte sigue
+      // existiendo; lo que cambia es que deja de cobrarse contra un consecutivo
+      // ya quemado.
+      if (sale_rail === 'on_demand') {
+        this.logger.warn(
+          `[DIAN] Documento ${invoice_number}: venta bajo demanda sin ninguna dirección declarable para el adquiriente. ` +
+            'Se emite SIN el grupo de dirección (FAK09-FAK12 son 0..1). ' +
+            'Si esta tienda debe declarar municipio del comprador, complétalo en la ficha del cliente.',
+        );
+        return null;
+      }
 
       throw new VendixHttpException(
         ErrorCodes.INVOICING_VALIDATE_001,

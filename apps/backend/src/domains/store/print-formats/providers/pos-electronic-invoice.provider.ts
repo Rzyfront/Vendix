@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { QrService } from '../../../../common/services/qr.service';
+import { S3Service } from '../../../../common/services/s3.service';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
 import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
@@ -10,15 +11,20 @@ import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import {
   FISCAL_DOCUMENT_PRINT_INCLUDE,
   mapFiscalDocumentToPrintData,
+  resolveRawLogoKey,
 } from './fiscal-document-print.mapper';
+import { signStoreLogoUrl } from '../lib/print-logo.util';
 
 @Injectable()
 export class PosElectronicInvoiceDataProvider implements IDocumentDataProvider {
   readonly formatType: print_format_type_enum = 'pos_electronic_invoice' as unknown as print_format_type_enum;
+  private readonly logger = new Logger(PosElectronicInvoiceDataProvider.name);
 
+  // `s3Service` opcional: ver mismo criterio en `fiscal-invoice.provider.ts`.
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly qrService: QrService,
+    private readonly s3Service?: S3Service,
   ) {}
 
   async fetchDocumentData(
@@ -57,10 +63,13 @@ export class PosElectronicInvoiceDataProvider implements IDocumentDataProvider {
       }
     }
 
+    const signedLogoUrl = await signStoreLogoUrl(this.s3Service, resolveRawLogoKey(invoice), this.logger);
+
     const printData = mapFiscalDocumentToPrintData(invoice, {
       qrBase64,
       acceptedLabel: 'Aprobada por DIAN',
       pendingLabel: 'Pendiente',
+      signedLogoUrl,
     });
 
     // Si la factura tiene orden asociada, enriquecer con mesa/cajero si existen

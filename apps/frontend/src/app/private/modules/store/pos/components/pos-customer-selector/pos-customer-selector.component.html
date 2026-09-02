@@ -37,8 +37,8 @@
       <!-- Sin cliente: prompt único. -->
       <div class="overview-empty">
         <button type="button" class="select-customer-btn" (click)="goToSearch()">
-          <app-icon name="search" [size]="18"></app-icon>
-          Buscar o registrar cliente
+          <app-icon [name]="minimalInvoiceMode() ? 'file-text' : 'search'" [size]="18"></app-icon>
+          {{ minimalInvoiceMode() ? 'Facturar a nombre de' : 'Buscar o registrar cliente' }}
         </button>
       </div>
     }
@@ -51,34 +51,37 @@
         <app-icon name="arrow-left" [size]="16"></app-icon>
         Volver
       </button>
-      <span>Buscar o registrar cliente</span>
+      <span>{{ minimalInvoiceMode() ? 'Facturar a nombre de' : 'Buscar o registrar cliente' }}</span>
     </div>
 
-    <!-- Segmented control — 2 opciones sin scroll -->
-    <div class="segmented-control" role="tablist" aria-label="Modo de cliente">
-      <button
-        type="button"
-        role="tab"
-        class="segment-btn"
-        [class.selected]="activeTab() === 'search'"
-        [attr.aria-selected]="activeTab() === 'search'"
-        (click)="setActiveTab('search')"
-      >
-        <app-icon name="search" [size]="14"></app-icon>
-        Buscar existente
-      </button>
-      <button
-        type="button"
-        role="tab"
-        class="segment-btn"
-        [class.selected]="activeTab() === 'create'"
-        [attr.aria-selected]="activeTab() === 'create'"
-        (click)="setActiveTab('create')"
-      >
-        <app-icon name="user-plus" [size]="14"></app-icon>
-        Crear nuevo
-      </button>
-    </div>
+    <!-- Segmented control — 2 opciones sin scroll. Paso 9: en modo factura
+         mínima no hay "Buscar existente" — un solo formulario, sin tabs. -->
+    @if (!minimalInvoiceMode()) {
+      <div class="segmented-control" role="tablist" aria-label="Modo de cliente">
+        <button
+          type="button"
+          role="tab"
+          class="segment-btn"
+          [class.selected]="activeTab() === 'search'"
+          [attr.aria-selected]="activeTab() === 'search'"
+          (click)="setActiveTab('search')"
+        >
+          <app-icon name="search" [size]="14"></app-icon>
+          Buscar existente
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="segment-btn"
+          [class.selected]="activeTab() === 'create'"
+          [attr.aria-selected]="activeTab() === 'create'"
+          (click)="setActiveTab('create')"
+        >
+          <app-icon name="user-plus" [size]="14"></app-icon>
+          Crear nuevo
+        </button>
+      </div>
+    }
 
     @if (activeTab() === 'search') {
       <!-- ── MODO BUSCAR: listado comprimido 3 máximo, sin scroll ── -->
@@ -162,7 +165,13 @@
       }
     } @else {
       <!-- ── MODO CREAR: formulario aislado, sin lista, sin scroll ── -->
-      <p class="create-header-hint">Crea un cliente nuevo y avanza con Siguiente</p>
+      <p class="create-header-hint">
+        {{
+          minimalInvoiceMode()
+            ? 'Datos mínimos para facturar esta venta a nombre de alguien'
+            : 'Crea un cliente nuevo y avanza con Siguiente'
+        }}
+      </p>
       <form
         [formGroup]="form"
         class="create-customer-form"
@@ -186,21 +195,16 @@
         </div>
 
         <div class="form-row">
-          <app-selector
-            formControlName="documentType"
-            label="Tipo Doc."
-            [options]="documentTypeOptions"
+          <!-- Par tipo+número: CVA compartido `app-document-identity-fields`
+               (no más selector/input reimplementados aquí). El hint de dígitos
+               sigue siendo cosa de esta pantalla (documentFormatHint) porque
+               depende de un util local del POS. -->
+          <app-document-identity-fields
+            formControlName="documentIdentity"
+            typeLabel="Tipo Doc."
+            numberLabel="Número"
             [size]="'sm'"
-            [placeholder]="'Seleccionar'"
-          ></app-selector>
-          <div class="document-number-field">
-            <app-input
-              formControlName="documentNumber"
-              label="Número"
-              placeholder="1023456789"
-              type="text"
-              [size]="'sm'"
-            ></app-input>
+          >
             @if (documentFormatHint(); as hint) {
               <span
                 class="document-format-hint"
@@ -213,10 +217,12 @@
                 {{ hint.text }}
               </span>
             }
-          </div>
+          </app-document-identity-fields>
         </div>
 
-        <div class="form-row">
+        <!-- En modo factura mínima el teléfono desaparece: la fila pasa a una
+             sola columna para que el email no quede a media caja. -->
+        <div class="form-row" [class.form-row--single]="minimalInvoiceMode()">
           <app-input
             formControlName="email"
             label="Email"
@@ -224,27 +230,34 @@
             type="email"
             [size]="'sm'"
           ></app-input>
-          <div class="phone-field">
-            <app-input
-              formControlName="phone"
-              label="Teléfono"
-              placeholder="+57 300 123 4567"
-              type="tel"
-              [size]="'sm'"
-            ></app-input>
-            @if (phoneFormatHint(); as hint) {
-              <span
-                class="document-format-hint"
-                [class.document-format-hint--ok]="hint.tone === 'ok'"
-                [class.document-format-hint--warn]="hint.tone === 'warn'"
-                role="status"
-                aria-live="polite"
-              >
-                <app-icon name="info" [size]="14"></app-icon>
-                {{ hint.text }}
-              </span>
-            }
-          </div>
+          <!-- Paso 9 — teléfono NO es uno de los 5 campos mínimos de
+               facturación (documento, nombres, apellidos, email): pedirlo
+               aquí convierte la venta rápida en trámite. Se oculta por
+               completo en modo factura mínima; el control sigue existiendo
+               en el form (vacío), así que `resolveIfNeeded()` no cambia. -->
+          @if (!minimalInvoiceMode()) {
+            <div class="phone-field">
+              <app-input
+                formControlName="phone"
+                label="Teléfono"
+                placeholder="+57 300 123 4567"
+                type="tel"
+                [size]="'sm'"
+              ></app-input>
+              @if (phoneFormatHint(); as hint) {
+                <span
+                  class="document-format-hint"
+                  [class.document-format-hint--ok]="hint.tone === 'ok'"
+                  [class.document-format-hint--warn]="hint.tone === 'warn'"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <app-icon name="info" [size]="14"></app-icon>
+                  {{ hint.text }}
+                </span>
+              }
+            </div>
+          }
         </div>
       </form>
     }

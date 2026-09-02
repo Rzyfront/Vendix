@@ -17,6 +17,13 @@ import { PrintFormatDefinition } from '../interfaces/print-format.interface';
 export const FISCAL_FORMATS: ReadonlySet<string> = new Set([
   'fiscal_electronic_invoice',
   'fiscal_credit_note',
+  // `pos_electronic_invoice` — la representación gráfica térmica de 80mm de
+  // la factura electrónica en el mostrador POS. Es tan fiscal como las dos
+  // de arriba (mismo Anexo Técnico 1.9 de la DIAN, mismos requisitos de
+  // CUFE/QR/resolución); sin este valor, un formato guardado sin esos
+  // campos pasaba la validación y el cliente se iba con un papel que
+  // aparenta ser factura electrónica pero no lo es.
+  'pos_electronic_invoice',
 ]);
 
 @Injectable()

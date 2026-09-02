@@ -326,7 +326,10 @@
   gap: 6px;
 }
 
-.document-number-field,
+.form-row--single {
+  grid-template-columns: 1fr;
+}
+
 .phone-field {
   display: flex;
   flex-direction: column;
