@@ -10,6 +10,7 @@ import { StockLevelManager } from '../inventory/shared/services/stock-level-mana
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
 import { OrderFlowService } from './order-flow/order-flow.service';
+import { OrderSseService } from './services/order-sse.service';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { CouponsService } from '../coupons/coupons.service';
 import { AuditService } from '@common/audit/audit.service';
@@ -137,6 +138,17 @@ describe('OrdersService', () => {
     getContext: jest.fn(),
   };
 
+  // FIX admin-orders-filters — `OrdersService` constructor gained
+  // `OrderSseService` (index 12) in a recent commit. The spec was not
+  // updated, so Nest refused to build the TestingModule and every test
+  // failed at module init. Mock mínimo sólo para que DI resuelva;
+  // `findAll` no usa SSE.
+  const mockOrderSseService = {
+    emit: jest.fn(),
+    pushEvent: jest.fn(),
+    subscribe: jest.fn(),
+  };
+
   beforeEach(async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2024-12-01T12:00:00Z'));
@@ -157,6 +169,7 @@ describe('OrdersService', () => {
         { provide: PromotionEngineService, useValue: mockPromotionEngine },
         { provide: CouponsService, useValue: mockCouponsService },
         { provide: AuditService, useValue: mockAuditService },
+        { provide: OrderSseService, useValue: mockOrderSseService },
       ],
     }).compile();
 
@@ -176,6 +189,119 @@ describe('OrdersService', () => {
 
   afterEach(() => {
     jest.useRealTimers();
+  });
+
+  /**
+   * FIX admin-orders-filters — regresión de los 3 bugs que rompían los
+   * filtros del dropdown en `/admin/orders/sales`:
+   *   A) `payment_status` se ignoraba silenciosamente (no estaba ni en el
+   *      destructure ni en el `where`).
+   *   B) `date_from` y `date_to` requerían ambos (cortocircuito `&&`).
+   *   C) `status` y `dispatchable` ambos escribían `state` en el `where`
+   *      y el último ganaba, descartando la selección de estado cuando
+   *      "Despachable" estaba activo.
+   *
+   * Cada test mockea `findMany` + `count` para que `findAll` retorne sin
+   * tocar la DB real, y luego inspecciona el `where` pasado al primer call.
+   */
+  describe('findAll — filtros (admin-orders-filters)', () => {
+    beforeEach(() => {
+      mockPrismaService.orders.findMany.mockResolvedValue([]);
+      mockPrismaService.orders.count.mockResolvedValue(0);
+    });
+
+    // Helper: captura el `where` del primer call a `findMany`.
+    const lastWhere = () =>
+      mockPrismaService.orders.findMany.mock.calls[0][0].where;
+
+    it('A) aplica payment_status via payments.some.state', async () => {
+      await service.findAll({
+        payment_status: 'succeeded',
+      } as any);
+
+      expect(lastWhere()).toEqual(
+        expect.objectContaining({
+          payments: { some: { state: 'succeeded' } },
+        }),
+      );
+    });
+
+    it('A-bis) NO agrega `payments` cuando payment_status viene undefined', async () => {
+      await service.findAll({} as any);
+
+      expect(lastWhere().payments).toBeUndefined();
+    });
+
+    it('B) aplica date_from solo (sin date_to)', async () => {
+      await service.findAll({
+        date_from: '2026-09-01T00:00:00Z',
+      } as any);
+
+      const where = lastWhere();
+      expect(where.created_at).toBeDefined();
+      expect(where.created_at.gte).toEqual(new Date('2026-09-01T00:00:00Z'));
+      // Sin `date_to` no debe existir bound superior.
+      expect(where.created_at.lte).toBeUndefined();
+    });
+
+    it('B) aplica date_to solo (sin date_from)', async () => {
+      await service.findAll({
+        date_to: '2026-09-30T23:59:59Z',
+      } as any);
+
+      const where = lastWhere();
+      expect(where.created_at).toBeDefined();
+      expect(where.created_at.lte).toEqual(new Date('2026-09-30T23:59:59Z'));
+      expect(where.created_at.gte).toBeUndefined();
+    });
+
+    it('B) aplica ambos date_from y date_to juntos', async () => {
+      await service.findAll({
+        date_from: '2026-09-01T00:00:00Z',
+        date_to: '2026-09-30T23:59:59Z',
+      } as any);
+
+      expect(lastWhere().created_at).toEqual({
+        gte: new Date('2026-09-01T00:00:00Z'),
+        lte: new Date('2026-09-30T23:59:59Z'),
+      });
+    });
+
+    it('B-bis) NO agrega created_at si ambos bounds están ausentes', async () => {
+      await service.findAll({} as any);
+
+      expect(lastWhere().created_at).toBeUndefined();
+    });
+
+    it('C) status solo se aplica cuando dispatchable es false/undefined', async () => {
+      await service.findAll({ status: 'finished' } as any);
+
+      expect(lastWhere().state).toBe('finished');
+    });
+
+    it('C) dispatchable=true omite el state de status (dispatchable gana)', async () => {
+      await service.findAll({
+        status: 'finished',
+        dispatchable: true,
+      } as any);
+
+      // dispatchable define su propio `state` (in [...]) — gana sobre status.
+      expect(lastWhere().state).toEqual({
+        in: ['processing', 'pending_payment'],
+      });
+    });
+
+    it('C) dispatchable=true sin status igual define state vía dispatchable', async () => {
+      await service.findAll({ dispatchable: true } as any);
+
+      expect(lastWhere().state).toEqual({
+        in: ['processing', 'pending_payment'],
+      });
+      expect(lastWhere().delivery_type).toEqual({
+        notIn: ['direct_delivery', 'dine_in'],
+      });
+      expect(lastWhere().dispatch_fulfillment).toEqual({ not: 'full' });
+    });
   });
 
   describe('findOne — discount snapshots', () => {
