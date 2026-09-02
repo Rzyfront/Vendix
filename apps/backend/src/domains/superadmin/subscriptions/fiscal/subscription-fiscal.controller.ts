@@ -11,12 +11,14 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { Response } from 'express';
 
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { RequestContextService } from '../../../../common/context/request-context.service';
@@ -454,6 +456,37 @@ export class SubscriptionFiscalController {
       throw new NotFoundException('Platform invoice not found');
     }
     return this.responseService.success(data, 'Platform invoice detail retrieved');
+  }
+
+  /**
+   * XML firmado de la factura de plataforma. Ruta propia y no un campo del
+   * detalle: el documento pesa entre 100 y 500 KB y el detalle se abre para
+   * mirar estados, no para descargar la prueba ante la DIAN.
+   *
+   * Se responde `application/xml` en crudo, sin el sobre `ResponseService`:
+   * el consumidor es una descarga del navegador, y envolver el XML en JSON
+   * obligaría al cliente a desescapar una cadena de medio megabyte para
+   * volver a obtener el mismo archivo.
+   */
+  @Get('platform-invoices/:id/xml')
+  @Permissions('superadmin:subscriptions:fiscal:read')
+  @ApiOperation({ summary: 'Download the signed XML of a platform invoice' })
+  async getPlatformInvoiceXml(
+    @Param('id', ParseIntPipe) id: number,
+    @Res() res: Response,
+  ): Promise<void> {
+    const result = await this.fiscalService.getPlatformInvoiceXml(id);
+    if (!result) {
+      // Sin XML no hay documento que descargar. Un 200 con cuerpo vacío haría
+      // que el navegador guardara un archivo de 0 bytes con nombre de factura.
+      throw new NotFoundException(
+        'Esta factura de plataforma todavía no tiene XML firmado.',
+      );
+    }
+    const filename = `${result.document_number.replace(/[^A-Za-z0-9_-]/g, '') || `factura-${id}`}.xml`;
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(result.xml);
   }
 
   @Post('invoices')

@@ -229,6 +229,18 @@ export interface SubscriptionFiscalTransmission {
   cufe?: string | null;
   qr_code?: string | null;
   pdf_url?: string | null;
+  /**
+   * XML firmado (UBL 2.1) tal como lo devolvió el proveedor.
+   *
+   * SÍ VIAJA EN EL LISTADO, aunque los dos endpoints de detalle lo excluyan:
+   * `listTransmissions` usa `include` —no `select`—, así que cada fila trae
+   * TODAS las columnas escalares de `fiscal_transmissions`, y `xml_document`
+   * se escribe tanto en la aceptación como en el rechazo
+   * (`subscription-fiscal.service.ts:5500` y `:5627`). Es lo que permite
+   * ofrecer «Descargar XML» desde la lista sin inventar un endpoint: NO existe
+   * ninguna ruta de XML en todo el backend.
+   */
+  xml_document?: string | null;
   error_message?: string | null;
   retry_count: number;
   sent_at?: string | null;

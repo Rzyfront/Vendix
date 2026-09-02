@@ -1,4 +1,8 @@
-import { CurrencyPipe, DatePipe, formatDate } from '@angular/common';
+// OJO: `CurrencyPipe` de Angular NO se importa acá. La que se usa es la de
+// Vendix (`VendixCurrencyPipe`, selector `currency`), que respeta la moneda y
+// el estilo de separadores configurados por el tenant. Importar las dos deja
+// dos pipes con el mismo nombre y gana la última registrada.
+import { DatePipe, formatDate } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
@@ -14,7 +18,13 @@ import {
   SelectorComponent,
   TableColumn,
 } from '../../../../../../../shared/components';
-import { CurrencyPipe as VendixCurrencyPipe } from '../../../../../../../shared/pipes/currency';
+import {
+  CurrencyFormatService,
+  CurrencyPipe as VendixCurrencyPipe,
+} from '../../../../../../../shared/pipes/currency';
+import { describeApiFailure } from '../../../../../store/invoicing/utils/invoicing-errors.util';
+import type { PlatformInvoiceKind } from '../../../../subscriptions/interfaces/platform-invoice-document.interface';
+import { FiscalBillingAdminService } from '../../../../subscriptions/services/fiscal-billing-admin.service';
 import {
   billingCycleLabel,
   evidenceTypeLabel,
@@ -172,66 +182,66 @@ interface SubscriptionInvoiceDetail {
       >← Volver al listado</a>
 
       @if (loading()) {
-        <p class="mt-4 text-sm text-gray-500">Cargando factura…</p>
+        <p class="mt-4 text-sm text-text-secondary">Cargando factura…</p>
       } @else if (errorMessage(); as msg) {
         <app-alert-banner variant="danger" class="mt-4">{{ msg }}</app-alert-banner>
       } @else if (data(); as d) {
-        <h2 class="mt-4 text-2xl font-semibold text-gray-900">
+        <h2 class="mt-4 text-2xl font-semibold text-text-primary">
           Factura {{ d.invoice.invoice_number }}
         </h2>
-        <p class="text-sm text-gray-500">
+        <p class="text-sm text-text-secondary">
           {{ d.organization?.legal_name ?? d.organization?.name ?? '—' }}
           ({{ d.organization?.tax_id ?? 'sin NIT' }})
         </p>
 
         <!-- Resumen + Plan -->
         <section class="mt-6 grid grid-cols-2 gap-4 text-sm">
-          <div class="bg-white rounded-lg shadow p-4">
-            <h2 class="font-semibold text-gray-900 mb-2">Resumen</h2>
+          <div class="bg-surface rounded-card shadow-card p-4">
+            <h2 class="font-semibold text-text-primary mb-2">Resumen</h2>
             <dl class="grid grid-cols-2 gap-y-1">
-              <dt class="text-gray-500">Estado</dt>
+              <dt class="text-text-secondary">Estado</dt>
               <dd>{{ invoiceStateLabel(d.invoice.state) }}</dd>
-              <dt class="text-gray-500">Periodo</dt>
+              <dt class="text-text-secondary">Periodo</dt>
               <dd>{{ formatPeriodDate(d.invoice.period_start) }} → {{ formatPeriodDate(d.invoice.period_end) }}</dd>
-              <dt class="text-gray-500">Subtotal</dt>
+              <dt class="text-text-secondary">Subtotal</dt>
               <dd>{{ subtotalNumber() | currency }}</dd>
-              <dt class="text-gray-500">Impuestos</dt>
+              <dt class="text-text-secondary">Impuestos</dt>
               <dd>{{ taxAmountNumber() | currency }}</dd>
-              <dt class="text-gray-500">Total</dt>
+              <dt class="text-text-secondary">Total</dt>
               <dd class="font-semibold">{{ totalNumber() | currency }}</dd>
-              <dt class="text-gray-500">Saldo a pagar</dt>
+              <dt class="text-text-secondary">Saldo a pagar</dt>
               <dd>{{ saldo() | currency }}</dd>
               @if (globalDiscountAmountNumber() > 0) {
-                <dt class="text-gray-500">Descuento global</dt>
+                <dt class="text-text-secondary">Descuento global</dt>
                 <dd>- {{ globalDiscountAmountNumber() | currency }}</dd>
               }
               @if (withholdingAmountNumber() > 0) {
-                <dt class="text-gray-500">Retenciones</dt>
+                <dt class="text-text-secondary">Retenciones</dt>
                 <dd>{{ withholdingAmountNumber() | currency }}</dd>
               }
             </dl>
           </div>
 
-          <div class="bg-white rounded-lg shadow p-4">
-            <h2 class="font-semibold text-gray-900 mb-2">Pago</h2>
+          <div class="bg-surface rounded-card shadow-card p-4">
+            <h2 class="font-semibold text-text-primary mb-2">Pago</h2>
             <dl class="grid grid-cols-2 gap-y-1">
-              <dt class="text-gray-500">Forma</dt>
+              <dt class="text-text-secondary">Forma</dt>
               <dd>{{ d.invoice.payment_form === '2' ? 'Crédito' : 'Contado' }}</dd>
               @if (d.invoice.due_date) {
-                <dt class="text-gray-500">Vencimiento</dt>
+                <dt class="text-text-secondary">Vencimiento</dt>
                 <dd>{{ formatPeriodDate(d.invoice.due_date) }}</dd>
               }
               @if (d.invoice.exchange_rate) {
-                <dt class="text-gray-500">TRM</dt>
+                <dt class="text-text-secondary">TRM</dt>
                 <dd>{{ d.invoice.exchange_rate }} ({{ d.invoice.exchange_rate_date ?? '—' }})</dd>
               }
               @if (d.invoice.operation_type && d.invoice.operation_type !== '10') {
-                <dt class="text-gray-500">Tipo de operación</dt>
+                <dt class="text-text-secondary">Tipo de operación</dt>
                 <dd>{{ operationTypeLabel(d.invoice.operation_type) }}</dd>
               }
             </dl>
             @if (d.plan) {
-              <p class="mt-3 text-sm text-gray-700">
+              <p class="mt-3 text-sm text-text-primary">
                 Plan: <span class="font-medium">{{ d.plan.name }}</span> ({{ billingCycleLabel(d.plan.billing_cycle) }})
               </p>
             }
@@ -240,29 +250,29 @@ interface SubscriptionInvoiceDetail {
 
         <!-- Tenant (destinatario) snapshot -->
         @if (acquirerSnapshot(); as acq) {
-          <section class="mt-6 bg-white rounded-lg shadow p-4">
-            <h2 class="font-semibold text-gray-900 mb-3">Destinatario (snapshot al emitir)</h2>
+          <section class="mt-6 bg-surface rounded-card shadow-card p-4">
+            <h2 class="font-semibold text-text-primary mb-3">Destinatario (snapshot al emitir)</h2>
             <dl class="grid grid-cols-2 gap-y-1 text-sm">
-              <dt class="text-gray-500">Tipo</dt>
+              <dt class="text-text-secondary">Tipo</dt>
               <dd class="font-mono">{{ acq.kind }} :{{ acq.id }}</dd>
-              <dt class="text-gray-500">Razón social</dt>
+              <dt class="text-text-secondary">Razón social</dt>
               <dd>{{ acq.legal_name }}</dd>
-              <dt class="text-gray-500">NIT</dt>
+              <dt class="text-text-secondary">NIT</dt>
               <dd>{{ acq.tax_id }}{{ acq.tax_id_dv ? '-' + acq.tax_id_dv : '' }}</dd>
               @if (acq.tax_regime_code) {
-                <dt class="text-gray-500">Régimen</dt>
+                <dt class="text-text-secondary">Régimen</dt>
                 <dd>{{ acq.tax_regime_code }}</dd>
               }
               @if (acq.fiscal_responsibilities && acq.fiscal_responsibilities.length > 0) {
-                <dt class="text-gray-500">Responsabilidades</dt>
+                <dt class="text-text-secondary">Responsabilidades</dt>
                 <dd>{{ acq.fiscal_responsibilities.join(', ') }}</dd>
               }
               @if (acq.email) {
-                <dt class="text-gray-500">Email</dt>
+                <dt class="text-text-secondary">Email</dt>
                 <dd>{{ acq.email }}</dd>
               }
               @if (acq.address && acq.address.line) {
-                <dt class="text-gray-500">Dirección</dt>
+                <dt class="text-text-secondary">Dirección</dt>
                 <dd>
                   {{ acq.address.line }} ·
                   {{ acq.address.city ?? '' }} ·
@@ -275,8 +285,8 @@ interface SubscriptionInvoiceDetail {
 
         <!-- Líneas con impuestos por línea -->
         @if (invoiceSnapshot()?.items && invoiceSnapshot()!.items!.length > 0) {
-          <section class="mt-6 bg-white rounded-lg shadow p-4">
-            <h2 class="font-semibold text-gray-900 mb-3">Líneas</h2>
+          <section class="mt-6 bg-surface rounded-card shadow-card p-4">
+            <h2 class="font-semibold text-text-primary mb-3">Líneas</h2>
             <app-responsive-data-view
               [data]="invoiceSnapshot()!.items!"
               [columns]="lineColumns"
@@ -291,12 +301,12 @@ interface SubscriptionInvoiceDetail {
 
         <!-- AIU note -->
         @if (invoiceSnapshot()?.aiu_contract_object) {
-          <section class="mt-6 bg-white rounded-lg shadow p-4">
-            <h2 class="font-semibold text-gray-900 mb-2">Nota AIU (regimen 09)</h2>
-            <p class="text-sm text-gray-700 whitespace-pre-wrap">
+          <section class="mt-6 bg-surface rounded-card shadow-card p-4">
+            <h2 class="font-semibold text-text-primary mb-2">Nota AIU (regimen 09)</h2>
+            <p class="text-sm text-text-primary whitespace-pre-wrap">
               {{ invoiceSnapshot()!.aiu_contract_object }}
             </p>
-            <p class="text-xs text-gray-500 mt-2">
+            <p class="text-xs text-text-secondary mt-2">
               {{ invoiceSnapshot()!.aiu_contract_object!.length }} / 4900 caracteres
             </p>
           </section>
@@ -304,8 +314,8 @@ interface SubscriptionInvoiceDetail {
 
         <!-- Retenciones breakdown -->
         @if (invoiceSnapshot()?.withholdings && invoiceSnapshot()!.withholdings!.length > 0) {
-          <section class="mt-6 bg-white rounded-lg shadow p-4">
-            <h2 class="font-semibold text-gray-900 mb-3">Retenciones</h2>
+          <section class="mt-6 bg-surface rounded-card shadow-card p-4">
+            <h2 class="font-semibold text-text-primary mb-3">Retenciones</h2>
             <app-responsive-data-view
               [data]="invoiceSnapshot()!.withholdings!"
               [columns]="withholdingColumns"
@@ -319,9 +329,9 @@ interface SubscriptionInvoiceDetail {
         }
 
         <!-- Transmisiones DIAN -->
-        <section class="mt-6 bg-white rounded-lg shadow p-4">
+        <section class="mt-6 bg-surface rounded-card shadow-card p-4">
           <div class="flex items-center justify-between mb-3">
-            <h2 class="font-semibold text-gray-900">Transmisiones DIAN</h2>
+            <h2 class="font-semibold text-text-primary">Transmisiones DIAN</h2>
             @if (d.transmissions.length === 0) {
               <button
                 app-button
@@ -336,7 +346,7 @@ interface SubscriptionInvoiceDetail {
           </div>
 
           @if (d.transmissions.length === 0) {
-            <p class="text-sm text-gray-500">Esta factura aún no fue emitida.</p>
+            <p class="text-sm text-text-secondary">Esta factura aún no fue emitida.</p>
           } @else {
             <div class="space-y-4">
               @for (t of d.transmissions; track t.id) {
@@ -352,14 +362,14 @@ interface SubscriptionInvoiceDetail {
                       {{ transmissionStatusLabel(t.dian_status) }}
                     </span>
                     @if (t.retry_count && t.retry_count > 0) {
-                      <span class="ml-2 text-xs text-gray-500">reintentos: {{ t.retry_count }}</span>
+                      <span class="ml-2 text-xs text-text-secondary">reintentos: {{ t.retry_count }}</span>
                     }
                   </p>
                   @if (t.cufe) {
-                    <p class="text-xs text-gray-500 mt-1 break-all">CUFE: {{ t.cufe }}</p>
+                    <p class="text-xs text-text-secondary mt-1 break-all">CUFE: {{ t.cufe }}</p>
                   }
                   @if (t.qr_code) {
-                    <p class="text-xs text-gray-500 mt-1 break-all">QR: {{ t.qr_code }}</p>
+                    <p class="text-xs text-text-secondary mt-1 break-all">QR: {{ t.qr_code }}</p>
                   }
                   @if (t.error_message) {
                     <p class="text-xs text-red-600 mt-1">{{ t.error_message }}</p>
@@ -385,19 +395,19 @@ interface SubscriptionInvoiceDetail {
 
         <!-- Readiness (blockers + warnings) -->
         @if (readinessBlockers().length > 0 || readinessWarnings().length > 0) {
-          <section class="mt-6 bg-white rounded-lg shadow p-4">
-            <h2 class="font-semibold text-gray-900 mb-2">Pre-validación</h2>
+          <section class="mt-6 bg-surface rounded-card shadow-card p-4">
+            <h2 class="font-semibold text-text-primary mb-2">Pre-validación</h2>
 
             @if (readinessBlockers().length > 0) {
               <div class="border-l-4 border-warning bg-warning-light/30 p-3 rounded mb-3">
-                <p class="font-semibold text-sm text-gray-900 mb-2">Bloqueadores</p>
+                <p class="font-semibold text-sm text-text-primary mb-2">Bloqueadores</p>
                 <ul class="text-xs space-y-2">
                   @for (b of readinessBlockers(); track b.code) {
                     <li>
-                      <p class="font-mono text-gray-500">{{ b.code }}</p>
+                      <p class="font-mono text-text-secondary">{{ b.code }}</p>
                       <p>{{ b.problem }}</p>
                       @if (b.fix) {
-                        <p class="text-gray-700"><span class="font-medium">Cómo resolver:</span> {{ b.fix }}</p>
+                        <p class="text-text-primary"><span class="font-medium">Cómo resolver:</span> {{ b.fix }}</p>
                       }
                     </li>
                   }
@@ -407,11 +417,11 @@ interface SubscriptionInvoiceDetail {
 
             @if (readinessWarnings().length > 0) {
               <div class="border-l-4 border-info bg-info-light/30 p-3 rounded">
-                <p class="font-semibold text-sm text-gray-900 mb-2">Advertencias</p>
+                <p class="font-semibold text-sm text-text-primary mb-2">Advertencias</p>
                 <ul class="text-xs space-y-2">
                   @for (w of readinessWarnings(); track w.code) {
                     <li>
-                      <p class="font-mono text-gray-500">{{ w.code }}</p>
+                      <p class="font-mono text-text-secondary">{{ w.code }}</p>
                       <p>{{ w.problem }}</p>
                     </li>
                   }
@@ -422,9 +432,9 @@ interface SubscriptionInvoiceDetail {
         }
 
         <!-- Acciones de documento -->
-        @if (canCancel()) {
-          <section class="mt-6 bg-white rounded-lg shadow p-4">
-            <h2 class="font-semibold text-gray-900 mb-2">Acciones</h2>
+        @if (canCancel() && isPlatformRail()) {
+          <section class="mt-6 bg-surface rounded-card shadow-card p-4">
+            <h2 class="font-semibold text-text-primary mb-2">Acciones</h2>
             <div class="flex gap-2">
               <button
                 app-button
@@ -439,9 +449,14 @@ interface SubscriptionInvoiceDetail {
           </section>
         }
 
-        <!-- Acciones fiscales (P3.6: delivery, RADIAN, PDF) -->
-        <section class="mt-6 bg-white rounded-lg shadow p-4">
-          <h2 class="font-semibold text-gray-900 mb-2">Acciones fiscales</h2>
+        <!-- Acciones fiscales (delivery, RADIAN, PDF).
+             SÓLO RIEL PLATAFORMA: los cuatro endpoints resuelven contra
+             'fiscal_transmissions' de plataforma o contra 'invoices' bajo la
+             organización plataforma. Disparados sobre una factura SaaS
+             devuelven 404 o —peor— resuelven el documento de otro. -->
+        @if (isPlatformRail()) {
+        <section class="mt-6 bg-surface rounded-card shadow-card p-4">
+          <h2 class="font-semibold text-text-primary mb-2">Acciones fiscales</h2>
           <div class="flex flex-wrap gap-2">
             <button
               app-button
@@ -481,19 +496,20 @@ interface SubscriptionInvoiceDetail {
             </button>
           </div>
         </section>
+        }
 
         <!-- Evidencias -->
         @if (d.evidences.length > 0) {
-          <section class="mt-6 bg-white rounded-lg shadow p-4">
-            <h2 class="font-semibold text-gray-900 mb-3">Evidencias</h2>
+          <section class="mt-6 bg-surface rounded-card shadow-card p-4">
+            <h2 class="font-semibold text-text-primary mb-3">Evidencias</h2>
             <ul class="text-sm space-y-1">
               @for (e of d.evidences; track e.id) {
                 <li>
-                  <span class="font-mono text-xs text-gray-500">#{{ e.fiscal_transmission_id }}</span>
+                  <span class="font-mono text-xs text-text-secondary">#{{ e.fiscal_transmission_id }}</span>
                   · {{ evidenceTypeLabel(e.evidence_type) }}
-                  · <span class="text-gray-500">{{ e.created_at | date: 'short' }}</span>
+                  · <span class="text-text-secondary">{{ e.created_at | date: 'short' }}</span>
                   @if (evidenceKind(e.metadata) && evidenceKind(e.metadata) !== 'platform_invoice_snapshot') {
-                    <span class="text-xs text-gray-400">({{ evidenceKind(e.metadata) }})</span>
+                    <span class="text-xs text-muted">({{ evidenceKind(e.metadata) }})</span>
                   }
                 </li>
               }
@@ -574,6 +590,8 @@ export class PlatformInvoiceDetailComponent {
   private readonly http = inject(HttpClient);
   private readonly route = inject(ActivatedRoute);
   private readonly toast = inject(ToastService);
+  private readonly fiscal = inject(FiscalBillingAdminService);
+  private readonly currencyFormat = inject(CurrencyFormatService);
 
   readonly data = signal<SubscriptionInvoiceDetail | null>(null);
   readonly loading = signal(true);
@@ -599,9 +617,23 @@ export class PlatformInvoiceDetailComponent {
 
   private base = `${environment.apiUrl}/superadmin/subscriptions/fiscal`;
   private detailPathPrefix = '/invoices';
-  private readinessPathPrefix = '/invoices';
-  private sendPathPrefix = '/invoices';
-  private cancelPathPrefix = '/invoices';
+  /**
+   * Prevalidación. SON DOS RUTAS DISTINTAS, una por riel:
+   *   · plataforma → `GET invoices/:id/emit-readiness`
+   *     (`platform-invoicing.controller.ts:289`, id = `fiscal_transmissions.id`)
+   *   · SaaS       → `GET saas-invoices/:id/emit-readiness`
+   *     (`subscription-fiscal.controller.ts:381`, id = `subscription_invoices.id`)
+   *
+   * Antes estaba al revés en los dos casos: el riel SaaS pedía la ruta de
+   * plataforma y el de plataforma pedía `platform-invoices/:id/emit-readiness`,
+   * que NO EXISTE. Como `loadReadiness` traga el error en silencio, la sección
+   * «Pre-validación» simplemente nunca aparecía y el operador no tenía forma
+   * de saber por qué la factura no se podía emitir.
+   */
+  private readinessPathPrefix = '/saas-invoices';
+  /** Riel del documento; decide endpoints e id space. */
+  readonly invoiceKind = signal<PlatformInvoiceKind>('subscription');
+  readonly isPlatformRail = computed(() => this.invoiceKind() === 'platform');
 
   /**
    * Snapshot derivado de `fiscal_evidences.metadata` para el detalle platform.
@@ -652,13 +684,12 @@ export class PlatformInvoiceDetailComponent {
   });
 
   constructor() {
-    const kind =
+    const kind: PlatformInvoiceKind =
       this.route.snapshot.data['kind'] === 'platform' ? 'platform' : 'subscription';
+    this.invoiceKind.set(kind);
     if (kind === 'platform') {
       this.detailPathPrefix = '/platform-invoices';
-      this.readinessPathPrefix = '/platform-invoices';
-      this.sendPathPrefix = '/invoices';
-      this.cancelPathPrefix = '/invoices';
+      this.readinessPathPrefix = '/invoices';
     }
     const id = Number(this.route.snapshot.paramMap.get('id'));
     if (!Number.isInteger(id) || id <= 0) {
@@ -707,16 +738,31 @@ export class PlatformInvoiceDetailComponent {
     return (r * 100).toFixed(4) + '%';
   }
 
+  /**
+   * Formatea un importe con la moneda y los separadores del tenant.
+   *
+   * `String(v)` imprimía el Decimal crudo de Prisma —«1234567.890000»— en una
+   * pantalla de facturación fiscal, sin símbolo y sin separadores.
+   */
+  private money(value: unknown): string {
+    return this.currencyFormat.format(Number(value) || 0);
+  }
+
   // ── Lines table (ResponsiveDataView) ───────────────────────────────────
   readonly lineColumns: TableColumn[] = [
     { key: 'description', label: 'Descripción' },
     { key: 'quantity', label: 'Cant', align: 'right', transform: (v) => String(v) },
-    { key: 'unit_price', label: 'Precio', align: 'right', transform: (v) => String(v) },
+    {
+      key: 'unit_price',
+      label: 'Precio',
+      align: 'right',
+      transform: (v) => this.money(v),
+    },
     {
       key: 'discount_amount',
       label: 'Desc',
       align: 'right',
-      transform: (v) => (v ? String(v) : '—'),
+      transform: (v) => (v ? this.money(v) : '—'),
     },
     {
       key: 'taxes',
@@ -736,6 +782,7 @@ export class PlatformInvoiceDetailComponent {
     footerKey: 'unit_price',
     footerLabel: 'Precio',
     footerStyle: 'prominent' as const,
+    footerTransform: (v: unknown) => this.money(v),
   };
 
   // ── Withholdings table (ResponsiveDataView) ─────────────────────────────
@@ -746,7 +793,7 @@ export class PlatformInvoiceDetailComponent {
       key: 'base_amount',
       label: 'Base',
       align: 'right',
-      transform: (v) => String(v),
+      transform: (v) => this.money(v),
     },
     {
       key: 'rate',
@@ -758,8 +805,15 @@ export class PlatformInvoiceDetailComponent {
       key: 'amount',
       label: 'Monto',
       align: 'right',
-      transform: (v, item) =>
-        this.whWithholdingAmount(item as Parameters<typeof this.whWithholdingAmount>[0]) as string,
+      // El `as string` anterior era una mentira al compilador:
+      // `whWithholdingAmount` devuelve `number | string` y la columna exige
+      // `string`, así que un monto calculado se pintaba como número crudo.
+      transform: (_v, item) =>
+        this.money(
+          this.whWithholdingAmount(
+            item as Parameters<typeof this.whWithholdingAmount>[0],
+          ),
+        ),
     },
   ];
 
@@ -767,8 +821,12 @@ export class PlatformInvoiceDetailComponent {
     titleKey: 'role',
     subtitleKey: 'concept_id',
     detailKeys: [
-      { key: 'base_amount', label: 'Base' },
-      { key: 'rate', label: 'Tasa' },
+      { key: 'base_amount', label: 'Base', transform: (v: unknown) => this.money(v) },
+      {
+        key: 'rate',
+        label: 'Tasa',
+        transform: (v: unknown) => this.whWithholdingRatePct({ rate: v as number }),
+      },
     ],
   };
 
@@ -915,22 +973,37 @@ export class PlatformInvoiceDetailComponent {
     await this.issueNow();
   }
 
+  /**
+   * Emite el documento. CADA RIEL TIENE SU RUTA Y SU ESPACIO DE ID:
+   *   · plataforma → `POST invoices/:id/send`  (`fiscal_transmissions.id`)
+   *   · SaaS       → `POST invoices/:id/issue` (`subscription_invoices.id`)
+   *
+   * Antes las dos usaban `/send`, la de plataforma. Sobre una factura SaaS eso
+   * mandaba su `subscription_invoices.id` a un handler que lo interpreta como
+   * id de transmisión de plataforma.
+   */
   async issueNow(): Promise<void> {
     const d = this.data();
     if (!d) return;
     this.issuing.set(true);
     this.issueError.set(null);
     try {
-      await firstValueFrom(
-        this.http.post(`${this.base}${this.sendPathPrefix}/${d.invoice.id}/send`, {}),
-      );
-      this.toast.success('Documento enviado a DIAN');
+      if (this.isPlatformRail()) {
+        await firstValueFrom(
+          this.http.post(`${this.base}/invoices/${d.invoice.id}/send`, {}),
+        );
+        this.toast.success('Documento enviado a DIAN');
+      } else {
+        const result = await firstValueFrom(this.fiscal.issueInvoice(d.invoice.id));
+        if ('skipped' in result && result.skipped) {
+          this.toast.warning('La factura no se emitió; revise la prevalidación.');
+        } else {
+          this.toast.success('Documento enviado a DIAN');
+        }
+      }
       await this.load(d.invoice.id);
     } catch (error) {
-      const msg =
-        (error instanceof HttpErrorResponse && (error.error?.message ?? error.message)) ||
-        (error instanceof Error ? error.message : null) ||
-        'Error desconocido al emitir la factura.';
+      const msg = describeApiFailure(error).message;
       this.issueError.set(msg);
       this.toast.error(msg);
     } finally {
@@ -941,39 +1014,41 @@ export class PlatformInvoiceDetailComponent {
   async retryTransmission(transmissionId: number): Promise<void> {
     this.retrying.set(transmissionId);
     try {
-      await firstValueFrom(
-        this.http.post(`${this.base}/transmissions/${transmissionId}/retry`, {}),
-      );
+      await firstValueFrom(this.fiscal.retryTransmission(transmissionId));
       this.toast.success('Reintento encolado');
       const id = this.data()?.invoice.id;
       if (id) await this.load(id);
     } catch (error) {
-      const msg =
-        (error instanceof HttpErrorResponse && (error.error?.message ?? error.message)) ||
-        (error instanceof Error ? error.message : null) ||
-        'Error al reintentar la transmisión.';
-      this.toast.error(msg);
+      this.toast.error(describeApiFailure(error).message);
     } finally {
       this.retrying.set(null);
     }
   }
 
+  /**
+   * `POST invoices/:id/cancel` es del riel plataforma y resuelve por
+   * `fiscal_transmissions.id`. No hay ruta equivalente para el riel SaaS, así
+   * que el botón se oculta allí en vez de mandar el id equivocado.
+   */
   async cancelInvoice(invoiceId: number): Promise<void> {
+    if (!this.isPlatformRail()) {
+      this.toast.warning(
+        'Las facturas de suscripción no se cancelan desde esta pantalla.',
+        'Acción no disponible',
+      );
+      return;
+    }
     this.cancelling.set(true);
     try {
       await firstValueFrom(
-        this.http.post(`${this.base}${this.cancelPathPrefix}/${invoiceId}/cancel`, {
+        this.http.post(`${this.base}/invoices/${invoiceId}/cancel`, {
           reason: 'cancelado desde UI super-admin',
         }),
       );
       this.toast.success('Documento cancelado');
       await this.load(invoiceId);
     } catch (error) {
-      const msg =
-        (error instanceof HttpErrorResponse && (error.error?.message ?? error.message)) ||
-        (error instanceof Error ? error.message : null) ||
-        'Error al cancelar.';
-      this.toast.error(msg);
+      this.toast.error(describeApiFailure(error).message);
     } finally {
       this.cancelling.set(false);
     }
@@ -992,21 +1067,14 @@ export class PlatformInvoiceDetailComponent {
   async doDeliverEmail(invoiceId: number, email: string): Promise<void> {
     this.actionLoading.set(true);
     try {
-      const res = await firstValueFrom(
-        this.http.post<{ success: boolean; data: any }>(
-          `${this.base}/sales-invoices/${invoiceId}/deliver`,
-          { email },
-        ),
+      const receipt = await firstValueFrom(
+        this.fiscal.deliverPlatformInvoice(invoiceId, email),
       );
-      if (res.success) {
-        this.toast.success(`Reenvío a ${email} (zip: ${res.data?.zip_name || '—'})`);
-      } else {
-        this.toast.error('Reenvío no completado');
-      }
+      this.toast.success(
+        `Reenvío a ${email} (zip: ${receipt?.zip_name || '—'})`,
+      );
     } catch (err) {
-      this.toast.error(
-        `Reenvío: ${(err instanceof HttpErrorResponse && err.error?.message) || 'Error'}`,
-      );
+      this.toast.error(describeApiFailure(err).message, 'Reenvío');
     } finally {
       this.actionLoading.set(false);
     }
@@ -1015,64 +1083,70 @@ export class PlatformInvoiceDetailComponent {
   async doRegisterRadianEvent(invoiceId: number, eventCode: string): Promise<void> {
     this.actionLoading.set(true);
     try {
-      const res = await firstValueFrom(
-        this.http.post<{ success: boolean; data: any }>(
-          `${this.base}/sales-invoices/${invoiceId}/events`,
-          { event_code: eventCode },
-        ),
+      const event = await firstValueFrom(
+        this.fiscal.registerPlatformDianEvent(invoiceId, { event_code: eventCode }),
       );
-      if (res.success) {
-        this.toast.success(`Evento ${eventCode} registrado (id=${res.data?.id}, status=${res.data?.status})`);
-      } else {
-        this.toast.error('RADIAN no registrado');
-      }
+      this.toast.success(
+        `Evento ${eventCode} registrado (id=${event?.id}, status=${event?.status})`,
+      );
     } catch (err) {
-      this.toast.error(
-        `RADIAN: ${(err instanceof HttpErrorResponse && err.error?.message) || 'Error'}`,
-      );
+      this.toast.error(describeApiFailure(err).message, 'RADIAN');
     } finally {
       this.actionLoading.set(false);
     }
   }
 
+  /**
+   * Previsualización del PDF.
+   *
+   * El endpoint responde `application/pdf` EN CRUDO, sin envelope. El código
+   * anterior pedía `responseType: 'blob' as 'json'` y después leía
+   * `res.success` sobre el `Blob` resultante: eso es siempre `undefined`, así
+   * que el `if` nunca entraba y el botón no abría absolutamente nada —ni
+   * siquiera fallaba—. Encima el toast prometía «ver logs backend para blob
+   * URL», que no es algo que un operador pueda hacer.
+   */
   async previewPdf(invoiceId: number): Promise<void> {
     this.actionLoading.set(true);
     try {
-      const res = await firstValueFrom(
-        this.http.post<{ success: boolean; data: any }>(
-          `${this.base}/invoices/${invoiceId}/preview-pdf`,
-          {},
-          { responseType: 'blob' as 'json' },
-        ),
+      const blob = await firstValueFrom(
+        this.fiscal.previewPlatformInvoicePdf(invoiceId),
       );
-      if (res.success) {
-        this.toast.success('Preview PDF solicitado (ver logs backend para blob URL)');
+      const url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
+      if (!window.open(url, '_blank', 'noopener')) {
+        this.toast.warning(
+          'El navegador bloqueó la ventana emergente con la previsualización.',
+          'Previsualización',
+        );
       }
+      // Se revoca tarde: la pestaña nueva ya cargó el documento y revocar de
+      // inmediato la dejaría en blanco en algunos navegadores.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (err) {
-      const msg =
-        (err instanceof HttpErrorResponse && err.error?.message) || 'Preview PDF no disponible';
-      this.toast.warning(msg);
+      this.toast.warning(describeApiFailure(err).message, 'Previsualización');
     } finally {
       this.actionLoading.set(false);
     }
   }
 
+  /**
+   * Regenera el PDF y ABRE el resultado. Antes sólo anunciaba la llave de S3
+   * (`res.data.key`), que no le sirve de nada a quien quiere ver el documento.
+   */
   async regeneratePdf(invoiceId: number): Promise<void> {
     this.actionLoading.set(true);
     try {
-      const res = await firstValueFrom(
-        this.http.post<{ success: boolean; data: { key: string; url?: string } }>(
-          `${this.base}/invoices/${invoiceId}/pdf/regenerate`,
-          {},
-        ),
+      const location = await firstValueFrom(
+        this.fiscal.regeneratePlatformInvoicePdf(invoiceId),
       );
-      if (res.success) {
-        this.toast.success(`PDF regenerado: ${res.data?.key}`);
+      if (location?.url) {
+        window.open(location.url, '_blank', 'noopener');
+        this.toast.success('PDF regenerado');
+      } else {
+        this.toast.warning('El PDF se regeneró pero no devolvió URL firmada.');
       }
     } catch (err) {
-      const msg =
-        (err instanceof HttpErrorResponse && err.error?.message) || 'PDF no regenerado';
-      this.toast.error(msg);
+      this.toast.error(describeApiFailure(err).message, 'PDF');
     } finally {
       this.actionLoading.set(false);
     }

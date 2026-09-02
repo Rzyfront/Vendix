@@ -13,6 +13,7 @@ import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
 
 import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
 import {
   TaxOption,
   TaxSelection,
@@ -54,7 +55,7 @@ import {
   selector: 'vendix-invoice-line-taxes',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [BadgeComponent, IconComponent],
+  imports: [BadgeComponent, IconComponent, ToggleComponent],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
@@ -79,38 +80,67 @@ import {
         Impuestos
       </label>
 
-      <div class="flex flex-wrap items-center gap-1.5">
+      <div class="flex flex-wrap items-start gap-1.5">
         @for (tax of value(); track tax.tax_rate_id) {
+          <!--
+            EL IMPUESTO SELECCIONADO YA NO ES UNA PÍLDORA DE UNA LÍNEA.
+
+            «Incl. / Adic.» era un texto de 10 px en versalitas dentro de la
+            píldora, y el operador no lo encontraba: se leía como parte del
+            nombre del impuesto, no como el único sitio donde se declara que el
+            precio ya trae el impuesto dentro. Ahora la selección es una tarjeta
+            de dos filas —identidad arriba, decisión abajo— con un conmutador
+            etiquetado en palabras.
+
+            Sin comillas invertidas en TODO este comentario: vive dentro del
+            template literal del componente y una sola lo cerraría en seco.
+          -->
           <span
-            class="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full border border-border bg-[var(--color-surface)] text-[11px]"
-            [title]="tax.name"
+            class="inline-flex flex-col gap-1 rounded-lg border border-border bg-[var(--color-surface)] px-2 py-1.5"
           >
-            <span class="font-medium text-text-primary max-w-[7rem] truncate">
-              {{ tax.name }}
+            <span class="flex items-center gap-1 text-[11px]">
+              <span
+                class="font-medium text-text-primary max-w-[9rem] truncate"
+                [title]="tax.name"
+              >
+                {{ tax.name }}
+              </span>
+              <span class="text-[var(--color-text-secondary)]">
+                {{ formatRate(tax.rate) }}%
+              </span>
+              <button
+                type="button"
+                class="ml-auto p-1 rounded text-[var(--color-text-secondary)] hover:text-error disabled:opacity-50"
+                [disabled]="isDisabled()"
+                [attr.aria-label]="'Quitar ' + tax.name"
+                [title]="'Quitar ' + tax.name + ' de esta línea'"
+                (click)="remove(tax.tax_rate_id)"
+              >
+                <app-icon name="x" [size]="12" />
+              </button>
             </span>
-            <span class="text-[var(--color-text-secondary)]">
-              {{ formatRate(tax.rate) }}%
-            </span>
-            <button
-              type="button"
-              class="px-1 rounded text-[10px] font-semibold uppercase tracking-wide"
-              [class.text-primary]="tax.is_inclusive"
-              [class.text-warning]="!tax.is_inclusive"
-              [disabled]="isDisabled()"
+
+            <!--
+              El conmutador va en su propia fila y con la altura de control de
+              los campos vecinos (min-h) para que sea un objetivo de toque real
+              y no un texto que se pulsa por accidente. El tooltip conserva
+              literalmente la ayuda que ya existía (inclusiveHint).
+            -->
+            <span
+              class="flex items-center min-h-[34px]"
               [title]="inclusiveHint(tax)"
-              (click)="toggleInclusive(tax.tax_rate_id)"
             >
-              {{ tax.is_inclusive ? 'Incl.' : 'Adic.' }}
-            </button>
-            <button
-              type="button"
-              class="p-0.5 text-[var(--color-text-secondary)] hover:text-error"
-              [disabled]="isDisabled()"
-              aria-label="Quitar impuesto"
-              (click)="remove(tax.tax_rate_id)"
-            >
-              <app-icon name="x" [size]="12" />
-            </button>
+              <app-toggle
+                styleVariant="classic"
+                label="Impuesto incluido en el precio"
+                [checked]="!!tax.is_inclusive"
+                [disabled]="isDisabled()"
+                [ariaLabel]="
+                  tax.name + ': impuesto incluido en el precio unitario'
+                "
+                (toggled)="setInclusive(tax.tax_rate_id, $event)"
+              ></app-toggle>
+            </span>
           </span>
         }
 
@@ -343,10 +373,25 @@ export class InvoiceLineTaxesComponent implements ControlValueAccessor {
 
   toggleInclusive(taxRateId: number): void {
     if (this.isDisabled()) return;
+    this.setInclusive(
+      taxRateId,
+      !this.value().find((tax) => tax.tax_rate_id === taxRateId)?.is_inclusive,
+    );
+  }
+
+  /**
+   * Fija el estado del conmutador con el valor QUE ÉL REPORTA, no invirtiendo
+   * el actual: `app-toggle` ya pinta su propio estado al pulsarse, y un padre
+   * que además invierte puede quedar medio paso desfasado del control que el
+   * operador está mirando. El valor guardado sigue siendo el mismo booleano
+   * `is_inclusive` de siempre — el contrato del CVA no cambia.
+   */
+  setInclusive(taxRateId: number, isInclusive: boolean): void {
+    if (this.isDisabled()) return;
     this.commit(
       this.value().map((tax) =>
         tax.tax_rate_id === taxRateId
-          ? { ...tax, is_inclusive: !tax.is_inclusive }
+          ? { ...tax, is_inclusive: isInclusive }
           : tax,
       ),
     );

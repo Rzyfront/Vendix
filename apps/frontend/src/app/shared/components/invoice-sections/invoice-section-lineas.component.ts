@@ -410,6 +410,9 @@ export interface LineasRowErrors {
           El primero se oculta cuando la superficie no tiene inventario detrás
           (showProductActions): un botón «Buscar en inventario» que no puede
           buscar nada es peor que no tenerlo.
+
+          El segundo se oculta cuando la superficie no aporta nada por encima
+          de la rejilla (showCustomItemAction): ver el docblock de esa entrada.
         -->
         @if (showProductActions()) {
           <app-button
@@ -423,16 +426,18 @@ export interface LineasRowErrors {
             Buscar en inventario
           </app-button>
         }
-        <app-button
-          variant="outline"
-          size="sm"
-          type="button"
-          (clicked)="addCustomItem.emit()"
-          [disabled]="rows().length >= maxLines()"
-        >
-          <app-icon slot="icon" name="sparkles" [size]="14" />
-          Ítem personalizado
-        </app-button>
+        @if (showCustomItemAction()) {
+          <app-button
+            variant="outline"
+            size="sm"
+            type="button"
+            (clicked)="addCustomItem.emit()"
+            [disabled]="rows().length >= maxLines()"
+          >
+            <app-icon slot="icon" name="sparkles" [size]="14" />
+            Ítem personalizado
+          </app-button>
+        }
         <app-button
           variant="ghost"
           size="sm"
@@ -502,6 +507,18 @@ export class InvoiceSectionLineasComponent {
    * quedarse pintados sin manejador, que es como estaban.
    */
   readonly showProductActions = input<boolean>(true);
+
+  /**
+   * Si la superficie ofrece el camino «Ítem personalizado» (un modal aparte
+   * para capturar la línea antes de meterla en la rejilla).
+   *
+   * `true` por defecto —el riel de tienda, que nació con esto y sigue igual— y
+   * `false` en la consola de plataforma: allí el modal sólo aportaba poder
+   * marcar el impuesto como incluido, y eso ya se hace en la propia fila desde
+   * que la línea nueva nace con impuesto declarado. Un segundo camino que
+   * termina en lo mismo es una decisión de más para el operador.
+   */
+  readonly showCustomItemAction = input<boolean>(true);
 
   readonly maxLines = input<number>(100);
   readonly emptyStateText = input.required<string>();

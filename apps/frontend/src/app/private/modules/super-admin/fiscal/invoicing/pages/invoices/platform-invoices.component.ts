@@ -29,6 +29,10 @@ import {
   SubscriptionFiscalEnvironment,
   SubscriptionFiscalTransmission,
 } from '../../../../subscriptions/interfaces/fiscal-billing.interface';
+// El mismo lector de errores del riel tienda: convierte el envelope del
+// backend en el copy en español que ya está curado en `ERROR_MESSAGES`.
+import { describeApiFailure } from '../../../../../store/invoicing/utils/invoicing-errors.util';
+import type { PlatformInvoiceKind } from '../../../../subscriptions/interfaces/platform-invoice-document.interface';
 import { FiscalBillingAdminService } from '../../../../subscriptions/services/fiscal-billing-admin.service';
 import { PlatformInvoicingStore } from '../../platform-invoicing.store';
 import { PlatformInvoiceDetailModalComponent } from '../../components/platform-invoice-detail-modal/platform-invoice-detail-modal.component';
@@ -86,6 +90,15 @@ export class PlatformInvoicesComponent {
   readonly showManualIssueModal = signal(false);
   readonly showDetailModal = signal(false);
   readonly selectedInvoiceId = signal<number | null>(null);
+  /**
+   * Riel del documento abierto en el modal. NO es cosmético: decide el
+   * endpoint de detalle y, con él, en qué espacio de id se interpreta
+   * `selectedInvoiceId`. Antes no se enviaba y el modal asumía `platform`
+   * sobre filas que siempre son SaaS.
+   */
+  readonly selectedInvoiceKind = signal<PlatformInvoiceKind>('subscription');
+  /** Fila con una descarga o previsualización en vuelo. */
+  readonly busyRowId = signal<number | null>(null);
 
   readonly manualInvoiceIdControl = this.fb.control<string | null>(null, [
     optionalNumericIdValidator,
@@ -170,12 +183,7 @@ export class PlatformInvoicesComponent {
           platform_support_document: 'secondary',
         },
       },
-      transform: (val) => {
-        if (val === 'subscription_invoice') return 'SaaS';
-        if (val === 'platform_invoice') return 'Plataforma';
-        if (val === 'platform_support_document') return 'Doc. Soporte';
-        return val || '—';
-      },
+      transform: (val: string) => this.sourceTypeLabel(val),
     },
     {
       key: 'source_id',
@@ -236,10 +244,36 @@ export class PlatformInvoicesComponent {
     {
       label: 'Descargar PDF',
       icon: 'file-text',
-      show: (item: SubscriptionFiscalTransmission) => !!item.pdf_url,
-      action: (item: SubscriptionFiscalTransmission) => {
-        if (item.pdf_url) window.open(item.pdf_url, '_blank', 'noopener');
-      },
+      // Antes la acción se ESCONDÍA cuando `pdf_url` venía vacío, así que una
+      // factura aceptada sin PDF cacheado no ofrecía ninguna salida.
+      show: (item: SubscriptionFiscalTransmission) =>
+        !!item.pdf_url || this.isPlatformRow(item),
+      disabled: (item: SubscriptionFiscalTransmission) =>
+        this.busyRowId() === item.id,
+      action: (item: SubscriptionFiscalTransmission) => this.onOpenPdf(item),
+    },
+    {
+      label: 'Previsualizar documento',
+      icon: 'file-search',
+      // `POST invoices/:id/preview-pdf` resuelve por `fiscal_transmissions.id`
+      // filtrando `source_type IN (platform_invoice, platform_support_document)`
+      // (`platform-invoice-pdf.service.ts:370`). Sobre una fila SaaS no sólo
+      // falla: cae al fallback legacy `invoices.findFirst({ id })`
+      // (`:153`), que puede devolver el PDF de OTRO documento que casualmente
+      // tenga ese id. Por eso la acción sólo aparece en el riel plataforma.
+      show: (item: SubscriptionFiscalTransmission) => this.isPlatformRow(item),
+      disabled: (item: SubscriptionFiscalTransmission) =>
+        this.busyRowId() === item.id,
+      action: (item: SubscriptionFiscalTransmission) => this.onPreviewPdf(item),
+    },
+    {
+      label: 'Descargar XML',
+      icon: 'code',
+      // El XML ya viajó en la fila: `listTransmissions` usa `include`, no
+      // `select`. No hay —ni puede haber— llamada HTTP acá porque el backend
+      // no expone ninguna ruta de XML.
+      show: (item: SubscriptionFiscalTransmission) => !!item.xml_document,
+      action: (item: SubscriptionFiscalTransmission) => this.onDownloadXml(item),
     },
     {
       label: 'Reintentar',
@@ -253,12 +287,12 @@ export class PlatformInvoicesComponent {
   readonly cardConfig: ItemListCardConfig = {
     titleKey: 'document_number',
     subtitleKey: 'source_type',
-    subtitleTransform: (val) => {
-      if (val === 'subscription_invoice') return 'SaaS';
-      if (val === 'platform_invoice') return 'Plataforma';
-      if (val === 'platform_support_document') return 'Doc. Soporte';
-      return val || '—';
-    },
+    // `subtitleTransform` recibe el ÍTEM completo, no el valor de
+    // `subtitleKey` (`item-list.component.ts:107`). Comparar el argumento
+    // contra los strings del enum nunca acertaba, así que la tarjeta móvil
+    // caía al `return val` y pintaba «[object Object]» de subtítulo.
+    subtitleTransform: (item: SubscriptionFiscalTransmission) =>
+      this.sourceTypeLabel(item.source_type),
     badgeKey: 'transmission_status',
     badgeConfig: {
       type: 'custom',
@@ -353,9 +387,139 @@ export class PlatformInvoicesComponent {
     }
   }
 
+  /** Etiqueta del riel de origen. Una sola definición para tabla y tarjeta. */
+  private sourceTypeLabel(sourceType: string | null | undefined): string {
+    if (sourceType === 'subscription_invoice') return 'SaaS';
+    if (sourceType === 'platform_invoice') return 'Plataforma';
+    if (sourceType === 'platform_support_document') return 'Doc. Soporte';
+    return sourceType || '—';
+  }
+
+  /** ¿La fila pertenece al riel plataforma (y no al SaaS)? */
+  private isPlatformRow(row: SubscriptionFiscalTransmission): boolean {
+    return (
+      row.source_type === 'platform_invoice' ||
+      row.source_type === 'platform_support_document'
+    );
+  }
+
+  /**
+   * Abre el detalle en el riel correcto.
+   *
+   * LOS DOS RIELES NO COMPARTEN ESPACIO DE ID. Una fila de plataforma se
+   * consulta por `fiscal_transmissions.id` (`row.id`); una SaaS por
+   * `subscription_invoices.id`, que es `row.source_id`. Pasar siempre
+   * `source_id` era lo que abría «el documento equivocado» cuando el listado
+   * traía filas de plataforma.
+   *
+   * Hoy `listTransmissions` filtra duro `source_type:'subscription_invoice'`
+   * (`subscription-fiscal.service.ts:1503`), así que en la práctica todas las
+   * filas son SaaS; la derivación se hace igual para que el día que ese filtro
+   * se abra —el selector de «Origen» de esta misma pantalla ya ofrece los tres
+   * valores— la pantalla no empiece a mostrar documentos ajenos.
+   */
   onRowClick(row: SubscriptionFiscalTransmission): void {
-    this.selectedInvoiceId.set(row.source_id);
+    const isPlatform = this.isPlatformRow(row);
+    this.selectedInvoiceKind.set(isPlatform ? 'platform' : 'subscription');
+    this.selectedInvoiceId.set(isPlatform ? row.id : row.source_id);
     this.showDetailModal.set(true);
+  }
+
+  /**
+   * PDF de la fila.
+   *
+   * `pdf_url` no significa lo mismo en los dos rieles: en el SaaS es la URL
+   * que devolvió el proveedor (`subscription-fiscal.service.ts:5501`), en el
+   * de plataforma es una LLAVE de S3 que se firma en el backend
+   * (`platform-invoice-pdf.service.ts:169`). Abrir la llave con
+   * `window.open` producía un 404 en el navegador; por eso sólo se abre
+   * directo lo que ya es una URL absoluta.
+   */
+  onOpenPdf(row: SubscriptionFiscalTransmission): void {
+    const stored = row.pdf_url?.trim();
+    if (stored && /^https?:\/\//i.test(stored)) {
+      window.open(stored, '_blank', 'noopener');
+      return;
+    }
+
+    if (!this.isPlatformRow(row)) {
+      // `GET invoices/:id/pdf` sólo resuelve transmisiones de plataforma; para
+      // una SaaS sin URL del proveedor no hay de dónde sacar el archivo.
+      this.toast.warning(
+        'Esta transmisión no tiene PDF del proveedor.',
+        'PDF no disponible',
+      );
+      return;
+    }
+
+    this.busyRowId.set(row.id);
+    this.fiscal
+      .getPlatformInvoicePdf(row.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (location) => {
+          this.busyRowId.set(null);
+          if (!location?.url) {
+            this.toast.warning(
+              'El documento todavía no tiene PDF generado.',
+              'PDF',
+            );
+            return;
+          }
+          window.open(location.url, '_blank', 'noopener');
+        },
+        error: (err: unknown) => {
+          this.busyRowId.set(null);
+          this.toast.error(describeApiFailure(err).message, 'PDF');
+        },
+      });
+  }
+
+  /**
+   * Previsualización del PDF sin quemar consecutivo. Este endpoint SÍ responde
+   * binario, así que se pide como blob y se abre con una URL de objeto; leer
+   * `success` sobre un `Blob` es siempre `undefined`.
+   */
+  onPreviewPdf(row: SubscriptionFiscalTransmission): void {
+    this.busyRowId.set(row.id);
+    this.fiscal
+      .previewPlatformInvoicePdf(row.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (blob) => {
+          this.busyRowId.set(null);
+          const url = URL.createObjectURL(
+            new Blob([blob], { type: 'application/pdf' }),
+          );
+          if (!window.open(url, '_blank', 'noopener')) {
+            this.toast.warning(
+              'El navegador bloqueó la ventana emergente con la previsualización.',
+              'Previsualización',
+            );
+          }
+          setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        },
+        error: (err: unknown) => {
+          this.busyRowId.set(null);
+          this.toast.error(describeApiFailure(err).message, 'Previsualización');
+        },
+      });
+  }
+
+  /** Guarda el XML que la propia fila ya trae, por la única vía que existe. */
+  onDownloadXml(row: SubscriptionFiscalTransmission): void {
+    const xml = row.xml_document;
+    if (!xml || !xml.trim()) {
+      this.toast.warning(
+        'Esta transmisión aún no tiene XML firmado.',
+        'XML no disponible',
+      );
+      return;
+    }
+    this.fiscal.saveXmlDocument(
+      xml,
+      `${row.document_number || `documento-${row.id}`}.xml`,
+    );
   }
 
   changePage(page: number): void {

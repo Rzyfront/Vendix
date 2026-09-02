@@ -76,6 +76,9 @@
             [paymentMeansOptions]="paymentMeansOptions"
             [resolutionControl]="resolutionControl"
             [resolutionOptions]="resolutionOptions()"
+            [activeResolution]="activeResolution()"
+            [activeResolutionLoading]="store.loadingResolutions()"
+            documentLabel="Factura de venta"
             [dueDateRequired]="isCredit()"
             dueDateHelp="Obligatoria cuando la forma de pago es a crédito."
             resolutionPlaceholder="Selecciona una resolución DIAN activa"
@@ -273,8 +276,8 @@
             [aiuComponentOptions]="[]"
             [toggleAiu]="toggleAiu"
             [showProductActions]="false"
-            emptyStateText="No hay líneas agregadas. Usa «Agregar línea manual» para capturarla con impuesto, o «Agregar línea en blanco» para teclearla directo en la rejilla."
-            (addCustomItem)="openLineModal()"
+            [showCustomItemAction]="false"
+            emptyStateText="No hay líneas agregadas. Usa «Línea en blanco» y captúrala directo en la rejilla: nace con IVA 19% declarado, y en la propia fila puedes cambiar el impuesto o marcarlo como incluido en el precio."
             (addBlankLine)="addBlankLine()"
             (removeLine)="removeLine($event)"
           ></vendix-invoice-section-lineas>
@@ -444,8 +447,36 @@
           }
         </div>
 
-        @if (errorMessage(); as err) {
-          <app-alert-banner variant="danger">{{ err }}</app-alert-banner>
+        <!--
+          LOS BLOQUEADORES DEL BACKEND, UNO POR FILA.
+
+          La puerta de prevalidación fiscal responde qué le falta al documento
+          en «details.blockers[]», con el problema y su remedio ya redactados.
+          Aplastarlos en el párrafo genérico —que es lo que se pintaba— deja al
+          operador con un «no cumple las validaciones» que no dice ni qué falta
+          ni dónde se arregla. El mensaje genérico se conserva como encabezado
+          del bloque; cuando no hay bloqueadores, es todo el contenido.
+        -->
+        @if (errorMessage() || issueBlockers().length > 0) {
+          <app-alert-banner
+            variant="danger"
+            [heading]="issueBlockers().length > 0 ? errorMessage() : ''"
+          >
+            @if (issueBlockers().length > 0) {
+              <ul class="space-y-2">
+                @for (blocker of issueBlockers(); track $index) {
+                  <li>
+                    <p class="font-semibold">{{ blocker.problem }}</p>
+                    @if (blocker.fix; as fix) {
+                      <p class="mt-0.5 text-xs opacity-80">{{ fix }}</p>
+                    }
+                  </li>
+                }
+              </ul>
+            } @else {
+              {{ errorMessage() }}
+            }
+          </app-alert-banner>
         }
       </div>
 
@@ -557,79 +588,16 @@
   </form>
 </div>
 
-<!-- Modal para Agregar Línea Manual con IVA Incluido / Agregado -->
-<app-modal [(isOpen)]="showLineModal" title="Nueva línea de factura" size="md">
-  <div class="space-y-4">
-    <app-input
-      label="Descripción del concepto o servicio"
-      [ngModel]="newLine().description"
-      (inputChange)="updateNewLine({ description: $event })"
-      placeholder="Ej. Suscripción Plan Pro Anual, Consultoría Técnica..."
-      [required]="true"
-    ></app-input>
+<!--
+  Aquí vivía el modal «Nueva línea de factura».
 
-    <div class="grid grid-cols-3 gap-3">
-      <app-input
-        label="Cantidad"
-        type="number"
-        [ngModel]="newLine().quantity"
-        (inputChange)="updateNewLine({ quantity: +$event || 1 })"
-        [required]="true"
-      ></app-input>
-      <div class="space-y-1">
-        <label class="text-xs font-medium text-text-secondary">Unidad de medida</label>
-        <app-selector
-          [options]="unitCodeOptions"
-          [searchable]="true"
-          [ngModel]="newLine().unit_code"
-          (ngModelChange)="updateNewLine({ unit_code: $event || '' })"
-        ></app-selector>
-      </div>
-      <app-input
-        label="Precio unitario"
-        type="number"
-        [ngModel]="newLine().unit_price"
-        (inputChange)="updateNewLine({ unit_price: +$event || 0 })"
-        [required]="true"
-      ></app-input>
-    </div>
-
-    <div class="grid grid-cols-2 gap-3">
-      <div class="space-y-1">
-        <label class="text-xs font-medium text-text-secondary">Impuesto</label>
-        <app-selector
-          [options]="taxRateOptions"
-          [ngModel]="newLine().tax_rate_id.toString()"
-          (ngModelChange)="updateNewLine({ tax_rate_id: +$event || 0 })"
-        ></app-selector>
-      </div>
-      <app-input
-        label="Descuento (COP)"
-        type="number"
-        [ngModel]="newLine().discount_amount"
-        (inputChange)="updateNewLine({ discount_amount: +$event || 0 })"
-      ></app-input>
-    </div>
-
-    <div class="p-3 rounded-lg bg-surface-secondary/60 border border-border flex items-center justify-between">
-      <div>
-        <p class="text-xs font-semibold text-text-primary">Impuesto incluido en el precio</p>
-        <p class="text-[11px] text-text-secondary">El precio ingresado ya contiene el impuesto; la base se despeja al calcular.</p>
-      </div>
-      <input
-        type="checkbox"
-        [ngModel]="newLine().is_inclusive"
-        (ngModelChange)="updateNewLine({ is_inclusive: !!$event })"
-        class="rounded border-border text-primary focus:ring-primary h-4 w-4"
-      />
-    </div>
-
-    <div class="flex justify-end gap-2 pt-4 border-t border-border">
-      <app-button variant="outline" size="sm" (clicked)="showLineModal.set(false)">Cancelar</app-button>
-      <app-button variant="primary" size="sm" (clicked)="confirmLine()">Agregar a la factura</app-button>
-    </div>
-  </div>
-</app-modal>
+  Su única ventaja sobre agregar en la rejilla era poder marcar el impuesto como
+  incluido en el precio. Desde que la línea nueva nace con IVA 19% declarado y
+  el conmutador «impuesto incluido en el precio» se ve y se pulsa en la propia
+  fila, era un segundo camino que terminaba exactamente en lo mismo: dos botones
+  para una sola acción, y el operador teniendo que adivinar en cuál está lo que
+  busca.
+-->
 
 <!-- Modal de previsualización del documento impreso (HTML del formato) -->
 <app-modal [isOpen]="printPreviewOpen()" (isOpenChange)="closePrintPreview($event)" title="Previsualización del documento" size="xl">
@@ -638,9 +606,29 @@
       <div class="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
       <p class="text-text-secondary font-medium text-sm">Generando la representación gráfica del documento...</p>
     </div>
-  } @else if (printPreviewError(); as err) {
+  } @else if (printPreviewError() || previewBlockers().length > 0) {
     <div class="p-6">
-      <app-alert-banner variant="danger">{{ err }}</app-alert-banner>
+      <!-- Mismo trato que en la emisión: la lista de bloqueadores manda, el
+           mensaje genérico queda de encabezado. -->
+      <app-alert-banner
+        variant="danger"
+        [heading]="previewBlockers().length > 0 ? printPreviewError() : ''"
+      >
+        @if (previewBlockers().length > 0) {
+          <ul class="space-y-2">
+            @for (blocker of previewBlockers(); track $index) {
+              <li>
+                <p class="font-semibold">{{ blocker.problem }}</p>
+                @if (blocker.fix; as fix) {
+                  <p class="mt-0.5 text-xs opacity-80">{{ fix }}</p>
+                }
+              </li>
+            }
+          </ul>
+        } @else {
+          {{ printPreviewError() }}
+        }
+      </app-alert-banner>
     </div>
   } @else if (printPreviewResult()) {
     <div class="w-full h-[70vh] bg-surface rounded-xl overflow-hidden border border-border">
