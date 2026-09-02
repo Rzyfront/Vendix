@@ -375,8 +375,35 @@ export class PosTicketService {
 
     const date = new Date(ticketData.date).toLocaleString();
 
+    /**
+     * ¿Este tiquete va a una térmica de rollo?
+     *
+     * `currentPrinterConfig` deriva `type: paper.isRoll ? 'thermal' :
+     * 'standard'`, así que ésta es la misma pregunta que el composer del
+     * backend resuelve con `paper.is_roll`.
+     *
+     * La térmica quema puntos y no tiene tonos: un gris o un color de marca
+     * se resuelve como trama y el papel térmico barato la ensucia. En rollo,
+     * entonces, la jerarquía de las sublíneas la sostiene el PESO y el color
+     * es negro pleno. En carta o media carta —el camino de quien imprime
+     * tiquetes en una láser— el tiquete conserva su código de color, que ahí
+     * sí se imprime como color y no cuesta legibilidad.
+     */
+    const isRollTicket = printer.type === 'thermal';
+    /** Negro pleno en rollo; el color original en hoja. */
+    const ink = (sheetColor: string): string =>
+      isRollTicket ? '#000' : sheetColor;
+
+    // El marco gris (borde, esquinas redondeadas, sombra) vive SOLO en la
+    // clase `.ticket` de TICKET_PRINT_STYLES, que `@media print` resetea a
+    // `border: none; box-shadow: none;`. Repetirlo aquí en línea rompía ese
+    // reseteo: un estilo en línea gana por especificidad sobre cualquier
+    // regla de clase, incluida una dentro de `@media print`, así que el
+    // marco de vista previa SÍ viajaba al documento impreso. Sólo queda
+    // inline lo que es igual en pantalla e impresión (tipografía, ancho,
+    // fondo blanco).
     let html = `
-      <div class="ticket" style="font-family: monospace; max-width: ${printer.paperWidth}mm; margin: 0 auto; padding: 10px; background: white; border: 1px solid #ccc; border-radius: 8px;">
+      <div class="ticket" style="font-family: monospace; max-width: ${printer.paperWidth}mm; margin: 0 auto; padding: 10px; background: white;">
     `;
 
     if (printer.printHeader) {
@@ -401,7 +428,7 @@ export class PosTicketService {
       ].filter(Boolean);
 
       html += `
-        <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px;">
+        <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid ${ink('#333')}; padding-bottom: 10px;">
       `;
       if (store.logo) {
         html += `<img src="${store.logo}" style="max-width: 100px; margin-bottom: 10px;" alt="Logo" />`;
@@ -450,7 +477,7 @@ export class PosTicketService {
       const primaryName = alias || name || customerFinalBadge;
       const showFinalBadge = isAliasPlaceholder;
       const displayName = showFinalBadge
-        ? `${primaryName} <span style="font-size: 10px; color: #6b7280;">(${customerFinalBadge})</span>`
+        ? `${primaryName} <span style="font-size: 10px; font-weight: 600; color: ${ink('#6b7280')};">(${customerFinalBadge})</span>`
         : primaryName;
       // For anonymous sales (empty name), show "000" as tax ID
       const displayTaxId = name ? ticketData.customer.taxId || '' : '000';
@@ -490,16 +517,18 @@ export class PosTicketService {
         : isSaleUnitItem
           ? `${saleQuantity!.toLocaleString('es-CO', { maximumFractionDigits: 3 })} ${saleUnitCode}`
           : `${item.quantity}`;
+      // Térmica de 80mm: la jerarquía de estas sublíneas ya no la sostiene el
+      // color (se imprime como trama gris sucia), la sostiene el peso.
       const tierLine = item.appliedPriceTierName
-        ? `<br><span style="font-size: 10px; color: #92400e;">Tarifa: ${item.appliedPriceTierName}</span>`
+        ? `<br><span style="font-size: 10px; font-weight: 600; color: ${ink('#92400e')};">Tarifa: ${item.appliedPriceTierName}</span>`
         : '';
       const packageLine =
         item.isPackageUnit && item.unitsPerPackage
-          ? `<br><span style="font-size: 10px; color: #1d4ed8;">x ${item.unitsPerPackage} unid c/u</span>`
+          ? `<br><span style="font-size: 10px; font-weight: 600; color: ${ink('#1d4ed8')};">x ${item.unitsPerPackage} unid c/u</span>`
           : '';
       const serialLine =
         Array.isArray(item.serials) && item.serials.length
-          ? `<br><span style="font-size: 10px; color: #6b7280;">Serial: ${item.serials.join(', ')}</span>`
+          ? `<br><span style="font-size: 10px; font-weight: 600; color: ${ink('#6b7280')};">Serial: ${item.serials.join(', ')}</span>`
           : '';
       // QUI-653 — un pedido de mesa puede ser MIXTO: parte se consume ahí y
       // parte se empaca. El tiquete tiene que distinguir las dos partes, porque
@@ -508,7 +537,7 @@ export class PosTicketService {
       // bloques para no reordenar el tiquete respecto a lo que el cliente vio
       // en la cuenta.
       const takeawayLine = item.isTakeaway
-        ? `<br><span style="font-size: 10px; color: #b45309; font-weight: 600;">** PARA LLEVAR **</span>`
+        ? `<br><span style="font-size: 10px; color: ${ink('#b45309')}; font-weight: 600;">** PARA LLEVAR **</span>`
         : '';
       html += `
         <tr>
@@ -648,7 +677,7 @@ export class PosTicketService {
           ${legalNotice}
           <p style="margin: 5px 0; font-size: 11px;">¡Gracias por su compra!</p>
           <p style="margin: 5px 0; font-size: 10px;">Vuelva pronto</p>
-          <p style="margin: 10px 0 0 0; font-size: 9px; color: #666;">
+          <p style="margin: 10px 0 0 0; font-size: 9px; color: ${ink('#666')};">
             ${new Date().toLocaleString()}
           </p>
         </div>
