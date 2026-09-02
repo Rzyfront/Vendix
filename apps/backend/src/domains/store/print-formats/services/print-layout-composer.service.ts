@@ -473,7 +473,7 @@ export class PrintLayoutComposerService {
       tbodyRows = `<tr>${tds}</tr>`;
     } else {
       if (items.length === 0) {
-        tbodyRows = `<tr><td colspan="${columns.length}" style="text-align:center;padding:8px;color:#888;">Sin ítems registrados</td></tr>`;
+        tbodyRows = `<tr><td colspan="${columns.length}" class="items-empty">Sin ítems registrados</td></tr>`;
       } else {
         tbodyRows = items
           .map((item, idx) => {
@@ -496,10 +496,10 @@ export class PrintLayoutComposerService {
                       sublines += `<br><small class="item-note">Nota: ${this.compiler.escapeHtml(item.notes)}</small>`;
                     }
                     if (showItemDiscounts && item.discount_amount && Number(item.discount_amount) > 0) {
-                      sublines += `<br><small class="item-sub item-discount" style="color: #ef4444;">Desc: -${item.discount_formatted || `$${Number(item.discount_amount).toLocaleString('es-CO')}`}</small>`;
+                      sublines += `<br><small class="item-sub item-discount">Desc: -${item.discount_formatted || `$${Number(item.discount_amount).toLocaleString('es-CO')}`}</small>`;
                     }
                     if (showItemTaxes && item.tax_rate !== undefined && Number(item.tax_rate) > 0) {
-                      sublines += `<br><small class="item-sub item-tax" style="color: #6b7280;">IVA: ${item.tax_rate}%</small>`;
+                      sublines += `<br><small class="item-sub item-tax">IVA: ${item.tax_rate}%</small>`;
                     }
                     val = `${this.compiler.escapeHtml(item.product_name)}${sublines}`;
                     return `<td data-column-id="${col.id}" data-element-id="col_${col.id}" style="text-align: ${col.align};">${val}</td>`;
@@ -684,12 +684,12 @@ export class PrintLayoutComposerService {
 
     const qrImg = fiscal?.qr_code_png_base64
       ? `<img src="data:image/png;base64,${fiscal.qr_code_png_base64}" alt="QR Fiscal" style="width: 110px; height: 110px;" />`
-      : `<div style="display:inline-block;width:100px;height:100px;border:1px dashed #3b82f6;line-height:100px;font-size:10px;color:#3b82f6;"><span class="vendix-token-pill" data-token="fiscal.qr_code">&#123;&#123; QR Fiscal &#125;&#125;</span></div>`;
+      : `<div class="qr-placeholder"><span class="vendix-token-pill" data-token="fiscal.qr_code">&#123;&#123; QR Fiscal &#125;&#125;</span></div>`;
 
     return `
       <div class="print-section section-qr-fiscal" data-section-id="sec_qr" style="text-align: center; margin-top: 10px;">
         ${qrImg}
-        <div style="font-size: 8pt; color: #666; margin-top: 4px;">Validación DIAN de Documento Electrónico</div>
+        <div class="qr-caption">Validación DIAN de Documento Electrónico</div>
       </div>
     `;
   }
@@ -873,11 +873,34 @@ export class PrintLayoutComposerService {
   ): string {
     const paper = definition.paper;
     const styles = definition.styles || {};
-    const primaryColor = styles.primary_color || '#111827';
-    const font = styles.font_family || "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    // La térmica de 80mm no imprime color: quema puntos. Un gris o un azul de
+    // marca se resuelve como trama y el papel térmico barato se la come, así
+    // que en rollo el color de marca deja de tener efecto aunque la plantilla
+    // lo traiga configurado — el fallback cae a negro pleno en vez de al
+    // "casi negro" #111827 que usan las hojas. El bloque al final de esta
+    // hoja de estilos (ver más abajo) es la garantía real; esto es defensa en
+    // profundidad para cuando ese bloque no alcanza a una regla (p. ej. si
+    // alguien lo retira sin querer).
+    const isRoll = !!paper.is_roll;
+    const primaryColor = isRoll ? '#000000' : (styles.primary_color || '#111827');
+    const bodyTextColor = isRoll ? '#000000' : '#111827';
+    // En rollo se ignora styles.font_family aunque la plantilla lo traiga
+    // configurado (hoy casi todas traen 'Courier New', Courier, monospace):
+    // una monoespaciada de asta fina se rasteriza a puntos discontinuos en
+    // el cabezal térmico y se lee peor que una sans de palo grueso. En hoja
+    // el comportamiento no cambia: gana styles.font_family si viene, con el
+    // mismo fallback de siempre.
+    const font = isRoll
+      ? 'Arial, Helvetica, sans-serif'
+      : (styles.font_family || "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif");
     const fontSize = styles.font_size_base_pt || (paper.is_roll ? 9 : 10);
 
-    const defaultMm = paper.is_roll ? 0 : 10;
+    // A 0mm el cabezal recorta el primer y último carácter de cada línea en
+    // la mayoría de las térmicas de 80mm: el margen mínimo seguro es 1.5mm.
+    // Este default sólo aplica cuando la plantilla NO trae margin_mm ni los
+    // per-side de abajo — una plantilla con margin_mm: 0 explícito sigue
+    // dando 0 (ese dato lo corrige la capa 2, no este código).
+    const defaultMm = paper.is_roll ? 1.5 : 10;
     const mTop = paper.margin_top_mm ?? paper.margin_mm ?? defaultMm;
     const mRight = paper.margin_right_mm ?? paper.margin_mm ?? defaultMm;
     const mBottom = paper.margin_bottom_mm ?? paper.margin_mm ?? defaultMm;
@@ -919,7 +942,7 @@ export class PrintLayoutComposerService {
     body {
       font-family: ${font};
       font-size: ${fontSize}pt;
-      color: #111827;
+      color: ${bodyTextColor};
       margin: 0;
       padding: ${mTop}mm ${mRight}mm ${mBottom}mm ${mLeft}mm;
       background: #fff;
@@ -945,7 +968,7 @@ export class PrintLayoutComposerService {
       margin-right: 4px;
     }
     .company-block .value {
-      color: #111827;
+      color: ${bodyTextColor};
     }
     .print-section {
       margin-bottom: 8px;
@@ -1016,6 +1039,36 @@ export class PrintLayoutComposerService {
       font-size: ${fontSize}pt;
       font-weight: 600;
       color: ${primaryColor};
+    }
+    /* [tirilla-80mm-negro] — color de las sublíneas de ítem y del placeholder
+       de tabla vacía: antes vivían pegados al atributo style del elemento,
+       lo que le habría exigido !important al bloque de negro de rollo (ver
+       final de esta hoja) para poder alcanzarlos. Sacados a clase, el bloque
+       de rollo los gana por cascada sin tocar el atributo style. */
+    .item-discount {
+      color: #ef4444;
+    }
+    .item-tax {
+      color: #6b7280;
+    }
+    .items-empty {
+      text-align: center;
+      padding: 8px;
+      color: #888;
+    }
+    .qr-placeholder {
+      display: inline-block;
+      width: 100px;
+      height: 100px;
+      border: 1px dashed #3b82f6;
+      line-height: 100px;
+      font-size: 10px;
+      color: #3b82f6;
+    }
+    .qr-caption {
+      font-size: 8pt;
+      color: #666;
+      margin-top: 4px;
     }
     .section-footer {
       text-align: center;
@@ -1155,9 +1208,71 @@ export class PrintLayoutComposerService {
       outline: 1.5px dashed #3b82f6 !important;
       outline-offset: 1px;
     }
+    ${isRoll ? `
+    /* [tirilla-80mm-negro] — Bloque único de negro absoluto para rollo
+       térmico, al final de la hoja para ganar por orden de cascada. La
+       térmica de 80mm quema puntos: no tiene tonos, así que cualquier gris o
+       color de marca que llegue aquí se imprime como trama sucia y el papel
+       térmico barato termina de comérsela. Este bloque es el ÚNICO lugar del
+       archivo con !important nuevo — a propósito: tiene que ganar sobre
+       CUALQUIER regla de arriba, incluida una sección que alguien agregue
+       mañana con un gris heredado de un formato de hoja (ver Objetivo
+       específico 4 del plan). No compite con ningún atributo style: esos
+       ya se sacaron a clases más arriba, así que este !important no se
+       esparce por el archivo, vive sólo aquí.
+       La jerarquía que antes sostenía el color (nombre de tienda, número de
+       documento, gran total, títulos de sección, encabezados de tabla) pasa
+       a sostenerla el peso: 700 para esos, 600 para rótulos y sublíneas.
+       Los formatos de hoja (carta/A4) no entran a este bloque — is_roll los
+       deja fuera y conservan su color de marca intacto. */
+    body.print-roll,
+    body.print-roll * {
+      color: #000 !important;
+      background-color: #fff !important;
+      border-color: #000 !important;
+      /* Base legible por defecto: semibold + sin antialiasing subpixel.
+         La térmica de 80mm rasteriza a puntos discontinuos; un peso normal
+         (400) se lava y el suavizado subpixel del renderer de Chromium
+         agrega grises que el cabezal no reproduce, dejando un trazo sucio.
+         Es la BASE, no la última palabra: su especificidad es (0,1,1) y la
+         lista de 700 de abajo es (0,2,1), así que la jerarquía sigue ganando
+         y los títulos salen en bold. El orden en la hoja NO es lo que
+         decide, de modo que esta regla puede vivir antes o después sin
+         cambiar el resultado; se deja primero por legibilidad (base
+         primero, refinamientos después). */
+      font-weight: 600 !important;
+      -webkit-font-smoothing: none;
+    }
+    body.print-roll .store-name,
+    body.print-roll .doc-number,
+    body.print-roll .grand-total,
+    body.print-roll .section-label,
+    body.print-roll .party-title,
+    body.print-roll .dt-section-label,
+    body.print-roll th {
+      font-weight: 700 !important;
+    }
+    /* Esta lista quedó redundante frente al font-weight: 600 !important de
+       la regla base de arriba (mismo valor, especificidad (0,2,1) > (0,1,1)
+       así que de todas formas ganaría). Se conserva a propósito: nombra
+       explícitamente qué elementos el diseño quiere en semibold, así que si
+       mañana alguien cambia el peso de la regla base a otro valor, estos
+       elementos NO degradan en silencio con él. */
+    body.print-roll .field-label,
+    body.print-roll .item-sub,
+    body.print-roll .total-label,
+    body.print-roll .customer-name,
+    body.print-roll .dt-customer-name,
+    body.print-roll .doc-cashier,
+    body.print-roll .doc-terminal,
+    body.print-roll .cufe-label,
+    body.print-roll .total-in-words-label {
+      font-weight: 600 !important;
+    }
+    ` : ''}
   </style>
 </head>
-<body>
+<body class="${isRoll ? 'print-roll' : 'print-sheet'}">
   ${bodyContent}
   <script>
     document.addEventListener('click', function(e) {

@@ -215,3 +215,468 @@ describe('PrintLayoutComposerService — v2 fields (P1.3)', () => {
     expect(html).toContain('Mi Tienda');
   });
 });
+
+/**
+ * [tirilla-80mm-negro-absoluto] — Regresión: en rollo térmico (80mm) el
+ * documento sólo puede imprimir negro y blanco; en hoja (carta/A4) el color
+ * de marca de la plantilla se conserva. Dos casos, uno espejo del otro a
+ * propósito: si alguien "arreglara" el defecto aplicando negro a TODO
+ * (incluida hoja), el caso espejo lo detecta.
+ *
+ * Las cuatro definiciones de rollo son copia fiel de
+ * `prisma/seeds/print-templates.seed.ts` (paper + styles + sections +
+ * columns de `pos_sale_ticket`, `pos_electronic_invoice`, `kitchen_ticket`
+ * y `dispatch_ticket`) — no se importan desde ahí porque ese archivo vive
+ * fuera del `rootDir` de Jest (`src/`) y ts-jest no lo compila. Copiarlas
+ * también deja la prueba legible sin saltar a otro paquete.
+ */
+describe('PrintLayoutComposerService — tirilla 80mm en negro absoluto', () => {
+  let composer: PrintLayoutComposerService;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [PrintLayoutComposerService, PrintTemplateCompilerService],
+    }).compile();
+
+    composer = module.get<PrintLayoutComposerService>(PrintLayoutComposerService);
+  });
+
+  /**
+   * Extrae los colores del `<body>` compuesto — lo único que de verdad se
+   * imprime. El `<head>` siempre contiene, como texto plano, los colores de
+   * marca de las reglas que el bloque de negro de rollo pisa por cascada
+   * (`!important`, al final de la hoja de estilos): un grep sobre el head
+   * confundiría "una regla que perdió la cascada" con "un color que sale en
+   * el papel". El body, en cambio, no lleva ni un solo `style="color:"` en
+   * rollo tras este plan — si aparece uno, la regresión es real.
+   */
+  function bodyColors(html: string): string[] {
+    const match = html.match(/<body[^>]*>([\s\S]*)<\/body>/);
+    const body = match ? match[1] : html;
+    // El único lugar del body donde un color se "pinta de verdad" es un
+    // atributo style="..."; el texto visible puede contener secuencias que
+    // parecen hex sin serlo (p. ej. un número de documento "#4567" — 4, 5, 6
+    // y 7 son dígitos hex válidos). Por eso el barrido va sólo sobre los
+    // valores de style="...", tal como dice el comentario de arriba: si
+    // sobrevive un style="color:" en rollo, ESO es la regresión real.
+    const styleAttrs = body.match(/style="[^"]*"/gi) || [];
+    const styleText = styleAttrs.join(' ');
+    // Hex, `rgb()/rgba()/hsl()` y colores con nombre. Los tres, no sólo hex:
+    // un `color: red` o un `rgb(107,114,128)` que alguien agregue mañana
+    // imprime igual de mal y un grep de `#` no lo vería.
+    const hexes = styleText.match(/#[0-9a-fA-F]{3,8}/g) || [];
+    const funcs = styleText.match(/\b(?:rgba?|hsla?)\([^)]*\)/gi) || [];
+    const named =
+      styleText.match(
+        /(?:color|background|background-color|border-color|border(?:-\w+)?)\s*:\s*([a-z]{3,20})\b/gi,
+      ) || [];
+    const namedValues = named
+      .map((decl) => (decl.split(':')[1] || '').trim().toLowerCase())
+      // `white`/`black` son los dos nombres admitidos; `none`, `solid`,
+      // `dashed`, `transparent` e `inherit` no son colores visibles.
+      .filter(
+        (value) =>
+          ![
+            'none',
+            'solid',
+            'dashed',
+            'dotted',
+            'transparent',
+            'inherit',
+            'initial',
+            'unset',
+            'currentcolor',
+            'white',
+            'black',
+          ].includes(value),
+      );
+    return Array.from(
+      new Set(
+        [...hexes, ...funcs, ...namedValues].map((c) =>
+          c.toLowerCase().replace(/\s+/g, ''),
+        ),
+      ),
+    );
+  }
+
+  const BLACK_AND_WHITE = ['#000', '#000000', '#fff', '#ffffff'];
+
+  const rollPaper = {
+    format: 'thermal_80' as const,
+    width_mm: 80,
+    is_roll: true,
+    margin_mm: 0,
+    copies: 1,
+  };
+
+  const rollStyles = (fontSize: number) => ({
+    font_family: "'Courier New', Courier, monospace",
+    font_size_base_pt: fontSize,
+    primary_color: '#000000',
+    header_alignment: 'center' as const,
+    compact_mode: true,
+  });
+
+  /**
+   * Un solo modelo "rico" que ejercita TODAS las rutas que antes emitían
+   * color: descuento e IVA por ítem (rojo/gris), retención, total en letras,
+   * discriminación de impuestos, QR con PNG real (para no caer en el
+   * placeholder azul de "QR pendiente" — ese es otro defecto, no el de este
+   * plan) y mesa/mesero para el ticket de cocina.
+   */
+  const richData: StandardPrintDataModel = {
+    store: {
+      name: 'Restaurante El Fogón',
+      legal_name: 'El Fogón S.A.S.',
+      tax_id: '900123456',
+      tax_regime: 'Común',
+      address: 'Calle 10 # 5-20',
+      city: 'Medellín',
+      phone: '+57 4 555 1234',
+      email: 'ventas@elfogon.co',
+    },
+    customer: {
+      name: 'Juan Pérez',
+      tax_id: '1020304050',
+      address: 'Cra 45 # 10-30',
+      phone: '3001234567',
+      email: 'juan@example.com',
+    },
+    document: {
+      id: 99,
+      number: '4567',
+      date: '2026-09-01',
+      date_formatted: '2026-09-01',
+      time: '19:45',
+      state: 'paid',
+      state_label: 'Pagado',
+      cashier_name: 'María López',
+      pos_terminal: 'Caja 1',
+      payment_method: 'Efectivo',
+      amount_received: 100000,
+      amount_received_formatted: '$100.000',
+      change_due: 5500,
+      change_due_formatted: '$5.500',
+      table_number: 'Mesa 5',
+      waiter_name: 'Carlos Ruiz',
+    },
+    fiscal: {
+      cufe: 'a1b2c3d4e5f6'.padEnd(96, '0'),
+      qr_code_content: 'NumFac:4567\nCUFE:a1b2c3',
+      qr_code_png_base64:
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    },
+    items: [
+      {
+        index: 1,
+        product_name: 'Bandeja Paisa',
+        variant_sku: 'BP-001',
+        variant_attributes: 'Tamaño: Grande',
+        quantity: 2,
+        unit_price: 25000,
+        unit_price_formatted: '$25.000',
+        discount_amount: 3000,
+        discount_formatted: '$3.000',
+        tax_rate: 19,
+        tax_amount: 4180,
+        total_price: 50000,
+        total_price_formatted: '$50.000',
+        notes: 'Sin cebolla',
+        dispatched_qty: 2,
+      },
+      {
+        index: 2,
+        product_name: 'Jugo Natural',
+        variant_sku: 'JN-002',
+        quantity: 1,
+        unit_price: 8000,
+        unit_price_formatted: '$8.000',
+        total_price: 8000,
+        total_price_formatted: '$8.000',
+        dispatched_qty: 1,
+      },
+    ],
+    taxes: [
+      {
+        name: 'IVA',
+        rate: 19,
+        base_amount: 50000,
+        tax_amount: 9500,
+        base_formatted: '$50.000',
+        tax_formatted: '$9.500',
+      },
+    ],
+    totals: {
+      subtotal: 58000,
+      subtotal_formatted: '$58.000',
+      discount_total: 3000,
+      discount_total_formatted: '$3.000',
+      shipping_total: 0,
+      shipping_total_formatted: '$0',
+      tax_total: 9500,
+      tax_total_formatted: '$9.500',
+      withholding_total: 500,
+      withholding_total_formatted: '$500',
+      grand_total: 64000,
+      grand_total_formatted: '$64.000',
+      grand_total_in_words: 'Sesenta y cuatro mil pesos',
+    },
+  };
+
+  // Copia fiel de SYSTEM_PRINT_TEMPLATES en prisma/seeds/print-templates.seed.ts
+  const rollDefinitions: Record<string, PrintFormatDefinition> = {
+    pos_sale_ticket: {
+      v: 2,
+      paper: rollPaper,
+      styles: rollStyles(9),
+      sections: [
+        { id: 'sec_header', type: 'header', title: 'Encabezado', enabled: true, order: 1 },
+        { id: 'sec_doc_info', type: 'document_info', title: 'Datos del Ticket', enabled: true, order: 2 },
+        { id: 'sec_customer', type: 'customer_info', title: 'Datos del Cliente', enabled: true, order: 3 },
+        { id: 'sec_items', type: 'items_table', title: 'Detalle de Productos', enabled: true, order: 4 },
+        { id: 'sec_totals', type: 'totals_summary', title: 'Totales y Medios de Pago', enabled: true, order: 5 },
+        { id: 'sec_footer', type: 'footer', title: 'Pie de Ticket', enabled: true, order: 6 },
+      ],
+      columns: [
+        { id: 'col_desc', key: 'product_name', label: 'Descripción', enabled: true, width_percent: 50, align: 'left' },
+        { id: 'col_qty', key: 'quantity', label: 'Cant.', enabled: true, width_percent: 15, align: 'center' },
+        { id: 'col_price', key: 'unit_price', label: 'Precio', enabled: true, width_percent: 15, align: 'right' },
+        { id: 'col_tot', key: 'total_price', label: 'Total', enabled: true, width_percent: 20, align: 'right' },
+      ],
+    },
+    pos_electronic_invoice: {
+      v: 2,
+      paper: rollPaper,
+      styles: rollStyles(8.5),
+      sections: [
+        { id: 'sec_dian_header', type: 'fiscal_header', title: 'Cabecera Fiscal', enabled: true, order: 1 },
+        { id: 'sec_doc_info', type: 'document_info', title: 'Datos de la Venta', enabled: true, order: 2 },
+        { id: 'sec_dian_buyer', type: 'fiscal_buyer_info', title: 'Datos del Adquirente', enabled: true, order: 3 },
+        { id: 'sec_items', type: 'items_table', title: 'Detalle', enabled: true, order: 4 },
+        { id: 'sec_totals', type: 'totals_summary', title: 'Liquidación Total', enabled: true, order: 5 },
+        { id: 'sec_dian_taxes', type: 'fiscal_tax_breakdown', title: 'Discriminación de Impuestos', enabled: true, order: 6 },
+        { id: 'sec_dian_cufe', type: 'fiscal_cufe_box', title: 'CUFE', enabled: true, order: 7 },
+        { id: 'sec_dian_qr', type: 'fiscal_qr_section', title: 'QR DIAN', enabled: true, order: 8 },
+        { id: 'sec_footer', type: 'footer', title: 'Pie', enabled: true, order: 9 },
+      ],
+      columns: [
+        { id: 'col_desc', key: 'product_name', label: 'Descripción', enabled: true, width_percent: 50, align: 'left' },
+        { id: 'col_qty', key: 'quantity', label: 'Cant.', enabled: true, width_percent: 15, align: 'center' },
+        { id: 'col_tot', key: 'total_price', label: 'Total', enabled: true, width_percent: 35, align: 'right' },
+      ],
+    },
+    kitchen_ticket: {
+      v: 2,
+      paper: rollPaper,
+      styles: rollStyles(11),
+      sections: [
+        { id: 'sec_header', type: 'header', title: 'Encabezado Comanda', enabled: true, order: 1 },
+        { id: 'sec_table_info', type: 'table_info', title: 'Mesa, Mesero y Turno', enabled: true, order: 2 },
+        { id: 'sec_items', type: 'kitchen_items', title: 'Platos y Modificadores', enabled: true, order: 3 },
+        { id: 'sec_notes', type: 'custom_notes', title: 'Observaciones de Cocina', enabled: true, order: 4 },
+      ],
+      columns: [
+        { id: 'col_qty', key: 'quantity', label: 'Cant.', enabled: true, width_percent: 25, align: 'center' },
+        { id: 'col_desc', key: 'product_name', label: 'Plato / Preparación', enabled: true, width_percent: 75, align: 'left' },
+      ],
+    },
+    dispatch_ticket: {
+      v: 2,
+      paper: rollPaper,
+      styles: { ...rollStyles(9), show_borders: true },
+      sections: [
+        { id: 'sec_header', type: 'header', title: 'Encabezado Despacho', enabled: true, order: 1 },
+        { id: 'sec_doc_info', type: 'document_info', title: 'Datos de la Orden', enabled: true, order: 2 },
+        { id: 'sec_customer', type: 'customer_info', title: 'Cliente y Dirección de Entrega', enabled: true, order: 3 },
+        { id: 'sec_items', type: 'items_table', title: 'Productos a Despachar', enabled: true, order: 4 },
+        { id: 'sec_footer', type: 'footer', title: 'Despachado por', enabled: true, order: 5 },
+      ],
+      columns: [
+        { id: 'col_idx', key: 'index', label: '#', enabled: true, width_percent: 8, align: 'center' },
+        { id: 'col_sku', key: 'variant_sku', label: 'SKU / Código', enabled: true, width_percent: 30, align: 'left' },
+        { id: 'col_desc', key: 'product_name', label: 'Descripción', enabled: true, width_percent: 32, align: 'left' },
+        { id: 'col_qty', key: 'quantity', label: 'Cant. Pedida', enabled: true, width_percent: 15, align: 'center' },
+        { id: 'col_disp', key: 'dispatched_qty', label: 'Cant. Despachada', enabled: true, width_percent: 15, align: 'center' },
+      ],
+    },
+  };
+
+  it.each(Object.entries(rollDefinitions))(
+    '1.%s (rollo 80mm) — el body compuesto sólo imprime negro y blanco',
+    (_name, def) => {
+      const html = composer.compose(def, richData);
+      // El interruptor de carril quedó marcado en el documento...
+      expect(html).toContain('<body class="print-roll">');
+      // ...y el bloque de negro absoluto va cableado para ese carril.
+      expect(html).toContain('body.print-roll');
+      expect(html).toContain('color: #000 !important');
+      // Lo que de verdad se imprime — el body — no tiene un solo color que
+      // no sea negro o blanco.
+      const colors = bodyColors(html);
+      const rogue = colors.filter((c) => !BLACK_AND_WHITE.includes(c));
+      expect(rogue).toEqual([]);
+    },
+  );
+
+  it('2. espejo — un formato de hoja (fiscal_electronic_invoice) SÍ conserva su color de marca', () => {
+    const sheetDef: PrintFormatDefinition = {
+      v: 2,
+      paper: {
+        format: 'letter',
+        width_mm: 216,
+        is_roll: false,
+        margin_mm: 12,
+        copies: 1,
+        orientation: 'portrait',
+      },
+      styles: {
+        font_family: "'Segoe UI', Arial, sans-serif",
+        font_size_base_pt: 9,
+        primary_color: '#1e3a8a',
+        header_alignment: 'left',
+        show_borders: true,
+      },
+      sections: [
+        { id: 'sec_dian_header', type: 'fiscal_header', title: 'Cabecera Fiscal', enabled: true, order: 1 },
+        { id: 'sec_dian_cufe', type: 'fiscal_cufe_box', title: 'CUFE', enabled: true, order: 2 },
+        { id: 'sec_dian_buyer', type: 'fiscal_buyer_info', title: 'Adquirente', enabled: true, order: 3 },
+        { id: 'sec_items', type: 'items_table', title: 'Detalle', enabled: true, order: 4 },
+        { id: 'sec_dian_taxes', type: 'fiscal_tax_breakdown', title: 'Impuestos', enabled: true, order: 5 },
+        { id: 'sec_totals', type: 'totals_summary', title: 'Liquidación', enabled: true, order: 6 },
+        { id: 'sec_dian_qr', type: 'fiscal_qr_section', title: 'QR DIAN', enabled: true, order: 7 },
+      ],
+      columns: [
+        { id: 'col_desc', key: 'product_name', label: 'Descripción', enabled: true, width_percent: 60, align: 'left' },
+        { id: 'col_qty', key: 'quantity', label: 'Cant.', enabled: true, width_percent: 15, align: 'center' },
+        { id: 'col_tot', key: 'total_price', label: 'Total', enabled: true, width_percent: 25, align: 'right' },
+      ],
+    };
+
+    const html = composer.compose(sheetDef, richData);
+
+    // El carril de hoja no entra al bloque de negro absoluto...
+    expect(html).toContain('<body class="print-sheet">');
+    expect(html).not.toContain('body.print-roll');
+    // ...y el color de marca de la plantilla sigue vivo en el documento.
+    expect(html).toContain('#1e3a8a');
+    expect(html).toContain('color: #1e3a8a');
+  });
+
+  /**
+   * [tirilla-80mm-legible] — Regresión de la CAPA 1 del plan: la tirilla de
+   * 80mm no sólo tenía que dejar de imprimir color (ya cubierto arriba),
+   * también tenía que dejar de imprimirse ilegible por margen 0 y por una
+   * monoespaciada de asta fina. `paper.margin_mm` es un campo REQUERIDO en
+   * `PrintPaperConfig` (ver interfaces/print-format.interface.ts) — los
+   * casos "sin margin_mm" usan `as any` a propósito para simular el dato
+   * real que puede llegar sin ese campo (plantilla legacy incompleta), no
+   * porque el tipo lo permita.
+   */
+  it('3. rollo sin margin_mm ni per-side — el default es 1.5mm, no 0', () => {
+    const def: PrintFormatDefinition = {
+      v: 2,
+      paper: {
+        format: 'thermal_80',
+        width_mm: 80,
+        is_roll: true,
+        copies: 1,
+      } as any,
+      styles: rollStyles(9),
+      sections: [
+        { id: 'sec_header', type: 'header', title: 'Encabezado', enabled: true, order: 1 },
+      ],
+    };
+    const html = composer.compose(def, richData);
+    expect(html).toMatch(/padding:\s*1\.5mm\s*1\.5mm\s*1\.5mm\s*1\.5mm/);
+    expect(html).toMatch(/@page\s*\{[\s\S]*margin:\s*1\.5mm/);
+  });
+
+  it('4. rollo con margin_mm: 0 explícito — el default de 1.5mm NO pisa un valor configurado', () => {
+    const def: PrintFormatDefinition = {
+      v: 2,
+      paper: rollPaper, // margin_mm: 0 explícito — dato que corrige la capa 2, no este código
+      styles: rollStyles(9),
+      sections: [
+        { id: 'sec_header', type: 'header', title: 'Encabezado', enabled: true, order: 1 },
+      ],
+    };
+    const html = composer.compose(def, richData);
+    expect(html).toMatch(/padding:\s*0mm\s*0mm\s*0mm\s*0mm/);
+    expect(html).toMatch(/@page\s*\{[\s\S]*margin:\s*0;/);
+  });
+
+  it('5. hoja sin márgenes — sigue dando 10mm (sin regresión en el carril de hoja)', () => {
+    const def: PrintFormatDefinition = {
+      v: 2,
+      paper: {
+        format: 'letter',
+        width_mm: 216,
+        height_mm: 280,
+        is_roll: false,
+        copies: 1,
+      } as any,
+      sections: [
+        { id: 'sec_header', type: 'header', title: 'Encabezado', enabled: true, order: 1 },
+      ],
+    };
+    const html = composer.compose(def, richData);
+    expect(html).toMatch(/padding:\s*10mm\s*10mm\s*10mm\s*10mm/);
+    expect(html).toMatch(/@page\s*\{[\s\S]*margin:\s*10mm/);
+  });
+
+  it('6. rollo con font_family Courier configurado — el body fuerza Arial/Helvetica y "Courier" no aparece en el HTML', () => {
+    // rollStyles trae 'Courier New', Courier, monospace — igual que las
+    // plantillas reales hoy en prisma/seeds/print-templates.seed.ts.
+    const def: PrintFormatDefinition = rollDefinitions.pos_sale_ticket;
+    const html = composer.compose(def, richData);
+    expect(html).toMatch(/font-family:\s*Arial,\s*Helvetica,\s*sans-serif/);
+    expect(html).not.toContain('Courier');
+  });
+
+  it('7. hoja con font_family configurado — SÍ se respeta (espejo del carril de hoja)', () => {
+    const def: PrintFormatDefinition = {
+      v: 2,
+      paper: {
+        format: 'letter',
+        width_mm: 216,
+        is_roll: false,
+        margin_mm: 12,
+        copies: 1,
+      },
+      styles: {
+        font_family: "'Segoe UI', Arial, sans-serif",
+        font_size_base_pt: 9,
+      },
+      sections: [
+        { id: 'sec_header', type: 'header', title: 'Encabezado', enabled: true, order: 1 },
+      ],
+    };
+    const html = composer.compose(def, richData);
+    expect(html).toContain("font-family: 'Segoe UI', Arial, sans-serif");
+  });
+
+  it('8. el bloque de negro absoluto de rollo trae font-weight: 600 !important y -webkit-font-smoothing: none', () => {
+    const def: PrintFormatDefinition = rollDefinitions.pos_sale_ticket;
+    const html = composer.compose(def, richData);
+    expect(html).toContain('font-weight: 600 !important');
+    expect(html).toContain('-webkit-font-smoothing: none');
+  });
+
+  it('9. precedencia — la regla base de 600 aparece en la cascada ANTES que la de .store-name con 700', () => {
+    // La especificidad ((0,2,1) de .store-name > (0,1,1) de la regla base)
+    // es lo que de verdad decide, no el orden — pero el plan pide fijar el
+    // orden real en la hoja para que no dependa sólo de la especificidad si
+    // alguien reescribe un selector mañana. Se asserta por índice de
+    // posición en la cadena, no por presencia.
+    const def: PrintFormatDefinition = rollDefinitions.pos_sale_ticket;
+    const html = composer.compose(def, richData);
+    const idxBase600 = html.indexOf('font-weight: 600 !important');
+    const idxStoreNameSelector = html.indexOf('body.print-roll .store-name');
+    const idx700 = html.indexOf('font-weight: 700 !important');
+    expect(idxBase600).toBeGreaterThan(-1);
+    expect(idxStoreNameSelector).toBeGreaterThan(-1);
+    expect(idx700).toBeGreaterThan(-1);
+    expect(idxBase600).toBeLessThan(idxStoreNameSelector);
+    expect(idxStoreNameSelector).toBeLessThan(idx700);
+  });
+});
