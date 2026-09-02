@@ -165,6 +165,55 @@ const SEND_TONES: Record<string, FiscalTone> = {
  * con la fila de la lista, y una respuesta vieja en caché podría no traerlas.
  * Pintar «—» sería inventar un estado que la base nunca tuvo.
  */
+/**
+ * Rótulo en español del `status` de la factura (`invoice_status_enum`).
+ *
+ * `fiscalStatusCells()` NO cubre esta columna: pinta las tres del ciclo fiscal
+ * (transmisión, DIAN, envío) más contabilidad, y `status` es el estado del
+ * documento en Vendix. Una factura `cancelled` que nunca se transmitió tiene
+ * transmisión «Borrador» y DIAN «Sin transmitir» — verdadero, pero incompleto
+ * si el rótulo de cancelada no aparece en ningún lado.
+ *
+ * DUPLICACIÓN CONOCIDA: el mismo mapa vive privado en
+ * `InvoiceDetailComponent.getStatusLabel` y en `InvoiceListComponent`. Esta es
+ * la copia PÚBLICA, para que quien necesite el rótulo desde fuera del módulo
+ * (el acceso rápido del detalle de orden) no cree una cuarta. Quien toque esas
+ * dos pantallas debería reemplazar su copia por esta función.
+ */
+export function invoiceStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    draft: 'Borrador',
+    validated: 'Validada',
+    sent: 'Enviada',
+    accepted: 'Aceptada',
+    rejected: 'Rechazada',
+    cancelled: 'Cancelada',
+    voided: 'Anulada',
+  };
+  return labels[status] || status;
+}
+
+/**
+ * Tono del rótulo de `status`. Mismo criterio semántico que las celdas
+ * fiscales: verde sólo lo aceptado, rojo lo rechazado, neutro lo que ya no
+ * avanza (cancelada/anulada) y ámbar lo que está a mitad de camino.
+ */
+export function invoiceStatusTone(status: string): FiscalTone {
+  switch (status) {
+    case 'accepted':
+      return 'success';
+    case 'rejected':
+      return 'error';
+    case 'sent':
+      return 'info';
+    case 'validated':
+      return 'warning';
+    default:
+      // `draft`, `cancelled`, `voided`: no hay nada en curso ante la DIAN.
+      return 'neutral';
+  }
+}
+
 export function fiscalStatusCells(invoice: Invoice): FiscalStatusCell[] {
   const cells: FiscalStatusCell[] = [];
 

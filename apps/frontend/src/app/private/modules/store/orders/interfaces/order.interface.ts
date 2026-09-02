@@ -95,14 +95,18 @@ export interface Order {
   order_promotions?: OrderPromotionSnapshot[];
   coupon_uses?: CouponUseSnapshot[];
   /**
-   * Electronic invoices already issued for this order, newest first and
-   * pre-filtered by the backend to `dian_status: 'accepted'` (`take: 1`).
-   * Optional: only the endpoints that print tickets include it.
+   * La última factura de la orden, EN CUALQUIER ESTADO — newest first, `take:
+   * 1`. Optional: sólo los endpoints que devuelven el detalle la incluyen.
    *
-   * `OrderTicketService.toTicketData` reads `invoices[0]` to turn the ticket
-   * into an informative copy of a DIAN-validated invoice. The acceptance filter
-   * stays in the query — the printed footer asserts DIAN validation, so the
-   * frontend must not re-derive it from a laxer condition.
+   * Antes venía pre-filtrada por el backend a `dian_status: 'accepted'`, así
+   * que la sola presencia de una fila significaba «aceptada». Dejó de ser así
+   * (`orders.service.ts`, método `findOne`): la orden es dueña de la relación
+   * con su factura y tiene que poder identificarla también rechazada,
+   * pendiente o en contingencia — que es justo cuando el operador más
+   * necesita entrar a verla. `OrderTicketService.toTicketData` y el detalle de
+   * orden derivan «aceptada» ellos mismos leyendo `dian_status`, cada uno para
+   * su propia pregunta (el tiquete: ¿puedo decir «validada por la DIAN»?; el
+   * detalle: ¿qué chips de estado fiscal pinto?).
    */
   invoices?: OrderInvoiceSnapshot[];
   /** Table session if order was placed at a restaurant table */
@@ -110,26 +114,114 @@ export interface Order {
 }
 
 /**
- * Minimal invoice projection needed to print a ticket as an informative copy.
+ * Espejo de `fiscal_transmission_status_enum` (schema.prisma, modelo
+ * `invoices`).
+ */
+export type OrderInvoiceTransmissionStatus =
+  | 'draft'
+  | 'queued'
+  | 'signing'
+  | 'signed'
+  | 'submitted'
+  | 'accepted'
+  | 'rejected'
+  | 'error'
+  | 'retrying'
+  | 'cancelled'
+  | 'contingency';
+
+/** Espejo de `dian_document_status_enum` (schema.prisma, modelo `invoices`). */
+export type OrderInvoiceDianStatus =
+  | 'pending'
+  | 'accepted'
+  | 'rejected'
+  | 'error'
+  | 'not_applicable';
+
+/**
+ * Espejo de `document_send_status_enum` (schema.prisma, modelo `invoices`).
+ */
+export type OrderInvoiceSendStatus =
+  | 'pending'
+  | 'sending'
+  | 'sent_ok'
+  | 'sent_error'
+  | 'not_applicable';
+
+/** Espejo de `invoice_status_enum` (schema.prisma, modelo `invoices`). */
+export type OrderInvoiceStatus =
+  | 'draft'
+  | 'validated'
+  | 'sent'
+  | 'accepted'
+  | 'rejected'
+  | 'cancelled'
+  | 'voided';
+
+/**
+ * Espejo de `invoice_type_enum` (schema.prisma, modelo `invoices`). Nueve
+ * valores, no cinco: el módulo de facturación declara su propio `InvoiceType`
+ * con sólo cinco porque hoy ningún flujo suyo emite documento equivalente ni
+ * nota de ajuste de documento equivalente. Una orden sí puede tener cualquiera
+ * de los nueve, así que este alias no se importa de allá.
+ */
+export type OrderInvoiceType =
+  | 'sales_invoice'
+  | 'purchase_invoice'
+  | 'credit_note'
+  | 'debit_note'
+  | 'export_invoice'
+  | 'support_document'
+  | 'support_adjustment_note'
+  | 'pos_equivalent_document'
+  | 'equivalent_adjustment_note';
+
+/**
+ * Proyección de factura que trae el detalle de la orden.
  *
- * ESTOS DOS CAMPOS Y NINGUNO MÁS. `OrdersService.findOne` proyecta
- * `select: { invoice_number: true, cufe: true }` (`orders.service.ts:574-579`);
- * no hay `id` ni `invoice_type` en la respuesta.
+ * DOS consultas la llenan, y no proyectan lo mismo:
+ * `OrdersService.findOne` manda las nueve columnas sin `where` — QUI-604 la
+ * filtraba a `dian_status: 'accepted'`; dejó de hacerlo (ver comentario de
+ * `invoices?` arriba)—, y `OrdersBulkService.bulkPrint` manda tres
+ * (`invoice_number`, `cufe`, `dian_status`) y conserva su `where`. De ahí que
+ * abajo sólo dos campos sean requeridos.
  *
- * Declararlos igual no era documentación optimista, era un bug: el detalle de
- * la orden escondía el botón «Emitir factura electrónica» con
- * `invoices.some(i => i.invoice_type === 'sales_invoice')`, un predicado que
- * sobre esta proyección es SIEMPRE falso. El botón nunca se escondía, y cada
- * clic quemaba un consecutivo autorizado de la DIAN.
- *
- * La pertenencia al tipo ya está garantizada por el `where` del backend
- * (`dian_status: 'accepted'`, `take: 1`): la sola presencia de un elemento
- * significa «esta orden tiene factura aceptada». No hace falta re-derivarlo, y
- * re-derivarlo desde campos ausentes es cómo se llegó acá.
+ * Antes esta interfaz sólo declaraba `invoice_number` + `cufe`: sin `id` la
+ * orden no podía abrir el modal de detalle de factura, y sin `invoice_type` /
+ * `dian_status` / `transmission_status` / `send_status` la tarjeta no podía
+ * reutilizar `fiscalStatusCells()` del módulo de facturación — esa función
+ * pinta un chip por columna presente y omite las que faltan, así que con la
+ * proyección vieja pintaba una tarjeta desnuda y, peor, sobre una factura
+ * electrónica real le decía al operador «no es electrónica»
+ * (`fiscalStatusCells` cae a esa lectura cuando `invoice_type` no viaja).
  */
 export interface OrderInvoiceSnapshot {
+  /**
+   * REQUERIDOS: los dos campos que proyectan LAS DOS consultas que llenan
+   * `invoices` — `OrdersService.findOne` y `OrdersBulkService.bulkPrint`.
+   *
+   * `dian_status` viaja también en la de bulk, donde es redundante (su `where`
+   * ya lo fija a `accepted`), precisamente para poder declararlo requerido:
+   * mientras faltaba, el tiquete tenía que tratar su ausencia como «aceptada»
+   * y afirmaba validación DIAN por omisión.
+   */
   invoice_number: string;
+  dian_status: OrderInvoiceDianStatus;
+  /** Opcional en el tipo porque lo es en el dato: `bulkPrint` no lo proyecta. */
   cufe?: string | null;
+  /**
+   * OPCIONALES: sólo los proyecta `findOne` (el detalle de una orden). El
+   * `bulkPrint` no los manda porque su tiquete no los usa y multiplicarlos por
+   * 300 órdenes es payload muerto. Declararlos requeridos sería mentirle al
+   * tipo: quien los lea desde el camino de impresión masiva tiene que aceptar
+   * `undefined`.
+   */
+  id?: number;
+  invoice_type?: OrderInvoiceType;
+  status?: OrderInvoiceStatus;
+  transmission_status?: OrderInvoiceTransmissionStatus;
+  send_status?: OrderInvoiceSendStatus;
+  issue_date?: string;
 }
 
 export interface OrderTableSession {
