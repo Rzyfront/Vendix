@@ -13,11 +13,11 @@ import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
 
 import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
 import {
   TaxOption,
   TaxSelection,
 } from '../../../../../../shared/components/tax-selector';
+import { TaxInclusiveChipComponent } from './tax-inclusive-chip.component';
 
 /**
  * IMPUESTOS DE UNA LÍNEA — VARIOS, DEL CATÁLOGO REAL DE LA TIENDA.
@@ -55,7 +55,7 @@ import {
   selector: 'vendix-invoice-line-taxes',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [BadgeComponent, IconComponent, ToggleComponent],
+  imports: [BadgeComponent, IconComponent, TaxInclusiveChipComponent],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
@@ -80,68 +80,33 @@ import {
         Impuestos
       </label>
 
-      <div class="flex flex-wrap items-start gap-1.5">
+      <div class="flex flex-wrap items-center gap-1.5">
         @for (tax of value(); track tax.tax_rate_id) {
           <!--
-            EL IMPUESTO SELECCIONADO YA NO ES UNA PÍLDORA DE UNA LÍNEA.
+            CADA IMPUESTO ES UN CHIP DE UNA SOLA ALTURA.
 
-            «Incl. / Adic.» era un texto de 10 px en versalitas dentro de la
-            píldora, y el operador no lo encontraba: se leía como parte del
-            nombre del impuesto, no como el único sitio donde se declara que el
-            precio ya trae el impuesto dentro. Ahora la selección es una tarjeta
-            de dos filas —identidad arriba, decisión abajo— con un conmutador
-            etiquetado en palabras.
+            Tres versiones de la misma decisión:
+              1. «Incl. / Adic.» en 10 px dentro de la píldora: nadie lo
+                 encontraba, se leía como parte del nombre.
+              2. Tarjeta de dos filas con un app-toggle etiquetado: se
+                 encontraba, pero con dos impuestos la fila de la línea crecía
+                 más que el resto de los campos.
+              3. Este chip: identidad, decisión (botón con aria-pressed y la
+                 palabra completa) y quitar, en 30 px. El chip no guarda
+                 estado; el valor sigue siendo el de este CVA.
 
             Sin comillas invertidas en TODO este comentario: vive dentro del
             template literal del componente y una sola lo cerraría en seco.
           -->
-          <span
-            class="inline-flex flex-col gap-1 rounded-lg border border-border bg-[var(--color-surface)] px-2 py-1.5"
-          >
-            <span class="flex items-center gap-1 text-[11px]">
-              <span
-                class="font-medium text-text-primary max-w-[9rem] truncate"
-                [title]="tax.name"
-              >
-                {{ tax.name }}
-              </span>
-              <span class="text-[var(--color-text-secondary)]">
-                {{ formatRate(tax.rate) }}%
-              </span>
-              <button
-                type="button"
-                class="ml-auto p-1 rounded text-[var(--color-text-secondary)] hover:text-error disabled:opacity-50"
-                [disabled]="isDisabled()"
-                [attr.aria-label]="'Quitar ' + tax.name"
-                [title]="'Quitar ' + tax.name + ' de esta línea'"
-                (click)="remove(tax.tax_rate_id)"
-              >
-                <app-icon name="x" [size]="12" />
-              </button>
-            </span>
-
-            <!--
-              El conmutador va en su propia fila y con la altura de control de
-              los campos vecinos (min-h) para que sea un objetivo de toque real
-              y no un texto que se pulsa por accidente. El tooltip conserva
-              literalmente la ayuda que ya existía (inclusiveHint).
-            -->
-            <span
-              class="flex items-center min-h-[34px]"
-              [title]="inclusiveHint(tax)"
-            >
-              <app-toggle
-                styleVariant="classic"
-                label="Impuesto incluido en el precio"
-                [checked]="!!tax.is_inclusive"
-                [disabled]="isDisabled()"
-                [ariaLabel]="
-                  tax.name + ': impuesto incluido en el precio unitario'
-                "
-                (toggled)="setInclusive(tax.tax_rate_id, $event)"
-              ></app-toggle>
-            </span>
-          </span>
+          <vendix-tax-inclusive-chip
+            [name]="tax.name"
+            [rate]="tax.rate"
+            [inclusive]="!!tax.is_inclusive"
+            [disabled]="isDisabled()"
+            [hint]="inclusiveHint(tax)"
+            (inclusiveChange)="setInclusive(tax.tax_rate_id, $event)"
+            (remove)="remove(tax.tax_rate_id)"
+          />
         }
 
         <!--
@@ -169,24 +134,45 @@ import {
             <app-icon name="alert-triangle" [size]="11" class="mr-1" />
             Sin impuesto
           </app-badge>
-        }
 
-        <button
-          type="button"
-          class="inline-flex items-center justify-center gap-1.5 px-3 min-h-[38px] rounded-lg border text-sm font-medium transition-colors disabled:opacity-50"
-          [class.flex-1]="value().length === 0"
-          [style.border-color]="'var(--color-primary)'"
-          [style.color]="'var(--color-primary)'"
-          [style.background]="
-            'color-mix(in srgb, var(--color-primary) 6%, transparent)'
-          "
-          [disabled]="isDisabled()"
-          [title]="triggerHint()"
-          (click)="togglePanel($event)"
-        >
-          <app-icon name="plus" [size]="14" />
-          Agregar impuesto
-        </button>
+          <button
+            type="button"
+            class="inline-flex flex-1 items-center justify-center gap-1.5 px-3 min-h-[38px] rounded-xl border text-sm font-medium transition-colors disabled:opacity-50"
+            [style.border-color]="'var(--color-primary)'"
+            [style.color]="'var(--color-primary)'"
+            [style.background]="
+              'color-mix(in srgb, var(--color-primary) 6%, transparent)'
+            "
+            [disabled]="isDisabled()"
+            [title]="triggerHint()"
+            (click)="togglePanel($event)"
+          >
+            <app-icon name="plus" [size]="14" />
+            Agregar impuesto
+          </button>
+        } @else {
+          <!--
+            Con impuestos ya elegidos, el disparador se encoge a un chip de la
+            misma altura que los demás: la acción principal de la fila ya
+            ocurrió y agregar un segundo impuesto es lo excepcional. El texto
+            pasa al aria-label y al tooltip, no desaparece.
+          -->
+          <button
+            type="button"
+            class="inline-flex h-[30px] w-[30px] items-center justify-center rounded-xl border transition-colors disabled:opacity-50"
+            [style.border-color]="'var(--color-primary)'"
+            [style.color]="'var(--color-primary)'"
+            [style.background]="
+              'color-mix(in srgb, var(--color-primary) 6%, transparent)'
+            "
+            [disabled]="isDisabled()"
+            [title]="triggerHint()"
+            aria-label="Agregar otro impuesto a esta línea"
+            (click)="togglePanel($event)"
+          >
+            <app-icon name="plus" [size]="14" />
+          </button>
+        }
       </div>
 
       @if (value().length === 0) {
