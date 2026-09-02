@@ -25,6 +25,11 @@ import { ResponseService } from '../../../../common/responses/response.service';
 // SELECCIONA rangos por su par `(resolution_number, prefix)` y nunca acarrea la
 // clave técnica. Un segundo DTO sería el sitio por donde esa regla se relaja.
 import { ApplyNumberingRangesDto } from '../../../store/invoicing/dian-config/dto/apply-numbering-range.dto';
+// Mismo criterio que el DTO de arriba: el de tiendas, no una copia. Define que
+// `environment` es OPCIONAL y que ausente significa «el de la configuración», y
+// una segunda declaración sería el sitio por donde los dos rieles empezarían a
+// contestar cosas distintas a la misma pregunta.
+import { QueryNumberingRangeDto } from '../../../store/invoicing/dian-config/dto/query-numbering-range.dto';
 import { ResolutionScannerService } from '../../../store/invoicing/resolutions/resolution-scanner.service';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { Roles } from '../../../auth/decorators/roles.decorator';
@@ -261,16 +266,39 @@ export class SubscriptionFiscalController {
    * LA ClTec NO VIAJA. La respuesta de la DIAN la trae en claro; la comparación
    * contra la guardada ocurre en el servidor y de ella sólo sale
    * `technical_key_matches`.
+   *
+   * ── `?environment=` NO CAMBIA EL PERMISO ───────────────────────────────────
+   *
+   * Sigue siendo `:read`. El ambiente no altera QUÉ se lee ni de quién —este
+   * riel opera sobre UNA sola configuración, la de la plataforma, y
+   * `requirePlatformDianConfig` rechaza cualquier otro id— sino únicamente a qué
+   * catálogo de la DIAN se dirige la pregunta. Y hace falta aquí por lo mismo
+   * que en tiendas: la resolución y la ClTec con las que Vendix factura sus
+   * propias suscripciones se seguían tecleando del portal MUISCA mientras la
+   * consulta no pudiera mirar el catálogo de producción desde habilitación.
+   *
+   * Ausente ⇒ el ambiente de la configuración, que es el comportamiento previo.
    */
   @Get('dian-config/:id/numbering-ranges')
   @Permissions('superadmin:subscriptions:fiscal:read')
   @ApiOperation({
     summary: 'DIAN-authorized numbering ranges for the platform NIT vs. stored',
   })
+  @ApiQuery({
+    name: 'environment',
+    required: false,
+    enum: ['test', 'production'],
+    description:
+      'Catálogo de la DIAN al que se consulta. Ausente: el de la configuración.',
+  })
   async getNumberingRanges(
     @Param('id', ParseIntPipe) id: number,
+    @Query() query: QueryNumberingRangeDto,
   ): Promise<any> {
-    const result = await this.fiscalService.queryPlatformNumberingRanges(id);
+    const result = await this.fiscalService.queryPlatformNumberingRanges(
+      id,
+      query.environment,
+    );
     return this.responseService.success(
       result,
       'Rangos de numeración consultados a la DIAN',
@@ -289,6 +317,13 @@ export class SubscriptionFiscalController {
    * Sin `try/catch`: lo que invalida el lote entero —configuración ajena, la DIAN
    * sin responder, cuerpo mal formado— sube al `AllExceptionsFilter`, que emite el
    * estado y el `error_code` reales.
+   *
+   * `environment` en el cuerpo tampoco cambia el permiso: sigue siendo `:write`
+   * porque sigue escribiendo lo mismo —las resoluciones de la plataforma— y sólo
+   * cambia a qué catálogo de la DIAN se le piden los valores. La fila resultante
+   * no habilita nada por sí sola: `assertElectronicEmissionLive` exige
+   * `environment === 'production' && enablement_status === 'enabled'` sobre la
+   * CONFIGURACIÓN, y esta ruta no toca ninguna de esas dos columnas.
    */
   @Post('dian-config/:id/numbering-ranges/apply')
   @HttpCode(HttpStatus.OK)

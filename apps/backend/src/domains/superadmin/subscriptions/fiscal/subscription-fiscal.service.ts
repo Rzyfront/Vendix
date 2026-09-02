@@ -1308,14 +1308,27 @@ export class SubscriptionFiscalService {
    * la DIAN tiene ligado a la resolución.
    *
    * La ClTec NO viaja al cliente en ninguna de las dos rutas.
+   *
+   * ── POR QUÉ EL AMBIENTE SE PROPAGA Y NO SE HEREDA ──────────────────────────
+   *
+   * Ausente ⇒ el de la configuración, igual que antes. Se puede pedir el
+   * contrario porque heredarlo cerraba un ciclo: una configuración en
+   * habilitación preguntaba a `vpfe-hab`, donde las autorizaciones de producción
+   * no viven, y sin rango no había resolución, sin resolución no había readiness
+   * y sin readiness no había promoción a producción. Este riel lo sufre igual
+   * que el de tiendas —es el MISMO servicio—, y aquí el afectado es el NIT con
+   * el que Vendix factura sus propias suscripciones.
+   *
+   * Consultar no emite, no reserva consecutivo y no promueve nada.
    */
   async queryPlatformNumberingRanges(
     configId: number,
+    environment?: 'test' | 'production' | null,
   ): Promise<NumberingRangeReport> {
     const { settings, configId: target } =
       await this.requirePlatformDianConfig(configId);
     return this.runInPlatformContext(settings, () =>
-      this.dianNumberingRangeService.queryRanges(target),
+      this.dianNumberingRangeService.queryRanges(target, environment),
     );
   }
 
@@ -1331,6 +1344,13 @@ export class SubscriptionFiscalService {
    * escritura resuelve su entidad fiscal desde el contexto, y fuera de él sería
    * la del super admin —o ninguna—, dejando la resolución colgada de la entidad
    * equivocada o invisible en los listados.
+   *
+   * El ambiente sale del CUERPO, que es donde lo pone el panel compartido, y por
+   * eso no se le pasa como tercer argumento: aquí no hay otra vía que lo haya
+   * resuelto antes. Ausente ⇒ el de la configuración. Escribir la fila no
+   * habilita nada: `assertElectronicEmissionLive` sigue exigiendo
+   * `environment === 'production' && enablement_status === 'enabled'` sobre la
+   * CONFIGURACIÓN, y ninguna de esas dos columnas se toca aquí.
    */
   async applyPlatformNumberingRanges(
     configId: number,
