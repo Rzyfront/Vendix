@@ -179,6 +179,20 @@ export class SubscriptionFiscalQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  /**
+   * RIEL del documento. `subscription_invoice` = factura de suscripción SaaS;
+   * `platform_invoice` = factura que el super-admin emite a un tercero desde
+   * Facturación → Nueva.
+   *
+   * Ausente significa LOS DOS, no «sólo suscripciones». El listado filtraba
+   * duro por `subscription_invoice`, así que una factura emitida desde esta
+   * misma pantalla no aparecía nunca en ella —y su filtro «Origen» ya ofrecía
+   * los tres valores sin que nadie los enviara—.
+   */
+  @IsOptional()
+  @IsIn(['subscription_invoice', 'platform_invoice'])
+  source_type?: 'subscription_invoice' | 'platform_invoice';
 }
 
 export class RetrySubscriptionFiscalDto {

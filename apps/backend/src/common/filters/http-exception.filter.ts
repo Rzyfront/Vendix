@@ -78,6 +78,24 @@ export class AllExceptionsFilter implements ExceptionFilter {
         details = { ...(details || {}), validationErrors: resp.validationErrors };
       }
 
+      // RED DE SEGURIDAD PARA EXCEPCIONES LEGADAS QUE PONEN `blockers` EN LA
+      // RAÍZ DEL CUERPO.
+      //
+      // Este filtro RECONSTRUYE la respuesta: sólo `error_code`, `details` y
+      // `validationErrors` sobreviven, así que cualquier
+      // `new BadRequestException({ message, blockers })` perdía sus
+      // bloqueadores en silencio y el cliente recibía «hay validaciones que
+      // fallaron» sin una sola línea de cuáles. `details` es el ÚNICO punto de
+      // lectura del frontend (`readApiBlockers` en
+      // `core/utils/parse-api-error.ts` lee `details.blockers[]`), así que se
+      // promueven acá.
+      //
+      // No duplica: si el servicio ya los mandó bajo `details` —que es la forma
+      // correcta y la que usa `VendixHttpException`— esta rama no toca nada.
+      if (Array.isArray(resp?.blockers) && !details?.blockers) {
+        details = { ...(details || {}), blockers: resp.blockers };
+      }
+
       const rawMessage =
         resp && typeof resp === 'object'
           ? (resp.message ?? resp.error ?? exception.message)

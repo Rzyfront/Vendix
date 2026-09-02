@@ -58,8 +58,13 @@ describe('parseNumberingRangeResponse', () => {
         </s:Body>
       </s:Envelope>`;
 
-    const { ranges, element_names } = parseNumberingRangeResponse(xml);
+    const { ranges, element_names, outcome, operation_code } =
+      parseNumberingRangeResponse(xml);
 
+    expect(outcome).toBe('ranges');
+    // El veredicto de la DIAN se publica TAMBIÉN cuando sí hubo rangos: vive
+    // fuera de la lista y no depende de que ésta traiga ítems.
+    expect(operation_code).toBe('100');
     expect(ranges).toHaveLength(2);
     expect(ranges[0]).toEqual({
       resolution_number: '18764113258848',
@@ -156,8 +161,9 @@ describe('parseNumberingRangeResponse', () => {
         </a:NumberRangeResponse>
       </s:Body>`;
 
-    const { ranges } = parseNumberingRangeResponse(xml);
+    const { ranges, outcome } = parseNumberingRangeResponse(xml);
 
+    expect(outcome).toBe('ranges');
     expect(ranges).toHaveLength(1);
     expect(ranges[0]).toEqual({
       resolution_number: '18764113258848',
@@ -191,9 +197,13 @@ describe('parseNumberingRangeResponse', () => {
         </GetNumberingRangeResponse>
       </s:Body></s:Envelope>`;
 
-    const { ranges, element_names } = parseNumberingRangeResponse(xml);
+    const { ranges, element_names, outcome } =
+      parseNumberingRangeResponse(xml);
 
     expect(ranges).toEqual([]);
+    // Sin `GetNumberingRangeResult` ni `ResponseList` no hay prueba de que la
+    // DIAN haya hablado su contrato: acusar al software es lo honesto aquí.
+    expect(outcome).toBe('unrecognized_contract');
     expect(element_names.length).toBeGreaterThan(0);
     // Nombres ÚTILES: los del cuerpo, sin prefijo de namespace y sin repetir.
     expect(element_names).toContain('IdentificadorResolucion');
@@ -218,10 +228,22 @@ describe('parseNumberingRangeResponse', () => {
 
     expect(() => parseNumberingRangeResponse(fault)).not.toThrow();
     expect(parseNumberingRangeResponse(fault).ranges).toEqual([]);
+    expect(parseNumberingRangeResponse(fault).outcome).toBe(
+      'unrecognized_contract',
+    );
 
     for (const empty of ['', '   ', undefined as unknown as string]) {
       expect(() => parseNumberingRangeResponse(empty)).not.toThrow();
       expect(parseNumberingRangeResponse(empty).ranges).toEqual([]);
+      /**
+       * Un cuerpo vacío NO puede salir como `empty_list`. No hubo respuesta que
+       * interpretar, y decirle al comerciante «la DIAN no te reporta
+       * numeración» a partir de la nada sería la misma mentira que este parser
+       * existe para no repetir, en la dirección contraria.
+       */
+      expect(parseNumberingRangeResponse(empty).outcome).toBe(
+        'unrecognized_contract',
+      );
     }
   });
 
@@ -250,9 +272,11 @@ describe('parseNumberingRangeResponse', () => {
         </Fila>
       </s:Body>`;
 
-    const { ranges, element_names } = parseNumberingRangeResponse(dos_claves);
+    const { ranges, element_names, outcome } =
+      parseNumberingRangeResponse(dos_claves);
 
     expect(ranges).toEqual([]);
+    expect(outcome).toBe('unrecognized_contract');
     // Y deja el rastro para depurarlo, que es el punto de rendirse aquí.
     expect(element_names).toContain('Fila');
     expect(element_names).toContain('TechnicalKey');
@@ -272,8 +296,12 @@ describe('parseNumberingRangeResponse', () => {
         <b:TechnicalKey>fc8eac422eba16e22ffd8c6f94b3f40a6e38162c</b:TechnicalKey>
       </b:GetNumberingRangeResult></s:Body>`;
 
-    const { ranges } = parseNumberingRangeResponse(xml);
+    const { ranges, outcome } = parseNumberingRangeResponse(xml);
 
+    // El envoltorio `GetNumberingRangeResult` está presente y la lectura del
+    // cuerpo entero sí produjo campos: es `ranges`, no `empty_list`. Ésta es la
+    // frontera exacta que la nueva clasificación no puede desplazar.
+    expect(outcome).toBe('ranges');
     expect(ranges).toHaveLength(1);
     expect(ranges[0].prefix).toBe('FAD');
     expect(ranges[0].technical_key).toBe(
@@ -302,5 +330,111 @@ describe('parseNumberingRangeResponse', () => {
     expect(ranges).toHaveLength(1);
     expect(ranges[0].technical_key).toBeNull();
     expect(ranges[0].resolution_number).toBe('18760000001');
+  });
+
+  /**
+   * ── EL CASO QUE MOTIVÓ LA TERCERA SALIDA ────────────────────────────────
+   *
+   * Cuerpo REAL de la configuración 20 (NIT 1123408049, ambiente de
+   * habilitación): el contrato oficial COMPLETO —`GetNumberingRangeResponse`,
+   * `GetNumberingRangeResult`, `OperationCode`, `OperationDescription`,
+   * `ResponseList`— con la lista sin un solo `<NumberRangeResponse>` dentro. La
+   * DIAN sencillamente no reporta numeración para ese NIT+software ahí.
+   *
+   * Con dos salidas esto caía en «no se pudo interpretar» y el panel acusaba a
+   * la DIAN de un cambio de contrato que nunca ocurrió, mandando a depurar
+   * durante horas algo que no estaba roto. El aserto que importa es
+   * `element_names: []`: mientras esa lista salga llena, aguas arriba hay
+   * material para volver a redactar la acusación falsa.
+   */
+  it('reporta lista vacía —no contrato roto— cuando la DIAN responde bien y sin rangos', () => {
+    const xml = `<?xml version="1.0"?>
+      <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+        <s:Header><a:Action>GetNumberingRangeResponse</a:Action></s:Header>
+        <s:Body>
+          <GetNumberingRangeResponse xmlns="http://wcf.dian.colombia">
+            <GetNumberingRangeResult xmlns:a="http://schemas.datacontract.org/2004/07/">
+              <a:OperationCode>100</a:OperationCode>
+              <a:OperationDescription>Consulta Exitosa</a:OperationDescription>
+              <a:ResponseList/>
+            </GetNumberingRangeResult>
+          </GetNumberingRangeResponse>
+        </s:Body>
+      </s:Envelope>`;
+
+    const result = parseNumberingRangeResponse(xml);
+
+    expect(result.outcome).toBe('empty_list');
+    expect(result.ranges).toEqual([]);
+    // Nada que catalogar: el contrato se entendió. Publicar los nombres del
+    // contrato NORMAL es lo que invita a leerlos como anomalía.
+    expect(result.element_names).toEqual([]);
+    // Y el diagnóstico que sí corresponde: lo que la DIAN misma dijo.
+    expect(result.operation_code).toBe('100');
+    expect(result.operation_description).toBe('Consulta Exitosa');
+  });
+
+  /**
+   * El `<ResponseList></ResponseList>` con cierre explícito es la misma lista
+   * vacía que `<ResponseList/>`. Se prueban las dos formas porque la detección
+   * es por regex y una que exija `>` inmediato tras el nombre no ve la
+   * autocerrada — el modo de fallo sería silencioso y devolvería al punto de
+   * partida.
+   */
+  it('lee la lista vacía tanto autocerrada como con cierre explícito', () => {
+    const explicito = `<s:Body>
+        <GetNumberingRangeResponse>
+          <GetNumberingRangeResult>
+            <b:OperationCode>100</b:OperationCode>
+            <b:ResponseList></b:ResponseList>
+          </GetNumberingRangeResult>
+        </GetNumberingRangeResponse>
+      </s:Body>`;
+
+    const result = parseNumberingRangeResponse(explicito);
+
+    expect(result.outcome).toBe('empty_list');
+    expect(result.element_names).toEqual([]);
+    expect(result.operation_code).toBe('100');
+    // Sin `OperationDescription` no se inventa texto: queda en null.
+    expect(result.operation_description).toBeNull();
+  });
+
+  /**
+   * ── EL ERROR SIMÉTRICO ──────────────────────────────────────────────────
+   *
+   * El envoltorio presente NO basta para declarar lista vacía. Si dentro hay
+   * nombres ajenos al contrato conocido, la DIAN sí puso rangos ahí y fuimos
+   * nosotros los que no supimos leerlos; llamar a eso `empty_list` afirmaría en
+   * falso —ahora contra el comerciante— que no tiene numeración autorizada, y
+   * además borraría `element_names`, que es lo único con lo que se depura un
+   * renombre sin volcar el XML crudo con la ClTec dentro.
+   *
+   * Es el mismo defecto que se está corrigiendo, con los papeles cambiados.
+   */
+  it('no confunde un campo renombrado dentro del envoltorio con una lista vacía', () => {
+    const renombrado = `<s:Body>
+        <GetNumberingRangeResponse>
+          <GetNumberingRangeResult>
+            <a:OperationCode>100</a:OperationCode>
+            <a:ResponseList>
+              <a:RangoAutorizado>
+                <a:SerieAutorizada>FAD</a:SerieAutorizada>
+                <a:LlaveTecnica>fc8eac422eba16e22ffd8c6f94b3f40a6e38162c</a:LlaveTecnica>
+              </a:RangoAutorizado>
+            </a:ResponseList>
+          </GetNumberingRangeResult>
+        </GetNumberingRangeResponse>
+      </s:Body>`;
+
+    const result = parseNumberingRangeResponse(renombrado);
+
+    expect(result.outcome).toBe('unrecognized_contract');
+    expect(result.ranges).toEqual([]);
+    expect(result.element_names).toContain('RangoAutorizado');
+    expect(result.element_names).toContain('LlaveTecnica');
+    // El estado se sigue publicando: ayuda a saber si la consulta fue exitosa
+    // aunque no hayamos entendido su carga.
+    expect(result.operation_code).toBe('100');
   });
 });

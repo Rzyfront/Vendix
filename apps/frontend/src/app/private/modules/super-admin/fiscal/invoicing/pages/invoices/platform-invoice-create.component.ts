@@ -14,7 +14,6 @@ import {
   FormBuilder,
   FormControl,
   FormGroup,
-  FormsModule,
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
@@ -24,6 +23,11 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { catchError, map, startWith } from 'rxjs/operators';
 
 import { environment } from '../../../../../../../../environments/environment';
+import {
+  ApiBlocker,
+  parseApiError,
+  readApiBlockers,
+} from '../../../../../../../core/utils/parse-api-error';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import {
   AlertBannerComponent,
@@ -37,6 +41,7 @@ import {
 import type { SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
 import { CurrencyPipe as VendixCurrencyPipe } from '../../../../../../../shared/pipes/currency';
 import { AccountCodeSelectComponent } from '../../../../../store/products/components/account-code-select.component';
+import type { InvoiceResolution } from '../../../../../store/invoicing/interfaces/invoice.interface';
 
 // Secciones Compartidas
 import { PlatformSectionWrapperComponent } from '../../components/platform-section-wrapper/platform-section-wrapper.component';
@@ -64,7 +69,10 @@ import {
 import { TenantPickerComponent } from '../../components/tenant-picker/tenant-picker.component';
 import { PlatformInvoicingStore } from '../../platform-invoicing.store';
 import { FiscalBillingAdminService } from '../../../../subscriptions/services/fiscal-billing-admin.service';
-import type { PreviewPlatformProfilePayload } from '../../../../subscriptions/interfaces/fiscal-billing.interface';
+import type {
+  PlatformResolution,
+  PreviewPlatformProfilePayload,
+} from '../../../../subscriptions/interfaces/fiscal-billing.interface';
 import { PlatformAcquirer } from '../../state';
 import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
 
@@ -126,13 +134,21 @@ interface LineFinancials {
   total: number;
 }
 
-interface NewLineDraft {
+/**
+ * Semilla de una línea nueva: sólo lo que `buildLineGroup` necesita para
+ * sembrar el `FormGroup`.
+ *
+ * NO lleva impuesto. Sustituye al borrador que alimentaba el modal «Nueva línea
+ * de factura»: aquél cargaba `tax_rate_id` e `is_inclusive` porque ese modal era
+ * el único sitio donde se podía marcar el impuesto como incluido. Ahora el
+ * impuesto y su inclusión se declaran en la propia fila de la rejilla
+ * (`vendix-invoice-line-taxes`), así que la semilla no tiene por qué conocerlos.
+ */
+interface LineSeed {
   description: string;
   quantity: number;
   unit_price: number;
   discount_amount: number;
-  tax_rate_id: number;
-  is_inclusive: boolean;
   unit_code: string;
 }
 
@@ -140,7 +156,8 @@ interface NewLineDraft {
   selector: 'app-platform-invoice-create',
   standalone: true,
   imports: [
-    FormsModule,
+    // `FormsModule` salió con el modal «Nueva línea de factura»: era el único
+    // sitio de la plantilla con `ngModel`. El resto del formulario es reactivo.
     CommonModule,
     ReactiveFormsModule,
     RouterLink,
@@ -306,15 +323,6 @@ export class PlatformInvoiceCreateComponent implements OnInit {
   readonly unitCodeOptions = UNIT_CODE_OPTIONS;
   readonly availableTaxes = PLATFORM_TAX_CATALOG;
   readonly currencyOptions = PLATFORM_FOREIGN_CURRENCY_OPTIONS;
-
-  /** Alimenta el selector de tarifa del modal de línea rápida. */
-  readonly taxRateOptions: SelectorOption[] = [
-    { value: '0', label: 'Sin impuesto (excluido)' },
-    ...PLATFORM_TAX_CATALOG.map((t) => ({
-      value: String(t.id),
-      label: t.name,
-    })),
-  ];
 
   /**
    * Conceptos de retención de la organización de plataforma.
@@ -616,21 +624,20 @@ export class PlatformInvoiceCreateComponent implements OnInit {
   readonly submitting = signal(false);
   readonly errorMessage = signal('');
 
-  // ── Modal de Nueva Línea ─────────────────────────────────────────
-  readonly showLineModal = signal(false);
-  readonly newLine = signal<NewLineDraft>(this.emptyLineDraft());
+  /**
+   * LOS BLOQUEADORES DE LA PUERTA DE EMISIÓN, UNO POR FILA.
+   *
+   * La prevalidación fiscal calcula exactamente qué le falta al documento y lo
+   * devuelve en `details.blockers[]` con `problem` («qué está mal ante la
+   * DIAN») y `fix` («dónde se corrige») ya redactados. La pantalla pintaba en
+   * su lugar un único párrafo genérico, que es justo lo que no deja actuar al
+   * operador. Se guardan aparte de `errorMessage` porque son una LISTA por
+   * campo: aplastarlos en una frase pierde todas las filas menos la primera.
+   */
+  readonly issueBlockers = signal<ApiBlocker[]>([]);
 
-  private emptyLineDraft(): NewLineDraft {
-    return {
-      description: '',
-      quantity: 1,
-      unit_price: 0,
-      discount_amount: 0,
-      tax_rate_id: PLATFORM_TAX_CATALOG[0]?.id ?? 0,
-      is_inclusive: false,
-      unit_code: DEFAULT_UNIT_CODE,
-    };
-  }
+  /** Lo mismo, para la previsualización: es otra respuesta y otro momento. */
+  readonly previewBlockers = signal<ApiBlocker[]>([]);
 
   ngOnInit() {
     this.store.loadResolutions();
@@ -795,21 +802,111 @@ export class PlatformInvoiceCreateComponent implements OnInit {
   }
 
   /**
-   * Sólo rangos de FACTURA DE VENTA y activos. Un rango de documento soporte
-   * o uno desactivado en este desplegable deja emitir contra una resolución
-   * que la DIAN rechaza, y el error aparece recién en la transmisión.
+   * Las FILAS CRUDAS que este riel puede consumir: factura de venta y activas.
+   *
+   * Sale del mismo signal que ya publica el store (`resolutions()`), así que no
+   * añade ninguna petición: el store carga la lista una vez en `ngOnInit` y las
+   * dos vistas —el desplegable y el banner— cuelgan de ella. Un rango de
+   * documento soporte o uno desactivado deja emitir contra una resolución que
+   * la DIAN rechaza, y el error aparece recién en la transmisión.
    */
-  readonly resolutionOptions = computed<SelectorOption[]>(() =>
+  private readonly activeSalesResolutions = computed<PlatformResolution[]>(() =>
     this.store
       .resolutions()
-      .filter((r) => r.document_type === 'sales_invoice' && r.is_active)
-      .map((r) => ({
-        value: r.id,
-        label: r.prefix
-          ? `${r.prefix} (Resolución ${r.resolution_number})`
-          : `Resolución ${r.resolution_number}`,
-      })),
+      .filter((r) => r.document_type === 'sales_invoice' && r.is_active),
   );
+
+  /**
+   * El desplegable se deriva de la MISMA colección que el banner. Antes cada
+   * uno habría filtrado por su cuenta, y dos filtros separados divergen: el
+   * banner acabaría describiendo una fila que el desplegable no ofrece.
+   */
+  readonly resolutionOptions = computed<SelectorOption[]>(() =>
+    this.activeSalesResolutions().map((r) => ({
+      value: r.id,
+      label: r.prefix
+        ? `${r.prefix} (Resolución ${r.resolution_number})`
+        : `Resolución ${r.resolution_number}`,
+    })),
+  );
+
+  /**
+   * LA FILA QUE EL BANNER TIENE QUE DESCRIBIR.
+   *
+   * El riel plataforma nunca pasaba `[activeResolution]`, así que el input
+   * quedaba en `null` y el banner pintaba SIEMPRE en rojo «No hay resolución
+   * activa para Factura de venta» aunque hubiera una vigente y seleccionada
+   * (caso real en producción: VNDS, resolución 18764114165962, rango 1-5000,
+   * vigente 18/8/2026-18/8/2028). El rojo es una compuerta: si miente cuando
+   * todo está bien, deja de significar nada cuando de verdad falta la fila.
+   *
+   * El rojo `missing` queda reservado a las tres situaciones en que emitir va a
+   * fallar de verdad:
+   *   - no hay ninguna resolución activa de factura de venta;
+   *   - el operador vació el selector a mano;
+   *   - la resolución elegida ya no está en la lista (la borraron o la
+   *     desactivaron después de elegirla).
+   */
+  readonly activeResolution = computed<InvoiceResolution | null>(() => {
+    const rows = this.activeSalesResolutions();
+    if (rows.length === 0) return null;
+
+    const selected = this.rawValue()['resolution_id'];
+
+    // Opción vacía del selector: el operador dijo explícitamente «ninguna».
+    if (selected === '' || selected === 0) return null;
+
+    if (selected == null) {
+      // Todavía no ha elegido. El generador de consecutivos del backend busca
+      // la resolución activa POR TIPO DE DOCUMENTO, así que la primera de la
+      // lista es la que numeraría el documento hoy: es la que hay que enseñar.
+      // El formulario sigue exigiendo la elección (`Validators.required`), de
+      // modo que esto informa, no decide.
+      return this.toBannerResolution(rows[0]);
+    }
+
+    const id = Number(selected);
+    const row = rows.find((r) => r.id === id);
+    return row ? this.toBannerResolution(row) : null;
+  });
+
+  /**
+   * `PlatformResolution` → `InvoiceResolution`, el tipo que espera el banner.
+   *
+   * Los dos rieles describen la misma fila de base pero con contratos
+   * distintos: el de plataforma declara anulables `resolution_number`,
+   * `resolution_date`, `valid_from`, `valid_to` y las marcas de tiempo, y no
+   * tiene `store_id` —una resolución de plataforma cuelga de la entidad
+   * contable de la organización, no de una tienda—. Se mapea aquí, en el borde,
+   * en vez de ensanchar `InvoiceResolution`, que consumen media docena de
+   * pantallas del riel de tienda.
+   *
+   * Las cadenas vacías son deliberadas y no pierden información: el banner ya
+   * trata un `valid_to` vacío como «sin vigencia declarada» y su comprobación
+   * de vencimiento devuelve `false` ante una fecha no parseable, así que una
+   * fila sin vigencia no se pinta como vencida.
+   */
+  private toBannerResolution(row: PlatformResolution): InvoiceResolution {
+    return {
+      id: row.id,
+      organization_id: row.organization_id,
+      // Sin tienda detrás; el banner no lo lee.
+      store_id: 0,
+      resolution_number: row.resolution_number ?? '',
+      resolution_date: row.resolution_date ?? '',
+      prefix: row.prefix ?? '',
+      range_from: row.range_from,
+      range_to: row.range_to,
+      current_number: row.current_number,
+      valid_from: row.valid_from ?? '',
+      valid_to: row.valid_to ?? '',
+      is_active: row.is_active,
+      document_type: row.document_type,
+      technical_key: row.technical_key ?? undefined,
+      created_at: row.created_at ?? '',
+      updated_at: row.updated_at ?? '',
+    };
+  }
 
   // ── Conmutador de Modo de Adquiriente ────────────────────────────
   setAcquirerMode(mode: 'system' | 'external'): void {
@@ -895,16 +992,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
   }
 
   // ── Líneas ───────────────────────────────────────────────────────
-  updateNewLine(patch: Partial<NewLineDraft>): void {
-    this.newLine.update((line) => ({ ...line, ...patch }));
-  }
-
-  openLineModal(): void {
-    this.newLine.set(this.emptyLineDraft());
-    this.showLineModal.set(true);
-  }
-
-  private buildLineGroup(draft: Partial<NewLineDraft>, taxes: LineTaxSelection[]): FormGroup {
+  private buildLineGroup(draft: Partial<LineSeed>, taxes: LineTaxSelection[]): FormGroup {
     return this.fb.group({
       row_uid: [`row-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`],
       description: [draft.description ?? '', Validators.required],
@@ -922,34 +1010,36 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     });
   }
 
-  confirmLine(): void {
-    const line = this.newLine();
-    if (!line.description?.trim() || line.quantity <= 0 || line.unit_price < 0) {
-      this.toast.error('Revisa los datos de la línea: descripción, cantidad > 0 y precio ≥ 0.');
-      return;
-    }
-
-    const selected = PLATFORM_TAX_CATALOG.find((t) => t.id === line.tax_rate_id);
-    const taxes: LineTaxSelection[] =
-      selected && selected.rate > 0
-        ? [
-            {
-              tax_rate_id: selected.id,
-              rate: selected.rate,
-              tax_type: selected.tax_type,
-              name: selected.name,
-              is_inclusive: line.is_inclusive,
-            },
-          ]
-        : [];
-
-    this.itemsArray.push(this.buildLineGroup(line, taxes));
-    this.showLineModal.set(false);
+  /**
+   * Línea nueva, ya con IVA 19% declarado.
+   *
+   * Nacía SIN ningún impuesto, y sin impuesto no hay chip en la fila: el
+   * conmutador «impuesto incluido en el precio» vive dentro del chip, así que
+   * una línea recién creada no ofrecía ningún sitio donde declarar que el
+   * precio ya trae el impuesto dentro. Es el mismo valor por defecto que traía
+   * el borrador del modal de línea rápida que esta pantalla ya no necesita.
+   */
+  addBlankLine(): void {
+    this.itemsArray.push(this.buildLineGroup({}, this.defaultLineTaxes()));
   }
 
-  /** Línea en blanco, para quien prefiere teclear directo en la rejilla. */
-  addBlankLine(): void {
-    this.itemsArray.push(this.buildLineGroup({}, []));
+  /**
+   * El primer impuesto del catálogo de plataforma (hoy IVA 19%). Se lee del
+   * catálogo y no se escribe a mano para que añadir o reordenar tarifas allí no
+   * deje aquí un `tax_rate_id` fantasma.
+   */
+  private defaultLineTaxes(): LineTaxSelection[] {
+    const [first] = PLATFORM_TAX_CATALOG;
+    if (!first || first.rate <= 0) return [];
+    return [
+      {
+        tax_rate_id: first.id,
+        rate: first.rate,
+        tax_type: first.tax_type,
+        name: first.name,
+        is_inclusive: first.default_is_inclusive ?? false,
+      },
+    ];
   }
 
   removeLine(index: number): void {
@@ -1254,6 +1344,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     this.printPreviewLoading.set(true);
     this.printPreviewOpen.set(true);
     this.printPreviewError.set('');
+    this.previewBlockers.set([]);
 
     this.store
       .previewProfile(profileId, this.buildPreviewPayload())
@@ -1265,6 +1356,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
         },
         error: (error: unknown) => {
           this.printPreviewLoading.set(false);
+          this.previewBlockers.set(this.readBlockers(error));
           this.printPreviewError.set(this.describeError(error, 'previsualizar'));
         },
       });
@@ -1275,7 +1367,20 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     if (!open) {
       this.printPreviewResult.set(null);
       this.printPreviewError.set('');
+      this.previewBlockers.set([]);
     }
+  }
+
+  /**
+   * Los bloqueadores de un error de API, si los trae.
+   *
+   * Se apoya en `readApiBlockers` (`core/utils/parse-api-error`), que ya es el
+   * punto único de lectura de `details.blockers[]` y es tolerante a propósito:
+   * un cuerpo sin bloqueadores devuelve lista vacía en vez de lanzar. Escribir
+   * aquí un segundo lector sería un segundo contrato que se desactualiza solo.
+   */
+  private readBlockers(error: unknown): ApiBlocker[] {
+    return readApiBlockers(parseApiError(error).details);
   }
 
   private describeError(error: unknown, action: string): string {
@@ -1448,6 +1553,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     // `Validators.required` y aun así se podía disparar el POST sin ninguna.
     this.invoiceForm.markAllAsTouched();
     if (this.invoiceForm.invalid) {
+      this.issueBlockers.set([]);
       this.errorMessage.set(
         'Revisa los campos marcados: hay datos obligatorios sin completar.',
       );
@@ -1460,6 +1566,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
 
     this.submitting.set(true);
     this.errorMessage.set('');
+    this.issueBlockers.set([]);
 
     const url = `${environment.apiUrl}/superadmin/subscriptions/fiscal/sales-invoices`;
 
@@ -1485,6 +1592,10 @@ export class PlatformInvoiceCreateComponent implements OnInit {
         this.errorMessage.set('La API no devolvió la confirmación esperada.');
       }
     } catch (error: unknown) {
+      // Los bloqueadores primero: el mensaje genérico queda de encabezado del
+      // bloque y la lista debajo dice, campo por campo, qué falta y dónde se
+      // arregla.
+      this.issueBlockers.set(this.readBlockers(error));
       const msg = this.describeError(error, 'emitir');
       this.errorMessage.set(msg);
       this.toast.error(msg);
