@@ -95,17 +95,26 @@ export class PrintLayoutComposerService {
       // llenaran `document.table_number`/`document.waiter_name`.
       case 'table_info':
         return this.renderTableInfoSection(section, data, mode);
-      // Los siguientes 5 tipos no tienen un layout propio en ninguna
+      // Mismo defecto que `table_info`, ahora para la cotización: la
+      // plantilla sembrada de `quotation` declara `sec_terms` (custom_notes)
+      // y `sec_validity` (validity_banner) SIN `fields`, así que el
+      // `default` las devolvía vacías y la nota, los términos y la vigencia
+      // guardados no llegaban nunca al papel. Ambas conservan la ruta
+      // genérica cuando la plantilla SÍ trae `fields` configurados desde el
+      // editor de formatos: ahí manda lo que configuró la tienda.
+      case 'custom_notes':
+        return this.renderNotesSection(section, data, mode);
+      case 'validity_banner':
+        return this.renderValiditySection(section, data, mode);
+      // Los siguientes 3 tipos no tienen un layout propio en ninguna
       // plantilla sembrada hoy — se listan explícitamente (en vez de dejarlos
       // caer al `default`) para que el switch documente el universo cerrado
       // de `section.type` (ver `PrintSectionTypeEnum` en
       // `enums/print-format.enum.ts`). Un tipo que el compositor ignora en
       // silencio es pérdida de datos, no tolerancia.
-      case 'custom_notes':
       case 'document_reference':
       case 'locations_info':
       case 'shipping_info':
-      case 'validity_banner':
         return this.renderGenericFieldsSection(section, data, mode);
       default:
         return this.renderGenericFieldsSection(section, data, mode);
@@ -849,6 +858,109 @@ export class PrintLayoutComposerService {
     return `<div class="print-section section-table-info" data-section-id="${section.id || section.type}">${rows}</div>`;
   }
 
+  /**
+   * `custom_notes` — nota al cliente y términos y condiciones, en prosa.
+   *
+   * La plantilla declara la sección sin `fields` (así la siembra
+   * `print-templates.seed.ts` para `quotation`), de modo que sin este render
+   * la nota guardada en `quotations.notes` y la letra pequeña de
+   * `terms_and_conditions` desaparecían del papel sin error ni log.
+   *
+   * No usa `field-row` (`Etiqueta: valor` en una línea) como la sección
+   * genérica: una nota es un párrafo, puede traer saltos de línea escritos
+   * por el vendedor, y en una línea etiquetada se colapsan. De ahí
+   * `white-space: pre-wrap` en el cuerpo.
+   *
+   * Si la plantilla SÍ trae `fields` configurados desde el editor, manda esa
+   * configuración y la sección vuelve a la ruta genérica. Y si no hay ningún
+   * dato que pintar no emite nada — ni el título — para que una cotización
+   * sin nota no saque un recuadro vacío.
+   */
+  private renderNotesSection(section: any, data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {
+    if ((section.fields || []).length > 0) {
+      return this.renderGenericFieldsSection(section, data, mode);
+    }
+
+    const doc = data.document || ({} as any);
+    const notes = doc.notes;
+    const terms = doc.terms_and_conditions;
+
+    if (mode !== 'tokenized' && !notes && !terms) return '';
+
+    const blocks: string[] = [];
+
+    if (notes || mode === 'tokenized') {
+      const val = mode === 'tokenized'
+        ? '<span class="vendix-token-pill" data-token="document.notes">&#123;&#123; document.notes &#125;&#125;</span>'
+        : this.compiler.escapeHtml(notes);
+      blocks.push(
+        `<div class="notes-block" data-element-id="f_notes" data-token="document.notes"><div class="notes-label">Notas</div><div class="notes-body">${val}</div></div>`,
+      );
+    }
+
+    if (terms || mode === 'tokenized') {
+      const val = mode === 'tokenized'
+        ? '<span class="vendix-token-pill" data-token="document.terms_and_conditions">&#123;&#123; document.terms_and_conditions &#125;&#125;</span>'
+        : this.compiler.escapeHtml(terms);
+      blocks.push(
+        `<div class="notes-block" data-element-id="f_terms" data-token="document.terms_and_conditions"><div class="notes-label">Términos y Condiciones</div><div class="notes-body">${val}</div></div>`,
+      );
+    }
+
+    if (blocks.length === 0) return '';
+
+    // El `section.title` de la plantilla NO se pinta aquí: la sembrada se
+    // llama "Términos y Condiciones", que es exactamente la etiqueta del
+    // segundo bloque, y usarla como encabezado dejaba el título repetido dos
+    // veces y rotulaba la nota del cliente como si fuera la letra pequeña.
+    // Cada bloque lleva su propia etiqueta, que es lo que el lector necesita.
+    return `<div class="print-section section-notes" data-section-id="${section.id || section.type}">${blocks.join('')}</div>`;
+  }
+
+  /**
+   * `validity_banner` — vigencia de la oferta y estado del documento.
+   *
+   * Misma razón de existir que `renderNotesSection`: la plantilla de
+   * cotización declara `sec_validity` sin `fields`, y una cotización cuyo
+   * papel no dice hasta cuándo valen los precios no es una oferta, es un
+   * listado. `valid_until_formatted` lo produce el proveedor (ya en zona
+   * horaria de presentación); aquí no se vuelve a formatear ninguna fecha.
+   */
+  private renderValiditySection(section: any, data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {
+    if ((section.fields || []).length > 0) {
+      return this.renderGenericFieldsSection(section, data, mode);
+    }
+
+    const doc = data.document || ({} as any);
+    const validUntil = doc.valid_until_formatted;
+    const stateLabel = doc.state_label;
+
+    if (mode !== 'tokenized' && !validUntil && !stateLabel) return '';
+
+    const rows: string[] = [];
+
+    if (validUntil || mode === 'tokenized') {
+      const val = mode === 'tokenized'
+        ? '<span class="vendix-token-pill" data-token="document.valid_until_formatted">&#123;&#123; document.valid_until_formatted &#125;&#125;</span>'
+        : this.compiler.escapeHtml(validUntil);
+      rows.push(
+        `<div class="field-row" data-element-id="f_valid_until" data-token="document.valid_until_formatted"><span class="field-label">Oferta válida hasta:</span> <span class="field-val">${val}</span></div>`,
+      );
+    }
+
+    if (stateLabel || mode === 'tokenized') {
+      const val = mode === 'tokenized'
+        ? '<span class="vendix-token-pill" data-token="document.state_label">&#123;&#123; document.state_label &#125;&#125;</span>'
+        : this.compiler.escapeHtml(stateLabel);
+      rows.push(
+        `<div class="field-row" data-element-id="f_state" data-token="document.state_label"><span class="field-label">Estado:</span> <span class="field-val">${val}</span></div>`,
+      );
+    }
+
+    if (rows.length === 0) return '';
+    return `<div class="print-section section-validity" data-section-id="${section.id || section.type}">${rows.join('')}</div>`;
+  }
+
   private renderGenericFieldsSection(section: any, data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {
     const fields = (section.fields || []).filter((f: any) => f.enabled);
     if (fields.length === 0) return '';
@@ -972,6 +1084,28 @@ export class PrintLayoutComposerService {
     }
     .print-section {
       margin-bottom: 8px;
+    }
+    /* Nota al cliente y términos (sección custom_notes). El cuerpo conserva
+       los saltos de línea que escribió el vendedor: una nota de dos párrafos
+       impresa en una sola línea deja de ser legible. En rollo no se pinta
+       fondo ni borde de color —la térmica los resuelve como trama— y se marca
+       con una línea punteada, igual que el resto de bloques de tirilla. */
+    .section-notes {
+      ${isRoll ? 'border-top: 1px dashed #000; padding-top: 4px;' : `border-left: 3px solid ${primaryColor}; padding: 6px 0 6px 8px;`}
+    }
+    .notes-block + .notes-block {
+      margin-top: 5px;
+    }
+    .notes-label {
+      font-weight: 600;
+      font-size: ${fontSize - 1}pt;
+      color: ${primaryColor};
+      margin-bottom: 2px;
+    }
+    .notes-body {
+      white-space: pre-wrap;
+      line-height: 1.35;
+      color: ${bodyTextColor};
     }
     .section-header {
       text-align: ${styles.header_alignment || (paper.is_roll ? 'center' : 'left')};

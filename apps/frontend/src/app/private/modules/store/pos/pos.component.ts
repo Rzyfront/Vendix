@@ -12,6 +12,7 @@ import { FormsModule } from '@angular/forms';
 import type {
   FirePreview,
   FireItemExclusion,
+  FireConfirmPayload,
 } from '../restaurant-ops/kds/interfaces';
 import { KitchenConfirmModalComponent } from '../restaurant-ops/kds/components/kitchen-confirm-modal/kitchen-confirm-modal.component';
 import { take, switchMap, catchError } from 'rxjs/operators';
@@ -1745,13 +1746,24 @@ export class PosComponent {
       total_price: item.totalPrice,
     }));
 
+    // La nota que el cajero escribió en el carrito (botón "Nota" →
+    // `PosCartService.updateNotes`) es la nota de la cotización: antes se
+    // enviaba `notes: ''` fijo y el texto se perdía sin aviso, así que la
+    // cotización se guardaba sin nota y el papel salía sin ella.
+    //
+    // Se omite la clave cuando no hay texto, en vez de mandar '': al editar
+    // una cotización existente `quotations.service.ts` hace
+    // `updateQuotationDto.notes ?? quotation.notes`, y una cadena vacía
+    // borraría la nota guardada. Mismo criterio que `onCreateOrder`.
+    const cartNotes = this.cartState()?.notes?.trim();
+
     const dto = {
       customer_id: this.selectedCustomer()
         ? this.selectedCustomer()!.id
         : undefined,
       channel: 'pos' as const,
       items,
-      notes: '',
+      ...(cartNotes ? { notes: cartNotes } : {}),
     };
 
     const editId = this.editingQuotationId();
@@ -4331,8 +4343,9 @@ export class PosComponent {
     );
   }
 
-  onKitchenConfirmed(exclusions: FireItemExclusion[]): void {
+  onKitchenConfirmed(event: FireConfirmPayload | FireItemExclusion[]): void {
     this.kitchenConfirmOpen.set(false);
+    const exclusions = Array.isArray(event) ? event : (event?.exclusions ?? []);
     this.kitchenConfirmBridge?.next(exclusions);
     this.kitchenConfirmBridge = null;
   }

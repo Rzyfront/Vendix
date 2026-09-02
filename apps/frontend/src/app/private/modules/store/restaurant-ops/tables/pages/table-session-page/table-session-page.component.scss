@@ -685,6 +685,20 @@
     color: var(--color-text-secondary, #4b5563);
   }
 
+  .item-comanda-note {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin: 0.15rem 0 0 0;
+    padding: 0.1rem 0.35rem;
+    border-radius: var(--radius-sm, 4px);
+    background-color: var(--color-warning-100, #fef3c7);
+    color: var(--color-warning-700, #b45309);
+    font-size: 0.75rem;
+    font-weight: 500;
+    width: fit-content;
+  }
+
   .item-meta {
     font-size: 0.78rem;
     font-weight: 600;

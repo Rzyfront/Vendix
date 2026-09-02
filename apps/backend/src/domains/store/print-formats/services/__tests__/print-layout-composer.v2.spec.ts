@@ -680,3 +680,165 @@ describe('PrintLayoutComposerService — tirilla 80mm en negro absoluto', () => 
     expect(idxStoreNameSelector).toBeLessThan(idx700);
   });
 });
+/**
+ * Cotización: la nota, los términos y la vigencia guardados deben llegar al
+ * papel.
+ *
+ * La plantilla sembrada de `quotation` declara `sec_terms` (`custom_notes`) y
+ * `sec_validity` (`validity_banner`) SIN `fields`. Antes de este fix ambas
+ * caían en `renderGenericFieldsSection`, que devuelve '' cuando no hay
+ * campos: la sección estaba habilitada, el dato existía en la base, y el
+ * compositor lo descartaba sin error ni log. Es el mismo defecto que ya se
+ * había corregido para `table_info` (QUI-733 C.3).
+ *
+ * La definición es copia fiel de `prisma/seeds/print-templates.seed.ts`
+ * (`format_type: 'quotation'`) por la misma razón que el describe anterior:
+ * ese archivo vive fuera del `rootDir` de Jest.
+ */
+describe('PrintLayoutComposerService — cotización: notas, términos y vigencia', () => {
+  let composer: PrintLayoutComposerService;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [PrintLayoutComposerService, PrintTemplateCompilerService],
+    }).compile();
+
+    composer = module.get<PrintLayoutComposerService>(PrintLayoutComposerService);
+  });
+
+  const quotationDefinition = (): PrintFormatDefinition =>
+    ({
+      paper: {
+        format: 'letter',
+        width_mm: 216,
+        is_roll: false,
+        margin_mm: 18,
+        copies: 1,
+        orientation: 'portrait',
+      },
+      styles: {
+        font_family: "-apple-system, sans-serif",
+        font_size_base_pt: 10,
+        primary_color: '#2563eb',
+        header_alignment: 'left',
+        show_borders: true,
+      },
+      sections: [
+        { id: 'sec_header', type: 'header', title: 'Encabezado Comercial', enabled: true, order: 1 },
+        { id: 'sec_validity', type: 'validity_banner', title: 'Vigencia de la Oferta', enabled: true, order: 2 },
+        { id: 'sec_terms', type: 'custom_notes', title: 'Términos y Condiciones', enabled: true, order: 3 },
+      ],
+      columns: [],
+    }) as unknown as PrintFormatDefinition;
+
+  const quotationData = (
+    overrides: Partial<StandardPrintDataModel['document']> = {},
+  ): StandardPrintDataModel => ({
+    store: { name: 'Tech Solutions Bogotá' },
+    customer: { name: 'Constructora Bolívar' },
+    document: {
+      id: 140,
+      number: 'QT-20260902-0001',
+      date: '2026-09-02',
+      date_formatted: '02/09/2026',
+      state: 'sent',
+      state_label: 'Enviada',
+      valid_until_formatted: '15/10/2026',
+      notes: 'Entrega en obra Bogotá.\nSegunda línea de la nota.',
+      terms_and_conditions: 'Pago 50% anticipado, 50% contra entrega.',
+      ...overrides,
+    },
+    items: [],
+    taxes: [],
+    totals: {
+      subtotal: 18800000,
+      subtotal_formatted: '$18.800.000',
+      discount_total: 0,
+      discount_total_formatted: '$0',
+      shipping_total: 0,
+      shipping_total_formatted: '$0',
+      tax_total: 3572000,
+      tax_total_formatted: '$3.572.000',
+      grand_total: 22372000,
+      grand_total_formatted: '$22.372.000',
+    },
+  });
+
+  /** Sólo el body: el `<head>` contiene la hoja de estilos, cuyos nombres de clase confundirían un grep. */
+  function bodyOf(html: string): string {
+    const match = html.match(/<body[^>]*>([\s\S]*)<\/body>/);
+    return match ? match[1] : html;
+  }
+
+  it('1. la nota guardada se imprime, con sus saltos de línea intactos', () => {
+    const body = bodyOf(composer.compose(quotationDefinition(), quotationData()));
+    expect(body).toContain('class="print-section section-notes"');
+    expect(body).toContain('Entrega en obra Bogotá.');
+    expect(body).toContain('Segunda línea de la nota.');
+    // El salto sobrevive en el markup; lo pinta `white-space: pre-wrap`.
+    expect(body).toMatch(/Entrega en obra Bogotá\.\s*\n\s*Segunda línea/);
+  });
+
+  it('2. los términos y condiciones se imprimen bajo su propia etiqueta', () => {
+    const body = bodyOf(composer.compose(quotationDefinition(), quotationData()));
+    expect(body).toContain('Pago 50% anticipado, 50% contra entrega.');
+    expect(body).toContain('data-token="document.terms_and_conditions"');
+    // Nota y términos son bloques distintos: rotular la nota como "letra
+    // pequeña" era el defecto de presentación de la primera versión.
+    expect(body).toContain('data-token="document.notes"');
+    expect((body.match(/Términos y Condiciones/g) || []).length).toBe(1);
+  });
+
+  it('3. la vigencia y el estado en español se imprimen', () => {
+    const body = bodyOf(composer.compose(quotationDefinition(), quotationData()));
+    expect(body).toContain('class="print-section section-validity"');
+    expect(body).toContain('Oferta válida hasta');
+    expect(body).toContain('15/10/2026');
+    expect(body).toContain('Enviada');
+  });
+
+  it('4. una cotización sin nota ni términos no emite el bloque (ni su etiqueta)', () => {
+    const body = bodyOf(
+      composer.compose(
+        quotationDefinition(),
+        quotationData({ notes: undefined, terms_and_conditions: undefined }),
+      ),
+    );
+    expect(body).not.toContain('section-notes');
+    expect(body).not.toContain('Términos y Condiciones');
+    // La vigencia sigue porque el estado siempre existe.
+    expect(body).toContain('section-validity');
+  });
+
+  it('5. sin vigencia ni estado, el banner tampoco se emite', () => {
+    const body = bodyOf(
+      composer.compose(
+        quotationDefinition(),
+        quotationData({ valid_until_formatted: undefined, state_label: undefined as any }),
+      ),
+    );
+    expect(body).not.toContain('section-validity');
+    expect(body).not.toContain('Oferta válida hasta');
+  });
+
+  it('6. si la plantilla configura `fields`, manda esa configuración y no el render propio', () => {
+    const def = quotationDefinition();
+    (def.sections as any[])[2].fields = [
+      { id: 'f_custom', key: 'document.notes', label: 'Observaciones', enabled: true },
+    ];
+    const body = bodyOf(composer.compose(def, quotationData()));
+    // Ruta genérica: `Etiqueta: valor` en una fila, con el label de la tienda.
+    expect(body).toContain('Observaciones');
+    expect(body).toContain('class="print-section section-generic"');
+    expect(body).not.toContain('section-notes');
+  });
+
+  it('7. en modo tokenized las dos secciones emiten sus píldoras de token para el editor', () => {
+    const html = composer.compose(quotationDefinition(), quotationData(), 'tokenized');
+    const body = bodyOf(html);
+    expect(body).toContain('data-token="document.notes"');
+    expect(body).toContain('data-token="document.terms_and_conditions"');
+    expect(body).toContain('data-token="document.valid_until_formatted"');
+    expect(body).toContain('vendix-token-pill');
+  });
+});
