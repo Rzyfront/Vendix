@@ -222,6 +222,15 @@ export class PrintLayoutComposerService {
       ? this.renderCompanyBlock(definition, data, mode)
       : '';
 
+    const extraHeader = this.renderExtraSectionFields(section, data, mode, [
+      'f_logo', 'store.logo_url', 'f_name', 'store.name', 'store_name',
+      'f_legal', 'store.legal_name', 'store_legal_name',
+      'f_nit', 'store.tax_id', 'store_tax_id',
+      'f_regime', 'store.tax_regime', 'store_regime',
+      'f_addr', 'store.address', 'store_address',
+      'f_phone', 'store.phone', 'store_phone',
+    ]);
+
     return `
       <div class="print-section section-header" data-section-id="sec_header">
         ${logo}
@@ -231,6 +240,7 @@ export class PrintLayoutComposerService {
         ${regime}
         ${addr}
         ${phone}
+        ${extraHeader}
         ${companyBlock}
       </div>
     `;
@@ -362,6 +372,12 @@ export class PrintLayoutComposerService {
       (s: any) => s.type === 'document_info' && s.enabled !== false,
     );
 
+    const extraFiscalHeader = this.renderExtraSectionFields(section, data, mode, [
+      'f_name', 'store.name', 'store_name', 'f_legal', 'store.legal_name',
+      'f_nit', 'store.tax_id', 'f_regime', 'store.tax_regime',
+      'f_addr', 'store.address', 'f_phone', 'store.phone',
+    ]);
+
     if (isRoll) {
       return `
         <div class="print-section section-header" data-section-id="${section.id || 'sec_header'}">
@@ -372,6 +388,7 @@ export class PrintLayoutComposerService {
           ${regime}
           ${addr}
           ${phone}
+          ${extraFiscalHeader}
           ${companyBlock}
           <div class="fiscal-doc-card roll-card">
             <div class="fiscal-doc-title">${docTitle}</div>
@@ -393,6 +410,7 @@ export class PrintLayoutComposerService {
           ${regime}
           ${addr}
           ${phone}
+          ${extraFiscalHeader}
           ${companyBlock}
         </div>
         <div class="fiscal-doc-card">
@@ -417,6 +435,65 @@ export class PrintLayoutComposerService {
     if (!section?.fields || !Array.isArray(section.fields)) return defaultLabel;
     const f = section.fields.find((field: any) => field.id === keyOrId || field.key === keyOrId);
     return (f?.custom_label && f.custom_label.trim().length > 0) ? f.custom_label : defaultLabel;
+  }
+
+  /**
+   * Fallback rico: pinta campos del catálogo que el renderer fijo de la
+   * sección no conoce (ej. `store.email` en header, `customer.city` en
+   * cliente). Sin esto, un toggle nuevo no cambiaría el papel.
+   * Solo corre cuando la sección SÍ trae `fields` (plantillas viejas sin
+   * `fields` conservan paridad total). Resuelve alias legacy `order.*`.
+   */
+  private renderExtraSectionFields(
+    section: any,
+    data: StandardPrintDataModel,
+    mode: 'dummy' | 'tokenized' = 'dummy',
+    excludeIds: string[] = [],
+  ): string {
+    const fields = (section?.fields || []).filter(
+      (f: any) => f && f.enabled !== false && !excludeIds.includes(f.id) && !excludeIds.includes(f.key),
+    );
+    if (fields.length === 0) return '';
+    const rows = fields
+      .map((f: any) => {
+        const val = this.resolveFieldValue(data, f.key);
+        if (mode !== 'tokenized' && (val === undefined || val === null || val === '')) return '';
+        const label = (f.custom_label && String(f.custom_label).trim()) || f.label || f.key;
+        const valHtml =
+          mode === 'tokenized'
+            ? `<span class="vendix-token-pill" data-token="${f.key}">&#123;&#123; ${f.key} &#125;&#125;</span>`
+            : this.compiler.escapeHtml(val);
+        return `<div class="field-row" data-element-id="${f.id || f.key}" data-token="${f.key}"><span class="field-label">${this.compiler.escapeHtml(label)}:</span> <span class="field-val">${valHtml}</span></div>`;
+      })
+      .filter((s: string) => s.length > 0)
+      .join('');
+    return rows;
+  }
+
+  private resolveFieldValue(data: any, key: string): any {
+    if (!key) return undefined;
+    const direct = this.compiler.resolvePath(data, key);
+    if (direct !== undefined && direct !== null && direct !== '') return direct;
+    // Alias legacy `order.*` → `document.*` / `totals.*`.
+    if (key.startsWith('order.')) {
+      const rest = key.slice('order.'.length);
+      const docAlias: Record<string, string> = {
+        order_number: 'document.number',
+        created_at: 'document.date_formatted',
+        cashier_name: 'document.cashier_name',
+        pos_terminal: 'document.pos_terminal',
+        subtotal_amount: 'totals.subtotal',
+        discount_amount: 'totals.discount_total',
+        tax_amount: 'totals.tax_total',
+        grand_total: 'totals.grand_total',
+        payment_method: 'document.payment_method',
+        amount_received: 'document.amount_received',
+        change_due: 'document.change_due',
+      };
+      const mapped = docAlias[rest] ?? `document.${rest}`;
+      return this.compiler.resolvePath(data, mapped);
+    }
+    return direct;
   }
 
   private renderCompanyBlock(
@@ -513,6 +590,11 @@ export class PrintLayoutComposerService {
       ? '<span class="vendix-token-pill" data-token="document.customer_alias">&#123;&#123; document.customer_alias &#125;&#125;</span>'
       : this.compiler.escapeHtml(doc.customer_alias || '');
 
+    const extraDoc = this.renderExtraSectionFields(section, data, mode, [
+      'f_num', 'order_number', 'f_date', 'order_date', 'f_cashier', 'order_cashier',
+      'f_terminal', 'order_terminal', 'f_customer_alias',
+    ]);
+
     return `
       <div class="print-section section-doc-info" data-section-id="sec_doc_info">
         <div class="doc-title-box">
@@ -522,6 +604,7 @@ export class PrintLayoutComposerService {
         ${isCashierActive && cashierVal ? `<div class="doc-cashier" data-element-id="f_cashier" data-section-id="sec_doc_info" data-token="order.cashier_name">${cashierVal}</div>` : ''}
         ${isTerminalActive && termVal ? `<div class="doc-terminal" data-element-id="f_terminal" data-section-id="sec_doc_info" data-token="order.pos_terminal">${termVal}</div>` : ''}
         ${mode === 'tokenized' || doc.customer_alias ? `<div class="doc-customer-alias" data-element-id="f_customer_alias" data-section-id="sec_doc_info" data-token="document.customer_alias">${aliasVal}</div>` : ''}
+        ${extraDoc}
       </div>
     `;
   }
@@ -556,6 +639,12 @@ export class PrintLayoutComposerService {
       ? `${emailLabel}: <span class="vendix-token-pill" data-token="customer.email">&#123;&#123; customer.email &#125;&#125;</span>`
       : (cust.email ? `${emailLabel}: ${this.compiler.escapeHtml(cust.email)}` : '');
 
+    const extraCust = this.renderExtraSectionFields(section, data, mode, [
+      'f_cname', 'customer_name', 'f_cnit', 'customer_tax_id',
+      'f_caddr', 'customer_address', 'f_cphone', 'customer_phone',
+      'f_cemail', 'customer_email',
+    ]);
+
     return `
       <div class="print-section section-customer" data-section-id="sec_customer">
         <div class="section-label">CLIENTE</div>
@@ -564,6 +653,7 @@ export class PrintLayoutComposerService {
         ${isAddrActive && addrVal ? `<div class="customer-address" data-element-id="f_caddr" data-section-id="sec_customer" data-token="customer.address">${addrVal}</div>` : ''}
         ${isPhoneActive && phoneVal ? `<div class="customer-phone" data-element-id="f_cphone" data-section-id="sec_customer" data-token="customer.phone">${phoneVal}</div>` : ''}
         ${isEmailActive && emailVal ? `<div class="customer-email" data-element-id="f_cemail" data-section-id="sec_customer" data-token="customer.email">${emailVal}</div>` : ''}
+        ${extraCust}
       </div>
     `;
   }
@@ -572,28 +662,43 @@ export class PrintLayoutComposerService {
     const store = data.store || ({} as any);
     const cust = data.customer || ({} as any);
     const doc = data.document || ({} as any);
+    // Catálogo rico: cada fila respeta `section.fields` por `id`. Sin `fields`
+    // (plantillas viejas) `isFieldActive` devuelve true y el papel no cambia.
+    const showStoreName = this.isFieldActive(section, 'f_name');
+    const showStoreNit = this.isFieldActive(section, 'f_nit');
+    const showStoreAddr = this.isFieldActive(section, 'f_addr');
+    const showStorePhone = this.isFieldActive(section, 'f_phone');
+    const showStoreEmail = this.isFieldActive(section, 'f_email');
+    const showCustName = this.isFieldActive(section, 'f_cname');
+    const showCustNit = this.isFieldActive(section, 'f_cnit');
+    const showCustAddr = this.isFieldActive(section, 'f_caddr');
+    const showCustEmail = this.isFieldActive(section, 'f_cemail');
+    const showDocNum = this.isFieldActive(section, 'f_num');
+    const showDocDate = this.isFieldActive(section, 'f_date');
+    const showDocState = this.isFieldActive(section, 'f_state');
 
     return `
       <div class="print-section section-parties-grid" data-section-id="sec_parties">
         <div class="party-col party-issuer">
           <div class="party-title">EMISOR</div>
-          <div class="party-name">${this.compiler.escapeHtml(store.legal_name || store.name)}</div>
-          <div>NIT: ${this.compiler.escapeHtml(store.tax_id || 'N/A')}</div>
-          <div>${this.compiler.escapeHtml(store.address || '')}</div>
-          <div>Tel: ${this.compiler.escapeHtml(store.phone || '')}</div>
+          ${showStoreName ? `<div class="party-name">${this.compiler.escapeHtml(store.legal_name || store.name)}</div>` : ''}
+          ${showStoreNit ? `<div>NIT: ${this.compiler.escapeHtml(store.tax_id || 'N/A')}</div>` : ''}
+          ${showStoreAddr ? `<div>${this.compiler.escapeHtml(store.address || '')}</div>` : ''}
+          ${showStorePhone ? `<div>Tel: ${this.compiler.escapeHtml(store.phone || '')}</div>` : ''}
+          ${showStoreEmail && store.email ? `<div>${this.compiler.escapeHtml(store.email)}</div>` : ''}
         </div>
         <div class="party-col party-client">
           <div class="party-title">CLIENTE / RECEPTOR</div>
-          <div class="party-name">${this.compiler.escapeHtml(cust.name || 'Consumidor Final')}</div>
-          <div>Doc: ${this.compiler.escapeHtml(cust.tax_id || '222222222222')}</div>
-          <div>${this.compiler.escapeHtml(cust.address || '')}</div>
-          <div>${this.compiler.escapeHtml(cust.email || '')}</div>
+          ${showCustName ? `<div class="party-name">${this.compiler.escapeHtml(cust.name || 'Consumidor Final')}</div>` : ''}
+          ${showCustNit ? `<div>Doc: ${this.compiler.escapeHtml(cust.tax_id || '222222222222')}</div>` : ''}
+          ${showCustAddr ? `<div>${this.compiler.escapeHtml(cust.address || '')}</div>` : ''}
+          ${showCustEmail ? `<div>${this.compiler.escapeHtml(cust.email || '')}</div>` : ''}
         </div>
         <div class="party-col party-doc">
           <div class="party-title">DOCUMENTO</div>
-          <div class="doc-num-highlight">#${this.compiler.escapeHtml(doc.number || '')}</div>
-          <div>Fecha: ${this.compiler.escapeHtml(doc.date_formatted || doc.date || '')}</div>
-          <div>Estado: ${this.compiler.escapeHtml(doc.state_label || doc.state || '')}</div>
+          ${showDocNum ? `<div class="doc-num-highlight">#${this.compiler.escapeHtml(doc.number || '')}</div>` : ''}
+          ${showDocDate ? `<div>Fecha: ${this.compiler.escapeHtml(doc.date_formatted || doc.date || '')}</div>` : ''}
+          ${showDocState ? `<div>Estado: ${this.compiler.escapeHtml(doc.state_label || doc.state || '')}</div>` : ''}
         </div>
       </div>
     `;
@@ -733,6 +838,19 @@ export class PrintLayoutComposerService {
   private renderTotalsSection(section: any, data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {
     const totals = data.totals || ({} as any);
     const doc = data.document || ({} as any);
+    // Catálogo rico: cada fila respeta `section.fields` por `id`. Sin `fields`
+    // `isFieldActive` devuelve true y el papel no cambia (paridad).
+    const showSub = this.isFieldActive(section, 'f_sub');
+    const showDisc = this.isFieldActive(section, 'f_disc');
+    const showShip = this.isFieldActive(section, 'f_ship');
+    const showTax = this.isFieldActive(section, 'f_tax');
+    const showReten = this.isFieldActive(section, 'f_reten');
+    const showTip = this.isFieldActive(section, 'f_tip');
+    const showTot = this.isFieldActive(section, 'f_tot');
+    const showWords = this.isFieldActive(section, 'f_words');
+    const showPaym = this.isFieldActive(section, 'f_paym');
+    const showRecv = this.isFieldActive(section, 'f_recv');
+    const showChg = this.isFieldActive(section, 'f_chg');
 
     const subVal = mode === 'tokenized'
       ? '<span class="vendix-token-pill" data-token="order.subtotal_amount">&#123;&#123; money order.subtotal_amount &#125;&#125;</span>'
@@ -768,43 +886,65 @@ export class PrintLayoutComposerService {
       ? '<span class="vendix-token-pill" data-token="order.change_due">&#123;&#123; money order.change_due &#125;&#125;</span>'
       : this.compiler.escapeHtml(doc.change_due_formatted || `$${Number(doc.change_due).toLocaleString('es-CO')}`);
 
+    const shipVal = mode === 'tokenized'
+      ? '<span class="vendix-token-pill" data-token="order.shipping_total">&#123;&#123; money order.shipping_total &#125;&#125;</span>'
+      : this.compiler.escapeHtml(totals.shipping_total_formatted || `$${Number(totals.shipping_total || 0).toLocaleString('es-CO')}`);
+    const tipVal = mode === 'tokenized'
+      ? '<span class="vendix-token-pill" data-token="order.tip_amount">&#123;&#123; money order.tip_amount &#125;&#125;</span>'
+      : this.compiler.escapeHtml(totals.tip_amount_formatted || `$${Number(totals.tip_amount || 0).toLocaleString('es-CO')}`);
+
     return `
       <div class="print-section section-totals" data-section-id="sec_totals">
         <div class="totals-table-wrapper">
           <table class="totals-table">
-            <tr data-element-id="f_sub" data-section-id="sec_totals" data-token="order.subtotal_amount">
+            ${showSub ? `<tr data-element-id="f_sub" data-section-id="sec_totals" data-token="order.subtotal_amount">
               <td class="total-label">Subtotal:</td>
               <td class="total-val">${subVal}</td>
-            </tr>
-            ${mode === 'tokenized' || Number(totals.discount_total) > 0 ? `
+            </tr>` : ''}
+            ${showDisc && (mode === 'tokenized' || Number(totals.discount_total) > 0) ? `
             <tr data-element-id="f_disc" data-section-id="sec_totals" data-token="order.discount_amount">
               <td class="total-label">Descuento:</td>
               <td class="total-val discount">${discVal}</td>
             </tr>` : ''}
-            ${mode === 'tokenized' || Number(totals.tax_total) > 0 ? `
+            ${showShip && (mode === 'tokenized' || Number(totals.shipping_total) > 0) ? `
+            <tr data-element-id="f_ship" data-section-id="sec_totals" data-token="order.shipping_total">
+              <td class="total-label">Envío:</td>
+              <td class="total-val">${shipVal}</td>
+            </tr>` : ''}
+            ${showTax && (mode === 'tokenized' || Number(totals.tax_total) > 0) ? `
             <tr data-element-id="f_tax" data-section-id="sec_totals" data-token="order.tax_amount">
               <td class="total-label">Impuestos (IVA):</td>
               <td class="total-val">${taxVal}</td>
             </tr>` : ''}
-            ${Number(totals.withholding_total) > 0 ? `
+            ${showReten && Number(totals.withholding_total) > 0 ? `
             <tr data-element-id="f_reten" data-section-id="sec_totals" data-token="order.withholding_amount">
               <td class="total-label">Retención:</td>
               <td class="total-val discount">${retenVal}</td>
             </tr>` : ''}
-            <tr class="grand-total-row" data-element-id="f_tot" data-section-id="sec_totals" data-token="order.grand_total">
+            ${showTip && (mode === 'tokenized' || Number(totals.tip_amount) > 0) ? `
+            <tr data-element-id="f_tip" data-section-id="sec_totals" data-token="order.tip_amount">
+              <td class="total-label">Propina:</td>
+              <td class="total-val">${tipVal}</td>
+            </tr>` : ''}
+            ${showTot ? `<tr class="grand-total-row" data-element-id="f_tot" data-section-id="sec_totals" data-token="order.grand_total">
               <td class="total-label">TOTAL:</td>
               <td class="total-val grand-total">${grandVal}</td>
-            </tr>
-            ${totals.grand_total_in_words ? `
+            </tr>` : ''}
+            ${showWords && totals.grand_total_in_words ? `
             <tr class="total-in-words-row" data-element-id="f_words" data-section-id="sec_totals" data-token="order.grand_total_in_words">
               <td class="total-label" colspan="2">Valor en letras: ${this.compiler.escapeHtml(totals.grand_total_in_words)}</td>
             </tr>` : ''}
-            ${mode === 'tokenized' || doc.payment_method ? `
+            ${showPaym && (mode === 'tokenized' || doc.payment_method) ? `
             <tr class="payment-info-row" data-element-id="f_paym" data-section-id="sec_totals" data-token="order.payment_method">
               <td class="total-label">Pago (${mode === 'tokenized' ? 'Método' : this.compiler.escapeHtml(doc.payment_method)}):</td>
               <td class="total-val">${paymVal}</td>
             </tr>` : ''}
-            ${mode === 'tokenized' || Number(doc.change_due) > 0 ? `
+            ${showRecv && (mode === 'tokenized' || Number(doc.amount_received) > 0) ? `
+            <tr class="payment-info-row" data-element-id="f_recv" data-section-id="sec_totals" data-token="order.amount_received">
+              <td class="total-label">Recibido:</td>
+              <td class="total-val">${paymVal}</td>
+            </tr>` : ''}
+            ${showChg && (mode === 'tokenized' || Number(doc.change_due) > 0) ? `
             <tr class="change-info-row" data-element-id="f_chg" data-section-id="sec_totals" data-token="order.change_due">
               <td class="total-label">Cambio:</td>
               <td class="total-val">${chgVal}</td>
