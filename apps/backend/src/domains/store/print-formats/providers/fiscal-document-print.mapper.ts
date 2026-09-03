@@ -42,7 +42,29 @@ import { resolveFiscalIssuerForPrint } from '../services/fiscal-issuer-identity'
  * que tocar, no lo último.
  */
 export const FISCAL_DOCUMENT_PRINT_INCLUDE = {
-  invoice_items: true,
+  invoice_items: {
+    include: {
+      product: {
+        select: {
+          sku: true,
+          barcode: true,
+        },
+      },
+      product_variant: {
+        select: {
+          sku: true,
+          barcode: true,
+        },
+      },
+      invoice_taxes: {
+        select: {
+          tax_name: true,
+          tax_rate: true,
+          tax_amount: true,
+        },
+      },
+    },
+  },
   invoice_taxes: true,
   resolution: { select: RESOLUTION_PUBLIC_SELECT },
   organization: {
@@ -164,30 +186,72 @@ export function mapFiscalDocumentToPrintData(
   const cust = invoice.customer || ({} as any);
   const res = invoice.resolution || ({} as any);
 
-  const items = (invoice.invoice_items || []).map((it: any, idx: number) => ({
-    index: idx + 1,
-    product_name: it.name || it.description || 'Ítem',
-    variant_sku: it.sku || undefined,
-    quantity: Number(it.quantity || 1),
-    unit_price: Number(it.price || 0),
-    unit_price_formatted: money(Number(it.price || 0)),
-    discount_amount: Number(it.discount_amount || 0),
-    discount_formatted: it.discount_amount
-      ? `-${money(Number(it.discount_amount))}`
-      : undefined,
-    tax_rate: Number(it.tax_rate || 0),
-    tax_amount: Number(it.tax_amount || 0),
-    total_price: Number(it.total || 0),
-    total_price_formatted: money(Number(it.total || 0)),
-  }));
+  const items = (invoice.invoice_items || []).map((it: any, idx: number) => {
+    const unitPrice = Number(it.unit_price ?? it.price ?? 0);
+    const totalPrice = Number(
+      it.total_amount ??
+        it.total_price ??
+        it.total ??
+        unitPrice * Number(it.quantity || 1),
+    );
+    const variantSku =
+      it.sku ||
+      it.product_variant?.sku ||
+      it.product?.sku ||
+      it.product_variant?.barcode ||
+      it.product?.barcode ||
+      (it.product_id ? String(it.product_id) : String(idx + 1));
 
-  const taxes = (invoice.invoice_taxes || []).map((t: any) => ({
-    name: t.tax_name || 'IVA',
-    rate: Number(t.tax_rate || 0),
-    base_amount: Number(t.taxable_amount || 0),
-    tax_amount: Number(t.tax_amount || 0),
-    base_formatted: money(Number(t.taxable_amount || 0)),
-    tax_formatted: money(Number(t.tax_amount || 0)),
+    let taxRate = Number(it.tax_rate || 0);
+    if (!taxRate && it.invoice_taxes && it.invoice_taxes.length > 0) {
+      taxRate = Number(it.invoice_taxes[0].tax_rate || 0);
+    } else if (
+      !taxRate &&
+      invoice.invoice_taxes &&
+      invoice.invoice_taxes.length === 1 &&
+      Number(it.tax_amount) > 0
+    ) {
+      taxRate = Number(invoice.invoice_taxes[0].tax_rate || 0);
+    }
+
+    const discountAmt = Number(it.discount_amount || 0);
+
+    return {
+      index: idx + 1,
+      product_name: it.description || it.name || 'Ítem',
+      variant_sku: variantSku,
+      quantity: Number(it.quantity || 1),
+      unit_price: unitPrice,
+      unit_price_formatted: money(unitPrice),
+      discount_amount: discountAmt,
+      discount_formatted:
+        discountAmt > 0 ? `-${money(discountAmt)}` : undefined,
+      tax_rate: taxRate,
+      tax_amount: Number(it.tax_amount || 0),
+      total_price: totalPrice,
+      total_price_formatted: money(totalPrice),
+    };
+  });
+
+  const taxesMap = new Map<string, { name: string; rate: number; base_amount: number; tax_amount: number }>();
+  for (const t of invoice.invoice_taxes || []) {
+    const name = t.tax_name || 'IVA';
+    const rate = Number(t.tax_rate || 0);
+    const key = `${name}_${rate}`;
+    const base = Number(t.taxable_amount || 0);
+    const amt = Number(t.tax_amount || 0);
+    const existing = taxesMap.get(key);
+    if (existing) {
+      existing.base_amount += base;
+      existing.tax_amount += amt;
+    } else {
+      taxesMap.set(key, { name, rate, base_amount: base, tax_amount: amt });
+    }
+  }
+  const taxes = Array.from(taxesMap.values()).map((t) => ({
+    ...t,
+    base_formatted: money(t.base_amount),
+    tax_formatted: money(t.tax_amount),
   }));
 
   const subtotal = Number(invoice.subtotal_amount || 0);
@@ -212,6 +276,31 @@ export function mapFiscalDocumentToPrintData(
     store,
     invoice.dian_status !== 'not_applicable',
   );
+
+  const PAYMENT_MEANS_LABELS: Record<string, string> = {
+    '10': 'Efectivo',
+    '42': 'Consignación / Transferencia',
+    '47': 'Transferencia Débito Bancaria',
+    '48': 'Tarjeta de Crédito',
+    '49': 'Tarjeta de Débito',
+    '20': 'Cheque',
+    '1': 'Instrumento no definido',
+    'ZZZ': 'Acuerdo mutuo',
+  };
+
+  const formLabel =
+    invoice.payment_form === '2'
+      ? 'Crédito'
+      : invoice.payment_form === '1'
+        ? 'Contado'
+        : undefined;
+  const meansLabel = invoice.payment_means_code
+    ? PAYMENT_MEANS_LABELS[invoice.payment_means_code] || invoice.payment_means_code
+    : undefined;
+  const paymentMethod =
+    formLabel && meansLabel
+      ? `${formLabel} (${meansLabel})`
+      : formLabel || meansLabel || undefined;
 
   return {
     store: {
@@ -260,6 +349,13 @@ export function mapFiscalDocumentToPrintData(
       date_formatted: invoice.issue_date
         ? new Date(invoice.issue_date).toLocaleDateString('es-CO')
         : new Date().toLocaleDateString('es-CO'),
+      valid_until: invoice.due_date
+        ? new Date(invoice.due_date).toISOString()
+        : undefined,
+      valid_until_formatted: invoice.due_date
+        ? new Date(invoice.due_date).toLocaleDateString('es-CO')
+        : undefined,
+      payment_method: paymentMethod,
       state: invoice.dian_status || 'draft',
       state_label: accepted
         ? options.acceptedLabel || 'Aprobada por DIAN'

@@ -131,6 +131,19 @@ describe('LegalDataFormComponent — DIAN strict resolver contract', () => {
     expect(component.getValue().vat_periodicity).toBe('');
   });
 
+  it('toggle de O-49 sincroniza tax_regime a SIMPLIFICADO y remueve O-48', () => {
+    fixture.detectChanges();
+
+    component.onResponsibilityToggle('O-48', true);
+    expect(component.getValue().tax_regime).toBe('COMUN');
+    expect(component.getValue().tax_responsibilities).toContain('O-48');
+
+    component.onResponsibilityToggle('O-49', true);
+    expect(component.getValue().tax_regime).toBe('SIMPLIFICADO');
+    expect(component.getValue().tax_responsibilities).toContain('O-49');
+    expect(component.getValue().tax_responsibilities).not.toContain('O-48');
+  });
+
   it('toggles de is_withholding_agent / is_self_withholder round-trip vía getValue()', () => {
     fixture.detectChanges();
 
@@ -185,8 +198,7 @@ describe('LegalDataFormComponent — DIAN strict resolver contract', () => {
   it('vatConflict es true cuando O-48 y O-49 están ambos marcados', () => {
     fixture.detectChanges();
 
-    component.onResponsibilityToggle('O-48', true);
-    component.onResponsibilityToggle('O-49', true);
+    component.form.controls.tax_responsibilities.setValue(['O-48', 'O-49']);
     expect(component.vatConflict()).toBe(true);
 
     component.onResponsibilityToggle('O-49', false);

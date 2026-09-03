@@ -820,6 +820,7 @@ export class LegalDataFormComponent implements OnInit {
 
   /** Single in-flight departments fetch shared across init + prefill paths. */
   private departmentsPromise: Promise<void> | null = null;
+  private selectedTaxRegime: TaxRegime = 'COMUN';
 
   ngOnInit(): void {
     // Default country is CO, so load its department catalog eagerly. The
@@ -865,8 +866,20 @@ export class LegalDataFormComponent implements OnInit {
     effect(() => {
       const v = this.initialValue();
       if (!v) return;
+      let patchedRegime: TaxRegime = v.tax_regime ?? 'COMUN';
+      if (
+        v.tax_responsibilities?.includes(VAT_NOT_RESPONSIBLE_CODE) &&
+        !v.tax_responsibilities?.includes(VAT_RESPONSIBLE_CODE)
+      ) {
+        patchedRegime = 'SIMPLIFICADO';
+      }
+      this.selectedTaxRegime = patchedRegime;
       this.form.patchValue(
-        { ...v, vat_periodicity: this.normalizeVatPeriodicity(v.vat_periodicity) },
+        {
+          ...v,
+          tax_regime: patchedRegime,
+          vat_periodicity: this.normalizeVatPeriodicity(v.vat_periodicity),
+        },
         { emitEvent: false },
       );
 
@@ -939,6 +952,35 @@ export class LegalDataFormComponent implements OnInit {
           else this.cities.set([]);
         }
 
+        const regime = this.form.controls.tax_regime.value;
+        if (regime !== this.selectedTaxRegime) {
+          this.selectedTaxRegime = regime;
+          const currentResp = this.form.controls.tax_responsibilities.value;
+          if (
+            regime === 'SIMPLIFICADO' &&
+            !currentResp.includes(VAT_NOT_RESPONSIBLE_CODE)
+          ) {
+            const next = [
+              ...currentResp.filter((c) => c !== VAT_RESPONSIBLE_CODE),
+              VAT_NOT_RESPONSIBLE_CODE,
+            ];
+            this.form.controls.tax_responsibilities.setValue(next, {
+              emitEvent: false,
+            });
+          } else if (
+            regime === 'COMUN' &&
+            !currentResp.includes(VAT_RESPONSIBLE_CODE)
+          ) {
+            const next = [
+              ...currentResp.filter((c) => c !== VAT_NOT_RESPONSIBLE_CODE),
+              VAT_RESPONSIBLE_CODE,
+            ];
+            this.form.controls.tax_responsibilities.setValue(next, {
+              emitEvent: false,
+            });
+          }
+        }
+
         this.emitCurrent();
       });
   }
@@ -971,17 +1013,27 @@ export class LegalDataFormComponent implements OnInit {
   }
 
   onResponsibilityToggle(code: string, enabled: boolean): void {
-    const current = this.form.controls.tax_responsibilities.value;
+    let current = this.form.controls.tax_responsibilities.value;
+    if (enabled) {
+      if (code === VAT_NOT_RESPONSIBLE_CODE) {
+        current = current.filter((c) => c !== VAT_RESPONSIBLE_CODE);
+        this.form.controls.tax_regime.setValue('SIMPLIFICADO', {
+          emitEvent: false,
+        });
+        this.selectedTaxRegime = 'SIMPLIFICADO';
+      } else if (code === VAT_RESPONSIBLE_CODE) {
+        current = current.filter((c) => c !== VAT_NOT_RESPONSIBLE_CODE);
+        this.form.controls.tax_regime.setValue('COMUN', {
+          emitEvent: false,
+        });
+        this.selectedTaxRegime = 'COMUN';
+      }
+    }
     const next = enabled
       ? Array.from(new Set([...current, code]))
       : current.filter((c) => c !== code);
     this.form.controls.tax_responsibilities.setValue(next);
-    // Limpia vat_periodicity cuando O-48 se apaga. Lo hacemos aquí (en
-    // adición al effect reactivo) para que sea determinístico en tests
-    // sincrónicos: un effect programado por zoneless puede no correr antes
-    // de la siguiente aserción. El effect sigue activo como red de
-    // seguridad cuando `tax_responsibilities` cambia por otra vía
-    // (p. ej. `patchValue` desde `initialValue`).
+    // Limpia vat_periodicity cuando O-48 se apaga.
     if (!enabled && code === VAT_RESPONSIBLE_CODE) {
       this.form.controls.vat_periodicity.setValue('', { emitEvent: false });
     }

@@ -62,8 +62,9 @@ export class PrintLayoutComposerService {
 
     switch (section.type) {
       case 'header':
-      case 'fiscal_header':
         return this.renderHeaderSection(section, definition, data, mode);
+      case 'fiscal_header':
+        return this.renderFiscalHeaderSection(section, definition, data, mode);
       case 'document_info':
         return this.renderDocumentInfoSection(section, data, mode);
       case 'customer_info':
@@ -231,6 +232,177 @@ export class PrintLayoutComposerService {
         ${addr}
         ${phone}
         ${companyBlock}
+      </div>
+    `;
+  }
+
+  private renderFiscalHeaderSection(
+    section: any,
+    definition: PrintFormatDefinition,
+    data: StandardPrintDataModel,
+    mode: 'dummy' | 'tokenized' = 'dummy',
+  ): string {
+    const store = data.store || ({} as any);
+    const doc = data.document || ({} as any);
+    const fiscal = data.fiscal || ({} as any);
+
+    // 1. Emisor / Store Header
+    const runtimeLogo = store.logo_url as string | undefined;
+    const defLogoBlock = definition.logo;
+    const designedLogoUrl = defLogoBlock?.url;
+    const fallbackLogoUrl = runtimeLogo && !designedLogoUrl ? runtimeLogo : undefined;
+    const defaultMonochromeLogo = `${process.env.FRONTEND_URL || 'http://localhost:4200'}/vlogomono.png`;
+    const isLogoExplicitlyDisabled = defLogoBlock && (defLogoBlock as any).enabled === false;
+    const logoUrl = isLogoExplicitlyDisabled
+      ? undefined
+      : designedLogoUrl || fallbackLogoUrl || defaultMonochromeLogo;
+
+    let logo = '';
+    if (logoUrl || mode === 'tokenized') {
+      const pos = defLogoBlock?.position || (definition.paper?.is_roll ? 'center' : 'left');
+      const sizeMm = typeof defLogoBlock?.size_mm === 'number' ? defLogoBlock.size_mm : 14;
+      const opacity = typeof defLogoBlock?.opacity === 'number' ? defLogoBlock.opacity : 100;
+      const maxPx = pos === 'full' ? '100%' : `${Math.max(8, Math.min(64, Math.round(sizeMm * 3.78)))}px`;
+      const heightPx = pos === 'full' ? 'auto' : `${Math.max(8, Math.min(64, Math.round(sizeMm * 3.78)))}px`;
+      const styleParts = [
+        `max-height: ${heightPx}`,
+        `max-width: ${maxPx}`,
+        `opacity: ${Math.max(0, Math.min(100, opacity)) / 100}`,
+      ];
+      const alignStyle =
+        pos === 'center' ? 'text-align: center;' : pos === 'right' ? 'text-align: right;' : 'text-align: left;';
+      if (mode === 'tokenized') {
+        logo = `<div class="store-logo" style="${alignStyle}" data-element-id="f_logo" data-section-id="sec_header" data-token="store.logo_url"><span class="vendix-token-pill" data-token="store.logo_url">&#123;&#123; store.logo_url &#125;&#125;</span></div>`;
+      } else if (logoUrl) {
+        logo = `<div class="store-logo" style="${alignStyle}" data-element-id="f_logo" data-section-id="sec_header" data-token="store.logo_url"><img src="${this.compiler.escapeHtml(logoUrl)}" alt="Logo" data-image-preset="logo-print" style="${styleParts.join('; ')}; object-fit: contain; image-rendering: -webkit-optimize-contrast;" /></div>`;
+      }
+    }
+
+    const isNameActive = this.isFieldActive(section, 'store_name') && this.isFieldActive(section, 'f_name');
+    const isLegalActive = this.isFieldActive(section, 'store_legal_name') && this.isFieldActive(section, 'f_legal');
+    const isNitActive = this.isFieldActive(section, 'store_tax_id') && this.isFieldActive(section, 'f_nit');
+    const isRegimeActive = this.isFieldActive(section, 'store_regime') && this.isFieldActive(section, 'f_regime');
+    const isAddrActive = this.isFieldActive(section, 'store_address') && this.isFieldActive(section, 'f_addr');
+    const isPhoneActive = this.isFieldActive(section, 'store_phone') && this.isFieldActive(section, 'f_phone');
+
+    const nitLabel = this.getFieldCustomLabel(section, 'f_nit', this.getFieldCustomLabel(section, 'store_tax_id', 'NIT'));
+    const phoneLabel = this.getFieldCustomLabel(section, 'f_phone', this.getFieldCustomLabel(section, 'store_phone', 'Tel'));
+
+    const nameVal = mode === 'tokenized' ? '<span class="vendix-token-pill" data-token="store.name">&#123;&#123; store.name &#125;&#125;</span>' : this.compiler.escapeHtml(store.name || '');
+    const name = isNameActive ? `<h1 class="store-name" data-element-id="f_name" data-section-id="sec_header" data-token="store.name">${nameVal}</h1>` : '';
+
+    const legalVal = mode === 'tokenized' ? '<span class="vendix-token-pill" data-token="store.legal_name">&#123;&#123; store.legal_name &#125;&#125;</span>' : this.compiler.escapeHtml(store.legal_name || '');
+    const legalName = isLegalActive && (store.legal_name || mode === 'tokenized') ? `<div class="store-legal" data-element-id="f_legal" data-section-id="sec_header" data-token="store.legal_name">${legalVal}</div>` : '';
+
+    const nitVal = mode === 'tokenized' ? '<span class="vendix-token-pill" data-token="store.tax_id">&#123;&#123; store.tax_id &#125;&#125;</span>' : `${nitLabel}: ${this.compiler.escapeHtml(store.tax_id || '')}`;
+    const nit = isNitActive && (store.tax_id || mode === 'tokenized') ? `<div class="store-nit" data-element-id="f_nit" data-section-id="sec_header" data-token="store.tax_id">${nitVal}</div>` : '';
+
+    const regimeVal = mode === 'tokenized' ? '<span class="vendix-token-pill" data-token="store.tax_regime">&#123;&#123; store.tax_regime &#125;&#125;</span>' : this.compiler.escapeHtml(store.tax_regime || '');
+    const regime = isRegimeActive && (store.tax_regime || mode === 'tokenized') ? `<div class="store-regime" data-element-id="f_regime" data-section-id="sec_header" data-token="store.tax_regime">${regimeVal}</div>` : '';
+
+    const addrVal = mode === 'tokenized' ? '<span class="vendix-token-pill" data-token="store.address">&#123;&#123; store.address &#125;&#125;</span>' : `${this.compiler.escapeHtml(store.address || '')}${store.city ? ', ' + this.compiler.escapeHtml(store.city) : ''}`;
+    const addr = isAddrActive && (store.address || mode === 'tokenized') ? `<div class="store-address" data-element-id="f_addr" data-section-id="sec_header" data-token="store.address">${addrVal}</div>` : '';
+
+    const phoneVal = mode === 'tokenized' ? '<span class="vendix-token-pill" data-token="store.phone">&#123;&#123; store.phone &#125;&#125;</span>' : `${phoneLabel}: ${this.compiler.escapeHtml(store.phone || '')}`;
+    const phone = isPhoneActive && (store.phone || mode === 'tokenized') ? `<div class="store-phone" data-element-id="f_phone" data-section-id="sec_header" data-token="store.phone">${phoneVal}</div>` : '';
+
+    const companyBlock = this.renderCompanyBlock(definition, data, mode);
+
+    // 2. Document Details & DIAN Resolution
+    const isCreditNote =
+      (definition as any).format_type === 'fiscal_credit_note' ||
+      data.document?.state === 'credit_note' ||
+      Boolean((data.fiscal as any)?.cude);
+    const docTitle = isCreditNote
+      ? 'NOTA CRÉDITO ELECTRÓNICA'
+      : 'FACTURA ELECTRÓNICA DE VENTA';
+
+    const numVal = mode === 'tokenized'
+      ? '<span class="vendix-token-pill" data-token="order.order_number">&#123;&#123; order.order_number &#125;&#125;</span>'
+      : (doc.number ? `No. ${this.compiler.escapeHtml(doc.number)}` : '');
+
+    const dateVal = mode === 'tokenized'
+      ? '<span class="vendix-token-pill" data-token="order.created_at">&#123;&#123; order.created_at &#125;&#125;</span>'
+      : (doc.date_formatted || doc.date ? `Fecha de Emisión: ${this.compiler.escapeHtml(doc.date_formatted || doc.date)}` : '');
+
+    const dueDateVal = doc.valid_until_formatted
+      ? `Vencimiento: ${this.compiler.escapeHtml(doc.valid_until_formatted)}`
+      : '';
+
+    const paymentVal = doc.payment_method
+      ? `Forma de Pago: ${this.compiler.escapeHtml(doc.payment_method)}`
+      : '';
+
+    let resolutionHtml = '';
+    if (fiscal.resolution_number || mode === 'tokenized') {
+      const resNum = mode === 'tokenized'
+        ? '<span class="vendix-token-pill" data-token="fiscal.resolution_number">&#123;&#123; fiscal.resolution_number &#125;&#125;</span>'
+        : this.compiler.escapeHtml(fiscal.resolution_number);
+      const resDate = fiscal.resolution_date
+        ? ` del ${this.compiler.escapeHtml(fiscal.resolution_date)}`
+        : '';
+      const rangeText = fiscal.resolution_prefix && fiscal.resolution_range_from != null && fiscal.resolution_range_to != null
+        ? `<div>Rango autorizado: ${this.compiler.escapeHtml(fiscal.resolution_prefix)}${fiscal.resolution_range_from} a ${this.compiler.escapeHtml(fiscal.resolution_prefix)}${fiscal.resolution_range_to}</div>`
+        : '';
+      const vigenciaText = fiscal.resolution_valid_from && fiscal.resolution_valid_to
+        ? `<div>Vigencia: ${this.compiler.escapeHtml(fiscal.resolution_valid_from)} a ${this.compiler.escapeHtml(fiscal.resolution_valid_to)}</div>`
+        : '';
+
+      resolutionHtml = `
+        <div class="fiscal-resolution-text">
+          <div>Resolución DIAN No. ${resNum}${resDate}</div>
+          ${rangeText}
+          ${vigenciaText}
+        </div>
+      `;
+    }
+
+    const isRoll = Boolean(definition.paper?.is_roll);
+    const hasDocInfoSection = definition.sections?.some(
+      (s: any) => s.type === 'document_info' && s.enabled !== false,
+    );
+
+    if (isRoll) {
+      return `
+        <div class="print-section section-header" data-section-id="${section.id || 'sec_header'}">
+          ${logo}
+          ${name}
+          ${legalName}
+          ${nit}
+          ${regime}
+          ${addr}
+          ${phone}
+          ${companyBlock}
+          <div class="fiscal-doc-card roll-card">
+            <div class="fiscal-doc-title">${docTitle}</div>
+            ${!hasDocInfoSection && numVal ? `<div class="fiscal-doc-num">${numVal}</div>` : ''}
+            ${!hasDocInfoSection && dateVal ? `<div class="fiscal-doc-date">${dateVal}</div>` : ''}
+            ${resolutionHtml}
+          </div>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="print-section section-header fiscal-header-container" data-section-id="${section.id || 'sec_header'}">
+        <div class="fiscal-header-emitter">
+          ${logo}
+          ${name}
+          ${legalName}
+          ${nit}
+          ${regime}
+          ${addr}
+          ${phone}
+          ${companyBlock}
+        </div>
+        <div class="fiscal-doc-card">
+          <div class="fiscal-doc-title">${docTitle}</div>
+          ${numVal ? `<div class="fiscal-doc-num">${numVal}</div>` : ''}
+          ${dateVal ? `<div class="fiscal-doc-date">${dateVal}</div>` : ''}
+          ${dueDateVal ? `<div class="fiscal-doc-date">${dueDateVal}</div>` : ''}
+          ${paymentVal ? `<div class="fiscal-doc-meta">${paymentVal}</div>` : ''}
+          ${resolutionHtml}
+        </div>
       </div>
     `;
   }
@@ -1111,6 +1283,53 @@ export class PrintLayoutComposerService {
       text-align: ${styles.header_alignment || (paper.is_roll ? 'center' : 'left')};
       border-bottom: ${paper.is_roll ? '1px dashed #000' : `2px solid ${primaryColor}`};
       padding-bottom: 8px;
+    }
+    .fiscal-header-container {
+      ${paper.is_roll ? '' : 'display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;'}
+    }
+    .fiscal-header-emitter {
+      ${paper.is_roll ? 'text-align: center;' : 'flex: 1; text-align: left;'}
+    }
+    .fiscal-doc-card {
+      ${paper.is_roll ? `
+        border-top: 1px dashed #000;
+        margin-top: 6px;
+        padding-top: 4px;
+        text-align: center;
+      ` : `
+        border: 1.5px solid ${primaryColor};
+        border-radius: 4px;
+        padding: 8px 12px;
+        text-align: center;
+        min-width: 220px;
+        max-width: 280px;
+        background: #fafafa;
+      `}
+    }
+    .fiscal-doc-title {
+      font-weight: bold;
+      font-size: ${fontSize + 1}pt;
+      ${paper.is_roll ? 'color: #000;' : `color: ${primaryColor};`}
+      margin-bottom: 4px;
+      text-transform: uppercase;
+    }
+    .fiscal-doc-num {
+      font-weight: bold;
+      font-size: ${fontSize + 2}pt;
+      margin-bottom: 4px;
+    }
+    .fiscal-doc-date, .fiscal-doc-meta {
+      font-size: ${fontSize - 1}pt;
+      color: ${paper.is_roll ? '#000' : '#374151'};
+      margin-bottom: 2px;
+    }
+    .fiscal-resolution-text {
+      font-size: 7.5pt;
+      color: ${paper.is_roll ? '#000' : '#4b5563'};
+      margin-top: 4px;
+      padding-top: 4px;
+      ${paper.is_roll ? 'border-top: 1px dashed #000;' : 'border-top: 1px dashed #d1d5db;'}
+      line-height: 1.3;
     }
     .store-name {
       margin: 2px 0;
