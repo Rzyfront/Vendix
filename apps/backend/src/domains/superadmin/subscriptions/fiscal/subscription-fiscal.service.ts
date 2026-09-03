@@ -1,8 +1,11 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import {
   dianAmount,
+  dianLineExtension,
   dianLineExtensionTotal,
+  clearInclusiveLine,
 } from '../../../store/invoicing/utils/dian-money.util';
 import { assertTechnicalKeyShape } from '../../../store/invoicing/utils/technical-key.util';
 // Mismas funciones que el generador de numeración de tiendas, sin copia local:
@@ -104,6 +107,7 @@ import {
   InvoiceLineItem,
   SubscriptionInvoiceMetadata,
 } from '../../../store/subscriptions/types/billing.types';
+import { PlatformInvoicingPersistenceService } from './platform-invoicing-persistence.service';
 import {
   buildSubscriptionItemCode,
   buildSubscriptionInvoiceNotes,
@@ -125,8 +129,68 @@ import {
 } from '../../../store/invoicing/providers/dian-direct/acquirer-address.resolver';
 import {
   DianAddressFields,
+  DianDocumentExtras,
+  DianExchangeRateDeclaration,
   UblDocumentLine,
 } from '../../../store/invoicing/providers/dian-direct/xml/ubl-common.builder';
+
+/**
+ * El payload que firma el emisor DIAN para el carril de PLATAFORMA.
+ *
+ * Es el mismo alias que el carril de tiendas declara en
+ * `invoice-flow.service.ts` (`DianProviderInvoiceData`): el contrato de
+ * CUALQUIER proveedor (`ProviderInvoiceData`) más lo que el Anexo Técnico
+ * exige de más (`DianDocumentExtras`: tipo de operación, tasa de cambio,
+ * retenciones) y las líneas con su desglose de tributos propio
+ * (`UblDocumentLine`).
+ *
+ * Existe porque `buildPlatformProviderData` cerraba con una aserción de tipo
+ * (`as unknown as …`) al contrato del proveedor, y esa aserción apagaba el
+ * compilador justo donde el payload dejó de cumplirlo: los impuestos viajaban
+ * con `rate` (fracción) en vez de `tax_rate` (porcentaje) y sin
+ * `taxable_amount`, así que el emisor leía `undefined` y el prevalidador
+ * bloqueaba TODA factura con impuestos. Con el tipo puesto, ese desajuste es
+ * un error de compilación y no un 400 en producción.
+ */
+type PlatformProviderInvoiceData = ProviderInvoiceData &
+  DianDocumentExtras & { items: UblDocumentLine[] };
+
+/**
+ * Una fila del desglose de impuestos DEL SNAPSHOT CONTABLE — no del XML.
+ *
+ * Conserva las dos cosas que el contrato del proveedor no lleva: la tarifa en
+ * FRACCIÓN (como la manda el DTO y como la multiplica el cálculo) y
+ * `is_inclusive`. Sin este registro, después de firmar no quedaría rastro de
+ * si el precio traía el impuesto dentro.
+ */
+interface PlatformTaxBreakdownRow {
+  tax_type: string;
+  /** Tarifa en FRACCIÓN (0,19), NO en porcentaje. */
+  rate: number;
+  tax_amount: number;
+  is_inclusive: boolean;
+  /** Base gravable calculada por el servidor, la misma que declara el XML. */
+  taxable_amount: number;
+}
+
+/**
+ * Una línea del snapshot contable (`fiscal_evidences.metadata.items`), que es
+ * una forma DISTINTA de la que se firma: lleva ordinal, importes numéricos, la
+ * cuenta PUC de la línea y el desglose con `is_inclusive`. La lee
+ * `emitInvoiceAccepted` para el asiento y `platform-invoice-pdf.service.ts`
+ * para el PDF.
+ */
+interface PlatformSnapshotLine {
+  position: number;
+  description: string;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+  discount_amount: number;
+  unit_code: string;
+  taxes: PlatformTaxBreakdownRow[];
+  account_code: string | null;
+}
 
 /**
  * A platform habilitación check. Same fields as the tenant
@@ -387,6 +451,16 @@ export class SubscriptionFiscalService {
     // el otro carril, para que actualizar una regla actualice los dos.
     private readonly identityValidator: CustomerFiscalIdentityValidator,
     private readonly documentValidator: FiscalDocumentValidator,
+    // Para releer el snapshot del documento (kind='platform_invoice_snapshot')
+    // tras la aceptación y emitir `invoice.accepted` con los totales e importes
+    // que la DIAN acaba de firmar. LaDIAN ya aceptó: el evento es el contrato
+    // que dispara el asiento contable automático contra el accounting_entity de
+    // la plataforma, igual que el riel de tienda pero con `store_id` ausente.
+    private readonly persistence: PlatformInvoicingPersistenceService,
+    // Único bus de eventos de Nest. La factura de plataforma emite
+    // `invoice.accepted` y `AccountingEventsListener` resuelve el subflujo
+    // `invoicing` + las cuentas PUC; no usamos el `EventEmitter` de Node.
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async getStatus() {
@@ -1296,14 +1370,27 @@ export class SubscriptionFiscalService {
    * la DIAN tiene ligado a la resolución.
    *
    * La ClTec NO viaja al cliente en ninguna de las dos rutas.
+   *
+   * ── POR QUÉ EL AMBIENTE SE PROPAGA Y NO SE HEREDA ──────────────────────────
+   *
+   * Ausente ⇒ el de la configuración, igual que antes. Se puede pedir el
+   * contrario porque heredarlo cerraba un ciclo: una configuración en
+   * habilitación preguntaba a `vpfe-hab`, donde las autorizaciones de producción
+   * no viven, y sin rango no había resolución, sin resolución no había readiness
+   * y sin readiness no había promoción a producción. Este riel lo sufre igual
+   * que el de tiendas —es el MISMO servicio—, y aquí el afectado es el NIT con
+   * el que Vendix factura sus propias suscripciones.
+   *
+   * Consultar no emite, no reserva consecutivo y no promueve nada.
    */
   async queryPlatformNumberingRanges(
     configId: number,
+    environment?: 'test' | 'production' | null,
   ): Promise<NumberingRangeReport> {
     const { settings, configId: target } =
       await this.requirePlatformDianConfig(configId);
     return this.runInPlatformContext(settings, () =>
-      this.dianNumberingRangeService.queryRanges(target),
+      this.dianNumberingRangeService.queryRanges(target, environment),
     );
   }
 
@@ -1319,6 +1406,13 @@ export class SubscriptionFiscalService {
    * escritura resuelve su entidad fiscal desde el contexto, y fuera de él sería
    * la del super admin —o ninguna—, dejando la resolución colgada de la entidad
    * equivocada o invisible en los listados.
+   *
+   * El ambiente sale del CUERPO, que es donde lo pone el panel compartido, y por
+   * eso no se le pasa como tercer argumento: aquí no hay otra vía que lo haya
+   * resuelto antes. Ausente ⇒ el de la configuración. Escribir la fila no
+   * habilita nada: `assertElectronicEmissionLive` sigue exigiendo
+   * `environment === 'production' && enablement_status === 'enabled'` sobre la
+   * CONFIGURACIÓN, y ninguna de esas dos columnas se toca aquí.
    */
   async applyPlatformNumberingRanges(
     configId: number,
@@ -1407,8 +1501,24 @@ export class SubscriptionFiscalService {
   async listTransmissions(query: SubscriptionFiscalQueryDto) {
     const page = Math.max(1, query.page ?? 1);
     const limit = Math.min(Math.max(1, query.limit ?? 20), 100);
+    // LOS DOS RIELES, no sólo el de suscripciones.
+    //
+    // Este filtro estaba clavado en `subscription_invoice`, así que una factura
+    // emitida desde «Facturación → Nueva» —el riel plataforma— no aparecía
+    // NUNCA en la lista de esa misma pantalla: el operador la emitía, recibía
+    // el número, y la lista seguía diciendo «Sin facturas ni transmisiones».
+    // El filtro «Origen» de la UI ya ofrecía los tres valores sin que nadie los
+    // enviara, o sea que la capacidad estaba a medio construir de los dos
+    // lados.
+    //
+    // Ausencia de `source_type` = los dos rieles. Se enumeran en vez de omitir
+    // la condición porque `fiscal_transmissions` también guarda documentos
+    // soporte de proveedor (`vendor-support-fiscal.service.ts`), que no son
+    // facturas y no pertenecen a esta pantalla.
     const where: Prisma.fiscal_transmissionsWhereInput = {
-      source_type: 'subscription_invoice',
+      source_type: query.source_type ?? {
+        in: ['subscription_invoice', 'platform_invoice'],
+      },
     };
     if (query.status) {
       where.transmission_status = query.status as any;
@@ -1440,7 +1550,12 @@ export class SubscriptionFiscalService {
       this.prisma.withoutScope().fiscal_transmissions.count({ where }),
     ]);
 
-    const invoiceIds = rows.map((row) => row.source_id);
+    // Sólo el riel SaaS tiene fila en `subscription_invoices`. El de
+    // plataforma escribe `source_id: 0` y su contenido vive en la evidencia
+    // `manual_support`, así que pedir ese id devolvería siempre vacío.
+    const invoiceIds = rows
+      .filter((row) => row.source_type === 'subscription_invoice')
+      .map((row) => row.source_id);
     const invoices = invoiceIds.length
       ? await this.prisma.withoutScope().subscription_invoices.findMany({
           where: { id: { in: invoiceIds } },
@@ -1896,6 +2011,162 @@ export class SubscriptionFiscalService {
     };
   }
 
+  /**
+   * Adquiriente en el contrato de `CustomerFiscalIdentityValidator`, desde el
+   * `dto.customer` de `createPlatformInvoice`. Espejo de
+   * `buildCustomerIdentityInput` (que lee de `organizations`): mismos campos,
+   * misma coerción de tipos. La rama del frontend manda lo que el riel tienda
+   * lee de la organización, así que el contrato que valida el validador es
+   * el MISMO.
+   */
+  private buildPlatformCustomerIdentityInput(
+    dto: CreatePlatformInvoiceDto,
+  ): CustomerFiscalIdentityInput {
+    const documentType = dto.customer.document_type ?? '31';
+    const isNit = documentType === '31' || documentType === 'NIT';
+
+    return {
+      identification_mode: 'nominative',
+      document_type: documentType,
+      document_number: dto.customer.tax_id ?? null,
+      // El DV sólo es relevante para NIT (Anexo 19). Cédula, CE y Pasaporte
+      // NO llevan DV — pasarlo aunque sea undefined dispara falsos positivos.
+      verification_digit: isNit ? (dto.customer.tax_id_dv ?? null) : null,
+      // `customer.person_type` guarda el CÓDIGO DIAN (`'1'`/`'2'`), no la
+      // etiqueta del validador. Sin traducir, cada factura legítima
+      // levantaba un `PERSON_TYPE_UNKNOWN` sobre un dato correcto.
+      person_type: normalizePersonType(dto.customer.person_type),
+      legal_name: dto.customer.legal_name ?? null,
+      tax_regime: normalizeAcquirerTaxRegime(dto.customer.tax_regime_code),
+      tax_responsibilities: dto.customer.fiscal_responsibilities?.length
+        ? dto.customer.fiscal_responsibilities
+        : null,
+      email: dto.customer.email ?? null,
+      address: dto.customer.address_line
+        ? {
+            address_line: dto.customer.address_line,
+            city_code: null,
+            city_name: dto.customer.city ?? null,
+            department_code: dto.customer.department_code ?? null,
+            department_name: null,
+            country_code: 'CO',
+            postal_code: null,
+          }
+        : null,
+    };
+  }
+
+  /**
+   * Arma el `ProviderInvoiceData` que firma el emisor DIAN. Vive como helper
+   * para que los pre-validadores (F4) puedan correr ANTES de
+   * `allocateFiscalNumber` con el NÚMERO DE SONDEO, y después —ya con la
+   * numeración real bajo el lock consultivo— se mutan sólo
+   * `invoice_number` y `control.resolution_id`. Items, totales, taxes,
+   * withholdings y todo lo que validan los pre-validadores se mantiene
+   * idéntico entre el sondeo y la asignación real.
+   */
+  private buildPlatformProviderData(
+    dto: CreatePlatformInvoiceDto,
+    fiscalNumber: string,
+    resolution: PlatformInvoiceResolution,
+    issuedAt: Date,
+    issuedAtTime: string,
+    dueAt: string,
+    issueAtLocal: string,
+    lineItems: UblDocumentLine[],
+    subtotal: number,
+    taxAmount: number,
+    total: number,
+    withholdingAmount: number,
+    hasAnyTax: boolean,
+    notesText: string,
+  ): PlatformProviderInvoiceData {
+    const customerDocumentType = dto.customer.document_type ?? '31';
+    const customerPersonType = dto.customer.person_type ?? '2';
+    const customerRegime = dto.customer.tax_regime_code ?? '49';
+    const customerResponsibilities =
+      dto.customer.fiscal_responsibilities ??
+      (customerRegime === '49' ? ['O-13'] : [customerRegime]);
+
+    return {
+      invoice_number: fiscalNumber,
+      invoice_type: 'sales_invoice',
+      issue_date: issueAtLocal,
+      issue_time: issuedAtTime,
+      due_date: dueAt,
+      invoice_period: {
+        start_date: dto.period_start
+          ? localDateString(new Date(dto.period_start), PLATFORM_TIMEZONE)
+          : issueAtLocal,
+        end_date: dto.period_end
+          ? localDateString(new Date(dto.period_end), PLATFORM_TIMEZONE)
+          : issueAtLocal,
+      },
+      customer_name: dto.customer.legal_name,
+      customer_tax_id: dto.customer.tax_id,
+      // `undefined` y no `null`: el contrato declara estos campos OPCIONALES,
+      // y el emisor pregunta por ausencia (`?? …`), no por nulidad.
+      customer_email: dto.customer.email ?? undefined,
+      customer_address: dto.customer.address_line
+        ? {
+            line: dto.customer.address_line,
+            city: dto.customer.city ?? null,
+            department_code: dto.customer.department_code ?? null,
+            country_code: 'CO',
+          }
+        : null,
+      customer_document_type: customerDocumentType,
+      customer_verification_digit: dto.customer.tax_id_dv ?? undefined,
+      customer_person_type: customerPersonType,
+      customer_regime: customerRegime,
+      customer_tax_responsibilities: customerResponsibilities,
+      subtotal_amount: subtotal.toFixed(2),
+      discount_amount: dto.items
+        .reduce((acc, it) => acc + Number(it.discount_amount ?? 0), 0)
+        .toFixed(2),
+      tax_amount: taxAmount.toFixed(2),
+      withholding_amount: withholdingAmount.toFixed(2),
+      total_amount: total.toFixed(2),
+      currency: 'COP',
+      ...(function buildExchangeRate(): {
+        exchange_rate?: DianExchangeRateDeclaration;
+      } {
+        const cur = dto.exchange_rate_payload;
+        if (!cur) return {};
+        const foreign = cur.iso_4217;
+        if (!foreign || foreign.toUpperCase() === 'COP') return {};
+        const rateRaw = Number(cur.exchange_rate);
+        if (!Number.isFinite(rateRaw) || rateRaw <= 0) return {};
+        return {
+          exchange_rate: {
+            foreign_currency: foreign.toUpperCase(),
+            rate: dianAmount(rateRaw),
+            date: cur.exchange_rate_date ?? issueAtLocal,
+          },
+        };
+      })(),
+      items: lineItems,
+      taxes: hasAnyTax ? lineItems.flatMap((l) => l.taxes ?? []) : [],
+      notes: notesText,
+      // `order_reference` y `payment_method` se emitían en `null`: el emisor de
+      // FACTURA DE VENTA no lee ninguno de los dos (`order_reference` sólo lo
+      // consultan las notas y el ajuste al documento soporte; `payment_method`
+      // no lo lee nadie). Declararlos en null era residuo del payload legado.
+      // `resolution_number` es `string | null` en la fila y el contrato lo
+      // declara OPCIONAL: otro null que la aserción de tipo ocultaba.
+      resolution_number: resolution.resolution_number ?? undefined,
+      // `reveal()` devuelve `string | null`; el contrato declara el campo
+      // opcional. Sin la conversión el `null` viajaba oculto tras la aserción.
+      technical_key: this.technicalKeyVault.reveal(resolution) ?? undefined,
+      control: resolveInvoiceControl(resolution, PLATFORM_TIMEZONE, issuedAt, {
+        resolution_id: resolution.id,
+        document_type: 'sales_invoice',
+      }),
+      payment_form: dto.payment_form ?? '1',
+      payment_means: dto.payment_means_code ?? '42',
+    };
+  }
+
   async retryTransmission(transmissionId: number) {
     const transmission = await this.prisma.withoutScope().fiscal_transmissions.findUnique({
       where: { id: transmissionId },
@@ -1989,8 +2260,28 @@ export class SubscriptionFiscalService {
         description: string;
         quantity: number;
         unit_price: number;
-        line_total: string;
+        line_total: number | string;
       }>;
+      /**
+       * Las líneas del snapshot en la forma que el emisor firma
+       * (`UblDocumentLine`, todos los importes en cadena).
+       *
+       * NO se enriquecen con `discount_amount` / `unit_code` aunque el snapshot
+       * los tenga: el primer intento los emitió ausentes, y el reintento tiene
+       * que reproducir EL MISMO documento. Cambiar cualquiera de los dos mueve
+       * `cbc:LineExtensionAmount` o la unidad y con ellos el CUFE, sobre un
+       * consecutivo que la DIAN ya quemó.
+       */
+      const providerItems: UblDocumentLine[] = items.map((it) => ({
+        description: it.description,
+        // `String(...)` y no `dianAmount(...)`: truncar a 2 decimales cambiaría
+        // el precio que el primer intento declaró en una línea con 4 decimales.
+        quantity: String(it.quantity),
+        unit_price: String(it.unit_price),
+        discount_amount: dianAmount(0),
+        tax_amount: dianAmount(0),
+        total_amount: dianAmount(it.line_total),
+      }));
       const totals = m.totals as { subtotal: number; tax_amount: number; total: number };
       const periodStart = (m.period_start as string | null) ?? null;
       const periodEnd = (m.period_end as string | null) ?? null;
@@ -2007,21 +2298,38 @@ export class SubscriptionFiscalService {
         PLATFORM_TIMEZONE,
       );
 
-      // Resolución: la misma que se usó en el primer intento (settings
-      // no debería cambiarla entre tanto, pero leemos de la fila por
-      // defensa).
+      // Resolución: la MISMA que se usó en el primer intento. La fuente
+      // correcta es el snapshot persistido en `createPlatformInvoice`
+      // (metadata.resolution_id), NO el setting. Antes de F1 siempre
+      // coincidían — el setting resolvía todo, así que la lectura del
+      // setting era legítima «por defensa». Ahora que `dto.resolution_id`
+      // sí elige, un primer intento pudo haber usado otra resolución y el
+      // reintento debe reconstruir `resolution_number`, `technical_key` y
+      // `control` contra ESA, no contra la del setting: cualquier valor
+      // distinto rompe el CUFE recalculado y la DIAN rechaza.
+      const originalResolutionId =
+        typeof m.resolution_id === 'number'
+          ? (m.resolution_id as number)
+          : null;
+      if (originalResolutionId === null) {
+        throw new BadRequestException(
+          'El snapshot del origen no registra resolution_id — la factura original no se emitió por createPlatformInvoice (no se puede reintentar).',
+        );
+      }
       const resolution = await this.prisma.withoutScope().invoice_resolutions.findFirst({
         where: {
-          id: settings.invoice_resolution_id!,
+          id: originalResolutionId,
           accounting_entity_id: settings.accounting_entity_id!,
           document_type: 'sales_invoice',
         },
       });
       if (!resolution) {
-        throw new BadRequestException('No se encontró la resolución original de la factura de plataforma');
+        throw new BadRequestException(
+          `No se encontró la resolución #${originalResolutionId} que la factura original usó; el reintento no puede firmar contra otra autorización.`,
+        );
       }
 
-      const providerData = {
+      const providerData: PlatformProviderInvoiceData = {
         invoice_number: transmission.document_number,
         invoice_type: 'sales_invoice',
         issue_date: firstAttemptDate,
@@ -2033,7 +2341,7 @@ export class SubscriptionFiscalService {
         },
         customer_name: customer.legal_name,
         customer_tax_id: customer.tax_id,
-        customer_email: customer.email ?? null,
+        customer_email: customer.email ?? undefined,
         customer_address: customer.address_line
           ? {
               line: customer.address_line,
@@ -2043,7 +2351,7 @@ export class SubscriptionFiscalService {
             }
           : null,
         customer_document_type: '31',
-        customer_verification_digit: customer.tax_id_dv ?? null,
+        customer_verification_digit: customer.tax_id_dv ?? undefined,
         customer_person_type: '2',
         customer_regime: '49',
         customer_tax_responsibilities: ['O-13'],
@@ -2053,24 +2361,27 @@ export class SubscriptionFiscalService {
         withholding_amount: '0.00',
         total_amount: Number(totals.total ?? 0).toFixed(2),
         currency,
-        items,
+        items: providerItems,
         taxes: [],
         notes: [
           `Factura de servicios generada desde super-admin el ${firstAttemptDate}`,
           'Servicio excluido de IVA — art. 476 num. 21 del Estatuto Tributario',
           `(retry) ${localDateString(new Date(), PLATFORM_TIMEZONE)} ${localTimeString(new Date(), PLATFORM_TIMEZONE)}`,
         ].join('\n'),
-        order_reference: null,
-        resolution_number: resolution.resolution_number,
-        technical_key: this.technicalKeyVault.reveal(resolution),
+        // `order_reference` / `payment_method`: mismo residuo legado que en
+        // `buildPlatformProviderData` — el emisor de factura de venta no lee
+        // ninguno de los dos, y viajaban en `null`.
+        // `resolution_number` es `string | null` en la fila y el contrato lo
+        // declara OPCIONAL: otro null que la aserción de tipo ocultaba.
+        resolution_number: resolution.resolution_number ?? undefined,
+        technical_key: this.technicalKeyVault.reveal(resolution) ?? undefined,
         control: resolveInvoiceControl(resolution, PLATFORM_TIMEZONE, firstAttemptAt, {
           resolution_id: resolution.id,
           document_type: 'sales_invoice',
         }),
         payment_form: '1',
         payment_means: '42',
-        payment_method: null,
-      } as unknown as ProviderInvoiceData;
+      };
 
       // No se reescribe `request_hash`: el primer intento ya lo dejó
       // firmado. Bump de `retry_count` ocurre implícitamente al
@@ -2148,13 +2459,20 @@ export class SubscriptionFiscalService {
     if (!/^\d+$/.test(dto.customer.tax_id)) {
       throw new BadRequestException('El destinatario requiere tax_id numérico');
     }
-    // customer_document_type va fijo en '31' (NIT) en este riel y la DIAN
-    // exige DV para NIT. El DTO ya lo declara requerido y regex, pero un
-    // cliente que mande el campo `undefined` (por ejemplo un retry de una
-    // plataforma vieja) lo colaría: re-validamos aquí también. Sin DV la
-    // DIAN rechaza por Anexo 19 después de quemar el consecutivo, y ese
-    // número no vuelve.
-    if (!/^\d$/.test(dto.customer.tax_id_dv ?? '')) {
+    // DV exigido SÓLO cuando el documento es NIT (Anexo Técnico 19, DIAN).
+    // Cédula (13), Cédula de Extranjería (22) y Pasaporte (41) NO llevan DV:
+    // el selector del frontend ya las distingue, y exigir DV rompe un caso
+    // real (facturar a persona natural). El default del lado del servicio
+    // sigue siendo '31' porque `document_type` todavía no fluye desde el
+    // DTO V1 (bloqueador en PlatformInvoiceTenantRefDto) — cuando sume el
+    // campo, este bloque ya está listo para leerlo.
+    const customerDocumentType = dto.customer.document_type ?? '31';
+    const isNit =
+      customerDocumentType === '31' || customerDocumentType === 'NIT';
+    if (
+      isNit &&
+      !/^\d$/.test(dto.customer.tax_id_dv ?? '')
+    ) {
       throw new BadRequestException(
         'El destinatario requiere DV (NIT, tipo 31): un solo dígito numérico.',
       );
@@ -2175,35 +2493,287 @@ export class SubscriptionFiscalService {
       const issuedAt = new Date();
       const issuedAtLocal = localDateString(issuedAt, PLATFORM_TIMEZONE);
       const issuedAtTime = localTimeString(issuedAt, PLATFORM_TIMEZONE);
-      const dueAt = new Date(issuedAt.getTime() + 7 * 24 * 60 * 60 * 1000);
-      const dueAtLocal = localDateString(dueAt, PLATFORM_TIMEZONE);
+      // due_date: el caller puede sobreescribirla (DTO). Default legacy:
+      // emisión + 7 días. ISO8601 → YYYY-MM-DD local.
+      const dueAt = dto.due_date
+        ? localDateString(new Date(dto.due_date), PLATFORM_TIMEZONE)
+        : localDateString(
+            new Date(issuedAt.getTime() + 7 * 24 * 60 * 60 * 1000),
+            PLATFORM_TIMEZONE,
+          );
+      // issue_date: idem, default = emisión.
+      const issueAtLocal = dto.issue_date
+        ? localDateString(new Date(dto.issue_date), PLATFORM_TIMEZONE)
+        : issuedAtLocal;
 
-      // 0.b) Subtotal: redondeo POR LÍNEA, después suma. Coincide con la
-      //     convención `LineExtensionAmount` de la DIAN; una suma de
-      //     floats sin redondeo intermedio puede dar FAU04 al cuadrar con
-      //     TaxExclusiveAmount.
-      const lineItems = dto.items.map((item, i) => {
+      // 0.b) Cálculo por línea. Construye `lineItems` (forma que firma la
+      //     DIAN) Y `snapshotItems` (forma del snapshot contable que lee el
+      //     listener de auto-asientos vía `loadInvoiceSnapshot`).
+      //
+      //     Regla de cuadre FAS02 (peer rule 3): `tax_amount` de cabecera
+      //     es SIEMPRE la suma de los impuestos por línea — NUNCA base×tarifa
+      //     recalculada sobre el subtotal. Recalcular da un céntimo de
+      //     diferencia y lo rechaza la DIAN.
+      //
+      //     Regla de impuesto incluido (peer rule 4): cuando una línea trae
+      //     `taxes[].is_inclusive=true`, su base gravable es
+      //     `neto / (1 + Σ tarifas_inclusivas)`. Cada impuesto exclusivo
+      //     usa esa misma base despejada. El frontend manda `rate` en
+      //     fracción 0–1.
+      //
+      //     Backward compat (peer rule 2): si NINGUNA línea trae `taxes`,
+      //     `tax_amount = 0` y se conserva la nota de exclusión art. 476
+      //     num. 21 ET. Si AL MENOS una línea trae `taxes`, la nota de
+      //     exclusión NO se emite (sería una declaración falsa) y la
+      //     cabecera lleva `taxes[]`.
+      let hasAnyTax = false;
+      let totalTaxAmount = 0;
+      // Subtotal acumulado línea a línea. Antes se derivaba de un campo
+      // `line_total` que el payload del proveedor arrastraba sólo para esto y
+      // que el contrato del emisor no tiene; acumularlo acá deja la línea
+      // exactamente en la forma que se firma.
+      let subtotalAccum = 0;
+      const lineItems: UblDocumentLine[] = [];
+      const snapshotItems: PlatformSnapshotLine[] = [];
+
+      for (let i = 0; i < dto.items.length; i++) {
+        const item = dto.items[i];
         const qty = Number(item.quantity);
         const price = Number(item.unit_price);
-        const lineTotal = Math.round(qty * price * 100) / 100;
-        return {
+        const discount = Number(item.discount_amount ?? 0);
+        // Redondeo POR LÍNEA, después suma. Coincide con la convención
+        // `LineExtensionAmount` de la DIAN; una suma de floats sin
+        // redondeo intermedio puede dar FAU04 al cuadrar con
+        // TaxExclusiveAmount.
+        const gross = Math.round((qty * price - discount) * 100) / 100;
+
+        const taxes = Array.isArray(item.taxes) ? item.taxes : [];
+        const inclusiveRateSum = taxes
+          .filter((t) => t.is_inclusive === true)
+          .reduce((acc, t) => acc + Number(t.rate || 0), 0);
+
+        let lineBaseForExclusiveTaxes: number;
+        let lineBaseForInclusiveTaxes: number;
+        if (inclusiveRateSum > 0) {
+          // gross = base * (1 + Σ inclusive). Despejamos.
+          lineBaseForInclusiveTaxes = Math.round((gross / (1 + inclusiveRateSum)) * 100) / 100;
+          // La base para exclusivos comparte el mismo neto despejado: ambos
+          // tipos tributan sobre el valor sin impuesto (post-disc, pre-tax).
+          lineBaseForExclusiveTaxes = lineBaseForInclusiveTaxes;
+        } else {
+          lineBaseForExclusiveTaxes = gross;
+          lineBaseForInclusiveTaxes = gross;
+        }
+
+        // DESPEJE DEL PRECIO CUANDO EL IMPUESTO VIENE DENTRO.
+        //
+        // Despejar sólo la BASE del `cac:TaxSubtotal` y dejar el precio con el
+        // impuesto adentro produce un documento que se contradice: una línea de
+        // 1 × $1.190 con IVA 19 % incluido declaraba `LineExtensionAmount`
+        // 1.190 contra una `TaxableAmount` de 1.000, y la cabecera cerraba en
+        // 1.190 + 190 = **$1.380** por una venta de $1.190. Peor que un
+        // rechazo: la aritmética del XML es internamente consistente, así que
+        // la DIAN puede ACEPTARLO y dejar firmada una factura por un importe
+        // que nadie pagó, con el consecutivo ya quemado.
+        //
+        // Se despeja el PRECIO, no sólo el importe, porque la regla FAV06
+        // (rechazo) valida la línea contra su propio precio:
+        // `LineExtensionAmount = PriceAmount × cantidad − descuentos`. El
+        // descuento se despeja en la misma proporción, porque un descuento
+        // sobre un precio con impuesto dentro también lo lleva dentro.
+        //
+        // Es el mismo helper que usa el riel tienda (`invoice-flow.service.ts`
+        // → `resolveInclusiveLineOverrides`), no una segunda implementación:
+        // dos despejes distintos del mismo importe es exactamente el defecto
+        // que este bloque cierra.
+        let emittedUnitPrice: string = String(price);
+        let emittedDiscount: string = discount.toFixed(2);
+        let lineNet = gross;
+        if (inclusiveRateSum > 0) {
+          const cleared = clearInclusiveLine({
+            quantity: qty,
+            unit_price: price,
+            discount_amount: discount,
+            taxable_base: lineBaseForInclusiveTaxes,
+          });
+          if (cleared) {
+            emittedUnitPrice = cleared.unit_price;
+            emittedDiscount = cleared.discount_amount;
+            // El neto vuelve a derivarse del precio despejado con la MISMA
+            // función que el emisor usa para escribir `LineExtensionAmount`,
+            // para que la igualdad de FAV06 se cumpla por construcción y no
+            // por coincidencia aritmética.
+            lineNet = Number(
+              dianLineExtension({
+                quantity: qty,
+                unit_price: cleared.unit_price,
+                discount_amount: cleared.discount_amount,
+              }),
+            );
+          } else {
+            // Cantidad cero o base inservible frente al bruto. Se deja la línea
+            // como estaba —comportamiento histórico— y que la puerta de
+            // pre-emisión la frene: visible, no silencioso.
+            this.logger.warn(
+              `Línea ${i + 1} de la factura de plataforma declara impuesto incluido pero su base ` +
+                `${lineBaseForInclusiveTaxes} no es despejable contra el bruto ${gross}; se emite sin ` +
+                `despejar y la validación de pre-emisión decidirá.`,
+            );
+          }
+        }
+
+        const providerTaxes: ProviderInvoiceTax[] = [];
+        const taxBreakdownSnapshot: PlatformTaxBreakdownRow[] = [];
+        let lineTaxTotal = 0;
+        for (const tax of taxes) {
+          const rate = Number(tax.rate || 0);
+          if (rate <= 0) continue;
+          // El frontend PUEDE mandar `tax_amount` calculado, pero un navegador
+          // es un origen que se puede manipular: si el monto que inyecta no
+          // cuadra con `base × tarifa`, la DIAN lo rechaza con FAS02 firmando
+          // con NUESTRO certificado. El monto que va al XML sale SIEMPRE de
+          // nuestro cálculo sobre la base despejada; el del cliente, si llega,
+          // se descarta (peer rule de vendix-db).
+          // La BASE la calcula el servidor, igual que el importe: el inclusivo
+          // grava el neto despejado (`gross / (1 + Σ tarifas)`) y el exclusivo
+          // el neto tal cual. `tax.taxable_amount` del DTO se IGNORA a
+          // propósito, por el mismo motivo que `tax.tax_amount`: es un dato de
+          // origen manipulable, y una base que no cuadra con el importe hace
+          // que la DIAN rechace por FAS02 un documento firmado con NUESTRO
+          // certificado.
+          const taxableBase = tax.is_inclusive
+            ? lineBaseForInclusiveTaxes
+            : lineBaseForExclusiveTaxes;
+          const taxAmount = Math.round(taxableBase * rate * 100) / 100;
+          lineTaxTotal += taxAmount;
+          providerTaxes.push({
+            tax_type: tax.tax_type,
+            tax_name: tax.tax_type, // el mapper legacy renombra según enum
+            // UNIDADES: el DTO trae `rate` en FRACCIÓN (0,19) y el contrato del
+            // proveedor —`ProviderInvoiceTax.tax_rate`— lo quiere en PORCENTAJE
+            // como cadena ('19.00'), que es lo que va a `cbc:Percent`. La
+            // conversión ocurre UNA sola vez, acá. Antes se empujaba la
+            // fracción bajo el nombre `rate`, un campo que el contrato no
+            // tiene: el emisor leía `tax_rate` → `undefined`, y el
+            // prevalidador levantaba `TAX_RATE_MISSING` en TODA factura con
+            // impuestos.
+            tax_rate: (rate * 100).toFixed(2),
+            taxable_amount: taxableBase.toFixed(2),
+            tax_amount: taxAmount.toFixed(2),
+            // `is_inclusive` NO viaja al proveedor: el contrato no lo tiene y
+            // el emisor no lo lee. El dato sigue vivo en
+            // `taxBreakdownSnapshot`, que es el snapshot contable.
+          });
+          // El snapshot contable conserva la FRACCIÓN (`rate`) y el
+          // `is_inclusive` que el proveedor no lleva: es el único sitio donde
+          // ese par sigue vivo después de firmar. La base es la MISMA que se
+          // declara en el XML —una sola fuente— en vez de la del DTO, que
+          // podía llegar nula y dejaba el asiento sin base.
+          taxBreakdownSnapshot.push({
+            tax_type: tax.tax_type,
+            rate,
+            tax_amount: taxAmount,
+            is_inclusive: !!tax.is_inclusive,
+            taxable_amount: taxableBase,
+          });
+          hasAnyTax = true;
+        }
+
+        // Default unit_code: 'NIU' (UN/ECE Rec. 20). 'EA' no está en la rec.
+        // y ningún selector del front lo puede pintar — el legacy lo
+        // hardcodeaba por bug histórico.
+        const unit_code = item.unit_code ?? 'NIU';
+
+        // La línea viaja en el contrato del emisor (`UblDocumentLine`): todos
+        // sus importes son CADENAS. `position` y `line_total` ya no viajan —
+        // el XML numera por índice y deriva el importe de
+        // `cantidad × precio − descuento`, así que nadie los leía; el subtotal
+        // que sí los usaba se acumula ahora en `subtotalAccum`. La forma con
+        // ordinal e importe de línea sigue existiendo donde SÍ se lee: en
+        // `snapshotItems`, que es lo que persiste el snapshot contable.
+        lineItems.push({
+          description: item.description,
+          quantity: String(qty),
+          // Precio y descuento YA DESPEJADOS cuando la línea captura con
+          // impuesto incluido; idénticos a los del DTO en cualquier otro caso.
+          unit_price: emittedUnitPrice,
+          // Si la línea no trae descuento lo emitimos como 0 explícito
+          // para que el snapshot refleje el cálculo real; si lo trae, fluye.
+          discount_amount: emittedDiscount,
+          // Importes de la línea que el contrato exige. El XML no los lee (la
+          // línea con impuestos declara su propio desglose y la que no los
+          // tiene calla su grupo), pero declararlos evita que el payload
+          // afirme cero donde hay impuesto.
+          tax_amount: lineTaxTotal.toFixed(2),
+          total_amount: (Math.round((lineNet + lineTaxTotal) * 100) / 100).toFixed(2),
+          unit_code,
+          // `omit_tax_total: true` SÓLO cuando la línea no trae taxes (legacy).
+          // Con taxes presentes la línea SÍ tributa y la DIAN debe incluirla
+          // en TaxSubtotal.
+          omit_tax_total: taxes.length === 0,
+          // Si la línea trae taxes, propagamos al provider; el mapper los
+          // aplana al array `taxes` de cabecera. Si NO trae taxes, no
+          // emitimos `taxes` por línea — el legacy así lo hacía.
+          ...(taxes.length > 0 ? { taxes: providerTaxes } : {}),
+        });
+
+        snapshotItems.push({
           position: i + 1,
           description: item.description,
           quantity: qty,
-          unit_price: price,
-          line_total: lineTotal.toFixed(2),
-          item_code: null,
-          unit_code: 'EA',
-          omit_tax_total: true,
-        };
-      });
-      const subtotal =
-        Math.round(lineItems.reduce((acc, l) => acc + Number(l.line_total), 0) * 100) / 100;
-      const taxAmount = 0; // Excluido de IVA art. 476 num. 21 ET
-      const total = subtotal + taxAmount;
+          // El snapshot guarda lo que se FIRMÓ, no lo que se capturó. Dos
+          // motivos: (1) el asiento contable debe reconocer como ingreso la
+          // base sin impuesto —con el bruto inclusivo el asiento quedaba
+          // 1.190 de ingreso + 190 de IVA contra un cobro de 1.190—; (2)
+          // `resendPlatformTransmission` reconstruye el documento desde acá y
+          // tiene que reproducir el MISMO XML, o cambia el CUFE sobre un
+          // consecutivo ya gastado.
+          unit_price: Number(emittedUnitPrice),
+          line_total: lineNet,
+          discount_amount: Number(emittedDiscount),
+          unit_code,
+          taxes: taxBreakdownSnapshot,
+          // Peer rule: cuenta PUC de ingreso por línea. Si falta, queda
+          // null en el snapshot; el listener cae al mapping legacy
+          // `invoice.validated.revenue`.
+          account_code: item.account_code ?? null,
+          // Para asiento multi-crédito futuro: la línea PUEDE llevar
+          // también un centro de costo / descripción adicional, pero el
+          // DTO V1 no lo trae — se omite.
+        });
+
+        totalTaxAmount += lineTaxTotal;
+        // El subtotal de cabecera es la suma de los importes que las líneas
+        // DECLARAN (`lineNet`), no la de los brutos capturados: FAU02 compara
+        // `LegalMonetaryTotal/LineExtensionAmount` contra esa misma suma.
+        subtotalAccum += lineNet;
+      }
+
+      const subtotal = Math.round(subtotalAccum * 100) / 100;
+      const taxAmount = Math.round(totalTaxAmount * 100) / 100;
+      const total = Math.round((subtotal + taxAmount) * 100) / 100;
+
+      // Withholdings: suman al campo withholding_amount del provider (asset
+      // debit en el listener — ver onInvoiceValidated caso 2). Si el caller
+      // no envía, queda `[]` y el campo se emite en 0.
+      //
+      // `rate` llega en FRACCIÓN 0..1 desde el DTO (elon NO divide por 100);
+      // la conversión a porcentaje la hace el provider UNA sola vez al firmar
+      // el XML. Acá sólo calculamos `amount` para `withholding_amount`, sin
+      // confiar en lo que mande el cliente — mismo razonamiento que para
+      // `tax_amount`: un navegador se puede manipular.
+      const withholdings = Array.isArray(dto.withholdings) ? dto.withholdings : [];
+      const withholdingAmount = withholdings.reduce((acc, w) => {
+        const base = Number(w.base_amount) || 0;
+        const rate = Number(w.rate) || 0;
+        return acc + Math.round(base * rate * 100) / 100;
+      }, 0);
 
       // 0.c) Idempotencia por contenido. Doble click en el botón =
       //     mismo tax_id + mismas items + mismo período → misma key.
+      //     Peer rule 7: con impuestos y retenciones variables, dos
+      //     facturas que difieren sólo en la tarifa colisionarían.
+      //     Sumamos `taxes`, `withholdings` y `total` al hash.
       //     La UNIQUE (accounting_entity_id, document_type, idempotency_key)
       //     en fiscal_transmissions rechaza la segunda.
       const idempotencyKey = this.hash({
@@ -2212,7 +2782,160 @@ export class SubscriptionFiscalService {
         items: lineItems,
         period_start: dto.period_start ?? null,
         period_end: dto.period_end ?? null,
+        // peer rule 7
+        taxes: lineItems.flatMap((l) => l.taxes ?? []),
+        withholdings,
+        total,
+        counterpart_account_code: dto.counterpart_account_code ?? null,
+        resolution_id: dto.resolution_id ?? null,
       });
+
+      // 0.d) F4 (auditoría vendix-db) — pre-validadores ANTES de
+      //      `allocateFiscalNumber`. Lo que el riel de suscripción corre en
+      //      `evaluateEmitReadiness` (42 reglas de identidad + documento) y
+      //      que el riel de tienda corre como compuerta dura, hoy saltaba
+      //      acá: el documento se creaba y la transmisión quedaba huérfana
+      //      con la numeración ya quemada, mientras que los bloqueos aparecían
+      //      recién en `UblStructureValidator`/`DianTotalsValidator` — en la
+      //      compuerta de totales, con la fila ya persistida.
+      //
+      //      Mismo suelo que `allocateFiscalNumber` (`range_from - 1`,
+      //      `cursor = max(current_number, floor)`): sin nivelar, una
+      //      resolución cuyo cursor derivó a 0 sondearía el número 1 y
+      //      la regla de rango denunciaría un falso positivo que la
+      //      asignación real ya corrige.
+      //
+      //      La guarda `if (!dto.resolution_id && !settings.invoice_resolution_id)`
+      //      vive en `allocateFiscalNumber` (línea ~4571) — acá propagamos
+      //      el mismo criterio sin `!` no-null assertion, para no colar
+      //      `undefined` al SQL cuando el caller no eligió y el setting
+      //      está vacío.
+      const probeResolutionId =
+        dto.resolution_id ?? settings.invoice_resolution_id;
+      if (!probeResolutionId) {
+        throw new BadRequestException(
+          'No hay resolución de numeración seleccionada: elegí una en el formulario o configurá el default de la plataforma.',
+        );
+      }
+      const probeResolution = await this.prisma
+        .withoutScope()
+        .invoice_resolutions.findFirst({
+          where: {
+            id: probeResolutionId,
+            accounting_entity_id: settings.accounting_entity_id!,
+            document_type: 'sales_invoice',
+            is_active: true,
+            valid_from: { lte: new Date() },
+            valid_to: { gte: new Date() },
+          },
+        });
+      if (!probeResolution) {
+        throw new BadRequestException(
+          'No hay una resolución de numeración activa para ventas (sales_invoice) ' +
+            'que coincida con la entidad contable y la ventana de vigencia actuales.',
+        );
+      }
+      const probeFloor = probeResolution.range_from - 1;
+      const probeCursor =
+        probeResolution.current_number < probeFloor
+          ? probeFloor
+          : probeResolution.current_number;
+      const probeNumber = `${probeResolution.prefix}${probeCursor + 1}`;
+
+      // Construimos el providerData con el número de SONDEO. Mismos
+      // items/totals/taxes/withholdings que la versión final — el `invoice_number`
+      // y el `control` son los únicos campos que pueden cambiar entre el
+      // sondeo y la asignación real (un proceso concurrente podría consumir
+      // un número entre el `findFirst` y el `pg_advisory_xact_lock`). Después
+      // de `allocateFiscalNumber` re-armamos el providerData con los valores
+      // reales, dentro de la tx.
+      //
+      // `notesText` se calcula acá (no dentro de la tx) porque la rama
+      // pre-validadora no necesita la tx para nada: corre contra el snapshot
+      // del sondeo. Si la nota cambia entre sondeo y final —no puede, sale
+      // sólo del DTO y de los totales locales, todos inmutables entre los dos
+      // puntos— el providerData real lo recalcula dentro de la tx.
+      const defaultNotes = hasAnyTax
+        ? [`Factura de servicios generada desde super-admin el ${issueAtLocal}`]
+        : [
+            `Factura de servicios generada desde super-admin el ${issueAtLocal}`,
+            'Servicio excluido de IVA — art. 476 num. 21 del Estatuto Tributario',
+          ];
+      const notesText = dto.notes ?? defaultNotes.join('\n');
+
+      const probeProviderData = this.buildPlatformProviderData(
+        dto,
+        probeNumber,
+        probeResolution,
+        issuedAt,
+        issuedAtTime,
+        dueAt,
+        issueAtLocal,
+        lineItems,
+        subtotal,
+        taxAmount,
+        total,
+        withholdingAmount,
+        hasAnyTax,
+        notesText,
+      );
+
+      // `fix` viaja junto al `problem`: es la mitad accionable del hallazgo, y
+      // sin ella el operador lee QUÉ está mal pero no DÓNDE se arregla. Es el
+      // mismo par que arma `evaluateEmitReadiness` para el riel de suscripción
+      // y el que `readApiBlockers` (frontend) espera encontrar.
+      const blockers: Array<{
+        code: string;
+        problem: string;
+        fix: string;
+        field?: string;
+      }> = [];
+      const identityInput = this.buildPlatformCustomerIdentityInput(dto);
+      const identityFindings = this.identityValidator.validate(identityInput);
+      for (const f of identityFindings.findings) {
+        if (f.severity === 'blocker') {
+          blockers.push({
+            code: f.code,
+            field: f.field,
+            problem: `Identidad del adquiriente: ${f.problem}`,
+            fix: f.fix,
+          });
+        }
+      }
+      const documentFindings = this.documentValidator.validate(
+        this.buildFiscalDocumentInput(probeProviderData, probeResolution),
+      );
+      for (const f of documentFindings.findings) {
+        if (f.severity === 'blocker') {
+          blockers.push({
+            code: f.code,
+            field: f.field,
+            problem: `Documento: ${f.problem}`,
+            fix: f.fix,
+          });
+        }
+      }
+      if (blockers.length > 0) {
+        // LOS BLOQUEADORES VAN BAJO `details`, NO EN LA RAÍZ DEL CUERPO.
+        //
+        // `AllExceptionsFilter` reconstruye la respuesta y sólo propaga
+        // `error_code`, `details` y `validationErrors`: un `blockers` colgado
+        // de la raíz —como estaba— lo descartaba el filtro, y el frontend, que
+        // lee `details.blockers[]` (`core/utils/parse-api-error.ts`), no veía
+        // nada. El operador recibía «hay validaciones que fallaron» sin una
+        // sola línea de cuáles.
+        //
+        // `INVOICING_VALIDATE_001` (400) es el MISMO código con el que el riel
+        // de tiendas corta su puerta de pre-emisión
+        // (`invoice-flow.service.ts`), y conserva el status 400 que este
+        // `throw` ya devolvía: no es un código nuevo ni un status nuevo.
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_VALIDATE_001,
+          'La factura no se puede emitir todavía: ' +
+            `${blockers[0].problem} ${blockers[0].fix}`.trim(),
+          { blockers },
+        );
+      }
 
       // 1) TODO dentro de UNA transacción. `pg_advisory_xact_lock` se
       //    libera al COMMIT, no antes. Si la llamada anterior era
@@ -2222,67 +2945,33 @@ export class SubscriptionFiscalService {
       //    documenta esto en `prisma_transaction_returns_committed_handle`.
       const result = await this.prisma.$transaction(async (tx) => {
         // 1.a) Asignar número con el lock consultivo.
-        const allocated = await this.allocateFiscalNumber(tx, settings);
+        const allocated = await this.allocateFiscalNumber(tx, settings, dto.resolution_id);
         const fiscalNumber = allocated.invoice_number;
         const resolution = allocated.resolution;
 
-        // 1.b) Construir el ProviderInvoiceData.
-        const providerData = {
-          invoice_number: fiscalNumber,
-          invoice_type: 'sales_invoice',
-          issue_date: issuedAtLocal,
-          issue_time: issuedAtTime,
-          due_date: dueAtLocal,
-          invoice_period: {
-            start_date: dto.period_start
-              ? localDateString(new Date(dto.period_start), PLATFORM_TIMEZONE)
-              : issuedAtLocal,
-            end_date: dto.period_end
-              ? localDateString(new Date(dto.period_end), PLATFORM_TIMEZONE)
-              : issuedAtLocal,
-          },
-          customer_name: dto.customer.legal_name,
-          customer_tax_id: dto.customer.tax_id,
-          customer_email: dto.customer.email ?? null,
-          customer_address: dto.customer.address_line
-            ? {
-                line: dto.customer.address_line,
-                city: dto.customer.city ?? null,
-                department_code: dto.customer.department_code ?? null,
-                country_code: 'CO',
-              }
-            : null,
-          // 31 = NIT. El DTO acepta DV opcional; el resto de campos
-          // (person_type, regime) son los que el riel SaaS usa para
-          // servicios exentos — coincide.
-          customer_document_type: '31',
-          customer_verification_digit: dto.customer.tax_id_dv ?? null,
-          customer_person_type: '2',
-          customer_regime: '49',
-          customer_tax_responsibilities: ['O-13'],
-          subtotal_amount: subtotal.toFixed(2),
-          discount_amount: '0.00',
-          tax_amount: taxAmount.toFixed(2),
-          withholding_amount: '0.00',
-          total_amount: total.toFixed(2),
-          currency: dto.currency ?? 'COP',
-          items: lineItems,
-          taxes: [],
-          notes: [
-            `Factura de servicios generada desde super-admin el ${issuedAtLocal}`,
-            'Servicio excluido de IVA — art. 476 num. 21 del Estatuto Tributario',
-          ].join('\n'),
-          order_reference: null,
-          resolution_number: resolution.resolution_number,
-          technical_key: this.technicalKeyVault.reveal(resolution),
-          control: resolveInvoiceControl(resolution, PLATFORM_TIMEZONE, issuedAt, {
-            resolution_id: resolution.id,
-            document_type: 'sales_invoice',
-          }),
-          payment_form: '1',
-          payment_means: '42',
-          payment_method: null,
-        } as unknown as ProviderInvoiceData;
+        // 1.b) Re-construir el providerData con los valores REALES. El
+        //      `probeProviderData` se construyó fuera de la tx para que los
+        //      pre-validadores (F4) lo vieran; sólo difieren `invoice_number`
+        //      y `control` (resolución que efectivamente dio el número bajo
+        //      `pg_advisory_xact_lock`). Re-armarlo es más barato que
+        //      mutar campo por campo y deja el código idéntico al que el riel
+        //      tienda esperaba.
+        const providerData = this.buildPlatformProviderData(
+          dto,
+          fiscalNumber,
+          resolution,
+          issuedAt,
+          issuedAtTime,
+          dueAt,
+          issueAtLocal,
+          lineItems,
+          subtotal,
+          taxAmount,
+          total,
+          withholdingAmount,
+          hasAnyTax,
+          notesText,
+        );
 
         // 1.c) Insertar la fila. Si la idempotency_key ya existe, el
         // UNIQUE la rechaza y devolvemos la fila existente — el caller
@@ -2344,6 +3033,11 @@ export class SubscriptionFiscalService {
         //     semánticamente un "documento de soporte interno" que
         //     respalda el documento fiscal. La lectura al detalle es por
         //     `metadata.kind`, no por `evidence_type`.
+        //
+        //     peer rule 6 — el metadata AHORA lleva `counterpart_account_code`,
+        //     `resolution_id`, `issue_date` y `account_code` dentro de cada
+        //     item para que `emitInvoiceAccepted` los pueda releer sin
+        //     recalcular.
         await tx.fiscal_evidences.create({
           data: {
             organization_id: settings.platform_organization_id!,
@@ -2356,11 +3050,21 @@ export class SubscriptionFiscalService {
             metadata: {
               kind: 'platform_invoice_snapshot',
               customer: dto.customer,
-              items: lineItems,
+              items: snapshotItems,
               totals: { subtotal, tax_amount: taxAmount, total },
               period_start: dto.period_start ?? null,
               period_end: dto.period_end ?? null,
               currency: dto.currency ?? 'COP',
+              withholdings: withholdings.map((w) => ({
+                role: w.role,
+                concept_id: w.concept_id,
+                base_amount: Number(w.base_amount),
+                rate: Number(w.rate),
+                amount: w.amount != null ? Number(w.amount) : Math.round(Number(w.base_amount) * Number(w.rate) * 100) / 100,
+              })),
+              counterpart_account_code: dto.counterpart_account_code ?? null,
+              resolution_id: resolution.id,
+              issue_date: issueAtLocal,
               created_by: 'createPlatformInvoice',
             },
           },
@@ -2732,6 +3436,23 @@ export class SubscriptionFiscalService {
         accounting_entity_id: true,
         organization_id: true,
         source_id: true,
+        // Trazabilidad del reintento y del rechazo. Faltaban las cuatro, y su
+        // ausencia no se veía como error: el contador salía `undefined` y el
+        // panel de rechazo del detalle quedaba inerte porque `dian_errors`
+        // vive DENTRO de `provider_response`, no en `error_message` —que sólo
+        // trae la primera frase—. `xml_hash` es la huella del documento
+        // firmado y es lo que permite contrastar el XML descargado contra el
+        // que se transmitió.
+        //
+        // `xml_document` SIGUE FUERA a propósito: pesa entre 100 y 500 KB y
+        // engordaría cada apertura del detalle. Se sirve por su propia ruta,
+        // `GET platform-invoices/:id/xml`.
+        error_code: true,
+        provider_response: true,
+        retry_count: true,
+        last_retry_at: true,
+        sent_at: true,
+        xml_hash: true,
       },
     });
 
@@ -2847,6 +3568,16 @@ export class SubscriptionFiscalService {
           rejected_at: transmission.rejected_at,
           error_message: transmission.error_message,
           created_at: transmission.created_at,
+          // El rechazo de la DIAN llega regla por regla dentro de
+          // `provider_response.provider_data.dian_errors[]`; `error_message`
+          // sólo conserva la primera frase. Sin este campo el operador ve
+          // «rechazada» y ninguna de las reglas que la rechazaron.
+          error_code: transmission.error_code,
+          provider_response: transmission.provider_response,
+          retry_count: transmission.retry_count,
+          last_retry_at: transmission.last_retry_at,
+          sent_at: transmission.sent_at,
+          xml_hash: transmission.xml_hash,
         },
       ],
       evidences: snapshot
@@ -2877,6 +3608,85 @@ export class SubscriptionFiscalService {
           }
         : null,
     };
+  }
+
+  /**
+   * XML FIRMADO de una factura de plataforma, por su propia ruta.
+   *
+   * ## Por qué no viaja dentro del detalle
+   *
+   * Un XML UBL firmado pesa entre 100 y 500 KB: meterlo en el payload del
+   * detalle multiplicaría por diez cada apertura del modal para un dato que el
+   * operador pide una vez cada cien. El `select` de `getPlatformInvoiceDetail`
+   * lo excluye a propósito y esta ruta es el otro lado de esa decisión.
+   *
+   * ## Por qué se lee la columna y no la evidencia
+   *
+   * El mismo XML se persiste en dos sitios: `fiscal_transmissions.xml_document`
+   * (columna, escrita al aceptar y al rechazar) y `fiscal_evidences` con
+   * `evidence_type='xml_signed'` (metadata.value). La columna es la fuente
+   * primaria porque es la que se actualiza en un reintento; la evidencia es
+   * append-only y en una transmisión reintentada devuelve el XML de la primera
+   * firma, que ya no es el documento vigente. La evidencia queda como respaldo
+   * para filas históricas anteriores a que la columna se escribiera.
+   *
+   * Devuelve `null` cuando la transmisión no existe, no es de plataforma, o no
+   * tiene XML todavía (encolada, o error antes de firmar). El controller
+   * traduce eso a 404: no hay documento que descargar, y un 200 con cuerpo
+   * vacío haría creer al navegador que lo hay.
+   */
+  async getPlatformInvoiceXml(
+    id: number,
+  ): Promise<{ document_number: string; xml: string } | null> {
+    const settings = await this.getSettings();
+    const platformOrgId = await this.resolvePlatformOrganizationId();
+
+    const transmission = await this.prisma
+      .withoutScope()
+      .fiscal_transmissions.findFirst({
+        where: {
+          id,
+          source_type: 'platform_invoice',
+          accounting_entity_id: settings.accounting_entity_id ?? undefined,
+        },
+        select: {
+          id: true,
+          organization_id: true,
+          document_number: true,
+          xml_document: true,
+        },
+      });
+
+    if (!transmission) return null;
+    if (transmission.organization_id !== platformOrgId) return null;
+
+    if (transmission.xml_document) {
+      return {
+        document_number: transmission.document_number,
+        xml: transmission.xml_document,
+      };
+    }
+
+    // Respaldo para filas anteriores a que la columna se escribiera. La
+    // evidencia guarda el string bajo `metadata.value` (ver `evidence()`).
+    const evidence = await this.prisma
+      .withoutScope()
+      .fiscal_evidences.findFirst({
+        where: {
+          fiscal_transmission_id: transmission.id,
+          evidence_type: 'xml_signed',
+        },
+        orderBy: { created_at: 'desc' },
+        select: { metadata: true },
+      });
+
+    const meta = (evidence?.metadata ?? null) as unknown as
+      | Record<string, unknown>
+      | null;
+    const value = typeof meta?.['value'] === 'string' ? (meta['value'] as string) : null;
+    if (!value) return null;
+
+    return { document_number: transmission.document_number, xml: value };
   }
 
   async getSubscriptionInvoiceDetail(id: number): Promise<{
@@ -4148,12 +4958,13 @@ export class SubscriptionFiscalService {
   private async allocateFiscalNumber(
     tx: any,
     settings: SubscriptionFiscalSettings,
+    preferredResolutionId?: number,
   ): Promise<{
     invoice_number: string;
     resolution_id: number;
     resolution: PlatformInvoiceResolution;
   }> {
-    if (!settings.invoice_resolution_id) {
+    if (!preferredResolutionId && !settings.invoice_resolution_id) {
       throw new BadRequestException('A DIAN invoice resolution is required');
     }
     // Llave unificada con el riel de tienda. Antes la plataforma usaba un
@@ -4173,9 +4984,18 @@ export class SubscriptionFiscalService {
     // throws P2010 UnsupportedNativeDataType when this runs through $queryRaw.
     await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', lockKey);
 
+    // F1 (auditoría vendix-db): el caller puede pedir una resolución concreta
+    // vía `dto.resolution_id`. Si la pide, ESA se usa — siempre que pase el
+    // resto del filtro (entidad contable, tipo de documento, activa, dentro
+    // de la ventana de vigencia). Si NO pasa el filtro, error EXPLÍCITO
+    // nombrando la resolución pedida: caer en silencio a la del setting
+    // emitiría contra otra autorización sin avisar y el operador creería
+    // que está emitiendo contra la que eligió.
+    const resolutionIdToFind =
+      preferredResolutionId ?? settings.invoice_resolution_id;
     const resolution = await tx.invoice_resolutions.findFirst({
       where: {
-        id: settings.invoice_resolution_id,
+        id: resolutionIdToFind,
         accounting_entity_id: settings.accounting_entity_id,
         document_type: 'sales_invoice',
         is_active: true,
@@ -4184,6 +5004,14 @@ export class SubscriptionFiscalService {
       },
     });
     if (!resolution) {
+      if (
+        preferredResolutionId !== undefined &&
+        preferredResolutionId !== settings.invoice_resolution_id
+      ) {
+        throw new BadRequestException(
+          `La resolución #${preferredResolutionId} pedida para esta factura no está activa, está vencida, no pertenece a la entidad contable ${settings.accounting_entity_id} o no es de ventas (sales_invoice). Verificá su estado antes de emitir.`,
+        );
+      }
       throw new BadRequestException('No active DIAN sales invoice resolution found');
     }
 
@@ -4880,6 +5708,108 @@ export class SubscriptionFiscalService {
       },
     });
     await this.createEvidences(updated, response);
+    await this.emitInvoiceAccepted(updated);
+  }
+
+  /**
+   * Emite `invoice.accepted` para que `AccountingEventsListener` genere el
+   * asiento contable de la factura de plataforma. El contrato del listener es
+   * el mismo del riel tienda (DR CxC / CR revenue + tax_payable), solo que acá
+   * `store_id` es undefined y `organization_id` es la organización plataforma
+   * (id=1 hoy). El subflujo `invoicing` se rige por el área fiscal maestra del
+   * mismo nombre, NO por `module_flows.accounting.*`, así que basta con que
+   * `fiscal_status.invoicing.state` esté en ACTIVE/LOCKED.
+   *
+   * Total/subtotal/tax_amount vienen del snapshot `platform_invoice_snapshot`
+   * que escribió `createEvidences` (escrito apenas arriba, en esta misma tx).
+   * Si el snapshot no existe (algo falló aguas arriba) NO emitimos — un asiento
+   * con totales en cero no representa la venta. El error se loguea: la factura
+   * quedó aceptada por la DIAN, pero sin asiento; el caller debe enterarse.
+   *
+   * `counterpart_account_code` y `items[].account_code` son la regla de
+   * precedencia del operador sobre el mapeo automático — se leen top-level del
+   * metadata del snapshot. Si no están (campo aún no agregado al snapshot),
+   * `AutoEntryService` cae al default 1305 / `invoice.validated.revenue`,
+   * idéntico al riel tienda.
+   */
+  private async emitInvoiceAccepted(transmission: {
+    id: number;
+    organization_id: number;
+    store_id: number | null;
+    accounting_entity_id: number | null;
+    document_number: string;
+    created_by_user_id: number | null;
+  }): Promise<void> {
+    try {
+      const snapshot = await this.persistence.loadInvoiceSnapshot(
+        this.prisma.withoutScope(),
+        transmission.id,
+      );
+      if (!snapshot) {
+        this.logger.error(
+          `Cannot emit invoice.accepted for platform transmission #${transmission.id}: ` +
+            `no platform_invoice_snapshot evidence found. The DIAN accepted the invoice ` +
+            `but no accounting entry will be posted.`,
+        );
+        return;
+      }
+
+      const counterpart_account_code =
+        (snapshot as any).counterpart_account_code ?? null;
+
+      const items = Array.isArray(snapshot.items) ? snapshot.items : [];
+      const item_account_codes = items
+        .map((it) => (it as any)?.account_code ?? null)
+        .filter((c): c is string => typeof c === 'string');
+
+      const withholding_breakdown = Array.isArray(snapshot.withholdings)
+        ? (snapshot.withholdings as unknown as Array<{
+            tax_type?: string;
+            amount?: number;
+            [k: string]: unknown;
+          }>)
+        : undefined;
+
+      // `tax_breakdown` por línea no existe todavía en el snapshot V1; el
+      // listener y `AutoEntryService` toleran su ausencia cayendo al mapping key
+      // legacy `invoice.validated.vat_payable` (suma simple). El contrato
+      // formal de `tax_breakdown` se completará cuando `elon` lo agregue al
+      // snapshot — el campo es optional en el listener.
+      const payload = {
+        invoice_id: transmission.id,
+        invoice_number: transmission.document_number,
+        organization_id: transmission.organization_id,
+        store_id: transmission.store_id ?? undefined,
+        accounting_entity_id: transmission.accounting_entity_id ?? undefined,
+        subtotal_amount: Number(snapshot.totals?.subtotal ?? 0),
+        tax_amount: Number(snapshot.totals?.tax_amount ?? 0),
+        total_amount: Number(snapshot.totals?.total ?? 0),
+        withholding_breakdown,
+        user_id: transmission.created_by_user_id ?? undefined,
+        customer: snapshot.customer as { id: number; name?: string; tax_id?: string } | undefined,
+        // Regla de precedencia: cuenta del operador > mapeo automático.
+        counterpart_account_code,
+        // Lista de cuentas de ingreso declaradas por línea (para asientos
+        // multi-crédito). Vacío hoy = cae a `invoice.validated.revenue`.
+        item_account_codes,
+      };
+
+      this.eventEmitter.emit('invoice.accepted', payload);
+      this.logger.log(
+        `Emitted invoice.accepted for platform transmission #${transmission.id} ` +
+          `(invoice ${transmission.document_number}, ` +
+          `subtotal=${payload.subtotal_amount} tax=${payload.tax_amount} ` +
+          `total=${payload.total_amount}` +
+          (counterpart_account_code ? `, counterpart=${counterpart_account_code}` : '') +
+          `)`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to emit invoice.accepted for platform transmission #${transmission.id}: ` +
+          `${(error as Error).message}`,
+        (error as Error).stack,
+      );
+    }
   }
 
   private async markRejected(

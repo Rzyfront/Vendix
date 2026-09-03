@@ -153,6 +153,14 @@ export class S3PathHelper {
   }
 
   /**
+   * Builds the path for bank account logo uploads
+   * @returns organizations/{org_slug}-{org_id}/stores/{store_slug}-{store_id}/bank-account-logos
+   */
+  buildBankAccountLogoPath(org: S3OrgContext, store: S3StoreContext): string {
+    return `${this.buildStorePath(org, store)}/bank-account-logos`;
+  }
+
+  /**
    * Builds the path for global help center article images (no org/store scope)
    * @returns global/help-center/articles
    */

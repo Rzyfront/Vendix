@@ -2,6 +2,11 @@ import { Injectable } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { Prisma, refunds_state_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+// Solo el TIPO: la vitrina pública pasa su propio cliente a
+// `resolveAndValidateBankAccount` (ver el docstring de ese método). Importarlo
+// como tipo no crea acoplamiento de módulos ni dependencia en el grafo de Nest.
+import type { EcommercePrismaService } from '../../../../prisma/services/ecommerce-prisma.service';
+import { S3Service } from '@common/services/s3.service';
 import {
   PaymentData,
   PaymentResult,
@@ -20,7 +25,25 @@ export class PaymentGatewayService {
   constructor(
     private prisma: StorePrismaService,
     private validatorService: PaymentValidatorService,
+    private s3Service: S3Service,
   ) {}
+
+  /**
+   * Helper local (no import desde `bank-accounts.service.ts` para evitar
+   * acoplamiento entre módulos). Devuelve `null` si el key es vacío o si la
+   * firma falla — el cajero POS / processor debe poder ver la cuenta aunque
+   * S3 esté momentáneamente caído.
+   */
+  private async signImageUrl(
+    key: string | null | undefined,
+  ): Promise<string | null> {
+    if (!key) return null;
+    try {
+      return await this.s3Service.getPresignedUrl(key, 300);
+    } catch {
+      return null;
+    }
+  }
 
   registerProcessor(name: string, processor: BasePaymentProcessor): void {
     this.processors.set(name, processor);
@@ -337,14 +360,25 @@ export class PaymentGatewayService {
    *      desde la Tienda B contra una cuenta de la Tienda A.
    *
    * `client` es un parámetro opcional para permitir la misma validación dentro
-   * de una transacción POS (`tx`) desde `PaymentsService`. Devuelve la proyección
-   * mínima `{ id, name, bank_name, account_number, currency }` — nunca el id sin
+   * de una transacción POS (`tx`) desde `PaymentsService`, y para que la vitrina
+   * pública pase su `EcommercePrismaService`: el comprador es anónimo y su
+   * contexto no tiene `organization_id`, así que el cliente por defecto
+   * (`StorePrismaService`) responde `403 organization context required` sobre
+   * `bank_accounts` —org-scoped— y tumba todo checkout por transferencia. Que
+   * ese cliente lea sin scoping automático no abre nada: los pasos 3 y 4 de
+   * arriba son exactamente el alcance, aplicado aquí de forma explícita.
+   *
+   * Devuelve la proyección mínima
+   * `{ id, name, bank_name, account_number, currency }` — nunca el id sin
    * validar, ni expone `current_balance` / `opening_balance`.
    */
   async resolveAndValidateBankAccount(
     bankAccountId: number,
     storeId: number,
-    client: StorePrismaService | Prisma.TransactionClient = this.prisma,
+    client:
+      | StorePrismaService
+      | EcommercePrismaService
+      | Prisma.TransactionClient = this.prisma,
   ): Promise<ResolvedBankAccount> {
     const account = await client.bank_accounts.findFirst({
       where: { id: bankAccountId },
@@ -396,6 +430,9 @@ export class PaymentGatewayService {
       bank_name: account.bank_name,
       account_number: account.account_number,
       currency: account.currency,
+      image_url: (account as any).image_s3_key
+        ? await this.signImageUrl((account as any).image_s3_key)
+        : null,
     };
   }
 

@@ -1,6 +1,6 @@
 import { SaveRequirement } from '../../../../../shared/components/save-requirements-modal/save-requirements.interface';
 import {
-  InvoiceEmitReadiness,
+  EmitReadinessVerdict,
   InvoiceEmitReadinessFinding,
   InvoiceEmitReadinessIdentity,
 } from '../services/invoice-emit-readiness.service';
@@ -312,9 +312,16 @@ export const INVOICE_EMIT_REQUIREMENTS_MAP: Record<
  *  - El `id` combina origen + código + campo. Dos validadores pueden emitir el
  *    mismo `code`, y un mismo `code` puede repetirse en varias líneas; el modal
  *    itera con `track req.id`, así que un id repetido no es un detalle estético.
+ *
+ * `readiness` se tipa como el NÚCLEO compartido (`EmitReadinessVerdict`), no
+ * como `InvoiceEmitReadiness`: esta función sólo lee `identity` y
+ * `fiscal_document`, así que sirve IGUAL para el veredicto de un documento ya
+ * persistido (`GET /:id/emit-readiness`) y para el de un borrador que todavía
+ * no existe (`POST /validate-draft`, `DraftEmitReadinessReport`) — ninguno de
+ * los dos usos declara `invoice_id`/`invoice_number`/`status`.
  */
 export function toEmitRequirements(
-  readiness: InvoiceEmitReadiness | null | undefined,
+  readiness: EmitReadinessVerdict | null | undefined,
 ): SaveRequirement[] {
   if (!readiness) {
     return [];
@@ -346,16 +353,25 @@ export function toEmitRequirements(
 /**
  * El informe de identidad inequívoco.
  *
- * El backend lo publica DOS veces: aplanado en la raíz (contrato heredado) y
- * completo en `identity`. Se prefiere `identity`; la raíz es el respaldo por si
- * un despliegue viejo no lo trae, porque quedarse sin hallazgos por elegir la
- * copia equivocada es justo el fallo silencioso que esta puerta viene a evitar.
+ * El documento YA persistido (`GET /:id/emit-readiness`) publica la identidad
+ * DOS veces: aplanada en la raíz (contrato heredado, `InvoiceEmitReadiness`
+ * extiende `InvoiceEmitReadinessIdentity`) y completa en `identity`. Se
+ * prefiere `identity`; la raíz aplanada es el respaldo por si un despliegue
+ * viejo no la trae, porque quedarse sin hallazgos por elegir la copia
+ * equivocada es justo el fallo silencioso que esta puerta viene a evitar.
+ *
+ * El borrador (`POST /validate-draft`, `DraftEmitReadinessReport`) NO aplana
+ * nada en la raíz — por eso el parámetro se tipa `EmitReadinessVerdict` (el
+ * núcleo que ambos comparten) y el respaldo se lee con un cast tolerante: si
+ * `identity` no trae arreglos utilizables, la raíz puede o no tener `mode` /
+ * `normalized`, y `?? `de abajo cubre ese hueco sin fingir un dato que nunca
+ * llegó.
  */
 function identityReportOf(
-  readiness: InvoiceEmitReadiness,
+  readiness: EmitReadinessVerdict,
 ): InvoiceEmitReadinessIdentity {
   const identity = readiness.identity;
-  const source =
+  const source: Partial<InvoiceEmitReadinessIdentity> =
     identity &&
     (Array.isArray(identity.blockers) || Array.isArray(identity.warnings))
       ? identity
@@ -363,7 +379,7 @@ function identityReportOf(
 
   return {
     emittable: source.emittable === true,
-    mode: source.mode,
+    mode: source.mode ?? 'nominative',
     findings: source.findings ?? [],
     blockers: source.blockers ?? [],
     warnings: source.warnings ?? [],

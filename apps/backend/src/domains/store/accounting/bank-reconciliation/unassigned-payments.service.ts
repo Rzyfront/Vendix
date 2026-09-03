@@ -9,6 +9,53 @@ import {
 } from './dto/unassigned-payment.dto';
 
 /**
+ * Métodos que por naturaleza NO llegan a una cuenta bancaria: el dinero queda
+ * en caja. Listarlos como "sin asignar" no le da al contador nada que asignar
+ * —el contador solo crecería— así que se excluyen del listado. Valores del
+ * `payment_methods_type_enum`; si mañana entra otro método de caja, va aquí.
+ */
+const METHODS_WITHOUT_BANK_ACCOUNT = ['cash', 'cash_on_delivery'] as const;
+
+/**
+ * `payments` NO tiene relación `payment_methods`: el método se alcanza vía
+ * `store_payment_method` → `system_payment_method` (schema.prisma, modelo
+ * `payments`). Escribir el nombre equivocado no rompe el build —Prisma lo
+ * rechaza en runtime con un `PrismaClientValidationError` que sale como 500—,
+ * así que el include vive aquí una sola vez y lo comparten las dos consultas.
+ */
+const PAYMENT_METHOD_INCLUDE = {
+  select: {
+    display_name: true,
+    system_payment_method: {
+      select: { name: true, display_name: true, type: true },
+    },
+  },
+} as const;
+
+/**
+ * Predicado de "asignable": un pago que sigue sin cuenta y que además PUEDE
+ * llegar a tener una. Vive aquí, y no repetido en cada consulta, porque el
+ * listado y el agregado que devuelve `assignAccount` tienen que responder
+ * sobre EL MISMO conjunto. Cuando no lo hacían, asignar una cuenta hacía
+ * saltar la tarjeta "Monto Total" al total con efectivo incluido —justo la
+ * contradicción entre la tarjeta y la lista que este módulo vino a cerrar.
+ */
+const assignableUnassignedWhere = (): Prisma.paymentsWhereInput => ({
+  bank_account_id: null,
+  state: 'succeeded',
+  OR: [
+    { store_payment_method_id: null },
+    {
+      store_payment_method: {
+        system_payment_method: {
+          type: { notIn: [...METHODS_WITHOUT_BANK_ACCOUNT] },
+        },
+      },
+    },
+  ],
+});
+
+/**
  * Servicio de "pagos sin asignar" (CP-POLLO-ARABE-727 / E.2 — cross-ref QUI-728).
  *
  * Cierra el ciclo contable: un `payments` con `bank_account_id` poblado entra
@@ -46,6 +93,7 @@ export class UnassignedPaymentsService {
     total: number;
     page: number;
     limit: number;
+    total_amount: number;
   }> {
     const page = query.page && query.page > 0 ? query.page : 1;
     const limit =
@@ -57,35 +105,62 @@ export class UnassignedPaymentsService {
       state: 'succeeded',
       ...(query.date_from && { paid_at: { gte: new Date(query.date_from) } }),
       ...(query.date_to && { paid_at: { lte: new Date(query.date_to) } }),
-      ...(query.search && {
-        OR: [
-          {
-            orders: {
-              order_number: { contains: query.search, mode: 'insensitive' },
-            },
-          },
-          {
-            gateway_reference: {
-              contains: query.search,
-              mode: 'insensitive',
-            },
-          },
-        ],
-      }),
+      AND: [
+        // Un pago en efectivo NO tiene cuenta bancaria de destino por
+        // naturaleza: nunca saldrá de "sin asignar" y el contador crecería para
+        // siempre. En la tienda de prueba eran 267 de 347 filas, con solo 6
+        // transferencias reales debajo. Los pagos SIN método (`store_payment_
+        // method_id` NULL, históricos anteriores al catálogo) sí se listan: no
+        // hay forma de saber si fueron transferencia, y el contador debe poder
+        // vaciarse a mano.
+        { OR: assignableUnassignedWhere().OR as Prisma.paymentsWhereInput[] },
+        ...(query.search
+          ? [
+              {
+                OR: [
+                  {
+                    orders: {
+                      order_number: {
+                        contains: query.search,
+                        mode: Prisma.QueryMode.insensitive,
+                      },
+                    },
+                  },
+                  {
+                    gateway_reference: {
+                      contains: query.search,
+                      mode: Prisma.QueryMode.insensitive,
+                    },
+                  },
+                ],
+              },
+            ]
+          : []),
+      ],
     };
 
-    const [rows, total] = await Promise.all([
+    const [rows, total, sum] = await Promise.all([
       this.prisma.payments.findMany({
         where,
-        orderBy: { paid_at: 'desc' },
+        // `paid_at` es nullable y Postgres pone los NULL PRIMERO en DESC: sin
+        // `nulls: 'last'` la primera página se llenaba de filas sin fecha.
+        // `created_at` desempata y siempre existe.
+        orderBy: [
+          { paid_at: { sort: 'desc', nulls: 'last' } },
+          { created_at: 'desc' },
+        ],
         skip,
         take: limit,
         include: {
-          payment_methods: { select: { type: true, display_name: true } },
+          store_payment_method: PAYMENT_METHOD_INCLUDE,
           orders: { select: { order_number: true, customer_alias: true } },
         },
       }),
       this.prisma.payments.count({ where }),
+      // El monto total es del CONJUNTO filtrado, no de la página: sumarlo en el
+      // cliente sobre `rows` daba el total de 25 filas de 80 y el contador de
+      // la tarjeta contradecía al de la lista que tenía al lado.
+      this.prisma.payments.aggregate({ where, _sum: { amount: true } }),
     ]);
 
     return {
@@ -93,6 +168,7 @@ export class UnassignedPaymentsService {
       total,
       page,
       limit,
+      total_amount: Number(sum._sum.amount ?? 0),
     };
   }
 
@@ -125,11 +201,11 @@ export class UnassignedPaymentsService {
   async assignAccount(
     payment_id: number,
     bank_account_id: number,
-  ): Promise<UnassignedPayment> {
+  ): Promise<{ payment: UnassignedPayment; total_amount: number }> {
     const payment = await this.prisma.payments.findFirst({
       where: { id: payment_id },
       include: {
-        payment_methods: { select: { type: true, display_name: true } },
+        store_payment_method: PAYMENT_METHOD_INCLUDE,
         orders: { select: { store_id: true, order_number: true, customer_alias: true } },
       },
     });
@@ -145,6 +221,28 @@ export class UnassignedPaymentsService {
       throw new VendixHttpException(
         ErrorCodes.SYS_CONFLICT_001,
         'Payment already has an assigned bank account',
+      );
+    }
+
+    /**
+     * Guarda de dominio (QUI-728+): un pago en efectivo / contra entrega NO
+     * tiene cuenta bancaria de destino por naturaleza — el listado de "sin
+     * asignar" ya los excluye vía el predicado de `findUnassigned`, pero
+     * `assignAccount` se puede invocar directamente desde la API (PATCH
+     * abierto). Si lo dejamos pasar, la conciliación bancaria recibe pagos
+     * cuyo dinero jamás tocó una cuenta propia: el contador crecería sin
+     * contrapartida real. Se compara contra la MISMA constante que el listado
+     * para que las dos puertas digan lo mismo.
+     */
+    const methodType = payment.store_payment_method?.system_payment_method?.type;
+    if (
+      methodType &&
+      (METHODS_WITHOUT_BANK_ACCOUNT as readonly string[]).includes(methodType)
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.BANK_RECONCILIATION_CASH_METHOD_REJECTED,
+        `Este pago se hizo en ${methodType === 'cash' ? 'efectivo' : 'contra entrega'}: no se le puede asignar una cuenta bancaria porque el dinero no pasó por una cuenta propia.`,
+        { payment_id, method_type: methodType },
       );
     }
 
@@ -183,12 +281,28 @@ export class UnassignedPaymentsService {
       `Payment ${payment_id} assigned to bank account ${bank_account_id}`,
     );
 
-    // La proyección no expone `bank_account_id`, así que el pago original ya
-    // basta para responder; el frontend recarga la lista tras la asignación.
-    return this.toProjection(payment);
+    // Después del `updateMany` re-leemos el agregado sobre el MISMO predicado
+    // de asignables que usa el listado, sin los filtros de fecha/búsqueda
+    // (este endpoint no los recibe). Usar el predicado compartido importa: con
+    // un `where` propio de `{ bank_account_id: null, state: 'succeeded' }` el
+    // monto devuelto incluía el efectivo que el listado excluye, y la tarjeta
+    // "Monto Total" saltaba a otra cifra justo al asignar. El pago recién
+    // asignado queda fuera porque su `bank_account_id` ya no es NULL.
+    const sum = await this.prisma.payments.aggregate({
+      where: assignableUnassignedWhere(),
+      _sum: { amount: true },
+    });
+
+    return {
+      payment: this.toProjection(payment),
+      total_amount: Number(sum._sum.amount ?? 0),
+    };
   }
 
   private toProjection(payment: any): UnassignedPayment {
+    const storeMethod = payment.store_payment_method;
+    const systemMethod = storeMethod?.system_payment_method;
+
     return {
       payment_id: payment.id,
       order_id: payment.order_id,
@@ -196,10 +310,21 @@ export class UnassignedPaymentsService {
       amount: Number(payment.amount),
       currency: payment.currency ?? null,
       state: payment.state,
-      paid_at: payment.paid_at ? payment.paid_at.toISOString() : null,
-      payment_method: payment.payment_methods?.type ?? null,
+      // `paid_at` solo se puebla en los caminos que pasan por el gateway: de
+      // los 6 pagos por transferencia sin asignar de la tienda de prueba, uno.
+      // Sin este respaldo la columna FECHA sale vacía en toda la pantalla, y
+      // una fila sin fecha no se puede conciliar contra un extracto.
+      paid_at: (payment.paid_at ?? payment.created_at)?.toISOString() ?? null,
+      // Clave técnica del método (`bank_transfer`, `cash`…), no la etiqueta.
+      payment_method: systemMethod?.name ?? null,
+      // Misma cadena de fallback que el detalle de orden (B.5 / FB-08): un pago
+      // huérfano —sin `store_payment_method_id` o con el método ya borrado—
+      // debe pintar `—` en la UI, nunca `undefined`.
       payment_method_display:
-        payment.payment_methods?.display_name ?? null,
+        storeMethod?.display_name ??
+        systemMethod?.display_name ??
+        systemMethod?.name ??
+        null,
       gateway_reference: payment.gateway_reference ?? null,
       customer_alias: payment.orders?.customer_alias ?? null,
     };

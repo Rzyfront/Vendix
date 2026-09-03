@@ -3,6 +3,7 @@
   [size]="'xl'"
   [title]="'Finalizar venta'"
   [subtitle]="stepSubtitle()"
+  [dialog]="true"
   [fullScreenOnMobile]="true"
   (closed)="onModalClosed()"
 >
@@ -60,7 +61,6 @@
               [cartState]="cartState()"
               [tableId]="tableId()"
               (advanceRequested)="attemptNextStep()"
-              (back)="onConsumoBack()"
             ></app-pos-consumo-step>
           </div>
         }
@@ -147,6 +147,35 @@
                             cliente con dirección.</span
                           >
                         </p>
+                      } @else if (isAnonymousSale()) {
+                        <!-- Paso 9 — «Facturar a nombre de»: on-demand, sin
+                             abandonar "Venta Anónima". Captura los 5 campos
+                             mínimos para una factura nominativa (documento,
+                             nombres, apellidos, email) reutilizando el mismo
+                             selector/resolver que "Con Cliente", en modo
+                             reducido (`minimalInvoiceMode`). -->
+                        <button
+                          type="button"
+                          class="invoice-capture-toggle"
+                          [attr.aria-expanded]="showAnonymousInvoiceCapture()"
+                          aria-label="Mostrar u ocultar los datos de facturación"
+                          (click)="toggleAnonymousInvoiceCapture()"
+                        >
+                          <app-icon name="file-text" [size]="14"></app-icon>
+                          {{
+                            showAnonymousInvoiceCapture()
+                              ? 'Ocultar datos de facturación'
+                              : 'Facturar a nombre de'
+                          }}
+                        </button>
+                        @if (showAnonymousInvoiceCapture()) {
+                          <app-pos-customer-selector
+                            [selectedCustomer]="null"
+                            [allowAnonymous]="false"
+                            [minimalInvoiceMode]="true"
+                            (customerSelected)="selectCustomer($event)"
+                          ></app-pos-customer-selector>
+                        }
                       }
                     }
 
@@ -226,7 +255,7 @@
                     saleMode() === 'alias'
                       ? 'Alias: ' + (customerAlias() || 'Ingresar alias')
                       : isAnonymousSale()
-                        ? 'Venta Anónima'
+                        ? 'Consumidor Final'
                         : 'Con Cliente: ' +
                           (cartState()?.customer ? customerDisplayName : 'Seleccionar')
                   }}</span>
@@ -272,7 +301,10 @@
                   }
                 } @else {
                   @if (clienteSubStep() === 1) {
-                    <section class="cliente-section">
+                    <section
+                      class="cliente-section cliente-section--no-scroll"
+                      style="max-height: none; overflow: visible"
+                    >
                       <div class="section-header">
                         <app-icon name="user" [size]="16" class="section-icon"></app-icon>
                         <h2 class="section-title">Cliente</h2>
@@ -286,10 +318,13 @@
                           >
                         }
                       </div>
+                      <!-- 2 opciones (Buscar 3 compact / Crear) viven en el selector via segmented tabs;
+                           el shell solo hostea sin scroll y fija searchLimit=3 (sin tabs duplicados). -->
                       <app-pos-customer-selector
                         [selectedCustomer]="cartState()?.customer ?? null"
                         [allowAnonymous]="canBeAnonymous()"
                         [showTopSuggestions]="true"
+                        [searchLimit]="3"
                         (customerSelected)="onSelectCustomerAndAdvance($event)"
                         (customerCleared)="onCustomerCleared()"
                       ></app-pos-customer-selector>

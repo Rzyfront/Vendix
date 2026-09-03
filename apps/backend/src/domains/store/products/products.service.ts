@@ -1436,7 +1436,10 @@ export class ProductsService {
    * activa). `mesero` y `STORE_ADMIN` ven lo de siempre.
    */
   private isKitchenRole(): boolean {
-    return RequestContextService.getRoles().includes('cocina');
+    // QUI-730b — literal renombrado a 'kitchen'. Si se aplica la migración
+    // sin tocar este predicado, el strip de dinero deja de aplicarse y
+    // cocina ve cost_price / profit_margin / precios de venta. ADR-10.
+    return RequestContextService.getRoles().includes('kitchen');
   }
 
   /**
@@ -1744,6 +1747,8 @@ export class ProductsService {
             pricing_type: String(product.pricing_type),
             product_type: product.product_type,
             track_inventory: product.track_inventory,
+            preparation_time_minutes: product.preparation_time_minutes,
+            kds_id: product.kds_id,
             // El POS lee este flag para abrir el modal obligatorio de captura
             // de seriales; sin exponerlo aquí, el modal nunca se dispara y la
             // venta de entrega directa procede sin verificar el serial.
@@ -2029,6 +2034,15 @@ export class ProductsService {
           },
         },
         brands: true,
+        kds: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            is_default: true,
+            is_active: true,
+          },
+        },
         online_purchase_domain: {
           select: {
             id: true,
@@ -2170,6 +2184,9 @@ export class ProductsService {
       is_ingredient: product.is_ingredient,
       is_combo: product.is_combo,
       is_batch_produced: product.is_batch_produced,
+      preparation_time_minutes: product.preparation_time_minutes,
+      kds_id: product.kds_id,
+      kds: product.kds,
       // UoM (Modelo B): el form de edición y el panel de inventario los leen
       // de ESTE mapeo. Sin exponerlos aquí, el detalle del producto pierde la
       // capacidad por unidad y el panel muestra el total crudo en vez de

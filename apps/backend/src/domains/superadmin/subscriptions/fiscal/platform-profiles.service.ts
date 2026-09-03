@@ -525,16 +525,61 @@ export class PlatformProfilesService {
       });
       if (!profile) throw profileNotFound(id);
 
-      const referenced = await tx.invoice_profile_versions.count({
+      // Lo que impide borrar un perfil es que una FACTURA lo haya fijado, no
+      // que el perfil tenga historial propio.
+      //
+      // La guarda anterior contaba `invoice_profile_versions` y rechazaba con
+      // 409 si había alguna. Pero `create` escribe la versión 1 y pone
+      // `current_version = 1` en la MISMA transacción, así que la condición
+      // `versiones > 0 && current_version > 0` era cierta para todo perfil
+      // que haya existido: el botón Eliminar no podía funcionar nunca, ni
+      // siquiera para un perfil recién creado por error y jamás usado.
+      //
+      // Lo que sí hay que proteger es el pin de la factura: `invoices` apunta
+      // a `(profile_id, profile_version)` con `onDelete: Restrict`, porque una
+      // factura emitida debe poder reconstruir el perfil EXACTO con el que se
+      // emitió. Esa es la referencia que se cuenta ahora.
+      const usedByInvoices = await tx.invoices.count({
         where: { profile_id: id },
       });
-      if (referenced > 0 && profile.current_version > 0) {
+      if (usedByInvoices > 0) {
         throw new VendixHttpException(
           ErrorCodes.INVOICING_PROFILE_003,
-          'El perfil tiene versiones comprometidas y no puede borrarse. Desactívalo como alternativa.',
-          { profile_id: id, versions: referenced },
+          `El perfil está fijado por ${usedByInvoices} ${
+            usedByInvoices === 1 ? 'factura emitida' : 'facturas emitidas'
+          } y no puede borrarse sin romper su trazabilidad. Desactívalo como alternativa.`,
+          { profile_id: id, invoices: usedByInvoices },
         );
       }
+
+      // Desligar a los CLONES antes de borrar, anulando el PAR completo.
+      //
+      // La FK `cloned_from` es de una sola columna (`cloned_from_profile_id`)
+      // y está declarada `onDelete: SetNull`, pero la procedencia son DOS
+      // columnas y un CHECK las ata:
+      //
+      //   invoice_profiles_clone_pair_complete
+      //     CHECK ((cloned_from_profile_id IS NULL) = (cloned_from_version IS NULL))
+      //
+      // Postgres, al aplicar el SET NULL, anula únicamente la columna de la FK
+      // y deja `cloned_from_version` con su valor: el par queda a medias y el
+      // CHECK rechaza la fila. El síntoma no menciona al clon ni al borrado —
+      // sale un 500 con «new row for relation "invoice_profiles" violates
+      // check constraint» sobre una tabla que uno no estaba escribiendo.
+      //
+      // Anular el par a mano es además el patrón seguro de la regla 6.2: se
+      // desapunta a los hijos ANTES de tocar al padre, con WHERE explícito,
+      // en vez de confiar en una regla ON DELETE que no ve la mitad del dato.
+      await tx.invoice_profiles.updateMany({
+        where: { cloned_from_profile_id: id },
+        data: { cloned_from_profile_id: null, cloned_from_version: null },
+      });
+
+      // Sin facturas detrás, el historial del perfil no le sirve a nadie más
+      // que al propio perfil. Se borra explícitamente porque la FK de
+      // `invoice_profile_versions.profile` es `onDelete: Restrict`: sin este
+      // paso el `delete` de abajo revienta con P2003.
+      await tx.invoice_profile_versions.deleteMany({ where: { profile_id: id } });
       await tx.invoice_profiles.delete({ where: { id } });
       await this.writeAudit(tx, 'DELETE', id, profile, null, s.user_id);
       return { id, deleted: true };

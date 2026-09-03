@@ -237,6 +237,18 @@ export class GeneralSettingsStore {
       false,
   );
 
+  /**
+   * Decisión del usuario 2026-08-31: opt-in por admin para que el tiquete
+   * de despacho funcione como tiquete de reclamo en ventas de mostrador
+   * (`direct_delivery`) y para llevar (`pickup`). Enmienda al ADR-6;
+   * default `false`. El POS y el detalle de la orden pasan este flag al
+   * predicado `shouldAutoPrintDispatchTicket` que vive en
+   * `shared/services/print/dispatch-ticket-autoprint.ts`.
+   */
+  readonly printDispatchTicketOnCounter = computed(
+    () => this.settings().receipts?.print_dispatch_ticket_on_counter ?? false,
+  );
+
   // ─── Cabecera sticky ────────────────────────────────────
 
   readonly badgeText = computed(() =>

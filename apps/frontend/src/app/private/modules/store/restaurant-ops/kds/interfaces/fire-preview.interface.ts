@@ -69,6 +69,12 @@ export interface FireItemExclusion {
    * completos + 1 sin el insumo, y el inventario refleja exactamente eso.
    */
   applies_to_units?: number;
+  notes?: string;
+}
+
+export interface FireConfirmPayload {
+  exclusions: FireItemExclusion[];
+  item_notes?: Array<{ order_item_id: number; notes: string }>;
 }
 
 /**

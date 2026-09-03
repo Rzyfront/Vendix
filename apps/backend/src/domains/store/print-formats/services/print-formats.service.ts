@@ -122,6 +122,7 @@ function assertSectionsWithinAdapterRegions(
 
 export const ALL_FORMAT_TYPES: print_format_type_enum[] = [
   'pos_sale_ticket',
+  'pos_electronic_invoice',
   'sales_order_invoice',
   'dispatch_note',
   'quotation',
@@ -143,6 +144,7 @@ export const FORMAT_TYPE_METADATA: Record<
   { name: string; category: string; icon: string; engine: 'html' | 'pdf' }
 > = {
   pos_sale_ticket: { name: 'Ticket de Venta POS', category: 'Ventas POS', icon: 'receipt', engine: 'html' },
+  pos_electronic_invoice: { name: 'Factura Electrónica POS (80mm)', category: 'Ventas POS', icon: 'receipt-text', engine: 'html' },
   sales_order_invoice: { name: 'Factura de Venta / Orden', category: 'Ventas', icon: 'file-text', engine: 'html' },
   dispatch_note: { name: 'Remisión / Despacho', category: 'Logística', icon: 'truck', engine: 'html' },
   quotation: { name: 'Cotización Comercial', category: 'Comercial', icon: 'file-spreadsheet', engine: 'html' },

@@ -1,5 +1,6 @@
 export enum PrintFormatTypeEnum {
   pos_sale_ticket = 'pos_sale_ticket',
+  pos_electronic_invoice = 'pos_electronic_invoice',
   sales_order_invoice = 'sales_order_invoice',
   dispatch_note = 'dispatch_note',
   quotation = 'quotation',

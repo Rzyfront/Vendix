@@ -131,11 +131,21 @@ import { AuthFacade } from '../../../core/store/auth/auth.facade';
                 </span>
               </div>
             }
-            <h1
+            <!-- Antes <h1>. Bajado a <h2> en C.1 — el H1 de página vive
+                 en app-sticky-header (lo emite cada vista privada que
+                 lo usa). El nombre del módulo no es título de página;
+                 dejarlo como <h1> duplicaba el landmark en todas las
+                 vistas y rompía la regla "una sola H1 por página".
+                 Si quieres revertirlo, primero agrégale un H1 propio a
+                 cada vista privada que NO use sticky-header (ej. las
+                 páginas de price-tiers) — antes el shell tapaba esa
+                 ausencia pero a costa de un heading semánticamente
+                 incorrecto. -->
+            <h2
               class="text-sm sm:text-xl md:text-2xl lg:text-3xl font-bold text-slate-900 m-0 leading-none tracking-tight block truncate"
             >
               {{ breadcrumb()?.title || title() }}
-            </h1>
+            </h2>
           </div>
         </div>
 

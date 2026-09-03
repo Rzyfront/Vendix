@@ -623,4 +623,28 @@ export class PlatformInvoicingController {
       'Evento RADIAN registrado (pending transmission)',
     );
   }
+
+  /**
+   * Conceptos de retención de la plataforma (organization_id resuelto por
+   * `resolvePlatformIdentity`). El selector del wizard los consume; el
+   * `id` (entero) es el que viaja como `MvpV1InvoiceWithholdingInputDto.concept_id`.
+   *
+   * Filtra `accounting_entity_id IS NULL` para devolver los conceptos
+   * compartidos a nivel organización (aplican a cualquier entidad contable
+   * que la org plataforma cree). Si en el futuro hay conceptos scoped a
+   * una entidad específica, este endpoint se queda como está y se agrega
+   * un `?accounting_entity_id=` con validación.
+   */
+  @Get('withholding-concepts')
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({
+    summary: 'Conceptos de retención activos de la plataforma',
+  })
+  async listWithholdingConcepts(): Promise<any> {
+    const identity = await this.resolvePlatformIdentity();
+    const data = await this.platformInvoicing.listWithholdingConceptsForPlatform(
+      identity.organizationId,
+    );
+    return this.responseService.success(data, 'Conceptos de retencion listados');
+  }
 }

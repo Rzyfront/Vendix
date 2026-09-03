@@ -58,6 +58,31 @@
 
         <div class="setting-cell">
           <app-setting-toggle
+            [formControl]="allowAliasSalesControl"
+            label="Venta con nombre o referencia"
+            description="Habilita el tercer modo del wizard: el cajero identifica la venta con un texto libre (ej. «Mesa 5», «Juan del taller») sin registrar un cliente completo"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+          <div class="setting-cell__meta">
+            <app-badge variant="info" size="xsm" badgeStyle="outline">
+              Sin datos fiscales
+            </app-badge>
+            <app-tooltip
+              content="La venta se persiste con customer_id en null y orders.customer_alias poblado (ADR-9). El tiquete de despacho y el recibo de venta muestran el alias como nombre del cliente. No bloquea una factura electrónica posterior (el cliente se pide recién al facturar)."
+              position="top"
+              size="sm"
+              color="default"
+            >
+              <span class="help-chip">
+                <app-icon name="help-circle" size="12"></app-icon>
+                Cuándo aplica
+              </span>
+            </app-tooltip>
+          </div>
+        </div>
+
+        <div class="setting-cell">
+          <app-setting-toggle
             [formControl]="anonymousSalesAsDefaultControl"
             label="Anónimas por Defecto"
             description="El POS abre cada venta como anónima; el cajero elige cliente sólo cuando hace falta"
@@ -177,7 +202,7 @@
               Requiere Ventas por Peso
             </app-badge>
             <app-tooltip
-              content="Es la salida de emergencia si la báscula se desconecta a mitad del turno, y también la puerta para teclear 0,300 kg de algo que pesa 0,800 kg. Dejala apagada si querés que el peso venga siempre del equipo."
+              content="Es la salida de emergencia si la báscula se desconecta a mitad del turno, y también la puerta para teclear 0,300 kg de algo que pesa 0,800 kg. Déjala apagada si quieres que el peso venga siempre del equipo."
               position="top"
               size="sm"
               color="default"
@@ -269,8 +294,8 @@
                       <option value="ohaus">OHAUS</option>
                     </select>
                     <p class="field__hint">
-                      Formato en el que la báscula envía el peso. Si no reconocés la
-                      marca, probá Genérico y usá el botón de abajo.
+                      Formato en el que la báscula envía el peso. Si no reconoces la
+                      marca, prueba Genérico y usa el botón de abajo.
                     </p>
                   </div>
                 </div>
@@ -294,7 +319,7 @@
                 } @else {
                   <p class="field__hint field__hint--warning">
                     Tu navegador no soporta WebSerial, así que no se puede probar la
-                    conexión desde acá. Usá Chrome o Edge en el equipo del POS.
+                    conexión desde acá. Usa Chrome o Edge en el equipo del POS.
                   </p>
                 }
               </div>
@@ -328,7 +353,7 @@
           ></app-setting-toggle>
           <div class="setting-cell__meta">
             <app-badge variant="success" size="xsm" badgeStyle="outline">
-              Recomendado si manejás efectivo
+              Recomendado si manejas efectivo
             </app-badge>
             <app-tooltip
               content="Apagado, el POS cobra igual pero no hay arqueo: al final del día nadie puede decir si faltan o sobran 20.000 $. No se puede apagar con sesiones abiertas — primero hay que cerrarlas con su conteo."
@@ -453,7 +478,7 @@
           ></app-setting-toggle>
           <div class="setting-cell__meta">
             <app-tooltip
-              content="Evita el arranque en seco: sin ninguna caja creada el cajero no puede abrir sesión y el POS lo bloquea. Si ya tenés tus cajas con nombre y código propios, no hace falta."
+              content="Evita el arranque en seco: sin ninguna caja creada el cajero no puede abrir sesión y el POS lo bloquea. Si ya tienes tus cajas con nombre y código propios, no hace falta."
               position="top"
               size="sm"
               color="default"
@@ -487,7 +512,7 @@
           ></app-setting-toggle>
           <div class="setting-cell__meta">
             <app-badge variant="info" size="xsm" badgeStyle="outline">
-              Sólo si atendés con fila
+              Sólo si atiendes con fila
             </app-badge>
             <app-tooltip
               content="Pensado para mostradores con cola: el cliente escribe nombre, documento y contacto mientras espera, y el cajero lo elige de la lista en un toque en vez de dictar los datos."
@@ -596,7 +621,7 @@
               Bloquea ventas
             </app-badge>
             <app-tooltip
-              content="Con el horario 09:00–19:00, una venta a las 19:40 queda bloqueada aunque el cajero esté en el local. Activalo si nadie debe facturar fuera de turno; apagalo si hacés cierres tarde o vendés en jornadas extendidas."
+              content="Con el horario 09:00–19:00, una venta a las 19:40 queda bloqueada aunque el cajero esté en el local. Actívalo si nadie debe facturar fuera de turno; apágalo si haces cierres tarde o vendes en jornadas extendidas."
               position="top"
               size="sm"
               color="default"
@@ -623,7 +648,7 @@
             al mediodía y reabrir en la tarde (por ejemplo 08:00–12:00 y 14:00–18:00).
           } @else {
             Continuo: un solo bloque de apertura y cierre por día (por ejemplo
-            09:00–19:00). Cambiá a Personalizado si cerrás al mediodía.
+            09:00–19:00). Cambia a Personalizado si cierras al mediodía.
           }
         </p>
       </div>
@@ -642,7 +667,7 @@
           @if (!isCustomMode()) {
             <p class="field__hint field__hint--block">
               En modo Continuo las horas se editan desde el horario general de la
-              tienda; acá se muestran para que puedas verificarlas. Usá Abrir/Cerrar
+              tienda; acá se muestran para que puedas verificarlas. Usa Abrir/Cerrar
               para marcar los días sin atención.
             </p>
             <div class="grid grid-cols-1 gap-3">

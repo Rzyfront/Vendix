@@ -12,7 +12,6 @@ import { HttpClient } from '@angular/common/http';
 import { map } from 'rxjs';
 import { environment } from '../../../../../../../environments/environment';
 import {
-  CardComponent,
   EmptyStateComponent,
   IconComponent,
   SpinnerComponent,
@@ -42,7 +41,6 @@ export interface BookingProvider {
   standalone: true,
   imports: [
     CommonModule,
-    CardComponent,
     EmptyStateComponent,
     IconComponent,
     SpinnerComponent,

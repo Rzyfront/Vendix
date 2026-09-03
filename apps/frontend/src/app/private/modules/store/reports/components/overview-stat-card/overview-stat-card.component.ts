@@ -4,7 +4,7 @@ import {
   computed,
   input,
 } from '@angular/core';
-import { CurrencyPipe, DecimalPipe } from '@angular/common';
+import { CurrencyPipe } from '@angular/common';
 
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 
@@ -49,7 +49,7 @@ export type OverviewStatFormat = 'currency' | 'percentage' | 'number';
   selector: 'app-overview-stat-card',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, DecimalPipe],
+  imports: [IconComponent],
   templateUrl: './overview-stat-card.component.html',
   styleUrls: ['./overview-stat-card.component.scss'],
 })

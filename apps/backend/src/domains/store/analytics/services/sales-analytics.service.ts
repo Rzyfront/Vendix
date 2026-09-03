@@ -217,6 +217,10 @@ export class SalesAnalyticsService {
         }),
         this.prisma.order_items.aggregate({
           where: {
+            // [resid-fiscal] — Excluir ítems cancelados (D2). El reporte
+            // agrega cantidades vendidas; un plato cancelado con stock
+            // ya revertido no debe contar como venta.
+            cancelled_at: null,
             orders: {
               state: { in: this.COMPLETED_STATES },
               ...(query.channel && { channel: query.channel }),
@@ -287,6 +291,10 @@ export class SalesAnalyticsService {
     const { startDate, endDate } = parseDateRange(query, tz);
 
     const groupWhere: any = {
+      // [resid-fiscal] — Excluir cancelados en el top de productos vendidos
+      // y en el conteo de grupos. Sin filtro, los total_price inflados por
+      // cancelados harían figurar productos que no se vendieron.
+      cancelled_at: null,
       orders: {
         state: { in: this.COMPLETED_STATES },
         ...(query.channel && { channel: query.channel }),
@@ -483,6 +491,9 @@ export class SalesAnalyticsService {
     const productAggregates = await this.prisma.order_items.groupBy({
       by: ['product_id'],
       where: {
+        // [resid-fiscal] — Mismo criterio que arriba: productos
+        // "vendidos" no deben incluir cancelados en revenue ni unidades.
+        cancelled_at: null,
         orders: {
           state: { in: this.COMPLETED_STATES },
           created_at: {
@@ -735,6 +746,10 @@ export class SalesAnalyticsService {
       LEFT JOIN (
         SELECT order_id, SUM(quantity) AS units
         FROM order_items
+        -- [resid-fiscal] — Excluir cancelados del trend de unidades
+        -- vendidas por período (los dos queries que comparten este
+        -- LEFT JOIN — trend bucketed y trend intradía).
+        WHERE cancelled_at IS NULL
         GROUP BY order_id
       ) oi ON oi.order_id = o.id
       WHERE o.store_id = ${storeId}
@@ -798,6 +813,10 @@ export class SalesAnalyticsService {
       LEFT JOIN (
         SELECT order_id, SUM(quantity) AS units
         FROM order_items
+        -- [resid-fiscal] — Excluir cancelados del trend de unidades
+        -- vendidas por período (los dos queries que comparten este
+        -- LEFT JOIN — trend bucketed y trend intradía).
+        WHERE cancelled_at IS NULL
         GROUP BY order_id
       ) oi ON oi.order_id = o.id
       WHERE o.store_id = ${storeId}

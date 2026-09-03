@@ -292,6 +292,14 @@ export class PosPaymentService {
         ),
       ),
       payment_reference: request.reference || '',
+      // QUI-728 (E.1) — la cuenta de destino elegida en el collector viaja con
+      // el pago. Se omite la clave cuando no hay cuenta (transferencia legacy
+      // sin FK, o método distinto de bank_transfer): `undefined` explícito
+      // dispararía el `forbidNonWhitelisted` en ningún caso, pero omitirla
+      // deja el payload idéntico al de hoy para el resto de métodos.
+      ...(request.bank_account_id != null
+        ? { bank_account_id: request.bank_account_id }
+        : {}),
       wompi_payment_method: (request.paymentMethod?.original as any)?.system_payment_method?.type === 'wompi'
         ? request.metadata?.wompiPaymentMethod
         : undefined,
@@ -416,6 +424,15 @@ export class PosPaymentService {
         ).toFixed(2),
       ),
       payment_reference: paymentRequest.reference || '',
+      // QUI-728 (E.1) — el selector de cuentas del collector emite
+      // `bankAccountId`; `pos-payment-step` lo pasa como `bank_account_id` y
+      // aquí viaja al backend, que lo valida y lo persiste en
+      // `payments.bank_account_id` (`processPosPaymentTransaction`). Omitir la
+      // clave cuando no hay cuenta: un `bank_account_id` ausente deja el pago
+      // en "Pagos sin asignar" (E.2), que es la degradación deliberada.
+      ...(paymentRequest.bank_account_id != null
+        ? { bank_account_id: paymentRequest.bank_account_id }
+        : {}),
       wompi_payment_method: (paymentRequest.paymentMethod?.original as any)?.system_payment_method?.type === 'wompi'
         ? paymentRequest.metadata?.wompiPaymentMethod
         : undefined,
@@ -600,6 +617,10 @@ export class PosPaymentService {
         ).toFixed(2),
       );
       sale_data['payment_reference'] = paymentRequest.reference || '';
+      // QUI-728 (E.1) — misma cuenta de destino en la venta con envío.
+      if (paymentRequest.bank_account_id != null) {
+        sale_data['bank_account_id'] = paymentRequest.bank_account_id;
+      }
     }
 
     return this.http.post<any>(this.apiUrl, sale_data).pipe(
@@ -1006,6 +1027,13 @@ export class PosPaymentService {
       customerId: cartState.customer?.id
         ? Number(cartState.customer.id)
         : undefined,
+      // QUI-728 (E.1) — `CreatePaymentDto` declara `bank_account_id` en
+      // snake_case (el resto del DTO es camelCase); `forbidNonWhitelisted` lo
+      // acepta solo con ese nombre exacto. Va a nivel raíz, no en `metadata`,
+      // porque el gateway lo resuelve y valida antes de invocar al processor.
+      ...(paymentRequest.bank_account_id != null
+        ? { bank_account_id: paymentRequest.bank_account_id }
+        : {}),
       // Hotfix post-PR-576: la firma del helper ignoraba tableSessionId
       // y tableId, así que los pagos sobre órdenes adoptadas con mesa
       // abierta nunca cerraban la mesa en backend. Propagamos ambos.

@@ -1,5 +1,6 @@
 export type PrintFormatType =
   | 'pos_sale_ticket'
+  | 'pos_electronic_invoice'
   | 'sales_order_invoice'
   | 'dispatch_note'
   | 'dispatch_ticket'
@@ -49,6 +50,7 @@ export interface PrintPaperConfig {
   /** [print-editor-dsk P1.2] — v2 NEW. Margen izquierdo en mm. */
   margin_left_mm?: number;
   copies: number;
+  auto_print?: boolean;
   /** [print-editor-dsk P1.2] — v2 NEW. */
   orientation?: 'portrait' | 'landscape';
 }
@@ -237,10 +239,45 @@ export interface PrintPreviewResponse {
 export interface RenderPrintDocumentResponse {
   format_type: PrintFormatType;
   html?: string;
+  /**
+   * [print-fiscal-gate P7.2] — Eco del flag enviado al renderer: cuando
+   * `body_only=true`, `html` contiene solo el contenido interior del
+   * `<body>`, sin `<!DOCTYPE>`, `<head>` ni `<html>`. El batch de impresión
+   * aprovecha este modo para concatenar N cuerpos bajo un único `<html>`.
+   */
+  body_only?: boolean;
   copies: number;
   is_roll: boolean;
   width_mm: number;
 }
+
+/**
+ * [print-fiscal-gate P3] — Resultado de `POST /store/print-formats/resolve-for-document`.
+ *
+ * El FE usa este objeto como UN solo punto de decisión de impresión: el
+ * backend ya decidió formato + documentId según el estado fiscal de la
+ * tienda. La duplicación previa (`pos-ticket.service.ts:238` +
+ * `order-ticket.service.ts:83`) se elimina; este contrato es el único que
+ * miran los callers.
+ */
+export interface ResolvedPrintDocument {
+  format_type: PrintFormatType;
+  document_id: number;
+  engine: 'html' | 'pdf';
+  reason:
+    | 'electronic_invoice_already_issued'
+    | 'fe_pending_emission'
+    | 'no_fiscal_activation';
+  /**
+   * TRUE cuando el caller debe emitir la FE antes de imprimir. Hoy es
+   * informativo: la emisión no se gatilla automáticamente porque imprimir no
+   * puede disparar un hecho fiscal irreversible (ver decisión en el JSDoc
+   * del gate BE).
+   */
+  requires_invoice_emission: boolean;
+}
+
+export type ResolveDocumentType = 'pos_order' | 'pos_invoice';
 
 /**
  * [print-editor-dsk P3.3] — Lightweight record returned by

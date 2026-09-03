@@ -259,6 +259,19 @@ export class EcommercePrismaService extends BasePrismaService {
   get system_payment_methods() {
     return this.baseClient.system_payment_methods;
   }
+  /**
+   * `bank_accounts` es org-scoped, y el contexto de la vitrina pública NO trae
+   * `organization_id` (el comprador es anónimo: solo se resuelve `store_id` por
+   * dominio). Leerlo por `StorePrismaService` devuelve
+   * `403 organization context required` y tumba el checkout por transferencia.
+   *
+   * Por eso se expone sin scoping automático: **quien lo use está obligado a
+   * filtrar por `organization_id`** —el de la tienda del contexto— y por
+   * `store_id` (`null` o el propio), igual que hace `BankAccountsService`.
+   */
+  get bank_accounts() {
+    return this.baseClient.bank_accounts;
+  }
   get users() {
     return this.baseClient.users;
   }

@@ -332,8 +332,8 @@ export type WorkbenchTab = 'sections' | 'columns' | 'tokens';
                 <!-- Physical Roll or Sheet Paper Wrapper -->
                 <div
                   class="vendix-physical-sheet"
-                  [class.is-roll]="draft.paper?.is_roll !== false"
-                  [class.is-sheet]="draft.paper?.is_roll === false"
+                  [class.is-roll]="draft.paper.is_roll !== false"
+                  [class.is-sheet]="draft.paper.is_roll === false"
                 >
                   @if (facade.previewHtml()) {
                     <iframe
@@ -356,7 +356,7 @@ export type WorkbenchTab = 'sections' | 'columns' | 'tokens';
             <!-- Footer Specs Bar -->
             <div class="px-4 py-2 bg-surface-secondary border-t border-border flex items-center justify-between text-[11px] text-text-tertiary font-mono">
               <div class="flex items-center gap-3">
-                <span>Papel: {{ draft.paper?.format || 'thermal_80' }} ({{ paperWidthMm() }}mm)</span>
+                <span>Papel: {{ draft.paper.format || 'thermal_80' }} ({{ paperWidthMm() }}mm)</span>
                 @if (selectedRegion(); as r) {
                   <span class="text-primary-500 font-sans font-medium">
                     Seleccionado: {{ r.label || r.kind }}

@@ -255,12 +255,50 @@ export class DianTestService {
    * CUFE de todo lo emitido bajo ese rango. La superficie HTTP es
    * `GET /store/invoicing/dian-config/:id/numbering-ranges`, que compara la
    * clave en el servidor y publica sólo un booleano.
+   *
+   * ── POR QUÉ EL AMBIENTE ES PARÁMETRO Y NO SE HEREDA ────────────────────────
+   *
+   * Porque heredarlo de `config.environment` cerraba un ciclo del que no se
+   * salía por dentro. Una configuración en habilitación preguntaba a
+   * `vpfe-hab.dian.gov.co`, donde las autorizaciones de PRODUCCIÓN no viven, así
+   * que la lista volvía vacía; sin rango no había cómo crear la fila de
+   * `invoice_resolutions`; sin esa fila `assertResolutionReady` respondía
+   * `FISCAL_RESOLUTION_MISSING`; sin readiness `promoteToProduction` se negaba; y
+   * sin producción la consulta seguía apuntando a habilitación. Seis pasos y
+   * vuelta al primero.
+   *
+   * La configuración 20 (NIT 1123408049) sólo salió de ahí por el rodeo:
+   * inventar una resolución falsa, promover con ella, consultar los rangos
+   * reales, borrar la falsa y activar la verdadera. Entre la promoción y el
+   * borrado la configuración estaba EN PRODUCCIÓN con una ClTec inventada, y
+   * cualquier factura emitida en esa ventana se habría firmado con ella: la DIAN
+   * la rechaza con `FAD06` y el consecutivo autorizado que gastó no vuelve.
+   *
+   * ── POR QUÉ PREGUNTAR POR EL OTRO AMBIENTE NO ABRE NADA ────────────────────
+   *
+   * Esta operación LEE. No emite documento, no reserva consecutivo y no toca
+   * `config.environment`: el ambiente sólo decide a qué catálogo de la DIAN se
+   * dirige el sobre SOAP. Ninguna guarda de emisión ni de promoción cambia por
+   * esto — ver la nota equivalente en `DianNumberingRangeService.applyRanges`
+   * para el lado que SÍ escribe.
+   *
+   * Ausente ⇒ el de la configuración, que es exactamente lo que hacía antes.
    */
-  async queryNumberingRange(config_id: number): Promise<{
+  async queryNumberingRange(
+    config_id: number,
+    environment?: 'test' | 'production' | null,
+  ): Promise<{
     dian_configuration_id: number;
     nit: string;
     software_id: string;
+    /** El ambiente que de verdad se CONSULTÓ. */
     environment: 'production' | 'test';
+    /**
+     * El de la configuración. Viaja aparte porque a partir de este cambio los
+     * dos pueden diferir, y quien lea la respuesta necesita saberlo para no
+     * atribuirle a la configuración un catálogo que no es el suyo.
+     */
+    config_environment: 'production' | 'test';
     accounting_entity_id: number | null;
     queried_at: string;
     raw_response: string;
@@ -268,7 +306,9 @@ export class DianTestService {
     const config = await this.getConfigById(config_id);
     const credentials = await this.loadWsCredentials(config);
     const nit = String(config.nit ?? '').replace(/\D/g, '');
-    const environment = config.environment === 'production' ? 'production' : 'test';
+    const config_environment =
+      config.environment === 'production' ? 'production' : 'test';
+    const queried_environment = environment ?? config_environment;
 
     // `accountCodeT` es el NIT del proveedor tecnológico. En software propio el
     // obligado ES su propio proveedor, así que va el mismo NIT.
@@ -276,7 +316,7 @@ export class DianTestService {
       nit,
       nit,
       String(config.software_id ?? ''),
-      environment,
+      queried_environment,
       credentials,
     );
 
@@ -301,7 +341,11 @@ export class DianTestService {
           dian_configuration_id: config_id,
           // El mensaje de la DIAN, nunca su cuerpo: el XML trae la ClTec.
           dian_status_code: response.status_code,
-          environment,
+          // Los DOS: sin el consultado no se sabe a qué catálogo no contestó la
+          // DIAN, y sin el de la configuración no se sabe si el fallo ocurrió
+          // preguntando por el ambiente propio o por el contrario.
+          environment: queried_environment,
+          config_environment,
         },
       );
     }
@@ -310,7 +354,8 @@ export class DianTestService {
       dian_configuration_id: config.id,
       nit,
       software_id: String(config.software_id ?? ''),
-      environment,
+      environment: queried_environment,
+      config_environment,
       accounting_entity_id: config.accounting_entity_id ?? null,
       queried_at: new Date().toISOString(),
       raw_response: response.raw_response,

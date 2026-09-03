@@ -122,6 +122,8 @@ export class PosApiService {
     storePaymentMethodId: number;
     storeId: number;
     customerId?: number;
+    /** QUI-728 (E.1) — `CreatePaymentDto.bank_account_id`, en snake_case. */
+    bank_account_id?: number;
     metadata?: Record<string, any>;
     returnUrl?: string;
     cancelUrl?: string;

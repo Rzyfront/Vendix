@@ -55,6 +55,19 @@ export const storeAdminRoutes: Routes = [
             (c) => c.DashboardComponent,
           ),
       },
+      // C.1(2): "sin acceso al panel". Terminal de la cadena de fallback
+      // cuando el usuario autenticado no tiene NINGÚN módulo activo del
+      // sidebar. El `panelUiGuard` lo deja pasar por bypass explícito de
+      // `PANEL_UI_NO_ACCESS_ROUTE` (ver `core/guards/panel-ui.guard.ts`); de
+      // lo contrario el redirect crearía un bucle infinito. El componente
+      // muestra un CTA de "Cerrar sesión" porque no hay nada más a donde ir.
+      {
+        path: 'no-access',
+        loadComponent: () =>
+          import(
+            '../../private/modules/store/no-access/no-access-page.component'
+          ).then((c) => c.NoAccessPageComponent),
+      },
       // Owner onboarding host — gated by `onboardingGuard` on the `admin`
       // root. Only an OWNER with `organizations.onboarding !== true` ever
       // resolves here; everyone else is bounced to the dashboard.
@@ -363,6 +376,17 @@ export const storeAdminRoutes: Routes = [
           },
           {
             path: ':id',
+            // El detalle de orden reutiliza `vendix-invoice-detail` (el modal
+            // completo del módulo de facturación) para su tarjeta "Factura
+            // Electrónica" en vez de duplicar sus acciones. Ese modal despacha
+            // contra el feature `invoicing`, así que esta rama tiene que
+            // proveerlo igual que ya lo hace `pos` — mismo patrón, acotado a
+            // `orders/:id` para que el listado de órdenes no cargue reducer ni
+            // effects que no usa.
+            providers: [
+              provideState({ name: 'invoicing', reducer: invoicingReducer }),
+              provideEffects(InvoicingEffects),
+            ],
             loadComponent: () =>
               import('../../private/modules/store/orders/pages/order-details/order-details-page.component').then(
                 (c) => c.OrderDetailsPageComponent,

@@ -83,6 +83,18 @@ export interface StandardPrintDataModel {
     change_due_formatted?: string;
     valid_until?: string;
     valid_until_formatted?: string;
+    /**
+     * Letra pequeña de la oferta (`quotations.terms_and_conditions`): forma de
+     * pago, tiempo de entrega, condiciones de garantía.
+     *
+     * OPCIONAL a propósito: sólo el proveedor de la cotización la llena, y
+     * `print-layout-composer` la pinta únicamente en la sección
+     * `custom_notes` cuando llega. Los otros diez documentos del dominio no la
+     * declaran y su papel no cambia. Es distinta de `notes` (mensaje al
+     * cliente para ESTA cotización) y de `internal_notes`, que nunca se
+     * imprime porque el papel va al cliente.
+     */
+    terms_and_conditions?: string;
     reference_document_number?: string;
     shipping_carrier?: string;
     shipping_tracking_number?: string;

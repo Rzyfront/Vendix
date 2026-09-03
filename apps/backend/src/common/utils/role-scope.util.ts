@@ -86,10 +86,11 @@ export const ASSIGNABLE_SYSTEM_ROLES: Record<
     'employee',
     'cashier',
     'carrier',
-    // QUI-727 (A.1) — roles de operación restaurante, asignables desde
-    // organización y tienda.
-    'mesero',
-    'cocina',
+    // QUI-730b — roles de operación restaurante, asignables desde
+    // organización y tienda. Renombrados a inglés (mesero→waiter,
+    // cocina→kitchen) por requisito del dueño del proyecto.
+    'waiter',
+    'kitchen',
   ],
   store: [
     'manager',
@@ -97,9 +98,9 @@ export const ASSIGNABLE_SYSTEM_ROLES: Record<
     'employee',
     'cashier',
     'carrier',
-    // QUI-727 (A.1) — roles de operación restaurante, asignables en tienda.
-    'mesero',
-    'cocina',
+    // QUI-730b — roles de operación restaurante, asignables en tienda.
+    'waiter',
+    'kitchen',
   ],
 };
 

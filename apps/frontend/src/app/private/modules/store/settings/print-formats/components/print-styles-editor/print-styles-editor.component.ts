@@ -186,27 +186,40 @@ import { PAPER_GEOMETRY } from '../../../../../../../core/lib/page-geometry';
             </div>
           </div>
 
-          <!-- Primary Accent Color -->
-          <div>
-            <label class="block text-xs font-medium text-text-secondary mb-1">
-              Color de Acento / Títulos
-            </label>
-            <div class="flex items-center gap-2">
-              <input
-                type="color"
-                [ngModel]="styles().primary_color || '#111827'"
-                (ngModelChange)="updatePrimaryColor($event)"
-                class="w-8 h-8 rounded border border-border cursor-pointer p-0.5 bg-surface-secondary"
-              />
-              <input
-                type="text"
-                [ngModel]="styles().primary_color || '#111827'"
-                (ngModelChange)="updatePrimaryColor($event)"
-                placeholder="#111827"
-                class="flex-1 px-3 py-1.5 bg-surface-secondary border border-border rounded-lg text-xs font-mono text-text-primary focus:border-primary-500 focus:outline-none uppercase"
-              />
+          <!-- Primary Accent Color — sin efecto en rollo: la impresora
+               térmica no imprime color (ver skill de negro absoluto en
+               rollo), así que en 80mm/58mm el control se reemplaza por una
+               nota en vez de dejar al comerciante elegir un tono que nunca
+               va a ver impreso. -->
+          @if (!paper().is_roll) {
+            <div>
+              <label class="block text-xs font-medium text-text-secondary mb-1">
+                Color de Acento / Títulos
+              </label>
+              <div class="flex items-center gap-2">
+                <input
+                  type="color"
+                  [ngModel]="styles().primary_color || '#111827'"
+                  (ngModelChange)="updatePrimaryColor($event)"
+                  class="w-8 h-8 rounded border border-border cursor-pointer p-0.5 bg-surface-secondary"
+                />
+                <input
+                  type="text"
+                  [ngModel]="styles().primary_color || '#111827'"
+                  (ngModelChange)="updatePrimaryColor($event)"
+                  placeholder="#111827"
+                  class="flex-1 px-3 py-1.5 bg-surface-secondary border border-border rounded-lg text-xs font-mono text-text-primary focus:border-primary-500 focus:outline-none uppercase"
+                />
+              </div>
             </div>
-          </div>
+          } @else {
+            <div class="sm:col-span-2 flex items-start gap-2.5 p-3 rounded-lg bg-surface-secondary border border-border">
+              <app-icon name="printer" [size]="16" class="text-text-secondary shrink-0 mt-0.5"></app-icon>
+              <p class="text-[11px] text-text-secondary leading-relaxed">
+                La impresión térmica es monocroma: el rollo sale siempre en negro pleno, sin colores ni grises, para que la térmica no lo resuelva como una trama sucia. El color de acento no aplica a este formato.
+              </p>
+            </div>
+          }
         </div>
       </div>
 

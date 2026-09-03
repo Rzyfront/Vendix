@@ -127,6 +127,30 @@
               deliveryConfig().label
             }}</span>
           </div>
+          <!-- T10 B2 — la sección "Mesa" sólo aparece en tiendas restaurante
+               Y si la orden trae sesión de mesa. Hoy se pintaba con sólo
+               `tableName()`, sin preguntar la industria: una orden anómala
+               con sesión en una tienda no-restaurante mostraba "Mesa: X".
+               La industria decide si la sección tiene sentido (canónica:
+               `AuthFacade.isRestaurant` vía `isRestaurant()` computed en
+               .ts:301); la sesión decide si hay dato que mostrar. -->
+          @if (isRestaurant() && tableName()) {
+            <span class="w-px h-3.5 bg-border"></span>
+            <div class="flex items-center gap-1.5 text-text-primary font-medium">
+              <app-icon
+                name="utensils"
+                size="14"
+                class="text-amber-500"
+              ></app-icon>
+              <span>Mesa:</span>
+              <span class="font-semibold text-amber-600">{{
+                tableName()
+              }}</span>
+              @if (tableSession()?.table?.zone) {
+                <span class="text-[10px] text-text-secondary">({{ tableSession()?.table?.zone }})</span>
+              }
+            </div>
+          }
           @if (isCreditOrder()) {
             <span class="w-px h-3.5 bg-border"></span>
             <div class="flex items-center gap-1.5">
@@ -194,14 +218,17 @@
                   <div class="customer-name-block">
                     <span class="customer-eyebrow">Cliente</span>
                     <h2>
-                      @if (
-                        orderData.users?.first_name ||
-                        orderData.users?.last_name
+                      {{ customerDisplayName() }}
+                      @if (isConsumidorFinal() && !customerDisplayName().length) {
+                        <!-- si no hay alias ni nombre, customerDisplayName ya cae a "Consumidor Final"; el badge CF refuerza la marca fiscal -->
+                      } @else if (
+                        orderData.customer_alias?.trim() &&
+                        !(orderData.users?.first_name || orderData.users?.last_name)
                       ) {
-                        {{ orderData.users?.first_name }}
-                        {{ orderData.users?.last_name }}
-                      } @else {
-                        Consumidor Final
+                        <span
+                          class="cf-badge"
+                          title="La orden sigue siendo consumidor final a nivel fiscal"
+                        >CF</span>
                       }
                     </h2>
                     <div class="customer-data-pills">
@@ -399,47 +426,89 @@
             </div>
           </app-card>
 
-          <!-- 1.5. NOTA DE LA ORDEN (pública — escrita por el cashier desde el POS) -->
-          @if (orderData.notes) {
+          <!-- 1.4. MESA Y NOTAS DE LA ORDEN (Sección compacta y unificada) -->
+          @if (tableSession() || cleanOrderNotes() || (cleanInternalNotes() && !flowMetadata().internal_notes_as_json)) {
             <app-card shadow="sm" [responsivePadding]="true">
-              <div slot="header" class="flex items-center gap-2">
-                <app-icon name="sticky-note" [size]="18" class="text-amber-500"></app-icon>
-                <h3 class="text-base sm:text-lg font-semibold text-[var(--color-text-primary)]">
-                  Nota de la orden
-                </h3>
-                <span
-                  class="text-[10px] sm:text-[11px] font-medium uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded"
-                >
-                  Pública
-                </span>
-              </div>
-              <p
-                class="text-sm text-[var(--color-text-primary)] whitespace-pre-line leading-relaxed"
-              >
-                {{ orderData.notes }}
-              </p>
-            </app-card>
-          }
+              <div class="flex flex-col gap-2.5">
+                <!-- Información de Mesa (si aplica) -->
+                @if (tableSession(); as session) {
+                  <div
+                    class="flex flex-wrap items-center justify-between gap-2.5"
+                    [class.pb-2.5]="cleanOrderNotes() || (cleanInternalNotes() && !flowMetadata().internal_notes_as_json)"
+                    [class.border-b]="cleanOrderNotes() || (cleanInternalNotes() && !flowMetadata().internal_notes_as_json)"
+                    [class.border-border]="cleanOrderNotes() || (cleanInternalNotes() && !flowMetadata().internal_notes_as_json)"
+                  >
+                    <div class="flex items-center gap-2.5 min-w-0">
+                      <div
+                        class="w-7 h-7 rounded-lg bg-amber-500/10 border border-amber-500/25 text-amber-600 flex items-center justify-center shrink-0"
+                      >
+                        <app-icon name="utensils" [size]="14"></app-icon>
+                      </div>
+                      <div class="flex items-center gap-2 flex-wrap min-w-0">
+                        <span class="font-bold text-xs sm:text-sm text-[var(--color-text-primary)]">
+                          {{ session.table?.name || 'Mesa #' + session.table_id }}
+                        </span>
+                        @if (session.table?.zone) {
+                          <span
+                            class="text-[11px] font-medium px-2 py-0.5 rounded-md bg-[var(--color-background)] border border-border text-text-secondary"
+                          >
+                            {{ session.table?.zone }}
+                          </span>
+                        }
+                        @if (session.guest_count) {
+                          <span class="text-[11px] text-text-secondary flex items-center gap-1">
+                            <app-icon name="users" [size]="12"></app-icon>
+                            {{ session.guest_count }} comensales
+                          </span>
+                        }
+                        @if (session.opener) {
+                          <span class="text-[11px] text-text-secondary flex items-center gap-1">
+                            <app-icon name="user" [size]="12"></app-icon>
+                            {{ session.opener.first_name }} {{ session.opener.last_name || '' }}
+                          </span>
+                        }
+                      </div>
+                    </div>
 
-          <!-- 1.6. NOTA INTERNA DEL STAFF (solo visible al equipo interno) -->
-          @if (orderData.internal_notes && !flowMetadata().internal_notes_as_json) {
-            <app-card shadow="sm" [responsivePadding]="true">
-              <div slot="header" class="flex items-center gap-2">
-                <app-icon name="message-square" [size]="18" class="text-rose-500"></app-icon>
-                <h3 class="text-base sm:text-lg font-semibold text-[var(--color-text-primary)]">
-                  Nota del staff
-                </h3>
-                <span
-                  class="text-[10px] sm:text-[11px] font-medium uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded"
-                >
-                  Solo interno
-                </span>
+                    <span
+                      class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0"
+                      [ngClass]="session.closed_at ? 'bg-gray-100 text-gray-600' : 'bg-emerald-50 text-emerald-700 border border-emerald-200/80'"
+                    >
+                      {{ session.closed_at ? 'Sesión Cerrada' : 'Mesa Ocupada' }}
+                    </span>
+                  </div>
+                }
+
+                <!-- Nota pública de la orden -->
+                @if (cleanOrderNotes()) {
+                  <div class="flex items-start gap-2 text-xs">
+                    <span
+                      class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-800 font-semibold uppercase text-[10px] shrink-0 mt-0.5"
+                    >
+                      <app-icon name="sticky-note" [size]="11" class="text-amber-600"></app-icon>
+                      Nota
+                    </span>
+                    <p class="text-text-primary text-xs leading-relaxed flex-1 whitespace-pre-line m-0">
+                      {{ cleanOrderNotes() }}
+                    </p>
+                  </div>
+                }
+
+                <!-- Nota interna de Staff -->
+                @if (cleanInternalNotes() && !flowMetadata().internal_notes_as_json) {
+                  <div class="flex items-start gap-2 text-xs">
+                    <span
+                      class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-50 border border-rose-200 text-rose-800 font-semibold uppercase text-[10px] shrink-0 mt-0.5"
+                    >
+                      <app-icon name="message-square" [size]="11" class="text-rose-600"></app-icon>
+                      Staff
+                    </span>
+                    <p class="text-text-primary text-xs leading-relaxed flex-1 whitespace-pre-line m-0">
+                      {{ cleanInternalNotes() }}
+                    </p>
+                  </div>
+                }
               </div>
-              <p
-                class="text-sm text-[var(--color-text-primary)] whitespace-pre-line leading-relaxed"
-              >
-                {{ orderData.internal_notes }}
-              </p>
             </app-card>
           }
 
@@ -585,6 +654,24 @@
                           Cocina: {{ kitchenStateLabel(ks) }}
                           <app-icon name="arrow-right" [size]="10" />
                         </button>
+                        <!-- QUI-762 — reenviar a cocina un plato ya
+                             disparado. Solo se ofrece cuando el ítem es
+                             reenviable por el predicado del backend
+                             (ver `canResend` en el componente): fue
+                             consumido, la orden no está cancelada ni
+                             devuelta, y ningún `kitchen_ticket_item`
+                             está delivered. -->
+                        @if (canResend(item)) {
+                          <button
+                            type="button"
+                            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 ml-1 cursor-pointer hover:opacity-80 transition-opacity bg-blue-100 text-blue-800 border border-blue-200"
+                            title="Reenviar este plato a cocina (la comanda se perdió o hay que rehacerlo)"
+                            (click)="openResendModal(item)"
+                          >
+                            <app-icon name="refresh-cw" [size]="10" />
+                            Reenviar a cocina
+                          </button>
+                        }
                       } @else if (
                         canShowKitchenDispatch() &&
                         item.products?.product_type === 'prepared' &&
@@ -612,6 +699,46 @@
                           <app-icon name="flame" [size]="10" />
                           Enviar a cocina
                         </label>
+                      }
+                      <!-- T9p6 — entregar ítem desde el detalle de la orden.
+                           Sister del bloque `canResend` para que la jerarquía
+                           visual sea: estado KDS (si aplica) → acción sobre
+                           el ítem. Aplica a TODO ítem no terminal: los
+                           platos disparados a cocina solo cuando el ticket
+                           está 'ready' (controlado en `canDeliver`), y los
+                           ítems de retail directo sin pasar por cocina —
+                           ese es el caso que el ticket vino a cubrir.
+
+                           Si el ítem YA fue entregado se muestra la fecha
+                           que viene del payload (`delivered_at` poblado
+                           por el findOne del backend). El control es
+                           `app-button` del sistema de diseño, no un botón
+                           plano: `xsm` ≈ 28px para alinear con los badges
+                           de 10px que viven arriba. -->
+                      @if (item.delivered_at) {
+                        <span
+                          class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 ml-1 bg-sky-100 text-sky-800 border border-sky-200"
+                          [title]="'Entregado el ' + (item.delivered_at | date: 'short')"
+                        >
+                          <app-icon name="check" [size]="10" />
+                          Entregado
+                        </span>
+                      } @else if (canDeliver(item)) {
+                        <app-button
+                          variant="outline"
+                          size="xsm"
+                          customClasses="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 ml-1 bg-sky-50 text-sky-700 border border-sky-200 disabled:opacity-50"
+                          title="Marcar este ítem como entregado al cliente"
+                          [disabled]="deliveringItemId() === item.id"
+                          (clicked)="deliverItem(item)"
+                        >
+                          <app-icon slot="icon" name="check" [size]="10" />
+                          @if (deliveringItemId() === item.id) {
+                            Entregando…
+                          } @else {
+                            Entregar
+                          }
+                        </app-button>
                       }
                       @if (parseVariantAttributes(item.variant_attributes); as attrs) {
                         @if (attrs.length) {
@@ -1338,73 +1465,164 @@
           </app-card>
 
           <!-- 5. FACTURA ELECTRÓNICA -->
-          <app-card shadow="sm" [responsivePadding]="true">
-            <h2
-              class="text-xs sm:text-sm font-bold text-gray-900 uppercase tracking-wider mb-3 sm:mb-4"
-            >
-              Factura Electrónica
-            </h2>
-            @if (acceptedInvoice(); as invoice) {
-              <!--
-                La factura ya existe: lo que el operador necesita acá no es que
-                se lo cuenten, es el NÚMERO —para buscarla en Facturación— y el
-                CUFE, que es lo que el adquiriente usa para verificarla en el
-                portal de la DIAN. Un párrafo que dice «ya tiene factura» y no
-                dice cuál obliga a salir de la pantalla a averiguarlo.
-              -->
-              <div
-                class="rounded-lg border border-success/30 bg-success-light p-3"
+          <!-- Acceso rápido a la factura de esta orden con la misma capacidad
+               que el módulo de Facturación: los chips de abajo salen de
+               `fiscalStatusCells()`, la misma función pura que pinta el modal
+               reutilizado (`vendix-invoice-detail`, montado más abajo), y
+               "Ver detalle" abre ESE modal — nunca una reimplementación. Sólo
+               para quien está emitiendo en producción ante la DIAN, o para una
+               orden con factura YA ACEPTADA (número y CUFE son registro fiscal
+               y no se esconden). Dentro de una tienda en producción la tarjeta
+               muestra la factura en cualquier estado —rechazada, pendiente o
+               en contingencia—, que es cuando más falta hace entrar a mirarla.
+               Set de pruebas, habilitación en trámite o tienda sin
+               configuración DIAN y sin factura aceptada: la tarjeta no
+               existe. -->
+          @if (showElectronicInvoiceCard()) {
+            <app-card shadow="sm" [responsivePadding]="true">
+              <h2
+                class="text-xs sm:text-sm font-bold text-gray-900 uppercase tracking-wider mb-3 sm:mb-4"
               >
-                <div class="flex items-start gap-2.5">
-                  <app-icon
-                    name="check-circle"
-                    [size]="16"
-                    class="text-success shrink-0 mt-0.5"
-                  />
-                  <div class="min-w-0 flex-1">
-                    <p
-                      class="text-[11px] font-semibold text-success uppercase tracking-wide"
-                    >
-                      Validada por la DIAN
-                    </p>
-                    <p
-                      class="text-sm sm:text-base font-bold text-gray-900 mt-1 break-all"
-                    >
-                      {{ invoice.invoice_number }}
-                    </p>
-                    @if (invoice.cufe) {
+                Factura Electrónica
+              </h2>
+              @if (orderInvoice(); as invoice) {
+                <!--
+                  La factura ya existe: lo que el operador necesita acá no es que
+                  se lo cuenten, es el NÚMERO —para buscarla en Facturación— y el
+                  CUFE, que es lo que el adquiriente usa para verificarla en el
+                  portal de la DIAN. Los chips de estado (transmisión, DIAN,
+                  envío) dicen en qué va SIN que haya que abrir el modal para
+                  saberlo.
+                -->
+                <div class="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <div class="flex items-start gap-2.5">
+                    <app-icon
+                      name="receipt"
+                      [size]="16"
+                      class="text-gray-500 shrink-0 mt-0.5"
+                    />
+                    <div class="min-w-0 flex-1">
                       <p
-                        class="text-[10px] font-mono text-gray-500 mt-1.5 break-all leading-snug"
-                        [title]="invoice.cufe"
+                        class="text-sm sm:text-base font-bold text-gray-900 break-all"
                       >
-                        <span class="font-sans font-semibold text-gray-600"
-                          >CUFE</span
-                        >
-                        {{ invoice.cufe }}
+                        {{ invoice.invoice_number }}
                       </p>
-                    }
+                      @if (invoice.cufe) {
+                        <p
+                          class="text-[10px] font-mono text-gray-500 mt-1 break-all leading-snug"
+                          [title]="invoice.cufe"
+                        >
+                          <span class="font-sans font-semibold text-gray-600"
+                            >CUFE</span
+                          >
+                          {{ invoice.cufe }}
+                        </p>
+                      }
+                      @if (invoiceFiscalCells().length || invoiceStatusChip()) {
+                        <div class="flex flex-wrap gap-1.5 mt-2">
+                          @if (invoiceStatusChip(); as statusChip) {
+                            <span
+                              class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                              [class]="toneClasses(statusChip.tone)"
+                            >
+                              {{ statusChip.label }}: {{ statusChip.text }}
+                            </span>
+                          }
+                          @for (
+                            cell of invoiceFiscalCells();
+                            track cell.label
+                          ) {
+                            <span
+                              class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                              [class]="toneClasses(cell.tone)"
+                              [title]="cell.hint || ''"
+                            >
+                              {{ cell.label }}: {{ cell.text }}
+                            </span>
+                          }
+                        </div>
+                      }
+                    </div>
                   </div>
+
+                  <!-- Los tres botones necesitan el `id` de la factura, que
+                       `invoiceStub()` es quien garantiza. Sin él se muestran
+                       número, CUFE y chips —que sí son legibles— y no botones
+                       que no harían nada. -->
+                  @if (invoiceStub()) {
+                    <div class="flex flex-wrap gap-2 mt-3">
+                      <app-button
+                        variant="outline"
+                        size="sm"
+                        (clicked)="openInvoiceDetail()"
+                      >
+                        <app-icon slot="icon" name="eye" [size]="14" />
+                        Ver detalle
+                      </app-button>
+                      <app-button
+                        variant="outline"
+                        size="sm"
+                        [loading]="invoicePdfLoading()"
+                        [disabled]="invoicePdfLoading()"
+                        (clicked)="downloadInvoicePdf()"
+                      >
+                        <app-icon slot="icon" name="download" [size]="14" />
+                        PDF
+                      </app-button>
+                      <app-button
+                        variant="outline"
+                        size="sm"
+                        [loading]="invoicePrinting()"
+                        [disabled]="invoicePrinting()"
+                        (clicked)="printInvoiceDocument()"
+                      >
+                        <app-icon slot="icon" name="printer" [size]="14" />
+                        Imprimir
+                      </app-button>
+                    </div>
+                  }
                 </div>
-              </div>
-            } @else {
-              <p class="text-xs sm:text-sm text-gray-700 mb-3">
-                Emite la factura electrónica de venta con los datos de esta
-                orden. Cada emisión consume un consecutivo autorizado ante la
-                DIAN que no se recupera, así que el botón desaparece en cuanto
-                la orden tenga su factura aceptada.
-              </p>
-              <app-button
-                variant="primary"
-                size="md"
-                [loading]="isEmittingInvoice()"
-                [disabled]="isEmittingInvoice()"
-                (clicked)="createInvoiceFromOrder()"
-              >
-                <app-icon slot="icon" name="receipt" [size]="14" />
-                Emitir factura electrónica
-              </app-button>
+              }
+              <!-- El botón NO es el `@else` del bloque de arriba: una factura
+                   anulada o cancelada deja ver su registro Y habilita volver a
+                   emitir, que es justo lo que hace el backend
+                   (`assertNotAlreadyInvoiced` excluye `voided`/`cancelled`).
+                   Como `@else`, cancelar una factura equivocada dejaba la
+                   orden sin salida. -->
+              @if (canEmitInvoice()) {
+                <div [class.mt-3]="orderInvoice() !== null">
+                  <app-button
+                    variant="primary"
+                    size="md"
+                    [loading]="isEmittingInvoice()"
+                    [disabled]="isEmittingInvoice()"
+                    (clicked)="createInvoiceFromOrder()"
+                  >
+                    <app-icon slot="icon" name="receipt" [size]="14" />
+                    Emitir factura electrónica
+                  </app-button>
+                </div>
+              }
+            </app-card>
+          }
+
+          <!-- Modal de detalle de factura reutilizado tal cual del módulo de
+               Facturación: se autohidrata al abrir (`loadInvoice({id})` +
+               `loadDianEvents`) sobre el stub de arriba, así que las 18
+               acciones del módulo (validar, enviar, reintentar, anular, nota
+               crédito/débito, copiar CUFE, QR, PDF, XML, eventos RADIAN…) son
+               las MISMAS del módulo, no una copia. Depende del feature NgRx
+               `invoicing` que la ruta `orders/:id` provee
+               (`store_admin.routes.ts`). -->
+          @defer (when showInvoiceDetailModal()) {
+            @if (showInvoiceDetailModal()) {
+              <vendix-invoice-detail
+                [isOpen]="showInvoiceDetailModal()"
+                [invoice]="invoiceStub()"
+                (isOpenChange)="onInvoiceDetailModalChange($event)"
+              />
             }
-          </app-card>
+          }
 
           <!-- 6. FLOW METADATA CARDS -->
 
@@ -1933,6 +2151,25 @@
                           '—'
                       }}
                     </p>
+                    <!-- QUI-728 (E.2) — cuenta de destino de la transferencia.
+                         Solo aparece cuando el pago la tiene: los pagos en
+                         efectivo no la llevan, y las transferencias sin
+                         `bank_account_id` quedan en "Pagos sin asignar" hasta
+                         que alguien las asigne desde conciliación. -->
+                    @if ($any(payment).bank_account; as bankAccount) {
+                      <p
+                        class="text-[11px] text-text-secondary mt-1 flex items-center gap-1 flex-wrap"
+                      >
+                        <app-icon name="bank" size="12"></app-icon>
+                        <span class="font-medium"
+                          >{{ bankAccount.bank_name }} ·
+                          {{ bankAccount.name }}</span
+                        >
+                        <span class="text-gray-400">{{
+                          bankAccount.account_number
+                        }}</span>
+                      </p>
+                    }
                     <p class="text-[10px] text-gray-400 mt-1">
                       {{ formatDate(payment.created_at) }}
                     </p>
@@ -2616,4 +2853,16 @@
       </div>
     </app-modal>
   }
+
+  <!-- QUI-762 — reenviar un plato ya disparado a cocina desde el detalle
+       de la orden. Una sola instancia del modal; el ítem elegido viaja en
+       `resendItemId` y se reemplaza al abrir otro. El modal cierra por
+       backdrop / Esc / Cancelar / `confirmed`. -->
+  <app-resend-dish-modal
+    [isOpen]="showResendModal()"
+    [orderId]="order()?.id ?? null"
+    [orderItemIds]="resendItemId() != null ? [resendItemId()!] : []"
+    (cancel)="closeResendModal()"
+    (confirmed)="onResendConfirmed($event)"
+  />
 </div>

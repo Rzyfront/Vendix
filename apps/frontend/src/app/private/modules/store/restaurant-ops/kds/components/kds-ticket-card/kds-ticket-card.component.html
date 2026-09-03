@@ -127,7 +127,13 @@
           </div>
         }
         @if (item.notes) {
-          <p class="kds-card__notes">{{ item.notes }}</p>
+          <!-- C3 — bloque destacado con borde izquierdo amber + icono + label
+               "Nota" para que el cocinero NO se la pierda. -->
+          <p class="kds-card__notes" [attr.title]="'Nota del mesero: ' + item.notes">
+            <app-icon name="message-square" [size]="12" />
+            <span class="kds-card__notes-label">Nota</span>
+            <span>{{ item.notes }}</span>
+          </p>
         }
       </li>
     }

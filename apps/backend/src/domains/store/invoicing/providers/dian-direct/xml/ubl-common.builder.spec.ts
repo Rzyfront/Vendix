@@ -6,6 +6,7 @@ import {
   DianCustomerData,
   DianIssuerData,
 } from '../interfaces/dian-config.interface';
+import { toDianTaxLevelCode } from '../constants/dian-tax-level-codes';
 
 describe('UblCommonBuilder.buildSupplierParty', () => {
   /**
@@ -74,6 +75,8 @@ describe('UblCommonBuilder.buildSupplierParty', () => {
     // Responsibility → TaxLevelCode value; @listName is the literal 'No aplica'.
     expect(xml).toMatch(/TaxLevelCode listName="No aplica"/);
     expect(xml).toMatch(/TaxLevelCode[^>]*>R-99-PN</);
+    // No responsable de IVA (régimen '49') declara ZZ / No aplica
+    expect(xml).toMatch(/<cac:TaxScheme>\s*<cbc:ID>ZZ<\/cbc:ID>\s*<cbc:Name>No aplica<\/cbc:Name>\s*<\/cac:TaxScheme>/);
   });
 
   it('honors an explicit person_type and carries a different responsibility', () => {
@@ -88,6 +91,8 @@ describe('UblCommonBuilder.buildSupplierParty', () => {
     expect(xml).toMatch(/AdditionalAccountID>2</);
     expect(xml).toMatch(/TaxLevelCode listName="No aplica"/);
     expect(xml).toMatch(/TaxLevelCode[^>]*>O-15</);
+    // Responsable de IVA (régimen '48') declara 01 / IVA
+    expect(xml).toMatch(/<cac:TaxScheme>\s*<cbc:ID>01<\/cbc:ID>\s*<cbc:Name>IVA<\/cbc:Name>\s*<\/cac:TaxScheme>/);
 
     // Ensure the alternate-case values from the other test are NOT present,
     // confirming the serialized values are driven by this issuer instance.
@@ -337,6 +342,20 @@ describe('UblCommonBuilder.buildCustomerParty — Anexo Técnico 19 structural b
     return root.end({ prettyPrint: true });
   }
 
+  /**
+   * Acota el conteo de `cbc:AdditionalAccountID` al bloque
+   * `cac:AccountingCustomerParty`. El emisor (`cac:AccountingSupplierParty`)
+   * también emite el suyo — contar sobre el XML entero daría un falso verde
+   * si algún día ambos builders comparten un mismo documento en la prueba.
+   */
+  function customerPartyXml(xml: string): string {
+    const start = xml.indexOf('<cac:AccountingCustomerParty>');
+    const end = xml.indexOf('</cac:AccountingCustomerParty>');
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    return xml.slice(start, end);
+  }
+
   it('persona natural — emite cac:Person con FirstName/FamilyName y NO PartyLegalEntity', () => {
     const xml = buildCustomerPartyXml({
       document_type: 'CC',
@@ -395,62 +414,103 @@ describe('UblCommonBuilder.buildCustomerParty — Anexo Técnico 19 structural b
     expect(xml).toMatch(/TaxLevelCode[^>]*>O-13;O-15</);
     // CIIU como cbc:IndustryClassificationCode.
     expect(xml).toContain('<cbc:IndustryClassificationCode>4711</cbc:IndustryClassificationCode>');
-    // AdditionalAccountID: '1' (Persona Jurídica) + '1' (gran contribuyente por O-13) +
-    // '2' (autorretenedor por O-15).
-    expect(xml).toMatch(/<cbc:AdditionalAccountID>1<\/cbc:AdditionalAccountID>/);
-    expect(xml).toContain('<cbc:AdditionalAccountID>2</cbc:AdditionalAccountID>');
-    // Conteo: al menos 3 (persona + 2 retenedores).
-    const matches = xml.match(/<cbc:AdditionalAccountID>/g) || [];
-    expect(matches.length).toBeGreaterThanOrEqual(3);
+    // `cbc:AdditionalAccountID` es 1..1 en el perfil DIAN: UNA sola ocurrencia
+    // con el código de persona ('1' Jurídica). Gran contribuyente (O-13) y
+    // autorretenedor (O-15) NO generan hermanos adicionales — viajan en
+    // TaxLevelCode, ya afirmado arriba. Emitir un segundo hermano fue lo que
+    // produjo el rechazo «Receptor debe ser persona natural o jurídica» en
+    // FVJL7/FVJL8.
+    const customer_block = customerPartyXml(xml);
+    const additional_account_ids =
+      customer_block.match(/<cbc:AdditionalAccountID>/g) || [];
+    expect(additional_account_ids.length).toBe(1);
+    expect(customer_block).toMatch(
+      /<cbc:AdditionalAccountID>1<\/cbc:AdditionalAccountID>/,
+    );
   });
 
-  it('retenedor agente de retención — emite cbc:AdditionalAccountID=3 además del tipo de persona', () => {
+  it('cliente agente de retención — emite UN solo cbc:AdditionalAccountID y declara O-23 en cbc:TaxLevelCode cuando el RUT lo trae', () => {
     const xml = buildCustomerPartyXml({
       document_type: 'NIT',
       document_number: '900123456',
       verification_digit: '7',
       person_type: 'JURIDICA',
       legal_name: 'Retenedora S.A',
-      tax_responsibilities: ['O-13'],
+      tax_responsibilities: ['O-23'],
       ciiu_code: null,
       is_withholding_agent: true,
     });
 
-    // '1' (Persona Jurídica) + '1' (gran contribuyente O-13) + '3' (agente de retención).
-    expect(xml).toMatch(/<cbc:AdditionalAccountID>1<\/cbc:AdditionalAccountID>/);
-    expect(xml).toMatch(/<cbc:AdditionalAccountID>3<\/cbc:AdditionalAccountID>/);
+    // Un solo `cbc:AdditionalAccountID`, con el código de persona ('1').
+    const customer_block = customerPartyXml(xml);
+    const additional_account_ids =
+      customer_block.match(/<cbc:AdditionalAccountID>/g) || [];
+    expect(additional_account_ids.length).toBe(1);
+    expect(customer_block).toMatch(
+      /<cbc:AdditionalAccountID>1<\/cbc:AdditionalAccountID>/,
+    );
+    // O-23 (agente de retención IVA) declarado en TaxLevelCode, tomado del RUT
+    // (`tax_responsibilities`) — NUNCA derivado de `is_withholding_agent`.
+    expect(xml).toMatch(/TaxLevelCode[^>]*>O-23</);
+    // El literal que producía el rechazo no puede reaparecer.
+    expect(xml).not.toContain(
+      '<cbc:AdditionalAccountID>3</cbc:AdditionalAccountID>',
+    );
+  });
+
+  it('REGRESIÓN — O-13 + O-15 + is_withholding_agent ya no producen tres cbc:AdditionalAccountID', () => {
+    const xml = buildCustomerPartyXml({
+      document_type: 'NIT',
+      document_number: '900123456',
+      verification_digit: '7',
+      person_type: 'JURIDICA',
+      legal_name: 'Gran Contribuyente Autorretenedor S.A.S',
+      tax_responsibilities: ['O-13', 'O-15'],
+      ciiu_code: null,
+      is_withholding_agent: true,
+    });
+
+    // Antes del fix esta combinación —gran contribuyente + autorretenedor +
+    // agente de retención— producía TRES etiquetas: '1' (persona) + '1'
+    // (O-13) + '2' (O-15). Esta prueba es la red de seguridad: debe fallar si
+    // alguien reintroduce los marcadores.
+    const customer_block = customerPartyXml(xml);
+    const additional_account_ids =
+      customer_block.match(/<cbc:AdditionalAccountID>/g) || [];
+    expect(additional_account_ids.length).toBe(1);
   });
 });
 
-describe('UblCommonBuilder.toTaxLevelCode — enumeración cerrada (FAJ26)', () => {
+describe('toDianTaxLevelCode — enumeración cerrada (FAJ26)', () => {
+  // Migrado desde `UblCommonBuilder.toTaxLevelCode` (eliminado): la función
+  // canónica vive ahora en `constants/dian-tax-level-codes.ts` y es la que
+  // `buildSupplierParty`/`buildCustomerParty` consumen.
   it('conserva los códigos que la lista de cbc:TaxLevelCode acepta', () => {
-    expect(UblCommonBuilder.toTaxLevelCode('O-13')).toBe('O-13');
-    expect(UblCommonBuilder.toTaxLevelCode('O-13;O-47')).toBe('O-13;O-47');
-    expect(UblCommonBuilder.toTaxLevelCode('R-99-PN')).toBe('R-99-PN');
+    expect(toDianTaxLevelCode('O-13')).toBe('O-13');
+    expect(toDianTaxLevelCode('O-13;O-47')).toBe('O-13;O-47');
+    expect(toDianTaxLevelCode('R-99-PN')).toBe('R-99-PN');
   });
 
   it('descarta los códigos del RUT que NO están en la lista', () => {
     // Casilla 53 del RUT de Quickss. Ninguno pertenece a la enumeración de
     // TaxLevelCode: declararlos produjo FAJ26 «Responsabilidad informada por
     // emisor no valida según lista».
-    expect(UblCommonBuilder.toTaxLevelCode('O-05')).toBe('R-99-PN');
-    expect(
-      UblCommonBuilder.toTaxLevelCode('O-05;O-07;O-14;O-42;O-48'),
-    ).toBe('R-99-PN');
+    expect(toDianTaxLevelCode('O-05')).toBe('R-99-PN');
+    expect(toDianTaxLevelCode('O-05;O-07;O-14;O-42;O-48')).toBe('R-99-PN');
   });
 
   it('conserva solo la intersección cuando la cadena mezcla ambos catálogos', () => {
-    expect(UblCommonBuilder.toTaxLevelCode('O-05;O-13;O-48')).toBe('O-13');
+    expect(toDianTaxLevelCode('O-05;O-13;O-48')).toBe('O-13');
   });
 
   it('cae a R-99-PN ante vacío, nulo o basura', () => {
-    expect(UblCommonBuilder.toTaxLevelCode('')).toBe('R-99-PN');
-    expect(UblCommonBuilder.toTaxLevelCode(null)).toBe('R-99-PN');
-    expect(UblCommonBuilder.toTaxLevelCode('COMUN')).toBe('R-99-PN');
+    expect(toDianTaxLevelCode('')).toBe('R-99-PN');
+    expect(toDianTaxLevelCode(null)).toBe('R-99-PN');
+    expect(toDianTaxLevelCode('COMUN')).toBe('R-99-PN');
   });
 
   it('tolera espacios alrededor de los códigos', () => {
-    expect(UblCommonBuilder.toTaxLevelCode(' O-13 ; O-47 ')).toBe('O-13;O-47');
+    expect(toDianTaxLevelCode(' O-13 ; O-47 ')).toBe('O-13;O-47');
   });
 });
 

@@ -519,4 +519,74 @@ describe('FiscalInvoicePdfRenderService — integración con paper_definitions (
     // resolución de `paper-defaults` antes del builder.
     expect(debugSpy.mock.calls.some((c) => String(c[0] ?? '').includes('paper_definition_resolved'))).toBe(true);
   });
+
+  describe('resolveFiscalIssuerForPrint — resolución segura de régimen tributario', () => {
+    const baseOrg = {
+      name: 'Org Real',
+      legal_name: 'Org Real S.A.S.',
+      tax_id: '900000000-1',
+      fiscal_scope: 'STORE',
+      addresses: [],
+    };
+    const baseStore = {
+      name: 'Tienda Real',
+      addresses: [],
+    };
+
+    it('resuelve No responsable de IVA cuando el tenant tiene O-49 aunque tax_regime tenga COMUN rancio', () => {
+      const store = {
+        ...baseStore,
+        store_settings: {
+          settings: {
+            fiscal_data: {
+              legal_name: 'Mi Tienda Simplificada',
+              nit: '900123456',
+              nit_dv: '1',
+              tax_regime: 'COMUN', // Rancio
+              tax_responsibilities: ['O-49', 'R-99-PN'],
+            },
+          },
+        },
+      };
+      const issuer = resolveFiscalIssuerForPrint(baseOrg, store, false);
+      expect(issuer.tax_regime).toBe('No responsable de IVA');
+    });
+
+    it('resuelve Responsable de IVA cuando el tenant tiene O-48', () => {
+      const store = {
+        ...baseStore,
+        store_settings: {
+          settings: {
+            fiscal_data: {
+              legal_name: 'Mi Tienda Común',
+              nit: '900123456',
+              nit_dv: '1',
+              tax_regime: 'COMUN',
+              tax_responsibilities: ['O-48', 'R-99-PN'],
+            },
+          },
+        },
+      };
+      const issuer = resolveFiscalIssuerForPrint(baseOrg, store, false);
+      expect(issuer.tax_regime).toBe('Responsable de IVA');
+    });
+
+    it('resuelve Regimen Simple cuando el tenant tiene O-47', () => {
+      const store = {
+        ...baseStore,
+        store_settings: {
+          settings: {
+            fiscal_data: {
+              legal_name: 'Mi Tienda RST',
+              nit: '900123456',
+              nit_dv: '1',
+              tax_responsibilities: ['O-47'],
+            },
+          },
+        },
+      };
+      const issuer = resolveFiscalIssuerForPrint(baseOrg, store, false);
+      expect(issuer.tax_regime).toBe('Regimen Simple de Tributacion (RST)');
+    });
+  });
 });

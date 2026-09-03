@@ -97,7 +97,13 @@ export class RefundFlowService {
       where: { id: orderId },
       include: {
         stores: { select: { id: true, organization_id: true } },
+        // [resid-fiscal] — Sólo ítems no cancelados participan en el cálculo
+        // del refund. El `grand_total` ya excluye cancelados, pero este
+        // include relee líneas y las suma para devolver proporcionalmente;
+        // sin filtro, una línea cancelada entra como base de reembolso y
+        // devuelve dinero por algo que el cliente no compró.
         order_items: {
+          where: { cancelled_at: null },
           include: {
             products: { select: { id: true, track_inventory: true } },
             product_variants: { select: { id: true } },

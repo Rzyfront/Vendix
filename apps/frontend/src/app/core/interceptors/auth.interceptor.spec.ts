@@ -5,6 +5,7 @@ import {
 } from '@angular/common/http/testing';
 import {
   HttpClient,
+  HttpErrorResponse,
   provideHttpClient,
   withInterceptors,
 } from '@angular/common/http';
@@ -203,6 +204,78 @@ describe('authInterceptorFn', () => {
       expect(sessionServiceSpy.terminateSession).toHaveBeenCalledWith(
         'token_refresh_failed',
       );
+    });
+
+    it('does NOT terminate the session when the refresh is rate limited', () => {
+      // La cadena que este caso protege: sin `trust proxy` el backend
+      // compartía una sola cubeta de rate limit entre todos los usuarios, así
+      // que renovaciones perfectamente legítimas recibían 429. Tratarlo como
+      // un refresh token inválido expulsaba a la plataforma entera de golpe.
+      authServiceSpy.refreshToken.and.returnValue(
+        rxjsThrowError(
+          () =>
+            new HttpErrorResponse({
+              status: 429,
+              statusText: 'Too Many Requests',
+              error: { retryAfter: 300 },
+            }),
+        ) as any,
+      );
+
+      let captured: any = null;
+      httpClient.get(`${API}/test`).subscribe({
+        next: () => {
+          /* no llega */
+        },
+        error: (err: unknown) => (captured = err),
+      });
+
+      const req = httpMock.expectOne(`${API}/test`);
+      req.flush({}, { status: 401, statusText: 'Unauthorized' });
+
+      expect(sessionServiceSpy.terminateSession).not.toHaveBeenCalled();
+      // El 429 se propaga al llamante en vez de tragarse con EMPTY: quien pidió
+      // el dato debe poder reaccionar, y la sesión sigue viva.
+      expect(captured instanceof HttpErrorResponse).toBeTrue();
+      expect(captured.status).toBe(429);
+    });
+
+    it('no reintenta el refresco mientras dura el enfriamiento del 429', () => {
+      authServiceSpy.refreshToken.and.returnValue(
+        rxjsThrowError(
+          () =>
+            new HttpErrorResponse({
+              status: 429,
+              statusText: 'Too Many Requests',
+              error: { retryAfter: 300 },
+            }),
+        ) as any,
+      );
+
+      httpClient.get(`${API}/first`).subscribe({
+        next: () => undefined,
+        error: () => undefined,
+      });
+      httpMock
+        .expectOne(`${API}/first`)
+        .flush({}, { status: 401, statusText: 'Unauthorized' });
+      expect(authServiceSpy.refreshToken).toHaveBeenCalledTimes(1);
+
+      // Segundo 401 dentro de la ventana: la compuerta debe cortarlo antes de
+      // pedir otro refresco. Insistir sólo engordaría la cubeta agotada.
+      let captured: any = null;
+      httpClient.get(`${API}/second`).subscribe({
+        next: () => undefined,
+        error: (err: unknown) => (captured = err),
+      });
+      httpMock
+        .expectOne(`${API}/second`)
+        .flush({}, { status: 401, statusText: 'Unauthorized' });
+
+      expect(authServiceSpy.refreshToken).toHaveBeenCalledTimes(1);
+      expect(sessionServiceSpy.terminateSession).not.toHaveBeenCalled();
+      // Durante el enfriamiento se devuelve el 401 original, no el 429.
+      expect(captured.status).toBe(401);
     });
 
     it('should handle concurrent 401 requests correctly', () => {

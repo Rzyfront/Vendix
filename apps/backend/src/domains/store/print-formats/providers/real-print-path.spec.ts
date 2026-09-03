@@ -15,6 +15,10 @@ import {
   WithholdingEmployeeCertificateDataProvider,
 } from './withholding-employee.provider';
 import { mapFiscalDocumentToPrintData } from './fiscal-document-print.mapper';
+import { PrintLayoutComposerService } from '../services/print-layout-composer.service';
+import { PrintTemplateCompilerService } from '../services/print-template-compiler.service';
+import { PrintFormatDefinition } from '../interfaces/print-format.interface';
+import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 
 /**
  * El carril REAL de impresión no puede devolver una muestra.
@@ -199,7 +203,7 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
       daily_number: 7,
       business_date: new Date('2026-08-22'),
       ready_at: null,
-      kds: { id: 1, name: 'Cocina Caliente', station_type: 'kitchen' },
+      kds: { id: 1, name: 'Cocina Caliente', code: 'kitchen' },
       items: [
         {
           id: 1,
@@ -258,7 +262,7 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
       daily_number: 8,
       business_date: new Date('2026-08-22'),
       ready_at: null,
-      kds: { id: 1, name: 'Cocina Caliente', station_type: 'kitchen' },
+      kds: { id: 1, name: 'Cocina Caliente', code: 'kitchen' },
       items: [
         {
           id: 2,
@@ -302,7 +306,7 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
       daily_number: 9,
       business_date: new Date('2026-08-22'),
       ready_at: null,
-      kds: { id: 1, name: 'Cocina Caliente', station_type: 'kitchen' },
+      kds: { id: 1, name: 'Cocina Caliente', code: 'kitchen' },
       items: [
         {
           id: 3,
@@ -330,6 +334,95 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
     expect(data.items).toHaveLength(1);
   });
 
+  /**
+   * [QUI-727 F.1 — cierre, Step 8] — Un spec que afirma sobre el modelo de
+   * datos (`data.document.table_number`, como los dos tests de arriba) puede
+   * quedar en verde mientras el papel sale vacío: exactamente el defecto que
+   * la oleada 5 encontró en la sección `table_info`. Antes de C.3, la
+   * sección `table_info` de la plantilla sembrada NO declaraba `fields`, y
+   * el compositor no tenía `case 'table_info'` en el switch de
+   * `renderSection` — caía al `default: renderGenericFieldsSection(...)`,
+   * cuya primera instrucción es `if (fields.length === 0) return '';`.
+   * Resultado: sección habilitada, con título, que emitía cadena vacía.
+   *
+   * Este test grepea el HTML devuelto por `compose()` (el método real,
+   * ejercitando el switch completo), no el objeto `StandardPrintDataModel`.
+   * Reproduce a propósito la plantilla sembrada sin `fields` en la sección
+   * `table_info` — si el `case 'table_info'` se revierte, este caso debe
+   * fallar aunque los dos tests de arriba (que solo miran el modelo) sigan
+   * en verde.
+   */
+  it('compose(): el tiquete de cocina renderiza mesa y mesero en el HTML, no solo en el modelo de datos', () => {
+    const composer = new PrintLayoutComposerService(
+      new PrintTemplateCompilerService(),
+    );
+
+    const data: StandardPrintDataModel = {
+      store: { name: 'Restaurante Test' },
+      document: {
+        id: 42,
+        number: 'KITCHEN-42',
+        date: '2026-08-22',
+        date_formatted: '2026-08-22',
+        time: '14:25',
+        state: 'fired',
+        state_label: 'Disparado',
+        table_number: 'Mesa 7',
+        waiter_name: 'Ana Mesera',
+      },
+      items: [
+        {
+          index: 1,
+          product_name: 'Hamburguesa Doble',
+          quantity: 2,
+          unit_price: 0,
+          total_price: 0,
+        },
+      ],
+      taxes: [],
+      totals: {
+        subtotal: 0,
+        subtotal_formatted: '$0',
+        discount_total: 0,
+        discount_total_formatted: '$0',
+        shipping_total: 0,
+        shipping_total_formatted: '$0',
+        tax_total: 0,
+        tax_total_formatted: '$0',
+        grand_total: 0,
+        grand_total_formatted: '$0',
+      },
+    };
+
+    // Plantilla sembrada real: la sección `table_info` habilitada, SIN
+    // `fields` (así se siembra hoy — ver comentario en
+    // `print-layout-composer.service.ts` junto al `case 'table_info'`).
+    const definition: PrintFormatDefinition = {
+      v: 1,
+      paper: {
+        format: 'thermal_80',
+        width_mm: 80,
+        is_roll: true,
+        margin_mm: 5,
+        copies: 1,
+      },
+      sections: [
+        {
+          id: 'mesa-mesero',
+          type: 'table_info',
+          title: 'Mesa, Mesero y Turno',
+          enabled: true,
+          order: 1,
+        },
+      ],
+    };
+
+    const html = composer.compose(definition, data);
+
+    expect(html).toContain('Mesa 7');
+    expect(html).toContain('Ana Mesera');
+  });
+
   it('pos_sale_ticket: venta en mesa — incluye la sesión ABIERTA y mapea mesa + mesero', async () => {
     const findFirst = jest.fn().mockResolvedValue({
       id: 7,
@@ -340,8 +433,17 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
       discount_amount: 0,
       tax_amount: 19000,
       grand_total: 119000,
+      // QUI-751 — antes mockeaba `order_taxes: []`, una relación que NO existe
+      // en `schema.prisma`. Eso era la razón por la que el bug del include
+      // (también inexistente en `pos-sale-ticket.provider.ts`) pasaba este
+      // spec en verde: el mock satisfacía la consulta sin que Prisma
+      // validara nada. Ahora el fixture refleja la forma REAL: líneas con su
+      // `order_item_taxes[]`. Sin líneas, la agregación devuelve [].
+      // ESTE TEST NO CUBRE: que la agregación de `aggregateTaxes` sume
+      // `tax_amount` por `(tax_name, tax_rate)` ni que derive la base como
+      // `tax_amount / tax_rate` — probar eso requiere un mock con varias
+      // líneas y tasas distintas. Lo dejo declarado, no disfrazado de verde.
       order_items: [],
-      order_taxes: [],
       users: null,
       stores: {
         name: 'Tienda Test',
@@ -677,6 +779,44 @@ describe('mapeador compartido invoices → modelo de impresión', () => {
     });
 
     expect(d.totals?.withholding_total).toBe(0);
+  });
+
+  it('mapea correctamente columnas reales de Prisma (unit_price, total_amount, description, product_variant) sin caer a $0', () => {
+    const filaPrismaReal = {
+      ...filaViva,
+      payment_form: '1',
+      payment_means_code: '10',
+      due_date: new Date('2026-08-20T15:00:00.000Z'),
+      invoice_items: [
+        {
+          id: 101,
+          description: 'PANTALLA SAMSUNG GALAXY A21S',
+          quantity: 1,
+          unit_price: 40000,
+          total_amount: 40000,
+          discount_amount: 0,
+          tax_amount: 0,
+          product_id: 5,
+          product_variant: {
+            sku: 'PAN-SAM-A21S',
+            barcode: '770123456789',
+          },
+        },
+      ],
+    };
+
+    const d = mapFiscalDocumentToPrintData(filaPrismaReal);
+
+    expect(d.items).toHaveLength(1);
+    expect(d.items[0].product_name).toBe('PANTALLA SAMSUNG GALAXY A21S');
+    expect(d.items[0].variant_sku).toBe('PAN-SAM-A21S');
+    expect(d.items[0].quantity).toBe(1);
+    expect(d.items[0].unit_price).toBe(40000);
+    expect(d.items[0].unit_price_formatted).toBe('$40.000');
+    expect(d.items[0].total_price).toBe(40000);
+    expect(d.items[0].total_price_formatted).toBe('$40.000');
+    expect(d.document.payment_method).toBe('Contado (Efectivo)');
+    expect(d.document.valid_until_formatted).toBeDefined();
   });
 
   it('el NIT del emisor sale del RESOLVEDOR (fiscal_data de tienda gana al tax_id crudo de la organización) con DV derivado', () => {

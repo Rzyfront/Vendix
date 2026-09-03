@@ -8,4 +8,5 @@ export enum UploadEntityType {
   STORE_FAVICONS = 'store_favicons',
   MARKETING_ADS = 'marketing_ads',
   RECEIPTS = 'receipts',
+  BANK_ACCOUNT_LOGOS = 'bank_account_logos',
 }

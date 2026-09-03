@@ -238,19 +238,6 @@ export class SelectorComponent implements ControlValueAccessor {
   private readonly searchInput =
     viewChild<ElementRef<HTMLInputElement>>('searchInput');
 
-  constructor() {
-    // Al abrir el dropdown searchable, enfocar el input de búsqueda para que el
-    // usuario pueda teclear de inmediato (UX: no exigir un click extra). El
-    // effect re-corre cuando isOpen() o la query signal cambian; en zoneless la
-    // escritura del signal agenda el render y la query se resuelve antes de esta
-    // pasada del effect.
-    effect(() => {
-      if (this.isOpen() && this.searchable()) {
-        this.searchInput()?.nativeElement.focus();
-      }
-    });
-  }
-
   readonly id = input<string>(`selector-${Math.random().toString(36).substr(2, 9)}`);
   readonly label = input<string>('');
   readonly placeholder = input<string>('');
@@ -268,6 +255,28 @@ export class SelectorComponent implements ControlValueAccessor {
    *  native <select>. Default false keeps the existing native behaviour, so no
    *  existing usage changes unless it opts in. */
   readonly searchable = input<boolean>(false);
+  readonly value = input<string | number | null | undefined>(undefined);
+
+  constructor() {
+    // Sincroniza el valor explícito del input si el consumidor no usa ngModel/CVA
+    effect(() => {
+      const v = this.value();
+      if (v !== undefined) {
+        this.selectedValue.set(v);
+      }
+    });
+
+    // Al abrir el dropdown searchable, enfocar el input de búsqueda para que el
+    // usuario pueda teclear de inmediato (UX: no exigir un click extra). El
+    // effect re-corre cuando isOpen() o la query signal cambian; en zoneless la
+    // escritura del signal agenda el render y la query se resuelve antes de esta
+    // pasada del effect.
+    effect(() => {
+      if (this.isOpen() && this.searchable()) {
+        this.searchInput()?.nativeElement.focus();
+      }
+    });
+  }
 
   readonly valueChange = output<string | number | null>();
   readonly blur = output<void>();

@@ -73,12 +73,11 @@ import {
         ></app-stats>
         <app-stats
           title="Monto Total"
-          [value]="stats().total_amount"
+          [value]="stats().total_amount | currency: 0"
           iconName="dollar-sign"
           iconBgColor="bg-purple-100"
           iconColor="text-purple-600"
           [clickable]="false"
-          prefix="$"
         ></app-stats>
         <app-stats
           title="Cuentas Activas"
@@ -352,12 +351,14 @@ export class UnassignedPaymentsComponent {
     Math.max(1, Math.ceil(this.totalItems() / this.limit())),
   );
 
+  // Suma del conjunto filtrado completo, la calcula el backend (`meta.total_amount`).
+  // Sumar `payments()` aquí daba el total de la página visible —25 de 80 filas—
+  // y la tarjeta contradecía al contador de la lista que tiene al lado.
+  totalAmount = signal(0);
+
   stats = computed(() => ({
     total: this.totalItems(),
-    total_amount: this.payments().reduce(
-      (sum, p) => sum + (Number(p.amount) || 0),
-      0,
-    ),
+    total_amount: this.totalAmount(),
   }));
 
   // ── Asignación
@@ -383,6 +384,10 @@ export class UnassignedPaymentsComponent {
 
   constructor() {
     this.loadPayments();
+    // La tarjeta "Cuentas Activas" lee `accounts()`, así que el dato tiene que
+    // existir al entrar: cargarlo solo al abrir el modal de asignación dejaba la
+    // tarjeta en 0 aunque la tienda tuviera cuentas activas.
+    this.loadAccounts();
   }
 
   loadPayments(): void {
@@ -398,6 +403,7 @@ export class UnassignedPaymentsComponent {
         next: (res) => {
           this.payments.set(res.data || []);
           this.totalItems.set(res.meta?.total ?? 0);
+          this.totalAmount.set(res.meta?.total_amount ?? 0);
           this.loading.set(false);
         },
         error: () => {
@@ -426,7 +432,10 @@ export class UnassignedPaymentsComponent {
     this.selectedPayment.set(payment);
     this.selectedAccountId.set(null);
     this.isAssignModalOpen.set(true);
-    this.loadAccounts();
+    // Ya se cargan al entrar a la pantalla; solo se reintenta si aquella falló.
+    if (this.accounts().length === 0) {
+      this.loadAccounts();
+    }
   }
 
   closeAssignModal(): void {

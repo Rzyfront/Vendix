@@ -12,7 +12,13 @@ import {
   ParseIntPipe,
   HttpCode,
   HttpStatus,
+  Sse,
+  ForbiddenException,
+  MessageEvent,
 } from '@nestjs/common';
+import { Observable, defer, from, interval, merge } from 'rxjs';
+import { catchError, map } from 'rxjs/operators';
+import { Request } from 'express';
 import { Logger } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import {
@@ -41,6 +47,12 @@ import { PurchaseOrdersService } from './purchase-orders/purchase-orders.service
 import { PurchaseOrderQueryDto } from './purchase-orders/dto/purchase-order-query.dto';
 import { ReturnOrdersService } from './return-orders/return-orders.service';
 import { ReturnOrderQueryDto } from './return-orders/dto/return-order-query.dto';
+// Carril B - B3: SSE compartido por tienda. El hub vive en
+// NotificationsSseService (Map<store_id, Subject>). OrderSseService empuja
+// eventos tipados al bus desde OrdersService via @OnEvent. Aqui suscribimos
+// el stream y discriminamos por `payload.data.order_id` en el cliente.
+import { NotificationsSseService } from '../notifications/notifications-sse.service';
+import { RequestContextService } from '@common/context/request-context.service';
 
 @Controller('store/orders')
 @UseGuards(PermissionsGuard)
@@ -54,6 +66,9 @@ export class OrdersController {
     private readonly settingsService: SettingsService,
     private readonly prisma: StorePrismaService,
     private readonly ecommercePrisma: EcommercePrismaService,
+    // Carril B - B3: NotificationsSseService es el hub por store_id del que
+    // OrderSseService empuja. Aqui suscribimos el stream del detalle de orden.
+    private readonly sseService: NotificationsSseService,
   ) {}
 
   // CP-POS-SVC-PERF-001 / Bugfix — Nest can't reflect Logger as a
@@ -217,6 +232,69 @@ export class OrdersController {
         error.status || 400,
       );
     }
+  }
+
+  /**
+   * Carril B - B3: SSE del detalle de orden. Colocado ARRIBA de `@Get(':id')`
+   * por la misma razon que `@Get('return-orders')`, `@Get('purchase-orders')`,
+   * etc. (ver comentario en :179): Nest resuelve rutas por orden de registro,
+   * asi que `store/orders/stream` debe matchear antes que el `:id` parametrizado.
+   *
+   * - `@Req() req: Request` (no `@Query() DTO`): EventSource solo puede
+   *   autenticarse por `?token=` (no header Authorization), y el
+   *   ValidationPipe global con `forbidNonWhitelisted: true` rechazaria
+   *   esa propiedad `token` con BadRequestException, que en SSE se emite
+   *   como `event: error` y tumba el stream. Mismo motivo que kitchen-fire.
+   * - Sin snapshot inicial: el cliente ya cargo la orden via
+   *   `GET /store/orders/:id` antes de abrir el stream; aqui solo entran
+   *   cambios en vivo. Cuando existan `order.paid` y el `order_id` del
+   *   payload de mesa (encargados a lina), se filtran en cliente por
+   *   `payload.data.order_id === idActual()`.
+   */
+  @Sse('stream')
+  @Permissions('store:orders:read')
+  stream(@Req() req: Request): Observable<MessageEvent> {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id) {
+      throw new ForbiddenException('Store context required');
+    }
+    const store_id = context.store_id;
+
+    const subject = this.sseService.getOrCreate(store_id);
+
+    req.on('close', () => {
+      this.sseService.unsubscribe(store_id);
+    });
+
+    // Live: cada push de OrderSseService llega al subject del store. El cliente
+    // discrimina por `payload.data.order_id`.
+    const live$ = subject.pipe(
+      map(
+        (payload) =>
+          ({
+            data: JSON.stringify(payload),
+          }) as MessageEvent,
+      ),
+    );
+
+    // Heartbeat 30s para que EventSource / proxies vean el stream vivo.
+    const heartbeat$ = interval(30_000).pipe(
+      map(
+        () =>
+          ({
+            data: `: heartbeat ${Date.now()}`,
+          }) as MessageEvent,
+      ),
+    );
+
+    // `defer(() => from([]))` + `catchError` evitan que un fallo en el setup
+    // tumbe el stream. Hoy no hay snapshot, pero la forma queda lista para
+    // cuando el cliente quiera re-hidratar al reconectar.
+    const snapshot$ = defer(() => from([] as MessageEvent[])).pipe(
+      catchError(() => from([] as MessageEvent[])),
+    );
+
+    return merge(snapshot$, live$, heartbeat$);
   }
 
   @Get(':id')

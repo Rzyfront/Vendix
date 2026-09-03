@@ -29,7 +29,6 @@ import {
 } from '../../../../../../../shared/components/multi-selector/multi-selector.component';
 import { PanelUiModulesEditorComponent } from '../../../../../../../shared/components/panel-ui-modules-editor/panel-ui-modules-editor.component';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
-import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import {
   INDUSTRY_METADATA,
   STORE_INDUSTRIES,
@@ -71,7 +70,6 @@ const nonEmptyArray: ValidatorFn = (control) => {
     MultiSelectorComponent,
     PanelUiModulesEditorComponent,
     ModalComponent,
-    IconComponent,
   ],
   templateUrl: './general-settings-form.component.html',
   styleUrls: ['./general-settings-form.component.scss'],

@@ -9,7 +9,6 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 
 import { AnalyticsService } from '../../services/analytics.service';
@@ -43,7 +42,6 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
     ChartComponent,
     StatsComponent,
     IconComponent,
-    ExportButtonComponent,
     AnalyticsCardComponent,
 
     OptionsDropdownComponent,],

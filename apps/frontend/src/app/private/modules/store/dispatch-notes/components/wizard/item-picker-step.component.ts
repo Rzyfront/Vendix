@@ -16,7 +16,9 @@ import {
 } from '@angular/forms';
 import { forkJoin, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
-import * as XLSX from 'xlsx';
+// Solo tipos: el runtime de xlsx (7,2 MB) entra por `await import` dentro del
+// handler, que es el unico camino que lo necesita.
+import type * as XLSX from 'xlsx';
 
 import {
   AiReviewAckComponent,
@@ -949,11 +951,12 @@ export class ItemPickerStepComponent {
 
     this.parsing.set(true);
     const reader = new FileReader();
-    reader.onload = (e: any) => {
+    reader.onload = async (e: any) => {
       try {
-        const wb: XLSX.WorkBook = XLSX.read(e.target.result, { type: 'binary' });
+        const xlsx = await import('xlsx');
+        const wb: XLSX.WorkBook = xlsx.read(e.target.result, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+        const rows = xlsx.utils.sheet_to_json(ws, { header: 1 }) as any[][];
         this.parsing.set(false);
 
         if (!rows || rows.length < 2) {

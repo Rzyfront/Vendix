@@ -887,6 +887,12 @@ export interface ReceiptsSettings {
    * con el documento de venta. Default false (opt-in por admin).
    */
   print_dispatch_ticket_auto_on_postventa?: boolean;
+  /**
+   * Decisión del usuario 2026-08-31: habilita el tiquete de despacho
+   * como tiquete de reclamo en ventas de mostrador (`direct_delivery`)
+   * y para llevar (`pickup`). Enmienda a ADR-6; default false.
+   */
+  print_dispatch_ticket_on_counter?: boolean;
 }
 
 export interface BusinessHoursBlock {

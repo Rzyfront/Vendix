@@ -36,6 +36,7 @@ import { UomService } from '../../services/uom.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import { PosBarcodeService } from '../../../pos/services/pos-barcode.service';
 import {
   PopProduct,
   PopProductVariant,
@@ -156,10 +157,18 @@ export type { PopProductConfigResult };
                     [required]="true"
                   ></app-input>
                   <app-input
-                    label="Descripción corta"
-                    formControlName="description"
-                    placeholder="Opcional"
+                    label="Código de Barras"
+                    formControlName="barcode"
+                    placeholder="Escanea o escribe el código"
+                    tooltipText="Código de barras físico del producto (EAN, UPC). Al pistolear con el escáner se rellena automáticamente."
                   ></app-input>
+                  <div class="md:col-span-2">
+                    <app-input
+                      label="Descripción corta"
+                      formControlName="description"
+                      placeholder="Opcional"
+                    ></app-input>
+                  </div>
                 </div>
 
                 <!-- Retail vs ingredient classification (only when the
@@ -779,6 +788,7 @@ export type { PopProductConfigResult };
 export class PopProductConfigModalComponent {
   private destroyRef = inject(DestroyRef);
   private fb = inject(FormBuilder);
+  private barcodeService = inject(PosBarcodeService);
   readonly isOpen = input(false);
   readonly product = input<PopProduct | null>(null);
   readonly initialVariant = input<PopProductVariant | null>(null);
@@ -827,6 +837,7 @@ export class PopProductConfigModalComponent {
   readonly identityForm: FormGroup = this.fb.group({
     name: ['', [Validators.required, Validators.maxLength(255)]],
     code: ['', [Validators.required, Validators.maxLength(64)]],
+    barcode: ['', [Validators.maxLength(64)]],
     description: [''],
     quantity: [1, [Validators.required, Validators.min(1)]],
     unitCost: [0, [Validators.required, Validators.min(0)]],
@@ -1173,6 +1184,17 @@ export class PopProductConfigModalComponent {
         cap.initFromInputs();
       }
     });
+
+    // Scan-to-fill: a barcode scan (gated by barcode_scanner.enabled) automatically fills
+    // the barcode input when creating a product in the POP modal.
+    this.barcodeService.scans$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((code) => {
+        if (this.isOpen() && this.createMode()) {
+          this.identityForm.get('barcode')?.setValue(code);
+          this.toastService.info(`Código de barras capturado: ${code}`);
+        }
+      });
   }
 
   /** Shared UoM-capture instance (present only in ingredient mode). */
@@ -1465,6 +1487,7 @@ export class PopProductConfigModalComponent {
       const prebulkData: PreBulkData = {
         name: v.name,
         code: v.code,
+        barcode: v.barcode ? v.barcode.trim() : undefined,
         description: v.description || undefined,
         base_price: Number(v.basePrice) || 0,
         is_ingredient: ingredient,
@@ -1782,6 +1805,7 @@ export class PopProductConfigModalComponent {
     this.identityForm.reset({
       name: '',
       code: '',
+      barcode: '',
       description: '',
       quantity: 1,
       unitCost:
@@ -1850,3 +1874,4 @@ export class PopProductConfigModalComponent {
     this.creatingVariants.set(false);
   }
 }
+

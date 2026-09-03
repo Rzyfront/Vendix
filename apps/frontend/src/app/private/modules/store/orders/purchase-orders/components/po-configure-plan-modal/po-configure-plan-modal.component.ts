@@ -23,7 +23,6 @@ import { scan } from 'rxjs/operators';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { InputButtonsComponent } from '../../../../../../../shared/components/input-buttons/input-buttons.component';
-import { CurrencyPipe } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 
@@ -68,7 +67,6 @@ function todayISO(): string {
     IconComponent,
     InputComponent,
     InputButtonsComponent,
-    CurrencyPipe,
   ],
   template: `
     @if (isOpen()) {

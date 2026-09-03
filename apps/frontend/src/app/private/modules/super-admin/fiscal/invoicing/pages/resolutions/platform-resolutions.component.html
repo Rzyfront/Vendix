@@ -33,41 +33,16 @@
 
   <!-- Main Card with Table -->
   <app-card [responsive]="true" [padding]="false">
-    <!-- Header with Actions -->
-    <div
-      class="sticky top-[99px] z-10 bg-background px-4 py-3 border-b border-border flex flex-col md:flex-row md:items-center md:justify-between gap-3"
-    >
-      <div>
-        <h2 class="text-sm font-semibold text-text-primary uppercase tracking-wide">
-          Resoluciones DIAN plataforma ({{ totalCount() }})
-        </h2>
-        <p class="text-xs text-text-secondary">
-          Rangos de numeración autorizados por la DIAN para la organización plataforma.
-        </p>
-      </div>
-
-      <div class="flex items-center gap-2">
-        <app-button
-          type="button"
-          variant="outline"
-          size="sm"
-          title="Leer los datos desde una foto o PDF de la resolución"
-          (clicked)="openScanner()"
-        >
-          <app-icon slot="icon" name="sparkles" [size]="14"></app-icon>
-          Escanear con IA
-        </app-button>
-        <app-button
-          type="button"
-          variant="primary"
-          size="sm"
-          (clicked)="openModal()"
-        >
-          <app-icon slot="icon" name="plus" [size]="14"></app-icon>
-          Nueva resolución
-        </app-button>
-      </div>
-    </div>
+    <!--
+      Sin barra de cabecera propia: el título, el subtítulo y los dos botones
+      («Escanear con IA» y «Nueva resolución») los publica el componente en el
+      sticky-header del shell vía ModuleShellActionsService. Lo que había acá
+      era una SEGUNDA barra fija a top-[99px], justo debajo de la del módulo,
+      repitiendo el mismo encabezado.
+    -->
+    <p class="px-4 pt-3 text-xs text-text-secondary">
+      Rangos de numeración autorizados por la DIAN para la organización plataforma.
+    </p>
 
     <div class="p-2 md:p-4">
       <app-responsive-data-view

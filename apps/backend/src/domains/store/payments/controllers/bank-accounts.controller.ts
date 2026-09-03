@@ -29,6 +29,13 @@ import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
  * `{ id, name, bank_name, account_number }`. Permisos: lectura
  * `store:settings:read`; escrituras `store:settings:write` (el cajero solo
  * tiene `read`, así que solo el admin configura cuentas).
+ *
+ * Los handlers NO envuelven el servicio en try/catch: `responseService.error()`
+ * arma el body pero NO cambia el status HTTP, así que un `return` de error
+ * salía como 2xx (201 en el `create`) con `success:false` y el `catchError` del
+ * frontend nunca disparaba — el editor de settings guardaba la cuenta sin `id`
+ * en silencio. Se deja subir la excepción al filtro global, que sí traduce el
+ * status y limpia el error crudo de Prisma.
  */
 @ApiTags('Store Bank Accounts')
 @Controller('store/payments/bank-accounts')
@@ -43,46 +50,30 @@ export class BankAccountsController {
   @Get()
   @Permissions('store:settings:read')
   async list() {
-    try {
-      const result = await this.bankAccountsService.listForStore();
-      return this.responseService.success(result, 'Cuentas bancarias obtenidas');
-    } catch (error) {
-      return this.responseService.error(error.message || 'Error al listar cuentas', error);
-    }
+    const result = await this.bankAccountsService.listForStore();
+    return this.responseService.success(result, 'Cuentas bancarias obtenidas');
   }
 
   @Post()
   @Permissions('store:settings:write')
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() dto: CreateBankAccountDto) {
-    try {
-      const result = await this.bankAccountsService.create(dto);
-      return this.responseService.success(result, 'Cuenta bancaria creada');
-    } catch (error) {
-      return this.responseService.error(error.message || 'Error al crear cuenta', error);
-    }
+    const result = await this.bankAccountsService.create(dto);
+    return this.responseService.success(result, 'Cuenta bancaria creada');
   }
 
   @Patch(':id')
   @Permissions('store:settings:write')
   async update(@Param('id') id: string, @Body() dto: UpdateBankAccountDto) {
-    try {
-      const result = await this.bankAccountsService.update(+id, dto);
-      return this.responseService.success(result, 'Cuenta bancaria actualizada');
-    } catch (error) {
-      return this.responseService.error(error.message || 'Error al actualizar cuenta', error);
-    }
+    const result = await this.bankAccountsService.update(+id, dto);
+    return this.responseService.success(result, 'Cuenta bancaria actualizada');
   }
 
   @Delete(':id')
   @Permissions('store:settings:write')
   @HttpCode(HttpStatus.OK)
   async close(@Param('id') id: string) {
-    try {
-      const result = await this.bankAccountsService.close(+id);
-      return this.responseService.success(result, 'Cuenta bancaria cerrada');
-    } catch (error) {
-      return this.responseService.error(error.message || 'Error al cerrar cuenta', error);
-    }
+    const result = await this.bankAccountsService.close(+id);
+    return this.responseService.success(result, 'Cuenta bancaria cerrada');
   }
 }

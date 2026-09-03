@@ -52,6 +52,15 @@ export interface KdsSession {
   kds?: Pick<KdsStation, 'id' | 'name' | 'code'>;
   opened_by_user?: KdsSessionUserRef;
   closed_by_user?: KdsSessionUserRef | null;
+  /** QUI-XXX: último momento en que este turno tuvo actividad. La UI lo usa
+   *  para mostrar "vencida en Xs" y el operador decide abrir otro o esperar.
+   *  Null si el backend aún no actualizó el heartbeat en esta sesión. */
+  last_seen_at?: string | null;
+  /** QUI-XXX: usuario que tomó esta estación por la fuerza (cierre explícito
+   *  por owner/admin). Solo poblado en sesiones CERRADAS por toma forzada —
+   *  la sesión abierta de turno nunca lleva esta marca. */
+  force_taken_by_user_id?: number | null;
+  force_taken_by_user?: KdsSessionUserRef | null;
 }
 
 /**
@@ -87,4 +96,26 @@ export interface KdsConsumptionHistoryRow {
   dish_name: string | null;
   order_id: number | null;
   order_number: string | null;
+}
+
+/**
+ * Movimiento de consumo SIN sesión atribuida (QUI-760).
+ *
+ * Aparece cuando el fire se ejecutó mientras ninguna estación tenía turno
+ * abierto. Antes del backfill estos movimientos quedaban huérfanos para
+ * siempre; ahora se imputan retroactivamente al abrir sesión, pero los
+ * **previos a la primera sesión abierta de la tienda** siguen sin dueño y se
+ * exponen acá. Mismo payload que el historial del turno: una fila por
+ * insumo POR PEDIDO. ADR-10 — sin dinero en el payload.
+ */
+export interface KdsUnattributedConsumptionRow {
+  transaction_id: number;
+  consumed_at: string;
+  quantity: number;
+  ingredient: { id: number; name: string; sku: string | null } | null;
+}
+
+export interface KdsUnattributedConsumption {
+  movement_count: number;
+  movements: KdsUnattributedConsumptionRow[];
 }

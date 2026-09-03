@@ -15,8 +15,6 @@ import {
 } from '../../../../../../../shared/components/selector/selector.component';
 import {
   AlertBannerComponent,
-  BadgeComponent,
-  IconComponent,
 } from '../../../../../../../shared/components/index';
 import { PromotionsSettings } from '../../../../../../../core/models/store-settings.interface';
 
@@ -37,8 +35,6 @@ const DEFAULTS: PromotionsSettings = {
     SettingToggleComponent,
     SelectorComponent,
     AlertBannerComponent,
-    BadgeComponent,
-    IconComponent,
   ],
   template: `
     <form [formGroup]="form" class="space-y-6">
@@ -48,7 +44,7 @@ const DEFAULTS: PromotionsSettings = {
             Modo de Evaluación de Promociones
           </label>
           <p class="text-xs text-text-secondary mb-1">
-            Elegí <strong>un solo modo</strong> — seleccionar otro modo reemplaza el actual.
+            Elige <strong>un solo modo</strong> — seleccionar otro modo reemplaza el actual.
           </p>
           <p class="text-xs text-text-secondary mb-3">
             Define cómo el motor resuelve el caso en que un carrito califica para varias promociones simultáneamente.

@@ -1,5 +1,12 @@
-import { DatePipe } from '@angular/common';
-import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  OnDestroy,
+  OnInit,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   FormBuilder,
@@ -10,13 +17,11 @@ import {
 } from '@angular/forms';
 
 import {
-  BadgeComponent,
   ButtonComponent,
   CardComponent,
   ConfirmationModalComponent,
   DianResolutionScanResult,
   DianResolutionScannerModalComponent,
-  EmptyStateComponent,
   IconComponent,
   InputComponent,
   ItemListCardConfig,
@@ -37,6 +42,7 @@ import {
   UpdatePlatformResolutionDto,
 } from '../../../../subscriptions/interfaces/fiscal-billing.interface';
 import { FiscalBillingAdminService } from '../../../../subscriptions/services/fiscal-billing-admin.service';
+import { ModuleShellActionsService } from '../../../../../../../shared/components/module-tabs-shell/module-shell-actions.service';
 import { PlatformInvoicingStore } from '../../platform-invoicing.store';
 import {
   ENVIRONMENT_OPTIONS,
@@ -67,13 +73,10 @@ interface ResolutionFormControls {
   standalone: true,
   imports: [
     ReactiveFormsModule,
-    DatePipe,
-    BadgeComponent,
     ButtonComponent,
     CardComponent,
     ConfirmationModalComponent,
     DianResolutionScannerModalComponent,
-    EmptyStateComponent,
     IconComponent,
     InputComponent,
     ModalComponent,
@@ -83,12 +86,44 @@ interface ResolutionFormControls {
   ],
   templateUrl: './platform-resolutions.component.html',
 })
-export class PlatformResolutionsComponent {
+export class PlatformResolutionsComponent implements OnInit, OnDestroy {
   private readonly fb = inject(FormBuilder);
+  private readonly shellActions = inject(ModuleShellActionsService);
   private readonly fiscal = inject(FiscalBillingAdminService);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
   protected readonly store = inject(PlatformInvoicingStore);
+
+  /**
+   * Los botones de la pantalla viven en el sticky-header del shell, no en una
+   * barra propia. Antes esta pagina dibujaba su propia cabecera sticky a
+   * `top-[99px]`, justo debajo de la del shell: dos barras pegadas, ambas
+   * fijas, repitiendo el titulo del modulo y robando ~90px de alto util en
+   * movil. El titulo y el conteo ya los da el shell.
+   */
+  ngOnInit(): void {
+    this.shellActions.set([
+      {
+        id: 'scan',
+        label: 'Escanear con IA',
+        variant: 'outline',
+        icon: 'sparkles',
+        title: 'Leer los datos desde una foto o PDF de la resolución',
+        run: () => this.openScanner(),
+      },
+      {
+        id: 'new',
+        label: 'Nueva resolución',
+        variant: 'primary',
+        icon: 'plus',
+        run: () => this.openModal(),
+      },
+    ]);
+  }
+
+  ngOnDestroy(): void {
+    this.shellActions.clear();
+  }
 
   readonly modalOpen = signal(false);
   readonly saving = signal(false);

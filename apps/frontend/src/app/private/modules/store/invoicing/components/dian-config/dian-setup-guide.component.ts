@@ -19,6 +19,19 @@ import {
 interface ChecklistItem {
   label: string;
   done: boolean;
+  /**
+   * El paso ocurre FUERA de Vendix y ninguna lectura nuestra lo puede probar.
+   *
+   * Es un tercer estado y no un `done: false` a secas porque los otros ocho se
+   * derivan de evidencia: ahí, gris significa «esto todavía no pasó». Aplicar
+   * esa lectura a un hecho que no observamos dejaría un paso condenado a no
+   * ponerse verde nunca, y el comerciante leería como bloqueo lo que en realidad
+   * es un trámite suyo en otro portal. Marcarlo `done` sería peor: inventar
+   * evidencia es exactamente la mentira que esta guía existe para no contar.
+   */
+  external?: boolean;
+  /** Dónde se hace y qué se rompe si no se hace. Sólo para los pasos externos. */
+  hint?: string;
 }
 
 /**
@@ -45,6 +58,23 @@ interface TestResultEvidence {
 type ResolutionWithDocumentType = InvoiceResolution & {
   document_type?: string | null;
 };
+
+/**
+ * Lo ÚNICO que el checklist juzga de una resolución: si está activa y qué
+ * documento numera.
+ *
+ * Se acepta esta forma mínima en vez de `InvoiceResolution` completa porque la
+ * pantalla donde el comerciante se queda atascado —el detalle de una
+ * habilitación— trabaja con `FiscalReadinessResolution`, la fila del agregado de
+ * estado fiscal, que no carga `organization_id` ni `store_id` ni obliga a
+ * `resolution_number`. Exigir la fila ancha era lo único que impedía montar la
+ * guía junto al panel de rangos, y una guía que no se puede montar no le ahorra
+ * el rodeo a nadie.
+ */
+export interface SetupGuideResolution {
+  is_active: boolean;
+  document_type?: string | null;
+}
 
 /**
  * Guía contextual de habilitación DIAN para tiendas.
@@ -86,17 +116,44 @@ type ResolutionWithDocumentType = InvoiceResolution & {
       <ul class="space-y-2 pt-2 border-t border-border">
         @for (item of checklist(); track item.label) {
           <li class="flex items-start gap-2 text-xs">
+            <!-- El paso externo no usa el circulo vacio de los demas: ahi vacio
+                 significa «te falta hacerlo dentro de Vendix», y este no se hace
+                 aqui ni lo podemos ver. El icono de enlace externo dice a donde
+                 va sin prometer que lo estemos vigilando.
+                 (Sin backticks: este comentario vive dentro del template literal
+                 del componente y un backtick lo corta.) -->
             <app-icon
-              [name]="item.done ? 'check-circle' : 'circle'"
+              [name]="
+                item.external
+                  ? 'external-link'
+                  : item.done
+                    ? 'check-circle'
+                    : 'circle'
+              "
               [size]="14"
               [class]="
-                item.done ? 'text-success mt-0.5' : 'text-text-secondary mt-0.5'
+                item.done && !item.external
+                  ? 'text-success mt-0.5'
+                  : 'text-text-secondary mt-0.5'
               "
             ></app-icon>
-            <span
-              [ngClass]="item.done ? 'text-text-primary' : 'text-text-secondary'"
-            >
-              {{ item.label }}
+            <span class="min-w-0">
+              <span
+                [ngClass]="
+                  item.done && !item.external
+                    ? 'text-text-primary'
+                    : 'text-text-secondary'
+                "
+              >
+                {{ item.label }}
+              </span>
+              @if (item.hint; as hint) {
+                <span
+                  class="block text-[11px] leading-relaxed text-text-secondary"
+                >
+                  {{ hint }}
+                </span>
+              }
             </span>
           </li>
         }
@@ -121,7 +178,7 @@ export class DianSetupGuideComponent {
    * Resoluciones del tenant. Opcional a propósito: hoy hay consumidores que sólo
    * pasan «config», y no deben perder nada por no pasarla.
    */
-  readonly resolutions = input<InvoiceResolution[]>([]);
+  readonly resolutions = input<SetupGuideResolution[]>([]);
 
   /**
    * ¿El tenant tiene resolución de numeración de factura de venta vigente?
@@ -173,12 +230,6 @@ export class DianSetupGuideComponent {
         done: !!cfg?.test_set_id,
       },
       {
-        label: 'Resolución de numeración asignada',
-        // El respaldo sobre «last_test_result» se conserva para el consumidor que
-        // no pasa «resolutions»: sin él, ese consumidor quedaría peor que antes.
-        done: this.hasSalesInvoiceResolution() || !!test?.resolution_id,
-      },
-      {
         // Evidencia MÁS fuerte que el test de conexión, que da por «conectado» un
         // SOAP Fault —o sea, la DIAN rechazando la autenticación—. Si existe un
         // ZipKey, entonces conexión, WS-Security y firma del certificado
@@ -191,6 +242,34 @@ export class DianSetupGuideComponent {
         // el bug: un tenant con la DIAN sin haber juzgado nada veía el paso verde.
         label: 'Set de pruebas aprobado (habilitación)',
         done: isTestSetApproved(cfg?.enablement_status),
+      },
+      {
+        // Trámite del contribuyente en el portal de la DIAN, no una escritura
+        // nuestra: ninguna lectura de Vendix —ni la configuración, ni el agregado
+        // fiscal, ni el último resultado de pruebas— devuelve si el prefijo quedó
+        // asociado al Software ID. Por eso viaja como paso externo y nunca en
+        // verde. Va después de la aprobación del set porque el portal sólo lo
+        // deja hacer sobre un software ya habilitado, y antes de la resolución
+        // porque sin la asociación la DIAN rechaza los documentos aunque el rango
+        // esté vigente y todo lo demás esté en orden.
+        label: 'Prefijo asociado al software en el portal MUISCA',
+        done: false,
+        external: true,
+        hint:
+          'Se hace en el portal de la DIAN, en Configuración / Gestionar Asociación ' +
+          'de Prefijos. Vendix no puede comprobarlo desde aquí.',
+      },
+      {
+        // El nombre dice de dónde tiene que salir. La ClTec se trae de la DIAN
+        // máquina a máquina; transcribirla del PDF fue la causa del incidente
+        // FAD06 («Valor del CUFE no está calculado correctamente»): la clave
+        // tecleada no era la autorizada, el CUFE salió mal y el consecutivo que
+        // la DIAN ya había contado se gastó sin recuperarse. Un rango se aplica,
+        // no se copia.
+        label: 'Resolución de numeración aplicada desde la DIAN',
+        // El respaldo sobre «last_test_result» se conserva para el consumidor que
+        // no pasa «resolutions»: sin él, ese consumidor quedaría peor que antes.
+        done: this.hasSalesInvoiceResolution() || !!test?.resolution_id,
       },
       {
         label: 'Emisión activa en producción',

@@ -7,7 +7,6 @@ import { StatsComponent } from '../../../../../../shared/components/stats/stats.
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
-import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 import { ProfitLossSummary, RefundsSummary, AnalyticsService } from '../../services/analytics.service';
 import { EChartsOption } from 'echarts';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
@@ -33,7 +32,6 @@ import {
     ChartComponent,
     IconComponent,
     CurrencyPipe,
-    ExportButtonComponent,
     AnalyticsCardComponent,
 
     OptionsDropdownComponent,],

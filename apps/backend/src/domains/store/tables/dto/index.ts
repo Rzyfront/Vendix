@@ -16,6 +16,9 @@ export { AssignCustomerDto } from './assign-customer.dto';
 
 export { ConfirmTablePaymentDto } from './confirm-payment.dto';
 
+export { CancelOrderItemDto } from './cancel-order-item.dto';
+export type { CancellationType } from './cancel-order-item.dto';
+
 export {
   SplitByItemsDto,
   SplitByAmountDto,

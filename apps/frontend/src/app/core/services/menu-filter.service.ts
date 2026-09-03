@@ -28,6 +28,16 @@ import type { FiscalArea } from '../models/fiscal-status.model';
 export const PANEL_UI_TERMINAL_ROUTE = '/admin/settings/general';
 
 /**
+ * Pantalla a la que se envía a un usuario SIN módulos activos. Se diferencia
+ * del terminal (`PANEL_UI_TERMINAL_ROUTE`) porque el dueño siempre cae al
+ * terminal y un usuario sin permisos aterriza aquí con un CTA de "Cerrar
+ * sesión". El `panelUiGuard` lo trata como compuerta de escape (la permite
+ * siempre, igual que el terminal) para que `firstActiveModuleRoute`/`storeDashboardGuard`
+ * puedan redirigirlo sin bucle.
+ */
+export const PANEL_UI_NO_ACCESS_ROUTE = '/admin/no-access';
+
+/**
  * Why a module is not on screen. Ordered from structural (the store simply
  * does not do this) to fixable (a toggle is off).
  */
@@ -797,7 +807,12 @@ export class MenuFilterService {
       }
 
       // ─── 7. Per-user panel_ui ──────────────────────────────────────
-      if (!moduleKeys.some((key) => this.authFacade.isModuleVisible(key))) {
+      // El owner ve TODO el panel sin importar `user_settings.config.panel_ui`.
+      // El gate real sigue siendo backend (`@Permissions`); aquí solo quitamos
+      // la restricción UX para que el owner nunca aterrice en "sin módulos"
+      // ni tenga que mantener su propio `panel_ui`. Coherente con
+      // `mergePanelUiSoft` que ya rellena defaults para roles privilegiados.
+      if (!this.authFacade.isOwner() && !moduleKeys.some((key) => this.authFacade.isModuleVisible(key))) {
         return {
           visible: false,
           blockedBy: 'user_panel_ui',
@@ -946,7 +961,17 @@ export class MenuFilterService {
     const byKey = new Map<string, MenuItem>();
 
     for (const entry of STORE_MODULE_CATALOG) {
-      const node: MenuItem = { label: entry.label, icon: '', route: entry.route };
+      // `panelUiKey` deja al filtro de panel_ui trabajar sobre este nodo
+      // aunque venga del catálogo (cuyos labels no resuelven en
+      // `moduleKeyMap`, el índice por label del sidebar). Sin esto, el
+      // árbol crudo es infiltrable y un no-owner con cero módulos acaba en
+      // la primera ruta del catálogo en vez del no-access (C1-b real).
+      const node: MenuItem = {
+        label: entry.label,
+        icon: '',
+        route: entry.route,
+        panelUiKey: entry.key,
+      };
       byKey.set(entry.key, node);
       if (entry.parentKey && byKey.has(entry.parentKey)) {
         const parent = byKey.get(entry.parentKey)!;
@@ -995,17 +1020,35 @@ export class MenuFilterService {
 
   /**
    * Primera ruta navegable de un módulo activo, en el orden del árbol/catálogo
-   * recibido. Es el terminal de la cadena de fallback: nunca devuelve `null`,
-   * siempre aterriza en `PANEL_UI_TERMINAL_ROUTE` si nada está activo.
+   * recibido. Es el terminal de la cadena de fallback: nunca devuelve `null`.
+   *
+   * - Si hay un módulo activo → su primera ruta.
+   * - Si NO hay módulos activos:
+   *     - **owner** → `PANEL_UI_TERMINAL_ROUTE` (settings/general). El owner
+   *       ve todo por bypass de `user_panel_ui`, así que este caso solo se da
+   *       cuando ni siquiera la config global de panel del catálogo tiene
+   *       rutas — rarísimo; igual se le da el terminal para no quedar en
+   *       blanco.
+   *     - **no-owner con cero módulos** → `PANEL_UI_NO_ACCESS_ROUTE`. Es el
+   *       caso del bug C1(2): usuario que termina en `/admin/settings/general`
+   *       sin tener nada activo, debiera ver "sin acceso" + cerrar sesión.
    *
    * A.4 la crea (ownership ADR-4); B.1 la consume en el `redirectTo` de
    * `store_admin.routes.ts`; `storeDashboardGuard` la usa para migrar su
    * `/admin/pos` hardcodeado.
    */
   firstActiveModuleRoute(modules: MenuItem[]): string {
+    // QUI-XXX (c1-b): el árbol del catálogo ahora es filtrable (cada nodo
+    // lleva `panelUiKey`), por lo que `[]` y `undefined` siguen el flujo
+    // original de esta función: o el caller pasa el árbol y el filtro lo
+    // despuja a cero, o el caller no pasa nada y caemos al catálogo —
+    // que ahora pasa por el mismo filtro. El terminal correcto (NO_ACCESS
+    // para no-owner, TERMINAL para owner) sale sin condicional nuevo.
     const tree = modules?.length ? modules : this.catalogMenuTree();
     const route = this.firstVisibleRoute(tree);
-    return route ?? PANEL_UI_TERMINAL_ROUTE;
+    if (route) return route;
+    if (this.authFacade.isOwner()) return PANEL_UI_TERMINAL_ROUTE;
+    return PANEL_UI_NO_ACCESS_ROUTE;
   }
 
   private firstVisibleRoute(items: MenuItem[]): string | null {
@@ -1038,6 +1081,11 @@ export class MenuFilterService {
 
   /** Normalizes `moduleKeyMap`'s `string | string[] | undefined` to an array. */
   private moduleKeysFor(item: MenuItem): string[] {
+    // QUI-XXX (c1-b): los nodos del catálogo llevan `panelUiKey` y el
+    // `moduleKeyMap` está indexado por label del sidebar. Si una clave
+    // viene del catálogo, no del sidebar, usar el label devuelve `[]` y el
+    // árbol se vuelve infiltrable. La clave explícita gana siempre.
+    if (item.panelUiKey) return [item.panelUiKey];
     const mapped = this.moduleKeyMap[item.label];
     if (!mapped) return [];
     return Array.isArray(mapped) ? mapped : [mapped];

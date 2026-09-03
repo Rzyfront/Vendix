@@ -149,6 +149,11 @@ export class PosCheckoutShellComponent {
   protected readonly consumoStep = viewChild(PosConsumoStepComponent);
   protected readonly paymentStep = viewChild(PosPaymentStepComponent);
   protected readonly shippingStep = viewChild(PosShippingStepComponent);
+  /**
+   * Cliente step hosts the 2-option selector (Buscar 3 compact / Crear) without invasive scroll.
+   * Shell passes [searchLimit]="3" and keeps container overflow:visible (see .cliente-section--no-scroll).
+   * attemptNextStep delegates to resolveIfNeeded() which works from either tab via unified find-or-create.
+   */
   private readonly customerSelector = viewChild(PosCustomerSelectorComponent);
 
   // ── Address capture (moved from the Envío step into the Cliente step) ────
@@ -479,6 +484,16 @@ export class PosCheckoutShellComponent {
 
   readonly isAnonymousSale = computed(() => this.saleMode() === 'anonymous');
   readonly userOverrideAnonymous = signal<boolean | null>(null);
+  /**
+   * Paso 9 — «Facturar a nombre de»: link secundario bajo "Venta Anónima" que
+   * despliega inline los 5 campos mínimos de facturación nominativa (sin
+   * pasar por "Con Cliente" ni por el buscador general). Al resolver un
+   * cliente aquí, `selectCustomer()` sigue el mismo camino que "Con Cliente"
+   * (el backend no distingue el origen de la captura); esto solo evita que
+   * el cajero navegue por un flujo pensado para búsqueda de CRM cuando lo
+   * único que quiere es poner un nombre en la factura.
+   */
+  readonly showAnonymousInvoiceCapture = signal(false);
   /** Guard: apply the config-driven anonymous default only on the first render. */
   private readonly anonymousDefaultSynced = signal(false);
 
@@ -1058,23 +1073,6 @@ export class PosCheckoutShellComponent {
     }
   }
 
-  /**
-   * QUI-739 (B.2) — handler del "Cambiar tipo de servicio" del paso Consumo.
-   * DIFERENTE del "Anterior"/"← Atrás" del footer: éste BORRA a propósito la
-   * elección de fulfillment + la mesa (vía `resetFulfillment()` del child)
-   * antes de volver al paso "Tipo". El rótulo del botón ("Cambiar tipo de
-   * servicio") anuncia el reset antes de tocarlo; el footer conserva la
-   * semántica QUI-482 (preserva estado). Dos controles, dos comportamientos.
-   *
-   * `prevStep()` es un no-op cuando Consumo es el paso 0 (el caso normal:
-   * Consumo abre el stepper), pero se mantiene por simetría con la
-   * navegación y porque la matriz de sub-pasos puede recolocar Consumo.
-   */
-  onConsumoBack(): void {
-    this.consumoStep()?.resetFulfillment();
-    this.prevStep();
-  }
-
   /** Navigate by step key; no-op when the key is not part of the current flow. */
   private goToStepKey(key: string): void {
     const index = this.stepKeys().indexOf(key);
@@ -1482,11 +1480,25 @@ export class PosCheckoutShellComponent {
   toggleAnonymousSale(enabled: boolean): void {
     this.userOverrideAnonymous.set(enabled);
     this.saleMode.set(enabled ? 'anonymous' : 'customer');
+    // Al salir de anónima, colapsa "Facturar a nombre de" para no dejarlo
+    // abierto detrás de la opción "Con Cliente" cuando el cajero vuelva.
+    if (!enabled) this.showAnonymousInvoiceCapture.set(false);
+  }
+
+  /**
+   * Paso 9 — abre/cierra el mini-formulario de 5 campos bajo "Venta Anónima".
+   * No toca `saleMode`: sigue siendo una venta anónima hasta que el cajero
+   * efectivamente resuelva un cliente (entonces `selectCustomer()` la
+   * convierte en 'customer', igual que si hubiera entrado por "Con Cliente").
+   */
+  toggleAnonymousInvoiceCapture(): void {
+    this.showAnonymousInvoiceCapture.update((v) => !v);
   }
 
   /** Cliente elegido/creado en el selector inline. */
   selectCustomer(customer: PosCustomer): void {
     this.userOverrideAnonymous.set(false);
+    this.showAnonymousInvoiceCapture.set(false);
     this.saleMode.set('customer');
     // QUI-737 (B.4) — un cliente real gana: cualquier alias previo se limpia.
     this.customerAlias.set('');

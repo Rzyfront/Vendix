@@ -50,6 +50,7 @@ import {
   type ProductionReadinessCheck,
 } from '../../../../../../shared/components/dian';
 
+import { DianSetupGuideComponent } from './dian-setup-guide.component';
 import { ResolutionCreateComponent } from '../resolutions/resolution-create/resolution-create.component';
 
 const CONFIGURATION_TYPES = Object.keys(
@@ -99,6 +100,7 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
     DianTestSetPanelComponent,
     DianNumberingRangePanelComponent,
     DianResolutionFormComponent,
+    DianSetupGuideComponent,
     ResolutionCreateComponent,
   ],
   template: `
@@ -349,6 +351,31 @@ const STATUS_BADGE: Readonly<Record<string, BadgeVariant>> = {
             [configId]="id"
             (changed)="reload()"
           ></app-dian-numbering-range-panel>
+
+          <!--
+            Guía de habilitación: el orden REAL de los pasos, escrito.
+
+            Va aquí, pegada a la numeración, y no arriba del todo, porque es
+            exactamente donde el comerciante se cree bloqueado: llega a mirar sus
+            rangos, no ve ninguno y concluye que le falta la resolución. Con los
+            pasos invertidos ese callejón empuja al rodeo que ya ocurrió en
+            producción — inventar una resolución falsa para poder promover, y
+            recién desde producción poder consultar los rangos reales. La guía
+            responde en el mismo sitio donde nace la duda: la resolución va
+            DESPUÉS de aprobar el set y DESPUÉS de asociar el prefijo al software
+            en el portal MUISCA.
+
+            Recibe el eje, no el tenant: «config» es la configuración de ESTA
+            habilitación y «resolutions» sus rangos, los mismos que lista la
+            tarjeta de abajo. Pasarle otra cosa haría que la guía hablara de una
+            habilitación distinta de la que se está mirando.
+            (Sin backticks: este comentario vive dentro del template literal del
+            componente y un backtick lo corta.)
+          -->
+          <vendix-dian-setup-guide
+            [config]="config()"
+            [resolutions]="resolutions()"
+          ></vendix-dian-setup-guide>
         }
 
         <!-- Numeración del eje -->

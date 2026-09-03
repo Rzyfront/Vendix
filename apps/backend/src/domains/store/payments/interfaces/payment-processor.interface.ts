@@ -49,6 +49,10 @@ export interface PaymentData {
  * exponer `current_balance`, `opening_balance`, `chart_account_id` ni
  * `column_mapping` (el saldo bancario no es asunto de una pantalla cuyo único
  * propósito es elegir a qué cuenta pagar). QUI-728.
+ *
+ * `image_url` es la URL pre-firmada (TTL 300s) calculada en lectura; opcional
+ * para no romper callers que aún no propagan el campo. La firma vive en el
+ * gateway — el processor solo la lee.
  */
 export interface ResolvedBankAccount {
   id: number;
@@ -56,6 +60,7 @@ export interface ResolvedBankAccount {
   bank_name: string;
   account_number: string;
   currency: string;
+  image_url?: string | null;
 }
 
 export interface PaymentResult {

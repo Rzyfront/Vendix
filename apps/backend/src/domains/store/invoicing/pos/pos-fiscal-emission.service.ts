@@ -375,10 +375,27 @@ export class PosFiscalEmissionService {
       };
     }
 
-    // draft / validated / sent sin reintento vivo: sigue en curso.
+    // `failure_message` SÓLO llega poblado desde el catch de `send()` en
+    // `runEmission` — es la única vía que lo puebla en todo el archivo (ver
+    // los demás llamados a `buildStatus`, que nunca lo pasan). Que llegue acá
+    // significa que YA HUBO un intento de transmisión que lanzó, y que no lo
+    // rescató ninguna rama anterior: ni contingencia, ni reintento vivo, ni un
+    // `rejected` con respuesta de la DIAN. Eso es un fallo permanente — el
+    // motor decidió no reintentarlo solo (`isTransientError` dio `false`, o el
+    // error traía su propio código tipado) — y no «sigue en curso» aunque el
+    // `status` de la fila no se haya movido de `validated`. Devolver
+    // `pending` aquí era el defecto original: el cajero veía «Enviando a la
+    // DIAN…» sobre un documento que no iba a salir nunca, y `registerFailure`
+    // —que sólo actúa sobre `state === 'failed'`— nunca dejaba constancia.
+    if (failure_message) {
+      return { state: 'failed', message: failure_message };
+    }
+
+    // draft / validated / sent sin ningún intento fallido ni reintento vivo:
+    // sigue en curso de verdad.
     return {
       state: 'pending',
-      message: failure_message ?? 'Emitiendo el documento electrónico…',
+      message: 'Emitiendo el documento electrónico…',
     };
   }
 

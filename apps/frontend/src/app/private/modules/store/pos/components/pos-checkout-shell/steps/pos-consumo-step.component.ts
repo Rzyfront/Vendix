@@ -130,16 +130,6 @@ export class PosConsumoStepComponent {
    */
   readonly advanceRequested = output<void>();
 
-  /**
-   * QUI-739 (B.2) — "Cambiar tipo de servicio". Fired when the operator wants
-   * to change the fulfillment/table choice without closing the whole flow.
-   * The SHELL owns the reset semantics: it calls {@link resetFulfillment} on
-   * this child and navigates back to the "Tipo" step. Event emission is
-   * separate so the two responsibilities (announce intent vs. reset state)
-   * stay decoupled, matching the two-controls/two-behaviours decision.
-   */
-  readonly back = output<void>();
-
   // ── Handlers (moved verbatim from pos-payment-step) ──────────────────────
   /**
    * Single entry point for the inline option rows. Preserves the exact
@@ -193,28 +183,5 @@ export class PosConsumoStepComponent {
     if (!table) return;
     this.pickedTable.set(table);
     this.advanceRequested.emit();
-  }
-
-  /**
-   * QUI-739 (B.2) — "Cambiar tipo de servicio" click handler. Announces the
-   * intent via {@link back}; the shell handler performs the reset + navigation.
-   * We deliberately do NOT reset here: the checklist scopes the reset to the
-   * parent (pos-checkout-shell), keeping one owner for the state teardown.
-   */
-  onChangeServiceType(): void {
-    this.back.emit();
-  }
-
-  /**
-   * QUI-739 (B.2) — restores the Consumo step to its "no selection" baseline:
-   * fulfillment back to `'entrega'` (the type is non-nullable), picked table
-   * cleared, inline table-picker closed. Called by the shell's `back` handler
-   * so a "Cambiar tipo de servicio" never leaks the previously-picked mesa
-   * into the next selection (blast-radius: stale mesa preselected).
-   */
-  resetFulfillment(): void {
-    this.fulfillment.set('entrega');
-    this.pickedTable.set(null);
-    this.openTablePicker.set(false);
   }
 }

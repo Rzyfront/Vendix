@@ -35,6 +35,16 @@ export interface MenuItem {
   alwaysVisible?: boolean;
   requiresFeature?: string;
   /**
+   * Clave de panel_ui cuando el nodo viene del catálogo (no del sidebar):
+   * `moduleKeyMap` está indexado por labels del sidebar y no resuelve los
+   * del catálogo. Sin este campo, `catalogMenuTree()` produce un árbol
+   * que `moduleKeysFor()` no puede filtrar — y el primer módulo visible
+   * del catálogo crudo gana, sea quien sea el usuario (C1b real).
+   * El sidebar nativo del layout no setea esto; sólo lo pone
+   * `catalogMenuTree()` para los items que vienen del `STORE_MODULE_CATALOG`.
+   */
+  panelUiKey?: string;
+  /**
    * Restricts this menu item to organizations operating under the given scope.
    * - 'STORE': only visible when the org operates per-store.
    * - 'ORGANIZATION': only visible when the org operates consolidated at org level.
@@ -142,7 +152,7 @@ export interface MenuItem {
           }
         </div>
         <div class="logo-text-container">
-          <h1 class="org-name">{{ title() }}</h1>
+          <h2 class="org-name">{{ title() }}</h2>
           <div class="vlink-container">
             <a
               [href]="vlinkUrl"

@@ -1,48 +1,13 @@
 <div class="space-y-6 pb-16">
-  <!-- Cabecera de Página -->
-  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border">
-    <div class="flex items-center gap-3">
-      <a
-        routerLink="/super-admin/fiscal/invoicing/invoices"
-        class="flex items-center justify-center w-9 h-9 rounded-lg border border-border bg-surface hover:bg-surface-secondary text-text-secondary hover:text-text-primary transition-colors shrink-0"
-        title="Volver a facturas"
-      >
-        <app-icon name="arrow-left" [size]="18"></app-icon>
-      </a>
-      <div>
-        <div class="flex items-center gap-2 flex-wrap">
-          <h1 class="text-xl font-bold text-text-primary tracking-tight">Nueva factura de plataforma</h1>
-          <app-badge variant="primary" size="sm">Factura Estándar</app-badge>
-        </div>
-        <p class="text-xs text-text-secondary">Emisión electrónica oficial DIAN con perfil y cliente configurable</p>
-      </div>
-    </div>
+  <!--
+    Sin cabecera de página propia.
 
-    <div class="flex items-center gap-2 self-end sm:self-auto">
-      <app-button
-        type="button"
-        variant="ghost"
-        size="sm"
-        (clicked)="openPrintPreview()"
-      >
-        <app-icon slot="icon" name="eye" [size]="16"></app-icon>
-        Previsualizar
-      </app-button>
-
-      <app-button
-        type="button"
-        variant="primary"
-        size="sm"
-        [loading]="submitting()"
-        [disabled]="submitting() || (itemsArray.length === 0)"
-        (clicked)="submit()"
-      >
-        <app-icon slot="icon" name="send" [size]="16"></app-icon>
-        {{ submitting() ? 'Emitiendo a la DIAN...' : 'Emitir factura' }}
-      </app-button>
-    </div>
-  </div>
-
+    El sticky-header del módulo ya pinta título, subtítulo, icono, botón de
+    volver y pestañas; lo que había acá repetía todo eso más abajo, y sus dos
+    botones («Previsualizar» y «Emitir factura») estaban duplicados literalmente
+    en el panel de resumen de la derecha, que es donde se ven junto al total que
+    se va a emitir.
+  -->
   <form [formGroup]="invoiceForm" class="space-y-6">
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
 
@@ -111,6 +76,11 @@
             [paymentMeansOptions]="paymentMeansOptions"
             [resolutionControl]="resolutionControl"
             [resolutionOptions]="resolutionOptions()"
+            [activeResolution]="activeResolution()"
+            [activeResolutionLoading]="store.loadingResolutions()"
+            documentLabel="Factura de venta"
+            [dueDateRequired]="isCredit()"
+            dueDateHelp="Obligatoria cuando la forma de pago es a crédito."
             resolutionPlaceholder="Selecciona una resolución DIAN activa"
           ></vendix-invoice-section-documento>
         </app-platform-section-wrapper>
@@ -161,8 +131,35 @@
             <app-platform-tenant-picker
               (tenantPicked)="onTenantPicked($event)"
             ></app-platform-tenant-picker>
-          } @else {
-            <div class="space-y-4 pt-1">
+          }
+
+          <!--
+            Los datos fiscales se muestran en LOS DOS modos.
+
+            En modo sistema aparecen recién elegido el destinatario, ya
+            precargados desde su ficha, para revisarlos o completarlos. Antes
+            el picker guardaba el tenant y no enseñaba nada: cuando a la tienda
+            le faltaba el NIT o el DV la emisión moría en el backend pidiendo
+            «captura los campos faltantes en el formulario», y en el formulario
+            no había ningún campo que capturar.
+          -->
+          @if (acquirerMode() === 'external' || selectedTenant()) {
+            <div class="space-y-4 pt-1" [class.mt-4]="acquirerMode() === 'system'">
+              @if (acquirerMode() === 'system') {
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
+                  <div>
+                    <p class="text-xs font-semibold text-text-primary">Datos fiscales del destinatario</p>
+                    <p class="text-[11px] text-text-secondary">
+                      Precargados desde su ficha. Lo que quede acá es lo que se declara en el documento.
+                    </p>
+                  </div>
+                  @if (acquirerFiscalIncomplete()) {
+                    <app-badge variant="warning" size="sm">Faltan identificación o razón social</app-badge>
+                  } @else {
+                    <app-badge variant="success" size="sm">Identificación completa</app-badge>
+                  }
+                </div>
+              }
               <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div class="space-y-1">
                   <label class="text-xs font-medium text-text-secondary">Tipo de documento</label>
@@ -231,7 +228,7 @@
                 </div>
               </div>
 
-              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
                 <div class="sm:col-span-2 space-y-1">
                   <app-input
                     label="Dirección fiscal"
@@ -245,6 +242,14 @@
                     formControlName="external_city"
                     placeholder="Bogotá, Medellín, Cali..."
                   ></app-input>
+                </div>
+                <div class="space-y-1">
+                  <label class="text-xs font-medium text-text-secondary">Departamento</label>
+                  <app-selector
+                    [options]="departmentOptions"
+                    formControlName="external_department_code"
+                    [searchable]="true"
+                  ></app-selector>
                 </div>
               </div>
             </div>
@@ -262,20 +267,151 @@
             context="invoice"
             [rows]="itemControls()"
             [rowPaths]="lineasRowPaths"
-            [rowErrors]="rowErrors"
+            [rowErrors]="lineasRowErrors()"
+            [rowSummaries]="lineasRowSummaries()"
+            [unitCodeOptions]="unitCodeOptions"
+            [availableTaxes]="availableTaxes"
             [isAiu]="false"
             [carriesAiu]="carriesAiu"
-            [aiuComponentOptions]="aiuComponentOptions"
+            [aiuComponentOptions]="[]"
             [toggleAiu]="toggleAiu"
-            emptyStateText="No hay líneas agregadas. Haz clic en «Agregar línea manual» para ingresar los conceptos a facturar."
-            (addCustomItem)="openLineModal()"
+            [showProductActions]="false"
+            [showCustomItemAction]="false"
+            emptyStateText="No hay líneas agregadas. Usa «Línea en blanco» y captúrala directo en la rejilla: nace con IVA 19% declarado, y en la propia fila puedes cambiar el impuesto o marcarlo como incluido en el precio."
+            (addBlankLine)="addBlankLine()"
             (removeLine)="removeLine($event)"
           ></vendix-invoice-section-lineas>
         </app-platform-section-wrapper>
 
-        <!-- 5. Notas y Observaciones -->
+        <!-- 5. Impuestos (agregado por tarifa) -->
         <app-platform-section-wrapper
-          title="5. Notas y términos legales"
+          title="5. Impuestos"
+          icon="percent"
+          [expanded]="sectionExpanded()['impuestos']"
+          (expandedChange)="toggleSection('impuestos', $event)"
+        >
+          <vendix-invoice-section-impuestos
+            context="invoice"
+            [breakdown]="taxBreakdown()"
+            [formatCurrency]="formatCurrencyBound"
+            [availableTaxesCount]="availableTaxes.length"
+          ></vendix-invoice-section-impuestos>
+        </app-platform-section-wrapper>
+
+        <!-- 6. Retenciones (opcional) -->
+        <app-platform-section-wrapper
+          title="6. Retenciones (opcional)"
+          icon="scale"
+          [expanded]="sectionExpanded()['retenciones']"
+          (expandedChange)="toggleSection('retenciones', $event)"
+        >
+          <vendix-invoice-section-retenciones
+            context="invoice"
+            [rows]="withholdingControls()"
+            [rowPaths]="retencionesRowPaths"
+            [conceptOptions]="withholdingConceptOptions()"
+            [roleOptions]="withholdingRoleOptions"
+            [rowErrors]="retencionesRowErrors()"
+            [catalogRateFor]="catalogRateForBound"
+            [rowAmounts]="withholdingAmounts()"
+            [totalWithheld]="totalWithheld()"
+            [formatCurrency]="formatCurrencyBound"
+            emptyStateText="Sin retenciones. Agrégalas sólo si el adquiriente es agente retenedor o si la plataforma se autorretiene."
+            (addWithholding)="addWithholding()"
+            (removeWithholding)="removeWithholding($event)"
+            (conceptChange)="onWithholdingConceptChange($event)"
+          ></vendix-invoice-section-retenciones>
+        </app-platform-section-wrapper>
+
+        <!-- 7. Contabilidad (opcional) -->
+        <app-platform-section-wrapper
+          title="7. Contabilidad (opcional)"
+          icon="book-open"
+          [expanded]="sectionExpanded()['contabilidad']"
+          (expandedChange)="toggleSection('contabilidad', $event)"
+        >
+          <div class="space-y-4">
+            <p class="text-xs text-text-secondary">
+              Si se dejan vacías, el asiento automático usa las cuentas por defecto
+              del mapeo contable de la plataforma. Al indicarlas aquí, el asiento
+              acredita la cuenta de cada línea y debita la contrapartida.
+            </p>
+
+            <div class="max-w-md">
+              <app-account-code-select
+                label="Cuenta de contrapartida (débito)"
+                scope="super-admin/fiscal"
+                [formControl]="counterpartControl"
+                placeholder="Ej. 130505 — Clientes nacionales"
+                helperText="Normalmente Clientes (13) al crédito, o Caja/Bancos (11) si la factura se cobra de contado."
+              ></app-account-code-select>
+            </div>
+
+            @if (itemControls().length === 0) {
+              <p class="text-xs text-text-secondary">
+                Agrega líneas para asignarles cuenta de ingreso.
+              </p>
+            } @else {
+              <div class="space-y-2">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-xs font-semibold text-text-primary">
+                    Cuenta de ingreso por línea (crédito)
+                  </span>
+                  @if (itemControls().length > 1) {
+                    <app-button
+                      type="button"
+                      variant="ghost"
+                      size="xsm"
+                      (clicked)="applyAccountToAllLines()"
+                    >
+                      <app-icon slot="icon" name="copy" [size]="14"></app-icon>
+                      Aplicar la de la primera a todas
+                    </app-button>
+                  }
+                </div>
+
+                @for (row of itemControls(); track row; let i = $index) {
+                  <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+                    <div class="sm:col-span-5 min-w-0">
+                      <p class="text-xs text-text-primary truncate">
+                        {{ i + 1 }}. {{ row.get('description')?.value || 'Línea sin descripción' }}
+                      </p>
+                    </div>
+                    <div class="sm:col-span-7">
+                      <app-account-code-select
+                        scope="super-admin/fiscal"
+                        [formControl]="accountControl(row)"
+                        placeholder="Cuenta por defecto del mapeo"
+                      ></app-account-code-select>
+                    </div>
+                  </div>
+                }
+              </div>
+            }
+          </div>
+        </app-platform-section-wrapper>
+
+        <!-- 8. Divisa extranjera (opcional) -->
+        <app-platform-section-wrapper
+          title="8. Divisa extranjera (opcional)"
+          icon="banknote"
+          [expanded]="sectionExpanded()['divisa']"
+          (expandedChange)="toggleSection('divisa', $event)"
+        >
+          <vendix-invoice-section-divisa
+            context="invoice"
+            [form]="invoiceForm"
+            [paths]="divisaSectionPaths"
+            [currencyOptions]="currencyOptions"
+            [usesForeignCurrency]="usesForeignCurrency()"
+            [foreignCurrencyCode]="rawValue()['foreign_currency_code'] || ''"
+            [formatCurrency]="formatCurrencyBound"
+          ></vendix-invoice-section-divisa>
+        </app-platform-section-wrapper>
+
+        <!-- 9. Notas y Observaciones -->
+        <app-platform-section-wrapper
+          title="9. Notas y términos legales"
           icon="sticky-note"
           [expanded]="sectionExpanded()['notas']"
           (expandedChange)="toggleSection('notas', $event)"
@@ -287,7 +423,7 @@
           ></vendix-invoice-section-notas>
         </app-platform-section-wrapper>
 
-        <!-- 6. Guardar como Perfil -->
+        <!-- 10. Guardar como Perfil -->
         <div class="p-4 rounded-xl border border-border bg-surface-secondary/30 space-y-3">
           <div class="flex items-center gap-2">
             <input
@@ -311,8 +447,36 @@
           }
         </div>
 
-        @if (errorMessage(); as err) {
-          <app-alert-banner variant="danger">{{ err }}</app-alert-banner>
+        <!--
+          LOS BLOQUEADORES DEL BACKEND, UNO POR FILA.
+
+          La puerta de prevalidación fiscal responde qué le falta al documento
+          en «details.blockers[]», con el problema y su remedio ya redactados.
+          Aplastarlos en el párrafo genérico —que es lo que se pintaba— deja al
+          operador con un «no cumple las validaciones» que no dice ni qué falta
+          ni dónde se arregla. El mensaje genérico se conserva como encabezado
+          del bloque; cuando no hay bloqueadores, es todo el contenido.
+        -->
+        @if (errorMessage() || issueBlockers().length > 0) {
+          <app-alert-banner
+            variant="danger"
+            [heading]="issueBlockers().length > 0 ? errorMessage() : ''"
+          >
+            @if (issueBlockers().length > 0) {
+              <ul class="space-y-2">
+                @for (blocker of issueBlockers(); track $index) {
+                  <li>
+                    <p class="font-semibold">{{ blocker.problem }}</p>
+                    @if (blocker.fix; as fix) {
+                      <p class="mt-0.5 text-xs opacity-80">{{ fix }}</p>
+                    }
+                  </li>
+                }
+              </ul>
+            } @else {
+              {{ errorMessage() }}
+            }
+          </app-alert-banner>
         }
       </div>
 
@@ -347,15 +511,38 @@
               <dd class="font-medium text-text-primary">{{ totals().taxableBase | currency }}</dd>
             </div>
 
+            @for (row of taxBreakdown(); track row.key) {
+              <div class="flex items-center justify-between text-text-secondary">
+                <dt>{{ row.name }}{{ row.isInclusive ? ' (incl.)' : '' }}:</dt>
+                <dd class="font-medium text-text-primary">{{ row.amount | currency }}</dd>
+              </div>
+            }
+
             <div class="flex items-center justify-between text-text-secondary">
-              <dt>Total IVA:</dt>
+              <dt>Total impuestos:</dt>
               <dd class="font-medium text-text-primary">{{ totals().totalIva | currency }}</dd>
             </div>
 
             <div class="flex items-center justify-between border-t border-border pt-3 text-sm font-bold text-text-primary">
-              <dt>Total a pagar:</dt>
+              <dt>Total factura:</dt>
               <dd class="text-base text-primary font-extrabold">{{ totals().total | currency }}</dd>
             </div>
+
+            <!--
+              Las retenciones NO restan del total facturado: la DIAN recibe el
+              total del documento y la retención sólo cambia lo que el cliente
+              gira. Por eso el neto va aparte y en gris, nunca en lugar del total.
+            -->
+            @if (totals().totalWithheld > 0) {
+              <div class="flex items-center justify-between text-warning">
+                <dt>Retenciones:</dt>
+                <dd class="font-medium">- {{ totals().totalWithheld | currency }}</dd>
+              </div>
+              <div class="flex items-center justify-between text-text-secondary">
+                <dt>Neto a girar:</dt>
+                <dd class="font-semibold text-text-primary">{{ totals().netPayable | currency }}</dd>
+              </div>
+            }
           </dl>
 
           <div class="pt-2 space-y-2">
@@ -380,7 +567,7 @@
               (clicked)="openPrintPreview()"
             >
               <app-icon slot="icon" name="eye" [size]="14"></app-icon>
-              Previsualizar XML técnico
+              Previsualizar documento
             </app-button>
           </div>
         </div>
@@ -401,81 +588,47 @@
   </form>
 </div>
 
-<!-- Modal para Agregar Línea Manual con IVA Incluido / Agregado -->
-<app-modal [(isOpen)]="showLineModal" title="Nueva línea de factura" size="md">
-  <div class="space-y-4">
-    <app-input
-      label="Descripción del concepto o servicio"
-      [ngModel]="newLine().description"
-      (inputChange)="updateNewLine({ description: $event ?? '' })"
-      placeholder="Ej. Suscripción Plan Pro Anual, Consultoría Técnica..."
-      [required]="true"
-    ></app-input>
+<!--
+  Aquí vivía el modal «Nueva línea de factura».
 
-    <div class="grid grid-cols-2 gap-3">
-      <app-input
-        label="Cantidad"
-        type="number"
-        [ngModel]="newLine().quantity"
-        (inputChange)="updateNewLine({ quantity: +$event || 1 })"
-        [required]="true"
-      ></app-input>
-      <app-input
-        label="Precio unitario"
-        type="number"
-        [ngModel]="newLine().unit_price"
-        (inputChange)="updateNewLine({ unit_price: +$event || 0 })"
-        [required]="true"
-      ></app-input>
-    </div>
+  Su única ventaja sobre agregar en la rejilla era poder marcar el impuesto como
+  incluido en el precio. Desde que la línea nueva nace con IVA 19% declarado y
+  el conmutador «impuesto incluido en el precio» se ve y se pulsa en la propia
+  fila, era un segundo camino que terminaba exactamente en lo mismo: dos botones
+  para una sola acción, y el operador teniendo que adivinar en cuál está lo que
+  busca.
+-->
 
-    <div class="grid grid-cols-2 gap-3">
-      <div class="space-y-1">
-        <label class="text-xs font-medium text-text-secondary">Tarifa de IVA</label>
-        <app-selector
-          [options]="taxRateOptions"
-          [ngModel]="newLine().tax_rate.toString()"
-          (ngModelChange)="updateNewLine({ tax_rate: +$event || 0 })"
-        ></app-selector>
-      </div>
-      <app-input
-        label="Descuento (COP)"
-        type="number"
-        [ngModel]="newLine().discount_amount"
-        (inputChange)="updateNewLine({ discount_amount: +$event || 0 })"
-      ></app-input>
-    </div>
-
-    <div class="p-3 rounded-lg bg-surface-secondary/60 border border-border flex items-center justify-between">
-      <div>
-        <p class="text-xs font-semibold text-text-primary">IVA incluido en el precio</p>
-        <p class="text-[11px] text-text-secondary">El precio ingresado ya contiene el valor del IVA.</p>
-      </div>
-      <input
-        type="checkbox"
-        [ngModel]="newLine().is_inclusive"
-        (ngModelChange)="updateNewLine({ is_inclusive: !!$event })"
-        class="rounded border-border text-primary focus:ring-primary h-4 w-4"
-      />
-    </div>
-
-    <div class="flex justify-end gap-2 pt-4 border-t border-border">
-      <app-button variant="outline" size="sm" (clicked)="showLineModal.set(false)">Cancelar</app-button>
-      <app-button variant="primary" size="sm" (clicked)="confirmLine()">Agregar a la factura</app-button>
-    </div>
-  </div>
-</app-modal>
-
-<!-- Modal Preview XML -->
-<app-modal [isOpen]="printPreviewOpen()" (isOpenChange)="closePrintPreview($event)" title="Previsualización Técnica DIAN" size="xl">
+<!-- Modal de previsualización del documento impreso (HTML del formato) -->
+<app-modal [isOpen]="printPreviewOpen()" (isOpenChange)="closePrintPreview($event)" title="Previsualización del documento" size="xl">
   @if (printPreviewLoading()) {
     <div class="flex flex-col items-center justify-center p-12 space-y-4">
       <div class="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-      <p class="text-text-secondary font-medium text-sm">Generando XML de prueba con la estructura UBL 2.1...</p>
+      <p class="text-text-secondary font-medium text-sm">Generando la representación gráfica del documento...</p>
     </div>
-  } @else if (printPreviewError(); as err) {
+  } @else if (printPreviewError() || previewBlockers().length > 0) {
     <div class="p-6">
-      <app-alert-banner variant="danger">{{ err }}</app-alert-banner>
+      <!-- Mismo trato que en la emisión: la lista de bloqueadores manda, el
+           mensaje genérico queda de encabezado. -->
+      <app-alert-banner
+        variant="danger"
+        [heading]="previewBlockers().length > 0 ? printPreviewError() : ''"
+      >
+        @if (previewBlockers().length > 0) {
+          <ul class="space-y-2">
+            @for (blocker of previewBlockers(); track $index) {
+              <li>
+                <p class="font-semibold">{{ blocker.problem }}</p>
+                @if (blocker.fix; as fix) {
+                  <p class="mt-0.5 text-xs opacity-80">{{ fix }}</p>
+                }
+              </li>
+            }
+          </ul>
+        } @else {
+          {{ printPreviewError() }}
+        }
+      </app-alert-banner>
     </div>
   } @else if (printPreviewResult()) {
     <div class="w-full h-[70vh] bg-surface rounded-xl overflow-hidden border border-border">

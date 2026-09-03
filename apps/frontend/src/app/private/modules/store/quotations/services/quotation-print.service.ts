@@ -35,11 +35,16 @@ export class QuotationPrintService {
   private readonly documentPrint = inject(DocumentPrintService);
 
   async printQuotation(quotation: Quotation): Promise<void> {
-    await this.documentPrint.print({
-      document: 'quotation',
-      body: this.generateQuotationBody(quotation),
+    await this.documentPrint.printViaGateway({
+      formatType: 'quotation',
+      documentId: quotation.id,
       title: `Cotización ${quotation.quotation_number}`,
-      styles: QUOTATION_PRINT_STYLES,
+      fallbackRequest: {
+        document: 'quotation',
+        body: this.generateQuotationBody(quotation),
+        title: `Cotización ${quotation.quotation_number}`,
+        styles: QUOTATION_PRINT_STYLES,
+      },
     });
   }
 

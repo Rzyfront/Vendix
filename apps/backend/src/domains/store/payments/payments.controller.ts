@@ -66,7 +66,7 @@ import { RequestContextService } from '../../../common/context/request-context.s
  * | :146 | confirmPosWompiPayment  | POST /store/payments/pos/confirm-wompi-payment/:id   | `store:pos:access`  | cashier POS — pos-payment.service.ts:1161 (sobreescribe el bucket "admin" del plan: el llamador real es el POS) |
  * | :168 | findAll                 | GET /store/payments                                 | `store:settings:read`  | admin — listado de pagos |
  * | :184 | processPosPayment       | POST /store/payments/pos                           | `store:pos:access`  | cashier POS (ya decorado) |
- * | :413 | getMyStorePaymentMethods| GET /store/payments/payment-methods                 | `store:settings:read`  | admin/settings — lectura de métodos de pago |
+ * | :413 | getMyStorePaymentMethods| GET /store/payments/payment-methods                 | `store:pos:access`  | cashier/mesero POS — catálogo de métodos de pago en el cobro (QUI-727 F.1 R4 — revertido de `store:settings:read`, ver :453) |
  * | :437 | findOne                 | GET /store/payments/:paymentId                     | `store:settings:read`  | admin — detalle de un pago |
  * | :449 | getStorePaymentMethods  | GET /store/payments/stores/:storeId/payment-methods| `store:settings:read`  | admin/settings |
  * | :469 | createStorePaymentMethod| POST /store/payments/stores/:storeId/payment-methods| `store:settings:write` | admin/settings — bloquea a cashier (cashier NO tiene store:settings:write) |
@@ -451,7 +451,16 @@ export class PaymentsController {
   }
 
   @Get('payment-methods')
-  @Permissions('store:settings:read')
+  // QUI-727 F.1 Round 4 — este endpoint lo llama tanto el cajero como el
+  // mesero (payment-collector) para cargar el catálogo con
+  // `custom_config.accounts`. `store:settings:read` desatascaba el 403 del
+  // mesero pero, al ser el mismo permiso que gatea 12 controladores de
+  // configuración (tenant-settings, invoicing, bank-accounts, etc.), le abría
+  // superficie que nadie pidió. Se revierte al permiso POS amplio existente
+  // `store:pos:access` (mismo patrón que :245): tanto cashier como mesero ya
+  // lo tienen asignado en la seed, así que el cobro sigue funcionando sin
+  // ampliar el rol.
+  @Permissions('store:pos:access')
   @ApiOperation({ summary: 'Get payment methods for the current user store' })
   @ApiResponse({
     status: 200,

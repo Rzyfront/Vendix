@@ -228,16 +228,16 @@
           </ul>
         }
       }
+    }
 
-      <app-button slot="footer" variant="secondary" (clicked)="closeDetail()">
-        Cerrar
+    <app-button slot="footer" variant="secondary" (clicked)="closeDetail()">
+      Cerrar
+    </app-button>
+    @if (detailSession()?.status === 'open') {
+      <app-button slot="footer" variant="primary" (clicked)="closeSession(detailSession()!)">
+        <app-icon slot="icon" name="lock" [size]="14" />
+        Cerrar turno
       </app-button>
-      @if (s.status === 'open') {
-        <app-button slot="footer" variant="primary" (clicked)="closeSession(s)">
-          <app-icon slot="icon" name="lock" [size]="14" />
-          Cerrar turno
-        </app-button>
-      }
     }
   </app-modal>
 </div>

@@ -127,6 +127,16 @@ export class AddItemsModalComponent {
   readonly selectedVariantByProduct = signal<Map<number, number>>(new Map());
   readonly searchTerm = signal('');
 
+  // --- C3 — nota libre del mesero por línea ("sin cebolla", "término medio").
+  // Persiste aunque el toggle se cierre para no perder lo escrito. Se envia en
+  // TableSessionAddItem.notes solo si trae texto no-vacio (el default del
+  // backend es null). El DTO backend TableSessionAddItemDto todavia no declara
+  // `notes` — pendiente de ventana corta para table-sessions.service.ts /
+  // table-session.dto.ts (verificacion documentada a nancy).
+  readonly notesByProduct = signal<Map<number, string>>(new Map());
+  /** Productos cuyo campo de nota esta desplegado (toggle del UI). */
+  readonly showNotesByProduct = signal<Set<number>>(new Set());
+
   readonly form: FormGroup<{ search: FormControl<string> }>;
 
   get searchControl(): FormControl<string> {
@@ -306,6 +316,37 @@ export class AddItemsModalComponent {
     });
   }
 
+  // --- C3 — notas por línea ----------------------------------------------
+  notesFor(productId: number): string {
+    return this.notesByProduct().get(productId) ?? '';
+  }
+
+  isNotesOpen(productId: number): boolean {
+    return this.showNotesByProduct().has(productId);
+  }
+
+  /**
+   * Toggle del campo de nota. Si el producto ya tiene texto y el toggle se
+   * reabre, mostramos el texto previo en vez de un textarea vacio.
+   */
+  toggleNotes(productId: number): void {
+    this.showNotesByProduct.update((prev) => {
+      const next = new Set(prev);
+      if (next.has(productId)) next.delete(productId);
+      else next.add(productId);
+      return next;
+    });
+  }
+
+  setNotes(productId: number, value: string): void {
+    this.notesByProduct.update((prev) => {
+      const next = new Map(prev);
+      if (value.trim()) next.set(productId, value);
+      else next.delete(productId);
+      return next;
+    });
+  }
+
   // --- CP-POLLO-ARABE-727 C.4 (QUI-736): variant picker -------------------
   /** Variante seleccionada para un producto, o `null` si ninguna. */
   selectedVariantOf(productId: number): number | null {
@@ -380,6 +421,11 @@ export class AddItemsModalComponent {
         ...(this.excludedCountFor(productId) > 0 && {
           excluded_component_ids: [...this.excludedByProduct().get(productId)!],
         }),
+        // C3 — nota del mesero. Solo viaja si trae texto no-vacio para no
+        // ensuciar el payload. El backend la persiste en order_items.notes.
+        ...(this.notesFor(productId).trim() && {
+          notes: this.notesFor(productId).trim(),
+        }),
       });
     }
     if (items.length === 0) {
@@ -411,6 +457,10 @@ export class AddItemsModalComponent {
     // Sin esto una exclusion de la tanda anterior se filtra y se captura un "sin
     // papas" que nadie pidio en ESTE pedido.
     this.excludedByProduct.set(new Map());
+    // C3 — sin esto una nota de la tanda anterior se filtra y aparece en el
+    // pedido siguiente sin que nadie la pidiera.
+    this.notesByProduct.set(new Map());
+    this.showNotesByProduct.set(new Set());
     this.recipeProductId.set(null);
     this.searchTerm.set('');
     this.form.controls.search.setValue('', { emitEvent: false });
@@ -445,6 +495,21 @@ export class AddItemsModalComponent {
       this.excludedByProduct.update((prev) => {
         if (!prev.has(product.id)) return prev;
         const cleaned = new Map(prev);
+        cleaned.delete(product.id);
+        return cleaned;
+      });
+      // C3 — si el mesero escribio una nota y luego saca el producto de la
+      // seleccion, limpiamos la nota. Igual que takeaway: una linea nueva
+      // no debe arrastrar la nota de la anterior.
+      this.notesByProduct.update((prev) => {
+        if (!prev.has(product.id)) return prev;
+        const cleaned = new Map(prev);
+        cleaned.delete(product.id);
+        return cleaned;
+      });
+      this.showNotesByProduct.update((prev) => {
+        if (!prev.has(product.id)) return prev;
+        const cleaned = new Set(prev);
         cleaned.delete(product.id);
         return cleaned;
       });

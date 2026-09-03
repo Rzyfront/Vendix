@@ -6,7 +6,6 @@ import {
   PrintPaperFormat,
 } from '../../../../../../../core/models/print-formats.model';
 import { PAPER_GEOMETRY } from '../../../../../../../core/lib/page-geometry';
-import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 
 /** Cast helper — PAPER_GEOMETRY is keyed by a closed set, but the
  *  editor dropdown also exposes `custom`. Unknown keys fall through to
@@ -26,7 +25,7 @@ function lookupGeometry(format: PrintPaperFormat) {
 @Component({
   selector: 'app-print-paper-panel',
   standalone: true,
-  imports: [CommonModule, FormsModule, IconComponent],
+  imports: [CommonModule, FormsModule],
   template: `
     <section class="vendix-subpanel">
       <h4 class="text-xs font-bold uppercase tracking-wider text-text-secondary mb-2">
@@ -191,7 +190,27 @@ function lookupGeometry(format: PrintPaperFormat) {
               (ngModelChange)="setCopies($event)"
               class="w-20 px-2 py-1 bg-surface-secondary border border-border rounded text-xs text-text-primary focus:border-primary-500 focus:outline-none"
             />
-            <span class="text-[10px] text-text-tertiary">0–10</span>
+            <span class="text-[10px] text-text-tertiary">0–10 (0 = default 1)</span>
+          </div>
+        </div>
+
+        <!-- Auto-impresión -->
+        <div class="pt-2 border-t border-border/50">
+          <div class="flex items-center justify-between">
+            <div>
+              <label class="block text-[11px] font-medium text-text-primary">
+                Auto-impresión
+              </label>
+              <p class="text-[10px] text-text-tertiary">
+                Disparar impresión al finalizar la acción (ej. venta POS)
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              [ngModel]="paper().auto_print !== false"
+              (ngModelChange)="setAutoPrint($event)"
+              class="w-4 h-4 rounded text-primary-600 bg-surface-secondary border-border focus:ring-primary-500 cursor-pointer"
+            />
           </div>
         </div>
       </div>
@@ -320,6 +339,14 @@ export class PrintPaperPanelComponent {
     const paper: PrintFormatDefinition['paper'] = {
       ...this.paper(),
       copies,
+    };
+    this.emit({ ...this.definition(), paper });
+  }
+
+  setAutoPrint(auto_print: boolean): void {
+    const paper: PrintFormatDefinition['paper'] = {
+      ...this.paper(),
+      auto_print,
     };
     this.emit({ ...this.definition(), paper });
   }

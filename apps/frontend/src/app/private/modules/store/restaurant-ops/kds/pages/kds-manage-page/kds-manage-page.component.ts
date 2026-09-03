@@ -162,7 +162,7 @@ export class KdsManagePageComponent implements OnInit {
 
   save(): void {
     if (this.form.invalid) {
-      this.toastService.error('Completá nombre y código');
+      this.toastService.error('Completa nombre y código');
       return;
     }
     const dto = this.form.getRawValue();

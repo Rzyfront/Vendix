@@ -1,9 +1,12 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
-import { catchError, map, switchMap } from 'rxjs/operators';
+import { catchError, map, switchMap, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
-import { parseApiError } from '../../../../../../../app/core/utils/parse-api-error';
+import {
+  parseApiError,
+  withApiErrorReference,
+} from '../../../../../../../app/core/utils/parse-api-error';
 import { DEFAULT_ERROR_MESSAGE } from '../../../../../../../app/core/utils/error-messages';
 import {
   Table,
@@ -58,6 +61,12 @@ export class TablesService {
   private readonly apiUrl = environment.apiUrl;
   private readonly http = inject(HttpClient);
 
+  /**
+   * Reactive single source of truth for the floor tables.
+   * Auto-refreshed whenever getFloorMap() resolves (manual load, polling fallback, or SSE push).
+   */
+  readonly floorTables = signal<Table[]>([]);
+
   // ─── Tables ────────────────────────────────────────────────────────
 
   listPaginated(
@@ -81,7 +90,8 @@ export class TablesService {
     return this.http
       .get<ApiResponse<Table[]>>(`${this.apiUrl}/store/tables/floor-map`)
       .pipe(
-        map((res) => res.data),
+        map((res) => res.data ?? []),
+        tap((tables) => this.floorTables.set(tables)),
         catchError(this.handleError),
       );
   }
@@ -224,6 +234,43 @@ export class TablesService {
     return this.http
       .delete<ApiResponse<TableSession>>(
         `${this.apiUrl}/store/table-sessions/${sessionId}/items/${orderItemId}`,
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /**
+   * carril D / lina — D2: cancela (soft cancel) un ítem de la cuenta de
+   * mesa. El ítem NO se borra: queda visible marcado como cancelado pero
+   * EXCLUIDO del subtotal/tax/grand_total (el backend filtra por
+   * `cancelled_at IS NULL` al recalcular).
+   *
+   * Diferencias con {@link removeItem} (DELETE legacy):
+   *  - Levanta la guarda `state === 'draft'`: bloquea solo si la orden
+   *    está cobrada o en estado terminal. Acepta cancelación en
+   *    `draft`, `created`, `pending_payment`, `processing`. ES EL BUG
+   *    reportado por el dueño (no se podía cancelar un plato tras
+   *    disparar a cocina).
+   *  - Motivo obligatorio siempre (mín 3 caracteres). En ítems ya
+   *    disparados a cocina el motivo queda como merma en
+   *    `order_items.cancellation_reason`.
+   *  - Stock: `before_fire` revierte, `after_fire_waste` registra merma
+   *    sin reversión. El backend decide según `inventory_consumed_at_fire`.
+   *
+   * El endpoint es DEFINITIVO en `TableSessionsController`
+   * (`POST /api/store/table-sessions/:id/items/:orderItemId/cancel`).
+   */
+  cancelOrderItem(
+    sessionId: number,
+    orderItemId: number,
+    body: { reason: string; cancellation_type?: 'before_fire' | 'after_fire_waste' },
+  ): Observable<TableSession> {
+    return this.http
+      .post<ApiResponse<TableSession>>(
+        `${this.apiUrl}/store/table-sessions/${sessionId}/items/${orderItemId}/cancel`,
+        body,
       )
       .pipe(
         map((res) => res.data),
@@ -528,7 +575,16 @@ export class TablesService {
       message = tablesStatusErrorCopy(error);
     }
 
-    return throwError(() => message);
+    // CP-POLLO-ARABE-727 F.1 — A.8 parcial. El backend adjunta `request_id`
+    // best-effort a todo cuerpo de error (`http-exception.filter.ts`) para
+    // que soporte pueda correlacionar la petición. Este handler normaliza el
+    // error a un string plano (contrato que ~15 llamadores verifican con
+    // `typeof err === 'string'`), así que la referencia se hornea en el
+    // propio mensaje aquí — no se puede recuperar más tarde leyendo el `err`
+    // crudo como sí hace `readApiErrorRequestId` cuando el error sobrevive
+    // como objeto. `withApiErrorReference` es un no-op si no hay
+    // `request_id` (red, auth, proxy).
+    return throwError(() => withApiErrorReference(message, parsed.request_id));
   };
 }
 

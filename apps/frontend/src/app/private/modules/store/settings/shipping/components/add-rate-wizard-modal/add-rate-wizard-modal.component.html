@@ -3,6 +3,7 @@
   [showCloseButton]="true"
   [title]="is_edit_mode() ? 'Editar Tarifa' : 'Nueva Tarifa de Envío'"
   [subtitle]="is_edit_mode() ? 'Modifica los datos de la tarifa existente' : 'Configura una nueva tarifa de envío'"
+  [dialog]="true"
   size="md"
   (closed)="close.emit()">
 

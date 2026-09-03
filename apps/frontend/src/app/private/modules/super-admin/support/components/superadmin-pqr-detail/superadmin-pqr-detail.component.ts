@@ -14,7 +14,6 @@ import { catchError, of } from 'rxjs';
 import { environment } from '../../../../../../../environments/environment';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { SupportService } from '../../services/support.service';
-import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
 /**
@@ -31,7 +30,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 @Component({
   selector: 'app-superadmin-pqr-detail',
   standalone: true,
-  imports: [CommonModule, DatePipe, FormsModule, RouterLink, IconComponent, ButtonComponent],
+  imports: [CommonModule, DatePipe, FormsModule, RouterLink, IconComponent],
   template: `
     <div class="pqr-detail-page">
       @if (loading()) {

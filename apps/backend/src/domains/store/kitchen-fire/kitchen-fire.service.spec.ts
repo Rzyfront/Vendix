@@ -134,6 +134,7 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     kds_sessions: { findFirst: jest.fn().mockResolvedValue(null) },
     order_items: {
       update: jest.fn().mockResolvedValue({ id: opts.orderItemId ?? 10 }),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       findMany: jest.fn().mockResolvedValue([]),
     },
     kitchen_ticket_items: {
@@ -181,20 +182,21 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
             },
           ],
     );
-    if (!opts.noRecipe) {
-      recipesService.explodeBom.mockResolvedValue(
-        opts.bom ?? [
-          { component_product_id: 99, quantity: 1, depth: 1, path_recipe_ids: [] },
-        ],
-      );
-      stockLevelManager.getDefaultLocationForProduct.mockResolvedValue(100);
-      stockLevelManager.updateStock.mockResolvedValue({
-        stock_level: { id: 99 } as FakeStockLevel,
-        transaction: { id: 99 } as any,
-        previous_quantity: 100,
-        cost_snapshot: { unit_cost: 1, total_cost: 2, stock_value: 0 },
-      });
-    }
+    recipesService.explodeBom.mockResolvedValue(
+      opts.bom ?? [
+        {
+          component_product_id: 201,
+          quantity: 0.25,
+          unit_cost: 4000,
+          depth: 1,
+          path_recipe_ids: [7],
+        },
+      ],
+    );
+    stockLevelManager.getDefaultLocationForProduct.mockResolvedValue(1);
+    stockLevelManager.updateStock.mockResolvedValue({
+      cost_snapshot: { total_cost: 1000 },
+    } as any);
   };
 
   /** Configura `$transaction` del fire y devuelve el mock de `kitchen_tickets.create`. */
@@ -261,6 +263,7 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       stockLevelManager as any,
       eventEmitter as any,
       { push: jest.fn() } as any,
+      { attributeOpenSessionToTicketConsumption: jest.fn() } as any,
     );
   });
 
@@ -701,5 +704,34 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
 
     // La validación ocurre ANTES de abrir la transacción.
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('updates order_items notes and passes notes to kitchen_ticket_items when item_notes are provided', async () => {
+    const item = makeOrderItem(10, 50, 'prepared', false);
+    setupFireableContext([item]);
+
+    const txMock = buildFireTxMock({ orderItemId: 10 });
+    const createMock = jest.fn().mockResolvedValue(makeTxTicket(77, 10, 50));
+    (txMock as any).kitchen_tickets = {
+      count: jest.fn().mockResolvedValue(0),
+      create: createMock,
+    };
+    prismaMock.$transaction.mockImplementation((cb: any) => cb(txMock));
+
+    const result = await service.fireOrderItems({
+      order_id: 100,
+      order_item_ids: [10],
+      item_notes: [{ order_item_id: 10, notes: 'Sin cebolla, bien cocido' }],
+    });
+
+    expect(result.kitchen_ticket_id).toBe(77);
+    expect(txMock.order_items.updateMany).toHaveBeenCalledWith({
+      where: { id: 10 },
+      data: { notes: 'Sin cebolla, bien cocido', updated_at: expect.any(Date) },
+    });
+    expect(txMock.kitchen_ticket_items.update).toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: { notes: 'Sin cebolla, bien cocido', updated_at: expect.any(Date) },
+    });
   });
 });

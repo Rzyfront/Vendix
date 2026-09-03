@@ -2,7 +2,7 @@
 name: buildcheck-dev
 description: >
   Build and runtime verification steps for Vendix development.
-  Trigger: Verifying Build, checking Docker watch-mode logs, checking current development app status, or confirming development changes do not introduce compile/runtime errors.
+  Trigger: Verifying Build, checking watch-mode output (Docker logs for the backend, `buildcheck.sh --watch` for the native frontend), checking current development app status, or confirming development changes do not introduce compile/runtime errors.
 license: MIT
 metadata:
   author: rzyfront
@@ -11,6 +11,9 @@ metadata:
   auto_invoke:
     - "Verifying Build"
     - "Checking Docker development logs after code changes"
+    - "Checking the state of the frontend watch / native ng serve"
+    - "Reading frontend compile errors without a vendix_frontend container"
+    - "Checking whether the dev server is alive and whether the last rebuild passed"
     - "Checking current development app status"
     - "Verifying that code compiles without starting any server"
     - "Running a production compilation check without leaving orphan processes"
@@ -27,11 +30,21 @@ metadata:
 
 ## Core Rule
 
-Development verification always uses Docker watch-mode logs — nothing else. Never run `tsc`,
-`ngc`, `ng build`, `npm run build`, `npm run build:prod`, or any `npm run buildcheck*` command as
-part of normal development, and never as an automatic pre-PR/pre-push gate. These commands hold
-multiple gigabytes of RAM on a machine that is already budgeted for the Docker stack (see Memory
-Budget below) and freeze it.
+Development verification always uses **watch-mode output** — nothing else. Since 2026-08-30 that
+output comes from two places, because the frontend no longer runs in Docker:
+
+| Surface | Where it runs | Where you read it |
+| --- | --- | --- |
+| Frontend | **native `ng serve` on macOS** (`npm run dev:fe`) | `bash scripts/buildcheck.sh --watch` |
+| Backend, Postgres, Redis, Nginx | Docker | `docker logs` |
+
+Never run `tsc`, `ngc`, `ng build`, `npm run build`, `npm run build:prod`, or any
+`npm run buildcheck*` command as part of normal development, and never as an automatic
+pre-PR/pre-push gate. These commands hold multiple gigabytes of RAM on a machine that is already
+budgeted for the dev stack (see Memory Budget below) and freeze it.
+
+The native `ng serve` is **not** an exception to that rule: it is a long-lived watcher you start
+once and leave running, not a one-shot build you fire to check something.
 
 GitHub Actions (`.github/workflows/ci.yml`) already runs the build before merge/release, so a local
 build adds little and costs a lot. The **only** two legitimate reasons to run a build/typecheck
@@ -60,9 +73,41 @@ docker ps --filter "name=vendix_" --format "table {{.Names}}\t{{.Status}}\t{{.Po
 
 ```bash
 docker logs --tail 80 vendix_backend
-docker logs --tail 80 vendix_frontend
 docker logs --tail 80 vendix_postgres
 docker logs --tail 80 vendix_redis
+```
+
+There is no `vendix_frontend` container any more, so there is no `docker logs vendix_frontend`.
+Its replacement — and the ONLY frontend check an agent can perform — is:
+
+```bash
+bash scripts/buildcheck.sh --watch
+```
+
+It reports three things in one shot: whether `ng serve` is alive on `:4200`, the verdict of the
+LAST compile cycle, and the errors of that cycle. It compiles nothing and starts nothing.
+
+It reads `.dev/frontend-watch.log`, which `scripts/dev-fe.sh` keeps trimmed to the **current cycle
+only** (hard ceiling 16 KB — it is rewritten on every cycle, never appended). That is deliberate:
+reading a whole build log is how an error that was already fixed gets reported as live. Since the
+file IS the last cycle, a reader cannot make that mistake.
+
+Two answers that mean "do not trust this":
+
+- `RANCIO` — the log survived but nothing listens on `:4200`. The watcher died; the last verdict
+  is history, not the state of the code. This is the failure a plain log read would report as
+  healthy.
+- `SIN DATOS ... el proceso corre pero no pasó por scripts/dev-fe.sh` — someone started
+  `ng serve` by hand. There is no log. Ask them to restart with `npm run dev:fe`.
+
+Do NOT tell a human to "read the terminal where `npm run dev:fe` runs": an agent cannot see it,
+and neither can a second agent working the same tree.
+
+To confirm the app answers at all, use the vhost — never `localhost:4200`, which has no row in
+`domain_settings` and makes the app resolve the wrong `app_type`:
+
+```bash
+curl -sk -o /dev/null -w "%{http_code}\n" https://vendix.com/
 ```
 
 3. Run lightweight HTTP checks only after containers are running:
@@ -97,7 +142,7 @@ Use the commands that match the files changed:
 | Change Area | Required Check |
 | --- | --- |
 | Backend | `docker logs --tail 40 vendix_backend` |
-| Frontend | `docker logs --tail 40 vendix_frontend` |
+| Frontend | `bash scripts/buildcheck.sh --watch` → `último ciclo  OK` |
 | Database/Prisma | `docker logs --tail 40 vendix_postgres` |
 | Redis/queues/cache | `docker logs --tail 40 vendix_redis` |
 | Nginx/domain routing | `docker logs --tail 40 vendix_nginx` |
@@ -145,12 +190,51 @@ Properties of the runner (`scripts/buildcheck.sh`):
 - A **preflight** aborts before spawning anything if free RAM is below what the
   step needs. Override only knowingly with `--force`.
 
+### Shared log path — do not trust the file under `.buildcheck/`
+
+The runner writes its log to `.buildcheck/<step>.log`, a path that lives **inside the repo and inside the shared dev tree**. When more than one agent is working on the same checkout at once, the file is being written by N writers and read by N readers. A PASS line that this agent reads may belong to a different agent's run, on a different tree state, finished seconds ago or minutes ago. Reporting `buildcheck PASS` without confirming the log was produced by the local run on the final tree is reporting hearsay.
+
+Two specific signals that a reported PASS is not trustworthy:
+
+1. **Total time landing exactly on `BUILDCHECK_TIMEOUT` (default 900 s).** This is not coincidence: it is the pattern of the pipeline hanging on an orphaned `sleep` left behind by a previous run. The typecheck step itself may still have completed and emitted `PASS`, so the verdict can be true, but a total time equal to the timeout is a tell that the wrapper did not exit cleanly and that the `exit code` is suspect.
+2. **Identical lines between two consecutive reports.** If the last 10 lines of `.buildcheck/frontend-typecheck.log` look exactly like the previous run's last 10 lines — including timestamps that haven't advanced — the file was probably not overwritten.
+
+Correct invocation when the runner is used at all (still subject to the two exceptions in the Core Rule):
+
+```bash
+LOG=/tmp/buildcheck-$$-fe.log            # $$ is this shell's PID: no collision with other agents
+date -u +"start %Y-%m-%dT%H:%M:%SZ"
+npm run buildcheck:fe > "$LOG" 2>&1; echo "exit=$?"
+date -u +"end   %Y-%m-%dT%H:%M:%SZ"
+tail -12 "$LOG"
+```
+
+Read the `exit code`, not the last line of the log. Capture `$?` on the line right after the command — any other command in between overwrites it.
+
+Always report:
+
+- The **HEAD hash** taken in the same shell call as the report — not a hash copied from a previous minute's dump. `dev` moves under you.
+- **UTC start and end** of the local run.
+- An explicit confirmation that the tree was the **final** state, not an intermediate one.
+
+For anyone orchestrating pushes: run your own buildcheck, then add a **HEAD guard immediately before pushing** that compares the local `git rev-parse HEAD` against the SHA you audited. A 2-minute typecheck is enough time for another agent to land a commit on `dev`.
+
 ## Memory Budget — 16 GB Dev Machine, 10 Cores
 
-The host does **not** have 16 GB available for a build. The Docker dev stack holds
-~8 GB inside the `limactl`/Colima VM (`docker-compose.yml` alone grants
-`mem_limit: 6g` to `vendix_frontend`), and that RAM is not released while the
-containers exist. Real host budget with the stack up: **~6 GB**.
+The host does **not** have 16 GB available for a build. Two consumers share it:
+
+| Consumer | Budget |
+| --- | --- |
+| Colima VM (db, redis, backend, nginx) | **6 GiB reserved**, not released while the VM is up |
+| Native `ng serve` (`npm run dev:fe`) | ~4-5 GB resident once warm |
+
+Real host budget with the full dev environment up: **~4 GB**. The frontend left Docker on
+2026-08-30 precisely because it did not fit: measured with the old layout, `vendix_frontend` held
+**5.4 GiB of its 5.5 GiB cgroup (98.2 %)** while the host had **903 MB free**.
+
+Running natively removed the cgroup, so the frontend no longer dies with `CONSTRAINT_MEMCG` — but
+it did **not** make it cheap. It is still the heaviest process on the machine, and it now competes
+with builds directly rather than from behind a memory limit.
 
 Consequences that are not negotiable:
 
@@ -159,7 +243,7 @@ Consequences that are not negotiable:
 | Jest is capped in `apps/backend/package.json`: `maxWorkers: 2`, `workerIdleMemoryLimit: "1024MB"` | Uncapped Jest uses `cores - 1` = **9 workers**, and each `ts-jest` worker builds its own full TypeScript program (~2.5 GB on this repo) → ~24 GB demanded, 12 GB of swap, machine unusable. Config lives in `package.json` so even a bare `npx jest` inherits it. Never raise these on the dev machine. |
 | Never run two heavy Node steps at once | Two 3 GB processes plus the Docker VM exceeds physical RAM and drops the machine into swap, where a 15s typecheck takes minutes. |
 | `NG_BUILD_MAX_WORKERS=2` for the deep bundle | Angular's bundler opens a worker pool sized by core count. |
-| If the preflight aborts, free RAM first | `docker compose stop frontend` releases the heaviest container; `docker compose stop` releases the whole stack. |
+| If the preflight aborts, free RAM first | `pkill -f 'ng serve'` releases the heaviest process (native, ~4-5 GB); `docker compose stop` releases the VM's share. |
 | After any killed run, sweep | `npm run buildcheck:reap`. Jest workers in particular survive their parent. |
 
 When the machine bogs down, `npm run buildcheck:top` names the culprit with its
@@ -170,10 +254,11 @@ a pool of `cores - 1` is Jest's default, not Angular's (Angular caps lower).
 
 | Never run to verify | Why | Use instead |
 | --- | --- | --- |
-| `npm run dev`, `npm start` | starts backend + frontend on the host, colliding with Docker | `docker logs` |
+| `npm run dev`, `npm start` | starts **backend** on the host too, colliding with the container | `npm run dev:fe` for the frontend, `docker logs vendix_backend` for the backend |
 | `nest start`, `npm run start:dev -w apps/backend` | boots Nest on :3000 in watch mode, stays alive | `docker logs vendix_backend` |
-| `ng serve`, `npm start -w apps/frontend` | dev server stays alive on :4200 | `docker logs vendix_frontend` |
-| `ng build --watch` | watcher never exits | `docker logs vendix_frontend` |
+| A **second** `ng serve` | the dev server is already running natively on :4200; a second one either fails to bind or fights the first for the port | read the terminal of the `npm run dev:fe` that is already up |
+| `docker compose --profile docker-fe up -d frontend` while the native one runs | both publish 4200 | pick one; the native path is the default |
+| `ng build --watch` | watcher never exits, and it is not how this repo serves the frontend | `npm run dev:fe` |
 | `npm run build:prod -w apps/frontend`, root `npm run build`, any `npm run buildcheck*` | not a dev-verification step at all — see Core Rule; runs only on explicit request or confirmed release prep | `docker logs` (dev) / CI already covers the rest |
 | `npm test -w apps/backend` to verify one new spec | it does not know what you wrote — it runs **all 171 specs** with a worker pool, holding ~1 GB per worker, and the workers outlive a killed parent | `npm run buildcheck:test -- <path/to/that.spec.ts>` (test execution, not a build — still scoped to avoid the worker-pool blowup) |
 | `npm run test:debug -w apps/backend` | runs `node --inspect-brk`, which halts before the first line and waits **forever** for a debugger to attach — a permanent orphan, not a slow one | `npm run buildcheck:test` |
@@ -235,8 +320,9 @@ After any restart or recreate, re-run the development log checks and `docker ps`
 
 ## Golden Rule
 
-Development means Docker logs/watch mode — nothing else. Never run a build or compile-check
-unprompted, not even before a PR: CI (`ci.yml`) already gates the build before merge/release. A
+Development means watch-mode output — the `npm run dev:fe` terminal for the frontend, `docker
+logs` for everything else. Nothing else. Never run a build or compile-check unprompted, not even
+before a PR: CI (`ci.yml`) already gates the build before merge/release. A
 build or `npm run buildcheck*` runs only when the human explicitly asks, or when preparing a
 release and the human confirms your suggestion to run one.
 

@@ -19,6 +19,7 @@
       [customer]="collectorCustomer()"
       [requireCustomer]="!isAnonymous() && !isAlias()"
       [walletInfo]="collectorWalletInfo()"
+      [allowTip]="authFacade.isRestaurant()"
       (submit)="onCollectorSubmit($event)"
       (requestCustomer)="requestCustomer.emit()"
       (walletLookup)="onWalletLookup($event)"

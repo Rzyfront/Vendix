@@ -57,6 +57,11 @@ export { TableComponent } from './table/table.component';
 export { TooltipComponent } from './tooltip/tooltip.component';
 export { SelectorComponent } from './selector/selector.component';
 export { MultiSelectorComponent } from './multi-selector/multi-selector.component';
+export {
+  DocumentIdentityFieldsComponent,
+  EMPTY_DOCUMENT_IDENTITY,
+} from './document-identity-fields/document-identity-fields.component';
+export type { DocumentIdentityValue } from './document-identity-fields/document-identity-fields.component';
 export { TextareaComponent } from './textarea/textarea.component';
 export { QuantityControlComponent } from './quantity-control/quantity-control.component';
 export {

@@ -54,14 +54,31 @@ services:
       # node:24-alpine (subido desde node:20-alpine por EOL de Node 20, 2026-04-30):
       # el mismo grafo de rutas/DI necesita más heap para bootear sin OOM que en
       # Node 20 — 1536 chocaba justo al terminar RouterExplorer.
-      NODE_OPTIONS: "--max-old-space-size=2048"
+      # nancy 2026-09-01: bajado 2048 -> 1792. El techo del contenedor es
+      # 2560m y el RSS total = heap + nativo + compilador swc + source maps.
+      # Con heap 2048 el proceso llegaba a 2.44 GiB (97,9% del cgroup) y el
+      # kernel lo mataba con SIGKILL en la segunda peticion; en el log se lee
+      # como "npm error signal SIGKILL", que NO parece un problema de memoria.
+      # Con 1792 V8 recolecta antes en vez de morir: una pausa de GC es
+      # preferible a un bucle de reinicios. No se toca `mem_limit` porque
+      # subirlo agranda la huella de la VM en el host, y el host va justo.
+      NODE_OPTIONS: "--max-old-space-size=1792"
       CHOKIDAR_USEPOLLING: "true"
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      # QUI-489: en dev el límite de 10 intentos de login estorba al probar
-      # flujos de auth. Este compose es sólo de desarrollo (NODE_ENV arriba lo
-      # fija), así que el 30 vive acá y prod queda con el default seguro de 10.
+      # QUI-489: en dev el límite por IP estorba al probar flujos de auth. Este
+      # compose es sólo de desarrollo (NODE_ENV arriba lo fija), así que el 30
+      # vive acá. Ojo: desde el arreglo del rate limit esta variable gobierna
+      # la cubeta por IP REAL (default 50, red anti-inundación); el freno de
+      # fuerza bruta por cuenta es LOGIN_RATE_LIMIT_MAX_PER_ACCOUNT (10).
       LOGIN_RATE_LIMIT_MAX_ATTEMPTS: ${LOGIN_RATE_LIMIT_MAX_ATTEMPTS:-30}
+      # Saltos de proxy propios delante del backend, para que `req.ip` sea la
+      # IP real del cliente y los rate limits dejen de compartir una sola
+      # cubeta global. Acá la cadena es navegador -> nginx -> backend, o sea 1.
+      # En producción hay CloudFront delante de nginx: ese entorno debe fijar
+      # TRUST_PROXY_HOPS=2 en /opt/vendix/.env. Verificable con
+      # `curl .../api/health` -> campo `client_ip`. Ver client-ip.util.ts.
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
     depends_on:
       - db
       - redis
@@ -135,7 +152,20 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # RESPALDO, no arranca por defecto. El frontend de desarrollo corre NATIVO
+  # en macOS: `npm run dev:fe` (ver README, "Arranque local").
+  #
+  # El motivo es memoria. Medido el 2026-08-30 con este mismo servicio arriba:
+  # el contenedor sostenia 5.4 GiB de su cgroup de 5.5 GiB (98.2 %) y el host
+  # se quedaba con 903 MB libres de sus 16 GB. Fuera del cgroup, el heap de V8
+  # crece contra la RAM fisica en vez de morir con CONSTRAINT_MEMCG, y el watch
+  # usa FSEvents en vez del `--poll 5000` que exige VirtioFS.
+  #
+  # Para volver a levantarlo (por ejemplo, si falla el camino nativo):
+  #   docker compose --profile docker-fe up -d frontend
+  # Ojo: entonces hay que APAGAR el `ng serve` nativo — ambos publican el 4200.
   frontend:
+    profiles: ["docker-fe"]
     build:
       context: ./apps/frontend
       dockerfile: Dockerfile.dev
@@ -189,9 +219,10 @@ services:
       - ./nginx.conf:/etc/nginx/nginx.conf
       - ./ssl/certs:/etc/ssl/certs:ro
       - ./ssl/private:/etc/ssl/private:ro
+    # Sin `frontend`: ese servicio vive ahora en el perfil `docker-fe` y no
+    # arranca por defecto. Declararlo aqui haria fallar `docker compose up`.
     depends_on:
       - backend
-      - frontend
     networks:
       - vendix_net
     logging:

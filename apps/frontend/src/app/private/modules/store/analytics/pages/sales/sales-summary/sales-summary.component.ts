@@ -19,7 +19,6 @@ import {
 import {
   CurrencyPipe,
   CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
-import { ExportButtonComponent } from '../../../components/export-button/export-button.component';
 
 import { DateRangeFilter } from '../../../interfaces/analytics.interface';
 import {
@@ -47,7 +46,6 @@ import { getViewsByCategory, AnalyticsView } from '../../../config/analytics-reg
     ChartComponent,
     IconComponent,
     OptionsDropdownComponent,
-    ExportButtonComponent,
     CurrencyPipe,
     AnalyticsCardComponent,
   ],

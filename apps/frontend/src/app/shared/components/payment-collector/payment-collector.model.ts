@@ -135,6 +135,27 @@ export interface PaymentSubmit {
   bankAccountId?: number;
   /** Optional tip on top of the base. */
   tip?: number;
+  /**
+   * T1 — modo de la propina. 'percentage' → `tipValue` es el % (0-100);
+   * 'fixed' → `tipValue` es el monto libre (en ese caso coincide con
+   * `tip`). Si el operador solo escribe el monto sin elegir modo, el
+   * backend asume 'fixed' por default.
+   */
+  tipType?: 'percentage' | 'fixed';
+  /**
+   * T1 — valor base de la propina. Si `tipType='percentage'`, el %
+   * aplicado (0-100). Si `tipType='fixed'`, el monto (en ese caso
+   * coincide con `tip`). Cuando el collector resuelve el % a monto
+   * antes de emitir, persiste el monto final (regla del dueño: la
+   * propina pactada no puede moverse si cambia el subtotal).
+   */
+  tipValue?: number;
+  /**
+   * T1 — id del mesero que recibe la propina. Opcional: el mostrador
+   * sin meseros puede cobrar sin este dato. El backend lo persiste
+   * en `orders.tip_waiter_id` con FK a `users(id) ON DELETE SET NULL`.
+   */
+  tipWaiterId?: number | null;
   /** contado | credito. */
   mode: PaymentMode;
   /** Id of the pre-existing installment being paid against (if any). */
@@ -173,6 +194,38 @@ export interface BankAccountOption {
   name?: string | null;
   bank_name?: string;
   account_number?: string;
+  /**
+   * S3 key persistida de la imagen/logo de la cuenta (sin URL firmada).
+   * La URL firmada de lectura la entrega el backend por separado.
+   */
+  image_s3_key?: string | null;
+  /**
+   * URL firmada (TTL corto) de la imagen de la cuenta, o null si no tiene
+   * imagen. Nunca persiste en BD: la resuelve el backend a cada lectura.
+   */
+  image_url?: string | null;
+}
+
+/**
+ * La misma cuenta, ya normalizada para el `<select>` del cajero.
+ *
+ * Existe por una razón concreta: una entrada migrada por
+ * `20260829095000_bank_transfer_config_accounts` **no tiene**
+ * `bank_accounts.id` — el legado guardaba los datos sueltos en el JSON, sin
+ * fila en la tabla. Con el id como valor de la opción, esa cuenta se pintaba
+ * `value="undefined"`, la selección se coaccionaba a `null` y la compuerta de
+ * cobro no abría nunca: la tienda migrada no podía cobrar por transferencia.
+ * `key` siempre existe; `id` es la FK real o `null`.
+ */
+export interface BankAccountSelectOption extends BankAccountOption {
+  /** Identidad estable dentro del selector: `id:<n>` o `legacy:<índice>`. */
+  key: string;
+  /**
+   * FK a `bank_accounts.id`, o `null` si la entrada es legado. Un `null` viaja
+   * como `bank_account_id` ausente y el pago cae en la pantalla "Pagos sin
+   * asignar" de E.2 para asignación manual — degradación deliberada.
+   */
+  id: number | null;
 }
 
 /**
@@ -194,7 +247,13 @@ export const DEFAULT_CONFIG_BY_CONTEXT: Record<PaymentContext, PaymentCollectorC
   pos: {
     allowCash: true,
     allowReference: true,
-    allowTip: false,
+    // T1 — la propina del POS caja vive dentro del collector desde
+    // este commit. La duplicación manual que tenía el step de cobro
+    // se eliminó; ahora toda la UI de propina (toggle Monto/Porcentaje
+    // + input mesero) la renderiza la tarjeta `pc-card` del collector
+    // y la emite en el submit con `tip_type` / `tip_value` /
+    // `tip_waiter_id`. El POS caja ya tenía backend listo.
+    allowTip: true,
     allowCredit: true,
     allowWompi: true,
     allowWallet: true,
@@ -242,7 +301,12 @@ export const DEFAULT_CONFIG_BY_CONTEXT: Record<PaymentContext, PaymentCollectorC
   order: {
     allowCash: true,
     allowReference: true,
-    allowTip: false,
+    // T1 — la propina del flujo `order` (cobro desde el detalle de
+    // orden) la renderiza la misma tarjeta del collector que usan
+    // POS y mesa. Antes estaba apagada porque el endpoint
+    // `flow/pay` no aceptaba los metadatos; ahora el backend ya
+    // los acepta y el DTO del submit los emite.
+    allowTip: true,
     allowCredit: false,
     // Order settlement goes through `flow/pay` | `flow/credit-payment`, which
     // accept a direct/reference PayOrderDto only — there is no order-flow

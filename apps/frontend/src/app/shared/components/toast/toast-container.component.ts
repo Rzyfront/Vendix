@@ -1,6 +1,6 @@
 import { Component, inject } from '@angular/core';
 import { NgClass } from '@angular/common';
-import { ToastService } from './toast.service';
+import { ToastService, Toast } from './toast.service';
 import { IconComponent } from '../icon/icon.component';
 import type { IconName } from '../icon/icons.registry';
 
@@ -33,7 +33,7 @@ import type { IconName } from '../icon/icons.registry';
                   [color]="iconColor(t.variant)"
                 ></app-icon>
               </div>
-              <div class="flex-1">
+              <div class="flex-1 min-w-0">
                 @if (t.title) {
                   <p class="text-sm font-semibold">{{ t.title }}</p>
                 }
@@ -43,13 +43,28 @@ import type { IconName } from '../icon/icons.registry';
                   </p>
                 }
               </div>
-              <button
-                class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-                (click)="dismiss(t.id)"
-                aria-label="Close"
-                >
-                ×
-              </button>
+              <div class="flex items-center gap-1 shrink-0">
+                @if (t.action) {
+                  <button
+                    type="button"
+                    class="text-xs font-semibold underline underline-offset-2
+                           hover:opacity-80 focus:outline-none focus:ring-2
+                           focus:ring-[var(--color-ring)] rounded px-1.5 py-0.5"
+                    (click)="onActionClick(t)"
+                    [attr.aria-label]="t.action.label"
+                  >
+                    {{ t.action.label }}
+                  </button>
+                }
+                <button
+                  class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                  (click)="dismiss(t.id)"
+                  aria-label="Cerrar"
+                  type="button"
+                  >
+                  ×
+                </button>
+              </div>
             </div>
           </div>
           <div class="h-1 toast-progress" [ngClass]="barClasses(t.variant)"></div>
@@ -64,6 +79,16 @@ export class ToastContainerComponent {
 
   dismiss(id: string) {
     this.toast.dismiss(id);
+  }
+
+  /**
+   * Acción opcional del toast. El handler decide si llama a `dismiss` o
+   * no — nosotros NO lo descartamos automáticamente para no quitarle al
+   * caller el control del cierre (ej. un "Deshacer" puede querer mantener
+   * el toast vivo unos segundos más mientras se procesa el undo).
+   */
+  onActionClick(t: Toast) {
+    t.action?.onClick();
   }
 
   variantClasses(variant: string) {

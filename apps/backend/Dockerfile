@@ -1,6 +1,7 @@
 # ---- Build Stage ----
 FROM node:20-alpine AS builder
 WORKDIR /app
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 COPY package*.json ./
 # `npm ci` SIN fallback a `npm install`. El fallback convertía un lock
 # desincronizado en un warning invisible: `npm ci` fallaba con EUSAGE, `npm

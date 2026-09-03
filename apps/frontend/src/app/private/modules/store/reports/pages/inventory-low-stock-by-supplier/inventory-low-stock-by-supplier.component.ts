@@ -33,7 +33,7 @@ import type {
 } from '../../../../../../shared/components';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { PaginationComponent } from '../../../../../../shared/components/pagination/pagination.component';
-import { SelectorComponent, SelectorOption } from '../../../../../../shared/components/selector/selector.component';
+import { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 
 import { SuppliersService } from '../../../inventory/services/suppliers.service';
@@ -98,7 +98,6 @@ const LOW_STOCK_EXPORT_CAP = 10000;
     OptionsDropdownComponent,
     PaginationComponent,
     ResponsiveDataViewComponent,
-    SelectorComponent,
     StatsComponent,
   ],
   templateUrl: './inventory-low-stock-by-supplier.component.html',

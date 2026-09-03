@@ -2,6 +2,12 @@
   // Typecheck AOT sin emitir nada: mismo compilador y mismas reglas de
   // strictTemplates que el build de producción, pero sin bundle, sin prerender
   // y sin arrancar el servidor SSR. Lo usa scripts/buildcheck.sh.
+  //
+  // NO añadir "incremental" + "tsBuildInfoFile" aquí. Se probó el 2026-08-30 y
+  // es un no-op: `ngc -p tsconfig.buildcheck.json` bajo `noEmit` no escribe
+  // ningún .tsbuildinfo, y la segunda pasada tarda lo mismo que la primera
+  // (20 s medidos en frío y en caliente, byte a byte el mismo tiempo). Deja
+  // configuración muerta que aparenta ser una optimización.
   "extends": "./tsconfig.app.json",
   "compilerOptions": {
     "noEmit": true

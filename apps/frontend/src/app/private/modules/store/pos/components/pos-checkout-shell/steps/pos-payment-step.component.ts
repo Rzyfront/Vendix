@@ -17,6 +17,7 @@ import {
   SpinnerComponent,
   ButtonComponent,
   PaymentCollectorComponent,
+  IconComponent,
 } from '../../../../../../../shared/components';
 import type {
   PaymentSubmit,
@@ -42,6 +43,7 @@ import { CartState } from '../../../models/cart.model';
 import { extractApiError } from '../../../../../../../shared/utils/http-error.util';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import type { BusinessHours } from '../../../../../../../core/models/store-settings.interface';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 
 /**
  * Fase 5·B1 — `app-pos-payment-step`.
@@ -177,6 +179,13 @@ export class PosPaymentStepComponent implements OnInit {
   private readonly walletService = inject(PosWalletService);
   private readonly wompiService = inject(WompiService);
   private readonly settingsFacade = inject(StoreSettingsFacade);
+  // T10.B1 — predicado único de industria (canónica: AuthFacade.isRestaurant).
+  // La propina del POS sólo se ofrece en restaurante (decisión textual del dueño:
+  // "la propina va sólo en restaurante"). NO se usa
+  // pos-restaurant-integration.isRestaurantMode porque keilis está
+  // reimplementando ese servicio en otro carril; el riesgo de acoplarse a algo
+  // en obra es exactamente el que evita la canónica.
+  protected readonly authFacade = inject(AuthFacade);
 
   // ── Self-loaded payment methods (fallback) ───────────────────────────────
   private readonly loadedMethods = signal<PaymentMethod[]>([]);
@@ -523,8 +532,28 @@ export class PosPaymentStepComponent implements OnInit {
   }
 
   // ── The single collector submit handler (all POS gates preserved) ────────
+  //
   onCollectorSubmit(submit: PaymentSubmit): void {
     if (!this.cartState()) return;
+
+    // T10.B1 — defensa de profundidad (NO confiar sólo en `[allowTip]="..."`):
+    // la propina vive DENTRO de `grand_total` y FUERA de `subtotal`/`tax_amount`,
+    // y si llega un monto de propina sin su línea de contrapartida el guard de
+    // asientos revierte el cobro. En no-restaurante neutralizamos explícitamente
+    // los cuatro campos del payload. Es la LÍNEA que demuestra que el dato sale
+    // limpio, no el `@if` del HTML.
+    if (!this.authFacade.isRestaurant()) {
+      submit.tip = undefined;
+      submit.tipType = undefined;
+      submit.tipValue = undefined;
+      submit.tipWaiterId = null;
+    }
+
+    // T1 — la propina (monto + tipo + valor + mesero) ya viene
+    // en el payload del collector (`tip`, `tipType`, `tipValue`,
+    // `tipWaiterId`); este step NO la sobrescribe. La tarjeta
+    // única de propina es la del collector.
+
 
     // Deferred execution (delivery pay-now): don't process here. Emit the raw
     // payload so the shipping step folds it into a single processShippingSale.
@@ -699,11 +728,6 @@ export class PosPaymentStepComponent implements OnInit {
         },
       });
   }
-
-  /**
-   * Creates a credit sale from the collector's {@link CreditTerms}. Routes by
-   * `terms.type`: 'free' → fiado libre; 'installments' → financed plan.
-   */
   private runCreditSale(terms: CreditTerms | null): void {
     if (!this.cartState() || !this.cartState()!.customer) {
       this.toastService.info('Seleccione un cliente para continuar');

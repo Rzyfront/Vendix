@@ -46,6 +46,11 @@ export interface ReceiptsSettings {
   print_dispatch_ticket_enabled?: boolean;
   print_dispatch_ticket_auto_with_pos?: boolean;
   print_dispatch_ticket_auto_on_postventa?: boolean;
+  /**
+   * Decisión del usuario 2026-08-31: opt-in. Tiquete de reclamo en
+   * mostrador (direct_delivery) y para llevar (pickup).
+   */
+  print_dispatch_ticket_on_counter?: boolean;
 }
 
 /**
@@ -227,6 +232,9 @@ export class ReceiptsSettingsForm {
     print_dispatch_ticket_enabled: new FormControl(true),
     print_dispatch_ticket_auto_with_pos: new FormControl(false),
     print_dispatch_ticket_auto_on_postventa: new FormControl(false),
+    // Decisión del usuario 2026-08-31: opt-in. Tiquete de reclamo en
+    // mostrador (direct_delivery) y para llevar (pickup).
+    print_dispatch_ticket_on_counter: new FormControl(false),
   });
 
   /** Label of the format each preview will render, for the section hint. */
@@ -327,6 +335,9 @@ export class ReceiptsSettingsForm {
   }
   get printDispatchTicketAutoOnPostventaControl() {
     return this.form.get('print_dispatch_ticket_auto_on_postventa') as FormControl;
+  }
+  get printDispatchTicketOnCounterControl() {
+    return this.form.get('print_dispatch_ticket_on_counter') as FormControl;
   }
 
   constructor() {
