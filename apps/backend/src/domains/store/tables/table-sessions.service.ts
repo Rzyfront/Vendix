@@ -990,6 +990,41 @@ export class TableSessionsService {
    * stepping out of the restaurant). The table's `status` is set back
    * to 'cleaning' so the operator knows to reset it before the next
    * seating.
+   *
+   * IMPORTANT — do NOT change `orders.state` here.
+   *
+   * El P0 revenue-integrity review (leader feedback on PR fix/table-close-order)
+   * detectó que la versión previa de este método subía `orders.state` a
+   * `'finished'` para cualquier orden en `draft` / `created` / `pending_payment`,
+   * y eso violaba el contrato de analytics: `COMPLETED_SALE_STATES =
+   * ['delivered', 'finished']` (analytics-metrics.contract.ts:29), por lo que
+   * CERRAR UNA MESA CON LA CUENTA IMPAGA sumaba esa orden a los ingresos del
+   * período con `total_paid = 0`. Lo consumen overview-analytics,
+   * sales-analytics, financial-analytics y weekly-report.
+   *
+   * Se aplica la OPCIÓN 2 del review: separar los dos problemas.
+   *  (1) **Acá** (closeSession) NO tocamos `orders.state` ni `completed_at`.
+   *      La orden queda en su estado editable (draft / created / pending_payment)
+   *      y sigue siendo cobrable por el flujo normal de pagos, aunque la sesión
+   *      ya esté cerrada. El docblock de arriba (pagar después de salir del
+   *      restaurante) deja de ser una mentira: la orden SÍ admite pagos
+   *      posteriores.
+   *  (2) **En otro lado** (OrdersService.updateOrderFromEditor y paths
+   *      equivalentes) se gatea la edición por `table_sessions.closed_at`. Ese
+   *      guard vive fuera de este método a propósito para que el estado de la
+   *      orden siga siendo dato puro de la operación, no un proxy de "se cerró
+   *      la mesa".
+   *
+   * Si en el futuro alguien propone re-introducir el cambio de estado acá, debe
+   * coordinar con `OrdersService.updateOrderFromEditor` para no abrir dos
+   * mecanismos compitando por el mismo invariante.
+   *
+   * Por qué se mantiene el comentario `processing / shipped / delivered /
+   * pending_delivery` aunque no se mencionan explícitamente en el código:
+   * esos cuatro estados no llegan por este camino hoy (KDS-tickets y
+   * dispatch-routes los gobiernan), así que la ausencia de un branch para
+   * ellos es intencional, no un descuido del diff. Si llegan a entrar acá,
+   * agrega un test que documente la decisión.
    */
   async closeSession(sessionId: number) {
     const session = await this.findOne(sessionId);
@@ -1007,30 +1042,10 @@ export class TableSessionsService {
         where: { id: session.table_id },
         data: { status: 'cleaning', updated_at: new Date() },
       });
-
-      // FIX/ table-close-order: close the bound order so the editor stops
-      // accepting mutations on a paid order. Gateado a estados editables
-      // (draft / created / pending_payment) para no clobber órdenes que ya
-      // están en processing (KDS en curso) o terminales.
-      if (session.order_id) {
-        const orderRow = await tx.orders.findUnique({
-          where: { id: session.order_id },
-          select: { state: true },
-        });
-        if (
-          orderRow &&
-          ['draft', 'created', 'pending_payment'].includes(orderRow.state)
-        ) {
-          await tx.orders.update({
-            where: { id: session.order_id },
-            data: {
-              state: 'finished',
-              completed_at: new Date(),
-              updated_at: new Date(),
-            },
-          });
-        }
-      }
+      // NO se muta `orders.state` acá. Ver docblock arriba (P0 revenue
+      // integrity). El estado de la orden se gobierna por el flujo de pagos
+      // (`PaymentsService` + `OrderFlowService`) y la edición se bloquea en
+      // `OrdersService.updateOrderFromEditor` cuando la sesión está cerrada.
     });
 
     // Notify staff + comensal streams of the close (ONLY on the real
@@ -1040,7 +1055,7 @@ export class TableSessionsService {
     this.emitSessionClosed(session.store_id, sessionId);
 
     this.logger.log(
-      `Table session closed: session=${sessionId} table=${session.table_id} order=${session.order_id}`,
+      `Table session closed: session=${sessionId} table=${session.table_id} order=${session.order_id} (order state unchanged — see docblock)`,
     );
     return this.findOne(sessionId);
   }
