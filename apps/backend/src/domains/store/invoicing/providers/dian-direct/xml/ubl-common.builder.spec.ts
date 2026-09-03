@@ -75,6 +75,8 @@ describe('UblCommonBuilder.buildSupplierParty', () => {
     // Responsibility → TaxLevelCode value; @listName is the literal 'No aplica'.
     expect(xml).toMatch(/TaxLevelCode listName="No aplica"/);
     expect(xml).toMatch(/TaxLevelCode[^>]*>R-99-PN</);
+    // No responsable de IVA (régimen '49') declara ZZ / No aplica
+    expect(xml).toMatch(/<cac:TaxScheme>\s*<cbc:ID>ZZ<\/cbc:ID>\s*<cbc:Name>No aplica<\/cbc:Name>\s*<\/cac:TaxScheme>/);
   });
 
   it('honors an explicit person_type and carries a different responsibility', () => {
@@ -89,6 +91,8 @@ describe('UblCommonBuilder.buildSupplierParty', () => {
     expect(xml).toMatch(/AdditionalAccountID>2</);
     expect(xml).toMatch(/TaxLevelCode listName="No aplica"/);
     expect(xml).toMatch(/TaxLevelCode[^>]*>O-15</);
+    // Responsable de IVA (régimen '48') declara 01 / IVA
+    expect(xml).toMatch(/<cac:TaxScheme>\s*<cbc:ID>01<\/cbc:ID>\s*<cbc:Name>IVA<\/cbc:Name>\s*<\/cac:TaxScheme>/);
 
     // Ensure the alternate-case values from the other test are NOT present,
     // confirming the serialized values are driven by this issuer instance.
