@@ -376,3 +376,241 @@ describe('OrderFlowService.reconcileOrderFromDispatch — tabla de derivación',
     expect(updateSpy).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * QUI-777 — Cobertura dedicada del puente de cocina del
+ * {@link OrderFlowService.markKitchenOrderDelivered} (y su reversa
+ * {@link OrderFlowService.revertKitchenOrderDelivery}). El listener que
+ * traduce `kitchen.order_all_delivered` a `OrderSseService.pushOrderEvent`
+ * depende de la DECISIÓN que toma este método: ¿la orden estaba en
+ * `processing`?, ¿se transicionó a `delivered`? Si este método devuelve
+ * la fila sin transicionar (estado distinto de `processing`), el listener
+ * NO emite SSE — y esa decisión se prueba aquí, no en el listener.
+ *
+ * Patrón: factory `buildService()` análogo al de `reconcileOrderFromDispatch`.
+ * `getOrder` se espía (es método privado) y `updateOrderState` también, para
+ * capturar argumentos exactos (incluido `source: 'kitchen_bridge'` T9).
+ */
+describe('OrderFlowService.markKitchenOrderDelivered — restaurant bridge', () => {
+  const ORDER_ID = 77;
+
+  const buildService = (order: { state: string } | null) => {
+    const prismaMock: any = {
+      orders: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+    };
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
+    );
+
+    // `getOrder` es el seam público que el método usa para cargar la fila.
+    // Espiamos con el order que el test quiera — refleja el SELECT real del
+    // service (incluye state + order_number + delivery_type, no solo state).
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(
+      order ? { id: ORDER_ID, ...order } : null,
+    );
+    const updateSpy = jest
+      .spyOn(service as any, 'updateOrderState')
+      .mockResolvedValue({ id: ORDER_ID, state: 'delivered' });
+
+    return { service, prismaMock, updateSpy };
+  };
+
+  it('happy path: orden en processing transiciona a delivered con source kitchen_bridge', async () => {
+    const { service, updateSpy } = buildService({ state: 'processing' });
+
+    const result = await service.markKitchenOrderDelivered(ORDER_ID);
+
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    // T9: el source marca este flujo como "puente de cocina" para que el
+    // listener de notificaciones silencie el evento (entregado NO alerta;
+    // el LISTO ya sonó por `kitchen.ticket_ready`).
+    expect(updateSpy).toHaveBeenCalledWith(
+      ORDER_ID,
+      'delivered',
+      expect.objectContaining({
+        delivered_at: expect.any(Date),
+        kitchen_all_delivered: true,
+      }),
+      { source: 'kitchen_bridge' },
+    );
+    expect(result?.state).toBe('delivered');
+  });
+
+  it('idempotencia: orden ya en delivered devuelve la fila sin transicionar', async () => {
+    const { service, updateSpy } = buildService({ state: 'delivered' });
+
+    const result = await service.markKitchenOrderDelivered(ORDER_ID);
+
+    // Re-trigger desde KDS o reconexión SSE: no-op real, NO emite SSE
+    // (el listener chequea `updated?.state === 'delivered'`, pero como el
+    // service ya hizo no-op y devolvió la fila original, la igualdad sí
+    // pasa — la idempotencia vive en el chequeo del state que retorna,
+    // no en el de la fila original).
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(result?.state).toBe('delivered');
+  });
+
+  it('idempotencia: orden en finished (auto-finalizada por job 4h) NO transiciona', async () => {
+    const { service, updateSpy } = buildService({ state: 'finished' });
+
+    const result = await service.markKitchenOrderDelivered(ORDER_ID);
+
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(result?.state).toBe('finished');
+  });
+
+  it('validateTransition lanza ORDER_INVALID_TRANSITION: el error se propaga al listener', async () => {
+    // Defensa en profundidad: si por alguna razón la fila cargada tiene un
+    // estado desde el que `delivered` no es alcanzable, validateTransition
+    // lanza 409 ORDER_INVALID_TRANSITION. El listener captura con try/catch
+    // (log + swallow) — pero el service NO debe silenciar el error.
+    const prismaMock: any = {
+      orders: { findFirst: jest.fn().mockResolvedValue(null) },
+    };
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
+    );
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue({
+      id: ORDER_ID,
+      state: 'processing',
+    });
+    jest.spyOn(service as any, 'updateOrderState').mockResolvedValue({});
+    jest
+      .spyOn(service as any, 'validateTransition')
+      .mockImplementation(() => {
+        throw new BadRequestException('Invalid state transition');
+      });
+
+    await expect(
+      service.markKitchenOrderDelivered(ORDER_ID),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+/**
+ * QUI-777 — Hermano reverso del describe anterior. Cubre
+ * {@link OrderFlowService.revertKitchenOrderDelivery} (delivered → processing
+ * cuando el KDS revierte un ticket terminal). El método es la imagen espejo:
+ * gate por `state === 'delivered'`, mismo seam `updateOrderState`, mismo
+ * patrón de no-op idempotente.
+ *
+ * Diferencia clave vs. `markKitchenOrderDelivered`: este método NO usa
+ * `getOrder()` — hace su propio `prisma.orders.findFirst` con select mínimo
+ * (id + state). Cubrimos esa ruta aquí para que el spec refleje la
+ * implementación real y no la contratemos por accidente.
+ */
+describe('OrderFlowService.revertKitchenOrderDelivery — kitchen bridge reverse', () => {
+  const ORDER_ID = 99;
+
+  const buildService = (order: { id: number; state: string } | null) => {
+    const prismaMock: any = {
+      orders: {
+        findFirst: jest.fn().mockResolvedValue(order),
+      },
+    };
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
+    );
+    const updateSpy = jest
+      .spyOn(service as any, 'updateOrderState')
+      .mockResolvedValue({ id: ORDER_ID, state: 'processing' });
+
+    return { service, prismaMock, updateSpy };
+  };
+
+  it('happy path: orden en delivered transiciona a processing', async () => {
+    const { service, updateSpy, prismaMock } = buildService({
+      id: ORDER_ID,
+      state: 'delivered',
+    });
+
+    const result = await service.revertKitchenOrderDelivery(ORDER_ID);
+
+    // El service usa su propio findFirst con select mínimo (id, state) —
+    // NO pasa por getOrder. Cubrir esa ruta evita que un refactor futuro
+    // acople accidentalmente los dos métodos.
+    expect(prismaMock.orders.findFirst).toHaveBeenCalledWith({
+      where: { id: ORDER_ID },
+      select: { id: true, state: true },
+    });
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    expect(updateSpy).toHaveBeenCalledWith(
+      ORDER_ID,
+      'processing',
+      expect.objectContaining({ kitchen_delivery_reverted: true }),
+    );
+    expect(result?.state).toBe('processing');
+  });
+
+  it('idempotencia: orden inexistente (findFirst retorna null) NO transiciona', async () => {
+    const { service, updateSpy } = buildService(null);
+
+    const result = await service.revertKitchenOrderDelivery(ORDER_ID);
+
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(result).toBeNull();
+  });
+
+  it('idempotencia: orden en processing (ya estaba) NO transiciona', async () => {
+    const { service, updateSpy } = buildService({
+      id: ORDER_ID,
+      state: 'processing',
+    });
+
+    const result = await service.revertKitchenOrderDelivery(ORDER_ID);
+
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(result?.state).toBe('processing');
+  });
+
+  it('idempotencia: orden en finished (pago confirmado antes de la reversa) NO transiciona', async () => {
+    const { service, updateSpy } = buildService({
+      id: ORDER_ID,
+      state: 'finished',
+    });
+
+    const result = await service.revertKitchenOrderDelivery(ORDER_ID);
+
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(result?.state).toBe('finished');
+  });
+
+  it('validateTransition lanza: el error se propaga al listener', async () => {
+    const { service } = buildService({ id: ORDER_ID, state: 'delivered' });
+    jest
+      .spyOn(service as any, 'validateTransition')
+      .mockImplementation(() => {
+        throw new BadRequestException('Invalid state transition');
+      });
+
+    await expect(
+      service.revertKitchenOrderDelivery(ORDER_ID),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
