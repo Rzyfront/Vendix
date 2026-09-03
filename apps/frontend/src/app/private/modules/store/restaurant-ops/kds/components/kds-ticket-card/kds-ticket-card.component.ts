@@ -112,6 +112,29 @@ export class KdsTicketCardComponent {
     KitchenTicketsService.statusLabel(this.ticket().status),
   );
 
+  /**
+   * QUI-756 — etiqueta humana que se muestra en el chip "Mesa …" del header.
+   * Si el backend anidó `ticket.table` con su `name` (caso normal desde el fix),
+   * se devuelve tal cual. Si no llega el include (snapshot legacy o ruta que se
+   * nos escapó), cae a "Mesa #<table_id>" — señalización explícita de que falta
+   * el join, debug-friendly sin abrir DevTools.
+   *
+   * El @if exterior del template protege contra `table_id` nulo, así que acá
+   * asumimos que existe al menos un identificador para etiquetar.
+   */
+  readonly tableLabel = computed<string>(() => {
+    const ticket = this.ticket();
+    // Happy path: el backend anidó `table.name` (rótulo humano, ej. "Mesa 2").
+    if (ticket.table?.name) return ticket.table.name;
+    // Fallback defensivo: el include no llegó (snapshot legacy u otra ruta
+    // que se nos escapó). El `#` señala explícitamente que es el FK crudo,
+    // no un rótulo humano — debug-friendly sin abrir DevTools.
+    if (ticket.table_id != null) return `Mesa #${ticket.table_id}`;
+    // Sin información — el @if del template ya previene este caso en práctica,
+    // pero devolvemos `''` por si la guarda cambia en el futuro.
+    return '';
+  });
+
   readonly statusBadgeVariant = computed<'success' | 'neutral' | 'warning' | 'error' | 'info' | 'primary'>(() => {
     switch (this.ticket().status) {
       case 'pending':

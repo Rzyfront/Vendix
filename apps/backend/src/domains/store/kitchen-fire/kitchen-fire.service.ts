@@ -19,6 +19,12 @@ import { KdsSessionsService } from '../kds/sessions/kds-sessions.service';
  */
 const KITCHEN_TICKET_INCLUDE = {
   order: { select: { order_number: true } },
+  // QUI-756 — anidar `table.name` (rótulo humano, ej. "Mesa 2") para que el KDS
+  // muestre el nombre y no el FK. `kitchen_tickets.table_id` es PK autoincrement
+  // de `tables.id` (sin columna `number` separada); sólo con el include el frontend
+  // puede renderizar "Mesa 2" en lugar de "Mesa 18". El `select` limita al par
+  // {id, name} para no inflar la columna SSE.
+  table: { select: { id: true, name: true } },
   items: {
     orderBy: { id: 'asc' },
     include: {
