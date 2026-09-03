@@ -16,6 +16,7 @@ export interface PopProduct {
   id: number;
   name: string;
   code?: string;
+  barcode?: string;
   price?: number;
   cost?: number;
   cost_price?: number;
@@ -115,6 +116,7 @@ export interface LotInfo {
 export interface PreBulkData {
   name: string;
   code?: string;
+  barcode?: string;
   description?: string;
   product_type?: string;
   track_inventory?: boolean;

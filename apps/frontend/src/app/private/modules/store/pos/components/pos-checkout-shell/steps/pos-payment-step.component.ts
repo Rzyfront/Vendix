@@ -17,6 +17,7 @@ import {
   SpinnerComponent,
   ButtonComponent,
   PaymentCollectorComponent,
+  IconComponent,
 } from '../../../../../../../shared/components';
 import type {
   PaymentSubmit,
@@ -42,6 +43,7 @@ import { CartState } from '../../../models/cart.model';
 import { extractApiError } from '../../../../../../../shared/utils/http-error.util';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import type { BusinessHours } from '../../../../../../../core/models/store-settings.interface';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 
 /**
  * Fase 5·B1 — `app-pos-payment-step`.
@@ -116,6 +118,15 @@ export class PosPaymentStepComponent implements OnInit {
   /** Anonymous-sale flag owned by the shell (drives collector requireCustomer). */
   readonly isAnonymous = input<boolean>(false);
   /**
+   * QUI-737 (B.4) — modo alias del shell. Junto con {@link isAnonymous} define el
+   * "sin cliente formal": el collector NO exige cliente cuando es anónimo O alias.
+   * Se pasa aparte porque el alias NO es anónimo (la venta se identifica por su
+   * alias, no como Consumidor Final).
+   */
+  readonly isAlias = input<boolean>(false);
+  /** QUI-737 (B.4) — texto del alias de la venta (ej. "Mesa 5"), desde el shell. */
+  readonly customerAlias = input<string>('');
+  /**
    * Payment methods supplied by the shell/parent. When null/empty the step
    * self-loads them (behavior-preserving fallback, mirrors the legacy
    * interface `loadPaymentMethods()`).
@@ -168,6 +179,13 @@ export class PosPaymentStepComponent implements OnInit {
   private readonly walletService = inject(PosWalletService);
   private readonly wompiService = inject(WompiService);
   private readonly settingsFacade = inject(StoreSettingsFacade);
+  // T10.B1 — predicado único de industria (canónica: AuthFacade.isRestaurant).
+  // La propina del POS sólo se ofrece en restaurante (decisión textual del dueño:
+  // "la propina va sólo en restaurante"). NO se usa
+  // pos-restaurant-integration.isRestaurantMode porque keilis está
+  // reimplementando ese servicio en otro carril; el riesgo de acoplarse a algo
+  // en obra es exactamente el que evita la canónica.
+  protected readonly authFacade = inject(AuthFacade);
 
   // ── Self-loaded payment methods (fallback) ───────────────────────────────
   private readonly loadedMethods = signal<PaymentMethod[]>([]);
@@ -514,8 +532,28 @@ export class PosPaymentStepComponent implements OnInit {
   }
 
   // ── The single collector submit handler (all POS gates preserved) ────────
+  //
   onCollectorSubmit(submit: PaymentSubmit): void {
     if (!this.cartState()) return;
+
+    // T10.B1 — defensa de profundidad (NO confiar sólo en `[allowTip]="..."`):
+    // la propina vive DENTRO de `grand_total` y FUERA de `subtotal`/`tax_amount`,
+    // y si llega un monto de propina sin su línea de contrapartida el guard de
+    // asientos revierte el cobro. En no-restaurante neutralizamos explícitamente
+    // los cuatro campos del payload. Es la LÍNEA que demuestra que el dato sale
+    // limpio, no el `@if` del HTML.
+    if (!this.authFacade.isRestaurant()) {
+      submit.tip = undefined;
+      submit.tipType = undefined;
+      submit.tipValue = undefined;
+      submit.tipWaiterId = null;
+    }
+
+    // T1 — la propina (monto + tipo + valor + mesero) ya viene
+    // en el payload del collector (`tip`, `tipType`, `tipValue`,
+    // `tipWaiterId`); este step NO la sobrescribe. La tarjeta
+    // única de propina es la del collector.
+
 
     // Deferred execution (delivery pay-now): don't process here. Emit the raw
     // payload so the shipping step folds it into a single processShippingSale.
@@ -537,7 +575,15 @@ export class PosPaymentStepComponent implements OnInit {
 
     // Non-anonymous sales require a customer (defensive — the collector gates
     // this via requireCustomer).
-    if (!this.isAnonymous() && !this.cartState()!.customer) {
+    // QUI-737 (B.4) — el modo alias es otra salida legítima de "sin cliente":
+    // no requiere customer. Si llega a Cobro sin alias escrito, lo pedimos.
+    if (this.isAlias() && !this.customerAlias().trim()) {
+      this.toastService.info(
+        'Ingresa un nombre o referencia para identificar la venta',
+      );
+      return;
+    }
+    if (!this.isAnonymous() && !this.isAlias() && !this.cartState()!.customer) {
       this.toastService.info('Seleccione un cliente para continuar');
       this.requestCustomer.emit();
       return;
@@ -587,6 +633,14 @@ export class PosPaymentStepComponent implements OnInit {
       cashReceived: submit.amountReceived,
       reference: submit.reference,
       isAnonymousSale: this.isAnonymous(),
+      // QUI-737 (B.4) — el alias viaja con el pago; nunca ''.
+      customer_alias: this.isAlias()
+        ? this.customerAlias().trim() || undefined
+        : undefined,
+      // QUI-728 (E.1) — el selector de cuentas del collector emite bankAccountId;
+      // viaja con el pago para que el POS persista payments.bank_account_id en
+      // processPosPaymentTransaction (CreatePosPaymentDto).
+      bank_account_id: submit.bankAccountId,
     };
 
     if (method.type === 'wallet' && this.walletInfo()) {
@@ -674,11 +728,6 @@ export class PosPaymentStepComponent implements OnInit {
         },
       });
   }
-
-  /**
-   * Creates a credit sale from the collector's {@link CreditTerms}. Routes by
-   * `terms.type`: 'free' → fiado libre; 'installments' → financed plan.
-   */
   private runCreditSale(terms: CreditTerms | null): void {
     if (!this.cartState() || !this.cartState()!.customer) {
       this.toastService.info('Seleccione un cliente para continuar');

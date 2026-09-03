@@ -34,6 +34,10 @@ import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invo
 import { PosFiscalStatusComponent } from './pos-fiscal-status.component';
 import { PosFiscalStatus } from '../services/pos-fiscal.service';
 import { DispatchTicketPrintService } from '../../dispatch-ticket/services/dispatch-ticket-print.service';
+import {
+  shouldAutoPrintDispatchTicket,
+  type ShouldAutoPrintDispatchTicketContext,
+} from '../../../../../shared/services/print/dispatch-ticket-autoprint';
 import { DispatchTicketData } from '../../dispatch-ticket/models/dispatch-ticket-data.model';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 
@@ -295,68 +299,6 @@ import { StoreSettingsFacade } from '../../../../../core/store/store-settings/st
         background-size: 20px 20px;
         background-color: var(--color-surface);
       }
-
-      @media print {
-        /* Hide everything by default */
-        body * {
-          visibility: hidden !important;
-        }
-        
-        /* Show only the ticket */
-        .receipt-container, .receipt-container * {
-          visibility: visible !important;
-          color: #000 !important;
-          background: none !important;
-          box-shadow: none !important;
-          font-family: 'Courier New', Courier, monospace !important;
-          text-shadow: none !important;
-        }
-
-        .receipt-container {
-          position: fixed !important;
-          left: 0 !important;
-          top: 0 !important;
-          width: 300px !important; /* Standard POS width approx */
-          margin: 0 !important;
-          padding: 10px !important;
-          border: none !important;
-        }
-
-        /* Simplify layout for print */
-        .receipt-container .border-t, 
-        .receipt-container .border-b,
-        .receipt-container .border-t-2 {
-          border-color: #000 !important;
-          border-style: dashed !important;
-          border-width: 1px 0 0 0 !important;
-        }
-
-        .receipt-container [class*="text-primary"],
-        .receipt-container [class*="text-text-secondary"] {
-          color: #000 !important;
-        }
-
-        .receipt-container [class*="bg-muted"] {
-          background: none !important;
-          border-top: 1px dashed #000 !important;
-        }
-        
-        .receipt-container .text-2xl,
-        .receipt-container .text-lg {
-          font-size: 14pt !important;
-          font-weight: bold !important;
-        }
-
-        /* Hide icons for print */
-        app-icon {
-          display: none !important;
-        }
-
-        @page {
-          margin: 0;
-          size: auto;
-        }
-      }
     `,
   ] })
 /**
@@ -486,6 +428,12 @@ export class PosOrderConfirmationComponent {
     }
     if (d.customer?.name) return d.customer.name;
     if (d.customer?.business_name) return d.customer.business_name;
+    // ADR-9: `customer_alias` es etiqueta de venta rápida (cliente no formal,
+    // sin documento fiscal). Coexiste con `customer_id = null` por CHECK en
+    // DB, así que las ramas de arriba no se dispararon. Va ANTES del
+    // fallback «Consumidor Final» para que el tiquete de despacho diga
+    // el nombre con el que el cliente reclama en el mostrador.
+    if (d.customer_alias) return d.customer_alias;
     return 'Consumidor Final';
   });
   readonly derivedCustomerEmail = computed(() => this.orderData()?.customer_email || this.orderData()?.customer?.email || '');
@@ -638,6 +586,17 @@ private authFacade = inject(AuthFacade);
   /** Auto-imprime el tiquete junto con POS/factura cuando hay envío. Default false. */
   readonly printDispatchTicketAutoWithPos = computed<boolean>(
     () => this.settingsFacade.receipts()?.print_dispatch_ticket_auto_with_pos ?? false,
+  );
+
+  /**
+   * Decisión del usuario 2026-08-31: opt-in por admin para que el tiquete
+   * de despacho funcione como tiquete de reclamo en ventas de mostrador
+   * (`direct_delivery`) y para llevar (`pickup`). Enmienda al ADR-6;
+   * default false. Pasado al predicado compartido en
+   * `shouldAutoPrintDispatchTicket`.
+   */
+  readonly printDispatchTicketOnCounter = computed<boolean>(
+    () => this.settingsFacade.receipts()?.print_dispatch_ticket_on_counter ?? false,
   );
 
   /**
@@ -826,8 +785,10 @@ private authFacade = inject(AuthFacade);
     this.printing = true;
 
     // Create TicketData from orderData
+    const docId = Number(this.orderId || this.orderData()?.id);
     const ticketData: any = {
-      id: this.derivedOrderNumber(),
+      orderId: !isNaN(docId) && docId > 0 ? docId : undefined,
+      id: String(this.orderId || this.orderData()?.id || this.derivedOrderNumber() || 'N/A'),
       date: new Date(this.orderData().created_at || new Date()),
       items: this.derivedOrderItems().map((item: any) => ({
         id: item.id || item.name,
@@ -1091,26 +1052,12 @@ private authFacade = inject(AuthFacade);
   }
 
   // ── CP-DTLP Phase E.1/E.2 — Helpers del disparador POS del tiquete de despacho ─
-
-  /**
-   * `direct_delivery` NO emite tiquete de despacho (ADR-6): la entrega es en
-   * mostrador, no hay envío que Despachar.
-   */
-  private isDirectDeliveryOrder(): boolean {
-    return this.orderData()?.delivery_type === 'direct_delivery';
-  }
-
-  /**
-   * El tiquete de despacho solo aplica a ventas con envío a domicilio
-   * (`home_delivery`) o con la marca explícita del POS (`isShippingSale`).
-   * `pickup` (retiro en tienda) y `direct_delivery` (mostrador) NO imprimen.
-   */
-  private hasShippingOrder(): boolean {
-    const d = this.orderData();
-    if (!d) return false;
-    if (d.delivery_type === 'home_delivery') return true;
-    return !!d.isShippingSale;
-  }
+  //
+  // `isDirectDeliveryOrder` y `hasShippingOrder` se consolidaron en el
+  // predicado compartido `shouldAutoPrintDispatchTicket`
+  // (`shared/services/print/dispatch-ticket-autoprint.ts`). El contexto
+  // que arma `printDispatchTicketIfNeeded` pasa `deliveryType`,
+  // `isShippingSale` y `counterEnabled`; el predicado decide.
 
   /**
    * Construye el `DispatchTicketData` desde el `orderData` actual. La dirección
@@ -1172,10 +1119,20 @@ private authFacade = inject(AuthFacade);
   ): Promise<void> {
     const order = this.orderData();
     if (!order) return;
-    if (!this.printDispatchTicketEnabled()) return;
-    if (trigger === 'automatic' && !this.printDispatchTicketAutoWithPos()) return;
-    if (this.isDirectDeliveryOrder()) return;
-    if (!this.hasShippingOrder()) return;
+    // Construye el contexto UNA vez y delega la cadena de guards al predicado
+    // compartido con el detalle de orden. Mismo flag, misma lógica,
+    // misma fuente (settings.receipts).
+    const context: ShouldAutoPrintDispatchTicketContext = {
+      printDispatchTicketEnabled: this.printDispatchTicketEnabled(),
+      printDispatchTicketAuto:
+        trigger === 'automatic' ? this.printDispatchTicketAutoWithPos() : undefined,
+      // Decisión del usuario 2026-08-31: tiquete de reclamo en mostrador
+      // y para llevar. Mismo flag, mismo origen que el detalle de orden.
+      counterEnabled: this.printDispatchTicketOnCounter(),
+      deliveryType: order.delivery_type,
+      isShippingSale: order.isShippingSale,
+    };
+    if (!shouldAutoPrintDispatchTicket(trigger, context)) return;
 
     try {
       await this.dispatchTicketPrint.printDispatchTicket(

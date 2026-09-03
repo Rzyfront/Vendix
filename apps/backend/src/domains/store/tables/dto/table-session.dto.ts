@@ -4,10 +4,12 @@ import {
   IsBoolean,
   IsInt,
   IsOptional,
+  IsString,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 
 /**
  * DTO to open a new table session.
@@ -39,6 +41,19 @@ export class OpenTableSessionDto {
   @Type(() => Number)
   @Min(1)
   customer_id?: number;
+
+  /**
+   * QUI-737 (B.4) — Alias de venta con mesa (FB-21 aprobado): el alias aplica
+   * también a mesas. Mutuamente excluyente con `customer_id`. `@Transform`
+   * colapsa string en blanco a `undefined`.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() === '' ? undefined : value,
+  )
+  customer_alias?: string;
 }
 
 /**
@@ -97,6 +112,35 @@ export class TableSessionAddItemDto {
   @IsInt({ each: true })
   @Type(() => Number)
   excluded_component_ids?: number[];
+
+  /**
+   * Nota libre del mesero por línea ("sin cebolla", "término medio",
+   * "salsa aparte"). El KDS la muestra pegada al ítem y se imprime en
+   * el ticket de cocina. NO es la misma dimensión que
+   * `excluded_component_ids` (esa es intención estructurada sobre el
+   * BOM); esta es prosa corta escrita al pedir.
+   *
+   * Tope de 200 caracteres (no 500) por el medio físico: el ticket
+   * de cocina se imprime en papel térmico de 58 u 80 mm y el cocinero
+   * la lee de reojo. Una nota de 500 caracteres no cabe y no se
+   * lee; 200 es generoso para "sin cebolla, término medio, salsa
+   * aparte".
+   *
+   * Cadena vacía se normaliza a NULL aguas abajo (en el create del
+   * service): un '' guardado como nota pinta un espacio vacío en el
+   * ticket y el cocinero ve "hay nota" sin contenido — peor que no
+   * tenerla.
+   *
+   * El mismo DTO lo consume `ecommerce-tables.service.ts:528`
+   * (camino del comensal pidiendo desde el QR de la mesa). Declarar
+   * `notes` aquí es lo que queremos: el comensal puede pedir
+   * "sin cebolla" desde su teléfono. Si ese create no persiste
+   * `notes`, es bug del comensal, no del DTO.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  notes?: string;
 }
 
 /**

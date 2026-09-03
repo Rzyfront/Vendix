@@ -5,6 +5,23 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { CloseKdsSessionDto, OpenKdsSessionDto } from '../dto';
 
 /**
+ * Roles que pueden actuar sobre cualquier turno abierto de KDS sin importar
+ * quién es el dueño del turno. Espejo lógico de `PRIVILEGED_ROLE_NAMES` del
+ * backend (ver `apps/backend/src/common/utils/privileged-roles.util.ts`),
+ * replicado acá porque el KDS necesita denegar al cook normal, no operar
+ * permisos abstractos sobre endpoints administrativos.
+ */
+const KDS_FORCE_TAKE_ROLES = new Set(['owner', 'admin', 'super_admin']);
+
+/**
+ * Inactividad máxima de un turno abierto antes de que el helper
+ * `assertCanMutateStationTicket` lo considere vencido y libere la estación
+ * para el siguiente operador. 5 minutos — el chef que se levanta sin
+ * cerrar deja el turno accesible para el relevo sin pedir acción.
+ */
+const KDS_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
  * KdsSessionsService — turnos de estación (QUI-651).
  *
  * Espejo de `cash-registers/sessions`, con una diferencia sustantiva: la sesión
@@ -33,6 +50,17 @@ export class KdsSessionsService {
     return { storeId: ctx.store_id, userId: ctx.user_id };
   }
 
+  /** Roles efectivos del caller como set — útil para chequeos rápidos. */
+  private callerRoles(): Set<string> {
+    return new Set(RequestContextService.getContext()?.roles ?? []);
+  }
+
+  /** True si el caller está en `KDS_FORCE_TAKE_ROLES` (owner/admin/super_admin). */
+  isCallerPrivileged(): boolean {
+    const r = this.callerRoles();
+    return r.has('owner') || r.has('admin') || r.has('super_admin');
+  }
+
   /** Sesión abierta de una estación, o null. Lo consulta el fire y la UI. */
   async findOpenByKds(kdsId: number) {
     return this.prisma.kds_sessions.findFirst({
@@ -48,7 +76,7 @@ export class KdsSessionsService {
   }
 
   async findAll(kdsId?: number) {
-    return this.prisma.kds_sessions.findMany({
+    const sessions = await this.prisma.kds_sessions.findMany({
       where: { ...(kdsId != null && { kds_id: kdsId }) },
       orderBy: { opened_at: 'desc' },
       take: 100,
@@ -58,6 +86,30 @@ export class KdsSessionsService {
         closed_by_user: { select: { id: true, first_name: true, last_name: true } },
       },
     });
+    return sessions.map((s) => ({ ...s, summary: this.stripSummaryCost(s.summary) }));
+  }
+
+  /**
+   * ADR-10: el KDS nunca muestra dinero. El snapshot `summary` persistido al
+   * cerrar un turno ANTES de esta regla puede traer `total_cost`/`unit_cost` en
+   * su JSON. Al servirlo se proyecta sin dinero: se conservan las cantidades por
+   * insumo y se descartan las claves de costo. No borra nada en base — solo deja
+   * de enviarlas en el payload.
+   */
+  private stripSummaryCost(summary: any): any {
+    if (!summary || typeof summary !== 'object') return summary;
+    const clean = { ...summary };
+    delete clean.total_cost;
+    if (Array.isArray(clean.ingredients)) {
+      clean.ingredients = clean.ingredients.map((i: any) => {
+        if (!i || typeof i !== 'object') return i;
+        const copy = { ...i };
+        delete copy.total_cost;
+        delete copy.unit_cost;
+        return copy;
+      });
+    }
+    return clean;
   }
 
   /**
@@ -67,6 +119,17 @@ export class KdsSessionsService {
    * real es el índice único parcial `kds_sessions_one_open_per_kds`: dos
    * operadores concurrentes pasarían ambos este chequeo y dejarían la estación
    * con dos dueños. Por eso el P2002 se traduce, no se propaga crudo.
+   *
+   * NOTA — QUI-760 ya NO hace backfill al abrir. La imputación de
+   * `inventory_transactions` se hace en el momento de la primera ACCIÓN de
+   * gestión sobre un ticket (`start`/`ready`/`delivered`), vía
+   * {@link attributeOpenSessionToTicketConsumption}. Razones del cambio:
+   *  - Si un operador entra por error a la KDS equivocada, cierra y abre
+   *    la suya, el turno viejo no debe quedarse con el consumo de la otra.
+   *  - El responsable del consumo es quien COCINA, no quien ABRE turno.
+   *  - El tablero KDS filtra por `business_date = hoy`, así que el límite
+   *    temporal está puesto por construcción y no necesita una ventana
+   *    propia acá.
    */
   async open(dto: OpenKdsSessionDto) {
     const { storeId, userId } = this.requireContext();
@@ -83,14 +146,26 @@ export class KdsSessionsService {
     }
 
     try {
+      const now = new Date();
       return await this.prisma.kds_sessions.create({
         data: {
           kds_id: dto.kds_id,
           store_id: storeId,
           opened_by: userId,
           status: 'open',
-          opened_at: new Date(),
-          updated_at: new Date(),
+          opened_at: now,
+          // `last_seen_at` se inicializa al mismo instante que `opened_at`
+          // para que el primer heartbeat llegue desde el frontend (1 min
+          // después) sin que el helper de inactividad lo considere vencido.
+          last_seen_at: now,
+          updated_at: now,
+        },
+        include: {
+          // Mismo `include` que `findOpenByKds` para que la UI del status
+          // bar pueda pintar nombre de estación y operador desde el
+          // snapshot del POST, sin un GET extra.
+          kds: { select: { id: true, name: true, code: true } },
+          opened_by_user: { select: { id: true, first_name: true, last_name: true } },
         },
       });
     } catch (e: any) {
@@ -100,6 +175,116 @@ export class KdsSessionsService {
       throw e;
     }
   }
+
+  /**
+   * QUI-760 — IMPUTA con la sesión abierta de la KDS del ticket las
+   * `inventory_transactions` de ese ticket que sigan con `kds_session_id
+   * IS NULL`.
+   *
+   * Se invoca desde los handlers de `startPreparation`, `markReady` y
+   * `markDelivered` en `kitchen-fire.service.ts` — la primera acción de
+   * gestión sobre un ticket es la que firma el consumo. La guarda
+   * `kds_session_id IS NULL` hace que solo esa primera acción tenga
+   * efecto: llamar el helper desde los tres handlers sale gratis (no
+   * rompe idempotencia) y deja cubierto un cuarto si mañana aparece.
+   *
+   * El routing de KDS NO se rederiva acá. El `kitchen_tickets.kds_id` ya
+   * fue resuelto al disparar el fire (mismo patrón `kdsByProduct.get(...)
+   * ?? defaultKds.id` que `kitchen-fire.service.ts:668-680`), así que el
+   * ticket y todas las `inventory_transactions` que pertenecen a sus
+   * `order_items` van a la misma KDS — basta con estampar a la sesión
+   * abierta de ESE kds_id.
+   *
+   * Comportamiento:
+   *  - Si no hay sesión abierta para la KDS del ticket: 0 filas
+   *    estampadas, sin error. La guardia del tablero ya prohíbe actuar
+   *    sin sesión; este helper es defensivo para ese caso y para
+   *    tickets de un kds_id sin estación activa.
+   *  - Si el ticket no existe en esta tienda: 0 filas estampadas. El
+   *    helper NO rompe el flujo del handler — la búsqueda del ticket
+   *    en el handler previo ya fallaría con su propio error.
+   *
+   * Caso especial `table-sessions` (reverso de un ítem disparado): el
+   * caller en `tables/table-sessions.service.ts:891` (dentro de
+   * `removeItem`) llama `cancelTicketInTx` y, en la MISMA tx, en orden:
+   *  - líneas 893-942: por cada `consumptionTxn` (los originales con
+   *    `order_item_id` y `quantity_change < 0`), crea la reversa de
+   *    stock vía `stockLevelManager.updateStock({ ..., movement_type:
+   *    'return' })` SIN `order_item_id` (la FK `Restrict` sobre el
+   *    `order_items.delete` posterior lo prohíbe).
+   *  - línea 946: `tx.inventory_transactions.deleteMany({ where:
+   *    { order_item_id: orderItemId } })` borra las consumption
+   *    originales. Las reversals (sin `order_item_id`) sobreviven en
+   *    la tabla.
+   *  - línea 974: post-commit, llama `emitTicketCancelledEvent(ticketId)`
+   *    que invoca este imputador.
+   *
+   * Cuando el imputador corre post-commit, su `where: { order_item_id:
+   * { not: null } }` no matchea ninguna fila: las consumption
+   * originales ya NO EXISTEN (el caller las borró), y las reversals
+   * NO TIENEN `order_item_id` por construcción. Resultado: 0
+   * estampadas, sin error. La doble-no-imputación es una INVARIANTE
+   * DEL CALLER, no una garantía del helper — documentado para que el
+   * próximo que lea entienda que si alguien refactoriza
+   * `removeItem` y deja las consumption con `order_item_id`
+   * persistidas, este imputador pasa a estampar la reversión al
+   * turno que la cocinó, lo que YA sería doble conteo de stock
+   * positivo. La invariante la sostiene el caller, no este helper.
+   *
+   * Devuelve el conteo de filas estampadas (útil para logs y para
+   * verificar que la primera acción tuvo efecto).
+   */
+  async attributeOpenSessionToTicketConsumption(ticketId: number): Promise<number> {
+    const { storeId } = this.requireContext();
+
+    // Traer el ticket para conocer su kds_id. Filtro por store_id
+    // explícito: defensa en profundidad contra un ticket creado en otra
+    // tienda por una fuga del scope del backend.
+    const ticket = await this.prisma.kitchen_tickets.findFirst({
+      where: { id: ticketId, store_id: storeId },
+      select: { id: true, kds_id: true },
+    });
+    if (!ticket) return 0;
+
+    // Sesión abierta de esta KDS. Si no hay, no imputamos nada: el
+    // helper es idempotente y el tablero debería bloquear esta acción.
+    const openSession = await this.findOpenByKds(ticket.kds_id);
+    if (!openSession) return 0;
+
+    // Imputación: transactions cuyo order_item está en este ticket y
+    // siguen null. La guarda `kds_session_id IS NULL` es la idempotencia
+    // — la segunda llamada al helper no tiene efecto. El relational scope
+    // de `StorePrismaService` filtra por `products.store_id`, así que
+    // cross-tenant está cubierto por construcción.
+    //
+    // Invariante sobre `type`: este helper NO filtra por `type` y eso
+    // es correcto por construcción. Todo `kitchen_ticket_items.order_item_id`
+    // tiene `inventory_consumed_at_fire = true` — el fire lo flipea
+    // siempre, incluidos los `recipeLessItems` (Fase K Gap 3, líneas
+    // 810-819 de `kitchen-fire.service.ts`). Y el path de pago
+    // (`payments.service.ts:2554`) tiene el guard `if (item.
+    // inventory_consumed_at_fire === true) continue;` antes de generar
+    // un `sale` o `return` para el mismo order_item. Verificado en DB
+    // local: TODOS los movimientos de order_items de kitchen_ticket_items
+    // son `stock_in`/`initial`, cero `sale`/`return`. Filtrar por
+    // `type` agregaría ruido sin cambiar el resultado.
+    const result = await this.prisma.inventory_transactions.updateMany({
+      where: {
+        kds_session_id: null,
+        order_item_id: { not: null },
+        order_items: {
+          kitchen_ticket_items: {
+            some: { kitchen_ticket_id: ticketId },
+          },
+        },
+      },
+      data: { kds_session_id: openSession.id },
+    });
+
+    return result.count;
+  }
+
+
 
   /**
    * Cierra la sesión y persiste el RESUMEN DEL TURNO como snapshot inmutable,
@@ -138,11 +323,10 @@ export class KdsSessionsService {
    * (a) HISTORIAL de consumos — una fila por insumo POR PEDIDO.
    *
    * Es una consulta sobre `inventory_transactions` filtrada por
-   * `kds_session_id`. El costo sale de las columnas `unit_cost`/`total_cost` que
-   * QUI-651 agregó: antes el costo por movimiento no existía en ninguna parte
-   * joineable — no estaba en inventory_transactions ni en inventory_movements, y
-   * el `total_value` de inventory_valuation_snapshots es el valor del stock
-   * ON-HAND posterior al movimiento, no el costo de lo consumido.
+   * `kds_session_id`. ADR-10: el KDS nunca muestra dinero. El historial expone
+   * SOLO cantidades por insumo; `unit_cost`/`total_cost` no se proyectan (vivían
+   * en las columnas que QUI-651 agregó, pero esa información pertenece a la capa
+   * de contabilidad/reportes, nunca a la superficie de cocina).
    */
   async getConsumptionHistory(sessionId: number) {
     const rows = await this.prisma.inventory_transactions.findMany({
@@ -152,8 +336,6 @@ export class KdsSessionsService {
         id: true,
         created_at: true,
         quantity_change: true,
-        unit_cost: true,
-        total_cost: true,
         products: { select: { id: true, name: true, sku: true } },
         order_items: {
           select: {
@@ -172,8 +354,6 @@ export class KdsSessionsService {
       // El fire registra el consumo como cantidad NEGATIVA. Se expone en
       // positivo porque la vista es "cuánto se consumió", no "cuánto varió".
       quantity: Math.abs(r.quantity_change),
-      unit_cost: r.unit_cost,
-      total_cost: r.total_cost,
       ingredient: r.products,
       // El plato que originó el consumo, vía el order_item del fire.
       dish_name: r.order_items?.product_name ?? null,
@@ -226,7 +406,7 @@ export class KdsSessionsService {
     });
 
     if (sessions.length === 0) {
-      return { sessions: [], by_station: [], total_cost: 0 };
+      return { sessions: [], by_station: [] };
     }
 
     // Un solo barrido de movimientos para todo el rango: consultar por sesión
@@ -236,7 +416,6 @@ export class KdsSessionsService {
       select: {
         kds_session_id: true,
         quantity_change: true,
-        total_cost: true,
         products: { select: { id: true, name: true, sku: true } },
       },
     });
@@ -259,8 +438,7 @@ export class KdsSessionsService {
         code: string;
         session_count: number;
         movement_count: number;
-        total_cost: number;
-        ingredients: Map<number, { product_id: number; name: string; sku: string | null; quantity: number; total_cost: number }>;
+        ingredients: Map<number, { product_id: number; name: string; sku: string | null; quantity: number }>;
       }
     >();
 
@@ -272,7 +450,6 @@ export class KdsSessionsService {
         code: station.code,
         session_count: 0,
         movement_count: 0,
-        total_cost: 0,
         ingredients: new Map(),
       };
       acc.session_count += 1;
@@ -286,31 +463,30 @@ export class KdsSessionsService {
       if (!acc || !r.products) continue;
 
       acc.movement_count += 1;
-      const cost = Number(r.total_cost ?? 0);
-      acc.total_cost += cost;
 
       const ing = acc.ingredients.get(r.products.id) ?? {
         product_id: r.products.id,
         name: r.products.name,
         sku: r.products.sku ?? null,
         quantity: 0,
-        total_cost: 0,
       };
       // El consumo se registra negativo; se expone en positivo porque la vista es
       // "cuánto se consumió", no "cuánto varió el stock".
       ing.quantity += Math.abs(r.quantity_change);
-      ing.total_cost += cost;
       acc.ingredients.set(r.products.id, ing);
     }
 
+    // ADR-10: el reporte de consumo de cocina es SOLO cantidades. Sin totales
+    // monetarios — el costo pertenece a la capa de contabilidad/reportes, nunca
+    // a una superficie que el rol `cocina` puede leer.
     const by_station = [...byStation.values()]
       .map((s) => ({
         ...s,
         ingredients: [...s.ingredients.values()].sort(
-          (a, b) => b.total_cost - a.total_cost,
+          (a, b) => b.quantity - a.quantity,
         ),
       }))
-      .sort((a, b) => b.total_cost - a.total_cost);
+      .sort((a, b) => b.movement_count - a.movement_count);
 
     return {
       sessions: sessions.map((s) => ({
@@ -321,7 +497,6 @@ export class KdsSessionsService {
         status: s.status,
       })),
       by_station,
-      total_cost: by_station.reduce((sum, s) => sum + s.total_cost, 0),
     };
   }
 
@@ -350,21 +525,19 @@ export class KdsSessionsService {
         id: true,
         created_at: true,
         quantity_change: true,
-        total_cost: true,
         products: { select: { id: true, name: true } },
       },
       orderBy: { created_at: 'desc' },
       take: 500,
     });
 
+    // ADR-10: sin dinero en el payload de cocina.
     return {
       movement_count: rows.length,
-      total_cost: rows.reduce((s, r) => s + Number(r.total_cost ?? 0), 0),
       movements: rows.map((r) => ({
         transaction_id: r.id,
         consumed_at: r.created_at,
         quantity: Math.abs(r.quantity_change),
-        total_cost: r.total_cost,
         ingredient: r.products,
       })),
     };
@@ -382,7 +555,7 @@ export class KdsSessionsService {
 
     const byIngredient = new Map<
       number,
-      { product_id: number; name: string; sku: string | null; quantity: number; total_cost: number }
+      { product_id: number; name: string; sku: string | null; quantity: number }
     >();
 
     for (const row of history) {
@@ -393,22 +566,243 @@ export class KdsSessionsService {
         name: row.ingredient!.name,
         sku: row.ingredient!.sku ?? null,
         quantity: 0,
-        total_cost: 0,
       };
       acc.quantity += row.quantity;
-      acc.total_cost += Number(row.total_cost ?? 0);
       byIngredient.set(id, acc);
     }
 
-    const ingredients = [...byIngredient.values()].sort(
-      (a, b) => b.total_cost - a.total_cost,
-    );
+    // ADR-10: el resumen del turno es SOLO cantidades por insumo. Sin totales
+    // monetarios — el costo no viaja a la superficie de cocina.
+    const ingredients = [...byIngredient.values()];
 
     return {
       movement_count: history.length,
       distinct_ingredients: ingredients.length,
-      total_cost: ingredients.reduce((s, i) => s + i.total_cost, 0),
       ingredients,
     };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // QUI-XXX — LOCK DE ESTACIÓN + HEARTBEAT + TOMA FORZADA
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Heartbeat: refresca `last_seen_at` sobre la sesión indicada. El frontend lo
+   * llama una vez por minuto mientras el operador tiene la sesión abierta, y
+   * los handlers de `kitchen-fire` lo actualizan de manera lazy (sólo si han
+   * pasado más de `KDS_HEARTBEAT_MIN_INTERVAL_MS` desde el último valor), para
+   * no escribir en una fila caliente en cada mutación de hora pico.
+   *
+   * El chequeo de propiedad es deliberado: un tercero NO puede inflar el
+   * contador de otro (con eso podría evitar que la sesión expire). Owner /
+   * admin / super_admin SÍ pueden refrescar aunque no sean dueños — los chefs
+   * reciben override cuando un admin está mirando el tablero.
+   */
+  async heartbeat(sessionId: number): Promise<void> {
+    const { userId } = this.requireContext();
+
+    const session = await this.prisma.kds_sessions.findFirst({
+      where: { id: sessionId, status: 'open' },
+      select: { id: true, opened_by: true, last_seen_at: true, kds_id: true },
+    });
+    if (!session) {
+      // La sesión puede haberse cerrado por la ventana de inactividad entre
+      // el heartbeat anterior y este. No es un error de cliente — el frontend
+      // deja de mandarlos en cuanto el snapshot le devuelva `null`.
+      return;
+    }
+
+    const isOwner = session.opened_by === userId;
+    if (!isOwner && !this.isCallerPrivileged()) {
+      throw new VendixHttpException(ErrorCodes.KDS_STATION_LOCKED, undefined, {
+        kds_id: session.kds_id,
+        opened_by: session.opened_by,
+        hint: 'Sólo el dueño del turno o un administrador pueden refrescar este heartbeat.',
+      });
+    }
+
+    await this.refreshLastSeen(session, /* minIntervalMs */ 0);
+  }
+
+  /**
+   * Toma forzada de la estación: cierra el turno abierto por otro operador y
+   * abre uno nuevo para el caller, en la MISMA transacción. Cierra primero
+   * y abre después para que el índice parcial `kds_sessions_one_open_per_kds`
+   * jamás vea dos filas abiertas en la misma KDS, ni siquiera bajo
+   * concurrencia entre los dos PATCH.
+   *
+   * El `force_taken_by_user_id` se estampa sobre la SESIÓN CERRADA (la del
+   * dueño anterior) para que el rastro sobreviva al cierre. La sesión nueva
+   * NO lleva marca: el tomador es legítimo del turno que abrió, no lo
+   * "tomó".
+   *
+   * Sólo roles `KDS_FORCE_TAKE_ROLES` pueden invocar; un chef normal que
+   * intenta tomar la estación de un compañero recibe 403.
+   */
+  async forceTake(kdsId: number) {
+    const { storeId, userId } = this.requireContext();
+
+    if (!this.isCallerPrivileged()) {
+      throw new VendixHttpException(ErrorCodes.AUTH_PERM_001, undefined, {
+        hint: 'Sólo owner/admin/super_admin pueden tomar el control de una estación manualmente.',
+      });
+    }
+
+    const station = await this.prisma.kds.findFirst({
+      where: { id: kdsId, is_active: true },
+      select: { id: true },
+    });
+    if (!station) throw new VendixHttpException(ErrorCodes.KDS_NOT_FOUND);
+
+    const now = new Date();
+    const result = await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.kds_sessions.findFirst({
+        where: { kds_id: kdsId, status: 'open' },
+        select: { id: true, opened_by: true },
+      });
+
+      if (existing) {
+        // Cierra primero — con la fila cerrada el índice parcial libera la
+        // KDS antes del INSERT.
+        await tx.kds_sessions.updateMany({
+          where: { id: existing.id, status: 'open' },
+          data: {
+            status: 'closed',
+            closed_at: now,
+            closed_by: userId,
+            closing_notes: 'tomada por el control manual',
+            // Rastro: el tomador queda en la sesión cerrada. Si el tomador
+            // se borra después, la FK con ON DELETE SET NULL lo deja NULL,
+            // que el reporte lee como "toma registrada pero tomador
+            // removido".
+            force_taken_by_user_id: userId,
+            updated_at: now,
+          },
+        });
+      }
+
+      try {
+        return await tx.kds_sessions.create({
+          data: {
+            kds_id: kdsId,
+            store_id: storeId,
+            opened_by: userId,
+            status: 'open',
+            opened_at: now,
+            last_seen_at: now,
+            updated_at: now,
+          },
+          // El `include` debe coincidir con `findOpenByKds` para que el
+          // frontend no pierda el nombre de la estación ni el del operador
+          // cuando la toma forzada abre la nueva sesión.
+          include: {
+            kds: { select: { id: true, name: true, code: true } },
+            opened_by_user: { select: { id: true, first_name: true, last_name: true } },
+          },
+        });
+      } catch (e: any) {
+        if (e?.code === 'P2002') {
+          throw new VendixHttpException(ErrorCodes.KDS_SESSION_ALREADY_OPEN);
+        }
+        throw e;
+      }
+    });
+
+    return result;
+  }
+
+  /**
+   * Guard para `kitchen-fire.service.ts` — sólo se consume desde las
+   * mutaciones `start`/`ready`/`delivered`/`cancel`/`revert`. Decisión
+   * basada en la regla de Nancy:
+   *
+   *  1. Si no hay sesión abierta → la mutación pasa (mismo comportamiento
+   *     de hoy: el fire nunca se bloquea por falta de sesión).
+   *  2. Si hay sesión abierta y la posée el caller → mutación pasa.
+   *  3. Si hay sesión ABIERTA poseída por otro y el caller NO es
+   *     privilegiado:
+   *     - `last_seen_at` reciente (<5min) → 403 KDS_STATION_LOCKED. El caller
+   *       no es el dueño ni tiene override de rol; el turno está activo.
+   *     - `last_seen_at` viejo (>=5min) → cierra la sesión en silencio (lazy
+   *       inactividad) y deja pasar la mutación. NO abre una nueva: el
+   *       operador actual no la pidió.
+   *  4. Si hay sesión ABIERTA poseída por otro y el caller ES privilegiado →
+   *     mutación pasa (registra `force_taken_by_user_id` si quiere, pero
+   *     eso es acción explícita del botón "Tomar control" — la mutación no
+   *     fuerza el rastro por sí sola para no contaminar la sesión del
+   *     dueño actual sin su voluntad).
+   *
+   * Refresca `last_seen_at` lazy: sólo si han pasado más de 60s desde la
+   * última marca. Cocina en hora pico dispara decenas de mutaciones por
+   * minuto — un UPDATE por cada una contendía la fila y no aportaba
+   * precisión útil.
+   */
+  async assertCanMutateStationTicket(ticketKdsId: number): Promise<void> {
+    const { userId } = this.requireContext();
+
+    const session = await this.findOpenByKds(ticketKdsId);
+    if (!session) return; // caso 1
+
+    // caso 2: dueño. Refresca lazy.
+    if (session.opened_by === userId) {
+      await this.refreshLastSeen(session, 60_000);
+      return;
+    }
+
+    const lastSeen = (session.last_seen_at ?? session.opened_at).getTime();
+    const ageMs = Date.now() - lastSeen;
+    const isStale = ageMs >= KDS_IDLE_TIMEOUT_MS;
+    const privileged = this.isCallerPrivileged();
+
+    // caso 3: sesión fresca, caller no-dueño y no-privilegiado → bloquea.
+    if (!isStale && !privileged) {
+      throw new VendixHttpException(ErrorCodes.KDS_STATION_LOCKED, undefined, {
+        kds_id: ticketKdsId,
+        opened_by: session.opened_by,
+        hint: 'La estación está siendo gestionada por otro operador. Pídele que cierre el turno o espera a que expire por inactividad.',
+      });
+    }
+
+    // caso 3.stale / caso 4: libera la estación silenciosamente y pasa.
+    // El privileged que quiera un rastro explícito usa el botón
+    // "Tomar control", que llama `forceTake()` y deja la huella en la fila
+    // cerrada con `closing_notes: tomada por el control manual`.
+    if (isStale) {
+      await this.prisma.kds_sessions.updateMany({
+        where: { id: session.id, status: 'open' },
+        data: {
+          status: 'closed',
+          closed_at: new Date(),
+          closed_by: userId,
+          closing_notes: 'liberada por inactividad',
+          updated_at: new Date(),
+        },
+      });
+      return;
+    }
+
+    // Privilegiado contra sesión fresca ajena: pasa y refresca lazy.
+    await this.refreshLastSeen(session, 60_000);
+  }
+
+  /**
+   * Refresh de `last_seen_at` con throttle. Si el último valor tiene menos
+   * de `minIntervalMs` milisegundos, omite el UPDATE. Usado por heartbeat
+   * explícito (minIntervalMs=0) y por el guard de mutación (60s) para no
+   * escribir en una fila caliente en cada cambio de estado de ticket.
+   */
+  private async refreshLastSeen(
+    session: { id: number; last_seen_at: Date | null },
+    minIntervalMs: number,
+  ): Promise<void> {
+    const now = new Date();
+    if (minIntervalMs > 0 && session.last_seen_at) {
+      const age = now.getTime() - session.last_seen_at.getTime();
+      if (age < minIntervalMs) return;
+    }
+    await this.prisma.kds_sessions.updateMany({
+      where: { id: session.id, status: 'open' },
+      data: { last_seen_at: now, updated_at: now },
+    });
   }
 }

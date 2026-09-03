@@ -598,7 +598,17 @@ export class OrdersBulkService {
         // Sin join con `products`: el tiquete imprime `product_name`, que es
         // columna de la LÍNEA (el nombre en el momento de vender), no del
         // catálogo actual — que es además lo correcto en un comprobante.
-        order_items: { orderBy: { id: 'asc' } },
+        order_items: {
+          orderBy: { id: 'asc' },
+          // carril D / lina — D2: filtrar ítems cancelados. La impresión
+          // masiva NO debe imprimir líneas canceladas como si fueran
+          // cobrables: el operador quiere ver el tiquete con lo que
+          // efectivamente se cobró. (El detalle de orden en pantalla
+          // sigue mostrando TODAS las líneas, tachadas, vía
+          // `order-detail-page` — son dos consumidores distintos, este
+          // filtro aplica solo a la impresión del comprobante.)
+          where: { cancelled_at: null },
+        },
         // El identificador fiscal del cliente en `users` es `document_number`
         // (+ `document_type`), no `tax_id` — `tax_id` solo existe en
         // `organizations` (schema.prisma). `phone` va porque el bloque de
@@ -660,9 +670,15 @@ export class OrdersBulkService {
         // es entonces la señal correcta para que el frontend imprima el
         // desglose de IVA y el pie de "este documento no es una factura
         // electrónica".
+        // `dian_status` viaja aunque el `where` ya lo fije a `accepted`: el
+        // mapper del tiquete (`OrderTicketService.toTicketData`) también sirve
+        // al detalle de orden, cuyo `findOne` NO pre-filtra, así que decide la
+        // aceptación leyendo la columna. Mandarla aquí —redundante para esta
+        // consulta— es lo que le permite exigirla en vez de tratar su ausencia
+        // como "aceptada", que sería afirmar validación DIAN por defecto.
         invoices: {
           where: { dian_status: 'accepted' },
-          select: { invoice_number: true, cufe: true },
+          select: { invoice_number: true, cufe: true, dian_status: true },
           orderBy: { id: 'desc' },
           take: 1,
         },

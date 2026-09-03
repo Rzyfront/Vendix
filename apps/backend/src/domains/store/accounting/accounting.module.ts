@@ -58,6 +58,8 @@ import { ReconciliationController } from './bank-reconciliation/reconciliation.c
 import { ReconciliationService } from './bank-reconciliation/reconciliation.service';
 import { ReconciliationMatchingService } from './bank-reconciliation/reconciliation-matching.service';
 import { DigitalPaymentMatcherService } from './bank-reconciliation/digital-payment-matcher.service';
+import { UnassignedPaymentsController } from './bank-reconciliation/unassigned-payments.controller';
+import { UnassignedPaymentsService } from './bank-reconciliation/unassigned-payments.service';
 
 // Bank Reconciliation Parsers
 import { StatementParserFactory } from './bank-reconciliation/parsers/statement-parser.factory';
@@ -101,6 +103,7 @@ import { DepreciationCalculatorService } from './fixed-assets/depreciation-calcu
     BankAccountsController,
     BankTransactionsController,
     ReconciliationController,
+    UnassignedPaymentsController,
     BudgetsController,
     ConsolidationController,
     FixedAssetsController,
@@ -127,6 +130,7 @@ import { DepreciationCalculatorService } from './fixed-assets/depreciation-calcu
     ReconciliationService,
     ReconciliationMatchingService,
     DigitalPaymentMatcherService,
+    UnassignedPaymentsService,
     StatementParserFactory,
     CsvStatementParser,
     OfxStatementParser,
@@ -154,6 +158,7 @@ import { DepreciationCalculatorService } from './fixed-assets/depreciation-calcu
     ReconciliationService,
     ReconciliationMatchingService,
     DigitalPaymentMatcherService,
+    UnassignedPaymentsService,
     BudgetsService,
     BudgetVarianceService,
     ConsolidationService,

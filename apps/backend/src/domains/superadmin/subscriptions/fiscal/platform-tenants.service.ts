@@ -92,7 +92,11 @@ export class PlatformTenantsService {
         },
         include: {
           addresses: { where: { type: 'billing' }, take: 1, orderBy: { id: 'desc' } },
-          organization: { select: { id: true, name: true } },
+          // model stores declara la relación como `organizations` (Prisma pluraliza
+          // el nombre del modelo destino); `organization` no existe y rompía con
+          // PrismaClientValidationError → HTTP 500 en /customers/search?kind=store
+          // y en /customers/:kind/:id.
+          organizations: { select: { id: true, name: true } },
         },
       });
       return row ? this.storeToTenantResult(row, row.addresses[0] ?? null) : null;
@@ -198,7 +202,10 @@ export class PlatformTenantsService {
       where,
       include: {
         addresses: { where: { type: 'billing' }, take: 1, orderBy: { id: 'desc' } },
-        organization: { select: { id: true, name: true } },
+        // model stores declara la relación como `organizations` (Prisma pluraliza
+        // el nombre del modelo destino); `organization` no existe y rompía con
+        // PrismaClientValidationError → HTTP 500 en /customers/search?kind=store.
+        organizations: { select: { id: true, name: true } },
       },
       orderBy: [{ legal_name: 'asc' }, { name: 'asc' }],
       take: args.limit,
@@ -273,9 +280,12 @@ export class PlatformTenantsService {
       address,
       organization: {
         id: store.organization_id,
-        // No proyectamos la org anidad para no acoplar el detail en este endpoint;
-        // el caller puede re-fetchear con /customers/:id si lo necesita.
-        name: null,
+        // El include ya proyecta `organizations.name` desde la fila cargada;
+        // el campo de salida conserva el nombre `organization` porque ese es
+        // el contrato HTTP que consume el picker del frontend (ADR-7). No es
+        // el mismo nombre que la relación Prisma, y NO hay que renombrarlo
+        // en el shape de respuesta.
+        name: store.organizations?.name ?? null,
       },
       fiscal_data_complete: this.checkStoreFiscalComplete(store, billingAddress),
     };

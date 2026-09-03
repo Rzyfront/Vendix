@@ -103,6 +103,15 @@ export interface OrderDetail extends Order {
     variant_image_url?: string | null;
     /** Mirrors `product_type_enum`; null when the product row was removed. */
     product_type?: 'physical' | 'service' | 'prepared' | null;
+    /**
+     * E2 (Carril B) — fecha de cancelación de la línea (soft cancel via D2).
+     * Si llega no-null, el frontend pinta la línea tachada con distintivo
+     * 'Cancelado' y oculta precio/impuestos. Nullable porque el grueso de
+     * las líneas no están canceladas.
+     */
+    cancelled_at?: string | null;
+    /** Motivo que dejó el operador o el sistema al cancelar. Vacío/null = no mostrar al cliente. */
+    cancellation_reason?: string | null;
   }[];
   payments: {
     id: number;

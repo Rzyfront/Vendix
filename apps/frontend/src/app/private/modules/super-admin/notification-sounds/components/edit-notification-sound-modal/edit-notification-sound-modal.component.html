@@ -3,6 +3,7 @@
   (isOpenChange)="isOpenChange.emit($event)"
   (cancel)="onCancel()"
   size="md"
+  [dialog]="true"
   title="Editar sonido de notificación"
   [subtitle]="sound()?.name || ''"
 >

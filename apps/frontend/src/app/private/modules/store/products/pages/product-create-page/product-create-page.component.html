@@ -1101,7 +1101,7 @@
                       <app-selector
                         formControlName="stock_uom_id"
                         label="El inventario se cuenta en"
-                        helpText="La unidad más pequeña que vendés. Déjalo vacío si vendés por pieza."
+                        helpText="La unidad más pequeña que vendes. Déjalo vacío si vendes por pieza."
                         [options]="stockUomOptions()"
                         placeholder="Ej. Milímetro, Gramo, Mililitro..."
                         (valueChange)="onStockUomChange()"
@@ -1112,7 +1112,7 @@
                           formControlName="price_unit_quantity"
                           label="El precio de venta es"
                           [helpText]="
-                            'El precio que escribís arriba cubre esta cantidad de ' +
+                            'El precio que escribes arriba cubre esta cantidad de ' +
                             stockUom.code + '.'
                           "
                           [options]="priceScaleOptions()"
@@ -2413,16 +2413,38 @@
                 tooltipText="Minutos que tarda tu equipo en preparar este producto antes de entregarlo. Afecta la ETA del pedido."
                 customWrapperClass="!mt-0"
               ></app-input>
+
+              @if (isPreparedProduct() && kdsStationOptions().length > 0) {
+                <app-selector
+                  label="Estación de preparación"
+                  formControlName="kds_id"
+                  placeholder="KDS por defecto de la tienda"
+                  [options]="kdsStationOptions()"
+                  tooltipText="Tablero de cocina al que se envía este plato al hacer fire. Si lo dejas vacío, cae en la estación por defecto."
+                ></app-selector>
+              }
             </div>
           } @else {
-            <app-input
-              label="Tiempo de preparación (min)"
-              type="number"
-              formControlName="preparation_time_minutes"
-              placeholder="Usa default de tienda"
-              tooltipText="Minutos que tarda tu equipo en preparar este producto antes de entregarlo. Afecta la ETA del pedido."
-              customWrapperClass="!mt-0"
-            ></app-input>
+            <div class="space-y-2">
+              <app-input
+                label="Tiempo de preparación (min)"
+                type="number"
+                formControlName="preparation_time_minutes"
+                placeholder="Usa default de tienda"
+                tooltipText="Minutos que tarda tu equipo en preparar este producto antes de entregarlo. Afecta la ETA del pedido."
+                customWrapperClass="!mt-0"
+              ></app-input>
+
+              @if (isPreparedProduct() && kdsStationOptions().length > 0) {
+                <app-selector
+                  label="Estación de preparación"
+                  formControlName="kds_id"
+                  placeholder="KDS por defecto de la tienda"
+                  [options]="kdsStationOptions()"
+                  tooltipText="Tablero de cocina al que se envía este plato al hacer fire. Si lo dejas vacío, cae en la estación por defecto."
+                ></app-selector>
+              }
+            </div>
           }
         </section>
 
@@ -2773,19 +2795,31 @@
               formControlName="kds_id"
               placeholder="KDS por defecto de la tienda"
               [options]="kdsStationOptions()"
-              tooltipText="Tablero de cocina al que se envía este plato al hacer fire. Si lo dejás vacío, cae en la estación por defecto."
+              tooltipText="Tablero de cocina al que se envía este plato al hacer fire. Si lo dejas vacío, cae en la estación por defecto."
             ></app-selector>
           }
         </div>
       } @else {
-        <app-input
-          label="Tiempo de preparación (min)"
-          type="number"
-          formControlName="preparation_time_minutes"
-          placeholder="Usa default de tienda"
-          tooltipText="Minutos que tarda tu equipo en preparar este producto antes de entregarlo. Afecta la ETA del pedido."
-          customWrapperClass="!mt-0"
-        ></app-input>
+        <div class="space-y-2">
+          <app-input
+            label="Tiempo de preparación (min)"
+            type="number"
+            formControlName="preparation_time_minutes"
+            placeholder="Usa default de tienda"
+            tooltipText="Minutos que tarda tu equipo en preparar este producto antes de entregarlo. Afecta la ETA del pedido."
+            customWrapperClass="!mt-0"
+          ></app-input>
+
+          @if (isPreparedProduct() && kdsStationOptions().length > 0) {
+            <app-selector
+              label="Estación de preparación"
+              formControlName="kds_id"
+              placeholder="KDS por defecto de la tienda"
+              [options]="kdsStationOptions()"
+              tooltipText="Tablero de cocina al que se envía este plato al hacer fire. Si lo dejas vacío, cae en la estación por defecto."
+            ></app-selector>
+          }
+        </div>
       }
     </section>
 

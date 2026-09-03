@@ -3,6 +3,7 @@
   (isOpenChange)="isOpenChange.emit($event)"
   (cancel)="onCancel()"
   [size]="'xl'"
+  [dialog]="true"
   title="Dividir cuenta"
   subtitle="Divide el total entre varios comensales o por items específicos"
 >
@@ -10,7 +11,7 @@
   <div class="tabs" role="tablist">
     <app-button
       [variant]="activeTab() === 'items' ? 'primary' : 'ghost'"
-      size="sm"
+      size="lg"
       [attr.role]="'tab'"
       [attr.aria-selected]="activeTab() === 'items'"
       (clicked)="setTab('items')"
@@ -20,7 +21,7 @@
     </app-button>
     <app-button
       [variant]="activeTab() === 'amount' ? 'primary' : 'ghost'"
-      size="sm"
+      size="lg"
       [attr.role]="'tab'"
       [attr.aria-selected]="activeTab() === 'amount'"
       (clicked)="setTab('amount')"
@@ -46,7 +47,7 @@
               @if (itemGroups().length > 2) {
                 <app-button
                   variant="outline-danger"
-                  size="sm"
+                  size="lg"
                   [attr.aria-label]="'Eliminar grupo'"
                   (clicked)="removeGroup(i)"
                 >
@@ -89,7 +90,7 @@
       </div>
 
       <div class="add-group-wrap">
-        <app-button variant="outline" size="sm" (clicked)="addGroup()">
+        <app-button variant="outline" size="lg" (clicked)="addGroup()">
           <app-icon slot="icon" name="plus" [size]="14"></app-icon>
           Agregar otro comensal
         </app-button>
@@ -111,7 +112,7 @@
       <div class="mode-toggle">
         <app-button
           [variant]="splitMode() === 'equal' ? 'primary' : 'ghost'"
-          size="sm"
+          size="lg"
           [attr.aria-pressed]="splitMode() === 'equal'"
           (clicked)="setMode('equal')"
         >
@@ -119,7 +120,7 @@
         </app-button>
         <app-button
           [variant]="splitMode() === 'custom' ? 'primary' : 'ghost'"
-          size="sm"
+          size="lg"
           [attr.aria-pressed]="splitMode() === 'custom'"
           (clicked)="setMode('custom')"
         >
@@ -177,6 +178,7 @@
     <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
     <app-button
       variant="primary"
+      size="lg"
       [loading]="loading()"
       (clicked)="onSubmit()"
     >

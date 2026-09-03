@@ -120,7 +120,7 @@ export interface TaxBreakdownRow {
                 [formControl]="rowControl(row, rowPaths().rate)"
                 [control]="rowControl(row, rowPaths().rate)"
                 size="sm"
-                [error]="rateErrors()[i] ?? ''"
+                [error]="rateErrors()[i]"
               ></app-input>
               <div class="flex items-center pb-2">
                 <app-toggle
@@ -216,7 +216,7 @@ export class InvoiceSectionImpuestosComponent {
   readonly bucketOptions = input<SelectorOption[]>([]);
   readonly taxCodeOptions = input<SelectorOption[]>([]);
   /** Error de `rate` por fila, ya resuelto por la página (`issueFor`). */
-  readonly rateErrors = input<readonly string[]>([]);
+  readonly rateErrors = input<readonly (string | undefined)[]>([]);
   readonly addRule = output<void>();
   readonly removeRule = output<number>();
 

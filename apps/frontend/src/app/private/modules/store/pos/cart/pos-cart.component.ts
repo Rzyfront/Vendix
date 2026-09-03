@@ -893,7 +893,7 @@ import {
       <app-booking-scheduler-modal
         [cartItem]="schedulerTarget()"
         [existingBooking]="schedulerExisting()"
-        [posCustomer]="cartState()?.customer"
+        [posCustomer]="cartState().customer"
         (customerSelected)="onCustomerSelected($event)"
         (scheduled)="onScheduled($event)"
         (cancelled)="closeScheduler()"

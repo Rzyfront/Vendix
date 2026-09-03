@@ -113,4 +113,16 @@ export class ResolveCustomerDto {
   @IsOptional()
   @IsBoolean()
   is_withholding_agent?: boolean;
+
+  /**
+   * QUI-734 (B.4) — Resolución quick-sale por nombre. Cuando `true`, la
+   * búsqueda salta email/documento y solo intenta por nombre:
+   *   - 1 coincidencia  → devuelve el cliente existente (`matched_by='name'`).
+   *   - >1 coincidencias → 409 (ERR-03): el nombre es ambiguo.
+   *   - 0 coincidencias → crea cliente con solo first_name/last_name.
+   * El frontend lo envía solo cuando el cajero tipea nombre sin email/doc.
+   */
+  @IsOptional()
+  @IsBoolean()
+  name_only?: boolean;
 }

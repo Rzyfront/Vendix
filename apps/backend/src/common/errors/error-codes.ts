@@ -3633,6 +3633,19 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'This bank transaction is already reconciled',
   },
+  /**
+   * No se puede asignar una cuenta bancaria a un pago cuyo método NO liquida
+   * por una cuenta propia (efectivo, contra entrega). El dinero nunca pasó
+   * por una cuenta de la organización: la conciliación bancaria no aplica.
+   * `unassigned-payments.service.ts:assignAccount` lo lanza tras leer el tipo
+   * del método del pago y compararlo contra `METHODS_WITHOUT_BANK_ACCOUNT`.
+   */
+  BANK_RECONCILIATION_CASH_METHOD_REJECTED: {
+    code: 'BANK_RECONCILIATION_CASH_METHOD_REJECTED',
+    httpStatus: 422,
+    devMessage:
+      'A bank account cannot be assigned to a payment whose method does not settle through a bank account (cash, cash_on_delivery).',
+  },
   STATEMENT_PARSE_ERROR: {
     code: 'STATEMENT_PARSE_ERROR',
     httpStatus: 400,
@@ -5077,6 +5090,21 @@ export const ErrorCodes = {
     devMessage:
       'La tienda no tiene un KDS por defecto activo al cual rutear el ticket',
   },
+  // QUI-762 — el reenvio de un plato a cocina solo aplica a items que ya
+  // fueron consumidos (inventory_consumed_at_fire=true). Si el item no
+  // tiene la bandera, el camino correcto es el fire normal (no el
+  // resend), porque disparar resend sobre un item sin consumir lo
+  // crearia con cero consumo y dejaria el flag apagado, rompiendo la
+  // invariante anti-doble-descuento del pago. Ademas, no se reenvian
+  // items ya entregados (kitchen_ticket_item.status='delivered').
+  KITCHEN_FIRE_NOT_RESENDABLE: {
+    code: 'KITCHEN_FIRE_NOT_RESENDABLE',
+    httpStatus: 422,
+    devMessage:
+      'El item no es elegible para reenvio: o no fue consumido al disparar, ' +
+      'o la orden esta cancelada o devuelta, o el item ya fue entregado. ' +
+      'Si nunca se disparo a cocina, use el fire normal en lugar de reenviar.',
+  },
   // QUI-655 — el cliente no puede excluir un producto arbitrario del consumo:
   // el componente tiene que pertenecer al BOM explotado de ESE plato, o el
   // consumo dejaría de reflejar la receta y el costeo se volvería inauditable.
@@ -5085,6 +5113,28 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage:
       'El componente excluido no pertenece a la receta explotada de ese plato',
+  },
+  // CP-POLLO-ARABE-727 A.6 (ERR-15) — la variante vendida se estampa en
+  // `kitchen_ticket_items`, así que el fire no puede aceptar una variante que no
+  // pertenezca al producto de la línea. Estampar una variante ajena dejaría el
+  // inventario descuadrado y el ticket mostraría lo que no se vendió.
+  PRODUCT_VARIANT_MISMATCH: {
+    code: 'PRODUCT_VARIANT_MISMATCH',
+    httpStatus: 422,
+    devMessage:
+      'La variante declarada no pertenece al producto de la línea de orden',
+  },
+  // CP-POLLO-ARABE-727 (ERR-07) — hermano de ERR-15 y complemento suyo:
+  // `PRODUCT_VARIANT_MISMATCH` cubre "variante ajena", nunca "falta variante".
+  // Un `prepared` con variantes vendido SIN variante entra al ticket de cocina
+  // como el producto base ("Pollo" cuando el cliente pidió "Pollo Picante") y
+  // descuenta inventario contra la fila base. Es el invariante que DB-14
+  // verifica en base de datos; esta es su defensa de escritura.
+  PRODUCT_VARIANT_REQUIRED: {
+    code: 'PRODUCT_VARIANT_REQUIRED',
+    httpStatus: 422,
+    devMessage:
+      'El producto preparado tiene variantes y la línea no declara ninguna',
   },
   // ── KDS: estaciones de preparación (QUI-651) ────────────────────────
   KDS_NOT_FOUND: {
@@ -5135,11 +5185,33 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'La sesión de estación ya está cerrada',
   },
+  // QUI-XXX — turno abierto por otro operador y todavía "fresco" (<5min desde
+  // `last_seen_at`). El caller no es el dueño ni tiene rol privilegiado
+  // (owner/admin/super_admin). La acción que disparó el chequeo es de
+  // SOLO LECTURA para ese caller hasta que el dueño libere el turno,
+  // expire por inactividad, o un admin tome el control.
+  KDS_STATION_LOCKED: {
+    code: 'KDS_STATION_LOCKED',
+    httpStatus: 403,
+    devMessage:
+      'La estación está siendo gestionada por otro operador. Solo el dueño del turno o un administrador pueden actuar sobre sus tickets.',
+  },
   // QUI-652 — la entrega es un hecho de servicio y aplica a todo item, pero un
   // plato preparado sigue exigiendo estado 'ready' en cocina: dejar que el
   // mesero marque entregado un plato sin cocinar haria mentir al KDS.
   TABLE_SESSION_ITEM_NOT_DELIVERABLE: {
     code: 'TABLE_SESSION_ITEM_NOT_DELIVERABLE',
+    httpStatus: 409,
+    devMessage:
+      'El plato preparado debe estar listo en cocina antes de marcarse entregado',
+  },
+  // T9 / QUI-652 — variante de la regla para orden-scope (POS, take-away,
+  // domicilio). Misma semantica: `item_type='prepared'` exige cocina en
+  // 'ready'; cualquier otro tipo se entrega directo. La forma del codigo
+  // cambia porque ya no estamos en una sesion de mesa; el mensaje al
+  // cliente sigue diciendo QUE plato y en QUE estado de cocina esta.
+  ORDER_ITEM_NOT_DELIVERABLE: {
+    code: 'ORDER_ITEM_NOT_DELIVERABLE',
     httpStatus: 409,
     devMessage:
       'El plato preparado debe estar listo en cocina antes de marcarse entregado',

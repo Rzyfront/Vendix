@@ -7,8 +7,9 @@ import { StockLevelManager } from '../inventory/shared/services/stock-level-mana
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
-import { FireOrderItemsDto, KitchenTicketQueryDto } from './dto';
+import { FireOrderItemsDto, KitchenTicketQueryDto, ResendOrderItemsDto } from './dto';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
+import { KdsSessionsService } from '../kds/sessions/kds-sessions.service';
 
 /**
  * Single source of truth for the kitchen-ticket payload shape returned to
@@ -86,6 +87,13 @@ export interface PreExplodedFireContext {
   order: {
     id: number;
     order_number: string;
+    /**
+     * C.3 QUI-733 — id de la mesa de la sesión ABIERTA del pedido, si la hay.
+     * Se resuelve ANTES de la transacción y se estampa en
+     * `kitchen_tickets.table_id` al crear el ticket. Null para pedidos sin
+     * mesa (mostrador / delivery) — el ticket no se rompe, solo pierde el dato.
+     */
+    table_id?: number | null;
   };
   firedItemIds: number[];
   skippedItemIds: number[];
@@ -98,6 +106,14 @@ export interface PreExplodedFireContext {
       // QUI-651 — el contexto ya arrastra el producto; se declara solo lo que
       // el ruteo necesita. `kds_id` null significa "KDS por defecto".
       products?: { kds_id: number | null } | null;
+      // CP-POLLO-ARABE-727 A.6 — la variante vendida viaja al ticket de cocina.
+      // `product_variant_id` viene de `order_items`; `variant_attributes` /
+      // `variant_sku` / `product_variants.name` alimentan el snapshot
+      // `variant_label`.
+      product_variant_id?: number | null;
+      variant_attributes?: string | null;
+      variant_sku?: string | null;
+      product_variants?: { product_id: number; name: string | null } | null;
     };
     recipeId: number;
     bomLines: BomExplosionLine[];
@@ -107,7 +123,12 @@ export interface PreExplodedFireContext {
     product_id: number | null;
     product_name: string;
     quantity: any;
-    products?: { kds_id: number | null } | null;
+    // CP-POLLO-ARABE-727 A.6 — mismo arrastre de variante que `preparedItems`.
+    products?: { kds_id: number | null; _count?: { product_variants?: number } } | null;
+    product_variant_id?: number | null;
+    variant_attributes?: string | null;
+    variant_sku?: string | null;
+    product_variants?: { product_id: number; name: string | null } | null;
   }>;
   locationByProduct: Map<number, number>;
   businessDate: string;
@@ -118,6 +139,10 @@ export interface PreExplodedFireContext {
    * marcados", que es el comportamiento previo al ticket.
    */
   exclusionsByOrderItem?: Map<number, number[]>;
+  /**
+   * Notas de preparación actualizadas por `order_item_id` al confirmar el envío.
+   */
+  itemNotesByOrderItem?: Map<number, string>;
 }
 
 /**
@@ -186,6 +211,7 @@ export class KitchenFireService {
     private readonly stockLevelManager: StockLevelManager,
     private readonly eventEmitter: EventEmitter2,
     private readonly sseService: NotificationsSseService,
+    private readonly kdsSessionsService: KdsSessionsService,
   ) {}
 
   /** Fecha de negocio 'YYYY-MM-DD' en tz de la tienda, desplazada por la hora de corte (default 3 AM → un ticket a la 1 AM cuenta para el día anterior). Configurable vía store_settings.settings.operations.ticket_closing_hour (con fallback legado a restaurant_ops.business_day_cutoff_hour). */
@@ -249,6 +275,16 @@ export class KitchenFireService {
         id: true,
         store_id: true,
         order_number: true,
+        // C.3 QUI-733 — la sesión de mesa ABIERTA (closed_at IS NULL) del pedido,
+        // para estampar `kitchen_tickets.table_id` al fire. `orders` no tiene
+        // `table_session_id`: la relación vive al revés (table_sessions.order_id).
+        // La más reciente; el índice one_open_per_table (A.3) garantiza una sola.
+        table_sessions: {
+          where: { closed_at: null },
+          orderBy: { opened_at: 'desc' },
+          take: 1,
+          select: { id: true, table_id: true },
+        },
         order_items: {
           where: { id: { in: effectiveItemIds } },
           include: {
@@ -261,7 +297,20 @@ export class KitchenFireService {
                 store_id: true,
                 // QUI-651 — estacion destino del plato. NULL => KDS por defecto.
                 kds_id: true,
+                // CP-POLLO-ARABE-727 A.6 — para detectar "producto con variantes
+                // y fire sin variante" (`logger.warn`, única señal del riesgo de
+                // inventario descuadrado).
+                _count: { select: { product_variants: true } },
               },
+            },
+            // CP-POLLO-ARABE-727 A.6 — la variante vendida se estampa en el ticket
+            // de cocina. Se incluye para derivar `variant_label` (snapshot inmutable
+            // del nombre) y validar en fire-time que la variante pertenece al
+            // producto (ERR-15, PRODUCT_VARIANT_MISMATCH). A.7 nota que cualquier
+            // consulta extra debe ir por `client`; esta va DENTRO del include (un
+            // JOIN, no un round-trip adicional), así que no agrega N+1.
+            product_variants: {
+              select: { id: true, name: true, product_id: true },
             },
           },
         },
@@ -292,6 +341,15 @@ export class KitchenFireService {
         skippedItemIds.push(item.id);
         continue;
       }
+      // CP-POLLO-ARABE-727 A.6 — ERR-15 en fire-time: la variante que se va a
+      // estampar en `kitchen_ticket_items` tiene que pertenecer al producto. Si
+      // declara una variante ajena, el ticket mostraría una especificación de
+      // otro plato y el inventario quedaría descuadrado — se falla fuerte antes
+      // de crear el ticket. (C.4 cubre los write-sites upstream; esta capa el fire.)
+      this.assertVariantBelongsToProduct(item);
+      // CP-POLLO-ARABE-727 A.6 — única señal del riesgo contable más grave del
+      // plan: un plato con variantes llegando al fire SIN variante vendida.
+      this.warnMissingVariantIdForProduct(item);
       firedItemIds.push(item.id);
     }
 
@@ -326,19 +384,31 @@ export class KitchenFireService {
     // CP-POS-SVC-PERF-001 / A.2 — cache explodeBom per recipeId locally so
     // multiple cart lines sharing the same recipe cost 1 explosion (not N).
     const bomCache = new Map<number, BomExplosionLine[]>();
+    // CP-POLLO-ARABE-727 A.7 — un único `findMany` en vez de un `findFirst` por
+    // línea (N+1). Los items que comparten receta cuestan 1 explosión (bomCache).
+    const firedProductIds = firedItemIds.map((itemId) => {
+      const item = order.order_items.find((oi) => oi.id === itemId)!;
+      return item.product_id!;
+    });
+    const activeRecipes =
+      firedProductIds.length > 0
+        ? await this.prisma.recipes.findMany({
+            where: {
+              product_id: { in: [...new Set(firedProductIds)] },
+              is_active: true,
+            },
+            select: { id: true, product_id: true, is_active: true },
+          })
+        : [];
+    const recipeByProduct = new Map<
+      number,
+      { id: number; product_id: number | null; is_active: boolean }
+    >(activeRecipes.map((r) => [r.product_id, r]));
     for (const itemId of firedItemIds) {
       const item = order.order_items.find((oi) => oi.id === itemId)!;
-      const recipe = await this.prisma.recipes.findFirst({
-        where: { product_id: item.product_id!, is_active: true },
-        select: { id: true, product_id: true, is_active: true },
-      });
-      if (!recipe) {
-        // No recipe at all → cooked by hand, no inventory consume.
-        recipeLessItems.push(item);
-        continue;
-      }
-      if (!recipe.is_active) {
-        // Inactive recipe → treat like no recipe (no consume).
+      const recipe = recipeByProduct.get(item.product_id!);
+      if (!recipe || !recipe.is_active) {
+        // No active recipe → cooked by hand, no inventory consume.
         recipeLessItems.push(item);
         continue;
       }
@@ -394,7 +464,11 @@ export class KitchenFireService {
     // (recipes, BOM, default locations, business date) so this method
     // executes only the tx-bound work; it never opens a new $transaction.
     const preComputed: PreExplodedFireContext = {
-      order: { id: order.id, order_number: order.order_number },
+      order: {
+        id: order.id,
+        order_number: order.order_number,
+        table_id: order.table_sessions?.[0]?.table_id ?? null,
+      },
       firedItemIds,
       skippedItemIds,
       preparedItems,
@@ -411,6 +485,24 @@ export class KitchenFireService {
           e.component_product_ids ?? [],
         ]),
       ),
+      itemNotesByOrderItem: (() => {
+        const notesMap = new Map<number, string>();
+        if (dto.item_notes && Array.isArray(dto.item_notes)) {
+          for (const n of dto.item_notes) {
+            if (typeof n.order_item_id === 'number') {
+              notesMap.set(n.order_item_id, (n.notes ?? '').trim());
+            }
+          }
+        }
+        if (dto.exclusions && Array.isArray(dto.exclusions)) {
+          for (const e of dto.exclusions) {
+            if (typeof e.order_item_id === 'number' && e.notes !== undefined) {
+              notesMap.set(e.order_item_id, (e.notes ?? '').trim());
+            }
+          }
+        }
+        return notesMap;
+      })(),
     };
     const result = await this.prisma.$transaction(async (tx) =>
       this.fireOrderItemsInTx(tx, store_id, preComputed),
@@ -549,6 +641,11 @@ export class KitchenFireService {
       productId: number;
       productName: string;
       quantity: number;
+      // CP-POLLO-ARABE-727 A.6 — la variante vendida viaja al ticket de cocina.
+      // `productVariantId` = `order_items.product_variant_id` (nullable);
+      // `variantLabel` snapshot inmutable del nombre de la variante.
+      productVariantId: number | null;
+      variantLabel: string | null;
     }>;
     cogsTotal: number;
     consumedLineCount: number;
@@ -563,6 +660,8 @@ export class KitchenFireService {
       productId: number;
       productName: string;
       quantity: number;
+      productVariantId: number | null;
+      variantLabel: string | null;
     }> = [];
 
     let cogsTotal = 0;
@@ -724,6 +823,8 @@ export class KitchenFireService {
         productId: orderItem.product_id!,
         productName: orderItem.product_name,
         quantity: orderQty,
+        productVariantId: orderItem.product_variant_id ?? null,
+        variantLabel: this.variantLabelFor(orderItem),
       });
     }
 
@@ -744,6 +845,8 @@ export class KitchenFireService {
         productId: item.product_id!,
         productName: item.product_name,
         quantity: orderQty,
+        productVariantId: item.product_variant_id ?? null,
+        variantLabel: this.variantLabelFor(item),
       });
     }
 
@@ -758,6 +861,17 @@ export class KitchenFireService {
     // en la estacion y desmarca en consecuencia. Se lee de la fuente de verdad
     // (`order_items.notes`) y no del DTO, porque la nota se escribio al pedir y
     // no al confirmar el envio.
+    // Persistir notas actualizadas de ítems enviadas en la confirmación de cocina
+    const itemNotesByOrderItem = preComputed.itemNotesByOrderItem;
+    if (itemNotesByOrderItem && itemNotesByOrderItem.size > 0) {
+      for (const [orderItemId, noteText] of itemNotesByOrderItem) {
+        await tx.order_items.updateMany({
+          where: { id: orderItemId },
+          data: { notes: noteText.trim() || null, updated_at: new Date() },
+        });
+      }
+    }
+
     const firedOrderItemIds = firedItemSnapshots.map((s) => s.orderItemId);
     const notesByOrderItem = new Map<number, string>();
     if (firedOrderItemIds.length > 0) {
@@ -767,6 +881,16 @@ export class KitchenFireService {
       });
       for (const row of noted) {
         if (row.notes) notesByOrderItem.set(row.id, row.notes);
+      }
+    }
+    // Sobrescribir con las notas recién enviadas en el confirm para sincronía inmediata
+    if (itemNotesByOrderItem) {
+      for (const [itemId, noteText] of itemNotesByOrderItem) {
+        if (noteText.trim()) {
+          notesByOrderItem.set(itemId, noteText.trim());
+        } else {
+          notesByOrderItem.delete(itemId);
+        }
       }
     }
 
@@ -804,6 +928,10 @@ export class KitchenFireService {
         data: {
           store_id,
           order_id: order.id,
+          // C.3 QUI-733 — estampar la mesa del pedido (vía su sesión ABIERTA,
+          // resuelta aguas arriba en el preComputed). NULL para pedidos sin mesa
+          // (mostrador / delivery); el ticket no se rompe, solo pierde el dato.
+          table_id: order.table_id ?? null,
           kds_id: kdsId,
           status: 'pending',
           daily_number: sameDayCount + 1,
@@ -815,6 +943,12 @@ export class KitchenFireService {
               product_id: snap.productId,
               quantity: snap.quantity,
               status: 'pending',
+              // CP-POLLO-ARABE-727 A.6 — la variante vendida viaja al ticket de
+              // cocina. NULL para producto sin variantes (ticket idéntico al de
+              // hoy). `variant_label` es un snapshot inmutable: no se re-etiqueta
+              // si `product_variants.name` cambia después.
+              product_variant_id: snap.productVariantId,
+              variant_label: snap.variantLabel,
             })),
           },
         },
@@ -923,6 +1057,385 @@ export class KitchenFireService {
    * `components: []`: el ticket pide que aparezcan en el modal aunque no haya nada
    * que desglosar, para que el cocinero los vea y los envíe igual.
    */
+  // ---------------------------------------------------------------- resend
+  /**
+   * QUI-762 — reenviar un plato a cocina SIN volver a consumir insumos.
+   *
+   * Caso de uso: un ticket caduca o se pierde (red, cocinero cerró la ventana,
+   * etc.) y la orden sigue vigente. El camino obvio —volver a disparar el fire—
+   * no funciona: `fireOrderItems` empuja los items con `inventory_consumed_at_fire`
+   * a `skippedItemIds` (líneas 323-327 y 1344-1348 del archivo), así que
+   * re-disparar produce un ticket vacío. Y resetear la bandera para re-disparar
+   * sería peor: el fire volvería a explotar el BOM y a descontar los insumos por
+   * segunda vez.
+   *
+   * Este método es un gemelo de `fireOrderItemsInTx` que SOLO crea el ticket y sus
+   * items. No toca stock, no llama `RecipesService.explodeBom`, no llama
+   * `StockLevelManager.updateStock`, no crea `inventory_transactions`, no crea
+   * `inventory_movements`, no emite `kitchen.fired` (ese evento es de consumo;
+   * el resend no consume). Sí emite `ticket.created` después del commit para que
+   * el KDS reciba el SSE.
+   *
+   * Interacción con QUI-760 (imputador de consumo por sesión de turno):
+   * las `inventory_transactions` del consumo original ya tienen (o no) un
+   * `kds_session_id`. La guarda `kds_session_id IS NULL` del helper de QUI-760
+   * protege el caso "ya imputado": el resend NO las mueve porque no crea
+   * transactions nuevas. Si estaban huérfanas, el turno que cocine el nuevo
+   * ticket las imputa al hacer `start/ready/delivered`. El resend es transparente
+   * al imputador — un ticket nuevo, no duplica consumo.
+   */
+  async resendOrderItems(
+    dto: ResendOrderItemsDto,
+  ): Promise<{
+    /** Ticket primario (estacion de menor id). */
+    ticketId: number;
+    /** Un id por estacion involucrada (mismo shape que el fire normal). */
+    ticketIds: number[];
+    /** Items reenviados. */
+    firedItemIds: number[];
+    /** Tickets viejos cancelados por este resend (solo `lost_command`). */
+    cancelledTicketIds: number[];
+  }> {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    // Gate al igual que el fire normal: un resend en tienda no-restaurante no
+    // tiene sentido (no hay KDS adonde rutear).
+    const storeIndustries = await this.prisma.stores.findUnique({
+      where: { id: store_id },
+      select: { industries: true },
+    });
+    if (!storeIsRestaurant(storeIndustries?.industries)) {
+      throw new VendixHttpException(ErrorCodes.RESTAURANT_NOT_ENABLED);
+    }
+
+    if (!dto.order_item_ids || dto.order_item_ids.length === 0) {
+      throw new VendixHttpException(ErrorCodes.KITCHEN_FIRE_NO_ITEMS);
+    }
+
+    // 1. Cargar la orden y los items solicitados, scope-safe.
+    const order = await this.prisma.orders.findFirst({
+      where: { id: dto.order_id, store_id },
+      select: {
+        id: true,
+        store_id: true,
+        // C.3 QUI-733 — la mesa se estampa al ticket via la sesión
+        // ABIERTA del pedido (`table_sessions.order_id`). `orders` no
+        // tiene `table_id` directo; la relación vive en table_sessions.
+        // El fire normal usa el mismo patrón (líneas 278-283).
+        table_sessions: {
+          where: { closed_at: null },
+          orderBy: { opened_at: 'desc' },
+          take: 1,
+          select: { id: true, table_id: true },
+        },
+        order_items: {
+          where: { id: { in: dto.order_item_ids } },
+          select: {
+            id: true,
+            product_id: true,
+            product_name: true,
+            product_variant_id: true,
+            quantity: true,
+            notes: true,
+            // La bandera es la primera guarda del resend: si el item NUNCA
+            // fue consumido al disparar, no es reenviable — es un fire
+            // inicial. Lo mandamos al fire normal en lugar de inventar
+            // un ticket con consumo cero.
+            inventory_consumed_at_fire: true,
+            products: {
+              select: {
+                id: true,
+                kds_id: true,
+              },
+            },
+            product_variants: {
+              select: { id: true, name: true, product_id: true },
+            },
+          },
+        },
+      },
+    });
+    if (!order) {
+      throw new VendixHttpException(ErrorCodes.KITCHEN_FIRE_ORDER_NOT_FOUND);
+    }
+    if (!order.order_items || order.order_items.length === 0) {
+      throw new VendixHttpException(ErrorCodes.KITCHEN_FIRE_ITEM_NOT_FOUND);
+    }
+
+    // 2. Validar estado de la orden. cancelled y refunded nunca reciben resend;
+    //    cualquier otro estado (created, processing, delivered, finished) es
+    //    legítimo porque un ticket se puede perder en cualquier momento de la
+    //    cadena mientras la orden siga activa.
+    const orderState = await this.prisma.orders.findUnique({
+      where: { id: order.id },
+      select: { state: true },
+    });
+    if (
+      orderState?.state === 'cancelled' ||
+      orderState?.state === 'refunded'
+    ) {
+      throw new VendixHttpException(ErrorCodes.KITCHEN_FIRE_NOT_RESENDABLE);
+    }
+
+    // 3. Validar que CADA item está consumido y pertenece a la orden. Si
+    //    alguno no cumple, rechaza — el cliente puede entonces decidir si
+    //    dispara un fire normal o elimina ese id del payload.
+    for (const item of order.order_items) {
+      if (!item.inventory_consumed_at_fire) {
+        throw new VendixHttpException(
+          ErrorCodes.KITCHEN_FIRE_NOT_RESENDABLE,
+          `El item #${item.id} nunca fue consumido al disparar a cocina. ` +
+            `Use el fire normal en lugar del resend para items sin consumir.`,
+        );
+      }
+    }
+
+    // 4. Validar que ninguno de los items ya fue entregado al cliente. Un
+    //    ticket de un item entregado no se reenvía: la cocina ya cocinó el
+    //    plato y el cliente ya lo tiene. Si la operación humana insiste, el
+    //    operador edita el pedido o crea uno nuevo.
+    const deliveredRows = await this.prisma.kitchen_ticket_items.findMany({
+      where: {
+        order_item_id: { in: order.order_items.map((it) => it.id) },
+        status: 'delivered',
+      },
+      select: { order_item_id: true },
+    });
+    if (deliveredRows.length > 0) {
+      const ids = Array.from(
+        new Set(deliveredRows.map((r) => r.order_item_id)),
+      ).join(', ');
+      throw new VendixHttpException(
+        ErrorCodes.KITCHEN_FIRE_NOT_RESENDABLE,
+        `Los items #${ids} ya fueron entregados y no se reenvían. ` +
+          `Cree un nuevo pedido si el cliente quiere repetir el plato.`,
+      );
+    }
+
+    // 5. Resolver KDS por item — mismo patrón que `fireOrderItemsInTx`. Si los
+    //    items enrutan a estaciones distintas, son tickets distintos. El
+    //    `UNIQUE (store_id, kds_id, business_date, daily_number)` exige
+    //    poblar `kds_id` y `business_date` (los NULL no colisionan en
+    //    Postgres), y un resend en NULL podría insertar duplicados sin
+    //    que el P2002 nos avisara. Por eso los populamos explícitamente.
+    const defaultKds = await this.prisma.kds.findFirst({
+      where: { store_id, is_default: true, is_active: true },
+      select: { id: true },
+    });
+    if (!defaultKds) {
+      throw new VendixHttpException(ErrorCodes.KITCHEN_FIRE_NO_DEFAULT_KDS);
+    }
+
+    const kdsByProduct = new Map<number, number>();
+    for (const item of order.order_items) {
+      if (item.product_id) {
+        kdsByProduct.set(
+          item.product_id,
+          item.products?.kds_id ?? defaultKds.id,
+        );
+      }
+    }
+
+    const businessDate = await this.getBusinessDate(store_id);
+    const businessDateAsDate = new Date(`${businessDate}T00:00:00.000Z`);
+
+    // 6. Crear los tickets en transacción. Mismo advisory lock + count +
+    //    daily_number que el fire normal, agrupando por kds_id cuando los
+    //    items enrutan a estaciones distintas.
+    const snapshotsByKds = new Map<
+      number,
+      Array<{
+        orderItemId: number;
+        productId: number;
+        productName: string;
+        quantity: number;
+        productVariantId: number | null;
+        variantLabel: string | null;
+        notes: string | null;
+      }>
+    >();
+    for (const item of order.order_items) {
+      if (!item.product_id) continue;
+      const kdsId = kdsByProduct.get(item.product_id) ?? defaultKds.id;
+      const snap = {
+        orderItemId: item.id,
+        productId: item.product_id,
+        productName: item.product_name,
+        quantity: Number(item.quantity || 0),
+        productVariantId: item.product_variant_id ?? null,
+        variantLabel: this.variantLabelFor(item),
+        notes: item.notes ?? null,
+      };
+      const bucket = snapshotsByKds.get(kdsId);
+      if (bucket) bucket.push(snap);
+      else snapshotsByKds.set(kdsId, [snap]);
+    }
+
+    const createdTickets: Array<{ id: number; kds_id: number }> = [];
+
+    // 6b. Tickets viejos candidatos a cancelacion (solo en `lost_command`).
+    //
+    // Buscamos TODOS los tickets previos que tengan AL MENOS UN item de los
+    // reenviados, sin importar el estado del item, PERO limitamos la
+    // cancelacion a los que NO estan en estado terminal (`delivered`): un
+    // ticket cuyo item ya fue entregado no se cancela retroactivamente — ya
+    // cuenta como coccion real para el reporte historico.
+    //
+    // Si reason='remake_dish', esta lista queda vacia y el comportamiento es
+    // el viejo (dos tickets vivos apuntando al mismo item, ambos reales).
+    const oldTicketIdsToCancel: number[] =
+      dto.reason === 'lost_command'
+        ? Array.from(
+            new Set(
+              (
+                await this.prisma.kitchen_ticket_items.findMany({
+                  where: {
+                    order_item_id: { in: order.order_items.map((it) => it.id) },
+                    status: { in: ['pending', 'in_preparation'] },
+                    // Acotar al mismo `business_date` del reenvío: un
+                    // pendiente de hace semanas es problema de QUI-761
+                    // (caducidad por dia), no del resend. Cancelar
+                    // tickets historicos como efecto colateral de una
+                    // accion sobre datos de hoy es una escritura sobre
+                    // datos que nadie pidio cambiar.
+                    kitchen_ticket: {
+                      business_date: businessDateAsDate,
+                    },
+                  },
+                  select: { kitchen_ticket_id: true },
+                })
+              ).map((row) => row.kitchen_ticket_id),
+            ),
+          )
+        : [];
+
+    const ticketIds: number[] = await this.prisma.$transaction(
+      async (tx) => {
+        const ids: number[] = [];
+
+        // 6b.i Cancelar los tickets viejos en la MISMA transaccion. Solo
+        // se invoca si la razon es `lost_command` — si el operador eligio
+        // `remake_dish`, oldTicketIdsToCancel viene vacio y este bloque es
+        // no-op. El helper `cancelTicketInTx` flipea el ticket a 'cancelled'
+        // y a sus items pendientes/preparacion a 'cancelled' tambien
+        // (ignora `delivered` y `ready`, que ya cuentan como coccion real).
+        //
+        // Contexto de inventario: la cancelacion aqui es de TICKET, no de
+        // INVENTARIO. La merma ya se firmo al disparar el primer fire y
+        // `payments.updateInventoryFromOrder:2554` ya protege contra doble
+        // descuento via `if (item.inventory_consumed_at_fire === true)
+        // continue;`. Cancelar la reimpresion no devuelve nada al stock
+        // (la fila `kitchen_ticket_items` vieja pasa a cancelled; el row
+        // de `inventory_transactions` del consumo original sigue intacto y
+        // estampado al turno de QUI-760 si corresponde).
+        for (const oldTicketId of oldTicketIdsToCancel) {
+          await this.cancelTicketInTx(tx, oldTicketId);
+        }
+
+        // Orden estable por kds_id: mismo shape que el fire normal.
+        for (const kdsId of [...snapshotsByKds.keys()].sort((a, b) => a - b)) {
+          const snaps = snapshotsByKds.get(kdsId)!;
+
+          // El lock y el count son POR ESTACION y POR DIA — un restaurante
+          // con dos tickets #1 simultáneos en dos cocinas distintas es lo
+          // que este lock evita. Mismo patrón que `fireOrderItemsInTx:875`.
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(${store_id}::int, hashtext(${businessDate} || ':' || ${kdsId}::text)::int)`;
+          const sameDayCount = await tx.kitchen_tickets.count({
+            where: {
+              store_id,
+              kds_id: kdsId,
+              business_date: businessDateAsDate,
+            },
+          });
+
+          const ticket = await tx.kitchen_tickets.create({
+            data: {
+              store_id,
+              order_id: order.id,
+              // Misma mesa que el fire normal (vía el snapshot del order):
+              // NULL para mostrador / delivery. El resend hereda la mesa
+              // del pedido original, no del ticket anterior.
+              table_id: order.table_sessions?.[0]?.table_id ?? null,
+              kds_id: kdsId,
+              status: 'pending',
+              daily_number: sameDayCount + 1,
+              business_date: businessDateAsDate,
+              fired_at: new Date(),
+              items: {
+                create: snaps.map((snap) => ({
+                  order_item_id: snap.orderItemId,
+                  product_id: snap.productId,
+                  quantity: snap.quantity,
+                  status: 'pending',
+                  // El snapshot del variant_label viaja igual que en el
+                  // fire normal — inmutable a cambios posteriores del
+                  // nombre de la variante.
+                  product_variant_id: snap.productVariantId,
+                  variant_label: snap.variantLabel,
+                  notes: snap.notes,
+                })),
+              },
+            },
+            include: { items: true },
+          });
+          ids.push(ticket.id);
+          createdTickets.push({ id: ticket.id, kds_id: kdsId });
+        }
+        return ids;
+      },
+    );
+
+    // 7. Emitir `ticket.created` por cada uno (igual que el fire normal:
+    //    después del commit, best-effort). El tipo es `ticket.created`
+    //    según el union declarado en el frontend
+    //    (`kitchen-ticket.interface.ts:136`). NO `kitchen.ticket.created`.
+    try {
+      const tickets = await this.prisma.kitchen_tickets.findMany({
+        where: { id: { in: ticketIds }, store_id },
+        include: KITCHEN_TICKET_INCLUDE,
+      });
+      for (const ticket of tickets) {
+        this.pushKitchenEvent(store_id, {
+          type: 'ticket.created',
+          ticket,
+          ts: Date.now(),
+        });
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Failed to push SSE for resend tickets ${ticketIds.join(', ')}: ${
+          (err as Error).message
+        }`,
+      );
+    }
+
+    // 8. Emitir `ticket.cancelled` por cada viejo cancelado (solo si
+    //    `lost_command`). Usamos `emitTicketCancelledEvent` que ya invoca
+    //    el imputador de QUI-760
+    //    (`KdsSessionsService.attributeOpenSessionToTicketConsumption`) en
+    //    post-commit — la guarda `kds_session_id IS NULL` deja quietas
+    //    las inventory_transactions del consumo original que ya estan
+    //    estampadas. Si hay filas sin estampar, se imputan al turno
+    //    actual. El resend no las altera.
+    for (const oldTicketId of oldTicketIdsToCancel) {
+      await this.emitTicketCancelledEvent(oldTicketId);
+    }
+
+    // El primario es el de menor kds_id (mismo criterio que el fire
+    // normal). Aquí ya tenemos `createdTickets` ordenada por kds_id, así
+    // que el primero es el primario.
+    return {
+      ticketId: ticketIds[0],
+      ticketIds,
+      firedItemIds: order.order_items.map((it) => it.id),
+      cancelledTicketIds: oldTicketIdsToCancel,
+    };
+  }
+
   async previewFire(
     orderId: number,
     candidateOrderItemIds: number[],
@@ -1008,6 +1521,8 @@ export class KitchenFireService {
         ...ctx.preparedItems.map((it) => ({
           order_item_id: it.orderItem.id,
           product_id: it.orderItem.product_id,
+          product_variant_id: it.orderItem.product_variant_id ?? null,
+          variant_attributes: it.orderItem.variant_attributes ?? null,
           product_name: it.orderItem.product_name,
           quantity: Number(it.orderItem.quantity || 0),
           notes: notesById.get(it.orderItem.id) ?? null,
@@ -1031,6 +1546,8 @@ export class KitchenFireService {
         ...ctx.recipeLessItems.map((it) => ({
           order_item_id: it.id,
           product_id: it.product_id,
+          product_variant_id: it.product_variant_id ?? null,
+          variant_attributes: it.variant_attributes ?? null,
           product_name: it.product_name,
           quantity: Number(it.quantity || 0),
           notes: notesById.get(it.id) ?? null,
@@ -1086,17 +1603,29 @@ export class KitchenFireService {
     const items: any[] = [];
     const componentIds = new Set<number>();
     const perItem: Array<{ item: any; bom: BomExplosionLine[] }> = [];
+    // CP-POLLO-ARABE-727 A.7 — cache explodeBom per recipeId so N lines sharing
+    // the same recipe cost 1 explosion, not N. Mirrors prepareFireContext.
+    const bomCache = new Map<number, BomExplosionLine[]>();
 
     for (const it of rawItems) {
-      const recipe = await this.prisma.recipes.findFirst({
-        where: { product_id: it.product_id, is_active: true },
-        select: { id: true },
-      });
+      // `KITCHEN_TICKET_INCLUDE` ya carga `product.recipe {id, is_active}`, así
+      // que no hay que re-consultar `recipes.findFirst` por línea — ese era el
+      // N+1 del modal de verificación de QUI-655 (10 platos = 10 round-trips).
+      const recipe = it.product?.recipe ?? null;
       // Sin receta activa se devuelve igual, con `components: []`: el cocinero debe
       // verlo en el modal y poder confirmarlo, no que desaparezca.
-      const bom = recipe
-        ? await this.recipesService.explodeBom(recipe.id)
-        : [];
+      let bom: BomExplosionLine[];
+      if (!recipe || !recipe.is_active) {
+        bom = [];
+      } else {
+        const cached = bomCache.get(recipe.id);
+        if (cached) {
+          bom = cached;
+        } else {
+          bom = await this.recipesService.explodeBom(recipe.id);
+          bomCache.set(recipe.id, bom);
+        }
+      }
       for (const l of bom) componentIds.add(l.component_product_id);
       perItem.push({ item: it, bom });
     }
@@ -1130,6 +1659,8 @@ export class KitchenFireService {
       items.push({
         order_item_id: item.order_item_id,
         product_id: item.product_id,
+        product_variant_id: item.product_variant_id ?? null,
+        variant_attributes: item.variant_label ?? null,
         product_name: item.product?.name ?? `#${item.product_id}`,
         quantity: qty,
         notes: notesById.get(item.order_item_id) ?? item.notes ?? null,
@@ -1187,6 +1718,16 @@ export class KitchenFireService {
         id: true,
         store_id: true,
         order_number: true,
+        // C.3 QUI-733 — la sesión de mesa ABIERTA (closed_at IS NULL) del pedido,
+        // para estampar `kitchen_tickets.table_id` al fire. `orders` no tiene
+        // `table_session_id`: la relación vive al revés (table_sessions.order_id).
+        // La más reciente; el índice one_open_per_table (A.3) garantiza una sola.
+        table_sessions: {
+          where: { closed_at: null },
+          orderBy: { opened_at: 'desc' },
+          take: 1,
+          select: { id: true, table_id: true },
+        },
         order_items: {
           where: { id: { in: candidateOrderItemIds } },
           include: {
@@ -1199,7 +1740,15 @@ export class KitchenFireService {
                 store_id: true,
                 // QUI-651 — estacion destino del plato. NULL => KDS por defecto.
                 kds_id: true,
+                // CP-POLLO-ARABE-727 A.6 — conteo de variantes para el warn de
+                // "producto con variantes y fire sin variante".
+                _count: { select: { product_variants: true } },
               },
+            },
+            // CP-POLLO-ARABE-727 A.6 — arrastre de la variante vendida (ver nota
+            // en el include de `fireOrderItems`).
+            product_variants: {
+              select: { id: true, name: true, product_id: true },
             },
           },
         },
@@ -1231,6 +1780,10 @@ export class KitchenFireService {
         skippedItemIds.push(item.id);
         continue;
       }
+      // CP-POLLO-ARABE-727 A.6 — mismo guard que `fireOrderItems`: ERR-15
+      // (variante que no pertenece al producto) + warn de variante ausente.
+      this.assertVariantBelongsToProduct(item);
+      this.warnMissingVariantIdForProduct(item);
       firedItemIds.push(item.id);
     }
     if (firedItemIds.length === 0) {
@@ -1248,21 +1801,42 @@ export class KitchenFireService {
     // CP-POS-SVC-PERF-001 / A.2 — cache explodeBom per recipeId locally so
     // multiple cart lines sharing the same recipe cost 1 explosion (not N).
     const bomCache = new Map<number, BomExplosionLine[]>();
+    // CP-POLLO-ARABE-727 A.7 — un único `findMany` en vez de `findFirst` por
+    // línea, y por `client` (el tx de la transacción abierta del llamador), no
+    // por `this.prisma`: esto era la fuga de pool documentada (1 conexión
+    // retenida por la tx + N secuenciales del mismo pool).
+    const firedProductIds = firedItemIds.map((itemId) => {
+      const item = order.order_items.find((oi) => oi.id === itemId)!;
+      return item.product_id!;
+    });
+    const activeRecipes =
+      firedProductIds.length > 0
+        ? await client.recipes.findMany({
+            where: {
+              product_id: { in: [...new Set(firedProductIds)] },
+              is_active: true,
+            },
+            select: { id: true, product_id: true, is_active: true },
+          })
+        : [];
+    const recipeByProduct = new Map<
+      number,
+      { id: number; product_id: number | null; is_active: boolean }
+    >(activeRecipes.map((r) => [r.product_id, r]));
     for (const itemId of firedItemIds) {
       const item = order.order_items.find((oi) => oi.id === itemId)!;
-      const recipe = await this.prisma.recipes.findFirst({
-        where: { product_id: item.product_id!, is_active: true },
-        select: { id: true, product_id: true, is_active: true },
-      });
+      const recipe = recipeByProduct.get(item.product_id!);
       if (!recipe || !recipe.is_active) {
         recipeLessItems.push(item);
         continue;
       }
       let bomLines = bomCache.get(recipe.id);
       if (!bomLines) {
-        bomLines = await this.recipesService.explodeBom(recipe.id, {
-          [recipe.id]: 1,
-        });
+        bomLines = await this.recipesService.explodeBom(
+          recipe.id,
+          { [recipe.id]: 1 },
+          client,
+        );
         bomCache.set(recipe.id, bomLines);
       }
       preparedItems.push({ orderItem: item, recipeId: recipe.id, bomLines });
@@ -1284,7 +1858,7 @@ export class KitchenFireService {
     const locationResults = await Promise.all(
       distinctLeafIds.map((pid) =>
         this.stockLevelManager
-          .getDefaultLocationForProduct(pid)
+          .getDefaultLocationForProduct(pid, undefined, client)
           .then((loc) => [pid, loc] as const)
           .catch(() => [pid, null] as const),
       ),
@@ -1296,7 +1870,11 @@ export class KitchenFireService {
     const businessDate = await this.getBusinessDate(store_id);
 
     return {
-      order: { id: order.id, order_number: order.order_number },
+      order: {
+        id: order.id,
+        order_number: order.order_number,
+        table_id: order.table_sessions?.[0]?.table_id ?? null,
+      },
       firedItemIds,
       skippedItemIds,
       preparedItems,
@@ -1331,6 +1909,10 @@ export class KitchenFireService {
         productId: number;
         productName: string;
         quantity: number;
+        // CP-POLLO-ARABE-727 A.6 — mismo shape que `fireOrderItemsInTx`; el
+        // auto-fire también conserva la variante en el snapshot.
+        productVariantId: number | null;
+        variantLabel: string | null;
       }>;
       cogsTotal: number;
       consumedLineCount: number;
@@ -1458,6 +2040,15 @@ export class KitchenFireService {
   async startPreparation(ticketId: number) {
     const { ticket, store_id } = await this.getTicketForStore(ticketId);
 
+    // QUI-XXX — station-lock guard. Si el turno abierto de la KDS del ticket
+    // lo posée otro operador y todavía está fresco (<5min sin `last_seen_at`),
+    // el helper lanza KDS_STATION_LOCKED antes de cualquier mutación de
+    // estado. Lazy inactividad: si el turno está vencido lo cierra en
+    // silencio y deja pasar. Owner/admin pueden actuar aunque el turno sea
+    // ajeno, pero el "Tomar control" explícito vive en el botón del status
+    // bar — esta mutación NO estampa `force_taken_by_user_id` por sí sola.
+    await this.kdsSessionsService.assertCanMutateStationTicket(ticket.kds_id);
+
     if (ticket.status === 'cancelled') {
       throw new VendixHttpException(
         ErrorCodes.KITCHEN_TICKET_ALREADY_CANCELLED,
@@ -1506,11 +2097,13 @@ export class KitchenFireService {
     const recipeLessItemIds: number[] = [];
     for (const item of ticket.items ?? []) {
       if (!item.product_id) continue;
-      const recipe = await this.prisma.recipes.findFirst({
-        where: { product_id: item.product_id, is_active: true },
-        select: { id: true },
-      });
-      if (!recipe) {
+      // CP-POLLO-ARABE-727 F.1 — `KITCHEN_TICKET_INCLUDE` ya carga
+      // `product.recipe {id, is_active}` (su comentario dice "Mirrors the
+      // startPreparation guard"). Re-consultar `recipes.findFirst` por línea
+      // era el mismo N+1 que A.7 eliminó en `fireOrderItems`/`prepareFireContext`
+      // y quedó vivo acá: N round-trips secuenciales al pool por ticket.
+      const hasActiveRecipe = item.product?.recipe?.is_active === true;
+      if (!hasActiveRecipe) {
         recipeLessItemIds.push(item.id);
       }
     }
@@ -1545,11 +2138,27 @@ export class KitchenFireService {
     });
 
     const full = await this.getTicketForStore(ticketId);
+    // QUI-760 — imputa las inventory_transactions del ticket a la sesión
+    // abierta de la KDS. Va DESPUÉS del pushKitchenEvent y envuelto en
+    // try/catch: la imputación es un side-effect contable; si falla, NO
+    // debe tumbar el handler (el cambio de estado ya está commiteado) NI
+    // bloquear la difusión SSE — un efecto contable no puede tener poder
+    // de veto sobre la difusión operativa. La guarda `kds_session_id IS
+    // NULL` del helper hace que solo la primera acción tenga efecto;
+    // llamarlo desde los tres sale gratis y no rompe idempotencia.
     this.pushKitchenEvent(store_id, {
       type: 'ticket.started',
       ticket: full.ticket,
       ts: Date.now(),
     });
+    try {
+      await this.kdsSessionsService.attributeOpenSessionToTicketConsumption(ticketId);
+    } catch (err) {
+      this.logger.error(
+        `QUI-760: failed to attribute ticket ${ticketId} consumption to KDS session`,
+        err as Error,
+      );
+    }
     return full.ticket;
   }
 
@@ -1563,6 +2172,10 @@ export class KitchenFireService {
    */
   async markReady(ticketId: number) {
     const { ticket, store_id } = await this.getTicketForStore(ticketId);
+
+    // Ver `startPreparation` — station-lock guard uniforme en todas las
+    // mutaciones de cocina.
+    await this.kdsSessionsService.assertCanMutateStationTicket(ticket.kds_id);
 
     if (ticket.status === 'cancelled') {
       throw new VendixHttpException(
@@ -1610,11 +2223,43 @@ export class KitchenFireService {
     });
 
     const full = await this.getTicketForStore(ticketId);
+    // QUI-760 — ver nota en `startPreparation`. La guarda `kds_session_id`
+    // IS NULL garantiza que este helper no haga nada si el ticket ya fue
+    // firmado por `start`. Mismo orden push-primero-try-catch-después:
+    // la difusión operativa no puede depender de un efecto contable.
     this.pushKitchenEvent(store_id, {
       type: 'ticket.ready',
       ticket: full.ticket,
       ts: Date.now(),
     });
+    // T9 — paso 2: listo de cocina produce notificación de tienda. Va
+    // DESPUÉS del push operativo y envuelto en try/catch porque la difusión
+    // del sonido no puede depender de un efecto secundario (mismo patrón que
+    // la imputación contable QUI-760 de abajo). `@OnEvent` tiene
+    // `suppressErrors` en true por defecto en este repo, así que un fallo
+    // dentro del listener se traga solo: registramos explícito para que el
+    // guardia del sonido no se vuelva silencio inexplicable.
+    try {
+      this.eventEmitter.emit('kitchen.ticket_ready', {
+        store_id,
+        ticket_id: ticketId,
+        order_id: full.ticket.order_id,
+        order_number: (full.ticket as any).order?.order_number ?? null,
+      });
+    } catch (err) {
+      this.logger.error(
+        `[kitchen.ticket_ready] failed to emit for ticket #${ticketId}: ${(err as Error).message}`,
+        (err as Error).stack,
+      );
+    }
+    try {
+      await this.kdsSessionsService.attributeOpenSessionToTicketConsumption(ticketId);
+    } catch (err) {
+      this.logger.error(
+        `QUI-760: failed to attribute ticket ${ticketId} consumption to KDS session`,
+        err as Error,
+      );
+    }
     return full.ticket;
   }
 
@@ -1643,6 +2288,9 @@ export class KitchenFireService {
    */
   async markDelivered(ticketId: number) {
     const { ticket, store_id } = await this.getTicketForStore(ticketId);
+
+    // Ver `startPreparation` — station-lock guard uniforme.
+    await this.kdsSessionsService.assertCanMutateStationTicket(ticket.kds_id);
 
     if (ticket.status === 'cancelled') {
       throw new VendixHttpException(
@@ -1735,11 +2383,24 @@ export class KitchenFireService {
     }
 
     const full = await this.getTicketForStore(ticketId);
+    // QUI-760 — ver nota en `startPreparation`. Mismo helper, mismo
+    // invariante de idempotencia: si el ticket ya fue firmado por `start`
+    // o `ready`, este llamado no estampa nada. Mismo orden push-primero-
+    // try-catch-después: la difusión operativa no puede depender de un
+    // efecto contable.
     this.pushKitchenEvent(store_id, {
       type: 'ticket.delivered',
       ticket: full.ticket,
       ts: Date.now(),
     });
+    try {
+      await this.kdsSessionsService.attributeOpenSessionToTicketConsumption(ticketId);
+    } catch (err) {
+      this.logger.error(
+        `QUI-760: failed to attribute ticket ${ticketId} consumption to KDS session`,
+        err as Error,
+      );
+    }
 
     // Restaurant lifecycle bridge: once EVERY kitchen ticket of this order is
     // in a terminal state (delivered/cancelled) and at least one was actually
@@ -1794,6 +2455,9 @@ export class KitchenFireService {
   async cancelTicket(ticketId: number) {
     const { ticket, store_id } = await this.getTicketForStore(ticketId);
 
+    // Ver `startPreparation` — station-lock guard uniforme.
+    await this.kdsSessionsService.assertCanMutateStationTicket(ticket.kds_id);
+
     if (ticket.status === 'cancelled') {
       throw new VendixHttpException(
         ErrorCodes.KITCHEN_TICKET_ALREADY_CANCELLED,
@@ -1832,11 +2496,26 @@ export class KitchenFireService {
     });
 
     const full = await this.getTicketForStore(ticketId);
+    // QUI-760 — imputa las inventory_transactions del ticket a la sesión
+    // abierta de la KDS. El insumo YA se gastó al cocinar: cancelar el
+    // ticket no lo devuelve al stock (la acción no distingue «no se llegó
+    // a preparar» de «se cocinó y se canceló»), y la merma queda cargada
+    // al turno que la produjo. Coherente con la regla "atribución es de
+    // quien cocina". Mismo patrón push-primero-try-catch-después que los
+    // otros tres handlers: la difusión operativa no depende del helper.
     this.pushKitchenEvent(store_id, {
       type: 'ticket.cancelled',
       ticket: full.ticket,
       ts: Date.now(),
     });
+    try {
+      await this.kdsSessionsService.attributeOpenSessionToTicketConsumption(ticketId);
+    } catch (err) {
+      this.logger.error(
+        `QUI-760: failed to attribute ticket ${ticketId} consumption to KDS session`,
+        err as Error,
+      );
+    }
     return full.ticket;
   }
 
@@ -1853,7 +2532,21 @@ export class KitchenFireService {
    *
    * The caller MUST have already validated tenancy + the `pending` precondition
    * (this helper performs the raw writes only).
+   *
+   * QUI-760 — esta vía NO imputa consumo al cerrar la tx. La imputación
+   * (`attributeOpenSessionToTicketConsumption`) hace su propio
+   * `updateMany` con scope por tienda y no se puede meter adentro de una
+   * tx ajena sin correr dos riesgos: contaminar la semántica de la tx
+   * del llamador (un fallo de imputación podría hacer rollback de
+   * cancelación que ya estaba decidida) y bloquear el commit de ese
+   * flujo por un efecto contable. La imputación viaja con el SSE: el
+   * `emitTicketCancelledEvent` post-commit ya invoca el helper además
+   * del push. Si el caller invoca `cancelTicketInTx` y olvida el
+   * `emitTicketCancelledEvent`, el ticket queda cancelado pero su
+   * consumo NO se imputa — mismo hueco que ya existía para el SSE, la
+   * imputación lo hereda. Documentado para que no parezca un olvido.
    */
+
   async cancelTicketInTx(
     tx: Prisma.TransactionClient,
     ticketId: number,
@@ -1890,6 +2583,22 @@ export class KitchenFireService {
         }`,
       );
     }
+    // QUI-760 — imputación post-commit, después de empujar el SSE (o de
+    // intentar empujarlo). Mismo patrón que `cancelTicket` directo: el
+    // insumo ya se gastó al cocinar y la merma queda cargada al turno.
+    // Se intenta imputar incluso si el push falló arriba — la imputación
+    // es independiente del SSE. Best-effort: si el helper tira, se
+    // loguea y se continúa (el caller ya invocó este helper asumiendo
+    // post-commit, no propagamos error).
+    try {
+      await this.kdsSessionsService.attributeOpenSessionToTicketConsumption(ticketId);
+    } catch (err) {
+      this.logger.warn(
+        `QUI-760: failed to attribute cancelled ticket ${ticketId} consumption: ${
+          (err as Error).message
+        }`,
+      );
+    }
   }
 
   /**
@@ -1916,6 +2625,9 @@ export class KitchenFireService {
    */
   async revertTicket(ticketId: number) {
     const { ticket, store_id } = await this.getTicketForStore(ticketId);
+
+    // Ver `startPreparation` — station-lock guard uniforme.
+    await this.kdsSessionsService.assertCanMutateStationTicket(ticket.kds_id);
 
     // Mapa de retroceso un-paso. `pending` no tiene estado previo.
     const REVERT_MAP: Record<string, string | null> = {
@@ -2172,6 +2884,93 @@ export class KitchenFireService {
         component_product_ids: ids,
       })),
     };
+  }
+
+  // ------------------------------------------------------ A.6 variant helpers
+  /**
+   * CP-POLLO-ARABE-727 A.6 — ERR-15 en fire-time. La variante vendida se estampa
+   * en `kitchen_ticket_items`, así que el fire DEBE garantizar que la variante
+   * que declara `order_item.product_variant_id` pertenece realmente a
+   * `order_item.product_id`. Si no, el ticket mostraría una especificación de
+   * otro plato (ej. "Pollo" con la variante de una línea ajena) y el inventario
+   * quedaría descuadrado — se falla fuerte antes de estampar una variante que no
+   * corresponde. Las dos capas de ERR-15 no son redundantes: A.6 cubre el fire;
+   * C.4 cubre los write-sites upstream (retail incluido).
+   *
+   * Invariante del dominio (ver `recipes.service.ts`): el yield puede tener
+   * variantes, los componentes del BOM NO.
+   */
+  private assertVariantBelongsToProduct(
+    item: {
+      id: number;
+      product_id: number | null;
+      product_variant_id: number | null;
+      product_variants?: { product_id: number } | null;
+    },
+  ): void {
+    if (item.product_variant_id == null) return;
+    const belongs = item.product_variants?.product_id === item.product_id;
+    if (!belongs) {
+      throw new VendixHttpException(
+        ErrorCodes.PRODUCT_VARIANT_MISMATCH,
+        undefined,
+        {
+          order_item_id: item.id,
+          product_id: item.product_id,
+          product_variant_id: item.product_variant_id,
+        },
+      );
+    }
+  }
+
+  /**
+   * CP-POLLO-ARABE-727 A.6 — única señal del riesgo contable más grave del plan
+   * ("inventario descuadrado"): un plato con variantes que llega al fire SIN
+   * `product_variant_id`. El operador vendió la línea base (que
+   * `enforceStockLevelsMode` borra), así que el consumo descontaría una fila que
+   * ningún agregado lee. Se avisa con `logger.warn` (no se bloquea): la venta
+   * puede ser legítima —por ejemplo una variante sin stock forzada a la base—
+   * pero el operador debe poder rastrear que ocurrió.
+   */
+  private warnMissingVariantIdForProduct(
+    item: {
+      id: number;
+      product_id: number | null;
+      product_variant_id: number | null;
+      products?: { _count?: { product_variants?: number } } | null;
+    },
+  ): void {
+    if (item.product_variant_id != null) return;
+    const variantCount = item.products?._count?.product_variants ?? 0;
+    if (variantCount > 0) {
+      this.logger.warn('variant_id missing for product with variants', {
+        order_item_id: item.id,
+        product_id: item.product_id,
+      });
+    }
+  }
+
+  /**
+   * CP-POLLO-ARABE-727 A.6 — etiqueta snapshot de la variante que viaja al
+   * ticket de cocina. Se toma del nombre de la variante (via el include de
+   * `order_items → product_variants`); si no lo tiene, cae al snapshot persistido
+   * `variant_attributes` y luego a `variant_sku`. Es INMUTABLE: se congela al
+   * fire y no se re-etiqueta si `product_variants.name` cambia después (igual
+   * que `order_items.product_name`). Devuelve `null` para producto sin variante.
+   */
+  private variantLabelFor(
+    item: {
+      product_variants?: { name: string | null } | null;
+      variant_attributes?: string | null;
+      variant_sku?: string | null;
+    },
+  ): string | null {
+    return (
+      item.product_variants?.name ??
+      item.variant_attributes ??
+      item.variant_sku ??
+      null
+    );
   }
 
 }

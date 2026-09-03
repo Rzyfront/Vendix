@@ -245,7 +245,7 @@ export class SessionsService {
     if (seen != null && Math.abs(Number(seen) - expected) > 0.01) {
       throw new VendixHttpException(
         ErrorCodes.CASH_SESSION_EXPECTED_STALE_001,
-        `El efectivo esperado cambió mientras contabas: la pantalla mostraba $${Number(seen).toLocaleString('es-CO')} y ahora son $${expected.toLocaleString('es-CO')}. Revisá el resumen actualizado antes de cerrar.`,
+        `El efectivo esperado cambió mientras contabas: la pantalla mostraba $${Number(seen).toLocaleString('es-CO')} y ahora son $${expected.toLocaleString('es-CO')}. Revisa el resumen actualizado antes de cerrar.`,
         {
           expected_now: expected,
           expected_seen: Number(seen),

@@ -8,7 +8,6 @@ import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
 
 import { CardComponent } from '../../../../../../../shared/components/card/card.component';
-import { StatsComponent } from '../../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { InputsearchComponent } from '../../../../../../../shared/components/inputsearch/inputsearch.component';
@@ -17,7 +16,6 @@ import {
 import {
   DropdownAction } from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
-  CurrencyPipe,
   CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 
 import { DateRangeFilter } from '../../../interfaces/analytics.interface';
@@ -30,9 +28,6 @@ import {
 import {
   AnalyticsCategoryChipsComponent
 } from '../../../components/analytics-category-chips/analytics-category-chips.component';
-import {
-  ExportButtonComponent
-} from '../../../components/export-button/export-button.component';
 import {
   DateRangeFilterComponent
 } from '../../../components/date-range-filter/date-range-filter.component';
@@ -65,15 +60,12 @@ import { queryParamsToDateRange } from '../../../../shared/utils/date-range-para
     CommonModule,
     FormsModule,
     CardComponent,
-    StatsComponent,
     ChartComponent,
     IconComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
-    CurrencyPipe,
     AnalyticsCardComponent,
     AnalyticsCategoryChipsComponent,
-    ExportButtonComponent,
     DateRangeFilterComponent,
     BreakEvenGaugeComponent,
     StickyHeaderComponent,

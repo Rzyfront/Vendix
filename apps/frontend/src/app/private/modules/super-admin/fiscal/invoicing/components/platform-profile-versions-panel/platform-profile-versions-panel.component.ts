@@ -4,7 +4,6 @@ import { DestroyRef } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { inject as injectSvc } from '@angular/core';
 
-import { IconComponent } from '../../../../../../../shared/components/index';
 import { FiscalBillingAdminService } from '../../../../subscriptions/services/fiscal-billing-admin.service';
 import type {
   PlatformInvoiceProfileVersion,
@@ -22,7 +21,7 @@ import type {
 @Component({
   selector: 'app-platform-profile-versions-panel',
   standalone: true,
-  imports: [IconComponent],
+  imports: [],
   template: `
     <div class="flex flex-col gap-3 md:flex-row">
       <!-- Lista de versiones -->

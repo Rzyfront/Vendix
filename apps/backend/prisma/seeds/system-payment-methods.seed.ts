@@ -4,6 +4,13 @@ import { getPrismaClient } from './shared/client';
 export interface SeedSystemPaymentMethodsResult {
   methodsCreated: number;
   methodsSkipped: number;
+  /**
+   * Métodos cuyo `config_schema` se reescribió. El seed es CREATE-ONLY salvo
+   * la excepción de `bank_transfer` (ver el bloque previo al bucle): su
+   * esquema viejo se creó antes de que existiera `accounts[]` y el skip lo
+   * dejaba congelado para siempre.
+   */
+  methodsUpdated: number;
 }
 
 /**
@@ -105,27 +112,54 @@ export async function seedSystemPaymentMethods(
       requires_config: true,
       config_schema: {
         type: 'object',
-        required: ['bank_name', 'account_number'],
+        required: ['accounts'],
         properties: {
-          bank_name: {
-            type: 'string',
-            description: 'Nombre del banco',
-          },
-          account_number: {
-            type: 'string',
-            description: 'Número de cuenta',
-          },
-          account_holder: {
-            type: 'string',
-            description: 'Titular de la cuenta',
-          },
-          swift_code: {
-            type: 'string',
-            description: 'Código SWIFT/BIC',
-          },
-          clabe: {
-            type: 'string',
-            description: 'CLABE interbancaria (México)',
+          // QUI-728 — multi-cuenta para transferencia. Cada ref apunta a una
+          // `bank_accounts` (id) o es un legacy auto-migrado sin vínculo.
+          accounts: {
+            type: 'array',
+            description:
+              'Cuentas bancarias de destino del pago por transferencia',
+            items: {
+              type: 'object',
+              required: ['bank_name', 'account_number'],
+              properties: {
+                id: {
+                  type: 'number',
+                  description:
+                    'Id de la cuenta en bank_accounts (opcional en legacy)',
+                },
+                name: {
+                  type: 'string',
+                  description: 'Nombre de la cuenta',
+                },
+                bank_name: {
+                  type: 'string',
+                  description: 'Nombre del banco',
+                },
+                account_number: {
+                  type: 'string',
+                  description: 'Número de cuenta',
+                },
+                account_holder: {
+                  type: 'string',
+                  description: 'Titular de la cuenta',
+                },
+                swift_code: {
+                  type: 'string',
+                  description: 'Código SWIFT/BIC',
+                },
+                clabe: {
+                  type: 'string',
+                  description: 'CLABE interbancaria (México)',
+                },
+                legacy: {
+                  type: 'boolean',
+                  description:
+                    'true si fue migrada desde la configuración anterior',
+                },
+              },
+            },
           },
         },
       },
@@ -252,6 +286,52 @@ export async function seedSystemPaymentMethods(
 
   let methodsCreated = 0;
   let methodsSkipped = 0;
+  let methodsUpdated = 0;
+
+  // QUI-727 (FB-15) — `bank_transfer` cambió su `config_schema` a un shape
+  // con `accounts[]` que apunta a `bank_accounts` (id) o a entradas legacy.
+  // El loop principal es CREATE-ONLY (skip si la fila existe), por diseño
+  // — cualquier otra columna NO debe sobrescribirse en re-runs porque
+  // algún merchant podría haber editado `display_name`, `provider`,
+  // `processing_fee_*`, etc.
+  //
+  // PERO `config_schema` es metadata que renderiza el form del UI, no
+  // estado de negocio. Si la fila `bank_transfer` ya existe con el
+  // shape viejo, la migramos al nuevo en este bloque dirigido y solo
+  // aquí. Esto evita "normalizarlo" en el loop general (que pisaría
+  // personalizaciones) y deja una pista para la próxima persona que
+  // vea este patrón: la excepción es por una razón, no por descuido.
+  const bankTransferMethod = systemMethods.find(
+    (m) => m.name === 'bank_transfer',
+  );
+  if (bankTransferMethod) {
+    const existingBankTransfer = await client.system_payment_methods.findUnique({
+      where: { name: 'bank_transfer' },
+      select: { id: true, config_schema: true },
+    });
+    if (existingBankTransfer) {
+      // Solo pisar si la fila actual NO expone aún `accounts[]` en su
+      // `config_schema.properties`. Si ya lo expone (otro equipo lo
+      // materializó manualmente), respetarlo.
+      const props =
+        (existingBankTransfer.config_schema as any)?.properties ?? {};
+      const hasAccounts = Object.prototype.hasOwnProperty.call(props, 'accounts');
+      if (!hasAccounts) {
+        await client.system_payment_methods.update({
+          where: { id: existingBankTransfer.id },
+          data: { config_schema: bankTransferMethod.config_schema },
+        });
+        methodsUpdated++;
+        console.log(
+          `   🔄 Updated bank_transfer.config_schema to new shape (accounts[] + legacy)`,
+        );
+      } else {
+        methodsSkipped++;
+      }
+    } else {
+      // Si no existe, se creará en el loop de abajo — nada que hacer acá.
+    }
+  }
 
   for (const method of systemMethods) {
     const existing = await client.system_payment_methods.findUnique({
@@ -273,5 +353,6 @@ export async function seedSystemPaymentMethods(
   return {
     methodsCreated,
     methodsSkipped,
+    methodsUpdated,
   };
 }

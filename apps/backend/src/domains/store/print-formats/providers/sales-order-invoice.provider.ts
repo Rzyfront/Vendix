@@ -1,17 +1,26 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { S3Service } from '../../../../common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
 import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
+import { signStoreLogoUrl } from '../lib/print-logo.util';
 
 @Injectable()
 export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
   readonly formatType: print_format_type_enum = 'sales_order_invoice';
+  private readonly logger = new Logger(SalesOrderInvoiceDataProvider.name);
 
-  constructor(private readonly prisma: StorePrismaService) {}
+  // `s3Service` opcional en la firma por la misma razón que en
+  // `pos-sale-ticket.provider.ts`: specs que instancian con un solo
+  // argumento no deben romper; Nest siempre lo inyecta en runtime.
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly s3Service?: S3Service,
+  ) {}
 
   async fetchDocumentData(
     storeId: number,
@@ -25,8 +34,17 @@ export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
     const order = await this.prisma.orders.findFirst({
       where: { id: orderId, store_id: storeId },
       include: {
-        order_items: true,
-        order_taxes: true,
+        // QUI-751 — el impuesto vive a nivel de línea (`order_item_taxes`),
+        // no existe la relación `order_taxes`. Antes del fix esto compilaba
+        // porque TypeScript no valida nombres de `include` contra Prisma, pero
+        // la 1ª llamada runtime hubiera sido `PrismaClientValidationError` 500.
+        order_items: {
+      // [resid-fiscal] — Mismo criterio que pos-sale-ticket: la factura
+      // comercial también agrega impuestos por línea y debe cuadrar con
+      // el `order.tax_amount`, que ya excluye cancelados.
+      where: { cancelled_at: null },
+      include: { order_item_taxes: true },
+    },
         users: true,
         addresses_orders_shipping_address_idToaddresses: true,
         stores: {
@@ -67,20 +85,14 @@ export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
       total_price_formatted: `$${Number(it.total_price || 0).toLocaleString('es-CO')}`,
     }));
 
-    const taxes = (order.order_taxes || []).map((t: any) => ({
-      name: t.tax_name || 'IVA',
-      rate: Number(t.tax_rate || 0),
-      base_amount: Number(t.taxable_amount || 0),
-      tax_amount: Number(t.tax_amount || 0),
-      base_formatted: `$${Number(t.taxable_amount || 0).toLocaleString('es-CO')}`,
-      tax_formatted: `$${Number(t.tax_amount || 0).toLocaleString('es-CO')}`,
-    }));
+    const taxes = this.aggregateTaxes(order.order_items);
 
     const subtotal = Number(order.subtotal_amount || 0);
     const discount = Number(order.discount_amount || 0);
     const tax = Number(order.tax_amount || 0);
     const shipping = Number(order.shipping_cost || 0);
     const grandTotal = Number(order.grand_total || subtotal - discount + tax + shipping);
+    const signedLogoUrl = await signStoreLogoUrl(this.s3Service, store.logo_url, this.logger);
 
     return {
       store: {
@@ -91,7 +103,7 @@ export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
         email: store.email,
         address: storeAddr.address_line1 ? `${storeAddr.address_line1} ${storeAddr.address_line2 || ''}`.trim() : undefined,
         city: storeAddr.city,
-        logo_url: store.logo_url,
+        logo_url: signedLogoUrl,
       },
       customer: user.id
         ? {
@@ -128,6 +140,61 @@ export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
         grand_total_formatted: `$${grandTotal.toLocaleString('es-CO')}`,
       },
     };
+  }
+
+  /**
+   * QUI-751 — agrega los impuestos de línea en uno por cabecera.
+   *
+   * Espejo del helper de `pos-sale-ticket.provider.ts`. Mismo invariante:
+   * la base se deriva `tax_amount / tax_rate` (no `base × tarifa`), la
+   * escala cruda de `rate` se preserva (`Decimal(6,5)` ⇒ 0.19, NO 19),
+   * y se agrupa por `(tax_name, tax_rate)` para que dos tarifas del
+   * mismo tributo no se sumen en una sola fila.
+   */
+  private aggregateTaxes(orderItems: any[]): Array<{
+    name: string;
+    rate: number;
+    base_amount: number;
+    tax_amount: number;
+    base_formatted: string;
+    tax_formatted: string;
+  }> {
+    const grouped = new Map<
+      string,
+      { name: string; rate: number; tax_amount: number; base_amount: number }
+    >();
+
+    for (const item of orderItems || []) {
+      for (const t of item.order_item_taxes || []) {
+        const name = t.tax_name || 'IVA';
+        const rate = Number(t.tax_rate || 0);
+        const taxAmount = Number(t.tax_amount || 0);
+        const key = `${name}|${rate}`;
+
+        const lineBase = rate > 0 ? taxAmount / rate : 0;
+        const existing = grouped.get(key);
+        if (existing) {
+          existing.tax_amount += taxAmount;
+          existing.base_amount += lineBase;
+        } else {
+          grouped.set(key, {
+            name,
+            rate,
+            tax_amount: taxAmount,
+            base_amount: lineBase,
+          });
+        }
+      }
+    }
+
+    return Array.from(grouped.values()).map((g) => ({
+      name: g.name,
+      rate: g.rate,
+      base_amount: g.base_amount,
+      tax_amount: g.tax_amount,
+      base_formatted: `$${g.base_amount.toLocaleString('es-CO')}`,
+      tax_formatted: `$${g.tax_amount.toLocaleString('es-CO')}`,
+    }));
   }
 
   async getSampleData(storeId?: number): Promise<StandardPrintDataModel> {

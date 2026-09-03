@@ -37,6 +37,12 @@ import {
   VendorSupportFiscalQuery,
   VendorSupportFiscalTransmission,
 } from '../interfaces/fiscal-billing.interface';
+import {
+  PlatformDianEvent,
+  PlatformInvoiceDeliveryReceipt,
+  PlatformInvoiceDetailPayload,
+  PlatformInvoicePdfLocation,
+} from '../interfaces/platform-invoice-document.interface';
 
 @Injectable({ providedIn: 'root' })
 export class FiscalBillingAdminService {
@@ -498,31 +504,185 @@ export class FiscalBillingAdminService {
       .pipe(map((res) => res.data));
   }
 
-  registerPlatformDianEvent(
+  // ─────────────────────────────────────────────────────────
+  // Documentos fiscales del riel super-admin
+  //
+  // UNA SOLA DEFINICIÓN POR CAPACIDAD. Antes el modal de detalle, la página
+  // de detalle y este servicio armaban las mismas URLs por separado y
+  // divergieron: el modal pedía `invoices/:id?kind=platform` (el controller
+  // IGNORA `kind`), `sales-invoices/:id/pdf`, `invoices/:id/deliver` e
+  // `invoices/:id/events` — tres de esas rutas no existen en el backend y la
+  // cuarta resolvía el documento del otro riel. Cada método de acá cita la
+  // ruta real del controller y dice qué espacio de id espera; ver el docblock
+  // de `platform-invoice-document.interface.ts` para por qué NO son el mismo
+  // número.
+  // ─────────────────────────────────────────────────────────
+
+  /**
+   * Detalle de una factura SaaS — `GET superadmin/subscriptions/fiscal/invoices/:id`
+   * (`subscription-fiscal.controller.ts:429`).
+   *
+   * `id` = `subscription_invoices.id`, que es el `source_id` de las filas de
+   * `GET /transmissions` con `source_type='subscription_invoice'`.
+   *
+   * El parámetro `?kind=` que enviaba el modal NO existe: el controller no lo
+   * lee, así que pedirlo con el id de una transmisión de plataforma devolvía
+   * la factura SaaS que casualmente tuviera ese número, o 404.
+   */
+  getSubscriptionInvoice(id: number): Observable<PlatformInvoiceDetailPayload> {
+    return this.http
+      .get<
+        ApiEnvelope<PlatformInvoiceDetailPayload>
+      >(`${this.base}/invoices/${id}`)
+      .pipe(map((res) => res.data));
+  }
+
+  /**
+   * Detalle de una factura de plataforma —
+   * `GET superadmin/subscriptions/fiscal/platform-invoices/:id`
+   * (`subscription-fiscal.controller.ts:448`).
+   *
+   * `id` = `fiscal_transmissions.id`. Es una ruta separada a propósito:
+   * `subscription_invoices` y `fiscal_transmissions` son secuencias
+   * independientes y compartir `/invoices/:id` hacía colisionar los dos
+   * documentos.
+   */
+  getPlatformInvoice(id: number): Observable<PlatformInvoiceDetailPayload> {
+    return this.http
+      .get<
+        ApiEnvelope<PlatformInvoiceDetailPayload>
+      >(`${this.base}/platform-invoices/${id}`)
+      .pipe(map((res) => res.data));
+  }
+
+  /**
+   * Ubicación del PDF persistido en S3 —
+   * `GET superadmin/subscriptions/fiscal/invoices/:id/pdf`
+   * (`platform-invoicing.controller.ts:480`).
+   *
+   * `id` = `fiscal_transmissions.id` (`PlatformInvoicePdfService.getPdf`).
+   * Devuelve `{ key, url }` con la URL FIRMADA; no es un binario, así que se
+   * abre con `window.open(url)` y nunca con `responseType:'blob'`.
+   *
+   * La ruta `sales-invoices/:id/pdf` que usaba el modal no existe.
+   */
+  getPlatformInvoicePdf(id: number): Observable<PlatformInvoicePdfLocation> {
+    return this.http
+      .get<
+        ApiEnvelope<PlatformInvoicePdfLocation>
+      >(`${this.base}/invoices/${id}/pdf`)
+      .pipe(map((res) => res.data));
+  }
+
+  /**
+   * Previsualización del PDF —
+   * `POST superadmin/subscriptions/fiscal/invoices/:id/preview-pdf`
+   * (`platform-invoicing.controller.ts:461`).
+   *
+   * `id` = `fiscal_transmissions.id`. Este SÍ responde binario
+   * (`res.setHeader('Content-Type','application/pdf')`), por eso pide
+   * `responseType: 'blob'`. Un `res.success` sobre esta respuesta es
+   * siempre `undefined`: no hay envelope que leer.
+   */
+  previewPlatformInvoicePdf(id: number): Observable<Blob> {
+    return this.http.post(
+      `${this.base}/invoices/${id}/preview-pdf`,
+      {},
+      { responseType: 'blob' },
+    );
+  }
+
+  /**
+   * Regenera el PDF sin reemitir —
+   * `POST superadmin/subscriptions/fiscal/invoices/:id/pdf/regenerate`
+   * (`platform-invoicing.controller.ts:494`). `id` = `fiscal_transmissions.id`.
+   */
+  regeneratePlatformInvoicePdf(
     id: number,
-    dto: { event_code: string },
-  ): Observable<any> {
+  ): Observable<PlatformInvoicePdfLocation> {
     return this.http
-      .post<ApiEnvelope<any>>(`${this.base}/invoices/${id}/events`, dto)
+      .post<
+        ApiEnvelope<PlatformInvoicePdfLocation>
+      >(`${this.base}/invoices/${id}/pdf/regenerate`, {})
       .pipe(map((res) => res.data));
   }
 
-  getInvoice(id: number, kind?: string): Observable<any> {
-    const params = kind ? new HttpParams().set('kind', kind) : undefined;
+  /**
+   * XML FIRMADO del documento de plataforma —
+   * `GET superadmin/subscriptions/fiscal/platform-invoices/:id/xml`
+   * (`subscription-fiscal.controller.ts`). `id` = `fiscal_transmissions.id`.
+   *
+   * Ruta propia y no un campo del detalle: el XML pesa entre 100 y 500 KB y
+   * los dos `select` de detalle lo excluyen a propósito. El backend responde
+   * `application/xml` en crudo —sin envelope—, así que se pide
+   * `responseType: 'text'`; leer `res.success` sobre esta respuesta daría
+   * siempre `undefined`, que es el defecto que tenía la previsualización del
+   * PDF antes de arreglarse.
+   *
+   * Un 404 aquí significa «esta transmisión todavía no tiene XML» (encolada, o
+   * error antes de firmar), no «no existe la factura».
+   */
+  getPlatformInvoiceXml(id: number): Observable<string> {
+    return this.http.get(`${this.base}/platform-invoices/${id}/xml`, {
+      responseType: 'text',
+    });
+  }
+
+  saveXmlDocument(xml: string, filename: string): void {
+    const url = URL.createObjectURL(
+      new Blob([xml], { type: 'application/xml;charset=utf-8' }),
+    );
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  /**
+   * Reenvío del documento por correo —
+   * `POST superadmin/subscriptions/fiscal/sales-invoices/:id/deliver`
+   * (`platform-invoicing.controller.ts:564`). La ruta `invoices/:id/deliver`
+   * que usaba el modal no existe.
+   */
+  deliverPlatformInvoice(
+    id: number,
+    email: string,
+  ): Observable<PlatformInvoiceDeliveryReceipt> {
     return this.http
-      .get<ApiEnvelope<any>>(`${this.base}/invoices/${id}`, { params })
+      .post<
+        ApiEnvelope<PlatformInvoiceDeliveryReceipt>
+      >(`${this.base}/sales-invoices/${id}/deliver`, { email })
       .pipe(map((res) => res.data));
   }
 
-  listPlatformDianEvents(id: number): Observable<any[]> {
+  /**
+   * Eventos RADIAN del documento —
+   * `GET superadmin/subscriptions/fiscal/sales-invoices/:id/events`
+   * (`platform-invoicing.controller.ts:593`). La ruta `invoices/:id/events`
+   * que usaban el modal y este servicio no existe.
+   */
+  listPlatformDianEvents(id: number): Observable<PlatformDianEvent[]> {
     return this.http
-      .get<ApiEnvelope<any[]>>(`${this.base}/invoices/${id}/events`)
+      .get<
+        ApiEnvelope<PlatformDianEvent[]>
+      >(`${this.base}/sales-invoices/${id}/events`)
       .pipe(map((res) => res.data ?? []));
   }
 
-  deliverPlatformInvoice(id: number, email: string): Observable<any> {
+  /**
+   * Registro de un evento RADIAN —
+   * `POST superadmin/subscriptions/fiscal/sales-invoices/:id/events`
+   * (`platform-invoicing.controller.ts:610`).
+   */
+  registerPlatformDianEvent(
+    id: number,
+    dto: { event_code: string },
+  ): Observable<PlatformDianEvent> {
     return this.http
-      .post<ApiEnvelope<any>>(`${this.base}/invoices/${id}/deliver`, { email })
+      .post<
+        ApiEnvelope<PlatformDianEvent>
+      >(`${this.base}/sales-invoices/${id}/events`, dto)
       .pipe(map((res) => res.data));
   }
 }

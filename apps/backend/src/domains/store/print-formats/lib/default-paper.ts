@@ -25,6 +25,13 @@ import { getPaperGeometry, type PaperFormat } from './page-geometry';
  */
 const DEFAULTS: Record<string, PaperFormat> = Object.freeze({
   pos_sale_ticket: 'thermal_80',
+  // Factura electrónica POS: misma tirilla térmica de 80mm que el ticket de
+  // venta, con el bloque fiscal (CUFE/QR) encima. `ALL_ADAPTERS` ya lo tenía
+  // (`POS_ELECTRONIC_INVOICE_ADAPTER.defaultPaper`) — faltaba aquí, así que
+  // `defaultPaperFor('pos_electronic_invoice')` caía al `'letter'` del
+  // fallback y una tienda sin `store_print_format_configs` propio recibía el
+  // papel equivocado en el primer render.
+  pos_electronic_invoice: 'thermal_80',
   sales_order_invoice: 'letter',
   dispatch_note: 'a4',
   dispatch_ticket: 'thermal_80',

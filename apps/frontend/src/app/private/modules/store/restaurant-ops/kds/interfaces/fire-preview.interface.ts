@@ -26,6 +26,15 @@ export interface FirePreviewItem {
   order_item_id: number;
   product_id: number | null;
   product_name: string;
+  /**
+   * CP-POLLO-ARABE-727 C.4 (QUI-736) — la variante vendida, leída DIRECTAMENTE
+   * del `order_item` (`product_variant_id` / `variant_attributes`). El preview
+   * corre PRE-fire sobre `prepareFireContext`: en ese punto del ciclo de vida
+   * `variant_label` (columna de `kitchen_ticket_items`) todavía NO existe, así
+   * que hay que leer la variante del `order_item`, nunca del ticket.
+   */
+  product_variant_id?: number | null;
+  variant_attributes?: string | null;
   quantity: number;
   /**
    * Nota de texto libre dejada al TOMAR el pedido ("sin cebolla", "poca sal").
@@ -60,6 +69,12 @@ export interface FireItemExclusion {
    * completos + 1 sin el insumo, y el inventario refleja exactamente eso.
    */
   applies_to_units?: number;
+  notes?: string;
+}
+
+export interface FireConfirmPayload {
+  exclusions: FireItemExclusion[];
+  item_notes?: Array<{ order_item_id: number; notes: string }>;
 }
 
 /**

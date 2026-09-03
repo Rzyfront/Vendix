@@ -46,6 +46,7 @@ export class UploadController {
     store_favicons: ImageContext.LOGO,
     marketing_ads: ImageContext.MARKETING_AD,
     receipts: ImageContext.RECEIPT,
+    bank_account_logos: ImageContext.LOGO,
   };
 
   constructor(
@@ -176,6 +177,13 @@ export class UploadController {
         path = this.s3PathHelper.buildReceiptPath(org, store);
         break;
       }
+      case UploadEntityType.BANK_ACCOUNT_LOGOS: {
+        if (!storeId)
+          throw new VendixHttpException(ErrorCodes.UPLOAD_STORE_CONTEXT_001);
+        const store = await this.resolveStore(storeId, org.id, isExplicitStore);
+        path = this.s3PathHelper.buildBankAccountLogoPath(org, store);
+        break;
+      }
       case UploadEntityType.BRANDS:
       case UploadEntityType.LOGOS:
         path = this.s3PathHelper.buildOrgEntityPath(org, entityType);
@@ -202,6 +210,7 @@ export class UploadController {
         UploadEntityType.CATEGORIES,
         UploadEntityType.STORE_LOGOS,
         UploadEntityType.STORE_FAVICONS,
+        UploadEntityType.BANK_ACCOUNT_LOGOS,
       ].includes(entityType);
 
     try {

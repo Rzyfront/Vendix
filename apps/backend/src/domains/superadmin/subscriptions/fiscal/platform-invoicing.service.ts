@@ -125,7 +125,11 @@ export class PlatformInvoicingService {
         legal_name: args.dto.customer.legal_name,
         tax_id: args.dto.customer.tax_id,
         tax_id_dv: args.dto.customer.tax_id_dv ?? '0',
-        document_type: args.dto.customer.document_type ?? 'NIT',
+        // Default '31' (NIT, código DIAN) — NO 'NIT' (etiqueta). El XML exige
+// el código; una etiqueta donde va código es rechazo silencioso del
+// provider. Si el operador eligió CC/CE/Pasaporte en el form, ese valor
+// ya viaja en `args.dto.customer.document_type` y pisa el default.
+document_type: args.dto.customer.document_type ?? '31',
         person_type: args.dto.customer.person_type ?? '2',
         tax_regime_code: args.dto.customer.tax_regime_code ?? '49',
         fiscal_responsibilities: args.dto.customer.fiscal_responsibilities ?? ['R-99-PN'],
@@ -149,6 +153,60 @@ export class PlatformInvoicingService {
           `No se encontro el destinatario ${args.dto.customer.kind}:${args.dto.customer.tenant_id} en la plataforma.`,
         );
       }
+
+      // El formulario puede completar o corregir la ficha del tenant sin
+      // tener que editarla primero (caso típico: tienda sin NIT/DV cargado
+      // en la base). Sólo pisa lo que viene con valor: `undefined`
+      // significa «no lo toques», no «bórralo». Una cadena vacía `''` también
+      // se trata como ausente para no destruir accidentalmente un valor
+      // del tenant cuando el operador borra un campo del form.
+      //
+      // Esto NO toca a `kind === 'external'` (el bloque anterior construye
+      // el tenant desde cero con los datos del form) ni a la validación de
+      // `customer_tax_id + customer_verification_digit` que hace
+      // `mapTenantToCustomerFields` después del `else` — esa validación
+      // ahora ve el NIT/DV efectivo (form + tenant), no sólo el del tenant.
+      const o = args.dto.customer;
+      const pick = <T>(v: T | undefined, fallback: T): T =>
+        v === undefined ? fallback : v;
+      const trimmed = (v: unknown): string | undefined => {
+        if (typeof v !== 'string') return undefined;
+        const t = v.trim();
+        return t === '' ? undefined : t;
+      };
+      tenant = {
+        ...tenant,
+        legal_name: pick(trimmed(o.legal_name), tenant.legal_name),
+        tax_id: pick(trimmed(o.tax_id), tenant.tax_id),
+        tax_id_dv: pick(trimmed(o.tax_id_dv), tenant.tax_id_dv),
+        // `document_type` no estaba en `PlatformInvoiceTenantRefDto` cuando se
+        // escribió este override; el frontend externo manda '31' (NIT) pero
+        // el pipe global lo rechaza con 400 hasta que frank agregue el campo
+        // al DTO. El override se deja escrito: cuando el DTO lo acepte, este
+        // `pick` ya pisa con el valor del form; mientras tanto, `undefined`
+        // cae a `tenant.document_type` (la ficha del store/org).
+        document_type: pick(trimmed(o.document_type), tenant.document_type),
+        person_type: pick(o.person_type, tenant.person_type),
+        tax_regime_code: pick(trimmed(o.tax_regime_code), tenant.tax_regime_code),
+        email: pick(trimmed(o.email), tenant.email),
+        phone: pick(trimmed(o.phone), tenant.phone),
+        address: o.address
+          ? {
+              line: pick(
+                trimmed(o.address.line),
+                tenant.address?.line ?? null,
+              ),
+              city: pick(
+                trimmed(o.address.city),
+                tenant.address?.city ?? null,
+              ),
+              department_code: pick(
+                trimmed(o.address.department_code),
+                tenant.address?.department_code ?? null,
+              ),
+            }
+          : tenant.address,
+      };
     }
 
     if (args.dto.profile_id) {
@@ -562,6 +620,63 @@ export class PlatformInvoicingService {
     );
   }
 
+  /**
+   * Lista los conceptos de retención activos de la organización de la
+   * plataforma (organization_id resuelto por `resolvePlatformIdentity`).
+   *
+   * Los conceptos con `accounting_entity_id` NULL son los "compartidos"
+   * a nivel organización: aplican a cualquier entidad contable que la org
+   * plataforma cree. El selector de retenciones del wizard los consume
+   * con `concept_id` numérico (entero), NO con `code` tipo 'RCO01'.
+   *
+   * Devuelve un envelope plano `{ data: WithholdingConceptDto[] }` que
+   * el controller mete dentro de `responseService.success(...)` igual que
+   * el resto de listados del rail.
+   */
+  async listWithholdingConceptsForPlatform(organizationId: number): Promise<{
+    data: Array<{
+      id: number;
+      code: string;
+      name: string;
+      rate: number;
+      withholding_type: string;
+      account_code: string | null;
+      min_uvt_threshold: number;
+    }>;
+  }> {
+    const rows = await this.prismaClient.withholding_concepts.findMany({
+      where: {
+        organization_id: organizationId,
+        accounting_entity_id: null,
+        is_active: true,
+      },
+      orderBy: [{ withholding_type: 'asc' }, { name: 'asc' }],
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        rate: true,
+        withholding_type: true,
+        account_code: true,
+        min_uvt_threshold: true,
+      },
+    });
+    return {
+      data: rows.map((row: any) => ({
+        id: row.id,
+        code: row.code,
+        name: row.name,
+        // Decimal → number: la regla DIAN no exige mas de 4 decimales y el
+        // campo se persiste como Decimal(7,4) en schema. El frontend opera
+        // en fracción (0..1), consistente con `MvpV1InvoiceWithholdingInputDto.rate`.
+        rate: Number(row.rate),
+        withholding_type: row.withholding_type,
+        account_code: row.account_code ?? null,
+        min_uvt_threshold: Number(row.min_uvt_threshold),
+      })),
+    };
+  }
+
   /* ── Mapper: V1 DTO → CreateInvoiceDto del riel tienda ──────────── */
 
   /**
@@ -751,6 +866,17 @@ export class PlatformInvoicingService {
    * `PlatformTenantsService.getTenantByKindAndId`. Si por algun motivo
    * falta tax_id o DV, el legacy `createPlatformInvoice` rechaza con
    * 400 BadRequest — el facade NO vuelve a validar para evitar drift.
+   *
+   * Propaga TODO lo que el V1 trae al DTO legacy extendido (cabecera y
+   * línea) con fallbacks seguros para que las llamadas legacy existentes
+   * sigan funcionando idéntico:
+   *   - `unit_code ?? 'NIU'` (NO `'EA'` — no existe en UN/ECE Rec. 20)
+   *   - `discount_amount ?? 0`
+   *   - `taxes ?? []` (vacío = línea exenta, igual que antes)
+   *   - `withholdings ?? []`
+   *   - `rate` se mantiene en FRACCIÓN (0..1) — la conversión a porcentaje
+   *     la hace el provider UNA sola vez; nunca recalcular base×tarifa
+   *     en el mapper (FAS02).
    */
   private mapMvpV1ToLegacyCreateDto(dto: any, tenant: any): any {
     return {
@@ -762,15 +888,62 @@ export class PlatformInvoicingService {
         address_line: tenant.address?.line ?? undefined,
         city: tenant.address?.city ?? undefined,
         department_code: tenant.address?.department_code ?? undefined,
+        document_type: tenant.document_type ?? undefined,
+        person_type: tenant.person_type ?? undefined,
+        tax_regime_code: tenant.tax_regime_code ?? undefined,
+        // Stores (la mitad del caso del módulo) devuelven `fiscal_responsibilities: []`
+        // explícitamente, NO `null`. `??` no atrapa `[]`, así que el fallback
+        // `['O-13']` del legacy nunca entra y la DIAN rechaza el `cac:PartyTaxScheme`
+        // sin responsabilidades. Forzamos `undefined` cuando el arreglo está vacío
+        // para que el legacy use su propio default.
+        fiscal_responsibilities:
+          Array.isArray(tenant.fiscal_responsibilities) &&
+          tenant.fiscal_responsibilities.length > 0
+            ? tenant.fiscal_responsibilities
+            : undefined,
       },
       items: (dto.items ?? []).map((line: any) => ({
         description: line.description,
         quantity: Number(line.quantity) || 1,
         unit_price: Number(line.unit_price) || 0,
+        unit_code: line.unit_code ?? 'NIU',
+        discount_amount: line.discount_amount ?? 0,
+        account_code: line.account_code ?? undefined,
+        taxes: (line.taxes ?? []).map((t: any) => ({
+          tax_type: t.tax_type,
+          rate: t.rate,           // fracción 0..1 — NO convertir acá
+          taxable_amount: t.taxable_amount ?? undefined,
+          tax_amount: t.tax_amount ?? undefined,
+          is_inclusive: t.is_inclusive ?? false,
+        })),
       })),
       period_start: dto.period_start ?? undefined,
       period_end: dto.period_end ?? undefined,
+      // `currency` queda como string ISO 4217 para el snapshot y para
+      // callers legacy que ya mandaban `currency: 'USD'` plano — el cambio
+      // a objeto rompería ambos lectores.
       currency: dto.currency?.iso_4217 ?? 'COP',
+      // `exchange_rate_payload` viaja APARTE con el objeto completo para que
+      // el legacy `buildExchangeRate` (subscription-fiscal.service.ts:2482)
+      // emita `cac:PaymentAlternativeExchangeRate` cuando hay TRM. Sin este
+      // campo, el grupo nunca se emite y la sección «Divisa extranjera» del
+      // wizard queda decorativa (el operador marca la casilla, teclea la
+      // TRM y nada de eso llega al XML firmado).
+      exchange_rate_payload: dto.currency ?? undefined,
+      resolution_id: dto.resolution_id ?? undefined,
+      issue_date: dto.issue_date ?? undefined,
+      due_date: dto.due_date ?? undefined,
+      payment_form: dto.payment_form ?? undefined,
+      payment_means_code: dto.payment_means_code ?? undefined,
+      notes: dto.notes ?? undefined,
+      counterpart_account_code: dto.counterpart_account_code ?? undefined,
+      withholdings: (dto.withholdings ?? []).map((w: any) => ({
+        role: w.role,
+        concept_id: w.concept_id,
+        base_amount: w.base_amount,
+        rate: w.rate,
+        amount: w.amount ?? undefined,
+      })),
       // C.1: profile_id se propaga al legacy DTO para que cuando
       // createPlatformInvoice extienda su create-data (siguiente slice), las
       // columnas invoices.profile_id/profile_version/profile_snapshot

@@ -1,17 +1,43 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { S3Service } from '../../../../common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
 import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
+import { signStoreLogoUrl } from '../lib/print-logo.util';
+
+/**
+ * Etiquetas de `quotation_status_enum` en español. Mismo diccionario de siete
+ * estados que pinta el detalle en pantalla
+ * (`quotation-print.service.ts:statusLabels`): sin él el papel salía con el
+ * valor crudo del enum ("sent"), que es lenguaje de base de datos, no de
+ * cliente.
+ */
+const QUOTATION_STATE_LABELS: Record<string, string> = {
+  draft: 'Borrador',
+  sent: 'Enviada',
+  accepted: 'Aceptada',
+  rejected: 'Rechazada',
+  expired: 'Expirada',
+  converted: 'Convertida',
+  cancelled: 'Cancelada',
+};
 
 @Injectable()
 export class QuotationDataProvider implements IDocumentDataProvider {
   readonly formatType: print_format_type_enum = 'quotation';
+  private readonly logger = new Logger(QuotationDataProvider.name);
 
-  constructor(private readonly prisma: StorePrismaService) {}
+  // `s3Service` opcional por la misma razón que en
+  // `sales-order-invoice.provider.ts`: los specs instancian el proveedor con
+  // un solo argumento; Nest siempre lo inyecta en runtime.
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly s3Service?: S3Service,
+  ) {}
 
   async fetchDocumentData(
     storeId: number,
@@ -22,10 +48,18 @@ export class QuotationDataProvider implements IDocumentDataProvider {
       throw new VendixHttpException(ErrorCodes.PRINT_DOCUMENT_NOT_FOUND_001);
     }
 
+    // Las tres relaciones son las que nombra `model quotations` en
+    // `schema.prisma`: `store` (SINGULAR), `customer` y `quotation_items`.
+    // Antes de este fix el include pedía `stores` y no pedía ítems ni
+    // cliente, así que TODA cotización moría en
+    // `PrismaClientValidationError` → el gateway devolvía 500 y el navegador
+    // caía al fallback local. El papel del gateway nunca se había visto.
     const quot = await this.prisma.quotations.findFirst({
       where: { id, store_id: storeId },
       include: {
-        stores: {
+        quotation_items: { orderBy: { id: 'asc' } },
+        customer: true,
+        store: {
           include: {
             addresses: { take: 1 },
             organizations: true,
@@ -38,65 +72,150 @@ export class QuotationDataProvider implements IDocumentDataProvider {
       throw new VendixHttpException(ErrorCodes.PRINT_DOCUMENT_NOT_FOUND_001);
     }
 
-    const store = quot.stores || {};
-    const storeAddr = store.addresses?.[0] || {};
-    const itemsRaw = (quot as any).items || [];
+    const store = quot.store || ({} as any);
+    const org = store.organizations || ({} as any);
+    const storeAddr = store.addresses?.[0] || ({} as any);
+    const customer = quot.customer;
 
-    const items = itemsRaw.map((it: any, idx: number) => ({
+    const items = (quot.quotation_items || []).map((it: any, idx: number) => ({
       index: idx + 1,
-      product_name: it.product_name || it.name || 'Ítem',
-      variant_sku: it.sku || undefined,
+      product_name: it.product_name || 'Ítem',
+      variant_sku: it.variant_sku || undefined,
       quantity: Number(it.quantity || 1),
       unit_price: Number(it.unit_price || 0),
       unit_price_formatted: `$${Number(it.unit_price || 0).toLocaleString('es-CO')}`,
-      total_price: Number(it.total_price || (it.quantity * it.unit_price) || 0),
-      total_price_formatted: `$${Number(it.total_price || (it.quantity * it.unit_price) || 0).toLocaleString('es-CO')}`,
+      discount_amount: Number(it.discount_amount || 0),
+      discount_formatted: it.discount_amount
+        ? `-$${Number(it.discount_amount).toLocaleString('es-CO')}`
+        : undefined,
+      tax_rate: it.tax_rate !== null && it.tax_rate !== undefined ? Number(it.tax_rate) : undefined,
+      tax_amount: it.tax_amount_item !== null && it.tax_amount_item !== undefined
+        ? Number(it.tax_amount_item)
+        : undefined,
+      // `total_price` se toma tal como quedó guardado: la línea ya viene
+      // resuelta por `quotations.service.ts` incluyendo `price_unit_quantity`
+      // (precio por empaque). Recalcularlo aquí desbarataría las tarifas por
+      // unidad de venta.
+      total_price: Number(it.total_price || 0),
+      total_price_formatted: `$${Number(it.total_price || 0).toLocaleString('es-CO')}`,
+      notes: it.notes || undefined,
     }));
 
-    const total = Number(quot.total_amount || 0);
+    const subtotal = Number(quot.subtotal_amount || 0);
+    const discount = Number(quot.discount_amount || 0);
+    const tax = Number(quot.tax_amount || 0);
+    const shipping = Number(quot.shipping_cost || 0);
+    const grandTotal = Number(quot.grand_total || subtotal - discount + tax + shipping);
+    const signedLogoUrl = await signStoreLogoUrl(this.s3Service, store.logo_url, this.logger);
 
     return {
       store: {
         name: store.name || 'Vendix',
-        legal_name: store.legal_name,
-        tax_id: store.organizations?.tax_id,
+        legal_name: store.legal_name || org.legal_name,
+        tax_id: org.tax_id,
         phone: store.phone,
         email: store.email,
-        address: storeAddr.address_line1,
+        address: storeAddr.address_line1
+          ? `${storeAddr.address_line1} ${storeAddr.address_line2 || ''}`.trim()
+          : undefined,
         city: storeAddr.city,
+        logo_url: signedLogoUrl,
       },
-      customer: {
-        name: (quot as any).customer_name || 'Cliente Prospecto',
-        tax_id: (quot as any).customer_tax_id,
-        phone: (quot as any).customer_phone,
-        email: (quot as any).customer_email,
-      },
+      customer: customer
+        ? {
+            name:
+              `${customer.first_name || ''} ${customer.last_name || ''}`.trim() ||
+              customer.legal_name ||
+              'Cliente Prospecto',
+            legal_name: customer.legal_name || undefined,
+            tax_id: customer.document_number || undefined,
+            phone: customer.phone || undefined,
+            email: customer.email || undefined,
+          }
+        : undefined,
       document: {
         id: quot.id,
-        number: (quot as any).quotation_number || `COT-${quot.id}`,
+        number: quot.quotation_number || `COT-${quot.id}`,
         date: quot.created_at ? new Date(quot.created_at).toISOString() : new Date().toISOString(),
         date_formatted: quot.created_at ? new Date(quot.created_at).toLocaleDateString('es-CO') : new Date().toLocaleDateString('es-CO'),
         valid_until: quot.valid_until ? new Date(quot.valid_until).toISOString() : undefined,
         valid_until_formatted: quot.valid_until ? new Date(quot.valid_until).toLocaleDateString('es-CO') : undefined,
         state: quot.status,
-        state_label: quot.status,
+        state_label: QUOTATION_STATE_LABELS[quot.status] || quot.status,
+        channel: quot.channel || undefined,
         notes: quot.notes || undefined,
+        // `internal_notes` NO se expone: es la nota interna del vendedor y el
+        // papel va al cliente. `terms_and_conditions` sí, porque es la letra
+        // pequeña de la oferta.
+        terms_and_conditions: quot.terms_and_conditions || undefined,
       },
       items,
-      taxes: [],
+      taxes: this.aggregateTaxes(quot.quotation_items),
       totals: {
-        subtotal: total,
-        subtotal_formatted: `$${total.toLocaleString('es-CO')}`,
-        discount_total: 0,
-        discount_total_formatted: '$0',
-        shipping_total: 0,
-        shipping_total_formatted: '$0',
-        tax_total: 0,
-        tax_total_formatted: '$0',
-        grand_total: total,
-        grand_total_formatted: `$${total.toLocaleString('es-CO')}`,
+        subtotal,
+        subtotal_formatted: `$${subtotal.toLocaleString('es-CO')}`,
+        discount_total: discount,
+        discount_total_formatted: `$${discount.toLocaleString('es-CO')}`,
+        shipping_total: shipping,
+        shipping_total_formatted: `$${shipping.toLocaleString('es-CO')}`,
+        tax_total: tax,
+        tax_total_formatted: `$${tax.toLocaleString('es-CO')}`,
+        grand_total: grandTotal,
+        grand_total_formatted: `$${grandTotal.toLocaleString('es-CO')}`,
       },
     };
+  }
+
+  /**
+   * Agrega el impuesto de las líneas en filas por tarifa para
+   * `fiscal_tax_breakdown`.
+   *
+   * A diferencia de `orders`, `quotation_items` no tiene tabla de impuestos
+   * por línea: sólo `tax_rate` (fracción, `Decimal(6,5)` ⇒ 0.19) y
+   * `tax_amount_item`. Como la fila NO guarda el tributo, la etiqueta es
+   * "Impuesto" y no "IVA": una cotización puede llevar INC o IBUA, y nombrar
+   * un tributo que el dato no afirma es inventar clasificación fiscal.
+   *
+   * La base se deriva `tax_amount / tax_rate` —no `total × tarifa`— igual que
+   * en los demás proveedores, para que la base impresa cuadre con el impuesto
+   * impreso aunque la línea traiga descuento.
+   */
+  private aggregateTaxes(quotationItems: any[]): Array<{
+    name: string;
+    rate: number;
+    base_amount: number;
+    tax_amount: number;
+    base_formatted: string;
+    tax_formatted: string;
+  }> {
+    const grouped = new Map<
+      number,
+      { rate: number; base_amount: number; tax_amount: number }
+    >();
+
+    for (const item of quotationItems || []) {
+      const rate = Number(item.tax_rate || 0);
+      const taxAmount = Number(item.tax_amount_item || 0);
+      if (rate <= 0 || taxAmount <= 0) continue;
+
+      const lineBase = taxAmount / rate;
+      const existing = grouped.get(rate);
+      if (existing) {
+        existing.tax_amount += taxAmount;
+        existing.base_amount += lineBase;
+      } else {
+        grouped.set(rate, { rate, base_amount: lineBase, tax_amount: taxAmount });
+      }
+    }
+
+    return Array.from(grouped.values()).map((g) => ({
+      name: 'Impuesto',
+      rate: g.rate,
+      base_amount: g.base_amount,
+      tax_amount: g.tax_amount,
+      base_formatted: `$${g.base_amount.toLocaleString('es-CO')}`,
+      tax_formatted: `$${g.tax_amount.toLocaleString('es-CO')}`,
+    }));
   }
 
   async getSampleData(storeId?: number): Promise<StandardPrintDataModel> {
@@ -126,6 +245,8 @@ export class QuotationDataProvider implements IDocumentDataProvider {
         state: 'sent',
         state_label: 'Enviada',
         notes: 'Precios válidos por 15 días calendario. Incluye entrega en obra en Bogotá.',
+        terms_and_conditions:
+          'Forma de pago: 50% anticipado, 50% contra entrega.\nTiempo de entrega: 10 días hábiles después de la orden de compra.\nGarantía: 12 meses por defectos de fábrica.',
       },
       items: [
         {
@@ -171,6 +292,9 @@ export class QuotationDataProvider implements IDocumentDataProvider {
       { token: '{{document.valid_until}}', path: 'document.valid_until_formatted', description: 'Fecha límite de validez de la oferta', example: '30/09/2026' },
       { token: '{{customer.name}}', path: 'customer.name', description: 'Nombre del prospecto o cliente', example: 'Constructora XYZ' },
       { token: '{{totals.grand_total}}', path: 'totals.grand_total_formatted', description: 'Monto total cotizado', example: '$16.500.000' },
+      { token: '{{document.state}}', path: 'document.state_label', description: 'Estado de la cotización en español', example: 'Enviada' },
+      { token: '{{document.notes}}', path: 'document.notes', description: 'Nota de la cotización dirigida al cliente', example: 'Incluye entrega en obra' },
+      { token: '{{document.terms}}', path: 'document.terms_and_conditions', description: 'Términos y condiciones de la oferta', example: 'Pago 50% anticipado' },
     ];
   }
 

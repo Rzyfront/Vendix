@@ -50,6 +50,7 @@ import type { InvoiceScreenSectionId } from '../../utils/invoice-section-order';
 import {
   applyBackendValidationErrors,
   clearBackendError,
+  describeApiFailure,
   extractValidationMessages,
 } from '../../utils/invoicing-errors.util';
 import {
@@ -64,6 +65,7 @@ import {
   InvoiceResolution,
 } from '../../interfaces/invoice.interface';
 import {
+  EmitReadinessVerdict,
   InvoiceEmitReadiness,
   InvoiceEmitReadinessService,
 } from '../../services/invoice-emit-readiness.service';
@@ -83,7 +85,6 @@ import {
   SelectorComponent,
   SelectorOption,
 } from '../../../../../../shared/components/selector/selector.component';
-import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
 import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import {
@@ -142,7 +143,6 @@ import { InvoiceProductOption } from '../../services/invoice-product-lookup.serv
 // siguen viviendo en `components/invoice-create/`: son piezas del formulario,
 // no de la página, y el POS u otra superficie podría montarlas sin esta vista.
 import { InvoiceFormSectionComponent } from '../../components/invoice-create/invoice-form-section.component';
-import { InvoiceLineTaxesComponent } from '../../components/invoice-create/invoice-line-taxes.component';
 import { InvoiceItemPickerModalComponent } from '../../components/invoice-create/invoice-item-picker-modal.component';
 import {
   InvoiceCustomItemDraft,
@@ -798,7 +798,6 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     ButtonComponent,
     InputComponent,
     SelectorComponent,
-    TextareaComponent,
     ToggleComponent,
     IconComponent,
     AccountCodeSelectComponent,
@@ -807,7 +806,6 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     ConfirmationModalComponent,
     SaveRequirementsModalComponent,
     InvoiceFormSectionComponent,
-    InvoiceLineTaxesComponent,
     InvoiceItemPickerModalComponent,
     InvoiceCustomItemModalComponent,
     InvoiceOrderSelectComponent,
@@ -2302,7 +2300,15 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     />
 
     <!--
-      LA PUERTA DE EMISIÓN, ANTES DE «VALIDAR».
+      LA PUERTA DE EMISIÓN — COMPARTIDA por DOS llamantes.
+
+      La abren presentEmitReadiness() (el chequeo automático tras crear el
+      documento, con el documento YA persistido) Y onValidateDraft() (el botón
+      «Validar», sobre un borrador que TODAVÍA no existe). Los dos veredictos
+      comparten el mismo núcleo (identity + fiscal_document) y se traducen con
+      el mismo openEmitReadinessModal(), así que un mismo modal les basta: dos
+      modales para el mismo veredicto sería la duplicación que este módulo ya
+      viene evitando en el traductor.
 
       Va DESPUÉS de los sub-modales en el orden del DOM a propósito: todos son
       app-modal y comparten z-index, así que el último declarado es el que queda
@@ -2562,6 +2568,17 @@ export class InvoiceCreatePageComponent implements OnInit {
   readonly emitRequirementsOpen = signal(false);
   /** `true` mientras se consulta la puerta, para no dejar el pie mudo. */
   readonly checkingEmitReadiness = signal(false);
+
+  /**
+   * `true` mientras corre `POST /store/invoicing/validate-draft` («Validar»).
+   *
+   * Señal PROPIA y no la misma `checkingEmitReadiness`: esa otra corre SOLA
+   * tras crear el documento y esta responde a un CLIC del usuario ANTES de
+   * crear nada. Comparten destino (el mismo modal de requisitos) pero no
+   * pueden compartir bandera — confundirlas dejaría el botón «Validar» girando
+   * mientras el chequeo automático post-creación hace su propia consulta.
+   */
+  readonly validatingDraft = signal(false);
 
   /**
    * Id del borrador creado EN ESTA SESIÓN del modal.
@@ -5255,8 +5272,9 @@ export class InvoiceCreatePageComponent implements OnInit {
    * Acciones de la cabecera.
    *
    * `computed` y no un arreglo fijo: dependen de `submitting()`,
-   * `checkingEmitReadiness()` y `draftCreated()`, y un arreglo plano en zoneless
-   * dejaría el botón congelado en su estado inicial.
+   * `checkingEmitReadiness()`, `validatingDraft()`, `draftCreated()` y `mode()`
+   * (este último apaga «Validar» en modo «desde pedido»), y un arreglo plano en
+   * zoneless dejaría el botón congelado en su estado inicial.
    *
    * Guardar NO se apaga por `formStatus()`. Es una decisión de esta pantalla:
    * un botón mudo con ocho secciones plegadas no dice dónde está el problema,
@@ -5277,6 +5295,24 @@ export class InvoiceCreatePageComponent implements OnInit {
       icon: 'eye',
       title:
         'Previsualización del formato de impresión: no emite ni toma consecutivo.',
+    },
+    {
+      id: 'validate',
+      label: 'Validar',
+      variant: 'outline',
+      icon: 'shield-check',
+      loading: this.validatingDraft(),
+      disabled:
+        this.submitting() ||
+        this.checkingEmitReadiness() ||
+        this.validatingDraft() ||
+        this.draftCreated(),
+      // Sólo en modo manual: «Crear desde pedido» no arma un `CreateInvoiceDto`
+      // en el cliente —el backend construye la factura A PARTIR del pedido—,
+      // así que no hay borrador propio que mandar a validar.
+      visible: this.mode() === 'manual',
+      title:
+        'Pregúntale al servidor si esto va a pasar ANTES de crear el documento. No toma consecutivo.',
     },
     {
       id: 'save',
@@ -6803,7 +6839,23 @@ export class InvoiceCreatePageComponent implements OnInit {
   }
 
   /**
-   * TODO lo que impide emitir, en una sola pasada.
+   * HINT INMEDIATO DE FORMA — YA NO ES LA FUENTE DE VERDAD FISCAL.
+   *
+   * Nació como un espejo A MANO de `FiscalDocumentValidator` (backend), y nada
+   * garantizaba que los dos no se desincronizaran: el mismo defecto que
+   * arrastra todo espejo mantenido por dos manos distintas. Desde que el
+   * servidor contesta el veredicto REAL — `POST /store/invoicing/validate-draft`
+   * («Validar», antes de crear nada) y `GET /:id/emit-readiness` (después de
+   * crear) — esa es la ÚNICA fuente que decide si la DIAN va a aceptar el
+   * documento.
+   *
+   * Lo que queda acá es, a propósito, sólo lo que un botón puede detectar SIN
+   * red: campos vacíos, cantidades imposibles, fechas invertidas. No tiene
+   * sentido gastar un viaje al servidor para enterarse de que falta la
+   * descripción de una línea cuando esta pantalla ya lo sabe sin preguntar.
+   * Lo que este método NO puede juzgar —identidad del adquiriente ante la
+   * DIAN, aritmética recompuesta, resolución, clave técnica— se queda para el
+   * backend, y sólo el backend.
    *
    * Se enumera en vez de deshabilitar el botón: un botón apagado sin explicación
    * es un callejón sin salida, y con ocho secciones plegables el campo culpable
@@ -7322,11 +7374,24 @@ export class InvoiceCreatePageComponent implements OnInit {
    */
   private presentEmitReadiness(readiness: InvoiceEmitReadiness): boolean {
     if (readiness.emittable) return false;
+    return this.openEmitReadinessModal(readiness);
+  }
 
+  /**
+   * Traduce un veredicto (`toEmitRequirements`) y abre el modal COMPARTIDO de
+   * requisitos si hay al menos una fila. Devuelve si lo abrió.
+   *
+   * Compartida entre DOS llamantes que no pueden pintar el mismo veredicto de
+   * dos maneras distintas: el chequeo automático tras crear el documento
+   * (`presentEmitReadiness`, que sólo entra acá cuando `emittable` es falso) y
+   * el botón «Validar» (`onValidateDraft`, que entra siempre y decide aparte
+   * qué hacer cuando no hay filas).
+   */
+  private openEmitReadinessModal(readiness: EmitReadinessVerdict): boolean {
     const rows = toEmitRequirements(readiness);
     if (rows.length === 0) {
-      // Veredicto negativo sin un solo hallazgo que mostrar. Abrir un modal
-      // vacío culparía al usuario de algo que nadie sabe nombrar.
+      // Sin un solo hallazgo que mostrar. Abrir un modal vacío culparía al
+      // usuario de algo que nadie sabe nombrar.
       return false;
     }
 
@@ -7343,6 +7408,84 @@ export class InvoiceCreatePageComponent implements OnInit {
       }
     }
     return true;
+  }
+
+  /**
+   * «Validar» — ¿esto va a pasar? ANTES de gastar el consecutivo.
+   *
+   * Arma EXACTAMENTE el mismo payload que «Crear factura» (`buildPayload()`) y
+   * se lo entrega al backend para que lo juzgue SIN persistir nada
+   * (`POST /store/invoicing/validate-draft`). La respuesta
+   * (`DraftEmitReadinessReport`) comparte el MISMO núcleo de veredicto que
+   * `GET /store/invoicing/:id/emit-readiness` —`identity` y `fiscal_document`,
+   * que es lo único que el modal necesita— y por eso se pinta con el MISMO
+   * modal y el MISMO traductor (`openEmitReadinessModal` / `toEmitRequirements`)
+   * que ya usa el chequeo posterior a crear. Lo que NO comparte es a propósito:
+   * sin documento persistido no hay `invoice_id`, `invoice_number` ni `status`
+   * que declarar.
+   *
+   * Los vacíos DE FORMA se siguen anunciando de inmediato con
+   * `collectBlockers()`, sin gastar el viaje de red: no tiene sentido esperar
+   * al servidor para enterarse de que falta la descripción de una línea cuando
+   * esta pantalla ya lo sabe sin preguntar. Lo que SÍ decide el servidor es lo
+   * que este formulario no puede juzgar solo: identidad del adquiriente ante
+   * la DIAN, aritmética recompuesta, resolución y clave técnica.
+   */
+  onValidateDraft(): void {
+    if (this.mode() !== 'manual') return;
+    if (
+      this.submitting() ||
+      this.checkingEmitReadiness() ||
+      this.validatingDraft() ||
+      this.draftCreated()
+    ) {
+      return;
+    }
+
+    this.clearSubmitError();
+    this.syncDueDate();
+    this.invoiceForm.markAllAsTouched();
+
+    const blockers = this.collectBlockers();
+    if (blockers.length > 0) {
+      this.submitError.set(
+        blockers.length === 1
+          ? 'No se pudo validar: falta 1 dato del formulario.'
+          : `No se pudo validar: faltan ${blockers.length} datos del formulario.`,
+      );
+      this.submitErrorDetails.set(blockers);
+      this.expandSectionsWithErrors();
+      return;
+    }
+
+    this.validatingDraft.set(true);
+    this.emitReadinessService
+      .validateDraft(this.buildPayload())
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (readiness) => {
+          const opened = this.openEmitReadinessModal(readiness);
+          if (!opened) {
+            // Nada que corregir: el silencio acá sería indistinguible de un
+            // botón roto. Es la única rama de esta puerta que SÍ celebra el
+            // veredicto positivo, porque es la única que el usuario pidió a
+            // propósito para saberlo.
+            this.toastService.success(
+              readiness.emittable
+                ? 'Todo listo: el documento puede emitirse tal como está.'
+                : 'El servidor no reportó ningún hallazgo que mostrar.',
+            );
+          }
+        },
+        error: (error) => {
+          this.validatingDraft.set(false);
+          // A DIFERENCIA de `check()` (puerta asesora, silenciosa), acá SÍ se
+          // avisa: el usuario pulsó un botón y un error tragado en silencio es
+          // un botón que no responde.
+          this.toastService.error(describeApiFailure(error).message);
+        },
+        complete: () => this.validatingDraft.set(false),
+      });
   }
 
   /**
@@ -7655,6 +7798,10 @@ export class InvoiceCreatePageComponent implements OnInit {
     }
     if (actionId === 'preview') {
       this.openPrintPreview();
+      return;
+    }
+    if (actionId === 'validate') {
+      this.onValidateDraft();
       return;
     }
     if (actionId === 'save') {

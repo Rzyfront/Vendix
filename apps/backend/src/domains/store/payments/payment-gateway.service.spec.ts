@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PaymentGatewayService } from './services/payment-gateway.service';
 import { PaymentValidatorService } from './services/payment-validator.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { S3Service } from '@common/services/s3.service';
 import {
   PaymentData,
   PaymentResult,
@@ -66,6 +67,13 @@ describe('PaymentGatewayService', () => {
       validateCurrency: jest.fn(),
     };
 
+    // QUI-728 — S3Service se inyecta en PaymentGatewayService para firmar la
+    // URL del logo de la cuenta bancaria destino. El mock devuelve `null`
+    // porque ningún test del archivo ejercita la rama con imagen.
+    const mockS3Service = {
+      getPresignedUrl: jest.fn().mockResolvedValue(null),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentGatewayService,
@@ -76,6 +84,10 @@ describe('PaymentGatewayService', () => {
         {
           provide: PaymentValidatorService,
           useValue: mockValidatorService,
+        },
+        {
+          provide: S3Service,
+          useValue: mockS3Service,
         },
       ],
     }).compile();

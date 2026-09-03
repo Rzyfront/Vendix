@@ -51,13 +51,12 @@ export class SplitOrderController {
         result,
         `Cuenta dividida en ${result.sub_orders.length} sub-órdenes`,
       );
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al dividir la cuenta',
-        error.response?.message || error.message,
-        error.status || 400,
-        error.error_code,
-      );
+    } catch (error) {
+      // CP-POLLO-ARABE-727 A.6 — mismo fix que `fire()`: nunca
+      // `return responseService.error(...)` en un catch (el handler sin
+      // `@HttpCode` responde 201 y el `2xx` impide que el `catchError` del
+      // frontend dispare). Rethrowing deja el status HTTP real al filter.
+      throw error;
     }
   }
 
@@ -76,13 +75,12 @@ export class SplitOrderController {
         result,
         `Cuenta dividida en ${result.sub_orders.length} sub-órdenes`,
       );
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al dividir la cuenta',
-        error.response?.message || error.message,
-        error.status || 400,
-        error.error_code,
-      );
+    } catch (error) {
+      // CP-POLLO-ARABE-727 A.6 — mismo fix que `fire()`: nunca
+      // `return responseService.error(...)` en un catch (el handler sin
+      // `@HttpCode` responde 201 y el `2xx` impide que el `catchError` del
+      // frontend dispare). Rethrowing deja el status HTTP real al filter.
+      throw error;
     }
   }
 }

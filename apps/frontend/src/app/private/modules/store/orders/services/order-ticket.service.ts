@@ -78,15 +78,41 @@ export class OrderTicketService {
     // Fiscal fix: an order that already produced a validated electronic invoice
     // must print as an informative copy pointing at that invoice, instead of
     // repeating a tax breakdown and claiming "no es una factura electrónica".
-    // The `dian_status: 'accepted'` filter lives in the backend query — the
-    // footer literally asserts DIAN validation, so it is not re-derived here.
+    //
+    // `dian_status === 'accepted'` used to live filtered into the backend
+    // query, so any row present meant "accepted". `OrdersService.findOne`
+    // stopped pre-filtering (the order detail's invoice card needs to see
+    // rejected / pending / contingency invoices too), so that endpoint's rows
+    // now carry the real `dian_status` and the acceptance check has to be
+    // written here.
+    //
+    // La comparación es ESTRICTA contra `'accepted'`: ausencia de columna no
+    // cuenta como aceptación. Este mapper también sirve a la impresión masiva
+    // (`OrdersBulkService.bulkPrint`), cuya consulta es otra y conserva su
+    // `where: { dian_status: 'accepted' }` — así que ahí la fila ya está
+    // pre-filtrada y `dian_status` viaja igual, redundante a propósito
+    // (`orders-bulk.service.ts`), para que este chequeo pueda exigir la
+    // columna. Tratar `undefined` como «aceptada» dejaría el pie afirmando
+    // validación DIAN por omisión: cualquier consulta futura que llene
+    // `invoices` sin proyectar `dian_status` imprimiría la afirmación falsa sin
+    // que nada falle.
     const invoice = order.invoices?.[0];
-    const electronicInvoice = invoice?.invoice_number
-      ? { number: invoice.invoice_number, cufe: invoice.cufe ?? undefined }
-      : undefined;
+    const electronicInvoice =
+      invoice?.dian_status === 'accepted' && invoice.invoice_number
+        ? { number: invoice.invoice_number, cufe: invoice.cufe ?? undefined }
+        : undefined;
+
+    // [print-fiscal-gate] — El alias vive en `customer_alias` (columna del
+    // modelo `orders` introducida por keilis en el payload de listado/detalle).
+    // Si está presente, el renderer del tiquete lo prefiere sobre el nombre
+    // del cliente. Va por separado de `customer` porque el alias NO es
+    // identificación fiscal — no debe leerse como nombre del cliente a efectos
+    // del QR de FE ni del encabezado fiscal.
+    const customerAlias = order.customer_alias ?? null;
 
     return {
       id: order.order_number || 'N/A',
+      orderId: order.id,
       date: new Date(order.created_at || Date.now()),
       items,
       subtotal: Number(order.subtotal_amount) || 0,
@@ -104,8 +130,9 @@ export class OrderTicketService {
             email: order.users.email,
             phone: order.users.phone,
             shippingAddress,
+            customerAlias,
           }
-        : { name: 'Consumidor Final', shippingAddress },
+        : { name: 'Consumidor Final', shippingAddress, customerAlias },
       store: order.stores
         ? {
             name: order.stores.name,

@@ -21,17 +21,14 @@ import { catchError, map } from 'rxjs/operators';
 
 import {
   ButtonComponent,
+  DocumentIdentityFieldsComponent,
+  DocumentIdentityValue,
+  EMPTY_DOCUMENT_IDENTITY,
   IconComponent,
   InputComponent,
   InputsearchComponent,
-  SelectorComponent,
-  SelectorOption,
   ToastService,
 } from '../../../../../../shared/components';
-import {
-  DOCUMENT_TYPES,
-  isValidDocumentType,
-} from '../../../../../../shared/constants/document-types';
 import { computeDocumentFormatHint } from '../../utils/document-format-hint.util';
 import { computePhoneFormatHint } from '../../utils/phone-format-hint.util';
 import { PosCustomerService } from '../../services/pos-customer.service';
@@ -63,10 +60,10 @@ export type CustomerSelectorView = 'overview' | 'search';
   imports: [
     ReactiveFormsModule,
     ButtonComponent,
+    DocumentIdentityFieldsComponent,
     IconComponent,
     InputComponent,
     InputsearchComponent,
-    SelectorComponent,
   ],
   templateUrl: './pos-customer-selector.component.html',
   styleUrl: './pos-customer-selector.component.scss',
@@ -90,6 +87,14 @@ export class PosCustomerSelectorComponent {
    * hosts (open-table / assign-customer modals) keep the default overview.
    */
   readonly showTopSuggestions = input<boolean>(false);
+  /**
+   * Paso 9 — «Facturar a nombre de»: colapsa la vista a los 5 campos mínimos
+   * para facturación nominativa (documento, nombres, apellidos, email) y
+   * oculta buscador, sugeridos, tabs y teléfono. El anfitrión (checkout
+   * shell) monta el selector con este flag desde la opción "Venta Anónima"
+   * en vez de mandar al cajero por el flujo completo "Con Cliente".
+   */
+  readonly minimalInvoiceMode = input<boolean>(false);
 
   // ── Outputs ─────────────────────────────────────────────────────────
   readonly customerSelected = output<PosCustomer>();
@@ -97,6 +102,12 @@ export class PosCustomerSelectorComponent {
 
   // ── View-state machine ──────────────────────────────────────────────
   readonly view = signal<CustomerSelectorView>('overview');
+  /**
+   * Segmented mode inside the `search` view — separates the two user intents
+   * without stacking them on a shared scroll. `search` = compressed 3-item
+   * lookup; `create` = isolated creation form that advances via wizard.
+   */
+  readonly activeTab = signal<'search' | 'create'>('search');
 
   // ── Internal signals ────────────────────────────────────────────────
   readonly results = signal<PosCustomer[]>([]);
@@ -110,10 +121,10 @@ export class PosCustomerSelectorComponent {
   readonly lastQuery = signal('');
 
   // ── Top-suggestions (clientes más frecuentes) ───────────────────────
-  /** Top-5 clientes por volumen de órdenes (carga on-init si showTopSuggestions). */
+  /** Top-3 clientes por volumen de órdenes (carga on-init si showTopSuggestions). */
   readonly topCustomers = signal<PosCustomer[]>([]);
   readonly loadingTop = signal(false);
-  /** Guard one-shot para la inicialización de vista + carga de top-5. */
+  /** Guard one-shot para la inicialización de vista + carga de top-3. */
   private topInitialized = false;
 
   /**
@@ -128,9 +139,11 @@ export class PosCustomerSelectorComponent {
       !this.isSearching(),
   );
 
-  /** Opciones del selector de tipo de documento (single source of truth). */
-  readonly documentTypeOptions: SelectorOption[] = DOCUMENT_TYPES.map(
-    (opt) => ({ value: opt.code, label: opt.label }),
+  /** Compressed slices — enforce 3-item MAX without scroll. */
+  readonly topCustomersSlice = computed(() => this.topCustomers().slice(0, 3));
+  readonly resultsSlice = computed(() => this.results().slice(0, 3));
+  readonly resultsOverflow = computed(() =>
+    Math.max(0, this.results().length - this.resultsSlice().length),
   );
 
   /**
@@ -155,9 +168,12 @@ export class PosCustomerSelectorComponent {
    * can be unit-tested without TestBed.
    */
   readonly documentFormatHint = computed(() => {
+    const v = this.formValues() as {
+      documentIdentity?: DocumentIdentityValue | null;
+    };
     return computeDocumentFormatHint(
-      this.form.get('documentType')?.value as string | null,
-      this.form.get('documentNumber')?.value as string | null,
+      v?.documentIdentity?.documentType ?? null,
+      v?.documentIdentity?.documentNumber ?? null,
     );
   });
 
@@ -170,9 +186,8 @@ export class PosCustomerSelectorComponent {
    * cashier can find legacy customers with any format.
    */
   readonly phoneFormatHint = computed(() => {
-    return computePhoneFormatHint(
-      this.form.get('phone')?.value as string | null,
-    );
+    const v = this.formValues() as { phone?: string | null };
+    return computePhoneFormatHint(v?.phone ?? null);
   });
 
   // ── Form ────────────────────────────────────────────────────────────
@@ -185,8 +200,10 @@ export class PosCustomerSelectorComponent {
     firstName: [''],
     lastName: [''],
     phone: [''],
-    documentType: [''],
-    documentNumber: [''],
+    // Paso 9 — control único (CVA `app-document-identity-fields`) en vez de
+    // los dos controles sueltos `documentType`/`documentNumber` que tenía
+    // esta pantalla antes de extraer el par compartido.
+    documentIdentity: [{ ...EMPTY_DOCUMENT_IDENTITY }],
   });
 
   /** Estado de validez del form como signal (Zoneless-safe). */
@@ -196,24 +213,40 @@ export class PosCustomerSelectorComponent {
   );
 
   /**
+   * QUI-737/734 (B.4) — bridge reactivo del `form.value`. Leer `form.value`
+   * directo dentro de un `computed()` lo congela (no es una señal): los hints
+   * `documentFormatHint`/`phoneFormatHint` y `canResolve` se recalculaban solo
+   * con el estado inicial. Este `valueChanges` bridged hace que cualquier
+   * tecleo re-renderice el computed.
+   */
+  private readonly formValues = toSignal(
+    this.form.valueChanges.pipe(startWith(this.form.value)),
+    { initialValue: this.form.value },
+  );
+
+  /**
    * Submit gate: form is submittable when the cashier provided at least one
-   * identifier — a valid email OR (document_type + document_number). Format
-   * validation is intentionally non-blocking: the dev lead's spec was
-   * "un mismo paso se va todo" (one step, don't add friction), so even a
-   * non-canonical document number is submitted — the lookup may still find
-   * a legacy customer, and the format-hint chip already warns the cashier
-   * before they hit Siguiente.
+   * identifier — a valid email OR (document_type + document_number) OR a name
+   * (QUI-734, B.4 quick-sale por nombre). Format validation is intentionally
+   * non-blocking: the dev lead's spec was "un mismo paso se va todo" (one step,
+   * don't add friction), so even a non-canonical document number is submitted —
+   * the lookup may still find a legacy customer, and the format-hint chip
+   * already warns the cashier before they hit Siguiente.
    */
   readonly canResolve = computed(() => {
     if (this.resolving()) return false;
-    const v = this.form.value as {
+    const v = this.formValues() as {
       email?: string | null;
-      documentType?: string | null;
-      documentNumber?: string | null;
+      documentIdentity?: DocumentIdentityValue | null;
+      firstName?: string | null;
+      lastName?: string | null;
     };
     const hasEmail = !!v.email?.trim() && this.formStatus() === 'VALID';
-    const hasDocument = !!v.documentType && !!v.documentNumber?.trim();
-    return hasEmail || hasDocument;
+    const hasDocument =
+      !!v.documentIdentity?.documentType &&
+      !!v.documentIdentity?.documentNumber?.trim();
+    const hasName = !!v.firstName?.trim();
+    return hasEmail || hasDocument || hasName;
   });
 
   constructor() {
@@ -225,30 +258,36 @@ export class PosCustomerSelectorComponent {
       const wantTop = this.showTopSuggestions();
       const initial = this.initialView();
       const hasCustomer = !!this.selectedCustomer();
+      const minimalInvoice = this.minimalInvoiceMode();
       untracked(() => {
         if (this.topInitialized) return;
         this.topInitialized = true;
-        if (initial !== 'overview') {
+        // Paso 9 — «Facturar a nombre de»: entra directo al formulario mínimo,
+        // sin pasar por 'overview' ni por el tab de búsqueda.
+        if (minimalInvoice) {
+          this.activeTab.set('create');
+          this.view.set('search');
+        } else if (initial !== 'overview') {
           this.view.set(initial);
         } else if (wantTop && !hasCustomer) {
           // Sin cliente aún → mostramos el buscador (con top-5) directamente.
           this.view.set('search');
         }
-        if (wantTop) this.loadTopCustomers();
+        if (wantTop && !minimalInvoice) this.loadTopCustomers();
       });
     });
   }
 
-  /** Carga perezosa e idempotente del top-5 (solo cuando showTopSuggestions). */
+  /** Carga perezosa e idempotente del top-3 comprimido (solo cuando showTopSuggestions). */
   private loadTopCustomers(): void {
     if (this.topCustomers().length > 0 || this.loadingTop()) return;
     this.loadingTop.set(true);
     this.customerService
-      .topCustomers(5)
+      .topCustomers(3)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (list) => {
-          this.topCustomers.set(list ?? []);
+          this.topCustomers.set((list ?? []).slice(0, 3));
           this.loadingTop.set(false);
         },
         error: () => {
@@ -260,11 +299,18 @@ export class PosCustomerSelectorComponent {
 
   // ── Navegación ──────────────────────────────────────────────────────
   goToSearch(): void {
+    // En modo factura mínima no hay tab de búsqueda: "cambiar cliente" siempre
+    // vuelve al mismo formulario de 5 campos, nunca al buscador general.
+    this.activeTab.set(this.minimalInvoiceMode() ? 'create' : 'search');
     this.view.set('search');
   }
 
   back(): void {
     this.view.set('overview');
+  }
+
+  setActiveTab(tab: 'search' | 'create'): void {
+    this.activeTab.set(tab);
   }
 
   // ── Búsqueda ────────────────────────────────────────────────────────
@@ -348,19 +394,27 @@ export class PosCustomerSelectorComponent {
     if (!this.canResolve()) {
       this.markFormTouched();
       this.toastService.info(
-        'Ingresa al menos un email o un documento para continuar',
+        'Ingresa un email, un documento o un nombre para continuar',
       );
       return of(false);
     }
 
     const value = this.form.value;
+    const documentIdentity = value.documentIdentity as DocumentIdentityValue | null;
+    const hasEmail = !!value.email?.trim();
+    const hasDocument = !!(
+      documentIdentity?.documentType && documentIdentity?.documentNumber?.trim()
+    );
     const request: CreatePosCustomerRequest = {
       email: value.email?.trim() || undefined,
       first_name: value.firstName?.trim() || undefined,
       last_name: value.lastName?.trim() || undefined,
       phone: value.phone?.trim() || undefined,
-      document_type: value.documentType || undefined,
-      document_number: value.documentNumber?.trim() || undefined,
+      document_type: documentIdentity?.documentType || undefined,
+      document_number: documentIdentity?.documentNumber?.trim() || undefined,
+      // QUI-734 (B.4) — quick-sale por nombre: solo cuando NO hay email ni
+      // documento (la prioridad de match es email → documento → nombre).
+      name_only: !hasEmail && !hasDocument ? true : undefined,
     };
 
     this.resolving.set(true);
@@ -433,6 +487,7 @@ export class PosCustomerSelectorComponent {
     this.resolving.set(false);
     this.query.set('');
     this.lastQuery.set('');
+    this.activeTab.set('search');
     this.view.set('overview');
   }
 }

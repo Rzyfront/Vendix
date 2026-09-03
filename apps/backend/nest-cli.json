@@ -7,6 +7,7 @@
     "assets": [
       {
         "include": "domains/store/print-formats/schemas/*.json",
+        "outDir": "dist/src",
         "watchAssets": true
       }
     ]

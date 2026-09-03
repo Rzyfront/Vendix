@@ -232,24 +232,14 @@ export const TAX_REGIME_OPTIONS: SelectorOption[] = [
 
 export const UNIT_CODE_DEFAULT = 'NIU';
 
-export const UNIT_CODE_OPTIONS: SelectorOption[] = [
-  { value: 'NIU', label: 'Unidad (NIU)' },
-  { value: 'KGM', label: 'Kilogramo (KGM)' },
-  { value: 'GRM', label: 'Gramo (GRM)' },
-  { value: 'LTR', label: 'Litro (LTR)' },
-  { value: 'MLT', label: 'Mililitro (MLT)' },
-  { value: 'MTR', label: 'Metro (MTR)' },
-  { value: 'CMT', label: 'Centímetro (CMT)' },
-  { value: 'MTK', label: 'Metro cuadrado (MTK)' },
-  { value: 'MTQ', label: 'Metro cúbico (MTQ)' },
-  { value: 'HUR', label: 'Hora (HUR)' },
-  { value: 'DAY', label: 'Día (DAY)' },
-  { value: 'MON', label: 'Mes (MON)' },
-  { value: 'PR', label: 'Par (PR)' },
-  { value: 'SET', label: 'Juego (SET)' },
-  { value: 'BX', label: 'Caja (BX)' },
-  { value: 'PK', label: 'Paquete (PK)' },
-];
+/**
+ * `UNIT_CODE_OPTIONS` se mudó a `shared/components/invoice-sections/` cuando la
+ * consola de plataforma necesitó el MISMO catálogo: dos superficies emiten
+ * facturas y no se importan entre sí, así que la lista no puede vivir dentro
+ * del riel de una de las dos. Se re-exporta desde aquí para no tocar a los
+ * consumidores que ya la importaban de este archivo.
+ */
+export { UNIT_CODE_OPTIONS } from '../../../../../../shared/components/invoice-sections/invoice-dian-catalogs';
 
 // ─────────────────────────────────────────────────────────────
 // Divisa extranjera (ISO 4217)

@@ -145,6 +145,17 @@ export class CheckoutDto {
   @Min(1)
   payment_method_id: number;
 
+  /**
+   * ID de la cuenta bancaria destino para `bank_transfer` / `voucher`.
+   * Validado en backend con `resolveAndValidateBankAccount` antes de
+   * persistir el pago. Opcional: los métodos sin cuenta (cash, card, wompi,
+   * wallet) lo ignoran. QUI-728.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  bank_account_id?: number;
+
   @IsOptional()
   @IsString()
   notes?: string;

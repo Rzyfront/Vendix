@@ -101,6 +101,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       cashRegisterMovementsService as any,
       kitchenFireService as any,
       stockLevelManager as any,
+      { markItemDelivered: jest.fn() } as any,
     );
   });
 

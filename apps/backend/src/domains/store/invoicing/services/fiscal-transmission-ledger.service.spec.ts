@@ -97,6 +97,72 @@ describe('FiscalTransmissionLedgerService', () => {
     ).rejects.toMatchObject({ errorCode: 'FISCAL_IDEMPOTENCY_CONFLICT' });
   });
 
+  // Reproduce el defecto reportado: un documento expedido bajo contingencia
+  // (Anexo Técnico 1.9 §12.2) queda con `contingency_type` vacío en el primer
+  // intento y `'04'` en el reintento que declara la contingencia — es el ÚNICO
+  // campo que `InvoiceFlowService.send()` llena distinto entre ambos. Antes de
+  // este fix, ese cambio esperado disparaba el mismo `FISCAL_IDEMPOTENCY_CONFLICT`
+  // que un payload realmente adulterado, y el reintento legítimo quedaba
+  // autobloqueado.
+  it('allows a contingency retry even though contingency_type changed', async () => {
+    const originalHash = createHash('sha256')
+      .update(JSON.stringify({ total: 100 }))
+      .digest('hex');
+    const update = jest.fn().mockImplementation(({ data }) =>
+      Promise.resolve({ id: 100, ...data }),
+    );
+    const { service } = createService({
+      fiscal_transmissions: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 100,
+          request_hash: originalHash,
+          transmission_status: 'error',
+          retry_count: 0,
+        }),
+        create: jest.fn(),
+        update,
+      },
+      fiscal_evidences: { createMany: jest.fn() },
+    });
+
+    const result = await service.ensureInvoiceTransmission({
+      invoice,
+      provider_data: { total: 100, contingency_type: '04' },
+    });
+
+    expect(result).toMatchObject({ id: 100, transmission_status: 'retrying' });
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+
+  // Un cambio real en el payload —no sólo `contingency_type`— sigue
+  // detectándose incluso disfrazado de reintento de contingencia: la
+  // exclusión del hash es puntual, no una puerta abierta a cualquier campo.
+  it('still rejects a contingency retry whose non-contingency fields changed', async () => {
+    const originalHash = createHash('sha256')
+      .update(JSON.stringify({ total: 100 }))
+      .digest('hex');
+    const { service } = createService({
+      fiscal_transmissions: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 100,
+          request_hash: originalHash,
+          transmission_status: 'error',
+          retry_count: 0,
+        }),
+        create: jest.fn(),
+        update: jest.fn(),
+      },
+      fiscal_evidences: { createMany: jest.fn() },
+    });
+
+    await expect(
+      service.ensureInvoiceTransmission({
+        invoice,
+        provider_data: { total: 999, contingency_type: '04' },
+      }),
+    ).rejects.toMatchObject({ errorCode: 'FISCAL_IDEMPOTENCY_CONFLICT' });
+  });
+
   it('blocks resubmitting an already accepted fiscal transmission', async () => {
     const requestHash = createHash('sha256')
       .update(JSON.stringify({ total: 100 }))

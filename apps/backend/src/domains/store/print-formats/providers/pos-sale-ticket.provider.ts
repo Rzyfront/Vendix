@@ -1,17 +1,27 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { S3Service } from '../../../../common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
 import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
+import { signStoreLogoUrl } from '../lib/print-logo.util';
 
 @Injectable()
 export class PosSaleTicketDataProvider implements IDocumentDataProvider {
   readonly formatType: print_format_type_enum = 'pos_sale_ticket';
+  private readonly logger = new Logger(PosSaleTicketDataProvider.name);
 
-  constructor(private readonly prisma: StorePrismaService) {}
+  // `s3Service` es opcional en la firma (no `@Optional()`) para no romper los
+  // specs que instancian el provider a mano con un solo argumento
+  // (`new PosSaleTicketDataProvider(prisma)`); en runtime Nest siempre lo
+  // inyecta porque `print-formats.module.ts` ya importa `S3Module`.
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly s3Service?: S3Service,
+  ) {}
 
   async fetchDocumentData(
     storeId: number,
@@ -25,13 +35,51 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     const order = await this.prisma.orders.findFirst({
       where: { id: orderId, store_id: storeId },
       include: {
-        order_items: true,
-        order_taxes: true,
+        // QUI-751 — el impuesto vive a nivel de línea (`order_item_taxes`),
+        // no existe la relación `order_taxes`. Antes del fix esto compilaba
+        // porque TypeScript no valida nombres de `include` contra Prisma, pero
+        // la 1ª llamada runtime hubiera sido `PrismaClientValidationError` 500.
+        //
+        // [resid-fiscal] — Filtramos líneas canceladas (D2). El
+        // `aggregateTaxes` que sigue más abajo sumaba sus impuestos y los
+        // imprimía en el breakdown; el `order.tax_amount` ya los excluye,
+        // así que el tiquete salía con un desglose que NO cuadraba con el
+        // total agregado — inconsistencia visible para el cliente.
+        order_items: {
+          where: { cancelled_at: null },
+          include: { order_item_taxes: true },
+        },
         users: true,
         stores: {
           include: {
             addresses: { take: 1 },
             organizations: true,
+          },
+        },
+        // C.3 QUI-733 — mesa + mesero en el recibo POS. Se une la sesión
+        // ABIERTA (closed_at IS NULL, la más reciente) para derivar
+        // `document.table_number` / `document.waiter_name` igual que el
+        // proveedor de ticket de cocina. Sin sesión (venta de mostrador)
+        // el array queda vacío y el recibo sale sin mesa/mesero.
+        table_sessions: {
+          where: { closed_at: null },
+          orderBy: { opened_at: 'desc' },
+          take: 1,
+          include: {
+            table: {
+              select: {
+                id: true,
+                name: true,
+                zone: true,
+                // mesero asignado vía table_waiters, prioridad sobre opener
+                table_waiters: {
+                  select: {
+                    user: { select: { first_name: true, last_name: true } },
+                  },
+                },
+              },
+            },
+            opener: { select: { first_name: true, last_name: true } },
           },
         },
       },
@@ -41,7 +89,12 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       throw new VendixHttpException(ErrorCodes.PRINT_DOCUMENT_NOT_FOUND_001);
     }
 
-    return this.mapOrderToStandardModel(order);
+    // El logo se firma acá (única llamada `async` de este flujo) porque
+    // `mapOrderToStandardModel` es un mapeador puro y síncrono que también
+    // usan otros callers de este provider — no podíamos meterle un `await`
+    // sin volverlo async y arrastrar ese cambio a todos sus usos.
+    const signedLogoUrl = await signStoreLogoUrl(this.s3Service, order.stores?.logo_url, this.logger);
+    return this.mapOrderToStandardModel(order, signedLogoUrl);
   }
 
   async getSampleData(storeId?: number): Promise<StandardPrintDataModel> {
@@ -181,16 +234,35 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     }));
   }
 
-  private mapOrderToStandardModel(order: any): StandardPrintDataModel {
+  private mapOrderToStandardModel(order: any, signedLogoUrl?: string): StandardPrintDataModel {
     const store = order.stores || {};
     const org = store.organizations || {};
     const addr = store.addresses?.[0] || {};
     const user = order.users || {};
 
+    // C.3 QUI-733 — mesa + mesero derivados de la sesión ABIERTA. El mesero
+    // asignado (table_waiters) manda sobre el opener. Sin sesión (venta de
+    // mostrador) ambos quedan vacíos y el recibo no muestra bloque de mesa.
+    const session = (order.table_sessions || [])[0];
+    const table = session?.table;
+    const opener = session?.opener;
+    const assignedWaiter = table?.table_waiters?.[0]?.user;
+    const waiterName =
+      assignedWaiter && (assignedWaiter.first_name || assignedWaiter.last_name)
+        ? `${assignedWaiter.first_name || ''} ${assignedWaiter.last_name || ''}`.trim()
+        : opener
+        ? `${opener.first_name || ''} ${opener.last_name || ''}`.trim()
+        : '';
+    const tableName = table?.name ? `Mesa ${table.name}` : '';
+
     const items = (order.order_items || []).map((it: any, i: number) => ({
       index: i + 1,
       product_name: it.product_name,
       variant_sku: it.variant_sku || undefined,
+      // CP-POLLO-ARABE-727 ADR-7: la variante del recibo POS viaja por
+      // `StandardPrintItem.variant_attributes` (column `order_items.variant_attributes`,
+      // snapshot al crear la línea), no por un campo nuevo del modelo.
+      variant_attributes: it.variant_attributes || undefined,
       quantity: Number(it.quantity || 1),
       unit_price: Number(it.unit_price || 0),
       unit_price_formatted: `$${Number(it.unit_price || 0).toLocaleString('es-CO')}`,
@@ -200,14 +272,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       total_price_formatted: `$${Number(it.total_price || 0).toLocaleString('es-CO')}`,
     }));
 
-    const taxes = (order.order_taxes || []).map((t: any) => ({
-      name: t.tax_name || 'IVA',
-      rate: Number(t.tax_rate || 0),
-      base_amount: Number(t.taxable_amount || 0),
-      tax_amount: Number(t.tax_amount || 0),
-      base_formatted: `$${Number(t.taxable_amount || 0).toLocaleString('es-CO')}`,
-      tax_formatted: `$${Number(t.tax_amount || 0).toLocaleString('es-CO')}`,
-    }));
+    const taxes = this.aggregateTaxes(order.order_items);
 
     const subtotal = Number(order.subtotal_amount || 0);
     const discount = Number(order.discount_amount || 0);
@@ -224,7 +289,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         email: store.email,
         address: addr.address_line1 ? `${addr.address_line1} ${addr.address_line2 || ''}`.trim() : undefined,
         city: addr.city,
-        logo_url: store.logo_url,
+        logo_url: signedLogoUrl,
       },
       customer: user.id
         ? {
@@ -245,6 +310,18 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         channel: order.channel,
         notes: order.notes,
         internal_notes: order.internal_notes,
+        // C.3 QUI-733 — mesa + mesero en el recibo POS.
+        table_number: tableName,
+        waiter_name: waiterName,
+        // QUI-737 (B.4) — alias de venta rápida ("Mesa 5"). Va en la CABECERA
+        // junto al número de orden, NO bajo el bloque "Datos del Cliente"
+        // (`customer`): el alias no es un cliente formal y no debe leerse como
+        // identificación fiscal. Se expone sin tocar `customer` (que sigue
+        // gateado por `user.id`). Spread condicional para no romper el tipo
+        // estricto de `StandardPrintDataModel['document']`.
+        ...(order.customer_alias
+          ? { customer_alias: order.customer_alias }
+          : {}),
       },
       items,
       taxes,
@@ -261,5 +338,69 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         grand_total_formatted: `$${grandTotal.toLocaleString('es-CO')}`,
       },
     };
+  }
+
+  /**
+   * QUI-751 — agrega los impuestos de línea en uno por cabecera.
+   *
+   * El esquema NO tiene una fila de impuesto a nivel de orden; los tributos
+   * viven en `order_item_taxes` (uno por línea, uno por tarifa). Para
+   * presentarlos en la sección "Tributos" del tiquete se agrupan por
+   * `(tax_name, tax_rate)` y se suman los `tax_amount`.
+   *
+   * NO recalculamos la base con `base × tarifa` — eso introduce un céntimo
+   * de más por redondeo y descuadra contra `order.tax_amount`. La base se
+   * DERIVA de la línea (`tax_amount / tax_rate` cuando `tax_rate > 0`,
+   * 0 en otro caso) y se suma dentro del grupo. La suma de bases dentro
+   * del grupo no es igual a `tax_amount_total / tax_rate` porque la base
+   * de cada línea arrastra su propio redondeo — pero es la forma
+   * contablemente honesta: cada línea aporta lo que aportó.
+   *
+   * La escala cruda de `rate` se preserva (`Decimal(6,5)` ⇒ 0.19, NO 19).
+   */
+  private aggregateTaxes(orderItems: any[]): Array<{
+    name: string;
+    rate: number;
+    base_amount: number;
+    tax_amount: number;
+    base_formatted: string;
+    tax_formatted: string;
+  }> {
+    const grouped = new Map<
+      string,
+      { name: string; rate: number; tax_amount: number; base_amount: number }
+    >();
+
+    for (const item of orderItems || []) {
+      for (const t of item.order_item_taxes || []) {
+        const name = t.tax_name || 'IVA';
+        const rate = Number(t.tax_rate || 0);
+        const taxAmount = Number(t.tax_amount || 0);
+        const key = `${name}|${rate}`;
+
+        const lineBase = rate > 0 ? taxAmount / rate : 0;
+        const existing = grouped.get(key);
+        if (existing) {
+          existing.tax_amount += taxAmount;
+          existing.base_amount += lineBase;
+        } else {
+          grouped.set(key, {
+            name,
+            rate,
+            tax_amount: taxAmount,
+            base_amount: lineBase,
+          });
+        }
+      }
+    }
+
+    return Array.from(grouped.values()).map((g) => ({
+      name: g.name,
+      rate: g.rate,
+      base_amount: g.base_amount,
+      tax_amount: g.tax_amount,
+      base_formatted: `$${g.base_amount.toLocaleString('es-CO')}`,
+      tax_formatted: `$${g.tax_amount.toLocaleString('es-CO')}`,
+    }));
   }
 }

@@ -8,7 +8,6 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
-import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import {
   BadgeComponent,
   EmptyStateComponent,
@@ -41,7 +40,6 @@ interface QueueRow extends QueueEntry {
   imports: [
     CommonModule,
     RouterModule,
-    CardComponent,
     BadgeComponent,
     EmptyStateComponent,
     IconComponent,

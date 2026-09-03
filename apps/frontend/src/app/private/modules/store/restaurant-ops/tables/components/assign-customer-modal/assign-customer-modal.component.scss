@@ -54,3 +54,13 @@
   gap: 0.5rem;
   width: 100%;
 }
+
+/* ── C.1 (QUI-735) — mobile-first del modal de asignar cliente ────────────
+   El footer mantiene la fila (los botones ya son `lg`, 48px). Solo se deja
+   que la info del cliente envuelva en pantallas estrechas. Bajo 640px. */
+@media (max-width: 640px) {
+  .current-customer,
+  .picked-chip {
+    flex-wrap: wrap;
+  }
+}

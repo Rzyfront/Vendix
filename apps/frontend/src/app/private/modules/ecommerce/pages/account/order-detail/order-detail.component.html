@@ -78,7 +78,19 @@
         <div class="section-divider"></div>
         <div class="items-list">
           @for (item of order.items; track item.id) {
-            <div class="item-row">
+            <!--
+              E2 — el item cancelado se queda en su posicion original
+              (Nancy: "el cliente necesita ver que cancelo en el sitio donde
+              lo pidio"). Precio y total OCULTOS: un numero tachado sigue
+              siendo un numero que el ojo suma. El nombre va tachado pero
+              legible (sin bajar el contraste al maximo). El motivo solo se
+              pinta si aporta — vacio o prefijo 'legacy:' de la ruta vieja
+              de compatibilidad, oculto.
+            -->
+            <div
+              class="item-row"
+              [class.item-row--cancelled]="isItemCancelled(item)"
+            >
               <div class="item-thumb">
                 @if (item.variant_image_url || item.image_url) {
                   <img [src]="item.variant_image_url || item.image_url" [alt]="item.product_name" />
@@ -91,7 +103,12 @@
               <div class="item-details">
                 <div class="item-name-row">
                   <span class="item-name">{{ item.product_name }}</span>
-                  @if (item.product_type === "service") {
+                  @if (isItemCancelled(item)) {
+                    <app-badge variant="warning" size="sm">
+                      <app-icon name="x-circle" [size]="11" />
+                      Cancelado
+                    </app-badge>
+                  } @else if (item.product_type === "service") {
                     <span class="item-type-badge item-type-badge--service"
                       >Servicio</span
                     >
@@ -100,11 +117,22 @@
                 @if (getVariantLabel(item)) {
                   <span class="item-variant">{{ getVariantLabel(item) }}</span>
                 }
-                <span class="item-meta"
-                  >{{ item.quantity }} × {{ item.unit_price | currency }}</span
-                >
+                @if (!isItemCancelled(item)) {
+                  <span class="item-meta"
+                    >{{ item.quantity }} × {{ item.unit_price | currency }}</span
+                  >
+                }
+                @if (
+                  isItemCancelled(item) && hasVisibleCancellationReason(item)
+                ) {
+                  <span class="item-cancellation-reason">
+                    {{ item.cancellation_reason }}
+                  </span>
+                }
               </div>
-              <span class="item-total">{{ item.total_price | currency }}</span>
+              @if (!isItemCancelled(item)) {
+                <span class="item-total">{{ item.total_price | currency }}</span>
+              }
             </div>
           }
         </div>

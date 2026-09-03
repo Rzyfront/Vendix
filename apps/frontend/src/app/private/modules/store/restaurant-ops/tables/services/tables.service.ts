@@ -1,8 +1,13 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
-import { catchError, map, switchMap } from 'rxjs/operators';
+import { catchError, map, switchMap, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
+import {
+  parseApiError,
+  withApiErrorReference,
+} from '../../../../../../../app/core/utils/parse-api-error';
+import { DEFAULT_ERROR_MESSAGE } from '../../../../../../../app/core/utils/error-messages';
 import {
   Table,
   CreateTableDto,
@@ -56,6 +61,12 @@ export class TablesService {
   private readonly apiUrl = environment.apiUrl;
   private readonly http = inject(HttpClient);
 
+  /**
+   * Reactive single source of truth for the floor tables.
+   * Auto-refreshed whenever getFloorMap() resolves (manual load, polling fallback, or SSE push).
+   */
+  readonly floorTables = signal<Table[]>([]);
+
   // ─── Tables ────────────────────────────────────────────────────────
 
   listPaginated(
@@ -79,7 +90,8 @@ export class TablesService {
     return this.http
       .get<ApiResponse<Table[]>>(`${this.apiUrl}/store/tables/floor-map`)
       .pipe(
-        map((res) => res.data),
+        map((res) => res.data ?? []),
+        tap((tables) => this.floorTables.set(tables)),
         catchError(this.handleError),
       );
   }
@@ -222,6 +234,43 @@ export class TablesService {
     return this.http
       .delete<ApiResponse<TableSession>>(
         `${this.apiUrl}/store/table-sessions/${sessionId}/items/${orderItemId}`,
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /**
+   * carril D / lina — D2: cancela (soft cancel) un ítem de la cuenta de
+   * mesa. El ítem NO se borra: queda visible marcado como cancelado pero
+   * EXCLUIDO del subtotal/tax/grand_total (el backend filtra por
+   * `cancelled_at IS NULL` al recalcular).
+   *
+   * Diferencias con {@link removeItem} (DELETE legacy):
+   *  - Levanta la guarda `state === 'draft'`: bloquea solo si la orden
+   *    está cobrada o en estado terminal. Acepta cancelación en
+   *    `draft`, `created`, `pending_payment`, `processing`. ES EL BUG
+   *    reportado por el dueño (no se podía cancelar un plato tras
+   *    disparar a cocina).
+   *  - Motivo obligatorio siempre (mín 3 caracteres). En ítems ya
+   *    disparados a cocina el motivo queda como merma en
+   *    `order_items.cancellation_reason`.
+   *  - Stock: `before_fire` revierte, `after_fire_waste` registra merma
+   *    sin reversión. El backend decide según `inventory_consumed_at_fire`.
+   *
+   * El endpoint es DEFINITIVO en `TableSessionsController`
+   * (`POST /api/store/table-sessions/:id/items/:orderItemId/cancel`).
+   */
+  cancelOrderItem(
+    sessionId: number,
+    orderItemId: number,
+    body: { reason: string; cancellation_type?: 'before_fire' | 'after_fire_waste' },
+  ): Observable<TableSession> {
+    return this.http
+      .post<ApiResponse<TableSession>>(
+        `${this.apiUrl}/store/table-sessions/${sessionId}/items/${orderItemId}/cancel`,
+        body,
       )
       .pipe(
         map((res) => res.data),
@@ -402,6 +451,13 @@ export class TablesService {
       ...(payload.tip_amount != null && payload.tip_amount > 0
         ? { tip_amount: payload.tip_amount }
         : {}),
+      // CP-POLLO-ARABE-727 F.1 Round 2 (M) — el mesero elige la cuenta en el
+      // collector (table-payment-modal la emite en TablePaymentSubmit) y el
+      // body del POST /store/payments/pos la descartaba: el cierre de mesa con
+      // transferencia llegaba sin bank_account_id y se perseguía NULL.
+      ...(payload.bank_account_id != null
+        ? { bank_account_id: payload.bank_account_id }
+        : {}),
     };
     return this.http
       .post<ApiResponse<PayTableSessionResult>>(
@@ -496,38 +552,60 @@ export class TablesService {
    * la única traducción necesaria. Aquí vivía un `unwrapEnvelope` que leía
    * `success:false` de una respuesta 200 — quitarlo es parte del arreglo,
    * no una regresión.
+   *
+   * CP-POLLO-ARABE-727 C.2 — MIGRADO a `parseApiError`, no parcheado. El
+   * orden anterior leía `error?.error?.message` ANTES de la rama 403: un 403
+   * de cocina (guard → `AUTH_PERM_001`, `devMessage` 'Access denied', 13
+   * chars < `MIN_PRESENTABLE_LENGTH=16`) pasaba tal cual al toast del
+   * cocinero en inglés. `parseApiError` es la aduana única del repo:
+   * descarta el devMessage no presentable y cae a
+   * `ERROR_MESSAGES[AUTH_PERM_001] = 'No tiene permisos para realizar esta
+   * accion.'` (error-messages.ts:107). El copy por status de abajo solo actúa
+   * de red de seguridad cuando parseApiError no encontró nada mejor
+   * (`DEFAULT_ERROR_MESSAGE`), para no degradar la UX de 404/409/422/5xx.
    */
   private handleError = (error: any): Observable<never> => {
     // eslint-disable-next-line no-console
     console.error('TablesService Error:', error);
-    let message = 'Error al procesar la solicitud';
-    const apiMessage = error?.error?.message;
-    if (apiMessage) {
-      message =
-        typeof apiMessage === 'string'
-          ? apiMessage
-          : Array.isArray(apiMessage)
-            ? apiMessage.join(', ')
-            : message;
-    } else if (error?.status === 401) {
-      message = 'No autorizado';
-    } else if (error?.status === 403) {
-      message = 'No tienes permisos suficientes';
-    } else if (error?.status === 404) {
-      message = 'Mesa o sesión no encontrada';
-    } else if (error?.status === 409) {
-      message =
-        typeof error?.error?.message === 'string'
-          ? error.error.message
-          : 'Conflicto: estado incompatible';
-    } else if (error?.status === 422) {
-      message =
-        typeof error?.error?.message === 'string'
-          ? error.error.message
-          : 'Operación no permitida';
-    } else if (typeof error?.status === 'number' && error.status >= 500) {
-      message = 'Error del servidor. Inténtalo más tarde';
+
+    const parsed = parseApiError(error);
+    let message = parsed.userMessage;
+
+    if (message === DEFAULT_ERROR_MESSAGE) {
+      message = tablesStatusErrorCopy(error);
     }
-    return throwError(() => message);
+
+    // CP-POLLO-ARABE-727 F.1 — A.8 parcial. El backend adjunta `request_id`
+    // best-effort a todo cuerpo de error (`http-exception.filter.ts`) para
+    // que soporte pueda correlacionar la petición. Este handler normaliza el
+    // error a un string plano (contrato que ~15 llamadores verifican con
+    // `typeof err === 'string'`), así que la referencia se hornea en el
+    // propio mensaje aquí — no se puede recuperar más tarde leyendo el `err`
+    // crudo como sí hace `readApiErrorRequestId` cuando el error sobrevive
+    // como objeto. `withApiErrorReference` es un no-op si no hay
+    // `request_id` (red, auth, proxy).
+    return throwError(() => withApiErrorReference(message, parsed.request_id));
   };
+}
+
+/**
+ * Copy por status de ÚLTIMO RECURSO para `TablesService.handleError`.
+ *
+ * Solo se invoca cuando `parseApiError` cayó al `DEFAULT_ERROR_MESSAGE` (sin
+ * `error_code` en el catálogo y sin mensaje presentable del backend). No
+ * sustituye la aduana de `parseApiError`: la complementa conservando el copy
+ * amigable por status de la versión anterior del handler, para no degradar
+ * 404/409/422/5xx a un genérico. NO re-lee `error.error.message` en crudo — ese
+ * era el origen del bug "Access denied".
+ */
+function tablesStatusErrorCopy(error: any): string {
+  if (error?.status === 401) return 'No autorizado';
+  if (error?.status === 403) return 'No tienes permisos suficientes';
+  if (error?.status === 404) return 'Mesa o sesión no encontrada';
+  if (error?.status === 409) return 'Conflicto: estado incompatible';
+  if (error?.status === 422) return 'Operación no permitida';
+  if (typeof error?.status === 'number' && error.status >= 500) {
+    return 'Error del servidor. Inténtalo más tarde';
+  }
+  return DEFAULT_ERROR_MESSAGE;
 }

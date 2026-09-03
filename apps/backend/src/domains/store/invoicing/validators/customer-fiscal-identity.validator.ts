@@ -427,6 +427,20 @@ export interface CustomerFiscalIdentityInput {
   email?: string | null;
   phone?: string | null;
   address?: CustomerFiscalAddressInput | null;
+  /**
+   * Otras direcciones REALES del mismo adquiriente — el segundo y tercer
+   * escalón de la cascada de respaldo que aplica el emisor al transmitir
+   * (`acquirer-address.resolver.ts`: fiscal → cualquier otra del cliente →
+   * dirección de la tienda que emite). `undefined` significa «el llamador no
+   * investigó la cascada»: el reporte se queda en `ADDRESS_REQUIRED` como
+   * advertencia, igual que siempre. Un ARREGLO (vacío o no) significa «el
+   * llamador SÍ la investigó», y entonces `ADDRESS_REQUIRED` escala a
+   * `ADDRESS_UNRESOLVABLE` (bloqueante) si ninguna candidata resuelve — porque
+   * eso es EXACTAMENTE lo que hoy hace `resolveAcquirerAddressForDocument` al
+   * transmitir, sólo que después de haber numerado. Ver el docblock de
+   * `checkAddress`.
+   */
+  other_addresses?: readonly CustomerFiscalAddressInput[] | null;
 }
 
 // -----------------------------------------------------------------------------
@@ -466,6 +480,7 @@ export type CustomerFiscalIdentityCode =
   | 'TAX_RESPONSIBILITIES_MISSING'
   // Dirección
   | 'ADDRESS_REQUIRED'
+  | 'ADDRESS_UNRESOLVABLE'
   | 'COUNTRY_CODE_REQUIRED'
   | 'COUNTRY_CODE_MALFORMED'
   | 'CITY_CODE_REQUIRED'
@@ -690,7 +705,7 @@ export class CustomerFiscalIdentityValidator {
     // -------------------------------------------------------------------------
     // 7. DIRECCIÓN
     // -------------------------------------------------------------------------
-    findings.push(...this.checkAddress(input.address));
+    findings.push(...this.checkAddress(input.address, input.other_addresses));
 
     // -------------------------------------------------------------------------
     // 8. CORREO ELECTRÓNICO
@@ -1179,10 +1194,55 @@ export class CustomerFiscalIdentityValidator {
    */
   private checkAddress(
     address: CustomerFiscalAddressInput | null | undefined,
+    other_addresses?: readonly CustomerFiscalAddressInput[] | null,
   ): CustomerFiscalIdentityFinding[] {
     const findings: CustomerFiscalIdentityFinding[] = [];
 
     if (!address) {
+      // `other_addresses === undefined` ⇒ el llamador no corrió la cascada de
+      // respaldo. Se preserva el comportamiento histórico: sólo advertencia,
+      // confiando en que el emisor resuelva por su cuenta al transmitir.
+      //
+      // HOY NINGÚN LLAMADOR LO PUEBLA, y es deliberado. Poblarlo bien exige
+      // dos cosas que no están a mano en `invoice-flow`: ensanchar
+      // `INVOICE_INCLUDE` (que trae `addresses: { take: 1 }`) y cargar la
+      // dirección fiscal de la tienda emisora. Con datos PARCIALES —sólo las
+      // del cliente, sin la de la tienda— el bloqueante dispararía sobre
+      // documentos que la cascada del emisor SÍ habría rescatado: un bloqueo
+      // falso, que es peor que el aviso que sustituye.
+      //
+      // Y el fallo que guarda es inalcanzable para un facturador HABILITADO:
+      // `resolveAcquirerAddress` sólo devuelve `null` cuando la dirección del
+      // propio emisor no es emitible, y un emisor sin municipio Divipola no
+      // pasa la habilitación ante la DIAN (FAJ09/FAJ16) — no llega a tener
+      // resolución con la que numerar. La regla queda escrita para el día en
+      // que un llamador SÍ pueda reunir el universo completo.
+      //
+      // `other_addresses` es un ARREGLO (vacío o no) ⇒ el llamador SÍ reunió
+      // las direcciones reales que existen — el mismo universo que agota
+      // `resolveAcquirerAddressForDocument` en `dian-direct.provider.ts`
+      // (dirección del cliente + dirección de la tienda emisora, si el
+      // llamador la incluyó). Si NINGUNA resuelve, el emisor va a LANZAR al
+      // transmitir, ya con el consecutivo numerado — así que acá se adelanta
+      // el mismo bloqueo, antes de que `validate()` deje pasar el documento.
+      if (other_addresses !== undefined && other_addresses !== null) {
+        const has_rescue = other_addresses.some((candidate) =>
+          this.isCascadeRescueUsable(candidate),
+        );
+
+        if (!has_rescue) {
+          findings.push({
+            code: 'ADDRESS_UNRESOLVABLE',
+            severity: 'blocker',
+            field: 'address',
+            problem:
+              'El adquiriente no tiene dirección fiscal propia, y tampoco se encontró ninguna otra dirección real —ni suya ni de la tienda que emite— que la emisión pueda declarar como respaldo. Tal como está, la transmisión a la DIAN fallaría después de haber numerado el documento.',
+            fix: `Agrega una dirección con municipio y departamento al cliente en ${SCREEN_ADDRESS}, o completa la dirección de facturación de la tienda/organización que emite.`,
+          });
+          return findings;
+        }
+      }
+
       findings.push({
         // AVISO, no bloqueante: desde la cascada de dirección el emisor ya no
         // inventa Bogotá. Baja por los domicilios REALES que existan —fiscal,
@@ -1344,6 +1404,41 @@ export class CustomerFiscalIdentityValidator {
     }
 
     return findings;
+  }
+
+  /**
+   * ¿Esta candidata (otra dirección del cliente, o la de la tienda emisora)
+   * alcanzaría para que la cascada de respaldo del emisor
+   * (`acquirer-address.resolver.ts`) la use? Réplica LIGERA del mismo criterio
+   * que `checkAddress` ya aplica a la dirección declarada — país ISO válido y,
+   * para Colombia, municipio DANE de 5 dígitos.
+   *
+   * No se llama a `UblCommonBuilder.canEmitAddress` (el criterio real que usa
+   * el emisor): ese import cruzaría este validador, que es agnóstico de
+   * proveedor, con el proveedor concreto `dian-direct`. La réplica puede
+   * divergir del emisor en el margen (un código con forma válida que el
+   * catálogo DANE real no reconoce), pero el error que importa evitar es el
+   * bloqueante silencioso — un `ADDRESS_REQUIRED` que no avisa cuando la
+   * cascada completa (incluida la tienda) tampoco tiene nada que ofrecer — y
+   * eso sí lo cubre.
+   */
+  private isCascadeRescueUsable(
+    candidate: CustomerFiscalAddressInput | null | undefined,
+  ): boolean {
+    if (!candidate) return false;
+
+    const country = (candidate.country_code ?? '').trim().toUpperCase();
+    if (!country || !COUNTRY_CODE_PATTERN.test(country)) return false;
+
+    const has_line = Boolean((candidate.address_line ?? '').trim());
+    const has_city_name = Boolean((candidate.city_name ?? '').trim());
+    const city_code = (candidate.city_code ?? '').trim();
+
+    if (country !== COLOMBIA_COUNTRY_CODE) {
+      return has_line || has_city_name || Boolean(city_code);
+    }
+
+    return DANE_MUNICIPALITY_PATTERN.test(city_code);
   }
 
   // ---------------------------------------------------------------------------

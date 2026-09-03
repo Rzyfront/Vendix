@@ -537,4 +537,68 @@ describe('UblStructureValidator', () => {
       ]);
     });
   });
+
+  describe('overrides del perfil DIAN — receptor', () => {
+    /**
+     * `cac:AccountingCustomerParty` con el `cbc:AdditionalAccountID` que se
+     * arme en cada caso. El resto del `Invoice` se deja mínimo, como en
+     * `describe('el validador detecta lo que debe detectar')`: sólo importan
+     * las violaciones del receptor, no que el documento esté completo.
+     */
+    function invoiceWithCustomerAdditionalAccountIds(values: string[]): string {
+      const ids = values
+        .map((value) => `    <cbc:AdditionalAccountID>${value}</cbc:AdditionalAccountID>`)
+        .join('\n');
+      return `<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2">
+  <cbc:ID>FV1</cbc:ID>
+  <cbc:IssueDate>2026-08-14</cbc:IssueDate>
+  <cac:AccountingSupplierParty/>
+  <cac:AccountingCustomerParty>
+${ids}
+  </cac:AccountingCustomerParty>
+  <cac:LegalMonetaryTotal/>
+  <cac:InvoiceLine/>
+</Invoice>`;
+    }
+
+    it('dos cbc:AdditionalAccountID en el receptor — el caso rechazado por la DIAN (FVJL7/FVJL8)', () => {
+      // El XML transmitido llevaba exactamente esto: '1' (tipo de persona) y
+      // '3' (marcador de agente de retención que nunca debió emitirse aquí).
+      // El XSD genérico admite 0..*, así que sin el override esto pasaba.
+      const xml = invoiceWithCustomerAdditionalAccountIds(['1', '3']);
+      const result = UblStructureValidator.validate(xml);
+
+      expect(result.valid).toBe(false);
+      expect(
+        result.violations.some(
+          (v) =>
+            v.kind === 'too-many' &&
+            v.path.includes('cac:AccountingCustomerParty'),
+        ),
+      ).toBe(true);
+    });
+
+    it('un cbc:AdditionalAccountID con valor fuera de la lista DIAN (\'3\')', () => {
+      const xml = invoiceWithCustomerAdditionalAccountIds(['3']);
+      const result = UblStructureValidator.validate(xml);
+
+      expect(result.valid).toBe(false);
+      expect(result.violations.some((v) => v.kind === 'bad-value')).toBe(true);
+    });
+
+    it('un solo cbc:AdditionalAccountID con valor \'1\' — receptor correcto', () => {
+      const xml = invoiceWithCustomerAdditionalAccountIds(['1']);
+      const result = UblStructureValidator.validate(xml);
+
+      // El fixture es parcial (no completa el documento), así que puede haber
+      // otras violaciones ajenas al receptor; lo único que se afirma es que
+      // `cbc:AdditionalAccountID` en sí no produce ninguna.
+      expect(
+        result.violations.some((v) => v.path.includes('cbc:AdditionalAccountID')),
+      ).toBe(false);
+    });
+  });
 });

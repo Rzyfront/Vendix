@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { EMPTY, Observable } from 'rxjs';
 import { catchError, filter, map } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { CreateInvoiceDto } from '../interfaces/invoice.interface';
 
 /**
  * Severidad de un hallazgo. Espejo LITERAL de `FiscalIdentitySeverity` y
@@ -82,6 +83,29 @@ export interface InvoiceEmitReadinessFiscalDocument {
 }
 
 /**
+ * NÚCLEO DEL VEREDICTO — lo que comparten el documento YA PERSISTIDO
+ * (`GET /:id/emit-readiness`, ver {@link InvoiceEmitReadiness}) y el BORRADOR
+ * que todavía no existe (`POST /validate-draft`, ver
+ * {@link DraftEmitReadinessReport}).
+ *
+ * `emittable` NO es el de identidad: es el AND de las DOS puertas (identidad ∧
+ * prevalidación fiscal). Es el único que se debe consultar para decidir si el
+ * documento puede emitirse. `fiscal_document` es `null` cuando el
+ * `invoice_type` no se emite a la DIAN — `null` NO significa "está mal":
+ * significa que no hay nada que prevalidar.
+ */
+export interface EmitReadinessVerdict {
+  emittable: boolean;
+  findings: InvoiceEmitReadinessFinding[];
+  blockers: InvoiceEmitReadinessFinding[];
+  warnings: InvoiceEmitReadinessFinding[];
+  has_items: boolean;
+  /** El informe de identidad SIN aplanar. */
+  identity: InvoiceEmitReadinessIdentity;
+  fiscal_document: InvoiceEmitReadinessFiscalDocument | null;
+}
+
+/**
  * Respuesta de `GET /store/invoicing/:id/emit-readiness`.
  *
  * OJO CON LA FORMA: los campos de identidad viajan APLANADOS en la raíz
@@ -89,23 +113,29 @@ export interface InvoiceEmitReadinessFiscalDocument {
  * dentro de `identity`. Leer `identity` es lo inequívoco; la raíz existe para
  * los consumidores viejos.
  *
- * `emittable` de la raíz NO es el de identidad: es el AND de las DOS puertas
- * (identidad ∧ prevalidación fiscal). Es el único que se debe consultar para
- * decidir si el documento puede emitirse.
- *
- * `fiscal_document` es `null` cuando el `invoice_type` no se emite a la DIAN.
- * `null` NO significa "está mal": significa que no hay nada que prevalidar.
+ * `invoice_id` / `invoice_number` / `status` sólo tienen sentido sobre un
+ * documento que YA se escribió — por eso NO viven en {@link EmitReadinessVerdict}
+ * y {@link DraftEmitReadinessReport} no los declara.
  */
-export interface InvoiceEmitReadiness extends InvoiceEmitReadinessIdentity {
-  /** El informe de identidad SIN aplanar. */
-  identity: InvoiceEmitReadinessIdentity;
-  /** `null` cuando el tipo de documento no viaja a la DIAN. */
-  fiscal_document: InvoiceEmitReadinessFiscalDocument | null;
+export interface InvoiceEmitReadiness
+  extends InvoiceEmitReadinessIdentity,
+    EmitReadinessVerdict {
   invoice_id: number;
   invoice_number: string;
   status: string;
-  has_items: boolean;
 }
+
+/**
+ * Respuesta EXACTA de `POST /store/invoicing/validate-draft`.
+ *
+ * Mismo veredicto que `InvoiceEmitReadiness`, SIN `invoice_id`,
+ * `invoice_number` ni `status`: el documento que se estaría validando todavía
+ * NO EXISTE. Inventarlos con `0` / `''` haría que la pantalla ofreciera
+ * acciones (transiciones, botón de descarte) sobre una factura que nunca se
+ * escribió. `toEmitRequirements()` y el modal de requisitos consumen esta
+ * forma sin cambios porque sólo leen `identity` y `fiscal_document`.
+ */
+export type DraftEmitReadinessReport = EmitReadinessVerdict;
 
 /**
  * LA PUERTA DE EMISIÓN, EN SÓLO LECTURA.
@@ -120,9 +150,13 @@ export interface InvoiceEmitReadiness extends InvoiceEmitReadinessIdentity {
  * Meterla en el store obligaría a inventar acciones, reducer y selectores para
  * un dato que se lee una vez y se tira.
  *
- * NINGÚN MÉTODO LANZA. Es una puerta ASESORA: si el backend no contesta, la
- * pantalla tiene que comportarse exactamente como antes de que esta puerta
- * existiera, nunca peor.
+ * `check()` NUNCA LANZA. Es una puerta ASESORA que corre sola tras crear el
+ * documento: si el backend no contesta, la pantalla tiene que comportarse
+ * exactamente como antes de que esta puerta existiera, nunca peor.
+ *
+ * `validateDraft()` es la excepción a esa regla, y a propósito: responde al
+ * botón «Validar», un clic explícito del usuario ANTES de crear nada. Ahí sí
+ * propaga el error — ver su doc individual.
  */
 @Injectable({
   providedIn: 'root',
@@ -188,6 +222,64 @@ export class InvoiceEmitReadinessService {
       // `emittable` de la raíz es el AND de las dos puertas y NO se puede pisar
       // con el de identidad, que sólo juzga al adquiriente.
       emittable: data.emittable,
+      identity,
+      fiscal_document: this.normalizeFiscalDocument(data.fiscal_document),
+    };
+  }
+
+  /**
+   * QUÉ LE FALTARÍA AL BORRADOR SI SE EMITIERA AHORA — sin crearlo.
+   *
+   * `POST /store/invoicing/validate-draft` corre los MISMOS validadores que
+   * juzgan un documento ya persistido (`check()` arriba), pero sobre el
+   * payload que el formulario armaría, antes de que exista una factura y con
+   * ella un consecutivo gastado. Cierra el hueco que dejaba `check()`: esa
+   * puerta sólo se podía consultar DESPUÉS de crear el documento, cuando un
+   * rechazo de la DIAN ya quemó el número autorizado.
+   *
+   * A DIFERENCIA DE `check()`, este método SÍ propaga el error de red o de
+   * servidor: «Validar» es un clic explícito del usuario, y tragárselo en
+   * silencio dejaría el botón sin respuesta. Quien lo consuma decide qué
+   * avisar (por ejemplo, que el endpoint todavía no existe en este entorno).
+   */
+  validateDraft(dto: CreateInvoiceDto): Observable<DraftEmitReadinessReport> {
+    return this.http.post<unknown>(`${this.apiUrl}/validate-draft`, dto).pipe(
+      map((response) => this.unwrapDraft(response)),
+      // Mismo predicado de tipo que `check()`: un cuerpo irreconocible no se
+      // convierte en un veredicto inventado, así que tampoco emite acá.
+      filter(
+        (readiness): readiness is DraftEmitReadinessReport =>
+          readiness !== null,
+      ),
+    );
+  }
+
+  /**
+   * Igual que `unwrap()`, pero SIN pisar el resultado con campos de una
+   * factura persistida. El cuerpo de `validate-draft` puede o no traer
+   * `invoice_id`/`invoice_number`/`status` según lo que decida el backend —
+   * este envoltorio los IGNORA a propósito en vez de propagarlos, porque
+   * `DraftEmitReadinessReport` no los declara y un consumidor que los leyera
+   * estaría afirmando la existencia de un documento que no se escribió.
+   */
+  private unwrapDraft(response: unknown): DraftEmitReadinessReport | null {
+    const envelope = response as { data?: unknown } | null;
+    const data = (envelope?.data ?? response) as Partial<EmitReadinessVerdict>;
+    if (!data || typeof data !== 'object') {
+      return null;
+    }
+    if (typeof data.emittable !== 'boolean') {
+      return null;
+    }
+
+    const identity = this.normalizeIdentity(data.identity);
+
+    return {
+      emittable: data.emittable,
+      findings: asArray(data.findings),
+      blockers: asArray(data.blockers),
+      warnings: asArray(data.warnings),
+      has_items: data.has_items === true,
       identity,
       fiscal_document: this.normalizeFiscalDocument(data.fiscal_document),
     };

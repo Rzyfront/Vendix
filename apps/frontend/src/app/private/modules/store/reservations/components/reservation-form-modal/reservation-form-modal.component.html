@@ -3,6 +3,7 @@
   (isOpenChange)="$event ? null : onClose()"
   (opened)="onOpen()"
   (cancel)="onClose()"
+  [dialog]="true"
   title="Nueva Reserva"
   size="md"
 >
@@ -341,14 +342,14 @@
                        or `prevStep()` once to go to step 2 (Proveedor).
                      Use `<app-button variant="outline" size="sm"
                      (clicked)="prevStep()">…</app-button>` for the CTA.
-                     Match the existing tone (informal Argentinian "vos",
-                     "probá", "agendamiento") used elsewhere in this file. -->
+                     Match the existing tone: neutral Spanish, "tú" form ("prueba",
+                     "elige"), never Rioplatense "vos". -->
                 <app-icon name="calendar-x" [size]="20" class="text-gray-400"></app-icon>
                 <p class="text-sm text-gray-700">
                   No hay horarios disponibles este día.
                 </p>
                 <p class="text-xs text-gray-500">
-                  Probá volver al paso Servicio y elegir otra fecha, o contactá
+                  Prueba volver al paso Servicio y elegir otra fecha, o contacta
                   al proveedor para confirmar disponibilidad.
                 </p>
               </div>

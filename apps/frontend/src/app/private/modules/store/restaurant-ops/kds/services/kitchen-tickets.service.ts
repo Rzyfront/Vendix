@@ -4,6 +4,11 @@ import { Observable, throwError } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
 import {
+  parseApiError,
+  withApiErrorReference,
+} from '../../../../../../../app/core/utils/parse-api-error';
+import { DEFAULT_ERROR_MESSAGE } from '../../../../../../../app/core/utils/error-messages';
+import {
   KitchenTicket,
   KitchenTicketStatus,
   KdsSnapshotResponse,
@@ -18,6 +23,17 @@ export interface FireOrderItemsResult {
   ticket?: KitchenTicket;
 }
 
+/** Result of `POST /store/kitchen-fire/resend` (QUI-762). */
+export interface ResendOrderItemsResult {
+  ticketId?: number;
+  ticketIds?: number[];
+  firedItemIds?: number[];
+  cancelledTicketIds?: number[];
+}
+
+/** Motivo declarado al reenviar un plato a cocina. QUI-762. */
+export type ResendReason = 'lost_command' | 'remake_dish';
+
 /**
  * Structured error thrown by ticket mutations. Unlike the snapshot/fire
  * paths (which throw a plain string), mutations preserve the backend
@@ -29,6 +45,15 @@ export interface KitchenMutationError {
   code: string | null;
   message: string;
   details?: any;
+  /**
+   * CP-POLLO-ARABE-727 F.1 — A.8 parcial. Se propaga SIN hornear en
+   * `message`: `kds-board-page`/`table-session-page` ya leen este campo con
+   * `readApiErrorRequestId(err)` y lo añaden ellos mismos con
+   * `withApiErrorReference` al armar el toast (mismo patrón que usan para el
+   * `error_code` estructurado). Hornearlo aquí también duplicaría la
+   * referencia en ese camino.
+   */
+  request_id?: string;
 }
 
 interface ApiResponse<T> {
@@ -163,11 +188,43 @@ export class KitchenTicketsService {
     exclusions?: Array<{
       order_item_id: number;
       component_product_ids: number[];
+      applies_to_units?: number;
+      notes?: string;
+    }>;
+    item_notes?: Array<{
+      order_item_id: number;
+      notes: string;
     }>;
   }): Observable<FireOrderItemsResult> {
     return this.http
       .post<ApiResponse<FireOrderItemsResult>>(
         `${this.apiUrl}${this.basePath}`,
+        payload,
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /**
+   * QUI-762 — reenviar un plato ya enviado a cocina, declarando el motivo.
+   *
+   * El backend OBLIGA a `reason` (`lost_command` o `remake_dish`); sin valor
+   * o con uno no enumerado, responde 400 con `SYS_VALIDATION_001` y el detalle
+   * de los valores aceptados. El 422 `KITCHEN_FIRE_NOT_RESENDABLE` indica que
+   * el ítem no está en condición de reenviarse — el modal lo muestra tal cual
+   * (regla 4 del spec). Esta capa no reescribe mensajes: deja pasar el
+   * `parseApiError` con la `userMessage` curada por el backend.
+   */
+  resendOrderItems(payload: {
+    order_id: number;
+    order_item_ids: number[];
+    reason: ResendReason;
+  }): Observable<ResendOrderItemsResult> {
+    return this.http
+      .post<ApiResponse<ResendOrderItemsResult>>(
+        `${this.apiUrl}${this.basePath}/resend`,
         payload,
       )
       .pipe(
@@ -211,36 +268,45 @@ export class KitchenTicketsService {
   // ─── Error mapping ───────────────────────────────────────────────────
 
   private deriveErrorMessage(error: any): string {
-    let message = 'Error al procesar la solicitud';
-    const apiMessage = error?.error?.message;
-    if (apiMessage) {
-      message =
-        typeof apiMessage === 'string'
-          ? apiMessage
-          : Array.isArray(apiMessage)
-            ? apiMessage.join(', ')
-            : message;
-    } else if (error?.status === 401) {
-      message = 'No autorizado';
-    } else if (error?.status === 403) {
-      message = 'No tienes permisos suficientes';
-    } else if (error?.status === 404) {
-      message = 'Ticket de cocina no encontrado';
-    } else if (error?.status === 409) {
-      message =
-        typeof error?.error?.message === 'string'
-          ? error.error.message
-          : 'Conflicto: el ticket ya cambió de estado';
-    } else if (typeof error?.status === 'number' && error.status >= 500) {
-      message = 'Error del servidor. Inténtalo más tarde';
+    // CP-POLLO-ARABE-727 F.1 / C.2 — migrado a `parseApiError` (aduana única
+    // del repo). El orden anterior leía `error?.error?.message` ANTES de la
+    // rama 403: un 403 del guard (`AUTH_PERM_001`, devMessage 'Access denied',
+    // 13 chars < MIN_PRESENTABLE_LENGTH) pasaba tal cual al toast del cocinero
+    // en inglés. parseApiError lo descarta y cae a
+    // `ERROR_MESSAGES[AUTH_PERM_001]`. La red por status de abajo solo actúa
+    // cuando parseApiError cayó al DEFAULT (para no degradar 404/409/5xx).
+    const parsed = parseApiError(error);
+    if (parsed.userMessage !== DEFAULT_ERROR_MESSAGE) {
+      return parsed.userMessage;
     }
-    return message;
+    switch (error?.status) {
+      case 401:
+        return 'No autorizado';
+      case 403:
+        return 'No tienes permisos suficientes';
+      case 404:
+        return 'Ticket de cocina no encontrado';
+      case 409:
+        return 'Conflicto: el ticket ya cambió de estado';
+      default:
+        return typeof error?.status === 'number' && error.status >= 500
+          ? 'Error del servidor. Inténtalo más tarde'
+          : DEFAULT_ERROR_MESSAGE;
+    }
   }
 
   private handleError = (error: any): Observable<never> => {
     // eslint-disable-next-line no-console
     console.error('KitchenTicketsService Error:', error);
-    return throwError(() => this.deriveErrorMessage(error));
+    // CP-POLLO-ARABE-727 F.1 — A.8 parcial. Este camino normaliza el error a
+    // un string plano (snapshot/preview/fire), así que — igual que
+    // `TablesService.handleError` — la referencia de soporte se hornea aquí:
+    // no sobrevive ningún objeto crudo hasta el componente donde
+    // `readApiErrorRequestId` pudiera leerla después.
+    const message = this.deriveErrorMessage(error);
+    return throwError(() =>
+      withApiErrorReference(message, parseApiError(error).request_id),
+    );
   };
 
   /**
@@ -257,6 +323,11 @@ export class KitchenTicketsService {
       code: error?.error?.error_code ?? error?.error?.code ?? null,
       message: this.deriveErrorMessage(error),
       details: error?.error?.details ?? null,
+      // CP-POLLO-ARABE-727 F.1 — A.8 parcial. Campo crudo, sin hornear en
+      // `message`: `onMutationError` (kds-board-page) y
+      // `onKitchenMutationError` (table-session-page) lo leen con
+      // `readApiErrorRequestId(err)` y arman la referencia ellos mismos.
+      request_id: parseApiError(error).request_id,
     };
     return throwError(() => mutationError);
   };

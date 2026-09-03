@@ -282,7 +282,7 @@ export class VexiVoicePipelineService {
       this.state.set('error');
       this.errorMessage.set(
         (error as any)?.error?.message ||
-          'No pude entender el audio. Probá de nuevo.',
+          'No pude entender el audio. Prueba de nuevo.',
       );
       return null;
     }

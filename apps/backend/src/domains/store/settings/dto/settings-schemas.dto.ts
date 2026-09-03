@@ -16,6 +16,7 @@ import {
   IsNotEmpty,
   MaxLength,
   ValidateIf,
+  Equals,
   ArrayMinSize,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
@@ -411,6 +412,32 @@ export class PosSettingsDto {
   @IsBoolean()
   anonymous_sales_as_default?: boolean;
 
+  /**
+   * QUI-737 (B.4) — Alias de venta rápida (opt-in, default false).
+   */
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
+  @IsBoolean()
+  allow_alias_sales?: boolean;
+
+  /**
+   * QUI-737 (B.4) — Alias como default al abrir el POS. Dependencia DB-10 del
+   * plan: solo tiene sentido si {@link allow_alias_sales} es true. Regla
+   * cruzada: cuando `allow_alias_sales === false`, el campo debe ser `false`
+   * (o estar ausente) — guardar `{allow:false, as_default:true}` se rechaza.
+   *
+   * El `@ValidateIf` gatea a `@IsOptional()+@Equals(false)`: ausente o `false`
+   * pasan; `true` con alias desvinculado falla. El gemelo legacy
+   * `anonymous_sales_as_default` NO tiene esta regla (deuda registrada).
+   */
+  @ValidateIf((o) => o.allow_alias_sales === false)
+  @IsOptional()
+  @Equals(false, {
+    message:
+      'alias_sales_as_default solo puede ser true cuando allow_alias_sales es true',
+  })
+  alias_sales_as_default?: boolean;
+
   @ApiProperty({
     example: {
       monday: { open: '09:00', close: '19:00' },
@@ -768,6 +795,53 @@ export class ReceiptsSettingsDto {
   @IsOptional()
   @IsBoolean()
   print_dispatch_ticket_auto_with_pos?: boolean;
+
+  /**
+   * ADR-7: Si true y print_dispatch_ticket_enabled=true, al confirmar una
+   * venta postventa se auto-imprime el tiquete de despacho (dispatch_ticket)
+   * junto con el documento de venta. Default false (opt-in por admin).
+   */
+  @ApiProperty({
+    example: false,
+    required: false,
+    description:
+      'Si true, al confirmar una venta postventa se auto-imprime el tiquete ' +
+      'de despacho junto con el documento de venta. Default false (opt-in ' +
+      'por admin).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  print_dispatch_ticket_auto_on_postventa?: boolean;
+
+  /**
+   * Decisión del usuario, 2026-08-31: habilita el tiquete de despacho
+   * como tiquete de reclamo en ventas de MOSTRADOR (`direct_delivery`)
+   * y PARA LLEVAR (`pickup`). Es una enmienda al ADR-6 — el guard
+   * original «en mostrador no hay envío que despachar» sigue siendo
+   * el camino por defecto; este interruptor lo reemplaza solo cuando
+   * el admin lo activa explícitamente.
+   *
+   * `dine_in` (comensal come en el local, ya hay comanda de cocina)
+   * y `other` (no definido) siguen en `false` aunque el interruptor
+   * esté prendido — ese es el borde que no se puede invertir.
+   *
+   * Plano bajo `receipts` raíz (NO bajo `printing.dispatch_ticket`)
+   * porque `KNOWN_SECTIONS` descarta secciones desconocidas
+   * respondiendo 200 (`settings.service.ts:49`); si te equivocás de
+   * nivel, el ajuste parece guardado y nunca persiste. ADR-7.
+   */
+  @ApiProperty({
+    example: false,
+    required: false,
+    description:
+      'Si true y print_dispatch_ticket_enabled=true, el tiquete de despacho ' +
+      'se imprime también en ventas de mostrador (direct_delivery) y para ' +
+      'llevar (pickup). El cliente paga en caja, espera a que le preparen ' +
+      'la comida y reclama con el tiquete. Default false (opt-in por admin).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  print_dispatch_ticket_on_counter?: boolean;
 }
 
 export class AppSettingsDto {

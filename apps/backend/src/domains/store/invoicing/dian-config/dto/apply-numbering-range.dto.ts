@@ -2,7 +2,9 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsIn,
   IsNotEmpty,
+  IsOptional,
   IsString,
   MaxLength,
   ValidateNested,
@@ -81,6 +83,28 @@ export class ApplyNumberingRangeItemDto {
  * sobra y acota el trabajo por petición.
  */
 export class ApplyNumberingRangesDto {
+  /**
+   * A QUÉ CATÁLOGO DE LA DIAN se le piden los valores que se van a escribir.
+   *
+   * Misma validación y mismo default que en `QueryNumberingRangeDto`, y por la
+   * misma razón: la aplicación vuelve a consultar `GetNumberingRange` para tomar
+   * de ahí la ClTec, así que si la consulta puede mirar el catálogo de
+   * producción y la aplicación no, lo que se ve queda fuera del alcance de lo
+   * que se puede traer — que es el ciclo cerrado que este parámetro rompe.
+   *
+   * NO habilita nada. La fila queda escrita en `invoice_resolutions`, pero
+   * `InvoiceEmissionGateService.assertElectronicEmissionLive` sigue exigiendo
+   * `environment === 'production' && enablement_status === 'enabled'` sobre la
+   * CONFIGURACIÓN para cualquier emisión electrónica: una resolución de
+   * producción aplicada mientras la configuración sigue en `test` está escrita y
+   * es inconsumible. Por eso este cambio no necesita un estado intermedio.
+   *
+   * Ausente ⇒ el de la configuración, igual que antes.
+   */
+  @IsOptional()
+  @IsIn(['test', 'production'])
+  environment?: 'test' | 'production';
+
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(50)

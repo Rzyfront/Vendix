@@ -34,6 +34,7 @@ import { UserRole } from '../../../auth/enums/user-role.enum';
 import { CreateDianConfigDto } from './dto/create-dian-config.dto';
 import { UpdateDianConfigDto } from './dto/update-dian-config.dto';
 import { ApplyNumberingRangesDto } from './dto/apply-numbering-range.dto';
+import { QueryNumberingRangeDto } from './dto/query-numbering-range.dto';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { ManualCertificateIssuerAdapter } from './certificates/manual-certificate-issuer.adapter';
 import { buildDianCertificateS3Key } from './certificates/certificate-s3-key.util';
@@ -297,11 +298,29 @@ export class DianConfigController {
    * contra la almacenada ocurre en el servidor y de ella sólo sale
    * `technical_key_matches`. Es el mismo criterio que ya aplican
    * `RESOLUTION_PUBLIC_SELECT` y el prefill del asistente fiscal.
+   *
+   * ── `?environment=` NO CAMBIA EL PERMISO ───────────────────────────────────
+   *
+   * Sigue siendo `invoicing:read`, y no porque se haya pasado por alto: el
+   * ambiente no altera QUÉ se lee ni de quién —la configuración de la ruta, sus
+   * resoluciones, su NIT— sino únicamente a qué catálogo de la DIAN se dirige la
+   * pregunta. No hay dato de otro tenant al alcance, no se escribe nada y no se
+   * promueve nada. Exigir `:write` para consultar el catálogo de producción
+   * habría reproducido dentro del permiso el mismo ciclo cerrado que el
+   * parámetro viene a romper: quien puede ver no podría diagnosticar.
+   *
+   * Ausente ⇒ el ambiente de la configuración, que es el comportamiento previo.
    */
   @Get(':id/numbering-ranges')
   @Permissions('invoicing:read')
-  async getNumberingRanges(@Param('id', ParseIntPipe) id: number) {
-    const result = await this.dian_numbering_range_service.queryRanges(id);
+  async getNumberingRanges(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: QueryNumberingRangeDto,
+  ) {
+    const result = await this.dian_numbering_range_service.queryRanges(
+      id,
+      query.environment,
+    );
     return this.response_service.success(result);
   }
 
@@ -326,6 +345,14 @@ export class DianConfigController {
    * Sin `try/catch`: lo que sí invalida el lote entero —configuración
    * inexistente, la DIAN sin responder, cuerpo mal formado— sube al
    * `AllExceptionsFilter`, que emite el estado y el `error_code` reales.
+   *
+   * `environment` en el cuerpo tampoco cambia el permiso: sigue siendo
+   * `invoicing:write` porque sigue escribiendo exactamente lo mismo —las
+   * resoluciones de ESTA configuración— y sólo cambia a qué catálogo de la DIAN
+   * se le piden los valores. La fila resultante no habilita nada por sí sola:
+   * `assertElectronicEmissionLive` exige `environment === 'production' &&
+   * enablement_status === 'enabled'` sobre la CONFIGURACIÓN antes de cualquier
+   * emisión, y esta ruta no toca ninguna de esas dos columnas.
    */
   @Post(':id/numbering-ranges/apply')
   @Permissions('invoicing:write')

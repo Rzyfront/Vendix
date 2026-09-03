@@ -1,8 +1,8 @@
 import { Component, inject } from '@angular/core';
+import { RouterLink } from '@angular/router';
 
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { PosSettingsForm } from '../components/pos-settings-form/pos-settings-form.component';
-import { PrintFormatsSettingsForm } from '../components/print-formats-settings-form/print-formats-settings-form.component';
 import { ReceiptsSettingsForm } from '../components/receipts-settings-form/receipts-settings-form.component';
 import { PromotionsSettingsForm } from '../components/promotions-settings-form/promotions-settings-form.component';
 import { SettingsSectionComponent } from '../components/settings-section/settings-section.component';
@@ -18,11 +18,11 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
   selector: 'app-sales-settings-page',
   standalone: true,
   imports: [
+    RouterLink,
     IconComponent,
     SettingsSectionComponent,
     PosSettingsForm,
     ReceiptsSettingsForm,
-    PrintFormatsSettingsForm,
     PromotionsSettingsForm,
   ],
   template: `
@@ -90,19 +90,28 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
           (posAutoPrintChange)="store.onPosAutoPrintChange($event)" />
       </app-settings-section>
 
-      <!-- Formatos de Impresión (QUI-641) — una fila por documento imprimible.
-           Se persiste bajo receipts.printing, por tienda, sin herencia.
-           Sin acentos graves acá: este template es un literal de plantilla y un
-           acento grave dentro lo cierra a mitad de camino (TS1005). -->
+      <!-- Formatos de Impresión — Centralizados en el Hub -->
       <app-settings-section
         anchorId="section-printing"
         icon="printer"
         iconTone="indigo"
         title="Formatos de Impresión"
-        hint="Tamaño y número de copias de cada documento; no se hereda de la organización.">
-        <app-print-formats-settings-form
-          [receipts]="store.receiptsSettings()"
-          (printingChange)="store.onPrintingChange($event)" />
+        hint="Diseño, márgenes, papel y auto-impresión de los 16 tipos de documentos de la tienda.">
+        <div class="p-4 rounded-xl bg-surface-secondary border border-border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div class="space-y-1">
+            <p class="text-xs font-semibold text-text-primary">Hub de Formatos Centralizado</p>
+            <p class="text-xs text-text-secondary">
+              Personaliza el diseño visual, papel térmico/hojas, copias y flags de auto-impresión para tiquetes POS, facturas electrónicas y guías desde un solo lugar.
+            </p>
+          </div>
+          <a
+            routerLink="/admin/settings/print-formats"
+            class="px-4 py-2 rounded-xl bg-primary-600 hover:bg-primary-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition whitespace-nowrap shadow-sm"
+          >
+            <app-icon name="printer" [size]="14"></app-icon>
+            Ir al Hub de Formatos
+          </a>
+        </div>
       </app-settings-section>
     </div>
   `,

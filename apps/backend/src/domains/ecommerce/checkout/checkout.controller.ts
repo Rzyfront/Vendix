@@ -20,6 +20,7 @@ import { WhatsappCheckoutDto } from './dto/whatsapp-checkout.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { StoreAvailabilityGuard } from './guards/store-availability.guard';
 import { OptionalAuth } from '@common/decorators/optional-auth.decorator';
+import { RequestContextService } from '@common/context/request-context.service';
 
 @Controller('ecommerce/checkout')
 @UseGuards(JwtAuthGuard)
@@ -53,6 +54,39 @@ export class CheckoutController {
   }
 
   /**
+   * QUI-728 — devuelve las cuentas bancarias activas que la tienda del
+   * contexto puede mostrar al comprador para el método `methodId`. Endpoint
+   * público-friendly (`@OptionalAuth()`) para que el checkout guest pueda
+   * pedirlo sin sesión; el contexto de tienda lo resuelve
+   * `DomainResolverMiddleware`.
+   *
+   * NO envuelve el handler en try/catch: el patrón del módulo
+   * (`BankAccountsController` ya migrado por QUI-728) confirma que
+   * `responseService.error` retorna 201+success:false y rompe el `catchError`
+   * del frontend. Las excepciones suben al `AllExceptionsFilter` global.
+   */
+  @Get('payment-methods/:methodId/bank-accounts')
+  @OptionalAuth()
+  async getBankAccountsForPaymentMethod(
+    @Param('methodId', ParseIntPipe) methodId: number,
+  ) {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      // Sin contexto de tienda el `DomainResolverMiddleware` ya habría
+      // rechazado la petición aguas arriba; este 400 es por defensa en
+      // profundidad si alguien llama al endpoint directamente.
+      throw new BadRequestException(
+        'Se requiere contexto de tienda para listar cuentas bancarias',
+      );
+    }
+    const data = await this.checkout_service.getBankAccountsForMethod(
+      methodId,
+      storeId,
+    );
+    return { success: true, data };
+  }
+
+  /**
    * Checkout endpoint. Accepts `multipart/form-data` so the customer can
    * optionally attach a payment receipt (`file`) when paying with
    * bank_transfer / voucher. The actual CheckoutDto travels as a JSON string
@@ -79,6 +113,32 @@ export class CheckoutController {
     const dto = await this.parseCheckoutBody(body);
     // store_id y user_id se resuelven automáticamente
     const data = await this.checkout_service.checkout(dto, file);
+    return { success: true, data };
+  }
+
+  /**
+   * QUI-728 — devuelve una URL prefirmada (TTL 5 min) al comprobante de
+   * transferencia/voucher del comprador autenticado. El control de acceso
+   * está delegado al scope de `EcommercePrismaService.payments`: la query
+   * aplica `customer_id = req.user.id` automáticamente, y si el `id` no
+   * pertenece al comprador el `findFirst` devuelve null → 404 indistinguible
+   * de «no existe» (mismo shape que la versión admin en
+   * `OrdersController.getPaymentReceiptUrl`).
+   *
+   * Distinto del endpoint admin en dos puntos:
+   *  - Auth: `JwtAuthGuard` sin `@OptionalAuth()` — el comprobante requiere
+   *    comprador identificado. Un guest no subió comprobante (no llega a
+   *    este pago porque la subida exige user_id en el flujo de upload).
+   *  - Path: `/ecommerce/payments/:paymentId/receipt-url` (no
+   *    `/ecommerce/orders/:id/payments/:paymentId/...`) — el comprador no
+   *    conoce su `order_id` y no debería tener que navegarlo.
+   */
+  @Get('payments/:paymentId/receipt-url')
+  @UseGuards(JwtAuthGuard)
+  async getPaymentReceiptUrl(
+    @Param('paymentId', ParseIntPipe) paymentId: number,
+  ) {
+    const data = await this.checkout_service.getPaymentReceiptUrl(paymentId);
     return { success: true, data };
   }
 

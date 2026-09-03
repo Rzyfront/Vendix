@@ -82,7 +82,7 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
             Tamaño Máximo (mm)
           </label>
           <span class="text-[10px] font-mono text-primary-500 font-bold">
-            {{ logo().sizeMm ?? 20 }} mm
+            {{ logo().size_mm ?? 20 }} mm
           </span>
         </div>
         <input
@@ -90,7 +90,7 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
           min="5"
           max="80"
           step="1"
-          [ngModel]="logo().sizeMm ?? 20"
+          [ngModel]="logo().size_mm ?? 20"
           (ngModelChange)="updateSize($event)"
           class="w-full accent-primary-500 cursor-pointer"
         />
@@ -182,8 +182,8 @@ export class PrintLogoPanelComponent {
   }
 
   updateSize(value: number): void {
-    const sizeMm = Math.max(5, Math.min(80, Math.round(Number(value) || 20)));
-    this.withLogo({ sizeMm });
+    const size_mm = Math.max(5, Math.min(80, Math.round(Number(value) || 20)));
+    this.withLogo({ size_mm });
   }
 
   updateOpacity(value: number): void {

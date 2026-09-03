@@ -1,4 +1,3 @@
-import { DatePipe } from '@angular/common';
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
@@ -9,10 +8,8 @@ import {
 } from '@angular/forms';
 
 import {
-  BadgeComponent,
   ButtonComponent,
   CardComponent,
-  EmptyStateComponent,
   IconComponent,
   ItemListCardConfig,
   PaginationComponent,
@@ -60,11 +57,8 @@ interface VendorSupportFiscalFormControls {
   standalone: true,
   imports: [
     ReactiveFormsModule,
-    DatePipe,
-    BadgeComponent,
     ButtonComponent,
     CardComponent,
-    EmptyStateComponent,
     IconComponent,
     PaginationComponent,
     ResponsiveDataViewComponent,

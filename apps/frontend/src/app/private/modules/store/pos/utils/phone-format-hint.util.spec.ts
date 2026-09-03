@@ -79,7 +79,7 @@ describe('computePhoneFormatHint', () => {
       // any other leading digits are part of a prefix or a typo.
       const hint = computePhoneFormatHint('+57 300 123 4567');
       expect(hint?.tone).toBe('warn');
-      expect(hint?.text).toContain('Quitá el prefijo de país');
+      expect(hint?.text).toContain('Quita el prefijo de país');
     });
 
     it('exposes PHONE_EXPECTED_LENGTH as 10', () => {
@@ -104,7 +104,7 @@ describe('computePhoneFormatHint', () => {
     it('hints to remove country prefix when over-length', () => {
       const hint = computePhoneFormatHint('+573001234567');
       expect(hint?.tone).toBe('warn');
-      expect(hint?.text).toContain('Quitá el prefijo de país');
+      expect(hint?.text).toContain('Quita el prefijo de país');
     });
   });
 

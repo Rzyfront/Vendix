@@ -246,16 +246,19 @@ export interface FiscalDocumentValidationInput {
   /**
    * Instante en que se va a FIRMAR el documento — `ds:SigningTime`.
    *
-   * OPCIONAL Y DORMIDO A PROPÓSITO. `FAD09e` exige que `cbc:IssueDate` sea igual
-   * a la fecha de firma, y Vendix puede violarla sin que nada lo note: un
-   * borrador creado el viernes y transmitido el lunes declara la fecha del
-   * viernes y se firma el lunes. Pero quien construye la entrada hoy
-   * (`InvoiceFlowService.buildFiscalDocumentInput`) todavía no aporta este dato,
-   * y **inventarlo aquí con `new Date()` sería falsificar la evidencia**: este
-   * validador corre en `validate()`, que no es el momento de la firma. Sin el
-   * campo la regla no se juzga; con él se juzga exacta. La otra opción —asumir
-   * «ahora»— bloquearía documentos legítimos y es justo el falso positivo que
-   * este archivo existe para no producir.
+   * OPCIONAL A PROPÓSITO, y ya NO dormido en toda la cadena. `FAD09e` exige que
+   * `cbc:IssueDate` sea igual a la fecha de firma, y Vendix puede violarla sin
+   * que nada lo note: un borrador creado el viernes y transmitido el lunes
+   * declara la fecha del viernes y se firma el lunes.
+   *
+   * `InvoiceFlowService.validate()` sigue sin aportarlo: ese método corre ANTES
+   * de que exista un momento de firma real, y asumir «ahora» ahí sería
+   * falsificar la evidencia y bloquear documentos legítimos (borrador validado
+   * hoy, transmitido después). `InvoiceFlowService.send()` SÍ lo aporta —con
+   * `new Date()`— en el único punto donde revalida antes de reenviar un
+   * documento `rejected`: ahí «ahora» ya no es una invención, es literalmente
+   * el instante en que el proveedor va a firmar segundos después. Sin el campo
+   * la regla no se juzga; con él se juzga exacta.
    */
   signing_date?: Date | string | null;
   /**
@@ -1081,12 +1084,12 @@ export class FiscalDocumentValidator {
    * `FAD09e` / `CAD09e` / `DAD09e`: «La fecha de generación de la factura es
    * diferente a la fecha de firma de la factura».
    *
-   * DORMIDA MIENTRAS NADIE APORTE `signing_date`. Ver el comentario de ese campo
-   * en {@link FiscalDocumentValidationInput}: asumir «ahora» como fecha de firma
-   * bloquearía documentos legítimos porque este validador NO corre en el momento
-   * de la firma. La regla se implementa ahora —con su caso de prueba— para que
-   * el día que el emisor aporte el dato la comprobación ya exista; cablearla es
-   * una línea en quien construye la entrada.
+   * SÓLO SE JUZGA CUANDO QUIEN INVOCA APORTA `signing_date`. Ver el comentario
+   * de ese campo en {@link FiscalDocumentValidationInput}: `validate()` no lo
+   * aporta (todavía no hay momento de firma), y `send()` sí lo aporta —con
+   * `new Date()`— al revalidar un reenvío `rejected`, que es el único punto de
+   * la cadena donde «ahora» es literalmente el instante de la firma y no una
+   * invención.
    *
    * Se compara por DÍA CIVIL en la zona del emisor, por el mismo motivo que la
    * vigencia del rango: `cbc:IssueDate` es una fecha-sólo y `ds:SigningTime` un

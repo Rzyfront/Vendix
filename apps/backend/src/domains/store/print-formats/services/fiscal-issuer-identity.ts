@@ -27,6 +27,7 @@ import {
   resolveTenantFiscalIdentity,
   tryResolveTenantFiscalIdentity,
 } from '@common/helpers/fiscal-identity.helper';
+import { isVatResponsible } from '@common/helpers/vat-responsibility.helper';
 
 /** Etiquetas legibles del régimen guardado en `fiscal_data.tax_regime`. */
 export const FISCAL_TAX_REGIME_LABELS: Record<string, string> = {
@@ -153,10 +154,26 @@ export function resolveFiscalIssuerForPrint(
     phone: identity.phone,
     email: identity.email || org?.email || undefined,
     logo_url: store?.logo_url || org?.logo_url || undefined,
-    tax_regime:
-      FISCAL_TAX_REGIME_LABELS[(identity.tax_regime || '').toUpperCase()] ||
-      identity.tax_regime ||
-      undefined,
+    tax_regime: (() => {
+      const isResponsible = isVatResponsible(identity);
+      const rawRegime = (identity.tax_regime || '').toUpperCase();
+      if (
+        identity.tax_responsibilities.includes('O-47') ||
+        rawRegime === 'SIMPLE'
+      ) {
+        return FISCAL_TAX_REGIME_LABELS.SIMPLE;
+      }
+      if (
+        identity.tax_responsibilities.includes('O-13') ||
+        rawRegime === 'GRAN_CONTRIBUYENTE'
+      ) {
+        return FISCAL_TAX_REGIME_LABELS.GRAN_CONTRIBUYENTE;
+      }
+      if (isResponsible) {
+        return FISCAL_TAX_REGIME_LABELS.COMUN;
+      }
+      return FISCAL_TAX_REGIME_LABELS.SIMPLIFICADO;
+    })(),
     tax_responsibilities: identity.tax_responsibilities,
   };
 }

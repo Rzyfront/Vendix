@@ -105,6 +105,9 @@ export const ERROR_MESSAGES: Record<string, string> = {
   AUTH_VALIDATE_001: 'La validacion de autenticacion fallo.',
   AUTH_DUP_001: 'Ya existe un usuario con este email.',
   AUTH_PERM_001: 'No tiene permisos para realizar esta accion.',
+  BANK_ACCOUNT_NOT_FOUND: 'No se encontro la cuenta bancaria.',
+  PAYMENT_NOT_OWNED: 'No puedes operar este pago: pertenece a otra persona.',
+  PRODUCT_VARIANT_MISMATCH: 'La variante seleccionada no corresponde al producto.',
   AUTH_TOKEN_001: 'Token invalido o expirado.',
   AUTH_CREDENTIALS_001: 'Email o contrasena incorrectos.',
   AUTH_PASSWORD_001: 'La contrasena es incorrecta.',
@@ -1017,7 +1020,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
 
   // Caja registradora — cierre contra un esperado rancio (QUI-572)
   CASH_SESSION_EXPECTED_STALE_001:
-    'El efectivo esperado cambió mientras contabas el arqueo. Revisá el resumen actualizado antes de cerrar la caja.',
+    'El efectivo esperado cambió mientras contabas el arqueo. Revisa el resumen actualizado antes de cerrar la caja.',
 
   // Escáner de facturas de compra (POP). Ninguno estaba mapeado: el modal
   // mostraba el devMessage crudo en inglés («AI OCR response parsed but is

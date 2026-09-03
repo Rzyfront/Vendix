@@ -6,13 +6,12 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { CommonModule, DatePipe } from '@angular/common';
+import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
+import { Router } from '@angular/router';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { PqrAdminService } from '../../services/pqr-admin.service';
 import { Pqr, PqrQuery, PqrStats, PqrType, PqrStatus, PqrPriority } from '../../models/pqr.model';
-import { PqrStatusPillComponent } from '../../components/pqr-status-pill.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import {
@@ -21,7 +20,6 @@ import {
   InputsearchComponent,
   OptionsDropdownComponent,
   PaginationComponent,
-  ButtonComponent,
   ToastService,
   TableColumn,
   TableAction,
@@ -49,9 +47,6 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
   imports: [
     CommonModule,
     FormsModule,
-    RouterLink,
-    DatePipe,
-    PqrStatusPillComponent,
     IconComponent,
     StickyHeaderComponent,
     StatsComponent,
@@ -60,7 +55,6 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
     InputsearchComponent,
     OptionsDropdownComponent,
     PaginationComponent,
-    ButtonComponent,
   ],
   templateUrl: './pqr-list-page.component.html',
   styleUrls: ['./pqr-list-page.component.scss'],

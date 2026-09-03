@@ -9,6 +9,7 @@ import {
   MaxLength,
   IsArray,
   Max,
+  IsInt,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { payment_methods_type_enum } from '@prisma/client';
@@ -39,6 +40,17 @@ export class CreatePaymentDto {
   @IsNumber()
   @Type(() => Number)
   storeId: number;
+
+  /**
+   * QUI-728 — cuenta bancaria de destino del pago por transferencia
+   * (`bank_accounts.id`). `@IsInt()` en el DTO es solo shape; la validación
+   * real (existe + activa + organización + scope de tienda) vive en el
+   * servicio (`payment-gateway.service.ts`).
+   */
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  bank_account_id?: number;
 
   @IsOptional()
   @IsObject()

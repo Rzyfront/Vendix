@@ -32,7 +32,10 @@ export class FiscalTransmissionLedgerService {
     }
 
     const idempotency_key = this.invoiceIdempotencyKey(params.invoice);
-    const request_hash = this.hash(params.provider_data);
+    // `hashablePayload` saca `contingency_type` ANTES de hashear: ver su
+    // docblock. El resto del payload sí viaja crudo — es lo que de verdad
+    // protege contra un reintento que cambió importes o líneas por debajo.
+    const request_hash = this.hash(this.hashablePayload(params.provider_data));
     const client = this.prisma.withoutScope();
     const existing = await client.fiscal_transmissions.findFirst({
       where: {
@@ -279,5 +282,31 @@ export class FiscalTransmissionLedgerService {
     const payload =
       typeof value === 'string' ? value : JSON.stringify(value ?? null);
     return createHash('sha256').update(payload).digest('hex');
+  }
+
+  /**
+   * Lo que SÍ debe permanecer estable entre intentos de la MISMA factura, para
+   * que la comparación de hash siga cazando lo que tiene que cazar —un
+   * `provider_data` que cambió de verdad (importes, líneas, adquiriente) entre
+   * un intento y el siguiente— sin cazar también un reintento LEGÍTIMO.
+   *
+   * `contingency_type` es el único campo de `provider_data` que
+   * `InvoiceFlowService.send()` llena a partir de `invoice.contingency_type`,
+   * y ese campo pasa de `undefined` a `'04'` DESPUÉS del primer intento —lo
+   * pone `handleContingency` cuando la DIAN no respondió—. El reintento que
+   * declara Tipo 04 (Anexo Técnico 1.9 §12.2) es EXACTAMENTE lo que se espera
+   * que pase distinto la segunda vez, no evidencia de que el documento cambió
+   * bajo cuerda. Sin esta exclusión, `ensureInvoiceTransmission` comparaba el
+   * hash del primer intento (sin `contingency_type`) contra el del reintento
+   * (con `'04'`) y lanzaba `FISCAL_IDEMPOTENCY_CONFLICT` sobre un reintento que
+   * la propia DIAN exige — la guarda de fraude bloqueando el único camino legal
+   * para salir de la contingencia.
+   */
+  private hashablePayload(value: unknown): unknown {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return value;
+    }
+    const { contingency_type, ...stable } = value as Record<string, unknown>;
+    return stable;
   }
 }

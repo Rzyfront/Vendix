@@ -20,7 +20,7 @@
         "format": {
           "type": "string",
           "enum": ["thermal_80", "thermal_58", "a4", "letter", "half_letter", "custom"],
-          "description": "Tamaño físico del papel. Rollos (`thermal_80`/`thermal_58`) y hojas (`a4`/`letter`/`half_letter`). `custom` permite dimensiones arbitrarias (>=58mm ancho, <=216mm)."
+          "description": "Tamaño físico del papel. Rollos (`thermal_80`/`thermal_58`) y hojas (`a4`/`letter`/`half_letter`). `custom` permite dimensiones arbitrarias: ancho 58-600mm, alto 50-2000mm (alto REQUERIDO cuando format=custom)."
         },
         "width_mm": {
           "type": "number",
@@ -33,6 +33,12 @@
           "minimum": 50,
           "maximum": 2000,
           "description": "Alto en mm. REQUERIDO si format=custom. Opcional para rollos (alto continuo) y hojas (puede omitirse y resolverse por format)."
+        },
+        "margin_mm": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50,
+          "description": "Margen uniforme en mm aplicado a los 4 lados. Campo real en uso: el compositor (`print-layout-composer.service.ts`) lo usa como fallback cuando los márgenes por lado (`margin_top_mm`, etc.) están ausentes, y el frontend lo escribe deliberadamente al restablecer márgenes o al cambiar de formato de papel. Convive con los márgenes por lado — no se expande a los 4 `margin_*_mm` ni se elimina del payload; son campos con semánticas distintas."
         },
         "margin_top_mm": {
           "type": "number",
@@ -63,6 +69,10 @@
           "minimum": 0,
           "maximum": 10,
           "description": "Número de copias a imprimir. 0 usa el default del sistema (1 para la mayoría). Máx 10 por protección anti-DoS."
+        },
+        "auto_print": {
+          "type": "boolean",
+          "description": "True para disparar impresión automática al finalizar la operación (ej. venta POS). False para requerir clic manual."
         },
         "orientation": {
           "type": "string",
@@ -234,6 +244,11 @@
         "additionalProperties": false,
         "required": ["width_percent"],
         "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Identificador estable de la columna. El compositor lo emite como `data-column-id` y `data-element-id` en cada `<th>` y `<td>`, y es lo que permite seleccionar una columna haciendo clic en la previsualización. Las 15 plantillas de sistema lo traen."
+          },
           "key": {
             "type": "string",
             "description": "Path al dato (`items.product_name`, `items.ordered_qty`, etc.). Si ausente, la columna es label-only."
@@ -275,8 +290,8 @@
       "properties": {
         "font_family": {
           "type": "string",
-          "maxLength": 64,
-          "description": "Familia tipográfica (`Courier New`, `Inter`, `Roboto`, etc.). Default `monospace` para rollos."
+          "maxLength": 200,
+          "description": "Familia tipográfica. Admite una pila CSS completa con fallbacks (`-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`), que es lo que usan las plantillas de hoja; un límite de 64 dejaba fuera esa pila por un carácter. Default `monospace` para rollos."
         },
         "font_size_base_pt": {
           "type": "number",

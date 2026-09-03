@@ -8,6 +8,10 @@ import { subscriptionManagementGuard } from '../../core/guards/subscription-mana
 import { manageUsersGuard } from '../../core/guards/manage-users.guard';
 import { vexiSettingsGuard } from '../../core/guards/vexi-settings.guard';
 import { storeDashboardGuard } from '../../core/guards/store-dashboard.guard'; // QUI-418
+import {
+  panelUiGuard,
+  firstActiveModuleRedirectGuard,
+} from '../../core/guards/panel-ui.guard'; // A.4 + B.1
 import { invoicingReducer } from '../../private/modules/store/invoicing/state/reducers/invoicing.reducer';
 import { InvoicingEffects } from '../../private/modules/store/invoicing/state/effects/invoicing.effects';
 import { couponReducer } from '../../private/modules/store/marketing/coupons/state/reducers/coupon.reducer';
@@ -24,17 +28,45 @@ export const storeAdminRoutes: Routes = [
       import('../../private/layouts/store-admin/store-admin-layout.component').then(
         (c) => c.StoreAdminLayoutComponent,
       ),
-    canActivate: [AuthGuard, onboardingGuard],
+    // A.4: `panelUiGuard` corre DESPUÉS de AuthGuard. Cierra el bypass de URL
+    // directa (deny-by-default): un módulo con `panel_ui=false` rechaza la URL
+    // y redirige al primer módulo activo. Es UX, no autorización (ver el
+    // encuadre en panel-ui.guard.ts).
+    canActivate: [AuthGuard, onboardingGuard, panelUiGuard],
     // canActivateChild re-runs onboardingGuard on EVERY child navigation
     // (including sibling→sibling SPA nav where the parent `admin` stays
     // mounted and its canActivate would NOT re-fire). This is what makes the
     // owner onboarding truly unavoidable, not just on hard reload.
-    canActivateChild: [onboardingGuard],
+    // `panelUiGuard` va también aquí para que la URL-directa de un módulo
+    // oculto bajo el shell ya montado (SPA) tampoco sea accesible.
+    canActivateChild: [onboardingGuard, panelUiGuard],
     children: [
       {
+        // B.1 / QUI-740: el aterrizaje en `/admin` va al primer módulo activo
+        // (CONSUME `firstActiveModuleRoute`; no la crea — la posee A.4). La
+        // guard devuelve siempre un `UrlTree`, así que el componente nunca se
+        // instancia; se mantiene `loadComponent` (dashboard) solo para que la
+        // ruta sea válida.
         path: '',
         pathMatch: 'full',
-        redirectTo: 'dashboard',
+        canActivate: [firstActiveModuleRedirectGuard],
+        loadComponent: () =>
+          import('../../private/modules/store/dashboard/dashboard.component').then(
+            (c) => c.DashboardComponent,
+          ),
+      },
+      // C.1(2): "sin acceso al panel". Terminal de la cadena de fallback
+      // cuando el usuario autenticado no tiene NINGÚN módulo activo del
+      // sidebar. El `panelUiGuard` lo deja pasar por bypass explícito de
+      // `PANEL_UI_NO_ACCESS_ROUTE` (ver `core/guards/panel-ui.guard.ts`); de
+      // lo contrario el redirect crearía un bucle infinito. El componente
+      // muestra un CTA de "Cerrar sesión" porque no hay nada más a donde ir.
+      {
+        path: 'no-access',
+        loadComponent: () =>
+          import(
+            '../../private/modules/store/no-access/no-access-page.component'
+          ).then((c) => c.NoAccessPageComponent),
       },
       // Owner onboarding host — gated by `onboardingGuard` on the `admin`
       // root. Only an OWNER with `organizations.onboarding !== true` ever
@@ -344,6 +376,17 @@ export const storeAdminRoutes: Routes = [
           },
           {
             path: ':id',
+            // El detalle de orden reutiliza `vendix-invoice-detail` (el modal
+            // completo del módulo de facturación) para su tarjeta "Factura
+            // Electrónica" en vez de duplicar sus acciones. Ese modal despacha
+            // contra el feature `invoicing`, así que esta rama tiene que
+            // proveerlo igual que ya lo hace `pos` — mismo patrón, acotado a
+            // `orders/:id` para que el listado de órdenes no cargue reducer ni
+            // effects que no usa.
+            providers: [
+              provideState({ name: 'invoicing', reducer: invoicingReducer }),
+              provideEffects(InvoicingEffects),
+            ],
             loadComponent: () =>
               import('../../private/modules/store/orders/pages/order-details/order-details-page.component').then(
                 (c) => c.OrderDetailsPageComponent,

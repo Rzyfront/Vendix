@@ -362,7 +362,7 @@ export class PosSessionCloseModalComponent {
   readonly expectedChanged = computed(() => this.staleFrom() !== null);
 
   /** Etiquetas de método de pago: el backend manda `method` crudo, sin label. */
-  readonly methodLabels: Record<string, string> = {
+  readonly methodLabels: Record<string, string | undefined> = {
     cash: 'Efectivo',
     card: 'Tarjeta',
     bank_transfer: 'Transferencia',
@@ -522,7 +522,7 @@ export class PosSessionCloseModalComponent {
           if (counted == null) {
             this.refreshing.set(false);
             this.toastService.warning(
-              'No pudimos mostrarte el efectivo esperado antes de contar. Revisá el resumen que acabamos de cargar y cerrá de nuevo.',
+              'No pudimos mostrarte el efectivo esperado antes de contar. Revisa el resumen que acabamos de cargar y cierra de nuevo.',
             );
             return;
           }
@@ -530,7 +530,7 @@ export class PosSessionCloseModalComponent {
           if (Math.abs(fresh.expected_cash_total - counted) > AMOUNT_EPSILON) {
             this.refreshing.set(false);
             this.toastService.warning(
-              'El efectivo esperado cambió mientras contabas. Revisá el resumen actualizado antes de cerrar.',
+              'El efectivo esperado cambió mientras contabas. Revisa el resumen actualizado antes de cerrar.',
             );
             return;
           }
@@ -603,7 +603,7 @@ export class PosSessionCloseModalComponent {
 
       this.toastService.warning(
         message ??
-          'El efectivo esperado cambió mientras contabas. Revisá el resumen actualizado antes de cerrar.',
+          'El efectivo esperado cambió mientras contabas. Revisa el resumen actualizado antes de cerrar.',
       );
       return;
     }

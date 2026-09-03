@@ -45,7 +45,7 @@ export function computePhoneFormatHint(
     const over = len - PHONE_EXPECTED_LENGTH;
     return {
       tone: 'warn',
-      text: `${over} ${over === 1 ? 'dígito de más' : 'dígitos de más'} (máximo ${PHONE_EXPECTED_LENGTH}). Quitá el prefijo de país si lo incluiste.`,
+      text: `${over} ${over === 1 ? 'dígito de más' : 'dígitos de más'} (máximo ${PHONE_EXPECTED_LENGTH}). Quita el prefijo de país si lo incluiste.`,
     };
   }
 

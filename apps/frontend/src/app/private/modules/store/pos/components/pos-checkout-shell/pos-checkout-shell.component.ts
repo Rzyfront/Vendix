@@ -149,6 +149,11 @@ export class PosCheckoutShellComponent {
   protected readonly consumoStep = viewChild(PosConsumoStepComponent);
   protected readonly paymentStep = viewChild(PosPaymentStepComponent);
   protected readonly shippingStep = viewChild(PosShippingStepComponent);
+  /**
+   * Cliente step hosts the 2-option selector (Buscar 3 compact / Crear) without invasive scroll.
+   * Shell passes [searchLimit]="3" and keeps container overflow:visible (see .cliente-section--no-scroll).
+   * attemptNextStep delegates to resolveIfNeeded() which works from either tab via unified find-or-create.
+   */
   private readonly customerSelector = viewChild(PosCustomerSelectorComponent);
 
   // ── Address capture (moved from the Envío step into the Cliente step) ────
@@ -230,7 +235,12 @@ export class PosCheckoutShellComponent {
   readonly customerMandatory = computed<boolean>(
     () =>
       this.customerRequiredByAddress() ||
-      (this.customerRequiredByPolicy() && !this.allowAnonymousSales()),
+      (this.customerRequiredByPolicy() &&
+        !this.allowAnonymousSales() &&
+        // QUI-737 (B.4) — el modo alias existe para NO pedir un cliente
+        // completo; si la tienda lo permite, "Obligatorio" no debe encenderse
+        // solo por la política (que el alias no necesita).
+        !this.allowAliasSales()),
   );
 
   /**
@@ -456,9 +466,34 @@ export class PosCheckoutShellComponent {
     return this.checkoutIntent() === 'delivery' ? base + this.shippingCost() : base;
   });
 
-  // ── Anonymous-sale ownership (moved from the legacy interface) ───────────
-  readonly isAnonymousSale = signal<boolean>(false);
+  // ── Sale mode (tri-state) + Anonymous ownership ─────────────────────────
+  /**
+   * QUI-737 (B.4) — tri-state de venta: `'anonymous'` (sin cliente), `'alias'`
+   * (venta rápida identificada por alias, ej. "Mesa 5"), `'customer'` (cliente
+   * real). Es la FUENTE de la verdad del modo; {@link isAnonymousSale} es
+   * derivado. El booleano legado queda como computed para no romper los ~15
+   * puntos de lectura, pero TODA escritura pasa por {@link saleMode}.
+   */
+  readonly saleMode = signal<'anonymous' | 'alias' | 'customer'>('customer');
+  /**
+   * Texto del alias de venta rápida (ej. "Mesa 5", "Juan del taller"). Solo
+   * tiene sentido cuando {@link saleMode} === 'alias'. El payload envía
+   * `customer_alias: alias || undefined` (nunca `''`).
+   */
+  readonly customerAlias = signal<string>('');
+
+  readonly isAnonymousSale = computed(() => this.saleMode() === 'anonymous');
   readonly userOverrideAnonymous = signal<boolean | null>(null);
+  /**
+   * Paso 9 — «Facturar a nombre de»: link secundario bajo "Venta Anónima" que
+   * despliega inline los 5 campos mínimos de facturación nominativa (sin
+   * pasar por "Con Cliente" ni por el buscador general). Al resolver un
+   * cliente aquí, `selectCustomer()` sigue el mismo camino que "Con Cliente"
+   * (el backend no distingue el origen de la captura); esto solo evita que
+   * el cajero navegue por un flujo pensado para búsqueda de CRM cuando lo
+   * único que quiere es poner un nombre en la factura.
+   */
+  readonly showAnonymousInvoiceCapture = signal(false);
   /** Guard: apply the config-driven anonymous default only on the first render. */
   private readonly anonymousDefaultSynced = signal(false);
 
@@ -467,6 +502,17 @@ export class PosCheckoutShellComponent {
   );
   readonly anonymousSalesAsDefault = computed(
     () => this.settingsFacade.pos()?.anonymous_sales_as_default ?? false,
+  );
+  /**
+   * QUI-737 (B.4) — alias opt-in. Leído del POS settings. NOTA: el tipo
+   * `PosSettings` (core, fuera de scope) aún no declara estos campos, por eso
+   * el cast; cuando se tipen, quitar el `(… as any)`.
+   */
+  readonly allowAliasSales = computed(
+    () => (this.settingsFacade.pos() as any)?.allow_alias_sales ?? false,
+  );
+  readonly aliasSalesAsDefault = computed(
+    () => (this.settingsFacade.pos() as any)?.alias_sales_as_default ?? false,
   );
 
   /**
@@ -509,11 +555,32 @@ export class PosCheckoutShellComponent {
   );
 
   /**
+   * QUI-737 (B.4) — whether the "Venta con nombre o referencia" option is
+   * offered. Mirrors {@link canBeAnonymous}: alias needs `pos.allow_alias_sales`
+   * AND is incompatible with a credit sale (fiarse a "Mesa 5" en crédito no
+   * tiene sentido — el plan a crédito se ata a una persona). Delivery también lo
+   * excluye (la dirección se ata a un cliente real).
+   */
+  readonly canBeAlias = computed<boolean>(
+    () =>
+      this.allowAliasSales() &&
+      this.paymentStep()?.mode() !== 'credito',
+  );
+
+  /**
    * Delivery sales cannot be anonymous: they require a customer with a shipping
    * address. The "Venta Anónima" button stays VISIBLE but DISABLED in this case
    * (with an explanatory legend) — see the template.
    */
   readonly anonymousBlockedByDelivery = computed<boolean>(
+    () => this.checkoutIntent() === 'delivery',
+  );
+
+  /**
+   * QUI-737 (B.4) — delivery sales cannot be alias-based either: the shipping
+   * address is bound to a real customer. The alias option is hidden in delivery.
+   */
+  readonly aliasBlockedByDelivery = computed<boolean>(
     () => this.checkoutIntent() === 'delivery',
   );
 
@@ -536,6 +603,8 @@ export class PosCheckoutShellComponent {
    */
   readonly clienteSubSteps = computed<StepsLineItem[]>(() => {
     if (this.isAnonymousSale()) return [{ label: 'Tipo' }];
+    // QUI-737 (B.4) — modo alias: sub-paso propio de captura del alias.
+    if (this.saleMode() === 'alias') return [{ label: 'Tipo' }, { label: 'Alias' }];
     if (this.requiresAddress()) {
       return [{ label: 'Tipo' }, { label: 'Cliente' }, { label: 'Dirección' }];
     }
@@ -596,7 +665,10 @@ export class PosCheckoutShellComponent {
     if (this.effectiveMode() === 'create-draft') {
       const state = this.cartState();
       if (!state || !(state.items?.length ?? 0)) return true;
+      // QUI-737 (B.4) — el modo alias es una tercera salida legítima de "sin
+      // cliente" (además de anónimo), siempre que el alias no esté vacío.
       if (this.isAnonymousSale()) return false;
+      if (this.saleMode() === 'alias') return !this.customerAlias().trim();
       if (state.customer?.id != null) return false;
       // No customer picked and not anonymous → block. The shell already
       // surfaces a toast in `createRetailDraft`, so this just keeps the CTA
@@ -684,9 +756,10 @@ export class PosCheckoutShellComponent {
         ? false
         : (override ?? (hasCartCustomer ? false : asDefault));
       untracked(() => {
-        if (this.isAnonymousSale() !== effective) {
-          this.isAnonymousSale.set(effective);
-        }
+        // QUI-737 (B.4) — no pelear una elección explícita de alias.
+        if (this.saleMode() === 'alias') return;
+        const desired = effective ? 'anonymous' : 'customer';
+        if (this.saleMode() !== desired) this.saleMode.set(desired);
       });
     });
 
@@ -751,24 +824,34 @@ export class PosCheckoutShellComponent {
       });
     });
 
-    // Credit sales cannot be anonymous: when the collector enters credito mode,
-    // clear the anonymous flag so the customer selector is shown.
+    // Credit sales cannot be anonymous (or alias): when the collector enters
+    // credito mode, clear both flags so the customer selector is shown. Fiarse
+    // a "Mesa 5" en crédito no tiene sentido — el plan a crédito se ata a una
+    // persona (QUI-737 B.4; paridad con anónimo).
     effect(() => {
-      if (this.paymentStep()?.mode() === 'credito' && this.isAnonymousSale()) {
-        untracked(() => this.isAnonymousSale.set(false));
+      if (this.paymentStep()?.mode() === 'credito') {
+        const mode = this.saleMode();
+        if (mode === 'anonymous' || mode === 'alias') {
+          untracked(() => this.saleMode.set('customer'));
+        }
       }
     });
 
-    // Delivery sales cannot be anonymous (they require a customer + address).
-    // Force the flag off AND pin the override to false so the config-driven
-    // "anonymous as default" sync effect above never flips it back on while the
-    // intent stays delivery. Leaves "Con Cliente" selected in the UI.
+    // Delivery sales cannot be anonymous or alias-based (they require a
+    // customer + address). Force the flag off AND pin the override to false so
+    // the config-driven "anonymous as default" sync effect above never flips it
+    // back on while the intent stays delivery. Leaves "Con Cliente" selected.
     effect(() => {
-      if (this.anonymousBlockedByDelivery() && this.isAnonymousSale()) {
-        untracked(() => {
-          this.isAnonymousSale.set(false);
-          this.userOverrideAnonymous.set(false);
-        });
+      if (this.anonymousBlockedByDelivery()) {
+        const mode = this.saleMode();
+        if (mode === 'anonymous') {
+          untracked(() => {
+            this.saleMode.set('customer');
+            this.userOverrideAnonymous.set(false);
+          });
+        } else if (mode === 'alias') {
+          untracked(() => this.saleMode.set('customer'));
+        }
       }
     });
 
@@ -782,12 +865,14 @@ export class PosCheckoutShellComponent {
 
   private syncAnonymousSaleState(): void {
     if (!this.allowAnonymousSales()) {
-      this.isAnonymousSale.set(false);
+      this.saleMode.set('customer');
       return;
     }
     const override = this.userOverrideAnonymous();
     const hasCartCustomer = !!this.cartState()?.customer;
-    this.isAnonymousSale.set(override ?? (hasCartCustomer ? false : this.anonymousSalesAsDefault()));
+    const anon =
+      override ?? (hasCartCustomer ? false : this.anonymousSalesAsDefault());
+    this.saleMode.set(anon ? 'anonymous' : 'customer');
   }
 
   /**
@@ -802,6 +887,8 @@ export class PosCheckoutShellComponent {
     this.currentStep.set(0);
     this.clienteSubStep.set(0);
     this.userOverrideAnonymous.set(null);
+    // QUI-737 (B.4) — limpiar el alias para la próxima venta.
+    this.customerAlias.set('');
     this.capturedAddress.set(null);
     this.addressValid.set(false);
     this.capturedAddressId.set(null);
@@ -856,6 +943,16 @@ export class PosCheckoutShellComponent {
       }
       // Cliente → en delivery exige cliente antes de la Dirección.
       if (sub === 1) {
+        // QUI-737 (B.4) — sub-paso "Alias": falta el texto del alias.
+        if (this.saleMode() === 'alias') {
+          if (!this.customerAlias().trim()) {
+            this.showCustomerError.set(true);
+            return;
+          }
+          // Alias es terminal en pickup (delivery bloquea alias) → avanzamos.
+          this.nextStep();
+          return;
+        }
         // QUI-723 — Sub-step unificado: si no hay cliente seleccionado, el
         // botón "Siguiente" dispara find-or-create desde el formulario del
         // sub-step. Solo avanzamos cuando `resolveIfNeeded()` confirma éxito;
@@ -1120,7 +1217,12 @@ export class PosCheckoutShellComponent {
     this.ordersService
       .updateOrderFromEditor(String(orderId), {
         items,
-        customer_id: customer?.id ?? null,
+        // QUI-737 (B.4) — el alias y el cliente son mutuamente excluyentes
+        // (CHECK orders_customer_xor_alias). En modo alias mandamos el alias y
+        // customer_id null, nunca ambos; el @Transform del DTO colapsa '' o un
+        // string en blanco a undefined para no persistir una línea vacía.
+        customer_id: this.saleMode() === 'alias' ? null : (customer?.id ?? null),
+        customer_alias: this.saleMode() === 'alias' ? (this.customerAlias() || undefined) : undefined,
         notes: state.notes || undefined,
         internal_notes: state.internalNotes || undefined,
         promotion_ids: (state.appliedDiscounts ?? [])
@@ -1274,11 +1376,13 @@ export class PosCheckoutShellComponent {
   }
 
   /**
-   * Tipo de venta (sub-paso Tipo):
+   * Tipo de venta (sub-paso Tipo) — TRI-STATE (QUI-737 B.4):
    *  - "Venta Anónima" estando YA anónima → avanza el wizard TOP-LEVEL
    *    (`nextStep()`): anónima solo tiene [Tipo], así que el segundo clic salta
    *    de paso (p.ej. Cliente → Envío en delivery). Si aún no era anónima, la
    *    fija y se queda en [Tipo] listo (un segundo clic avanza top-level).
+   *  - "Venta con nombre o referencia" (alias) estando YA en alias → avanza.
+   *    De otro modo fija alias y va al sub-paso "Alias" (captura del texto).
    *  - "Con Cliente" → contrae Tipo y avanza al sub-paso Cliente (Buscar).
    *
    *  Round 3 MAJOR #4 — refuse anonymous when the policy requires one: a
@@ -1287,8 +1391,8 @@ export class PosCheckoutShellComponent {
    *  {@link canBeAnonymous}, but defending here keeps the invariant under any
    *  caller — including keyboard shortcuts or tests).
    */
-  onSelectSaleType(anonymous: boolean): void {
-    if (anonymous) {
+  onSelectSaleMode(mode: 'anonymous' | 'alias' | 'customer'): void {
+    if (mode === 'anonymous') {
       // Round 8 — `pos.allow_anonymous_sales=true` is the POS-side escape
       // hatch: even when `checkout.require_customer_data=true` (which
       // governs ecommerce + electronic invoicing), the cashier may sell
@@ -1308,8 +1412,61 @@ export class PosCheckoutShellComponent {
       this.goToClienteSubStep(0);
       return;
     }
+
+    if (mode === 'alias') {
+      // Delivery no admite alias (la dirección se ata a un cliente real).
+      if (this.aliasBlockedByDelivery()) {
+        this.toggleAnonymousSale(false);
+        this.goToClienteSubStep(1);
+        return;
+      }
+      // Re-clic en alias ya activo → avanza el wizard (alias tiene [Tipo, Alias]).
+      if (this.saleMode() === 'alias') {
+        this.nextStep();
+        return;
+      }
+      this.userOverrideAnonymous.set(false);
+      this.saleMode.set('alias');
+      this.goToClienteSubStep(1); // sub-paso Alias (input)
+      return;
+    }
+
+    // 'customer'
     this.toggleAnonymousSale(false);
     this.goToClienteSubStep(1);
+  }
+
+  /**
+   * CP-POLLO-ARABE-727 F.1 — navegación por teclado del radiogroup "Tipo de
+   * venta". Los botones usan roving tabindex (0/-1); sin flechas, las opciones
+   * no seleccionadas quedan inalcanzables por teclado (Enter re-selecciona la
+   * actual). Mismo patrón que `product-type-chip-filter`: ArrowLeft/Right
+   * cíclico sobre los modos disponibles (anonymous si canBeAnonymous, alias si
+   * canBeAlias, customer siempre).
+   */
+  onSaleTypeKeydown(event: KeyboardEvent): void {
+    if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+    event.preventDefault();
+    const modes: Array<'anonymous' | 'alias' | 'customer'> = [];
+    // CP-POLLO-ARABE-727 F.1 Round 2 — excluir los modos bloqueados por
+    // envío (checkoutIntent === 'delivery'): el botón está deshabilitado y la
+    // navegación por teclado no debe activar programáticamente un modo que el
+    // usuario no puede pulsar (regresión WCAG del fix de flechas).
+    if (this.canBeAnonymous() && !this.anonymousBlockedByDelivery()) {
+      modes.push('anonymous');
+    }
+    if (this.canBeAlias() && !this.aliasBlockedByDelivery()) {
+      modes.push('alias');
+    }
+    modes.push('customer');
+    if (modes.length <= 1) return;
+    const base = modes.indexOf(this.saleMode());
+    const idx = base === -1 ? 0 : base;
+    const next =
+      event.key === 'ArrowRight'
+        ? (idx + 1) % modes.length
+        : (idx - 1 + modes.length) % modes.length;
+    this.onSelectSaleMode(modes[next]);
   }
 
   /** Cliente elegido/creado: preserva la lógica de selectCustomer y avanza. */
@@ -1322,13 +1479,29 @@ export class PosCheckoutShellComponent {
   // ── Cliente step handlers ───────────────────────────────────────────────
   toggleAnonymousSale(enabled: boolean): void {
     this.userOverrideAnonymous.set(enabled);
-    this.isAnonymousSale.set(enabled);
+    this.saleMode.set(enabled ? 'anonymous' : 'customer');
+    // Al salir de anónima, colapsa "Facturar a nombre de" para no dejarlo
+    // abierto detrás de la opción "Con Cliente" cuando el cajero vuelva.
+    if (!enabled) this.showAnonymousInvoiceCapture.set(false);
+  }
+
+  /**
+   * Paso 9 — abre/cierra el mini-formulario de 5 campos bajo "Venta Anónima".
+   * No toca `saleMode`: sigue siendo una venta anónima hasta que el cajero
+   * efectivamente resuelva un cliente (entonces `selectCustomer()` la
+   * convierte en 'customer', igual que si hubiera entrado por "Con Cliente").
+   */
+  toggleAnonymousInvoiceCapture(): void {
+    this.showAnonymousInvoiceCapture.update((v) => !v);
   }
 
   /** Cliente elegido/creado en el selector inline. */
   selectCustomer(customer: PosCustomer): void {
     this.userOverrideAnonymous.set(false);
-    this.isAnonymousSale.set(false);
+    this.showAnonymousInvoiceCapture.set(false);
+    this.saleMode.set('customer');
+    // QUI-737 (B.4) — un cliente real gana: cualquier alias previo se limpia.
+    this.customerAlias.set('');
     // A customer is now attached → clear any flashed "falta cliente" hint.
     this.showCustomerError.set(false);
     // El padre (POS) es dueño del carrito; solo re-emitimos.
@@ -1377,6 +1550,14 @@ export class PosCheckoutShellComponent {
   /** "Quitar cliente / venta anónima" desde el selector inline. */
   onCustomerCleared(): void {
     this.toggleAnonymousSale(true);
+  }
+
+  /**
+   * QUI-737 (B.4) — write del input de alias al signal. Zoneless-safe: `set()`
+   * notifica a `customerAlias` y el template se re-renderiza al vuelo.
+   */
+  onAliasInput(event: Event): void {
+    this.customerAlias.set((event.target as HTMLInputElement).value);
   }
 
   // ── Step passthrough outputs ─────────────────────────────────────────────
@@ -1463,7 +1644,7 @@ export class PosCheckoutShellComponent {
     }
     const customerId = this.resolveCustomerId(state.customer);
     this.integration
-      .createCounterDraftOrder(customerId, lines)
+      .createCounterDraftOrder(customerId, lines, undefined, this.customerAliasForPayload())
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (order) => {
@@ -1488,7 +1669,12 @@ export class PosCheckoutShellComponent {
     this.integration
       .openTableSession({
         table_id: tableId,
+        // QUI-737 (B.4) — alias aplica también a mesas (FB-21). Mutuamente
+        // excluyente con customer_id; nunca '' (el DTO colapsa a undefined).
         ...(customerId > 0 ? { customer_id: customerId } : {}),
+        ...(this.saleMode() === 'alias'
+          ? { customer_alias: this.customerAlias() || undefined }
+          : {}),
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -1580,6 +1766,7 @@ export class PosCheckoutShellComponent {
     // backend separately.
     if (
       !this.isAnonymousSale() &&
+      this.saleMode() !== 'alias' &&
       (!state.customer || state.customer.id == null)
     ) {
       this.submittingDraft.set(false);
@@ -1601,12 +1788,12 @@ export class PosCheckoutShellComponent {
     // is a defaulting convenience, not an override of an explicit pick.
     const customerPicked = state.customer?.id != null;
     const draftState =
-      this.isAnonymousSale() && !customerPicked
+      (this.isAnonymousSale() || this.saleMode() === 'alias') && !customerPicked
         ? { ...state, customer: null }
         : state;
 
     this.paymentService
-      .saveDraft(draftState, 'current_user')
+      .saveDraft(draftState, 'current_user', this.customerAliasForPayload())
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res: any) => {
@@ -1745,6 +1932,17 @@ export class PosCheckoutShellComponent {
     if (!customer) return 0;
     const id = Number((customer as any).id);
     return Number.isFinite(id) && id > 0 ? id : 0;
+  }
+
+  /**
+   * QUI-737 (B.4) — alias para el payload, solo en modo alias y nunca `''`.
+   * `undefined` en cualquier otro modo (anónimo/cliente) para que el @Transform
+   * del DTO no reciba un string vacío.
+   */
+  private customerAliasForPayload(): string | undefined {
+    return this.saleMode() === 'alias'
+      ? this.customerAlias().trim() || undefined
+      : undefined;
   }
 
   private toastError(err: any, fallback: string): string {

@@ -31,7 +31,12 @@ import { TaxFiscalType } from '../taxes/dto';
 import { CreateCustomerDto } from '../customers/dto/create-customer.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { QueryInvoiceDto } from './dto/query-invoice.dto';
-import { InvoiceNumberGenerator } from './utils/invoice-number-generator';
+import {
+  InvoiceNumberGenerator,
+  INTERNAL_SERIES_BLOCK,
+  INTERNAL_SERIES_VALIDITY_YEARS,
+} from './utils/invoice-number-generator';
+import { internalSeriesPrefixFor } from './fiscal-document-requirements';
 import { RESOLUTION_PUBLIC_SELECT } from './utils/technical-key.util';
 import { InvoiceRetryQueueService } from './services/invoice-retry-queue.service';
 import {
@@ -84,6 +89,9 @@ import {
   DIAN_AIU_NOTE_PREFIX,
 } from './providers/dian-direct/xml/ubl-common.builder';
 import { InvoiceWithholdingInputDto } from './dto/invoice-withholding-input.dto';
+import { resolveAcquirerRail } from './validators/acquirer-rail.resolver';
+import type { StoredTechnicalKey } from '../../../common/services/technical-key-vault.service';
+import { CUSTOMER_FOR_INVOICE_SELECT } from './utils/customer-invoice-data.adapter';
 
 /**
  * Listing rows whose send/transmission state is an error or a pending send get
@@ -1201,6 +1209,437 @@ export class InvoicingService {
   }
 
   /**
+   * LA MISMA FACTURA, PROYECTADA EN MEMORIA — sin escribir y sin numerar.
+   *
+   * ## Por qué existe
+   *
+   * `create()` toma el consecutivo autorizado JUSTO antes del INSERT, así que
+   * la factura nace con su número gastado. Todo lo que se descubra después —
+   * que el adquiriente no está identificable ante la DIAN, que la aritmética no
+   * recompone, que la resolución no respalda el número— llega tarde: Vendix no
+   * tiene forma de explicarle a la DIAN un hueco de numeración, no existe tabla
+   * ni reporte de anulación de consecutivo, y el 14/08/2026 una ClTec mal
+   * guardada quemó uno real.
+   *
+   * Esta función arma lo que `create()` armaría, con LOS MISMOS helpers y en el
+   * MISMO orden, y se detiene exactamente donde `create()` llamaría a
+   * `generateNextNumber`. Lo que devuelve alimenta
+   * `InvoiceFlowService.getDraftEmitReadiness`, que corre sobre ella los dos
+   * validadores de emisión.
+   *
+   * ## Qué NO hace, y por qué
+   *
+   * - **No numera.** El `invoice_number` proyectado es el que
+   *   `generateNextNumber` asignaría —`prefix` + el cursor siguiente, con el
+   *   mismo suelo `range_from - 1` que aplica el generador—, calculado por
+   *   LECTURA. Sirve para que las reglas de rango y prefijo del prevalidador
+   *   tengan algo real que medir. `invoice_resolutions.current_number` no se
+   *   toca.
+   * - **No crea el cliente en línea.** `create()` materializa `inline_customer`
+   *   como fila `users`; una previsualización que lo hiciera dejaría clientes
+   *   fantasma cada vez que alguien pulsa «Validar». La identidad del
+   *   adquiriente se proyecta desde el DTO, que es exactamente lo que se
+   *   persistiría como snapshot.
+   * - **No traga los rechazos de las puertas de datos.** Periodo fiscal
+   *   cerrado, perfil inactivo, régimen AIU contradictorio, cliente de otro
+   *   tenant, aritmética imposible: todo eso LANZA, con el mismo
+   *   `VendixHttpException` y el mismo texto que devolvería «Crear factura».
+   *   Convertirlos en hallazgos exigiría un catálogo de códigos paralelo que se
+   *   desincronizaría del mensaje real.
+   */
+  async buildDraftProjection(dto: CreateInvoiceDto): Promise<{
+    invoice: any;
+    resolution_secret: StoredTechnicalKey | null;
+  }> {
+    const context = this.getContext();
+    await this.assertInvoicingAreaActive(context);
+    const accounting_entity_id =
+      await this.resolveAccountingEntityIdForContext(context);
+    const issue_date = new Date(dto.issue_date);
+    // Mismo `action` que usa la creación: el mensaje que el usuario lea acá
+    // tiene que ser palabra por palabra el que leería al crear.
+    await this.assertFiscalPeriodOpen(
+      accounting_entity_id,
+      issue_date,
+      'create',
+    );
+    const support_supplier = await this.loadSupportDocumentSupplier(dto);
+
+    // `inline_customer` NO se materializa (ver docblock). Sólo el id que llegó
+    // del cliente pasa por la puerta de tenant, igual que en `create()`.
+    if (dto.customer_id != null) {
+      await this.assertCustomerResolvable(dto.customer_id);
+    }
+
+    // ── EL MISMO BLOQUE PRE-NUMERACIÓN DE `create()`, EN EL MISMO ORDEN ──
+    const line_snapshots = await this.resolveLinePricingSnapshots(dto.items);
+    const tax_catalog = await this.resolveTenantTaxRateCatalog(dto.items);
+    const profile_snapshot = await this.resolveProfileSnapshot(
+      dto.profile_id,
+      dto.operation_type,
+    );
+    const aiu_context = await this.resolveAiuContext(
+      dto.operation_type,
+      dto.items,
+      dto.aiu_contract_object,
+      profile_snapshot?.config.aiu,
+      {
+        taxable_basis: dto.aiu_taxable_basis,
+        enforce_minimum_base: dto.aiu_enforce_minimum_base,
+        minimum_base_percent: dto.aiu_minimum_base_percent,
+      },
+    );
+    this.assertAiuBaseMatchesProfileMatrix(
+      profile_snapshot?.config,
+      aiu_context.aiu,
+      dto.operation_type,
+      profile_snapshot?.profile_id,
+    );
+    // La etiqueta de origen dice `invoice:validate-draft` y no `invoice:create`
+    // a propósito: si el motor registra un descuadre, la traza tiene que decir
+    // que vino de una validación y no de una emisión — si no, un log de
+    // previsualizaciones se lee como una racha de facturas rotas.
+    const calculated = this.recalculateDocument(
+      dto.items,
+      line_snapshots,
+      'invoice:validate-draft',
+      aiu_context.aiu,
+      tax_catalog,
+    );
+    const exchange_rate = await this.resolveExchangeRateForDocument({
+      foreign_currency: dto.foreign_currency,
+      exchange_rate: dto.exchange_rate,
+      exchange_rate_date: dto.exchange_rate_date,
+      issue_date: dto.issue_date,
+    });
+    const is_purchase_side =
+      dto.invoice_type === 'support_document' ||
+      dto.invoice_type === 'support_adjustment_note';
+    const resolved_withholding = is_purchase_side
+      ? null
+      : await this.resolveWithholdingAmount({
+          organization_id: context.organization_id,
+          store_id: context.store_id,
+          customer_id: dto.customer_id,
+          base: calculated.totals.total_before_tax,
+          iva_amount: calculated.totals.tax_amount,
+          issue_date,
+        });
+
+    const document_type = this.toFiscalDocumentType(dto.invoice_type);
+    const { resolution, projected_number, resolution_secret } =
+      await this.peekResolutionForDraft(
+        accounting_entity_id,
+        document_type,
+        dto.resolution_id,
+      );
+
+    // La ficha VIVA del adquiriente, con el mismo `select` que `send()` lee.
+    // `buildAcquirerIdentityInput` la prefiere sobre el snapshot, así que
+    // omitirla haría que la puerta juzgara datos distintos de los que se van a
+    // emitir — y aprobaría documentos que la DIAN rechaza, o al revés.
+    const customer =
+      dto.customer_id != null
+        ? await this.prisma.users.findFirst({
+            where: { id: dto.customer_id },
+            select: CUSTOMER_FOR_INVOICE_SELECT,
+          })
+        : null;
+
+    const split_line_taxes = this.needsPersistedLineTaxes(
+      calculated.header_taxes,
+    );
+    // Las MISMAS filas que se escribirían, por los mismos dos caminos que
+    // `create()` + `persistLineTaxes`. `invoice_item_id` no se proyecta: el
+    // prevalidador no lo lee y acá no hay ids que apuntar.
+    const projected_taxes = split_line_taxes
+      ? calculated.lines.flatMap((line) =>
+          line.taxes.map((tax) => this.buildInvoiceTaxCreateInput(tax)),
+        )
+      : calculated.header_taxes.length > 0
+        ? calculated.header_taxes.map((tax) =>
+            this.buildInvoiceTaxCreateInput(tax),
+          )
+        : dto.taxes && dto.taxes.length > 0
+          ? this.buildDocumentLevelTaxRows(dto.taxes)
+          : [];
+
+    const invoice = {
+      // Ids NEGATIVOS y no `0`/`undefined`: los mapas por línea del
+      // prevalidador (`resolveInclusiveLineOverrides`, `resolveLineUnitCodes`)
+      // se llavean por `item.id`, y un id repetido colapsaría dos líneas en
+      // una. Negativos porque ninguna fila real los tiene, así que un valor de
+      // éstos que se filtrara a una consulta no puede coincidir con nada.
+      id: -1,
+      organization_id: context.organization_id,
+      store_id: context.store_id ?? null,
+      accounting_entity_id,
+      fiscal_document_type: document_type,
+      invoice_number: projected_number,
+      invoice_type: dto.invoice_type,
+      status: 'draft',
+      customer_id: dto.customer_id ?? null,
+      supplier_id: dto.supplier_id ?? null,
+      customer,
+      supplier: support_supplier ?? null,
+      // El snapshot del adquiriente TAL COMO SE PERSISTIRÍA. Cuando hay
+      // `inline_customer`, éste es el único sitio donde su identidad viaja: no
+      // se creó ninguna fila.
+      customer_name:
+        dto.customer_name ??
+        support_supplier?.name ??
+        this.draftInlineCustomerName(dto) ??
+        null,
+      customer_tax_id:
+        dto.customer_tax_id ??
+        support_supplier?.tax_id ??
+        dto.inline_customer?.document_number ??
+        null,
+      customer_address: dto.customer_address ?? support_supplier?.addresses,
+      customer_email: dto.customer_email ?? dto.inline_customer?.email ?? null,
+      customer_phone: dto.customer_phone ?? dto.inline_customer?.phone ?? null,
+      customer_document_type:
+        dto.customer_document_type ??
+        dto.inline_customer?.document_type ??
+        null,
+      customer_verification_digit: dto.customer_verification_digit ?? null,
+      customer_tax_regime: dto.customer_tax_regime ?? null,
+      customer_fiscal_responsibilities:
+        dto.customer_fiscal_responsibilities ?? null,
+      operation_type: dto.operation_type ?? null,
+      currency: dto.currency || 'COP',
+      issue_date,
+      due_date: this.resolveDueDate(dto, issue_date),
+      exchange_rate: exchange_rate ?? null,
+      subtotal_amount: new Prisma.Decimal(calculated.totals.total_before_tax),
+      discount_amount: new Prisma.Decimal(calculated.totals.discount_amount),
+      tax_amount: new Prisma.Decimal(calculated.totals.tax_amount),
+      withholding_amount:
+        resolved_withholding ??
+        new Prisma.Decimal(dto.withholding_amount || 0),
+      total_amount: new Prisma.Decimal(calculated.totals.total_amount),
+      resolution_id: resolution?.id ?? null,
+      resolution,
+      invoice_items: dto.items.map((item, index) => ({
+        id: -(index + 1),
+        ...this.buildInvoiceItemCreateInput(
+          item,
+          calculated.lines[index],
+          line_snapshots[index],
+        ),
+      })),
+      invoice_taxes: projected_taxes,
+    };
+
+    return { invoice, resolution_secret };
+  }
+
+  /**
+   * Nombre proyectado del cliente creado en línea, cuando el DTO no declaró
+   * `customer_name`. Jurídica ⇒ razón social; natural ⇒ nombre y apellido,
+   * exactamente la precedencia que aplica `resolveAcquirerRail`.
+   */
+  private draftInlineCustomerName(dto: CreateInvoiceDto): string | null {
+    const inline = dto.inline_customer as
+      | {
+          legal_name?: string | null;
+          first_name?: string | null;
+          last_name?: string | null;
+        }
+      | undefined;
+    if (!inline) return null;
+    const legal = (inline.legal_name || '').trim();
+    if (legal) return legal;
+    const full = `${inline.first_name || ''} ${inline.last_name || ''}`.trim();
+    return full || null;
+  }
+
+  /**
+   * La resolución que `generateNextNumber` elegiría, y el número que asignaría,
+   * SIN asignarlo.
+   *
+   * Repite el `where` del generador —misma entidad contable, mismo tipo de
+   * documento, activa y vigente, y la fila concreta si el DTO la nombró— y su
+   * misma regla de suelo: el cursor nunca puede quedar por debajo de
+   * `range_from - 1`, porque una resolución con `current_number` a la deriva
+   * emitiría números fuera del rango autorizado.
+   *
+   * NO ESCRIBE la serie interna que el generador daría de alta para una nota
+   * sin resolución — pero sí la PROYECTA. La diferencia importa: el generador
+   * (`provisionInternalSeries`) abre o reactiva una serie propia para los tipos
+   * cuyo `internal_series_prefix` no es `null` (`NAS` para la nota de ajuste de
+   * documento soporte, `NAE` para la del documento equivalente), porque esos
+   * consecutivos no los autoriza la DIAN y por tanto no hay nada que pedirle a
+   * MUISCA. Si la previsualización se limitara al `findFirst`, la PRIMERA nota
+   * de ajuste de una tienda saldría de «Validar» con un `RESOLUTION_MISSING`
+   * bloqueante mientras «Crear factura» la emitiría sin chistar: el veredicto
+   * mentiría justo en el caso que esta función existe para cubrir.
+   *
+   * Así que acá se replica la MISMA decisión del generador, en lectura:
+   *
+   * - Resolución nombrada en el DTO y no encontrada ⇒ `null`, igual que
+   *   `provisionInternalSeries`, que también se niega a fabricar otra. El
+   *   problema es ESA fila, no la ausencia de serie.
+   * - Serie interna DORMIDA (existe pero inactiva o vencida) ⇒ se proyecta
+   *   reactivada, que es lo que el generador haría con ella, conservando su
+   *   cursor: reabrirla en `range_from` reemitiría números ya usados.
+   * - Sin fila y con prefijo interno ⇒ se proyecta la serie recién abierta,
+   *   con el mismo bloque y la misma vigencia que escribiría el generador.
+   * - Sin fila y SIN prefijo interno (factura de venta, documento soporte,
+   *   documento equivalente POS) ⇒ `null`. Ahí `RESOLUTION_MISSING` es la
+   *   respuesta honesta: ese rango lo autoriza la DIAN y no se inventa.
+   *
+   * Nada de esto toca la base: `is_active`, `valid_from` y `valid_to` se
+   * proyectan en memoria y `invoice_resolutions` queda como estaba.
+   */
+  private async peekResolutionForDraft(
+    accounting_entity_id: number,
+    document_type: string,
+    requested_resolution_id?: number | null,
+  ): Promise<{
+    resolution: Record<string, any> | null;
+    projected_number: string;
+    resolution_secret: StoredTechnicalKey | null;
+  }> {
+    const now = new Date();
+    const row = await this.prisma.withoutScope().invoice_resolutions.findFirst({
+      where: {
+        accounting_entity_id,
+        document_type: document_type as any,
+        is_active: true,
+        valid_from: { lte: now },
+        valid_to: { gte: now },
+        ...(requested_resolution_id ? { id: requested_resolution_id } : {}),
+      },
+      orderBy: { created_at: 'desc' },
+    });
+
+    const effective = row ?? (await this.peekInternalSeries(
+      accounting_entity_id,
+      document_type,
+      requested_resolution_id,
+      now,
+    ));
+
+    if (!effective) {
+      return { resolution: null, projected_number: '', resolution_secret: null };
+    }
+
+    const floor = effective.range_from - 1;
+    const cursor =
+      effective.current_number < floor ? floor : effective.current_number;
+    const next = cursor + 1;
+
+    return {
+      // Sólo las columnas PÚBLICAS de la resolución entran en la proyección: la
+      // ClTec viaja aparte, en `resolution_secret`, y la abre el vault dentro
+      // de `InvoiceFlowService`. Copiarla acá la metería en un objeto que
+      // cualquier `JSON.stringify` de diagnóstico volcaría a un log.
+      resolution: {
+        id: effective.id,
+        resolution_number: effective.resolution_number,
+        prefix: effective.prefix,
+        range_from: effective.range_from,
+        range_to: effective.range_to,
+        current_number: effective.current_number,
+        valid_from: effective.valid_from,
+        valid_to: effective.valid_to,
+        is_active: effective.is_active,
+      },
+      projected_number: `${effective.prefix ?? ''}${next}`,
+      resolution_secret: {
+        technical_key: effective.technical_key,
+        technical_key_encrypted: effective.technical_key_encrypted,
+      },
+    };
+  }
+
+  /**
+   * La serie INTERNA que `provisionInternalSeries` abriría o reactivaría, tal
+   * como quedaría — sin escribirla. Ver el docblock de `peekResolutionForDraft`
+   * para por qué la previsualización tiene que contemplarla.
+   *
+   * Devuelve una fila con la misma FORMA que `invoice_resolutions` para que el
+   * llamador no tenga que distinguir entre una resolución real y ésta. `id`
+   * viaja en `null` cuando la serie todavía no existe: el prevalidador sólo
+   * llena `scope.resolution_id` si viene, y anunciar un id inventado apuntaría
+   * un diagnóstico a una fila ajena.
+   */
+  private async peekInternalSeries(
+    accounting_entity_id: number,
+    document_type: string,
+    requested_resolution_id: number | null | undefined,
+    now: Date,
+  ): Promise<{
+    id: number | null;
+    resolution_number: string;
+    prefix: string | null;
+    range_from: number;
+    range_to: number;
+    current_number: number;
+    valid_from: Date;
+    valid_to: Date;
+    is_active: boolean;
+    technical_key: string | null;
+    technical_key_encrypted: string | null;
+  } | null> {
+    // El DTO nombró una resolución concreta y no apareció. `provisionInternalSeries`
+    // devuelve `null` en ese mismo caso; fabricar una serie acá diría que sí se
+    // puede emitir contra una fila que el generador va a rechazar.
+    if (requested_resolution_id) return null;
+
+    const prefix = internalSeriesPrefixFor(document_type as any);
+    if (!prefix) return null;
+
+    const valid_to = new Date(now);
+    valid_to.setFullYear(valid_to.getFullYear() + INTERNAL_SERIES_VALIDITY_YEARS);
+
+    // MISMA consulta que `provisionInternalSeries`: sin filtro de vigencia ni
+    // de `is_active`, porque lo que busca es precisamente la serie dormida.
+    const dormant = await this.prisma
+      .withoutScope()
+      .invoice_resolutions.findFirst({
+        where: { accounting_entity_id, document_type: document_type as any },
+        orderBy: { created_at: 'desc' },
+      });
+
+    if (dormant) {
+      return {
+        id: dormant.id,
+        resolution_number: dormant.resolution_number,
+        prefix: dormant.prefix,
+        range_from: dormant.range_from,
+        range_to: dormant.range_to,
+        // El cursor SE CONSERVA. El generador reactiva la fila sin tocarlo;
+        // devolverlo en cero acá anunciaría un número ya emitido.
+        current_number: dormant.current_number,
+        valid_from: now,
+        valid_to,
+        is_active: true,
+        technical_key: dormant.technical_key,
+        technical_key_encrypted: dormant.technical_key_encrypted,
+      };
+    }
+
+    return {
+      id: null,
+      resolution_number: `INTERNA-${prefix}`,
+      prefix,
+      range_from: 1,
+      range_to: INTERNAL_SERIES_BLOCK,
+      current_number: 0,
+      valid_from: now,
+      valid_to,
+      is_active: true,
+      // Sin ClTec, igual que la serie que se escribiría: el CUDE de estas notas
+      // se firma con el Software-PIN. Inventarle una haría que el prevalidador
+      // juzgara una clave que la emisión real no va a usar.
+      technical_key: null,
+      technical_key_encrypted: null,
+    };
+  }
+
+  /**
    * QUI-690 — Inline customer creation for the XXL invoice-create modal.
    *
    * Mirrors a subset of `CustomersService.create()`:
@@ -1372,7 +1811,20 @@ export class InvoicingService {
     const order = await this.prisma.orders.findFirst({
       where: { id: order_id },
       include: {
+        // [print-fiscal-gate / resid-fiscal] — Filtramos líneas canceladas
+        // (soft cancel de lina, D2) antes de armar las líneas de la factura.
+        // `orders.subtotal_amount`/`tax_amount`/`grand_total` ya excluyen
+        // cancelados, pero este `include` relee las líneas y las vuelve a
+        // sumar — sin el filtro, el plato cancelado salía como línea
+        // fantasma en el XML DIAN y rompía la igualdad header tax = Σ
+        // line taxes. Una factura así o se rechaza o se emite con un
+        // documento legalmente incorrecto que YA consumió consecutivo de
+        // resolución — irreversible ante la DIAN. Filtrar aquí evita
+        // ambos escenarios. `order_item_taxes` viaja colgado de la línea
+        // cancelada, así que el filtro en cascada es correcto: ningún
+        // impuesto de línea cancelada entra al cálculo.
         order_items: {
+          where: { cancelled_at: null },
           include: {
             products: true,
             product_variants: true,
@@ -1580,17 +2032,34 @@ export class InvoicingService {
     const split_order_line_taxes = taxGroups.size >= 2;
 
     const invoiceDataRequest = order.invoice_data_requests?.[0];
-    const guest_customer_name = invoiceDataRequest
-      ? `${invoiceDataRequest.first_name || ''} ${invoiceDataRequest.last_name || ''}`.trim()
-      : '';
-    // Step 8 — for a JURIDICA the RUT razón social is the canonical name to
-    // persist on the invoice; for a persona natural (or when `person_type`
-    // is null) concatenate first/last. Falls back to the order's guest data
-    // request when there is no `users` row, then to 'Consumidor Final'.
-    const customer_name = order.users
-      ? (order.users.legal_name?.trim() ||
-        `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim())
-      : guest_customer_name || 'Consumidor Final';
+    // El adquiriente declarado para ESTE documento sale de UNA sola fuente
+    // completa — la fila `users` del pedido si hay cliente identificado, o los
+    // datos que el comprador cargó como invitado (`invoice_data_requests`) — y
+    // nunca se mezclan campos entre las dos. Mezclar el número de una fuente
+    // con el nombre de otra es exactamente el defecto de identidad partida que
+    // `resolveAcquirerRail` existe para cerrar: antes, `customer_name` caía a
+    // 'Consumidor Final' y `customer_tax_id` caía a `undefined` de forma
+    // independiente, y esa mitad de identidad hacía fallar la emisión DESPUÉS
+    // de haber numerado (ver el docblock del resolver).
+    const declaredAcquirer = order.users
+      ? {
+          document_type: order.users.document_type,
+          document_number: order.users.document_number,
+          legal_name: order.users.legal_name,
+          first_name: order.users.first_name,
+          last_name: order.users.last_name,
+        }
+      : invoiceDataRequest
+        ? {
+            document_type: invoiceDataRequest.document_type,
+            document_number: invoiceDataRequest.document_number,
+            legal_name: null,
+            first_name: invoiceDataRequest.first_name,
+            last_name: invoiceDataRequest.last_name,
+          }
+        : {};
+    const acquirerRail = resolveAcquirerRail(declaredAcquirer);
+    const customer_name = acquirerRail.identity.name;
 
     const invoice = await this.prisma.invoices.create({
       data: {
@@ -1603,10 +2072,13 @@ export class InvoicingService {
         status: 'draft',
         customer_id: order.customer_id,
         customer_name,
-        customer_tax_id:
-          order.users?.document_number ||
-          invoiceDataRequest?.document_number ||
-          undefined,
+        // Nunca `undefined`: el carril consumidor final persiste el número
+        // oficial `222222222222`, así que `dian-direct.provider.ts` lo
+        // reconoce como `declares_final_consumer` en vez de caer al carril
+        // nominativo con media identidad — que es lo que quemaba el
+        // consecutivo en cada venta anónima.
+        customer_tax_id: acquirerRail.identity.document_number,
+        customer_document_type: acquirerRail.identity.document_type,
         order_id: order.id,
         resolution_id,
         subtotal_amount: new Prisma.Decimal(subtotal),

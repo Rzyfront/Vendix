@@ -1597,10 +1597,14 @@ export class ProductCreatePageComponent {
     // que trackear un flag `dirty` separado.
     this.setupAutoSlugGeneration();
   
-    // QUI-651 — cargar estaciones para el selector del plato preparado. Va aca y no
-    // en un ngOnInit porque el componente no implementa OnInit: el resto de su
-    // inicializacion tambien vive en el constructor.
-    this.loadKdsStations();
+    // QUI-651 — Auto-cargar estaciones KDS cuando la tienda es restaurante o el producto es preparado.
+    // El effect resuelve la condición de carrera donde storeSettings$ o loginIndustries$
+    // emiten tras la construcción inicial del componente (especialmente en tablets/móvil/recarga).
+    effect(() => {
+      if (this.isRestaurant() || this.isPreparedProduct()) {
+        this.loadKdsStations();
+      }
+    });
 }
 
   /**
@@ -4064,12 +4068,26 @@ export class ProductCreatePageComponent {
         };
 
         // Camino limpio: éxito real "creado/actualizado correctamente".
+        //
+        // ERR-13 (QUI-729): el backend fuerza `is_ingredient` a false cuando el
+        // tipo de negocio de la tienda no admite insumos
+        // (`enforceIngredientCapability`, products.service.ts) SIN lanzar. Si el
+        // admin marcó "Es insumo" y la respuesta vino desmarcada, NO celebres un
+        // campo que no se guardó: avisa con un warning en lugar del toast verde.
         const finish = () => {
-          this.toastService.success(
-            this.isEditMode()
-              ? 'Producto actualizado correctamente'
-              : 'Producto creado correctamente',
-          );
+          const requestedIngredient = !!formValue.is_ingredient;
+          const savedIngredient = !!savedProduct?.is_ingredient;
+          if (requestedIngredient && !savedIngredient) {
+            this.toastService.warning(
+              'Este producto se guardó, pero no se pudo marcar como insumo: el tipo de negocio de esta tienda no lo permite.',
+            );
+          } else {
+            this.toastService.success(
+              this.isEditMode()
+                ? 'Producto actualizado correctamente'
+                : 'Producto creado correctamente',
+            );
+          }
           navigateAfterSave();
         };
 
@@ -5193,39 +5211,47 @@ export class ProductCreatePageComponent {
   /**
    * Estaciones de KDS de la tienda, para el selector del plato preparado.
    *
-   * Se cargan solo cuando la tienda es restaurante: pedirlas en una tienda retail
-   * seria una llamada garantizada a devolver vacio.
+   * Se cargan reactivamente cuando la tienda es restaurante o el producto es de tipo preparado.
    */
   readonly kdsStations = signal<KdsStation[]>([]);
 
-  readonly kdsStationOptions = computed<SelectorOption[]>(() =>
-    this.kdsStations()
+  readonly kdsStationOptions = computed<SelectorOption[]>(() => [
+    { value: null as any, label: 'KDS por defecto de la tienda' },
+    ...this.kdsStations()
       .filter((s) => s.is_active)
       .map((s) => ({
         value: s.id,
         label: s.is_default ? `${s.name} (por defecto)` : s.name,
       })),
-  );
+  ]);
 
   /**
-   * El campo de estacion solo aplica a platos preparados: el fire excluye
-   * explicitamente todo lo que no sea `prepared`, asi que en cualquier otro tipo
-   * la estacion no se leeria nunca.
+   * El campo de estación solo aplica a platos preparados: el fire excluye
+   * explícitamente todo lo que no sea `prepared`.
+   * Reactive computed signal para compatibilidad total con Angular Zoneless.
    */
-  isPreparedProduct(): boolean {
-    return this.productForm.get('product_type')?.value === 'prepared';
-  }
+  readonly isPreparedProduct = computed<boolean>(() => {
+    this.formUpdateTrigger();
+    return this.productForm?.get('product_type')?.value === 'prepared';
+  });
 
+  private isLoadingStations = false;
   private loadKdsStations(): void {
-    if (!this.isRestaurant()) return;
+    if (this.isLoadingStations || this.kdsStations().length > 0) return;
+    this.isLoadingStations = true;
     this.kdsStationsService
       .loadStations()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (stations) => this.kdsStations.set(stations),
+        next: (stations) => {
+          this.kdsStations.set(stations);
+          this.isLoadingStations = false;
+        },
         // Silencioso: sin estaciones el selector no se muestra y el plato cae en el
         // KDS por defecto, que es el comportamiento correcto.
-        error: () => {},
+        error: () => {
+          this.isLoadingStations = false;
+        },
       });
   }
 

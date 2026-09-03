@@ -32,6 +32,7 @@ import {
   GuestCheckoutCustomer,
   BookingSelection,
   WompiWidgetConfig,
+  BankAccountOption,
 } from '../../services/checkout.service';
 import { WompiService } from '../../../../../shared/services/wompi.service';
 import { AccountService, Address } from '../../services/account.service';
@@ -209,6 +210,44 @@ export class CheckoutComponent implements OnInit {
     const t = this.selectedPaymentMethodObj()?.type;
     return t === 'bank_transfer' || t === 'voucher';
   });
+
+  // ====== Cuentas bancarias (bank_transfer / voucher) ======
+  /**
+   * Cuenta bancaria destino seleccionada por el cliente. Se inicializa al
+   * cargar el catálogo del método y se persiste en el `CheckoutRequest` para
+   * que el backend la valide con `resolveAndValidateBankAccount`.
+   *
+   * Permanece en `null` cuando el método no requiere cuenta o cuando el
+   * backend devuelve `[]` (caso legacy: la tienda aún no configuró cuentas).
+   * En ese último escenario el modal sigue mostrando `payment_instructions`
+   * para no romper el flujo existente.
+   */
+  readonly selected_bank_account_id = signal<number | null>(null);
+
+  /**
+   * Cache de cuentas por método (`method_id → accounts[]`). La entrada se
+   * setea al cargar y se conserva durante toda la sesión de checkout para
+   * que cambiar de método y volver no dispare un refetch. El modal abre
+   * instantáneamente con las cuentas cacheadas.
+   */
+  readonly bankAccountsByMethod = signal<Map<number, BankAccountOption[]>>(
+    new Map(),
+  );
+
+  /**
+   * Lista de cuentas correspondiente al método actualmente seleccionado.
+   * Devuelve `[]` cuando el método no es `bank_transfer`/`voucher`, cuando
+   * aún no se cargaron las cuentas, o cuando el backend devolvió catálogo
+   * vacío.
+   */
+  readonly currentBankAccounts = computed<BankAccountOption[]>(() => {
+    const methodId = this.selected_payment_method_id();
+    if (methodId == null) return [];
+    return this.bankAccountsByMethod().get(methodId) ?? [];
+  });
+
+  /** True mientras se carga el catálogo de cuentas del método actual. */
+  readonly loadingBankAccounts = signal(false);
 
   /**
    * Disables the "Confirmar Pedido" button when the order cannot be placed
@@ -994,6 +1033,15 @@ export class CheckoutComponent implements OnInit {
   }
 
   selectPaymentMethod(method_id: number): void {
+    // Guarda de "mismo método": si el cliente ya está en este método (re-click
+    // del pill desde el picker) NO reiniciamos nada — preservamos su elección
+    // de cuenta, el comprobante ya cargado y el flag de acuse. Antes este
+    // handler re-ejecutaba el bloque completo en cada clic, lo que pisaba la
+    // selección del usuario con la primera cuenta cacheada y descartaba el
+    // `payment_receipt_file` sin aviso. Patrón silencioso de "compré
+    // transferencia y terminé pagando a la cuenta equivocada".
+    const isSameMethod = method_id === this.selected_payment_method_id();
+
     this.selected_payment_method_id.set(method_id);
 
     // Check if selected method is Wompi
@@ -1006,13 +1054,126 @@ export class CheckoutComponent implements OnInit {
 
     const t = selectedMethod?.type;
     if (t === 'bank_transfer' || t === 'voucher') {
+      if (isSameMethod) {
+        // Mismo método: re-abrimos el modal y salimos. Estado preservado.
+        this.show_payment_instructions_modal.set(true);
+        return;
+      }
+
+      // Cambio real desde otro método: descartar comprobante y acuse del
+      // método anterior. NO tocamos `selected_bank_account_id`: la elección
+      // previa se conserva si sigue siendo válida para este método (la
+      // validez se chequea contra la lista cacheada del método destino, así
+      // no se arrastra una cuenta ajena). Esto resuelve el round trip
+      // Transferencia → Efectivo → Transferencia sin re-pisar la elección.
       this.payment_receipt_file.set(null);
       this.payment_instructions_acknowledged.set(false);
+
+      // Carga lazy de cuentas. Si ya están cacheadas, no refetch — el modal
+      // las resuelve instantáneamente desde `bankAccountsByMethod`.
+      if (!this.bankAccountsByMethod().has(method_id)) {
+        this.loadBankAccountsForMethod(method_id);
+      } else {
+        // Cache hit: default a la primera cuenta SOLO si la elección actual
+        // no es válida para este método (cuenta borrada, método nuevo que
+        // nunca tuvo elección previa, etc.). Misma guarda que
+        // `loadBankAccountsForMethod` (líneas 1126-1131): respeta elecciones
+        // previas válidas y solo rellena el hueco. El predicado vive en
+        // `isBankAccountStillValid` para no divergir entre los dos sitios.
+        const cached = this.bankAccountsByMethod().get(method_id) ?? [];
+        if (!this.isBankAccountStillValid(cached)) {
+          this.selected_bank_account_id.set(cached[0]?.id ?? null);
+        }
+      }
+
       this.show_payment_instructions_modal.set(true);
     } else {
+      // Cambio a un método no-transferencia: descartar comprobante y acuse
+      // del método anterior. La cuenta seleccionada NO se descarta — si el
+      // usuario vuelve a Transferencia/Voucher, la preservamos mientras siga
+      // siendo válida (la guarda del cache hit de arriba se encarga). Esto
+      // es lo que faltaba para que el round trip del repro original no
+      // re-pise la elección.
       this.payment_receipt_file.set(null);
       this.payment_instructions_acknowledged.set(false);
     }
+  }
+
+  /**
+   * Predicado compartido: ¿la cuenta seleccionada actualmente sigue siendo
+   * válida para esta lista de cuentas? Vive en un método privado porque el
+   * mismo predicado se usa en dos sitios (cache hit y cache miss de
+   * `loadBankAccountsForMethod`) — si dos implementaciones del mismo
+   * predicado divergen, una paga a la cuenta equivocada (QUI-756).
+   */
+  private isBankAccountStillValid(
+    accounts: ReadonlyArray<{ id: number }>,
+  ): boolean {
+    const current = this.selected_bank_account_id();
+    return current != null && accounts.some((a) => a.id === current);
+  }
+
+  /**
+   * Carga las cuentas activas para un método `bank_transfer`/`voucher` desde
+   * el endpoint del storefront. El resultado se cachea en
+   * `bankAccountsByMethod` por método para evitar refetch al alternar.
+   *
+   * QUI-728 — el servicio ahora exige JSON (Content-Type `application/json`)
+   * y cuerpo `{success:true, data:Array}`. Si la respuesta NO es JSON
+   * (típico cuando un vhost sirviendo la SPA contesta con `index.html` y
+   * status 200), el servicio lanza un error con mensaje legible. Acá
+   * propagamos al `console.error` para que al menos haya telemetría, y
+   * guardamos `null` en el cache (distinto de `[]`) para que la UI pueda
+   * diferenciar «sin cuentas configuradas» de «fallo de carga». El modal
+   * sigue cayendo al fallback de `payment_instructions`, pero ya no de
+   * forma silenciosa.
+   */
+  private loadBankAccountsForMethod(method_id: number): void {
+    this.loadingBankAccounts.set(true);
+    this.checkout_service.getBankAccountsForMethod(method_id).subscribe({
+      next: (accounts) => {
+        const next = new Map(this.bankAccountsByMethod());
+        next.set(method_id, accounts);
+        this.bankAccountsByMethod.set(next);
+        // Default a la primera cuenta SOLO si la elección actual no es válida
+        // para esta lista. Mismo predicado que el cache hit de arriba
+        // (`isBankAccountStillValid`): chequea validez contra la lista del
+        // método destino, no solo null. Antes este chequeo era `== null`,
+        // pero ahora `selectPaymentMethod` ya no nulifica la cuenta al
+        // cambiar entre métodos — así que un cliente que eligió cuenta 19 en
+        // Transferencia y pasa a Vouchers (otro método de tipo transferencia,
+        // también cache miss) podía terminar con la cuenta 19 seleccionada
+        // aunque 19 no estuviera en la lista de Vouchers. El predicado
+        // extraído evita ese hueco y mantiene los dos sitios sincronizados.
+        // El chequeo `selected_payment_method_id() === method_id` se
+        // conserva: protege contra una respuesta tardía que pisa la elección
+        // de un método que el usuario ya abandonó.
+        if (
+          this.selected_payment_method_id() === method_id &&
+          !this.isBankAccountStillValid(accounts)
+        ) {
+          this.selected_bank_account_id.set(accounts[0]?.id ?? null);
+        }
+        this.loadingBankAccounts.set(false);
+      },
+      error: (err: unknown) => {
+        // Error de carga: lo logueamos para que al menos haya telemetría.
+        // El bug original era tragar errores como `[]` sin log, haciendo
+        // imposible distinguir «endpoint sano, sin cuentas activas» de
+        // «endpoint roto / vhost sirviendo HTML». Con este log el siguiente
+        // reporte al soporte llega con el stack, mientras el modal sigue
+        // cayendo al fallback de `payment_instructions`.
+        // eslint-disable-next-line no-console
+        console.error(
+          `[QUI-728] getBankAccountsForMethod(${method_id}) failed:`,
+          err,
+        );
+        const next = new Map(this.bankAccountsByMethod());
+        next.set(method_id, []);
+        this.bankAccountsByMethod.set(next);
+        this.loadingBankAccounts.set(false);
+      },
+    });
   }
 
   onReceiptFile(file: File | null): void {
@@ -1744,6 +1905,15 @@ export class CheckoutComponent implements OnInit {
       // Send coupon code as raw string; backend validates and recomputes
       // the total. Frontend never sends a precomputed grand_total.
       coupon_code: this.coupon_code().trim() || undefined,
+      // bank_transfer / voucher: backend resuelve y valida la cuenta con
+      // `resolveAndValidateBankAccount`. Solo viajamos el id cuando el
+      // método actual lo soporta y el cliente eligió una cuenta. Para el
+      // resto de métodos omitimos el campo (undefined) para que el backend
+      // no lo inspeccione.
+      ...(this.requiresPaymentInstructions() &&
+      this.selected_bank_account_id() != null
+        ? { bank_account_id: this.selected_bank_account_id() }
+        : {}),
     };
 
     if (!this.cartHasOnlyServices && this.use_new_address()) {

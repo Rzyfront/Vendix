@@ -17,6 +17,15 @@ export interface PaymentRequest {
   customerId?: number | string;
   customerName?: string;
   isAnonymousSale?: boolean;
+  /**
+   * QUI-728 (E.1) — id de `bank_accounts` elegido por el cajero en el selector
+   * del payment-collector cuando el método es `bank_transfer`. Viaja en
+   * snake_case porque es el nombre del campo en `CreatePosPaymentDto` /
+   * `CreatePaymentDto`; el backend lo valida (existe + activa + organización +
+   * `store_id`) y lo persiste en `payments.bank_account_id`. Sin él, el pago
+   * cae en la pantalla "Pagos sin asignar" de E.2.
+   */
+  bank_account_id?: number;
   metadata?: {
     wompiPaymentMethod?: any;
     walletId?: number;

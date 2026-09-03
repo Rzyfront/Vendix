@@ -7,6 +7,7 @@ export type ButtonVariant =
   | 'outline'
   | 'outline-danger'
   | 'outline-warning'
+  | 'outline-success'
   | 'ghost'
   | 'danger'
   | 'success';
@@ -165,6 +166,14 @@ export type ButtonSize = 'xsm' | 'sm' | 'md' | 'lg';
       .btn-outline-warning-border:hover:not(:disabled) {
         background: rgba(var(--color-warning-rgb), 0.06);
       }
+
+      .btn-outline-success-border {
+        border: 1px solid rgba(var(--color-success-rgb), 0.5);
+      }
+
+      .btn-outline-success-border:hover:not(:disabled) {
+        background: rgba(var(--color-success-rgb), 0.06);
+      }
     `,
   ],
 })
@@ -256,6 +265,11 @@ export class ButtonComponent {
         'btn-outline-warning-border',
         'text-[var(--color-warning)]',
         'focus:ring-orange-500/50',
+      ],
+      'outline-success': [
+        'btn-outline-success-border',
+        'text-[var(--color-success)]',
+        'focus:ring-[var(--color-success)]/50',
       ],
       ghost: [
         'text-[var(--color-text-primary)]',

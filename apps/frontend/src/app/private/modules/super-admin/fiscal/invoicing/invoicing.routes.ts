@@ -83,7 +83,7 @@ export const PLATFORM_INVOICING_ROUTES: Routes = [
       },
       {
         // Orden importa: `invoices/new` antes que `invoices/:id` porque
-        // Angular matchea first-match-wins. Si dejás `:id` primero, la URL
+        // Angular matchea first-match-wins. Si dejas `:id` primero, la URL
         // `invoices/new` captura `:id='new'`, Number('new')===NaN, y el detail
         // renderiza "Identificador de factura inválido". Cubre tanto SaaS
         // como platform-invoices (la creación es por el builder compartido).

@@ -90,6 +90,7 @@
 
 <app-modal
   [isOpen]="showDetailModal()"
+  [dialog]="true"
   [title]="'Detalle de Auditoría'"
   [subtitle]="selectedLog() ? 'Evento ID: ' + selectedLog()?.id : ''"
   [size]="'lg'"

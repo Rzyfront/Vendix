@@ -6,7 +6,6 @@ import {
   PrintPaperFormat,
 } from '../../../../../../../core/models/print-formats.model';
 import { PAPER_GEOMETRY } from '../../../../../../../core/lib/page-geometry';
-import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 
 /** Cast helper — PAPER_GEOMETRY is keyed by a closed set, but the
  *  editor dropdown also exposes `custom`. Unknown keys fall through to
@@ -26,7 +25,7 @@ function lookupGeometry(format: PrintPaperFormat) {
 @Component({
   selector: 'app-print-paper-panel',
   standalone: true,
-  imports: [CommonModule, FormsModule, IconComponent],
+  imports: [CommonModule, FormsModule],
   template: `
     <section class="vendix-subpanel">
       <h4 class="text-xs font-bold uppercase tracking-wider text-text-secondary mb-2">
@@ -49,11 +48,40 @@ function lookupGeometry(format: PrintPaperFormat) {
             <option value="letter">Carta (8.5" x 11")</option>
             <option value="half_letter">Media Carta (5.5" x 8.5")</option>
             <option value="a4">A4 (210mm x 297mm)</option>
+            <option value="custom">Personalizado (mm)</option>
           </select>
           <p class="text-[10px] text-text-tertiary mt-1">
             {{ geometryHint() }}
           </p>
         </div>
+
+        <!-- Custom dimensions -->
+        @if (paper().format === 'custom') {
+          <div class="grid grid-cols-2 gap-2">
+            <label class="block">
+              <span class="text-[10px] text-text-tertiary">Ancho (mm)</span>
+              <input
+                type="number"
+                min="58"
+                max="600"
+                [ngModel]="paper().width_mm"
+                (ngModelChange)="setCustomWidth($event)"
+                class="w-full px-2 py-1 bg-surface-secondary border border-border rounded text-xs text-text-primary focus:border-primary-500 focus:outline-none"
+              />
+            </label>
+            <label class="block">
+              <span class="text-[10px] text-text-tertiary">Alto (mm)</span>
+              <input
+                type="number"
+                min="50"
+                max="2000"
+                [ngModel]="paper().height_mm ?? 150"
+                (ngModelChange)="setCustomHeight($event)"
+                class="w-full px-2 py-1 bg-surface-secondary border border-border rounded text-xs text-text-primary focus:border-primary-500 focus:outline-none"
+              />
+            </label>
+          </div>
+        }
 
         <!-- Margins -->
         <div>
@@ -76,7 +104,7 @@ function lookupGeometry(format: PrintPaperFormat) {
                 type="number"
                 min="0"
                 max="50"
-                [ngModel]="paper().marginTopMm ?? paper().margin_mm ?? 0"
+                [ngModel]="paper().margin_top_mm ?? paper().margin_mm ?? 0"
                 (ngModelChange)="setMargin('top', $event)"
                 class="w-full px-2 py-1 bg-surface-secondary border border-border rounded text-xs text-text-primary focus:border-primary-500 focus:outline-none"
               />
@@ -87,7 +115,7 @@ function lookupGeometry(format: PrintPaperFormat) {
                 type="number"
                 min="0"
                 max="50"
-                [ngModel]="paper().marginRightMm ?? paper().margin_mm ?? 0"
+                [ngModel]="paper().margin_right_mm ?? paper().margin_mm ?? 0"
                 (ngModelChange)="setMargin('right', $event)"
                 class="w-full px-2 py-1 bg-surface-secondary border border-border rounded text-xs text-text-primary focus:border-primary-500 focus:outline-none"
               />
@@ -98,7 +126,7 @@ function lookupGeometry(format: PrintPaperFormat) {
                 type="number"
                 min="0"
                 max="50"
-                [ngModel]="paper().marginBottomMm ?? paper().margin_mm ?? 0"
+                [ngModel]="paper().margin_bottom_mm ?? paper().margin_mm ?? 0"
                 (ngModelChange)="setMargin('bottom', $event)"
                 class="w-full px-2 py-1 bg-surface-secondary border border-border rounded text-xs text-text-primary focus:border-primary-500 focus:outline-none"
               />
@@ -109,7 +137,7 @@ function lookupGeometry(format: PrintPaperFormat) {
                 type="number"
                 min="0"
                 max="50"
-                [ngModel]="paper().marginLeftMm ?? paper().margin_mm ?? 0"
+                [ngModel]="paper().margin_left_mm ?? paper().margin_mm ?? 0"
                 (ngModelChange)="setMargin('left', $event)"
                 class="w-full px-2 py-1 bg-surface-secondary border border-border rounded text-xs text-text-primary focus:border-primary-500 focus:outline-none"
               />
@@ -162,7 +190,27 @@ function lookupGeometry(format: PrintPaperFormat) {
               (ngModelChange)="setCopies($event)"
               class="w-20 px-2 py-1 bg-surface-secondary border border-border rounded text-xs text-text-primary focus:border-primary-500 focus:outline-none"
             />
-            <span class="text-[10px] text-text-tertiary">0–10</span>
+            <span class="text-[10px] text-text-tertiary">0–10 (0 = default 1)</span>
+          </div>
+        </div>
+
+        <!-- Auto-impresión -->
+        <div class="pt-2 border-t border-border/50">
+          <div class="flex items-center justify-between">
+            <div>
+              <label class="block text-[11px] font-medium text-text-primary">
+                Auto-impresión
+              </label>
+              <p class="text-[10px] text-text-tertiary">
+                Disparar impresión al finalizar la acción (ej. venta POS)
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              [ngModel]="paper().auto_print !== false"
+              (ngModelChange)="setAutoPrint($event)"
+              class="w-4 h-4 rounded text-primary-600 bg-surface-secondary border-border focus:ring-primary-500 cursor-pointer"
+            />
           </div>
         </div>
       </div>
@@ -192,6 +240,9 @@ export class PrintPaperPanelComponent {
 
   geometryHint(): string {
     const p = this.paper();
+    if (p.format === 'custom') {
+      return 'Dimensiones personalizadas: ancho y alto definidos manualmente (58–600 × 50–2000 mm).';
+    }
     const geo = lookupGeometry(p.format);
     if (!geo) return '';
     if (geo.is_roll) {
@@ -206,9 +257,12 @@ export class PrintPaperPanelComponent {
 
   setFormat(format: PrintPaperFormat): void {
     const geo = lookupGeometry(format);
+    const isCustom = format === 'custom';
     const target = geo
       ? { width_mm: geo.width_mm, is_roll: geo.is_roll }
-      : { width_mm: 80, is_roll: true };
+      : isCustom
+        ? { width_mm: Math.max(58, this.paper().width_mm || 100), is_roll: false }
+        : { width_mm: 80, is_roll: true };
 
     const paper: PrintFormatDefinition['paper'] = {
       ...this.paper(),
@@ -216,27 +270,46 @@ export class PrintPaperPanelComponent {
       width_mm: target.width_mm,
       is_roll: target.is_roll,
     };
+    if (isCustom) {
+      paper.height_mm = Math.max(50, this.paper().height_mm || 150);
+    }
     if (target.is_roll) {
       paper.margin_mm = 0;
-      paper.marginTopMm = 0;
-      paper.marginRightMm = 0;
-      paper.marginBottomMm = 0;
-      paper.marginLeftMm = 0;
+      paper.margin_top_mm = 0;
+      paper.margin_right_mm = 0;
+      paper.margin_bottom_mm = 0;
+      paper.margin_left_mm = 0;
     }
     this.emit({ ...this.definition(), paper });
   }
 
+  setCustomWidth(value: number): void {
+    const width_mm = Math.max(58, Math.min(600, Number(value) || 58));
+    this.emit({ ...this.definition(), paper: { ...this.paper(), width_mm } });
+  }
+
+  setCustomHeight(value: number): void {
+    const height_mm = Math.max(50, Math.min(2000, Number(value) || 50));
+    this.emit({ ...this.definition(), paper: { ...this.paper(), height_mm } });
+  }
+
+  /**
+   * Writes ONLY the side it receives. `margin_mm` (the uniform margin) is
+   * reserved for `resetMargins()` and `setFormat()` — overwriting it here
+   * used to mean editing the top margin silently reset the other three,
+   * because the backend composer falls back to `margin_mm` uniformly
+   * whenever the per-side value it looks for is absent.
+   */
   setMargin(side: 'top' | 'right' | 'bottom' | 'left', value: number): void {
     const clamped = Math.max(0, Math.min(50, Number(value) || 0));
-    const field = `margin${side.charAt(0).toUpperCase()}${side.slice(1)}Mm` as
-      | 'marginTopMm'
-      | 'marginRightMm'
-      | 'marginBottomMm'
-      | 'marginLeftMm';
+    const field = `margin_${side}_mm` as
+      | 'margin_top_mm'
+      | 'margin_right_mm'
+      | 'margin_bottom_mm'
+      | 'margin_left_mm';
     const paper: PrintFormatDefinition['paper'] = {
       ...this.paper(),
       [field]: clamped,
-      margin_mm: clamped,
     };
     this.emit({ ...this.definition(), paper });
   }
@@ -245,10 +318,10 @@ export class PrintPaperPanelComponent {
     const paper: PrintFormatDefinition['paper'] = {
       ...this.paper(),
       margin_mm: 0,
-      marginTopMm: 0,
-      marginRightMm: 0,
-      marginBottomMm: 0,
-      marginLeftMm: 0,
+      margin_top_mm: 0,
+      margin_right_mm: 0,
+      margin_bottom_mm: 0,
+      margin_left_mm: 0,
     };
     this.emit({ ...this.definition(), paper });
   }
@@ -266,6 +339,14 @@ export class PrintPaperPanelComponent {
     const paper: PrintFormatDefinition['paper'] = {
       ...this.paper(),
       copies,
+    };
+    this.emit({ ...this.definition(), paper });
+  }
+
+  setAutoPrint(auto_print: boolean): void {
+    const paper: PrintFormatDefinition['paper'] = {
+      ...this.paper(),
+      auto_print,
     };
     this.emit({ ...this.definition(), paper });
   }

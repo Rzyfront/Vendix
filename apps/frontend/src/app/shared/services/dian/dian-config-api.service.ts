@@ -41,6 +41,35 @@ export interface DianApiContext {
 
 // ── Rangos de numeración: la verdad de la DIAN vs. lo guardado ────────────
 
+/**
+ * Los dos ambientes de la DIAN. Son web services SEPARADOS
+ * (`vpfe-hab.dian.gov.co` y `vpfe.dian.gov.co`) con datos distintos: una
+ * resolución de producción NO existe en habilitación, y preguntarle a la DIAN
+ * equivocada devuelve una lista vacía que parece «no tienes numeración».
+ */
+export type DianEnvironment = 'test' | 'production';
+
+/**
+ * Cómo terminó la consulta a `GetNumberingRange`. Los tres desenlaces son
+ * distintos y NO se pueden resumir en «hay o no hay filas»:
+ *
+ * - `ranges`: la DIAN reportó numeración.
+ * - `empty_list`: la DIAN respondió con su contrato normal y vigente, y lo que
+ *   dice es que no hay rangos para ese NIT en ese ambiente. Es una respuesta
+ *   legítima, no un fallo.
+ * - `unrecognized_contract`: la respuesta llegó con una estructura que el
+ *   parser no supo leer. SÓLO aquí cabe acusar a la DIAN de haber cambiado su
+ *   contrato.
+ *
+ * La distinción existe porque colapsar los dos últimos mandó a investigar
+ * durante horas un cambio de contrato inexistente: el panel afirmaba que la
+ * DIAN respondió algo ininteligible cuando en realidad respondió «no hay nada».
+ */
+export type DianNumberingRangeOutcome =
+  | 'ranges'
+  | 'empty_list'
+  | 'unrecognized_contract';
+
 /** Fila local con la que se compara un rango que la DIAN reporta. */
 export interface DianNumberingRangeLocal {
   id: number;
@@ -128,15 +157,37 @@ export interface DianNumberingRangesResponse {
   dian_configuration_id: number;
   nit: string;
   software_id: string;
-  environment: 'production' | 'test';
+  /**
+   * Ambiente al que se le PREGUNTÓ. No tiene por qué ser el de la
+   * configuración: la consulta acepta el otro para poder mirar producción
+   * desde una configuración todavía en habilitación.
+   */
+  environment: DianEnvironment;
+  /**
+   * Ambiente de la CONFIGURACIÓN. Va aparte del anterior porque es lo único que
+   * permite decir en pantalla «estás mirando otro ambiente»: sin él, una
+   * consulta cruzada es indistinguible de la normal y una resolución leída en
+   * producción parecería la que la configuración usa para firmar.
+   */
+  config_environment: DianEnvironment;
   /** ISO. Marca de cuándo se le preguntó a la DIAN, no de cuándo se pintó. */
   queried_at: string;
   ranges: DianNumberingRange[];
   local_only: DianNumberingRangeLocalOnly[];
+  /** Cómo terminó la consulta. Ver `DianNumberingRangeOutcome`. */
+  outcome: DianNumberingRangeOutcome;
   /**
-   * Sólo llega cuando no se pudo interpretar NINGÚN rango. Lista los elementos
-   * que sí venían en la respuesta: es lo único que hace depurable un cambio de
-   * contrato de la DIAN sin acceso al XML crudo.
+   * `OperationCode` / `OperationDescription` tal como los devuelve la DIAN.
+   * Son SU explicación de la lista vacía, y son lo que evita que la pantalla
+   * tenga que inventar una causa. `null` cuando la respuesta no los trae.
+   */
+  operation_code: string | null;
+  operation_description: string | null;
+  /**
+   * Sólo llega cuando no se pudo interpretar NINGÚN rango
+   * (`outcome === 'unrecognized_contract'`). Lista los elementos que sí venían
+   * en la respuesta: es lo único que hace depurable un cambio de contrato de la
+   * DIAN sin acceso al XML crudo.
    */
   unparsed?: { element_names: string[] };
 }
@@ -419,12 +470,29 @@ export class DianConfigApiService {
    * clave equivocada cada factura vuelve rechazada por FAD06 y desde la pantalla
    * no había forma de verlo, porque la clave se teclea de un PDF y nadie la
    * puede contrastar.
+   *
+   * `environment` es OPCIONAL y, cuando se omite, la consulta usa el de la
+   * configuración. Se puede pasar el OTRO a propósito: los dos ambientes de la
+   * DIAN son web services separados con datos distintos, así que un
+   * comerciante todavía en habilitación pregunta por defecto a
+   * `vpfe-hab.dian.gov.co`, donde sus resoluciones de producción no viven, y
+   * recibe una lista vacía. Sin este parámetro el único camino para verlas era
+   * inventar una resolución y promover la configuración a producción — un
+   * rodeo que quema consecutivos irrecuperables si alguien factura en esa
+   * ventana. Sigue siendo una LECTURA: no promueve nada ni gasta numeración.
    */
   getNumberingRanges(
     config_id: number,
+    environment?: DianEnvironment,
   ): Observable<ApiResponse<DianNumberingRangesResponse>> {
     return this.http.get<ApiResponse<DianNumberingRangesResponse>>(
       this.getApiUrl(`dian-config/${config_id}/numbering-ranges`),
+      // El parámetro se añade SÓLO cuando hay ambiente explícito, y la guarda
+      // es de veracidad para que `''` y `null` caigan del mismo lado que
+      // `undefined`. `QueryNumberingRangeDto` es estricto: `?environment=`
+      // vacío responde 400 igual que un valor no reconocido, así que «el de la
+      // configuración» se pide OMITIENDO la clave, nunca mandándola en blanco.
+      environment ? { params: { environment } } : {},
     );
   }
 
@@ -443,10 +511,21 @@ export class DianConfigApiService {
    * El backend decide qué campos son escribibles: una resolución que ya consumió
    * consecutivos no puede mover su rango sin romper la trazabilidad de lo ya
    * emitido, así que devuelve por separado lo aplicado y lo omitido.
+   *
+   * `environment` viaja en el CUERPO y tiene que ser el mismo con el que se
+   * obtuvo la lista, no el de la configuración: aplicar es traerse la clave
+   * técnica que la DIAN tiene ligada a esa resolución EN ESE AMBIENTE. Con la
+   * del ambiente equivocado, la DIAN recalcula otro CUFE y devuelve
+   * `FAD06 — Valor del CUFE no está calculado correctamente` con el
+   * consecutivo autorizado ya gastado y no recuperable. Omitirlo vuelve a
+   * significar «el de la configuración».
    */
   applyNumberingRanges(
     config_id: number,
-    payload: { ranges: DianNumberingRangeApplyItem[] },
+    payload: {
+      environment?: DianEnvironment;
+      ranges: DianNumberingRangeApplyItem[];
+    },
   ): Observable<ApiResponse<DianNumberingRangeApplyReport>> {
     return this.http.post<ApiResponse<DianNumberingRangeApplyReport>>(
       this.getApiUrl(`dian-config/${config_id}/numbering-ranges/apply`),

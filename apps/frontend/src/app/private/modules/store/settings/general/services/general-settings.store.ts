@@ -225,6 +225,30 @@ export class GeneralSettingsStore {
     () => this.settings().receipts?.print_dispatch_ticket_auto_with_pos ?? false,
   );
 
+  /**
+   * ADR-7: Auto-imprimir tiquete de despacho al confirmar una venta postventa.
+   * Default false (opt-in por admin). La key técnica conserva `_on_postventa`.
+   * Se lee cast porque la key aún no está tipada en el modelo de core fuera de
+   * alcance de este step (mismo patrón que `(this.settings() as any).shipping`).
+   */
+  readonly printDispatchTicketAutoOnPostventa = computed(
+    () =>
+      (this.settings().receipts as any)?.print_dispatch_ticket_auto_on_postventa ??
+      false,
+  );
+
+  /**
+   * Decisión del usuario 2026-08-31: opt-in por admin para que el tiquete
+   * de despacho funcione como tiquete de reclamo en ventas de mostrador
+   * (`direct_delivery`) y para llevar (`pickup`). Enmienda al ADR-6;
+   * default `false`. El POS y el detalle de la orden pasan este flag al
+   * predicado `shouldAutoPrintDispatchTicket` que vive en
+   * `shared/services/print/dispatch-ticket-autoprint.ts`.
+   */
+  readonly printDispatchTicketOnCounter = computed(
+    () => this.settings().receipts?.print_dispatch_ticket_on_counter ?? false,
+  );
+
   // ─── Cabecera sticky ────────────────────────────────────
 
   readonly badgeText = computed(() =>

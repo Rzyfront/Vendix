@@ -2,14 +2,13 @@ import { Component, inject, computed, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
-import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { PrintFormatsFacade } from '../../services/print-formats.facade';
 import { PrintTokenDefinition } from '../../../../../../../core/models/print-formats.model';
 
 @Component({
   selector: 'app-print-custom-template-editor',
   standalone: true,
-  imports: [CommonModule, FormsModule, IconComponent, ButtonComponent],
+  imports: [CommonModule, FormsModule, IconComponent],
   template: `
     <div class="space-y-4">
       <div class="flex items-center justify-between pb-2 border-b border-border">

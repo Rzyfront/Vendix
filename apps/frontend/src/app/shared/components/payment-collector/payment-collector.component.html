@@ -243,6 +243,38 @@
               </section>
             }
 
+            <!-- QUI-728: selector de cuenta bancaria de destino (transferencia) -->
+            @if (isBankTransferSelected()) {
+              <section
+                class="pc-card"
+                [class.pc-flash-target]="flashSection() === 'reference'"
+              >
+                <div class="section-header">
+                  <div class="section-indicator"></div>
+                  <h3 class="section-title">Cuenta bancaria de destino</h3>
+                </div>
+                @if (bankTransferConfigured()) {
+                  <select
+                    class="pc-input"
+                    aria-label="Cuenta bancaria de destino"
+                    [value]="selectedBankAccountKey() ?? ''"
+                    (change)="onBankAccountSelect($event)"
+                  >
+                    <option value="" disabled>Selecciona una cuenta</option>
+                    @for (acc of selectedBankAccounts(); track acc.key) {
+                      <option [value]="acc.key">
+                        {{ bankAccountLabel(acc) }}
+                      </option>
+                    }
+                  </select>
+                } @else {
+                  <p class="pc-warn">
+                    Sin cuentas configuradas. Contacta al administrador.
+                  </p>
+                }
+              </section>
+            }
+
             <!-- Tip -->
             @if (config().allowTip) {
               <section class="pc-card">
@@ -250,13 +282,60 @@
                   <div class="section-indicator"></div>
                   <h3 class="section-title">Propina (opcional)</h3>
                 </div>
-                <input
-                  appCurrencyInput
-                  [currencyDecimals]="currencyDecimals()"
-                  [formControl]="tipControl"
-                  placeholder="0"
-                  class="pc-input"
-                />
+                <!--
+                  T1 — toggle Monto / Porcentaje. Va pegado al input
+                  para que el operador cambie el modo sin perder el
+                  foco del dato que está tipeando. mobile-first: las
+                  dos chips caben en 375px sin desbordar; la fila se
+                  envuelve si el viewport es muy estrecho.
+                -->
+                <div class="pc-tip-mode" role="tablist">
+                  <button
+                    type="button"
+                    role="tab"
+                    class="pc-tip-mode-btn"
+                    [class.is-active]="tipType() === 'fixed'"
+                    [attr.aria-selected]="tipType() === 'fixed'"
+                    (click)="tipType.set('fixed')"
+                  >
+                    Monto
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    class="pc-tip-mode-btn"
+                    [class.is-active]="tipType() === 'percentage'"
+                    [attr.aria-selected]="tipType() === 'percentage'"
+                    (click)="tipType.set('percentage')"
+                  >
+                    Porcentaje
+                  </button>
+                </div>
+                <div class="pc-tip-row">
+                  <span class="pc-tip-suffix">{{ tipSuffix() }}</span>
+                  <input
+                    appCurrencyInput
+                    [currencyDecimals]="tipType() === 'percentage' ? 2 : currencyDecimals()"
+                    [formControl]="tipControl"
+                    [placeholder]="tipType() === 'percentage' ? '0' : '0'"
+                    inputmode="decimal"
+                    class="pc-input"
+                    aria-label="Monto o porcentaje de propina"
+                  />
+                </div>
+                <label class="pc-tip-waiter">
+                  <span>ID del mesero (opcional)</span>
+                  <input
+                    type="number"
+                    min="1"
+                    [value]="tipWaiterId() ?? ''"
+                    (input)="onTipWaiterInput($any($event.target).value)"
+                    placeholder="Sin asignar"
+                    class="pc-input"
+                    inputmode="numeric"
+                    aria-label="Identificador del mesero que recibe la propina"
+                  />
+                </label>
               </section>
             }
 
@@ -551,13 +630,60 @@
             <div class="section-indicator"></div>
             <h3 class="section-title">Propina (opcional)</h3>
           </div>
-          <input
-            appCurrencyInput
-            [currencyDecimals]="currencyDecimals()"
-            [formControl]="tipControl"
-            placeholder="0"
-            class="pc-input"
-          />
+          <!--
+            T1 — duplicado consciente del bloque de la rama `stepped`.
+            Ambas tarjetas son idénticas a propósito: el collector
+            tiene dos layouts (stepped + plano) y la UI de propina
+            debe verse igual en los dos. Si en el futuro cambia el
+            patrón, se cambia en las DOS ramas a la vez.
+          -->
+          <div class="pc-tip-mode" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              class="pc-tip-mode-btn"
+              [class.is-active]="tipType() === 'fixed'"
+              [attr.aria-selected]="tipType() === 'fixed'"
+              (click)="tipType.set('fixed')"
+            >
+              Monto
+            </button>
+            <button
+              type="button"
+              role="tab"
+              class="pc-tip-mode-btn"
+              [class.is-active]="tipType() === 'percentage'"
+              [attr.aria-selected]="tipType() === 'percentage'"
+              (click)="tipType.set('percentage')"
+            >
+              Porcentaje
+            </button>
+          </div>
+          <div class="pc-tip-row">
+            <span class="pc-tip-suffix">{{ tipSuffix() }}</span>
+            <input
+              appCurrencyInput
+              [currencyDecimals]="tipType() === 'percentage' ? 2 : currencyDecimals()"
+              [formControl]="tipControl"
+              placeholder="0"
+              inputmode="decimal"
+              class="pc-input"
+              aria-label="Monto o porcentaje de propina"
+            />
+          </div>
+          <label class="pc-tip-waiter">
+            <span>ID del mesero (opcional)</span>
+            <input
+              type="number"
+              min="1"
+              [value]="tipWaiterId() ?? ''"
+              (input)="onTipWaiterInput($any($event.target).value)"
+              placeholder="Sin asignar"
+              class="pc-input"
+              inputmode="numeric"
+              aria-label="Identificador del mesero que recibe la propina"
+            />
+          </label>
         </section>
       }
     } @else {

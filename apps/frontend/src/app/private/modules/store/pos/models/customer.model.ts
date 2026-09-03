@@ -49,6 +49,12 @@ export interface CreatePosCustomerRequest {
   is_withholding_agent?: boolean;
 
   password?: string;
+  /**
+   * QUI-734 (B.4) — resolve quick-sale por nombre. Cuando true (y sin
+   * email/documento), el backend busca por nombre; >1 → ERR-03 (409);
+   * 0 → crea cliente con solo first+last_name.
+   */
+  name_only?: boolean;
 }
 
 export interface SearchCustomersRequest {

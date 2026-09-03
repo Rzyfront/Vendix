@@ -9,6 +9,7 @@
  */
 export * from './invoice-section-context';
 export * from './invoice-section-field-map';
+export * from './invoice-dian-catalogs';
 /**
  * `invoice-section-controls` quedó fuera del barril cuando se creó el armazón,
  * y con él sin exportar el armazón no tenía forma de usarse: es el mecanismo
