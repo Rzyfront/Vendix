@@ -127,6 +127,51 @@ describe('OrdersListSseService — QUI-777', () => {
     expect(service.lastRelevantEvent()).toBeNull();
   });
 
+  it('onmessage con new_state FUERA del union OrderState se descarta (defensivo contra typos del backend)', () => {
+    service.connect();
+    lastInstance.onopen?.();
+    lastInstance.onmessage?.({
+      data: JSON.stringify({
+        id: 99,
+        type: 'order.status_changed',
+        created_at: '2026-09-03T10:00:00.000Z',
+        data: {
+          order_id: 42,
+          kind: 'order.status_changed',
+          old_state: 'processing',
+          new_state: 'inventado_por_typo',
+          order_number: 'ORD-2026-001',
+        },
+      }),
+    });
+    // El servicio filtra antes de propagar — el upsert downstream nunca ve
+    // un valor fuera del union `OrderState`. Esto cierra la grieta donde un
+    // cast `as OrderState` en el componente silenciaba un bug del backend.
+    expect(service.lastRelevantEvent()).toBeNull();
+  });
+
+  it('onmessage con new_state que SÍ está en el union actualiza lastRelevantEvent', () => {
+    service.connect();
+    lastInstance.onopen?.();
+    lastInstance.onmessage?.({
+      data: JSON.stringify({
+        id: 100,
+        type: 'order.status_changed',
+        created_at: '2026-09-03T10:00:00.000Z',
+        data: {
+          order_id: 50,
+          kind: 'order.status_changed',
+          old_state: 'processing',
+          new_state: 'shipped',
+          order_number: 'ORD-2026-050',
+        },
+      }),
+    });
+    const evt = service.lastRelevantEvent();
+    expect(evt).toBeTruthy();
+    expect(evt?.data.new_state).toBe('shipped');
+  });
+
   it('onerror cierra la conexión y programa reconexión (backoff exponencial)', () => {
     service.connect();
     lastInstance.onopen?.();

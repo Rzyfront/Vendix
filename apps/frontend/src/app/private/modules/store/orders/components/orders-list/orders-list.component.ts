@@ -537,14 +537,13 @@ export class OrdersListComponent {
       const evt = this.ordersListSse.lastRelevantEvent();
       if (!evt) return;
       const { order_id, new_state } = evt.data;
-      // El payload SSE llega como string (viene del JSON) y `Order.state`
-      // es un union literal — el cast es el mismo que ya usa este componente
-      // para `selectedStatus` y `_filters.status`. Si el backend envía un
-      // estado desconocido, el upsert silencioso deja la fila intacta y el
-      // filtro posterior no la rompe.
+      // `new_state` ya viene tipado como `OrderState` desde el servicio SSE
+      // (validación runtime en `OrdersListSseService.handleMessage`). Si el
+      // backend pushea un estado desconocido, el servicio descarta el
+      // evento silencioso y este effect nunca lo ve.
       this.orders.update((prev) =>
         prev.map((o) =>
-          o.id === order_id ? { ...o, state: new_state as OrderState } : o,
+          o.id === order_id ? { ...o, state: new_state } : o,
         ),
       );
       // Limpiar el signal para que el próximo evento vuelva a disparar el effect.

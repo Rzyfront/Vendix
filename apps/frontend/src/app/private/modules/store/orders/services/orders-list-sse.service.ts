@@ -1,10 +1,26 @@
-import {
-  effect,
-  Injectable,
-  signal,
-  untracked,
-} from '@angular/core';
+import { Injectable, signal } from '@angular/core';
 import { environment } from '../../../../../../environments/environment';
+import { OrderState } from '../interfaces/order.interface';
+
+/**
+ * Set exhaustivo de estados de orden (mirror literal de `OrderState`).
+ * Se reescribe acá para validar runtime que el valor que llega del SSE
+ * pertenece al union — si el backend pushea un estado que ya no existe
+ * (refactor, typo), descartamos el evento silencioso. El upsert del
+ * componente downstream nunca ve strings ajenos al contrato.
+ */
+const ORDER_STATES: ReadonlySet<string> = new Set<string>([
+  'draft',
+  'created',
+  'pending_payment',
+  'processing',
+  'shipped',
+  'delivered',
+  'cancelled',
+  'refunded',
+  'finished',
+  'pending_delivery',
+]);
 
 /**
  * QUI-777: payload canónico que el backend publica al SSE compartido por
@@ -25,7 +41,7 @@ export interface OrderListStateChangedEvent {
     order_id: number;
     kind: 'order.status_changed';
     old_state: string;
-    new_state: string;
+    new_state: OrderState;
     order_number?: string;
   };
 }
@@ -88,16 +104,6 @@ export class OrdersListSseService {
   readonly lastRelevantEvent = signal<OrderListStateChangedEvent | null>(null);
   /** Último evento que vio el stream, sea relevante o no (debug/UI). */
   readonly lastEvent = signal<OrderListStateChangedEvent | null>(null);
-
-  constructor() {
-    // Si el servicio es destruido (cambio de ruta), cerramos la conexion.
-    // providedIn:'root' rara vez se destruye, pero defendemos igual.
-    effect(() => {
-      // No leemos nada del effect; solo queremos registrar la limpieza
-      // cuando `destroyed` pase a true (manejado por ngOnDestroy abajo).
-      untracked(() => undefined);
-    });
-  }
 
   /**
    * Abre el SSE para la lista. Idempotente: si ya está abierto, no-op.
@@ -198,11 +204,22 @@ export class OrdersListSseService {
     if (payload.data.kind !== 'order.status_changed') return;
     if (typeof payload.data.order_id !== 'number') return;
 
+    // Validación runtime del new_state: si el backend pushea un estado que
+    // ya no existe (typo, refactor, versión vieja del cliente), descartamos
+    // el evento silencioso. El upsert downstream nunca ve un valor fuera
+    // del union `OrderState` — sin necesidad de cast en el componente.
+    if (
+      typeof payload.data.new_state !== 'string' ||
+      !ORDER_STATES.has(payload.data.new_state)
+    ) {
+      return;
+    }
+
     const evt: OrderListStateChangedEvent = {
       id: payload.id ?? 0,
       type: 'order.status_changed',
       occurred_at: payload.created_at ?? new Date().toISOString(),
-      data: payload.data,
+      data: payload.data as OrderListStateChangedEvent['data'],
     };
     this.lastEvent.set(evt);
     this.lastRelevantEvent.set(evt);
