@@ -842,3 +842,131 @@ describe('PrintLayoutComposerService — cotización: notas, términos y vigenci
     expect(body).toContain('vendix-token-pill');
   });
 });
+
+describe('PrintLayoutComposerService — fiscal_header con datos de factura y resolución DIAN', () => {
+  const composer = new PrintLayoutComposerService(new PrintTemplateCompilerService());
+
+  const fiscalData: StandardPrintDataModel = {
+    store: {
+      name: 'A&ftecnicell',
+      legal_name: 'ALMAZO VANEGAS AMILOY ALEXANDRA',
+      tax_id: '1123408049-0',
+      address: 'CR 21 N 14C-58',
+      city: 'Riohacha',
+      tax_regime: 'Responsable de IVA',
+    },
+    document: {
+      id: 5,
+      number: 'AYFT-5',
+      date: '2026-09-02T10:00:00.000Z',
+      date_formatted: '02/09/2026',
+      state: 'accepted',
+      state_label: 'Aprobada por DIAN',
+      payment_method: 'Contado (Efectivo)',
+    },
+    fiscal: {
+      cufe: '500af3335bb566ec7bcdef8bcb9b1ed6be50632909592ec0ad16441e933f9dd80d9d89914b23b2716b245d3b9519ae68',
+      resolution_number: '18764000001234',
+      resolution_prefix: 'AYFT',
+      resolution_range_from: 1,
+      resolution_range_to: 1000,
+      resolution_date: '15/01/2026',
+      resolution_valid_from: '15/01/2026',
+      resolution_valid_to: '15/01/2027',
+    },
+    items: [
+      {
+        index: 1,
+        product_name: 'PANTALLA SAMSUNG GALAXY A21S',
+        variant_sku: '1',
+        quantity: 1,
+        unit_price: 40000,
+        unit_price_formatted: '$40.000',
+        total_price: 40000,
+        total_price_formatted: '$40.000',
+      },
+    ],
+    taxes: [],
+    totals: {
+      subtotal: 40000,
+      subtotal_formatted: '$40.000',
+      discount_total: 0,
+      discount_total_formatted: '$0',
+      shipping_total: 0,
+      shipping_total_formatted: '$0',
+      tax_total: 0,
+      tax_total_formatted: '$0',
+      grand_total: 40000,
+      grand_total_formatted: '$40.000',
+      grand_total_in_words: 'CUARENTA MIL PESOS M/CTE',
+    },
+  };
+
+  it('en hoja carta, fiscal_header renderiza el título, número, fecha y caja de resolución DIAN', () => {
+    const sheetDef: PrintFormatDefinition = {
+      v: 2,
+      paper: {
+        format: 'letter',
+        width_mm: 216,
+        is_roll: false,
+        margin_mm: 10,
+        copies: 1,
+        orientation: 'portrait',
+      },
+      styles: {
+        font_family: 'Arial',
+        font_size_base_pt: 9,
+        primary_color: '#1e3a8a',
+        header_alignment: 'left',
+        show_borders: true,
+      },
+      sections: [
+        { id: 'sec_dian_header', type: 'fiscal_header', title: 'Cabecera Fiscal', enabled: true, order: 1 },
+      ],
+    };
+
+    const html = composer.compose(sheetDef, fiscalData);
+
+    expect(html).toContain('FACTURA ELECTRÓNICA DE VENTA');
+    expect(html).toContain('No. AYFT-5');
+    expect(html).toContain('Fecha de Emisión: 02/09/2026');
+    expect(html).toContain('Forma de Pago: Contado (Efectivo)');
+    expect(html).toContain('Resolución DIAN No. 18764000001234 del 15/01/2026');
+    expect(html).toContain('Rango autorizado: AYFT1 a AYFT1000');
+    expect(html).toContain('Vigencia: 15/01/2026 a 15/01/2027');
+    expect(html).toContain('fiscal-header-container');
+    expect(html).toContain('fiscal-doc-card');
+  });
+
+  it('en rollo 80mm, fiscal_header renderiza el título y la resolución DIAN', () => {
+    const rollDef: PrintFormatDefinition = {
+      v: 2,
+      paper: {
+        format: 'thermal_80',
+        width_mm: 80,
+        is_roll: true,
+        margin_mm: 2,
+        copies: 1,
+        orientation: 'portrait',
+      },
+      styles: {
+        font_family: 'Arial',
+        font_size_base_pt: 8.5,
+        primary_color: '#000000',
+        header_alignment: 'center',
+        show_borders: false,
+      },
+      sections: [
+        { id: 'sec_dian_header', type: 'fiscal_header', title: 'Cabecera Fiscal', enabled: true, order: 1 },
+        { id: 'sec_doc_info', type: 'document_info', title: 'Datos Venta', enabled: true, order: 2 },
+      ],
+    };
+
+    const html = composer.compose(rollDef, fiscalData);
+
+    expect(html).toContain('FACTURA ELECTRÓNICA DE VENTA');
+    expect(html).toContain('Resolución DIAN No. 18764000001234 del 15/01/2026');
+    expect(html).toContain('class="fiscal-doc-card roll-card"');
+  });
+});
+

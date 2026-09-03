@@ -781,6 +781,44 @@ describe('mapeador compartido invoices → modelo de impresión', () => {
     expect(d.totals?.withholding_total).toBe(0);
   });
 
+  it('mapea correctamente columnas reales de Prisma (unit_price, total_amount, description, product_variant) sin caer a $0', () => {
+    const filaPrismaReal = {
+      ...filaViva,
+      payment_form: '1',
+      payment_means_code: '10',
+      due_date: new Date('2026-08-20T15:00:00.000Z'),
+      invoice_items: [
+        {
+          id: 101,
+          description: 'PANTALLA SAMSUNG GALAXY A21S',
+          quantity: 1,
+          unit_price: 40000,
+          total_amount: 40000,
+          discount_amount: 0,
+          tax_amount: 0,
+          product_id: 5,
+          product_variant: {
+            sku: 'PAN-SAM-A21S',
+            barcode: '770123456789',
+          },
+        },
+      ],
+    };
+
+    const d = mapFiscalDocumentToPrintData(filaPrismaReal);
+
+    expect(d.items).toHaveLength(1);
+    expect(d.items[0].product_name).toBe('PANTALLA SAMSUNG GALAXY A21S');
+    expect(d.items[0].variant_sku).toBe('PAN-SAM-A21S');
+    expect(d.items[0].quantity).toBe(1);
+    expect(d.items[0].unit_price).toBe(40000);
+    expect(d.items[0].unit_price_formatted).toBe('$40.000');
+    expect(d.items[0].total_price).toBe(40000);
+    expect(d.items[0].total_price_formatted).toBe('$40.000');
+    expect(d.document.payment_method).toBe('Contado (Efectivo)');
+    expect(d.document.valid_until_formatted).toBeDefined();
+  });
+
   it('el NIT del emisor sale del RESOLVEDOR (fiscal_data de tienda gana al tax_id crudo de la organización) con DV derivado', () => {
     const d = mapFiscalDocumentToPrintData(filaViva);
 
