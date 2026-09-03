@@ -148,7 +148,7 @@ const QUICK_LINKS: QuickLink[] = [
               [filterValues]="dateFilterValues()"
               title="Período"
               triggerLabel="Período"
-              [debounceMs]="0"
+              [debounceMs]="300"
               (filterChange)="onDateFilterChange($event)"
             />
           </div>
@@ -335,9 +335,33 @@ export class DashboardComponent {
   storeId = signal<string | null>(null);
 
   // Date range
+  //
+  // QUI-744: el filtro del dashboard quedaba fijado en 'hoy' y no respondía al
+  // cambio de preset. Tres causas medidas:
+  //   (a) `dateRange` y `selectedPreset` eran signals independientes que el
+  //       handler tenía que sincronizar a mano — si el handler salía por el
+  //       camino `custom` sin `start && end`, `dateRange` quedaba stale.
+  //   (b) `dateFilterValues` era un `computed` que devolvía un objeto NUEVO
+  //       en cada lectura; el sync effect del `options-dropdown` lo
+  //       comparaba con `localFilterValues` por `shallowEqual` (key count
+  //       primero) → siempre veía `incoming` con `start_date/end_date: null`
+  //       y `local` con solo `{preset}` → pisaba el local justo antes de que
+  //       el `timer(0)` emitiese.
+  //   (c) `debounceMs="0"` con `timer(0)` programaba en macrotask y dejaba
+  //       la ventana abierta para que el sync effect corriese primero.
+  //
+  // Fix: `dateRange` ahora es un `computed` derivado del preset + customRange
+  // (single source of truth — cambiar el preset siempre actualiza dateRange
+  // atómicamente); `dateFilterValues` es un writable signal que el handler
+  // rellena con la forma EXACTA que emitió el dropdown (round-trip estable
+  // → shallowEqual pasa → no overwrite); `debounceMs=300` da tiempo real al
+  // sync effect para correr antes que el emit.
+
   selectedPreset = signal<string>('today');
-  customStartDate = signal<string>('');
-  customEndDate = signal<string>('');
+  private readonly customRange = signal<{ start_date: string; end_date: string }>({
+    start_date: '',
+    end_date: '',
+  });
 
   // Dynamic filters: show date inputs when preset is 'custom'
   dateFilters = computed<FilterConfig[]>(() => {
@@ -359,23 +383,47 @@ export class DashboardComponent {
     return filters;
   });
 
-  dateFilterValues = computed<FilterValues>(() => ({
-    preset: this.selectedPreset(),
-    start_date: this.customStartDate() || null,
-    end_date: this.customEndDate() || null,
-  }));
+  // Stable writable signal — se setea explícitamente en el handler con la
+  // forma exacta del dropdown (`{preset}` o `{preset, start_date, end_date}`
+  // sólo cuando aplica). Así el round-trip preserva la cantidad de keys y
+  // el `shallowEqual` del sync effect del dropdown pasa → no pisa el local.
+  private readonly _dateFilterValues = signal<FilterValues>({ preset: 'today' });
+  readonly dateFilterValues = this._dateFilterValues.asReadonly();
 
   dateRangeLabel = computed(() => {
     const range = this.dateRange();
+    if (!range.start_date || !range.end_date) {
+      return 'Selecciona un rango';
+    }
     const start = new Date(range.start_date + 'T12:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: 'short' });
     const end = new Date(range.end_date + 'T12:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: 'short' });
     return `${start} - ${end}`;
   });
 
-  dateRange = signal<DateRangeFilter>({
-    start_date: getDefaultEndDate(),
-    end_date: getDefaultEndDate(),
-    preset: 'today',
+  // dateRange es un computed del preset + customRange. Single source of truth:
+  // el backend (`analytics-query.dto` + `parseDateRange`) resuelve las fechas
+  // del preset en la TZ de la tienda. La capa front solo necesita mandar el
+  // `preset` (o `start_date/end_date` si es custom). Ver analytics-metrics
+  // contract — `getDateRangeFromPreset` se mantiene solo como fallback para
+  // el label visible y para custom; el backend es el dueño del cálculo.
+  dateRange = computed<DateRangeFilter>(() => {
+    const preset = this.selectedPreset();
+    if (preset === 'custom') {
+      const c = this.customRange();
+      return {
+        start_date: c.start_date,
+        end_date: c.end_date,
+        preset: 'custom',
+      };
+    }
+    const range = this.getDateRangeFromPreset(preset);
+    return (
+      range ?? {
+        start_date: getDefaultEndDate(),
+        end_date: getDefaultEndDate(),
+        preset: 'today' as any,
+      }
+    );
   });
 
   // Loading states
@@ -401,7 +449,13 @@ export class DashboardComponent {
   constructor() {
     this.currencyService.loadCurrency();
 
-    // Bootstrap: wait for store id then load data once
+    // Bootstrap: wait for store id then load data once.
+    //
+    // NOTA: este effect llama loadAllData() una vez al detectar el store. NO
+    // hace falta coordinarlo con el effect del dateRange porque cada uno se
+    // dispara por su propia signal. Si el store ya estaba seteado cuando el
+    // effect corre por primera vez (CD tras init), el body se ejecuta y
+    // fetchea "today" — es el comportamiento esperado del primer render.
     effect(() => {
       const store = this.userStore();
       const id = (store as any)?.id;
@@ -411,12 +465,28 @@ export class DashboardComponent {
       }
     });
 
-    // React to date range changes (skip initial emission)
-    let isFirst = true;
+    // React to date range changes. Como `dateRange` ahora es un `computed`
+    // del preset + customRange, este effect se dispara SIEMPRE que el usuario
+    // cambia el preset (no hay carrera entre `selectedPreset` y `dateRange`
+    // porque son la misma fuente). El guard `isFirst` se reemplazó por
+    // `userChangedFilter` — solo recargamos cuando el usuario cambió algo,
+    // no en la primera lectura ni cuando el bootstrap effect ya disparó
+    // el fetch inicial. Esto evita el doble GET al montar el componente.
+    let userChangedFilter = false;
     effect(() => {
       this.dateRange();
-      if (isFirst) { isFirst = false; return; }
+      if (!userChangedFilter) return;
       untracked(() => this.loadAllData());
+    });
+    // Marcamos el "ya cambió el usuario" recién cuando el handler corre;
+    // así el primer render monta la pantalla con los datos del bootstrap
+    // effect (que ya disparó loadAllData) y no recargamos encima.
+    effect(() => {
+      // Solo leemos para registrar reactividad; el handler setea el flag.
+      this.dateFilterValues();
+      untracked(() => {
+        userChangedFilter = true;
+      });
     });
   }
 
@@ -426,17 +496,26 @@ export class DashboardComponent {
 
     this.selectedPreset.set(preset);
 
+    // Round-trip: replicar la forma EXACTA que emitió el dropdown.
+    // Si el preset no es custom, NO añadimos `start_date/end_date: null`
+    // porque el sync effect del dropdown compara por key count y eso
+    // causaba el overwrite que rompía el flujo.
     if (preset === 'custom') {
       const start = values['start_date'] as string;
       const end = values['end_date'] as string;
-      if (start) this.customStartDate.set(start);
-      if (end) this.customEndDate.set(end);
-      if (start && end) {
-        this.dateRange.set({ start_date: start, end_date: end, preset: 'custom' });
+      if (start || end) {
+        this.customRange.update((c) => ({
+          start_date: start || c.start_date,
+          end_date: end || c.end_date,
+        }));
       }
+      this._dateFilterValues.set({
+        preset: 'custom',
+        ...(start ? { start_date: start } : {}),
+        ...(end ? { end_date: end } : {}),
+      });
     } else {
-      const range = this.getDateRangeFromPreset(preset);
-      if (range) this.dateRange.set(range);
+      this._dateFilterValues.set({ preset });
     }
   }
 
