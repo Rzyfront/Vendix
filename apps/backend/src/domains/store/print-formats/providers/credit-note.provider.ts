@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { S3Service } from '../../../../common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
 import { RecentDocumentSummary } from '../interfaces/document-index.interface';
@@ -9,13 +10,22 @@ import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import {
   FISCAL_DOCUMENT_PRINT_INCLUDE,
   mapFiscalDocumentToPrintData,
+  resolveRawLogoKey,
 } from './fiscal-document-print.mapper';
+import { signStoreLogoUrl } from '../lib/print-logo.util';
 
 @Injectable()
 export class CreditNoteDataProvider implements IDocumentDataProvider {
   readonly formatType: print_format_type_enum = 'credit_note';
+  private readonly logger = new Logger(CreditNoteDataProvider.name);
 
-  constructor(private readonly prisma: StorePrismaService) {}
+  // `s3Service` opcional: `real-print-path.spec.ts` instancia con 1 solo
+  // argumento; Nest inyecta el segundo en runtime (`S3Module` ya importado
+  // por `print-formats.module.ts`).
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly s3Service?: S3Service,
+  ) {}
 
   /**
    * Lee la nota de crédito REAL, por la misma proyección que el formato fiscal.
@@ -60,10 +70,13 @@ export class CreditNoteDataProvider implements IDocumentDataProvider {
         : undefined;
     }
 
+    const signedLogoUrl = await signStoreLogoUrl(this.s3Service, resolveRawLogoKey(note), this.logger);
+
     return mapFiscalDocumentToPrintData(note, {
       acceptedLabel: 'Nota crédito aplicada',
       pendingLabel: 'Nota crédito en borrador',
       referenceDocumentNumber,
+      signedLogoUrl,
     });
   }
 

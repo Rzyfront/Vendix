@@ -16,15 +16,12 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
-import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { map } from 'rxjs/operators';
 
 import {
   AlertBannerComponent,
-  ButtonComponent,
-  IconComponent,
   InputComponent,
-  SelectorComponent,
   StickyHeaderActionButton,
 } from '../../../../../../../shared/components/index';
 import type { SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
@@ -38,6 +35,7 @@ import {
   formatPercentScaled,
 } from '../../../../../../../core/utils/invoice-profile-config.contract';
 import type { ProfileConfigIssue, AiuTaxableBasis, AiuComponentsBasis, AccountingModel } from '../../../../../../../core/utils/invoice-profile-config.contract';
+import { ModuleShellActionsService } from '../../../../../../../shared/components/module-tabs-shell/module-shell-actions.service';
 import { PlatformInvoicingStore } from '../../platform-invoicing.store';
 
 /**
@@ -106,13 +104,9 @@ type SectionId =
   standalone: true,
   imports: [
     ReactiveFormsModule,
-    RouterLink,
     PlatformSectionWrapperComponent,
     AlertBannerComponent,
-    ButtonComponent,
-    IconComponent,
     InputComponent,
-    SelectorComponent,
     InvoiceSectionAiuComponent,
     InvoiceSectionDocumentoComponent,
     InvoiceSectionLineasComponent,
@@ -126,49 +120,20 @@ type SectionId =
   ],
   template: `
     <div class="w-full max-w-[1400px] mx-auto">
-      <!-- Cabecera de la página (alineada al shell sin duplicar sticky header) -->
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 mb-4 border-b border-border">
-        <div class="flex items-center gap-3">
-          <a
-            routerLink="/super-admin/fiscal/invoicing/profiles"
-            class="flex items-center justify-center w-9 h-9 rounded-lg border border-border bg-surface hover:bg-surface-secondary text-text-secondary hover:text-text-primary transition-colors shrink-0"
-            title="Volver a perfiles"
-          >
-            <app-icon name="arrow-left" [size]="18"></app-icon>
-          </a>
-          <div>
-            <h1 class="text-xl font-bold text-text-primary tracking-tight">{{ pageTitle() }}</h1>
-            <p class="text-xs text-text-secondary">{{ pageSubtitle() }}</p>
-          </div>
-        </div>
+      <!--
+        Sin cabecera de pagina y sin barra de acciones al pie.
 
-        <div class="flex items-center gap-2 self-end sm:self-auto">
-          @if (saveHint()) {
-            <span class="text-xs text-text-secondary hidden sm:inline mr-2">{{ saveHint() }}</span>
-          }
-          <app-button
-            type="button"
-            variant="outline"
-            size="sm"
-            (clicked)="onHeaderAction('cancel')"
-          >
-            <app-icon slot="icon" name="x" [size]="16"></app-icon>
-            Cancelar
-          </app-button>
-          <app-button
-            type="button"
-            variant="primary"
-            size="sm"
-            [loading]="saving()"
-            [disabled]="saving()"
-            (clicked)="onHeaderAction('save')"
-          >
-            <app-icon slot="icon" name="save" [size]="16"></app-icon>
-            Guardar perfil
-          </app-button>
-        </div>
-      </div>
+        Los dos bloques repetian el titulo que ya pinta el sticky-header del
+        shell y duplicaban Cancelar / Guardar: tres sitios distintos para el
+        mismo par de botones. Ahora se publican UNA vez en el header del shell
+        via ModuleShellActionsService (ver el effect del constructor), que es
+        el unico camino posible porque el contenido de un router-outlet no se
+        puede proyectar hacia el template del shell.
 
+        OJO: nada de backticks en este comentario. Esta dentro del template
+        literal del @Component, asi que un backtick lo CIERRA y el compilador
+        reporta el error en la linea del @Component, no aqui.
+      -->
       <div class="px-2 md:px-4 pb-6 space-y-4">
         @if (loading() && isEdit() && !hydrated()) {
           <div class="rounded-lg border border-border bg-surface-secondary px-3 py-6 text-center text-sm text-text-secondary">
@@ -189,14 +154,29 @@ type SectionId =
                 helperText="Único por organización y tipo de operación."
                 size="sm"
               ></app-input>
-              <app-selector
-                label="Tipo de operación"
-                formControlName="operation_type"
-                [options]="operation_options"
-                [disabled]="isEdit()"
-                size="sm"
-                [helpText]="isEdit() ? 'No se cambia después de crear.' : 'Determina qué secciones aplican.'"
-              ></app-selector>
+              <!--
+                La consola de plataforma emite UNA sola operación: factura de
+                venta estándar, la 10. No hay selector porque no hay elección:
+                ofrecer AIU, mandato o consorcio sería ofrecer perfiles que
+                esta superficie nunca va a poder emitir. El control sigue en el
+                formulario —el backend exige operation_type— pero fijo.
+              -->
+              <div class="space-y-1">
+                <label class="text-xs font-medium text-text-secondary">Tipo de operación</label>
+                <div
+                  class="flex items-center gap-2 h-9 px-3 rounded-lg border border-border bg-surface-secondary/50"
+                >
+                  <span class="px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[11px] font-semibold">
+                    10
+                  </span>
+                  <span class="text-xs text-text-primary">
+                    {{ operationTypeLabel() }}
+                  </span>
+                </div>
+                <p class="text-[11px] text-text-secondary">
+                  La plataforma sólo emite factura de venta estándar.
+                </p>
+              </div>
             </div>
           </div>
 
@@ -438,21 +418,6 @@ type SectionId =
           </app-alert-banner>
         }
 
-        <!-- Pie -->
-        <div class="flex flex-col gap-3 rounded-lg border border-border bg-surface-secondary p-3 sm:flex-row sm:items-center sm:justify-between">
-          <span class="min-w-0 truncate text-xs text-text-secondary">{{ saveHint() }}</span>
-          <div class="flex flex-col gap-2 sm:flex-row">
-            <app-button variant="outline" (clicked)="cancel()">Cancelar</app-button>
-            <app-button
-              variant="primary"
-              [disabled]="saving() || blockers().length > 0"
-              (clicked)="save()"
-            >
-              <app-icon slot="icon" name="save" [size]="16"></app-icon>
-              {{ isEdit() ? 'Guardar cambios' : 'Crear perfil' }}
-            </app-button>
-          </div>
-        </div>
       </div>
     </div>
   `,
@@ -462,6 +427,7 @@ export class PlatformProfileEditorComponent {
   private readonly fiscal = inject(FiscalBillingAdminService);
   private readonly fb = inject(FormBuilder);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly shellActions = inject(ModuleShellActionsService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly toast = inject(ToastService);
@@ -488,6 +454,14 @@ export class PlatformProfileEditorComponent {
   readonly saving = signal(false);
   readonly loading = signal(false);
 
+  /** Etiqueta legible de la única operación que emite la plataforma. */
+  readonly operationTypeLabel = computed(
+    () =>
+      (PLATFORM_OPERATION_LABELS as Record<string, string>)[
+        this.operationType()
+      ] ?? 'Factura de venta',
+  );
+
   readonly operation_options: SelectorOption[] = (Object.entries(PLATFORM_OPERATION_LABELS) as [string, string][]).map(
     ([value, label]) => ({ value, label }),
   );
@@ -499,16 +473,26 @@ export class PlatformProfileEditorComponent {
   readonly isEdit = computed(() => this.profileId() !== null);
   readonly isAiu = computed(() => this.operationType() === '09');
 
+  /**
+   * Sólo rangos de FACTURA DE VENTA y activos.
+   *
+   * Ofrecer un rango de documento soporte para un perfil de factura deja fijar
+   * en el perfil una resolución que la DIAN rechaza al emitir, y el error sale
+   * recién en la transmisión. Un rango inactivo tiene el mismo problema.
+   */
   readonly resolutionOptions = computed<SelectorOption[]>(() =>
-    this.store.resolutions().map((r) => ({
-      value: r.id,
-      label: `${r.prefix} · rango ${r.range_from}-${r.range_to}`,
-    })),
+    this.store
+      .resolutions()
+      .filter((r) => r.document_type === 'sales_invoice' && r.is_active)
+      .map((r) => ({
+        value: r.id,
+        label: `${r.prefix} · rango ${r.range_from}-${r.range_to}`,
+      })),
   );
 
   readonly documentoResolutionHint = computed<string | null>(() =>
     this.resolutionOptions().length === 0
-      ? 'No hay resoluciones registradas. Configúralas en la pestaña Resoluciones.'
+      ? 'No hay resoluciones de factura de venta activas. Regístralas en la pestaña Resoluciones.'
       : null,
   );
 
@@ -660,7 +644,14 @@ export class PlatformProfileEditorComponent {
   // ─── Form ────────────────────────────────────────────────────────
   readonly form: FormGroup = this.fb.group({
     name: ['', [Validators.required, Validators.maxLength(120)]],
-    operation_type: ['09', Validators.required],
+    operation_type: [
+      // La plataforma sólo emite factura de venta estándar. El default era
+      // '09' (AIU), así que un perfil creado sin tocar nada nacía con una
+      // operación que esta consola no puede emitir y que el creador de
+      // facturas después filtraba de la lista: invisible al minuto de nacer.
+      '10',
+      Validators.required,
+    ],
     general: this.fb.group({ description: [''], internal_note: [''] }),
     aiu: this.fb.group({
       taxable_basis: ['aiu' as AiuTaxableBasis],
@@ -763,19 +754,36 @@ export class PlatformProfileEditorComponent {
   readonly blockers = computed(() => blockingIssues(this.issues()));
   readonly warnings = computed(() => this.issues().filter((i) => !isBlockingIssue(i)));
 
+  /**
+   * Prefijo del CONTRATO que corresponde a cada sección visual.
+   *
+   * El identificador de la sección en pantalla y el nombre del campo que
+   * emite el validador no coinciden en ningún caso salvo `aiu`: la sección
+   * «documento» agrupa issues de `dian.*`, «impuestos» los de `taxes.*`,
+   * «formato» los de `format.*`. Comparar el id visual contra `field` con un
+   * `startsWith` directo devolvía cero para todas las secciones excepto AIU,
+   * así que el contador de errores estaba apagado justo donde importaba.
+   */
+  private static readonly SECTION_ISSUE_PREFIXES: Record<string, string> = {
+    documento: 'dian.',
+    aiu: 'aiu',
+    lineas: 'model_lines',
+    impuestos: 'taxes.',
+    retenciones: 'withholdings',
+    divisa: 'currency.',
+    contabilidad: 'accounting.',
+    formato: 'format.',
+    notas_internas: 'general.',
+  };
+
   sectionErrorCount(section: string): number {
-    return this.issues().filter((i) => i.field.startsWith(section)).length;
+    const prefix =
+      PlatformProfileEditorComponent.SECTION_ISSUE_PREFIXES[section];
+    if (!prefix) return 0;
+    return this.issues().filter((i) => i.field.startsWith(prefix)).length;
   }
 
   // ─── Page metadata ───────────────────────────────────────────────
-  readonly pageTitle = computed(() =>
-    this.isEdit() ? 'Editar perfil de facturación' : 'Nuevo perfil de facturación',
-  );
-  readonly pageSubtitle = computed(() => {
-    if (!this.isEdit()) return 'Preconfigura el documento';
-    const id = this.profileId();
-    return 'Perfil plataforma · ' + (id ? '#' + id : '');
-  });
   readonly saveHint = computed(() => {
     const blocked = this.blockers().length;
     if (blocked > 0) {
@@ -804,6 +812,32 @@ export class PlatformProfileEditorComponent {
 
   // ─── Lifecycle ───────────────────────────────────────────────
   constructor() {
+    // El selector de resolución del bloque «Documento» lee
+    // store.resolutions(), que sólo se llena cuando alguien abre la pestaña
+    // Resoluciones. Sin esta carga el desplegable salía vacío en el editor y
+    // no había forma de dejarle una resolución fija al perfil: la pantalla
+    // ofrecía el campo y el campo no tenía opciones.
+    this.store.loadResolutions();
+
+    // Cancelar / Guardar viven en el sticky-header del shell, no en la pagina.
+    //
+    // Va en un `effect` y no en un `set` de una sola vez porque los botones
+    // cambian solos: `saving()` los pone en loading y `blockers()` deshabilita
+    // Guardar. Publicarlos una vez dejaba un boton que nunca reflejaba el
+    // estado del formulario.
+    effect(() => {
+      this.shellActions.set(
+        this.headerActions().map((button) => ({
+          ...button,
+          run: () => this.onHeaderAction(button.id),
+        })),
+      );
+    });
+
+    // Obligatorio: sin esto los botones sobreviven al cambio de pestana y
+    // disparan callbacks de un componente ya destruido.
+    this.destroyRef.onDestroy(() => this.shellActions.clear());
+
     effect(() => {
       const id = this.profileId();
       if (id !== null) this.loadProfile(id);
@@ -859,9 +893,13 @@ export class PlatformProfileEditorComponent {
         aiu['minimum_base_percent'] ?? formatPercentScaled(AIU_LEGAL_FLOOR_PERCENT_SCALED),
       );
       this.form.get('aiu.components_basis')?.setValue(aiu['components_basis'] ?? 'contract');
-      this.form.get('aiu.administracion')?.setValue(aiu['administracion'] ?? '5.00');
-      this.form.get('aiu.imprevistos')?.setValue(aiu['imprevistos'] ?? '2.00');
-      this.form.get('aiu.utilidad')?.setValue(aiu['utilidad'] ?? '3.00');
+      // Los tres porcentajes viven bajo `components`, no sueltos en `aiu`. Con
+      // la lectura plana volvían siempre los valores por omisión y guardar
+      // reescribia 5/2/3 sobre el reparto real del contrato.
+      const comps = (aiu['components'] as Record<string, unknown> | null) ?? {};
+      this.form.get('aiu.administracion')?.setValue(comps['administracion'] ?? '5.00');
+      this.form.get('aiu.imprevistos')?.setValue(comps['imprevistos'] ?? '2.00');
+      this.form.get('aiu.utilidad')?.setValue(comps['utilidad'] ?? '3.00');
       this.form.get('aiu.accounting_model')?.setValue(aiu['accounting_model'] ?? 'sumada');
     }
     const accounting = cfg['accounting'] as Record<string, unknown> | null;
@@ -887,10 +925,23 @@ export class PlatformProfileEditorComponent {
     }
     const modelLines = cfg['model_lines'] as Record<string, unknown>[] | null;
     if (modelLines?.length) modelLines.forEach((l) => this.addModelLine(l));
-    const taxes = cfg['taxes'] as Record<string, unknown>[] | null;
-    if (taxes?.length) taxes.forEach((t) => this.addTaxRule(t));
-    const withholdings = cfg['withholdings'] as Record<string, unknown>[] | null;
-    if (withholdings?.length) withholdings.forEach((w) => this.addWithholding(w));
+
+    // `taxes` y `withholdings` se guardan como { rules: [...] }, no como
+    // arreglo suelto: es la forma que impone `invoice-profile-config.contract`
+    // y la que devuelve el backend después de normalizar. Esto leía
+    // `cfg['taxes']` como arreglo, y `.length` sobre un objeto es undefined:
+    // el bucle no corría NUNCA. Reabrir un perfil mostraba cero tarifas y cero
+    // retenciones aunque las tuviera, y al guardar se escribía `rules: []`
+    // encima — cada edición borraba la matriz de impuestos del perfil sin
+    // decir nada. Se aceptan las dos formas porque hay snapshots viejos con el
+    // arreglo suelto.
+    const rulesOf = (raw: unknown): Record<string, unknown>[] => {
+      if (Array.isArray(raw)) return raw as Record<string, unknown>[];
+      const nested = (raw as Record<string, unknown> | null)?.['rules'];
+      return Array.isArray(nested) ? (nested as Record<string, unknown>[]) : [];
+    };
+    rulesOf(cfg['taxes']).forEach((t) => this.addTaxRule(t));
+    rulesOf(cfg['withholdings']).forEach((w) => this.addWithholding(w));
   }
 
   // ─── Form helpers ─────────────────────────────────────────────
@@ -969,15 +1020,26 @@ export class PlatformProfileEditorComponent {
         description: v.general?.description ?? null,
         internal_note: v.general?.internal_note ?? null,
       },
+      // Forma canónica del contrato: `regime` obligatorio y los tres
+      // porcentajes bajo `components`. Sueltos, el normalizador del backend los
+      // descarta por clave desconocida y el perfil queda con el reparto por
+      // omisión. `regime` se deriva de la base gravable declarada — es la
+      // misma equivalencia de `aiuRegimeForTaxableBasis` del contrato.
       aiu: this.isAiu() ? {
+        regime:
+          (v.aiu?.taxable_basis ?? 'aiu') === 'utilidad'
+            ? 'decreto_1372_1992'
+            : 'et_462_1',
         taxable_basis: v.aiu?.taxable_basis ?? 'aiu',
-        contract_object: v.aiu?.contract_object ?? null,
+        contract_object: v.aiu?.contract_object ?? '',
         enforce_minimum_base: v.aiu?.enforce_minimum_base ?? true,
-        minimum_base_percent: v.aiu?.minimum_base_percent ?? null,
+        minimum_base_percent: v.aiu?.minimum_base_percent ?? '10.00',
         components_basis: v.aiu?.components_basis ?? 'contract',
-        administracion: v.aiu?.administracion ?? '5.00',
-        imprevistos: v.aiu?.imprevistos ?? '2.00',
-        utilidad: v.aiu?.utilidad ?? '3.00',
+        components: {
+          administracion: v.aiu?.administracion ?? '5.00',
+          imprevistos: v.aiu?.imprevistos ?? '2.00',
+          utilidad: v.aiu?.utilidad ?? '3.00',
+        },
         accounting_model: v.aiu?.accounting_model ?? 'sumada',
       } : null,
       accounting: {
@@ -1005,23 +1067,41 @@ export class PlatformProfileEditorComponent {
       },
       dian: {
         document_type: v.dian?.document_type ?? null,
-        operation_type: v.operation_type,
+        // `operation_type` NO va dentro de `dian`.
+        //
+        // Es una COLUMNA de `invoice_profiles`, no una clave del JSON de
+        // configuracion: viaja aparte, al nivel raiz del payload (ver el
+        // `save()` de mas abajo). Mandarla aqui tambien hacia que
+        // `normalizeAndAssertProfileConfig` la rechazara con 422
+        // INVOICING_PROFILE_005 / UNKNOWN_KEY en `dian.operation_type` — o sea
+        // que ningun perfil se podia guardar. El contrato
+        // (`ProfileDianConfig`) solo admite document_type,
+        // payment_means_code, payment_method_code, header_notes y
+        // resolution_id.
         payment_method_code: v.dian?.payment_method_code ?? null,
         payment_means_code: v.dian?.payment_means_code ?? null,
         header_notes: v.dian?.header_notes ?? [],
         resolution_id: v.dian?.resolution_id ?? null,
       },
-      taxes: (v.taxes ?? []).map((t: Record<string, unknown>) => ({
-        tax_code: t['tax_code'] ?? '01',
-        taxable: t['taxable'] ?? true,
-        rate: t['rate'] ?? '',
-        bucket: t['bucket'] ?? 'administracion',
-      })),
-      withholdings: (v.withholdings ?? []).map((w: Record<string, unknown>) => ({
-        concept_id: w['concept_id'] ?? '',
-        role: w['role'] ?? 'practiced',
-        rate: w['rate'] ?? '',
-      })),
+      // `{ rules: [...] }`, no arreglo suelto. El backend normaliza a esta forma
+      // igual, pero mandar el arreglo hacía que el editor leyera de vuelta algo
+      // distinto de lo que escribió — y esa asimetría es la que borraba la
+      // matriz en cada guardado.
+      taxes: {
+        rules: (v.taxes ?? []).map((t: Record<string, unknown>) => ({
+          tax_code: t['tax_code'] ?? '01',
+          taxable: t['taxable'] ?? true,
+          rate: t['rate'] ?? '',
+          bucket: t['bucket'] ?? 'administracion',
+        })),
+      },
+      withholdings: {
+        rules: (v.withholdings ?? []).map((w: Record<string, unknown>) => ({
+          concept_id: Number(w['concept_id']) || 0,
+          role: w['role'] ?? 'practiced',
+          rate: w['rate'] ?? '',
+        })),
+      },
       currency: {
         declare_foreign: v.currency?.declare_foreign ?? false,
         code: v.currency?.code ?? null,
@@ -1035,8 +1115,48 @@ export class PlatformProfileEditorComponent {
     if (actionId === 'save') this.save();
   }
 
+  /**
+   * Ruta del primer control inválido, en notación de puntos. Recorre grupos y
+   * arreglos porque el formulario del perfil anida nueve secciones y el
+   * campo que bloquea casi nunca está en la raíz.
+   */
+  private firstInvalidControlLabel(): string | null {
+    const walk = (control: AbstractControl, path: string): string | null => {
+      if (control instanceof FormGroup) {
+        for (const [key, child] of Object.entries(control.controls)) {
+          const found = walk(child, path ? `${path}.${key}` : key);
+          if (found) return found;
+        }
+        return null;
+      }
+      if (control instanceof FormArray) {
+        for (let i = 0; i < control.length; i++) {
+          const found = walk(control.at(i), `${path}[${i}]`);
+          if (found) return found;
+        }
+        return null;
+      }
+      return control.invalid ? path : null;
+    };
+    return walk(this.form, '');
+  }
+
   save(): void {
-    if (this.form.invalid) return;
+    if (this.form.invalid) {
+      // Antes era un `return` mudo: el operador pulsaba «Guardar», no pasaba
+      // nada y no había forma de saber por qué. Marcar los controles es lo
+      // que hace aparecer los mensajes de error, y el toast nombra el primero
+      // para que no haya que ir buscándolo por las nueve secciones.
+      this.form.markAllAsTouched();
+      const first = this.firstInvalidControlLabel();
+      this.server_error.set(
+        first
+          ? `Revisa el formulario: ${first} no es válido.`
+          : 'Revisa el formulario: hay campos obligatorios sin completar.',
+      );
+      this.toast.error('No se pudo guardar', 'Hay campos inválidos en el perfil.');
+      return;
+    }
     this.saving.set(true);
     this.server_error.set(null);
 
@@ -1055,7 +1175,11 @@ export class PlatformProfileEditorComponent {
           id === null ? 'Perfil creado' : 'Cambios guardados',
           v.name,
         );
-        this.router.navigate(['../'], { relativeTo: this.route });
+        // Ruta ABSOLUTA: `['../']` relativo resuelve distinto en alta
+        // (`profiles/new` → `profiles`) que en edición (`profiles/7/edit` →
+        // `profiles/7`, que no existe y deja al operador en un 404 después de
+        // haber guardado bien.
+        this.router.navigate(['/super-admin/fiscal/invoicing/profiles']);
       },
       error: (err: any) => {
         this.saving.set(false);

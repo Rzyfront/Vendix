@@ -34,201 +34,232 @@
         </div>
       }
     } @else {
-      <!-- Sin cliente: prompt único. QUI-723 eliminó "Crear cliente" como
-           acción separada; el sub-step es ahora un único paso (buscar + crear). -->
+      <!-- Sin cliente: prompt único. -->
       <div class="overview-empty">
         <button type="button" class="select-customer-btn" (click)="goToSearch()">
-          <app-icon name="search" [size]="18"></app-icon>
-          Buscar o registrar cliente
+          <app-icon [name]="minimalInvoiceMode() ? 'file-text' : 'search'" [size]="18"></app-icon>
+          {{ minimalInvoiceMode() ? 'Facturar a nombre de' : 'Buscar o registrar cliente' }}
         </button>
       </div>
     }
   }
 
-  <!-- ══════════════════ SEARCH ══════════════════ -->
+  <!-- ══════════════════ SEARCH (segmented: buscar / crear) ══════════════════ -->
   @if (view() === 'search') {
     <div class="selector-header">
       <button type="button" class="back-btn" (click)="back()">
         <app-icon name="arrow-left" [size]="16"></app-icon>
         Volver
       </button>
-      <span>Buscar o registrar cliente</span>
+      <span>{{ minimalInvoiceMode() ? 'Facturar a nombre de' : 'Buscar o registrar cliente' }}</span>
     </div>
 
-    <app-inputsearch
-      placeholder="Buscar por nombre, email o documento..."
-      [debounceTime]="300"
-      (search)="onSearch($event)"
-      (enter)="onSearchEnter()"
-      (clear)="onClear()"
-    ></app-inputsearch>
+    <!-- Segmented control — 2 opciones sin scroll. Paso 9: en modo factura
+         mínima no hay "Buscar existente" — un solo formulario, sin tabs. -->
+    @if (!minimalInvoiceMode()) {
+      <div class="segmented-control" role="tablist" aria-label="Modo de cliente">
+        <button
+          type="button"
+          role="tab"
+          class="segment-btn"
+          [class.selected]="activeTab() === 'search'"
+          [attr.aria-selected]="activeTab() === 'search'"
+          (click)="setActiveTab('search')"
+        >
+          <app-icon name="search" [size]="14"></app-icon>
+          Buscar existente
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="segment-btn"
+          [class.selected]="activeTab() === 'create'"
+          [attr.aria-selected]="activeTab() === 'create'"
+          (click)="setActiveTab('create')"
+        >
+          <app-icon name="user-plus" [size]="14"></app-icon>
+          Crear nuevo
+        </button>
+      </div>
+    }
 
-    <!-- Sugerencias: top-5 clientes por volumen de órdenes cuando el buscador
-         está vacío. Al escribir (≥2 chars) los resultados los reemplazan. -->
-    @if (showingSuggestions()) {
-      @if (loadingTop()) {
+    @if (activeTab() === 'search') {
+      <!-- ── MODO BUSCAR: listado comprimido 3 máximo, sin scroll ── -->
+      <app-inputsearch
+        placeholder="Buscar por nombre, email o documento..."
+        [debounceTime]="300"
+        (search)="onSearch($event)"
+        (enter)="onSearchEnter()"
+        (clear)="onClear()"
+      ></app-inputsearch>
+
+      @if (showingSuggestions()) {
+        @if (loadingTop()) {
+          <div class="search-loading">
+            <div class="spinner"></div>
+            <span>Cargando clientes frecuentes…</span>
+          </div>
+        } @else if (topCustomersSlice().length > 0) {
+          <div class="suggestions-block">
+            <span class="suggestions-label">Clientes frecuentes (3)</span>
+            <div class="search-results compact-results">
+              @for (customer of topCustomersSlice(); track customer.id) {
+                <button
+                  type="button"
+                  class="customer-result"
+                  (click)="selectCustomer(customer)"
+                >
+                  <span class="result-name">
+                    {{ customer.first_name }} {{ customer.last_name }}
+                  </span>
+                  <span class="result-email">
+                    {{ customer.email || customer.phone || '—' }}
+                    @if (customer.document_number) {
+                      · {{ customer.document_type || 'Doc' }}: {{ customer.document_number }}
+                    }
+                  </span>
+                </button>
+              }
+            </div>
+          </div>
+        }
+      }
+
+      @if (isSearching()) {
         <div class="search-loading">
           <div class="spinner"></div>
-          <span>Cargando clientes frecuentes…</span>
-        </div>
-      } @else if (topCustomers().length > 0) {
-        <div class="suggestions-block">
-          <span class="suggestions-label">Clientes frecuentes</span>
-          <div class="search-results">
-            @for (customer of topCustomers(); track customer.id) {
-              <button
-                type="button"
-                class="customer-result"
-                (click)="selectCustomer(customer)"
-              >
-                <span class="result-name">
-                  {{ customer.first_name }} {{ customer.last_name }}
-                </span>
-                <span class="result-email">
-                  {{ customer.email || customer.phone || '—' }}
-                  @if (customer.document_number) {
-                    · {{ customer.document_type || 'Doc' }}: {{ customer.document_number }}
-                  }
-                </span>
-              </button>
-            }
-          </div>
+          <span>Buscando…</span>
         </div>
       }
-    }
 
-    @if (isSearching()) {
-      <div class="search-loading">
-        <div class="spinner"></div>
-        <span>Buscando…</span>
-      </div>
-    }
-
-    @if (!isSearching() && results().length > 0) {
-      <div class="search-results">
-        @for (customer of results(); track customer.id) {
-          <button
-            type="button"
-            class="customer-result"
-            (click)="selectCustomer(customer)"
-          >
-            <span class="result-name">
-              {{ customer.first_name }} {{ customer.last_name }}
-            </span>
-            <span class="result-email">
-              {{ customer.email || customer.phone || '—' }}
-              @if (customer.document_number) {
-                · {{ customer.document_type || 'Doc' }}: {{ customer.document_number }}
-              }
-            </span>
-          </button>
-        }
-      </div>
-    }
-
-    @if (!isSearching() && searchPerformed() && results().length === 0) {
-      <div class="no-results">
-        <app-icon name="user-x" [size]="32" color="var(--color-text-muted)"></app-icon>
-        <p>No se encontraron clientes con esos criterios</p>
-      </div>
-    }
-
-    <!-- QUI-723 — Formulario unificado "registrar cliente". Vive dentro del
-         mismo sub-step BUSCAR CLIENTE. El botón "Siguiente" del anfitrión
-         dispara `resolveIfNeeded()` que hace find-or-create en backend. No
-         hay botón propio adentro del form: fuente única de avance = Siguiente. -->
-    <form
-      [formGroup]="form"
-      class="create-customer-form"
-      (ngSubmit)="$event.preventDefault(); onResolve()"
-    >
-      <span class="form-divider-label">o registra un cliente nuevo</span>
-
-      <app-input
-        formControlName="email"
-        label="Email"
-        placeholder="cliente@ejemplo.com"
-        type="email"
-        [size]="'md'"
-      ></app-input>
-
-      <div class="form-row">
-        <app-input
-          formControlName="firstName"
-          label="Nombre"
-          placeholder="Juan"
-          type="text"
-          [size]="'md'"
-        ></app-input>
-        <app-input
-          formControlName="lastName"
-          label="Apellido"
-          placeholder="Pérez"
-          type="text"
-          [size]="'md'"
-        ></app-input>
-      </div>
-
-      <div class="phone-field">
-        <app-input
-          formControlName="phone"
-          label="Teléfono"
-          placeholder="+57 300 123 4567"
-          type="tel"
-          [size]="'md'"
-        ></app-input>
-        <!-- QUI-723 — Live counter for the phone input. Dev lead's spec:
-             "el número de teléfono son 10" — exactly 10 Colombian digits,
-             no country prefix. Pure info — does NOT block submit. -->
-        @if (phoneFormatHint(); as hint) {
-          <span
-            class="document-format-hint"
-            [class.document-format-hint--ok]="hint.tone === 'ok'"
-            [class.document-format-hint--warn]="hint.tone === 'warn'"
-            role="status"
-            aria-live="polite"
-          >
-            <app-icon name="info" [size]="14"></app-icon>
-            {{ hint.text }}
-          </span>
-        }
-      </div>
-
-      <div class="form-row">
-        <app-selector
-          formControlName="documentType"
-          label="Tipo Doc."
-          [options]="documentTypeOptions"
-          [size]="'md'"
-          [placeholder]="'Seleccionar'"
-        ></app-selector>
-        <div class="document-number-field">
-          <app-input
-            formControlName="documentNumber"
-            label="Número"
-            placeholder="1023456789"
-            type="text"
-            [size]="'md'"
-          ></app-input>
-          <!-- QUI-723 — Real-time counter for the document number. Shows the
-               cashier how many digits they have, how many are missing, and the
-               min/max range for the selected document type. Three tones:
-               info (in progress), ok (within range), warn (overflow / bad format).
-               Pure info — does NOT block submit (backend is format-tolerant). -->
-          @if (documentFormatHint(); as hint) {
-            <span
-              class="document-format-hint"
-              [class.document-format-hint--ok]="hint.tone === 'ok'"
-              [class.document-format-hint--warn]="hint.tone === 'warn'"
-              role="status"
-              aria-live="polite"
+      @if (!isSearching() && resultsSlice().length > 0) {
+        <div class="search-results compact-results">
+          @for (customer of resultsSlice(); track customer.id) {
+            <button
+              type="button"
+              class="customer-result"
+              (click)="selectCustomer(customer)"
             >
-              <app-icon name="info" [size]="14"></app-icon>
-              {{ hint.text }}
-            </span>
+              <span class="result-name">
+                {{ customer.first_name }} {{ customer.last_name }}
+              </span>
+              <span class="result-email">
+                {{ customer.email || customer.phone || '—' }}
+                @if (customer.document_number) {
+                  · {{ customer.document_type || 'Doc' }}: {{ customer.document_number }}
+                }
+              </span>
+            </button>
           }
         </div>
-      </div>
-    </form>
+        @if (resultsOverflow() > 0) {
+          <span class="overflow-hint">+ {{ resultsOverflow() }} más — escribe para filtrar</span>
+        }
+      }
+
+      @if (!isSearching() && searchPerformed() && results().length === 0) {
+        <div class="no-results">
+          <app-icon name="user-x" [size]="32" color="var(--color-text-muted)"></app-icon>
+          <p>No se encontraron clientes con esos criterios</p>
+        </div>
+      }
+    } @else {
+      <!-- ── MODO CREAR: formulario aislado, sin lista, sin scroll ── -->
+      <p class="create-header-hint">
+        {{
+          minimalInvoiceMode()
+            ? 'Datos mínimos para facturar esta venta a nombre de alguien'
+            : 'Crea un cliente nuevo y avanza con Siguiente'
+        }}
+      </p>
+      <form
+        [formGroup]="form"
+        class="create-customer-form"
+        (ngSubmit)="$event.preventDefault(); onResolve()"
+      >
+        <div class="form-row">
+          <app-input
+            formControlName="firstName"
+            label="Nombre"
+            placeholder="Juan"
+            type="text"
+            [size]="'sm'"
+          ></app-input>
+          <app-input
+            formControlName="lastName"
+            label="Apellido"
+            placeholder="Pérez"
+            type="text"
+            [size]="'sm'"
+          ></app-input>
+        </div>
+
+        <div class="form-row">
+          <!-- Par tipo+número: CVA compartido `app-document-identity-fields`
+               (no más selector/input reimplementados aquí). El hint de dígitos
+               sigue siendo cosa de esta pantalla (documentFormatHint) porque
+               depende de un util local del POS. -->
+          <app-document-identity-fields
+            formControlName="documentIdentity"
+            typeLabel="Tipo Doc."
+            numberLabel="Número"
+            [size]="'sm'"
+          >
+            @if (documentFormatHint(); as hint) {
+              <span
+                class="document-format-hint"
+                [class.document-format-hint--ok]="hint.tone === 'ok'"
+                [class.document-format-hint--warn]="hint.tone === 'warn'"
+                role="status"
+                aria-live="polite"
+              >
+                <app-icon name="info" [size]="14"></app-icon>
+                {{ hint.text }}
+              </span>
+            }
+          </app-document-identity-fields>
+        </div>
+
+        <!-- En modo factura mínima el teléfono desaparece: la fila pasa a una
+             sola columna para que el email no quede a media caja. -->
+        <div class="form-row" [class.form-row--single]="minimalInvoiceMode()">
+          <app-input
+            formControlName="email"
+            label="Email"
+            placeholder="cliente@ejemplo.com"
+            type="email"
+            [size]="'sm'"
+          ></app-input>
+          <!-- Paso 9 — teléfono NO es uno de los 5 campos mínimos de
+               facturación (documento, nombres, apellidos, email): pedirlo
+               aquí convierte la venta rápida en trámite. Se oculta por
+               completo en modo factura mínima; el control sigue existiendo
+               en el form (vacío), así que `resolveIfNeeded()` no cambia. -->
+          @if (!minimalInvoiceMode()) {
+            <div class="phone-field">
+              <app-input
+                formControlName="phone"
+                label="Teléfono"
+                placeholder="+57 300 123 4567"
+                type="tel"
+                [size]="'sm'"
+              ></app-input>
+              @if (phoneFormatHint(); as hint) {
+                <span
+                  class="document-format-hint"
+                  [class.document-format-hint--ok]="hint.tone === 'ok'"
+                  [class.document-format-hint--warn]="hint.tone === 'warn'"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <app-icon name="info" [size]="14"></app-icon>
+                  {{ hint.text }}
+                </span>
+              }
+            </div>
+          }
+        </div>
+      </form>
+    }
   }
 </div>

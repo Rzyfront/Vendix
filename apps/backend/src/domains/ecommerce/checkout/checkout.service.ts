@@ -26,6 +26,7 @@ import { WompiEnvironment } from '../../store/payments/processors/wompi/wompi.ty
 import { WompiProcessor } from '../../store/payments/processors/wompi/wompi.processor';
 import { PaymentEncryptionService } from '../../store/payments/services/payment-encryption.service';
 import { WebhookHandlerService } from '../../store/payments/services/webhook-handler.service';
+import { PaymentGatewayService } from '../../store/payments/services/payment-gateway.service';
 import * as crypto from 'crypto';
 import { ReservationsService } from '../../store/reservations/reservations.service';
 import { order_channel_enum } from '@prisma/client';
@@ -132,6 +133,9 @@ export class CheckoutService {
     private readonly paymentEncryption: PaymentEncryptionService,
     private readonly reservationsService: ReservationsService,
     private readonly webhookHandler: WebhookHandlerService,
+    // QUI-728 — valida y resuelve la cuenta bancaria destino de un
+    // `bank_transfer` / `voucher` antes de persistir el pago.
+    private readonly paymentGateway: PaymentGatewayService,
     private readonly invoiceDataRequestsService: InvoiceDataRequestsService,
     private readonly invoicingService: InvoicingService,
     private readonly operatingScopeService: OperatingScopeService,
@@ -157,6 +161,165 @@ export class CheckoutService {
     'image/webp',
     'application/pdf',
   ];
+
+  /**
+   * Firma la URL pre-firmada del logo de la cuenta. Devuelve `null` si el key
+   * está ausente o si la firma falla (defensivo: no romper el listado si S3
+   * se cae — el comprador sigue viendo nombre y número de cuenta).
+   */
+  private async signImageUrl(
+    key: string | null | undefined,
+  ): Promise<string | null> {
+    if (!key) return null;
+    try {
+      return await this.s3Service.getPresignedUrl(key, 300);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * QUI-728 — lista las cuentas bancarias activas que la tienda del contexto
+   * puede ofrecer al comprador en un método de pago. Se filtran por:
+   *   - `organization_id` de la tienda del contexto (multi-tenant),
+   *   - `status='active'`,
+   *   - `store_id === null` (cuenta de la organización) o `=== storeId`
+   *     (cuenta de la tienda).
+   *
+   * El catálogo NO son "todas las cuentas activas de la organización": el
+   * comercio CURA por método cuáles ofrece, en
+   * `store_payment_methods.custom_config.accounts` (shape QUI-728). El POS ya
+   * lee esa lista (`payment-collector`), así que listar aquí todo lo activo
+   * hacía que el comprador viera cuentas que el comercio no habilitó para ese
+   * método y que las dos superficies mostraran catálogos distintos — con
+   * `roku` eran 4 cuentas en la vitrina contra 2 en el POS.
+   *
+   * Se respeta además el ORDEN del `custom_config`, porque el checkout
+   * selecciona la PRIMERA por defecto: ordenar por `bank_name` cambiaba en
+   * silencio qué cuenta ve el cliente al abrir el modal.
+   *
+   * Devuelve solo lo necesario para el selector de cuenta del checkout: id,
+   * name, bank_name, account_number, image_url (pre-firmada). Nunca expone
+   * balances ni configuración contable.
+   *
+   * Se lee por `EcommercePrismaService`, NO por `StorePrismaService`: el
+   * contexto de la vitrina es anónimo y solo tiene `store_id`, así que un
+   * modelo org-scoped como `bank_accounts` respondía
+   * `403 organization context required` a todo comprador. El alcance por
+   * organización y por tienda se aplica aquí, explícito en el `where`.
+   */
+  async getBankAccountsForMethod(
+    methodId: number,
+    storeId: number,
+  ): Promise<
+    Array<{
+      id: number;
+      name: string | null;
+      bank_name: string;
+      account_number: string;
+      image_url: string | null;
+    }>
+  > {
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+      select: { organization_id: true },
+    });
+    if (!store) return [];
+
+    const method = await this.prisma.store_payment_methods.findFirst({
+      where: { id: methodId, store_id: storeId },
+      select: { custom_config: true },
+    });
+    const configured = this.extractConfiguredBankAccountIds(
+      method?.custom_config,
+    );
+
+    // Lista curada presente pero sin ninguna FK resoluble (config legacy sin
+    // migrar, o `accounts: []`): se devuelve vacío a propósito para que el
+    // modal caiga a las `payment_instructions` que `buildPaymentInstructions`
+    // sigue derivando del mismo `custom_config`.
+    if (configured !== null && configured.length === 0) return [];
+
+    const rows = await this.prisma.bank_accounts.findMany({
+      where: {
+        organization_id: store.organization_id,
+        status: 'active',
+        OR: [{ store_id: null }, { store_id: storeId }],
+        ...(configured !== null && { id: { in: configured } }),
+      },
+      orderBy: { bank_name: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        bank_name: true,
+        account_number: true,
+        image_s3_key: true,
+      },
+    });
+
+    // Con lista curada manda el orden del admin; sin ella (tienda que nunca
+    // migró al shape nuevo) se conserva el alfabético de siempre.
+    const ordered =
+      configured !== null
+        ? configured
+            .map((id) => rows.find((r) => r.id === id))
+            .filter((r): r is (typeof rows)[number] => r != null)
+        : rows;
+
+    return Promise.all(
+      ordered.map(async (r) => ({
+        id: r.id,
+        name: r.name,
+        bank_name: r.bank_name,
+        account_number: r.account_number,
+        image_url: r.image_s3_key
+          ? await this.signImageUrl(r.image_s3_key)
+          : null,
+      })),
+    );
+  }
+
+  /**
+   * Extrae los `bank_accounts.id` curados en `custom_config.accounts`,
+   * aplanando las tres formas que conviven (las mismas que aplana el
+   * `payment-collector` del POS):
+   *   1. `{ bank_account_id }` — forma nueva con FK real.
+   *   2. `{ id }` — la que escribe hoy el editor de settings.
+   *   3. `{ legacy: { … } }` — migrada desde el shape de cuenta única; no
+   *      tiene FK, así que no es seleccionable y se omite.
+   *
+   * Devuelve `null` cuando el método NO tiene la clave `accounts`: esa tienda
+   * nunca se configuró con el shape nuevo y conserva el comportamiento previo
+   * (todas las cuentas activas), en vez de quedarse sin ninguna.
+   */
+  private extractConfiguredBankAccountIds(
+    customConfig: unknown,
+  ): number[] | null {
+    if (
+      customConfig == null ||
+      typeof customConfig !== 'object' ||
+      Array.isArray(customConfig)
+    ) {
+      return null;
+    }
+    const raw = (customConfig as Record<string, unknown>)['accounts'];
+    if (!Array.isArray(raw)) return null;
+
+    const ids: number[] = [];
+    for (const entry of raw) {
+      if (entry == null || typeof entry !== 'object') continue;
+      const e = entry as Record<string, unknown>;
+      const nested =
+        e['legacy'] != null && typeof e['legacy'] === 'object'
+          ? (e['legacy'] as Record<string, unknown>)
+          : {};
+      const candidate =
+        e['bank_account_id'] ?? e['id'] ?? nested['bank_account_id'] ?? nested['id'];
+      const id = Number(candidate);
+      if (Number.isInteger(id) && id > 0 && !ids.includes(id)) ids.push(id);
+    }
+    return ids;
+  }
 
   /**
    * Returns whether the current ecommerce store has invoicing fiscal status
@@ -1314,8 +1477,32 @@ export class CheckoutService {
       receipt_uploaded_at = new Date();
     }
 
-    // store_id y customer_id se inyectan automáticamente
-    await this.prisma.payments.create({
+    // QUI-728 — valida y resuelve la cuenta bancaria destino ANTES de crear
+    // el pago. El DTO puede traer `bank_account_id` solo cuando el método es
+    // `bank_transfer` o `voucher`; el resto de métodos lo ignoran. La
+    // validación reusa la misma lógica que el POS / cobros en tienda (mismo
+    // `PaymentGatewayService.resolveAndValidateBankAccount`) para que las dos
+    // superficies nunca discrepen sobre qué cuenta es válida.
+    let resolved_bank_account_id: number | null = null;
+    if (dto.bank_account_id != null) {
+      // Se le pasa el cliente de la vitrina: con el suyo por defecto
+      // (`StorePrismaService`) esta llamada respondía 403 a todo comprador
+      // anónimo — `bank_accounts` es org-scoped y el contexto público solo
+      // resuelve `store_id`. La validación de organización y tienda la sigue
+      // haciendo el gateway, igual que para el POS.
+      const resolved = await this.paymentGateway.resolveAndValidateBankAccount(
+        dto.bank_account_id,
+        store_id ?? 0,
+        this.prisma,
+      );
+      resolved_bank_account_id = resolved.id;
+    }
+
+    // store_id y customer_id se inyectan automáticamente.
+    // QUI-728 — capturamos el `id` del pago recién creado para devolverlo al
+    // comprador en la respuesta y permitirle releer su comprobante más tarde
+    // (solo si subió archivo — sin `receipt_s3_key` no hay qué re-leer).
+    const created_payment = await this.prisma.payments.create({
       data: {
         order_id: order.id,
         amount: grand_total,
@@ -1324,8 +1511,13 @@ export class CheckoutService {
         store_payment_method_id: dto.payment_method_id,
         receipt_s3_key,
         receipt_uploaded_at,
+        bank_account_id: resolved_bank_account_id,
       },
+      select: { id: true },
     });
+    const payment_id_with_receipt: number | null = receipt_s3_key
+      ? created_payment.id
+      : null;
 
     // Bucle POR ÍNDICE: dos líneas del mismo producto en presentaciones
     // distintas son dos reservas independientes, y la suma de ambas es lo que
@@ -1435,11 +1627,65 @@ export class CheckoutService {
       coupon_discount: discountResult.coupon_discount,
       shipping_cost,
       state: order.state,
+      // QUI-728 — ancla para que el comprador pueda releer su comprobante
+      // mediante `GET /ecommerce/payments/:paymentId/receipt-url`. Solo se
+      // devuelve cuando el comprador efectivamente subió un archivo; sin
+      // `receipt_s3_key` no hay comprobante que re-leer.
+      payment_id: payment_id_with_receipt,
       public_order_token: guestArtifacts?.invoice_data_token ?? null,
       invoice_data_token: guestArtifacts?.invoice_data_token ?? null,
       invoice_id: guestArtifacts?.invoice_id ?? invoice_id,
       message: 'Order placed successfully',
     };
+  }
+
+  /**
+   * QUI-728 — devuelve una URL prefirmada (TTL 5 min) al comprobante de
+   * transferencia/voucher subido por el comprador en el checkout. Solo el
+   * dueño del pago puede releerlo: el `EcommercePrismaService` inyecta
+   * automáticamente `customer_id = user_id` desde ALS en `payments`, así que
+   * un `findFirst` sin `where` adicional ya está acotado al comprador
+   * autenticado. Si el `id` no le pertenece, devuelve null y el handler
+   * lanza 404 sin distinguir «no existe» de «no es tuyo» (mismo shape que
+   * el patrón admin en `OrdersService.getPaymentReceiptUrl`).
+   *
+   * Sin migración: `content_type` no se persiste en BD; se obtiene del
+   * `HEAD` del objeto S3 en cada lectura (objetos borrados → null → el
+   * frontend cae al PDF como fallback).
+   */
+  async getPaymentReceiptUrl(paymentId: number): Promise<{
+    url: string;
+    expires_at: string;
+    content_type: string | null;
+  }> {
+    const payment = await this.prisma.payments.findFirst({
+      where: { id: paymentId },
+      select: {
+        id: true,
+        order_id: true,
+        receipt_s3_key: true,
+        receipt_uploaded_at: true,
+      },
+    });
+
+    if (!payment) {
+      throw new VendixHttpException(ErrorCodes.PAY_FIND_001);
+    }
+
+    if (!payment.receipt_s3_key) {
+      throw new VendixHttpException(ErrorCodes.PAY_RECEIPT_NOT_FOUND_001);
+    }
+
+    const TTL_SECONDS = 300;
+    const [url, head] = await Promise.all([
+      this.s3Service.getPresignedUrl(payment.receipt_s3_key, TTL_SECONDS),
+      this.s3Service.headObject(payment.receipt_s3_key),
+    ]);
+    const expires_at = new Date(
+      Date.now() + TTL_SECONDS * 1000,
+    ).toISOString();
+
+    return { url, expires_at, content_type: head?.contentType ?? null };
   }
 
   async whatsappCheckout(dto: WhatsappCheckoutDto) {
@@ -1995,6 +2241,12 @@ export class CheckoutService {
         quantity: oi.quantity,
         unit_price: Number(oi.unit_price),
         total_price: Number(oi.total_price),
+        // [resid-fiscal] — Aditivo. El FE pinta la línea tachada con
+        // distintivo "Cancelado" cuando `cancelled_at != null` y oculta
+        // precio/impuestos en ese caso. Camino principal en restaurante:
+        // el comensal cancela desde el QR ANTES de confirmar.
+        cancelled_at: oi.cancelled_at ?? null,
+        cancellation_reason: oi.cancellation_reason ?? null,
       })),
       state: order.state,
       customer: customer_data,
@@ -2506,9 +2758,16 @@ export class CheckoutService {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
-    // The ecommerce-scoped client filters by store_id but `select` here
-    // doesn't include it explicitly — we just need slug+id+organization_id.
-    const store = await this.prisma.stores.findFirst({
+    // `stores` NO está scopeado: en `EcommercePrismaService` es uno de los
+    // getters globales (`get stores() { return this.baseClient.stores }`),
+    // así que un `findFirst` sin `where` devuelve la PRIMERA tienda de la
+    // tabla, no la del contexto. Con eso, el comprobante de un comprador de
+    // una tienda terminaba guardado bajo el prefijo S3 de otro tenant
+    // (observado: un pago de Roku escrito en
+    // `organizations/fashion-retail-3/stores/fashion-online-7/receipts/...`).
+    // El filtro por `store_id` tiene que ser explícito.
+    const store = await this.prisma.stores.findUnique({
+      where: { id: store_id },
       select: {
         id: true,
         slug: true,

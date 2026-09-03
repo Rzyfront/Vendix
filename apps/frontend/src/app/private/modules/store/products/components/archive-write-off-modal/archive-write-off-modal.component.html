@@ -1,6 +1,7 @@
 <app-modal
   [(isOpen)]="modalOpen"
   size="lg"
+  [dialog]="true"
   [title]="
     isBlocked()
       ? 'No se puede eliminar este producto'

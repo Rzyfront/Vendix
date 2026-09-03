@@ -787,8 +787,8 @@
               <span>Subtotal</span>
               <span>{{
                 ((cart()!.promotion_discount ?? 0) > 0
-                  ? (cart()!.promotional_subtotal ?? cart()!.subtotal ?? 0)
-                  : (cart()!.subtotal ?? 0)) | currency
+                  ? (cart()!.promotional_subtotal ?? cart()!.subtotal)
+                  : cart()!.subtotal) | currency
               }}</span>
             </div>
             @if (
@@ -927,6 +927,8 @@
   <app-payment-instructions-modal
     [isOpen]="show_payment_instructions_modal()"
     [method]="selectedPaymentMethodObj()"
+    [accounts]="currentBankAccounts()"
+    [(selectedBankAccountId)]="selected_bank_account_id"
     [currentFile]="payment_receipt_file()"
     (isOpenChange)="show_payment_instructions_modal.set($event)"
     (fileChange)="onReceiptFile($event)"

@@ -6,7 +6,6 @@ import {Component,
   signal,
   computed, effect } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { NgClass } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { forkJoin } from 'rxjs';
@@ -31,6 +30,12 @@ import {
 } from '../../../../../../shared/components/index';
 import { StoreOrdersService } from '../../services/store-orders.service';
 import { CustomersService } from '../../../../store/customers/services/customers.service';
+// Carril B - B2: el dropdown del filtro por mesa se llena con
+// GET /store/tables via TablesService. Si la tienda no tiene mesas,
+// el filtro no se pinta (mayoria de tiendas de Vendix no son restaurante).
+import { TablesService } from '../../../restaurant-ops/tables/services/tables.service';
+import { Table } from '../../../restaurant-ops/tables/interfaces/table.interface';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import {
   Order,
   OrderQuery,
@@ -46,7 +51,6 @@ import { OrderPrintService } from '../../services/order-print.service';
   standalone: true,
   imports: [
     FormsModule,
-    NgClass,
     ResponsiveDataViewComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
@@ -64,11 +68,21 @@ export class OrdersListComponent {
   private printService = inject(OrderPrintService);
   private ordersService = inject(StoreOrdersService);
   private customersService = inject(CustomersService);
+  private tablesService = inject(TablesService);
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
   private destroyRef = inject(DestroyRef);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
+  // T10 B3 — predicado único de industria (canónica: AuthFacade.isRestaurant).
+  // Antes este componente era "presentacional: no consulta AuthFacade"; ese
+  // límite se rompe porque la columna Mesa debe responder a la industria del
+  // tenant, no solo a si hay datos. Si en el futuro hay que re-evaluar si
+  // este componente debe seguir siendo presentacional, la respuesta sigue
+  // siendo la misma: consultar la canónica, no escribir un duplic.
+  private authFacade = inject(AuthFacade);
+  /** T10 B3 — gate de industria reusado por `columns` y `cardConfig`. */
+  readonly isRestaurant = computed<boolean>(() => this.authFacade.isRestaurant());
 
   /** Timestamp (epoch ms) del momento en que se cargó la lista actual. */
   private loadedAt = 0;
@@ -89,6 +103,13 @@ export class OrdersListComponent {
   readonly selectedPaymentStatus = signal('');
   readonly selectedDateRange = signal('');
   readonly dispatchableFilter = signal(false);
+  // Carril B - B2: mesa seleccionada (string para empatar con FilterValues;
+  // '' = sin filtro, sino el id de la mesa). El numero viaja al backend
+  // como table_id en _filters; '' NO viaja porque OrderQueryDto.table_id
+  // valida con @IsInt() @Min(1) y un vacio da 400.
+  readonly selectedTable = signal('');
+  /** Mesas de la tienda; se cargan al init y solo si hay >=1 pintamos el filtro. */
+  readonly tables = signal<Table[]>([]);
 
   // Outputs
   readonly create = output<void>();
@@ -99,7 +120,13 @@ export class OrdersListComponent {
    * QUI-599: afordancia del item "Operaciones masivas". El permiso lo lee el
    * componente de página (`orders.component.ts:canBulkOrderOperations`) y baja
    * como input, igual que `canBulkEdit` en `product-list.component.ts:80`.
-   * Este componente es presentacional: no consulta `AuthFacade`.
+   *
+   * AuthFacade: este componente consume la canónica SOLO para el gate de
+   * industria (`isRestaurant` reusado por `columns` y `cardConfig`, T10 B3);
+   * no la consulta para permisos, roles ni scopes — esos siguen llegando
+   * por inputs desde el componente de página. La excepción al límite
+   * "presentacional" anterior está documentada en el comentario de la
+   * inyección (:77-82).
    */
   readonly canBulkOperations = input(false);
 
@@ -142,7 +169,13 @@ export class OrdersListComponent {
   };
 
   // Filter configuration for the options dropdown
-  filterConfigs: FilterConfig[] = [
+  // Carril B - B2: filterConfigs es computed (no campo plano) porque la
+  // entrada "table_id" solo aparece si la tienda tiene mesas. Si la lista
+  // de mesas carga vacia (mayoria de tiendas de Vendix no son restaurantes)
+  // el filtro no se pinta — mismo criterio que la columna Mesa, que deja
+  // la celda vacia en vez de guion/N/A.
+  readonly filterConfigs = computed<FilterConfig[]>(() => {
+    const configs: FilterConfig[] = [
     {
       key: 'status',
       label: 'Estado',
@@ -200,7 +233,27 @@ export class OrdersListComponent {
         { value: 'lastYear', label: 'Año Pasado' },
       ],
     },
-  ];
+    ];
+    const ts = this.tables();
+    if (ts.length > 0) {
+      configs.push({
+        key: 'table_id',
+        label: 'Mesa',
+        type: 'select',
+        options: [
+          { value: '', label: 'Todas las Mesas' },
+          ...ts
+            .slice()
+            .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+            .map((t) => ({
+              value: String(t.id),
+              label: t.zone ? `${t.name} (${t.zone})` : t.name,
+            })),
+        ],
+      });
+    }
+    return configs;
+  });
 
   // Current filter values
   readonly filterValues = signal<FilterValues>({});
@@ -240,77 +293,103 @@ export class OrdersListComponent {
   });
 
   // Table configuration
-  columns: TableColumn[] = [
-    { key: 'order_number', label: 'Order ID', sortable: true, priority: 1 },
-    {
-      key: 'customer_name',
-      label: 'Customer',
-      sortable: true,
-      priority: 2,
-    },
-    {
-      key: 'channel',
-      label: 'Canal',
-      sortable: true,
-      badge: true,
-      priority: 2,
-      badgeConfig: {
-        type: 'custom',
-        size: 'sm',
-        colorMap: {
-          pos: '#6366f1',
-          ecommerce: '#10b981',
-          agent: '#8b5cf6',
-          whatsapp: '#22c55e',
-          marketplace: '#f59e0b',
+  // T10 B3 — columns ahora es computed. La entrada Mesa solo aparece cuando:
+  //   - la tienda es restaurante (gate de industria: AuthFacade.isRestaurant,
+  //     arranca en false durante la carga de settings — aceptamos el parpadeo
+  //     porque es una superficie informativa, no operativa), Y
+  //   - la tienda tiene mesas cargadas (gate de datos: tables().length > 0).
+  // Tienda no-restaurante con mesas creadas por error o importación: NO
+  // muestra la columna. Restaurante sin mesas configuradas: NO muestra
+  // la columna (caso real que no queremos romper). ZONELESS: el template
+  // debe invocar columns() — la columna se re-evalúa cuando isRestaurant()
+  // o tables() cambia.
+  readonly columns = computed<TableColumn[]>(() => {
+    const hasTables = this.isRestaurant() && this.tables().length > 0;
+    const base: TableColumn[] = [
+      { key: 'order_number', label: 'Order ID', sortable: true, priority: 1 },
+      {
+        key: 'customer_name',
+        label: 'Customer',
+        sortable: true,
+        priority: 2,
+      },
+      {
+        key: 'channel',
+        label: 'Canal',
+        sortable: true,
+        badge: true,
+        priority: 2,
+        badgeConfig: {
+          type: 'custom',
+          size: 'sm',
+          colorMap: {
+            pos: '#6366f1',
+            ecommerce: '#10b981',
+            agent: '#8b5cf6',
+            whatsapp: '#22c55e',
+            marketplace: '#f59e0b',
+          },
+        },
+        transform: (value: any) => this.formatChannel(value),
+      },
+      {
+        key: 'state',
+        label: 'Status',
+        sortable: true,
+        badge: true,
+        priority: 1,
+        badgeConfig: {
+          type: 'custom',
+          size: 'sm',
+          colorMap: {
+            draft: '#9ca3af',
+            created: '#6b7280',
+            pending_payment: '#f59e0b',
+            processing: '#3b82f6',
+            shipped: '#06b6d4',
+            delivered: '#10b981',
+            cancelled: '#ef4444',
+            refunded: '#f97316',
+            finished: '#8b5cf6',
+          },
+        },
+        transform: (value: any) => this.formatStatus(value),
+      },
+      {
+        key: 'grand_total',
+        label: 'Total',
+        sortable: true,
+        priority: 1,
+        transform: (value: any) => this.currencyService.format(value || 0),
+      },
+      {
+        key: 'created_at',
+        label: 'Date',
+        sortable: true,
+        priority: 3,
+        transform: (value: any) => {
+          if (!value) return 'N/A';
+          const date = new Date(value);
+          return isNaN(date.getTime())
+            ? 'Invalid Date'
+            : date.toLocaleDateString();
         },
       },
-      transform: (value: any) => this.formatChannel(value),
-    },
-    {
-      key: 'state',
-      label: 'Status',
-      sortable: true,
-      badge: true,
-      priority: 1,
-      badgeConfig: {
-        type: 'custom',
-        size: 'sm',
-        colorMap: {
-          draft: '#9ca3af',
-          created: '#6b7280',
-          pending_payment: '#f59e0b',
-          processing: '#3b82f6',
-          shipped: '#06b6d4',
-          delivered: '#10b981',
-          cancelled: '#ef4444',
-          refunded: '#f97316',
-          finished: '#8b5cf6',
-        },
-      },
-      transform: (value: any) => this.formatStatus(value),
-    },
-    {
-      key: 'grand_total',
-      label: 'Total',
-      sortable: true,
-      priority: 1,
-      transform: (value: any) => this.currencyService.format(value || 0),
-    },
-    {
-      key: 'created_at',
-      label: 'Date',
-      sortable: true,
-      priority: 3,
-      transform: (value: any) => {
-        if (!value) return 'N/A';
-        const date = new Date(value);
-        return isNaN(date.getTime())
-          ? 'Invalid Date'
-          : date.toLocaleDateString();
-      },
-    },
-  ];
+    ];
+    if (hasTables) {
+      // Mesa: lee el campo plano precomputado en loadOrders() (mesa string
+      // o null). defaultValue cubre la celda vacía → '—' en lugar de
+      // confundir null/'' con dato.
+      base.push({
+        key: 'mesa',
+        label: 'Mesa',
+        sortable: false,
+        priority: 2,
+        defaultValue: '—',
+      });
+    }
+    return base;
+  });
 
   actions: TableAction[] = [
     {
@@ -337,34 +416,14 @@ export class OrdersListComponent {
   ];
 
   // Card configuration for mobile
-  cardConfig: ItemListCardConfig = {
-    titleKey: 'order_number',
-    titleTransform: (item) => `#${item.order_number}`,
-    subtitleKey: 'customer_name',
-    avatarFallbackIcon: 'shopping-bag',
-    avatarShape: 'circle',
-    badgeKey: 'state',
-    badgeConfig: {
-      type: 'custom',
-      size: 'sm',
-      colorMap: {
-        draft: '#9ca3af',
-        created: '#6b7280',
-        pending_payment: '#f59e0b',
-        processing: '#3b82f6',
-        shipped: '#06b6d4',
-        delivered: '#10b981',
-        cancelled: '#ef4444',
-        refunded: '#f97316',
-        finished: '#8b5cf6',
-      },
-    },
-    badgeTransform: (value: any) => this.formatStatus(value),
-    footerKey: 'grand_total',
-    footerLabel: 'Total',
-    footerStyle: 'prominent',
-    footerTransform: (value: any) => this.currencyService.format(Number(value) || 0),
-    detailKeys: [
+  // T10 B3 — cardConfig ahora es computed. detailKeys incluye Mesa solo
+  // cuando la tienda es restaurante Y tiene mesas (mismo gate que `columns`
+  // arriba). Sin esto la tarjeta móvil pinta "Mesa: —" en tiendas que no
+  // son restaurante — residuo visible que miente sobre una capacidad que
+  // la tienda no tiene. ZONELESS: el template debe invocar cardConfig().
+  readonly cardConfig = computed<ItemListCardConfig>(() => {
+    const hasTables = this.isRestaurant() && this.tables().length > 0;
+    const detailKeys: ItemListCardConfig['detailKeys'] = [
       {
         key: 'channel',
         label: 'Canal',
@@ -372,19 +431,62 @@ export class OrdersListComponent {
         infoIconTransform: (value: any) => this.getChannelIcon(value),
         infoIconVariantTransform: (value: any) => this.getChannelVariant(value),
       },
-      {
-        key: 'created_at',
-        label: 'Fecha',
-        transform: (value: any) => {
-          if (!value) return 'N/A';
-          const date = new Date(value);
-          return isNaN(date.getTime())
-            ? 'Invalid Date'
-            : date.toLocaleDateString();
+    ];
+    if (hasTables) {
+      // Mesa: lee el campo plano precomputado en loadOrders() (mesa string
+      // o null). infoIcon coherente con el texto: icono ⇔ mesa presente.
+      detailKeys.push({
+        key: 'mesa',
+        label: 'Mesa',
+        transform: (value: unknown) =>
+          value == null || value === '' ? '—' : (value as string),
+        infoIconTransform: (value: unknown) =>
+          value == null || value === '' ? undefined : 'utensils',
+        infoIconVariant: 'warning',
+      });
+    }
+    detailKeys.push({
+      key: 'created_at',
+      label: 'Fecha',
+      transform: (value: any) => {
+        if (!value) return 'N/A';
+        const date = new Date(value);
+        return isNaN(date.getTime())
+          ? 'Invalid Date'
+          : date.toLocaleDateString();
+      },
+    });
+    return {
+      titleKey: 'order_number',
+      titleTransform: (item) => `#${item.order_number}`,
+      subtitleKey: 'customer_name',
+      avatarFallbackIcon: 'shopping-bag',
+      avatarShape: 'circle',
+      badgeKey: 'state',
+      badgeConfig: {
+        type: 'custom',
+        size: 'sm',
+        colorMap: {
+          draft: '#9ca3af',
+          created: '#6b7280',
+          pending_payment: '#f59e0b',
+          processing: '#3b82f6',
+          shipped: '#06b6d4',
+          delivered: '#10b981',
+          cancelled: '#ef4444',
+          refunded: '#f97316',
+          finished: '#8b5cf6',
         },
       },
-    ],
-  };
+      badgeTransform: (value: any) => this.formatStatus(value),
+      footerKey: 'grand_total',
+      footerLabel: 'Total',
+      footerStyle: 'prominent',
+      footerTransform: (value: any) =>
+        this.currencyService.format(Number(value) || 0),
+      detailKeys,
+    };
+  });
 
   constructor() {
     // Pre-filter from URL (ref 2026-06-25 — feature/orders-pending-dispatch).
@@ -419,6 +521,20 @@ export class OrdersListComponent {
     });
 
     this.loadSeen();
+    // Carril B - B2: carga mesas de la tienda. Si falla, el filtro no se
+    // pinta (computed filterConfigs arriba depende de tables().length > 0).
+    // Fire-and-forget con takeUntilDestroyed. TablesService.getFloorMap()
+    // devuelve Observable<Table[]> (el plano completo, sin paginar) - lo
+    // que necesita un dropdown de filtro. listPaginated() obligaria a
+    // paginar un desplegable, sin sentido para un restaurante con decenas
+    // de mesas.
+    this.tablesService
+      .getFloorMap()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (tables: Table[]) => this.tables.set(tables ?? []),
+        error: () => this.tables.set([]),
+      });
   }
 
   private loadSeen(): void {
@@ -446,7 +562,8 @@ export class OrdersListComponent {
       this.selectedChannel() ||
       this.selectedPaymentStatus() ||
       this.selectedDateRange() ||
-      this.dispatchableFilter()
+      this.dispatchableFilter() ||
+      this.selectedTable()
     ),
   );
 
@@ -476,6 +593,10 @@ export class OrdersListComponent {
     this.selectedChannel.set((values['channel'] as string) || '');
     this.selectedPaymentStatus.set((values['payment_status'] as string) || '');
     this.selectedDateRange.set((values['date_range'] as string) || '');
+    // Carril B - B2: '' = sin filtro (viaja undefined al backend para no
+    // romper el @IsInt() @Min(1) del DTO). Cualquier otro valor es el id
+    // de la mesa como string.
+    this.selectedTable.set((values['table_id'] as string) || '');
 
     this._filters.status = this.selectedStatus()
       ? (this.selectedStatus() as OrderState)
@@ -487,6 +608,9 @@ export class OrdersListComponent {
       ? (this.selectedPaymentStatus() as PaymentStatus)
       : undefined;
     this._filters.date_range = this.selectedDateRange() || undefined;
+    this._filters.table_id = this.selectedTable()
+      ? Number(this.selectedTable())
+      : undefined;
     this._filters.page = 1;
 
     this.loadOrders();
@@ -499,6 +623,7 @@ export class OrdersListComponent {
     this.selectedPaymentStatus.set('');
     this.selectedDateRange.set('');
     this.dispatchableFilter.set(false);
+    this.selectedTable.set('');
     this.filterValues.set({});
 
     this._filters.search = '';
@@ -507,6 +632,7 @@ export class OrdersListComponent {
     this._filters.payment_status = undefined;
     this._filters.date_range = undefined;
     this._filters.dispatchable = undefined;
+    this._filters.table_id = undefined;
     this._filters.page = 1;
 
     this.loadOrders();
@@ -558,9 +684,20 @@ export class OrdersListComponent {
           const rawOrders = paginatedData.data || paginatedData || [];
 
           // Normalize numeric strings to numbers
-          const normalizedOrders = rawOrders.map((order: any) => ({
-            ...order,
-            customer_id:
+          const normalizedOrders = rawOrders.map((order: any) => {
+            // Carril B - B2: precomputar mesa plana para que la columna/celda
+            // lean el string y el template pinte '—' cuando falta (null),
+            // no '' (cadena vacía) que el gate del shared confunde con dato.
+            const ts = order?.table_sessions?.[0];
+            const mesa = ts?.table?.name
+              ? ts.table.zone
+                ? `${ts.table.name} (${ts.table.zone})`
+                : ts.table.name
+              : null;
+            return {
+              ...order,
+              mesa,
+              customer_id:
               typeof order.customer_id === 'string'
                 ? parseInt(order.customer_id)
                 : order.customer_id,
@@ -584,7 +721,8 @@ export class OrdersListComponent {
               typeof order.discount_amount === 'string'
                 ? parseFloat(order.discount_amount)
                 : order.discount_amount,
-          }));
+            };
+          });
 
           // Get pagination info safely
           const paginationInfo = paginatedData.pagination || {
@@ -610,11 +748,13 @@ export class OrdersListComponent {
                   const customerMap = new Map(customers.map((c) => [c.id, c]));
                   this.orders.set(normalizedOrders.map((order: any) => ({
                     ...order,
-                    // Show "Consumidor Final" for anonymous sales (no customer_id), otherwise show customer name
-                    customer_name: order.customer_id
-                      ? `${customerMap.get(order.customer_id)?.first_name || ''} ${customerMap.get(order.customer_id)?.last_name || ''}`.trim() ||
-                        'N/A'
-                      : 'Consumidor Final',
+                    // Carril B - B1: prioridad alias > customer.first+last > 'Consumidor Final'.
+                    // Mismo orden que el detalle y el ticket de despacho.
+                    customer_name: order.customer_alias?.trim()
+                      || (order.customer_id
+                        ? `${customerMap.get(order.customer_id)?.first_name || ''} ${customerMap.get(order.customer_id)?.last_name || ''}`.trim() ||
+                          'N/A'
+                        : 'Consumidor Final'),
                   })));
                   this.loading.set(false);
                 },
@@ -622,18 +762,17 @@ export class OrdersListComponent {
                   console.error('Error loading customers:', error);
                   this.orders.set(normalizedOrders.map((order: any) => ({
                     ...order,
-                    customer_name: order.customer_id
-                      ? 'N/A'
-                      : 'Consumidor Final',
+                    customer_name: order.customer_alias?.trim()
+                      || (order.customer_id ? 'N/A' : 'Consumidor Final'),
                   })));
                   this.loading.set(false);
                 },
               });
           } else {
-            // No customer IDs to fetch, show "Consumidor Final" for orders without customer
+            // Carril B - B1: sin customers a fetchear, la unica fuente es alias.
             this.orders.set(normalizedOrders.map((order: any) => ({
               ...order,
-              customer_name: order.customer_id ? 'N/A' : 'Consumidor Final',
+              customer_name: order.customer_alias?.trim() || 'Consumidor Final',
             })));
             this.loading.set(false);
           }

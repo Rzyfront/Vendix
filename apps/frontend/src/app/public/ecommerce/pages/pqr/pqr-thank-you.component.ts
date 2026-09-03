@@ -3,7 +3,6 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
-import { PublicHeaderComponent } from '../../../landing/components/public-header/public-header.component';
 
 /**
  * Confirmation page shown after a successful PQR submission. Displays
@@ -13,7 +12,7 @@ import { PublicHeaderComponent } from '../../../landing/components/public-header
 @Component({
   selector: 'app-pqr-thank-you',
   standalone: true,
-  imports: [CommonModule, RouterLink, IconComponent, PublicHeaderComponent],
+  imports: [CommonModule, RouterLink, IconComponent],
   templateUrl: './pqr-thank-you.component.html',
   styleUrls: ['./pqr-thank-you.component.scss'],
 })

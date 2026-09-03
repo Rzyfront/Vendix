@@ -291,6 +291,21 @@ export class UpdateOrderEditorDto {
   customer_id?: number | null;
 
   /**
+   * QUI-737 (B.4) — Alias de venta rápida. Este DTO es standalone A PROPÓSITO
+   * (no extiende CreateOrderDto) y la regla de escritura ADR-9 garantiza que
+   * `customer_id` y `customer_alias` son mutuamente excluyentes. Si se omitiera
+   * aquí, un `PATCH` con el campo respondería 400 `forbidNonWhitelisted`. El
+   * `@Transform` colapsa un string en blanco a `undefined`.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() === '' ? undefined : value,
+  )
+  customer_alias?: string;
+
+  /**
    * Nota visible para el cliente (max 500 chars, igual que `notes` en
    * CreateOrderDto). Se persiste en `orders.notes`.
    */

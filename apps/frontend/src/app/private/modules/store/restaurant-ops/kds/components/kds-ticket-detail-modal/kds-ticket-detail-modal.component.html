@@ -1,6 +1,7 @@
 <app-modal
   [isOpen]="isOpen()"
   size="lg"
+  [dialog]="true"
   [title]="'Ticket #' + (ticketDisplay()?.daily_number ?? ticketDisplay()?.id ?? '')"
   [showCloseButton]="true"
   (cancel)="onClose()"
@@ -44,6 +45,14 @@
                 <p class="text-sm font-semibold text-[var(--color-text-primary)]">
                   ×{{ item.quantity }} {{ item.product?.name || ('Producto #' + item.product_id) }}
                 </p>
+                <!-- CP-POLLO-ARABE-727 C.4 (QUI-736) — sub-línea de variante, NO
+                     concatenada al nombre. sr-only para que el lector de pantalla
+                     oiga "Variante: Picante", no "Pollo… Picante". -->
+                @if (item.variant_label) {
+                  <p class="text-[12px] text-[var(--color-text-secondary)] mt-0.5">
+                    <span class="sr-only">Variante: </span>{{ item.variant_label }}
+                  </p>
+                }
                 @if (item.product?.preparation_time_minutes) {
                   <p class="text-[11px] text-[var(--color-text-secondary)] flex items-center gap-1 mt-0.5">
                     <app-icon name="clock" [size]="11" />

@@ -31,6 +31,23 @@ NEED_FE="${BUILDCHECK_NEED_FE:-2560}"
 NEED_DEEP="${BUILDCHECK_NEED_DEEP:-4096}"
 NEED_TEST="${BUILDCHECK_NEED_TEST:-3072}"
 
+# npm decide por su cuenta si iza un binario de workspace a la raíz o lo deja
+# anidado en apps/frontend/node_modules/.bin. El 2026-08-30, al alinear
+# @angular/cli de ^21 a ^20.3, `ng` se movió de la raíz al workspace y este
+# script —que fijaba la ruta de la raíz— dejó de encontrarlo. La ruta no es un
+# hecho estable: hay que resolverla.
+resolve_bin() {
+  local name="$1" c
+  for c in "$ROOT/node_modules/.bin/$name" \
+           "$ROOT/apps/frontend/node_modules/.bin/$name" \
+           "$ROOT/apps/backend/node_modules/.bin/$name"; do
+    [ -x "$c" ] && { printf '%s' "$c"; return 0; }
+  done
+  echo "buildcheck: no encuentro el binario '$name' en ningún node_modules/.bin." >&2
+  echo "  ¿Falta un npm install? Buscado en raíz, apps/frontend y apps/backend." >&2
+  return 1
+}
+
 # PGID del propio script: nunca lo matamos.
 SELF_PGID="$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')"
 
@@ -41,6 +58,7 @@ DEEP=0
 MODE_REAP=0
 REAP_HARD=0
 MODE_TOP=0
+MODE_WATCH=0
 FORCE=0
 EXPLICIT_TARGET=0
 PASSTHRU=""
@@ -61,6 +79,10 @@ Uso: bash scripts/buildcheck.sh [opciones]
       --reap         No compila: barre procesos de build/serve/jest huérfanos y sale
       --reap-hard    Igual que --reap pero también mata procesos esbuild sueltos
       --top          Lista procesos node de >300MB con su comando (diagnóstico)
+      --watch        No compila: informa del estado del `ng serve` NATIVO
+                     (:4200 + veredicto del último ciclo). Es el sustituto de
+                     `docker logs vendix_frontend`, que dejó de existir cuando
+                     el frontend salió de Docker. Léelo desde un agente.
       --force        Ignora el preflight de memoria libre
       --timeout N    Segundos antes de matar un paso (default 900)
   -h, --help         Esta ayuda
@@ -84,6 +106,7 @@ while [ $# -gt 0 ]; do
     --reap)        MODE_REAP=1 ;;
     --reap-hard)   MODE_REAP=1; REAP_HARD=1 ;;
     --top)         MODE_TOP=1 ;;
+    --watch)       MODE_WATCH=1 ;;
     --force)       FORCE=1 ;;
     --timeout)     shift; TIMEOUT="${1:-900}" ;;
     -h|--help)     usage; exit 0 ;;
@@ -99,6 +122,87 @@ done
 if [ "$EXPLICIT_TARGET" -eq 0 ]; then
   TARGET_BE=1
   TARGET_FE=1
+fi
+
+# ---------------------------------------------------------------------------
+# --watch — estado del `ng serve` NATIVO, para agentes
+# ---------------------------------------------------------------------------
+# Desde que el frontend salió de Docker (2026-08-30) ya no hay
+# `docker logs vendix_frontend`. Su salida vive en la terminal del dev, que
+# ningún agente puede leer. Esto la sustituye.
+#
+# La bitácora que escribe scripts/dev-fe.sh contiene SÓLO el ciclo en curso,
+# así que aquí no hay que recortar nada: leer el archivo entero ya es leer el
+# último ciclo. Eso cierra por construcción la trampa de dar por vigente un
+# error de un ciclo anterior.
+watch_status() {
+  local log="$ROOT/.dev/frontend-watch.log"
+  local pid puerto_ok=0
+
+  pid="$(lsof -nP -iTCP:4200 -sTCP:LISTEN -t 2>/dev/null | head -1)"
+  [ -n "$pid" ] && puerto_ok=1
+
+  if [ "$puerto_ok" -eq 1 ]; then
+    printf 'ng serve      ACTIVO (pid %s, :4200 escuchando)\n' "$pid"
+  else
+    printf 'ng serve      CAÍDO (nadie escucha en :4200)\n'
+    printf '              arráncalo con: npm run dev:fe\n'
+  fi
+
+  if [ ! -s "$log" ]; then
+    printf 'último ciclo  SIN DATOS (no hay bitácora en .dev/frontend-watch.log)\n'
+    [ "$puerto_ok" -eq 1 ] && printf '              el proceso corre pero no pasó por scripts/dev-fe.sh\n'
+    return 0
+  fi
+
+  # Antigüedad de la bitácora. Un log intacto con el proceso muerto es la
+  # trampa que hace leer como sano un dev server que se cayó hace media hora.
+  local edad ahora mtime
+  ahora=$(date +%s)
+  mtime=$(stat -f %m "$log" 2>/dev/null || stat -c %Y "$log" 2>/dev/null || echo "$ahora")
+  edad=$(( ahora - mtime ))
+
+  # El log lleva secuencias ANSI, y esbuild las mete ENTRE el corchete y la
+  # palabra: '\e[43;33m[\e[43;30mWARNING\e[43;33m]'. Por eso un patrón
+  # '\[ERROR\]' sobre el crudo casa cero veces y un ciclo roto se lee limpio.
+  # Todo lo que sigue grepea sobre la copia sin color.
+  local plano
+  plano="$(sed $'s/\033\\[[0-9;]*[a-zA-Z]//g' "$log")"
+
+  if [ "$puerto_ok" -eq 0 ]; then
+    printf 'último ciclo  RANCIO — la bitácora es de hace %ss y el proceso ya no está\n' "$edad"
+  elif printf '%s\n' "$plano" | grep -q 'bundle generation failed'; then
+    printf 'último ciclo  FALLÓ hace %ss\n' "$edad"
+  elif printf '%s\n' "$plano" | grep -qE 'bundle generation complete|Watch mode enabled'; then
+    # El arranque en frío no imprime 'bundle generation complete': termina con
+    # 'Watch mode enabled. Watching for file changes...'. Sin este marcador el
+    # primer ciclo se lee EN CURSO para siempre y nadie da el frontend por sano.
+    printf 'último ciclo  OK hace %ss\n' "$edad"
+  else
+    printf 'último ciclo  EN CURSO (%ss desde la última línea)\n' "$edad"
+  fi
+
+  # Sólo errores. 'NG[0-9]{4}' a secas casaba también los NG8113/NG8102 de
+  # aviso, así que un ciclo limpio se reportaba con 20 'errores' inexistentes.
+  local errores avisos
+  errores="$(printf '%s\n' "$plano" | grep -nE '\[ERROR\]|error TS[0-9]+|Could not resolve|Failed to resolve import|Internal server error' | head -20)"
+  avisos="$(printf '%s\n' "$plano" | grep -cE '\[WARNING\]' | tr -d ' ')"
+  if [ -n "$errores" ]; then
+    printf 'errores\n'
+    printf '%s\n' "$errores" | sed 's/^/              /'
+  else
+    printf 'errores       ninguno en el último ciclo\n'
+  fi
+  if [ "${avisos:-0}" -gt 0 ]; then
+    printf 'avisos        %s [WARNING] en el ciclo (no bloquean)\n' "$avisos"
+  fi
+
+  printf '\nbitácora      %s (%s bytes, sólo el ciclo actual)\n' "$log" "$(wc -c < "$log" | tr -d ' ')"
+}
+
+if [ "$MODE_WATCH" -eq 1 ]; then
+  watch_status
+  exit 0
 fi
 
 # ---------------------------------------------------------------------------
@@ -236,10 +340,11 @@ preflight() {
 ✖ ABORTADO antes de empezar: memoria libre insuficiente para "$label".
   Disponible: ${avail} MB — necesario: ${need} MB
 
-  La VM de Docker retiene su RAM aunque los contenedores estén ociosos, así que
-  con el stack dev arriba el host queda sin presupuesto. Opciones:
+  Dos consumidores se reparten la RAM: la VM de Docker la retiene aunque los
+  contenedores estén ociosos, y el `ng serve` NATIVO (fuera de Docker desde el
+  2026-08-30) es el proceso más pesado del host. Opciones:
 
-    docker compose stop frontend     # libera el contenedor más pesado (mem_limit 6g)
+    pkill -f 'ng serve'              # libera el proceso más pesado (~4-5 GB, nativo)
     docker compose stop              # libera todo el stack dev
     bash scripts/buildcheck.sh --top # ver qué se está comiendo la RAM
     ... --force                      # correr igual, asumiendo el swap
@@ -323,7 +428,7 @@ if [ "$TARGET_FE" -eq 1 ]; then
     if preflight "$NEED_DEEP" "frontend-bundle"; then
       # NG_BUILD_MAX_WORKERS=2: el bundler de Angular abre un pool por cores.
       run_step frontend-bundle \
-        bash -c "cd '$ROOT/apps/frontend' && NG_BUILD_MAX_WORKERS=2 exec node '--max-old-space-size=$FE_MEM' '$ROOT/node_modules/.bin/ng' build --configuration buildcheck"
+        bash -c "cd '$ROOT/apps/frontend' && NG_BUILD_MAX_WORKERS=2 exec node '--max-old-space-size=$FE_MEM' '$(resolve_bin ng)' build --configuration buildcheck"
       rm -rf "$ROOT/apps/frontend/dist/buildcheck"
     else
       FAILED="$FAILED frontend-bundle(preflight)"
@@ -331,7 +436,7 @@ if [ "$TARGET_FE" -eq 1 ]; then
   else
     if preflight "$NEED_FE" "frontend-typecheck"; then
       run_step frontend-typecheck \
-        bash -c "cd '$ROOT/apps/frontend' && exec node '--max-old-space-size=$FE_MEM' '$ROOT/node_modules/.bin/ngc' -p tsconfig.buildcheck.json --pretty false"
+        bash -c "cd '$ROOT/apps/frontend' && exec node '--max-old-space-size=$FE_MEM' '$(resolve_bin ngc)' -p tsconfig.buildcheck.json --pretty false"
     else
       FAILED="$FAILED frontend-typecheck(preflight)"
     fi

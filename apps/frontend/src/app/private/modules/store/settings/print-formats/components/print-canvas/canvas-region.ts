@@ -40,20 +40,20 @@ export function definitionToRegions(
       label: 'Logo de la Tienda',
       x_mm: 0,
       y_mm: 0,
-      width_mm: definition.logo.sizeMm ?? 15,
-      height_mm: definition.logo.sizeMm ?? 15,
+      width_mm: definition.logo.size_mm ?? 15,
+      height_mm: definition.logo.size_mm ?? 15,
       zIndex: 3,
     });
   }
 
-  if (definition.companyBlock?.fields) {
-    for (const f of definition.companyBlock.fields) {
+  if (definition.company_block?.fields) {
+    for (const f of definition.company_block.fields) {
       if (!f.enabled) continue;
       regions.push({
         id: `comp-${f.key}`,
         kind: 'company-field',
         anchorId: f.key,
-        label: f.customLabel || f.key,
+        label: f.custom_label || f.key,
         x_mm: 0,
         y_mm: cursorY,
         width_mm: 0,

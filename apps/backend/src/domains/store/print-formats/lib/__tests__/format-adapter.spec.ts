@@ -3,9 +3,11 @@
  * its 11 known adapter records.
  *
  * [print-editor-dsk P8] — Subió a 15: dispatch_route + 3 retenciones.
+ * Subió a 16 con `pos_electronic_invoice` (factura electrónica POS 80mm), el
+ * tercer adaptador fiscal del dominio junto a los dos de Facturación.
  *
  * The contract this file pins:
- *   1. Exactly 15 adapters exist (matches the print_format_type_enum
+ *   1. Exactly 16 adapters exist (matches the print_format_type_enum
  *      shape; adding a new enum value requires adding an adapter here).
  *   2. `defaultPaperFor(formatType)` returns the matching `defaultPaper`
  *      field on the same adapter record — so the registry and the bare
@@ -20,14 +22,14 @@ import { ALL_ADAPTERS } from '../adapters';
 import { defaultPaperFor } from '../default-paper';
 
 describe('FormatAdapter (P7 — adapter contract)', () => {
-  it('1. exposes exactly 15 adapter records (one per print_format_type_enum value)', () => {
-    expect(ALL_ADAPTERS).toHaveLength(15);
+  it('1. exposes exactly 16 adapter records (one per print_format_type_enum value)', () => {
+    expect(ALL_ADAPTERS).toHaveLength(16);
     // Sanity: every enum value should be accounted for, and only for
     // those enum values. The registry's Map size matches by construction.
     const adapterFormatTypes = new Set(
       ALL_ADAPTERS.map((a) => a.formatType),
     );
-    expect(adapterFormatTypes.size).toBe(15);
+    expect(adapterFormatTypes.size).toBe(16);
     for (const t of PRINT_FORMAT_TYPES) {
       expect(adapterFormatTypes.has(t)).toBe(true);
     }
@@ -75,7 +77,9 @@ describe('FormatAdapter (P7 — adapter contract)', () => {
 
   it('4. fiscal adapters include fiscal-block, qr-block and the three required fields', () => {
     const fiscal = ALL_ADAPTERS.filter((a) => a.fiscal);
-    expect(fiscal).toHaveLength(2);
+    // 3 desde `pos_electronic_invoice`: los dos de Facturación (factura y nota
+    // crédito en carta) más la factura electrónica POS en térmico de 80mm.
+    expect(fiscal).toHaveLength(3);
 
     for (const adapter of fiscal) {
       expect(adapter.availableRegions).toContain('fiscal-block');

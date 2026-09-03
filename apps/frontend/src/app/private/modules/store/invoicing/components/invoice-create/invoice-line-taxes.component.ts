@@ -17,6 +17,7 @@ import {
   TaxOption,
   TaxSelection,
 } from '../../../../../../shared/components/tax-selector';
+import { TaxInclusiveChipComponent } from './tax-inclusive-chip.component';
 
 /**
  * IMPUESTOS DE UNA LÍNEA — VARIOS, DEL CATÁLOGO REAL DE LA TIENDA.
@@ -54,7 +55,7 @@ import {
   selector: 'vendix-invoice-line-taxes',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [BadgeComponent, IconComponent],
+  imports: [BadgeComponent, IconComponent, TaxInclusiveChipComponent],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
@@ -81,37 +82,31 @@ import {
 
       <div class="flex flex-wrap items-center gap-1.5">
         @for (tax of value(); track tax.tax_rate_id) {
-          <span
-            class="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full border border-border bg-[var(--color-surface)] text-[11px]"
-            [title]="tax.name"
-          >
-            <span class="font-medium text-text-primary max-w-[7rem] truncate">
-              {{ tax.name }}
-            </span>
-            <span class="text-[var(--color-text-secondary)]">
-              {{ formatRate(tax.rate) }}%
-            </span>
-            <button
-              type="button"
-              class="px-1 rounded text-[10px] font-semibold uppercase tracking-wide"
-              [class.text-primary]="tax.is_inclusive"
-              [class.text-warning]="!tax.is_inclusive"
-              [disabled]="isDisabled()"
-              [title]="inclusiveHint(tax)"
-              (click)="toggleInclusive(tax.tax_rate_id)"
-            >
-              {{ tax.is_inclusive ? 'Incl.' : 'Adic.' }}
-            </button>
-            <button
-              type="button"
-              class="p-0.5 text-[var(--color-text-secondary)] hover:text-error"
-              [disabled]="isDisabled()"
-              aria-label="Quitar impuesto"
-              (click)="remove(tax.tax_rate_id)"
-            >
-              <app-icon name="x" [size]="12" />
-            </button>
-          </span>
+          <!--
+            CADA IMPUESTO ES UN CHIP DE UNA SOLA ALTURA.
+
+            Tres versiones de la misma decisión:
+              1. «Incl. / Adic.» en 10 px dentro de la píldora: nadie lo
+                 encontraba, se leía como parte del nombre.
+              2. Tarjeta de dos filas con un app-toggle etiquetado: se
+                 encontraba, pero con dos impuestos la fila de la línea crecía
+                 más que el resto de los campos.
+              3. Este chip: identidad, decisión (botón con aria-pressed y la
+                 palabra completa) y quitar, en 30 px. El chip no guarda
+                 estado; el valor sigue siendo el de este CVA.
+
+            Sin comillas invertidas en TODO este comentario: vive dentro del
+            template literal del componente y una sola lo cerraría en seco.
+          -->
+          <vendix-tax-inclusive-chip
+            [name]="tax.name"
+            [rate]="tax.rate"
+            [inclusive]="!!tax.is_inclusive"
+            [disabled]="isDisabled()"
+            [hint]="inclusiveHint(tax)"
+            (inclusiveChange)="setInclusive(tax.tax_rate_id, $event)"
+            (remove)="remove(tax.tax_rate_id)"
+          />
         }
 
         <!--
@@ -139,24 +134,45 @@ import {
             <app-icon name="alert-triangle" [size]="11" class="mr-1" />
             Sin impuesto
           </app-badge>
-        }
 
-        <button
-          type="button"
-          class="inline-flex items-center justify-center gap-1.5 px-3 min-h-[38px] rounded-lg border text-sm font-medium transition-colors disabled:opacity-50"
-          [class.flex-1]="value().length === 0"
-          [style.border-color]="'var(--color-primary)'"
-          [style.color]="'var(--color-primary)'"
-          [style.background]="
-            'color-mix(in srgb, var(--color-primary) 6%, transparent)'
-          "
-          [disabled]="isDisabled()"
-          [title]="triggerHint()"
-          (click)="togglePanel($event)"
-        >
-          <app-icon name="plus" [size]="14" />
-          Agregar impuesto
-        </button>
+          <button
+            type="button"
+            class="inline-flex flex-1 items-center justify-center gap-1.5 px-3 min-h-[38px] rounded-xl border text-sm font-medium transition-colors disabled:opacity-50"
+            [style.border-color]="'var(--color-primary)'"
+            [style.color]="'var(--color-primary)'"
+            [style.background]="
+              'color-mix(in srgb, var(--color-primary) 6%, transparent)'
+            "
+            [disabled]="isDisabled()"
+            [title]="triggerHint()"
+            (click)="togglePanel($event)"
+          >
+            <app-icon name="plus" [size]="14" />
+            Agregar impuesto
+          </button>
+        } @else {
+          <!--
+            Con impuestos ya elegidos, el disparador se encoge a un chip de la
+            misma altura que los demás: la acción principal de la fila ya
+            ocurrió y agregar un segundo impuesto es lo excepcional. El texto
+            pasa al aria-label y al tooltip, no desaparece.
+          -->
+          <button
+            type="button"
+            class="inline-flex h-[30px] w-[30px] items-center justify-center rounded-xl border transition-colors disabled:opacity-50"
+            [style.border-color]="'var(--color-primary)'"
+            [style.color]="'var(--color-primary)'"
+            [style.background]="
+              'color-mix(in srgb, var(--color-primary) 6%, transparent)'
+            "
+            [disabled]="isDisabled()"
+            [title]="triggerHint()"
+            aria-label="Agregar otro impuesto a esta línea"
+            (click)="togglePanel($event)"
+          >
+            <app-icon name="plus" [size]="14" />
+          </button>
+        }
       </div>
 
       @if (value().length === 0) {
@@ -343,10 +359,25 @@ export class InvoiceLineTaxesComponent implements ControlValueAccessor {
 
   toggleInclusive(taxRateId: number): void {
     if (this.isDisabled()) return;
+    this.setInclusive(
+      taxRateId,
+      !this.value().find((tax) => tax.tax_rate_id === taxRateId)?.is_inclusive,
+    );
+  }
+
+  /**
+   * Fija el estado del conmutador con el valor QUE ÉL REPORTA, no invirtiendo
+   * el actual: `app-toggle` ya pinta su propio estado al pulsarse, y un padre
+   * que además invierte puede quedar medio paso desfasado del control que el
+   * operador está mirando. El valor guardado sigue siendo el mismo booleano
+   * `is_inclusive` de siempre — el contrato del CVA no cambia.
+   */
+  setInclusive(taxRateId: number, isInclusive: boolean): void {
+    if (this.isDisabled()) return;
     this.commit(
       this.value().map((tax) =>
         tax.tax_rate_id === taxRateId
-          ? { ...tax, is_inclusive: !tax.is_inclusive }
+          ? { ...tax, is_inclusive: isInclusive }
           : tax,
       ),
     );

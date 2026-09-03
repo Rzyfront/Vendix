@@ -8,7 +8,9 @@ import {
   KdsConsumptionSummary,
   KdsSession,
   KdsStation,
+  KdsUnattributedConsumption,
 } from '../interfaces';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
 interface ApiResponse<T> {
   success?: boolean;
@@ -26,6 +28,7 @@ interface ApiResponse<T> {
 @Injectable({ providedIn: 'root' })
 export class KdsStationsService {
   private readonly http = inject(HttpClient);
+  private readonly authFacade = inject(AuthFacade);
   private readonly apiUrl = environment.apiUrl;
 
   readonly stations = signal<KdsStation[]>([]);
@@ -46,7 +49,7 @@ export class KdsStationsService {
 
   /**
    * Una sola estación activa => se entra directo al tablero, sin pantalla de
-   * selección. Es el caso de la mayoría de los restaurantes y no debe costar un
+   * selección. Es el caso de la mayoría de los restaurantes y no debe añadir un
    * clic extra.
    */
   readonly needsStationChoice = computed(() => this.activeStations().length > 1);
@@ -55,6 +58,61 @@ export class KdsStationsService {
     const id = this.selectedStationId();
     return id == null ? null : (this.stations().find((s) => s.id === id) ?? null);
   });
+
+  // ── QUI-XXX: helpers de "estación reclamada" ──────────────────────────────
+  /** ID del usuario autenticado. Null cuando la sesión de Auth aún no hidrató. */
+  readonly currentUserId = computed<number | null>(() => this.authFacade.userId() ?? null);
+
+  /** True si el turno abierto lo abrió el caller. Null cuando no hay turno. */
+  readonly sessionOpenedByMe = computed<boolean | null>(() => {
+    const session = this.openSession();
+    const me = this.currentUserId();
+    if (session == null || me == null) return null;
+    return session.opened_by === me;
+  });
+
+  /** True si el turno abierto pertenece a otro operador (badge "Reclamada por"). */
+  readonly sessionHeldByOther = computed<boolean>(() => {
+    const owned = this.sessionOpenedByMe();
+    const session = this.openSession();
+    return session != null && owned === false;
+  });
+
+  /** Roles privilegiados en el cliente — espejo de los KDS_FORCE_TAKE_ROLES del
+   *  backend. Ver `kds-sessions.service.ts`. La regla está duplicada para
+   *  decidir visibilidad del botón "Tomar control" sin un round-trip. */
+  readonly callerIsPrivileged = computed<boolean>(() => {
+    const roles = this.authFacade.userRoles() ?? [];
+    return roles.includes('owner') || roles.includes('admin') || roles.includes('super_admin');
+  });
+
+  /** El botón "Tomar control" sólo aparece si hay sesión abierta ajena y el
+   *  caller tiene rol privilegiado. Owner/admin/super_admin ven el botón en
+   *  cualquier sesión que no sea la propia; los demás roles no lo ven jamás. */
+  readonly canForceTakeCurrentStation = computed<boolean>(
+    () => this.sessionHeldByOther() && this.callerIsPrivileged(),
+  );
+
+  // ─── station switching (QUI-739) ──────────────────────────────────────────
+  /**
+   * Devuelve la elección de estación a null y limpia la sesión en memoria.
+   *
+   * No cierra el turno de la estación anterior — el turno es un registro del
+   * servidor por estación (`GET /store/kds-sessions/open/:kdsId`) y de él
+   * cuelga el consumo firmado del fire con su costo. Si lo cerráramos al
+   * cambiar de vista destruiríamos datos reales de operación. El turno abierto
+   * queda intacto en el servidor y `refreshOpenSession(oldId)` lo resuelve de
+   * nuevo si el usuario vuelve a la estación original.
+   *
+   * El stream SSE es de tienda, no de estación (ver `KdsSseService`), así
+   * que la suscripción NO se desmonta al pasar por null: los tickets del SSE
+   * siguen llegando y `visibleTickets` los filtra por la estación actual
+   * cuando el usuario elige una nueva.
+   */
+  clearStation(): void {
+    this.selectedStationId.set(null);
+    this.openSession.set(null);
+  }
 
   /** ¿Se puede gestionar un ticket? Solo con turno abierto en esta estación. */
   readonly canManageTickets = computed(() => this.openSession() != null);
@@ -191,9 +249,52 @@ export class KdsStationsService {
       );
   }
 
+  /**
+   * Heartbeat — refresca `last_seen_at` del turno abierto. El board lo invoca
+   * en un `setInterval` de 60 segundos mientras `openSession() != null`. El
+   * backend refresca el campo y rechaza con `KDS_STATION_LOCKED` si el caller
+   * no es el dueño del turno ni un rol privilegiado; en ese caso la UI
+   * detecta el lock y deja de mandar heartbeats hasta que se libere la sesión
+   * (auto-cierre por inactividad o toma manual).
+   */
+  heartbeat(sessionId: number): Observable<void> {
+    return this.http
+      .post<ApiResponse<void>>(
+        `${this.apiUrl}/store/kds-sessions/${sessionId}/heartbeat`,
+        {},
+      )
+      .pipe(
+        map(() => undefined),
+        catchError((err) => this.fail(err, 'No se pudo registrar el heartbeat')),
+      );
+  }
+
+  /**
+   * Toma forzada — cierra el turno abierto por otro operador y abre uno nuevo
+   * para el caller. Disponible sólo para owner / admin / super_admin
+   * (`canForceTakeCurrentStation`). Refresca `openSession` con la sesión nueva.
+   *
+   * Cierra y abre en la misma transacción del backend para no violar el
+   * índice parcial `kds_sessions_one_open_per_kds` ni por un instante. El
+   * rastro de auditoría (`force_taken_by_user_id`) queda en la sesión CERRADA;
+   * la nueva es legítima del tomador y no lleva marca.
+   */
+  forceTake(kdsId: number): Observable<KdsSession> {
+    return this.http
+      .post<ApiResponse<KdsSession>>(
+        `${this.apiUrl}/store/kds-sessions/force-take/${kdsId}`,
+        {},
+      )
+      .pipe(
+        map((res) => res.data),
+        tap((session) => this.openSession.set(session)),
+        catchError((err) => this.fail(err, 'No se pudo tomar el control de la estación')),
+      );
+  }
+
   // -------------------------------------------------- consumo del turno
 
-  /** Detalle: una fila por insumo POR PEDIDO, con cantidad y costo. */
+  /** Detalle: una fila por insumo POR PEDIDO, con la cantidad consumida. */
   getConsumptionHistory(
     sessionId: number,
   ): Observable<KdsConsumptionHistoryRow[]> {
@@ -210,8 +311,8 @@ export class KdsStationsService {
   }
 
   /**
-   * Agregado: una fila por insumo con los totales del turno. En vivo mientras la
-   * sesión está abierta; tras cerrar, el valor congelado vive en
+   * Agregado: una fila por insumo con la cantidad consumida en el turno. En vivo
+   * mientras la sesión está abierta; tras cerrar, el valor congelado vive en
    * `KdsSession.summary` y ya no cambia.
    */
   getConsumptionSummary(sessionId: number): Observable<KdsConsumptionSummary> {
@@ -247,6 +348,35 @@ export class KdsStationsService {
       .pipe(
         map((res) => res.data),
         catchError((err) => this.fail(err, 'No se pudo cargar el reporte')),
+      );
+  }
+
+  /**
+   * Consumo SIN sesión atribuida (QUI-760): movimientos del fire cuya estación
+   * no tenía turno abierto al disparar. Antes del backfill siempre crecía
+   * silenciosamente; ahora se reduce conforme se abren sesiones, pero las
+   * ocurrencias previas a la primera apertura quedan aquí. El cocinero las ve
+   * en el modal de su turno para saber que la cocina corrió consumo no
+   * firmado. ADR-10 — sin dinero en el payload.
+   */
+  getUnattributedConsumption(params: {
+    from?: string;
+    to?: string;
+  } = {}): Observable<KdsUnattributedConsumption> {
+    let httpParams = new HttpParams();
+    if (params.from) httpParams = httpParams.set('from', params.from);
+    if (params.to) httpParams = httpParams.set('to', params.to);
+
+    return this.http
+      .get<ApiResponse<KdsUnattributedConsumption>>(
+        `${this.apiUrl}/store/kds-sessions/report/unattributed`,
+        { params: httpParams },
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError((err) =>
+          this.fail(err, 'No se pudo cargar el consumo sin sesión'),
+        ),
       );
   }
 

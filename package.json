@@ -4,11 +4,18 @@
     "apps/*",
     "libs/*"
   ],
+  "engines": {
+    "node": "^20.19 || ^22.12 || ^24"
+  },
   "scripts": {
     "// ----- WORKSPACES -----": "",
     "install:all": "npm install -ws",
     "// ----- DEVELOPMENT -----": "",
     "dev": "npm run start:dev -w apps/backend & npm run start -w apps/frontend",
+    "// dev:fe — ng serve NATIVO en macOS. El frontend ya no vive en Docker: nginx (contenedor) proxya vendix.com hacia host.docker.internal:4200. Sin cgroup el heap puede crecer, y sin VirtioFS el watch usa FSEvents en vez de --poll.": "",
+    "dev:fe": "bash scripts/dev-fe.sh",
+    "// dev:fe:lite — misma cosa con presupuesto recortado, para cuando corras algo pesado en paralelo (buildcheck, tests, otro agente).": "",
+    "dev:fe:lite": "bash scripts/dev-fe.sh --lite",
     "mobile:start": "npm run start -w apps/mobile",
     "mobile:ios": "npm run ios -w apps/mobile",
     "mobile:android": "npm run android -w apps/mobile",

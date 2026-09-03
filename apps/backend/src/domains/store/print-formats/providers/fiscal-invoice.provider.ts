@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { QrService } from '../../../../common/services/qr.service';
+import { S3Service } from '../../../../common/services/s3.service';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
 import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
@@ -10,16 +11,24 @@ import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import {
   FISCAL_DOCUMENT_PRINT_INCLUDE,
   mapFiscalDocumentToPrintData,
+  resolveRawLogoKey,
 } from './fiscal-document-print.mapper';
+import { signStoreLogoUrl } from '../lib/print-logo.util';
 import { amountToSpanishWords } from '@common/utils/amount-in-words.util';
 
 @Injectable()
 export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
   readonly formatType: print_format_type_enum = 'fiscal_electronic_invoice';
+  private readonly logger = new Logger(FiscalInvoiceDataProvider.name);
 
+  // `s3Service` opcional en la firma: `document-number-format.spec.ts`
+  // instancia este provider con 2 argumentos (`prisma`, `qrService`); Nest
+  // siempre inyecta el tercero en runtime (`print-formats.module.ts` importa
+  // `S3Module`).
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly qrService: QrService,
+    private readonly s3Service?: S3Service,
   ) {}
 
   async fetchDocumentData(
@@ -50,10 +59,13 @@ export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
       }
     }
 
+    const signedLogoUrl = await signStoreLogoUrl(this.s3Service, resolveRawLogoKey(invoice), this.logger);
+
     return mapFiscalDocumentToPrintData(invoice, {
       qrBase64,
       acceptedLabel: 'Aprobada por DIAN',
       pendingLabel: 'Pendiente',
+      signedLogoUrl,
     });
   }
 

@@ -4,6 +4,8 @@ import {
   Delete,
   ForbiddenException,
   Get,
+  HttpCode,
+  HttpStatus,
   MessageEvent,
   Param,
   ParseIntPipe,
@@ -24,6 +26,7 @@ import {
   AddItemsToTableSessionDto,
   AssignCustomerDto,
   ConfirmTablePaymentDto,
+  CancelOrderItemDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -60,6 +63,11 @@ const STAFF_EVENT_WHITELIST = (type: string): boolean => {
   // Mesa abierta (POS open / QR `open_tab` / `confirmStaff`) — el floor-map
   // refresca la mesa a `occupied` con sesión activa en vivo.
   if (type === 'session_opened') return true;
+  // Transiciones y cambios en mesas (limpieza, disponible, reservada, creada, eliminada)
+  if (type === 'table_status_changed') return true;
+  if (type === 'table_updated') return true;
+  if (type === 'table_created') return true;
+  if (type === 'table_deleted') return true;
   if (type.startsWith('kitchen.')) return true;
   // The synthetic channels emitted by THIS SSE (snapshot / heartbeat) are
   // allowed through here too — they're emitted as their own typed
@@ -281,12 +289,16 @@ export class TableSessionsController {
    * Remove one item from the draft order backing an open table session.
    * DELETE /api/store/table-sessions/:id/items/:orderItemId
    *
-   * Business rules (see `TableSessionsService.removeItem`):
-   *   - Non-fired item → deleted + totals recomputed (inventory untouched).
-   *   - Fired item with a `pending` KDS ticket → ticket cancelled (SSE
-   *     `ticket.cancelled`), fire stock reversed, item deleted + recomputed.
-   *   - Fired item beyond `pending` (in_preparation/ready/delivered/cancelled)
-   *     → 409 TABLE_SESSION_ITEM_NOT_REMOVABLE.
+   * @deprecated en favor de `POST .../items/:orderItemId/cancel`. El
+   * endpoint nuevo (D2) hace soft cancel (el ítem queda visible marcado
+   * como cancelado pero EXCLUIDO del total) y levanta la guarda
+   * `state === 'draft'` que antes bloqueaba cualquier cancelación tras
+   * disparar a cocina. Este DELETE se conserva temporalmente para
+   * compat del frontend legado y se eliminará cuando mesa y POS estén
+   * en el nuevo flujo. Hoy delega a `cancelOrderItem` con un motivo
+   * sintético `legacy:`.
+   *
+   * Ver {@link TableSessionsService.removeItem} y {@link cancelOrderItem}.
    */
   @Delete(':id/items/:orderItemId')
   @Permissions('store:table_sessions:update')
@@ -298,6 +310,54 @@ export class TableSessionsController {
     return this.responseService.updated(
       result,
       'Item eliminado de la cuenta',
+    );
+  }
+
+  /**
+   * Cancel one item from the order backing an open table session.
+   * POST /api/store/table-sessions/:id/items/:orderItemId/cancel
+   *
+   * carril D / lina — D2: este endpoint es DEFINITIVO en este controller
+   * (no migra a `orders.controller.ts`): la cancelación tiene aquí su
+   * contexto completo (sesión abierta, KDS disparado, stock comprometido,
+   * motivo obligatorio) y moverla dejaría un segundo callsite duplicado.
+   *
+   * Comportamiento (ver `TableSessionsService.cancelOrderItem`):
+   *  - Soft cancel: el ítem NO se borra; queda VISIBLE marcado como
+   *    cancelado pero EXCLUIDO del subtotal/tax/grand_total (filtro
+   *    `cancelled_at IS NULL` en el recálculo).
+   *  - Guarda levantada: bloquea solo si la orden está cobrada o en
+   *    estado terminal (completed/cancelled/refunded). Acepta
+   *    cancelación en `draft`, `created`, `pending_payment`,
+   *    `processing`. Esto ES el bug reportado por el dueño.
+   *  - Stock: `before_fire` revierte; `after_fire_waste` queda como
+   *    merma sin reversión. Si el ítem ya fue disparado a cocina
+   *    (flag `inventory_consumed_at_fire=true`), el motivo es
+   *    obligatorio y queda registrado en `order_items.cancellation_reason`.
+   *  - KDS: si el ticket asociado está en `pending` se cancela in-tx y
+   *    se emite `ticket.cancelled` post-commit. Si ya avanzó de
+   *    `pending`, NO se toca el ticket del cocinero.
+   *
+   * Idempotente: un segundo llamado sobre un ítem ya cancelado
+   * devuelve el snapshot sin reescribir campos.
+   */
+  @Post(':id/items/:orderItemId/cancel')
+  @Permissions('store:table_sessions:update')
+  @HttpCode(HttpStatus.OK)
+  async cancelOrderItem(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('orderItemId', ParseIntPipe) orderItemId: number,
+    @Body() dto: CancelOrderItemDto,
+  ) {
+    const result = await this.tableSessionsService.cancelOrderItem(
+      id,
+      orderItemId,
+      dto.reason,
+      dto.cancellation_type,
+    );
+    return this.responseService.updated(
+      result,
+      'Item cancelado de la cuenta',
     );
   }
 

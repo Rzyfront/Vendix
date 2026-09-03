@@ -72,7 +72,7 @@
   <!--
     QUI-651 — SELECCION DE ESTACION. Solo aparece cuando la tienda tiene mas de una
     estacion activa Y todavia no se eligio: con una sola se entra directo al
-    tablero, que es el caso de la mayoria de los restaurantes y no debe costar un
+    tablero, que es el caso de la mayoria de los restaurantes y no debe añadir un
     clic extra.
   -->
   @if (stationsService.needsStationChoice() && stationsService.selectedStationId() === null) {
@@ -128,9 +128,15 @@
     [session]="stationsService.openSession()"
     [station]="stationsService.selectedStation()"
     [canExitFullscreen]="isFullscreen()"
+    [canChangeStation]="canChangeStation()"
+    [changeBlockedReason]="changeBlockedReason()"
+    [heldByOther]="stationsService.sessionHeldByOther()"
+    [canForceTake]="stationsService.canForceTakeCurrentStation()"
     (closeClicked)="onHeaderAction('close-session')"
     (detailClicked)="openSessionSummary()"
     (exitFullscreenClicked)="exitFullscreen()"
+    (changeStationClicked)="onChangeStation()"
+    (forceTakeClicked)="onForceTake()"
   />
 
   @if (lastError()) {
@@ -248,6 +254,7 @@
   <app-modal
     [isOpen]="sessionSummaryOpen()"
     size="lg"
+    [dialog]="true"
     title="Mi turno"
     [showCloseButton]="true"
     (cancel)="closeSessionSummary()"
@@ -276,17 +283,16 @@
             <li>
               <span>{{ ing.name }}</span>
               <span>{{ ing.quantity }}</span>
-              <span>{{ ing.total_cost | currency }}</span>
             </li>
           }
         </ul>
         <p class="kds-sum-total">
-          Total del turno: <strong>{{ sum.total_cost | currency }}</strong>
-          · {{ sum.movement_count }} movimiento(s)
+          {{ sum.movement_count }} movimiento(s) · {{ sum.distinct_ingredients }} insumo(s)
         </p>
 
-        <!-- El detalle por pedido es lo que explica de dónde salió cada peso del
-             resumen; sin él el total es un número que hay que creer. -->
+        <!-- El detalle por pedido muestra si un mismo insumo salió en pedidos
+             distintos; sin él las cantidades son un agregado que hay que creer.
+             ADR-10: solo cantidades, nunca dinero. -->
         @if (sessionHistory().length > 0) {
           <h4 class="kds-sum-title">Detalle por pedido</h4>
           <ul class="kds-sum-list">
@@ -294,10 +300,40 @@
               <li>
                 <span>{{ r.order_number ?? '—' }} · {{ r.dish_name ?? '—' }}</span>
                 <span>{{ r.quantity }}</span>
-                <span>{{ +(r.total_cost ?? 0) | currency }}</span>
               </li>
             }
           </ul>
+        }
+
+        <!--
+          QUI-760 — consumo SIN sesión atribuida. Antes del backfill estos
+          movimientos crecían silenciosamente y nadie los veía. Ahora el
+          backfill los imputa al abrir sesión, pero los previos a la primera
+          apertura de la tienda siguen sin dueño. Se muestran separados del
+          resumen del turno: el turno del operador es una cosa, lo que nadie
+          firmó es otra. ADR-10: solo cantidades, nunca dinero.
+        -->
+        @if (loadingUnattributed()) {
+          <p class="kds-sum-empty">Buscando consumo sin sesión…</p>
+        } @else if (unattributed(); as u) {
+          @if (u.movement_count > 0) {
+            <h4 class="kds-sum-title">Sin sesión atribuida</h4>
+            <p class="kds-sum-empty">
+              {{ u.movement_count }} movimiento(s) de fires pasados sin turno
+              abierto. Quedaron sin firmar — el de tu turno ya está acá abajo.
+            </p>
+            <ul class="kds-sum-list">
+              @for (m of u.movements; track m.transaction_id) {
+                <li>
+                  <span>
+                    {{ m.ingredient?.name ?? '—' }} ·
+                    {{ m.consumed_at | date: 'short' }}
+                  </span>
+                  <span>{{ m.quantity }}</span>
+                </li>
+              }
+            </ul>
+          }
         }
       }
     }
@@ -310,6 +346,7 @@
   <app-modal
     [isOpen]="sessionGateOpen()"
     size="sm"
+    [dialog]="true"
     title="Abrir turno de estación"
     [showCloseButton]="true"
     (cancel)="cancelOpenSession()"

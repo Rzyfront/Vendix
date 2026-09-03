@@ -61,8 +61,8 @@ import { BankAccount, ChartAccount } from '../../interfaces/accounting.interface
         <!-- Account Number + Currency -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <app-input
-            label="Numero de Cuenta"
-            placeholder="Ej: 12345678901"
+            label="Número de Cuenta o Llave"
+            placeholder="Ej: 12345678901, correo, celular o llave"
             [(ngModel)]="form['account_number']"
             [required]="true"
           ></app-input>

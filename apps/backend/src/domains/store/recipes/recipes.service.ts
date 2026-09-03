@@ -132,6 +132,44 @@ export class RecipesService {
     });
   }
 
+  /**
+   * QUI-727 F.1 Round 4 (H2) — ADR-10: `store:recipes:read` (concedido a
+   * `cocina` en F.1 Round 2 para el picker de exclusiones y el árbol de la
+   * receta del detalle del ticket) no debe exponer dinero. `findAll` y
+   * `findOne` seleccionan `product.base_price` y `component_product.cost_price`
+   * — exactamente los campos que ADR-10 prohíbe que viajen a cocina. El KDS
+   * solo consume `findByProduct` (seguro, sin montos); si cocina llama a los
+   * otros dos, el dato monetario no viaja. Mismo patrón por-rol que
+   * `products.service.ts` (`isKitchenRole` / `stripCocinaMoney`).
+   */
+  private isKitchenRole(): boolean {
+    // QUI-730b — ver products.service.ts. ADR-10 strip de dinero depende
+    // de este predicado. Si la migración se aplica sin tocar este archivo,
+    // cocina ve el campo `product.base_price` y `component_product.cost_price`.
+    return RequestContextService.getRoles().includes('kitchen');
+  }
+
+  private stripCocinaRecipeMoney<T>(recipe: T): T {
+    if (!recipe || typeof recipe !== 'object' || !this.isKitchenRole()) {
+      return recipe;
+    }
+    const r = recipe as { product?: Record<string, unknown>; items?: Array<{ component_product?: Record<string, unknown> }> };
+    if (r.product && typeof r.product === 'object') {
+      const { base_price: _p, ...productRest } = r.product;
+      r.product = productRest;
+    }
+    if (Array.isArray(r.items)) {
+      r.items = r.items.map((item) => {
+        if (item?.component_product && typeof item.component_product === 'object') {
+          const { base_price: _iBase, cost_price: _iCost, ...componentRest } = item.component_product;
+          item.component_product = componentRest;
+        }
+        return item;
+      });
+    }
+    return recipe;
+  }
+
   async findAll(query: RecipeQueryDto) {
     const { page = 1, limit = 10, search, is_active, product_id } = query ?? {};
     const skip = (page - 1) * limit;
@@ -183,7 +221,7 @@ export class RecipesService {
     ]);
 
     return {
-      data,
+      data: this.isKitchenRole() ? data.map((d) => this.stripCocinaRecipeMoney(d)) : data,
       meta: {
         total,
         page,
@@ -232,7 +270,7 @@ export class RecipesService {
     if (!recipe) {
       throw new VendixHttpException(ErrorCodes.RECIPE_NOT_FOUND);
     }
-    return recipe;
+    return this.stripCocinaRecipeMoney(recipe);
   }
 
   async findByProduct(productId: number) {
@@ -558,9 +596,23 @@ export class RecipesService {
   async explodeBom(
     recipeId: number,
     multipliers: Record<number, number> = { [recipeId]: 1 },
+    /**
+     * Optional Prisma transaction client. When provided, the recursive recipe
+     * reads run inside the caller's $transaction instead of on a separate pool
+     * connection. Used by `prepareFireContext` when the caller has the payment
+     * transaction open (CP-POLLO-ARABE-727 A.7 — avoids the pool leak).
+     */
+    tx?: Prisma.TransactionClient,
   ): Promise<BomExplosionLine[]> {
     const MAX_DEPTH = 32;
-    return this.explodeBomRecursive(recipeId, multipliers, [], 0, MAX_DEPTH);
+    return this.explodeBomRecursive(
+      recipeId,
+      multipliers,
+      [],
+      0,
+      MAX_DEPTH,
+      tx,
+    );
   }
 
   private async explodeBomRecursive(
@@ -569,12 +621,13 @@ export class RecipesService {
     pathRecipeIds: number[],
     depth: number,
     maxDepth: number,
+    tx?: Prisma.TransactionClient,
   ): Promise<BomExplosionLine[]> {
     if (depth >= maxDepth) {
       return [];
     }
 
-    const recipe = await this.prisma.recipes.findFirst({
+    const recipe = await (tx ?? this.prisma).recipes.findFirst({
       where: { id: recipeId, is_active: true },
       include: {
         items: {
@@ -625,7 +678,7 @@ export class RecipesService {
       const scaled = (perYield * rootMultiplier) / effectiveYield;
 
       // Does the component itself own an active recipe (sub-prep)?
-      const childRecipe = await this.prisma.recipes.findFirst({
+      const childRecipe = await (tx ?? this.prisma).recipes.findFirst({
         where: {
           product_id: item.component_product_id,
           is_active: true,
@@ -646,6 +699,7 @@ export class RecipesService {
           [...pathRecipeIds, recipeId],
           depth + 1,
           maxDepth,
+          tx,
         );
         lines.push(...childLines);
       } else {

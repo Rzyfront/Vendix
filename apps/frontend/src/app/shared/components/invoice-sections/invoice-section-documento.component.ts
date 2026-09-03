@@ -158,6 +158,7 @@ export interface DocumentoSectionErrors {
         @if (isInvoice()) {
           <vendix-invoice-resolution-banner
             [resolution]="activeResolution()"
+            [loading]="activeResolutionLoading()"
             [documentLabel]="documentLabel()"
           />
         }
@@ -280,7 +281,7 @@ export interface DocumentoSectionErrors {
                     [formControl]="asFormControl(note)"
                     [maxlength]="headerNoteLimit()"
                     size="sm"
-                    [error]="headerNoteErrors()[$index] ?? ''"
+                    [error]="headerNoteErrors()[$index]"
                   ></app-input>
                   @if (showCharCounter(asFormControl(note).value, headerNoteLimit())) {
                     <p
@@ -345,13 +346,26 @@ export class InvoiceSectionDocumentoComponent {
   readonly notices = input<readonly DocumentoSectionNotice[]>([]);
   /** Sólo contexto `invoice`: la resolución realmente activa hoy. */
   readonly activeResolution = input<InvoiceResolution | null>(null);
+  /**
+   * Si el catálogo de resoluciones TODAVÍA se está trayendo.
+   *
+   * Sin esto, mientras la lista viaja `activeResolution` es `null` y el banner
+   * pinta «No hay resolución activa» —el mismo rojo que significa «esto no se
+   * va a poder emitir»— para acabar corrigiéndose solo medio segundo después.
+   * El banner ya sabe pintar «Buscando la resolución activa…»; sólo le faltaba
+   * que alguien se lo dijera.
+   *
+   * `false` por defecto: la página que no lo pase se comporta exactamente como
+   * hasta ahora.
+   */
+  readonly activeResolutionLoading = input<boolean>(false);
   readonly documentLabel = input<string>('Factura de venta');
 
   readonly errors = input<DocumentoSectionErrors>({});
   readonly dueDateRequired = input<boolean>(false);
   readonly dueDateHelp = input<string>('');
   /** Un mensaje por índice de nota de cabecera. Sólo aplica en el perfil. */
-  readonly headerNoteErrors = input<readonly string[]>([]);
+  readonly headerNoteErrors = input<readonly (string | undefined)[]>([]);
   readonly headerNoteLimit = input<number>(CONFIG_LIMITS.header_note);
 
   readonly invoiceTypeChanged = output<void>();

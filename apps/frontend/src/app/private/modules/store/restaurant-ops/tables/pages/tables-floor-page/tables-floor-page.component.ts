@@ -68,7 +68,7 @@ export class TablesFloorPageComponent implements OnInit {
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
-  readonly tables = signal<Table[]>([]);
+  readonly tables = this.tablesService.floorTables;
   readonly isLoading = signal(false);
   readonly selectedTable = signal<Table | null>(null);
   readonly isOpenModalOpen = signal(false);
@@ -135,8 +135,7 @@ export class TablesFloorPageComponent implements OnInit {
       .getFloorMap()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (data) => {
-          this.tables.set(data);
+        next: () => {
           this.isLoading.set(false);
         },
         error: (err: unknown) => {
@@ -243,8 +242,16 @@ export class TablesFloorPageComponent implements OnInit {
         },
         error: (err: unknown) => {
           this.isOpeningSession.set(false);
-          this.toastService.error(
-            typeof err === 'string' ? err : 'Error al abrir la mesa',
+          this.isOpenModalOpen.set(false);
+          this.selectedTable.set(null);
+          this.loadFloor();
+          const msg = typeof err === 'string' ? err : 'Error al abrir la mesa';
+          this.toastService.warning(
+            msg.toLowerCase().includes('abierta') ||
+              msg.toLowerCase().includes('open') ||
+              msg.toLowerCase().includes('ocupad')
+              ? 'Esta mesa ya fue abierta por otro mesero.'
+              : msg,
           );
         },
       });

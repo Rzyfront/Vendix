@@ -142,6 +142,34 @@ export class OrdersService {
   }
 
   /**
+   * QUI-T9p6 — entregar un ítem desde el detalle de la orden.
+   *
+   * Endpoint: PATCH /api/store/orders/:orderId/flow/items/:orderItemId/deliver
+   * (sin cuerpo). El seam vive en `order-flow/order-flow.service.ts:1618-1710`
+   * (lina) y es idempotente por diseño: una re-entrega responde 200 sin
+   * mover `delivered_at`. La primera entrega es la que ocurrió.
+   *
+   * Devuelve la orden actualizada con `order_items[*].delivered_at`
+   * poblado para los ítems entregados. La página de detalle refresca su
+   * signal `order` con esta respuesta para que el badge "Entregado" se
+   * pinte sin otro roundtrip.
+   */
+  deliverOrderItem(orderId: number, itemId: number): Observable<Order> {
+    return this.http
+      .patch<Order>(
+        `${this.api_url}/store/orders/${orderId}/flow/items/${itemId}/deliver`,
+        {},
+      )
+      .pipe(
+        map((res) => unwrap<Order>(res)),
+        catchError((error) => {
+          console.error('Error delivering order item:', error);
+          throw error;
+        }),
+      );
+  }
+
+  /**
    * Get orders by customer. Backend envelope: `{success, data: Order[], pagination}`.
    */
   getOrdersByCustomer(

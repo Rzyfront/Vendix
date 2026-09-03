@@ -1,6 +1,6 @@
 .session-body {
-  padding: 1rem;
-  max-width: 1200px;
+  padding: 1.25rem 1rem 2rem;
+  max-width: 1360px;
   margin: 0 auto;
 }
 
@@ -13,132 +13,195 @@
   color: var(--color-text-secondary, #6b7280);
 }
 
-/* ── Estado de la orden: styled summary panel ───────────────────────── */
-.summary-panel {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg, 12px);
-  overflow: hidden;
-  background: var(--color-surface);
+/* ── Resumen: sticky column ──────────────────────────────────────────── */
+/*
+ * El scroll del admin ocurre en el `<main overflow-y-auto>` del layout, no
+ * en `window`, así que `position: sticky` se resuelve contra ese contenedor
+ * (mismo patrón que `orders-bulk-page` / `products-bulk-edit-page`). El
+ * `top: 5.5rem` deja hueco al `app-sticky-header`, que es el único elemento
+ * pegado por encima. Esto es lo que elimina el hueco vertical: la columna
+ * de cuenta ya no se queda corta frente a una comanda larga, se desplaza
+ * con el scroll en vez de terminar a mitad de página.
+ */
+@media (min-width: 1024px) {
+  .summary-column {
+    position: sticky;
+    top: 5.5rem;
+    align-self: start;
+  }
 }
 
-.summary-hero {
+/*
+ * R2/D1 — estructural: sin `grid-template-columns` explícito por debajo de
+ * `lg:`, la rejilla de Tailwind cae a una sola pista implícita `auto`, que
+ * toma el `min-content` del hijo más ancho. Cualquier contenido no-encogible
+ * dentro de `.summary-column` o `.items-column` (p.ej. una fila de comanda
+ * sin `minmax(0, 1fr)` en su grid interno) infla esa pista más allá del
+ * viewport y el `overflow-x-hidden` de la raíz recorta el contenido sin dar
+ * scroll. `min-width: 0` en AMBOS hijos deja que se encojan al ancho del
+ * contenedor en vez de imponer su min-content hacia arriba.
+ */
+.summary-column,
+.items-column {
+  min-width: 0;
+}
+
+/* ── Totals block (flat — no nested border/shadow, app-card already owns it) */
+.totals-block {
   display: flex;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.totals-row {
+  display: flex;
+  align-items: baseline;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 1rem;
-  /* Subtle brand-tinted gradient using theme tokens (no hardcoded hex). */
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--color-primary) 12%, var(--color-surface)),
-      var(--color-surface)
-    );
-  border-bottom: 1px solid var(--color-border);
+  font-size: 0.85rem;
 
-  .hero-total {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    min-width: 0;
+  /*
+   * `--color-text-secondary` sobre `--color-surface` se lee como texto
+   * deshabilitado: la etiqueta de una cifra de dinero no puede parecer
+   * inactiva. Mezclando contra el texto primario sube a contraste AA sin
+   * igualar el peso del importe, que sigue siendo el elemento dominante.
+   */
+  .totals-label {
+    color: color-mix(in srgb, var(--color-text-primary) 78%, transparent);
+    font-weight: 600;
   }
 
-  .hero-label {
-    font-size: 0.7rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--color-text-secondary);
+  .totals-value {
+    color: var(--color-text-primary);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
   }
 
-  .hero-amount {
-    font-size: 1.6rem;
-    line-height: 1.1;
-    font-weight: 800;
-    color: var(--color-primary);
-    word-break: break-word;
+  &--discount {
+    .totals-value {
+      color: var(--color-error, #dc2626);
+    }
   }
 
-  .hero-badge {
-    flex-shrink: 0;
-  }
-}
-
-.summary-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0;
-  margin: 0;
-
-  .cell {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    padding: 0.75rem 1rem;
+  &--grand {
+    margin-top: 0.25rem;
+    padding-top: 0.5rem;
     border-top: 1px solid var(--color-border);
 
-    /* second column gets a left divider on >1 col layouts */
-    &:nth-child(even) {
-      border-left: 1px solid var(--color-border);
+    /* Sin desglose encima, el filete queda flotando sobre nada. */
+    &:first-child {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: none;
     }
 
-    dt {
-      font-size: 0.68rem;
+    .totals-label {
+      font-size: 0.78rem;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      color: var(--color-text-secondary);
+      color: var(--color-text-primary);
     }
 
-    dd {
-      margin: 0;
-      font-size: 0.9rem;
-      font-weight: 600;
-      color: var(--color-text-primary);
+    .totals-value {
+      font-size: 1.4rem;
+      font-weight: 800;
+      color: var(--color-primary);
+      letter-spacing: -0.02em;
+    }
+  }
+}
+
+.per-guest {
+  margin-top: 0.125rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  /* Misma razón que `.totals-label`: es una cifra de dinero, no puede
+     leerse como texto deshabilitado. */
+  color: color-mix(in srgb, var(--color-text-primary) 65%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+
+.payment-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin-top: 0.625rem;
+}
+
+/* ── Mobile-only collapse toggle ─────────────────────────────────────── */
+.summary-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  width: 100%;
+  margin-top: 0.875rem;
+  padding: 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-surface);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.summary-collapsible {
+  display: block;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border);
+}
+
+@media (max-width: 640px) {
+  .summary-toggle {
+    display: flex;
+  }
+
+  .summary-collapsible {
+    display: none;
+    border-top: none;
+    padding-top: 0;
+    margin-top: 0.75rem;
+
+    &.is-expanded {
+      display: block;
+      border-top: 1px solid var(--color-border);
+      padding-top: 0.75rem;
+    }
+  }
+}
+
+/* ── Meta chips (Cliente / Comensales / Items / Abierta hace) ───────────── */
+.meta-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+
+  .meta-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.55rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-border) 35%, transparent);
+    color: var(--color-text-primary);
+    font-size: 0.76rem;
+    font-weight: 600;
+    max-width: 100%;
+
+    span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .muted {
       color: var(--color-text-secondary);
       font-weight: 500;
     }
-
-    .customer-name {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.375rem;
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-  }
-}
-
-.summary-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 1rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--color-border, #e5e7eb);
-}
-
-.status-group {
-  margin-top: 1.25rem;
-
-  .group-label {
-    display: block;
-    font-size: 0.75rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--color-text-secondary, #6b7280);
-    margin-bottom: 0.5rem;
-  }
-
-  .status-selector {
-    display: block;
-    margin-top: 0.625rem;
   }
 }
 
@@ -150,24 +213,123 @@
   gap: 0.75rem;
   width: 100%;
 
+  .header-title-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
   .items-card-title {
     font-size: 1.125rem;
-    font-weight: 600;
+    font-weight: 700;
     color: var(--color-text-primary);
     margin: 0;
   }
+
+  .items-count-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.375rem;
+    height: 1.375rem;
+    padding: 0 0.4rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface));
+    color: var(--color-primary);
+    font-size: 0.75rem;
+    font-weight: 700;
+  }
 }
 
-.unfired-hint {
+/* ── Filter Tabs ───────────────────────────────────────────────────────── */
+.filter-tabs {
   display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
-  margin-top: 1rem;
-  padding: 0.625rem 0.75rem;
-  background: rgba(234, 179, 8, 0.1);
-  border-radius: var(--radius-md, 8px);
-  font-size: 0.8rem;
-  color: var(--color-warning, #b45309);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+
+  .filter-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.7rem;
+    border-radius: 999px;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition:
+      background-color 0.15s ease,
+      border-color 0.15s ease,
+      color 0.15s ease;
+
+    &:hover {
+      background: var(--color-background);
+      color: var(--color-text-primary);
+    }
+
+    /*
+     * Peso reducido: antes rellenaba con `--color-primary` sólido, compitiendo
+     * visualmente con los botones primary de la fila. Un tinte + borde +
+     * texto en el mismo color de marca basta para leerse como "activo" sin
+     * pesar como un botón.
+     */
+    &.active {
+      background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface));
+      border-color: var(--color-primary);
+      color: var(--color-primary);
+
+      .tab-count {
+        background: color-mix(in srgb, var(--color-primary) 20%, transparent);
+        color: var(--color-primary);
+      }
+    }
+
+    .tab-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 1.125rem;
+      height: 1.125rem;
+      padding: 0 0.3rem;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--color-border) 60%, transparent);
+      font-size: 0.7rem;
+      font-weight: 700;
+    }
+
+    &.has-pending:not(.active) {
+      border-color: color-mix(in srgb, var(--color-warning) 50%, var(--color-border));
+      color: var(--color-warning);
+
+      .tab-count {
+        background: color-mix(in srgb, var(--color-warning) 15%, transparent);
+        color: var(--color-warning);
+      }
+    }
+  }
+}
+
+@media (max-width: 640px) {
+  .filter-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+
+    .filter-tab {
+      flex-shrink: 0;
+    }
+  }
 }
 
 /* ── E2 — Pagos por confirmar (mesero) ───────────────────────────────── */
@@ -184,17 +346,12 @@
   margin-bottom: 0.5rem;
 
   .label {
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.05em;
     color: var(--color-text-secondary, #6b7280);
   }
-}
-
-.pending-payments-empty {
-  margin: 0;
-  font-size: 0.82rem;
 }
 
 .pending-payments-list {
@@ -208,7 +365,6 @@
 
 .pending-payment-row {
   display: grid;
-  /* method+amount | meta | action — collapses on mobile via media query */
   grid-template-columns: 1fr auto auto;
   align-items: center;
   gap: 0.5rem 0.75rem;
@@ -235,15 +391,16 @@
       display: inline-flex;
       align-items: center;
       gap: 0.35rem;
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       font-weight: 600;
       color: var(--color-text-primary, #111827);
     }
 
     .amount {
-      font-size: 0.95rem;
+      font-size: 0.92rem;
       font-weight: 700;
       color: var(--color-primary, #2f6f4e);
+      font-variant-numeric: tabular-nums;
     }
   }
 
@@ -251,7 +408,7 @@
     display: flex;
     flex-direction: column;
     gap: 0.125rem;
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     color: var(--color-text-secondary, #6b7280);
     text-align: right;
 
@@ -265,7 +422,7 @@
 
     .ref {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      max-width: 9rem;
+      max-width: 8.5rem;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -300,7 +457,7 @@
   }
 }
 
-/* ── Batch fire bar (secondary, discreet) ──────────────────────────────── */
+/* ── Batch fire bar (secondary, discreet but readable) ─────────────────── */
 .batch-bar {
   display: flex;
   flex-wrap: wrap;
@@ -309,26 +466,28 @@
   gap: 0.5rem 0.75rem;
   margin-bottom: 0.75rem;
   padding: 0.5rem 0.75rem;
-  border: 1px dashed var(--color-border);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-md, 8px);
   background: var(--color-surface-secondary, var(--color-surface));
 
   &.is-active {
-    border-style: solid;
     border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
     background: color-mix(in srgb, var(--color-primary) 7%, var(--color-surface));
   }
 
   .batch-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
     font-size: 0.8rem;
     font-weight: 600;
-    color: var(--color-text-secondary);
+    color: var(--color-text-primary);
   }
 
   .batch-toggle {
     display: inline-flex;
     align-items: center;
-    gap: 0.375rem;
+    gap: 0.35rem;
     padding: 0.25rem 0.5rem;
     border: none;
     background: transparent;
@@ -337,7 +496,7 @@
     font-weight: 600;
     color: var(--color-primary);
     cursor: pointer;
-    transition: background 0.15s ease;
+    transition: background-color 0.15s ease;
 
     &:hover {
       background: color-mix(in srgb, var(--color-primary) 12%, transparent);
@@ -348,7 +507,7 @@
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
-    font-size: 0.85rem;
+    font-size: 0.82rem;
     font-weight: 600;
     color: var(--color-text-primary);
     cursor: pointer;
@@ -362,9 +521,9 @@
   }
 
   .batch-count {
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     font-weight: 600;
-    color: var(--color-text-secondary);
+    color: var(--color-text-primary);
   }
 }
 
@@ -378,39 +537,49 @@
   list-style: none;
 }
 
+/*
+ * `.item-row` is a flex shell (checkbox + the info grid); the checkbox is
+ * always rendered as an empty cell when not in selection mode so the grid
+ * columns below never shift width between rows.
+ */
 .item-row {
-  display: grid;
-  /*
-   * Up to 4 columns: checkbox/qty, name+price, kitchen status, action.
-   * The status and action columns only render for `prepared` dishes
-   * (see template guards), so a non-dish row collapses to the first
-   * two columns and the price sits at the end of `item-main`.
-   */
-  grid-template-columns: auto 1fr auto auto;
+  display: flex;
   align-items: center;
-  gap: 0.75rem 1rem;
-  padding: 0.75rem 0.875rem;
+  gap: 0.5rem;
+  padding: 0.625rem 0.875rem;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md, 8px);
   background: var(--color-surface);
   transition:
     border-color 0.15s ease,
-    background 0.15s ease,
+    background-color 0.15s ease,
     box-shadow 0.15s ease;
 
-  /*
-   * Status differentiation is carried by a soft background tint per
-   * state instead of a side bar. The kitchen-state badge in the row
-   * remains the primary signal; the tint is a secondary cue so a
-   * pending dish and a sent one are still distinguishable at a glance
-   * even when scrolling.
-   */
   &:not(.is-fired) {
     background: color-mix(in srgb, var(--color-warning) 3%, var(--color-surface));
   }
 
   &.is-fired {
     background: color-mix(in srgb, var(--color-success) 4%, var(--color-surface));
+  }
+
+  /*
+   * carril D / lina — D2: la fila se atenúa cuando el ítem fue
+   * cancelado (soft cancel). El backend ya excluye este ítem del
+   * subtotal/tax/grand_total; aquí solo es presentación.
+   */
+  &.is-cancelled {
+    background: color-mix(in srgb, var(--color-error) 4%, var(--color-surface));
+    opacity: 0.7;
+
+    .name {
+      text-decoration: line-through;
+      text-decoration-color: color-mix(
+        in srgb,
+        var(--color-error) 50%,
+        transparent
+      );
+    }
   }
 
   &.selectable {
@@ -428,141 +597,370 @@
     box-shadow: inset 0 0 0 1px var(--color-primary);
   }
 
-  /* Batch checkbox */
   .item-check {
+    flex: 0 0 auto;
     display: inline-flex;
     align-items: center;
-  }
-
-  /* Quantity chip */
-  .item-qty {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 2.25rem;
-    height: 1.75rem;
-    padding: 0 0.4rem;
-    border-radius: var(--radius-sm, 6px);
-    background: color-mix(in srgb, var(--color-primary) 14%, var(--color-surface));
-    color: var(--color-primary);
-    font-size: 0.8rem;
-    font-weight: 800;
-    line-height: 1;
-  }
-
-  /* Name + price */
-  .item-main {
-    display: flex;
-    flex-direction: column;
-    gap: 0.125rem;
     min-width: 0;
 
-    .name {
-      font-weight: 600;
-      color: var(--color-text-primary);
-      font-size: 0.95rem;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .price {
-      font-size: 0.8rem;
-      font-weight: 600;
-      color: var(--color-text-secondary);
+    &:empty {
+      width: 0;
     }
   }
 
-  /* Pending tag (no kitchen ticket yet) */
-  .pending-tag {
-    display: inline-flex;
+  /*
+   * R2/D4 — `money` y `action` eran pistas `auto`: su ancho lo decidía el
+   * contenido de CADA fila (el ancho del botón de turno), así que el importe
+   * no alineaba entre filas. `max-content` fija ambas pistas al mayor
+   * contenido de la COLUMNA (no de la fila), y `.item-money` con
+   * `min-width` propio asegura una X estable incluso si una fila no trae
+   * botón. `main` usa `minmax(0, 1fr)` — no basta con `1fr`: un track `1fr`
+   * solo, sin `minmax`, sigue tomando el `min-content` de su contenido
+   * (el nombre en `white-space: nowrap`) como mínimo implícito y sigue
+   * infriendo la pista (causa raíz de R2/D1 en desktop).
+   */
+  .item-fields {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto max-content max-content;
+    grid-template-areas: "qty main status money action";
     align-items: center;
-    gap: 0.25rem;
-    padding: 0.2rem 0.5rem;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--color-warning) 16%, var(--color-surface));
-    color: var(--color-warning);
-    font-size: 0.72rem;
-    font-weight: 700;
-    white-space: nowrap;
+    gap: 0.75rem 1rem;
   }
+}
 
-  .item-action {
+.item-qty {
+  grid-area: qty;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  height: 1.75rem;
+  padding: 0 0.35rem;
+  border-radius: var(--radius-sm, 6px);
+  background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface));
+  color: var(--color-primary);
+  font-size: 0.8rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.item-main {
+  grid-area: main;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  overflow: hidden;
+
+  .item-title-row {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
+    flex-wrap: wrap;
     gap: 0.375rem;
   }
 
-  /* Compact icon-only delete button — never stretches next to the
-     primary kitchen action. */
-  .item-remove-btn {
-    flex: 0 0 auto;
+  .name {
+    font-weight: 600;
+    color: var(--color-text-primary);
+    font-size: 0.9rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  /* Terminal "Entregado" label when no further action remains */
-  .item-done {
+  /*
+   * QUI-736 — sub-línea de variante. Mismo tratamiento visual que la
+   * comanda de cocina (`.kds-card__variant` en el KDS) para que salón
+   * y cocina lean la variante igual: peso 600, tamaño más chico que
+   * el nombre, color secundario. Se mantiene el nombre de clase del KDS
+   * a propósito: si un dev busca "kds-card__variant" lo encuentra acá
+   * también, y un cambio futuro en uno lo unificamos en el otro.
+   */
+  .kds-card__variant {
+    margin: 0.125rem 0 0 0;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--color-text-secondary, #4b5563);
+  }
+
+  .item-comanda-note {
     display: inline-flex;
     align-items: center;
     gap: 0.25rem;
+    margin: 0.15rem 0 0 0;
+    padding: 0.1rem 0.35rem;
+    border-radius: var(--radius-sm, 4px);
+    background-color: var(--color-warning-100, #fef3c7);
+    color: var(--color-warning-700, #b45309);
+    font-size: 0.75rem;
+    font-weight: 500;
+    width: fit-content;
+  }
+
+  .item-meta {
     font-size: 0.78rem;
     font-weight: 600;
+    color: var(--color-text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.item-status {
+  grid-area: status;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+
+  .status-extra {
+    white-space: nowrap;
+  }
+}
+
+.item-money {
+  grid-area: money;
+  min-width: 6.5rem;
+  text-align: right;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.item-action {
+  grid-area: action;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.375rem;
+}
+
+/*
+ * D4 — el importe no alineaba entre filas. Cada `<li>` es su PROPIA rejilla:
+ * `max-content` iguala las pistas dentro de una fila, nunca entre filas, así
+ * que el ancho de la columna de acciones (nada / papelera / botón + papelera)
+ * corría el importe de cada línea a una x distinta. Reservar aquí el ancho de
+ * la acción más ancha ("Marcar entregado" + papelera) fija esa columna y con
+ * ella el borde derecho del importe, sin necesidad de `subgrid`.
+ */
+@media (min-width: 641px) {
+  .item-action {
+    min-width: 13rem;
+  }
+}
+
+.item-remove-btn {
+  flex: 0 0 auto;
+}
+
+/* Pending tag (no kitchen ticket yet) */
+.pending-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-warning) 16%, var(--color-surface));
+  color: var(--color-warning);
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/*
+ * R2/D5 — Unified "Entregado" chip: same class, same markup, whether the
+ * dish went through the kitchen (`isPrepared` + `kitchenStatusFor === 'delivered'`)
+ * or not (`isDelivered`, non-kitchen item). The kitchen provenance is a
+ * `--hint` INSIDE this one chip, never a second component/style.
+ */
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+
+  &--done {
+    background: color-mix(in srgb, var(--color-success) 14%, var(--color-surface));
     color: var(--color-success);
-    white-space: nowrap;
-
-    /* Cancelled is also terminal but reads as an error, not a success. */
-    &.item-cancelled {
-      color: var(--color-error);
-    }
   }
 
-  /* QUI-653 — "Para llevar" en la fila. Va junto al nombre y no en la columna
-     de estado, porque no es un estado del item: es una propiedad de cómo se
-     entrega, y convive con el estado de cocina sin competir por el mismo hueco.
-     Se usa el shade del token en vez de primary/opacity porque `/opacity` no
-     compone sobre estas variables. */
-  .item-takeaway {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.2rem;
-    margin-left: 0.4rem;
-    padding: 0.1rem 0.4rem;
-    border-radius: 0.75rem;
-    background-color: var(--color-warning-100);
-    color: var(--color-warning-700);
-    font-size: 0.68rem;
-    font-weight: 600;
-    white-space: nowrap;
-    vertical-align: middle;
+  &__hint {
+    font-weight: 500;
+    opacity: 0.75;
   }
+}
+
+/* Takeaway pill */
+.item-takeaway {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background-color: color-mix(in srgb, var(--color-warning) 15%, var(--color-surface));
+  color: var(--color-warning, #b45309);
+  font-size: 0.68rem;
+  font-weight: 600;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+/* Cancelled pill — D2 soft cancel */
+.item-cancelled-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background-color: color-mix(in srgb, var(--color-error) 15%, var(--color-surface));
+  color: var(--color-error, #b91c1c);
+  font-size: 0.68rem;
+  font-weight: 600;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.item-cancelled-reason {
+  margin: 0.25rem 0 0;
+  font-size: 0.72rem;
+  color: var(--color-text-secondary, #6b7280);
+  font-style: italic;
 }
 
 @media (max-width: 640px) {
   .item-row {
-    grid-template-columns: auto 1fr auto;
-    row-gap: 0.5rem;
+    align-items: flex-start;
+    padding: 0.75rem;
+    min-height: 44px;
 
-    .item-status {
-      grid-column: 2 / 4;
-      justify-self: start;
+    /*
+     * R2/D2 — causa raíz REAL del desborde: esta regla vivía como
+     * `.item-fields` suelta (especificidad 0,1,0), pero la regla de
+     * escritorio la define ANIDADA en `.item-row` (compila a
+     * `.item-row .item-fields`, especificidad 0,2,0). Una media query NO
+     * suma especificidad — sin anidar aquí también, la regla de escritorio
+     * SIEMPRE ganaba, incluso a 390px: la rejilla móvil nunca se aplicaba
+     * y la fila seguía siendo la de 5 columnas de escritorio (de ahí el
+     * min-content de ~494px que arrastraba a toda la página bajo
+     * `overflow-x-hidden`).
+     *
+     * Además, `status` y `action` ya NO comparten columna con `money`:
+     * antes las tres pistas de escritorio quedaban en la 3ª columna
+     * (`auto`, que se dimensiona al MAYOR contenido de esa pista en toda
+     * la fila) — un botón "Marcar entregado" de 210px inflaba esa columna
+     * y con ella la fila entera. Cada una vive ahora en su propia fila de
+     * ancho completo: sin presupuesto de ancho compartido, no hay forma de
+     * que un botón lateral vuelva a inflar la rejilla.
+     */
+    /*
+     * `status` y `action` ocupan filas COMPLETAS a propósito, no una
+     * columna propia. Un ítem colocado en una sola pista intrínseca
+     * (`auto` / `max-content`) impone su ancho a esa pista: el botón
+     * "Marcar entregado" (~165px) dejaría al nombre del plato con ~90px
+     * en un viewport de 390px, que es exactamente por qué el nombre no se
+     * veía. Al abarcar también la pista flexible `minmax(0, 1fr)`, el
+     * algoritmo de rejilla resuelve su contribución contra ese `1fr` y no
+     * infla ni `qty` ni `money`: el nombre recupera todo el ancho libre.
+     */
+    .item-fields {
+      grid-template-columns: auto minmax(0, 1fr) max-content;
+      grid-template-areas:
+        "qty    main   money"
+        "status status status"
+        "action action action";
+      align-items: center;
+      column-gap: 0.625rem;
+      row-gap: 0.375rem;
+    }
+  }
+
+  .item-status {
+    justify-self: start;
+
+    /* Sin chip no debe reservar altura ni hueco propio. */
+    &:empty {
+      display: none;
+    }
+  }
+
+  /*
+   * Cuando la única acción de la línea es eliminar, el botón (40px) cabe de
+   * sobra en la pista del importe (~50px) y no necesita fila propia: en fila
+   * aparte dejaba una banda vacía a lo ancho de la tarjeta. Sólo se aplica
+   * en ese caso — con "Enviar a cocina" o "Marcar entregado" el botón sí
+   * mide más que el importe y volvería a estrangular el nombre del plato.
+   */
+  .item-fields:has(.item-action > .item-remove-btn:only-child) {
+    grid-template-areas:
+      "qty    main   money"
+      "status status action";
+  }
+
+  // ── T6 (unificado) — Fila simétrica 44pt (HIG iOS): botón
+  // principal flex:1 centrado + papelera 44×44 danger-outline.
+  // Un solo bloque evita la colisión de especificidad que antes
+  // duplicaba `.item-action`. Simetría = misma altura (44px), mismo
+  // gap (0.375rem) y borde/hover idéntico en desktop/mobile porque
+  // el color lo aporta variant="outline-danger" / "success".
+  .item-action {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    justify-content: flex-end;
+    gap: 0.375rem;
+    width: 100%;
+
+    &:empty {
+      display: none;
     }
 
-    .item-action {
-      grid-column: 1 / 4;
-      justify-content: flex-end;
-      gap: 0.5rem;
-
-      /* Primary kitchen action fills the row; the delete button stays
-         compact so the two never overflow on narrow screens. */
-      app-button:not(.item-remove-btn) {
-        flex: 1 1 auto;
-      }
-
-      .item-remove-btn {
-        flex: 0 0 auto;
-        width: auto;
-      }
+    > app-button:not(.item-remove-btn) {
+      flex: 1 1 auto;
+      min-height: 44px;
+      min-width: 0;
+      justify-content: center;
     }
+  }
+
+  // Destructive — cuadrado 44×44 pegado al principal.
+  // Usa variant="outline-danger" del sistema (btn-outline-danger-border) para
+  // que el color/borde/hover queden centralizados en ButtonComponent, idéntico
+  // en desktop y mobile. Aquí sólo se fija el tamaño táctil 44×44 (HIG iOS).
+  // El `button` interno hereda la altura para que el borde/hover del variant
+  // (outline-danger / success) ocupe todo el área táctil y quede simétrico
+  // con "Marcar entregado" (misma altura, mismo gap).
+  .item-remove-btn {
+    flex: 0 0 44px;
+    width: 44px;
+    min-height: 44px;
+    // El `<button>` interno se dimensiona via `customClasses="!h-11 !w-11
+    // !px-0"` en el HTML. La encapsulación Emulated de Angular NO deja
+    // llegar al inner button desde el SCSS del padre — el :where(button)
+    // anterior no aplicaba y los !important no salvaban nada.
+  }
+
+  // Texto del nombre y del importe legibles sin zoom a 375px. La densidad
+  // de comanda ya baja a 0.875rem en :1210/:1226, pero a 375px sigue
+  // pequeno para un mesero de pie. Nombre a 1rem, importe a 1rem, meta a
+  // 0.85rem — sin perder el contraste con el header de la comanda.
+  .item-main {
+    .name {
+      font-size: 1rem;
+    }
+
+    .item-meta {
+      font-size: 0.85rem;
+    }
+  }
+
+  .item-money {
+    font-size: 1rem;
   }
 }
 
@@ -579,8 +977,8 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 3.5rem;
-    height: 3.5rem;
+    width: 3.25rem;
+    height: 3.25rem;
     border-radius: 50%;
     background: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface));
     color: var(--color-primary);
@@ -595,9 +993,321 @@
   }
 
   .empty-sub {
-    margin: 0 0 0.5rem;
+    margin: 0 0 0.75rem;
     font-size: 0.85rem;
     color: var(--color-text-secondary);
     max-width: 22rem;
+  }
+}
+
+/* ── Header `···` overflow menu (desktop dropdown) ──────────────────────── */
+.header-more-menu {
+  display: inline-flex;
+}
+
+.header-more-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  justify-content: center;
+  color: var(--color-text-primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.header-more-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.55rem 0.9rem;
+  border: none;
+  background: transparent;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+  min-height: 44px;
+
+  &:hover:not(:disabled) {
+    background: var(--color-surface, rgba(0, 0, 0, 0.04));
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  &.is-danger {
+    color: var(--color-error, #dc2626);
+  }
+}
+
+/* ── Mobile action sheet (shares secondaryActions() with the dropdown) ──── */
+.actions-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.actions-sheet-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-surface);
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  &.is-danger {
+    color: var(--color-error, #dc2626);
+    border-color: color-mix(in srgb, var(--color-error) 30%, var(--color-border));
+  }
+}
+
+/* ── Sticky-cta móvil: [···] [Agregar items] [Cobrar] ─────────────────────
+ * Fixed (no sticky): queda pegado al viewport sin importar el alto del
+ * contenido ni el tipo de celular. `env(safe-area-inset-bottom)` cubre
+ * iPhone con barra de gestos; `padding-bottom` en `.session-body` evita
+ * que la última fila quede tapada por la barra.
+ */
+.session-cta {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .session-cta {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    margin-top: 0;
+    padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom));
+    background: var(--color-surface, #fff);
+    border-top: 1px solid var(--color-border, #e5e7eb);
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.06);
+
+    .session-cta__more {
+      flex: 0 0 auto;
+      min-width: 44px;
+      min-height: 44px;
+    }
+
+    .session-cta__secondary {
+      flex-shrink: 0;
+      min-height: 44px;
+    }
+
+    .session-cta__primary {
+      flex: 1 1 auto;
+      min-height: 44px;
+    }
+  }
+
+  .session-body {
+    padding-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * Pasada de diseño móvil (≤ 640px)
+ *
+ * Causa raíz de "todo está en el aire": las dos `app-card` de esta página
+ * usaban `[responsive]="true"`, y ese modo aplica el fondo, el borde, el
+ * radio y la sombra con utilidades prefijadas `md:` — por debajo de 768px
+ * la tarjeta NO pinta ningún contenedor. El arreglo real vive en el HTML
+ * (`[responsivePadding]` en lugar de `[responsive]`); lo de aquí abajo es
+ * lo que hace que ese contenedor se lea como una tarjeta de verdad:
+ * un solo gutter horizontal, un solo ritmo vertical y densidad de fila
+ * apta para una mano.
+ * ═══════════════════════════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+  /*
+   * Gutter de página estrecho: el gutter que importa ahora es el de la
+   * tarjeta (`p-4` = 1rem), y es el que alinea etiquetas, importes, filas,
+   * chips y la barra inferior sobre el mismo eje.
+   * Bottom incluye altura de la barra fija + safe-area para que la última
+   * fila nunca quede tapada, sin importar el alto del viewport.
+   */
+  .session-body {
+    padding: 0.75rem 0.75rem calc(4.5rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* ── Resumen ───────────────────────────────────────────────────────── */
+  .totals-row {
+    font-size: 0.9rem;
+
+    &--grand .totals-value {
+      font-size: 1.55rem;
+    }
+  }
+
+  .payment-badges {
+    margin-top: 0.75rem;
+  }
+
+  /*
+   * El toggle era un botón con borde compitiendo con las acciones reales.
+   * Como sólo revela detalle secundario, baja a enlace silencioso con un
+   * filete superior que lo separa del bloque de totales.
+   */
+  .summary-toggle {
+    margin-top: 0.75rem;
+    padding: 0.5rem 0;
+    border: none;
+    border-top: 1px solid var(--color-border);
+    border-radius: 0;
+    background: transparent;
+    font-size: 0.78rem;
+  }
+
+  .summary-collapsible {
+    .meta-chips {
+      gap: 0.375rem;
+    }
+
+    .meta-chip {
+      font-size: 0.74rem;
+    }
+  }
+
+  .pending-payments {
+    margin-top: 0.875rem;
+    padding-top: 0.75rem;
+  }
+
+  /* ── Cabecera de la comanda ────────────────────────────────────────── */
+  .items-card-header {
+    .items-card-title {
+      font-size: 1rem;
+    }
+
+    /*
+     * "Agregar items" ya vive en la barra fija inferior, al alcance del
+     * pulgar. Repetirlo arriba duplica el peso visual del encabezado y
+     * empuja el primer plato fuera de la pantalla.
+     */
+    .items-card-add {
+      display: none;
+    }
+  }
+
+  /* ── Riel de filtros ───────────────────────────────────────────────── */
+  /*
+   * Sangra hasta el borde de la tarjeta (la tarjeta recorta con
+   * `overflow-hidden`) para que se lea como un riel deslizable, pero el
+   * primer chip sigue alineado al gutter. El degradado de la derecha es la
+   * única señal de que hay más chips: sin él, el último aparece cortado en
+   * seco contra el borde y parece un defecto de maquetación.
+   */
+  .filter-tabs {
+    margin: 0 -1rem 0.75rem;
+    padding: 0 1rem 0.625rem;
+    -webkit-mask-image: linear-gradient(
+      to right,
+      #000 calc(100% - 1.75rem),
+      transparent
+    );
+    mask-image: linear-gradient(
+      to right,
+      #000 calc(100% - 1.75rem),
+      transparent
+    );
+
+    .filter-tab {
+      padding: 0.4rem 0.65rem;
+      font-size: 0.76rem;
+    }
+  }
+
+  /* ── Barra de envío por lotes ──────────────────────────────────────── */
+  .batch-bar {
+    padding: 0.5rem 0.625rem;
+    margin-bottom: 0.625rem;
+
+    .batch-actions {
+      width: 100%;
+
+      app-button {
+        flex: 1 1 auto;
+      }
+    }
+  }
+
+  /* ── Densidad de la comanda ────────────────────────────────────────── */
+  .item-list {
+    gap: 0.5rem;
+  }
+
+  .item-row {
+    padding: 0.625rem 0.75rem;
+  }
+
+  .item-qty {
+    align-self: center;
+    min-width: 1.85rem;
+    height: 1.6rem;
+    font-size: 0.76rem;
+  }
+
+  .item-main {
+    .name {
+      font-size: 0.875rem;
+    }
+
+    .item-meta {
+      font-size: 0.74rem;
+    }
+  }
+
+  /*
+   * `min-width: 6.5rem` era una reserva pensada para alinear la columna de
+   * dinero en escritorio; en 390px se come el ancho del nombre. En móvil el
+   * importe vive en su propia pista `max-content`, así que la reserva sobra.
+   */
+  .item-money {
+    min-width: 0;
+    font-size: 0.875rem;
+  }
+
+  /* ── Barra fija inferior ───────────────────────────────────────────── */
+  .session-cta {
+    /*
+     * La barra es hermana de `.session-body`, así que arranca en su borde
+     * exterior. Para que "Agregar items" caiga sobre el mismo eje que el
+     * nombre del primer plato hay que sumar el gutter de página (0.75rem),
+     * el borde de la tarjeta (1px) y su padding (1rem) — es el mismo eje
+     * único que comparten totales, filas y chips.
+     */
+    padding-left: calc(0.75rem + 1rem + 1px);
+    padding-right: calc(0.75rem + 1rem + 1px);
+    gap: 0.5rem;
+
+    /*
+     * El `···` en ghost no se leía como pulsable junto a dos botones
+     * sólidos: un borde tenue le da la misma afordancia sin sumar peso.
+     */
+    .session-cta__more {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md, 8px);
+    }
   }
 }

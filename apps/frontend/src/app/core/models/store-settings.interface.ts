@@ -541,6 +541,13 @@ export interface BarcodeScannerSettings {
 
 export interface PosSettings {
   allow_anonymous_sales: boolean;
+  /**
+   * Decisión del usuario 2026-08-31 — habilita la opción «Venta con nombre o
+   * referencia» en el wizard del POS (alias de venta rápida, customer_id
+   * queda en `null` y `orders.customer_alias` poblado por ADR-9). Default
+   * `false` (opt-in) porque no todas las tiendas lo necesitan.
+   */
+  allow_alias_sales?: boolean;
   anonymous_sales_as_default: boolean;
   business_hours: Record<string, BusinessHours>;
   schedule_mode?: 'continuous' | 'custom';
@@ -756,6 +763,18 @@ export interface ReceiptsSettings {
    * Default false (opt-in por admin).
    */
   print_dispatch_ticket_auto_with_pos?: boolean;
+  /**
+   * QUI-727 (A.2) — Si true y print_dispatch_ticket_enabled=true, la
+   * postventa encadena auto el tiquete de despacho al confirmar entrega/pago.
+   * Default false (opt-in por admin).
+   */
+  print_dispatch_ticket_auto_on_postventa?: boolean;
+  /**
+   * Decisión del usuario 2026-08-31: habilita el tiquete de despacho
+   * como tiquete de reclamo en ventas de mostrador (`direct_delivery`)
+   * y para llevar (`pickup`). Enmienda a ADR-6; default false.
+   */
+  print_dispatch_ticket_on_counter?: boolean;
 }
 
 export interface BusinessHoursBlock {

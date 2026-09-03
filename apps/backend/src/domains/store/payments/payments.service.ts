@@ -28,6 +28,7 @@ import {
   UpdateOrderWithPaymentDto,
 } from './dto';
 import { PaymentError, PaymentErrorCodes, LEGACY_TO_NEW } from './utils';
+import { assertVariantRequiredForPrepared } from '../orders/utils/variant-required.validator';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { buildTaxBreakdown } from 'src/common/interfaces/tax-breakdown.interface';
 import {
@@ -73,6 +74,7 @@ import type { WithholdingResolution } from '../withholding-tax/withholding-flow.
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
 import { TableSessionsService } from '../tables/table-sessions.service';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
+import { resolveTip } from '../../../common/utils/tip.util';
 import { SerialNumberEnforcementService } from '../inventory/serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../inventory/serial-numbers/inventory-serial-numbers.service';
 import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-threshold.service';
@@ -153,6 +155,9 @@ export class PaymentsService {
         currency: createPaymentDto.currency,
         storePaymentMethodId: createPaymentDto.storePaymentMethodId,
         storeId: createPaymentDto.storeId,
+        // QUI-728 — cuenta bancaria de destino (bank_transfer). El gateway la
+        // valida y la pasa resuelta al processor.
+        bankAccountId: createPaymentDto.bank_account_id,
         // Back-compat: legacy eCommerce DTO does not yet carry an idempotency
         // key. Initialize a fresh UUID per attempt so each call still maps
         // to a unique provider-side idempotency key. Cross-attempt retry
@@ -191,6 +196,8 @@ export class PaymentsService {
         currency: createOrderPaymentDto.currency,
         storePaymentMethodId: createOrderPaymentDto.storePaymentMethodId,
         storeId: createOrderPaymentDto.storeId,
+        // QUI-728 — cuenta bancaria de destino (bank_transfer).
+        bankAccountId: createOrderPaymentDto.bank_account_id,
         // Back-compat: see comment in processPayment above.
         idempotencyKey: crypto.randomUUID(),
         metadata: createOrderPaymentDto.metadata,
@@ -780,11 +787,19 @@ export class PaymentsService {
         checkoutSettings?.require_customer_data !== false;
 
       const posSettings = (settings as any)?.pos as
-        | { allow_anonymous_sales?: boolean }
+        | { allow_anonymous_sales?: boolean; allow_alias_sales?: boolean }
         | undefined;
       const allowAnonymousSales = posSettings?.allow_anonymous_sales === true;
+      // QUI-737 (B.4) — el alias es otra vía legítima de "sin cliente formal":
+      // requiere el flag POS y un alias no vacío.
+      const allowAliasSales = posSettings?.allow_alias_sales === true;
+      const hasAlias = !!createPosPaymentDto.customer_alias;
 
-      if (requireCustomerData && !allowAnonymousSales) {
+      if (
+        requireCustomerData &&
+        !allowAnonymousSales &&
+        !(allowAliasSales && hasAlias)
+      ) {
         const customerId = createPosPaymentDto.customer_id;
         const customerIdInvalid =
           customerId === undefined ||
@@ -1207,6 +1222,10 @@ export class PaymentsService {
                 product_id: { not: null },
                 inventory_consumed_at_fire: false,
                 products: { product_type: 'prepared' },
+                // [resid-fiscal] — No re-disparar ítems cancelados (D2). Si
+                // entra al fire, KDS recibe un plato fantasma que el cliente
+                // no pidió y el cocinero cobraría como desperdicio.
+                cancelled_at: null,
               },
               select: { id: true, product_id: true },
             });
@@ -1350,7 +1369,16 @@ export class PaymentsService {
           // type (IVA → 2408, INC → 2436, ICA → 241205) instead of collapsing to
           // 2408. Read from the persisted, typed order_item_taxes rows.
           const orderItemsWithTaxes = await tx.order_items.findMany({
-            where: { order_id: order.id },
+            where: {
+              order_id: order.id,
+              // carril D / lina — D2: un ítem cancelado (soft cancel vía
+              // `cancelled_at IS NOT NULL`) NO debe aportar al
+              // `tax_breakdown` del asiento contable. Si entra, el DR
+              // iva/reteiva queda inflado por un impuesto que el
+              // cliente nunca pagó. El grand_total ya excluye el item,
+              // así que esto sólo cierra la grieta del breakdown.
+              cancelled_at: null,
+            },
             select: {
               order_item_taxes: { select: { tax_type: true, tax_amount: true } },
             },
@@ -1678,6 +1706,11 @@ export class PaymentsService {
           // close-out (null when a digital payment deferred the close). Used
           // AFTER commit to emit `session_closed` to staff + comensal streams.
           closed_session_id: orderCreation.closedSessionId ?? null,
+          // carril D / lina — D1: id de la sesión de mesa PAGADA (≠ cerrada)
+          // por este cobro. Null cuando el pago no aplica a mesa o cuando
+          // la mesa ya estaba pagada (idempotencia). Consumido por el caller
+          // (`processPosPayment` post-commit) para emitir `session_paid` SSE.
+          paid_session_id: orderCreation.paidSessionId ?? null,
           applied_promotions: appliedPromotionsResponse,
           applied_coupons: appliedCouponsResponse,
           payment: payment
@@ -1755,6 +1788,60 @@ export class PaymentsService {
           ctxStoreId,
           result.closed_session_id,
         );
+      }
+
+      // carril D / lina — D1: emitir `order.paid` (carril keilis lo consume)
+      // y `session_paid` SSE (consumido por mesa y POS) DESPUÉS del commit.
+      // El EventEmitter2 transporta `order.paid` al `OrderSseService` que
+      // keilis mantiene; el `notificationsSseService.push` directo cubre
+      // el staff floor-map y el POS cobro, que filtran por `order_id`.
+      //
+      // Idempotencia: si un pago ya había marcado `paid_at`, `paidSessionId`
+      // sería null en este call (guard de `applyPosPaymentToTableSession`),
+      // por lo que `session_paid` se omite y `order.paid` se sigue emitiendo
+      // una sola vez por orden pagada.
+      //
+      // P0 fix (auditoría nancy): `payment` vive dentro del closure del
+      // `$transaction` y NO está disponible aquí. La fuente post-commit
+      // del id de pago es `result.payment`, que ya queda construido
+      // dentro del callback (línea 1717). Cast a `any` solo en este
+      // bloque defensivo — el contrato del `result` cambia entre
+      // ramas (mesa vs retail) y el typecheck de la unión se quejaba.
+      const orderPaidId = result.order?.id;
+      const paymentIdResolved =
+        (result.payment as { id?: number } | undefined)?.id ?? null;
+      const paidSessionIdResolved =
+        (result as { paid_session_id?: number | null }).paid_session_id ??
+        null;
+      if (orderPaidId) {
+        try {
+          this.eventEmitter.emit('order.paid', {
+            store_id: ctxStoreId,
+            order_id: orderPaidId,
+            payment_id: paymentIdResolved,
+            paid_session_id: paidSessionIdResolved,
+            grand_total: Number(result.order.grand_total || 0),
+            currency: result.order.currency,
+          });
+        } catch (err) {
+          this.logger.error(
+            `Failed to emit order.paid for order #${orderPaidId}: ${
+              (err as Error).message
+            }`,
+          );
+        }
+        if (paidSessionIdResolved) {
+          this.tableSessionsService.emitSessionPaid(
+            ctxStoreId,
+            paidSessionIdResolved,
+            orderPaidId,
+            // `emitSessionPaid` declara `paymentId?: number` (opcional =
+            // undefined). `paymentIdResolved` es `number | null` por la
+            // union mesa/retail; coalescemos null a undefined para no
+            // cambiar la firma y no romper a los otros callers.
+            paymentIdResolved ?? undefined,
+          );
+        }
       }
 
       // Process digital payments AFTER transaction commit (order is now visible)
@@ -2867,6 +2954,13 @@ export class PaymentsService {
     // awaiting webhook) or nothing was closed. The caller emits `session_closed`
     // post-commit only when this is non-null.
     closedSessionId: number | null;
+    // carril D / lina — D1: id de la sesión de mesa PAGADA por este pago,
+    // o null cuando no hay sesión (venta fresca sin mesa) o la mesa ya
+    // estaba pagada (idempotencia). El caller emite `session_paid` SSE
+    // post-commit solo cuando es no-null. El mark paid ocurre dentro del
+    // propio tx para que la marca sea atómica con el pago; un rollback
+    // del pago nunca deja un paid_at fantasma.
+    paidSessionId: number | null;
   }> {
     const tableSessionId = dto.table_session_id!;
 
@@ -2934,6 +3028,14 @@ export class PaymentsService {
         ? await resolveTierSnapshotsForItems(tx, dto.items, context)
         : [];
 
+    // ERR-07 / DB-14 — invariante "prepared + variantes exige variante".
+    // El POS payment flow NO la aplicaba antes (este fue el camino que
+    // slipped por `createOrder` para oi_id=1660). Mismo helper que
+    // `orders.service.ts create/updateOrderItems/updateOrderFromEditor`.
+    if (dto.items && dto.items.length > 0) {
+      await assertVariantRequiredForPrepared(tx, dto.items);
+    }
+
     // Build the new order_items from the POS payload (if any).
     const newItems =
       dto.items && dto.items.length > 0
@@ -2993,7 +3095,34 @@ export class PaymentsService {
     // NO se suma a subtotal_amount ni tax_amount (no es ingreso ni base
     // gravable). Se persiste aparte en orders.tip_amount y la contabilidad
     // la reconoce como pasivo custodio (propinas por pagar).
-    const tip = this.roundMoney(dto.tip_amount || 0);
+    //
+    // carril D / lina — D3: cálculo y metadatos de la propina.
+    //  - Si llega `tip_amount` directo, gana sobre cualquier porcentaje.
+    //  - Si NO llega `tip_amount` y llega `tip_type='percentage'`, se
+    //    calcula sobre `newSubtotal` (la base gravable): un % sobre
+    //    envío/envío + propina es absurdo, la convención contable
+    //    colombiana es "% sobre lo consumido". Si `tip_value` falta o
+    //    es <= 0, no se calcula nada (propina 0, no obligatoria).
+    //  - El % se guarda RESUELTO A MONTO (no como porcentaje crudo):
+    //    si mañana cambia el subtotal de esa orden, la propina ya
+    //    pactada no puede moverse sola. Persistimos `tip_value` con
+    //    el monto final y `tip_type='fixed'`, porque el operador ya
+    //    eligió la cifra que va a pagar el cliente.
+    //  - El `tip_type` que persiste es 'fixed' cuando se calculó desde
+    //    percentage; o el que vino cuando fue 'fixed' directo. La
+    //    auditoría ve la decisión original del operador en una
+    //    columna y el monto anclado en otra.
+    // Las reglas viven en `resolveTip` (common/utils/tip.util.ts). Se
+    // extrajeron de aquí cuando el pago desde el detalle de orden necesitó las
+    // mismas: dos implementaciones de la misma regla divergen, y una propina
+    // que se calcula distinto según por dónde cobró el operador es un
+    // descuadre que nadie ve hasta la conciliación.
+    const resolvedTip = resolveTip(dto, newSubtotal, (v) =>
+      this.roundMoney(v),
+    );
+    const tip = resolvedTip.amount;
+    const resolvedTipType = resolvedTip.type;
+    const resolvedTipValue = resolvedTip.value;
     // Re-evaluate promotions + coupons over the merged subtotal so the
     // final total stays consistent with the fresh path.
     const promotionQuote = await this.calculatePosPromotionQuote(dto);
@@ -3015,7 +3144,17 @@ export class PaymentsService {
     const updated = await tx.orders.update({
       where: { id: session.order_id },
       data: {
-        ...(dto.customer_id != null ? { customer_id: dto.customer_id } : {}),
+        // ADR-9 (CP-POLLO-ARABE-727): alias↔cliente mutuamente excluyentes
+        // (CHECK orders_customer_xor_alias). El alias también aplica a mesas
+        // (FB-21 cerrado): al fijar customer_id garantizamos customer_alias NULL,
+        // y si el cierre trae `customer_alias` lo PERSISTIMOS (limpiando
+        // customer_id). A.3 dejó este guard manejando solo customer_id; B.4 lo
+        // extiende a la rama alias.
+        ...(dto.customer_id != null
+          ? { customer_id: dto.customer_id, customer_alias: null }
+          : dto.customer_alias != null
+            ? { customer_id: null, customer_alias: dto.customer_alias }
+            : {}),
         ...(newItems.length > 0
           ? { order_items: { create: newItems } }
           : {}),
@@ -3025,13 +3164,39 @@ export class PaymentsService {
         grand_total: grandTotal,
         shipping_cost: shippingCost,
         // GAP-6 — propina persistida aparte (no entra a subtotal/tax).
+        // carril D / D3: tip_amount + metadatos (tip_type, tip_value,
+        // tip_waiter_id). Los metadatos quedan en NULL si no llegaron.
         tip_amount: tip,
+        tip_type: resolvedTipType,
+        tip_value: resolvedTipValue,
+        tip_waiter_id: dto.tip_waiter_id ?? null,
         updated_at: new Date(),
         // The table's own order already carries `channel=pos` from the
         // session creation; we keep that and just refresh totals.
       },
       include: { order_items: true, stores: true },
     });
+
+    // ----------------------------------------------------------------
+    // carril D / lina — D1: marca la sesión de mesa como PAGADA dentro
+    // del mismo `$transaction` del pago. La marca es atómica con el
+    // update del order: un rollback del pago NUNCA deja un `paid_at`
+    // fantasma. `markSessionPaid` es idempotente sobre `paid_at` (no
+    // reescribe el primer timestamp), así que un retry del POS no corre
+    // el riesgo de "pagar dos veces" contablemente.
+    //
+    // Se hace aquí, antes del auto-fire, para que la cocina ya sepa que
+    // la mesa está pagada cuando vea el ticket (el KDS usa
+    // `session_paid` SSE post-commit para refrescar el header).
+    let paidSessionId: number | null = null;
+    if (!session.closed_at) {
+      const marked = await this.tableSessionsService.markSessionPaid(
+        tableSessionId,
+        null, // payment.id aún no existe; el flag paid_at no lo requiere.
+        tx,
+      );
+      paidSessionId = marked.id;
+    }
 
     // ----------------------------------------------------------------
     // Plan KDS fire-flows (B6): auto-fire the pending `prepared` items
@@ -3158,6 +3323,7 @@ export class PaymentsService {
       couponInfo,
       kitchenFire,
       closedSessionId,
+      paidSessionId,
     };
   }
 
@@ -3414,13 +3580,41 @@ export class PaymentsService {
           promotionQuote.total_discount + couponInfo.discount_amount,
         );
         const shippingCost = this.roundMoney(dto.shipping_cost || 0);
+
+        // carril D / lina — D3: cálculo y metadatos de la propina
+        // (rama retail / POS caja). Misma regla que mesa: el % se
+        // calcula sobre el subtotal (no sobre total con impuestos) y
+        // se guarda RESUELTO A MONTO, no como porcentaje crudo. Si
+        // llega tip_amount directo, gana sobre cualquier porcentaje.
+        let tip = this.roundMoney(dto.tip_amount || 0);
+        let resolvedTipType: 'percentage' | 'fixed' | null = dto.tip_type ?? null;
+        let resolvedTipValue: number | null =
+          dto.tip_value != null ? this.roundMoney(dto.tip_value) : null;
+        if (
+          tip === 0 &&
+          resolvedTipType === 'percentage' &&
+          resolvedTipValue != null &&
+          resolvedTipValue > 0
+        ) {
+          tip = this.roundMoney((calculatedSubtotal * resolvedTipValue) / 100);
+          resolvedTipType = 'fixed';
+          resolvedTipValue = tip;
+        }
+        if (resolvedTipType == null && tip > 0) {
+          resolvedTipType = 'fixed';
+        }
+        if (resolvedTipType === 'fixed' && resolvedTipValue == null && tip > 0) {
+          resolvedTipValue = tip;
+        }
+
         const grandTotal = this.roundMoney(
           Math.max(
             0,
             calculatedSubtotal +
               calculatedTaxAmount -
               totalDiscount +
-              shippingCost,
+              shippingCost +
+              tip,
           ),
         );
 
@@ -3461,6 +3655,15 @@ export class PaymentsService {
             ? null
             : dto.payment_form || (dto.requires_payment ? '1' : '2'),
           shipping_cost: shippingCost,
+          // GAP-6 — propina persistida aparte (no entra a subtotal/tax).
+          // carril D / D3: tip_amount + metadatos (tip_type, tip_value,
+          // tip_waiter_id). Los metadatos quedan en NULL si no llegaron.
+          // En el flujo retail (POS caja) aplica la misma regla que en
+          // mesa: el % se resuelve a monto antes de persistir.
+          tip_amount: tip,
+          tip_type: resolvedTipType,
+          tip_value: resolvedTipValue,
+          tip_waiter_id: dto.tip_waiter_id ?? null,
           shipping_address_snapshot: dto.shipping_address_snapshot || undefined,
           order_items: {
             create: orderItems,
@@ -3475,6 +3678,15 @@ export class PaymentsService {
         // Only include customer_id if provided (for anonymous sales, this will be undefined/null)
         if (dto.customer_id !== undefined && dto.customer_id !== null) {
           orderData.customer_id = dto.customer_id;
+        }
+
+        // QUI-737 (B.4) — el alias es una tercera identidad ("sin cliente
+        // formal"). Mutuamente excluyente con customer_id (CHECK
+        // orders_customer_xor_alias): si vino un alias, el cliente formal no
+        // aplica y forzamos customer_id null.
+        if (dto.customer_alias) {
+          orderData.customer_alias = dto.customer_alias;
+          orderData.customer_id = null;
         }
 
         // Create the order
@@ -3528,6 +3740,14 @@ export class PaymentsService {
           // Fresh sales never close a table session — only the table close-out
           // branch (`applyPosPaymentToTableSession`) can. Keep the shape aligned.
           closedSessionId: null as number | null,
+          // carril D / lina — D1: rama retail nunca marca `paid_at` en una
+          // session de mesa (no hay session asociada). Devolvemos null
+          // explícito para ESTRECHAR la unión con la rama mesa (que sí
+          // devuelve `paidSessionId: number | null`) y que el typecheck
+          // vea el campo en ambas ramas. Sin esto, el caller cae en
+          // union-typed y `orderCreation.paidSessionId` queda fuera de
+          // tipo — bug detectado por typecheck consolidado.
+          paidSessionId: null as number | null,
         };
       } catch (error) {
         if (
@@ -3654,11 +3874,29 @@ export class PaymentsService {
       change = this.roundMoney(amountReceived - payableAmount);
     }
 
+    // QUI-728 — si el pago es por transferencia y el cajero eligió cuenta, la
+    // resolvemos y validamos AQUÍ (dentro de la misma transacción) antes de
+    // persistir `bank_account_id`. La comprobación (existe + activa + pertenece
+    // a la organización + scope de tienda) es la misma que hace el gateway
+    // (ADR-3 / ERR-04): validar solo a nivel de organización dejaría pagar
+    // desde la Tienda B contra una cuenta de la Tienda A.
+    let resolvedBankAccountId: number | null = null;
+    if (methodType === 'bank_transfer' && dto.bank_account_id) {
+      const account = await this.paymentGateway.resolveAndValidateBankAccount(
+        dto.bank_account_id,
+        dtoStoreId,
+        tx,
+      );
+      resolvedBankAccountId = account.id;
+    }
+
     // Create payment record
     const payment = await tx.payments.create({
       data: {
         order_id: order.id,
         store_payment_method_id: dto.store_payment_method_id,
+        // QUI-728 — cuenta bancaria de destino del pago por transferencia.
+        bank_account_id: resolvedBankAccountId,
         amount: payableAmount,
         currency: dto.currency,
         state: 'succeeded',

@@ -1,6 +1,7 @@
 <app-modal
   [isOpen]="isOpen()"
   [size]="'sm'"
+  [dialog]="true"
   [title]="'Asignar cliente'"
   [subtitle]="'Asocia o cambia el cliente de la cuenta de esta mesa.'"
   (isOpenChange)="onIsOpenChange($event)"
@@ -16,7 +17,7 @@
         </div>
         <app-button
           variant="ghost"
-          size="sm"
+          size="lg"
           [loading]="isProcessing()"
           (clicked)="detach()"
         >
@@ -37,7 +38,7 @@
           <app-icon name="user-check" [size]="16"></app-icon>
           <span>{{ p.first_name }} {{ p.last_name ?? '' }}</span>
         </div>
-        <app-button variant="ghost" size="sm" (clicked)="clearPicked()">
+        <app-button variant="ghost" size="lg" (clicked)="clearPicked()">
           Cambiar
         </app-button>
       </div>
@@ -55,6 +56,7 @@
     </app-button>
     <app-button
       variant="primary"
+      size="lg"
       [disabled]="!picked() || isProcessing()"
       [loading]="isProcessing()"
       [showTextWhileLoading]="true"

@@ -1710,7 +1710,14 @@ export class EcommerceTablesService {
         where: { id: order_id },
         select: {
           order_items: {
-            where: { inventory_consumed_at_fire: false },
+            where: {
+              inventory_consumed_at_fire: false,
+              // [resid-fiscal] — Mismo criterio que
+              // payments.service.ts:1217: un ítem cancelado no se re-dispara
+              // a cocina. Sin esto, el domiciliario/cocinero recibe un
+              // plato fantasma en la comanda.
+              cancelled_at: null,
+            },
             select: { id: true },
           },
         },

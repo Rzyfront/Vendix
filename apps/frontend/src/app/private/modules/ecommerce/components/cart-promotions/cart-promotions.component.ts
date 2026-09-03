@@ -20,7 +20,6 @@ import {
   IncentiveProgressData,
 } from '../../../../../shared/components/gamified-incentive-bar/gamified-incentive-bar.component';
 import {
-  CurrencyPipe,
   CurrencyFormatService,
 } from '../../../../../shared/pipes/currency';
 
@@ -53,7 +52,6 @@ import {
     CommonModule,
     PromotionStackComponent,
     GamifiedIncentiveBarComponent,
-    CurrencyPipe,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `

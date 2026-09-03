@@ -41,7 +41,7 @@ type GenerateNextNumberOptions =
  * `range_to` sea un número legible en pantalla y para que ampliar sea un evento
  * ocasional en el log, no uno por documento.
  */
-const INTERNAL_SERIES_BLOCK = 1000;
+export const INTERNAL_SERIES_BLOCK = 1000;
 
 /**
  * Vigencia que se le pone a una serie interna, en años.
@@ -51,7 +51,7 @@ const INTERNAL_SERIES_BLOCK = 1000;
  * de las notas se bloqueara solo el día del aniversario, que es exactamente el
  * bloqueo que este código existe para quitar.
  */
-const INTERNAL_SERIES_VALIDITY_YEARS = 100;
+export const INTERNAL_SERIES_VALIDITY_YEARS = 100;
 
 @Injectable()
 export class InvoiceNumberGenerator {

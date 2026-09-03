@@ -41,7 +41,7 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
     const ticket = await this.prisma.kitchen_tickets.findFirst({
       where: { id, store_id: storeId },
       include: {
-        kds: { select: { id: true, name: true, station_type: true } },
+        kds: { select: { id: true, name: true, code: true } },
         items: {
           orderBy: { id: 'asc' },
           include: {
@@ -60,16 +60,6 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
           select: {
             id: true,
             order_number: true,
-            // Una orden puede tener muchas sesiones; la primera (más antigua)
-            // suele ser la activa — `findFirst` por orden ascendente.
-            table_sessions: {
-              orderBy: { opened_at: 'asc' },
-              take: 1,
-              include: {
-                table: { select: { id: true, name: true, zone: true } },
-                opener: { select: { first_name: true, last_name: true } },
-              },
-            },
           },
         },
       },
@@ -82,13 +72,48 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
       );
     }
 
-    const session = ticket.order?.table_sessions?.[0];
+    // CP-POLLO-ARABE-727 A.7 — la sesión ABIERTA (closed_at IS NULL) se resuelve
+    // con un `findFirst` top-level en vez del include anidado. El `$extends` de
+    // `StorePrismaService` es por modelo/operación top-level y NO recorre
+    // `include`/`select`, así que el tramo anidado no recibía `store_id` y ningún
+    // índice lo servía. Este `findFirst` sí pasa por el scoping e inyecta
+    // `store_id`, haciendo innecesario el índice DB-16. `ticket.order?.id` es la
+    // única clave que tenemos: la relación vive al revés (table_sessions.order_id).
+    const session = ticket.order?.id
+      ? await this.prisma.table_sessions.findFirst({
+          where: { order_id: ticket.order.id, closed_at: null },
+          orderBy: { opened_at: 'desc' },
+          take: 1,
+          include: {
+            table: {
+              select: {
+                id: true,
+                name: true,
+                zone: true,
+                // C.3 — meseros asignados a la mesa (table_waiters).
+                // Al resolver el mesero tienen prioridad sobre el opener.
+                table_waiters: {
+                  select: {
+                    user: { select: { first_name: true, last_name: true } },
+                  },
+                },
+              },
+            },
+            opener: { select: { first_name: true, last_name: true } },
+          },
+        })
+      : undefined;
     const opener = session?.opener;
     const table = session?.table;
+    // C.3 — el mesero asignado (table_waiters) manda sobre el opener.
+    const assignedWaiter = table?.table_waiters?.[0]?.user;
 
-    const waiterName = opener
-      ? `${opener.first_name || ''} ${opener.last_name || ''}`.trim()
-      : '';
+    const waiterName =
+      assignedWaiter && (assignedWaiter.first_name || assignedWaiter.last_name)
+        ? `${assignedWaiter.first_name || ''} ${assignedWaiter.last_name || ''}`.trim()
+        : opener
+        ? `${opener.first_name || ''} ${opener.last_name || ''}`.trim()
+        : '';
     const tableName = table?.name
       ? `Mesa ${table.name}`
       : '';
@@ -126,6 +151,11 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
           index: idx + 1,
           product_name: it.product?.name || '',
           variant_sku: it.product?.sku || undefined,
+          // CP-POLLO-ARABE-727 ADR-7: la variante impresa viaja por
+          // `StandardPrintItem.variant_attributes`, NO por un campo nuevo.
+          // `it` es un `kitchen_ticket_item` (include sin select → trae todos
+          // los campos), cuyo `variant_label` es el snapshot inmutable al fire.
+          variant_attributes: it.variant_label || undefined,
           quantity: Number(it.quantity || 0),
           unit_price: 0,
           total_price: 0,
@@ -148,7 +178,7 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
       },
       custom_variables: {
         kds_name: ticket.kds?.name || '',
-        kds_station_type: ticket.kds?.station_type || '',
+        kds_station_type: ticket.kds?.code || '',
         daily_number: ticket.daily_number || 0,
         business_date: ticket.business_date
           ? new Date(ticket.business_date).toISOString()
@@ -187,6 +217,7 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
         {
           index: 1,
           product_name: 'Hamburguesa Artesanal Doble Carne',
+          variant_attributes: 'Término: 3/4',
           quantity: 2,
           unit_price: 34000,
           total_price: 68000,

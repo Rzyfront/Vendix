@@ -22,6 +22,7 @@ import { RegisterOwnerDto } from './dto/register-owner.dto';
 import { RegisterCustomerDto } from './dto/register-customer.dto';
 import { RegisterStaffDto } from './dto/register-staff.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { extractClientIpOptional } from '@common/utils/client-ip.util';
 import {
   ChangePasswordDto,
   ForgotPasswordDto,
@@ -53,11 +54,14 @@ export class AuthController {
     @Body() registerOwnerDto: RegisterOwnerDto,
     @Req() request: Request,
   ) {
-    const raw_ip = request.headers['x-forwarded-for'] || request.ip || '';
-    const ip_address = Array.isArray(raw_ip) ? raw_ip[0] : String(raw_ip || '');
     const user_agent = request.get('user-agent') || '';
     const client_info = {
-      ip_address: ip_address || undefined,
+      // `extractClientIp` y NO `x-forwarded-for` a mano: esa cabecera la
+      // escribe el cliente, así que leer su primer elemento dejaba envenenar
+      // el registro de auditoría con la IP que se quisiera. Express ya
+      // descarta los saltos de confianza y deja el valor bueno en `req.ip`
+      // (ver `resolveTrustProxySetting`).
+      ip_address: extractClientIpOptional(request),
       user_agent: user_agent || undefined,
     };
     try {
@@ -93,11 +97,14 @@ export class AuthController {
     @Body() registerCustomerDto: RegisterCustomerDto,
     @Req() request: Request,
   ) {
-    const raw_ip = request.headers['x-forwarded-for'] || request.ip || '';
-    const ip_address = Array.isArray(raw_ip) ? raw_ip[0] : String(raw_ip || '');
     const user_agent = request.get('user-agent') || '';
     const client_info = {
-      ip_address: ip_address || undefined,
+      // `extractClientIp` y NO `x-forwarded-for` a mano: esa cabecera la
+      // escribe el cliente, así que leer su primer elemento dejaba envenenar
+      // el registro de auditoría con la IP que se quisiera. Express ya
+      // descarta los saltos de confianza y deja el valor bueno en `req.ip`
+      // (ver `resolveTrustProxySetting`).
+      ip_address: extractClientIpOptional(request),
       user_agent: user_agent || undefined,
     };
 
@@ -142,11 +149,14 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(@Body() loginDto: LoginDto, @Req() request: Request) {
-    const raw_ip = request.headers['x-forwarded-for'] || request.ip || '';
-    const ip_address = Array.isArray(raw_ip) ? raw_ip[0] : String(raw_ip || '');
     const user_agent = request.get('user-agent') || '';
     const client_info = {
-      ip_address: ip_address || undefined,
+      // `extractClientIp` y NO `x-forwarded-for` a mano: esa cabecera la
+      // escribe el cliente, así que leer su primer elemento dejaba envenenar
+      // el registro de auditoría con la IP que se quisiera. Express ya
+      // descarta los saltos de confianza y deja el valor bueno en `req.ip`
+      // (ver `resolveTrustProxySetting`).
+      ip_address: extractClientIpOptional(request),
       user_agent: user_agent || undefined,
     };
 
@@ -169,11 +179,14 @@ export class AuthController {
     @Body() loginCustomerDto: LoginCustomerDto,
     @Req() request: Request,
   ) {
-    const raw_ip = request.headers['x-forwarded-for'] || request.ip || '';
-    const ip_address = Array.isArray(raw_ip) ? raw_ip[0] : String(raw_ip || '');
     const user_agent = request.get('user-agent') || '';
     const client_info = {
-      ip_address: ip_address || undefined,
+      // `extractClientIp` y NO `x-forwarded-for` a mano: esa cabecera la
+      // escribe el cliente, así que leer su primer elemento dejaba envenenar
+      // el registro de auditoría con la IP que se quisiera. Express ya
+      // descarta los saltos de confianza y deja el valor bueno en `req.ip`
+      // (ver `resolveTrustProxySetting`).
+      ip_address: extractClientIpOptional(request),
       user_agent: user_agent || undefined,
     };
 
@@ -199,11 +212,14 @@ export class AuthController {
     @Body() refreshTokenDto: RefreshTokenDto,
     @Req() request: Request,
   ) {
-    const raw_ip = request.headers['x-forwarded-for'] || request.ip || '';
-    const ip_address = Array.isArray(raw_ip) ? raw_ip[0] : String(raw_ip || '');
     const user_agent = request.get('user-agent') || '';
     const client_info = {
-      ip_address: ip_address || undefined,
+      // `extractClientIp` y NO `x-forwarded-for` a mano: esa cabecera la
+      // escribe el cliente, así que leer su primer elemento dejaba envenenar
+      // el registro de auditoría con la IP que se quisiera. Express ya
+      // descarta los saltos de confianza y deja el valor bueno en `req.ip`
+      // (ver `resolveTrustProxySetting`).
+      ip_address: extractClientIpOptional(request),
       user_agent: user_agent || undefined,
     };
 
@@ -648,11 +664,9 @@ export class AuthController {
     @Body() switchDto: SwitchEnvironmentDto,
   ) {
     const expressReq = req as any;
-    const raw_ip = expressReq.headers['x-forwarded-for'] || expressReq.ip || '';
-    const ip_address = Array.isArray(raw_ip) ? raw_ip[0] : String(raw_ip || '');
     const user_agent = expressReq.get('user-agent') || '';
     const client_info = {
-      ip_address: ip_address || undefined,
+      ip_address: extractClientIpOptional(expressReq),
       user_agent: user_agent || undefined,
     };
 

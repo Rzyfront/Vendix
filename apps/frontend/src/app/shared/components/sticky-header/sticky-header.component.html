@@ -95,6 +95,7 @@
           variant="ghost"
           [routerLink]="backRoute()"
           size="xsm"
+          aria-label="Volver"
           customClasses="!p-0 !w-7 !h-7 md:!w-8 md:!h-8 flex-shrink-0 !rounded-lg border border-transparent hover:border-gray-200"
         >
           <app-icon
@@ -192,6 +193,11 @@
             </app-button>
           }
         }
+        <!-- Slot aditivo: permite proyectar acciones compuestas (p. ej. un
+             menú de desbordamiento `app-dropdown`) junto a los botones planos
+             de `actions()`. Sin contenido proyectado no renderiza nada, así
+             que ningún consumidor existente cambia. -->
+        <ng-content select="[actions-extra]"></ng-content>
       </div>
     </div>
   </div>

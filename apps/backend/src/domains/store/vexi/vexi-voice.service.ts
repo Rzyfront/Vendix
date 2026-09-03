@@ -138,7 +138,7 @@ export class VexiVoiceService {
       this.logger.warn(`Transcription failed: ${response.error}`);
       throw new VendixHttpException(
         ErrorCodes.VEXI_VOICE_TRANSCRIBE_FAILED,
-        'No pude entender el audio. Probá de nuevo.',
+        'No pude entender el audio. Prueba de nuevo.',
       );
     }
 

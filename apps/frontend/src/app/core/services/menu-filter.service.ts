@@ -6,12 +6,36 @@ import { AuthFacade } from '../store/auth/auth.facade';
 import { SubscriptionAccessService } from './subscription-access.service';
 import { MenuItem } from '../../shared/components/sidebar/sidebar.component';
 import { getModulesHiddenByIndustries } from '../../shared/constants/industry-modules.constant';
-import { STORE_MODULE_BY_KEY } from '../../shared/constants/store-module-catalog.constant';
+import {
+  MODULE_ROUTES,
+  STORE_MODULE_BY_KEY,
+  STORE_MODULE_CATALOG,
+} from '../../shared/constants/store-module-catalog.constant';
 import type {
   OrganizationOperatingScope,
   OrganizationFiscalScope,
 } from '../models/organization.model';
 import type { FiscalArea } from '../models/fiscal-status.model';
+
+/**
+ * Terminal garantizado de la cadena de fallback "primer módulo activo".
+ * Ruta a la que se rebota cuando ningún módulo del panel está habilitado, de
+ * forma que el navegador nunca quede en bucle infinito ni en pantalla en
+ * blanco. El guardla trata como compuerta de escape (la permite siempre);
+ * el layout muestra una pantalla de "sin módulos" cuando el sidebar queda
+ * vacío. Es el terminal de A.4 / B.1 / `storeDashboardGuard`.
+ */
+export const PANEL_UI_TERMINAL_ROUTE = '/admin/settings/general';
+
+/**
+ * Pantalla a la que se envía a un usuario SIN módulos activos. Se diferencia
+ * del terminal (`PANEL_UI_TERMINAL_ROUTE`) porque el dueño siempre cae al
+ * terminal y un usuario sin permisos aterriza aquí con un CTA de "Cerrar
+ * sesión". El `panelUiGuard` lo trata como compuerta de escape (la permite
+ * siempre, igual que el terminal) para que `firstActiveModuleRoute`/`storeDashboardGuard`
+ * puedan redirigirlo sin bucle.
+ */
+export const PANEL_UI_NO_ACCESS_ROUTE = '/admin/no-access';
 
 /**
  * Why a module is not on screen. Ordered from structural (the store simply
@@ -63,6 +87,21 @@ export class MenuFilterService {
    * blame this layer while unknown rather than assert a reason it cannot back.
    */
   readonly storeHasPqrs = signal<boolean | null>(null);
+
+  /**
+   * Árbol de menú del store-admin. Por defecto se reconstruye del catálogo
+   * (`STORE_MODULE_CATALOG`) para que el guard y el redirect de B.1 funcionen
+   * ANTES de que el layout se monte (los guards corren antes de la creación de
+   * componentes). El layout lo sobreescribe con su árbol real (con
+   * `alwaysVisible`, badges, etc.) al montarse vía `registerMenuTree`.
+   */
+  private menuTree: MenuItem[] | null = null;
+
+  /** Caché del árbol reconstruido del catálogo. */
+  private catalogTreeCache: MenuItem[] | null = null;
+
+  /** Caché del índice ruta → keys panel_ui. */
+  private routeKeysIndexCache: Record<string, string[]> | null = null;
 
   /**
    * Emits whenever an authorization prefilter flips, so `filterMenuItems`
@@ -286,6 +325,9 @@ export class MenuFilterService {
    * @returns Observable of filtered menu items
    */
   filterMenuItems(menuItems: MenuItem[]): Observable<MenuItem[]> {
+    // Register the tree so `currentMenuTree()`/`firstActiveModuleRoute()`
+    // reflect the real sidebar (with alwaysVisible/badges) once mounted.
+    this.menuTree = menuItems;
     return combineLatest([
       this.authFacade.getVisibleModules$(),
       this.authFacade.userStoreType$,
@@ -765,7 +807,12 @@ export class MenuFilterService {
       }
 
       // ─── 7. Per-user panel_ui ──────────────────────────────────────
-      if (!moduleKeys.some((key) => this.authFacade.isModuleVisible(key))) {
+      // El owner ve TODO el panel sin importar `user_settings.config.panel_ui`.
+      // El gate real sigue siendo backend (`@Permissions`); aquí solo quitamos
+      // la restricción UX para que el owner nunca aterrice en "sin módulos"
+      // ni tenga que mantener su propio `panel_ui`. Coherente con
+      // `mergePanelUiSoft` que ya rellena defaults para roles privilegiados.
+      if (!this.authFacade.isOwner() && !moduleKeys.some((key) => this.authFacade.isModuleVisible(key))) {
         return {
           visible: false,
           blockedBy: 'user_panel_ui',
@@ -887,8 +934,158 @@ export class MenuFilterService {
     return null;
   }
 
+  /**
+   * Árbol de menú actual (layout real si ya se montó, o el reconstruido del
+   * catálogo). Usado por `panelUiGuard`, `storeDashboardGuard` y el redirect
+   * de B.1, que corren antes de que el layout se monte — por eso el default
+   * es el catálogo y no un array vacío.
+   */
+  currentMenuTree(): MenuItem[] {
+    return this.menuTree ?? this.catalogMenuTree();
+  }
+
+  /** El layout registra su árbol real (con `alwaysVisible`, badges, etc.). */
+  registerMenuTree(items: MenuItem[]): void {
+    this.menuTree = items;
+  }
+
+  /**
+   * Reconstruye un árbol `MenuItem[]` desde `STORE_MODULE_CATALOG` (orden
+   * top-down del catálogo), agrupando hijos por `parentKey`. Es el "orden del
+   * módulo catalog" que B.1/QUI-740 pide explícitamente, y evita depender del
+   * layout durante los guards.
+   */
+  private catalogMenuTree(): MenuItem[] {
+    if (this.catalogTreeCache) return this.catalogTreeCache;
+    const roots: MenuItem[] = [];
+    const byKey = new Map<string, MenuItem>();
+
+    for (const entry of STORE_MODULE_CATALOG) {
+      // `panelUiKey` deja al filtro de panel_ui trabajar sobre este nodo
+      // aunque venga del catálogo (cuyos labels no resuelven en
+      // `moduleKeyMap`, el índice por label del sidebar). Sin esto, el
+      // árbol crudo es infiltrable y un no-owner con cero módulos acaba en
+      // la primera ruta del catálogo en vez del no-access (C1-b real).
+      const node: MenuItem = {
+        label: entry.label,
+        icon: '',
+        route: entry.route,
+        panelUiKey: entry.key,
+      };
+      byKey.set(entry.key, node);
+      if (entry.parentKey && byKey.has(entry.parentKey)) {
+        const parent = byKey.get(entry.parentKey)!;
+        (parent.children ??= []).push(node);
+      } else {
+        roots.push(node);
+      }
+    }
+
+    this.catalogTreeCache = roots;
+    return roots;
+  }
+
+  /**
+   * Keys `panel_ui` que gobiernan una ruta. Índice inverso de `MODULE_ROUTES`
+   * (ruta → keys); la ruta más específica (prefijo más largo) gana. Para
+   * `/admin/orders/sales` devuelve `['orders', 'orders_sales']` (la específica
+   * es la que decide el acceso, pero si el padre está oculto la hoja es
+   * inalcanzable, así que ambas entran como gobernantes).
+   */
+  resolveKeysForRoute(path: string): string[] {
+    const clean = (path.split('?')[0] || '/').replace(/\/+$/, '') || '/';
+    const index = (this.routeKeysIndexCache ??= this.buildRouteKeysIndex());
+
+    let bestLength = -1;
+    let bestKeys: string[] = [];
+    for (const [route, keys] of Object.entries(index)) {
+      const normalized = route.replace(/\/+$/, '');
+      if (clean === normalized || clean.startsWith(`${normalized}/`)) {
+        if (normalized.length > bestLength) {
+          bestLength = normalized.length;
+          bestKeys = keys;
+        }
+      }
+    }
+    return bestKeys;
+  }
+
+  private buildRouteKeysIndex(): Record<string, string[]> {
+    const index: Record<string, string[]> = {};
+    for (const [key, route] of Object.entries(MODULE_ROUTES)) {
+      (index[route] ??= []).push(key);
+    }
+    return index;
+  }
+
+  /**
+   * Primera ruta navegable de un módulo activo, en el orden del árbol/catálogo
+   * recibido. Es el terminal de la cadena de fallback: nunca devuelve `null`.
+   *
+   * - Si hay un módulo activo → su primera ruta.
+   * - Si NO hay módulos activos:
+   *     - **owner** → `PANEL_UI_TERMINAL_ROUTE` (settings/general). El owner
+   *       ve todo por bypass de `user_panel_ui`, así que este caso solo se da
+   *       cuando ni siquiera la config global de panel del catálogo tiene
+   *       rutas — rarísimo; igual se le da el terminal para no quedar en
+   *       blanco.
+   *     - **no-owner con cero módulos** → `PANEL_UI_NO_ACCESS_ROUTE`. Es el
+   *       caso del bug C1(2): usuario que termina en `/admin/settings/general`
+   *       sin tener nada activo, debiera ver "sin acceso" + cerrar sesión.
+   *
+   * A.4 la crea (ownership ADR-4); B.1 la consume en el `redirectTo` de
+   * `store_admin.routes.ts`; `storeDashboardGuard` la usa para migrar su
+   * `/admin/pos` hardcodeado.
+   */
+  firstActiveModuleRoute(modules: MenuItem[]): string {
+    // QUI-XXX (c1-b): el árbol del catálogo ahora es filtrable (cada nodo
+    // lleva `panelUiKey`), por lo que `[]` y `undefined` siguen el flujo
+    // original de esta función: o el caller pasa el árbol y el filtro lo
+    // despuja a cero, o el caller no pasa nada y caemos al catálogo —
+    // que ahora pasa por el mismo filtro. El terminal correcto (NO_ACCESS
+    // para no-owner, TERMINAL para owner) sale sin condicional nuevo.
+    const tree = modules?.length ? modules : this.catalogMenuTree();
+    const route = this.firstVisibleRoute(tree);
+    if (route) return route;
+    if (this.authFacade.isOwner()) return PANEL_UI_TERMINAL_ROUTE;
+    return PANEL_UI_NO_ACCESS_ROUTE;
+  }
+
+  private firstVisibleRoute(items: MenuItem[]): string | null {
+    for (const item of items) {
+      if (item.alwaysVisible) {
+        // alwaysVisible se renderiza sin importar panel_ui (filter Case 1);
+        // solo lo detienen los prefiltros de autorización y la suscripción.
+        if (
+          this.passesAuthorizationGates(item) &&
+          (!item.requiresFeature ||
+            this.subscriptionAccess.canUseAI(item.requiresFeature)())
+        ) {
+          if (item.route) return item.route;
+          if (item.children?.length) {
+            const child = this.firstVisibleRoute(item.children);
+            if (child) return child;
+          }
+        }
+      } else if (this.diagnose(item).visible) {
+        // Un grupo sin ruta propia (header de grupo) cae a su primer hijo visible.
+        if (item.route) return item.route;
+        if (item.children?.length) {
+          const child = this.firstVisibleRoute(item.children);
+          if (child) return child;
+        }
+      }
+    }
+    return null;
+  }
+
   /** Normalizes `moduleKeyMap`'s `string | string[] | undefined` to an array. */
   private moduleKeysFor(item: MenuItem): string[] {
+    // QUI-XXX (c1-b): los nodos del catálogo llevan `panelUiKey` y el
+    // `moduleKeyMap` está indexado por label del sidebar. Si una clave
+    // viene del catálogo, no del sidebar, usar el label devuelve `[]` y el
+    // árbol se vuelve infiltrable. La clave explícita gana siempre.
+    if (item.panelUiKey) return [item.panelUiKey];
     const mapped = this.moduleKeyMap[item.label];
     if (!mapped) return [];
     return Array.isArray(mapped) ? mapped : [mapped];

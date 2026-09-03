@@ -35,11 +35,16 @@ export class PurchaseOrderPrintService {
   private readonly documentPrint = inject(DocumentPrintService);
 
   async printPurchaseOrder(order: PurchaseOrder): Promise<void> {
-    await this.documentPrint.print({
-      document: 'purchase_order',
-      body: this.generatePurchaseOrderBody(order),
+    await this.documentPrint.printViaGateway({
+      formatType: 'purchase_order',
+      documentId: order.id,
       title: `Orden de Compra ${order.order_number || ''}`,
-      styles: PURCHASE_ORDER_PRINT_STYLES,
+      fallbackRequest: {
+        document: 'purchase_order',
+        body: this.generatePurchaseOrderBody(order),
+        title: `Orden de Compra ${order.order_number || ''}`,
+        styles: PURCHASE_ORDER_PRINT_STYLES,
+      },
     });
   }
 

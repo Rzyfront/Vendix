@@ -1,6 +1,9 @@
 import {Component, inject, input, output, signal, computed, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import * as XLSX from 'xlsx';
+// `import type` deja el namespace disponible para las anotaciones sin meter
+// los 7,2 MB de xlsx en el chunk: el runtime llega por `await import('xlsx')`
+// dentro del handler, que es el unico momento en que hay un archivo que leer.
+import type * as XLSX from 'xlsx';
 import { CustomersService } from '../../services/customers.service';
 import {
   ModalComponent,
@@ -509,14 +512,15 @@ export class CustomerBulkUploadModalComponent {
 
     const reader: FileReader = new FileReader();
 
-    reader.onload = (e: any) => {
+    reader.onload = async (e: any) => {
       try {
         const bstr: string = e.target.result;
-        const wb: XLSX.WorkBook = XLSX.read(bstr, { type: 'binary' });
+        const xlsx = await import('xlsx');
+        const wb: XLSX.WorkBook = xlsx.read(bstr, { type: 'binary' });
         const wsname: string = wb.SheetNames[0];
         const ws: XLSX.WorkSheet = wb.Sheets[wsname];
 
-        const rawData = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+        const rawData = xlsx.utils.sheet_to_json(ws, { header: 1 }) as any[][];
 
         if (!rawData || rawData.length < 2) {
           this.toastService.error('El archivo debe contener al menos una fila de encabezados y una fila de datos');

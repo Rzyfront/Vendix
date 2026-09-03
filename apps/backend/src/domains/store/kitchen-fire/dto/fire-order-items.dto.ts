@@ -59,6 +59,24 @@ export class FireItemExclusionDto {
   @Min(1)
   @Type(() => Number)
   applies_to_units?: number;
+
+  /**
+   * Nota libre actualizada para este ítem específico al confirmar el envío a cocina.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  notes?: string;
+}
+
+export class ItemNoteDto {
+  @IsInt()
+  @Type(() => Number)
+  order_item_id!: number;
+
+  @IsString()
+  @MaxLength(200)
+  notes!: string;
 }
 
 export class FireOrderItemsDto {
@@ -89,6 +107,16 @@ export class FireOrderItemsDto {
   @ValidateNested({ each: true })
   @Type(() => FireItemExclusionDto)
   exclusions?: FireItemExclusionDto[];
+
+  /**
+   * Notas actualizadas por item al confirmar el envío a cocina.
+   * Se persisten en order_items.notes y se propagan a kitchen_ticket_items.notes.
+   */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ItemNoteDto)
+  item_notes?: ItemNoteDto[];
 }
 
 /**
@@ -124,7 +152,7 @@ export class KitchenTicketQueryDto {
  * Query DTO for the KDS snapshot — used both by the explicit REST
  * fallback and as the warm-up payload of the SSE stream.
  *
- *   windowMinutes: how far back to include non-final tickets
+ *   windowMinutes: how far back to include non-terminal tickets
  *                  (pending/in_preparation/ready). Default 120min
  *                  covers a typical lunch/dinner service.
  */
@@ -135,4 +163,49 @@ export class KdsSnapshotQueryDto {
   @Min(5)
   @Max(720)
   windowMinutes?: number = 120;
+}
+
+/**
+ * QUI-762 — body del reenvio de un plato a cocina SIN volver a consumir
+ * insumos.
+ *
+ * Hereda los dos campos de `FireOrderItemsDto` (`order_id`,
+ * `order_item_ids`) y agrega `reason`, OBLIGATORIO, sin valor por
+ * defecto. La eleccion la hace el operador en el modal de UI segun el
+ * caso de uso real:
+ *
+ *   `lost_command`: la comanda original no llego a cocina (impresora
+ *     rota, comanda perdida, etc). El ticket viejo se CANCELA junto con
+ *     sus items en la misma transaccion, y se crea el nuevo. Asi el
+ *     historial refleja UNA coccion real.
+ *
+ *   `remake_dish`: el cliente devolvio el plato y se rehace. Ambos
+ *     tickets quedan vivos y la cocina cocina DOS veces. El historial
+ *     refleja DOS cocciones reales.
+ *
+ * Un valor por defecto reintroduce el caso ambiguo (comportamiento (a)
+ * de la discusion 2026-08-30) para todo llamador que no se actualice:
+ * el ticket viejo queda en pending, el nuevo tambien, y el orden detail
+ * reporta dos estados divergentes para el mismo order_item. Por eso
+ * `reason` es REQUIRED y validado por el DTO — la UI obliga a elegir.
+ */
+export class ResendOrderItemsDto {
+  @IsInt()
+  @Type(() => Number)
+  @Min(1)
+  order_id!: number;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsInt({ each: true })
+  @Type(() => Number)
+  order_item_ids!: number[];
+
+  /**
+   * Por que se reenvia. Sin default: si no viene, el DTO rechaza con 422
+   * `property reason should not exist` o `reason must be one of: ...`
+   * segun el caso. Esto es deliberado, no un descuido.
+   */
+  @IsIn(['lost_command', 'remake_dish'])
+  reason!: 'lost_command' | 'remake_dish';
 }

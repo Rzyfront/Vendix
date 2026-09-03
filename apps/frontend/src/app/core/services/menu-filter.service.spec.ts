@@ -136,6 +136,9 @@ describe('MenuFilterService.diagnose', () => {
   });
 
   it('culpa al panel del usuario cuando su mapa oculta el módulo', () => {
+    // El owner ignora la capa user_panel_ui (C.1(2)): forzamos un usuario
+    // SIN rol de owner para que el bloqueo siga siendo user_panel_ui.
+    authFacade.isOwner.and.returnValue(false);
     authFacade.isModuleVisible.and.returnValue(false);
     const result = service.diagnose(item());
     expect(result.visible).toBe(false);
@@ -180,6 +183,10 @@ describe('MenuFilterService.diagnose', () => {
   });
 
   it('isMenuItemVisible es la proyección booleana de diagnose', () => {
+    // Mismo motivo: con `isOwner=true` el filtro ignora user_panel_ui, así
+    // que para verificar la proyección booleana del bloqueo necesitamos un
+    // actor sin owner.
+    authFacade.isOwner.and.returnValue(false);
     authFacade.isModuleVisible.and.returnValue(false);
     const menuItem = item();
     expect(service.isMenuItemVisible(menuItem)).toBe(
@@ -189,6 +196,8 @@ describe('MenuFilterService.diagnose', () => {
   });
 
   it('diagnoseModule resuelve por key usando el catálogo', () => {
+    // Forzamos no-owner por la misma razón (C.1(2)).
+    authFacade.isOwner.and.returnValue(false);
     authFacade.isModuleVisible.and.returnValue(false);
     const result = service.diagnoseModule('inventory_pop');
     expect(result.visible).toBe(false);

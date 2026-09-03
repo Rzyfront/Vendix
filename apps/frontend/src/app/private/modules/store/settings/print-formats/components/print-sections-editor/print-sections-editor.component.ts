@@ -154,7 +154,7 @@ import {
                                 </label>
                                 <input
                                   type="text"
-                                  [ngModel]="field.custom_label ?? field.label ?? ''"
+                                  [ngModel]="field.custom_label ?? field.label"
                                   (ngModelChange)="updateFieldLabel(section.id, field.id, $event)"
                                   [placeholder]="field.label || 'Etiqueta'"
                                   class="w-full px-2 py-1 bg-surface border border-border rounded text-xs text-text-primary focus:border-primary-500 focus:outline-none"

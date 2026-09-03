@@ -13,6 +13,7 @@ import {
   StickyHeaderComponent,
   StickyHeaderTab,
 } from '../sticky-header/sticky-header.component';
+import { ModuleShellActionsService } from './module-shell-actions.service';
 
 /**
  * Generic shell that renders a sticky-header with tabs + a `<router-outlet>`.
@@ -48,8 +49,10 @@ import {
         [backRoute]="backRoute()"
         [tabs]="tabs()"
         [activeTab]="activeTabId()"
+        [actions]="shellActions.buttons()"
         tabsAriaLabel="Secciones del módulo"
         (tabChanged)="onTabChanged($event)"
+        (actionClicked)="shellActions.run($event)"
       ></app-sticky-header>
 
       <div class="module-shell__body">
@@ -79,6 +82,13 @@ import {
   ],
 })
 export class ModuleTabsShellComponent {
+  /**
+   * Canal por el que la página ruteada publica sus botones en esta cabecera.
+   * Público porque el template lo lee directo; ver
+   * `ModuleShellActionsService` para el contrato de set/clear.
+   */
+  readonly shellActions = inject(ModuleShellActionsService);
+
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
 

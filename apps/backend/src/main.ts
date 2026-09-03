@@ -23,6 +23,11 @@ import { PublicSeoService } from './domains/public/seo/public-seo.service';
 import { PublicPwaService } from './domains/public/pwa/public-pwa.service';
 import { isPwaIconVariant } from '@common/config/image-presets';
 import { resolveTenantHostname } from '@common/utils/tenant-hostname.util';
+import {
+  extractClientIp,
+  resolveTrustProxySetting,
+  createTrustProxyPredicate,
+} from '@common/utils/client-ip.util';
 import { DynamicCorsService } from './common/cors/dynamic-cors.service';
 import {
   flattenBulkValidationErrors,
@@ -160,6 +165,41 @@ async function bootstrapApi(role: VendixProcessRole) {
   }
 
   const app = await NestFactory.create(AppModule);
+
+  // Confía en los proxies propios para que `req.ip` sea la IP real del cliente.
+  //
+  // Sin esto Express ignora `X-Forwarded-For` por completo y `req.ip` es la IP
+  // del socket TCP entrante — es decir, la de nginx / la gateway de Docker —
+  // idéntica para todo el tráfico del planeta. Como los rate limits se
+  // llavean por `req.ip`, TODOS los usuarios comparten una sola cubeta: diez
+  // renovaciones de sesión legítimas en cinco minutos agotaban el límite de
+  // `auth/refresh` y expulsaban a la plataforma entera.
+  //
+  // El número (ver `resolveTrustProxySetting`) es la cantidad de saltos
+  // propios delante del backend, NUNCA `true`: `true` haría que Express tome
+  // el primer elemento de `X-Forwarded-For`, que es el que escribe el cliente,
+  // y cualquiera podría falsificar su IP para evadir todos los límites.
+  //
+  // Tampoco basta el número pelado: el contenedor publica `-p 3000:3000` y el
+  // security group de EC2 abre ese puerto a `0.0.0.0/0`, así que se le puede
+  // hablar al backend saltándose nginx. Con `trust proxy: N` esa conexión
+  // directa cuenta igual como salto de confianza y el `X-Forwarded-For` que
+  // traiga se acepta sin más. Por eso el valor de `set()` es el predicado
+  // `createTrustProxyPredicate` (ver su docblock en `client-ip.util.ts` para
+  // la lógica completa), no `trustProxyHops` directo.
+  const trustProxyHops = resolveTrustProxySetting();
+  // Vía `getInstance()` y no `app.set(...)`: `NestFactory.create` devuelve
+  // `INestApplication`, que no expone `set`. Tiparlo como
+  // `NestExpressApplication` obligaría a cambiar la firma del create y arrastra
+  // el tipo por el resto del arranque; esto toca la instancia de Express, que
+  // es justo lo que hay que configurar.
+  app
+    .getHttpAdapter()
+    .getInstance()
+    .set('trust proxy', createTrustProxyPredicate(trustProxyHops));
+  new Logger('Bootstrap').log(
+    `Trust proxy: ${trustProxyHops} salto(s) — req.ip se resuelve desde X-Forwarded-For`,
+  );
 
   // Increase payload limit for base64 images
   app.use(
@@ -539,6 +579,14 @@ async function bootstrapApi(role: VendixProcessRole) {
         arrayBuffers: mem.arrayBuffers,
       },
       version: process.env.npm_package_version || '1.0.0',
+      // Sonda de `TRUST_PROXY_HOPS`. Un `curl https://api.vendix.com/api/health`
+      // desde fuera debe devolver la IP pública de quien llama; si devuelve una
+      // IP privada (10.x, 172.x) el número de saltos se quedó corto y los rate
+      // limits están agrupando clientes, y si devuelve algo que el llamante
+      // pueda elegir vía cabecera, se pasó y son falsificables. Sólo se ve la
+      // propia IP, así que no filtra nada de terceros.
+      client_ip: extractClientIp(req as any),
+      trust_proxy_hops: trustProxyHops,
     });
   });
 

@@ -1,6 +1,7 @@
 <app-modal
   [(isOpen)]="modalOpen"
   size="xl"
+  [dialog]="true"
   [title]="request()?.title ?? 'Confirmar operación masiva'"
   [subtitle]="request()?.subtitle ?? ''"
   [closeOnBackdrop]="false"

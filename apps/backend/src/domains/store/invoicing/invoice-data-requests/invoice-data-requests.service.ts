@@ -115,7 +115,12 @@ export class InvoiceDataRequestsService {
             order_number: true,
             grand_total: true,
             created_at: true,
+            // [resid-fiscal] — Excluir ítems cancelados (soft cancel D2).
+            // La lista llega al cliente vía QR de "Solicite su factura
+            // electrónica"; un cancelado con monto descolgaría el total
+            // agregado del `grand_total` que ya está excluido.
             order_items: {
+              where: { cancelled_at: null },
               select: {
                 product_name: true,
                 quantity: true,
@@ -170,7 +175,12 @@ export class InvoiceDataRequestsService {
       include: {
         order: {
           include: {
+            // [resid-fiscal] — Mismo filtro que arriba: el summary va a
+            // la página pública del cliente. Si quedara un cancelado,
+            // vería una línea con `total_price` que el total agregado
+            // ya no suma — inconsistencia visible.
             order_items: {
+              where: { cancelled_at: null },
               select: {
                 product_name: true,
                 variant_sku: true,
@@ -559,7 +569,10 @@ export class InvoiceDataRequestsService {
       include: {
         order: {
           include: {
-            order_items: true,
+            // [resid-fiscal] — `processRequest` arma el payload que dispara
+            // la emisión DIAN; cualquier cancelado se vuelve línea
+            // legalmente emitida. Filtramos antes del map a líneas.
+            order_items: { where: { cancelled_at: null } },
             stores: true,
           },
         },
@@ -652,10 +665,13 @@ export class InvoiceDataRequestsService {
       }
 
       // 2. Link customer to order (update order with customer_id)
+      // QUI-727 (A.3 / ADR-9): al fijar customer_id garantizamos customer_alias
+      // NULL — el CHECK orders_customer_xor_alias rechaza ambos poblados.
       await this.prisma.orders.update({
         where: { id: order.id },
         data: {
           customer_id: customer.id,
+          customer_alias: null,
           updated_at: new Date(),
         },
       });

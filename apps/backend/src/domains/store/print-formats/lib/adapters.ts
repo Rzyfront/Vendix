@@ -40,9 +40,41 @@ export const POS_SALE_TICKET_ADAPTER = freezeAdapter({
   label: 'Ticket de Venta POS',
   category: 'Ventas POS',
   defaultPaper: 'thermal_80',
-  availableRegions: ['header', 'logo', 'items-table', 'totals', 'footer'],
+  availableRegions: [
+    'header',
+    'logo',
+    'company-block',
+    'customer-info',
+    'items-table',
+    'totals',
+    'footer',
+  ],
   fiscal: false,
   requiredFields: [],
+} as FormatAdapter);
+
+/**
+ * POS Electronic Invoice (DIAN) — 80mm thermal roll representation of electronic invoice in POS.
+ * Carries fiscal block (CUFE, Resolution) and QR block along with items and taxes.
+ */
+export const POS_ELECTRONIC_INVOICE_ADAPTER = freezeAdapter({
+  formatType: 'pos_electronic_invoice',
+  label: 'Factura Electrónica POS (80mm)',
+  category: 'Ventas POS',
+  defaultPaper: 'thermal_80',
+  availableRegions: [
+    'header',
+    'fiscal-block',
+    'logo',
+    'company-block',
+    'customer-info',
+    'items-table',
+    'totals',
+    'qr-block',
+    'footer',
+  ],
+  fiscal: true,
+  requiredFields: ['fiscal.cufe', 'fiscal.qr_code_png_base64', 'store.tax_id'],
 } as FormatAdapter);
 
 /**
@@ -354,6 +386,7 @@ export const WITHHOLDING_EMPLOYEE_CERTIFICATE_ADAPTER = freezeAdapter({
 /** Frozen tuple — the registry consumes this order directly. */
 export const ALL_ADAPTERS: ReadonlyArray<Readonly<FormatAdapter>> = Object.freeze([
   POS_SALE_TICKET_ADAPTER,
+  POS_ELECTRONIC_INVOICE_ADAPTER,
   SALES_ORDER_INVOICE_ADAPTER,
   DISPATCH_NOTE_ADAPTER,
   DISPATCH_TICKET_ADAPTER,

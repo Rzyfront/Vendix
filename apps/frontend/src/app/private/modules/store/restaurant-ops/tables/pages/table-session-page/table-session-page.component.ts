@@ -11,10 +11,12 @@ import {
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { interval } from 'rxjs';
 import {
   CardComponent,
   StickyHeaderComponent,
   StickyHeaderActionButton,
+  StickyHeaderBadgeColor,
   BadgeComponent,
   BadgeVariant,
   ButtonComponent,
@@ -23,9 +25,8 @@ import {
   ToastService,
   SpinnerComponent,
   DialogService,
-  TimelineComponent,
-  SelectorComponent,
-  SelectorOption,
+  DropdownComponent,
+  ModalComponent,
 } from '../../../../../../../shared/components/index';
 import {
   TimelineStep,
@@ -47,6 +48,7 @@ import {
   KitchenMutationError,
 } from '../../../kds/services';
 import type {
+  FireConfirmPayload,
   FireItemExclusion,
   FirePreview,
 } from '../../../kds/interfaces';
@@ -65,6 +67,16 @@ import {
   TablePaymentConfirmSubmit,
 } from '../../components/table-payment-modal/table-payment-modal.component';
 import { AssignCustomerModalComponent } from '../../components/assign-customer-modal/assign-customer-modal.component';
+import { QuickStatusModalComponent } from '../../components/quick-status-modal/quick-status-modal.component';
+
+/** One entry of the `Opciones` overflow menu (desktop dropdown + mobile action sheet). */
+interface SecondaryAction {
+  id: 'pay' | 'split' | 'customer' | 'table-status' | 'history' | 'close';
+  label: string;
+  icon: string;
+  disabled?: boolean;
+  danger?: boolean;
+}
 
 /**
  * Open-check / table administration page (zona A — administración de una mesa).
@@ -97,14 +109,15 @@ import { AssignCustomerModalComponent } from '../../components/assign-customer-m
     IconComponent,
     ToggleComponent,
     SpinnerComponent,
-    TimelineComponent,
-    SelectorComponent,
+    DropdownComponent,
+    ModalComponent,
     CurrencyPipe,
     AddItemsModalComponent,
     SplitOrderModalComponent,
     TablePaymentModalComponent,
     AssignCustomerModalComponent,
     KitchenConfirmModalComponent,
+    QuickStatusModalComponent,
   ],
   templateUrl: './table-session-page.component.html',
   styleUrl: './table-session-page.component.scss',
@@ -155,6 +168,21 @@ export class TableSessionPageComponent implements OnInit {
   /** Order-item id currently being removed (drives the per-row spinner). */
   readonly removingItemId = signal<number | null>(null);
 
+  /**
+   * Clock tick (ms), refreshed every 60s. Drives `elapsedSinceOpen` and
+   * `firedMinutesFor` without a per-row `setInterval` — a single ticker for
+   * the whole page, cleaned up via `takeUntilDestroyed` in the constructor.
+   */
+  private readonly now = signal(Date.now());
+
+  /** `···` overflow menu — desktop dropdown / mobile action sheet. */
+  readonly isActionsSheetOpen = signal(false);
+  /** Quick-status modal (table status change + history). */
+  readonly isQuickStatusOpen = signal(false);
+  readonly statusModalShowsHistory = signal(false);
+  /** Mobile-only: collapses the account detail below the totals row. */
+  readonly summaryExpanded = signal(false);
+
   // ── Pending payments (E2 — staff confirmation) ────────────────────
   /** Pending manual payments for the order backing this session. */
   readonly pendingPayments = signal<PaymentPendingView[]>([]);
@@ -186,12 +214,83 @@ export class TableSessionPageComponent implements OnInit {
     Number(this.session()?.order?.subtotal_amount ?? 0),
   );
 
+  readonly orderTax = computed(() =>
+    Number(this.session()?.order?.tax_amount ?? 0),
+  );
+
+  readonly orderDiscount = computed(() =>
+    Number(this.session()?.order?.discount_amount ?? 0),
+  );
+
+  /** Average spend per guest (`orderTotal / guest_count`, floor 1 guest). */
+  readonly perGuestAverage = computed(() => {
+    const guests = Math.max(1, this.session()?.guest_count ?? 1);
+    return this.orderTotal() / guests;
+  });
+
+  /**
+   * Elapsed since the session opened, degrading by magnitude so a stale
+   * table never reads as "482 h 26 min": `< 1h` → "X min", `< 48h` →
+   * "X h Y min", `>= 48h` → "X d Y h". Re-evaluates every 60s off the
+   * shared `now` ticker.
+   */
+  /**
+   * ¿El desglose aporta algo? Sin impuesto ni descuento, `subtotal` es igual
+   * a `total` y las filas de desglose sólo repiten la misma cifra tres veces.
+   */
+  readonly hasTotalsBreakdown = computed(
+    () => this.orderTax() > 0 || this.orderDiscount() > 0,
+  );
+
+  readonly elapsedSinceOpen = computed(() => {
+    const openedAt = this.session()?.opened_at;
+    if (!openedAt) return '—';
+    const diffMs = this.now() - new Date(openedAt).getTime();
+    return this.formatElapsedMinutes(Math.max(0, Math.floor(diffMs / 60000)));
+  });
+
+  private formatElapsedMinutes(totalMinutes: number): string {
+    if (totalMinutes < 60) {
+      return `${totalMinutes} min`;
+    }
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (hours < 48) {
+      return `${hours} h ${minutes} min`;
+    }
+    const days = Math.floor(hours / 24);
+    const remHours = hours % 24;
+    return `${days} d ${remHours} h`;
+  }
+
   readonly customer = computed(() => this.session()?.order?.customer ?? null);
+
+  /**
+   * carril D / lina — D1: alias del cliente cuando la venta es anónima pero
+   * etiquetada (ej. "Mesa 5", "Para llevar"). Persistido en
+   * `orders.customer_alias` (schema.prisma:1445, XOR con `customer_id`).
+   * Se renderiza SOLO (sin etiqueta "CF" adyacente) en lugar del nombre
+   * del cliente cuando este último está ausente, exactamente como pidió
+   * el dueño: el alias existe precisamente para que el mesero no vea una
+   * fila anónima.
+   */
+  readonly customerAlias = computed(
+    () => this.session()?.order?.customer_alias ?? null,
+  );
 
   readonly customerName = computed(() => {
     const c = this.customer();
-    if (!c) return null;
-    return `${c.first_name} ${c.last_name}`.trim();
+    if (c) {
+      // Hay cliente formal: gana el nombre sobre cualquier alias.
+      return `${c.first_name} ${c.last_name}`.trim();
+    }
+    const alias = this.customerAlias();
+    if (alias && alias.trim()) {
+      // Sin cliente formal pero con alias: alias solo, sin "CF".
+      return alias.trim();
+    }
+    // Sin cliente ni alias: consumidor final explícito.
+    return 'Consumidor Final';
   });
 
   readonly selectedItems = computed(() => {
@@ -220,46 +319,70 @@ export class TableSessionPageComponent implements OnInit {
 
   readonly isClosed = computed(() => !!this.session()?.closed_at);
 
+  /**
+   * carril D / lina — D1: la mesa fue pagada en POS (cobrada) pero NO
+   * cerrada todavía. La fuente de verdad es `table_sessions.paid_at`
+   * (migration `20260901120000_table_session_paid_at`); se persiste
+   * dentro del `$transaction` del pago para que un rollback no deje
+   * un `paid_at` fantasma.
+   *
+   * La mesa sigue `occupied` hasta que el mesero ejecute `closeSession`
+   * (canónico), pero el frontend de mesa y el floor-map pintan el badge
+   * "Pagada" sin esperar al cierre explícito.
+   */
+  readonly isPaid = computed(() => !!this.session()?.paid_at);
+
   /** Reads `restaurant.enable_table_checkout` (loose JSON slice). */
   readonly checkoutEnabled = computed(
     () => this.settingsFacade.settings()?.restaurant?.enable_table_checkout === true,
   );
 
-  /** Raw order state from the backend (English enum value). */
-  readonly orderState = computed(() => this.session()?.order?.state ?? null);
-
-  /**
-   * Spanish labels for order states. Local map (the orders module util
-   * `OrderFormatUtils.formatOrderStatus` is mostly English and coupled to
-   * the orders `OrderState` enum, so a complete local map is cleaner and
-   * stays in scope). Covers the lifecycle states a table draft order can
-   * surface. Unknown values fall back to the raw value capitalized.
-   */
-  private readonly ORDER_STATE_LABELS_ES: Record<string, string> = {
-    draft: 'Borrador',
-    created: 'Confirmada',
-    confirmed: 'Confirmada',
-    pending: 'Pendiente',
-    pending_payment: 'Pago pendiente',
-    processing: 'En proceso',
-    shipped: 'Enviada',
-    delivered: 'Entregada',
-    completed: 'Completada',
-    finished: 'Completada',
-    cancelled: 'Cancelada',
-    refunded: 'Reembolsada',
-    partially_refunded: 'Reembolso parcial',
-  };
-
-  /** Order state translated to Spanish for display. */
-  readonly orderStateLabel = computed(() => {
-    const state = this.orderState();
-    if (!state) return '—';
-    return (
-      this.ORDER_STATE_LABELS_ES[state] ??
-      state.charAt(0).toUpperCase() + state.slice(1)
-    );
+  /** Normalized table name avoiding duplicate "Mesa Mesa X" */
+  readonly tableName = computed(() => {
+    const raw = this.session()?.table?.name;
+    if (!raw) return null;
+    const trimmed = raw.trim();
+    if (/^mesa\b/i.test(trimmed)) {
+      return trimmed;
+    }
+    return `Mesa ${trimmed}`;
   });
+
+  /** Quick filter tabs for multi-item table orders */
+  readonly activeFilter = signal<'all' | 'unfired' | 'in_kitchen' | 'delivered'>('all');
+
+  readonly inKitchenCount = computed(() =>
+    this.items().filter((it) => {
+      const st = this.kitchenStatusFor(it);
+      return st != null && st !== 'delivered' && st !== 'cancelled';
+    }).length,
+  );
+
+  readonly deliveredCount = computed(() =>
+    this.items().filter((it) => this.isDelivered(it)).length,
+  );
+
+  readonly filteredItems = computed<TableSessionOrderItem[]>(() => {
+    const filter = this.activeFilter();
+    const all = this.items();
+    if (filter === 'unfired') {
+      return all.filter((it) => this.isPrepared(it) && !this.isItemFired(it));
+    }
+    if (filter === 'in_kitchen') {
+      return all.filter((it) => {
+        const st = this.kitchenStatusFor(it);
+        return st != null && st !== 'delivered' && st !== 'cancelled';
+      });
+    }
+    if (filter === 'delivered') {
+      return all.filter((it) => this.isDelivered(it));
+    }
+    return all;
+  });
+
+  setFilter(filter: 'all' | 'unfired' | 'in_kitchen' | 'delivered'): void {
+    this.activeFilter.set(filter);
+  }
 
   /** Count of currently selected (pending) items for the batch toolbar. */
   readonly selectedCount = computed(() => this.selectedItemIds().size);
@@ -275,6 +398,28 @@ export class TableSessionPageComponent implements OnInit {
   readonly tableStatus = computed<TableStatus | null>(
     () => (this.session()?.table?.status as TableStatus) ?? null,
   );
+
+  /** Table status as a Spanish label — feeds the sticky header's `badgeText`. */
+  readonly tableStatusLabel = computed(() => {
+    const status = this.tableStatus();
+    return status ? TablesService.statusLabel(status) : '';
+  });
+
+  /** Maps the table status to the sticky header's fixed badge color palette. */
+  readonly tableStatusBadgeColor = computed<StickyHeaderBadgeColor>(() => {
+    switch (this.tableStatus()) {
+      case 'occupied':
+        return 'yellow';
+      case 'available':
+        return 'green';
+      case 'reserved':
+        return 'blue';
+      case 'cleaning':
+        return 'gray';
+      default:
+        return 'gray';
+    }
+  });
 
   /**
    * Table status as a collapsed-timeline (reuses the shared `app-timeline`,
@@ -315,35 +460,71 @@ export class TableSessionPageComponent implements OnInit {
     });
   });
 
+  /**
+   * Primary action in the sticky header: `Cerrar mesa`.
+   * Secondary / contextual actions (Cobrar, Dividir cuenta, Asignar cliente, etc.)
+   * live inside `secondaryActions()`'s dropdown menu.
+   */
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
-    const actions: StickyHeaderActionButton[] = [];
-    // Core flow only: Cobrar (when checkout is ON) + Cerrar mesa.
-    // "Agregar items" lives in the Items card header now.
+    return [
+      {
+        id: 'close',
+        label: 'Cerrar mesa',
+        icon: 'lock',
+        variant: 'danger',
+        disabled: this.isClosed(),
+        title: this.isClosed()
+          ? 'La mesa ya está cerrada'
+          : 'Cerrar la mesa y finalizar la sesión',
+      },
+    ];
+  });
+
+  /**
+   * Advanced actions grouped in the `Opciones` dropdown menu — a single source
+   * of truth consumed by BOTH the desktop `app-dropdown` (projected into
+   * the sticky header's `[actions-extra]` slot) and the mobile action
+   * sheet (`app-modal`). Empty once the session is closed.
+   */
+  readonly secondaryActions = computed<SecondaryAction[]>(() => {
+    if (this.isClosed()) return [];
+    const actions: SecondaryAction[] = [];
+
     if (this.checkoutEnabled()) {
       actions.push({
         id: 'pay',
         label: 'Cobrar',
         icon: 'credit-card',
-        variant: 'primary',
-        disabled: this.isClosed() || this.items().length === 0,
-        title: this.isClosed()
-          ? 'La mesa ya está cerrada'
-          : 'Cobrar (la mesa queda ocupada — ciérrala desde "Cerrar mesa")',
+        disabled: this.items().length === 0,
       });
     }
-    actions.push({
-      id: 'close',
-      label: 'Cerrar mesa',
-      icon: 'lock',
-      variant: 'outline-danger',
-      loading: this.isClosing(),
-      disabled: this.isClosed(),
-      title: this.isClosed() ? 'La mesa ya está cerrada' : 'Cerrar la mesa',
-    });
+
+    actions.push(
+      {
+        id: 'split',
+        label: 'Dividir cuenta',
+        icon: 'split',
+        disabled: this.items().length < 2,
+      },
+      {
+        id: 'customer',
+        label: this.customerName() ? 'Cambiar cliente' : 'Asignar cliente',
+        icon: 'user-plus',
+      },
+      { id: 'table-status', label: 'Cambiar estado de mesa', icon: 'table' },
+      { id: 'history', label: 'Historial de estados', icon: 'clock' },
+      { id: 'close', label: 'Cerrar mesa', icon: 'lock', danger: true },
+    );
+
     return actions;
   });
 
   constructor() {
+    // Single page-wide clock tick driving `elapsedSinceOpen` + `firedMinutesFor`.
+    interval(60_000)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.now.set(Date.now()));
+
     // Merge KDS SSE ticket events into the live kitchen-state map, scoped
     // to THIS session's order. The stream is store-wide; we filter by
     // order_id. Graceful: if the stream falls to manual/polling, the
@@ -505,6 +686,21 @@ export class TableSessionPageComponent implements OnInit {
 
   kitchenStatusLabel(status: KitchenTicketItemRefStatus): string {
     return KitchenTicketsService.statusLabel(status);
+  }
+
+  /** `kitchen_ticket.daily_number` of the item's most recent ticket row. */
+  ticketNumberFor(item: TableSessionOrderItem): number | null {
+    return (
+      item.kitchen_ticket_items?.[0]?.kitchen_ticket?.daily_number ?? null
+    );
+  }
+
+  /** Whole minutes elapsed since the item's most recent ticket was fired. */
+  firedMinutesFor(item: TableSessionOrderItem): number | null {
+    const firedAt = item.kitchen_ticket_items?.[0]?.kitchen_ticket?.fired_at;
+    if (!firedAt) return null;
+    const diffMs = this.now() - new Date(firedAt).getTime();
+    return Math.max(0, Math.floor(diffMs / 60000));
   }
 
   /**
@@ -709,10 +905,27 @@ export class TableSessionPageComponent implements OnInit {
   // ── Remove item (Frente 2) ───────────────────────────────────────────
 
   /**
-   * Remove a single line from the open check. Confirms first (the message
-   * warns about the kitchen-ticket cancel + stock return when the item was
-   * already fired-pending), then calls the backend and replaces the local
-   * session with the recalculated snapshot it returns.
+   * Cancel a single line from the open check (soft cancel).
+   *
+   * carril D / lina — D2: flujo nuevo. Antes era un hard delete
+   * (`removeItem` DELETE legacy) que rompía la orden cuando el plato
+   * ya estaba disparado a cocina o la orden salía de `draft`. Ahora:
+   *  - Motivo obligatorio siempre (mín 3 chars). Se persiste en
+   *    `order_items.cancellation_reason` para auditoría y para que el
+   *    KDS y el listado de ordenes puedan mostrarlo.
+   *  - El ítem NO se borra: queda VISIBLE marcado como cancelado pero
+   *    EXCLUIDO del subtotal/tax/grand_total (filtro `cancelled_at IS
+   *    NULL` en el recálculo del backend).
+   *  - Stock: `before_fire` revierte; `after_fire_waste` queda como
+   *    merma sin reversión (backend decide según
+   *    `inventory_consumed_at_fire`).
+   *  - KDS: si el ticket está en `pending`, se cancela in-tx y se emite
+   *    `ticket.cancelled` SSE post-commit. Si ya avanzó de `pending`,
+   *    no se toca el ticket del cocinero.
+   *
+   * UX: el motivo se pide con `DialogService.prompt` (PromptModalComponent
+   * del design system) tras un `confirm` previo. Distinto copy entre
+   * `firedPending` (merma) y resto (exclusión del total).
    */
   onRemoveItem(item: TableSessionOrderItem): void {
     const sessionId = this.session()?.id;
@@ -722,33 +935,66 @@ export class TableSessionPageComponent implements OnInit {
       this.isItemFired(item) && this.kitchenStatusFor(item) === 'pending';
     this.dialogService
       .confirm({
-        title: 'Eliminar plato',
+        title: 'Cancelar plato',
         message: firedPending
-          ? `¿Eliminar "${item.product_name}" de la cuenta? Se cancelará su ticket de cocina y se devolverá el inventario consumido.`
-          : `¿Eliminar "${item.product_name}" de la cuenta?`,
-        confirmText: 'Eliminar',
-        cancelText: 'Cancelar',
+          ? `¿Cancelar "${item.product_name}" de la cuenta? Se cancelará su ticket de cocina. Si el ticket ya pasó a preparación, queda como merma sin reversión de stock.`
+          : `¿Cancelar "${item.product_name}" de la cuenta? El plato queda visible marcado como cancelado, pero se excluye del total.`,
+        confirmText: 'Continuar',
+        cancelText: 'Atrás',
         confirmVariant: 'danger',
       })
       .then((confirmed) => {
         if (!confirmed) return;
-        this.removingItemId.set(item.id);
-        this.tablesService
-          .removeItem(sessionId, item.id)
-          .pipe(takeUntilDestroyed(this.destroyRef))
-          .subscribe({
-            next: (s) => {
-              this.removingItemId.set(null);
-              this.session.set(s);
-              this.seedKitchenStateFromOrder(s);
-              this.toastService.success('Plato eliminado de la cuenta');
-            },
-            error: (err: unknown) => {
-              this.removingItemId.set(null);
+        // Motivo obligatorio vía `DialogService.prompt` (PromptModalComponent
+        // del design system). Resuelve `undefined` si el usuario cancela el
+        // modal; el string con trim si confirma. Sustituye a `window.prompt`
+        // nativo — mismo dato, modal compartido del design system.
+        this.dialogService
+          .prompt({
+            title: 'Motivo de cancelación',
+            message: firedPending
+              ? 'Quedará registrado como merma.'
+              : 'Quedará registrado en el pedido.',
+            placeholder: 'Describe el motivo (mínimo 3 caracteres)',
+            confirmText: 'Cancelar plato',
+            cancelText: 'Atrás',
+          })
+          .then((reasonInput) => {
+            if (reasonInput === undefined) {
+              this.toastService.error('Cancelación abortada');
+              return;
+            }
+            const reason = reasonInput.trim();
+            if (reason.length < 3) {
               this.toastService.error(
-                typeof err === 'string' ? err : 'Error al eliminar el plato',
+                'El motivo debe tener al menos 3 caracteres',
               );
-            },
+              return;
+            }
+            this.removingItemId.set(item.id);
+            this.tablesService
+              .cancelOrderItem(sessionId, item.id, { reason })
+              .pipe(takeUntilDestroyed(this.destroyRef))
+              .subscribe({
+                next: (s) => {
+                  this.removingItemId.set(null);
+                  this.session.set(s);
+                  this.seedKitchenStateFromOrder(s);
+                  this.toastService.success(
+                    firedPending
+                      ? 'Plato cancelado como merma'
+                      : 'Plato cancelado de la cuenta',
+                  );
+                },
+                error: (err: unknown) => {
+                  this.removingItemId.set(null);
+                  this.toastService.error(
+                    typeof err === 'string'
+                      ? err
+                      : 'Error al cancelar el plato',
+                  );
+                },
+              });
           });
       });
   }
@@ -887,12 +1133,14 @@ export class TableSessionPageComponent implements OnInit {
       });
   }
 
-  /** Confirma el envio con las exclusiones que dejo el modal. */
-  onKitchenConfirmed(exclusions: FireItemExclusion[]): void {
+  /** Confirma el envio con las exclusiones y notas que dejo el modal. */
+  onKitchenConfirmed(event: FireConfirmPayload | FireItemExclusion[]): void {
     const ids = this.pendingFireIds();
     if (ids.length === 0) return;
     this.kitchenConfirmOpen.set(false);
-    this.executeFire(ids, this.pendingFireSingleId(), exclusions);
+    const exclusions = Array.isArray(event) ? event : (event?.exclusions ?? []);
+    const itemNotes = Array.isArray(event) ? undefined : event?.item_notes;
+    this.executeFire(ids, this.pendingFireSingleId(), exclusions, itemNotes);
   }
 
   /** Cancelar no consume inventario ni crea tickets: el modal abre ANTES de escribir. */
@@ -907,6 +1155,7 @@ export class TableSessionPageComponent implements OnInit {
     orderItemIds: number[],
     singleItemId: number | null,
     exclusions: FireItemExclusion[],
+    itemNotes?: Array<{ order_item_id: number; notes: string }>,
   ): void {
     const order = this.session()?.order;
     if (!order) return;
@@ -919,6 +1168,7 @@ export class TableSessionPageComponent implements OnInit {
         // Solo se manda cuando hay algo excluido: el backend trata la ausencia
         // como "todos los componentes marcados", que es el camino rapido.
         ...(exclusions.length > 0 && { exclusions }),
+        ...(itemNotes && itemNotes.length > 0 && { item_notes: itemNotes }),
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -1096,57 +1346,54 @@ export class TableSessionPageComponent implements OnInit {
     );
   }
 
-  // ── Change table status ────────────────────────────────────────────────
+  // ── `···` overflow menu (desktop dropdown + mobile action sheet) ───────
 
   /**
-   * Options for the single "Cambiar estado" selector. The timeline is the
-   * sole DISPLAY of the current status; this selector is the sole CONTROL
-   * to change it (no more redundant 4-button row).
+   * Single dispatch point for every `secondaryActions()` entry, invoked from
+   * both the desktop `app-dropdown` items and the mobile action sheet.
    */
-  readonly tableStatusOptions: SelectorOption[] = [
-    { value: 'available', label: TablesService.statusLabel('available') },
-    { value: 'reserved', label: TablesService.statusLabel('reserved') },
-    { value: 'occupied', label: TablesService.statusLabel('occupied') },
-    { value: 'cleaning', label: TablesService.statusLabel('cleaning') },
-  ];
-
-  /** Selector handler — the `app-selector` emits the chosen status value. */
-  onTableStatusChange(value: string | number | null): void {
-    if (value == null) return;
-    const status = value as TableStatus;
-    if (status === this.tableStatus()) return; // no-op if unchanged
-    this.changeTableStatus(status);
+  onSecondaryAction(id: SecondaryAction['id']): void {
+    this.isActionsSheetOpen.set(false);
+    switch (id) {
+      case 'pay':
+        this.openPay();
+        return;
+      case 'split':
+        this.openSplit();
+        return;
+      case 'customer':
+        this.openAssignCustomer();
+        return;
+      case 'table-status':
+        this.openQuickStatusModal(false);
+        return;
+      case 'history':
+        this.openQuickStatusModal(true);
+        return;
+      case 'close':
+        this.closeSession();
+        return;
+    }
   }
 
-  changeTableStatus(status: TableStatus): void {
-    const tableId = this.session()?.table_id;
-    if (!tableId) return;
-    this.tablesService
-      .update(tableId, { status })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (table) => {
-          // Reflect the new status on the local session.table view.
-          this.session.update((s) =>
-            s
-              ? {
-                  ...s,
-                  table: s.table
-                    ? { ...s.table, status: table.status }
-                    : s.table,
-                }
-              : s,
-          );
-          this.toastService.success(
-            `Estado de mesa: ${TablesService.statusLabel(status)}`,
-          );
-        },
-        error: (err: unknown) => {
-          this.toastService.error(
-            typeof err === 'string' ? err : 'Error al cambiar el estado',
-          );
-        },
-      });
+  /**
+   * Opens the shared `app-quick-status-modal` (already used by the floor
+   * map) with the history timeline collapsed or expanded depending on which
+   * menu entry triggered it.
+   */
+  openQuickStatusModal(showHistory: boolean): void {
+    this.statusModalShowsHistory.set(showHistory);
+    this.isQuickStatusOpen.set(true);
+  }
+
+  /**
+   * The modal already calls `TablesService.update` itself (Frente 3 reuse);
+   * this just refreshes the session snapshot so `table.status` — and every
+   * computed derived from it — reflects the change.
+   */
+  onTableStatusChanged(_status: TableStatus): void {
+    const id = this.session()?.id;
+    if (id) this.loadSession(id, { silent: true });
   }
 
   // ── Assign / change customer ───────────────────────────────────────────
@@ -1214,6 +1461,9 @@ export class TableSessionPageComponent implements OnInit {
         amount_received: payload.amount_received,
         payment_reference: payload.payment_reference,
         tip_amount: payload.tip_amount,
+        // QUI-728 (E.1) — el cobro de mesa va a POST /store/payments/pos
+        // (CreatePosPaymentDto); el bank_account_id viaja con él.
+        bank_account_id: payload.bank_account_id,
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -1363,11 +1613,14 @@ export class TableSessionPageComponent implements OnInit {
 
   onHeaderAction(actionId: string): void {
     switch (actionId) {
+      case 'close':
+        this.closeSession();
+        return;
       case 'pay':
         this.openPay();
         return;
-      case 'close':
-        this.closeSession();
+      case 'add-items':
+        this.openAddItems();
         return;
     }
   }

@@ -140,12 +140,88 @@ export class NotificationsEventsListener {
 
   @OnEvent('order.status_changed')
   async handleOrderStatusChanged(event: OrderStatusChangedEvent) {
+    // T9 — paso 3: el puente de cocina (`markKitchenOrderDelivered` →
+    // `updateOrderState`) emite esta misma transición con
+    // `source === 'kitchen_bridge'`. Entregado no es una alerta para el
+    // operador; el sonido único de tienda suena una sola vez cuando se
+    // marca LISTO (kitchen_ticket_ready). Silenciar SÓLO esta fuente
+    // preserva el resto de notificaciones de estado en todo el sistema.
+    if (event.source === 'kitchen_bridge') {
+      return;
+    }
     await this.notifications_service.createAndBroadcast(
       event.store_id,
       'order_status_change',
       'Estado de Orden Actualizado',
       `Orden #${event.order_number}: ${event.old_state} → ${event.new_state}`,
       { order_id: event.order_id, order_number: event.order_number },
+    );
+  }
+
+  /**
+   * T9 — paso 2: listo de cocina. El mesero tiene que ir a recoger el
+   * plato, por eso suena la campana. Entregado no suena porque es un
+   * cierre, no una alerta (eso lo maneja el silencio del
+   * `order.status_changed` con source='kitchen_bridge' arriba).
+   *
+   * Texto: la palabra LISTO en mayúsculas y el contexto que el mesero
+   * necesita para no tener que abrir el panel — número de orden y, si
+   * hay mesa, la mesa. Si no hay mesa, número de orden es el ancla.
+   */
+  @OnEvent('kitchen.ticket_ready')
+  async handleKitchenTicketReady(event: {
+    store_id: number;
+    ticket_id: number;
+    order_id: number;
+    order_number: string | null;
+  }) {
+    // Resolver mesa desde la sesión más reciente de la orden (mismo
+    // criterio que el carrusel de comandas). Best-effort: si falla, el
+    // número de orden sigue dando el contexto suficiente.
+    //
+    // T9 — `global_prisma` NO expone `table_sessions` (sólo modelos globales);
+    // la ruta correcta es `global_prisma.orders` con include de la sesión.
+    let mesaLabel: string | null = null;
+    try {
+      const order = await this.global_prisma.orders.findFirst({
+        where: { id: event.order_id, store_id: event.store_id },
+        orderBy: { id: 'desc' },
+        select: {
+          table_sessions: {
+            orderBy: { id: 'desc' },
+            take: 1,
+            select: { table: { select: { name: true, zone: true } } },
+          },
+        },
+      });
+      const table = order?.table_sessions?.[0]?.table;
+      if (table?.name) {
+        mesaLabel = table.zone ? `${table.name} (${table.zone})` : table.name;
+      }
+    } catch (err: any) {
+      this.logger.warn(
+        `[handleKitchenTicketReady] mesa lookup failed for ticket ${event.ticket_id}: ${err.message}`,
+      );
+    }
+
+    const orderLabel = event.order_number ? `#${event.order_number}` : `#${event.order_id}`;
+    const title = '¡Pedido LISTO!';
+    const body = mesaLabel
+      ? `Mesa ${mesaLabel} — orden ${orderLabel} lista para entregar`
+      : `Orden ${orderLabel} lista para entregar`;
+
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'kitchen_ticket_ready',
+      title,
+      body,
+      {
+        ticket_id: event.ticket_id,
+        order_id: event.order_id,
+        order_number: event.order_number,
+        mesa: mesaLabel,
+        kind: 'kitchen_ready',
+      },
     );
   }
 
@@ -1675,7 +1751,7 @@ export class NotificationsEventsListener {
             <p>Hola ${fullName || ''},</p>
             <p>Tu solicitud de reagenda para la reserva <strong>${event.booking_number}</strong> fue rechazada.</p>
             <p><strong>Razón:</strong> ${event.decision_reason}</p>
-            <p>Si querés elegir otro horario, podés intentarlo de nuevo desde tu cuenta.</p>
+            <p>Si quieres elegir otro horario, puedes intentarlo de nuevo desde tu cuenta.</p>
           </div>`;
         // Appointment redesign phase 2 — send FROM the person who
         // actually decided (the admin/staff in session). If that lookup

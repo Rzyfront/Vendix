@@ -59,6 +59,16 @@ export interface KitchenTicketItem {
   kitchen_ticket_id: number;
   order_item_id: number;
   product_id: number;
+  /**
+   * CP-POLLO-ARABE-727 C.4 (QUI-736) — la variante vendida viaja a cocina para
+   * que "Pollo" y "Pollo Picante" no sean indistinguibles en el tablero.
+   * `product_variant_id` es el FK a `product_variants`; `variant_label` es el
+   * snapshot inmutable al fire (denormalizado por A.6, A.3). El include del
+   * backend usa `include` sin `select`, así que ambas columnas llegan por SSE
+   * automáticamente — el tipo y el template deben leerlas explícitamente.
+   */
+  product_variant_id?: number | null;
+  variant_label?: string | null;
   quantity: number;
   status: KitchenTicketItemStatus;
   notes?: string | null;

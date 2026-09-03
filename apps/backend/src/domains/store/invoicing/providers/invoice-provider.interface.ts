@@ -87,6 +87,25 @@ export interface ProviderInvoiceData {
    * y no debe cambiar de comportamiento por este campo.
    */
   invoice_period?: ProviderInvoicePeriod;
+  /**
+   * CARRIL COMERCIAL DEL DOCUMENTO. Decide cuánto puede exigirle la emisión al
+   * adquiriente antes de negarse a emitir.
+   *
+   * - `'on_demand'` — venta rápida: punto de venta, mesa y tienda en línea. El
+   *   comprador da sus datos en el mostrador o en el checkout, y el conjunto
+   *   mínimo que se le pide es tipo y número de documento, nombres, apellidos
+   *   y correo. NO incluye dirección ni municipio, a propósito: pedirlos
+   *   convierte una venta de mostrador en un trámite. Esta venta SIEMPRE tiene
+   *   que poder emitir.
+   * - `'advanced'` — módulo de facturación electrónica, con el cliente creado
+   *   por completo en el módulo de clientes. Ahí sí se exige la identidad
+   *   fiscal entera, y el operador tiene dónde y cuándo completarla.
+   *
+   * OPCIONAL a propósito: ausente ⇒ se conserva EXACTAMENTE el comportamiento
+   * anterior (el más estricto). Ningún emisor cambia de conducta por no
+   * declararlo.
+   */
+  sale_rail?: 'on_demand' | 'advanced';
   customer_name?: string;
   customer_tax_id?: string;
   customer_address?: any;

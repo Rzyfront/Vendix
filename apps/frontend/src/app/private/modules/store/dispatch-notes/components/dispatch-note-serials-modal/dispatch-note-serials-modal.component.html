@@ -1,4 +1,4 @@
-<app-modal [(isOpen)]="isOpen" (cancel)="onCancel()" size="lg" [showCloseButton]="true">
+<app-modal [(isOpen)]="isOpen" (cancel)="onCancel()" size="lg" [dialog]="true" [showCloseButton]="true">
   <div slot="header" class="flex items-center gap-2">
     <app-icon name="hash" [size]="20" class="text-primary" />
     <h3 class="text-base font-semibold text-[var(--color-text-primary)]">

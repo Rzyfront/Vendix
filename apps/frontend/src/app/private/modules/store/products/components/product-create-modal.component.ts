@@ -35,7 +35,6 @@ import { BrandsService } from '../services/brands.service';
 import { TaxesService } from '../services/taxes.service';
 import { PosBarcodeService } from '../../pos/services/pos-barcode.service';
 import { CategoryQuickCreateComponent } from './category-quick-create.component';
-import { BrandQuickCreateComponent } from './brand-quick-create.component';
 import { TaxQuickCreateComponent } from './tax-quick-create.component';
 import { AccountCodeSelectComponent } from './account-code-select.component';
 
@@ -52,7 +51,6 @@ import { AccountCodeSelectComponent } from './account-code-select.component';
     MultiSelectorComponent,
     TooltipComponent,
     CategoryQuickCreateComponent,
-    BrandQuickCreateComponent,
     TaxQuickCreateComponent,
     AccountCodeSelectComponent,
   ],

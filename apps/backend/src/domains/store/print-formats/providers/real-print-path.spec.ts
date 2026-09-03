@@ -15,6 +15,10 @@ import {
   WithholdingEmployeeCertificateDataProvider,
 } from './withholding-employee.provider';
 import { mapFiscalDocumentToPrintData } from './fiscal-document-print.mapper';
+import { PrintLayoutComposerService } from '../services/print-layout-composer.service';
+import { PrintTemplateCompilerService } from '../services/print-template-compiler.service';
+import { PrintFormatDefinition } from '../interfaces/print-format.interface';
+import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 
 /**
  * El carril REAL de impresión no puede devolver una muestra.
@@ -199,7 +203,7 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
       daily_number: 7,
       business_date: new Date('2026-08-22'),
       ready_at: null,
-      kds: { id: 1, name: 'Cocina Caliente', station_type: 'kitchen' },
+      kds: { id: 1, name: 'Cocina Caliente', code: 'kitchen' },
       items: [
         {
           id: 1,
@@ -209,20 +213,18 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
           exclusions: [],
         },
       ],
-      order: {
-        id: 100,
-        order_number: 'ORD-2026-0012',
-        table_sessions: [
-          {
-            id: 5,
-            guest_count: 3,
-            table: { id: 4, name: '04', zone: 'Salón principal' },
-            opener: { first_name: 'Mateo', last_name: 'Sánchez' },
-          },
-        ],
-      },
+      order: { id: 100, order_number: 'ORD-2026-0012' },
     });
-    const prisma = { kitchen_tickets: { findFirst: findFirstTicket } } as any;
+    const findFirstSession = jest.fn().mockResolvedValue({
+      id: 5,
+      guest_count: 3,
+      table: { id: 4, name: '04', zone: 'Salón principal' },
+      opener: { first_name: 'Mateo', last_name: 'Sánchez' },
+    });
+    const prisma = {
+      kitchen_tickets: { findFirst: findFirstTicket },
+      table_sessions: { findFirst: findFirstSession },
+    } as any;
     const p = new KitchenTicketDataProvider(prisma);
 
     const data = await p.fetchDocumentData(10, 42);
@@ -237,6 +239,243 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
     expect(data.items[0].quantity).toBe(2);
     expect(data.custom_variables?.kds_name).toBe('Cocina Caliente');
     expect(data.custom_variables?.order_number).toBe('ORD-2026-0012');
+
+    // A.5 / CP-POLLO-ARABE-727 A.7 — la sesión ABIERTA (closed_at IS NULL) y la
+    // más reciente se resuelve con un `findFirst` top-level sobre `table_sessions`
+    // (que sí pasa por el scoping), no con un include anidado.
+    expect(findFirstSession).toHaveBeenCalledTimes(1);
+    expect(findFirstSession.mock.calls[0][0].where).toEqual({
+      order_id: 100,
+      closed_at: null,
+    });
+    expect(findFirstSession.mock.calls[0][0].orderBy).toEqual({
+      opened_at: 'desc',
+    });
+    expect(findFirstSession.mock.calls[0][0].take).toBe(1);
+  });
+
+  it('kitchen_ticket: el mesero asignado (table_waiters) manda sobre el opener', async () => {
+    const findFirstTicket = jest.fn().mockResolvedValue({
+      id: 43,
+      fired_at: new Date('2026-08-22T15:00:00.000Z'),
+      status: 'fired',
+      daily_number: 8,
+      business_date: new Date('2026-08-22'),
+      ready_at: null,
+      kds: { id: 1, name: 'Cocina Caliente', code: 'kitchen' },
+      items: [
+        {
+          id: 2,
+          quantity: 1,
+          notes: null,
+          product: { id: 11, name: 'Pollo Asado', sku: 'POL-AS' },
+          exclusions: [],
+        },
+      ],
+      order: { id: 101, order_number: 'ORD-2026-0013' },
+    });
+    const findFirstSession = jest.fn().mockResolvedValue({
+      id: 6,
+      guest_count: 2,
+      table: {
+        id: 5,
+        name: '05',
+        zone: 'Salón principal',
+        table_waiters: [{ user: { first_name: 'Lucía', last_name: 'Ramírez' } }],
+      },
+      opener: { first_name: 'Mateo', last_name: 'Sánchez' },
+    });
+    const prisma = {
+      kitchen_tickets: { findFirst: findFirstTicket },
+      table_sessions: { findFirst: findFirstSession },
+    } as any;
+    const p = new KitchenTicketDataProvider(prisma);
+
+    const data = await p.fetchDocumentData(10, 43);
+
+    // C.3 — el mesero asignado (table_waiters) gana al opener.
+    expect(data.document.waiter_name).toBe('Lucía Ramírez');
+    expect(data.document.table_number).toBe('Mesa 05');
+  });
+
+  it('kitchen_ticket: orden sin mesa (sin sesión abierta) → sin mesa ni mesero, no rompe', async () => {
+    const findFirstTicket = jest.fn().mockResolvedValue({
+      id: 44,
+      fired_at: new Date('2026-08-22T16:00:00.000Z'),
+      status: 'fired',
+      daily_number: 9,
+      business_date: new Date('2026-08-22'),
+      ready_at: null,
+      kds: { id: 1, name: 'Cocina Caliente', code: 'kitchen' },
+      items: [
+        {
+          id: 3,
+          quantity: 1,
+          notes: null,
+          product: { id: 12, name: 'Malta', sku: 'MAL' },
+          exclusions: [],
+        },
+      ],
+      order: { id: 102, order_number: 'ORD-2026-0014' },
+    });
+    const findFirstSession = jest.fn().mockResolvedValue(null);
+    const prisma = {
+      kitchen_tickets: { findFirst: findFirstTicket },
+      table_sessions: { findFirst: findFirstSession },
+    } as any;
+    const p = new KitchenTicketDataProvider(prisma);
+
+    const data = await p.fetchDocumentData(10, 44);
+
+    // Regresión (A.5/C.3/CP-POLLO-ARABE-727 A.7): un ticket sin mesa no debe
+    // romper ni inventar datos.
+    expect(data.document.table_number).toBe('');
+    expect(data.document.waiter_name).toBe('');
+    expect(data.items).toHaveLength(1);
+  });
+
+  /**
+   * [QUI-727 F.1 — cierre, Step 8] — Un spec que afirma sobre el modelo de
+   * datos (`data.document.table_number`, como los dos tests de arriba) puede
+   * quedar en verde mientras el papel sale vacío: exactamente el defecto que
+   * la oleada 5 encontró en la sección `table_info`. Antes de C.3, la
+   * sección `table_info` de la plantilla sembrada NO declaraba `fields`, y
+   * el compositor no tenía `case 'table_info'` en el switch de
+   * `renderSection` — caía al `default: renderGenericFieldsSection(...)`,
+   * cuya primera instrucción es `if (fields.length === 0) return '';`.
+   * Resultado: sección habilitada, con título, que emitía cadena vacía.
+   *
+   * Este test grepea el HTML devuelto por `compose()` (el método real,
+   * ejercitando el switch completo), no el objeto `StandardPrintDataModel`.
+   * Reproduce a propósito la plantilla sembrada sin `fields` en la sección
+   * `table_info` — si el `case 'table_info'` se revierte, este caso debe
+   * fallar aunque los dos tests de arriba (que solo miran el modelo) sigan
+   * en verde.
+   */
+  it('compose(): el tiquete de cocina renderiza mesa y mesero en el HTML, no solo en el modelo de datos', () => {
+    const composer = new PrintLayoutComposerService(
+      new PrintTemplateCompilerService(),
+    );
+
+    const data: StandardPrintDataModel = {
+      store: { name: 'Restaurante Test' },
+      document: {
+        id: 42,
+        number: 'KITCHEN-42',
+        date: '2026-08-22',
+        date_formatted: '2026-08-22',
+        time: '14:25',
+        state: 'fired',
+        state_label: 'Disparado',
+        table_number: 'Mesa 7',
+        waiter_name: 'Ana Mesera',
+      },
+      items: [
+        {
+          index: 1,
+          product_name: 'Hamburguesa Doble',
+          quantity: 2,
+          unit_price: 0,
+          total_price: 0,
+        },
+      ],
+      taxes: [],
+      totals: {
+        subtotal: 0,
+        subtotal_formatted: '$0',
+        discount_total: 0,
+        discount_total_formatted: '$0',
+        shipping_total: 0,
+        shipping_total_formatted: '$0',
+        tax_total: 0,
+        tax_total_formatted: '$0',
+        grand_total: 0,
+        grand_total_formatted: '$0',
+      },
+    };
+
+    // Plantilla sembrada real: la sección `table_info` habilitada, SIN
+    // `fields` (así se siembra hoy — ver comentario en
+    // `print-layout-composer.service.ts` junto al `case 'table_info'`).
+    const definition: PrintFormatDefinition = {
+      v: 1,
+      paper: {
+        format: 'thermal_80',
+        width_mm: 80,
+        is_roll: true,
+        margin_mm: 5,
+        copies: 1,
+      },
+      sections: [
+        {
+          id: 'mesa-mesero',
+          type: 'table_info',
+          title: 'Mesa, Mesero y Turno',
+          enabled: true,
+          order: 1,
+        },
+      ],
+    };
+
+    const html = composer.compose(definition, data);
+
+    expect(html).toContain('Mesa 7');
+    expect(html).toContain('Ana Mesera');
+  });
+
+  it('pos_sale_ticket: venta en mesa — incluye la sesión ABIERTA y mapea mesa + mesero', async () => {
+    const findFirst = jest.fn().mockResolvedValue({
+      id: 7,
+      order_number: 'POS-0007',
+      created_at: new Date('2026-08-27T09:15:00.000Z'),
+      state: 'finished',
+      subtotal_amount: 100000,
+      discount_amount: 0,
+      tax_amount: 19000,
+      grand_total: 119000,
+      // QUI-751 — antes mockeaba `order_taxes: []`, una relación que NO existe
+      // en `schema.prisma`. Eso era la razón por la que el bug del include
+      // (también inexistente en `pos-sale-ticket.provider.ts`) pasaba este
+      // spec en verde: el mock satisfacía la consulta sin que Prisma
+      // validara nada. Ahora el fixture refleja la forma REAL: líneas con su
+      // `order_item_taxes[]`. Sin líneas, la agregación devuelve [].
+      // ESTE TEST NO CUBRE: que la agregación de `aggregateTaxes` sume
+      // `tax_amount` por `(tax_name, tax_rate)` ni que derive la base como
+      // `tax_amount / tax_rate` — probar eso requiere un mock con varias
+      // líneas y tasas distintas. Lo dejo declarado, no disfrazado de verde.
+      order_items: [],
+      users: null,
+      stores: {
+        name: 'Tienda Test',
+        organizations: { tax_id: '900.000.000-1' },
+        addresses: [],
+      },
+      table_sessions: [
+        {
+          id: 9,
+          guest_count: 3,
+          table: {
+            id: 7,
+            name: '07',
+            zone: 'Terraza',
+            table_waiters: [{ user: { first_name: 'Lucía', last_name: 'Ramírez' } }],
+          },
+          opener: { first_name: 'Mateo', last_name: 'Sánchez' },
+        },
+      ],
+    });
+    const prisma = { orders: { findFirst } } as any;
+    const p = new PosSaleTicketDataProvider(prisma);
+
+    const data = await p.fetchDocumentData(10, 7);
+
+    // C.3 — la consulta pide la sesión ABIERTA (closed_at IS NULL) y la más
+    // reciente; el recibo mapea mesa + mesero (asignado, prioridad sobre opener).
+    const tableSessions = findFirst.mock.calls[0][0].include.table_sessions;
+    expect(tableSessions.where).toEqual({ closed_at: null });
+    expect(tableSessions.orderBy).toEqual({ opened_at: 'desc' });
+    expect(data.document.table_number).toBe('Mesa 07');
+    expect(data.document.waiter_name).toBe('Lucía Ramírez');
   });
 
   /**

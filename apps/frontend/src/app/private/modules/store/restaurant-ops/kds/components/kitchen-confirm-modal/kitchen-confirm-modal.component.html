@@ -29,15 +29,69 @@
             </span>
           </header>
 
-          <!-- La nota del pedido va ARRIBA del árbol: es lo que el cocinero tiene
-               que leer para saber qué desmarcar. Enterrarla abajo la vuelve
-               decorativa. -->
-          @if (item.notes) {
-            <p class="kc-note">
-              <app-icon name="message-square" [size]="12" />
-              {{ item.notes }}
+          <!--
+            CP-POLLO-ARABE-727 C.4 (QUI-736) — la variante vendida, como sub-línea
+            del plato. Se lee de `order_item.variant_attributes` (pre-fire, el
+            `variant_label` del ticket todavía no existe). sr-only para que el
+            lector de pantalla oiga "Variante: Picante", no "Pollo… Picante".
+          -->
+          @if (item.variant_attributes) {
+            <p class="kc-variant">
+              <span class="sr-only">Variante: </span>{{ item.variant_attributes }}
             </p>
           }
+
+          <!-- Nota de preparación (vista / edición / agregar) -->
+          <div class="kc-note-section">
+            @if (isNoteOpen(item.order_item_id)) {
+              <div class="kc-note-field">
+                <textarea
+                  class="kc-note-field__input"
+                  rows="2"
+                  maxlength="200"
+                  [value]="notesFor(item.order_item_id)"
+                  (input)="setNote(item.order_item_id, $any($event.target).value)"
+                  [attr.aria-label]="'Nota de preparación para ' + item.product_name"
+                  placeholder="Nota para cocina (ej. sin cebolla, término medio). Opcional."
+                ></textarea>
+                <button
+                  type="button"
+                  class="kc-note-field__close"
+                  (click)="toggleNote(item.order_item_id)"
+                  aria-label="Cerrar nota"
+                  title="Cerrar"
+                >
+                  <app-icon name="x" [size]="12" />
+                </button>
+              </div>
+            } @else if (notesFor(item.order_item_id)) {
+              <div
+                class="kc-note kc-note--editable"
+                (click)="toggleNote(item.order_item_id)"
+                role="button"
+                tabindex="0"
+                title="Clic para editar nota"
+              >
+                <app-icon name="message-square" [size]="12" />
+                <span class="kc-note__text">{{ notesFor(item.order_item_id) }}</span>
+                <span class="kc-note__edit-action">
+                  <app-icon name="pencil" [size]="10" />
+                  Editar
+                </span>
+              </div>
+            } @else {
+              <button
+                type="button"
+                class="kc-note-toggle"
+                (click)="toggleNote(item.order_item_id)"
+                [attr.aria-label]="'Agregar nota para ' + item.product_name"
+                title="Agregar nota para cocina (opcional)"
+              >
+                <app-icon name="message-square" [size]="12" />
+                Agregar nota
+              </button>
+            }
+          </div>
 
           @if (!item.has_active_recipe) {
             <p class="kc-no-recipe">
@@ -54,7 +108,7 @@
               descontar nada, en silencio.
             -->
             <p class="kc-no-recipe">
-              La receta está activa pero no arroja ingredientes — revisá su
+              La receta está activa pero no arroja ingredientes — revisa su
               rendimiento y su merma (una merma del 100% deja el rendimiento en
               cero). Si se envía así, no se descuenta inventario.
             </p>
@@ -96,6 +150,13 @@
                       [class.is-off]="!isNodeChecked(item.order_item_id, node)"
                       [class.is-partial]="isNodePartial(item.order_item_id, node)"
                       [attr.aria-pressed]="isNodeChecked(item.order_item_id, node)"
+                      [attr.aria-label]="
+                        isNodeChecked(item.order_item_id, node)
+                          ? 'Quitar ' + node.label
+                          : isNodePartial(item.order_item_id, node)
+                            ? 'Resolver inclusión parcial de ' + node.label
+                            : 'Incluir ' + node.label
+                      "
                       (click)="toggleNode(item.order_item_id, node)"
                     >
                       <app-icon
@@ -114,6 +175,12 @@
                       <button
                         type="button"
                         class="kc-collapse"
+                        [attr.aria-expanded]="!isCollapsed(node.key)"
+                        [attr.aria-label]="
+                          isCollapsed(node.key)
+                            ? 'Expandir ingredientes de ' + node.label
+                            : 'Contraer ingredientes de ' + node.label
+                        "
                         (click)="toggleCollapse(node.key)"
                       >
                         <app-icon
@@ -149,6 +216,13 @@
                               [class.is-off]="!isNodeChecked(item.order_item_id, child)"
                               [class.is-partial]="isNodePartial(item.order_item_id, child)"
                               [attr.aria-pressed]="isNodeChecked(item.order_item_id, child)"
+                              [attr.aria-label]="
+                                isNodeChecked(item.order_item_id, child)
+                                  ? 'Quitar ' + child.label
+                                  : isNodePartial(item.order_item_id, child)
+                                    ? 'Resolver inclusión parcial de ' + child.label
+                                    : 'Incluir ' + child.label
+                              "
                               (click)="toggleNode(item.order_item_id, child)"
                             >
                               <app-icon
@@ -201,7 +275,7 @@
           Queda registrado en el ticket, pero el descuento de inventario ya ocurrió
           al enviar a cocina.
         } @else {
-          No se descuentan del inventario ni entran al costo de este envío.
+          No se descuentan del inventario ni se contabilizan en este envío.
         }
       </p>
     }

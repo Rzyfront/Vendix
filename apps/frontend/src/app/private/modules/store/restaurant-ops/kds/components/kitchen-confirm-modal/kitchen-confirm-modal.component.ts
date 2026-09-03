@@ -12,6 +12,7 @@ import { ModalComponent } from '../../../../../../../shared/components/modal/mod
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import {
+  FireConfirmPayload,
   FireItemExclusion,
   FirePreview,
   FirePreviewComponent,
@@ -23,16 +24,16 @@ import {
  * Modal de confirmación de envío a cocina — QUI-655.
  *
  * Es el ÚNICO punto obligatorio del flujo: el lugar donde la exclusión se
- * materializa en consumo de inventario y en costo. Los tres caminos de captura
+ * materializa en consumo de inventario. Los tres caminos de captura
  * (exclusión estructurada al pedir, nota de texto libre, o nada) convergen acá, y
  * el modal NO depende de que alguien haya capturado algo antes.
  *
  * Todos los componentes vienen MARCADOS por defecto. Desmarcar excluye del consumo
- * y del costeo.
+ * de insumos.
  *
  * Riesgo de UX que el ticket marcaba: un restaurante con volumen envía a cocina
  * decenas de veces por hora y la mayoría de esas veces no hay nada que excluir. Se
- * mitiga con `hasAnyExclusion`: mientras nadie desmarque nada, el botón dice
+ * mitiga con `hasAnyChanges`: mientras nadie desmarque nada ni altere notas, el botón dice
  * "Enviar sin cambios" y el árbol arranca colapsado. La obligatoriedad del paso
  * queda como se pidió; lo que no cuesta es el tiempo.
  */
@@ -74,18 +75,18 @@ export class KitchenConfirmModalComponent {
 
   readonly hintText = computed(() =>
     this.mode() === 'cook'
-      ? 'Verificá los ingredientes de cada plato. Lo que quitó quien tomó el pedido ya viene desmarcado; podés quitar más antes de empezar.'
-      : 'Todos los ingredientes vienen marcados. Desmarcá lo que no se va a usar: eso evita su descuento del inventario y su costo.',
+      ? 'Verifica los ingredientes y notas de cada plato. Lo que quitó quien tomó el pedido ya viene desmarcado; puedes ajustar notas o quitar más antes de empezar.'
+      : 'Todos los ingredientes vienen marcados. Puedes agregar/editar notas de preparación y desmarcar lo que no se va a usar para evitar su descuento de inventario.',
   );
 
   readonly confirmLabel = computed(() => {
     if (this.mode() === 'cook') {
-      return this.hasAnyExclusion() ? 'Confirmar y cocinar' : 'Cocinar sin cambios';
+      return this.hasAnyChanges() ? 'Confirmar y cocinar' : 'Cocinar sin cambios';
     }
-    return this.hasAnyExclusion() ? 'Confirmar y enviar' : 'Enviar sin cambios';
+    return this.hasAnyChanges() ? 'Confirmar y enviar' : 'Enviar sin cambios';
   });
 
-  readonly confirmed = output<FireItemExclusion[]>();
+  readonly confirmed = output<FireConfirmPayload>();
   readonly cancelled = output<void>();
 
   /**
@@ -107,8 +108,19 @@ export class KitchenConfirmModalComponent {
    */
   private readonly unitsByItem = signal<Map<number, number>>(new Map());
 
+  /**
+   * Notas de preparación por order_item_id.
+   * Se inicializan desde `preview().items[].notes` y pueden ser editadas/agregadas.
+   */
+  private readonly notesByItem = signal<Map<number, string>>(new Map());
+
+  /**
+   * Ids de ítems cuyo campo textarea de nota está expandido para edición.
+   */
+  private readonly openNotesByItem = signal<Set<number>>(new Set());
+
   constructor() {
-    // Reset al reabrir: sin esto las exclusiones del envío anterior se filtran al
+    // Reset al reabrir: sin esto las exclusiones y notas del envío anterior se filtran al
     // siguiente y se excluye un insumo que nadie desmarcó en ESTE envío.
     effect(() => {
       if (this.isOpen()) {
@@ -125,6 +137,16 @@ export class KitchenConfirmModalComponent {
         this.excluded.set(next);
         this.collapsed.set(new Set());
         this.unitsByItem.set(new Map());
+
+        // Inicializar notas con lo que ya venía en el preview
+        const notesMap = new Map<number, string>();
+        for (const item of this.items()) {
+          if (item.notes && item.notes.trim()) {
+            notesMap.set(item.order_item_id, item.notes.trim());
+          }
+        }
+        this.notesByItem.set(notesMap);
+        this.openNotesByItem.set(new Set());
       }
     });
   }
@@ -135,13 +157,27 @@ export class KitchenConfirmModalComponent {
 
   readonly hasItems = computed(() => this.items().length > 0);
 
-  /** ¿Alguien desmarcó algo? Decide el texto del botón y el aviso de costo. */
+  /** ¿Alguien desmarcó algo? Decide el texto del botón y el aviso. */
   readonly hasAnyExclusion = computed(() => {
     for (const set of this.excluded().values()) {
       if (set.size > 0) return true;
     }
     return false;
   });
+
+  /** ¿Alguien editó o agregó una nota respecto al valor original del preview? */
+  readonly hasAnyNoteChange = computed(() => {
+    for (const item of this.items()) {
+      const orig = (item.notes ?? '').trim();
+      const current = (this.notesByItem().get(item.order_item_id) ?? '').trim();
+      if (orig !== current) return true;
+    }
+    return false;
+  });
+
+  readonly hasAnyChanges = computed(
+    () => this.hasAnyExclusion() || this.hasAnyNoteChange(),
+  );
 
   readonly excludedCount = computed(() => {
     let total = 0;
@@ -253,6 +289,36 @@ export class KitchenConfirmModalComponent {
     return Array.from({ length: item.quantity }, (_, i) => i + 1);
   }
 
+  /** Nota de preparación actual para este ítem. */
+  notesFor(itemId: number): string {
+    return this.notesByItem().get(itemId) ?? '';
+  }
+
+  /** Indica si el campo textarea de la nota está desplegado para edición. */
+  isNoteOpen(itemId: number): boolean {
+    return this.openNotesByItem().has(itemId);
+  }
+
+  /** Alterna la apertura/cierre del campo textarea de la nota. */
+  toggleNote(itemId: number): void {
+    this.openNotesByItem.update((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  }
+
+  /** Actualiza el contenido de la nota para este ítem. */
+  setNote(itemId: number, value: string): void {
+    this.notesByItem.update((prev) => {
+      const next = new Map(prev);
+      if (value) next.set(itemId, value);
+      else next.delete(itemId);
+      return next;
+    });
+  }
+
   onConfirm(): void {
     const payload: FireItemExclusion[] = [];
     for (const [orderItemId, set] of this.excluded()) {
@@ -270,9 +336,24 @@ export class KitchenConfirmModalComponent {
         });
       }
     }
-    // Se emite el arreglo vacío cuando no hay exclusiones: el backend lo trata
-    // como "todos los componentes marcados" y no hay que inventar un caso aparte.
-    this.confirmed.emit(payload);
+
+    const itemNotes: Array<{ order_item_id: number; notes: string }> = [];
+    for (const item of this.items()) {
+      const current = this.notesFor(item.order_item_id).trim();
+      const original = (item.notes ?? '').trim();
+      // Si tiene nota o si tenía una original y fue borrada/cambiada, se incluye para actualizarla
+      if (current || original) {
+        itemNotes.push({
+          order_item_id: item.order_item_id,
+          notes: current,
+        });
+      }
+    }
+
+    this.confirmed.emit({
+      exclusions: payload,
+      item_notes: itemNotes.length > 0 ? itemNotes : undefined,
+    });
   }
 
   onCancel(): void {

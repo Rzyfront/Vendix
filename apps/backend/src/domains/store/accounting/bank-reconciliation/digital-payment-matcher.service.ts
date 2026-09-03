@@ -24,6 +24,14 @@ export class DigitalPaymentMatcherService {
    * 1. Pass 1 (High confidence 0.95): Match by gateway transaction_id in payment's gateway_response
    * 2. Pass 2 (Medium confidence 0.80): Match by exact amount + date within ±2 days
    * 3. Pass 3 (Low confidence 0.60): Match by approximate amount (±1%) + date within ±3 days
+   *
+   * STATUS (QUI-728+): este servicio está REGISTRADO en `accounting.module.ts`
+   * pero ningún controller lo inyecta (`grep -rn DigitalPaymentMatcherService
+   * apps/backend/src` solo encuentra el module y un comentario). Compila, pero
+   * no se invoca desde ningún request. La relación `payment_methods` previa
+   * no existe en el schema (`payments` alcanza el método vía
+   * `store_payment_method.system_payment_method.type`); antes del fix, la
+   * primera llamada en runtime hubiera devuelto `PrismaClientValidationError` 500.
    */
   async findMatches(params: {
     reconciliation_id: number;
@@ -39,14 +47,20 @@ export class DigitalPaymentMatcherService {
     const payments = await this.prisma.payments.findMany({
       where: {
         state: 'succeeded',
-        payment_methods: { type: { in: digital_methods } },
+        store_payment_method: {
+          system_payment_method: { type: { in: digital_methods } },
+        },
         paid_at: {
           ...(params.date_from && { gte: params.date_from }),
           ...(params.date_to && { lte: params.date_to }),
         },
       },
       include: {
-        payment_methods: { select: { type: true } },
+        store_payment_method: {
+          select: {
+            system_payment_method: { select: { type: true } },
+          },
+        },
       },
     });
 
@@ -96,7 +110,7 @@ export class DigitalPaymentMatcherService {
             match_type: 'transaction_id',
             payment_amount: Number(payment.amount),
             transaction_amount: Number(matching_txn.amount),
-            payment_method: payment.payment_methods?.type || 'unknown',
+            payment_method: payment.store_payment_method?.system_payment_method?.type || 'unknown',
           });
           matched_payment_ids.add(payment.id);
           matched_transaction_ids.add(matching_txn.id);
@@ -132,7 +146,7 @@ export class DigitalPaymentMatcherService {
           match_type: 'amount_date',
           payment_amount,
           transaction_amount: Number(matching_txn.amount),
-          payment_method: payment.payment_methods?.type || 'unknown',
+          payment_method: payment.store_payment_method?.system_payment_method?.type || 'unknown',
         });
         matched_payment_ids.add(payment.id);
         matched_transaction_ids.add(matching_txn.id);
@@ -169,7 +183,7 @@ export class DigitalPaymentMatcherService {
           match_type: 'reference',
           payment_amount,
           transaction_amount: Number(matching_txn.amount),
-          payment_method: payment.payment_methods?.type || 'unknown',
+          payment_method: payment.store_payment_method?.system_payment_method?.type || 'unknown',
         });
         matched_payment_ids.add(payment.id);
         matched_transaction_ids.add(matching_txn.id);
@@ -198,14 +212,20 @@ export class DigitalPaymentMatcherService {
     const payments = await this.prisma.payments.findMany({
       where: {
         state: 'succeeded',
-        payment_methods: { type: { in: digital_methods } },
+        store_payment_method: {
+          system_payment_method: { type: { in: digital_methods } },
+        },
         paid_at: {
           ...(params.date_from && { gte: params.date_from }),
           ...(params.date_to && { lte: params.date_to }),
         },
       },
       include: {
-        payment_methods: { select: { type: true } },
+        store_payment_method: {
+          select: {
+            system_payment_method: { select: { type: true } },
+          },
+        },
       },
     });
 
@@ -213,7 +233,7 @@ export class DigitalPaymentMatcherService {
     let total_amount = 0;
 
     for (const payment of payments) {
-      const method = payment.payment_methods?.type || 'unknown';
+      const method = payment.store_payment_method?.system_payment_method?.type || 'unknown';
       if (!by_method[method]) by_method[method] = { count: 0, amount: 0 };
       by_method[method].count++;
       by_method[method].amount += Number(payment.amount);

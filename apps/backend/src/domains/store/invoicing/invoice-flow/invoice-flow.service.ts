@@ -4,7 +4,10 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { FiscalGateService } from '../../../../common/services/fiscal-gate.service';
-import { TechnicalKeyVaultService } from '../../../../common/services/technical-key-vault.service';
+import {
+  StoredTechnicalKey,
+  TechnicalKeyVaultService,
+} from '../../../../common/services/technical-key-vault.service';
 import { RESOLUTION_PUBLIC_SELECT } from '../utils/technical-key.util';
 import {
   VendixHttpException,
@@ -77,13 +80,18 @@ import { resolveInvoiceControl } from '../../../../common/helpers/invoice-contro
 // declara piezas donde hubo kilos. La versión que devuelve `null` permite
 // rechazar el documento en vez de emitirlo con una unidad inventada.
 import { resolveUneceUnitCodeStrict } from '../../products/services/uom-uncefact.util';
-import { toCustomerInvoiceData } from '../utils/customer-invoice-data.adapter';
+import {
+  CUSTOMER_FOR_INVOICE_SELECT,
+  toCustomerInvoiceData,
+} from '../utils/customer-invoice-data.adapter';
+import { onlyDigits } from '../../../../common/utils/nit.util';
 import {
   AcquirerIdentificationMode,
   CustomerFiscalIdentityFinding,
   CustomerFiscalIdentityInput,
   CustomerFiscalIdentityReport,
   CustomerFiscalIdentityValidator,
+  DIAN_FINAL_CONSUMER_DOCUMENT_NUMBER,
 } from '../validators/customer-fiscal-identity.validator';
 import {
   FiscalDocumentFinding,
@@ -97,48 +105,37 @@ import {
   isFiscalDocumentType,
   toFiscalDocumentType,
 } from '../fiscal-document-requirements';
+import type {
+  DraftEmitReadinessReport,
+  EmitReadinessFinding,
+  EmitReadinessVerdict,
+} from './emit-readiness.contract';
 
 /**
- * Un hallazgo de `emit-readiness`, venga de la puerta que venga.
- *
- * Las dos puertas producen la MISMA forma útil para la pantalla —`code`,
- * `severity`, `field`, `problem`, `fix`— y difieren sólo en el universo de
- * `code` y en que el fiscal añade `category` y la regla del Anexo. La unión se
- * declara para que las listas aplanadas de {@link EmitReadinessReport} puedan
- * llevar los dos sin que ninguna se quede fuera por tipo.
+ * Re-export del hallazgo unificado. La definición vive en
+ * `emit-readiness.contract.ts`, junto al veredicto que la usa, para que la
+ * puerta del borrador (`validate-draft`) y la del documento persistido
+ * (`:id/emit-readiness`) no puedan derivar. Se re-exporta acá porque este
+ * archivo es el que los consumidores ya importaban.
  */
-export type EmitReadinessFinding =
-  | CustomerFiscalIdentityFinding
-  | FiscalDocumentFinding;
+export type { EmitReadinessFinding, DraftEmitReadinessReport };
 
 /**
  * Lo que responde `GET /store/invoicing/:id/emit-readiness`.
  *
- * `findings`/`blockers`/`warnings` en la raíz llevan la UNIÓN de las dos
- * puertas —identidad del adquiriente y prevalidación fiscal— porque `emittable`
- * también es el AND de las dos: publicar un `emittable:false` cuya lista de
- * requisitos sólo mira una de ellas deja al usuario sin nada que corregir.
- * `identity` y `fiscal_document` conservan cada informe entero para quien
- * necesite saber de qué puerta salió cada hallazgo.
+ * Es {@link EmitReadinessVerdict} —el núcleo común con `validate-draft`— MÁS lo
+ * que sólo tiene sentido sobre una fila ya escrita, y con los campos de
+ * identidad además APLANADOS en la raíz (contrato heredado que se conserva a
+ * propósito: el formulario ya lo consume así).
  */
 export type EmitReadinessReport = Omit<
   CustomerFiscalIdentityReport,
-  'findings' | 'blockers' | 'warnings'
-> & {
-  findings: EmitReadinessFinding[];
-  blockers: EmitReadinessFinding[];
-  warnings: EmitReadinessFinding[];
+  'findings' | 'blockers' | 'warnings' | 'emittable'
+> &
+  EmitReadinessVerdict & {
   invoice_id: number;
   invoice_number: string;
   status: string;
-  has_items: boolean;
-  /** El informe de identidad SIN aplanar, para leerlo sin ambigüedad. */
-  identity: CustomerFiscalIdentityReport;
-  /**
-   * El veredicto de prevalidación fiscal, o `null` cuando el `invoice_type` no
-   * se emite a la DIAN y por tanto no hay nada que prevalidar.
-   */
-  fiscal_document: FiscalDocumentReport | null;
   /**
    * Las transiciones legales desde el estado actual — lo mismo que aplica
    * `validateTransition`.
@@ -435,32 +432,11 @@ const INVOICE_INCLUDE = {
   invoice_taxes: true,
   resolution: { select: RESOLUTION_PUBLIC_SELECT },
   customer: {
-    // Step 8 — Anexo 19 wiring. The customer fields here are the contract the
-    // customer-invoice-data.adapter consumes; `person_type`, `tax_regime`,
-    // `fiscal_responsibilities`, `ciiu_code`, `verification_digit`, `legal_name`
-    // and `is_withholding_agent` were added by Steps 1–2 of the plan so the
-    // UBL builder can emit the structural / catalogue fields Anexo 19 expects.
-    //
-    // `addresses` returns the primary address only — the adapter copies
-    // `addresses[0]` into `customer_address`, and pulling any more rows would
-    // be wasted scope on every `send()` / `accept()` call.
-    select: {
-      id: true,
-      first_name: true,
-      last_name: true,
-      legal_name: true,
-      email: true,
-      phone: true,
-      document_type: true,
-      document_number: true,
-      verification_digit: true,
-      tax_regime: true,
-      person_type: true,
-      fiscal_responsibilities: true,
-      ciiu_code: true,
-      is_withholding_agent: true,
-      addresses: { take: 1, orderBy: { is_primary: 'desc' } },
-    },
+    // Step 8 — Anexo 19 wiring. La lista de campos vive en
+    // `CUSTOMER_FOR_INVOICE_SELECT`, junto al tipo que produce, porque la
+    // comparte con la proyección de borrador (`buildDraftProjection`). Ver el
+    // docblock de esa constante.
+    select: CUSTOMER_FOR_INVOICE_SELECT,
   },
   supplier: {
     select: {
@@ -1362,6 +1338,81 @@ export class InvoiceFlowService {
   }
 
   /**
+   * LO MISMO, PERO ANTES DE QUE EXISTA LA FACTURA.
+   *
+   * `getEmitReadiness` sólo se puede consultar sobre una fila ya escrita, y en
+   * el carril avanzado esa fila NACE con su consecutivo autorizado puesto
+   * (`InvoicingService.create` llama a `generateNextNumber` justo antes del
+   * INSERT). Consecuencia: hasta acá, la única forma de saber si un documento
+   * iba a poder emitirse era crearlo — y si no podía, el número ya estaba
+   * gastado y Vendix no tiene forma de explicarle a la DIAN un hueco de
+   * numeración.
+   *
+   * Esta puerta juzga una PROYECCIÓN en memoria del documento —la que arma
+   * `InvoicingService.buildDraftProjection` a partir del mismo DTO que crearía
+   * la factura— con los MISMOS dos validadores y los MISMOS constructores de
+   * entrada (`buildAcquirerIdentityInput`, `buildFiscalDocumentInput`). Reusar
+   * los constructores es el punto entero: una segunda lista de requisitos
+   * escrita aparte se desincroniza el primer día y la pantalla acabaría
+   * diciendo «todo listo» sobre algo que `validate()` rechaza un clic después.
+   *
+   * NO ESCRIBE NADA y NO NUMERA. El número que lleva la proyección es el que
+   * `generateNextNumber` asignaría (`prefix` + siguiente cursor), calculado por
+   * lectura: sirve para que la regla de rango del prevalidador tenga algo real
+   * que medir, y se descarta con la proyección.
+   *
+   * ## Qué NO contesta esta puerta
+   *
+   * Las puertas de datos del request —periodo fiscal cerrado, aritmética que no
+   * cuadra, perfil inactivo, régimen AIU contradictorio, cliente de otro
+   * tenant— NO se convierten en hallazgos: se dejan LANZAR desde
+   * `buildDraftProjection`, con el mismo `VendixHttpException` y el mismo texto
+   * que devolvería «Crear factura». Traducirlas a una lista de requisitos
+   * exigiría un catálogo de códigos paralelo al de los dos validadores, y ese
+   * catálogo se desincronizaría del mensaje real que el usuario ve al crear —
+   * que es precisamente el desenlace que esta pantalla existe para evitar.
+   */
+  async getDraftEmitReadiness(
+    invoice: any,
+    options: {
+      /**
+       * La fila de `invoice_resolutions` con sus DOS columnas de clave, tal
+       * como salió de la base. Se recibe cruda y se abre ACÁ, con el mismo
+       * vault que usa `revealResolutionTechnicalKey`, para que la ClTec en
+       * claro no exista fuera de este servicio ni pase por el controlador.
+       * `null` cuando no hay resolución que respalde el documento.
+       */
+      resolution_secret: StoredTechnicalKey | null;
+    },
+  ): Promise<DraftEmitReadinessReport> {
+    const identity = this.acquirerIdentity.validate(
+      this.buildAcquirerIdentityInput(invoice),
+    );
+    // Por la BÓVEDA, no por la columna plana: mismo motivo que en
+    // `revealResolutionTechnicalKey`. Validar una clave distinta de la que se
+    // va a hashear es lo que dejó pasar la ClTec de 38 caracteres.
+    const fiscal_document = await this.runFiscalDocumentPrevalidation(
+      invoice,
+      undefined,
+      this.technicalKeyVault.reveal(options.resolution_secret),
+    );
+
+    const verdict: EmitReadinessVerdict = {
+      // MISMO AND que `getEmitReadiness`. Un `emittable` que mirara una sola
+      // puerta dejaría al usuario con «no se puede emitir» y la lista vacía.
+      emittable: identity.emittable && (fiscal_document?.emittable ?? true),
+      findings: [...identity.findings, ...(fiscal_document?.findings ?? [])],
+      blockers: [...identity.blockers, ...(fiscal_document?.blockers ?? [])],
+      warnings: [...identity.warnings, ...(fiscal_document?.warnings ?? [])],
+      has_items: (invoice.invoice_items?.length ?? 0) > 0,
+      identity,
+      fiscal_document,
+    };
+
+    return verdict;
+  }
+
+  /**
    * ÚNICO PUNTO DE ESTE ARCHIVO DONDE LA ClTec ENTRA EN MEMORIA.
    *
    * `INVOICE_INCLUDE` ya NO la trae: publicarla en toda respuesta de facturación
@@ -1424,6 +1475,21 @@ export class InvoiceFlowService {
    */
   private async runFiscalDocumentPrevalidation(
     invoice: any,
+    /**
+     * Ver {@link FiscalDocumentValidationInput.signing_date}. `undefined` en
+     * todo llamador salvo el reenvío de un `rejected` en `send()`.
+     */
+    signing_date?: Date | null,
+    /**
+     * ClTec YA revelada por el llamador. Sólo la aporta la puerta del borrador
+     * (`getDraftEmitReadiness`), porque su documento todavía no tiene fila y
+     * `revealResolutionTechnicalKey` lee POR `invoice.id`. Se distingue
+     * `undefined` («no la aportó, léela») de `null` («la busqué y no hay»):
+     * colapsar los dos haría que un borrador sin clave cayera a la lectura por
+     * id, encontrara `null` de todos modos y ocultara que el llamador ya lo
+     * sabía.
+     */
+    revealed_technical_key?: string | null,
   ): Promise<FiscalDocumentReport | null> {
     const document_type = this.resolveFiscalDocumentType(invoice);
     if (!document_type) return null;
@@ -1440,7 +1506,10 @@ export class InvoiceFlowService {
     // clave de 38 caracteres antes de gastar el consecutivo, y sin cargarla acá
     // esa regla se apagaría en silencio contra un `undefined` — el peor de los
     // desenlaces, porque el documento pasaría la puerta y lo rechazaría la DIAN.
-    const technical_key = await this.revealResolutionTechnicalKey(invoice.id);
+    const technical_key =
+      revealed_technical_key !== undefined
+        ? revealed_technical_key
+        : await this.revealResolutionTechnicalKey(invoice.id);
 
     return this.fiscalDocument.validate(
       this.buildFiscalDocumentInput(
@@ -1449,6 +1518,7 @@ export class InvoiceFlowService {
         timezone,
         unit_code_by_item,
         technical_key,
+        signing_date,
       ),
     );
   }
@@ -1460,18 +1530,60 @@ export class InvoiceFlowService {
    * no decir algo falso— pero sí se registran: son la lista de lo que hoy se
    * emite a medias.
    */
-  private async assertFiscalDocumentEmittable(invoice: any): Promise<void> {
-    const report = await this.runFiscalDocumentPrevalidation(invoice);
+  private async assertFiscalDocumentEmittable(
+    invoice: any,
+    options?: {
+      /**
+       * Ver {@link FiscalDocumentValidationInput.signing_date}. Sólo lo pasa
+       * `send()`, con `new Date()`, al revalidar un reenvío `rejected`.
+       */
+      signing_date?: Date | null;
+      /**
+       * Verbo del mensaje de error («validar» por defecto). `send()` pasa
+       * «reenviar» para que el cajero no lea «no se puede validar» sobre un
+       * documento que ya está `rejected` y validado hace rato.
+       */
+      action_label?: string;
+      /**
+       * `true` SÓLO cuando `send()` revalida un reenvío `rejected` (ver su
+       * único call site). Existe porque el `fix` genérico de `FAD09e`
+       * (`ISSUE_DATE_AFTER_SIGNING_DATE`) le dice al operador «actualiza la
+       * fecha de emisión en {SCREEN_DOCUMENT_HEADER}» — instrucción correcta
+       * cuando `validate()` la lanza sobre un `draft` editable, pero
+       * IRREALIZABLE aquí: `InvoicingService.update()` rechaza cualquier
+       * factura que no esté en `draft`, y `VALID_TRANSITIONS.rejected` no
+       * contempla volver a `draft`. Sin este flag el operador recibía una
+       * orden que no podía ejecutar y el documento quedaba varado.
+       */
+      is_resend?: boolean;
+    },
+  ): Promise<void> {
+    const report = await this.runFiscalDocumentPrevalidation(
+      invoice,
+      options?.signing_date,
+    );
     if (!report) return;
 
     if (!report.emittable) {
       const blocker = this.pickLeadingBlocker(report.blockers);
       const error_code =
         InvoiceFlowService.PREVALIDATION_ERROR_CODES[blocker.category];
+      const action = options?.action_label ?? 'validar';
+      // Ver el docblock de `options.is_resend`: el texto genérico de
+      // `fiscal-document.validator.ts` no cambia (sigue sirviendo a
+      // `validate()` sobre un `draft`), sólo se sustituye lo que se le
+      // muestra al operador en ESTE camino, donde esa instrucción es
+      // imposible de seguir. El consecutivo ya se pierde en los dos caminos
+      // (reenvío rechazado de nuevo, o anulación) — anular es el que además
+      // deja al operador con un camino real hacia adelante.
+      const fix =
+        options?.is_resend && blocker.code === 'ISSUE_DATE_AFTER_SIGNING_DATE'
+          ? 'Este documento ya fue rechazado por la DIAN y su fecha de emisión ya no se puede editar. Anúlalo y emite uno nuevo con la fecha de hoy.'
+          : blocker.fix;
 
       throw new VendixHttpException(
         error_code,
-        `No se puede validar el documento: ${blocker.problem} ${blocker.fix}`,
+        `No se puede ${action} el documento: ${blocker.problem} ${fix}`,
         {
           invoice_id: invoice.id,
           document_type: report.document_type,
@@ -1552,6 +1664,14 @@ export class InvoiceFlowService {
      * omitirla y apagar la regla `technical_key` del prevalidador sin notarlo.
      */
     technical_key: string | null,
+    /**
+     * Instante de firma — SÓLO lo aporta `send()` al revalidar un reenvío
+     * `rejected`, y con `new Date()` porque ahí «ahora» sí es el momento real
+     * de la firma (ver {@link FiscalDocumentValidationInput.signing_date}).
+     * `validate()` sigue sin pasarlo: la regla `FAD09e` se queda dormida ahí a
+     * propósito.
+     */
+    signing_date?: Date | null,
   ): FiscalDocumentValidationInput {
     // El validador tiene que juzgar la MISMA línea que se va a emitir. Si el
     // emisor despeja el precio de una línea inclusiva y el validador no, el
@@ -1563,6 +1683,12 @@ export class InvoiceFlowService {
       document_type,
       invoice_number: invoice.invoice_number,
       issue_date: invoice.issue_date,
+      // Ver el docblock del parámetro `signing_date` de esta función: sin
+      // esta línea el parámetro llegaba, pero el objeto que de verdad juzga
+      // `FiscalDocumentValidator` nunca lo llevaba puesto, y `checkSigningDate`
+      // se apagaba en silencio (`if (!signing_date || !issue_date) return [];`)
+      // incluso en el único llamador que sí lo aporta.
+      signing_date,
       timezone,
       currency: invoice.currency,
       operation_type: invoice.operation_type,
@@ -1650,8 +1776,30 @@ export class InvoiceFlowService {
       invoice.supplier?.tax_id ??
       null;
 
+    // El número oficial de Consumidor Final cuenta como «sin identificar» aun
+    // cuando SÍ viaja un valor: desde que `InvoicingService.createFromOrder`
+    // persiste la identidad resuelta por `resolveAcquirerRail`, una venta
+    // anónima de mostrador guarda `customer_tax_id = '222222222222'` en vez de
+    // dejarlo vacío — a propósito, para que `dian-direct.provider.ts` lo
+    // reconozca como consumidor final en `send()`. Si aquí sólo se mirara
+    // `!document_number`, esa misma venta llegaría en modo `nominative` y
+    // `CustomerFiscalIdentityValidator` la bloquearía con
+    // `IMPLICIT_FINAL_CONSUMER` — el documento se quedaría atascado en `draft`
+    // por una identidad que en realidad SÍ es válida.
+    const is_final_consumer_sentinel =
+      onlyDigits(document_number) === DIAN_FINAL_CONSUMER_DOCUMENT_NUMBER;
+
+    // El sentinel MANDA sobre `customer_id`. Una venta con alias crea una fila
+    // de cliente por nombre (`POST /store/customers/resolve` con
+    // `matched_by: 'name'`) que no trae documento, así que la orden llega con
+    // `customer_id` poblado y `resolveAcquirerRail` resuelve consumidor final.
+    // Si `customer_id` pudiera vetar al sentinel, esa venta caería en modo
+    // `nominative` y `IMPLICIT_FINAL_CONSUMER` la bloquearía — con el
+    // consecutivo ya tomado. Un cliente sin documento identificatorio no es un
+    // adquiriente nominativo ante la DIAN por el mero hecho de tener fila.
     const mode: AcquirerIdentificationMode =
-      !invoice.customer_id && !document_number && !invoice.supplier_id
+      is_final_consumer_sentinel ||
+      (!invoice.customer_id && !invoice.supplier_id && !document_number)
         ? 'final_consumer'
         : 'nominative';
 
@@ -2937,6 +3085,31 @@ export class InvoiceFlowService {
     const invoice = await this.getInvoice(id);
     await this.assertInvoicingAreaActive(invoice);
     this.validateTransition(invoice.status, 'sent');
+
+    // REENVÍO DE UN RECHAZO — `rejected -> sent` es una transición LEGAL en
+    // `VALID_TRANSITIONS`, pero legal no es lo mismo que revisada. Hasta acá
+    // `assertFiscalDocumentEmittable` sólo corría dentro de `validate()`
+    // (draft -> validated), así que un documento que la DIAN ya rechazó podía
+    // reenviarse sin pasar por NINGUNA puerta de validación fiscal — y el
+    // consecutivo ya está gastado una vez; un segundo rechazo lo deja como un
+    // segundo hueco irrecuperable en la numeración autorizada.
+    //
+    // Se revalida con la MISMA puerta que usa `validate()`, y esta vez SÍ con
+    // `signing_date: new Date()`: es el único punto de toda la cadena de
+    // emisión donde «ahora» no es una invención — el proveedor va a firmar el
+    // documento segundos después—, así que es también el único punto donde
+    // `FAD09e` (`cbc:IssueDate` == fecha de firma) se puede juzgar sin
+    // arriesgar un falso positivo. Un documento `rejected` que lleva días
+    // esperando corrección es precisamente el candidato más probable a violar
+    // esa regla.
+    if (invoice.status === 'rejected') {
+      await this.assertFiscalDocumentEmittable(invoice, {
+        signing_date: new Date(),
+        action_label: 'reenviar',
+        is_resend: true,
+      });
+    }
+
     await this.assertFiscalPeriodOpen(
       invoice.accounting_entity_id,
       invoice.issue_date,
@@ -3230,6 +3403,17 @@ export class InvoiceFlowService {
       // `|| undefined` porque `ProviderInvoiceData` declara ausencia como
       // `undefined`, no como `null`.
       note_concept_code: invoice.note_concept_code || undefined,
+      // CARRIL COMERCIAL — decide cuánto puede exigirle la emisión al
+      // adquiriente antes de negarse a emitir. Una factura que nace de una
+      // `order` o de una `sales_order` es una venta bajo demanda: punto de
+      // venta, mesa o tienda en línea. Ahí al comprador se le piden tipo y
+      // número de documento, nombres, apellidos y correo — sin dirección ni
+      // municipio, a propósito—, y la venta SIEMPRE tiene que poder emitir.
+      // Sin `order_id` ni `sales_order_id` el documento nació en el módulo de
+      // facturación electrónica, con el cliente creado por completo, y ahí sí
+      // se exige la identidad fiscal entera.
+      sale_rail:
+        invoice.order_id || invoice.sales_order_id ? 'on_demand' : 'advanced',
     };
 
     if (

@@ -13,6 +13,7 @@ import { RouterModule, ActivatedRoute, Router } from '@angular/router';
 import { AccountService, OrderDetail } from '../../../services/account.service';
 import { EcommerceBookingService } from '../../../services/ecommerce-booking.service';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { RescheduleModalComponent } from '../../../../store/reservations/components/reschedule-modal/reschedule-modal.component';
@@ -25,6 +26,7 @@ import { parseVariantAttributes } from '../../../../../../shared/utils';
     CommonModule,
     RouterModule,
     IconComponent,
+    BadgeComponent,
     CurrencyPipe,
     RescheduleModalComponent,
   ],
@@ -542,6 +544,31 @@ if (this.wompiPollTimer) {
       return attrs.map(a => (a.name ? `${a.name}: ${a.value}` : a.value)).join(' · ');
     }
     return item?.variant_sku || '';
+  }
+
+  // === E2 — helpers de cancelación de línea =================================
+
+  /**
+   * True si el item fue cancelado (soft cancel vía D2). El backend persiste
+   * `cancelled_at` en order_items; el cliente ve el item en su posición
+   * original, tachado, con distintivo 'Cancelado'.
+   */
+  isItemCancelled(item: { cancelled_at?: string | null }): boolean {
+    return !!item?.cancelled_at;
+  }
+
+  /**
+   * El motivo se muestra al cliente SOLO si aporta. Filtra:
+   *  - Vacío / null / solo espacios.
+   *  - Marcador interno `legacy:` que dejó la ruta vieja de compatibilidad.
+   */
+  hasVisibleCancellationReason(item: {
+    cancellation_reason?: string | null;
+  }): boolean {
+    const reason = (item?.cancellation_reason ?? '').trim();
+    if (!reason) return false;
+    if (reason.startsWith('legacy:')) return false;
+    return true;
   }
 
   getStateLabel(state: string): string {

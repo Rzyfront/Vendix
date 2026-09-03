@@ -151,6 +151,16 @@ export type AdminTablesEvent =
       type: 'session_opened';
       data: Record<string, unknown>;
       ts?: number;
+    }
+  | {
+      // Cambio de estado o metadatos de mesa (limpieza, disponible, reservada, etc.)
+      type:
+        | 'table_status_changed'
+        | 'table_updated'
+        | 'table_created'
+        | 'table_deleted';
+      data: Record<string, unknown>;
+      ts?: number;
     };
 
 /**
@@ -361,27 +371,17 @@ export class AdminTablesSseService {
       return;
     }
 
-    // `session_opened` is TABLE-scoped, not session-scoped: trigger the
-    // floor-map refetch BEFORE the sessionId guard drops it. The new
-    // session's id won't be in `tablesLive` yet (it's only hydrated by
-    // the snapshot), so we need the refetch to pick it up.
-    if (event.type === 'session_opened') {
-      void this.handleSessionOpened(event);
-      return;
-    }
-
-    // `session_closed` (Restaurant Suite / POS cash-out, comensal
-    // `close_tab`): the backend has already flipped `tables.status` to
-    // `cleaning` and stamped `table_sessions.closed_at` BEFORE emitting.
-    // The badge change lives on `TablesService.tables()` (NOT in
-    // `tablesLive`), so the only thing that can refresh the floor page is
-    // a `getFloorMap()` refetch. Like `session_opened`, the closed
-    // session's id may not be in `tablesLive` if the operator reloaded
-    // the page mid-session — so we trigger the refetch BEFORE the
-    // sessionId guard rather than mutating the live map (which no longer
-    // represents the post-close state anyway).
-    if (event.type === 'session_closed') {
-      void this.handleSessionClosed(event);
+    // Transiciones de estado de mesas y sesiones: disparan un refetch inmediato
+    // del plano de mesas para que todas las pantallas reflejen el estado en vivo.
+    if (
+      event.type === 'session_opened' ||
+      event.type === 'session_closed' ||
+      event.type === 'table_status_changed' ||
+      event.type === 'table_updated' ||
+      event.type === 'table_created' ||
+      event.type === 'table_deleted'
+    ) {
+      void this.handleFloorTransition(event);
       return;
     }
 
@@ -495,36 +495,11 @@ export class AdminTablesSseService {
   }
 
   /**
-   * `session_opened` es table-scoped (no session-scoped): cuando llega,
-   * la mesa afectada pasa a `occupied` con sesión activa — el floor-page
-   * debe refrescar para reflejar el cambio. Como el `tablesLive` map se
-   * hidrata desde `snapshot`, lo más correcto es forzar un refetch del
-   * floor map (que ya incluye `current_session_id` por mesa) y dejar que
-   * el siguiente `snapshot` re-pueble el map.
-   *
-   * También bumpeamos `lastEventAt` para que la UI sepa "algo se movió"
-   * (consistente con el patrón de `bill.requested` / `kitchen.*`).
+   * Transición del plano de mesas (apertura, cierre, cambio de estado,
+   * creación o eliminación de mesa): refresca el plano llamando a
+   * `getFloorMap()`, que actualiza la señal reactiva `TablesService.floorTables`.
    */
-  private async handleSessionOpened(event: AdminTablesEvent): Promise<void> {
-    if (event.type !== 'session_opened') return;
-    this.lastEventAt.set(new Date());
-    await this.refetchFloorMap();
-  }
-
-  /**
-   * Mirror of `handleSessionOpened` for the close path. The backend
-   * already committed `tables.status = 'cleaning'` and stamped
-   * `table_sessions.closed_at` BEFORE emitting this event (see
-   * `PaymentsService.applyPosPaymentToTableSession` and
-   * `TableSessionsService.closeSession`). The badge change on the floor
-   * page is driven by `TablesService.tables()`, which the SSE event
-   * itself does NOT mutate — only `getFloorMap()` does. Without this
-   * refetch the operator sees the pre-close badge for up to 10s (until
-   * the manual-mode polling tick catches up) and may double-fire a
-   * payment on what looks like an open table.
-   */
-  private async handleSessionClosed(event: AdminTablesEvent): Promise<void> {
-    if (event.type !== 'session_closed') return;
+  private async handleFloorTransition(event: AdminTablesEvent): Promise<void> {
     this.lastEventAt.set(new Date());
     await this.refetchFloorMap();
   }

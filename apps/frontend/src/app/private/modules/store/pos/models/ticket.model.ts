@@ -33,6 +33,7 @@ export interface TicketItem {
 
 export interface TicketData {
   id: string;
+  orderId?: number;
   date: Date;
   items: TicketItem[];
   subtotal: number;
@@ -52,6 +53,13 @@ export interface TicketData {
      * the order's shipping address. Omitted for counter POS sales (no address).
      */
     shippingAddress?: string;
+    /**
+     * [print-fiscal-gate] — alias capturado al cierre de la venta ("Mesa 5",
+     * "Cliente mostrador", etc.). El renderer del tiquete lo prefiere sobre
+     * `name` cuando está presente, con el distintivo de "Consumidor Final"
+     * al lado si el alias coincide con el placeholder.
+     */
+    customerAlias?: string | null;
   };
   store?: {
     name: string;

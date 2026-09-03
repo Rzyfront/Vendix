@@ -25,8 +25,8 @@ import { environment } from '../../../../../../../../environments/environment';
 import {
   BadgeComponent,
   ButtonComponent,
-  CardComponent,
   IconComponent,
+  InputsearchComponent,
   SelectorComponent,
 } from '../../../../../../../shared/components';
 import type { SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
@@ -49,8 +49,8 @@ interface SearchResponse {
     FormsModule,
     BadgeComponent,
     ButtonComponent,
-    CardComponent,
     IconComponent,
+    InputsearchComponent,
     SelectorComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -121,29 +121,24 @@ interface SearchResponse {
         <!-- Estado: Búsqueda Interactiva -->
         <div class="space-y-2 relative">
           <div class="grid grid-cols-1 sm:grid-cols-[1fr_160px] gap-2">
-            <div class="relative">
-              <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-text-secondary">
-                <app-icon name="search" [size]="16" />
-              </div>
-              <input
-                type="text"
-                class="w-full pl-9 pr-8 py-2 text-xs md:text-sm border border-border rounded-lg bg-surface text-text-primary placeholder:text-text-secondary focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary transition-colors"
-                placeholder="Buscar por nombre, razón social, NIT o slug..."
-                [ngModel]="searchQuery()"
-                (ngModelChange)="onSearchChange($event)"
-                (focus)="onInputFocus()"
-                autocomplete="off"
-              />
-              @if (searchQuery().length > 0) {
-                <button
-                  type="button"
-                  class="absolute inset-y-0 right-0 pr-2.5 flex items-center text-text-secondary hover:text-text-primary"
-                  (click)="onClearQuery()"
-                >
-                  <app-icon name="x" [size]="14" />
-                </button>
-              }
-            </div>
+            <!--
+              Buscador del sistema en lugar del <input> suelto que había acá:
+              trae el icono, el botón de limpiar, los tamaños y el foco del
+              resto del panel. El debounce se deja en 0 a propósito porque el
+              pipeline de este componente ya tiene su propio debounceTime(250);
+              con los dos activos la lista tardaba medio segundo largo en
+              moverse y parecía colgada.
+            -->
+            <app-inputsearch
+              type="search"
+              size="sm"
+              placeholder="Buscar por nombre, razón social, NIT o slug..."
+              [debounceTime]="0"
+              [ngModel]="searchQuery()"
+              (searchChange)="onSearchChange($event)"
+              (focus)="onInputFocus()"
+              (clear)="onClearQuery()"
+            ></app-inputsearch>
 
             <app-selector
               [options]="kindOptions"
@@ -152,15 +147,41 @@ interface SearchResponse {
             ></app-selector>
           </div>
 
-          <!-- Dropdown / Lista flotante de resultados -->
+          <!--
+            Lista de resultados EN FLUJO, no flotante.
+
+            Antes era un absolute z-50 y no se veía nunca: el
+            app-platform-section-wrapper que la contiene lleva
+            overflow-hidden para redondear sus esquinas, y eso recorta a
+            cualquier descendiente posicionado que se salga de la caja. El
+            z-index no salva de un recorte por overflow — el apilado y el
+            clipping son cosas distintas. Poner la lista en flujo la vuelve
+            inmune al overflow de CUALQUIER ancestro, presente o futuro, que
+            es lo que un dropdown flotante dentro de un acordeón no puede
+            garantizar.
+          -->
           @if (isOpen()) {
             <div
-              class="absolute z-50 left-0 right-0 top-full mt-1 bg-surface border border-border rounded-xl shadow-xl max-h-72 overflow-y-auto divide-y divide-border"
+              class="bg-surface border border-border rounded-xl shadow-sm max-h-72 overflow-y-auto divide-y divide-border"
             >
               @if (loading()) {
                 <div class="flex items-center justify-center gap-2 p-4 text-xs text-text-secondary">
                   <app-icon name="loader-2" [size]="16" class="animate-spin text-primary" />
                   Buscando clientes...
+                </div>
+              } @else if (searchError(); as err) {
+                <div class="p-4 space-y-2">
+                  <div class="flex items-start gap-2 text-xs text-danger">
+                    <app-icon name="alert-triangle" [size]="16" class="shrink-0 mt-0.5" />
+                    <span>{{ err }}</span>
+                  </div>
+                  <button
+                    type="button"
+                    class="text-xs font-semibold text-primary hover:underline"
+                    (click)="triggerSearch()"
+                  >
+                    Reintentar
+                  </button>
                 </div>
               } @else if (results().length === 0) {
                 <div class="p-4 text-center text-xs text-text-secondary">
@@ -227,7 +248,15 @@ export class TenantPickerComponent implements OnInit {
   readonly selectedKind = signal<string>('');
   readonly results = signal<PlatformAcquirer[]>([]);
   readonly loading = signal<boolean>(false);
-  readonly isOpen = signal<boolean>(false);
+  /** Motivo por el que la última búsqueda falló. Vacío mientras vaya bien. */
+  readonly searchError = signal<string>('');
+  /**
+   * La lista arranca ABIERTA. Mientras no haya destinatario elegido, la lista
+   * ES el contenido de la sección: arrancar cerrada dejaba un buscador mudo
+   * que sólo reaccionaba al foco, y el operador no tenía forma de saber que
+   * había algo que elegir.
+   */
+  readonly isOpen = signal<boolean>(true);
   readonly selectedTenant = signal<PlatformAcquirer | null>(null);
 
   readonly tenantPicked = output<PlatformAcquirer | null>();
@@ -245,7 +274,10 @@ export class TenantPickerComponent implements OnInit {
       .pipe(
         debounceTime(250),
         distinctUntilChanged((prev, curr) => prev.q === curr.q && prev.kind === curr.kind),
-        tap(() => this.loading.set(true)),
+        tap(() => {
+          this.loading.set(true);
+          this.searchError.set('');
+        }),
         switchMap(({ q, kind }) => {
           let params = new HttpParams();
           if (q) params = params.set('q', q);
@@ -256,19 +288,30 @@ export class TenantPickerComponent implements OnInit {
               { params },
             )
             .pipe(
-              catchError(() =>
-                of({
-                  success: false,
-                  data: { data: [] },
-                }),
-              ),
+              // Un fallo del buscador NO puede disfrazarse de «cero
+              // resultados»: durante meses el endpoint devolvió 500 por una
+              // relación mal nombrada en Prisma y la pantalla decía «No hay
+              // registros disponibles», que es exactamente lo que se ve
+              // cuando la búsqueda funciona y no hay coincidencias. El
+              // operador no tenía forma de distinguir un catálogo vacío de un
+              // backend caído. El error se guarda y se pinta.
+              catchError((err: unknown) => {
+                this.searchError.set(this.describeSearchError(err));
+                return of({ success: false, data: { data: [] } } as SearchResponse);
+              }),
             );
         }),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((res) => {
         this.loading.set(false);
-        const rows = res?.data?.data ?? [];
+        const payload: any = res?.data;
+        // El sobre del backend anida `data.data`, pero algunos handlers
+        // devuelven el arreglo directo. Se aceptan las dos formas antes que
+        // mostrar vacío por una capa de más o de menos.
+        const rows: PlatformAcquirer[] = Array.isArray(payload)
+          ? payload
+          : (payload?.data ?? []);
         this.results.set(rows);
       });
 
@@ -315,7 +358,26 @@ export class TenantPickerComponent implements OnInit {
     this.triggerSearch();
   }
 
-  private triggerSearch(): void {
+  /**
+   * Motivo legible del fallo. Se prefiere el mensaje del backend sobre uno
+   * inventado: es el que nombra el error real (`INVOICING_*`, validación de
+   * Prisma) y el que sirve para reportarlo.
+   */
+  private describeSearchError(err: unknown): string {
+    const e = err as any;
+    const backend = e?.error?.message ?? e?.error?.error?.message;
+    const detail = Array.isArray(backend) ? backend.join(' · ') : backend;
+    if (detail) return `No se pudo buscar clientes: ${detail}`;
+    if (e?.status === 0) {
+      return 'No se pudo buscar clientes: el servidor no respondió.';
+    }
+    if (e?.status) {
+      return `No se pudo buscar clientes (HTTP ${e.status}).`;
+    }
+    return 'No se pudo buscar clientes.';
+  }
+
+  triggerSearch(): void {
     this.searchSubject$.next({
       q: this.searchQuery().trim(),
       kind: this.selectedKind(),

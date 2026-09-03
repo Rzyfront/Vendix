@@ -12,6 +12,7 @@ import {
 } from '../utils/technical-key.util';
 import {
   DianNumberingRange,
+  NumberingRangeOutcome,
   parseNumberingRangeResponse,
 } from '../providers/dian-direct/dian-numbering-range.parser';
 import { DianTestService } from './dian-test.service';
@@ -79,7 +80,19 @@ export interface NumberingRangeReport {
   dian_configuration_id: number;
   nit: string;
   software_id: string;
+  /**
+   * El ambiente que se CONSULTÓ. Desde que es parámetro de la petición puede no
+   * ser el de la configuración, y quien lea este informe necesita saber sobre
+   * qué catálogo de la DIAN se está afirmando lo que se afirma.
+   */
   environment: 'production' | 'test';
+  /**
+   * El de la CONFIGURACIÓN. Existe para que la pantalla pueda decir «estás
+   * mirando producción con una configuración en habilitación» en vez de dejar
+   * que el operador lo deduzca: una lista de rangos de producción sobre una
+   * configuración en `test` es correcta y a la vez no es lo que él espera ver.
+   */
+  config_environment: 'production' | 'test';
   queried_at: string;
   /**
    * Ordenados con PRODUCCIÓN PRIMERO. Ver `sortProductionFirst`: el orden en que
@@ -100,7 +113,33 @@ export interface NumberingRangeReport {
     /** Misma marca derivada que en `ranges`, aquí sobre la fila guardada. */
     is_habilitation_numbering: boolean;
   }>;
-  /** Sólo cuando no se pudo extraer un solo rango. Ver el parser. */
+  /**
+   * Qué ocurrió al leer la respuesta, tal como lo clasifica el parser.
+   *
+   * Viaja SIEMPRE, también con rangos, porque es lo que le permite a la pantalla
+   * distinguir las dos maneras de no tener nada que mostrar: `empty_list` es una
+   * afirmación sobre el NEGOCIO —«la DIAN no te reporta numeración en este
+   * ambiente»—, y `unrecognized_contract` lo es sobre el SOFTWARE —«no entendimos
+   * lo que la DIAN dijo»—. Antes sólo se publicaba la segunda, así que una lista
+   * legítimamente vacía acusaba a la DIAN de un cambio de contrato inexistente y
+   * mandaba a depurar durante horas algo que nunca estuvo roto.
+   */
+  outcome: NumberingRangeOutcome;
+  /**
+   * `OperationCode` / `OperationDescription`: el veredicto que la DIAN da sobre
+   * la consulta misma. Son texto de estado —no transportan ClTec ni nada con lo
+   * que se pueda recomputar un CUFE—, así que sí pueden viajar al navegador, y
+   * son lo ÚNICO que explica un `empty_list`, donde por diseño no hay
+   * `element_names` que mirar.
+   */
+  operation_code: string | null;
+  operation_description: string | null;
+  /**
+   * Sólo cuando `outcome === 'unrecognized_contract'`. Ver el parser: en
+   * `empty_list` la lista va vacía a propósito, porque ahí el contrato SÍ se
+   * entendió y publicar los nombres del contrato normal invitaría a leerlos como
+   * sospechosos.
+   */
   unparsed?: { element_names: string[] };
 }
 
@@ -177,6 +216,20 @@ interface ApplyBatchContext {
   accounting_entity_id: number | null;
   ranges: DianNumberingRange[];
   element_names: string[];
+  /**
+   * Qué ocurrió al leer la respuesta. Sin esto, un elemento que no empareja
+   * porque la DIAN no reporta nada en ese ambiente y otro que no empareja porque
+   * no entendimos la respuesta cuentan la misma historia, y sólo una de las dos
+   * es cierta.
+   */
+  outcome: NumberingRangeOutcome;
+  /**
+   * El ambiente al que se le preguntó. Va al mensaje del fallo: «la DIAN no
+   * reporta rangos» sin decir DÓNDE es la mitad de la frase que hacía dar
+   * vueltas — la otra mitad es que probablemente estaba mirando el catálogo
+   * equivocado.
+   */
+  environment: 'production' | 'test';
 }
 
 /**
@@ -242,12 +295,36 @@ export class DianNumberingRangeService {
 
   /**
    * Consulta a la DIAN y devuelve el diff contra lo guardado. No escribe nada.
+   *
+   * ── EL AMBIENTE ES DE LA PREGUNTA, NO DE LA CONFIGURACIÓN ──────────────────
+   *
+   * Ausente ⇒ el de la configuración, que es como se comportaba antes. Se puede
+   * pedir el contrario porque heredarlo cerraba un ciclo del que no se salía:
+   * una configuración en habilitación preguntaba a `vpfe-hab`, donde las
+   * autorizaciones de producción no viven, así que la lista volvía vacía; sin
+   * rango no había fila en `invoice_resolutions`; sin esa fila el readiness
+   * respondía `FISCAL_RESOLUTION_MISSING`; sin readiness no había promoción; y
+   * sin producción la consulta seguía apuntando a habilitación. Ver
+   * `DianTestService.queryNumberingRange` para el incidente concreto.
+   *
+   * Esta operación LEE. Ninguna guarda de emisión ni de promoción depende de
+   * qué catálogo se consulte.
    */
-  async queryRanges(config_id: number): Promise<NumberingRangeReport> {
-    const query = await this.dian_test_service.queryNumberingRange(config_id);
-    const { ranges, element_names } = parseNumberingRangeResponse(
-      query.raw_response,
+  async queryRanges(
+    config_id: number,
+    environment?: 'test' | 'production' | null,
+  ): Promise<NumberingRangeReport> {
+    const query = await this.dian_test_service.queryNumberingRange(
+      config_id,
+      environment,
     );
+    const {
+      ranges,
+      element_names,
+      outcome,
+      operation_code,
+      operation_description,
+    } = parseNumberingRangeResponse(query.raw_response);
 
     const local_rows = await this.loadLocalResolutions(
       query.accounting_entity_id,
@@ -274,7 +351,11 @@ export class DianNumberingRangeService {
       nit: query.nit,
       software_id: query.software_id,
       environment: query.environment,
+      config_environment: query.config_environment,
       queried_at: query.queried_at,
+      outcome,
+      operation_code,
+      operation_description,
       ranges: comparisons,
       local_only: local_rows
         .filter((row) => !matched_ids.has(row.id))
@@ -291,11 +372,21 @@ export class DianNumberingRangeService {
         })),
     };
 
-    // Sólo cuando no se leyó ni un rango: si la DIAN renombra un campo, la
-    // respuesta se vería como «no tienes rangos autorizados» —una afirmación de
-    // negocio falsa— y el único modo de depurarla sería volcar el XML, que trae
-    // la ClTec. Los nombres de elemento bastan y no exponen nada.
-    if (comparisons.length === 0) {
+    // SÓLO cuando el contrato no se reconoció, y NO cuando la lista vino vacía.
+    //
+    // La condición era `comparisons.length === 0`, y ahí está el defecto: una
+    // respuesta perfectamente vigente cuya lista viene sin ítems —porque ese NIT
+    // no tiene numeración autorizada EN ESE AMBIENTE— publicaba `unparsed`, y el
+    // panel lo traducía a «la DIAN respondió con una estructura que no se pudo
+    // interpretar». Es la acusación equivocada contra la parte equivocada: manda
+    // a depurar el parser cuando lo que falta es una autorización de numeración.
+    // El parser ya distingue los tres desenlaces; aquí sólo hay que creerle.
+    //
+    // Cuando la DIAN sí renombra un campo, la respuesta se vería como «no tienes
+    // rangos autorizados» —una afirmación de negocio falsa— y el único modo de
+    // depurarla sería volcar el XML, que trae la ClTec. Los nombres de elemento
+    // bastan y no exponen nada.
+    if (outcome === 'unrecognized_contract') {
       report.unparsed = { element_names };
     }
 
@@ -344,10 +435,36 @@ export class DianNumberingRangeService {
    * que el cuerpo esté mal formado (lo rechaza el `ValidationPipe` antes de
    * llegar). Esas sí suben como excepción, porque con ellas NINGÚN elemento
    * tiene respuesta posible.
+   *
+   * ── DE QUÉ AMBIENTE SALEN LOS VALORES ──────────────────────────────────────
+   *
+   * Del que se pida, y ausente ⇒ el de la configuración. Tiene que poder ser el
+   * mismo que el de la consulta: si la pantalla puede VER el catálogo de
+   * producción desde una configuración en habilitación pero no puede TRAER de
+   * él, lo visible queda fuera del alcance de lo aplicable y el ciclo que este
+   * cambio rompe se vuelve a cerrar un paso más adelante.
+   *
+   * ── POR QUÉ ESO NO ADELANTA NINGUNA HABILITACIÓN ───────────────────────────
+   *
+   * Porque escribir la fila no es lo que autoriza a emitir.
+   * `InvoiceEmissionGateService.assertElectronicEmissionLive` exige
+   * `environment === 'production' && enablement_status === 'enabled'` sobre la
+   * CONFIGURACIÓN antes de CUALQUIER emisión electrónica, y esta operación no
+   * toca ninguna de las dos columnas: una resolución de producción aplicada
+   * mientras la configuración sigue en `test` queda escrita y es INCONSUMIBLE.
+   * Ésa es la razón por la que desacoplar la consulta no necesita un estado
+   * intermedio ni tocar `promoteToProduction`, el gate del set de pruebas o el
+   * propio `assertElectronicEmissionLive`.
+   *
+   * El parámetro explícito manda sobre `dto.environment` para que un riel que ya
+   * resolvió el ambiente por otra vía —una query, un contexto de plataforma— no
+   * tenga que mutar el cuerpo que recibió; sin él gobierna el del cuerpo, y sin
+   * ninguno de los dos, el de la configuración.
    */
   async applyRanges(
     config_id: number,
     dto: ApplyNumberingRangesDto,
+    environment?: 'test' | 'production' | null,
   ): Promise<ApplyNumberingRangesResult> {
     // UN RESULTADO POR PAR DISTINTO. Aplicar dos veces la misma clave no rompe
     // nada —la segunda pasada no encuentra diferencias—, pero un `results` con
@@ -355,8 +472,11 @@ export class DianNumberingRangeService {
     // una, y que el conteo de `applied` no cuadrara con lo que el usuario marcó.
     const selectors = dedupeSelectors(dto.ranges ?? []);
 
-    const query = await this.dian_test_service.queryNumberingRange(config_id);
-    const { ranges, element_names } = parseNumberingRangeResponse(
+    const query = await this.dian_test_service.queryNumberingRange(
+      config_id,
+      environment ?? dto.environment ?? null,
+    );
+    const { ranges, element_names, outcome } = parseNumberingRangeResponse(
       query.raw_response,
     );
 
@@ -373,6 +493,8 @@ export class DianNumberingRangeService {
       accounting_entity_id: query.accounting_entity_id,
       ranges,
       element_names,
+      outcome,
+      environment: query.environment,
     };
 
     const results: ApplyNumberingRangeItemResult[] = [];
@@ -431,7 +553,7 @@ export class DianNumberingRangeService {
     selector: NumberingRangeSelector,
     context: ApplyBatchContext,
   ): Promise<AppliedNumberingRange> {
-    const { config_id, ranges, element_names } = context;
+    const { config_id, ranges, element_names, outcome, environment } = context;
     const resolution_number = selector.resolution_number || null;
     const prefix = selector.prefix || null;
 
@@ -463,18 +585,36 @@ export class DianNumberingRangeService {
     );
 
     if (matches.length === 0) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_FIND_002,
-        `La DIAN no reporta un rango con número de resolución ${resolution_number} y prefijo ${prefix} para el NIT ${context.nit}. Consulta primero los rangos autorizados y elige uno de los que la DIAN devuelve.`,
-        {
-          dian_configuration_id: config_id,
-          resolution_number,
-          prefix,
-          // Cuando no se leyó ningún rango, el motivo probable es que la DIAN
-          // renombró un campo — no que el tenant no tenga rangos.
-          ...(ranges.length === 0 ? { element_names } : {}),
-        },
-      );
+      // TRES MANERAS DISTINTAS DE NO EMPAREJAR, y decirlas todas igual fue el
+      // defecto. Antes el detalle llevaba `element_names` con sólo mirar
+      // `ranges.length === 0`, así que una lista legítimamente vacía —el NIT no
+      // tiene numeración autorizada EN ESE AMBIENTE— se publicaba como si la
+      // DIAN hubiera cambiado su contrato, y el operador se iba a depurar el
+      // parser en vez de a mirar el catálogo correcto.
+      //
+      // `empty_list` es una afirmación sobre el NEGOCIO y por eso nombra el
+      // ambiente consultado: quien preguntó en habilitación por una resolución
+      // de producción no tiene un problema, tiene la pregunta hecha al catálogo
+      // equivocado, y el mensaje es el único sitio donde eso se puede decir.
+      // `unrecognized_contract` es una afirmación sobre el SOFTWARE, y sólo ahí
+      // los nombres de elemento significan algo — en `empty_list` invitarían a
+      // leer como sospechosos los nombres del contrato normal.
+      const message =
+        outcome === 'empty_list'
+          ? `La DIAN no reporta ningún rango de numeración para el NIT ${context.nit} en el ambiente de ${describeEnvironment(environment)}, así que tampoco el de resolución ${resolution_number} con prefijo ${prefix}. Si la autorización que buscas es del otro ambiente, consulta los rangos indicándolo.`
+          : `La DIAN no reporta un rango con número de resolución ${resolution_number} y prefijo ${prefix} para el NIT ${context.nit} en el ambiente de ${describeEnvironment(environment)}. Consulta primero los rangos autorizados y elige uno de los que la DIAN devuelve.`;
+
+      throw new VendixHttpException(ErrorCodes.INVOICING_FIND_002, message, {
+        dian_configuration_id: config_id,
+        resolution_number,
+        prefix,
+        // El ambiente es público —el comerciante lo eligió— y es justo el dato
+        // que convierte «no lo reporta» en «no lo reporta AQUÍ».
+        environment,
+        outcome,
+        // Sólo cuando de verdad no entendimos la respuesta. Ver arriba.
+        ...(outcome === 'unrecognized_contract' ? { element_names } : {}),
+      });
     }
 
     // Ambigüedad → se para. Escoger «el primero» resolvería el 100 % de los
@@ -1067,6 +1207,17 @@ export class DianNumberingRangeService {
 /** Comparación insensible a mayúsculas y espacios de borde. */
 function normalizeText(value: string | null | undefined): string {
   return (value ?? '').trim().toUpperCase();
+}
+
+/**
+ * El ambiente EN CASTELLANO, para los mensajes que lee un comerciante.
+ *
+ * `test` se dice «habilitación» y no «pruebas»: es el nombre con el que la DIAN
+ * lo llama en el portal y en el trámite, y es el que el usuario reconoce cuando
+ * el mensaje le está diciendo, en el fondo, que preguntó en el sitio que no era.
+ */
+function describeEnvironment(environment: 'production' | 'test'): string {
+  return environment === 'production' ? 'producción' : 'habilitación';
 }
 
 /**

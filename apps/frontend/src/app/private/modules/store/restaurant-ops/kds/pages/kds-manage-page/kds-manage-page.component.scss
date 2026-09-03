@@ -106,7 +106,7 @@
   flex-wrap: wrap;
 }
 
-.session-cost {
+.session-summary {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -182,19 +182,16 @@
 }
 
 .sum-list li {
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto;
 }
 
-/* El historial lleva pedido + plato + insumo: es la vista que explica de dónde
-   salió cada peso del resumen, así que necesita las cinco columnas. */
+/* El historial lleva pedido + plato + insumo + cantidad. ADR-10: sin dinero. */
 .hist-list li {
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.2fr) minmax(0, 1.2fr) auto auto;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.2fr) minmax(0, 1.2fr) auto;
 }
 
 .sum-qty,
-.sum-cost,
-.hist-qty,
-.hist-cost {
+.hist-qty {
   font-variant-numeric: tabular-nums;
   text-align: right;
   white-space: nowrap;
@@ -216,8 +213,8 @@
 }
 
 @media (max-width: 640px) {
-  /* En móvil las cinco columnas del historial no caben: se apilan pedido/plato
-     arriba y las cifras abajo, en vez de comprimirse a texto ilegible. */
+  /* En móvil las columnas del historial no caben: se apilan pedido/plato/insumo
+     arriba y la cantidad abajo, en vez de comprimirse a texto ilegible. */
   .hist-list li {
     grid-template-columns: 1fr auto;
   }

@@ -11,6 +11,7 @@ import { Request } from 'express';
 import { Public } from '../../../common/decorators/public.decorator';
 import { CreatePqrPublicDto } from './dto/create-pqr-public.dto';
 import { PqrService } from './pqr.service';
+import { extractClientIp } from '@common/utils/client-ip.util';
 
 /**
  * Public PQR endpoint.
@@ -28,11 +29,10 @@ export class PqrController {
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Post()
   async create(@Body() dto: CreatePqrPublicDto, @Req() req: Request) {
-    const ip =
-      (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
-      req.ip ||
-      req.socket?.remoteAddress ||
-      'unknown';
+    // `extractClientIp` y no el primer elemento de `x-forwarded-for`: esa
+    // cabecera la escribe el cliente, y un PQR anónimo con IP falsificada
+    // vuelve inútil el rastro de abuso que esta columna existe para guardar.
+    const ip = extractClientIp(req);
 
     // The DomainResolverMiddleware already mapped the incoming hostname
     // (e.g. nike.vendix.com) to its store + org via the public_domains

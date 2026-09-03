@@ -5,14 +5,6 @@ import {
   PrintFormatDefinition,
 } from '../../../../../../../../core/models/print-formats.model';
 import { PrintPropertiesPanelComponent } from '../print-properties-panel.component';
-import { PrintPaperPanelComponent } from '../paper-panel.component';
-import { PrintSectionPanelComponent } from '../section-panel.component';
-import { PrintColumnPanelComponent } from '../column-panel.component';
-import { PrintLogoPanelComponent } from '../logo-panel.component';
-import { PrintCompanyPanelComponent } from '../company-panel.component';
-import { PrintStylesPanelComponent } from '../styles-panel.component';
-import { PrintCustomTemplatePanelComponent } from '../custom-template-panel.component';
-import { IconComponent } from '../../../../../../../../shared/components/icon/icon.component';
 
 /**
  * [print-editor-dsk P5] — Property panel shell selection logic.
@@ -32,14 +24,6 @@ import { IconComponent } from '../../../../../../../../shared/components/icon/ic
   standalone: true,
   imports: [
     PrintPropertiesPanelComponent,
-    IconComponent,
-    PrintPaperPanelComponent,
-    PrintSectionPanelComponent,
-    PrintColumnPanelComponent,
-    PrintLogoPanelComponent,
-    PrintCompanyPanelComponent,
-    PrintStylesPanelComponent,
-    PrintCustomTemplatePanelComponent,
   ],
   template: `
     <app-print-properties-panel

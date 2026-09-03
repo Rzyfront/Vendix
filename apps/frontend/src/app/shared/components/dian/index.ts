@@ -56,6 +56,14 @@ export type {
   DianCertificateState,
 } from './fiscal-readiness.interface';
 
+// Ambientes DIAN como opciones de selector (etiquetas derivadas del diccionario)
+export {
+  DIAN_ENVIRONMENTS,
+  DIAN_ENVIRONMENT_OPTIONS,
+  isDianEnvironment,
+  dianEnvironmentLabel,
+} from './dian-environment.constants';
+
 // Lectura del checklist en sus tres registros
 export { summarizeReadiness, warningDetail } from './readiness-summary.util';
 export type { ReadinessSummary } from './readiness-summary.util';

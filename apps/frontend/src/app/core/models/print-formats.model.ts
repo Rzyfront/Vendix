@@ -1,5 +1,6 @@
 export type PrintFormatType =
   | 'pos_sale_ticket'
+  | 'pos_electronic_invoice'
   | 'sales_order_invoice'
   | 'dispatch_note'
   | 'dispatch_ticket'
@@ -9,7 +10,11 @@ export type PrintFormatType =
   | 'transfer_note'
   | 'fiscal_electronic_invoice'
   | 'fiscal_credit_note'
-  | 'kitchen_ticket';
+  | 'kitchen_ticket'
+  | 'dispatch_route'
+  | 'withholding_practiced'
+  | 'withholding_suffered'
+  | 'withholding_employee_certificate';
 
 export type PrintPaperFormat =
   | 'thermal_80'
@@ -23,27 +28,29 @@ export interface PrintPaperConfig {
   format: PrintPaperFormat;
   width_mm: number;
   /**
-   * [print-editor-dsk P1.2] — v2 NEW (camelCase per frontend TS convention).
-   * Alto físico en mm. Requerido cuando `format === 'custom'` (validado
-   * por el AJV del backend).
+   * [print-editor-dsk P1.2] — v2 NEW. Alto físico en mm. Requerido cuando
+   * `format === 'custom'` (validado por el AJV del backend).
    */
-  heightMm?: number;
+  height_mm?: number;
   is_roll: boolean;
   /**
-   * DEPRECATED en v2 pero conservado para compatibilidad con overrides v1.
-   * El composer v2 prefiere los márgenes por lado cuando están presentes;
-   * si faltan, aplica `margin_mm` uniforme.
+   * Margen uniforme. El composer v2 prefiere los márgenes por lado
+   * (`margin_top_mm`, etc.) cuando están presentes; si faltan, aplica
+   * `margin_mm` uniformemente. Sigue siendo un campo real y requerido por
+   * las plantillas de sistema — no es un alias legacy de los márgenes por
+   * lado.
    */
   margin_mm?: number;
-  /** [print-editor-dsk P1.2] — v2 NEW (camelCase). Margen superior en mm. */
-  marginTopMm?: number;
-  /** [print-editor-dsk P1.2] — v2 NEW (camelCase). Margen derecho en mm. */
-  marginRightMm?: number;
-  /** [print-editor-dsk P1.2] — v2 NEW (camelCase). Margen inferior en mm. */
-  marginBottomMm?: number;
-  /** [print-editor-dsk P1.2] — v2 NEW (camelCase). Margen izquierdo en mm. */
-  marginLeftMm?: number;
+  /** [print-editor-dsk P1.2] — v2 NEW. Margen superior en mm. */
+  margin_top_mm?: number;
+  /** [print-editor-dsk P1.2] — v2 NEW. Margen derecho en mm. */
+  margin_right_mm?: number;
+  /** [print-editor-dsk P1.2] — v2 NEW. Margen inferior en mm. */
+  margin_bottom_mm?: number;
+  /** [print-editor-dsk P1.2] — v2 NEW. Margen izquierdo en mm. */
+  margin_left_mm?: number;
   copies: number;
+  auto_print?: boolean;
   /** [print-editor-dsk P1.2] — v2 NEW. */
   orientation?: 'portrait' | 'landscape';
 }
@@ -55,8 +62,8 @@ export interface PrintPaperConfig {
 export interface PrintLogoBlock {
   url?: string;
   position?: 'left' | 'center' | 'right' | 'full';
-  /** [print-editor-dsk P1.2] — v2 NEW (camelCase). */
-  sizeMm?: number;
+  /** [print-editor-dsk P1.2] — v2 NEW. */
+  size_mm?: number;
   opacity?: number;
 }
 
@@ -78,8 +85,8 @@ export type PrintCompanyFieldKey =
 export interface PrintCompanyField {
   key: PrintCompanyFieldKey;
   enabled: boolean;
-  /** [print-editor-dsk P1.2] — v2 NEW (camelCase). */
-  customLabel?: string;
+  /** [print-editor-dsk P1.2] — v2 NEW. */
+  custom_label?: string;
   format?: 'text' | 'number' | 'currency' | 'date' | 'percent';
 }
 
@@ -153,21 +160,21 @@ export interface PrintTokenDefinition {
  * [print-editor-dsk P1.2] — Shape v2 de `PrintFormatDefinition` (mirror TS del
  * `apps/backend/.../interfaces/print-format.interface.ts`).
  *
- * Los campos v1 (`paper` con `margin_mm`/`orientation?`, `sections`, `columns`,
- * `styles`, `tokens`, `custom_template`) conservan su forma snake_case para
- * no romper consumidores existentes. Los campos v2 nuevos usan camelCase
- * (`heightMm`, `marginTopMm`, `logo.sizeMm`, `companyBlock`, etc.) — convención
- * frontend TS. Stores con overrides v1 (sin `v`) siguen funcionando: el
+ * Dialecto único: TODOS los campos, v1 y v2, usan `snake_case` — el mismo
+ * que el compositor del backend lee de forma incondicional
+ * (`PrintLayoutComposerService`). No existe una variante camelCase válida
+ * para persistir; el backend normaliza alias legacy solo en lectura, nunca
+ * en escritura. Stores con overrides v1 (sin `v`) siguen funcionando: el
  * servicio las enruta a la ruta legacy sin AJV.
  */
 export interface PrintFormatDefinition {
   /** [print-editor-dsk P1.2] — v2 NEW. Discriminador (1 = legacy, 2 = schema enforced). */
   v?: PrintFormatVersion;
   paper: PrintPaperConfig;
-  /** [print-editor-dsk P1.2] — v2 NEW (camelCase). */
+  /** [print-editor-dsk P1.2] — v2 NEW. */
   logo?: PrintLogoBlock;
-  /** [print-editor-dsk P1.2] — v2 NEW (camelCase). */
-  companyBlock?: PrintCompanyBlock;
+  /** [print-editor-dsk P1.2] — v2 NEW. */
+  company_block?: PrintCompanyBlock;
   sections: PrintSectionDefinition[];
   columns?: PrintColumnDefinition[];
   styles?: PrintStylesDefinition;
@@ -232,10 +239,45 @@ export interface PrintPreviewResponse {
 export interface RenderPrintDocumentResponse {
   format_type: PrintFormatType;
   html?: string;
+  /**
+   * [print-fiscal-gate P7.2] — Eco del flag enviado al renderer: cuando
+   * `body_only=true`, `html` contiene solo el contenido interior del
+   * `<body>`, sin `<!DOCTYPE>`, `<head>` ni `<html>`. El batch de impresión
+   * aprovecha este modo para concatenar N cuerpos bajo un único `<html>`.
+   */
+  body_only?: boolean;
   copies: number;
   is_roll: boolean;
   width_mm: number;
 }
+
+/**
+ * [print-fiscal-gate P3] — Resultado de `POST /store/print-formats/resolve-for-document`.
+ *
+ * El FE usa este objeto como UN solo punto de decisión de impresión: el
+ * backend ya decidió formato + documentId según el estado fiscal de la
+ * tienda. La duplicación previa (`pos-ticket.service.ts:238` +
+ * `order-ticket.service.ts:83`) se elimina; este contrato es el único que
+ * miran los callers.
+ */
+export interface ResolvedPrintDocument {
+  format_type: PrintFormatType;
+  document_id: number;
+  engine: 'html' | 'pdf';
+  reason:
+    | 'electronic_invoice_already_issued'
+    | 'fe_pending_emission'
+    | 'no_fiscal_activation';
+  /**
+   * TRUE cuando el caller debe emitir la FE antes de imprimir. Hoy es
+   * informativo: la emisión no se gatilla automáticamente porque imprimir no
+   * puede disparar un hecho fiscal irreversible (ver decisión en el JSDoc
+   * del gate BE).
+   */
+  requires_invoice_emission: boolean;
+}
+
+export type ResolveDocumentType = 'pos_order' | 'pos_invoice';
 
 /**
  * [print-editor-dsk P3.3] — Lightweight record returned by
@@ -315,6 +357,13 @@ export interface PrintAnnexValidationRule {
     sectionId?: string;
     fieldKey?: string;
     columnKey?: string;
+    /**
+     * Targets `definition.company_block.fields` directly instead of a
+     * `section.fields` entry. Rules gated on emisor data that actually
+     * lives in the company block (NIT, régimen, dirección) must set this
+     * — `fieldKey` alone only reaches section fields.
+     */
+    companyFieldKey?: PrintCompanyFieldKey;
   };
 }
 

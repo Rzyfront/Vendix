@@ -2,7 +2,6 @@ import { Component, OnInit, inject, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
-import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { PrintThumbnailService } from '../../../../../shared/services/print/print-thumbnail.service';
 import { PrintFormatsFacade } from './services/print-formats.facade';
 import { PrintFormatEditorComponent } from './components/print-format-editor/print-format-editor.component';
@@ -16,7 +15,7 @@ interface CategoryGroup {
 @Component({
   selector: 'app-print-formats-hub',
   standalone: true,
-  imports: [CommonModule, FormsModule, IconComponent, ButtonComponent, PrintFormatEditorComponent],
+  imports: [CommonModule, FormsModule, IconComponent, PrintFormatEditorComponent],
   template: `
     <div class="space-y-6">
       @if (facade.selectedFormatDetail()) {

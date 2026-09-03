@@ -19,6 +19,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { AccountSelectComponent } from '../../../../../shared/components/account-select/account-select.component';
 import type { InheritedAccountHint } from '../../../../../shared/components/account-select/account-select.component';
 import { ChartAccountLookupService } from '../../../../../shared/services/chart-account-lookup.service';
+import type { ChartAccountScope } from '../../../../../shared/services/chart-account-lookup.service';
 
 /**
  * Espejo de `PUC_ACCOUNT_CODE_REGEX` del backend
@@ -74,6 +75,7 @@ const PUC_ACCOUNT_CODE_REGEX = /^[0-9]{4,20}$/;
       [placeholder]="placeholder()"
       [ariaLabel]="ariaLabel() || label()"
       [acceptsEntriesOnly]="true"
+      [scope]="scope()"
       [inherited]="inheritedAccount()"
     />
 
@@ -128,6 +130,23 @@ export class AccountCodeSelectComponent implements ControlValueAccessor {
 
   readonly placeholder = input<string>('Cuenta por defecto de la organización');
   readonly disabled = input<boolean>(false);
+
+  /**
+   * Qué controlador responde el lookup del PUC.
+   *
+   * Por defecto `'store'`, que es como nació y como lo siguen usando los
+   * formularios de producto. La consola de plataforma pasa
+   * `'super-admin/fiscal'`: allí NO hay tienda, y una lectura con el scope de
+   * tienda devolvería vacío —el selector se pintaría sin cuentas y sin decir
+   * por qué—.
+   *
+   * Se propaga a las DOS resoluciones internas además de al selector: si sólo
+   * viajara al hijo, `resolveByCode` (hidratación de un código ya guardado) y
+   * `resolveById` (traducción de la cuenta elegida a su código) seguirían
+   * preguntando por el plan de cuentas equivocado, y el control quedaría
+   * mudo justo al releer lo que acaba de guardar.
+   */
+  readonly scope = input<ChartAccountScope>('store');
 
   /**
    * Etiqueta visible, y también el nombre accesible del disparador.
@@ -246,7 +265,11 @@ export class AccountCodeSelectComponent implements ControlValueAccessor {
       // puede apuntar a una cuenta que ya no pasa los filtros del selector, y
       // pintarlo vacío sería peor que pintarlo — un "Guardar" a ciegas lo
       // borraría.
-      .resolveByCode(next, { acceptsEntriesOnly: false, activeOnly: false })
+      .resolveByCode(next, {
+        scope: this.scope(),
+        acceptsEntriesOnly: false,
+        activeOnly: false,
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((account) => {
         if (token !== this.resolutionToken) return;
@@ -302,7 +325,11 @@ export class AccountCodeSelectComponent implements ControlValueAccessor {
     }
 
     this.lookup
-      .resolveById(id, { acceptsEntriesOnly: false, activeOnly: false })
+      .resolveById(id, {
+        scope: this.scope(),
+        acceptsEntriesOnly: false,
+        activeOnly: false,
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((account) => {
         if (token !== this.resolutionToken) return;

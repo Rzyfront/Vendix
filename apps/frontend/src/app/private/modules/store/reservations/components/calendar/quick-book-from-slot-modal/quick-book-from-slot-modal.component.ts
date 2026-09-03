@@ -108,7 +108,7 @@ export class QuickBookFromSlotModalComponent {
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     if (this.prefilledDate() && this.prefilledDate() < today) {
       this.toastService.warning(
-        'No podés agendar en un horario que ya pasó.',
+        'No puedes agendar en un horario que ya pasó.',
       );
       this.closed.emit();
       return;

@@ -15,6 +15,7 @@ import { ButtonComponent } from '../../button/button.component';
 import { CardComponent } from '../../card/card.component';
 import { ConfirmationModalComponent } from '../../confirmation-modal/confirmation-modal.component';
 import { IconComponent } from '../../icon/icon.component';
+import { SelectorComponent } from '../../selector/selector.component';
 import {
   DIAN_API_CONTEXT,
   DIAN_NUMBERING_RANGE_APPLY_MAX,
@@ -25,6 +26,19 @@ import {
   type DianNumberingRangeStatus,
   type DianNumberingRangesResponse,
 } from '../../../services/dian';
+// Los dos tipos del ambiente se toman del módulo concreto y no del barril:
+// `shared/services/dian/index.ts` queda fuera del alcance de este cambio, y una
+// importación directa al archivo que declara el contrato no cambia nada del
+// grafo (es el mismo módulo que el barril reexporta).
+import type {
+  DianEnvironment,
+  DianNumberingRangeOutcome,
+} from '../../../services/dian/dian-config-api.service';
+import {
+  DIAN_ENVIRONMENT_OPTIONS,
+  dianEnvironmentLabel,
+  isDianEnvironment,
+} from '../dian-environment.constants';
 import { formatDateOnlyUTC } from '../../../utils/date.util';
 import { isHabilitationNumbering } from '../../../utils/habilitation-numbering.util';
 
@@ -122,6 +136,29 @@ type HeaderSelectionState = 'none' | 'some' | 'all';
  * Las resoluciones guardadas que la DIAN no devuelve se listan aparte y se
  * señalan. Que su web service no las reporte no prueba que no existan, y borrar
  * una resolución que ya emitió documentos rompe la trazabilidad de lo emitido.
+ *
+ * ## Se elige a QUÉ DIAN se pregunta
+ *
+ * Los dos ambientes son web services separados con datos distintos. Antes la
+ * consulta heredaba siempre el de la configuración, así que un comerciante en
+ * habilitación preguntaba a `vpfe-hab.dian.gov.co` —donde sus resoluciones de
+ * PRODUCCIÓN no viven— y recibía una lista vacía. Sufrido en la configuración
+ * 20 (NIT 1123408049): para poder ver sus rangos reales hubo que inventar una
+ * resolución y promover la configuración a producción, un rodeo que quema
+ * consecutivos irrecuperables si alguien factura en esa ventana. El selector de
+ * ambiente existe para que esa consulta no cueste una promoción.
+ *
+ * Consultar el otro ambiente NO cambia nada: sigue siendo la misma lectura. Lo
+ * que sí cambia es qué clave técnica se copiaría al sincronizar, y por eso el
+ * lote viaja con el ambiente con el que se obtuvo la lista.
+ *
+ * ## Lista vacía y contrato ilegible NO son lo mismo
+ *
+ * `outcome` los separa. Que la DIAN responda «no hay rangos» es una respuesta
+ * legítima con su contrato de siempre; presentarla como «no se pudo
+ * interpretar» es acusarla de un cambio que no hizo, y eso mandó a investigar
+ * durante horas un problema inexistente. El aviso de contrato ilegible sólo se
+ * pinta con `unrecognized_contract`.
  */
 @Component({
   selector: 'app-dian-numbering-range-panel',
@@ -131,6 +168,7 @@ type HeaderSelectionState = 'none' | 'some' | 'all';
     BadgeComponent,
     ButtonComponent,
     IconComponent,
+    SelectorComponent,
     ConfirmationModalComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -151,13 +189,25 @@ type HeaderSelectionState = 'none' | 'some' | 'all';
               Numeración registrada en la DIAN
             </h3>
           </div>
+          <!-- El distintivo nombra el ambiente CONSULTADO, no el de la
+               configuración. Cuando difieren se dice cuál es el de la
+               configuración: sin esa segunda línea, una consulta cruzada a
+               producción es indistinguible de la normal y se leería como si la
+               configuración ya estuviera facturando de verdad. -->
           @if (environmentLabel(); as label) {
-            <app-badge
-              [variant]="isProduction() ? 'success' : 'warning'"
-              badgeStyle="outline"
-              size="xs"
-              >{{ label }}</app-badge
-            >
+            <div class="flex flex-col items-end gap-1 shrink-0">
+              <app-badge
+                [variant]="isProduction() ? 'success' : 'warning'"
+                badgeStyle="outline"
+                size="xs"
+                >{{ label }}</app-badge
+              >
+              @if (environmentDiffersFromConfig()) {
+                <app-badge variant="info" size="xs">
+                  La configuración está en {{ configEnvironmentLabel() }}
+                </app-badge>
+              }
+            </div>
           }
         </div>
 
@@ -174,7 +224,28 @@ type HeaderSelectionState = 'none' | 'some' | 'all';
             lo guardado aquí.
           </p>
 
-          <div class="flex flex-wrap items-center gap-2">
+          <!-- A qué DIAN se le pregunta. El selector va PEGADO al botón porque
+               es parte de la misma decisión: los dos ambientes son web
+               services distintos, y elegir mal es lo que devuelve la lista
+               vacía que parece «no tienes numeración».
+
+               Cambiarlo consulta de inmediato. Es deliberado: la consulta es
+               una lectura que no emite ni gasta numeración, y la alternativa
+               —dejar en pantalla la lista de un ambiente mientras el selector
+               nombra otro— es justo la confusión que este panel existe para
+               evitar. -->
+          <div class="flex flex-wrap items-end gap-2">
+            <div class="w-full sm:w-52">
+              <app-selector
+                label="Ambiente a consultar"
+                size="sm"
+                placeholder="El de la configuración"
+                [options]="environmentOptions"
+                [value]="selectorEnvironment()"
+                [disabled]="busy()"
+                (valueChange)="onEnvironmentChange($event)"
+              ></app-selector>
+            </div>
             <app-button
               size="sm"
               variant="primary"
@@ -185,14 +256,17 @@ type HeaderSelectionState = 'none' | 'some' | 'all';
               <app-icon slot="icon" name="search" [size]="14"></app-icon>
               Consultar rangos en la DIAN
             </app-button>
-            <span
-              class="text-[11px] text-[var(--color-text-secondary)] inline-flex items-start gap-1"
-            >
-              <app-icon name="info" [size]="12" class="shrink-0 mt-0.5"></app-icon>
-              Es una consulta de solo lectura: no emite documentos ni gasta
-              numeración.
-            </span>
           </div>
+
+          <span
+            class="text-[11px] text-[var(--color-text-secondary)] inline-flex items-start gap-1"
+          >
+            <app-icon name="info" [size]="12" class="shrink-0 mt-0.5"></app-icon>
+            Es una consulta de solo lectura: no emite documentos ni gasta
+            numeración. Se puede preguntar al ambiente que no es el de la
+            configuración —las resoluciones de producción no viven en
+            habilitación— y eso tampoco promueve nada.
+          </span>
 
           <!-- Mensajes -->
           @if (errorText(); as message) {
@@ -336,6 +410,20 @@ type HeaderSelectionState = 'none' | 'some' | 'all';
                     Lo que aparece abajo es la numeración con la que se factura de
                     verdad.
                   </p>
+                  <!-- Consulta cruzada: se está mirando producción desde una
+                       configuración que todavía firma en habilitación. Verlo NO
+                       promueve nada, y decirlo aquí evita leer estos rangos como
+                       si la tienda ya estuviera emitiendo con ellos. -->
+                  @if (environmentDiffersFromConfig()) {
+                    <p
+                      class="text-[11px] leading-relaxed text-[var(--color-text-primary)]"
+                    >
+                      La configuración sigue en
+                      {{ configEnvironmentLabel() }}: esta consulta no la
+                      promueve ni cambia con qué ambiente firma. Sirve para ver
+                      la numeración real sin tener que promoverla antes.
+                    </p>
+                  }
                 </div>
               </div>
             } @else {
@@ -432,6 +520,81 @@ type HeaderSelectionState = 'none' | 'some' | 'all';
               </div>
             }
 
+            <!-- La DIAN respondió BIEN y lo que dice es que no hay nada.
+                 Es un desenlace distinto del de arriba y se redacta distinto:
+                 llamarlo «no se pudo interpretar» acusa a la DIAN de un cambio
+                 de contrato que no hizo, y eso mandó a investigar durante horas
+                 un problema que no existía. Aquí sólo se repite lo que la DIAN
+                 dijo, con su propio código de operación cuando lo trae. -->
+            @if (isEmptyList()) {
+              <div
+                class="rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 flex items-start gap-2"
+              >
+                <app-icon
+                  name="info"
+                  [size]="16"
+                  class="text-[var(--color-text-secondary)] shrink-0 mt-0.5"
+                ></app-icon>
+                <div class="min-w-0 flex flex-col gap-1.5">
+                  <p class="text-xs font-semibold text-[var(--color-text-primary)]">
+                    La DIAN no reporta numeración para este NIT en
+                    {{ environmentLabel() }}
+                  </p>
+                  <p
+                    class="text-[11px] leading-relaxed text-[var(--color-text-secondary)]"
+                  >
+                    La respuesta llegó completa y con el contrato de siempre: lo
+                    que dice es que en ese ambiente no hay ningún rango asociado
+                    al NIT {{ payload.nit }} y al software
+                    {{ payload.software_id }}. No es un fallo de lectura ni un
+                    cambio de contrato de la DIAN.
+                  </p>
+                  @if (operationText(); as operation) {
+                    <p
+                      class="text-[11px] leading-relaxed text-[var(--color-text-primary)]"
+                    >
+                      La DIAN lo explica así: {{ operation }}
+                    </p>
+                  }
+                  @if (canQueryProduction()) {
+                    <p
+                      class="text-[11px] leading-relaxed text-[var(--color-text-secondary)]"
+                    >
+                      Estás preguntando a la DIAN de habilitación, y las
+                      resoluciones de PRODUCCIÓN no viven ahí: este ambiente sólo
+                      conoce la numeración de pruebas. Si las que buscas son las
+                      reales, pregúntaselas a producción — es la misma lectura, no
+                      promueve la configuración ni gasta numeración.
+                    </p>
+                    <div class="pt-0.5">
+                      <app-button
+                        size="sm"
+                        variant="secondary"
+                        [disabled]="busy()"
+                        [loading]="querying()"
+                        (clicked)="queryProduction()"
+                      >
+                        <app-icon
+                          slot="icon"
+                          name="search"
+                          [size]="14"
+                        ></app-icon>
+                        Consultar en producción
+                      </app-button>
+                    </div>
+                  }
+                  <p
+                    class="text-[11px] leading-relaxed text-[var(--color-text-secondary)]"
+                  >
+                    Si esperabas ver un rango en este ambiente, revisa en MUISCA
+                    que el prefijo esté asociado al software registrado: una
+                    resolución que existe pero no está asociada a este software
+                    tampoco aparece aquí.
+                  </p>
+                </div>
+              </div>
+            }
+
             <!-- Rangos reportados por la DIAN -->
             <div class="flex flex-col gap-2">
               <div class="flex flex-wrap items-center justify-between gap-2">
@@ -506,13 +669,10 @@ type HeaderSelectionState = 'none' | 'some' | 'all';
                 </p>
               }
 
-              @if (!payload.ranges.length) {
-                <p class="text-[11px] text-[var(--color-text-secondary)]">
-                  La DIAN no reporta ningún rango de numeración para este NIT y
-                  software. Si esperabas ver uno, revisa que la resolución esté
-                  asociada al software registrado.
-                </p>
-              }
+              <!-- La lista vacía ya se explica arriba, con el desenlace que
+                   reportó el backend y el código de la DIAN. Aquí NO se repite:
+                   un segundo texto genérico sobre lo mismo compite con el que sí
+                   dice por qué está vacía y con el atajo a producción. -->
 
               <!-- El backend ya devuelve produccion primero: NO se reordena aquí,
                    o el panel discutiria con la fuente sobre cual es la prioridad. -->
@@ -773,15 +933,67 @@ export class DianNumberingRangePanelComponent {
 
   readonly busy = computed(() => this.querying() || this.applying());
 
-  readonly isProduction = computed(
-    () => this.result()?.environment === 'production',
+  // ── Ambiente ────────────────────────────────────────────
+  //
+  // Hay TRES ambientes distintos en juego y confundirlos es el fallo caro:
+  // el que se va a preguntar (`requestedEnvironment`), el que se preguntó y
+  // produjo la lista en pantalla (`queriedEnvironment`) y el de la propia
+  // configuración (`configEnvironment`). Antes eran uno solo porque la consulta
+  // siempre heredaba el de la configuración.
+
+  /**
+   * Ambiente elegido a mano. `null` significa «el de la configuración»: la
+   * petición OMITE el parámetro y deja que el backend lo resuelva. Se guarda la
+   * ausencia y no una copia adivinada del ambiente de la configuración, porque
+   * el panel no lo conoce hasta que la DIAN responde por primera vez.
+   */
+  readonly requestedEnvironment = signal<DianEnvironment | null>(null);
+
+  readonly environmentOptions = DIAN_ENVIRONMENT_OPTIONS;
+
+  /** Ambiente con el que se obtuvo la lista que está en pantalla. */
+  readonly queriedEnvironment = computed<DianEnvironment | null>(() => {
+    const environment = this.result()?.environment;
+    return isDianEnvironment(environment) ? environment : null;
+  });
+
+  /** Ambiente de la configuración, tal como lo reporta la última respuesta. */
+  readonly configEnvironment = computed<DianEnvironment | null>(() => {
+    const environment = this.result()?.config_environment;
+    return isDianEnvironment(environment) ? environment : null;
+  });
+
+  /**
+   * Lo que pinta el selector: lo elegido a mano o, si no se ha elegido nada, lo
+   * último consultado. Así el selector acaba mostrando el ambiente de la
+   * configuración en cuanto la primera respuesta lo revela, sin que el panel
+   * tenga que suponerlo antes de preguntar.
+   */
+  readonly selectorEnvironment = computed<DianEnvironment | null>(
+    () => this.requestedEnvironment() ?? this.queriedEnvironment(),
   );
 
-  readonly environmentLabel = computed(() => {
-    const environment = this.result()?.environment;
-    if (!environment) return null;
-    return environment === 'production' ? 'Producción' : 'Pruebas';
+  /**
+   * `true` cuando lo que se está mirando NO es el ambiente en el que la
+   * configuración firma. Es lo que separa una consulta cruzada de la normal.
+   */
+  readonly environmentDiffersFromConfig = computed(() => {
+    const queried = this.queriedEnvironment();
+    const config = this.configEnvironment();
+    return !!queried && !!config && queried !== config;
   });
+
+  readonly isProduction = computed(
+    () => this.queriedEnvironment() === 'production',
+  );
+
+  readonly environmentLabel = computed(() =>
+    dianEnvironmentLabel(this.queriedEnvironment()),
+  );
+
+  readonly configEnvironmentLabel = computed(() =>
+    dianEnvironmentLabel(this.configEnvironment()),
+  );
 
   readonly queriedAtLabel = computed(() => {
     const queriedAt = this.result()?.queried_at;
@@ -806,11 +1018,66 @@ export class DianNumberingRangePanelComponent {
       ).length ?? 0,
   );
 
-  /** `null` cuando la DIAN sí se pudo interpretar: el aviso no debe pintarse. */
-  readonly unparsedNames = computed<string[] | null>(() => {
-    const unparsed = this.result()?.unparsed;
-    return unparsed ? unparsed.element_names : null;
+  // ── Desenlace de la consulta ────────────────────────────
+
+  /**
+   * Cuál de los tres desenlaces reportó el backend.
+   *
+   * Manda `outcome`. El respaldo es para una respuesta servida por un despliegue
+   * anterior, que no lo trae: entonces se deduce, y se deduce igual que el
+   * backend nuevo —`unparsed` presente es contrato ilegible; sin él, cero filas
+   * es lista vacía—. Lo que NO se hace es lo de antes: dar por ilegible toda
+   * respuesta sin filas.
+   */
+  readonly outcome = computed<DianNumberingRangeOutcome | null>(() => {
+    const payload = this.result();
+    if (!payload) return null;
+    if (payload.outcome) return payload.outcome;
+    if (payload.unparsed) return 'unrecognized_contract';
+    return payload.ranges.length ? 'ranges' : 'empty_list';
   });
+
+  /**
+   * `null` salvo cuando la DIAN respondió algo que de verdad no se pudo leer.
+   *
+   * El desenlace es la compuerta y no la presencia de `unparsed`: acusar a la
+   * DIAN de haber cambiado su contrato cuando lo único que dijo es que no hay
+   * rangos es la mentira que este panel contaba, y costó horas de investigación
+   * sobre un cambio inexistente.
+   */
+  readonly unparsedNames = computed<string[] | null>(() => {
+    if (this.outcome() !== 'unrecognized_contract') return null;
+    const unparsed = this.result()?.unparsed;
+    return unparsed ? unparsed.element_names : [];
+  });
+
+  readonly isEmptyList = computed(() => this.outcome() === 'empty_list');
+
+  /**
+   * La explicación de la DIAN, con SUS palabras y SU código. Se prefiere a
+   * cualquier redacción propia: es la única pista de por qué la lista vino
+   * vacía, y reescribirla borraría el dato con el que se abre un caso.
+   */
+  readonly operationText = computed<string | null>(() => {
+    const payload = this.result();
+    if (!payload) return null;
+    const description = payload.operation_description?.trim();
+    const code = payload.operation_code?.trim();
+    if (description && code) return `«${description}» (código ${code})`;
+    if (description) return `«${description}»`;
+    if (code) return `código de operación ${code}`;
+    return null;
+  });
+
+  /**
+   * Cuándo tiene sentido el atajo a producción: la DIAN de habilitación
+   * respondió que no hay nada, y las resoluciones reales no viven ahí. Es el
+   * punto exacto donde el usuario quedaba atrapado y acababa inventando una
+   * resolución para poder promover la configuración.
+   */
+  readonly canQueryProduction = computed(
+    () => this.isEmptyList() && this.queriedEnvironment() === 'test',
+  );
 
   /** Filas que se pueden marcar, en el orden en que el backend las devolvió. */
   readonly selectableRanges = computed<DianNumberingRange[]>(() => {
@@ -845,6 +1112,43 @@ export class DianNumberingRangePanelComponent {
     this.runQuery();
   }
 
+  /**
+   * Cambiar el ambiente consulta en el acto.
+   *
+   * La alternativa —guardar la elección y esperar a que pulsen «Consultar»—
+   * dejaría en pantalla la lista de un ambiente mientras el selector nombra el
+   * otro, que es exactamente la confusión que hace guardar una resolución de
+   * pruebas como si fuera real. Consultar es gratis: es una lectura que no emite
+   * ni gasta numeración.
+   */
+  onEnvironmentChange(value: string | number | null): void {
+    if (!isDianEnvironment(value)) return;
+    // Ya se está mirando ese ambiente: repetir la llamada no aportaría nada.
+    if (value === this.selectorEnvironment()) return;
+    this.requestedEnvironment.set(value);
+    this.query();
+  }
+
+  /**
+   * Atajo del bloque de lista vacía. Deja el selector coherente con lo que se va
+   * a consultar en vez de disparar una petición «invisible» que contradiría lo
+   * que el selector dice.
+   */
+  queryProduction(): void {
+    if (this.busy()) return;
+    this.requestedEnvironment.set('production');
+    this.query();
+  }
+
+  /**
+   * `undefined` cuando no se eligió ambiente: la petición omite el parámetro y
+   * el backend usa el de la configuración. Omitir NO es lo mismo que mandar el
+   * ambiente adivinado.
+   */
+  private queryEnvironment(): DianEnvironment | undefined {
+    return this.requestedEnvironment() ?? undefined;
+  }
+
   private runQuery(): void {
     const configId = this.configId();
     if (!configId) {
@@ -854,7 +1158,7 @@ export class DianNumberingRangePanelComponent {
     }
 
     this.api
-      .getNumberingRanges(configId)
+      .getNumberingRanges(configId, this.queryEnvironment())
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: unknown) => {
@@ -1005,13 +1309,21 @@ export class DianNumberingRangePanelComponent {
     }
     if (!ranges.length) return;
 
+    // Se envía el ambiente con el que se OBTUVO la lista, no el de la
+    // configuración: aplicar es traerse la clave técnica que la DIAN tiene
+    // ligada a esa resolución EN ESE AMBIENTE. Si el backend fuera a buscarla al
+    // otro, se guardaría una ClTec que no corresponde y cada factura volvería
+    // con `FAD06 — Valor del CUFE no está calculado correctamente`, con el
+    // consecutivo autorizado ya gastado y no recuperable.
+    const environment = this.queriedEnvironment() ?? undefined;
+
     this.applying.set(true);
     this.errorText.set(null);
     this.noticeText.set(null);
     this.applyReport.set(null);
 
     this.api
-      .applyNumberingRanges(configId, { ranges })
+      .applyNumberingRanges(configId, { environment, ranges })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: unknown) => {
@@ -1194,6 +1506,11 @@ export class DianNumberingRangePanelComponent {
    * resoluciones se van a tocar, no un genérico. Va como HTML porque el modal de
    * confirmación pinta su mensaje con innerHTML; todo valor que venga de la DIAN
    * se escapa antes de entrar.
+   *
+   * Nombra el AMBIENTE del que sale la clave técnica, y lo destaca cuando no es
+   * el de la configuración: una ClTec traída del ambiente que no toca produce
+   * `FAD06` en cada factura con el consecutivo ya gastado, y el único momento en
+   * que eso todavía se puede evitar es este.
    */
   applyConfirmationMessage(batch: DianNumberingRange[]): string {
     const lines = batch
@@ -1236,11 +1553,26 @@ export class DianNumberingRangePanelComponent {
         '. No sirve para facturar de verdad, y una vez guardada nada en Vendix la distingue de una resolución real.'
       : '';
 
+    const environmentLabel = this.environmentLabel();
+    const environmentNote = environmentLabel
+      ? ' Se traerá la que tiene registrada en <strong>' +
+        this.escapeHtml(environmentLabel) +
+        '</strong>, que es el ambiente al que se consultó.'
+      : '';
+    const configLabel = this.configEnvironmentLabel();
+    const crossEnvironmentWarning = this.environmentDiffersFromConfig()
+      ? '<br><br><strong>OJO:</strong> ese NO es el ambiente de la configuración' +
+        (configLabel ? ', que está en ' + this.escapeHtml(configLabel) : '') +
+        '. Estás copiando la clave técnica de un ambiente distinto del que firma hoy, y una ClTec del ambiente equivocado hace que la DIAN recalcule otro CUFE y rechace cada factura por FAD06 con el consecutivo ya gastado.'
+      : '';
+
     return (
       header +
       '<br>' +
       lines +
       '<br><br>En cada una se sobrescribirá la clave técnica guardada con la que la DIAN tiene ligada a esa resolución: es justo el dato con el que la DIAN recalcula el CUFE.' +
+      environmentNote +
+      crossEnvironmentWarning +
       habilitationWarning +
       '<br><br>El backend decide qué campos son escribibles: los que la resolución ya consumió quedan como están y se te dirá cuáles fueron. Nada se emite ni se numera con esta acción.'
     );

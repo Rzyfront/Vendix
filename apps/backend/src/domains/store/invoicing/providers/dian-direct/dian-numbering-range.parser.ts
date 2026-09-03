@@ -54,16 +54,55 @@ export interface DianNumberingRange {
   technical_key: string | null;
 }
 
+/**
+ * Las TRES cosas distintas que puede significar una lectura de esta respuesta.
+ *
+ * Antes sólo había dos —«leí rangos» o «no pude interpretar»— y eso obligaba a
+ * publicar como fallo de contrato el caso más normal de todos: la DIAN contesta
+ * con su estructura VIGENTE y su lista viene sin ítems porque ese NIT no tiene
+ * numeración autorizada en ese ambiente. El panel lo traducía a «la DIAN
+ * respondió con una estructura que no se pudo interpretar», acusaba a la DIAN de
+ * un cambio de contrato inexistente y mandaba a depurar durante horas algo que
+ * nunca estuvo roto. Separar los tres estados es la razón de ser de este tipo.
+ */
+export type NumberingRangeOutcome =
+  | 'ranges'
+  | 'empty_list'
+  | 'unrecognized_contract';
+
 export interface ParsedNumberingRangeResponse {
   ranges: DianNumberingRange[];
   /**
+   * Qué ocurrió realmente. `empty_list` es una afirmación sobre el NEGOCIO del
+   * comerciante («la DIAN no te reporta numeración aquí»); `unrecognized_contract`
+   * lo es sobre el SOFTWARE («no entendimos lo que la DIAN dijo»). Confundirlas
+   * manda al usuario a resolver el problema equivocado, que es exactamente lo
+   * que pasó con la configuración 20 en habilitación.
+   */
+  outcome: NumberingRangeOutcome;
+  /**
+   * `OperationCode`: el veredicto que la DIAN da sobre la consulta misma.
+   *
+   * Es TEXTO DE ESTADO. No transporta ClTec ni nada con lo que se pueda
+   * recomputar un CUFE, así que —al revés que `technical_key`— sí puede viajar
+   * al navegador. Y es lo único que explica un `empty_list`, donde por diseño no
+   * hay `element_names` que mirar.
+   */
+  operation_code: string | null;
+  /** `OperationDescription`. Texto de estado, con el mismo criterio que `operation_code`. */
+  operation_description: string | null;
+  /**
    * Nombres de elemento DISTINTOS hallados en el cuerpo, sin prefijo de
-   * namespace. Se llena SÓLO cuando no se extrajo ningún rango.
+   * namespace. Se llena SÓLO en `unrecognized_contract`.
    *
    * Sin esto, el día que la DIAN renombre un campo la respuesta se lee como «no
    * tienes rangos autorizados» —una afirmación de negocio falsa— y nadie puede
    * depurarlo sin volcar el XML crudo, que trae la ClTec en claro. Con la lista
    * de nombres, el diagnóstico es inmediato y no expone el secreto.
+   *
+   * En `empty_list` va VACÍA a propósito: ahí el contrato SÍ se entendió, no hay
+   * anomalía que catalogar, y publicar la lista invitaría a leer como sospechosos
+   * los nombres del contrato normal —el bucle de depuración que se está cerrando.
    */
   element_names: string[];
 }
@@ -107,20 +146,85 @@ const FIELD_ALIASES: Record<
 };
 
 /**
- * Lee la respuesta cruda y devuelve los rangos que la DIAN reporta.
+ * Campos de ESTADO de la respuesta, los que viven FUERA de la lista de rangos.
+ * Mismo criterio de alias que `FIELD_ALIASES`: primero el nombre vigente,
+ * después la variante en castellano vista en documentación.
  *
- * No lanza NUNCA: una respuesta ilegible se comunica con `ranges: []` y la lista
- * de nombres de elemento. Lanzar aquí convertiría un cambio de nomenclatura de
- * la DIAN en un 500 sin pista, justo en la herramienta que existe para
- * diagnosticar.
+ * No describen un rango: son el veredicto de la DIAN sobre la consulta, y son lo
+ * único que un operador tiene en la mano para entender por qué su lista vino
+ * vacía sin que nadie le vuelque el XML crudo.
+ */
+const STATUS_FIELD_ALIASES = {
+  operation_code: ['OperationCode', 'CodigoOperacion'],
+  operation_description: ['OperationDescription', 'DescripcionOperacion'],
+} as const;
+
+/**
+ * Envoltorios del contrato vigente de `GetNumberingRange`. Su presencia es la
+ * prueba de que la DIAN habló SU idioma: si están, la respuesta se entendió, y
+ * una lista sin ítems significa que no hay numeración autorizada —no que el
+ * parser se haya quedado corto.
+ */
+const CONTRACT_WRAPPER_ELEMENTS = ['GetNumberingRangeResult', 'ResponseList'];
+
+/**
+ * Vocabulario COMPLETO de una respuesta vigente con la lista vacía: exactamente
+ * los cinco nombres que devolvió la configuración 20 (NIT 1123408049, ambiente
+ * de habilitación) el día que se capturó el caso.
+ *
+ * Existe para no cometer el error simétrico al que se está corrigiendo. Si
+ * dentro del envoltorio aparece CUALQUIER otro nombre, la DIAN sí puso algo ahí
+ * que no supimos leer —un campo renombrado, un ítem con otro nombre—, y llamar
+ * a eso «lista vacía» afirmaría en falso, ahora contra el comerciante, que no
+ * tiene rangos autorizados. Los contenedores de ítem (`RANGE_ITEM_ELEMENTS`) se
+ * dejan FUERA a propósito: un `<NumberRangeResponse>` del que no se extrajo ni
+ * un campo es un rango que existe y no supimos leer, no una lista vacía.
+ */
+const EMPTY_CONTRACT_ELEMENTS = new Set(
+  [
+    'GetNumberingRangeResponse',
+    ...CONTRACT_WRAPPER_ELEMENTS,
+    ...STATUS_FIELD_ALIASES.operation_code,
+    ...STATUS_FIELD_ALIASES.operation_description,
+  ].map((name) => name.toLowerCase()),
+);
+
+/**
+ * Lee la respuesta cruda y devuelve los rangos que la DIAN reporta, junto con el
+ * veredicto de por qué son los que son.
+ *
+ * No lanza NUNCA: una respuesta ilegible se comunica con `ranges: []`,
+ * `outcome: 'unrecognized_contract'` y la lista de nombres de elemento. Lanzar
+ * aquí convertiría un cambio de nomenclatura de la DIAN en un 500 sin pista,
+ * justo en la herramienta que existe para diagnosticar.
  */
 export function parseNumberingRangeResponse(
   xml: string,
 ): ParsedNumberingRangeResponse {
   const body = extractSoapBody(xml ?? '');
   if (!body.trim()) {
-    return { ranges: [], element_names: [] };
+    /**
+     * Un cuerpo vacío NO es `empty_list`. No hubo respuesta que interpretar
+     * —red caída, sobre truncado, cadena vacía— y decirle al comerciante «la
+     * DIAN no te reporta numeración» sería la misma clase de mentira que este
+     * parser existe para no repetir, sólo que en la dirección contraria.
+     */
+    return {
+      ranges: [],
+      outcome: 'unrecognized_contract',
+      operation_code: null,
+      operation_description: null,
+      element_names: [],
+    };
   }
+
+  // El veredicto de la DIAN vive FUERA de la lista, así que se lee del cuerpo
+  // entero y acompaña por igual a las tres salidas: con rangos también informa.
+  const operation_code = pickText(body, STATUS_FIELD_ALIASES.operation_code);
+  const operation_description = pickText(
+    body,
+    STATUS_FIELD_ALIASES.operation_description,
+  );
 
   const blocks = extractRangeBlocks(body);
   const ranges = blocks
@@ -128,10 +232,59 @@ export function parseNumberingRangeResponse(
     .filter((range) => hasAnyField(range));
 
   if (ranges.length > 0) {
-    return { ranges, element_names: [] };
+    return {
+      ranges,
+      outcome: 'ranges',
+      operation_code,
+      operation_description,
+      element_names: [],
+    };
   }
 
-  return { ranges: [], element_names: distinctElementNames(body) };
+  /**
+   * La clasificación va DESPUÉS del filtrado por `hasAnyField`, y el orden no es
+   * cosmético: el fallback de rango único mete el cuerpo ENTERO en
+   * `parseRangeBlock` aunque `ResponseList` venga vacío, y sólo tras descartar
+   * ese bloque sin un solo campo se sabe que de verdad no había rangos que leer.
+   * Clasificar antes daría `ranges: [ {todo null} ]` y ninguna de las tres
+   * respuestas sería cierta.
+   */
+  const outcome = classifyEmptyResult(body);
+  return {
+    ranges: [],
+    outcome,
+    operation_code,
+    operation_description,
+    element_names:
+      outcome === 'unrecognized_contract' ? distinctElementNames(body) : [],
+  };
+}
+
+/**
+ * Decide si una lectura sin rangos es «la DIAN no reporta numeración» o «no
+ * entendimos a la DIAN». El panel convierte esta distinción en una frase
+ * dirigida al comerciante, así que se resuelve con dos condiciones verificables
+ * y ninguna heurística.
+ */
+function classifyEmptyResult(body: string): NumberingRangeOutcome {
+  const has_wrapper = CONTRACT_WRAPPER_ELEMENTS.some((element) =>
+    containsElement(body, element),
+  );
+  if (!has_wrapper) return 'unrecognized_contract';
+
+  const unknown = distinctElementNames(body).filter(
+    (name) => !EMPTY_CONTRACT_ELEMENTS.has(name.toLowerCase()),
+  );
+  return unknown.length === 0 ? 'empty_list' : 'unrecognized_contract';
+}
+
+/**
+ * Presencia de un elemento, con o sin prefijo de namespace y esté o no
+ * autocerrado. El `\/?` importa: la lista vacía llega precisamente como
+ * `<a:ResponseList/>`, y una regex que exija `>` inmediato no la ve.
+ */
+function containsElement(body: string, name: string): boolean {
+  return new RegExp(`<(?:\\w+:)?${name}(?:\\s[^>]*)?\\/?>`, 'i').test(body);
 }
 
 /**

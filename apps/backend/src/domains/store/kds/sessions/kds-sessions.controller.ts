@@ -73,8 +73,34 @@ export class KdsSessionsController {
   }
 
   /**
-   * (a) Historial de consumos: una fila por insumo POR PEDIDO, con cantidad y
-   * costo. Permite navegar del resumen al detalle.
+   * Heartbeat — el frontend lo llama una vez por minuto mientras el
+   * operador mantiene la sesión abierta. Refresca `last_seen_at`; sólo
+   * el dueño del turno o un rol privilegiado pueden invocarlo.
+   */
+  @Post(':id/heartbeat')
+  @Permissions('store:kds_sessions:update')
+  async heartbeat(@Param('id', ParseIntPipe) id: number) {
+    await this.sessionsService.heartbeat(id);
+    return this.responseService.success({ id }, 'Heartbeat registrado');
+  }
+
+  /**
+   * Toma forzada — cierra el turno abierto de otro operador y abre uno
+   * nuevo para el caller. Sólo roles `owner`/`admin`/`super_admin`. La
+   * validación de permisos finos vive en el servicio (chequea el rol, no
+   * una fila de `permissions`).
+   */
+  @Post('force-take/:kdsId')
+  @Permissions('store:kds_sessions:create')
+  async forceTake(@Param('kdsId', ParseIntPipe) kdsId: number) {
+    const result = await this.sessionsService.forceTake(kdsId);
+    return this.responseService.success(result, 'Control de la estación transferido');
+  }
+
+  /**
+   * (a) Historial de consumos: una fila por insumo POR PEDIDO, con la cantidad
+   * consumida. ADR-10: el KDS no transporta dinero. Permite navegar del resumen
+   * al detalle.
    */
   /**
    * Reporte de consumo de insumos por estación, agregable por KDS y por rango.
@@ -124,9 +150,9 @@ export class KdsSessionsController {
   }
 
   /**
-   * (b) Resumen de consumos: una fila por insumo con cantidad y costo totales
-   * del turno. En vivo mientras la sesión está abierta; tras cerrar, el valor
-   * congelado vive en `kds_sessions.summary`.
+   * (b) Resumen de consumos: una fila por insumo con la cantidad total del
+   * turno. ADR-10: sin dinero en el payload. En vivo mientras la sesión está
+   * abierta; tras cerrar, el valor congelado vive en `kds_sessions.summary`.
    */
   @Get(':id/consumption-summary')
   @Permissions('store:kds_sessions:read')

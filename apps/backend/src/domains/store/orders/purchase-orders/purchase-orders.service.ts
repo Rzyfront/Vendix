@@ -1443,6 +1443,7 @@ export class PurchaseOrdersService {
                     .replace(/(^-|-$)+/g, '') + `-${Date.now()}`,
                 description: item.product_description || '',
                 sku: desiredSku,
+                barcode: item.barcode || undefined,
                 cost_price: cost,
                 profit_margin: margin,
                 stock_quantity: 0,

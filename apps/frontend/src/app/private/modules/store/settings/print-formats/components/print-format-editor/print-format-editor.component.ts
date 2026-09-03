@@ -13,6 +13,7 @@ import { PrintPropertiesPanelComponent } from '../print-properties-panel/print-p
 import {
   CanvasRegion,
   PrintAnnexValidationRule,
+  PrintCompanyField,
   PrintFormatDefinition,
   PrintPreviewMode,
 } from '../../../../../../../core/models/print-formats.model';
@@ -331,8 +332,8 @@ export type WorkbenchTab = 'sections' | 'columns' | 'tokens';
                 <!-- Physical Roll or Sheet Paper Wrapper -->
                 <div
                   class="vendix-physical-sheet"
-                  [class.is-roll]="draft.paper?.is_roll !== false"
-                  [class.is-sheet]="draft.paper?.is_roll === false"
+                  [class.is-roll]="draft.paper.is_roll !== false"
+                  [class.is-sheet]="draft.paper.is_roll === false"
                 >
                   @if (facade.previewHtml()) {
                     <iframe
@@ -355,7 +356,7 @@ export type WorkbenchTab = 'sections' | 'columns' | 'tokens';
             <!-- Footer Specs Bar -->
             <div class="px-4 py-2 bg-surface-secondary border-t border-border flex items-center justify-between text-[11px] text-text-tertiary font-mono">
               <div class="flex items-center gap-3">
-                <span>Papel: {{ draft.paper?.format || 'thermal_80' }} ({{ paperWidthMm() }}mm)</span>
+                <span>Papel: {{ draft.paper.format || 'thermal_80' }} ({{ paperWidthMm() }}mm)</span>
                 @if (selectedRegion(); as r) {
                   <span class="text-primary-500 font-sans font-medium">
                     Seleccionado: {{ r.label || r.kind }}
@@ -773,6 +774,18 @@ export class PrintFormatEditorComponent {
       const cleanColKey = rule.fixAction.columnKey.replace('col_', '');
       const col = next.columns?.find((c) => c.id === cleanColKey || c.key === cleanColKey || c.id === rule.fixAction!.columnKey);
       if (col) col.enabled = true;
+    }
+
+    if (rule.fixAction?.companyFieldKey) {
+      const companyFieldKey = rule.fixAction.companyFieldKey;
+      const fields = [...(next.company_block?.fields ?? [])];
+      const idx = fields.findIndex((f) => f.key === companyFieldKey);
+      if (idx >= 0) {
+        fields[idx] = { ...fields[idx], enabled: true };
+      } else {
+        fields.push({ key: companyFieldKey, enabled: true } as PrintCompanyField);
+      }
+      next.company_block = { fields };
     }
 
     this.facade.draftDefinition.set(next);

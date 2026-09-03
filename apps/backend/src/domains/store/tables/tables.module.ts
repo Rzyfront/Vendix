@@ -6,6 +6,7 @@ import { KitchenFireModule } from '../kitchen-fire/kitchen-fire.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { CashRegistersModule } from '../cash-registers/cash-registers.module';
 import { InventoryModule } from '../inventory/inventory.module';
+import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
 import { QrService } from '@common/services/qr.service';
 import { TablesController } from './tables.controller';
 import { TablesService } from './tables.service';
@@ -35,7 +36,7 @@ import { SplitOrderService } from './split-order.service';
  * flows that depend on it run later, after the session is open).
  */
 @Module({
-  imports: [ResponseModule, PrismaModule, SettingsModule, KitchenFireModule, NotificationsModule, CashRegistersModule, InventoryModule],
+  imports: [ResponseModule, PrismaModule, SettingsModule, KitchenFireModule, NotificationsModule, CashRegistersModule, InventoryModule, OrderFlowModule],
   controllers: [
     TablesController,
     TableSessionsController,

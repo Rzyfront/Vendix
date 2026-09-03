@@ -1,0 +1,12 @@
+
+> buildcheck:test
+> bash scripts/buildcheck.sh --test apps/backend/src/domains/store/invoicing/pos/pos-fiscal-emission.service.spec.ts
+
+buildcheck — solo compilación, sin servidores (timeout 900s)
+logs: /Users/rzy/Documents/Organizations/Quickss/Vendix/.buildcheck
+
+RAM libre estimada: 4757 MB
+
+▶ backend-tests          PASS  (7s)
+
+RESULTADO: PASS — compila y no quedó ningún proceso vivo.

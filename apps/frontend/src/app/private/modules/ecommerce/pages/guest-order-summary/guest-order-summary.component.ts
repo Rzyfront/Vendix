@@ -39,6 +39,10 @@ interface GuestOrderItem {
   tax_amount_item?: number | null;
   image_url?: string | null;
   variant_image_url?: string | null;
+  // E2 (Carril B) — fecha de cancelación y motivo del soft-cancel D2.
+  // Nullable: el grueso de líneas no están canceladas.
+  cancelled_at?: string | null;
+  cancellation_reason?: string | null;
 }
 
 interface GuestOrderPromotion {
@@ -270,7 +274,19 @@ interface GuestOrderSummary {
                 item of data.order.items;
                 track item.product_name + item.variant_sku
               ) {
-                <div class="item-row">
+                <!--
+                  E2 — el item cancelado se queda en su posicion original
+                  (Nancy: "el cliente necesita ver que cancelo en el sitio
+                  donde lo pidio"). Precio y total OCULTOS: un numero tachado
+                  sigue siendo un numero que el ojo suma. El nombre va
+                  tachado pero legible (sin bajar el contraste al maximo).
+                  El motivo solo se pinta si aporta — vacio o prefijo
+                  "legacy:" de la ruta vieja de compatibilidad, oculto.
+                -->
+                <div
+                  class="item-row"
+                  [class.item-row--cancelled]="isItemCancelled(item)"
+                >
                   <div class="item-thumb">
                     @if (item.variant_image_url || item.image_url) {
                       <img
@@ -284,7 +300,15 @@ interface GuestOrderSummary {
                     }
                   </div>
                   <div class="item-info">
-                    <span class="item-name">{{ item.product_name }}</span>
+                    <div class="item-name-row">
+                      <span class="item-name">{{ item.product_name }}</span>
+                      @if (isItemCancelled(item)) {
+                        <app-badge variant="warning" size="sm">
+                          <app-icon name="x-circle" [size]="11" />
+                          Cancelado
+                        </app-badge>
+                      }
+                    </div>
                     @if (item.variant_sku || item.variant_attributes) {
                       <span class="item-variant">
                         @if (item.variant_sku) {
@@ -298,13 +322,25 @@ interface GuestOrderSummary {
                         }
                       </span>
                     }
-                    <span class="item-qty"
-                      >{{ item.quantity }} × {{ item.unit_price | currency }}</span
-                    >
+                    @if (!isItemCancelled(item)) {
+                      <span class="item-qty"
+                        >{{ item.quantity }} ×
+                        {{ item.unit_price | currency }}</span
+                      >
+                    }
+                    @if (
+                      isItemCancelled(item) && hasVisibleCancellationReason(item)
+                    ) {
+                      <span class="item-cancellation-reason">
+                        {{ item.cancellation_reason }}
+                      </span>
+                    }
                   </div>
-                  <strong class="item-total">{{
-                    item.total_price | currency
-                  }}</strong>
+                  @if (!isItemCancelled(item)) {
+                    <strong class="item-total">{{
+                      item.total_price | currency
+                    }}</strong>
+                  }
                 </div>
               }
             </div>
@@ -700,6 +736,26 @@ interface GuestOrderSummary {
         border-bottom: 0;
       }
 
+      // E2 — soft cancel: precio OCULTO (no tachado), nombre tachado pero
+      // legible. Sin bajar el contraste al maximo para que el cliente pueda
+      // seguir leyendo que ese es el plato que pidio.
+      .item-row--cancelled .item-name {
+        text-decoration: line-through;
+        text-decoration-color: color-mix(
+          in srgb,
+          var(--color-text-secondary) 70%,
+          transparent
+        );
+        text-decoration-thickness: 1.5px;
+      }
+
+      .item-cancellation-reason {
+        font-size: var(--fs-xs);
+        color: var(--color-text-secondary);
+        font-style: italic;
+        margin-top: 0.125rem;
+      }
+
       .item-thumb {
         flex-shrink: 0;
         width: 60px;
@@ -1016,5 +1072,31 @@ export class GuestOrderSummaryComponent implements OnInit {
       refunded: 'info',
     };
     return variants[state] || 'neutral';
+  }
+
+  // === E2 — helpers de cancelación de línea =================================
+
+  /**
+   * True si el item fue cancelado (soft cancel vía D2). El backend persiste
+   * `cancelled_at` en order_items; el cliente ve el item en su posición
+   * original, tachado, con distintivo 'Cancelado'.
+   */
+  isItemCancelled(item: GuestOrderItem): boolean {
+    return !!item.cancelled_at;
+  }
+
+  /**
+   * El motivo se muestra al cliente SOLO si aporta. Filtra:
+   *  - Vacío / null / solo espacios.
+   *  - Marcador interno `legacy:` que dejó la ruta vieja de compatibilidad
+   *    (no aporta al cliente, le confunde más).
+   *  - Marcadores internos equivalentes que un operador con prisa haya podido
+   *    dejar y que NO comunican al cliente por qué se canceló.
+   */
+  hasVisibleCancellationReason(item: GuestOrderItem): boolean {
+    const reason = (item.cancellation_reason ?? '').trim();
+    if (!reason) return false;
+    if (reason.startsWith('legacy:')) return false;
+    return true;
   }
 }

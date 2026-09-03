@@ -316,4 +316,139 @@ describe('InvoiceFlowService support documents', () => {
     expect(provider.sendSupportDocument).not.toHaveBeenCalled();
     expect(fiscalLedger.ensureInvoiceTransmission).not.toHaveBeenCalled();
   });
+
+  // Reenvío de un `rejected`: antes de este fix, `send()` sólo comprobaba que
+  // la transición fuera legal (`VALID_TRANSITIONS.rejected` incluye `sent`) y
+  // transmitía directo, sin volver a pasar por la puerta de prevalidación
+  // fiscal que `validate()` sí exige. Un documento que la DIAN ya rechazó
+  // podía reenviarse tal cual, gastando un segundo consecutivo irrecuperable
+  // si el defecto seguía ahí.
+  describe('reenvío de un documento rechazado', () => {
+    it('revalida con la puerta fiscal (signing_date incluido) antes de transmitir', async () => {
+      const rejectedInvoice = { ...supportDocument, status: 'rejected' };
+      const fiscalDocumentValidate = jest.fn().mockReturnValue({
+        emittable: true,
+        blockers: [],
+        warnings: [],
+        document_type: 'support_document',
+        computed: {},
+      });
+
+      const { service, provider, resolver } = createService({
+        prisma: {
+          invoices: {
+            findFirst: jest.fn().mockResolvedValue(rejectedInvoice),
+            update: jest
+              .fn()
+              .mockResolvedValue({ ...rejectedInvoice, status: 'accepted' }),
+          },
+        },
+        fiscalDocument: { validate: fiscalDocumentValidate },
+      });
+
+      await RequestContextService.run(requestContext, () => service.send(100));
+
+      // Se llamó ANTES de transmitir, y con `signing_date` poblado — el único
+      // punto de la cadena donde la regla FAD09e (IssueDate == fecha de
+      // firma) se juzga de verdad.
+      expect(fiscalDocumentValidate).toHaveBeenCalledWith(
+        expect.objectContaining({ signing_date: expect.any(Date) }),
+      );
+      expect(resolver.resolve).toHaveBeenCalled();
+      expect(provider.sendSupportDocument).toHaveBeenCalled();
+    });
+
+    it('bloquea el reenvío sin transmitir si la revalidación sigue fallando', async () => {
+      const rejectedInvoice = { ...supportDocument, status: 'rejected' };
+      const fiscalDocumentValidate = jest.fn().mockReturnValue({
+        emittable: false,
+        blockers: [
+          {
+            code: 'RESOLUTION_EXPIRED',
+            category: 'resolution',
+            field: 'resolution',
+            problem: 'La resolución vigente venció.',
+            fix: 'Registra una resolución vigente antes de reenviar.',
+          },
+        ],
+        warnings: [],
+        document_type: 'support_document',
+        computed: {},
+      });
+
+      const { service, provider, resolver, fiscalLedger } = createService({
+        prisma: {
+          invoices: {
+            findFirst: jest.fn().mockResolvedValue(rejectedInvoice),
+          },
+        },
+        fiscalDocument: { validate: fiscalDocumentValidate },
+      });
+
+      await expect(
+        RequestContextService.run(requestContext, () => service.send(100)),
+      ).rejects.toMatchObject({
+        errorCode: 'INVOICING_PREVALIDATION_002',
+      });
+
+      // El bloqueo se cortó ANTES de reservar transmisión o llamar al
+      // proveedor — el mismo principio que protege el consecutivo en
+      // `validate()`: rechazar acá es recuperable, rechazar en la DIAN no.
+      expect(fiscalLedger.ensureInvoiceTransmission).not.toHaveBeenCalled();
+      expect(resolver.resolve).not.toHaveBeenCalled();
+      expect(provider.sendSupportDocument).not.toHaveBeenCalled();
+    });
+
+    // Un `rejected` con `issue_date` de otro día viola FAD09e al revalidar el
+    // reenvío. El mensaje genérico de `fiscal-document.validator.ts` manda a
+    // «actualizar la fecha de emisión» — instrucción imposible aquí: un
+    // `rejected` no vuelve a `draft` (`VALID_TRANSITIONS`) y `InvoicingService
+    // .update()` rechaza cualquier factura fuera de `draft`. El mensaje debe
+    // nombrar el camino que sí existe: anular y emitir de nuevo.
+    it('si la revalidación choca con FAD09e, el mensaje manda a anular y reemitir, no a editar la fecha', async () => {
+      const rejectedInvoice = { ...supportDocument, status: 'rejected' };
+      const fiscalDocumentValidate = jest.fn().mockReturnValue({
+        emittable: false,
+        blockers: [
+          {
+            code: 'ISSUE_DATE_AFTER_SIGNING_DATE',
+            category: 'content',
+            field: 'issue_date',
+            problem:
+              'Documento soporte declara fecha de emisión 2026-03-10 pero se va a firmar el 2026-09-02.',
+            fix: 'Actualiza la fecha de emisión del documento a 2026-09-02 en el encabezado del documento antes de transmitirlo.',
+          },
+        ],
+        warnings: [],
+        document_type: 'support_document',
+        computed: {},
+      });
+
+      const { service, provider, resolver, fiscalLedger } = createService({
+        prisma: {
+          invoices: {
+            findFirst: jest.fn().mockResolvedValue(rejectedInvoice),
+          },
+        },
+        fiscalDocument: { validate: fiscalDocumentValidate },
+      });
+
+      await expect(
+        RequestContextService.run(requestContext, () => service.send(100)),
+      ).rejects.toMatchObject({
+        errorCode: 'INVOICING_PREVALIDATION_004',
+        message: expect.stringMatching(/anúl|anula/i),
+      });
+
+      const rejection = await RequestContextService.run(
+        requestContext,
+        () => service.send(100),
+      ).catch((error) => error);
+      // No debe sobrevivir la instrucción irrealizable del camino de `draft`.
+      expect(rejection.message).not.toMatch(/actualiza la fecha de emisión/i);
+      expect(fiscalLedger.ensureInvoiceTransmission).not.toHaveBeenCalled();
+      expect(resolver.resolve).not.toHaveBeenCalled();
+      expect(provider.sendSupportDocument).not.toHaveBeenCalled();
+    });
+  });
 });

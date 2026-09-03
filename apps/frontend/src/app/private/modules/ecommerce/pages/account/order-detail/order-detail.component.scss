@@ -327,6 +327,29 @@
   &:last-child {
     padding-bottom: 0;
   }
+
+  // E2 — soft cancel: precio OCULTO (no tachado), nombre tachado pero
+  // legible. Sin bajar el contraste al maximo para que el cliente pueda
+  // seguir leyendo que ese es el plato que pidio. Fondo tenue para que el
+  // ojo lo distinga del resto sin gritar.
+  &--cancelled {
+    .item-name {
+      text-decoration: line-through;
+      text-decoration-color: color-mix(
+        in srgb,
+        var(--color-text-secondary) 70%,
+        transparent
+      );
+      text-decoration-thickness: 1.5px;
+    }
+  }
+
+  .item-cancellation-reason {
+    font-size: var(--fs-xs);
+    color: var(--color-text-secondary);
+    font-style: italic;
+    margin-top: 0.125rem;
+  }
 }
 
 .item-thumb {

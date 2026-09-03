@@ -15,7 +15,6 @@ import {
   PqrService,
 } from '../../../../shared/services/pqr.service';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
-import { PublicHeaderComponent } from '../../../landing/components/public-header/public-header.component';
 import { TimelineComponent } from '../../../../shared/components/timeline/timeline.component';
 import type {
   TimelineStep,
@@ -38,7 +37,6 @@ type TrackState = 'idle' | 'loading' | 'loaded' | 'not_found' | 'error';
     RouterLink,
     DatePipe,
     IconComponent,
-    PublicHeaderComponent,
     TimelineComponent,
   ],
   templateUrl: './pqr-track.component.html',

@@ -236,6 +236,10 @@ export class FinancialAnalyticsService {
         AND o.state IN (${revenueStates})
         AND o.created_at >= ${startDate}
         AND o.created_at <= ${endDate}
+        -- [resid-fiscal] — Excluir ítems cancelados (D2). El reporte de
+        -- ingresos grava/exenta se arma desde líneas; un cancelado entraría
+        -- como ingreso inexistente y desvía la base gravable.
+        AND oi.cancelled_at IS NULL
     `);
 
     // QUI-630 defect 4: the DIAN posición needs ALL sides — ventas IVA generado,
@@ -705,6 +709,11 @@ export class FinancialAnalyticsService {
         AND o.state IN (${states})
         AND o.created_at >= ${startDate}
         AND o.created_at <= ${endDate}
+        -- [resid-fiscal] — Excluir cancelados del COGS. Un ítem cancelado
+        -- antes de fire revierte stock (cancellation_type='before_fire'),
+        -- pero su línea seguía sumando COGS al reporte — eso descuadra la
+        -- utilidad bruta.
+        AND oi.cancelled_at IS NULL
     `);
     const row = rows[0];
     return {
@@ -802,6 +811,9 @@ export class FinancialAnalyticsService {
         INNER JOIN order_items oi ON oi.id = oit.order_item_id
         WHERE oi.order_id IN (SELECT order_id FROM paid_per_order)
           AND oit.tax_type IN (${taxTypes})
+          -- [resid-fiscal] — Excluir cancelados. Si entra, el passthrough
+          -- fiscal de la venta se infla y descuadra la base gravable DIAN.
+          AND oi.cancelled_at IS NULL
         GROUP BY oi.order_id
       ),
       order_cost AS (
@@ -812,6 +824,8 @@ export class FinancialAnalyticsService {
           SUM(CASE WHEN oi.cost_price IS NULL THEN oi.quantity ELSE 0 END) AS units_without_cost
         FROM order_items oi
         WHERE oi.order_id IN (SELECT order_id FROM paid_per_order)
+          -- [resid-fiscal] — Excluir cancelados del COGS por orden.
+          AND oi.cancelled_at IS NULL
         GROUP BY oi.order_id
       ),
       recognized AS (

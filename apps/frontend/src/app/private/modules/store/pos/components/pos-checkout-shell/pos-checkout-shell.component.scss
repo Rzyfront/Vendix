@@ -118,14 +118,19 @@
   grid-template-columns: 1fr;
   gap: 14px;
   min-height: 0;
+  overflow: visible;
 }
 
 .checkout-main {
   min-width: 0;
+  min-height: 0;
+  overflow: visible;
 }
 
 .step-panel {
   min-width: 0;
+  overflow: visible;
+  max-height: none;
 }
 
 .step-hidden {
@@ -278,6 +283,50 @@
   border-radius: 16px;
   border: 1px solid var(--color-border);
   padding: 14px;
+  max-height: none;
+  overflow: visible;
+  overflow-y: visible;
+}
+
+/* No-scroll container para subStep Cliente (host de las 2 opciones del selector sin scroll invasivo). */
+.cliente-section--no-scroll {
+  max-height: none !important;
+  overflow: visible !important;
+  overflow-y: visible !important;
+}
+
+/* Complemento al fix de Agent A (selector sin scroll): asegura que el shell no reintroduzca scroll
+   en el host del selector ni en su listado interno comprimido de 3 opciones. */
+.cliente-section app-pos-customer-selector,
+.cliente-section .customer-selector,
+.cliente-section .search-results,
+.cliente-section .search-results.compact-results,
+.cliente-section .suggestions-block {
+  max-height: none !important;
+  overflow: visible !important;
+  overflow-y: visible !important;
+}
+
+/* Asegura que ningún wrapper intermedio del shell recorte el contenido del selector. */
+.checkout-shell,
+.checkout-grid,
+.checkout-main,
+.step-panel,
+.cliente-grid,
+.cliente-main {
+  scrollbar-width: none;
+}
+
+.checkout-shell::-webkit-scrollbar,
+.checkout-grid::-webkit-scrollbar,
+.checkout-main::-webkit-scrollbar,
+.step-panel::-webkit-scrollbar,
+.cliente-grid::-webkit-scrollbar,
+.cliente-main::-webkit-scrollbar,
+.cliente-section::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 /* Rail de resumen: fondo sutil (muted) para jerarquía. Fallback a surface
@@ -435,8 +484,10 @@
 .cliente-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 16px;
+  gap: 12px;
   align-items: start;
+  min-height: 0;
+  overflow: visible;
 }
 
 .cliente-main {
@@ -444,6 +495,8 @@
   flex-direction: column;
   gap: 12px;
   min-width: 0;
+  min-height: 0;
+  overflow: visible;
 }
 
 /* Fila-resumen colapsada (clickable, vuelve a ese sub-paso).
@@ -500,6 +553,36 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* «Facturar a nombre de» — enlace secundario bajo "Venta Anónima". Es
+   deliberadamente discreto (no un `.sale-type-btn`): no es una cuarta opción
+   del radiogroup, es un despliegue dentro de la opción anónima ya elegida. */
+.invoice-capture-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  margin-left: 4px;
+  padding: 4px 2px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-primary);
+  transition: opacity 0.15s ease;
+}
+
+.invoice-capture-toggle:hover {
+  opacity: 0.75;
+  text-decoration: underline;
+}
+
+.invoice-capture-toggle:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 6px;
 }
 
 .sale-type-btn {

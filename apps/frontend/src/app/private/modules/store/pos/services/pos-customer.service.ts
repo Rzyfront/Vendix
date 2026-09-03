@@ -100,7 +100,7 @@ export class PosCustomerService {
     customer: PosCustomer;
     was_created: boolean;
     was_updated: boolean;
-    matched_by: 'email' | 'document' | null;
+    matched_by: 'email' | 'document' | 'name' | null;
   }> {
     this.loading.set(true);
 
@@ -115,6 +115,7 @@ export class PosCustomerService {
           matched_by: (payload.matched_by ?? null) as
             | 'email'
             | 'document'
+            | 'name'
             | null,
         };
       }),
