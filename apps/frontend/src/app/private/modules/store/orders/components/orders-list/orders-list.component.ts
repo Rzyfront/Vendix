@@ -197,10 +197,18 @@ export class OrdersListComponent {
       key: 'channel',
       label: 'Canal',
       type: 'select',
+      // El backend acepta más canales (whatsapp, agent, marketplace — ver
+      // channelMap en formatChannel / colorMap en columns), pero el filtro
+      // solo exponía pos + ecommerce. Tienda con ventas por WhatsApp
+      // (ej. TCM01-260728-0001) no podía filtrar por ese canal. Se agregan
+      // los tres que faltaban para empatar con las órdenes reales.
       options: [
         { value: '', label: 'Todos los Canales' },
         { value: 'pos', label: 'Punto de Venta' },
         { value: 'ecommerce', label: 'Tienda Online' },
+        { value: 'whatsapp', label: 'WhatsApp' },
+        { value: 'agent', label: 'Agente IA' },
+        { value: 'marketplace', label: 'Marketplace' },
       ],
     },
     {
