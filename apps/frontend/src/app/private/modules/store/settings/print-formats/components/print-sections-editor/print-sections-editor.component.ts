@@ -4,6 +4,10 @@ import { FormsModule } from '@angular/forms';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { PrintFormatsFacade } from '../../services/print-formats.facade';
 import {
+  catalogFieldsForSectionType,
+  mergeSectionFields,
+} from '../../services/section-field-catalog';
+import {
   PrintSectionDefinition,
   PrintFieldDefinition,
   PrintFormatDefinition,
@@ -208,6 +212,25 @@ import {
                     </div>
                   </div>
                 }
+                @if (availableFields(section).length > 0) {
+                  <div class="space-y-2 pt-2">
+                    <span class="text-[10px] font-bold text-text-tertiary uppercase tracking-wider block">
+                      Agregar dato disponible:
+                    </span>
+                    <div class="flex flex-wrap gap-1.5">
+                      @for (opt of availableFields(section); track opt.id) {
+                        <button
+                          type="button"
+                          (click)="addField(section.id, opt.id)"
+                          class="px-2 py-1 text-[11px] font-medium rounded-full border border-dashed border-border text-text-secondary hover:text-primary-500 hover:border-primary-500 transition cursor-pointer"
+                          [title]="opt.key"
+                        >
+                          + {{ opt.label }}
+                        </button>
+                      }
+                    </div>
+                  </div>
+                }
               </div>
             }
           </div>
@@ -358,6 +381,33 @@ export class PrintSectionsEditorComponent {
       def.sections[currentIndex] = def.sections[newIndex];
       def.sections[newIndex] = temp;
       def.sections.forEach((s, idx) => (s.order = idx + 1));
+      return def;
+    });
+  }
+
+  availableFields(section: PrintSectionDefinition): Array<{ id: string; key: string; label: string }> {
+    return mergeSectionFields(section.fields as any, section.type);
+  }
+
+  addField(sectionId: string, catalogId: string): void {
+    const draft = this.facade.draftDefinition();
+    const sec = draft?.sections.find((s) => s.id === sectionId);
+    if (!sec) return;
+    const opt = catalogFieldsForSectionType(sec.type).find((c) => c.id === catalogId);
+    if (!opt) return;
+    this.facade.updateDraftDefinition((def) => {
+      const s = def.sections.find((item) => item.id === sectionId);
+      if (!s) return def;
+      s.fields = s.fields ?? [];
+      if (s.fields.some((f) => f.id === opt.id)) return def;
+      s.fields.push({
+        id: opt.id,
+        key: opt.key,
+        label: opt.label,
+        enabled: true,
+        position: (opt.position ?? 'left') as any,
+        format: (opt.format ?? 'text') as any,
+      } as any);
       return def;
     });
   }
