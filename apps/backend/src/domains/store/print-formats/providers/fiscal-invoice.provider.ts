@@ -88,6 +88,8 @@ export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
         phone: '+57 602 888 1234',
         email: 'facturaelectronica@pacificomin.com',
         address: 'Avenida Colombia # 1-50, Cali',
+        address_line1: 'Avenida Colombia # 1-50',
+        city: 'Cali',
       },
       document: {
         id: 888,
@@ -162,6 +164,7 @@ export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
       { token: '{{fiscal.qr_code_png_base64}}', path: 'fiscal.qr_code_png_base64', description: 'Imagen Base64 del código QR oficial DIAN', example: 'iVBORw0KGgo...' },
       { token: '{{store.legal_name}}', path: 'store.legal_name', description: 'Razón social del emisor fiscal', example: 'Mi Empresa S.A.S.' },
       { token: '{{customer.legal_name}}', path: 'customer.name', description: 'Razón social del adquirente', example: 'Cliente S.A.' },
+      { token: '{{customer.address}}', path: 'customer.address', description: 'Dirección del adquirente', example: 'Avenida Colombia # 1-50, Cali' },
     ];
   }
 

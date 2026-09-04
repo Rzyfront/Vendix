@@ -8,6 +8,7 @@ import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import { signStoreLogoUrl } from '../lib/print-logo.util';
+import { mapUserAddress } from '../lib/customer-address';
 
 /**
  * Etiquetas de `quotation_status_enum` en español. Mismo diccionario de siete
@@ -58,7 +59,8 @@ export class QuotationDataProvider implements IDocumentDataProvider {
       where: { id, store_id: storeId },
       include: {
         quotation_items: { orderBy: { id: 'asc' } },
-        customer: true,
+        // CP-print-token-flow A.3 — dirección del cliente (igual que POS).
+        customer: { include: { addresses: { take: 1 } } },
         store: {
           include: {
             addresses: { take: 1 },
@@ -131,6 +133,7 @@ export class QuotationDataProvider implements IDocumentDataProvider {
             tax_id: customer.document_number || undefined,
             phone: customer.phone || undefined,
             email: customer.email || undefined,
+            ...mapUserAddress(customer.addresses?.[0]),
           }
         : undefined,
       document: {
@@ -234,6 +237,10 @@ export class QuotationDataProvider implements IDocumentDataProvider {
         tax_id: '860.000.111-2',
         phone: '+57 601 321 0000',
         email: 'proyectos@bolivar.com.co',
+        // CP-print-token-flow A.3 — paridad muestra/real (ADR-2).
+        address: 'Calle 127 # 15-46, Bogotá D.C.',
+        address_line1: 'Calle 127 # 15-46',
+        city: 'Bogotá D.C.',
       },
       document: {
         id: 701,
@@ -291,6 +298,7 @@ export class QuotationDataProvider implements IDocumentDataProvider {
       { token: '{{document.number}}', path: 'document.number', description: 'Número de cotización', example: 'COT-2026-001' },
       { token: '{{document.valid_until}}', path: 'document.valid_until_formatted', description: 'Fecha límite de validez de la oferta', example: '30/09/2026' },
       { token: '{{customer.name}}', path: 'customer.name', description: 'Nombre del prospecto o cliente', example: 'Constructora XYZ' },
+      { token: '{{customer.address}}', path: 'customer.address', description: 'Dirección del cliente', example: 'Calle 127 # 15-46, Bogotá D.C.' },
       { token: '{{totals.grand_total}}', path: 'totals.grand_total_formatted', description: 'Monto total cotizado', example: '$16.500.000' },
       { token: '{{document.state}}', path: 'document.state_label', description: 'Estado de la cotización en español', example: 'Enviada' },
       { token: '{{document.notes}}', path: 'document.notes', description: 'Nota de la cotización dirigida al cliente', example: 'Incluye entrega en obra' },

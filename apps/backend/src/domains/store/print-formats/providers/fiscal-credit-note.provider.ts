@@ -133,6 +133,10 @@ export class FiscalCreditNoteDataProvider implements IDocumentDataProvider {
         tax_id: '800.123.987-6',
         phone: '+57 602 888 1234',
         email: 'facturaelectronica@pacificomin.com',
+        // CP-print-token-flow A.2 — paridad muestra/real (ADR-2).
+        address: 'Avenida Colombia # 1-50, Cali',
+        address_line1: 'Avenida Colombia # 1-50',
+        city: 'Cali',
       },
       document: {
         id: 999,
@@ -191,6 +195,7 @@ export class FiscalCreditNoteDataProvider implements IDocumentDataProvider {
     return [
       { token: '{{fiscal.cude}}', path: 'fiscal.cude', description: 'Código Único de Documento Electrónico (CUDE)', example: 'c1d2e3f4...' },
       { token: '{{document.reference_document_number}}', path: 'document.reference_document_number', description: 'Factura electrónica afectada', example: 'SETP-990001' },
+      { token: '{{customer.address}}', path: 'customer.address', description: 'Dirección del adquirente', example: 'Avenida Colombia # 1-50, Cali' },
       { token: '{{totals.grand_total}}', path: 'totals.grand_total_formatted', description: 'Monto total acreditado', example: '$595.000' },
     ];
   }

@@ -120,7 +120,10 @@ export class PosElectronicInvoiceDataProvider implements IDocumentDataProvider {
         tax_id: '222222222222',
         phone: '+57 300 000 0000',
         email: 'cliente@ejemplo.com',
-        address: 'Bogotá D.C.',
+        // CP-print-token-flow A.2 — paridad muestra/real (ADR-2).
+        address: 'Calle 45 # 12-30, Bogotá D.C.',
+        address_line1: 'Calle 45 # 12-30',
+        city: 'Bogotá D.C.',
       },
       document: {
         id: 999,
@@ -240,6 +243,7 @@ export class PosElectronicInvoiceDataProvider implements IDocumentDataProvider {
       { token: '{{store.name}}', path: 'store.name', description: 'Nombre comercial de la tienda', example: 'Vendix POS Express' },
       { token: '{{store.tax_id}}', path: 'store.tax_id', description: 'NIT o identificación fiscal', example: '901.555.333-2' },
       { token: '{{customer.name}}', path: 'customer.name', description: 'Nombre del cliente', example: 'Consumidor Final' },
+      { token: '{{customer.address}}', path: 'customer.address', description: 'Dirección del cliente', example: 'Calle 45 # 12-30, Bogotá D.C.' },
       { token: '{{totals.grand_total}}', path: 'totals.grand_total_formatted', description: 'Total a pagar con formato', example: '$89.250' },
     ];
   }
