@@ -33,18 +33,24 @@ export class OrderPrintService {
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly documentPrint = inject(DocumentPrintService);
 
+  /**
+   * Solo dos formatos, decididos por el backend: ticket POS sin FE,
+   * factura electrónica de venta en producción fiscal
+   * (`/resolve-for-document`). Sin fallback local: el emisor legacy
+   * `generateOrderBody` queda muerto a propósito (regla del dueño: no
+   * borrar) pero ya no se invoca desde este camino.
+   */
   async printOrder(order: Order): Promise<void> {
-    await this.documentPrint.printViaGateway({
-      formatType: 'sales_order_invoice',
-      documentId: order.id,
-      title: `Orden de Venta #${order.order_number}`,
-      fallbackRequest: {
-        document: 'sales_order',
-        body: this.generateOrderBody(order),
+    try {
+      await this.documentPrint.resolveAndPrint({
+        documentType: 'pos_order',
+        documentId: order.id,
         title: `Orden de Venta #${order.order_number}`,
-        styles: ORDER_PRINT_STYLES,
-      },
-    });
+      });
+    } catch (err) {
+      console.error(`[OrderPrintService] no se pudo imprimir la orden ${order.id}:`, err);
+      throw err;
+    }
   }
 
   private generateOrderBody(order: Order): string {
