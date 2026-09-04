@@ -8,6 +8,7 @@ import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import { signStoreLogoUrl } from '../lib/print-logo.util';
+import { mapUserAddress } from '../lib/customer-address';
 
 @Injectable()
 export class PosSaleTicketDataProvider implements IDocumentDataProvider {
@@ -49,7 +50,10 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
           where: { cancelled_at: null },
           include: { order_item_taxes: true },
         },
-        users: true,
+        // CP-print-token-flow A.1 — dirección del cliente para el ticket.
+        // `take: 1` sobre la relación vigente (misma forma que
+        // `stores.addresses` arriba); sin direcciones el array queda vacío.
+        users: { include: { addresses: { take: 1 } } },
         stores: {
           include: {
             addresses: { take: 1 },
@@ -114,6 +118,10 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         tax_id: '1.020.304.050',
         phone: '+57 311 987 6543',
         email: 'juan.perez@ejemplo.com',
+        // CP-print-token-flow A.1 — paridad muestra/real (ADR-2).
+        address: 'Carrera 15 # 88-64, Bogotá D.C.',
+        address_line1: 'Carrera 15 # 88-64',
+        city: 'Bogotá D.C.',
       },
       document: {
         id: 101,
@@ -190,6 +198,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       { token: '{{order.order_number}}', path: 'document.number', description: 'Número de ticket u orden', example: 'POS-1002' },
       { token: '{{order.cashier_name}}', path: 'document.cashier_name', description: 'Nombre del cajero', example: 'Ana Torres' },
       { token: '{{customer.name}}', path: 'customer.name', description: 'Nombre del cliente', example: 'Consumidor Final' },
+      { token: '{{customer.address}}', path: 'customer.address', description: 'Dirección del cliente', example: 'Carrera 15 # 88-64, Bogotá D.C.' },
       { token: '{{order.grand_total}}', path: 'totals.grand_total_formatted', description: 'Total a pagar con formato', example: '$87.500' },
       { token: '{{order.change_due}}', path: 'document.change_due_formatted', description: 'Cambio o vuelto entregado', example: '$12.500' },
     ];
@@ -291,12 +300,15 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         city: addr.city,
         logo_url: signedLogoUrl,
       },
+      // CP-print-token-flow A.1 — dirección del cliente. Sin direcciones
+      // queda `undefined` (el compositor no emite fila: invariante 1).
       customer: user.id
         ? {
             name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Cliente',
             tax_id: user.document_number,
             phone: user.phone,
             email: user.email,
+            ...mapUserAddress(user.addresses?.[0]),
           }
         : undefined,
       document: {

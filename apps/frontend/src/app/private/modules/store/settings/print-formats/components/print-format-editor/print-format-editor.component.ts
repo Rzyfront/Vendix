@@ -586,22 +586,31 @@ export type WorkbenchTab = 'sections' | 'columns' | 'tokens';
         border-radius: 2px;
         overflow: hidden;
         position: relative;
-        min-height: 280px;
       }
       .vendix-physical-sheet.is-roll {
         border-top: 3px solid #cbd5e1;
         border-bottom: 3px dashed #94a3b8;
+        /* CP-print-token-flow B.1 — el rollo mide lo que el contenido mida:
+           el min-height fijo estiraba tickets cortos y el preview no
+           equivalía al papel. Solo la hoja conserva alto mínimo. */
+        min-height: 0;
       }
       .vendix-physical-sheet.is-sheet {
         border: 1px solid #cbd5e1;
+        min-height: 280px;
       }
       .vendix-preview-iframe {
         width: 100%;
-        min-height: 560px;
         height: 100%;
         border: none;
         display: block;
         background: #ffffff;
+      }
+      .vendix-physical-sheet.is-sheet .vendix-preview-iframe {
+        min-height: 560px;
+      }
+      .vendix-physical-sheet.is-roll .vendix-preview-iframe {
+        min-height: 120px;
       }
     `,
   ],

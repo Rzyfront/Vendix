@@ -140,6 +140,7 @@ export class CreditNoteDataProvider implements IDocumentDataProvider {
       { token: '{{document.number}}', path: 'document.number', description: 'Número de la nota crédito', example: 'NC-0012' },
       { token: '{{document.reference_document_number}}', path: 'document.reference_document_number', description: 'Factura u orden referenciada', example: 'ORD-1002' },
       { token: '{{customer.name}}', path: 'customer.name', description: 'Nombre del cliente', example: 'María Restrepo' },
+      { token: '{{customer.address}}', path: 'customer.address', description: 'Dirección del cliente', example: 'Centro Comercial Unicentro, Local 215' },
       { token: '{{totals.grand_total}}', path: 'totals.grand_total_formatted', description: 'Monto total acreditado', example: '$240.000' },
     ];
   }

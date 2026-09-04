@@ -6,6 +6,7 @@ import { IDocumentDataProvider } from '../interfaces/document-data-provider.inte
 import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
+import { mapUserAddress } from '../lib/customer-address';
 
 /**
  * [print-editor-dsk P8] — Certificado de retención SUFRIDA
@@ -48,7 +49,8 @@ export class WithholdingSufferedDataProvider implements IDocumentDataProvider {
       include: {
         concept: { select: { code: true, name: true, rate: true, withholding_type: true } },
         supplier: { select: { name: true, tax_id: true, verification_digit: true } },
-        customer: { select: { first_name: true, last_name: true, document_number: true } },
+        // CP-print-token-flow A.3 — dirección solo si la contraparte es el cliente.
+        customer: { select: { first_name: true, last_name: true, document_number: true, addresses: { take: 1, select: { address_line1: true, address_line2: true, city: true, state_province: true, country: true } } } },
         invoice: { select: { invoice_number: true, issue_date: true } },
       },
     });
@@ -83,6 +85,9 @@ export class WithholdingSufferedDataProvider implements IDocumentDataProvider {
       customer: {
         name: counterparty,
         tax_id: counterpartyTaxId,
+        // Solo del cliente: si la contraparte es el proveedor, `suppliers`
+        // no tiene columna de dirección y no se inventa nada.
+        ...(!calculation.supplier?.name ? mapUserAddress(calculation.customer?.addresses?.[0]) : {}),
       },
       items: [],
       taxes: [
@@ -139,6 +144,9 @@ export class WithholdingSufferedDataProvider implements IDocumentDataProvider {
       customer: {
         name: 'Tercero Demo S.A.S.',
         tax_id: '800.999.888-1',
+        // CP-print-token-flow A.3 — paridad muestra/real (ADR-2).
+        address: 'Calle 100 # 15-20, Bogotá D.C.',
+        city: 'Bogotá D.C.',
       },
       items: [],
       taxes: [
@@ -178,6 +186,7 @@ export class WithholdingSufferedDataProvider implements IDocumentDataProvider {
     return [
       { token: '{{ document.number }}', path: 'document.number', description: 'Número del certificado recibido', example: 'WH-SUFR-0001' },
       { token: '{{ customer.name }}', path: 'customer.name', description: 'Tercero que retuvo', example: 'Tercero Demo' },
+      { token: '{{ customer.address }}', path: 'customer.address', description: 'Dirección del tercero (solo si es cliente)', example: 'Calle 100 # 15-20, Bogotá D.C.' },
       { token: '{{ customer.tax_id }}', path: 'customer.tax_id', description: 'NIT del tercero', example: '800.999.888-1' },
       { token: '{{ concept_code }}', path: 'custom_variables.concept_code', description: 'Código del concepto', example: 'RETEFTE' },
       { token: '{{ totals.grand_total }}', path: 'totals.grand_total_formatted', description: 'Valor sufrido', example: '$50.000' },

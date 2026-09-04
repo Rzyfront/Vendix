@@ -169,6 +169,7 @@ export class PurchaseOrderDataProvider implements IDocumentDataProvider {
       { token: '{{document.number}}', path: 'document.number', description: 'Número de la orden de compra', example: 'OC-2026-001' },
       { token: '{{supplier.name}}', path: 'supplier.name', description: 'Razón social del proveedor', example: 'Textiles S.A.' },
       { token: '{{supplier.tax_id}}', path: 'supplier.tax_id', description: 'NIT del proveedor', example: '890.100.200-5' },
+      { token: '{{supplier.address}}', path: 'supplier.address', description: 'Dirección del proveedor', example: 'Zona Industrial Belén, Medellín' },
       { token: '{{totals.grand_total}}', path: 'totals.grand_total_formatted', description: 'Monto total de la compra', example: '$5.400.000' },
     ];
   }

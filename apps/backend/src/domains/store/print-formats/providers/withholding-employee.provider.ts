@@ -6,6 +6,7 @@ import { IDocumentDataProvider } from '../interfaces/document-data-provider.inte
 import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
+import { mapUserAddress } from '../lib/customer-address';
 
 /**
  * [print-editor-dsk P8] — Certificado laboral de retención al empleado
@@ -65,6 +66,8 @@ export class WithholdingEmployeeCertificateDataProvider implements IDocumentData
             last_name: true,
             document_number: true,
             email: true,
+            // CP-print-token-flow A.3 — dirección del empleado.
+            addresses: { take: 1, select: { address_line1: true, address_line2: true, city: true, state_province: true, country: true } },
           },
         },
         invoice: { select: { invoice_number: true, issue_date: true } },
@@ -99,6 +102,7 @@ export class WithholdingEmployeeCertificateDataProvider implements IDocumentData
         name: employeeName,
         tax_id: employee.document_number || '',
         email: employee.email,
+        ...mapUserAddress(employee.addresses?.[0]),
       },
       items: [],
       taxes: [
@@ -150,6 +154,9 @@ export class WithholdingEmployeeCertificateDataProvider implements IDocumentData
         name: 'Empleado Demo',
         tax_id: '79.123.456',
         email: 'empleado@demo.co',
+        // CP-print-token-flow A.3 — paridad muestra/real (ADR-2).
+        address: 'Calle 80 # 10-20, Bogotá D.C.',
+        city: 'Bogotá D.C.',
       },
       items: [],
       taxes: [
@@ -190,6 +197,7 @@ export class WithholdingEmployeeCertificateDataProvider implements IDocumentData
     return [
       { token: '{{ document.number }}', path: 'document.number', description: 'Número del certificado laboral', example: 'WH-EMP-2026-0001' },
       { token: '{{ customer.name }}', path: 'customer.name', description: 'Nombre del empleado', example: 'Juan Pérez' },
+      { token: '{{ customer.address }}', path: 'customer.address', description: 'Dirección del empleado', example: 'Calle 80 # 10-20, Bogotá D.C.' },
       { token: '{{ customer.tax_id }}', path: 'customer.tax_id', description: 'Cédula del empleado', example: '79.123.456' },
       { token: '{{ totals.grand_total }}', path: 'totals.grand_total_formatted', description: 'Total retenido al empleado', example: '$1.500.000' },
       { token: '{{ year }}', path: 'custom_variables.year', description: 'Periodo gravable', example: '2026' },
