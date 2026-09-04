@@ -824,22 +824,60 @@ describe('PaymentsService', () => {
       expect(res.discount_amount).toBe(9);
     });
 
-    it('returns 0 when coupon validation throws (silent failure preserves sale)', async () => {
+    it('rethrows the coupon validation error (no silent swallow — QUI-783)', async () => {
+      // QUI-783 — silently swallowing the coupon validation error made the
+      // backend charge the full subtotal even though the UI showed a
+      // discounted total, overcharging the customer. The cashier now gets
+      // the precise CPN_* error so they can fix or remove the coupon.
       (couponsService.validate as jest.Mock).mockRejectedValue(
         new BadRequestException('Coupon expired'),
       );
 
-      const res = await (service as any).calculatePosCouponDiscount(
-        { ...baseDto, coupon_code: 'EXPIRED' },
-        100,
-        0,
+      await expect(
+        (service as any).calculatePosCouponDiscount(
+          { ...baseDto, coupon_code: 'EXPIRED' },
+          100,
+          0,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rethrows a CPN_* VendixHttpException with its error_code intact', async () => {
+      // The cashier-facing message must round-trip the original error_code so
+      // the frontend's `parseApiError` can pick the right user-friendly copy
+      // from `ERROR_MESSAGES`.
+      (couponsService.validate as jest.Mock).mockRejectedValue(
+        new VendixHttpException(ErrorCodes.CPN_EXPIRED_001),
       );
 
-      expect(res).toEqual({
-        coupon_id: null,
-        coupon_code: null,
-        discount_amount: 0,
-      });
+      let caught: any;
+      try {
+        await (service as any).calculatePosCouponDiscount(
+          { ...baseDto, coupon_code: 'OFF10' },
+          100,
+          0,
+        );
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(VendixHttpException);
+      expect(caught.errorCode).toBe('CPN_EXPIRED_001');
+    });
+
+    it('wraps unexpected non-CPN errors as BadRequest (does not silently swallow)', async () => {
+      // Non-domain errors (e.g., DB outage, programmer mistake) must still
+      // fail loud rather than silently returning discount_amount=0.
+      (couponsService.validate as jest.Mock).mockRejectedValue(
+        new Error('connection reset'),
+      );
+
+      await expect(
+        (service as any).calculatePosCouponDiscount(
+          { ...baseDto, coupon_code: 'OFF10' },
+          100,
+          0,
+        ),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 

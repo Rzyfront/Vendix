@@ -1852,7 +1852,14 @@ export class PaymentsService {
             {
               id: result.order.id,
               store_id: createPosPaymentDto.store_id,
-              grand_total: result.order.total_amount,
+              // QUI-783 — the `orders` table only has `grand_total` (no
+              // `total_amount` column). Using `result.order.total_amount`
+              // was always undefined and made the digital-payment path
+              // silently fall back to `dto.total_amount`, which let the
+              // frontend's local discount estimate win over the server's
+              // recalc. Use the persisted grand_total (already includes
+              // promotion + coupon discounts applied server-side).
+              grand_total: result.order.grand_total,
             } as any,
             createPosPaymentDto,
           );
@@ -2236,9 +2243,18 @@ export class PaymentsService {
    * Coupons are independent of promotions: their discount stacks on top of the
    * promotional discount but is capped so the combined discount does not
    * exceed the items subtotal. Returns an object with the validated
-   * coupon_id/code plus the recalculated `discount_amount` (0 if the coupon
-   * is missing, invalid, or fails business rules — silent failure mirrors
-   * the legacy behavior to avoid breaking POS sales due to coupon issues).
+   * coupon_id/code plus the recalculated `discount_amount` (0 if no coupon
+   * code was sent).
+   *
+   * If a coupon code IS sent but the backend rejects it (CPN_FIND_001 /
+   * CPN_EXPIRED_001 / CPN_LIMIT_001 / CPN_LIMIT_002 / CPN_MIN_001 /
+   * CPN_APPLY_001 / CPN_VALIDATE_001) the error is RE-THROWN to the cashier
+   * (no silent swallow) so the UI can show the precise reason and the cashier
+   * can fix or remove the coupon before retrying. Previously the catch
+   * silently set discount_amount=0, which made the system charge the full
+   * subtotal even though the UI displayed the discounted total — the cashier
+   * would then hit "el monto recibido no puede ser menor al total de la
+   * orden" and the customer was overcharged (QUI-783).
    */
   private async calculatePosCouponDiscount(
     dto: CreatePosPaymentDto,
@@ -2296,12 +2312,26 @@ export class PaymentsService {
         discount_amount: discount,
       };
     } catch (error) {
-      this.logger.warn(
-        `[POS] Coupon validation failed for code="${code}": ${
+      // QUI-783 — surface the coupon rejection to the cashier instead of
+      // silently dropping the discount. The frontend already showed a
+      // discounted total; returning 0 here made the backend charge the full
+      // subtotal, the cash validation rejected the cashier's received amount,
+      // and the customer was overcharged. Re-throwing keeps the existing CPN_*
+      // error_code/message so the frontend can display it via
+      // `parseApiError` → `ERROR_MESSAGES`. Non-CPN_* errors are wrapped as
+      // a generic BadRequest so unexpected failures still fail loud instead
+      // of silently swallowing.
+      if (error instanceof VendixHttpException) {
+        throw error;
+      }
+      this.logger.error(
+        `[POS] Unexpected coupon validation failure for code="${code}": ${
           (error as Error).message
         }`,
       );
-      return { coupon_id: null, coupon_code: null, discount_amount: 0 };
+      throw new BadRequestException(
+        'No se pudo validar el cupón. Verifica el código e inténtalo de nuevo.',
+      );
     }
   }
 
