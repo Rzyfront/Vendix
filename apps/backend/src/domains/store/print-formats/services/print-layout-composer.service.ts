@@ -157,8 +157,12 @@ export class PrintLayoutComposerService {
       ? undefined
       : designedLogoUrl || fallbackLogoUrl || defaultMonochromeLogo;
 
+    // `f_logo` guardado en plantillas viejas funciona como on/off de la
+    // imagen (sin `fields` siempre visible: paridad). En tokenizado siempre
+    // se muestra para que el editor lo pueda seleccionar.
+    const showLogo = mode === 'tokenized' || this.isFieldActive(section, 'f_logo');
     let logo = '';
-    if (logoUrl || mode === 'tokenized') {
+    if ((logoUrl || mode === 'tokenized') && showLogo) {
       // El defecto SIN posición explícita depende del papel: en rollo
       // térmico (`paper.is_roll`) el logo es el encabezado del tiquete y va
       // centrado, igual que el resto del header (`header_alignment` por
@@ -268,7 +272,8 @@ export class PrintLayoutComposerService {
       : designedLogoUrl || fallbackLogoUrl || defaultMonochromeLogo;
 
     let logo = '';
-    if (logoUrl || mode === 'tokenized') {
+    const showFiscalLogo = mode === 'tokenized' || this.isFieldActive(section, 'f_logo');
+    if ((logoUrl || mode === 'tokenized') && showFiscalLogo) {
       const pos = defLogoBlock?.position || (definition.paper?.is_roll ? 'center' : 'left');
       const sizeMm = typeof defLogoBlock?.size_mm === 'number' ? defLogoBlock.size_mm : 14;
       const opacity = typeof defLogoBlock?.opacity === 'number' ? defLogoBlock.opacity : 100;
@@ -373,6 +378,7 @@ export class PrintLayoutComposerService {
     );
 
     const extraFiscalHeader = this.renderExtraSectionFields(section, data, mode, [
+      'f_logo', 'store.logo_url',
       'f_name', 'store.name', 'store_name', 'f_legal', 'store.legal_name',
       'f_nit', 'store.tax_id', 'f_regime', 'store.tax_regime',
       'f_addr', 'store.address', 'f_phone', 'store.phone',
@@ -1030,17 +1036,23 @@ export class PrintLayoutComposerService {
 
   private renderFooterSection(section: any, data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {
     const receipts = (data as any).receipts || ({} as any);
+    const showMsg = this.isFieldActive(section, 'f_msg');
+    const showPowered = this.isFieldActive(section, 'f_powered');
     const msgVal = mode === 'tokenized'
       ? '<span class="vendix-token-pill" data-token="receipts.receipt_footer">&#123;&#123; receipts.receipt_footer &#125;&#125;</span>'
       : (receipts.receipt_footer ? this.compiler.escapeHtml(receipts.receipt_footer) : '¡Gracias por su compra!');
     const poweredVal = mode === 'tokenized'
       ? '<span class="vendix-token-pill" data-token="system.powered_by">&#123;&#123; system.powered_by &#125;&#125;</span>'
       : 'Generado por Vendix';
+    const extraFooter = this.renderExtraSectionFields(section, data, mode, [
+      'f_msg', 'f_powered',
+    ]);
 
     return `
       <div class="print-section section-footer" data-section-id="sec_footer">
-        <div class="footer-msg" data-element-id="f_msg" data-section-id="sec_footer" data-token="receipts.receipt_footer">${msgVal}</div>
-        <div class="powered-by" data-element-id="f_powered" data-section-id="sec_footer" data-token="system.powered_by">${poweredVal}</div>
+        ${showMsg ? `<div class="footer-msg" data-element-id="f_msg" data-section-id="sec_footer" data-token="receipts.receipt_footer">${msgVal}</div>` : ''}
+        ${extraFooter}
+        ${showPowered ? `<div class="powered-by" data-element-id="f_powered" data-section-id="sec_footer" data-token="system.powered_by">${poweredVal}</div>` : ''}
       </div>
     `;
   }
