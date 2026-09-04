@@ -90,6 +90,11 @@ describe('PaymentsService', () => {
       stores: {
         findUnique: jest.fn(),
       },
+      // QUI-783 round 2 — fallback path of calculatePosCouponDiscount looks up
+      // the coupon code by id when the POS only sends `coupon_id`.
+      coupons: {
+        findFirst: jest.fn(),
+      },
       // `processPosPayment` corre todo el cobro dentro de una transacción; el
       // mock ejecuta el callback en línea para poder observar lo que ocurre
       // adentro sin una base de datos.
@@ -878,6 +883,60 @@ describe('PaymentsService', () => {
           0,
         ),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('falls back to coupon_id lookup when coupon_code is missing (QUI-783 round 2)', async () => {
+      // The POS frontend sends `coupon_id` but the cart state never
+      // populates `coupon_code`. Without this fallback the server
+      // returned discount_amount=0 and the cash validation rejected the
+      // cashier's amountReceived even though the UI showed the discount.
+      (prisma.coupons.findFirst as jest.Mock).mockResolvedValue({
+        code: 'OFF10',
+      });
+      (couponsService.validate as jest.Mock).mockResolvedValue({
+        valid: true,
+        coupon_id: 42,
+        code: 'OFF10',
+        discount_type: 'PERCENTAGE',
+        discount_value: 10,
+        discount_amount: 10,
+      });
+
+      const res = await (service as any).calculatePosCouponDiscount(
+        { ...baseDto, coupon_id: 42 }, // NO coupon_code
+        100,
+        0,
+      );
+
+      expect(prisma.coupons.findFirst).toHaveBeenCalledWith({
+        where: { id: 42, is_active: true },
+        select: { code: true },
+      });
+      expect(couponsService.validate).toHaveBeenCalledWith(
+        expect.objectContaining({ code: 'OFF10' }),
+      );
+      expect(res.discount_amount).toBe(10);
+    });
+
+    it('returns 0 when only an inactive coupon_id is provided', async () => {
+      // The id resolves to nothing (deleted / inactive) → fall through to
+      // the no-coupon path, NOT throw. The cashier's UI showed a discount
+      // for a coupon that no longer exists; the safe behavior is to charge
+      // full price rather than error out.
+      (prisma.coupons.findFirst as jest.Mock).mockResolvedValue(null);
+
+      const res = await (service as any).calculatePosCouponDiscount(
+        { ...baseDto, coupon_id: 9999 },
+        100,
+        0,
+      );
+
+      expect(res).toEqual({
+        coupon_id: null,
+        coupon_code: null,
+        discount_amount: 0,
+      });
+      expect(couponsService.validate).not.toHaveBeenCalled();
     });
   });
 

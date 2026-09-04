@@ -2255,6 +2255,12 @@ export class PaymentsService {
    * subtotal even though the UI displayed the discounted total — the cashier
    * would then hit "el monto recibido no puede ser menor al total de la
    * orden" and the customer was overcharged (QUI-783).
+   *
+   * QUI-783 round 2 — the POS frontend's `processSaleWithPayment` sends
+   * `coupon_id` but the cart state never populates `coupon_code`. Falling
+   * back to the DB lookup by `coupon_id` keeps the discount applied even
+   * when only the id arrives. Server-side validation still runs, so a
+   * disabled/expired/over-used coupon is rejected with the same CPN_* error.
    */
   private async calculatePosCouponDiscount(
     dto: CreatePosPaymentDto,
@@ -2265,7 +2271,28 @@ export class PaymentsService {
     coupon_code: string | null;
     discount_amount: number;
   }> {
-    const code = (dto.coupon_code || '').trim();
+    let code = (dto.coupon_code || '').trim();
+
+    // QUI-783 round 2 — fallback: si el frontend manda `coupon_id` pero no
+    // `coupon_code`, resolver el código desde la DB. No cambiamos el contrato
+    // del DTO (sigue documentado como @deprecated en favor de coupon_code);
+    // simplemente dejamos de devolver discount=0 cuando el id sí identifica
+    // un cupón válido. Esto evita el ciclo "UI muestra descuento, backend
+    // cobra sin descuento" que producía el error de cash validation.
+    if (!code && dto.coupon_id != null) {
+      try {
+        const found = await this.prisma.coupons.findFirst({
+          where: { id: Number(dto.coupon_id), is_active: true },
+          select: { code: true },
+        });
+        if (found?.code) {
+          code = found.code;
+        }
+      } catch {
+        // Lookup failure is non-fatal — fall through to the no-coupon path.
+      }
+    }
+
     if (!code) {
       return { coupon_id: null, coupon_code: null, discount_amount: 0 };
     }
