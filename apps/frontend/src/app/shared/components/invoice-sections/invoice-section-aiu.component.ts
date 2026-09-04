@@ -739,8 +739,11 @@ const SECTION = 'AIU';
             Se recorre «visibleTaxRules()» y NO el arreglo entero: la fila del
             costo reembolsable sigue EXISTIENDO en el formulario cuando la base
             la deja fuera —es la constancia de que ese costo estaba exento— pero
-            no se pinta. Cada fila lleva su índice REAL, que es el que el
-            «FormArray» y los mensajes del validador usan.
+            no se pinta. Se pinta SÓLO cuando la base elegida sí lo grava, que
+            hoy es «subtotal»: esconder una porción gravada dejaba su tarifa
+            fuera de la vista de quien la está declarando. Cada fila lleva su
+            índice REAL, que es el que el «FormArray» y los mensajes del
+            validador usan.
 
             La columna «Gravable» es un «app-badge» DERIVADO de la base, no un
             «app-toggle»: las combinaciones libres son las que el servidor
@@ -1119,7 +1122,7 @@ export class InvoiceSectionAiuComponent implements OnInit {
           index,
           bucket: String(control.get('bucket')?.value ?? ''),
         }))
-        .filter((row) => row.bucket !== 'costo');
+        .filter((row) => row.bucket !== 'costo' || this.bucketTaxable('costo'));
     },
   );
 

@@ -4450,9 +4450,28 @@ export class InvoiceCreatePageComponent implements OnInit {
     // que grava A/I/U mientras la base heredada decía «utilidad», y eso NO
     // falla al guardar: muere en la última compuerta antes de firmar
     // (`INVOICING_AIU_005`, línea con impuesto persistido fuera de la base)
-    // con el consecutivo ya gastado. En la PRIMERA aplicación manda siempre el
-    // perfil, que es justo el comportamiento que había antes de la siembra.
-    if (!firstApplication && this.aiuTaxesArray.length > 0 && !forced) return;
+    // con el consecutivo ya gastado. En la PRIMERA aplicación manda el perfil,
+    // que es justo el comportamiento que había antes de la siembra.
+    //
+    // Salvo que el operador YA HAYA ESCRITO en una fila. La siembra derivada
+    // empuja sus filas sin marcarlas, así que `dirty` por fila distingue lo
+    // sembrado de lo tecleado: sólo lo segundo es una decisión sobre este
+    // documento, y reemplazarla en silencio cambiaría un tributo que alguien
+    // eligió a mano. Respetarlo NO reabre el `INVOICING_AIU_005` de arriba: la
+    // base llega congelada del perfil por un `effect` que patchea CON evento, y
+    // la sección reproyecta la matriz sobre ella (`reprojectTaxMatrix`). Es
+    // decir, la base sigue mandando sobre `taxable`; del tecleo sobrevive sólo
+    // el tributo y la tarifa de una porción que la base sí grava.
+    const handEditedMatrix = this.aiuTaxesArray.controls.some(
+      (row) => row.dirty,
+    );
+    if (
+      (!firstApplication || handEditedMatrix) &&
+      this.aiuTaxesArray.length > 0 &&
+      !forced
+    ) {
+      return;
+    }
     this.aiuTaxesArray.clear();
     // Se reproyecta sobre la base del DOCUMENTO al sembrarla: un perfil viejo
     // puede traer una matriz que su propia base ya no admite, y sembrarla tal

@@ -602,4 +602,65 @@ describe('InvoiceSectionAiuComponent · sugerencia de tributos (DOM)', () => {
       expect(text()).toContain('413510');
     });
   });
+
+  /**
+   * LA FILA DEL COSTO SE PINTA CUANDO LA BASE LA GRAVA.
+   *
+   * `visibleTaxRules()` escondía el costo SIEMPRE, y eso era correcto mientras
+   * las dos bases ofrecidas lo dejaban fuera. Con «Subtotal» en el selector, el
+   * costo reembolsable pasó a ser una porción GRAVADA cuya tarifa nadie podía
+   * ver ni corregir: la matriz declaraba un impuesto invisible. Se prueba por
+   * el `computed` y no por el texto porque la explicación de la base también
+   * nombra «Costo reembolsable», y ahí `text()` no distingue.
+   */
+  describe('visibilidad de la fila del costo según la base', () => {
+    beforeEach(() => {
+      const fb = TestBed.inject(FormBuilder);
+      for (const bucket of [
+        'administracion',
+        'imprevistos',
+        'utilidad',
+        'costo',
+      ]) {
+        taxRules.push(
+          fb.group({
+            bucket: [bucket],
+            taxable: [bucket !== 'costo'],
+            tax_code: ['01'],
+            rate: [bucket === 'costo' ? '0.00' : '19.00'],
+          }),
+        );
+      }
+      mount('profile', []);
+    });
+
+    it('bajo «AIU» el costo queda fuera de la base y no se pinta', () => {
+      expect(component.visibleTaxRules().length).toBe(3);
+      expect(component.bucketTaxable('costo')).toBe(false);
+    });
+
+    it('al pasar a «Subtotal» el costo entra a la base y aparece', () => {
+      form.get('aiu.taxable_basis')!.setValue('subtotal');
+      fixture.detectChanges();
+
+      expect(component.bucketTaxable('costo')).toBe(true);
+      expect(component.visibleTaxRules().length).toBe(4);
+      expect(
+        component.visibleTaxRules().some((row) => row.bucket === 'costo'),
+      ).toBe(true);
+    });
+
+    it('y al volver a «Utilidad» se esconde otra vez, sin perder la fila', () => {
+      form.get('aiu.taxable_basis')!.setValue('subtotal');
+      fixture.detectChanges();
+      form.get('aiu.taxable_basis')!.setValue('utilidad');
+      fixture.detectChanges();
+
+      expect(component.visibleTaxRules().length).toBe(3);
+      // La fila SIGUE en el formulario: es la constancia de que ese costo
+      // quedó exento, y el índice de las demás no se corre.
+      expect(matrix().length).toBe(4);
+      expect(matrix()[3].bucket).toBe('costo');
+    });
+  });
 });
