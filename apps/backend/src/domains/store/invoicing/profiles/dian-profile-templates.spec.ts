@@ -10,6 +10,7 @@ import {
   normalizeInvoiceProfileConfig,
   validateInvoiceProfileConfig,
 } from './invoice-profile-config.contract';
+import type { AiuComponentLiteral } from './invoice-profile-config.contract';
 
 describe('DIAN_PROFILE_TEMPLATES', () => {
   it('cada plantilla es GUARDABLE tal cual: ningún problema bloqueante', () => {
@@ -71,10 +72,13 @@ describe('DIAN_PROFILE_TEMPLATES', () => {
           expect(rule.taxable).toBe(false);
           continue;
         }
-        expect({ key: template.key, bucket: rule.bucket, taxable: rule.taxable }).toEqual({
+        // Narrowing: `costo` ya salió por la rama de arriba, así que la
+        // porción es un componente del AIU y `includes` compila.
+        const bucket = rule.bucket as AiuComponentLiteral;
+        expect({ key: template.key, bucket, taxable: rule.taxable }).toEqual({
           key: template.key,
-          bucket: rule.bucket,
-          taxable: expected.includes(rule.bucket),
+          bucket,
+          taxable: expected.includes(bucket),
         });
       }
     }

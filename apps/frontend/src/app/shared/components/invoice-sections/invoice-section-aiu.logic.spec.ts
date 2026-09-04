@@ -4,6 +4,8 @@ import {
   aiuTaxSuggestionOrigin,
   aiuTaxSuggestions,
   aiuTaxableComponents,
+  deriveAiuTaxMatrix,
+  reprojectAiuTaxRules,
 } from './invoice-section-aiu.logic';
 import type { AiuTaxRuleValue } from './invoice-section-aiu.logic';
 
@@ -203,6 +205,126 @@ describe('invoice-section-aiu.logic · sugerencia de tributos', () => {
       );
       expect(aiuBucketListLabel(['utilidad'])).toBe('Utilidad');
       expect(aiuBucketListLabel([])).toBe('');
+    });
+  });
+
+  describe('deriveAiuTaxMatrix · la matriz derivada de la base', () => {
+    it('base aiu: las tres porciones gravan y el costo queda exento al 0.00', () => {
+      expect(deriveAiuTaxMatrix('aiu', [])).toEqual([
+        {
+          bucket: 'administracion',
+          taxable: true,
+          tax_code: '01',
+          rate: '19.00',
+        },
+        { bucket: 'imprevistos', taxable: true, tax_code: '01', rate: '19.00' },
+        { bucket: 'utilidad', taxable: true, tax_code: '01', rate: '19.00' },
+        { bucket: 'costo', taxable: false, tax_code: '01', rate: '0.00' },
+      ]);
+    });
+
+    it('base utilidad: sólo la utilidad grava, el resto exento al 0.00', () => {
+      expect(deriveAiuTaxMatrix('utilidad', [])).toEqual([
+        {
+          bucket: 'administracion',
+          taxable: false,
+          tax_code: '01',
+          rate: '0.00',
+        },
+        { bucket: 'imprevistos', taxable: false, tax_code: '01', rate: '0.00' },
+        { bucket: 'utilidad', taxable: true, tax_code: '01', rate: '19.00' },
+        { bucket: 'costo', taxable: false, tax_code: '01', rate: '0.00' },
+      ]);
+    });
+
+    it('base subtotal: las cuatro porciones gravan, incluido el costo', () => {
+      const matrix = deriveAiuTaxMatrix('subtotal', []);
+      expect(matrix.map((rule) => rule.bucket)).toEqual([
+        'administracion',
+        'imprevistos',
+        'utilidad',
+        'costo',
+      ]);
+      expect(matrix.every((rule) => rule.taxable)).toBe(true);
+      expect(matrix.every((rule) => rule.rate)).toBe(true);
+    });
+
+    it('lee la base por resolveAiuTaxableBasis: regime sin taxable_basis (plantillas DIAN)', () => {
+      // Las dos plantillas DIAN declaran `regime` y no `taxable_basis`: la
+      // derivación tiene que resolver por el único punto de lectura, nunca en
+      // crudo.
+      expect(
+        deriveAiuTaxMatrix({ regime: 'et_462_1' }, []).map((rule) => [
+          rule.bucket,
+          rule.taxable,
+        ]),
+      ).toEqual([
+        ['administracion', true],
+        ['imprevistos', true],
+        ['utilidad', true],
+        ['costo', false],
+      ]);
+      expect(
+        deriveAiuTaxMatrix({ regime: 'decreto_1372_1992' }, []).map((rule) => [
+          rule.bucket,
+          rule.taxable,
+        ]),
+      ).toEqual([
+        ['administracion', false],
+        ['imprevistos', false],
+        ['utilidad', true],
+        ['costo', false],
+      ]);
+    });
+
+    it('conserva el tributo y la tarifa real de las porciones que la base grava', () => {
+      const matrix = deriveAiuTaxMatrix('aiu', [
+        {
+          bucket: 'administracion',
+          taxable: true,
+          tax_code: '04',
+          rate: '16.00',
+        },
+      ]);
+      expect(
+        matrix.find((rule) => rule.bucket === 'administracion'),
+      ).toEqual(
+        jasmine.objectContaining({
+          taxable: true,
+          tax_code: '04',
+          rate: '16.00',
+        }),
+      );
+    });
+
+    it('reprojectAiuTaxRules ya no honra la base por fila: manda la global', () => {
+      const projected = reprojectAiuTaxRules(
+        [
+          {
+            bucket: 'administracion',
+            taxable: false,
+            tax_code: '01',
+            rate: '0.00',
+            taxable_basis: 'utilidad',
+          },
+          {
+            bucket: 'utilidad',
+            taxable: true,
+            tax_code: '01',
+            rate: '19.00',
+            taxable_basis: 'utilidad',
+          },
+        ],
+        'aiu',
+      );
+      // Bajo la base global «aiu» la administración vuelve a gravar aunque su
+      // fila dijera otra base, y la salida ya no escribe la clave por fila.
+      expect(
+        projected.find((rule) => rule.bucket === 'administracion'),
+      ).toEqual(jasmine.objectContaining({ taxable: true }));
+      for (const rule of projected) {
+        expect(Object.keys(rule)).not.toContain('taxable_basis');
+      }
     });
   });
 });

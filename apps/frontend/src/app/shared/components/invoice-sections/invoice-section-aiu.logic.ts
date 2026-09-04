@@ -34,12 +34,14 @@ import {
   AIU_TAXABLE_BUCKETS_BY_BASIS,
   formatPercentScaled,
   parsePercentScaled,
+  resolveAiuTaxableBasis,
 } from '../../../core/utils/invoice-profile-config.contract';
 import type {
   AiuBucket,
   AiuComponentLiteral,
   AiuComponentsBasis,
   AiuTaxableBasis,
+  ProfileAiuConfig,
   ProfileTaxRule,
 } from '../../../core/utils/invoice-profile-config.contract';
 import { getFiscalResponsibilityLabel } from '../../constants/fiscal-responsibilities.constants';
@@ -314,6 +316,62 @@ export function derivedCostTaxRule(
 }
 
 /**
+ * Las CUATRO porciones derivadas de la base, en el orden de `AIU_BUCKETS`.
+ *
+ * Es la siembra con que nace un perfil AIU en blanco y lo que completa las
+ * porciones ausentes al hidratar: la gravabilidad (`taxable`) y la tarifa de
+ * las no gravadas (`'0.00'`) las escribe ESTA tabla, nunca una persona —las
+ * combinaciones libres son exactamente las que el servidor devuelve con 422—.
+ * Lo editable es el tributo y la tarifa de las porciones que la base SÍ grava.
+ *
+ * La base NUNCA se lee en crudo: se resuelve por `resolveAiuTaxableBasis`,
+ * así que una config que declara `regime` y no `taxable_basis` —el caso de
+ * las dos plantillas DIAN— deriva igual. Acepta la base ya resuelta como
+ * atajo para la reproyección en caliente.
+ */
+export function deriveAiuTaxMatrix(
+  aiuOrBasis:
+    | Pick<ProfileAiuConfig, 'regime' | 'taxable_basis'>
+    | AiuTaxableBasis
+    | null
+    | undefined,
+  existing: readonly AiuTaxRuleValue[] = [],
+): AiuTaxRuleValue[] {
+  const basis =
+    typeof aiuOrBasis === 'string'
+      ? (AIU_TAXABLE_BASES.includes(aiuOrBasis as AiuTaxableBasis)
+          ? (aiuOrBasis as AiuTaxableBasis)
+          : resolveAiuTaxableBasis(null))
+      : resolveAiuTaxableBasis(aiuOrBasis);
+  const taxableBuckets = AIU_TAXABLE_BUCKETS_BY_BASIS[basis];
+  const reference = aiuReferenceTaxRate(existing);
+  return AIU_BUCKETS.map((bucket) => {
+    if (bucket === 'costo') return derivedCostTaxRule(existing, basis);
+    const shouldBeTaxable = taxableBuckets.includes(bucket);
+    const found = existing.find((rule) => rule.bucket === bucket);
+    const foundCode = String(found?.tax_code ?? '').trim();
+    if (!shouldBeTaxable) {
+      return {
+        bucket,
+        taxable: false,
+        tax_code: foundCode || reference.tax_code,
+        rate: '0.00',
+      } satisfies AiuTaxRuleValue;
+    }
+    const foundRate = parsePercentScaled(found?.rate);
+    const hasRealRate = foundRate !== null && foundRate > 0;
+    return {
+      bucket,
+      taxable: true,
+      tax_code: foundCode || reference.tax_code,
+      rate: hasRealRate
+        ? formatPercentScaled(foundRate as number)
+        : reference.rate,
+    } satisfies AiuTaxRuleValue;
+  });
+}
+
+/**
  * La matriz completa reproyectada sobre la base elegida.
  *
  * ─── POR QUÉ NO BASTA CON ESCRIBIR LA BASE ──────────────────────────────────
@@ -349,40 +407,50 @@ export function reprojectAiuTaxRules(
   rules: readonly AiuTaxRuleValue[],
   defaultBasis: AiuTaxableBasis,
 ): AiuTaxRuleValue[] {
+  // La base la decide el GRUPO (`defaultBasis`), nunca la fila: ningún
+  // productor de emisión lee una base por regla, así que honrarla aquí
+  // divergiría del validador, que resuelve por `resolveAiuTaxableBasis`.
+  // La clave vieja se retira al reproyectar; los snapshots históricos la
+  // conservan en su `jsonb` y se leen con tolerancia en la hidratación.
+  const stripBasis = (
+    rule: AiuTaxRuleValue,
+  ): Omit<AiuTaxRuleValue, 'taxable_basis'> => {
+    const { taxable_basis: _dropped, ...rest } = rule;
+    return rest;
+  };
   const reference = aiuReferenceTaxRate(rules);
 
   const projected: AiuTaxRuleValue[] = rules.map((rule) => {
-    const basis = rule.taxable_basis ?? defaultBasis;
-    const expected = AIU_TAXABLE_BUCKETS_BY_BASIS[basis];
+    const expected = AIU_TAXABLE_BUCKETS_BY_BASIS[defaultBasis];
     const bucket = rule.bucket;
+    const base = stripBasis(rule);
     if (!bucket || !AIU_BUCKETS.includes(bucket) || bucket === 'costo') {
-      return { ...rule, taxable_basis: basis };
+      return base;
     }
     const shouldBeTaxable = expected.includes(bucket);
     if (Boolean(rule.taxable) === shouldBeTaxable) {
-      return { ...rule, taxable_basis: basis };
+      return base;
     }
     if (!shouldBeTaxable) {
-      return { ...rule, taxable: false, rate: '0.00', taxable_basis: basis };
+      return { ...base, taxable: false, rate: '0.00' };
     }
     const hasRealRate = (parsePercentScaled(rule.rate) ?? 0) > 0;
     return hasRealRate
-      ? { ...rule, taxable: true, taxable_basis: basis }
+      ? { ...base, taxable: true }
       : {
-          ...rule,
+          ...base,
           taxable: true,
           tax_code: reference.tax_code,
           rate: reference.rate,
-          taxable_basis: basis,
         };
   });
 
   const derived = derivedCostTaxRule(projected, defaultBasis);
   const costIndex = projected.findIndex((rule) => rule.bucket === 'costo');
   if (costIndex >= 0) {
-    projected[costIndex] = { ...derived, taxable_basis: defaultBasis };
+    projected[costIndex] = stripBasis(derived as AiuTaxRuleValue);
   } else {
-    projected.push({ ...derived, taxable_basis: defaultBasis });
+    projected.push(stripBasis(derived as AiuTaxRuleValue));
   }
   return projected;
 }

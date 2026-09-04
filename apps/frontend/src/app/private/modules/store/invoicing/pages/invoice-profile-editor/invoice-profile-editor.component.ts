@@ -77,6 +77,7 @@ import { InvoiceFormSectionComponent } from '../../components/invoice-create/inv
 import {
     InvoiceSectionAiuComponent,
     derivedCostTaxRule as derivedAiuCostTaxRule,
+    deriveAiuTaxMatrix,
     asAiuTaxableBasis,
     aiuComponentsSumScaled,
     aiuTaxableBasisShortLabel,
@@ -2146,7 +2147,6 @@ export class InvoiceProfileEditorComponent {
                 taxable: [true],
                 tax_code: ['01'],
                 rate: ['19.00'],
-                taxable_basis: [this.taxableBasis() ?? 'aiu'],
             }),
         );
     }
@@ -2372,16 +2372,56 @@ export class InvoiceProfileEditorComponent {
 
         this.taxRules.clear({ emitEvent: false });
         for (const rule of config.taxes.rules) {
+            // Lectura tolerante: los snapshots viejos traen `taxable_basis`
+            // por fila y se hidrata sin él —la base la decide el grupo—,
+            // así que un perfil histórico abre y valida sin reescribir su
+            // `jsonb` hasta que se guarda de nuevo.
             this.taxRules.push(
                 this.fb.group({
                     bucket: [rule.bucket ?? 'administracion'],
                     taxable: [rule.taxable],
                     tax_code: [rule.tax_code],
                     rate: [rule.rate],
-                    taxable_basis: [rule.taxable_basis ?? resolveAiuTaxableBasis(config.aiu)],
                 }),
                 { emitEvent: false },
             );
+        }
+        // Porciones ausentes al hidratar (perfil viejo parcial o matriz
+        // vacía): se completan derivadas de la base, sin marcar `dirty`.
+        // Es lo que hace que «Nuevo perfil» se comporte como «Usar plantilla».
+        {
+            const present = new Set(
+                this.taxRules.controls.map((control) =>
+                    String(control.get('bucket')?.value ?? ''),
+                ),
+            );
+            if (present.size < AIU_BUCKETS.length) {
+                const current: AiuTaxRuleValue[] =
+                    this.taxRules.controls.map((control) => ({
+                        bucket: (control.get('bucket')?.value ??
+                            'administracion') as AiuBucket,
+                        taxable: Boolean(control.get('taxable')?.value),
+                        tax_code: String(control.get('tax_code')?.value ?? ''),
+                        rate: String(control.get('rate')?.value ?? '0.00'),
+                    }));
+                for (const next of deriveAiuTaxMatrix(
+                    resolveAiuTaxableBasis(config.aiu),
+                    current,
+                )) {
+                    const bucket = String(next.bucket ?? '');
+                    if (!bucket || present.has(bucket)) continue;
+                    this.taxRules.push(
+                        this.fb.group({
+                            bucket: [next.bucket],
+                            taxable: [next.taxable],
+                            tax_code: [next.tax_code],
+                            rate: [next.rate],
+                        }),
+                        { emitEvent: false },
+                    );
+                    present.add(bucket);
+                }
+            }
         }
 
         this.modelLines.clear({ emitEvent: false });
@@ -2499,7 +2539,6 @@ export class InvoiceProfileEditorComponent {
             taxable: Boolean(control.get('taxable')?.value),
             tax_code: String(control.get('tax_code')?.value ?? ''),
             rate: String(control.get('rate')?.value ?? '0.00'),
-            taxable_basis: control.get('taxable_basis')?.value as AiuTaxableBasis,
         }));
         const rules: ProfileTaxRule[] = rawRules.map((rule) =>
             aiuProfile && rule.bucket === 'costo'

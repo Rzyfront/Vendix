@@ -7,6 +7,7 @@ import {
   linkedSignal,
   signal,
   effect,
+  OnInit,
 } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import {
@@ -18,6 +19,7 @@ import {
 } from '@angular/forms';
 
 import { AlertBannerComponent } from '../alert-banner/alert-banner.component';
+import { BadgeComponent } from '../badge/badge.component';
 import { ButtonComponent } from '../button/button.component';
 import { IconComponent } from '../icon/icon.component';
 import { InputComponent } from '../input/input.component';
@@ -27,6 +29,7 @@ import { ToggleComponent } from '../toggle/toggle.component';
 import { AccountCodeSelectComponent } from '../../../private/modules/store/products/components/account-code-select.component';
 import {
   AIU_COMPONENTS,
+  AIU_TAXABLE_BUCKETS_BY_BASIS,
   accountingModelDisabledReason,
   formatPercentScaled,
   isAccountingModelEnabled,
@@ -53,6 +56,7 @@ import {
   AIU_MATRIX_BUCKET_OPTIONS,
   AIU_TAXABLE_BASIS_OPTIONS,
   AIU_TAX_CODE_OPTIONS,
+  aiuBucketLabel,
   aiuBucketListLabel,
   aiuComponentUnitSuffix,
   aiuComponentsBasisExplainer,
@@ -69,6 +73,7 @@ import {
   asAiuComponentsBasis,
   asAiuTaxableBasis,
   derivedCostTaxRule,
+  deriveAiuTaxMatrix,
   reprojectAiuTaxRules,
 } from './invoice-section-aiu.logic';
 import type {
@@ -189,6 +194,7 @@ const SECTION = 'AIU';
     ReactiveFormsModule,
     AccountCodeSelectComponent,
     AlertBannerComponent,
+    BadgeComponent,
     ButtonComponent,
     IconComponent,
     InputComponent,
@@ -439,6 +445,27 @@ const SECTION = 'AIU';
           </h4>
         </div>
         <div class="p-3 space-y-3">
+          <div class="md:max-w-xs">
+            <app-selector
+              label="Base gravable del contrato"
+              [formControl]="taxableBasisControl()"
+              [options]="basisOptions"
+              size="sm"
+              [helpText]="minimumBaseHelp()"
+            ></app-selector>
+          </div>
+          @if (departed('taxable_basis')) {
+            <p class="flex items-start gap-1.5 text-[11px] text-warning">
+              <app-icon name="git-branch" [size]="12" class="mt-0.5 shrink-0" />
+              <span>{{ departureFieldNote }}</span>
+            </p>
+          }
+          @if (frozen('taxable_basis')) {
+            <p class="flex items-start gap-1.5 text-[11px] text-text-secondary">
+              <app-icon name="lock" [size]="12" class="mt-0.5 shrink-0" />
+              <span>{{ frozenReason() }}</span>
+            </p>
+          }
           <p class="text-xs text-text-secondary">
             {{ componentsBasisExplainer() }}
           </p>
@@ -529,22 +556,14 @@ const SECTION = 'AIU';
               Base impuestos
             </h4>
           </div>
-          <!--
-            «Agregar impuesto» y no «Regla»: la fila que crea es (impuesto,
-            base, tarifa), y quien busca dónde añadir un IVA no reconoce
-            «Regla» como el sitio.
-          -->
-          <app-button variant="secondary" size="sm" (clicked)="addTaxRule()">
-            <app-icon slot="icon" name="plus" [size]="14"></app-icon>
-            Agregar impuesto
-          </app-button>
         </div>
         <div class="p-3 space-y-2">
           <p class="text-xs text-text-secondary">
-            Qué impuesto grava qué base. Lo que aquí se marque gravable es lo que
-            emite <code>cac:TaxTotal</code> en el XML; lo que no, no emite
-            totalización alguna —y por eso no se rechaza por declarar una tarifa
-            del 0 %—.
+            Las cuatro porciones del contrato y su gravabilidad según la base
+            elegida arriba. Lo gravable emite
+            <code>cac:TaxTotal</code> en el XML; lo no gravable se guarda exento
+            con tarifa 0,00 % y no emite totalización alguna. Ni se añaden, ni
+            se quitan, ni se marcan a mano: la base las deriva.
           </p>
           @if (aiuOfContractLabel(); as aiuPct) {
             <!-- Las bases del bloque 3, ya calculadas, para que elegir una base
@@ -712,8 +731,8 @@ const SECTION = 'AIU';
           }
           @if (visibleTaxRules().length === 0) {
             <p class="text-xs italic text-text-secondary">
-              Sin impuestos. El documento no declararía ninguno: agrégalos con el
-              botón de arriba.
+              Sin impuestos. Elige la base gravable del contrato para sembrar
+              las cuatro porciones.
             </p>
           }
           <!--
@@ -722,53 +741,49 @@ const SECTION = 'AIU';
             la deja fuera —es la constancia de que ese costo estaba exento— pero
             no se pinta. Cada fila lleva su índice REAL, que es el que el
             «FormArray» y los mensajes del validador usan.
+
+            La columna «Gravable» es un «app-badge» DERIVADO de la base, no un
+            «app-toggle»: las combinaciones libres son las que el servidor
+            devuelve con 422. La tarifa de una porción no gravada queda
+            «readonly» en «0.00» por la misma razón.
           -->
           <div class="space-y-2">
             @for (row of visibleTaxRules(); track row.index) {
               <div
-                class="grid grid-cols-1 items-end gap-2 rounded-lg border border-border p-2 md:grid-cols-5"
+                class="grid grid-cols-1 items-end gap-2 rounded-lg border border-border p-2 md:grid-cols-4"
               >
+                <div class="pb-2">
+                  <p class="text-sm font-semibold text-text-primary">
+                    {{ bucketLabel(row.bucket) }}
+                  </p>
+                  @if (bucketTaxable(row.bucket)) {
+                    <app-badge variant="success" size="sm">Gravable</app-badge>
+                  } @else {
+                    <app-badge variant="neutral" size="sm">No gravable</app-badge>
+                  }
+                </div>
                 <app-selector
                   label="Impuesto"
                   [formControl]="ruleControl(row.index, 'tax_code')"
                   [options]="taxCodeOptions"
                   size="sm"
                 ></app-selector>
-                <app-selector
-                  label="Base gravable"
-                  [formControl]="ruleControl(row.index, 'taxable_basis')"
-                  [options]="basisOptions"
-                  size="sm"
-                ></app-selector>
                 <app-input
                   label="Tarifa (%)"
                   [formControl]="ruleControl(row.index, 'rate')"
                   size="sm"
+                  [readonly]="!bucketTaxable(row.bucket)"
                   [error]="
                     issueFor('taxes.rules[' + row.index + '].rate')
                   "
                 ></app-input>
-                <div class="flex items-center pb-2">
-                  <app-toggle
-                    [formControl]="ruleControl(row.index, 'taxable')"
-                    label="Gravable"
-                  ></app-toggle>
+                <div class="pb-2 text-[11px] leading-relaxed text-text-secondary">
+                  @if (bucketTaxable(row.bucket)) {
+                    El tributo y la tarifa de esta porción sí se declaran.
+                  } @else {
+                    Fuera de la base: se guarda exenta al 0,00 %.
+                  }
                 </div>
-                <!--
-                  SÓLO EL ICONO. La palabra «Quitar» repetida en cada fila no
-                  aporta nada que el bote de basura no diga, y ensancha el botón
-                  hasta empujar los campos. El nombre accesible viaja en
-                  «ariaLabel»: sin él, un botón de sólo icono se anuncia sin
-                  nombre.
-                -->
-                <app-button
-                  variant="outline-danger"
-                  size="sm"
-                  ariaLabel="Quitar esta regla de impuesto"
-                  (clicked)="removeTaxRule(row.index)"
-                >
-                  <app-icon slot="icon" name="trash-2" [size]="15"></app-icon>
-                </app-button>
               </div>
             }
           </div>
@@ -783,7 +798,7 @@ const SECTION = 'AIU';
     </div>
   `,
 })
-export class InvoiceSectionAiuComponent {
+export class InvoiceSectionAiuComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
 
   /**
@@ -934,6 +949,20 @@ export class InvoiceSectionAiuComponent {
       });
       onCleanup(() => sub.unsubscribe());
     });
+
+  }
+
+  /**
+   * SIEMBRA DERIVADA. Un perfil AIU en blanco nace con las cuatro porciones
+   * sin haber pulsado nada —es lo que hace que «Nuevo perfil» se comporte
+   * como «Usar plantilla DIAN»—. Corre en `ngOnInit`, con los inputs ya
+   * fijados y antes del primer pintado, y no marca `dirty`: es estado
+   * inicial. Las pantallas que hidratan completan las ausentes en su propia
+   * hidratación, porque la suya pasa con `emitEvent: false` y ninguna
+   * suscripción la vería.
+   */
+  ngOnInit(): void {
+    this.ensureDerivedMatrix();
   }
 
   // ── Controles ───────────────────────────────────────────────────────────
@@ -1093,6 +1122,56 @@ export class InvoiceSectionAiuComponent {
         .filter((row) => row.bucket !== 'costo');
     },
   );
+
+  /** Etiqueta de la porción, para la fila derivada. Un solo sitio. */
+  bucketLabel(bucket: string): string {
+    return aiuBucketLabel(bucket);
+  }
+
+  /**
+   * ¿Esta porción entra a la base gravable elegida? Es lo que pinta el
+   * `app-badge` y lo que bloquea la tarifa: se consulta la tabla del
+   * contrato, no la casilla —la casilla la escribe la base—.
+   */
+  bucketTaxable(bucket: string): boolean {
+    this.revision();
+    const basis = this.taxableBasis();
+    return (
+      AIU_TAXABLE_BUCKETS_BY_BASIS[basis]?.includes(bucket as AiuBucket) ??
+      false
+    );
+  }
+
+  /**
+   * Siembra la matriz derivada cuando llega vacía y completa las porciones
+   * ausentes al hidratar, sin marcar `dirty`: es estado inicial, como los
+   * porcentajes 5/2/3 con que nace el formulario. La reproyección por cambio
+   * de base sigue viviendo en `reprojectTaxMatrix`, que sí marca.
+   */
+  private ensureDerivedMatrix(): void {
+    const rules = this.taxRules();
+    if (!rules || rules.length >= 4) return;
+    const present = new Set(
+      rules.controls.map((control) =>
+        String(control.get('bucket')?.value ?? ''),
+      ),
+    );
+    if (present.size >= 4) return;
+    const basis = this.taxableBasis();
+    for (const next of deriveAiuTaxMatrix(basis, this.ruleValues())) {
+      const bucket = String(next.bucket ?? '');
+      if (!bucket || present.has(bucket)) continue;
+      rules.push(
+        this.fb.group({
+          bucket: [next.bucket],
+          taxable: [next.taxable],
+          tax_code: [next.tax_code],
+          rate: [next.rate],
+        }),
+      );
+      present.add(bucket);
+    }
+  }
 
   componentsSumLabel(): string {
     return formatPercentScaled(this.componentsSumScaled());
@@ -1323,7 +1402,6 @@ export class InvoiceSectionAiuComponent {
           taxable: [true],
           tax_code: [suggestion.tax_code],
           rate: [suggestion.rate],
-          taxable_basis: [basis],
         }),
       );
     }
@@ -1361,7 +1439,6 @@ export class InvoiceSectionAiuComponent {
           taxable: [derived.taxable],
           tax_code: [derived.tax_code],
           rate: [derived.rate],
-          taxable_basis: [basis],
         }),
       );
       return;
@@ -1441,7 +1518,6 @@ export class InvoiceSectionAiuComponent {
         taxable: [true],
         tax_code: ['01'],
         rate: ['19.00'],
-        taxable_basis: [this.taxableBasis() ?? 'aiu'],
       }),
     );
     this.taxRules().markAsDirty();
@@ -1517,5 +1593,8 @@ export class InvoiceSectionAiuComponent {
       );
     }
     if (projected.length !== before) rules.markAsDirty();
+    // Porciones que la matriz anterior ni traía: se completan derivadas para
+    // que la matriz quede siempre en cuatro filas.
+    this.ensureDerivedMatrix();
   }
 }

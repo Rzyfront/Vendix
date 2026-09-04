@@ -133,7 +133,7 @@ export const PAYMENT_MEANS_OPTIONS: SelectorOption[] = [
 // Tipo de operación (cbc:CustomizationID)
 // ─────────────────────────────────────────────────────────────
 
-/** AIU. Cambia la base gravable del IVA a sólo la utilidad. */
+/** AIU. El contrato se factura en porciones A/I/U y la base gravable la declara el perfil. */
 export const OPERATION_TYPE_AIU = '09';
 export const OPERATION_TYPE_STANDARD = '10';
 
@@ -146,7 +146,7 @@ export const OPERATION_TYPE_OPTIONS: SelectorOption[] = [
   {
     value: OPERATION_TYPE_AIU,
     label: 'AIU (09)',
-    description: 'Sólo la utilidad es base gravable del IVA',
+    description: 'Contrato por porciones A/I/U; la base gravable la declara el perfil',
   },
   {
     value: '11',
@@ -164,7 +164,7 @@ export const OPERATION_TYPE_OPTIONS: SelectorOption[] = [
 export const AIU_COMPONENT_OPTIONS: SelectorOption[] = [
   { value: 'administracion', label: 'Administración' },
   { value: 'imprevistos', label: 'Imprevistos' },
-  { value: 'utilidad', label: 'Utilidad (base gravable del IVA)' },
+  { value: 'utilidad', label: 'Utilidad' },
 ];
 
 // ─────────────────────────────────────────────────────────────

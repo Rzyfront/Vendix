@@ -158,6 +158,7 @@ import { InvoiceSectionAiuComponent } from '../../../../../../shared/components/
 import {
   asAiuComponentsBasis,
   asAiuTaxableBasis,
+  deriveAiuTaxMatrix,
   reprojectAiuTaxRules,
 } from '../../../../../../shared/components/invoice-sections/index';
 import type {
@@ -4406,6 +4407,10 @@ export class InvoiceCreatePageComponent implements OnInit {
     const aiu = config.aiu;
     if (!aiu) return;
     const group = this.aiuGroup;
+    // ¿Es la PRIMERA vez que un perfil toca este documento? Se lee antes de
+    // `aiuSeeded.set(true)`, unas líneas más abajo, porque de esa respuesta
+    // depende quién manda sobre la matriz —ver el guardián de más abajo—.
+    const firstApplication = !this.aiuSeeded();
 
     const put = (name: string, value: unknown): void => {
       const control = group.get(name);
@@ -4436,7 +4441,18 @@ export class InvoiceCreatePageComponent implements OnInit {
     // LA MATRIZ. Sólo si está vacía —o si la aplicación completa lo autoriza—:
     // una fila editada a mano es una decisión sobre este documento, y
     // reemplazarla cambiaría un impuesto sin que nadie lo pidiera.
-    if (this.aiuTaxesArray.length > 0 && !forced) return;
+    //
+    // «length > 0» dejó de significar «hay algo capturado» cuando la sección
+    // AIU pasó a nacer con las cuatro porciones derivadas: si el operador
+    // marca la operación 09 ANTES de elegir el perfil, la sección se monta,
+    // siembra su matriz derivada de la base POR OMISIÓN y este guardián
+    // abortaba la siembra del perfil. El documento se quedaba con una matriz
+    // que grava A/I/U mientras la base heredada decía «utilidad», y eso NO
+    // falla al guardar: muere en la última compuerta antes de firmar
+    // (`INVOICING_AIU_005`, línea con impuesto persistido fuera de la base)
+    // con el consecutivo ya gastado. En la PRIMERA aplicación manda siempre el
+    // perfil, que es justo el comportamiento que había antes de la siembra.
+    if (!firstApplication && this.aiuTaxesArray.length > 0 && !forced) return;
     this.aiuTaxesArray.clear();
     // Se reproyecta sobre la base del DOCUMENTO al sembrarla: un perfil viejo
     // puede traer una matriz que su propia base ya no admite, y sembrarla tal
@@ -4451,9 +4467,42 @@ export class InvoiceCreatePageComponent implements OnInit {
           taxable: [rule.taxable],
           tax_code: [rule.tax_code],
           rate: [rule.rate],
-          taxable_basis: [rule.taxable_basis ?? basis],
         }),
       );
+    }
+    // Porciones que el perfil ni traía: se completan derivadas para que el
+    // documento nazca siempre con las cuatro filas.
+    {
+      const present = new Set(
+        this.aiuTaxesArray.controls.map((control) =>
+          String(control.get('bucket')?.value ?? ''),
+        ),
+      );
+      if (present.size < 4) {
+        const current: AiuTaxRuleValue[] = this.aiuTaxesArray.controls.map(
+          (control) => ({
+            bucket: String(
+              control.get('bucket')?.value ?? 'administracion',
+            ) as AiuBucket,
+            taxable: Boolean(control.get('taxable')?.value),
+            tax_code: String(control.get('tax_code')?.value ?? ''),
+            rate: String(control.get('rate')?.value ?? '0.00'),
+          }),
+        );
+        for (const next of deriveAiuTaxMatrix(basis, current)) {
+          const bucket = String(next.bucket ?? '');
+          if (!bucket || present.has(bucket)) continue;
+          this.aiuTaxesArray.push(
+            this.fb.group({
+              bucket: [next.bucket],
+              taxable: [next.taxable],
+              tax_code: [next.tax_code],
+              rate: [next.rate],
+            }),
+          );
+          present.add(bucket);
+        }
+      }
     }
   }
 
