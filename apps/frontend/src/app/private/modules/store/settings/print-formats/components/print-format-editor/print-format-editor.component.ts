@@ -18,6 +18,7 @@ import {
   PrintPreviewMode,
 } from '../../../../../../../core/models/print-formats.model';
 import { definitionToRegions } from '../print-canvas/canvas-region';
+import { DocumentPrintService } from '../../../../../../../shared/services/print/document-print.service';
 
 export type WorkbenchTab = 'sections' | 'columns' | 'tokens';
 
@@ -607,6 +608,7 @@ export type WorkbenchTab = 'sections' | 'columns' | 'tokens';
 })
 export class PrintFormatEditorComponent {
   readonly facade = inject(PrintFormatsFacade);
+  private readonly printService = inject(DocumentPrintService);
 
   readonly activeTab = signal<WorkbenchTab>('sections');
   readonly isLibraryOpen = signal<boolean>(false);
@@ -792,11 +794,16 @@ export class PrintFormatEditorComponent {
     void this.facade.refreshPreview();
   }
 
-  printTest(): void {
-    const iframe = document.getElementById('vendix-preview-iframe') as HTMLIFrameElement;
-    if (iframe && iframe.contentWindow) {
-      iframe.contentWindow.focus();
-      iframe.contentWindow.print();
+  /**
+   * Abre el diálogo de impresión del navegador con el HTML del preview.
+   * Va por `DocumentPrintService` (iframe oculto propio + espera de
+   * imágenes): el `print()` directo sobre el iframe sandboxed del preview
+   * está bloqueado por el sandbox y no abría nada.
+   */
+  async printTest(): Promise<void> {
+    const html = this.facade.previewHtml();
+    if (html) {
+      await this.printService.printGatewayHtml(html);
     }
   }
 }
