@@ -165,7 +165,38 @@ describe('InvoiceSectionAiuComponent · sugerencia de tributos (DOM)', () => {
   });
 
   describe('contexto «invoice» con «Responsable de IVA» (O-48)', () => {
+    /**
+     * La matriz derivada siembra IVA por omisión, y un IVA ya declarado no se
+     * sugiere. Para probar la sugerencia de IVA la matriz previa declara OTRO
+     * tributo (INC): la pregunta de cada caso se conserva, cambia el punto de
+     * partida —cuatro porciones siempre presentes, `taxable` derivado—.
+     */
+    function seedIncMatrix(): void {
+      const fb = TestBed.inject(FormBuilder);
+      for (const row of [
+        {
+          bucket: 'administracion',
+          taxable: true,
+          tax_code: '04',
+          rate: '16.00',
+        },
+        { bucket: 'imprevistos', taxable: true, tax_code: '04', rate: '16.00' },
+        { bucket: 'utilidad', taxable: true, tax_code: '04', rate: '16.00' },
+        { bucket: 'costo', taxable: false, tax_code: '04', rate: '0.00' },
+      ]) {
+        taxRules.push(
+          fb.group({
+            bucket: [row.bucket],
+            taxable: [row.taxable],
+            tax_code: [row.tax_code],
+            rate: [row.rate],
+          }),
+        );
+      }
+    }
+
     beforeEach(() => {
+      seedIncMatrix();
       mount('invoice', ['O-48']);
     });
 
@@ -180,79 +211,81 @@ describe('InvoiceSectionAiuComponent · sugerencia de tributos (DOM)', () => {
       );
       expect(text()).toContain('IVA (01)');
       expect(text()).toContain('19.00 %');
-      // Y NO está aplicada: la matriz sigue vacía y el formulario intacto.
-      expect(matrix()).toEqual([]);
-      expect(taxRules.dirty).toBe(false);
-      expect(form.dirty).toBe(false);
-    });
-
-    it('dice qué escribiría antes de escribirlo', () => {
-      expect(text()).toContain(
-        'Al aplicar se escribe en: Administración, Imprevistos y Utilidad',
-      );
-    });
-
-    it('aplicar es un acto explícito: sólo el botón escribe la matriz', () => {
-      const apply = buttonWithText('Aplicar');
-      expect(apply).toBeDefined();
-
-      apply!.click();
-      fixture.detectChanges();
-
+      // Y NO está aplicada: la matriz trae las cuatro porciones derivadas con
+      // otro tributo, y el formulario sigue intacto.
       expect(matrix()).toEqual([
         {
           bucket: 'administracion',
           taxable: true,
-          tax_code: '01',
-          rate: '19.00',
+          tax_code: '04',
+          rate: '16.00',
         },
-        { bucket: 'imprevistos', taxable: true, tax_code: '01', rate: '19.00' },
-        { bucket: 'utilidad', taxable: true, tax_code: '01', rate: '19.00' },
-        // La fila DERIVADA del costo reembolsable: bajo la base «aiu» queda
-        // exenta, y su ausencia sería un 422 bajo «subtotal».
-        { bucket: 'costo', taxable: false, tax_code: '01', rate: '0.00' },
+        { bucket: 'imprevistos', taxable: true, tax_code: '04', rate: '16.00' },
+        { bucket: 'utilidad', taxable: true, tax_code: '04', rate: '16.00' },
+        { bucket: 'costo', taxable: false, tax_code: '04', rate: '0.00' },
       ]);
-      // Aplicada, deja de sugerirse.
-      expect(text()).not.toContain(
-        'Sugeridos por las responsabilidades fiscales del cliente',
-      );
-      // Y la matriz queda `dirty`, que es lo que hace que un cambio de perfil
-      // posterior avise de que la reemplazaría.
-      expect(taxRules.dirty).toBe(true);
+      expect(taxRules.dirty).toBe(false);
+      expect(form.dirty).toBe(false);
     });
 
-    it('QUITAR la fila aplicada no vuelve a proponer el tributo', () => {
-      buttonWithText('Aplicar')!.click();
-      fixture.detectChanges();
+    /**
+     * LA MATRIZ DERIVADA RETIRÓ EL «APLICAR» EN MODO AIU, y es correcto.
+     *
+     * `aiuSuggestionPlan` sólo manda una porción a `writes` cuando FALTA de la
+     * matriz o cuando no es gravable; una porción gravable que ya declara otro
+     * tributo va a `keeps` y no se sobreescribe. Desde que la sección nace con
+     * las cuatro porciones y `taxable` derivado de la base, ninguna porción
+     * gravable puede faltar ni estar no-gravable, así que `writes` queda vacío
+     * y `applicable` —que exige `writes.length > 0`— es falso siempre.
+     *
+     * No se pierde nada: con la matriz por omisión el IVA YA está declarado
+     * (`aiuReferenceTaxRate([])` da `01` al 19,00 %) y la sugerencia se calla
+     * sola; con otro tributo declarado la sugerencia SÍ se ve y explica qué
+     * respeta, que es lo que el operador necesita para decidir a mano. Un
+     * botón que sobreescribiera un INC deliberado con IVA sería peor que no
+     * tenerlo. Estos dos casos sustituyen a «dice qué escribiría» y «aplicar
+     * es un acto explícito», que medían ese botón.
+     */
+    it('la sugerencia NO ofrece «Aplicar»: una porción que ya declara otro tributo no se sobreescribe', () => {
+      expect(buttonWithText('Aplicar')).toBeUndefined();
+      expect(text()).not.toContain('Al aplicar se escribe en:');
+    });
 
-      // Se quitan las tres filas gravables por el bote de basura de cada una.
-      // Sólo se pintan tres: la del costo existe y no se pinta.
-      for (let i = 0; i < 3; i++) {
-        const trash = buttonWithLabel('Quitar esta regla de impuesto');
-        expect(trash).toBeDefined();
-        trash!.click();
-        fixture.detectChanges();
-      }
+    it('y dice qué respeta, para que la ausencia del botón no quede sin motivo', () => {
+      expect(text()).toContain('Administración ya declara');
+      expect(text()).toContain('Utilidad ya declara');
+      expect(text()).toContain('y no se toca.');
+      // Nada se escribió: la matriz sigue con su tributo y el formulario limpio.
+      expect(taxRules.dirty).toBe(false);
+    });
 
+    it('en modo AIU no hay Agregar ni Quitar: las porciones no se desarman por fila', () => {
+      expect(buttonWithText('Agregar impuesto')).toBeUndefined();
       expect(
-        matrix().filter((row) => row.bucket !== 'costo' && row.taxable),
-      ).toEqual([]);
-      // La matriz ya no declara IVA, así que la regla desnuda lo volvería a
-      // sugerir. La memoria del descarte es lo que lo impide.
-      expect(text()).not.toContain(
-        'Sugeridos por las responsabilidades fiscales del cliente',
-      );
-      expect(text()).not.toContain('Sugerido por «Responsable de IVA»');
+        buttonWithLabel('Quitar esta regla de impuesto'),
+      ).toBeUndefined();
+      expect(matrix().length).toBe(4);
     });
 
-    it('descartar sin aplicar tampoco lo repone', () => {
+    it('descartar sin aplicar tampoco lo repone y deja la matriz intacta', () => {
       const dismiss = buttonWithLabel('Descartar este tributo sugerido');
       expect(dismiss).toBeDefined();
 
       dismiss!.click();
       fixture.detectChanges();
 
-      expect(matrix()).toEqual([]);
+      // Descartar es memoria, no edición: la matriz derivada queda igual.
+      expect(matrix()).toEqual([
+        {
+          bucket: 'administracion',
+          taxable: true,
+          tax_code: '04',
+          rate: '16.00',
+        },
+        { bucket: 'imprevistos', taxable: true, tax_code: '04', rate: '16.00' },
+        { bucket: 'utilidad', taxable: true, tax_code: '04', rate: '16.00' },
+        { bucket: 'costo', taxable: false, tax_code: '04', rate: '0.00' },
+      ]);
       expect(text()).not.toContain(
         'Sugeridos por las responsabilidades fiscales del cliente',
       );
@@ -289,7 +322,19 @@ describe('InvoiceSectionAiuComponent · sugerencia de tributos (DOM)', () => {
       expect(buttonWithText('Aplicar')).toBeUndefined();
       // El botón de descartar sí está: es una decisión que se puede tomar.
       expect(buttonWithLabel('Descartar este tributo sugerido')).toBeDefined();
-      expect(matrix()).toEqual([]);
+      // La matriz nace sembrada con las cuatro porciones derivadas (base
+      // «aiu» por omisión): ninguna declara el 06, por eso se sugiere.
+      expect(matrix()).toEqual([
+        {
+          bucket: 'administracion',
+          taxable: true,
+          tax_code: '01',
+          rate: '19.00',
+        },
+        { bucket: 'imprevistos', taxable: true, tax_code: '01', rate: '19.00' },
+        { bucket: 'utilidad', taxable: true, tax_code: '01', rate: '19.00' },
+        { bucket: 'costo', taxable: false, tax_code: '01', rate: '0.00' },
+      ]);
     });
   });
 
@@ -306,21 +351,38 @@ describe('InvoiceSectionAiuComponent · sugerencia de tributos (DOM)', () => {
       );
       mount('invoice', ['O-48']);
 
+      // La porción ausente se completa derivada al montar, y el IVA ya
+      // declarado en la matriz no se vuelve a sugerir.
+      expect(matrix().length).toBe(4);
       expect(text()).not.toContain(
         'Sugeridos por las responsabilidades fiscales del cliente',
       );
     });
 
     it('una fila con el código pero NO gravable no cuenta como declarada', () => {
+      // Ninguna porción GRAVABLE declara el 01: la de administración lo trae
+      // exento y las otras dos declaran INC. El IVA sí se sugiere.
       const fb = TestBed.inject(FormBuilder);
-      taxRules.push(
-        fb.group({
-          bucket: ['administracion'],
-          taxable: [false],
-          tax_code: ['01'],
-          rate: ['0.00'],
-        }),
-      );
+      for (const row of [
+        {
+          bucket: 'administracion',
+          taxable: false,
+          tax_code: '01',
+          rate: '0.00',
+        },
+        { bucket: 'imprevistos', taxable: true, tax_code: '04', rate: '16.00' },
+        { bucket: 'utilidad', taxable: true, tax_code: '04', rate: '16.00' },
+        { bucket: 'costo', taxable: false, tax_code: '01', rate: '0.00' },
+      ]) {
+        taxRules.push(
+          fb.group({
+            bucket: [row.bucket],
+            taxable: [row.taxable],
+            tax_code: [row.tax_code],
+            rate: [row.rate],
+          }),
+        );
+      }
       mount('invoice', ['O-48']);
 
       expect(text()).toContain(
@@ -330,6 +392,14 @@ describe('InvoiceSectionAiuComponent · sugerencia de tributos (DOM)', () => {
   });
 
   describe('contexto «profile»', () => {
+    /** La siembra derivada con la base «aiu» por omisión. */
+    const derivedAiuMatrix = [
+      { bucket: 'administracion', taxable: true, tax_code: '01', rate: '19.00' },
+      { bucket: 'imprevistos', taxable: true, tax_code: '01', rate: '19.00' },
+      { bucket: 'utilidad', taxable: true, tax_code: '01', rate: '19.00' },
+      { bucket: 'costo', taxable: false, tax_code: '01', rate: '0.00' },
+    ];
+
     beforeEach(() => {
       // Se le pasan responsabilidades A PROPÓSITO: la compuerta tiene que ser
       // el contexto y no la ausencia del dato. Un editor de perfiles que algún
@@ -345,14 +415,16 @@ describe('InvoiceSectionAiuComponent · sugerencia de tributos (DOM)', () => {
       expect(text()).toContain(
         'La sugerencia por responsabilidades fiscales del cliente sólo existe al emitir.',
       );
-      expect(matrix()).toEqual([]);
+      // En un perfil la matriz también nace sembrada: cuatro porciones.
+      expect(matrix()).toEqual(derivedAiuMatrix);
     });
 
     it('ni siquiera por la vía imperativa: no hay nada que aplicar', () => {
       component.applyTaxSuggestion('01');
       fixture.detectChanges();
 
-      expect(matrix()).toEqual([]);
+      // Sin adquiriente no hay sugerencia viva: la matriz derivada queda igual.
+      expect(matrix()).toEqual(derivedAiuMatrix);
     });
   });
 

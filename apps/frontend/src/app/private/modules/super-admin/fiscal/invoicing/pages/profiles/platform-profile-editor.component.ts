@@ -26,6 +26,7 @@ import {
 } from '../../../../../../../shared/components/index';
 import type { SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
 import {
+  AIU_BUCKETS,
   AIU_LEGAL_FLOOR_PERCENT_SCALED,
   CONFIG_LIMITS,
   validateInvoiceProfileConfig,
@@ -33,8 +34,9 @@ import {
   blockingIssues,
   isBlockingIssue,
   formatPercentScaled,
+  resolveAiuTaxableBasis,
 } from '../../../../../../../core/utils/invoice-profile-config.contract';
-import type { ProfileConfigIssue, AiuTaxableBasis, AiuComponentsBasis, AccountingModel } from '../../../../../../../core/utils/invoice-profile-config.contract';
+import type { ProfileConfigIssue, AiuBucket, AiuTaxableBasis, AiuComponentsBasis, AccountingModel } from '../../../../../../../core/utils/invoice-profile-config.contract';
 import { ModuleShellActionsService } from '../../../../../../../shared/components/module-tabs-shell/module-shell-actions.service';
 import { PlatformInvoicingStore } from '../../platform-invoicing.store';
 
@@ -67,9 +69,11 @@ import {
   InvoiceSectionDivisaComponent,
   InvoiceSectionFormatoComponent,
   InvoiceSectionNotasComponent,
+  deriveAiuTaxMatrix,
 } from '../../../../../../../shared/components/invoice-sections/index';
 import type {
   AiuSectionPaths,
+  AiuTaxRuleValue,
   DocumentoSectionPaths,
   DocumentoSectionErrors,
   DocumentoSectionNotice,
@@ -942,6 +946,51 @@ export class PlatformProfileEditorComponent {
     };
     rulesOf(cfg['taxes']).forEach((t) => this.addTaxRule(t));
     rulesOf(cfg['withholdings']).forEach((w) => this.addWithholding(w));
+    // Porciones ausentes al hidratar: se completan derivadas de la base, con
+    // lectura tolerante de snapshots viejos (traen `taxable_basis` por fila).
+    {
+      const present = new Set(
+        this.taxRules.controls.map((control) =>
+          String(control.get('bucket')?.value ?? ''),
+        ),
+      );
+      if (this.isAiu() && present.size < AIU_BUCKETS.length) {
+        const aiu = (cfg['aiu'] ?? null) as {
+          regime?: 'et_462_1' | 'decreto_1372_1992';
+          taxable_basis?: AiuTaxableBasis | null;
+        } | null;
+        const current: AiuTaxRuleValue[] = this.taxRules.controls.map(
+          (control) => ({
+            bucket: (control.get('bucket')?.value ??
+              'administracion') as AiuBucket,
+            taxable: Boolean(control.get('taxable')?.value),
+            tax_code: String(control.get('tax_code')?.value ?? ''),
+            rate: String(control.get('rate')?.value ?? '0.00'),
+          }),
+        );
+        // El default `'et_462_1'` es el MISMO que aplica el resolvedor cuando
+        // la config no trae régimen: se escribe acá porque el snapshot de
+        // plataforma llega como `Record<string, unknown>` y su `regime` es
+        // opcional, mientras la firma del resolvedor lo exige presente.
+        for (const next of deriveAiuTaxMatrix(
+          resolveAiuTaxableBasis({
+            regime: aiu?.regime ?? 'et_462_1',
+            taxable_basis: aiu?.taxable_basis ?? null,
+          }),
+          current,
+        )) {
+          const bucket = String(next.bucket ?? '');
+          if (!bucket || present.has(bucket)) continue;
+          this.addTaxRule({
+            bucket: next.bucket,
+            taxable: next.taxable,
+            tax_code: next.tax_code,
+            rate: next.rate,
+          });
+          present.add(bucket);
+        }
+      }
+    }
   }
 
   // ─── Form helpers ─────────────────────────────────────────────

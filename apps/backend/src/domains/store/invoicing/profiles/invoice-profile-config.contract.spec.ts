@@ -5,12 +5,15 @@ import { VendixHttpException } from 'src/common/errors';
 
 import {
   ACCOUNTING_MODELS,
+  AIU_BUCKETS,
   AIU_LEGAL_FLOOR_PERCENT_SCALED,
   AIU_TAXABLE_BASES,
+  AIU_TAXABLE_BUCKETS_BY_BASIS,
   ENABLED_ACCOUNTING_MODELS,
   INVOICE_PROFILE_CONFIG_VERSION,
   InvoiceProfileConfig,
   accountingModelDisabledReason,
+  blockingIssues,
   buildDefaultAiuProfileConfig,
   formatPercentScaled,
   isAccountingModelEnabled,
@@ -686,6 +689,125 @@ describe('InvoiceProfileConfig — taxable_basis (Subtotal / AIU / Utilidad)', (
       });
       expect(codes(config)).not.toContain('TAX_RULE_MISSING');
     }
+  });
+});
+
+describe('InvoiceProfileConfig — matriz AIU derivada de la base (sonda permanente)', () => {
+  /**
+   * La sonda que originó este plan: con la base por omisión (`aiu`) y un clic
+   * en «Agregar impuesto» el guardado devolvía 2 bloqueantes TAX_RULE_MISSING
+   * (imprevistos, utilidad); con dos clics se sumaba TAX_BUCKET_DUPLICATED.
+   * Los tres escenarios de la izquierda lo dejan escrito con su código exacto:
+   * si alguien reintroduce la matriz parcial, el spec dice qué código bloquea.
+   * Los tres de la derecha —uno por base— afirman el criterio de aceptación:
+   * la matriz derivada de cuatro porciones guarda sin bloqueos.
+   */
+  const derivedRules = (basis: 'aiu' | 'utilidad' | 'subtotal') => {
+    const taxable = AIU_TAXABLE_BUCKETS_BY_BASIS[basis];
+    return AIU_BUCKETS.map((bucket) => {
+      const shouldBeTaxable = taxable.includes(bucket);
+      return {
+        bucket,
+        taxable: shouldBeTaxable,
+        tax_code: '01',
+        rate: shouldBeTaxable ? '19.00' : '0.00',
+      };
+    });
+  };
+
+  it('matriz parcial bajo aiu: faltan imprevistos y utilidad (2 TAX_RULE_MISSING)', () => {
+    const config = aiuConfig((c) => {
+      c.taxes.rules = [
+        {
+          bucket: 'administracion',
+          taxable: true,
+          tax_code: '01',
+          rate: '19.00',
+        },
+        { bucket: 'costo', taxable: false, tax_code: '01', rate: '0.00' },
+      ] as any;
+    });
+    const blocking = blockingIssues(
+      validateInvoiceProfileConfig(config, { operation_type: '09' }),
+    );
+    const missing = blocking.filter((i) => i.code === 'TAX_RULE_MISSING');
+    expect(missing.map((i) => i.field).sort()).toEqual([
+      'taxes.rules.imprevistos',
+      'taxes.rules.utilidad',
+    ]);
+  });
+
+  it('matriz parcial con porción duplicada: se suma TAX_BUCKET_DUPLICATED', () => {
+    const config = aiuConfig((c) => {
+      c.taxes.rules = [
+        {
+          bucket: 'administracion',
+          taxable: true,
+          tax_code: '01',
+          rate: '19.00',
+        },
+        {
+          bucket: 'administracion',
+          taxable: true,
+          tax_code: '01',
+          rate: '19.00',
+        },
+        { bucket: 'costo', taxable: false, tax_code: '01', rate: '0.00' },
+      ] as any;
+    });
+    expect(codes(config)).toContain('TAX_BUCKET_DUPLICATED');
+    expect(codes(config)).toContain('TAX_RULE_MISSING');
+  });
+
+  it('matriz que grava lo que la base utilidad excluye: TAX_MATRIX_CONTRADICTS_REGIME', () => {
+    const config = aiuConfig((c) => {
+      (c.aiu as any).taxable_basis = 'utilidad';
+      (c.aiu as any).regime = 'decreto_1372_1992';
+      c.taxes.rules = derivedRules('utilidad').map((r) =>
+        r.bucket === 'administracion' ? { ...r, taxable: true } : r,
+      ) as any;
+    });
+    expect(codes(config)).toContain('TAX_MATRIX_CONTRADICTS_REGIME');
+  });
+
+  it.each(['aiu', 'utilidad', 'subtotal'] as const)(
+    'base %s con la matriz derivada: 0 bloqueantes',
+    (basis) => {
+      const config = aiuConfig((c) => {
+        (c.aiu as any).taxable_basis = basis;
+        (c.aiu as any).regime =
+          regimeFromTaxableBasis(basis) ?? 'et_462_1';
+        c.taxes.rules = derivedRules(basis) as any;
+      });
+      expect(
+        blockingIssues(
+          validateInvoiceProfileConfig(config, { operation_type: '09' }),
+        ),
+      ).toEqual([]);
+    },
+  );
+
+  it('base utilidad derivada: taxable sólo en utilidad y 0.00 en el resto', () => {
+    const config = aiuConfig((c) => {
+      (c.aiu as any).taxable_basis = 'utilidad';
+      (c.aiu as any).regime = 'decreto_1372_1992';
+      c.taxes.rules = derivedRules('utilidad') as any;
+    });
+    const byBucket = Object.fromEntries(
+      config.taxes.rules.map((r) => [r.bucket, r]),
+    ) as Record<string, { taxable: boolean; rate: string }>;
+    expect(byBucket['utilidad']).toMatchObject({
+      taxable: true,
+      rate: '19.00',
+    });
+    for (const bucket of ['administracion', 'imprevistos', 'costo']) {
+      expect(byBucket[bucket]).toMatchObject({ taxable: false, rate: '0.00' });
+    }
+    expect(
+      blockingIssues(
+        validateInvoiceProfileConfig(config, { operation_type: '09' }),
+      ).length,
+    ).toBe(0);
   });
 });
 
