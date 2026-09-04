@@ -347,6 +347,15 @@ export interface ProfilePreviewResult {
     };
     not_performed: ProfilePreviewNotPerformed;
     xml: string;
+    /**
+     * Representación gráfica, SÓLO cuando el cuerpo pidió `include_render`.
+     *
+     * Con el flag ausente o en `false` la clave no viaja (contrato intacto);
+     * con el flag en `true` viaja siempre —el HTML o `null` si no se pudo
+     * componer—. Opcional a propósito: las respuestas pedidas sin el flag no
+     * la traen y leerla no puede romperlas.
+     */
+    html?: string | null;
     breakdown: {
         lines: ProfilePreviewLine[];
         totals: ProfilePreviewTotals;
@@ -377,4 +386,9 @@ export interface PreviewProfilePayload {
         document_number?: string;
         document_type?: string;
     };
+    /**
+     * Pide la representación gráfica (`html`) además del XML. Ausente o
+     * `false` ⇒ la respuesta es la de siempre, sin la clave.
+     */
+    include_render?: boolean;
 }

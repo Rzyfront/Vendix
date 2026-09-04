@@ -1,4 +1,6 @@
 import { InvoiceCalculatorService } from '../services/invoice-calculator.service';
+import { PrintLayoutComposerService } from '../../print-formats/services/print-layout-composer.service';
+import { PrintTemplateCompilerService } from '../../print-formats/services/print-template-compiler.service';
 
 import { ProfilePreviewService } from './profile-preview.service';
 import {
@@ -596,6 +598,39 @@ describe('ProfilePreviewService', () => {
     });
   });
 
+  describe('unidades de medida (UNIDADES-UNECE)', () => {
+    /**
+     * La regla valida contra los 1089 códigos de `UnidadesMedida-2.1.gc`
+     * (`isDianUnitCode`), no contra el subconjunto curado `DIAN_UNIT_CODES`.
+     * `NIU` está en la lista oficial pero fuera del subconjunto: con el filtro
+     * anterior fallaba como desconocido (falso positivo).
+     */
+    async function previewWithUnit(unit_code: string) {
+      const { service } = build();
+      return service.preview(8, {
+        issue_date: '2026-08-22',
+        lines: [{ bucket: 'costo', unit_price: 90000000, unit_code }],
+      } as any);
+    }
+
+    it('NIU —código DIAN vigente— pasa la validación', async () => {
+      const result = await previewWithUnit('NIU');
+
+      const rule = result.validations.find((v) => v.rule === 'UNIDADES-UNECE');
+      expect(rule?.passed).toBe(true);
+      expect(rule?.severity).toBe('warning');
+    });
+
+    it('un código inventado (ZZZZ) sigue fallando', async () => {
+      const result = await previewWithUnit('ZZZZ');
+
+      const rule = result.validations.find((v) => v.rule === 'UNIDADES-UNECE');
+      expect(rule?.passed).toBe(false);
+      expect(rule?.severity).toBe('warning');
+      expect(rule?.details).toEqual({ unknown_unit_codes: ['ZZZZ'] });
+    });
+  });
+
   describe('muestras inutilizables', () => {
     const cases: Array<[string, any]> = [
       ['lines y contract_value a la vez', { ...CONTRACT, lines: [{ bucket: 'utilidad', unit_price: 1000 }] }],
@@ -629,6 +664,163 @@ describe('ProfilePreviewService', () => {
       // tienda» también vive ahí.
       expect(profiles.findOne).toHaveBeenCalledWith(8);
       expect(profiles.findOne).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('representación gráfica (include_render, paso 6 del plan AIU)', () => {
+    /**
+     * Caso real medido de la sesión del plan: contrato de mano de obra por
+     * $2.587.556 bajo base `utilidad` (Decreto 1372/1992) —costo reembolsable
+     * $2.328.800, A $129.378, I $51.751, U $77.627 con IVA 19 % sólo en la
+     * utilidad—.
+     */
+    const AIU_REAL_BODY = {
+      issue_date: '2026-09-04',
+      lines: [
+        { bucket: 'costo', description: 'Mano de obra retrolavado', quantity: 1, unit_price: 2328800 },
+        { bucket: 'administracion', description: 'Administración AIU', quantity: 1, unit_price: 129378 },
+        { bucket: 'imprevistos', description: 'Imprevistos AIU', quantity: 1, unit_price: 51751 },
+        { bucket: 'utilidad', description: 'Utilidad AIU', quantity: 1, unit_price: 77627 },
+      ],
+      customer: { legal_name: 'HIDRO INSTALAR S.A.S.', document_number: '900123456', document_type: '31' },
+    };
+    const AIU_REAL_RULES = [
+      { bucket: 'administracion', taxable: false, tax_code: '01', rate: '0.00' },
+      { bucket: 'imprevistos', taxable: false, tax_code: '01', rate: '0.00' },
+      { bucket: 'utilidad', taxable: true, tax_code: '01', rate: '19.00' },
+      { bucket: 'costo', taxable: false, tax_code: '01', rate: '0.00' },
+    ];
+    const AIU_REAL_OVERRIDES = {
+      aiu: { regime: 'decreto_1372_1992', enforce_minimum_base: false },
+      rules: AIU_REAL_RULES,
+    };
+
+    /** Definición mínima con las cuatro secciones del papel fiscal. */
+    const DEFINITION = {
+      paper: { is_roll: false, width_mm: 80 },
+      columns: [
+        { id: 'c1', key: 'product_name', label: 'Descripción', enabled: true, width_percent: 60, align: 'left' },
+        { id: 'c2', key: 'total_price', label: 'Total', enabled: true, width_percent: 40, align: 'right' },
+      ],
+      sections: [
+        { id: 's1', type: 'document_info', enabled: true, order: 1 },
+        { id: 's2', type: 'customer_info', enabled: true, order: 2 },
+        { id: 's3', type: 'items_table', enabled: true, order: 3 },
+        { id: 's4', type: 'totals_summary', enabled: true, order: 4 },
+      ],
+    };
+
+    function db(overrides: any = {}) {
+      return {
+        store_print_format_configs: {
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
+        print_templates: {
+          findFirst: jest.fn().mockResolvedValue({ definition: DEFINITION }),
+        },
+        stores: {
+          findFirst: jest.fn().mockResolvedValue({
+            name: 'Tienda Demo',
+            legal_name: 'Tienda Demo S.A.S.',
+            tax_id: '900111222',
+            logo_url: null,
+            store_settings: null,
+            addresses: [],
+          }),
+        },
+        organizations: {
+          findFirst: jest.fn().mockResolvedValue({
+            name: 'Org Demo',
+            legal_name: 'Org Demo S.A.S.',
+            tax_id: '900111222',
+            phone: null,
+            email: null,
+            logo_url: null,
+            fiscal_scope: 'STORE',
+            document_type: null,
+            person_type: null,
+            organization_settings: null,
+            addresses: [],
+          }),
+        },
+        ...overrides,
+      };
+    }
+
+    function buildWithRender(profile_overrides: any = {}, config_overrides: any = {}, database: any = db()) {
+      const profiles = {
+        findOne: jest.fn().mockResolvedValue({
+          id: 8,
+          store_id: 5,
+          organization_id: 7,
+          name: 'Facturacion AIU',
+          operation_type: '09',
+          current_version: 3,
+          current_config: config(config_overrides),
+          ...profile_overrides,
+        }),
+      };
+      const service = new ProfilePreviewService(
+        profiles as any,
+        new InvoiceCalculatorService(),
+        { withoutScope: () => database } as any,
+        new PrintLayoutComposerService(new PrintTemplateCompilerService()),
+      );
+      return { service, profiles, database };
+    }
+
+    it('sin el flag la respuesta no trae la clave html (contrato intacto)', async () => {
+      const { service } = build();
+      const result = await service.preview(8, CONTRACT as any);
+
+      expect('html' in result).toBe(false);
+    });
+
+    it('con include_render: false la respuesta no trae la clave html', async () => {
+      const { service } = build();
+      const result = await service.preview(8, { ...CONTRACT, include_render: false } as any);
+
+      expect('html' in result).toBe(false);
+    });
+
+    it('con el flag pero sin compositor responde html: null sin romper el XML', async () => {
+      // El servicio de dos argumentos (sin prisma ni compositor, como los
+      // specs viejos) atiende el flag degradando a `null`, nunca lanzando.
+      const { service } = build();
+      const result = await service.preview(8, { ...CONTRACT, include_render: true } as any);
+
+      expect(result.html).toBe(null);
+      expect(result.xml).toContain(PREVIEW_INVOICE_NUMBER);
+    });
+
+    it('con el flag y cuerpo AIU real compone html con los datos capturados', async () => {
+      const { service } = buildWithRender({}, AIU_REAL_OVERRIDES);
+      const result = await service.preview(8, { ...AIU_REAL_BODY, include_render: true } as any);
+
+      // La base gravable es SÓLO la utilidad: 77627, no el contrato.
+      expect(result.aiu_summary?.taxable_base).toBe('77627.00');
+      // IVA 19 % sobre la utilidad: 77627 × 0.19 = 14749.13.
+      expect(result.breakdown.totals.tax_amount).toBe('14749.13');
+
+      expect(typeof result.html).toBe('string');
+      const html = result.html as string;
+      expect(html.length).toBeGreaterThan(0);
+      // El papel lleva lo capturado: número marcado, adquiriente del DTO y
+      // las líneas con su descripción —no la muestra del Hub—.
+      expect(html).toContain('PREVIEW');
+      expect(html).toContain('HIDRO INSTALAR S.A.S.');
+      expect(html).toContain('Mano de obra retrolavado');
+      expect(html).toContain('Utilidad AIU');
+    });
+
+    it('sin plantilla del sistema responde html: null sin romper el XML', async () => {
+      const database = db();
+      database.print_templates.findFirst.mockResolvedValue(null);
+      const { service } = buildWithRender({}, AIU_REAL_OVERRIDES, database);
+      const result = await service.preview(8, { ...AIU_REAL_BODY, include_render: true } as any);
+
+      expect(result.html).toBe(null);
+      expect(result.aiu_summary?.taxable_base).toBe('77627.00');
     });
   });
 });

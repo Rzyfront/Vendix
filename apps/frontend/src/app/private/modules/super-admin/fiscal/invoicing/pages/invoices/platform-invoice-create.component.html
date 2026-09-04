@@ -630,9 +630,26 @@
         }
       </app-alert-banner>
     </div>
-  } @else if (printPreviewResult()) {
-    <div class="w-full h-[70vh] bg-surface rounded-xl overflow-hidden border border-border">
-      <iframe [srcdoc]="printPreviewSrcdoc()" class="w-full h-full border-none" title="Print Preview"></iframe>
-    </div>
+  } @else if (printPreviewResult(); as result) {
+    @if (result.html) {
+      <div class="w-full h-[70vh] bg-surface rounded-xl overflow-hidden border border-border">
+        <iframe [srcdoc]="printPreviewSrcdoc()" sandbox="allow-same-origin" class="w-full h-full border-none" title="Print Preview"></iframe>
+      </div>
+    } @else {
+      <!--
+        Paso 7 del plan AIU: respaldo XML cuando el backend no pudo componer
+        el gráfico (`html: null`). El modal ya no queda en blanco.
+      -->
+      <div class="p-4">
+        <app-alert-banner variant="info" class="mb-3 block">
+          No se pudo componer la representación gráfica; se muestra el XML con los datos capturados.
+        </app-alert-banner>
+        <pre
+          class="max-h-[70vh] overflow-auto rounded-xl border border-border bg-slate-950 p-3 text-[11px] leading-tight text-slate-100"
+          role="region"
+          aria-label="XML proyectado"
+        ><code>{{ result.xml }}</code></pre>
+      </div>
+    }
   }
 </app-modal>

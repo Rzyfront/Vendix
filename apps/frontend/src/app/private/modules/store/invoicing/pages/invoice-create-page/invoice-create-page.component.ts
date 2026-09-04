@@ -323,6 +323,255 @@ const AIU_DOCUMENT_TAX_TYPE_BY_CODE: Readonly<Record<string, string>> = {
   '03': 'ica',
   '04': 'inc',
 };
+
+/**
+ * Lectura AIU de las líneas ya capturadas, hermana de `totals()`.
+ *
+ * No calcula nada nuevo: reagrupa la misma `lineMath` por cubeta. La línea
+ * sin `aiu_component` es el costo reembolsable (`'costo'`); la que lo trae es
+ * su porción del AIU. Qué cubetas gravan lo dice
+ * `AIU_TAXABLE_BUCKETS_BY_BASIS` — la misma tabla que consulta
+ * `aiuTaxableWithoutTax`—, nunca un ternario reescrito acá.
+ *
+ * Caso real que custodia (base utilidad): costo $2.328.800 + A $129.378 + I
+ * $51.751 + U $77.627 con IVA 19 % sólo en la utilidad ⇒ `taxableBase`
+ * 77627, `contractAmount` 2587556, `taxAmount` 14749.13.
+ */
+export interface AiuTotals {
+  /** Σ de las bases de TODAS las líneas: lo pactado en el contrato. */
+  contractAmount: number;
+  /** Σ de las bases de las líneas CON componente (A+I+U). */
+  aiuAmount: number;
+  /** Σ de las bases de las líneas cuya cubeta grava bajo la base vigente. */
+  taxableBase: number;
+  /** Σ del impuesto (incluido + adicional) declarado sobre la base gravable. */
+  taxAmount: number;
+}
+
+export function deriveAiuTotals(
+  items: ReadonlyArray<{ aiu_component?: string | null }>,
+  math: ReadonlyArray<{
+    base: number;
+    taxInclusive: number;
+    taxAdditional: number;
+  }>,
+  taxableBuckets: ReadonlyArray<string>,
+): AiuTotals {
+  let contractAmount = 0;
+  let aiuAmount = 0;
+  let taxableBase = 0;
+  let taxAmount = 0;
+  for (let i = 0; i < items.length; i++) {
+    const component = String(items[i]?.aiu_component ?? '').trim();
+    const line = math[i] ?? { base: 0, taxInclusive: 0, taxAdditional: 0 };
+    const base = Number(line.base) || 0;
+    contractAmount += base;
+    if (component.length > 0) aiuAmount += base;
+    if (taxableBuckets.includes(component.length > 0 ? component : 'costo')) {
+      taxableBase += base;
+      taxAmount += (Number(line.taxInclusive) || 0) + (Number(line.taxAdditional) || 0);
+    }
+  }
+  return { contractAmount, aiuAmount, taxableBase, taxAmount };
+}
+
+/**
+ * Paso 8 del plan AIU: la tarifa gravable que no se resuelve tiene que
+ * decirlo, nombrando tributo y porcentaje.
+ *
+ * `aiuTaxesForBucket` resolvía cada regla contra el catálogo con cuatro
+ * `continue` mudos: la línea viajaba sin impuesto y moría en
+ * `INVOICING_AIU_004`, cuyo mensaje habla de la línea y no de la tarifa
+ * ausente. Esta función pura es el mismo recorrido, pero devuelve ADEMÁS
+ * las reglas gravables que no pudo resolver, cada una con su frase lista
+ * para el recuadro y para `blockers`.
+ *
+ * Lo único que sigue mudo es el filtro (`rule.bucket !== bucket ||
+ * !rule.taxable`): esa regla no le toca a esta línea y no hay nada que
+ * decir de ella.
+ */
+export type AiuUnresolvedReason =
+  | 'unknown-tax-code'
+  | 'unparsable-rate'
+  | 'empty-catalog'
+  | 'missing-rate';
+
+export interface AiuUnresolvedTax {
+  bucket: string;
+  bucketLabel: string;
+  taxCode: string;
+  taxName: string;
+  rateLabel: string;
+  reason: AiuUnresolvedReason;
+  /** Frase lista para el recuadro y para `blockers`: nombra tributo y tarifa. */
+  message: string;
+}
+
+const AIU_TAX_DISPLAY_NAME: Readonly<Record<string, string>> = {
+  iva: 'IVA',
+  inc: 'INC',
+  ica: 'ICA',
+};
+
+export function resolveAiuBucketTaxes(
+  rules: ReadonlyArray<{
+    bucket?: unknown;
+    taxable: unknown;
+    tax_code: unknown;
+    rate: unknown;
+  }>,
+  bucket: string,
+  bucketLabel: string,
+  catalog: ReadonlyArray<TaxOption>,
+): { selections: TaxSelection[]; unresolved: AiuUnresolvedTax[] } {
+  const selections: TaxSelection[] = [];
+  const unresolved: AiuUnresolvedTax[] = [];
+  for (const rule of rules) {
+    // `bucket` es opcional en `ProfileTaxRule`: la regla sin cubeta no le
+    // toca a ninguna línea y se filtra acá, igual que antes.
+    if (String(rule.bucket ?? '') !== bucket || !rule.taxable) continue;
+    const taxCode = String(rule.tax_code ?? '').trim();
+    const taxType = AIU_DOCUMENT_TAX_TYPE_BY_CODE[taxCode];
+    if (!taxType) {
+      unresolved.push({
+        bucket,
+        bucketLabel,
+        taxCode,
+        taxName: '',
+        rateLabel: String(rule.rate ?? '').trim(),
+        reason: 'unknown-tax-code',
+        message:
+          `La ${bucketLabel} se grava con el tributo «${taxCode || 'sin código'}», ` +
+          'que el documento no reconoce. Revisa la matriz del perfil en Base AIU.',
+      });
+      continue;
+    }
+    const taxName = AIU_TAX_DISPLAY_NAME[taxType] ?? taxType.toUpperCase();
+    const rate = parsePercentScaled(rule.rate);
+    if (rate === null) {
+      unresolved.push({
+        bucket,
+        bucketLabel,
+        taxCode,
+        taxName,
+        rateLabel: String(rule.rate ?? '').trim(),
+        reason: 'unparsable-rate',
+        message:
+          `La ${bucketLabel} trae una tarifa ilegible ` +
+          `(«${String(rule.rate ?? '').trim() || 'vacía'}»). Escríbela con hasta ` +
+          'dos decimales y punto (por ejemplo 19.00).',
+      });
+      continue;
+    }
+    const rateLabel = `${formatPercentScaled(rate)} %`;
+    if (catalog.length === 0) {
+      unresolved.push({
+        bucket,
+        bucketLabel,
+        taxCode,
+        taxName,
+        rateLabel,
+        reason: 'empty-catalog',
+        message:
+          `La ${bucketLabel} se grava con ${taxName} al ${rateLabel}, pero tu ` +
+          'catálogo de impuestos está vacío. Créalo en Ajustes → Impuestos o ' +
+          'el documento se rechazará al crearlo.',
+      });
+      continue;
+    }
+    const option = catalog.find(
+      (candidate) =>
+        (candidate.tax_type ?? '').toLowerCase() === taxType &&
+        Math.round(candidate.rate * 100) === rate,
+    );
+    if (!option) {
+      unresolved.push({
+        bucket,
+        bucketLabel,
+        taxCode,
+        taxName,
+        rateLabel,
+        reason: 'missing-rate',
+        message:
+          `La ${bucketLabel} se grava con ${taxName} al ${rateLabel}, pero tu ` +
+          'catálogo de impuestos no tiene esa tarifa. Configúrala en ' +
+          'Ajustes → Impuestos o el documento se rechazará al crearlo.',
+      });
+      continue;
+    }
+    selections.push({
+      tax_rate_id: option.id,
+      rate: option.rate,
+      name: option.name,
+      tax_type: option.tax_type,
+      is_inclusive: option.default_is_inclusive ?? false,
+    });
+  }
+  return { selections, unresolved };
+}
+
+/**
+ * Puerta de la operación AIU (paso 1 del plan AIU, caso `operation_type='10'`).
+ *
+ * La barra de totales sólo enseña «Base gravable AIU» cuando el documento es
+ * `09`; con cualquier otro tipo `aiuTotals()` es `null` y la barra queda
+ * idéntica a la histórica. Esta es esa puerta, probada donde es pura.
+ */
+export function isAiuOperation(operationType: unknown): boolean {
+  return operationType === OPERATION_TYPE_AIU;
+}
+
+/**
+ * Frase de estado de la cabecera (paso 3 del plan AIU), probada donde es pura.
+ *
+ * Es la cadena de `submitHint()` con sus entradas como parámetros: cada rama
+ * devuelve byte a byte lo que el computed devolvía. La rama AIU
+ * (`isAiu && aiuWithoutComponent`) es la que deja de decir «Todo listo para
+ * emitir» sobre un documento que el validador rechaza.
+ */
+export interface SubmitHintState {
+  checkingEmitReadiness: boolean;
+  createdInvoiceId: number | null;
+  mode: string;
+  orderIdValue: unknown;
+  itemCount: number;
+  hasActiveResolution: boolean;
+  isCredit: boolean;
+  hasDueDate: boolean;
+  incompleteWithholdingRow: number;
+  formStatus: string;
+  isAiu: boolean;
+  aiuWithoutComponent: boolean;
+}
+
+export function resolveSubmitHint(state: SubmitHintState): string {
+  if (state.checkingEmitReadiness) {
+    return 'Comprobando si el documento puede emitirse…';
+  }
+  if (state.createdInvoiceId !== null) {
+    return 'La factura ya se creó. Ciérrala y ábrela desde el listado para corregirla.';
+  }
+  if (state.mode === 'from_order') {
+    return state.orderIdValue
+      ? 'Se facturará el pedido elegido, con sus líneas e impuestos.'
+      : 'Busca el pedido por su número, por el cliente o por su id.';
+  }
+  if (state.itemCount === 0) return 'Agrega al menos una línea.';
+  if (!state.hasActiveResolution) {
+    return 'No hay resolución activa: el servidor rechazará la factura.';
+  }
+  if (state.isCredit && !state.hasDueDate) {
+    return 'Venta a crédito: declara la fecha de vencimiento.';
+  }
+  if (state.incompleteWithholdingRow > 0) {
+    return `La retención #${state.incompleteWithholdingRow} está incompleta: elige concepto, tarifa y base.`;
+  }
+  if (state.formStatus !== 'VALID') return 'Revisa los campos marcados.';
+  if (state.isAiu && state.aiuWithoutComponent) {
+    return 'Falta aplicar la base AIU a las líneas.';
+  }
+  return 'Todo listo para emitir.';
+}
 import {
   AIU_COMPONENT_OPTIONS,
   DOCUMENT_TYPE_NIT_CODE,
@@ -1673,7 +1922,29 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                     <div class="min-w-0">
                       <p class="text-sm font-medium text-text-primary">
                         Base AIU configurada en el perfil
+                        <!--
+                          Paso 3 del plan AIU: mientras ninguna línea lleve
+                          componente (aiuWithoutAnyComponent — el mismo
+                          predicado que ya cuenta la cabecera plegada), estas
+                          cifras son un plan sin aplicar, no el documento. El
+                          distintivo y la constancia lo dicen para que nadie
+                          emita creyendo que el reparto ya está escrito.
+                        -->
+                        @if (aiuWithoutAnyComponent()) {
+                          <span
+                            class="ml-2 inline-flex items-center rounded-full bg-warning/10 px-2 py-0.5 align-middle text-[11px] font-semibold text-warning ring-1 ring-warning/30"
+                          >
+                            Sin aplicar
+                          </span>
+                        }
                       </p>
+                      @if (aiuWithoutAnyComponent()) {
+                        <p
+                          class="mt-0.5 text-xs leading-relaxed text-[var(--color-text-secondary)]"
+                        >
+                          Estas cifras todavía no están escritas en las líneas.
+                        </p>
+                      }
                       <p
                         class="mt-0.5 text-xs leading-relaxed text-[var(--color-text-secondary)]"
                       >
@@ -1751,6 +2022,31 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                         componente AIU. Las lineas de costo no se tocan.
                       </p>
                     }
+                  }
+                  @if (plan.unresolvedTaxes.length > 0) {
+                    <!--
+                      Paso 8: la tarifa gravable que el catálogo no resolvió
+                      nombra tributo y tarifa en vez de viajar muda hasta el
+                      rechazo INVOICING_AIU_004. El mismo hecho bloquea en
+                      collectBlockers para que Validar lo delate.
+                    -->
+                    <app-alert-banner
+                      class="mt-3"
+                      variant="danger"
+                      icon="alert-triangle"
+                      tone="token"
+                      [heading]="
+                        plan.unresolvedTaxes.length +
+                        ' tarifa(s) gravable(s) sin resolver en tu catálogo'
+                      "
+                    >
+                      @for (
+                        item of plan.unresolvedTaxes;
+                        track item.bucket + item.taxCode + item.rateLabel
+                      ) {
+                        <p>{{ item.message }}</p>
+                      }
+                    </app-alert-banner>
                   }
                 </div>
               }
@@ -2172,15 +2468,44 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
           <div
             class="rounded-lg border border-border p-3 bg-[var(--color-surface-muted)]"
           >
-            <div class="grid grid-cols-2 md:grid-cols-6 gap-3 text-sm">
-              <div>
-                <div class="text-[var(--color-text-secondary)]">
-                  Base gravable
+            <div
+              class="grid grid-cols-2 gap-3 text-sm"
+              [ngClass]="aiuTotals() ? 'md:grid-cols-7' : 'md:grid-cols-6'"
+            >
+              <!--
+                En operación AIU (09) la «base gravable» a secas miente: el
+                contrato entero no grava, sólo la porción de
+                AIU_TAXABLE_BUCKETS_BY_BASIS. Se rotula la base real y se
+                añade el valor del contrato; fuera de 09 (aiuTotals() en
+                null) esta rama no existe y la barra queda idéntica.
+              -->
+              @if (aiuTotals(); as aiu) {
+                <div>
+                  <div class="text-[var(--color-text-secondary)]">
+                    Base gravable AIU
+                  </div>
+                  <div class="font-semibold">
+                    {{ formatCurrency(aiu.taxableBase) }}
+                  </div>
                 </div>
-                <div class="font-semibold">
-                  {{ formatCurrency(totals().base) }}
+                <div>
+                  <div class="text-[var(--color-text-secondary)]">
+                    Valor del contrato
+                  </div>
+                  <div class="font-semibold">
+                    {{ formatCurrency(aiu.contractAmount) }}
+                  </div>
                 </div>
-              </div>
+              } @else {
+                <div>
+                  <div class="text-[var(--color-text-secondary)]">
+                    Base gravable
+                  </div>
+                  <div class="font-semibold">
+                    {{ formatCurrency(totals().base) }}
+                  </div>
+                </div>
+              }
               <div>
                 <div class="text-[var(--color-text-secondary)]">Descuento</div>
                 <div class="font-semibold">
@@ -2349,15 +2674,17 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
     />
 
     <!--
-      «VER COMO SALDRÁ» ANTES DE EMITIR (E.2 — paso 6 del plan de cierre).
+      «VER COMO SALDRÁ» ANTES DE EMITIR (E.2 — paso 6 del plan de cierre,
+      paso 5 del plan AIU).
 
-      La previsualización muestra el XML que la factura produciría y las reglas
-      del Anexo Técnico evaluadas sobre él, no el formato de impresión. El
-      acoplamiento entre datos y formato vive en el editor de plantillas (FB-29
-      tiene su propio botón de previsualización con un documento de muestra);
-      acá lo que se valida es el CONTENIDO —la base gravable segregada, la nota
-      CAV03, las identidades de totales, los códigos de tributo— porque es lo
-      que decide si la DIAN acepta o rechaza.
+      Dos paneles: «Representación gráfica» monta el papel del formato fiscal
+      sobre la MUESTRA del Hub ('POST /store/print-formats/
+      fiscal_electronic_invoice/preview': papel e identidad reales, datos de
+      muestra, rotulados en el propio panel); «XML» muestra el documento que
+      la factura produciría con lo CAPTURADO y las reglas del Anexo evaluadas
+      sobre él —la base gravable segregada, la nota CAV03, las identidades de
+      totales, los códigos de tributo— porque es lo que decide si la DIAN
+      acepta o rechaza. El XML no se retira: es la evidencia.
 
       No descarga nada, no persiste nada y NO toma consecutivo
       ('PreviewNumberingGuard' lo protege). El número visible es «PREVIEW». El
@@ -2371,7 +2698,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
       (isOpenChange)="closePrintPreview($event)"
       title="Ver como saldrá"
       [subtitle]="
-        'Previsualización del XML — ' +
+        'Previsualización del documento — ' +
         (printPreviewProfileId() !== null
           ? 'perfil #' + printPreviewProfileId()
           : 'modo manual')
@@ -2466,18 +2793,93 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
         </div>
 
         <!--
-          XML crudo. Se pinta en monoespaciado y con scroll horizontal porque
-          el Anexo exige líneas largas; envolverlas deformaría la jerarquía.
+          Paso 5 del plan AIU (+ paso 6): dos paneles conmutables.
+          «Representación gráfica» monta el papel con lo CAPTURADO cuando el
+          perfil lo devolvió (include_render) y la MUESTRA del Hub como
+          respaldo, rotulada en su propio panel; «XML» conserva íntegro el
+          documento con lo capturado, que es la evidencia. Sin ningún gráfico
+          no hay pestañas y el modal es sólo-XML.
         -->
-        <pre
-          class="max-h-[420px] overflow-auto rounded-lg border border-border bg-slate-950 p-3 text-[11px] leading-tight text-slate-100"
-          role="region"
-          aria-label="XML proyectado"
-        ><code>{{ result.xml }}</code></pre>
+        @if (printPreviewGraphicHtml()) {
+          <div
+            role="tablist"
+            aria-label="Vistas de la previsualización"
+            class="mb-3 inline-flex flex-wrap gap-1.5 rounded-xl bg-gray-200/80 p-1.5"
+          >
+            <button
+              type="button"
+              role="tab"
+              [attr.aria-selected]="printPreviewTab() === 'grafica'"
+              (click)="printPreviewTab.set('grafica')"
+              class="px-5 py-2.5 text-sm font-semibold rounded-lg transition-all duration-200"
+              [class.bg-surface]="printPreviewTab() === 'grafica'"
+              [class.shadow-md]="printPreviewTab() === 'grafica'"
+              [class.text-primary-700]="printPreviewTab() === 'grafica'"
+            >Representación gráfica</button>
+            <button
+              type="button"
+              role="tab"
+              [attr.aria-selected]="printPreviewTab() === 'xml'"
+              (click)="printPreviewTab.set('xml')"
+              class="px-5 py-2.5 text-sm font-semibold rounded-lg transition-all duration-200"
+              [class.bg-surface]="printPreviewTab() === 'xml'"
+              [class.shadow-md]="printPreviewTab() === 'xml'"
+              [class.text-primary-700]="printPreviewTab() === 'xml'"
+            >XML</button>
+          </div>
+        }
 
-        <p class="mt-2 text-right text-[11px] text-[var(--color-text-secondary)]">
-          El XML viaja siempre igual a la DIAN; el formato de impresión se previsualiza en su editor.
-        </p>
+        @if (printPreviewGraphicHtml() && printPreviewTab() === 'grafica') {
+          @if (printPreviewGraphicIsCaptured()) {
+            <app-alert-banner
+              variant="info"
+              icon="info"
+              tone="token"
+              class="mb-3 block"
+            >
+              <strong>Datos capturados.</strong> Papel e identidad de tu
+              tienda reales, con lo que acabas de escribir. El XML lleva el
+              mismo documento.
+            </app-alert-banner>
+          } @else {
+            <app-alert-banner
+              variant="info"
+              icon="info"
+              tone="token"
+              class="mb-3 block"
+            >
+              <strong>Datos de muestra.</strong> Papel e identidad de tu
+              tienda reales; cliente, líneas e importes de muestra. El XML sí
+              lleva lo que acabas de capturar.
+            </app-alert-banner>
+          }
+
+          <div
+            class="mx-auto w-full overflow-hidden rounded-lg border border-border bg-surface"
+            [style.max-width]="printPreviewPaperWidth()"
+          >
+            <iframe
+              [srcdoc]="printPreviewGraphicHtml()"
+              sandbox="allow-same-origin"
+              title="Representación gráfica"
+              class="h-[70vh] w-full border-none"
+            ></iframe>
+          </div>
+        } @else {
+          <!--
+            XML crudo. Se pinta en monoespaciado y con scroll horizontal porque
+            el Anexo exige líneas largas; envolverlas deformaría la jerarquía.
+          -->
+          <pre
+            class="max-h-[420px] overflow-auto rounded-lg border border-border bg-slate-950 p-3 text-[11px] leading-tight text-slate-100"
+            role="region"
+            aria-label="XML proyectado"
+          ><code>{{ result.xml }}</code></pre>
+
+          <p class="mt-2 text-right text-[11px] text-[var(--color-text-secondary)]">
+            El XML lleva lo que capturaste y es lo que viaja a la DIAN.
+          </p>
+        }
       }
     </app-modal>
   `,
@@ -2830,8 +3232,8 @@ export class InvoiceCreatePageComponent implements OnInit {
     () => this.rawValue()['payment_form'] === PAYMENT_FORM_CREDIT,
   );
 
-  readonly isAiu = computed(
-    () => this.rawValue()['operation_type'] === OPERATION_TYPE_AIU,
+  readonly isAiu = computed(() =>
+    isAiuOperation(this.rawValue()['operation_type']),
   );
 
   /**
@@ -3805,6 +4207,28 @@ export class InvoiceCreatePageComponent implements OnInit {
     return { base, discount, taxInclusive, taxAdditional, total };
   });
 
+  /**
+   * Paso 1 del plan AIU — emisión legible, cifras honestas.
+   *
+   * Hermana de `totals()`: reagrupa la misma `lineMath` por cubeta con
+   * `deriveAiuTotals` y la tabla única `AIU_TAXABLE_BUCKETS_BY_BASIS`. Sólo
+   * emite (`null` en cualquier otro caso) cuando el documento es AIU (09) Y
+   * la base gravable vigente ya se resolvió: mientras `effectiveAiu()` es
+   * `null` la barra de totales enseña la lectura histórica, nunca una base a
+   * medias. No toca cálculo ni emisión: es la misma previsión de pantalla que
+   * `totals()`, reagrupada.
+   */
+  readonly aiuTotals = computed<AiuTotals | null>(() => {
+    if (!this.isAiu()) return null;
+    const settings = this.effectiveAiu();
+    if (!settings) return null;
+    return deriveAiuTotals(
+      this.itemsValue(),
+      this.lineMath(),
+      AIU_TAXABLE_BUCKETS_BY_BASIS[settings.taxable_basis],
+    );
+  });
+
   /** Agregado por `(impuesto, tarifa, aplicación)`, igual que `invoice_taxes`. */
   readonly taxBreakdown = computed(() => {
     const items = this.itemsValue();
@@ -4205,6 +4629,26 @@ export class InvoiceCreatePageComponent implements OnInit {
   readonly printPreviewResult = signal<ProfilePreviewResult | null>(null);
   /** `profile_id` con el que se pidió el preview (o `null` si modo manual). */
   readonly printPreviewProfileId = signal<number | null>(null);
+  /**
+   * Panel visible del modal «Ver como saldrá» (paso 5 del plan AIU).
+   *
+   * Sólo hay pestañas cuando el gráfico cargó (`printPreviewHtml()` no vacío):
+   * sin gráfico el modal es sólo-XML y esta señal no se lee.
+   */
+  readonly printPreviewTab = signal<'grafica' | 'xml'>('grafica');
+
+  /**
+   * HTML del panel gráfico: el del perfil con lo CAPTURADO cuando viajó
+   * (`include_render`, paso 6) y la muestra del Hub como respaldo (paso 5).
+   * El XML sigue siendo el autoritativo; el gráfico nunca lo reemplaza.
+   */
+  readonly printPreviewGraphicHtml = computed(
+    () => this.printPreviewResult()?.html || this.printPreviewHtml(),
+  );
+  /** `true` cuando el gráfico enseña lo capturado y no la muestra. */
+  readonly printPreviewGraphicIsCaptured = computed(
+    () => (this.printPreviewResult()?.html?.length ?? 0) > 0,
+  );
 
   /**
    * Marcador que ve el iframe mientras llega el HTML. Vive como campo y no en
@@ -4565,6 +5009,8 @@ export class InvoiceCreatePageComponent implements OnInit {
     aiuAmount: number;
     contractAmount: number;
     replaces: number;
+    /** Paso 8: reglas gravables que el catálogo no resolvió, con nombre. */
+    unresolvedTaxes: AiuUnresolvedTax[];
     parts: Array<{
       bucket: AiuComponentLiteral;
       label: string;
@@ -4665,17 +5111,27 @@ export class InvoiceCreatePageComponent implements OnInit {
     const draftRules = this.aiuDraftRules();
 
     let assigned = 0;
+    // Paso 8: la tarifa gravable que el catálogo no resuelve no se calla —
+    // viaja con nombre hasta el recuadro y hasta `blockers`.
+    const unresolvedTaxes: AiuUnresolvedTax[] = [];
     const parts = AIU_COMPONENTS.map((bucket) => {
       const percent = scaled.get(bucket) ?? 0;
       const cents = Math.floor((aiuCents * percent) / sum);
       assigned += cents;
+      const resolved = resolveAiuBucketTaxes(
+        draftRules,
+        bucket,
+        this.aiuComponentLabel(bucket),
+        this.availableTaxes(),
+      );
+      unresolvedTaxes.push(...resolved.unresolved);
       return {
         bucket,
         label: this.aiuComponentLabel(bucket),
         percentLabel: formatPercentScaled(percent),
         amount: cents / 100,
         account: accounts[bucket] ?? '',
-        taxes: this.aiuTaxesForBucket(draftRules, bucket),
+        taxes: resolved.selections,
       };
     });
 
@@ -4704,6 +5160,7 @@ export class InvoiceCreatePageComponent implements OnInit {
       aiuAmount: aiuCents / 100,
       contractAmount: (costCents + aiuCents) / 100,
       replaces,
+      unresolvedTaxes,
       parts: parts.filter((part) => part.amount > 0),
     };
   });
@@ -4720,6 +5177,7 @@ export class InvoiceCreatePageComponent implements OnInit {
     aiuAmount: number;
     contractAmount: number;
     replaces: number;
+    unresolvedTaxes: AiuUnresolvedTax[];
     parts: [];
   } {
     return {
@@ -4731,6 +5189,7 @@ export class InvoiceCreatePageComponent implements OnInit {
       aiuAmount: 0,
       contractAmount: 0,
       replaces: 0,
+      unresolvedTaxes: [],
       parts: [],
     };
   }
@@ -4742,48 +5201,12 @@ export class InvoiceCreatePageComponent implements OnInit {
     return found ? found.label : bucket;
   }
 
-  /**
-   * Las reglas GRAVABLES del bloque 4 para una cubeta, traducidas a los
-   * impuestos que la línea lleva.
-   *
-   * Se resuelven contra el catálogo real de la tienda (`availableTaxes`) y no
-   * se fabrican: `TaxSelection.tax_rate_id` es un id de `tax_rates`, y un id
-   * inventado se envía y el backend lo rechaza nombrando un impuesto que el
-   * operador nunca eligió. Si la tarifa configurada no existe en el catálogo,
-   * la línea sale sin ese impuesto y el aviso de
-   * `aiuTaxableWithoutTax` —que ya existe— lo señala.
-   *
-   * Sólo tributos de DOCUMENTO. Una regla de retención (`06`/`07`/`05`) no es
-   * un impuesto de línea: no suma al total y se captura en su propia sección.
-   */
-  private aiuTaxesForBucket(
-    rules: readonly AiuTaxRuleValue[],
-    bucket: AiuComponentLiteral,
-  ): TaxSelection[] {
-    const catalog = this.availableTaxes();
-    const selections: TaxSelection[] = [];
-    for (const rule of rules) {
-      if (rule.bucket !== bucket || !rule.taxable) continue;
-      const taxType = AIU_DOCUMENT_TAX_TYPE_BY_CODE[rule.tax_code];
-      if (!taxType) continue;
-      const rate = parsePercentScaled(rule.rate);
-      if (rate === null) continue;
-      const option = catalog.find(
-        (candidate) =>
-          (candidate.tax_type ?? '').toLowerCase() === taxType &&
-          Math.round(candidate.rate * 100) === rate,
-      );
-      if (!option) continue;
-      selections.push({
-        tax_rate_id: option.id,
-        rate: option.rate,
-        name: option.name,
-        tax_type: option.tax_type,
-        is_inclusive: option.default_is_inclusive ?? false,
-      });
-    }
-    return selections;
-  }
+  // La resolución vive en `resolveAiuBucketTaxes` (pura y probada, paso 8):
+  // devuelve las selecciones Y las reglas gravables sin resolver, para que
+  // el recuadro y `blockers` las nombren en vez de callarlas.
+  //
+  // Sólo tributos de DOCUMENTO. Una regla de retención (`06`/`07`/`05`) no es
+  // un impuesto de línea: no suma al total y se captura en su propia sección.
 
   /**
    * Escribe las líneas del AIU con lo que las cuatro configuraciones del perfil
@@ -5307,34 +5730,24 @@ export class InvoiceCreatePageComponent implements OnInit {
   });
 
   /** Lo que falta para poder emitir, en una frase. */
-  readonly submitHint = computed(() => {
-    if (this.checkingEmitReadiness()) {
-      return 'Comprobando si el documento puede emitirse…';
-    }
-    if (this.createdInvoiceId() !== null) {
-      return 'La factura ya se creó. Ciérrala y ábrela desde el listado para corregirla.';
-    }
-    if (this.mode() === 'from_order') {
-      return this.orderIdValue()
-        ? 'Se facturará el pedido elegido, con sus líneas e impuestos.'
-        : 'Busca el pedido por su número, por el cliente o por su id.';
-    }
-    if (this.itemCount() === 0) return 'Agrega al menos una línea.';
-    if (!this.activeResolution()) {
-      return 'No hay resolución activa: el servidor rechazará la factura.';
-    }
-    if (this.isCredit() && !this.rawValue()['due_date']) {
-      return 'Venta a crédito: declara la fecha de vencimiento.';
-    }
-    // Se nombra antes del genérico porque la sección de retenciones va plegada:
-    // «revisa los campos marcados» manda a buscar una marca que no está a la
-    // vista, y era la queja más fácil de evitar.
-    if (this.incompleteWithholdingRow() > 0) {
-      return `La retención #${this.incompleteWithholdingRow()} está incompleta: elige concepto, tarifa y base.`;
-    }
-    if (this.formStatus() !== 'VALID') return 'Revisa los campos marcados.';
-    return 'Todo listo para emitir.';
-  });
+  // Delegada en `resolveSubmitHint` (pura y probada): este computed sólo lee
+  // señales. Ver el docblock de la función para la rama AIU del paso 3.
+  readonly submitHint = computed(() =>
+    resolveSubmitHint({
+      checkingEmitReadiness: this.checkingEmitReadiness(),
+      createdInvoiceId: this.createdInvoiceId(),
+      mode: this.mode(),
+      orderIdValue: this.orderIdValue(),
+      itemCount: this.itemCount(),
+      hasActiveResolution: this.activeResolution() !== null,
+      isCredit: this.isCredit(),
+      hasDueDate: !!this.rawValue()['due_date'],
+      incompleteWithholdingRow: this.incompleteWithholdingRow(),
+      formStatus: this.formStatus(),
+      isAiu: this.isAiu(),
+      aiuWithoutComponent: this.aiuWithoutAnyComponent(),
+    }),
+  );
 
   /**
    * Acciones de la cabecera.
@@ -5361,8 +5774,10 @@ export class InvoiceCreatePageComponent implements OnInit {
       label: 'Ver como saldrá',
       variant: 'outline',
       icon: 'eye',
+      // Paso 5 del plan AIU: el botón abre el XML con lo capturado MÁS la
+      // representación gráfica de muestra —ya no sólo uno de los dos—.
       title:
-        'Previsualización del formato de impresión: no emite ni toma consecutivo.',
+        'Previsualización del XML con tus datos y la representación gráfica de muestra: no emite ni toma consecutivo.',
     },
     {
       id: 'validate',
@@ -7001,6 +7416,15 @@ export class InvoiceCreatePageComponent implements OnInit {
         'La operación es AIU (09) y ninguna línea es administración, imprevistos o utilidad: el documento no declararía AIU alguno. Marca las líneas del AIU o aplica la base configurada en el perfil.',
       );
     }
+    // Paso 8: la tarifa gravable que el catálogo no resolvió entra con nombre
+    // propio —tributo y tarifa— para que Validar la delate antes de gastar
+    // consecutivo. Es el mismo hecho que pinta el recuadro.
+    const aiuPlan = this.aiuApplyPlan();
+    if (aiuPlan && aiuPlan.unresolvedTaxes.length > 0) {
+      for (const item of aiuPlan.unresolvedTaxes) {
+        blockers.push(item.message);
+      }
+    }
     // Espejo exacto de lo que el backend valida en `resolveAiuContext` antes de
     // tomar consecutivo. Se repite acá para que el usuario lo lea con la factura
     // todavía en pantalla, no en un error de servidor.
@@ -8001,6 +8425,12 @@ export class InvoiceCreatePageComponent implements OnInit {
     this.printPreviewOpen.set(true);
     this.printPreviewLoading.set(true);
     this.printPreviewProfileId.set(profileId);
+    // Paso 5 del plan AIU: el gráfico arranca en la pestaña nueva y sin HTML
+    // heredado de una apertura anterior.
+    this.printPreviewTab.set('grafica');
+    this.printPreviewWidthMm.set(0);
+    this.printPreviewIsRoll.set(false);
+    this.loadPrintFormatSample();
 
     this.profileService
       .preview(profileId, payload)
@@ -8015,6 +8445,37 @@ export class InvoiceCreatePageComponent implements OnInit {
           this.printPreviewError.set(
             'No se pudo generar la previsualización. Revisa que las líneas tengan descripción, cantidad y precio.',
           );
+        },
+      });
+  }
+
+  /**
+   * Paso 5 del plan AIU: vista gráfica DE MUESTRA del formato fiscal.
+   *
+   * `POST /store/print-formats/fiscal_electronic_invoice/preview` compone el
+   * papel con la identidad real de la tienda sobre datos de muestra —el propio
+   * panel lo declara—. Corre en paralelo al preview del XML y alimenta los
+   * signals del iframe que estaban sin consumidor (`printPreviewHtml`,
+   * `printPreviewWidthMm`, `printPreviewIsRoll`).
+   *
+   * Es best-effort junto al XML, que es el autoritativo: ante 402/403 por
+   * `StoreOperationsGuard` —o cualquier otro fallo— se degrada en silencio a
+   * sólo-XML, sin tocar `printPreviewError` (que es del flujo del XML).
+   */
+  private loadPrintFormatSample(): void {
+    this.printGateway
+      .previewFormat('fiscal_electronic_invoice')
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (preview) => {
+          this.printPreviewHtml.set(preview.html ?? '');
+          this.printPreviewWidthMm.set(preview.width_mm ?? 0);
+          this.printPreviewIsRoll.set(preview.is_roll ?? false);
+        },
+        error: () => {
+          // Degradación silenciosa a sólo-XML: el modal sigue mostrando el
+          // XML con los datos capturados, que es la superficie que importa.
+          this.printPreviewHtml.set('');
         },
       });
   }
@@ -8083,6 +8544,9 @@ export class InvoiceCreatePageComponent implements OnInit {
     const customer_doc_type = (raw['customer_document_type'] as string | undefined)?.trim();
 
     return {
+      // Paso 6: el gráfico del modal se compone con lo capturado —el backend
+      // devuelve `html` además del XML— y el XML sigue intacto sin el flag.
+      include_render: true,
       ...(lines_explicit
         ? {}
         : contract_value > 0
@@ -8110,6 +8574,7 @@ export class InvoiceCreatePageComponent implements OnInit {
       this.printPreviewError.set('');
       this.printPreviewResult.set(null);
       this.printPreviewProfileId.set(null);
+      this.printPreviewTab.set('grafica');
     }
   }
 
