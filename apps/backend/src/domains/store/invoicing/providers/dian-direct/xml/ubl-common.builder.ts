@@ -662,11 +662,16 @@ export class UblCommonBuilder {
     // junto a `cbc:ID` y la DIAN notifica FAJ41 «el contenido de este elemento
     // no corresponde al nombre y código valido» cuando el nombre falta —
     // XPath `/Invoice/cac:AccountingSupplierParty/…/cac:TaxScheme/cbc:Name`.
+    // Si el emisor es no responsable de IVA (régimen '49' / O-49), se declara
+    // tributo ZZ ('No aplica') para evitar que la DIAN lo etiquete como IVA.
+    const is_responsible = issuer.tax_regime !== '49';
     const issuer_scheme = tax_scheme.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
-    issuer_scheme.ele(UBL_NAMESPACES.CBC, 'ID').txt(DIAN_TAX_CODES.IVA);
+    issuer_scheme
+      .ele(UBL_NAMESPACES.CBC, 'ID')
+      .txt(is_responsible ? DIAN_TAX_CODES.IVA : DIAN_TAX_CODES.OTHER);
     issuer_scheme
       .ele(UBL_NAMESPACES.CBC, 'Name')
-      .txt(DIAN_TAX_NAMES[DIAN_TAX_CODES.IVA]);
+      .txt(is_responsible ? DIAN_TAX_NAMES[DIAN_TAX_CODES.IVA] : 'No aplica');
 
     // Party legal entity
     const legal = party.ele(UBL_NAMESPACES.CAC, 'PartyLegalEntity');
@@ -922,11 +927,16 @@ export class UblCommonBuilder {
       );
     }
 
+    // `cac:TaxScheme` del adquirente: 01 (IVA) si es responsable, ZZ (No aplica)
+    // para consumidor final o adquirente no responsable.
+    const is_customer_responsible = customer.tax_regime === '48';
     const customer_scheme = tax_scheme.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
-    customer_scheme.ele(UBL_NAMESPACES.CBC, 'ID').txt(DIAN_TAX_CODES.IVA);
+    customer_scheme
+      .ele(UBL_NAMESPACES.CBC, 'ID')
+      .txt(is_customer_responsible ? DIAN_TAX_CODES.IVA : DIAN_TAX_CODES.OTHER);
     customer_scheme
       .ele(UBL_NAMESPACES.CBC, 'Name')
-      .txt(DIAN_TAX_NAMES[DIAN_TAX_CODES.IVA]);
+      .txt(is_customer_responsible ? DIAN_TAX_NAMES[DIAN_TAX_CODES.IVA] : 'No aplica');
 
     // Rama estructural (ver el JSDoc del método). Sólo el lado JURÍDICO se emite
     // aquí: `cac:PartyLegalEntity` ocupa la posición 12 de `PartyType` y
