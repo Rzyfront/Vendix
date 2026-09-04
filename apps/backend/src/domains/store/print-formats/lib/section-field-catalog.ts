@@ -23,8 +23,11 @@ export interface SectionFieldCatalogEntry {
   position?: 'left' | 'center' | 'right' | 'full';
 }
 
+// Sin `f_logo`: el logo vive en `definition.logo` (panel de logo), no en
+// secciones. Ofrecerlo como fila de texto pintaba la URL cruda junto a la
+// imagen real. El compositor sí respeta el `f_logo` ya guardado en
+// plantillas viejas como on/off de la imagen.
 const HEADER_FIELDS: SectionFieldCatalogEntry[] = [
-  { id: 'f_logo', key: 'store.logo_url', label: 'Logo', format: 'text', position: 'center' },
   { id: 'f_name', key: 'store.name', label: 'Nombre Comercial', format: 'text', position: 'center' },
   { id: 'f_legal', key: 'store.legal_name', label: 'Razón Social', format: 'text', position: 'center' },
   { id: 'f_nit', key: 'store.tax_id', label: 'NIT / RUT', format: 'text', position: 'center' },

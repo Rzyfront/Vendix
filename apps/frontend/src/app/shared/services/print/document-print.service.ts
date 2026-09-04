@@ -387,6 +387,13 @@ export class DocumentPrintService {
       );
     }
 
+    // Tienda FE-capaz sin factura emitida: el gate devuelve el ticket como
+    // salida honesta (`fe_pending_emission`). Rotularlo evita que el cliente
+    // lo confunda con la factura electrónica que viene después.
+    if (resolved.reason === 'fe_pending_emission') {
+      response.html = this.withPendingFeNotice(response.html);
+    }
+
     const requestedFormat = resolved.format_type as unknown as PrintFormat;
     await this.sendToPrinter(response.html);
     return {
@@ -402,6 +409,22 @@ export class DocumentPrintService {
    */
   async printGatewayHtml(documentHtml: string): Promise<void> {
     await this.sendToPrinter(documentHtml);
+  }
+
+  /**
+   * Inserta un rótulo de copia no fiscal al inicio del `<body>`. Estilos
+   * inline a propósito: este HTML viaja a un iframe de impresión sin las
+   * hojas del Hub, así que ninguna clase externa aplicaría.
+   */
+  private withPendingFeNotice(documentHtml: string): string {
+    const notice =
+      '<div style="border:1.5px dashed #000;text-align:center;font-family:Arial,sans-serif;' +
+      'font-size:11px;font-weight:bold;padding:6px;margin:0 0 8px;">' +
+      'COPIA INFORMATIVA — NO ES FACTURA ELECTRÓNICA</div>';
+    if (/<body[^>]*>/i.test(documentHtml)) {
+      return documentHtml.replace(/<body[^>]*>/i, (m) => `${m}${notice}`);
+    }
+    return `${notice}${documentHtml}`;
   }
 
   /**
