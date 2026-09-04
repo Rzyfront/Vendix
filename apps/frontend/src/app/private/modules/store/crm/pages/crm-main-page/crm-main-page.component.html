@@ -1,19 +1,35 @@
 <div class="w-full min-h-screen">
-  <app-sticky-header
-    title="CRM / Landing Inteligente"
-    subtitle="Tu landing page inteligente: se genera con la información de tu tienda y captura leads automáticamente"
-    icon="sparkles"
-    variant="glass"
-    [badgeText]="landing()?.enabled ? 'CRM Activado' : 'Inactivo'"
-    [badgeColor]="landing()?.enabled ? 'green' : 'gray'"
-    [tabs]="headerTabs()"
-    [activeTab]="tab()"
-    [actions]="headerActions()"
-    (tabChanged)="setTab($any($event))"
-    (actionClicked)="onHeaderAction($event)"
-  />
+  <!-- Pestañas de navegación superiores estilo 1.jpeg -->
+  <div class="border-b border-border bg-surface/80 backdrop-blur-xs px-4 md:px-8 pt-2">
+    <nav class="flex space-x-8 -mb-px" aria-label="Tabs">
+      <button
+        type="button"
+        (click)="setTab('estado')"
+        class="inline-flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-all cursor-pointer select-none"
+        [class]="tab() === 'estado' 
+          ? 'border-slate-900 dark:border-white text-text-primary font-bold' 
+          : 'border-transparent text-text-secondary hover:text-text-primary hover:border-border'"
+      >
+        <app-icon name="activity" [size]="16" />
+        <span>Estado y Configuración</span>
+      </button>
 
-  <div class="p-4 md:p-6 max-w-7xl mx-auto flex flex-col gap-6">
+      <button
+        type="button"
+        (click)="setTab('diseno')"
+        [disabled]="!landing()?.enabled"
+        class="inline-flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-all cursor-pointer select-none"
+        [class]="tab() === 'diseno' 
+          ? 'border-slate-900 dark:border-white text-text-primary font-bold' 
+          : 'border-transparent text-text-secondary hover:text-text-primary hover:border-border disabled:opacity-40 disabled:cursor-not-allowed'"
+      >
+        <app-icon name="palette" [size]="16" />
+        <span>Editor y Diseño</span>
+      </button>
+    </nav>
+  </div>
+
+  <div class="p-4 md:p-6 max-w-[1600px] mx-auto flex flex-col gap-6">
     @if (loading()) {
       <div class="flex items-center justify-center gap-3 py-16 text-text-secondary">
         <app-icon name="loader" [size]="24" class="animate-spin text-primary" />
@@ -179,7 +195,12 @@
 
             <app-crm-editor
               [document]="serverDocument()"
+              [isBusy]="busy()"
+              [hasPendingChanges]="!!pendingDocument()"
               (documentChange)="onDocumentChange($event)"
+              (saveDraft)="saveDraft()"
+              (publish)="publish()"
+              (discard)="discardChanges()"
             />
           </div>
         }

@@ -2,6 +2,7 @@ import {
   Component,
   computed,
   effect,
+  HostListener,
   inject,
   input,
   output,
@@ -45,7 +46,7 @@ export const COLOR_PRESETS: ColorPreset[] = [
 ];
 
 const BLOCK_ICONS: Record<CrmBlockType, string> = {
-  hero: 'sparkles',
+  hero: 'image',
   features: 'shield-check',
   products_grid: 'shopping-bag',
   store_gallery: 'image',
@@ -75,7 +76,13 @@ export class CrmEditorComponent {
 
   /** Documento vigente (draft del backend). Se copia al entrar para edición local. */
   readonly document = input.required<CrmLandingDocument | null>();
+  readonly isBusy = input<boolean>(false);
+  readonly hasPendingChanges = input<boolean>(false);
+
   readonly documentChange = output<CrmLandingDocument>();
+  readonly saveDraft = output<void>();
+  readonly publish = output<void>();
+  readonly discard = output<void>();
 
   readonly blocks = signal<CrmBlock[]>([]);
   readonly theme = signal<CrmLandingTheme>({
@@ -86,7 +93,10 @@ export class CrmEditorComponent {
   });
 
   readonly selectedIndex = signal<number | null>(null);
+  readonly reorderingIndex = signal<number | null>(null);
+  readonly activeSubModal = signal<'none' | 'theme' | 'ai'>('none');
   readonly catalogModalOpen = signal(false);
+  readonly laptopModalOpen = signal(false);
   readonly catalogCategory = signal<string>('all');
 
   readonly selectedBlock = computed<CrmBlock | null>(() => {
@@ -201,12 +211,66 @@ export class CrmEditorComponent {
     return CRM_BLOCK_LABELS[type] || type;
   }
 
+  subtitleFor(type: CrmBlockType): string {
+    const map: Record<CrmBlockType, string> = {
+      hero: 'Hero',
+      features: 'features, beneficios y valores',
+      products_grid: 'products.gnd',
+      store_gallery: 'store_gallery',
+      testimonials: 'testimonios',
+      faq: 'faq, preguntas frecuentes',
+      location_hours: 'ubicación y horarios',
+      promo_banner: 'banner promocional',
+      about: 'sobre nosotros',
+      contact: 'formulario de contacto',
+      footer_cta: 'llamado a la acción',
+    };
+    return map[type] || type;
+  }
+
+  toggleReorder(index: number): void {
+    this.reorderingIndex.update((current) => (current === index ? null : index));
+  }
+
+  openThemeModal(): void {
+    this.activeSubModal.set('theme');
+  }
+
+  openAiModal(): void {
+    this.activeSubModal.set('ai');
+  }
+
+  closeSubModal(): void {
+    this.activeSubModal.set('none');
+  }
+
   iconFor(type: CrmBlockType): string {
     return BLOCK_ICONS[type] ?? 'box';
   }
 
   setPreviewMode(mode: 'desktop' | 'mobile'): void {
-    this.previewMode.set(mode);
+    if (mode === 'desktop') {
+      this.openLaptopModal();
+    } else {
+      this.previewMode.set('mobile');
+    }
+  }
+
+  openLaptopModal(): void {
+    this.laptopModalOpen.set(true);
+    this.previewMode.set('desktop');
+  }
+
+  closeLaptopModal(): void {
+    this.laptopModalOpen.set(false);
+    this.previewMode.set('mobile');
+  }
+
+  @HostListener('window:keydown.escape')
+  onEscapePress(): void {
+    if (this.laptopModalOpen()) {
+      this.closeLaptopModal();
+    }
   }
 
   setActiveTab(tab: 'sections' | 'theme' | 'ai'): void {

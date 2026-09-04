@@ -169,6 +169,12 @@ export class CrmMainPageComponent {
     this.tab.set(tab);
   }
 
+  discardChanges(): void {
+    this.pendingDocument.set(null);
+    this.loadLanding();
+    this.toast.info('Borrador descartado');
+  }
+
   onHeaderAction(actionId: string): void {
     switch (actionId) {
       case 'activate':
@@ -181,7 +187,7 @@ export class CrmMainPageComponent {
         this.setTab('diseno');
         break;
       case 'discard':
-        this.loadLanding();
+        this.discardChanges();
         break;
       case 'save_draft':
         this.saveDraft();
