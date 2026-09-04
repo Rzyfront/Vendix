@@ -704,6 +704,12 @@ private authFacade = inject(AuthFacade);
    */
   private autoPrintedOrderId: string | null = null;
 
+  /**
+   * La FE ya auto-impresa para la orden (tras `issued`). Guard por orden:
+   * el sondeo fiscal re-emite estados y cada `issued` no debe reimprimir.
+   */
+  private autoPrintedFeOrderId: string | null = null;
+
   /** Electronic invoice issued for this sale, once one exists. */
   readonly electronicInvoice = signal<{
     number: string;
@@ -725,6 +731,7 @@ private authFacade = inject(AuthFacade);
       this.fiscalStatus.set(null);
       this.awaitingManualEmit = false;
       this.creatingInvoice.set(false);
+      this.autoPrintedFeOrderId = null;
     }
     // Mirrors still useful for the print path (see `printReceipt`).
     this.orderTotal = Number(data?.grand_total ?? data?.total_amount ?? data?.total ?? 0);
@@ -1012,6 +1019,19 @@ private authFacade = inject(AuthFacade);
             ? `Factura ${status.invoice_number} aceptada por la DIAN`
             : 'Factura aceptada por la DIAN',
         );
+        // Con auto-print activo y ticket ya auto-impreso, la FE sale sola:
+        // el gate ahora resuelve a la factura emitida. Guard por orden para
+        // no reimprimir en cada re-sondeo. Imprimir nunca emite (la emisión
+        // ya ocurrió arriba, a mano), así que no se consume consecutivo extra.
+        if (
+          this.orderId &&
+          this.autoPrintedOrderId === this.orderId &&
+          this.autoPrintedFeOrderId !== this.orderId &&
+          this.ticketService.shouldAutoPrint()
+        ) {
+          this.autoPrintedFeOrderId = this.orderId;
+          this.printReceipt();
+        }
         break;
       case 'contingency':
         this.toastService.warning(status.message);

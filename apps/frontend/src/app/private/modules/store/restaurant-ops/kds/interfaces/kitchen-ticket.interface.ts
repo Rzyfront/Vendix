@@ -102,6 +102,13 @@ export interface KitchenTicket {
   /** QUI-651 — estacion que prepara este ticket. NOT NULL en la DB. */
   kds_id?: number;
   order?: { order_number: string } | null;
+  /**
+   * QUI-756 — rótulo humano de la mesa, anidado por `KITCHEN_TICKET_INCLUDE`
+   * en el backend. `table_id` (el FK crudo) sigue presente para queries
+   * internas, pero el card renderiza `table?.name` y cae a `#table_id`
+   * como fallback defensivo si el include no viaja (snapshot legacy).
+   */
+  table?: { id: number; name: string } | null;
   table_id?: number | null;
   status: KitchenTicketStatus;
   fired_at: string | Date;

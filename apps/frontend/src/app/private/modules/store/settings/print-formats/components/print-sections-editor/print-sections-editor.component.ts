@@ -4,6 +4,11 @@ import { FormsModule } from '@angular/forms';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { PrintFormatsFacade } from '../../services/print-formats.facade';
 import {
+  catalogFieldsForSectionType,
+  defaultFieldsForSectionType,
+  mergeSectionFields,
+} from '../../services/section-field-catalog';
+import {
   PrintSectionDefinition,
   PrintFieldDefinition,
   PrintFormatDefinition,
@@ -208,6 +213,46 @@ import {
                     </div>
                   </div>
                 }
+                @if (defaultFields(section).length > 0) {
+                  <div class="space-y-2 pt-2 border-t border-border/60">
+                    <span class="text-[10px] font-bold text-text-tertiary uppercase tracking-wider block">
+                      Incluidos por defecto en este documento:
+                    </span>
+                    <div class="space-y-1.5">
+                      @for (d of defaultFields(section); track d.id) {
+                        <label class="flex items-center gap-2 cursor-pointer p-2 rounded-lg border border-border bg-surface-secondary/40">
+                          <input
+                            type="checkbox"
+                            checked
+                            (change)="disableDefault(section.id, d.id)"
+                            class="rounded border-border text-primary-600 focus:ring-primary-500 w-3.5 h-3.5 cursor-pointer"
+                          />
+                          <span class="text-xs font-semibold text-text-primary flex-1">{{ d.label }}</span>
+                          <span class="text-[10px] font-medium text-text-tertiary bg-surface px-1.5 py-0.5 rounded border border-border">Por defecto</span>
+                        </label>
+                      }
+                    </div>
+                  </div>
+                }
+                @if (availableFields(section).length > 0) {
+                  <div class="space-y-2 pt-2">
+                    <span class="text-[10px] font-bold text-text-tertiary uppercase tracking-wider block">
+                      Agregar dato disponible:
+                    </span>
+                    <div class="flex flex-wrap gap-1.5">
+                      @for (opt of availableFields(section); track opt.id) {
+                        <button
+                          type="button"
+                          (click)="addField(section.id, opt.id)"
+                          class="px-2 py-1 text-[11px] font-medium rounded-full border border-dashed border-border text-text-secondary hover:text-primary-500 hover:border-primary-500 transition cursor-pointer"
+                          [title]="opt.key"
+                        >
+                          + {{ opt.label }}
+                        </button>
+                      }
+                    </div>
+                  </div>
+                }
               </div>
             }
           </div>
@@ -358,6 +403,65 @@ export class PrintSectionsEditorComponent {
       def.sections[currentIndex] = def.sections[newIndex];
       def.sections[newIndex] = temp;
       def.sections.forEach((s, idx) => (s.order = idx + 1));
+      return def;
+    });
+  }
+
+  availableFields(section: PrintSectionDefinition): Array<{ id: string; key: string; label: string }> {
+    return mergeSectionFields(section.fields as any, section.type);
+  }
+
+  /** Fijos que el documento ya trae aunque la plantilla no guarde `fields`. */
+  defaultFields(section: PrintSectionDefinition): Array<{ id: string; key: string; label: string }> {
+    const storedIds = new Set((section.fields ?? []).map((f) => f.id));
+    return defaultFieldsForSectionType(section.type).filter((d) => !storedIds.has(d.id));
+  }
+
+  /** Apagar un "Por defecto" lo persiste con `enabled:false` (no duplica). */
+  disableDefault(sectionId: string, catalogId: string): void {
+    const draft = this.facade.draftDefinition();
+    const sec = draft?.sections.find((s) => s.id === sectionId);
+    if (!sec) return;
+    const opt =
+      defaultFieldsForSectionType(sec.type).find((c) => c.id === catalogId) ??
+      catalogFieldsForSectionType(sec.type).find((c) => c.id === catalogId);
+    if (!opt) return;
+    this.facade.updateDraftDefinition((def) => {
+      const s = def.sections.find((item) => item.id === sectionId);
+      if (!s) return def;
+      s.fields = s.fields ?? [];
+      if (s.fields.some((f) => f.id === opt.id)) return def;
+      s.fields.push({
+        id: opt.id,
+        key: opt.key,
+        label: opt.label,
+        enabled: false,
+        position: (opt.position ?? 'left') as any,
+        format: (opt.format ?? 'text') as any,
+      } as any);
+      return def;
+    });
+  }
+
+  addField(sectionId: string, catalogId: string): void {
+    const draft = this.facade.draftDefinition();
+    const sec = draft?.sections.find((s) => s.id === sectionId);
+    if (!sec) return;
+    const opt = catalogFieldsForSectionType(sec.type).find((c) => c.id === catalogId);
+    if (!opt) return;
+    this.facade.updateDraftDefinition((def) => {
+      const s = def.sections.find((item) => item.id === sectionId);
+      if (!s) return def;
+      s.fields = s.fields ?? [];
+      if (s.fields.some((f) => f.id === opt.id)) return def;
+      s.fields.push({
+        id: opt.id,
+        key: opt.key,
+        label: opt.label,
+        enabled: true,
+        position: (opt.position ?? 'left') as any,
+        format: (opt.format ?? 'text') as any,
+      } as any);
       return def;
     });
   }

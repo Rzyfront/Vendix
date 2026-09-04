@@ -1,4 +1,5 @@
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
+import { mapUserAddress } from '../lib/customer-address';
 import { RESOLUTION_PUBLIC_SELECT } from '../../invoicing/utils/technical-key.util';
 import { amountToSpanishWords } from '@common/utils/amount-in-words.util';
 import { resolveFiscalIssuerForPrint } from '../services/fiscal-issuer-identity';
@@ -133,6 +134,18 @@ export const FISCAL_DOCUMENT_PRINT_INCLUDE = {
       document_number: true,
       phone: true,
       email: true,
+      // CP-print-token-flow A.2 — dirección del adquirente. Solo las
+      // columnas que `mapUserAddress` lee (patrón del comentario de arriba).
+      addresses: {
+        take: 1,
+        select: {
+          address_line1: true,
+          address_line2: true,
+          city: true,
+          state_province: true,
+          country: true,
+        },
+      },
     },
   },
 } as const;
@@ -326,6 +339,10 @@ export function mapFiscalDocumentToPrintData(
       tax_id: cust.document_number || '222222222222',
       phone: cust.phone,
       email: cust.email,
+      // CP-print-token-flow A.2 — dirección del adquirente desde
+      // `users.addresses[0]` (los providers la incluyen). Sin direcciones
+      // queda ausente: el compositor no emite fila (invariante 1).
+      ...mapUserAddress(cust.addresses?.[0]),
     },
     document: {
       id: invoice.id,

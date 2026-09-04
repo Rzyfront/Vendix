@@ -725,6 +725,14 @@ export class PosCheckoutShellComponent {
   readonly cobroNeedsAdvance = computed<boolean>(
     () =>
       this.currentStepKey() === 'cobro' &&
+      // Modo crédito: el sub-wizard del collector colapsa a ['Forma de pago',
+      // 'Plan de crédito'] (sin 'Monto'). El monto se deriva del plan; no hay
+      // sub-paso que confirmar con "Aceptar". Si dejamos que `cobroNeedsAdvance`
+      // se quede en `true` aquí, el footer renderiza "Siguiente" en lugar del CTA
+      // terminal "Crear Venta a Crédito" y el clic se consume sin disparar
+      // HTTP — bug QUI-779. Cortar el modo crédito mantiene el flujo contado
+      // (Forma → Método → Monto) intacto.
+      this.paymentStep()?.mode() !== 'credito' &&
       (this.paymentStep()?.hasPendingSubSteps() ?? false),
   );
 
@@ -1035,7 +1043,19 @@ export class PosCheckoutShellComponent {
     // confirma el monto en el último sub-paso, cuyo amountConfirmed finaliza
     // (Cobro último) o avanza el paso mayor.
     if (key === 'cobro') {
-      if (this.paymentStep()?.advanceSubStepOrConfirm()) return;
+      const pay = this.paymentStep();
+      if (pay?.advanceSubStepOrConfirm()) return;
+      // Modo crédito: no hay sub-wizard que avanzar; el último paso mayor es
+      // Cobro. Si attemptNextStep llega aquí con crédito (atajo de teclado,
+      // navegación programática, o un cambio tardío de cobroNeedsAdvance),
+      // disparar el submit en lugar del no-op `nextStep()` — mismo camino que
+      // el CTA "Crear Venta a Crédito" del footer. Defensa en profundidad
+      // para QUI-779 (el footer ya queda correcto con el cambio en
+      // `cobroNeedsAdvance`).
+      if (pay?.mode() === 'credito') {
+        this.onPrimaryConfirm();
+        return;
+      }
       this.nextStep();
       return;
     }

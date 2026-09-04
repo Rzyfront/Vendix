@@ -21,7 +21,7 @@
     <div class="kds-card__meta">
       @if (ticket().table_id) {
         <span class="kds-card__table" title="Mesa">
-          <app-icon name="square" [size]="12" /> Mesa {{ ticket().table_id }}
+          <app-icon name="square" [size]="12" /> {{ tableLabel() }}
         </span>
       }
       <span class="kds-card__order" title="Orden">

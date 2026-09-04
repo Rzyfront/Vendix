@@ -18,6 +18,7 @@ import {
   PrintPreviewMode,
 } from '../../../../../../../core/models/print-formats.model';
 import { definitionToRegions } from '../print-canvas/canvas-region';
+import { DocumentPrintService } from '../../../../../../../shared/services/print/document-print.service';
 
 export type WorkbenchTab = 'sections' | 'columns' | 'tokens';
 
@@ -585,28 +586,38 @@ export type WorkbenchTab = 'sections' | 'columns' | 'tokens';
         border-radius: 2px;
         overflow: hidden;
         position: relative;
-        min-height: 280px;
       }
       .vendix-physical-sheet.is-roll {
         border-top: 3px solid #cbd5e1;
         border-bottom: 3px dashed #94a3b8;
+        /* CP-print-token-flow B.1 — el rollo mide lo que el contenido mida:
+           el min-height fijo estiraba tickets cortos y el preview no
+           equivalía al papel. Solo la hoja conserva alto mínimo. */
+        min-height: 0;
       }
       .vendix-physical-sheet.is-sheet {
         border: 1px solid #cbd5e1;
+        min-height: 280px;
       }
       .vendix-preview-iframe {
         width: 100%;
-        min-height: 560px;
         height: 100%;
         border: none;
         display: block;
         background: #ffffff;
+      }
+      .vendix-physical-sheet.is-sheet .vendix-preview-iframe {
+        min-height: 560px;
+      }
+      .vendix-physical-sheet.is-roll .vendix-preview-iframe {
+        min-height: 120px;
       }
     `,
   ],
 })
 export class PrintFormatEditorComponent {
   readonly facade = inject(PrintFormatsFacade);
+  private readonly printService = inject(DocumentPrintService);
 
   readonly activeTab = signal<WorkbenchTab>('sections');
   readonly isLibraryOpen = signal<boolean>(false);
@@ -792,11 +803,16 @@ export class PrintFormatEditorComponent {
     void this.facade.refreshPreview();
   }
 
-  printTest(): void {
-    const iframe = document.getElementById('vendix-preview-iframe') as HTMLIFrameElement;
-    if (iframe && iframe.contentWindow) {
-      iframe.contentWindow.focus();
-      iframe.contentWindow.print();
+  /**
+   * Abre el diálogo de impresión del navegador con el HTML del preview.
+   * Va por `DocumentPrintService` (iframe oculto propio + espera de
+   * imágenes): el `print()` directo sobre el iframe sandboxed del preview
+   * está bloqueado por el sandbox y no abría nada.
+   */
+  async printTest(): Promise<void> {
+    const html = this.facade.previewHtml();
+    if (html) {
+      await this.printService.printGatewayHtml(html);
     }
   }
 }
