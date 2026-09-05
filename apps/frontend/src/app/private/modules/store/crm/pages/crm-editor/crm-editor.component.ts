@@ -23,7 +23,6 @@ import {
 } from '../../../../../../public/dynamic-landing/blocks/landing-blocks.types';
 import { BlockRendererComponent } from '../../../../../../public/dynamic-landing/blocks/block-renderer/block-renderer.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { ToastService } from '../../../../../../shared/components';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
@@ -62,7 +61,7 @@ const BLOCK_ICONS: Record<CrmBlockType, string> = {
 @Component({
   selector: 'app-crm-editor',
   standalone: true,
-  imports: [CommonModule, IconComponent, ButtonComponent, BlockRendererComponent],
+  imports: [CommonModule, IconComponent, BlockRendererComponent],
   templateUrl: './crm-editor.component.html',
   styleUrl: './crm-editor.component.scss',
 })
