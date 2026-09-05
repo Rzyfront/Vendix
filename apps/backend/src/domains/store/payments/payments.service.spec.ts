@@ -90,6 +90,11 @@ describe('PaymentsService', () => {
       stores: {
         findUnique: jest.fn(),
       },
+      // QUI-783 round 2 — fallback path of calculatePosCouponDiscount looks up
+      // the coupon code by id when the POS only sends `coupon_id`.
+      coupons: {
+        findFirst: jest.fn(),
+      },
       // `processPosPayment` corre todo el cobro dentro de una transacción; el
       // mock ejecuta el callback en línea para poder observar lo que ocurre
       // adentro sin una base de datos.
@@ -824,13 +829,104 @@ describe('PaymentsService', () => {
       expect(res.discount_amount).toBe(9);
     });
 
-    it('returns 0 when coupon validation throws (silent failure preserves sale)', async () => {
+    it('rethrows the coupon validation error (no silent swallow — QUI-783)', async () => {
+      // QUI-783 — silently swallowing the coupon validation error made the
+      // backend charge the full subtotal even though the UI showed a
+      // discounted total, overcharging the customer. The cashier now gets
+      // the precise CPN_* error so they can fix or remove the coupon.
       (couponsService.validate as jest.Mock).mockRejectedValue(
         new BadRequestException('Coupon expired'),
       );
 
+      await expect(
+        (service as any).calculatePosCouponDiscount(
+          { ...baseDto, coupon_code: 'EXPIRED' },
+          100,
+          0,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rethrows a CPN_* VendixHttpException with its error_code intact', async () => {
+      // The cashier-facing message must round-trip the original error_code so
+      // the frontend's `parseApiError` can pick the right user-friendly copy
+      // from `ERROR_MESSAGES`.
+      (couponsService.validate as jest.Mock).mockRejectedValue(
+        new VendixHttpException(ErrorCodes.CPN_EXPIRED_001),
+      );
+
+      let caught: any;
+      try {
+        await (service as any).calculatePosCouponDiscount(
+          { ...baseDto, coupon_code: 'OFF10' },
+          100,
+          0,
+        );
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(VendixHttpException);
+      expect(caught.errorCode).toBe('CPN_EXPIRED_001');
+    });
+
+    it('wraps unexpected non-CPN errors as BadRequest (does not silently swallow)', async () => {
+      // Non-domain errors (e.g., DB outage, programmer mistake) must still
+      // fail loud rather than silently returning discount_amount=0.
+      (couponsService.validate as jest.Mock).mockRejectedValue(
+        new Error('connection reset'),
+      );
+
+      await expect(
+        (service as any).calculatePosCouponDiscount(
+          { ...baseDto, coupon_code: 'OFF10' },
+          100,
+          0,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('falls back to coupon_id lookup when coupon_code is missing (QUI-783 round 2)', async () => {
+      // The POS frontend sends `coupon_id` but the cart state never
+      // populates `coupon_code`. Without this fallback the server
+      // returned discount_amount=0 and the cash validation rejected the
+      // cashier's amountReceived even though the UI showed the discount.
+      (prisma.coupons.findFirst as jest.Mock).mockResolvedValue({
+        code: 'OFF10',
+      });
+      (couponsService.validate as jest.Mock).mockResolvedValue({
+        valid: true,
+        coupon_id: 42,
+        code: 'OFF10',
+        discount_type: 'PERCENTAGE',
+        discount_value: 10,
+        discount_amount: 10,
+      });
+
       const res = await (service as any).calculatePosCouponDiscount(
-        { ...baseDto, coupon_code: 'EXPIRED' },
+        { ...baseDto, coupon_id: 42 }, // NO coupon_code
+        100,
+        0,
+      );
+
+      expect(prisma.coupons.findFirst).toHaveBeenCalledWith({
+        where: { id: 42, is_active: true },
+        select: { code: true },
+      });
+      expect(couponsService.validate).toHaveBeenCalledWith(
+        expect.objectContaining({ code: 'OFF10' }),
+      );
+      expect(res.discount_amount).toBe(10);
+    });
+
+    it('returns 0 when only an inactive coupon_id is provided', async () => {
+      // The id resolves to nothing (deleted / inactive) → fall through to
+      // the no-coupon path, NOT throw. The cashier's UI showed a discount
+      // for a coupon that no longer exists; the safe behavior is to charge
+      // full price rather than error out.
+      (prisma.coupons.findFirst as jest.Mock).mockResolvedValue(null);
+
+      const res = await (service as any).calculatePosCouponDiscount(
+        { ...baseDto, coupon_id: 9999 },
         100,
         0,
       );
@@ -840,6 +936,7 @@ describe('PaymentsService', () => {
         coupon_code: null,
         discount_amount: 0,
       });
+      expect(couponsService.validate).not.toHaveBeenCalled();
     });
   });
 
@@ -1181,6 +1278,122 @@ describe('PaymentsService', () => {
         }),
       );
       expect(result.closedSessionId).toBeNull();
+    });
+  });
+
+  // QUI-783 — the `orders` table has `grand_total` but NO `total_amount`
+  // column, so `result.order.total_amount` is always undefined. Both
+  // post-commit `grand_total` reads must use the persisted
+  // `result.order.grand_total`, never the frontend's `dto.total_amount`
+  // estimate (which still carries the pre-coupon subtotal).
+  //
+  // `$transaction` is stubbed to resolve the canned post-commit result
+  // directly: the in-transaction sale is not what these cases assert, and
+  // running it would need hundreds of lines of unrelated mocks.
+  describe('processPosPayment post-commit grand_total (QUI-783)', () => {
+    const CONTEXT_STORE_ID = 1;
+    let contextSpy: jest.SpyInstance;
+
+    const posUser: any = {
+      id: 1,
+      email: 'cajero@example.com',
+      organization_id: 1,
+      roles: ['super_admin'],
+    };
+
+    // Persisted order shape, as Prisma returns it: HAS `grand_total`,
+    // NEVER `total_amount`. `total_amount` only exists on the DTO.
+    const PERSISTED_GRAND_TOTAL = 90;
+    const DTO_TOTAL_ESTIMATE = 100;
+
+    const arrange = () => {
+      contextSpy = jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({
+          store_id: CONTEXT_STORE_ID,
+          organization_id: 1,
+        } as any);
+    };
+
+    afterEach(() => {
+      contextSpy?.mockRestore();
+      jest.restoreAllMocks();
+    });
+
+    it('digital-payment site forwards the persisted grand_total, not the DTO estimate', async () => {
+      arrange();
+      (prisma as any).$transaction = jest.fn(async () => ({
+        success: true,
+        order: {
+          id: 55,
+          order_number: 'ORD Test 001',
+          grand_total: PERSISTED_GRAND_TOTAL,
+          currency: 'COP',
+        },
+        _digitalPaymentPending: true,
+      }));
+
+      const processTx = jest
+        .spyOn(service as any, 'processPosPaymentTransaction')
+        .mockResolvedValue({
+          id: 7,
+          amount: PERSISTED_GRAND_TOTAL,
+          store_payment_method: { display_name: 'Wompi' },
+          state: 'pending',
+          transaction_id: 'txn_123',
+          nextAction: { type: 'redirect', url: 'https://pay.test' },
+        });
+
+      const result = await service.processPosPayment(
+        {
+          store_id: CONTEXT_STORE_ID,
+          currency: 'COP',
+          customer_id: 77,
+          items: [],
+          payments: [],
+          total_amount: DTO_TOTAL_ESTIMATE,
+          requires_payment: true,
+        } as any,
+        posUser,
+      );
+
+      expect(processTx).toHaveBeenCalledTimes(1);
+      const orderArg = processTx.mock.calls[0][1] as any;
+      expect(orderArg.grand_total).toBe(PERSISTED_GRAND_TOTAL);
+      expect(orderArg.grand_total).not.toBe(DTO_TOTAL_ESTIMATE);
+      expect(result.payment).toMatchObject({ id: 7 });
+    });
+
+    it('draft audit site snapshots the persisted grand_total, not total_amount', async () => {
+      arrange();
+      (prisma as any).$transaction = jest.fn(async () => ({
+        success: true,
+        order: {
+          id: 56,
+          order_number: 'ORD Test 002',
+          grand_total: PERSISTED_GRAND_TOTAL,
+          currency: 'COP',
+        },
+      }));
+
+      const result = await service.processPosPayment(
+        {
+          store_id: CONTEXT_STORE_ID,
+          currency: 'COP',
+          items: [],
+          payments: [],
+          total_amount: DTO_TOTAL_ESTIMATE,
+          is_draft: true,
+        } as any,
+        posUser,
+      );
+
+      expect((result as any)._isDraft).toBe(true);
+      const audit = (service as any).auditService.logCustom as jest.Mock;
+      expect(audit).toHaveBeenCalledTimes(1);
+      const details = audit.mock.calls[0][3];
+      expect(details.grand_total).toBe(PERSISTED_GRAND_TOTAL);
+      expect(details.grand_total).not.toBe(DTO_TOTAL_ESTIMATE);
     });
   });
 });
