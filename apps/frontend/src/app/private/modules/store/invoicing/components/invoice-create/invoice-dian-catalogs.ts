@@ -1,5 +1,6 @@
 import { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
 import { DIAN_DOCUMENT_TYPE_SCHEME_IDS } from '../../../../../../shared/constants/dian-document-types.constants';
+import type { AccountingModel } from '../../../../../../core/utils/invoice-profile-config.contract';
 
 /**
  * CATÁLOGOS DIAN DE LA SUPERFICIE AVANZADA DE FACTURACIÓN.
@@ -166,6 +167,49 @@ export const AIU_COMPONENT_OPTIONS: SelectorOption[] = [
   { value: 'imprevistos', label: 'Imprevistos' },
   { value: 'utilidad', label: 'Utilidad' },
 ];
+
+/**
+ * El componente del MODELO 1 («base AIU NO sumada al total»).
+ *
+ * No es una cuarta porción: es la declaración de que ESTA línea vale el
+ * contrato y lleva el AIU DENTRO. Por eso su etiqueta nombra el contrato y no
+ * una porción — quien la elige no está clasificando un renglón de cobro, está
+ * diciendo que no hay renglones de cobro que clasificar.
+ *
+ * Vive aparte de {@link AIU_COMPONENT_OPTIONS} y no dentro: esa constante la
+ * consumen además el desglose por porción y el mapa de etiquetas de la pantalla
+ * de emisión —que cuentan TRES cubetas— y el modal de línea a medida. Meterlo
+ * en la lista base habría pintado una cuarta tarjeta «Contrato» en el desglose
+ * y habría ofrecido el Modelo 1 bajo `'sumada'`, que es el documento híbrido
+ * que el backend rechaza.
+ */
+export const AIU_COMPONENT_CONTRATO_OPTION: SelectorOption = {
+  value: 'contrato',
+  label: 'Contrato (AIU incluido)',
+  description:
+    'El AIU va DENTRO del valor de esta línea: no suma al total del documento',
+};
+
+/**
+ * Los componentes que se pueden elegir en una línea, según el modelo de
+ * contabilización que declara el documento.
+ *
+ * `'no_sumada'` (Modelo 1) suma «Contrato (AIU incluido)»; `'sumada'`
+ * (Modelo 2) devuelve la MISMA referencia de siempre —no una copia— para que
+ * quien la compara por identidad siga viendo lo de hoy.
+ *
+ * El filtro es la regla, no una comodidad: ofrecer `'contrato'` bajo
+ * `'sumada'` dejaría construir un documento con una línea de contrato y tres
+ * de porción, que declara el AIU dos veces y que la validación D.4 del backend
+ * rechaza después de haber capturado el documento entero.
+ */
+export function aiuComponentOptionsForModel(
+  model: AccountingModel,
+): SelectorOption[] {
+  return model === 'no_sumada'
+    ? [...AIU_COMPONENT_OPTIONS, AIU_COMPONENT_CONTRATO_OPTION]
+    : AIU_COMPONENT_OPTIONS;
+}
 
 // ─────────────────────────────────────────────────────────────
 // Identificación del adquiriente

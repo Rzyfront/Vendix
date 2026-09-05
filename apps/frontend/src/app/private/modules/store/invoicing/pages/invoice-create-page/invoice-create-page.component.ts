@@ -264,10 +264,12 @@ import type {
   ProfileConfigIssue,
 } from '../../../../../../core/utils/invoice-profile-config.contract';
 import {
+  AIU_BUCKETS,
   AIU_COMPONENTS,
   AIU_LEGAL_FLOOR_PERCENT_SCALED,
   AIU_TAXABLE_BUCKETS_BY_BASIS,
   CONFIG_LIMITS,
+  PERCENT_TOTAL_SCALED,
   formatPercentScaled,
   parsePercentScaled,
   regimeFromTaxableBasis,
@@ -349,6 +351,152 @@ export interface AiuTotals {
   taxableBase: number;
   /** Σ del impuesto (incluido + adicional) declarado sobre la base gravable. */
   taxAmount: number;
+  /**
+   * Cuánto vale cada cubeta en el documento entero. Bajo el Modelo 2 es la Σ
+   * de las líneas de cada porción; bajo el Modelo 1 —donde no hay líneas de
+   * porción— es el reparto interno de las líneas de contrato. Es lo que
+   * alimenta el desglose del resumen de cobro (paso 7), que existe justamente
+   * porque bajo el Modelo 1 no hay renglones que enseñen el AIU.
+   */
+  portions: Readonly<Record<AiuBucket, number>>;
+}
+
+/**
+ * Cómo se reparte por dentro una línea del MODELO 1 (`aiu_component:
+ * 'contrato'`), o sea una línea que vale el contrato y lleva el AIU DENTRO.
+ *
+ * Es el espejo de `explodeAiuContratoLine` del calculador: la unidad de los
+ * porcentajes decide qué mide cada uno, y confundirla no da error — da una base
+ * gravable diez veces mayor o menor sobre un documento que se emite igual.
+ */
+export interface AiuContratoSplit {
+  /** Los tres porcentajes del documento, escalados ×100 (5 % ⇒ `500`). */
+  percentsScaled: Readonly<Record<AiuComponentLiteral, number>>;
+  /** Unidad en la que están medidos. Ver `AiuComponentsBasis`. */
+  basis: AiuComponentsBasis;
+}
+
+/** Las cuatro cubetas en cero. Nunca se comparte: cada llamada muta la suya. */
+function emptyAiuPortions(): Record<AiuBucket, number> {
+  return { administracion: 0, imprevistos: 0, utilidad: 0, costo: 0 };
+}
+
+/**
+ * Reparto interno de una línea Modelo 1, cerrando EXACTAMENTE contra su
+ * importe.
+ *
+ * · `'contract'` — cada porción es `pct_i %` del importe de la línea y lo que
+ *   falte hasta el 100 % es costo reembolsable embebido. Es como se redacta un
+ *   contrato AIU («AIU del 10 %: A 5 %, I 2 %, U 3 %»), y con 5/2/3 sobre
+ *   $2.328.800 da A 116.440 · I 46.576 · U 69.864 · costo 2.095.920.
+ * · `'aiu'` — los porcentajes son del AIU y suman 100, así que la línea ENTERA
+ *   es el AIU: se normaliza por `Σpct` y no queda costo. La utilidad absorbe el
+ *   residuo del truncamiento (Anexo Técnico 1.9 §11.2), que es el lado
+ *   recuperable del redondeo: declara un centavo de más, nunca de menos.
+ *
+ * Todo en centavos, con un `Math.floor` por porción y el remanente a una sola
+ * cubeta: el reparto tiene que cerrar contra el importe de la línea o la
+ * cabecera y las líneas discrepan en un centavo, que es un rechazo FAU06.
+ *
+ * Un reparto imposible bajo `'contract'` —porcentajes que suman más del 100 %,
+ * que el validador del perfil ya reporta— se lee como `'aiu'` en vez de
+ * producir un costo NEGATIVO: preferimos declarar toda la línea como AIU
+ * (base gravable mayor) a inventar una cubeta en rojo.
+ */
+export function splitAiuContratoAmount(
+  base: number,
+  split: AiuContratoSplit,
+): Readonly<Record<AiuBucket, number>> {
+  const out = emptyAiuPortions();
+  const baseCents = Math.round((Number(base) || 0) * 100);
+  const sum = AIU_COMPONENTS.reduce(
+    (total, component) => total + (Number(split.percentsScaled[component]) || 0),
+    0,
+  );
+  if (baseCents <= 0 || sum <= 0) {
+    out.costo = baseCents / 100;
+    return out;
+  }
+
+  if (split.basis === 'contract' && sum <= PERCENT_TOTAL_SCALED) {
+    let assigned = 0;
+    for (const component of AIU_COMPONENTS) {
+      const percent = Number(split.percentsScaled[component]) || 0;
+      const cents = Math.floor((baseCents * percent) / PERCENT_TOTAL_SCALED);
+      out[component] = cents / 100;
+      assigned += cents;
+    }
+    out.costo = (baseCents - assigned) / 100;
+    return out;
+  }
+
+  let assigned = 0;
+  for (const component of AIU_COMPONENTS) {
+    const percent = Number(split.percentsScaled[component]) || 0;
+    const cents = Math.floor((baseCents * percent) / sum);
+    out[component] = cents / 100;
+    assigned += cents;
+  }
+  out.utilidad += (baseCents - assigned) / 100;
+  return out;
+}
+
+/**
+ * Reparto de UNA línea por cubeta, sea del modelo que sea.
+ *
+ * La línea con porción declarada va entera a su cubeta; la línea sin componente
+ * es costo reembolsable; y la línea `'contrato'` —Modelo 1— se explota. Sin
+ * reparto configurado (`split` nulo) la línea de contrato cae también a
+ * `'costo'`: es la lectura conservadora, la que NO inventa una base gravable
+ * que nadie configuró.
+ */
+export function splitAiuLine(
+  component: string,
+  base: number,
+  split: AiuContratoSplit | null,
+): Readonly<Record<AiuBucket, number>> {
+  const amount = Number(base) || 0;
+  if (component === 'contrato') {
+    if (!split) {
+      const out = emptyAiuPortions();
+      out.costo = amount;
+      return out;
+    }
+    return splitAiuContratoAmount(amount, split);
+  }
+  const out = emptyAiuPortions();
+  const bucket = AIU_COMPONENTS.find((known) => known === component);
+  if (bucket) out[bucket] = amount;
+  else out.costo = amount;
+  return out;
+}
+
+/**
+ * Qué FRACCIÓN de una línea entra a la base gravable, entre 0 y 1.
+ *
+ * Existe porque bajo el Modelo 1 la respuesta deja de ser binaria: una línea de
+ * contrato de $2.328.800 con base `'utilidad'` y 5/2/3 grava $69.864, o sea el
+ * 3 % de sí misma. La previsión de pantalla escala el impuesto de la línea por
+ * esta fracción — si no lo hiciera, el total mostraría el IVA del contrato
+ * entero ($442.472) sobre un documento que declara $13.274,16.
+ *
+ * Fuera del Modelo 1 devuelve 1 o 0, que es exactamente lo que la lectura
+ * histórica hacía con su `includes`: el Modelo 2 no cambia ni un centavo.
+ */
+export function aiuLineTaxableShare(
+  component: string,
+  base: number,
+  taxableBuckets: ReadonlyArray<string>,
+  split: AiuContratoSplit | null,
+): number {
+  const amount = Number(base) || 0;
+  if (amount <= 0) return taxableBuckets.includes(component || 'costo') ? 1 : 0;
+  const portions = splitAiuLine(component, amount, split);
+  let taxable = 0;
+  for (const bucket of AIU_BUCKETS) {
+    if (taxableBuckets.includes(bucket)) taxable += portions[bucket];
+  }
+  return Math.min(Math.max(taxable / amount, 0), 1);
 }
 
 export function deriveAiuTotals(
@@ -359,23 +507,81 @@ export function deriveAiuTotals(
     taxAdditional: number;
   }>,
   taxableBuckets: ReadonlyArray<string>,
+  split: AiuContratoSplit | null = null,
 ): AiuTotals {
   let contractAmount = 0;
   let aiuAmount = 0;
   let taxableBase = 0;
   let taxAmount = 0;
+  const portions = emptyAiuPortions();
   for (let i = 0; i < items.length; i++) {
     const component = String(items[i]?.aiu_component ?? '').trim();
     const line = math[i] ?? { base: 0, taxInclusive: 0, taxAdditional: 0 };
     const base = Number(line.base) || 0;
     contractAmount += base;
     if (component.length > 0) aiuAmount += base;
-    if (taxableBuckets.includes(component.length > 0 ? component : 'costo')) {
-      taxableBase += base;
-      taxAmount += (Number(line.taxInclusive) || 0) + (Number(line.taxAdditional) || 0);
+
+    // El reparto por cubeta y la fracción gravable salen de la MISMA lectura:
+    // dos recorridos separados divergirían en el Modelo 1, donde la porción y
+    // la base gravable son la misma cifra vista dos veces.
+    const lineSplit = splitAiuLine(component, base, split);
+    let lineTaxable = 0;
+    for (const bucket of AIU_BUCKETS) {
+      portions[bucket] += lineSplit[bucket];
+      if (taxableBuckets.includes(bucket)) lineTaxable += lineSplit[bucket];
     }
+    taxableBase += lineTaxable;
+    const lineTax =
+      (Number(line.taxInclusive) || 0) + (Number(line.taxAdditional) || 0);
+    taxAmount += base > 0 ? (lineTax * lineTaxable) / base : 0;
   }
-  return { contractAmount, aiuAmount, taxableBase, taxAmount };
+  return { contractAmount, aiuAmount, taxableBase, taxAmount, portions };
+}
+
+/**
+ * Una fila del desglose AIU del resumen de cobro (paso 7).
+ *
+ * `taxable` no es decoración: es la marca de qué porción entra a la base bajo
+ * la base declarada, leída de `AIU_TAXABLE_BUCKETS_BY_BASIS` y no de una lista
+ * escrita a mano acá. Bajo `'utilidad'` sólo la Utilidad la lleva, y ver
+ * «No gravable» junto a Administración es lo que evita que el operador crea que
+ * el documento está sub-declarando.
+ */
+export interface AiuSummaryRow {
+  key: AiuComponentLiteral;
+  label: string;
+  amount: number;
+  taxable: boolean;
+  badge: string;
+}
+
+/**
+ * Las TRES porciones del AIU con su importe y su marca de gravabilidad.
+ *
+ * Siempre tres filas, aunque alguna valga cero: una porción ausente del
+ * desglose se lee como «no la hay», y bajo base `'utilidad'` la ausencia de
+ * Administración e Imprevistos es precisamente lo que hay que enseñar —valen
+ * dinero y no gravan—. El costo reembolsable NO es una fila: no es AIU, y ya
+ * está en «Valor del contrato».
+ */
+export function buildAiuSummaryRows(
+  portions: Readonly<Record<AiuBucket, number>>,
+  basis: AiuTaxableBasis,
+): AiuSummaryRow[] {
+  const taxableBuckets = AIU_TAXABLE_BUCKETS_BY_BASIS[basis];
+  return AIU_COMPONENTS.map((bucket) => {
+    const option = AIU_COMPONENT_OPTIONS.find(
+      (candidate) => String(candidate.value) === bucket,
+    );
+    const taxable = taxableBuckets.includes(bucket);
+    return {
+      key: bucket,
+      label: option ? option.label : bucket,
+      amount: portions[bucket] ?? 0,
+      taxable,
+      badge: taxable ? 'Gravable' : 'No gravable',
+    };
+  });
 }
 
 /**
@@ -514,6 +720,163 @@ export function resolveAiuBucketTaxes(
 }
 
 /**
+ * Qué hace «Aplicar a las líneas» según el modelo de contabilización.
+ *
+ * · `'creacion'` (Modelo 2, `'sumada'`) — el AIU son LÍNEAS del documento: se
+ *   deduce del costo capturado y se materializa en tres renglones que suman al
+ *   total. Es lo que esta pantalla ha hecho siempre.
+ * · `'marcado'` (Modelo 1, `'no_sumada'`) — el AIU vive DENTRO del contrato ya
+ *   capturado: no se crea, no se borra y no se reordena nada, sólo se marcan
+ *   las líneas existentes. El `line_extension_amount` del documento queda
+ *   IDÉNTICO antes y después, que es exactamente lo que el nombre del modelo
+ *   promete y lo que estaba roto: aplicar bajo `'no_sumada'` subía el total de
+ *   $2.328.800 a $2.587.556 y facturaba $258.756 de más.
+ */
+export type AiuApplyMode = 'marcado' | 'creacion';
+
+/** El plan que `applyAiuBase()` ejecuta, ya resuelto contra el documento. */
+export interface AiuApplyPlan {
+  ready: boolean;
+  blocked: string | null;
+  /** Modelo que gobierna la aplicación; es quien decide `mode`. */
+  model: AccountingModel;
+  mode: AiuApplyMode;
+  basis: AiuComponentsBasis;
+  aiuPercentLabel: string;
+  /** Costo reembolsable: capturado en líneas (Modelo 2) o embebido (Modelo 1). */
+  costBase: number;
+  aiuAmount: number;
+  contractAmount: number;
+  /** Modo `'creacion'`: cuántas líneas con componente se reemplazan. */
+  replaces: number;
+  /** Modo `'marcado'`: índices de las líneas que reciben la marca `'contrato'`. */
+  marks: number[];
+  /** Modo `'marcado'`: tributos que reciben las líneas marcadas, sin repetir. */
+  markTaxes: TaxSelection[];
+  /** Paso 8 del plan anterior: reglas gravables sin resolver, con nombre. */
+  unresolvedTaxes: AiuUnresolvedTax[];
+  parts: Array<{
+    bucket: AiuComponentLiteral;
+    label: string;
+    percentLabel: string;
+    amount: number;
+    account: string;
+    taxes: TaxSelection[];
+  }>;
+}
+
+/**
+ * Escribe la marca del MODELO 1 sobre las filas que el plan señala.
+ *
+ * Vive fuera de la clase —y no como método privado— para poder custodiarla
+ * sobre un `FormArray` de verdad sin levantar la página entera, que arrastra
+ * la tienda NgRx, el enrutador y una decena de servicios. Un arnés a medias
+ * afirmaría contra los dobles y no contra el comportamiento; un `FormArray`
+ * es el mismo objeto que la pantalla muta.
+ *
+ * NO crea, NO borra y NO reordena: recorre índices existentes y escribe dos
+ * controles. Devuelve cuántas filas marcó, que es lo que la constancia cuenta.
+ *
+ * `patchValue` va con `emitEvent` por omisión a propósito: en Zoneless la tabla
+ * de líneas se redibuja por `valueChanges`, y silenciarlo dejaría la marca en
+ * el modelo y el selector en blanco en pantalla.
+ */
+export function applyAiuMarkingToRows(
+  rows: readonly AbstractControl[],
+  marks: readonly number[],
+  taxes: readonly TaxSelection[],
+): number {
+  let marked = 0;
+  for (const index of marks) {
+    const row = rows[index];
+    if (!row) continue;
+    row.patchValue({ aiu_component: 'contrato', taxes: [...taxes] });
+    row.markAsDirty();
+    marked += 1;
+  }
+  return marked;
+}
+
+/**
+ * Estado que decide si la base AIU se aplica sola (paso 8), y si hay que
+ * ofrecer volver a aplicarla.
+ *
+ * `appliedFingerprint` es la huella del documento en el instante en que la base
+ * se aplicó: cuántas líneas había, cuánto valía cada una y qué porción llevaba.
+ * No se guarda para poder re-aplicar sino para poder CALLAR — mientras el
+ * documento sea el mismo que se aplicó, no hay nada que avisar.
+ */
+export interface AiuAutoApplyState {
+  isAiu: boolean;
+  planReady: boolean;
+  /** ¿Ya se aplicó una vez en esta sesión del formulario? */
+  applied: boolean;
+  lineCount: number;
+  linesWithComponent: number;
+  fingerprint: string;
+  appliedFingerprint: string | null;
+}
+
+/**
+ * ¿Se aplica sola la base AIU?
+ *
+ * SÓLO la primera vez, y sólo sobre un documento virgen: operación AIU, plan
+ * aplicable, líneas capturadas y NINGUNA con componente todavía. El dueño pidió
+ * el automatismo con estas palabras —«no sabía que había que aplicarlo, eso
+ * debería auto-aplicarse»—, pero sobrescribir un reparto que alguien corrigió a
+ * mano sale mucho más caro que el clic que se ahorra: el operador no vería el
+ * cambio, y el documento se emitiría con cifras que él no escribió.
+ *
+ * Por eso `linesWithComponent === 0` y no `> 0`: basta UNA línea marcada —a
+ * mano o por una aplicación anterior— para que el automatismo se retire y ceda
+ * el turno al aviso de re-aplicación.
+ */
+export function shouldAutoApplyAiuBase(state: AiuAutoApplyState): boolean {
+  return (
+    state.isAiu &&
+    state.planReady &&
+    !state.applied &&
+    state.lineCount > 0 &&
+    state.linesWithComponent === 0
+  );
+}
+
+/**
+ * ¿Hay que avisar de que el documento cambió DESPUÉS de aplicar la base?
+ *
+ * El aviso es la contrapartida honesta de no sobrescribir: si el operador
+ * edita un importe, el reparto que hay escrito deja de corresponder a las
+ * líneas, y quedarse callado emitiría un AIU que ya no cuadra con el contrato.
+ * Se ofrece re-aplicar; nunca se impone.
+ */
+export function shouldOfferAiuReapply(state: AiuAutoApplyState): boolean {
+  return (
+    state.isAiu &&
+    state.applied &&
+    state.appliedFingerprint !== null &&
+    state.fingerprint !== state.appliedFingerprint
+  );
+}
+
+/**
+ * Huella del documento para el aviso de re-aplicación: cuántas líneas, cuánto
+ * vale cada una y qué porción declara. Cambiar cualquiera de las tres cosas
+ * invalida el reparto aplicado; cambiar la descripción o la unidad, no.
+ */
+export function aiuDocumentFingerprint(
+  items: ReadonlyArray<{ aiu_component?: string | null }>,
+  math: ReadonlyArray<{ base: number }>,
+): string {
+  return items
+    .map((item, index) => {
+      const base = Number(math[index]?.base) || 0;
+      const component = String(item?.aiu_component ?? '').trim();
+      return base.toFixed(2) + ':' + (component || 'costo');
+    })
+    .join('|');
+}
+
+/**
  * Puerta de la operación AIU (paso 1 del plan AIU, caso `operation_type='10'`).
  *
  * La barra de totales sólo enseña «Base gravable AIU» cuando el documento es
@@ -577,6 +940,7 @@ export function resolveSubmitHint(state: SubmitHintState): string {
 }
 import {
   AIU_COMPONENT_OPTIONS,
+  aiuComponentOptionsForModel,
   DOCUMENT_TYPE_NIT_CODE,
   DOCUMENT_TYPE_OPTIONS,
   FOREIGN_CURRENCY_OPTIONS,
@@ -839,7 +1203,12 @@ interface InvoiceCreateItemPayload {
   discount_amount?: number;
   unit_code?: string;
   account_code?: string;
-  aiu_component?: 'administracion' | 'imprevistos' | 'utilidad';
+  /**
+   * `'contrato'` es el MODELO 1: la línea vale el contrato y lleva el AIU
+   * dentro, así que su base gravable es MENOR que su propio importe. No es una
+   * cuarta porción — ver `AIU_COMPONENT_CONTRATO_OPTION`.
+   */
+  aiu_component?: 'administracion' | 'imprevistos' | 'utilidad' | 'contrato';
   taxes?: {
     /** Ausente cuando el impuesto elegido no tiene fila real en `tax_rates`. */
     tax_rate_id?: number;
@@ -1952,15 +2321,31 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                         class="mt-0.5 text-xs leading-relaxed text-[var(--color-text-secondary)]"
                       >
                         @if (plan.ready) {
-                          AIU del
-                          <strong class="text-text-primary"
-                            >{{ plan.aiuPercentLabel }} %</strong
-                          >
-                          del valor del contrato, deducido de
-                          {{ formatCurrency(plan.costBase) }} en lineas de
-                          costo: contrato
-                          {{ formatCurrency(plan.contractAmount) }}, AIU
-                          {{ formatCurrency(plan.aiuAmount) }}.
+                          @if (plan.mode === 'marcado') {
+                            AIU del
+                            <strong class="text-text-primary"
+                              >{{ plan.aiuPercentLabel }} %</strong
+                            >
+                            DENTRO del contrato ya capturado
+                            ({{ formatCurrency(plan.contractAmount) }}): AIU
+                            {{ formatCurrency(plan.aiuAmount) }} y costo
+                            reembolsable embebido
+                            {{ formatCurrency(plan.costBase) }}. Aplicarlo
+                            <strong class="text-text-primary"
+                              >no cambia el total</strong
+                            >
+                            del documento.
+                          } @else {
+                            AIU del
+                            <strong class="text-text-primary"
+                              >{{ plan.aiuPercentLabel }} %</strong
+                            >
+                            del valor del contrato, deducido de
+                            {{ formatCurrency(plan.costBase) }} en lineas de
+                            costo: contrato
+                            {{ formatCurrency(plan.contractAmount) }}, AIU
+                            {{ formatCurrency(plan.aiuAmount) }}.
+                          }
                         } @else {
                           {{ plan.blocked }}
                         }
@@ -2017,7 +2402,22 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                         </div>
                       }
                     </div>
-                    @if (plan.replaces > 0) {
+                    @if (plan.mode === 'marcado') {
+                      <!--
+                        La promesa del Modelo 1, escrita donde se pulsa: ni una
+                        linea nueva, ni una borrada. Es lo que estaba roto —
+                        aplicar creaba tres renglones y subia el total.
+                      -->
+                      <p
+                        class="mt-2 text-[11px] text-[var(--color-text-secondary)]"
+                      >
+                        Marca {{ plan.marks.length }} linea(s) como
+                        <strong>Contrato (AIU incluido)</strong>: no crea, no
+                        borra ni reordena ninguna, y el valor facturado queda
+                        igual. El AIU se enseña en el desglose del resumen de
+                        cobro.
+                      </p>
+                    } @else if (plan.replaces > 0) {
                       <p
                         class="mt-2 text-[11px] text-[var(--color-text-secondary)]"
                       >
@@ -2067,6 +2467,32 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                     </app-alert-banner>
                   }
                 </div>
+              }
+
+              @if (aiuReapplyNeeded()) {
+                <!--
+                  PASO 8 — AVISAR, NUNCA SOBRESCRIBIR.
+
+                  La base se aplico sola una vez y desde entonces el documento
+                  cambio. Volver a aplicarla por nuestra cuenta pisaria un
+                  reparto que el operador pudo corregir a mano, y lo haria sin
+                  que se entere: el documento se emitiria con cifras que el no
+                  escribio. Asi que se avisa y se ofrece el boton de arriba.
+                -->
+                <app-alert-banner
+                  class="mt-3"
+                  variant="warning"
+                  icon="alert-triangle"
+                  tone="token"
+                  heading="Las lineas cambiaron despues de aplicar la base AIU"
+                >
+                  El reparto escrito corresponde al documento de antes del
+                  cambio. Revisa el desglose y, si quieres rehacerlo con las
+                  lineas actuales, vuelve a pulsar
+                  <strong>Aplicar a las lineas</strong>. No se re-aplica sola:
+                  sobrescribir un reparto corregido a mano seria peor que el
+                  clic que ahorra.
+                </app-alert-banner>
               }
 
               @if (aiuUnassigned() > 0) {
@@ -2166,12 +2592,27 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                 las tres formas de crear una línea siguen abriendo los mismos
                 modales de siempre; el componente sólo emite la intención.
               -->
+              <!--
+                LA BASE GRAVABLE VIAJA AL HIJO («aiuTaxableBasis»).
+
+                El predicado del hijo ya sabe distinguir la porcion que grava de
+                la que no, pero se queda MUDO si esta pantalla no le dice contra
+                que base decidir: por omision asume «aiu», bajo la cual gravan
+                las tres porciones, y entonces acusa de sub-declarar a
+                Administracion e Imprevistos, que bajo base «utilidad» estan
+                correctamente sin impuesto. Es el mismo valor que ya resuelve
+                «toggleLineAiu», leido del mismo sitio.
+
+                «aiuComponentOptions» tampoco es estatico: bajo el Modelo 1
+                suma «Contrato (AIU incluido)». Ver el computed.
+              -->
               <vendix-invoice-section-lineas
                 context="invoice"
                 [rows]="itemControls()"
                 [rowPaths]="lineasRowPaths"
                 [isAiu]="isAiu()"
-                [aiuComponentOptions]="aiuComponentOptions"
+                [aiuComponentOptions]="aiuComponentOptions()"
+                [aiuTaxableBasis]="effectiveAiu()?.taxable_basis ?? 'aiu'"
                 [unitCodeOptions]="unitCodeOptions"
                 [descriptionLimit]="itemDescriptionLimit"
                 [rowErrors]="lineasRowErrors()"
@@ -2564,6 +3005,64 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                 </div>
               </div>
             </div>
+            <!--
+              PASO 7 — EL DESGLOSE DEL AIU VIVE EN EL RESUMEN DE COBRO.
+
+              El AIU no es un item de cobro sino un desglose del valor
+              contratado, asi que su sitio es este panel y no la lista de
+              lineas. Bajo el Modelo 1 es ademas la UNICA superficie donde el
+              AIU se ve: no hay renglones que lo enseñen. La marca
+              «Gravable»/«No gravable» sale de AIU_TAXABLE_BUCKETS_BY_BASIS y
+              no de una lista escrita a mano: es lo que evita que el operador
+              lea «Administracion $116.440» y crea que falta declararle IVA.
+            -->
+            @if (aiuSummaryRows().length > 0) {
+              <div class="mt-3 rounded-lg border border-border bg-[var(--color-surface)] p-3">
+                <div
+                  class="flex flex-wrap items-baseline justify-between gap-2"
+                >
+                  <p class="text-xs font-semibold text-text-primary">
+                    Desglose del AIU
+                  </p>
+                  <p class="text-[11px] text-[var(--color-text-secondary)]">
+                    Base gravable declarada:
+                    <strong class="text-text-primary">{{
+                      aiuGuidance()?.taxableLabel
+                    }}</strong>
+                  </p>
+                </div>
+                <ul class="mt-2 space-y-1.5">
+                  @for (row of aiuSummaryRows(); track row.key) {
+                    <li
+                      class="flex flex-wrap items-center justify-between gap-2 text-xs"
+                      [attr.data-aiu-bucket]="row.key"
+                    >
+                      <span class="flex items-center gap-2">
+                        <span class="text-text-primary">{{ row.label }}</span>
+                        <span
+                          class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1"
+                          [ngClass]="
+                            row.taxable
+                              ? 'bg-success/10 text-success ring-success/30'
+                              : 'bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] ring-border'
+                          "
+                        >
+                          {{ row.badge }}
+                        </span>
+                      </span>
+                      <span class="font-semibold tabular-nums text-text-primary">
+                        {{ formatCurrency(row.amount) }}
+                      </span>
+                    </li>
+                  }
+                </ul>
+                <p class="mt-2 text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
+                  Las porciones marcadas «No gravable» valen dinero y suman al
+                  valor del contrato: lo que no hacen es entrar a la base del
+                  impuesto bajo la base declarada.
+                </p>
+              </div>
+            }
             <p class="mt-2 text-[11px] text-[var(--color-text-secondary)]">
               Cifras de referencia. El servidor recalcula el documento entero con
               aritmética decimal y su resultado es el que se declara.
@@ -2929,7 +3428,20 @@ export class InvoiceCreatePageComponent implements OnInit {
   readonly documentTypeOptions = DOCUMENT_TYPE_OPTIONS;
   readonly taxRegimeOptions = TAX_REGIME_OPTIONS;
   readonly unitCodeOptions = UNIT_CODE_OPTIONS;
-  readonly aiuComponentOptions = AIU_COMPONENT_OPTIONS;
+  /**
+   * Los componentes que una línea puede declarar. YA NO ES ESTÁTICO: bajo el
+   * Modelo 1 («base AIU NO sumada al total») la lista suma «Contrato (AIU
+   * incluido)», que es la única forma de expresar una línea que vale el
+   * contrato y lleva el AIU dentro; bajo el Modelo 2 devuelve la lista de
+   * siempre, byte por byte.
+   *
+   * El filtro por modelo es la regla y no una comodidad de interfaz: ofrecer
+   * las dos formas a la vez dejaría capturar un documento con una línea de
+   * contrato Y tres de porción, que declara el AIU dos veces.
+   */
+  readonly aiuComponentOptions = computed<SelectorOption[]>(() =>
+    aiuComponentOptionsForModel(this.documentAccountingModel()),
+  );
   /**
    * La ayuda larga de cada sección, del catálogo compartido con el editor de
    * perfiles. Método y no mapa inline: la misma regla fiscal explicada de dos
@@ -4217,19 +4729,102 @@ export class InvoiceCreatePageComponent implements OnInit {
     this.itemsValue().map((item) => computeLineMath(item)),
   );
 
+  /**
+   * Modelo de contabilización que declara ESTE documento.
+   *
+   * Se lee con `resolveAccountingModel` —único punto de lectura del contrato—
+   * y no de `aiu.accounting_model` a secas: un control en blanco (documento
+   * recién abierto, o perfil viejo sin el campo) resuelve a `'sumada'`, que es
+   * lo que el calculador hace por construcción.
+   */
+  readonly documentAccountingModel = computed<AccountingModel>(() =>
+    resolveAccountingModel(
+      this.aiuDraft() as { accounting_model?: AccountingModel },
+    ),
+  );
+
+  /**
+   * El reparto con el que se explota una línea `'contrato'` (Modelo 1).
+   *
+   * `null` fuera de la operación AIU: sin él, `splitAiuLine` lee la línea de
+   * contrato como costo reembolsable, que es la lectura conservadora —no
+   * inventa una base gravable que nadie configuró—.
+   *
+   * Los porcentajes son los DEL DOCUMENTO y no los del snapshot del perfil,
+   * por el mismo motivo que `aiuApplyPlan`: lo que el operador tiene delante es
+   * lo que escribe las líneas, y leer el perfil acá haría que corregir el
+   * reparto en la factura no moviera ni un peso de lo emitido.
+   */
+  readonly aiuContratoSplit = computed<AiuContratoSplit | null>(() => {
+    if (!this.isAiu()) return null;
+    const draft = this.aiuDraft();
+    const percentsScaled: Record<AiuComponentLiteral, number> = {
+      administracion: 0,
+      imprevistos: 0,
+      utilidad: 0,
+    };
+    for (const component of AIU_COMPONENTS) {
+      const text = String(draft[component] ?? '').trim();
+      percentsScaled[component] = text === '' ? 0 : parsePercentScaled(text) ?? 0;
+    }
+    return {
+      percentsScaled,
+      basis: asAiuComponentsBasis(draft['components_basis']),
+    };
+  });
+
+  /**
+   * Qué fracción de cada línea entra a la base gravable, en el mismo orden que
+   * las líneas.
+   *
+   * Fuera del Modelo 1 es siempre `1`: el arreglo vacío significa «no hay nada
+   * que escalar» y los consumidores caen a `1`, así que el Modelo 2 y los
+   * documentos que no son AIU recorren exactamente el mismo camino de siempre.
+   *
+   * Existe porque bajo el Modelo 1 el impuesto de una línea NO es su tarifa por
+   * su importe: la línea vale el contrato y sólo grava la porción que la base
+   * declarada admite. Sin este escalado la barra de totales enseñaría el IVA
+   * del contrato entero sobre un documento que declara el de la utilidad.
+   */
+  readonly aiuTaxableShares = computed<number[]>(() => {
+    const split = this.aiuContratoSplit();
+    const settings = this.effectiveAiu();
+    if (!split || !settings) return [];
+    const items = this.itemsValue();
+    if (!items.some((item) => item?.aiu_component === 'contrato')) return [];
+    const buckets = AIU_TAXABLE_BUCKETS_BY_BASIS[settings.taxable_basis];
+    const math = this.lineMath();
+    return items.map((item, index) =>
+      aiuLineTaxableShare(
+        String(item?.aiu_component ?? '').trim(),
+        math[index]?.base ?? 0,
+        buckets,
+        split,
+      ),
+    );
+  });
+
   readonly totals = computed(() => {
     const items = this.itemsValue();
     const math = this.lineMath();
+    // Vacío mientras no haya una sola línea Modelo 1: `?? 1` deja la
+    // aritmética histórica intacta para todo lo demás.
+    const shares = this.aiuTaxableShares();
     let base = 0;
     let discount = 0;
     let taxInclusive = 0;
     let taxAdditional = 0;
     let total = 0;
     for (let i = 0; i < math.length; i++) {
+      const share = shares[i] ?? 1;
       base += math[i].base;
-      taxInclusive += math[i].taxInclusive;
-      taxAdditional += math[i].taxAdditional;
-      total += math[i].total;
+      taxInclusive += math[i].taxInclusive * share;
+      taxAdditional += math[i].taxAdditional * share;
+      // El importe de la línea NO se escala —es el `line_extension_amount` que
+      // el contrato pactó— y por eso el total del documento no se mueve al
+      // aplicar la base bajo el Modelo 1: sólo se mueve el impuesto.
+      total +=
+        math[i].base + (math[i].taxInclusive + math[i].taxAdditional) * share;
       discount += Number(items[i]?.discount_amount) || 0;
     }
     return { base, discount, taxInclusive, taxAdditional, total };
@@ -4254,6 +4849,11 @@ export class InvoiceCreatePageComponent implements OnInit {
       this.itemsValue(),
       this.lineMath(),
       AIU_TAXABLE_BUCKETS_BY_BASIS[settings.taxable_basis],
+      // El reparto viaja para que una línea Modelo 1 se explote en sus cuatro
+      // porciones. Sin él la línea de contrato se leería entera como costo y el
+      // desglose del resumen de cobro saldría en cero sobre un documento que sí
+      // declara AIU.
+      this.aiuContratoSplit(),
     );
   });
 
@@ -4299,25 +4899,43 @@ export class InvoiceCreatePageComponent implements OnInit {
     return [...rows.values()];
   });
 
+  /**
+   * Desglose por porción de la SECCIÓN AIU.
+   *
+   * Sale de `aiuTotals().portions` —la misma lectura que alimenta el resumen de
+   * cobro— y no de un recorrido propio de las líneas. La diferencia sólo se ve
+   * bajo el Modelo 1: ahí no hay líneas de porción que agrupar, y el recorrido
+   * antiguo pintaba tres tarjetas en cero sobre un documento que sí declara
+   * AIU. Bajo el Modelo 2 devuelve exactamente las mismas cifras que antes,
+   * porque cada línea marcada va entera a su cubeta.
+   */
   readonly aiuBreakdown = computed(() => {
-    const items = this.itemsValue();
-    const math = this.lineMath();
-    const buckets: Record<string, number> = {
-      administracion: 0,
-      imprevistos: 0,
-      utilidad: 0,
-    };
-    for (let i = 0; i < items.length; i++) {
-      const component = items[i]?.aiu_component;
-      if (component && component in buckets) {
-        buckets[component] += math[i]?.base ?? 0;
-      }
-    }
-    return AIU_COMPONENT_OPTIONS.map((option) => ({
-      key: String(option.value),
-      label: option.label,
-      amount: buckets[String(option.value)] ?? 0,
-    }));
+    const portions = this.aiuTotals()?.portions ?? null;
+    return AIU_COMPONENT_OPTIONS.map((option) => {
+      const key = String(option.value);
+      return {
+        key,
+        label: option.label,
+        amount: portions ? (portions[key as AiuBucket] ?? 0) : 0,
+      };
+    });
+  });
+
+  /**
+   * Paso 7 — el desglose A/I/U del RESUMEN DE COBRO, con la marca de qué
+   * porción entra a la base gravable.
+   *
+   * El AIU no es un ítem de cobro sino un desglose del valor contratado, así
+   * que su sitio es el panel de totales y no la lista de líneas. Bajo el Modelo
+   * 1 es además la ÚNICA superficie donde el AIU se ve: no hay renglones que lo
+   * enseñen. Las tres filas se pintan bajo los dos modelos para que el operador
+   * lea siempre lo mismo, cambie o no la forma del documento.
+   */
+  readonly aiuSummaryRows = computed<AiuSummaryRow[]>(() => {
+    const totals = this.aiuTotals();
+    const settings = this.effectiveAiu();
+    if (!totals || !settings) return [];
+    return buildAiuSummaryRows(totals.portions, settings.taxable_basis);
   });
 
   /**
@@ -4346,6 +4964,54 @@ export class InvoiceCreatePageComponent implements OnInit {
     const items = this.itemsValue();
     return items.length > 0 && items.every((item) => !item.aiu_component);
   });
+
+  // ── Paso 8: la base AIU se aplica sola UNA vez ──────────────
+
+  /**
+   * ¿La base AIU ya se aplicó en esta sesión del formulario?
+   *
+   * Es el interruptor de una sola disparada. Se enciende tanto si la aplicó el
+   * efecto como si la pulsó el operador, porque la pregunta que responde no es
+   * «¿la aplicó el sistema?» sino «¿hay ya un reparto escrito que podría estar
+   * corregido a mano?».
+   */
+  private readonly aiuBaseApplied = signal(false);
+
+  /** La huella del documento en el instante en que la base se aplicó. */
+  private readonly aiuAppliedFingerprint = signal<string | null>(null);
+
+  /** Huella VIVA del documento: líneas, importes y porción de cada una. */
+  private readonly aiuFingerprint = computed<string>(() =>
+    aiuDocumentFingerprint(this.itemsValue(), this.lineMath()),
+  );
+
+  private readonly aiuAutoApplyState = computed<AiuAutoApplyState>(() => {
+    const items = this.itemsValue();
+    return {
+      isAiu: this.isAiu(),
+      planReady: this.aiuApplyPlan()?.ready === true,
+      applied: this.aiuBaseApplied(),
+      lineCount: items.length,
+      linesWithComponent: items.filter((item) =>
+        String(item?.aiu_component ?? '').trim(),
+      ).length,
+      fingerprint: this.aiuFingerprint(),
+      appliedFingerprint: this.aiuAppliedFingerprint(),
+    };
+  });
+
+  /**
+   * ¿Hay que ofrecer volver a aplicar la base?
+   *
+   * Es la contrapartida honesta de no sobrescribir: el reparto escrito deja de
+   * corresponder a las líneas en cuanto alguien edita un importe, y callarlo
+   * emitiría un AIU que ya no cuadra con el contrato. Se OFRECE; nunca se
+   * impone — sobrescribir un reparto corregido a mano cuesta más caro que el
+   * clic que ahorraría.
+   */
+  readonly aiuReapplyNeeded = computed<boolean>(() =>
+    shouldOfferAiuReapply(this.aiuAutoApplyState()),
+  );
 
   // ── La sección AIU compartida ───────────────────────────────
   //
@@ -5028,26 +5694,7 @@ export class InvoiceCreatePageComponent implements OnInit {
    * el perfil es lo único que trae los porcentajes, y los ajustes de la tienda
    * no los tienen.
    */
-  readonly aiuApplyPlan = computed<{
-    ready: boolean;
-    blocked: string | null;
-    basis: AiuComponentsBasis;
-    aiuPercentLabel: string;
-    costBase: number;
-    aiuAmount: number;
-    contractAmount: number;
-    replaces: number;
-    /** Paso 8: reglas gravables que el catálogo no resolvió, con nombre. */
-    unresolvedTaxes: AiuUnresolvedTax[];
-    parts: Array<{
-      bucket: AiuComponentLiteral;
-      label: string;
-      percentLabel: string;
-      amount: number;
-      account: string;
-      taxes: TaxSelection[];
-    }>;
-  } | null>(() => {
+  readonly aiuApplyPlan = computed<AiuApplyPlan | null>(() => {
     if (!this.isAiu()) return null;
 
     // YA NO EXIGE PERFIL. Antes el plan devolvía `null` sin perfil elegido,
@@ -5070,6 +5717,7 @@ export class InvoiceCreatePageComponent implements OnInit {
     // pudo sembrar un reparto acordado. Sin perfil los tres porcentajes nacen
     // vacíos y el plan lo dice, en vez de inventar un 5/2/3.
     const draft = this.aiuDraft();
+    const model = this.documentAccountingModel();
     const basis = asAiuComponentsBasis(draft['components_basis']);
     const scaled = new Map<AiuComponentLiteral, number>();
     for (const component of AIU_COMPONENTS) {
@@ -5082,6 +5730,7 @@ export class InvoiceCreatePageComponent implements OnInit {
       if (value === null) {
         return this.blockedAiuPlan(
           basis,
+          model,
           'Los porcentajes de la sección AIU no son válidos: se escriben con hasta dos decimales y punto (por ejemplo 5.00). Corrígelos arriba, en Base AIU.',
         );
       }
@@ -5089,15 +5738,29 @@ export class InvoiceCreatePageComponent implements OnInit {
     }
     const sum = [...scaled.values()].reduce((total, value) => total + value, 0);
 
+    // ── EL MODELO DECIDE LA FORMA DE LA APLICACIÓN ───────────────────────────
+    //
+    // Bajo `'no_sumada'` el AIU no es un renglón de cobro: ya está DENTRO de lo
+    // que el operador capturó. Aplicar la base ahí no crea, no borra ni
+    // reordena líneas — marca las que hay— y por eso sale por otra rama antes
+    // de llegar a la deducción de abajo, que existe justamente para inventar
+    // renglones nuevos.
+    if (model === 'no_sumada') {
+      return this.aiuMarkingPlan(basis, scaled, sum, draft);
+    }
+
+    // ── MODELO 2 (`'sumada'`) — el camino de siempre, sin cambio alguno ──────
     if (basis !== 'contract') {
       return this.blockedAiuPlan(
         basis,
+        model,
         'Los porcentajes están medidos sobre el AIU, no sobre el valor del contrato, así que no determinan cuánto AIU lleva este documento. Cambia la unidad arriba, en Base AIU, o captura las líneas de administración, imprevistos y utilidad a mano.',
       );
     }
     if (sum <= 0 || sum >= 10000) {
       return this.blockedAiuPlan(
         basis,
+        model,
         sum <= 0
           ? 'No hay ningún porcentaje de AIU configurado. Escríbelos arriba, en Base AIU.'
           : 'El reparto declara un AIU del 100 % del contrato: no queda costo reembolsable del que deducirlo, así que las líneas hay que capturarlas a mano.',
@@ -5122,6 +5785,7 @@ export class InvoiceCreatePageComponent implements OnInit {
     if (costCents <= 0) {
       return this.blockedAiuPlan(
         basis,
+        model,
         'Captura primero las líneas de costo del contrato (las que NO llevan la marca AIU): el AIU se deduce de ellas.',
       );
     }
@@ -5186,12 +5850,16 @@ export class InvoiceCreatePageComponent implements OnInit {
     return {
       ready: true,
       blocked: null,
+      model: 'sumada',
+      mode: 'creacion',
       basis,
       aiuPercentLabel: formatPercentScaled(sum),
       costBase: costCents / 100,
       aiuAmount: aiuCents / 100,
       contractAmount: (costCents + aiuCents) / 100,
       replaces,
+      marks: [],
+      markTaxes: [],
       unresolvedTaxes: catalogFailed
         ? unresolvedTaxes.filter((item) => item.reason !== 'empty-catalog')
         : unresolvedTaxes,
@@ -5199,30 +5867,175 @@ export class InvoiceCreatePageComponent implements OnInit {
     };
   });
 
+  /**
+   * El plan del MODELO 1: marcar, no crear.
+   *
+   * ─── LA DIFERENCIA QUE LO JUSTIFICA ──────────────────────────────────────
+   *
+   * El plan del Modelo 2 DEDUCE el AIU hacia afuera: toma el costo capturado y
+   * calcula cuánto hay que añadirle para que el AIU sea el porcentaje pactado
+   * del resultado (`costo × Σ% / (100 % − Σ%)`). Eso es correcto cuando las
+   * líneas capturadas son SÓLO el costo y el AIU todavía no está en ninguna
+   * parte.
+   *
+   * Bajo `'no_sumada'` la premisa se invierte: las líneas capturadas YA valen el
+   * contrato —AIU incluido—, así que no hay nada que añadir. El reparto se mide
+   * HACIA ADENTRO de lo que ya hay, la porción de costo reembolsable es lo que
+   * sobra hasta el 100 %, y el total del documento no se mueve ni un peso. Ese
+   * era el defecto: aplicar la base con la fórmula del Modelo 2 sobre un
+   * documento del Modelo 1 subía $2.328.800 a $2.587.556.
+   *
+   * Se marcan TODAS las líneas capturadas y no sólo la primera: un contrato AIU
+   * puede facturar varios servicios, y obligar a consolidarlos en un renglón
+   * perdería el detalle que el cliente firmó (objetivo 5 del plan).
+   */
+  private aiuMarkingPlan(
+    basis: AiuComponentsBasis,
+    scaled: ReadonlyMap<AiuComponentLiteral, number>,
+    sum: number,
+    draft: Record<string, unknown>,
+  ): AiuApplyPlan {
+    if (sum <= 0) {
+      return this.blockedAiuPlan(
+        basis,
+        'no_sumada',
+        'No hay ningún porcentaje de AIU configurado. Escríbelos arriba, en Base AIU.',
+      );
+    }
+    // A diferencia del Modelo 2, un AIU del 100 % SÍ es aplicable acá: significa
+    // que el contrato no lleva costo reembolsable, no que no quede nada de lo
+    // que deducir. Lo que sigue siendo imposible es un AIU MAYOR que el
+    // contrato, que dejaría la porción de costo en rojo.
+    if (basis === 'contract' && sum > PERCENT_TOTAL_SCALED) {
+      return this.blockedAiuPlan(
+        basis,
+        'no_sumada',
+        'El reparto declara un AIU mayor que el valor del contrato: la porción de costo reembolsable quedaría en negativo. Corrige los porcentajes arriba, en Base AIU.',
+      );
+    }
+
+    // El contrato es TODO lo capturado: bajo este modelo no hay líneas «de
+    // costo» y líneas «de AIU», hay líneas del contrato con el AIU dentro.
+    const items = this.itemsValue();
+    const math = this.lineMath();
+    const marks: number[] = [];
+    let contractCents = 0;
+    for (let i = 0; i < items.length; i++) {
+      contractCents += Math.round((math[i]?.base ?? 0) * 100);
+      marks.push(i);
+    }
+    if (marks.length === 0 || contractCents <= 0) {
+      return this.blockedAiuPlan(
+        basis,
+        'no_sumada',
+        'Captura primero las líneas del contrato: bajo este modelo el AIU va DENTRO de lo que ya facturas, así que no hay nada que repartir mientras no haya líneas.',
+      );
+    }
+
+    const percentsScaled: Record<AiuComponentLiteral, number> = {
+      administracion: scaled.get('administracion') ?? 0,
+      imprevistos: scaled.get('imprevistos') ?? 0,
+      utilidad: scaled.get('utilidad') ?? 0,
+    };
+    // MISMA función que lee la barra de totales y el desglose del resumen: dos
+    // repartos del mismo contrato divergirían sin dar un error, y la pantalla
+    // enseñaría una cifra distinta de la que se acaba de escribir.
+    const portions = splitAiuContratoAmount(contractCents / 100, {
+      percentsScaled,
+      basis,
+    });
+
+    const accounts: Readonly<Record<AiuComponentLiteral, string>> = {
+      administracion: String(draft['revenue_administracion'] ?? ''),
+      imprevistos: String(draft['revenue_imprevistos'] ?? ''),
+      utilidad: String(draft['revenue_utilidad'] ?? ''),
+    };
+    const draftRules = this.aiuDraftRules();
+    const unresolvedTaxes: AiuUnresolvedTax[] = [];
+    const parts = AIU_COMPONENTS.map((bucket) => {
+      const resolved = resolveAiuBucketTaxes(
+        draftRules,
+        bucket,
+        this.aiuComponentLabel(bucket),
+        this.availableTaxes(),
+      );
+      unresolvedTaxes.push(...resolved.unresolved);
+      return {
+        bucket,
+        label: this.aiuComponentLabel(bucket),
+        percentLabel: formatPercentScaled(scaled.get(bucket) ?? 0),
+        amount: portions[bucket],
+        account: accounts[bucket] ?? '',
+        taxes: resolved.selections,
+      };
+    });
+
+    // LOS TRIBUTOS DE LA LÍNEA MARCADA SON LOS DE LAS PORCIONES QUE GRAVAN.
+    //
+    // Una línea Modelo 1 lleva UN juego de tributos para una base que es sólo
+    // una fracción de su importe, así que tomar los de las porciones NO
+    // gravables declararía impuesto sobre algo que la base declarada excluye.
+    // Se deduplican por tarifa: si Administración y Utilidad gravan con el
+    // mismo IVA, la línea lo lleva UNA vez o el impuesto saldría doble.
+    const settings = this.effectiveAiu();
+    const taxableBuckets =
+      AIU_TAXABLE_BUCKETS_BY_BASIS[settings?.taxable_basis ?? 'aiu'];
+    const markTaxes: TaxSelection[] = [];
+    const seenRates = new Set<number>();
+    for (const part of parts) {
+      if (!taxableBuckets.includes(part.bucket)) continue;
+      for (const tax of part.taxes) {
+        if (seenRates.has(tax.tax_rate_id)) continue;
+        seenRates.add(tax.tax_rate_id);
+        markTaxes.push(tax);
+      }
+    }
+
+    const aiuCents = contractCents - Math.round(portions.costo * 100);
+    const catalogFailed = this.taxCatalogState() !== 'ok';
+    return {
+      ready: true,
+      blocked: null,
+      model: 'no_sumada',
+      mode: 'marcado',
+      basis,
+      // Con la unidad `'aiu'` los porcentajes son del AIU y la línea ENTERA lo
+      // es: el AIU vale el 100 % del contrato, no la suma de unos porcentajes
+      // que ya estaban normalizados.
+      aiuPercentLabel: formatPercentScaled(
+        basis === 'contract' ? sum : PERCENT_TOTAL_SCALED,
+      ),
+      costBase: portions.costo,
+      aiuAmount: aiuCents / 100,
+      contractAmount: contractCents / 100,
+      replaces: 0,
+      marks,
+      markTaxes,
+      unresolvedTaxes: catalogFailed
+        ? unresolvedTaxes.filter((item) => item.reason !== 'empty-catalog')
+        : unresolvedTaxes,
+      parts: parts.filter((part) => part.amount > 0),
+    };
+  }
+
   private blockedAiuPlan(
     basis: AiuComponentsBasis,
+    model: AccountingModel,
     blocked: string,
-  ): {
-    ready: false;
-    blocked: string;
-    basis: AiuComponentsBasis;
-    aiuPercentLabel: string;
-    costBase: number;
-    aiuAmount: number;
-    contractAmount: number;
-    replaces: number;
-    unresolvedTaxes: AiuUnresolvedTax[];
-    parts: [];
-  } {
+  ): AiuApplyPlan {
     return {
       ready: false,
       blocked,
+      model,
+      mode: model === 'no_sumada' ? 'marcado' : 'creacion',
       basis,
       aiuPercentLabel: '0.00',
       costBase: 0,
       aiuAmount: 0,
       contractAmount: 0,
       replaces: 0,
+      marks: [],
+      markTaxes: [],
       unresolvedTaxes: [],
       parts: [],
     };
@@ -5243,18 +6056,58 @@ export class InvoiceCreatePageComponent implements OnInit {
   // un impuesto de línea: no suma al total y se captura en su propia sección.
 
   /**
-   * Escribe las líneas del AIU con lo que las cuatro configuraciones del perfil
-   * dicen. Acción explícita del usuario.
+   * Aplica la base AIU al documento. Acción explícita del usuario — o, la
+   * PRIMERA vez y sobre un documento virgen, del efecto del paso 8.
    *
-   * REEMPLAZA las líneas que ya llevan componente y NO TOCA las de costo. Por
-   * eso es idempotente —pulsarlo dos veces da el mismo documento— y por eso no
-   * puede destruir lo capturado a mano: el costo es lo que el operador escribió,
-   * y el AIU es lo que se deduce de él.
+   * Ramifica por el modelo de contabilización, que es lo que cambia la forma
+   * del documento y no sólo su presentación:
+   *
+   * · `'creacion'` (`'sumada'`) — REEMPLAZA las líneas que ya llevan componente
+   *   y NO TOCA las de costo. Es idempotente —pulsarlo dos veces da el mismo
+   *   documento— y no puede destruir lo capturado a mano: el costo es lo que el
+   *   operador escribió y el AIU es lo que se deduce de él.
+   * · `'marcado'` (`'no_sumada'`) — no crea, no borra y no reordena NADA: marca
+   *   las líneas existentes como `'contrato'` y les escribe los tributos de las
+   *   porciones gravables. El `line_extension_amount` del documento queda
+   *   idéntico antes y después, que es la promesa del modelo.
    */
   applyAiuBase(): void {
     const plan = this.aiuApplyPlan();
     if (!plan || !plan.ready) return;
 
+    if (plan.mode === 'marcado') {
+      this.applyAiuMarking(plan);
+    } else {
+      this.applyAiuLineCreation(plan);
+    }
+
+    this.itemsArray.updateValueAndValidity();
+    this.itemsArray.markAsDirty();
+    // Paso 8: a partir de aquí la base NUNCA se vuelve a aplicar sola. Se
+    // recuerda además la huella del documento aplicado para poder callar
+    // mientras no cambie, y avisar en cuanto cambie.
+    this.aiuBaseApplied.set(true);
+    this.aiuAppliedFingerprint.set(this.aiuFingerprint());
+    this.toastService.success(this.aiuAppliedMessage(plan));
+  }
+
+  /**
+   * MODELO 1 — marcar lo que hay. Ni una línea nueva, ni una borrada.
+   *
+   * El componente se escribe con `emitEvent` por omisión: en Zoneless la tabla
+   * de líneas se redibuja por `valueChanges`, y silenciarlo dejaría la marca en
+   * el modelo y el selector en blanco en pantalla.
+   */
+  private applyAiuMarking(plan: AiuApplyPlan): void {
+    applyAiuMarkingToRows(
+      this.itemsArray.controls,
+      plan.marks,
+      plan.markTaxes,
+    );
+  }
+
+  /** MODELO 2 — el código de siempre: fuera las viejas, dentro las tres nuevas. */
+  private applyAiuLineCreation(plan: AiuApplyPlan): void {
     // Primero fuera las viejas, de atrás hacia adelante: quitar por índice
     // ascendente desplaza los que faltan y borra la línea equivocada.
     for (let i = this.itemsArray.length - 1; i >= 0; i--) {
@@ -5280,15 +6133,32 @@ export class InvoiceCreatePageComponent implements OnInit {
       });
       group.markAsDirty();
     }
+  }
 
-    this.itemsArray.updateValueAndValidity();
-    this.itemsArray.markAsDirty();
-    this.toastService.success(
-      'Base AIU aplicada: ' +
-        plan.parts.length +
-        ' línea(s) por ' +
+  /**
+   * La constancia de lo aplicado NOMBRA EL MODELO.
+   *
+   * Sin el modelo en la frase, «Base AIU aplicada» describe igual de bien las
+   * dos cosas opuestas que puede haber pasado —tres renglones nuevos que suman
+   * al total, o una marca que no lo mueve—, y el operador no tiene forma de
+   * saber cuál le tocó hasta que mira el total.
+   */
+  private aiuAppliedMessage(plan: AiuApplyPlan): string {
+    if (plan.mode === 'marcado') {
+      return (
+        'Base AIU aplicada (modelo no sumada): ' +
+        plan.marks.length +
+        ' línea(s) marcada(s) como contrato, con ' +
         this.formatCurrency(plan.aiuAmount) +
-        '.',
+        ' de AIU dentro. El total del documento no cambia.'
+      );
+    }
+    return (
+      'Base AIU aplicada (modelo sumada al total): ' +
+      plan.parts.length +
+      ' línea(s) por ' +
+      this.formatCurrency(plan.aiuAmount) +
+      '.'
     );
   }
 
@@ -5875,6 +6745,24 @@ export class InvoiceCreatePageComponent implements OnInit {
       });
     });
 
+    // PASO 8 — LA BASE AIU SE APLICA SOLA, UNA ÚNICA VEZ.
+    //
+    // El dueño lo pidió con estas palabras: «no sabía que había que aplicarlo,
+    // eso debería auto-aplicarse». El automatismo se limita a un documento
+    // VIRGEN —operación 09, porcentajes configurados, líneas capturadas y
+    // ninguna con componente todavía— porque sobrescribir un reparto que
+    // alguien corrigió a mano cuesta mucho más caro que el clic que ahorra: el
+    // operador no vería el cambio y el documento se emitiría con cifras que él
+    // no escribió. De ahí en adelante manda `aiuReapplyNeeded()`, que AVISA y
+    // ofrece re-aplicar en vez de imponerlo.
+    //
+    // No hay ciclo posible: `applyAiuBase()` enciende `aiuBaseApplied`, y la
+    // segunda pasada del efecto sale por la primera condición.
+    effect(() => {
+      if (!shouldAutoApplyAiuBase(this.aiuAutoApplyState())) return;
+      this.applyAiuBase();
+    });
+
     // EL MODAL ESPERA EL DESENLACE. Sin esto, "cerrar" significaba únicamente
     // "se despachó la acción", que es cierto tanto cuando la factura se creó
     // como cuando el backend la rechazó.
@@ -6444,6 +7332,16 @@ export class InvoiceCreatePageComponent implements OnInit {
       return;
     }
     if (this.lineCarriesAiu(item)) return;
+    // BAJO EL MODELO 1 NO HAY PORCIÓN QUE PROPONER: la línea vale el contrato
+    // y lleva el AIU dentro, así que la única marca válida es `'contrato'`.
+    // Proponer «Administración» acá construiría el documento híbrido —una
+    // línea de contrato junto a líneas de porción— que declara el AIU dos
+    // veces y que el backend rechaza.
+    if (this.documentAccountingModel() === 'no_sumada') {
+      control.setValue('contrato');
+      control.markAsDirty();
+      return;
+    }
     // Primer componente GRAVABLE de la base vigente, leído de la tabla del
     // contrato. Con `'utilidad'` sólo grava la utilidad; con `'aiu'` y con
     // `'subtotal'` graban los tres, y se propone Administración.
@@ -7606,6 +8504,11 @@ export class InvoiceCreatePageComponent implements OnInit {
   private buildPayload(): CreateInvoiceDto {
     const raw = this.rawValue();
     const math = this.lineMath();
+    // Vacío salvo Modelo 1 — ver `aiuTaxableShares`. Es la MISMA lectura que
+    // escala la barra de totales: si el payload y la pantalla derivaran la base
+    // gravable por su cuenta, el operador emitiría una cifra distinta de la que
+    // leyó.
+    const shares = this.aiuTaxableShares();
 
     const items: InvoiceCreateItemPayload[] = (
       raw['items'] as InvoiceItemFormValue[]
@@ -7630,9 +8533,20 @@ export class InvoiceCreatePageComponent implements OnInit {
         payload.aiu_component = item.aiu_component as
           | 'administracion'
           | 'imprevistos'
-          | 'utilidad';
+          | 'utilidad'
+          | 'contrato';
       }
       if (taxes.length > 0) {
+        // BAJO EL MODELO 1 LA BASE GRAVABLE NO ES EL IMPORTE DE LA LÍNEA.
+        //
+        // Una línea `'contrato'` vale el contrato y grava sólo las porciones
+        // que la base declarada admite: con 5/2/3 y base `'utilidad'`, una
+        // línea de $2.328.800 declara $69.864. Mandar su importe entero —que es
+        // lo que hacía este `round2(base)` para todas— declararía una base
+        // treinta veces mayor que la que el calculador persiste. Fuera del
+        // Modelo 1 el factor es 1 y el valor es el de siempre, al centavo.
+        const taxableShare = shares[index] ?? 1;
+        const taxableAmount = round2(base * taxableShare);
         payload.taxes = taxes.map((tax) => ({
           // Sólo un identificador REAL de `tax_rates` viaja: el catálogo marca
           // con negativo la categoría legada que no tiene fila de tarifa, y esa
@@ -7640,7 +8554,7 @@ export class InvoiceCreatePageComponent implements OnInit {
           ...(tax.tax_rate_id > 0 ? { tax_rate_id: tax.tax_rate_id } : {}),
           tax_name: tax.name,
           tax_rate: Number(tax.rate) || 0,
-          taxable_amount: round2(base),
+          taxable_amount: taxableAmount,
           // CERO A PROPÓSITO. El backend recalcula toda la aritmética con
           // `Prisma.Decimal` y su resultado manda. El único caso que rechaza
           // (`INVOICING_CALC_001`) es un importe distinto de cero SIN tarifa de
@@ -8246,6 +9160,12 @@ export class InvoiceCreatePageComponent implements OnInit {
     // llegue la configuración del perfil.
     this.aiuTaxesArray.clear();
     this.aiuSeeded.set(false);
+    // El documento nuevo vuelve a ser virgen, así que la base AIU vuelve a
+    // poder aplicarse sola. Sin esto, el segundo documento de la sesión
+    // exigiría el clic que el primero se ahorró — y nadie relaciona «ya lo
+    // apliqué una vez» con «esta factura es otra».
+    this.aiuBaseApplied.set(false);
+    this.aiuAppliedFingerprint.set(null);
     this.invoiceForm.reset({
       invoice_type: 'sales_invoice',
       // A `null` a propósito: el efecto de preselección vuelve a elegir la

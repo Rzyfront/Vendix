@@ -17,7 +17,32 @@ import {
   TaxOption,
   TaxSelection,
 } from '../../../../../../shared/components/tax-selector';
+import { isAiuLineTaxable } from '../../../../../../core/utils/invoice-profile-config.contract';
+import type {
+  AiuBucket,
+  AiuLineComponent,
+  AiuTaxableBasis,
+} from '../../../../../../core/utils/invoice-profile-config.contract';
 import { TaxInclusiveChipComponent } from './tax-inclusive-chip.component';
+
+/**
+ * Cómo se NOMBRA la porción que la base declarada deja fuera.
+ *
+ * El rótulo tiene que decir CUÁL porción es, no sólo que hay una: bajo base
+ * `'utilidad'` conviven en la misma factura una Administración fuera de base y
+ * una Utilidad dentro, y un texto que sólo dijera «fuera de la base gravable
+ * AIU» no permitiría distinguir el renglón correcto del renglón mal marcado.
+ *
+ * La entrada `costo` conserva LITERALMENTE la copia anterior —cuando el único
+ * caso contemplado era el costo reembolsable— para que la constancia que el
+ * operador ya conoce no cambie de redacción al ganar hermanas.
+ */
+const AIU_OUT_OF_BASE_NOTICE: Readonly<Record<AiuBucket, string>> = {
+  costo: 'Costo reembolsable — fuera de la base gravable AIU.',
+  administracion: 'Administración — fuera de la base gravable AIU.',
+  imprevistos: 'Imprevistos — fuera de la base gravable AIU.',
+  utilidad: 'Utilidad — fuera de la base gravable AIU.',
+};
 
 /**
  * IMPUESTOS DE UNA LÍNEA — VARIOS, DEL CATÁLOGO REAL DE LA TIENDA.
@@ -176,11 +201,11 @@ import { TaxInclusiveChipComponent } from './tax-inclusive-chip.component';
       </div>
 
       @if (value().length === 0) {
-        @if (aiuCostLine()) {
+        @if (aiuOutOfBaseNotice(); as notice) {
           <p
             class="mt-1 text-[11px] leading-snug text-[var(--color-text-secondary)]"
           >
-            Costo reembolsable — fuera de la base gravable AIU.
+            {{ notice }}
           </p>
         } @else {
           <p class="mt-1 text-[11px] leading-snug text-warning">
@@ -271,14 +296,27 @@ export class InvoiceLineTaxesComponent implements ControlValueAccessor {
   readonly taxes = input<TaxOption[]>([]);
 
   /**
-   * La línea es costo reembolsable de un contrato AIU: suma al valor del
-   * contrato y queda fuera de la base gravable, así que salir sin impuesto NO
-   * afirma nada fiscal — no es una operación excluida ni exenta. Con `true`,
-   * el aviso de «línea sin impuesto» y su mensaje espejo se sustituyen por la
-   * constancia neutra. En `false` (una factura que no es AIU, o una línea que
-   * sí lleva componente) la copia no cambia ni una coma.
+   * Componente AIU declarado por la línea; `null` cuando no lleva ninguno —la
+   * porción de COSTO reembolsable, que es la ausencia de componente y no un
+   * componente más—.
+   *
+   * Sustituye al booleano `aiuCostLine`, que sólo sabía distinguir «lleva
+   * componente» de «no lleva», y por eso acusaba de sub-declarar a una
+   * Administración que bajo base `'utilidad'` está CORRECTAMENTE sin impuesto.
+   * Quién grava no lo decide la presencia del componente sino la pareja
+   * componente + base declarada, así que las dos viajan juntas.
    */
-  readonly aiuCostLine = input(false);
+  readonly aiuLineComponent = input<AiuLineComponent | null>(null);
+
+  /**
+   * Base gravable AIU del documento; `null` cuando el documento NO es AIU.
+   *
+   * `null` —y no una base por omisión— es lo que preserva la copia histórica
+   * en las facturas ordinarias: sin base declarada no hay porción que pueda
+   * quedar «fuera de base», así que una línea sin impuesto sigue afirmando una
+   * operación excluida o exenta, exactamente como antes de este input.
+   */
+  readonly aiuTaxableBasis = input<AiuTaxableBasis | null>(null);
 
   /** Valor del control: los impuestos declarados para esta línea. */
   readonly value = signal<TaxSelection[]>([]);
@@ -289,18 +327,46 @@ export class InvoiceLineTaxesComponent implements ControlValueAccessor {
   readonly catalogEmpty = computed(() => this.taxes().length === 0);
 
   /**
+   * La constancia neutra que reemplaza al aviso de sub-declaración, o `null`
+   * si la línea sí debía llevar impuesto.
+   *
+   * La regla NO se reescribe acá: la resuelve `isAiuLineTaxable`, que a su vez
+   * lee `AIU_TAXABLE_BUCKETS_BY_BASIS`. Ésa es la misma tabla que gobierna el
+   * cálculo del backend, así que el aviso de la pantalla y la base que se
+   * declara ante la DIAN no pueden divergir — que es justo lo que pasaba
+   * cuando el predicado preguntaba por la presencia del componente.
+   *
+   * `'contrato'` (Modelo 1) no puede quedar fuera de base bajo ninguna de las
+   * tres bases —contiene siempre alguna porción gravable—, así que la guarda
+   * es defensiva y sólo existe para que el rótulo, que se indexa por PORCIÓN,
+   * no reciba algo que no lo es.
+   */
+  readonly aiuOutOfBaseNotice = computed<string | null>(() => {
+    const basis = this.aiuTaxableBasis();
+    if (basis === null) return null;
+
+    const component = this.aiuLineComponent();
+    if (isAiuLineTaxable(component, basis)) return null;
+    if (component === 'contrato') return null;
+
+    return AIU_OUT_OF_BASE_NOTICE[component ?? 'costo'];
+  });
+
+  /**
    * Qué significa el estado actual del campo, en el tooltip del disparador.
-   * Es el espejo del párrafo de abajo: con `aiuCostLine` la línea sin
-   * impuesto es un costo reembolsable fuera de base, no una operación excluida
-   * o exenta, y el tooltip lo dice igual.
+   * Es el espejo del párrafo de abajo: cuando la porción de la línea queda
+   * fuera de la base declarada, la línea sin impuesto no afirma una operación
+   * excluida ni exenta, y el tooltip dice la misma constancia con el mismo
+   * nombre de porción.
    */
   readonly triggerHint = computed(() => {
     if (this.value().length > 0) {
       return 'Agregar otro impuesto a esta línea. Una línea colombiana puede llevar varios (IVA + INC).';
     }
-    return this.aiuCostLine()
-      ? 'Costo reembolsable — fuera de la base gravable AIU.'
-      : 'Esta línea no declara ningún impuesto: sale al XML como operación excluida o exenta. Sólo es correcto si realmente lo es.';
+    return (
+      this.aiuOutOfBaseNotice() ??
+      'Esta línea no declara ningún impuesto: sale al XML como operación excluida o exenta. Sólo es correcto si realmente lo es.'
+    );
   });
 
   readonly visibleTaxes = computed<TaxOption[]>(() => {

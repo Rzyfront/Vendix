@@ -3,6 +3,10 @@ import { DianTotalsValidator } from './dian-totals.validator';
 import { UblCommonBuilder, UblDocumentLine } from './ubl-common.builder';
 import { UBL_NAMESPACES } from './xml-namespaces';
 import { ProviderInvoiceTax } from '../../invoice-provider.interface';
+import {
+  InvoiceCalculatorInput,
+  InvoiceCalculatorService,
+} from '../../../services/invoice-calculator.service';
 
 /**
  * El documento que la DIAN rechazó el 17/08/2026 (transmisión 7, `VEND1`): una
@@ -1187,6 +1191,153 @@ describe('D.6 — matriz AIU: 3 bases × 2 modelos × piso (con/sin) sobre la co
         '<cbc:TaxableAmount currencyID="COP">3500000.00</cbc:TaxableAmount>',
       );
 
+      expectClean(xml);
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Modelo 1 «no sumada» — con las cifras del CALCULADOR, no escritas a mano
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Las celdas de arriba alimentan el emisor con importes escritos a mano, y
+   * eso las hace ciegas a un defecto que ya ocurrió una vez en este dominio: si
+   * quien calcula y quien escribe el test son la misma persona con la misma
+   * idea equivocada, el XML cuadra consigo mismo y la DIAN lo rechaza igual.
+   * Este bloque cierra ese hueco corriendo la cadena COMPLETA —
+   * `InvoiceCalculatorService` → `UblCommonBuilder` → `DianTotalsValidator`—
+   * sobre el modelo de contabilización «no sumada», donde la línea vale el
+   * CONTRATO y sólo una fracción declara base gravable.
+   *
+   * Es exactamente la divergencia legítima entre FAU02 (bruto) y FAU04 (base)
+   * que el docblock del validador describe, llevada a su caso extremo: el bruto
+   * es diez veces la base.
+   */
+  describe('Modelo 1 «no sumada»: la línea vale el contrato y el AIU va dentro', () => {
+    /** El caso del dueño: $2.328.800 con AIU del 10 % repartido 5/2/3. */
+    const COMPONENTS = {
+      administracion: '5',
+      imprevistos: '2',
+      utilidad: '3',
+    };
+
+    function noSumada(
+      taxable_basis: NonNullable<InvoiceCalculatorInput['aiu']>['taxable_basis'],
+      amounts: readonly string[],
+      components: Readonly<Record<string, string>> = COMPONENTS,
+    ): InvoiceCalculatorInput {
+      return {
+        aiu: { taxable_basis, components_basis: 'contract', components },
+        items: amounts.map((unit_price, i) => ({
+          description: `Servicio de aseo ${i + 1} — contrato AIU`,
+          quantity: 1,
+          unit_price,
+          aiu_component: 'contrato' as const,
+          taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+        })),
+      };
+    }
+
+    /**
+     * Traduce el resultado del calculador a lo que el emisor recibe. Es el
+     * mismo puente que arma `DianDirectProvider`, reducido a lo que estas
+     * reglas miran: importe de línea, base propia por tributo y la bandera de
+     * la línea que calla.
+     */
+    function emitCalculated(input: InvoiceCalculatorInput): {
+      xml: string;
+      totals: Record<string, string>;
+      result: ReturnType<InvoiceCalculatorService['calculate']>;
+    } {
+      const result = new InvoiceCalculatorService().calculate(input);
+      const { xml, totals } = emit({
+        discount_amount: result.totals.discount_amount,
+        tax_amount: result.totals.tax_amount,
+        items: result.lines.map((calculated) =>
+          line({
+            description: calculated.description,
+            unit_price: calculated.line_extension_amount,
+            total_amount: calculated.total_amount,
+            tax_amount: calculated.tax_amount,
+            omit_tax_total: calculated.omit_tax_total,
+            taxes: calculated.taxes.length > 0 ? calculated.taxes : undefined,
+          }),
+        ),
+        taxes: result.header_taxes,
+      });
+      return { xml, totals, result };
+    }
+
+    it('DOS líneas Modelo 1: FAU02, FAU04 y FAU06 cuadran sobre el mismo documento', () => {
+      const { xml, totals, result } = emitCalculated(
+        noSumada('utilidad', ['2328800', '1000000']),
+      );
+
+      // FAU02 — el bruto de la cabecera es la Σ de los contratos, íntegros.
+      expect(totals.LineExtensionAmount).toBe('3328800.00');
+      // FAU04 — la base es la Σ de las porciones Utilidad de LAS DOS líneas:
+      // 69.864,00 + 30.000,00. Que fuera sólo la de la primera es el defecto
+      // que este caso existe para impedir.
+      expect(totals.TaxExclusiveAmount).toBe('99864.00');
+      // FAU06 — bruto + tributos de cabecera: 3.328.800 + 18.974,16.
+      expect(totals.TaxInclusiveAmount).toBe('3347774.16');
+      expect(totals.PayableAmount).toBe('3347774.16');
+
+      // Ninguna línea desaparece ni se agrega: el modelo «no sumada» no crea
+      // renglones de cobro, que es el defecto reportado en producción.
+      expect(xml.split('<cac:InvoiceLine>').slice(1)).toHaveLength(2);
+      expect(result.aiu?.contract_value).toBe('3328800.00');
+      expect(result.aiu?.aiu_value).toBe('332880.00');
+
+      expectClean(xml);
+    });
+
+    it('las TRES bases producen documentos que la compuerta acepta', () => {
+      // Misma línea, tres bases gravables: la base declarada cambia cuánto
+      // entra a `cbc:TaxableAmount`, nunca cuánto vale la línea.
+      const porBase = {
+        aiu: emitCalculated(noSumada('aiu', ['2328800'])),
+        utilidad: emitCalculated(noSumada('utilidad', ['2328800'])),
+        subtotal: emitCalculated(noSumada('subtotal', ['2328800'])),
+      };
+
+      for (const caso of Object.values(porBase)) {
+        expect(caso.totals.LineExtensionAmount).toBe('2328800.00');
+        expectClean(caso.xml);
+      }
+
+      expect(porBase.aiu.totals.TaxExclusiveAmount).toBe('232880.00');
+      expect(porBase.utilidad.totals.TaxExclusiveAmount).toBe('69864.00');
+      expect(porBase.subtotal.totals.TaxExclusiveAmount).toBe('2328800.00');
+    });
+
+    it('el piso del 10 % rechaza nombrando cuánto falta, aunque el XML cuadre', () => {
+      // AIU del 9 % (4/2/3): aritméticamente impecable —esta compuerta lo
+      // valida limpio, igual que la Base 3 de la matriz— y sin embargo
+      // inemitible, porque incumple el mínimo del E.T. art. 462-1. Son DOS
+      // reglas distintas, y confundirlas deja pasar el documento que la DIAN
+      // rechaza con el consecutivo ya gastado.
+      const { xml, totals, result } = emitCalculated(
+        noSumada('aiu', ['2328800'], {
+          administracion: '4',
+          imprevistos: '2',
+          utilidad: '3',
+        }),
+      );
+
+      const floor = result.divergences.find(
+        (d) => d.scope === 'aiu_base_below_minimum',
+      );
+      expect(floor).toBeDefined();
+      expect(floor?.expected).toBe('232880.00'); // 10 % del contrato
+      expect(floor?.received).toBe('209592.00'); // el 9 % declarado
+      expect(floor?.difference).toBe('-23288.00'); // cuánto falta
+
+      expect(totals.LineExtensionAmount).toBe('2328800.00');
+      expect(totals.TaxExclusiveAmount).toBe('209592.00');
+      expect(Number(totals.TaxExclusiveAmount)).toBeLessThan(
+        Number(totals.LineExtensionAmount) * 0.1,
+      );
       expectClean(xml);
     });
   });

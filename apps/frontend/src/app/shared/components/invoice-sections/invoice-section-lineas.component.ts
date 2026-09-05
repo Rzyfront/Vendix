@@ -16,10 +16,42 @@ import { ToggleComponent } from '../toggle/toggle.component';
 import type { TaxOption } from '../tax-selector';
 import { InvoiceLineTaxesComponent } from '../../../private/modules/store/invoicing/components/invoice-create/invoice-line-taxes.component';
 import { remainingChars, showCharCounter } from '../../../private/modules/store/invoicing/utils/char-limit.util';
+import { AIU_COMPONENTS } from '../../../core/utils/invoice-profile-config.contract';
+import type {
+  AiuLineComponent,
+  AiuTaxableBasis,
+} from '../../../core/utils/invoice-profile-config.contract';
 import type { InvoiceSectionContext } from './invoice-section-context';
 import { isInvoiceContext, isProfileContext } from './invoice-section-context';
 
 const NBSP_LABEL_FALLBACK = 'Vincular producto';
+
+/**
+ * Valores que el control de componente AIU puede llevar, para efectos de
+ * gravabilidad. Es el conjunto literal del tipo `AiuLineComponent`, NO una
+ * regla: quién grava lo sigue decidiendo `isAiuLineTaxable` sobre
+ * `AIU_TAXABLE_BUCKETS_BY_BASIS`. Existe sólo para no dejar pasar una cadena
+ * arbitraria del formulario a un input tipado.
+ */
+const AIU_LINE_COMPONENTS: readonly AiuLineComponent[] = [
+  ...AIU_COMPONENTS,
+  'contrato',
+];
+
+/**
+ * Traduce el valor CRUDO del control de componente AIU al vocabulario del
+ * contrato fiscal. Exportada —y no un método privado— para poder custodiarla
+ * sin montar la sección entera, que arrastra `app-input` y con él el servicio
+ * de moneda, `HttpClient` y la fachada de tenant.
+ *
+ * Todo lo que no esté en la lista (el control aún vacío, un `'costo'` que el
+ * perfil usa para codificar «apagado», una cadena de una versión futura) cae a
+ * `null`, que `isAiuLineTaxable` lee como la porción de COSTO reembolsable.
+ */
+export function resolveAiuLineComponent(raw: unknown): AiuLineComponent | null {
+  const value = String(raw ?? '').trim();
+  return AIU_LINE_COMPONENTS.find((component) => component === value) ?? null;
+}
 
 /**
  * Dónde vive cada campo DENTRO de cada fila (no en la raíz del formulario:
@@ -277,10 +309,21 @@ export interface LineasRowErrors {
               doce columnas y con dos o tres impuestos empujaban el disparador
               a otro renglón.
             -->
+            <!--
+              LA GRAVABILIDAD NO SE DECIDE ACÁ, SE REENVÍA.
+
+              Antes esta línea mandaba un booleano —«no lleva componente»— y
+              con eso el hijo acusaba de sub-declarar a toda línea marcada sin
+              impuesto, incluidas Administración e Imprevistos, que bajo base
+              'utilidad' están correctamente sin él. Ahora viajan los dos
+              datos crudos (porción y base) y la decisión la toma
+              isAiuLineTaxable, único punto donde vive la tabla.
+            -->
             <vendix-invoice-line-taxes
               [formControl]="rowControl(row, rowPaths().taxes!)"
               [taxes]="availableTaxes()"
-              [aiuCostLine]="isAiu() && !carriesAiu()(row, i)"
+              [aiuLineComponent]="aiuLineComponentFor(row, i)"
+              [aiuTaxableBasis]="isAiu() ? aiuTaxableBasis() : null"
             />
           </div>
         } @else {
@@ -471,6 +514,21 @@ export class InvoiceSectionLineasComponent {
 
   readonly isAiu = input.required<boolean>();
   readonly aiuComponentOptions = input.required<SelectorOption[]>();
+
+  /**
+   * Base gravable AIU declarada por el documento o por el perfil. Decide qué
+   * porciones entran a la base, y con eso cuáles pueden salir sin impuesto sin
+   * estar sub-declarando.
+   *
+   * Por omisión `'aiu'` A PROPÓSITO, y no `null` ni requerida: bajo esa base
+   * gravan las tres porciones y sólo el costo reembolsable queda fuera, que es
+   * EXACTAMENTE la pregunta que este componente hacía antes («¿lleva
+   * componente?»). Las superficies que todavía no la pasan —el editor de
+   * perfiles de tienda, y las dos consolas de plataforma— siguen pintando lo
+   * mismo carácter por carácter; sólo cambia el comportamiento de quien la
+   * declara distinta.
+   */
+  readonly aiuTaxableBasis = input<AiuTaxableBasis>('aiu');
   /**
    * No nula SÓLO en contexto `invoice`: cuando llega, `unit_code` se pinta
    * como `app-selector` con este catálogo. Cuando es `null` (perfil), se
@@ -544,6 +602,28 @@ export class InvoiceSectionLineasComponent {
 
   errorsFor(index: number): LineasRowErrors {
     return this.rowErrors()[index] ?? {};
+  }
+
+  /**
+   * Qué porción del AIU declara ESTA fila, en el vocabulario del contrato
+   * fiscal y no en el del formulario.
+   *
+   * El estado «apagado» sigue leyéndose por `carriesAiu()` y no por el valor
+   * del control, porque cada pantalla lo codifica distinto (cadena vacía en la
+   * factura, `'costo'` en el perfil) y ese es justamente el conocimiento que
+   * este componente no tiene. Apagado significa `null`, que
+   * `isAiuLineTaxable` traduce al bucket `'costo'`.
+   *
+   * Un valor que no esté en la lista —el control vacío mientras el operador
+   * aún no elige— vuelve a `null` en vez de propagarse: preferimos tratar la
+   * fila como costo reembolsable a mandar una cadena suelta a un input tipado.
+   */
+  aiuLineComponentFor(
+    row: AbstractControl,
+    index: number,
+  ): AiuLineComponent | null {
+    if (!this.isAiu() || !this.carriesAiu()(row, index)) return null;
+    return resolveAiuLineComponent(row.get(this.rowPaths().aiu_field)?.value);
   }
 
   /** Sólo tiene sentido en contexto `invoice`: el perfil no vincula producto. */
