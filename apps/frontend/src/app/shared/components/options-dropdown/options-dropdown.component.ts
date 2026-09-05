@@ -8,6 +8,7 @@ import {
   input,
   output,
   signal,
+  untracked,
   viewChild
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -107,18 +108,41 @@ export class OptionsDropdownComponent {
   constructor() {
     // Sync filterValues input → local state.
     //
-    // La guarda de igualdad superficial importa: varios padres reconstruyen el
-    // objeto `filterValues` en cada emisión (`this.filterValues = {...}`), así
-    // que sin ella el effect corría en cada ciclo y podía pisar una edición
-    // local todavía en debounce. Con `'date-range'` esto se agrava, porque un
-    // solo filtro escribe TRES keys y el padre las devuelve reconstruidas.
+    // BUG FIX admin-orders-filters: antes leíamos `this.localFilterValues()`
+    // directamente dentro del effect (vía `shallowEqual` y vía
+    // `calculateActiveFiltersCount`), lo que creaba una dependencia
+    // reactiva entre el effect y `localFilterValues`. Resultado: cuando el
+    // usuario seleccionaba un filtro, `onFilterChange()` escribía en
+    // `localFilterValues` con el valor nuevo, el effect se re-disparaba
+    // antes de que el debounce emitiera, leía el `filterValues` del
+    // padre (que aún estaba vacío), lo copiaba sobre `localFilterValues`
+    // y CANCELABA la selección del usuario antes de que llegara al
+    // backend. Síntomas: filtrar por "Entregada" mostraba órdenes en
+    // "Procesando"; filtrar por "Tienda Online" devolvía órdenes POS;
+    // el usuario percibía "click afuera del modal pierde los filtros"
+    // porque la cancelación ocurre en el mismo frame que la selección.
+    //
+    // La guarda de igualdad superficial importa: varios padres reconstruyen
+    // el objeto `filterValues` en cada emisión (`this.filterValues = {...}`),
+    // así que sin ella el effect corría en cada ciclo y podía pisar una
+    // edición local todavía en debounce. Con `'date-range'` esto se agrava,
+    // porque un solo filtro escribe TRES keys y el padre las devuelve
+    // reconstruidas.
+    //
+    // El `untracked()` evita que el effect se suscriba a `localFilterValues`
+    // y, por tanto, que se re-dispare cada vez que el usuario edita el
+    // dropdown. La sincronía padre→local sigue siendo reactiva (sólo
+    // depende de `this.filterValues()`).
     effect(() => {
       const incoming = this.filterValues();
-      if (this.shallowEqual(incoming, this.localFilterValues())) {
-        return;
-      }
-      this.localFilterValues.set({ ...incoming });
-      this.calculateActiveFiltersCount();
+      untracked(() => {
+        const local = this.localFilterValues();
+        if (this.shallowEqual(incoming, local)) {
+          return;
+        }
+        this.localFilterValues.set({ ...incoming });
+        this.calculateActiveFiltersCount();
+      });
     });
 
     // Single pipeline: switchMap re-crea la espera cuando llega un nuevo cambio,
