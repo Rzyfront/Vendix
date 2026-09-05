@@ -1,8 +1,17 @@
+import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { InvoicingService } from './invoicing.service';
-import { CreateInvoiceDto } from './dto/create-invoice.dto';
-import { InvoiceCalculatorService } from './services/invoice-calculator.service';
+import {
+  CreateInvoiceDto,
+  CreateInvoiceItemDto,
+} from './dto/create-invoice.dto';
+import {
+  InvoiceCalculatorAiuInput,
+  InvoiceCalculatorResult,
+  InvoiceCalculatorService,
+} from './services/invoice-calculator.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 describe('InvoicingService support adjustment notes', () => {
   const requestContext = {
@@ -310,5 +319,162 @@ describe('InvoicingService support adjustment notes', () => {
       // Error invoice not present in the queue: retry_status null.
       expect(result.data[2].retry_status).toBeNull();
     });
+  });
+});
+
+/**
+ * D.4 revisitado — un contrato AIU puede facturar VARIOS servicios, así que el
+ * documento admite N líneas `aiu_component: 'contrato'` (Modelo 1). Lo que
+ * `recalculateDocument` sigue frenando es MEZCLAR el Modelo 1 con el Modelo 2
+ * (líneas por componente), porque el primero lleva el AIU dentro del importe de
+ * la línea y el segundo lo suma aparte: combinarlos contaría el mismo AIU dos
+ * veces.
+ *
+ * Se instancia por prototipo, igual que
+ * `invoicing.service.aiu-contrato-exclusivity.spec.ts`: `recalculateDocument`
+ * sólo toca `this.calculator` y `this.applyTaxCatalogToLine` (que retorna
+ * temprano con el catálogo vacío), y el `throw` ocurre antes de cualquier
+ * lectura a Prisma. Levantar el grafo de dependencias mediría el grafo, no la
+ * regla.
+ */
+describe('InvoicingService · N líneas Modelo 1 en un documento (D.4)', () => {
+  /**
+   * Superficie privada bajo prueba, declarada en vez de casteada a `any` para
+   * que un cambio de firma de `recalculateDocument` rompa la compilación de
+   * esta suite en lugar de dejarla verde midiendo otra cosa.
+   */
+  interface RecalculateHarness {
+    calculator: InvoiceCalculatorService;
+    logger: Pick<Logger, 'warn'>;
+    recalculateDocument(
+      items: CreateInvoiceItemDto[],
+      snapshots: { price_unit_quantity?: number }[],
+      label: string,
+      aiu?: InvoiceCalculatorAiuInput,
+    ): InvoiceCalculatorResult;
+  }
+
+  const buildHarness = (): RecalculateHarness => {
+    const service = Object.create(
+      InvoicingService.prototype,
+    ) as RecalculateHarness;
+    // Instancia REAL: el motor es puro y mockearlo dejaría sin cubrir las
+    // divergencias que esta regla decide ignorar o traducir.
+    service.calculator = new InvoiceCalculatorService();
+    // El logger SÍ hace falta: `recalculateDocument` avisa por él cuando su
+    // lectura de la mezcla y la del calculador no coinciden, y sin el doble esa
+    // traza tumbaría el caso que debe pasar. El calculador ya NO reporta
+    // `aiu_contrato_mutually_exclusive` por el mero conteo de líneas
+    // «contrato» —esa es la regla que cambió—: sólo cuando de verdad se
+    // mezclan los dos modelos.
+    service.logger = { warn: jest.fn() };
+    return service;
+  };
+
+  const aiu: InvoiceCalculatorAiuInput = {
+    taxable_basis: 'aiu',
+    components: {
+      administracion: 6,
+      imprevistos: 1,
+      utilidad: 3,
+    },
+    components_basis: 'contract',
+  };
+
+  const item = (
+    overrides: Partial<CreateInvoiceItemDto>,
+  ): CreateInvoiceItemDto =>
+    ({
+      description: 'Servicio del contrato',
+      quantity: 1,
+      unit_price: 10_000_000,
+      // Con impuesto declarado para que el caso no caiga en `INVOICING_AIU_004`
+      // (componente gravable sin impuesto), que no es lo que estas pruebas
+      // aíslan.
+      taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+      ...overrides,
+    }) as CreateInvoiceItemDto;
+
+  it('Modelo 1: dos líneas «contrato» en el mismo documento ya NO se rechazan', () => {
+    const harness = buildHarness();
+    const items = [
+      item({ description: 'Aseo', aiu_component: 'contrato' }),
+      item({ description: 'Vigilancia', aiu_component: 'contrato' }),
+    ];
+
+    expect(() =>
+      harness.recalculateDocument(items, [], 'factura', aiu),
+    ).not.toThrow();
+  });
+
+  it('Modelo 1: las dos líneas «contrato» conservan su propio importe (el total no se consolida)', () => {
+    const harness = buildHarness();
+    const items = [
+      item({
+        description: 'Aseo',
+        aiu_component: 'contrato',
+        unit_price: 2_328_800,
+      }),
+      item({
+        description: 'Vigilancia',
+        aiu_component: 'contrato',
+        unit_price: 1_000_000,
+      }),
+    ];
+
+    const result = harness.recalculateDocument(items, [], 'factura', aiu);
+
+    expect(result.lines).toHaveLength(2);
+    expect(result.lines[0].line_extension_amount.toString()).toBe('2328800.00');
+    expect(result.lines[1].line_extension_amount.toString()).toBe('1000000.00');
+  });
+
+  it('Modelo 1 mezclado con Modelo 2 («contrato» + «utilidad») sigue devolviendo INVOICING_AIU_007', () => {
+    const harness = buildHarness();
+    const items = [
+      item({ description: 'Aseo', aiu_component: 'contrato' }),
+      item({ description: 'Utilidad', aiu_component: 'utilidad' }),
+    ];
+
+    let thrown: unknown;
+    try {
+      harness.recalculateDocument(items, [], 'factura', aiu);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(VendixHttpException);
+    const failure = thrown as VendixHttpException;
+    expect(failure.errorCode).toBe(ErrorCodes.INVOICING_AIU_007.code);
+    // El mensaje nombra los DOS modelos y la línea infractora: sin eso el
+    // operador no sabe cuál de los dos renglones corregir.
+    expect(failure.message).toContain('Modelo 1');
+    expect(failure.message).toContain('Modelo 2');
+    expect(failure.message).toContain('La línea 2');
+  });
+
+  it('Modelo 1 mezclado con Modelo 2 se detecta aunque haya VARIAS líneas «contrato»', () => {
+    // El calculador corta al contar más de una «contrato» y nunca llega a
+    // reportar la mezcla; por eso `recalculateDocument` la deriva de los
+    // `items` y no de las divergencias.
+    const harness = buildHarness();
+    const items = [
+      item({ description: 'Aseo', aiu_component: 'contrato' }),
+      item({ description: 'Vigilancia', aiu_component: 'contrato' }),
+      item({ description: 'Administración', aiu_component: 'administracion' }),
+    ];
+
+    let thrown: unknown;
+    try {
+      harness.recalculateDocument(items, [], 'factura', aiu);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(VendixHttpException);
+    expect((thrown as VendixHttpException).errorCode).toBe(
+      ErrorCodes.INVOICING_AIU_007.code,
+    );
+    expect((thrown as VendixHttpException).message).toContain('La línea 3');
   });
 });
