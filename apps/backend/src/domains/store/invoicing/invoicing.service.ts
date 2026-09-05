@@ -956,6 +956,7 @@ export class InvoicingService {
     // documento de un solo tributo NO se parte.
     const split_line_taxes = this.needsPersistedLineTaxes(
       calculated.header_taxes,
+      calculated.lines,
     );
 
     const invoice = await this.prisma.invoices.create({
@@ -1348,6 +1349,7 @@ export class InvoicingService {
 
     const split_line_taxes = this.needsPersistedLineTaxes(
       calculated.header_taxes,
+      calculated.lines,
     );
     // Las MISMAS filas que se escribirían, por los mismos dos caminos que
     // `create()` + `persistLineTaxes`. `invoice_item_id` no se proyecta: el
@@ -2569,6 +2571,7 @@ export class InvoicingService {
       recalculated_header_taxes = calculated.header_taxes;
       recalculated_line_taxes = this.needsPersistedLineTaxes(
         calculated.header_taxes,
+        calculated.lines,
       )
         ? calculated.lines.map((line) => line.taxes)
         : [];
@@ -2986,8 +2989,35 @@ export class InvoicingService {
    * `HEADER_TAX_TOTAL_MISMATCH` en el prevalidador y declaraciones fiscales
    * infladas. No es una opción "más segura", es la única que rompe todo.
    */
-  private needsPersistedLineTaxes(header_taxes: CalculatedTax[]): boolean {
-    return header_taxes.length >= 2;
+  private needsPersistedLineTaxes(
+    header_taxes: CalculatedTax[],
+    lines: CalculatedLine[],
+  ): boolean {
+    if (header_taxes.length >= 2) return true;
+
+    // SEGUNDA razón, y no es el número de tributos: que la base gravable de la
+    // línea NO sea su propio importe.
+    //
+    // Todo el párrafo de arriba —«con un único tributo el camino histórico
+    // produce EXACTAMENTE el mismo XML»— descansa en una premisa que el Modelo 1
+    // del AIU (`'no_sumada'`) rompe: que `cbc:TaxableAmount` de la línea es
+    // `cbc:LineExtensionAmount`. En una línea con `aiu_component: 'contrato'` la
+    // línea ES el contrato entero y su base es sólo una fracción —bajo Decreto
+    // 1372/1992, la utilidad—, así que el camino histórico declara una base
+    // varias veces mayor que la real. La factura 63 (`FVJL11`) lo produjo:
+    // 852.000 de base declarada con 4.856,40 de IVA al 19 %.
+    //
+    // El predicado pregunta por el HECHO, no por el modelo: cualquier línea
+    // cuya base declarada difiera de su importe necesita persistir su desglose,
+    // porque es la única estructura donde esa base cabe. Una línea que calla su
+    // grupo (`omit_tax_total`) no declara ninguna y no cuenta.
+    return lines.some(
+      (line) =>
+        !line.omit_tax_total &&
+        !new Prisma.Decimal(line.taxable_amount).equals(
+          new Prisma.Decimal(line.line_extension_amount),
+        ),
+    );
   }
 
   /**
@@ -3544,8 +3574,21 @@ export class InvoicingService {
         };
 
       entry.lines += 1;
+      // `taxable_amount` de la línea, NO `line_extension_amount`. El campo se
+      // llama «base gravable» y hasta acá guardaba el importe de la línea: en el
+      // Modelo 2 (`'sumada'`) los dos coinciden —cada componente es una línea y
+      // grava por entero o no grava—, así que la diferencia no se notaba. En el
+      // Modelo 1 (`'no_sumada'`) la línea ES el contrato y su base es una
+      // fracción: la matriz de la factura 63 (`FVJL11`) declaraba «contrato ·
+      // Grava · Base $2.328.800» donde la base real es $69.864, y esa fila la
+      // lee el operador en el panel de la factura antes de decidir si emite.
+      //
+      // Es la MISMA cifra que va al XML (`cbc:TaxableAmount`), y sale del mismo
+      // campo del calculador, así que la matriz y el documento ya no pueden
+      // discrepar. Una línea que calla su grupo trae `'0.00'` acá, que es lo que
+      // corresponde y lo que ya venía pasando por otra vía.
       entry.taxable_amount = entry.taxable_amount.plus(
-        new Prisma.Decimal(line.line_extension_amount),
+        new Prisma.Decimal(line.taxable_amount),
       );
       entry.tax_amount = entry.tax_amount.plus(
         new Prisma.Decimal(line.tax_amount),

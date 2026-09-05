@@ -2403,6 +2403,158 @@ export class InvoiceFlowService {
       }
     });
   }
+  /**
+   * Base gravable de la línea que ES EL CONTRATO ENTERO (Modelo 1).
+   *
+   * ## El defecto que cierra
+   *
+   * En el Modelo 2 (`'sumada'`) el AIU son LÍNEAS del documento: administración,
+   * imprevistos y utilidad van separadas, las que no gravan callan su grupo
+   * (`omit_tax_total`, FAX01) y la que grava declara como base su propio
+   * importe. Base = `cbc:LineExtensionAmount`, y todo el andamiaje histórico del
+   * emisor sirve tal cual.
+   *
+   * En el Modelo 1 (`'no_sumada'`) la línea es el contrato entero con
+   * `aiu_component: 'contrato'`. NO puede callar —sí grava— pero su base es
+   * sólo una FRACCIÓN de su importe: bajo Decreto 1372/1992, la utilidad. Y ahí
+   * el camino histórico del emisor miente: `buildLineTaxTotal`, cuando la línea
+   * no trae desglose propio, hereda el tributo de la cabecera y escribe
+   * `cbc:TaxableAmount = dianLineExtension(item)` — el importe COMPLETO.
+   *
+   * La factura 63 (`FVJL11`) lo hizo visible: dos líneas de 852.000 y 1.476.800
+   * con utilidad del 3 %, cuotas de 4.856,40 y 8.417,76 correctas al centavo, y
+   * un XML que habría declarado 852.000 de base gravable con 4.856,40 de IVA al
+   * 19 % — 33 veces la base real. `lineTaxableContribution` deriva de la misma
+   * función, así que `cbc:TaxExclusiveAmount` de cabecera habría publicado
+   * 2.328.800 donde la base es 69.864.
+   *
+   * ## Por qué la línea llega sin desglose
+   *
+   * `needsPersistedLineTaxes` sólo parte los tributos por línea a partir de DOS
+   * de cabecera, y `attachReconstructedLineTaxes` sale por `candidates.length <
+   * 2`. Una factura AIU con un único IVA cae en el hueco de los dos. Desde este
+   * cambio los documentos NUEVOS sí persisten su desglose —con la base que el
+   * calculador ya sabía—, pero los ya creados no lo tienen y hay que derivarlo.
+   *
+   * ## Cómo se deriva SIN inventar
+   *
+   * De la cuota misma: `base = cuota × divisor ÷ tarifa`. No es una estimación
+   * —es el despeje exacto de lo que el calculador computó como
+   * `tarifa × base_gravable`—, y deja `Percent × TaxableAmount = TaxAmount`
+   * cierta por construcción, que es lo que la DIAN contrasta.
+   *
+   * Tres guardas, y las tres prefieren NO tocar la línea antes que emitir una
+   * base que nadie verificó:
+   *
+   * · **Un solo tributo no-retención.** Con dos o más la cuota de la línea es
+   *   una suma y el despeje es ambiguo; ese documento además ya persiste su
+   *   desglose, así que no llega hasta acá.
+   * · **Tarifa distinta de cero.** Un contrato AIU exento no permite despejar
+   *   nada de una cuota que es cero. Se deja como está.
+   * · **La Σ tiene que cerrar contra la base de cabecera.** Se compara con
+   *   `invoice_taxes.taxable_amount`, que es lo que el calculador escribió, y el
+   *   residuo —a lo sumo un centavo por línea, por el truncado de cada cuota— se
+   *   carga a la línea de mayor base. Si la diferencia excede eso, las dos
+   *   mitades no describen el mismo documento y no se toca ninguna línea: que
+   *   falle la compuerta con diagnóstico es mejor que emitir una base derivada
+   *   de números que no concuerdan.
+   */
+  private attachAiuContratoLineTaxes(
+    lines: UblDocumentLine[],
+    rows: any[],
+    header_taxes: any[],
+  ): void {
+    if (lines.length !== rows.length) return;
+
+    // MISMA clasificación que el emisor: una retención infiltrada en
+    // `invoice_taxes` no es un tributo del documento y no puede entrar al
+    // despeje.
+    const candidates = (header_taxes || []).filter(
+      (tax: any) =>
+        !UblCommonBuilder.isWithholdingTax({
+          tax_name: tax.tax_name,
+          tax_rate: dianRate(tax.tax_rate),
+          taxable_amount: dianAmount(tax.taxable_amount),
+          tax_amount: dianAmount(tax.tax_amount),
+          tax_type: tax.tax_type ?? undefined,
+        }),
+    );
+    if (candidates.length !== 1) return;
+
+    const header_tax = candidates[0];
+    const rate = toDecimal(dianRate(header_tax.tax_rate));
+    if (!rate.greaterThan(0)) return;
+
+    // Divisor POR TRIBUTO: el ICA se guarda por mil y el emisor lo divide por
+    // 10 antes de escribir `cbc:Percent`. Con un `/100` fijo, toda base de un
+    // contrato con ICA saldría diez veces menor.
+    const divisor =
+      UblCommonBuilder.resolveTaxCodeFromTax({
+        tax_name: header_tax.tax_name,
+        tax_rate: dianRate(header_tax.tax_rate),
+        taxable_amount: dianAmount(header_tax.taxable_amount),
+        tax_amount: dianAmount(header_tax.tax_amount),
+        tax_type: header_tax.tax_type ?? undefined,
+      }) === DIAN_TAX_CODES.ICA
+        ? toDecimal(1000)
+        : toDecimal(100);
+
+    const targets: { line: UblDocumentLine; base: Prisma.Decimal }[] = [];
+
+    lines.forEach((line, index) => {
+      if (rows[index]?.aiu_component !== 'contrato') return;
+      if (line.omit_tax_total) return;
+      // Un desglose ya presente —persistido al crear, o reconstruido— trae su
+      // propia base y manda: reescribirla acá crearía una segunda verdad sobre
+      // la misma línea.
+      if ((line.taxes ?? []).length > 0) return;
+
+      const base = toDecimal(
+        dianAmount(toDecimal(line.tax_amount).times(divisor).dividedBy(rate)),
+      );
+      if (!base.greaterThan(0)) return;
+      targets.push({ line, base });
+    });
+
+    if (targets.length === 0) return;
+
+    // Cierre contra lo que el calculador declaró. El truncado de cada cuota
+    // pierde a lo sumo un centavo por línea al despejar hacia atrás.
+    const header_base = toDecimal(dianAmount(header_tax.taxable_amount));
+    const derived = targets.reduce(
+      (acc, target) => acc.plus(target.base),
+      toDecimal(0),
+    );
+    const residue = header_base.minus(derived);
+    if (residue.abs().greaterThan(toDecimal(ONE_CENT).times(targets.length))) {
+      this.logger.warn(
+        `AIU Modelo 1: la base despejada de las líneas (${dianAmount(derived)}) ` +
+          `no cierra contra la base de cabecera (${dianAmount(header_base)}). ` +
+          `Se emite sin desglose de línea.`,
+      );
+      return;
+    }
+
+    // El residuo va a la línea de MAYOR base: es donde un centavo pesa menos en
+    // términos relativos, y así el reparto es determinista y no depende del
+    // orden de las líneas.
+    const anchor = targets.reduce((biggest, target) =>
+      target.base.greaterThan(biggest.base) ? target : biggest,
+    );
+    anchor.base = anchor.base.plus(residue);
+
+    for (const target of targets) {
+      target.line.taxes = [
+        {
+          tax_name: header_tax.tax_name,
+          tax_rate: dianRate(header_tax.tax_rate),
+          taxable_amount: dianAmount(target.base),
+          tax_amount: dianAmount(target.line.tax_amount),
+          tax_type: header_tax.tax_type ?? undefined,
+        },
+      ];
+    }
+  }
 
   /**
    * ¿Dice el XML lo mismo que los importes que lleva dentro?
@@ -2480,7 +2632,27 @@ export class InvoiceFlowService {
       // la primera en el calculador: allí la divergencia de captura lo exigía y
       // por eso el documento de 100 M bajo `'subtotal'` se capturaba sin una
       // sola divergencia y moría acá, con el consecutivo ya gastado.
-      if (!line.omit_tax_total && !declared) {
+      //
+      // `!declared` NO BASTA, y por eso pregunta también por el importe. El
+      // desglose por línea (`line.taxes`) sólo existe cuando el documento trae
+      // DOS O MÁS tributos de cabecera: `attachPersistedLineTaxes` se rinde en
+      // cuanto una fila de `invoice_taxes` viene sin `invoice_item_id` —y hoy
+      // ninguna lo trae, la columna nunca se escribe— y
+      // `attachReconstructedLineTaxes` sale por `candidates.length < 2`, porque
+      // con un solo tributo no hay nada que repartir: la línea hereda el
+      // esquema de la cabecera y el emisor escribe su grupo igual.
+      //
+      // Así que una factura AIU con un único IVA del 19 % llegaba acá con
+      // `taxes` vacío y `tax_amount` correcto —4.856,40 sobre la utilidad de su
+      // línea— y se rechazaba por sub-declarar un impuesto que sí está
+      // declarado. La comprobación hermana de `INVOICING_AIU_005`, tres líneas
+      // más arriba, siempre miró las dos cosas (`declared || !amount.isZero()`);
+      // ésta miraba sólo una.
+      //
+      // Un servicio exento sigue frenándose: su cuota es cero y el documento
+      // lleva la tarifa 0 como segundo tributo, así que la reconstrucción sí
+      // corre y la línea declara su grupo al 0 %.
+      if (!line.omit_tax_total && !declared && amount.isZero()) {
         throw new VendixHttpException(
           ErrorCodes.INVOICING_AIU_004,
           `No se puede emitir la factura ${invoice.invoice_number ?? invoice.id}: la línea ` +
@@ -2825,8 +2997,29 @@ export class InvoiceFlowService {
       // La base que el emisor VA A ESCRIBIR, no la que la fila afirma: son dos
       // cálculos distintos y sólo la primera llega a la DIAN.
       const emitted_base = dianAmount(dianLineExtension(line));
+
+      // LA LÍNEA DE CONTRATO AIU (Modelo 1) ES LA EXCEPCIÓN, y sin ella todo el
+      // desglose persistido del modelo se tiraba a la basura acá.
+      //
+      // La igualdad `base == LineExtensionAmount` vale para cualquier línea
+      // normal —y la guarda existe por la línea con precio impuesto-incluido,
+      // donde la base despejada y el importe bruto se contradicen entre sí—.
+      // Pero una línea con `aiu_component: 'contrato'` ES el contrato entero y
+      // su base es por definición una FRACCIÓN de su importe: bajo Decreto
+      // 1372/1992, la utilidad. Exigirle la igualdad es exigirle que declare
+      // como gravable todo el contrato, que es exactamente lo que el régimen
+      // niega.
+      //
+      // Se cambia la igualdad por la desigualdad que sí tiene que cumplirse: la
+      // base de una porción NUNCA puede exceder el importe del que sale. La
+      // segunda guarda —la Σ de cuotas contra el impuesto de la línea— sigue
+      // corriendo igual para todas, así que una base inventada seguiría sin
+      // cuadrar contra su propia cuota.
+      const is_aiu_contrato = row?.aiu_component === 'contrato';
       const base_matches = persisted.every((tax) =>
-        toDecimal(tax.taxable_amount).equals(toDecimal(emitted_base)),
+        is_aiu_contrato
+          ? !toDecimal(tax.taxable_amount).greaterThan(toDecimal(emitted_base))
+          : toDecimal(tax.taxable_amount).equals(toDecimal(emitted_base)),
       );
       if (!base_matches) {
         this.logger.warn(
@@ -3269,6 +3462,15 @@ export class InvoiceFlowService {
 
     if (aiu) {
       this.attachAiuLineExtras(provider_items, invoice.invoice_items || [], aiu);
+      // DESPUÉS de `attachAiuLineExtras`, que es quien decide `omit_tax_total`:
+      // una línea que calla su grupo no declara base, así que no entra al
+      // despeje. Y después de `attachLineTaxes`, para no pisar un desglose que
+      // ya vino persistido con su propia base.
+      this.attachAiuContratoLineTaxes(
+        provider_items,
+        invoice.invoice_items || [],
+        invoice.invoice_taxes || [],
+      );
       // PUERTA, justo después de decidir qué líneas callan su grupo de tributos
       // y ANTES de firmar. Ver `assertAiuLineTaxCoherence`.
       this.assertAiuLineTaxCoherence(invoice, provider_items, aiu);

@@ -180,4 +180,67 @@ describe('InvoicingService · matriz AIU persistida', () => {
   it('la etapa viaja tal cual: es la que dice si la matriz es de creación o de edición', () => {
     expect(buildMatrix('aiu', 'update').stage).toBe('update');
   });
+  /**
+   * MODELO 1 (`'no_sumada'`) — la línea es el contrato entero.
+   *
+   * La casilla `taxable_amount` de la matriz acumulaba
+   * `line_extension_amount`, que en el Modelo 2 coincide con la base porque
+   * cada componente es su propia línea y grava por entero o no grava. En el
+   * Modelo 1 no coincide: la factura 63 (`FVJL11`) escribió «contrato · Grava ·
+   * Base $2.328.800» sobre una base real de $69.864, y ésa es la fila que el
+   * operador lee en el panel antes de decidir si emite.
+   */
+  describe('Modelo 1 — la base de la matriz es la GRAVABLE, no el importe', () => {
+    /** $2.328.800 de contrato con AIU del 10 %: A 5 %, I 2 %, U 3 %. */
+    const noSumada = (taxable_basis: AiuTaxableBasis) => {
+      const service = Object.create(InvoicingService.prototype) as any;
+      const aiu = {
+        taxable_basis,
+        components_basis: 'contract' as const,
+        components: { administracion: '5', imprevistos: '2', utilidad: '3' },
+      };
+      const calculation = calculator.calculate({
+        aiu,
+        items: [
+          {
+            description: 'Servicio de aseo — contrato AIU (no sumada)',
+            quantity: 1,
+            unit_price: '2328800',
+            aiu_component: 'contrato',
+            taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+          },
+        ],
+      } as InvoiceCalculatorInput);
+      return service.buildAiuTaxableMatrix(
+        calculation.lines,
+        aiu,
+        'create',
+      ) as Record<string, any>;
+    };
+
+    it('bajo «utilidad» declara los $69.864 gravables, no los $2.328.800 del contrato', () => {
+      const matrix = noSumada('utilidad');
+
+      expect(matrix.components).toEqual([
+        expect.objectContaining({
+          component: 'contrato',
+          taxable: true,
+          taxable_amount: '69864.00',
+          tax_amount: '13274.16',
+        }),
+      ]);
+    });
+
+    it('bajo «aiu» la base es el A+I+U completo: el 10 % del contrato', () => {
+      const matrix = noSumada('aiu');
+
+      expect(matrix.components[0].taxable_amount).toBe('232880.00');
+    });
+
+    it('bajo «subtotal» la base SÍ es el contrato entero, y ahí las dos cifras coinciden', () => {
+      const matrix = noSumada('subtotal');
+
+      expect(matrix.components[0].taxable_amount).toBe('2328800.00');
+    });
+  });
 });

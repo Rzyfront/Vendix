@@ -223,4 +223,73 @@ describe('InvoicingService · desglose de tributos por línea', () => {
       true,
     );
   });
+  /**
+   * EL PREDICADO, aislado. No es «cuántos tributos tiene el documento» sino
+   * «¿alguna línea declara una base distinta de su importe?».
+   *
+   * El número de tributos es sólo la primera de las dos razones. La segunda la
+   * trajo el Modelo 1 del AIU (`'no_sumada'`), donde la línea ES el contrato
+   * entero y su base es una fracción: ahí el camino histórico del emisor —que
+   * escribe `cbc:TaxableAmount = cbc:LineExtensionAmount`— declara varias veces
+   * la base real, y la única estructura donde esa base cabe es la fila por línea.
+   */
+  describe('cuándo hay que partir los tributos por línea', () => {
+    const predicate = (header_taxes: any[], lines: any[]): boolean =>
+      (Object.create(InvoicingService.prototype) as any).needsPersistedLineTaxes(
+        header_taxes,
+        lines,
+      );
+
+    /** Línea normal: lo que grava es exactamente lo que vale. */
+    const plain = (amount: string) => ({
+      omit_tax_total: false,
+      line_extension_amount: amount,
+      taxable_amount: amount,
+    });
+
+    it('dos o más tributos: sigue siendo razón suficiente', () => {
+      expect(predicate([{}, {}], [plain('100000.00')])).toBe(true);
+    });
+
+    it('un tributo y líneas normales: fila agregada de cabecera, como siempre', () => {
+      expect(predicate([{}], [plain('100000.00'), plain('50000.00')])).toBe(
+        false,
+      );
+    });
+
+    it('un tributo pero la base de la línea NO es su importe: hay que partir', () => {
+      // El contrato AIU del Modelo 1: $2.328.800 de importe, $69.864 de base.
+      expect(
+        predicate(
+          [{}],
+          [
+            {
+              omit_tax_total: false,
+              line_extension_amount: '2328800.00',
+              taxable_amount: '69864.00',
+            },
+          ],
+        ),
+      ).toBe(true);
+    });
+
+    it('la línea que calla su grupo no cuenta: no declara ninguna base', () => {
+      // Administración e imprevistos bajo `'utilidad'` traen `'0.00'` de base y
+      // `omit_tax_total`. Contarlas metería a TODO documento AIU del Modelo 2 en
+      // el desglose por línea sin que nada lo necesite.
+      expect(
+        predicate(
+          [{}],
+          [
+            {
+              omit_tax_total: true,
+              line_extension_amount: '6000000.00',
+              taxable_amount: '0.00',
+            },
+            plain('3000000.00'),
+          ],
+        ),
+      ).toBe(false);
+    });
+  });
 });
