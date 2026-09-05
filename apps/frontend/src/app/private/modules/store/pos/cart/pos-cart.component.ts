@@ -592,8 +592,55 @@ import {
                       >
                         <app-icon name="calendar" [size]="12"></app-icon>
                       </button>
+                      <!--
+                        QUI-787 · botón "Notas" por línea. Paridad visual con el
+                        botón global "Nota" del header del carrito (mismo icono
+                        notebook-pen, mismo texto "Nota", mismos estados de
+                        color verde-lleno / gris-vacío). Compacto (px-1.5
+                        py-0.5, texto 10 px, icono 12 px) para caber al lado de
+                        la indita calendar sin romper la grilla del carrito.
+                      -->
+                      <button
+                        type="button"
+                        class="shrink-0 px-1.5 py-0.5 rounded flex items-center gap-1 border transition-colors text-[10px] font-semibold"
+                        [class]="
+                          item.notes
+                            ? 'text-green-700 bg-green-50 border-green-200 hover:bg-green-100'
+                            : 'text-text-secondary border-border/80 hover:text-text-primary hover:bg-muted/40'
+                        "
+                        [attr.aria-label]="
+                          (item.notes ? 'Editar nota de ' : 'Agregar nota a ') +
+                          item.product.name
+                        "
+                        [title]="
+                          (item.notes ? 'Editar nota' : 'Agregar nota para cocina') +
+                          ': ' +
+                          item.product.name
+                        "
+                        (click)="openItemNote(item)"
+                      >
+                        <app-icon name="notebook-pen" [size]="12"></app-icon>
+                        <span>Nota</span>
+                      </button>
                     }
                   </div>
+                  @if (item.notes) {
+                    <!--
+                      QUI-787 · chip amarillo de nota activa en su propia
+                      línea para no competir con el botón "Nota". Paridad
+                      visual con .item-comanda-note de mesa
+                      (table-session-page.component.scss:688-700): fondo
+                      warning-100, texto warning-700. Truncado a 180 px.
+                    -->
+                    <p
+                      class="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium w-fit"
+                      style="background-color: var(--color-warning-100, #fef3c7); color: var(--color-warning-700, #b45309);"
+                      [attr.title]="'Nota para cocina: ' + item.notes"
+                    >
+                      <app-icon name="message-square" [size]="10"></app-icon>
+                      <span class="truncate" style="max-width: 180px;">{{ item.notes }}</span>
+                    </p>
+                  }
                   @if (item.variant_display_name) {
                     <p
                       class="text-[10px] text-primary font-medium truncate leading-tight"
@@ -893,6 +940,65 @@ import {
           size="md"
           customClasses="min-w-[120px]"
           (clicked)="orderNoteModalOpen.set(false)"
+        >
+          Aceptar
+        </app-button>
+      </div>
+    </app-modal>
+
+    <!--
+      QUI-787 · editor de nota POR LÍNEA. Mismo patrón que el staff-note
+      modal del header, pero: scoped a un CartItem, maxlength 200 (paridad
+      con add-items-modal y FireOrderItemsDto.item_notes), y persiste via
+      PosCartService.updateCartItem para que el campo viaje por el mismo
+      camino que cantidad/precio (signal store → mapCartItemForPos).
+    -->
+    <app-modal
+      [isOpen]="itemNoteModalOpen()"
+      [title]="'Nota para cocina: ' + (itemNoteTarget()?.product?.name ?? '')"
+      size="sm"
+      (closed)="closeItemNote()"
+    >
+      <div class="space-y-2">
+        <textarea
+          [ngModel]="itemNoteDraft()"
+          (ngModelChange)="itemNoteDraft.set($event)"
+          maxlength="200"
+          rows="2"
+          placeholder="Notas para cocina (ej. sin cebolla, término medio). Opcional."
+          class="w-full px-3 py-2 text-sm border border-border bg-surface rounded-md text-text-primary placeholder:text-text-secondary/60 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary resize-none"
+        ></textarea>
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] text-text-secondary">
+            Opcional — se envía a cocina y a la comanda del KDS.
+          </span>
+          <span class="text-[11px] text-text-secondary">
+            {{ (itemNoteDraft() || '').length }}/200
+          </span>
+        </div>
+      </div>
+
+      <div
+        slot="footer"
+        class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"
+      >
+        @if (itemNoteTarget()?.notes) {
+          <app-button
+            class="w-full sm:w-auto"
+            variant="outline"
+            size="md"
+            customClasses="min-w-[120px]"
+            (clicked)="clearItemNote()"
+          >
+            Quitar nota
+          </app-button>
+        }
+        <app-button
+          class="w-full sm:w-auto"
+          variant="primary"
+          size="md"
+          customClasses="min-w-[120px]"
+          (clicked)="closeItemNote()"
         >
           Aceptar
         </app-button>
@@ -1723,6 +1829,14 @@ private cartService = inject(PosCartService);
    */
   readonly orderNoteModalOpen = signal(false);
 
+  // ─── QUI-787 · nota por línea (preparados / servicios → KDS) ─────────
+  // El editor se monta UNA VEZ por línea; las signals locales guardan qué
+  // item se está editando y el borrador (sin trim) mientras el cajero
+  // teclea. El trim y la persistencia pasan al servicio solo al cerrar.
+  readonly itemNoteModalOpen = signal(false);
+  readonly itemNoteTarget = signal<CartItem | null>(null);
+  readonly itemNoteDraft = signal<string>('');
+
   /**
    * CP-POS-SVC-BOOKING-001 — Service scheduler state.
    */
@@ -1816,6 +1930,66 @@ private cartService = inject(PosCartService);
    */
   onStaffNoteChange(notes: string): void {
     this.cartService.updateNotes(notes ?? '').subscribe();
+  }
+
+  // ─── QUI-787 · handlers del editor de nota por línea ──────────────
+
+  /**
+   * Abre el editor de nota para una línea. Pre-rellena con la nota actual
+   * (puede estar vacía). El editor es independiente del modal de staff-note
+   * del header: ese es GLOBAL a la orden, este es POR PLATO.
+   */
+  openItemNote(item: CartItem): void {
+    this.itemNoteTarget.set(item);
+    this.itemNoteDraft.set(item.notes ?? '');
+    this.itemNoteModalOpen.set(true);
+  }
+
+  /**
+   * Cierra el editor y, si el borrador trimado difiere del actual, lo persiste
+   * via `PosCartService.updateCartItem` (que ya propaga `notes` a través del
+   * signal store — ver `pos-cart.service.ts:2224, 2265, 2383`). Si el cajero
+   * borró todo, el campo se omite para que el backend lo deje en null.
+   */
+  closeItemNote(): void {
+    const target = this.itemNoteTarget();
+    const draft = this.itemNoteDraft().trim();
+    if (!target) {
+      this.itemNoteModalOpen.set(false);
+      return;
+    }
+    const next = draft.length > 0 ? draft : undefined;
+    // no-op si no cambió
+    if ((target.notes ?? '') === (next ?? '')) {
+      this.itemNoteModalOpen.set(false);
+      return;
+    }
+    this.cartService
+      .updateCartItem({
+        itemId: target.id,
+        quantity: target.quantity,
+        notes: next,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success(next ? 'Nota guardada' : 'Nota eliminada');
+          this.itemNoteModalOpen.set(false);
+          this.itemNoteTarget.set(null);
+          this.itemNoteDraft.set('');
+        },
+        error: (err) =>
+          this.toastService.error(err?.message || 'Error al guardar la nota'),
+      });
+  }
+
+  /**
+   * Vuelca el draft a vacío. El guardado real ocurre en `closeItemNote` cuando
+   * el cajero toca "Aceptar" — el botón "Quitar nota" del modal usa esto para
+   * limpiar el textarea y luego Aceptar persiste el cambio a null.
+   */
+  clearItemNote(): void {
+    this.itemNoteDraft.set('');
   }
 
   proceedToPayment(): void {
