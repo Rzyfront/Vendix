@@ -751,6 +751,61 @@
   }
 }
 
+/*
+ * QUI-785 — Tablet (641–1023px) — zona muerta entre las dos rejillas
+ * existentes. La rama de escritorio aplica aquí (5 columnas fijas: auto
+ * minmax(0, 1fr) auto max-content max-content) y `.item-action {
+ * min-width: 13rem }` también (bloque anterior), así que la suma de
+ * pistas no-encogibles (qty + status + money + action + 3 gaps × 1rem)
+ * son ~488 px contra un viewport de 768 px con sidebar: la pista
+ * `minmax(0, 1fr)` del nombre colapsa a ~100 px y `.name { text-overflow:
+ * ellipsis }` pinta `…` después del primer carácter.
+ *
+ * Mismo patrón de 3-filas que en móvil, con la acción alineada a la
+ * derecha (no full-width) para no estirar la fila más allá de lo
+ * necesario y mantener la metáfora visual "fila de comanda arriba /
+ * fila de control abajo".
+ *
+ * `.item-fields` se redefine ANIDADO dentro de `.item-row` para igualar
+ * la especificidad de la regla de escritorio (R2/D2): una media query NO
+ * suma especificidad, y la regla suelta pierde siempre contra la anidada.
+ */
+@media (min-width: 641px) and (max-width: 1023px) {
+  .item-row .item-fields {
+    grid-template-columns: auto minmax(0, 1fr) max-content;
+    grid-template-areas:
+      "qty    main   money"
+      "status status action";
+    align-items: center;
+    gap: 0.75rem 1rem;
+  }
+
+  /*
+   * `min-width: 5.5rem` (vs 6.5rem de desktop): en tablet el importe ya
+   * no comparte fila con la acción, así que no necesita la reserva de
+   * ancho del botón "Marcar entregado". 5.5rem sigue siendo suficiente
+   * para alinear la X del importe entre filas de la fila 1.
+   */
+  .item-money {
+    min-width: 5.5rem;
+  }
+
+  /* Status en su propia pista izquierda: el chip se queda como viene. */
+  .item-status {
+    justify-self: start;
+  }
+
+  /*
+   * Action a la derecha de la fila 2: alinea el borde derecho de los
+   * botones entre filas. No necesita `min-width` propio: la pista
+   * `max-content` ya se acomoda al contenido, y dejar el `13rem` de
+   * arriba consumiría el espacio ganado al reorganizar.
+   */
+  .item-action {
+    justify-self: end;
+  }
+}
+
 .item-remove-btn {
   flex: 0 0 auto;
 }
