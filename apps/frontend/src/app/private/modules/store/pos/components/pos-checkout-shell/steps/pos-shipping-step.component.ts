@@ -202,6 +202,19 @@ export class PosShippingStepComponent {
     this.loadShippingMethods();
     this.currencyService.loadCurrency();
 
+    // CP-POS-CHECKOUT-KEYBOARD (C.1 / ADR-3): preselecciona el primer método
+    // habilitado en el orden del backend para el flujo solo-Enter. No avanza
+    // de sub-paso ni pisa la elección manual del cajero.
+    effect(() => {
+      const methods = this.shippingMethods();
+      const selected = this.selectedShippingMethod();
+      if (methods.length === 0 || selected) return;
+      untracked(() => {
+        const first = methods.find((m) => m.is_active !== false) ?? null;
+        if (first) this.selectShippingMethod(first, { advance: false });
+      });
+    });
+
     // Recalculate shipping cost whenever the captured address changes (delivery
     // only, unless the operator overrode the cost manually). Writes to signals
     // happen through calculateShippingCost inside untracked() (zoneless-safe).
@@ -238,7 +251,7 @@ export class PosShippingStepComponent {
   }
 
   // ── Shipping methods ──────────────────────────────────────────────────────
-  selectShippingMethod(method: PosShippingMethod): void {
+  selectShippingMethod(method: PosShippingMethod, opts?: { advance?: boolean }): void {
     this.selectedShippingMethod.set(method);
     if (method.type === 'pickup') {
       this.shippingCost.set(0);
@@ -246,8 +259,9 @@ export class PosShippingStepComponent {
     } else {
       this.calculateShippingCost();
     }
-    // Avanza al sub-paso terminal Costo (índice 1) tras seleccionar método.
-    this.goToShipSubStep(1);
+    // Avanza al sub-paso terminal Costo (índice 1) tras seleccionar método,
+    // salvo preselección de default (advance:false deja Método visible).
+    if (opts?.advance !== false) this.goToShipSubStep(1);
   }
 
   getShippingIcon(type: string): string {
