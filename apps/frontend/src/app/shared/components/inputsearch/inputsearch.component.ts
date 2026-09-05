@@ -1,5 +1,6 @@
 import {Component,
   OnInit,
+  ChangeDetectionStrategy,
   forwardRef,
   input,
   output,
@@ -28,6 +29,7 @@ export type InputSearchSize = 'sm' | 'md' | 'lg';
       multi: true},
   ],
   styleUrl: './inputsearch.component.scss',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="inputsearch-container" [class]="containerClasses">
       <div class="inputsearch-wrapper" [class]="wrapperClasses">
@@ -149,7 +151,18 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
   }
 // ControlValueAccessor implementation
   writeValue(value: string): void {
-    this.value.set(value || '');
+    const next = value || '';
+    // Guard de identidad: si el padre nos reescribe con el mismo valor que
+    // ya pintamos (eco de debounce/ngModel), no hacemos nada. Sin este guard,
+    // cada writeValue rebota al <input> nativo via [value]="value()" y mueve
+    // el caret al final, haciendo que el último carácter tecleado "parpadee".
+    if (next === this.value()) return;
+    // Guard de foco: mientras el usuario está tecleando, NO sobrescribir el
+    // DOM del input — el navegador ya tiene el valor correcto. Patrón del
+    // currency-input.directive.ts del mismo repo. Esto corta el síntoma
+    // incluso si el guard de identidad falla por un valor casi-idéntico.
+    if (this.isFocused()) return;
+    this.value.set(next);
   }
 
   registerOnChange(fn: (value: string) => void): void {

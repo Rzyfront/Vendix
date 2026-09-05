@@ -9,7 +9,7 @@ import {
   computed,
   DestroyRef,
 } from '@angular/core';
-import { Subject, debounceTime, distinctUntilChanged } from 'rxjs';
+import { Subject, distinctUntilChanged } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
@@ -721,7 +721,7 @@ export class PosProductSelectionComponent {
   readonly openCustomerModal = output<void>();
   readonly openQueueModal = output<void>();
 
-  private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
+  private searchSubject$ = new Subject<string>(); // LEGÍTIMO — distinctUntilChanged search stream (debounce ya vive dentro de app-inputsearch)
   private productService = inject(PosProductService);
   private cartService = inject(PosCartService);
   private toastService = inject(ToastService);
@@ -886,7 +886,6 @@ export class PosProductSelectionComponent {
   private setupSearchSubscription(): void {
     this.searchSubject$
       .pipe(
-        debounceTime(300),
         distinctUntilChanged(),
         takeUntilDestroyed(this.destroyRef),
       )
