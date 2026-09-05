@@ -20,14 +20,21 @@ import {
   SpinnerComponent,
   StickyHeaderComponent,
   ToastService,
+  ToggleComponent,
 } from '../../../../../../../shared/components/index';
-import { KdsStationsService } from '../../services';
+import {
+  KdsDisplayService,
+  KDS_TICKET_SIZES,
+  KdsStationsService,
+} from '../../services';
+import type { KdsTicketSize } from '../../services';
 import type {
   KdsConsumptionHistoryRow,
   KdsConsumptionSummary,
   KdsSession,
   KdsStation,
 } from '../../interfaces';
+import { KDS_COLUMNS, KdsColumn } from '../../interfaces/kitchen-ticket.interface';
 
 /**
  * Gestión de estaciones de KDS y sus turnos — QUI-651.
@@ -60,6 +67,7 @@ import type {
     InputComponent,
     ModalComponent,
     SpinnerComponent,
+    ToggleComponent,
   ],
   templateUrl: './kds-manage-page.component.html',
   styleUrl: './kds-manage-page.component.scss',
@@ -104,6 +112,48 @@ export class KdsManagePageComponent implements OnInit {
   readonly formTitle = computed(() =>
     this.editingId() == null ? 'Nueva estación' : 'Editar estación',
   );
+
+  // ------------------------------------------------- vista del tablero
+  /**
+   * QA display: qué estados se ven en el tablero y a qué tamaño los tickets.
+   * Es preferencia del DISPOSITIVO (`KdsDisplayService` + localStorage) y se
+   * aplica al instante, sin guardar: el tablero lee los mismos signals.
+   */
+  readonly display = inject(KdsDisplayService);
+  readonly displayColumns = KDS_COLUMNS;
+  readonly ticketSizes = KDS_TICKET_SIZES;
+
+  displayTitle(column: KdsColumn): string {
+    switch (column) {
+      case 'pending':
+        return 'Pendientes';
+      case 'in_preparation':
+        return 'En preparación';
+      case 'ready':
+        return 'Listos';
+      case 'delivered':
+        return 'Entregados';
+      case 'cancelled':
+        return 'Cancelados';
+    }
+  }
+
+  toggleDisplayColumn(column: KdsColumn): void {
+    const ok = this.display.toggleColumn(column);
+    if (!ok) {
+      this.toastService.warning('El tablero necesita al menos una columna visible');
+      return;
+    }
+    this.toastService.success(
+      this.display.isColumnVisible(column)
+        ? `Columna "${this.displayTitle(column)}" visible`
+        : `Columna "${this.displayTitle(column)}" oculta`,
+    );
+  }
+
+  setTicketSize(size: KdsTicketSize): void {
+    this.display.setTicketSize(size);
+  }
 
   ngOnInit(): void {
     this.reload();

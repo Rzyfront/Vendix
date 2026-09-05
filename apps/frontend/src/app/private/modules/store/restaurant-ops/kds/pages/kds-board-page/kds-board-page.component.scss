@@ -163,8 +163,11 @@
 .kds-column {
   display: flex;
   flex-direction: column;
-  /* Ancho fijo dentro de la cinta horizontal: sin wrap en ningún viewport. */
-  flex: 0 0 clamp(250px, 80vw, 300px);
+  /* Ancho base fijo dentro de la cinta horizontal (sin wrap en ningún
+     viewport) + `flex-grow: 1` para que las columnas VISIBLES se repartan
+     todo el ancho: al ocultar Entregados/Cancelados, las que quedan se
+     ensanchan y los tickets se ven más grandes. */
+  flex: 1 0 clamp(250px, 80vw, 300px);
   min-width: 0;
   background: var(--color-surface, #ffffff);
   border: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
@@ -271,6 +274,18 @@
   gap: 0.5rem;
   padding: 0.5rem;
   background: var(--kds-tint, transparent);
+}
+
+/* QA display: tamaño del contenido de los tickets (`data-ticket-size` lo pone
+   la plantilla desde `KdsDisplayService`). `zoom` escala layout real
+   (Baseline 2024, Chromium de las pantallas de cocina) y atraviesa la
+   encapsulación sin `::ng-deep`. */
+.kds-board[data-ticket-size='grande'] .kds-column__body {
+  zoom: 1.15;
+}
+
+.kds-board[data-ticket-size='muy-grande'] .kds-column__body {
+  zoom: 1.3;
 }
 
 .kds-column__empty {

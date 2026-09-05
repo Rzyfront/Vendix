@@ -23,7 +23,6 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
 import { BadgeComponent } from '../../../../../../../shared/components/badge/badge.component';
 
 import {
-  KDS_COLUMNS,
   KdsColumn,
   KitchenTicket,
   KitchenTicketItem,
@@ -119,7 +118,6 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
 
-  readonly columns = KDS_COLUMNS;
   /**
    * QA display: columnas visibles según la config (kds-manage-page →
    * `KdsDisplayService`). Al ocultar Entregados/Cancelados las que quedan
