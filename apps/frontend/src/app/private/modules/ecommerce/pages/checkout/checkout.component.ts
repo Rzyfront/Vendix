@@ -1878,7 +1878,7 @@ export class CheckoutComponent implements OnInit {
           return;
         }
         this.error_message.set('');
-        this.step.set(this.step() + 1);
+        this.advanceStep();
         return;
       }
 
@@ -1925,7 +1925,7 @@ export class CheckoutComponent implements OnInit {
           return;
         }
       }
-      this.step.set(this.step() + 1);
+      this.advanceStep();
       return;
     }
 
@@ -1938,7 +1938,7 @@ export class CheckoutComponent implements OnInit {
         return;
       }
       this.error_message.set('');
-      this.step.set(this.step() + 1);
+      this.advanceStep();
       return;
     }
 
@@ -1984,7 +1984,7 @@ export class CheckoutComponent implements OnInit {
     }
 
     this.error_message.set('');
-    this.step.set(this.step() + 1);
+    this.advanceStep();
   }
 
   /** Handle booking slot selection from the picker */
@@ -2081,7 +2081,7 @@ export class CheckoutComponent implements OnInit {
         // Continue with shipping options
         this.error_message.set('');
         await this.loadShippingOptions();
-        this.step.set(this.step() + 1);
+        this.advanceStep();
         this.is_loading.set(false);
       },
       error: async () => {
@@ -2093,7 +2093,7 @@ export class CheckoutComponent implements OnInit {
         );
         this.error_message.set('');
         await this.loadShippingOptions();
-        this.step.set(this.step() + 1);
+        this.advanceStep();
       },
     });
   }
@@ -2118,6 +2118,15 @@ export class CheckoutComponent implements OnInit {
       type: 'shipping',
       is_primary: this.addresses().length === 0, // Make it primary if it's the first address
     };
+  }
+
+  /**
+   * Avanza a la siguiente etapa llevando la vista al tope con scroll suave,
+   * para que cada etapa siempre se vea desde arriba.
+   */
+  private advanceStep(): void {
+    this.step.set(this.step() + 1);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   prevStep(): void {
