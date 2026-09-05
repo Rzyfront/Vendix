@@ -1651,7 +1651,16 @@ describe('InvoiceCalculatorService', () => {
       expect(result.aiu?.taxable_base).toBe('540000.04');
     });
 
-    it('la unidad de los porcentajes ("contract" vs "aiu") no cambia el reparto interno', () => {
+    /**
+     * Este test se llamaba «la unidad de los porcentajes no cambia el reparto
+     * interno» y pasaba por una razón que no era la que afirmaba: 17+29+54 =
+     * 100, y con Σpct = 100 las dos unidades son la MISMA división
+     * (`pct_i/Σpct` = `pct_i/100`, remanente cero). Que coincidan aquí no
+     * probaba que coincidieran siempre — y no coinciden: ver el caso Σ = 10 %
+     * más abajo, donde `'contract'` declara el 10 % del contrato como AIU y
+     * `'aiu'` declararía el 100 %.
+     */
+    it('con Σpct = 100 las dos unidades coinciden — y sólo por eso', () => {
       const components = {
         administracion: '17',
         imprevistos: '29',
@@ -1677,6 +1686,39 @@ describe('InvoiceCalculatorService', () => {
         viaAiu.lines[0].taxable_amount,
       );
       expect(viaContract.lines[0].taxable_amount).toBe('540000.04');
+    });
+
+    it('con Σpct ≠ 100 las dos unidades DIVERGEN, y ahí es donde importa declararla', () => {
+      // Σ = 10 %: el AIU es un décimo del contrato. Leído como `'aiu'`, esos
+      // mismos tres números se renormalizan y describen el 100 % de la línea.
+      const components = {
+        administracion: '5',
+        imprevistos: '2',
+        utilidad: '3',
+      };
+
+      const viaAiu = service.calculate(
+        contratoContract({
+          taxable_basis: 'aiu',
+          components_basis: 'aiu',
+          components,
+        }),
+      );
+      const viaContract = service.calculate(
+        contratoContract({
+          taxable_basis: 'aiu',
+          components_basis: 'contract',
+          components,
+        }),
+      );
+
+      // La línea entera: normalizado por Σ, A+I+U agota el importe.
+      expect(viaAiu.lines[0].taxable_amount).toBe('1000000.07');
+      // Un décimo: el 90 % restante es costo reembolsable embebido. El centavo
+      // sobre los 100.000,00 exactos es el residuo del truncamiento del costo
+      // (900.000,063 → 900.000,06), que Utilidad absorbe para que las cuatro
+      // porciones cierren contra 1.000.000,07 sin sobrar ni faltar.
+      expect(viaContract.lines[0].taxable_amount).toBe('100000.01');
     });
 
     it('sin porcentajes configurados, cae TODO en Utilidad (lado seguro, nunca sub-declara)', () => {
@@ -1736,7 +1778,18 @@ describe('InvoiceCalculatorService', () => {
       expect(result.lines[0].taxes[0].tax_amount).toBe('102600.00');
     });
 
-    it('INVOICING_AIU_007 — dos líneas "contrato" en el mismo documento son mutuamente excluyentes', () => {
+    /**
+     * Regla DEROGADA. Este caso afirmaba lo contrario —«dos líneas "contrato"
+     * son mutuamente excluyentes»— sobre la premisa de que una línea
+     * `'contrato'` es el AIU completo del contrato y una segunda lo
+     * duplicaría. Bajo el modelo «no sumada» la línea vale el SERVICIO con su
+     * AIU dentro, y un contrato AIU puede facturar varios servicios: obligar a
+     * un solo renglón forzaría a consolidarlos y perdería el detalle que el
+     * cliente firmó. Lo que sostenía la prohibición —que el piso del 10 %
+     * tenga una cifra única contra la cual medirse— lo sostiene ahora
+     * `summarizeAiu`, que agrega las porciones de las N líneas.
+     */
+    it('dos líneas "contrato" YA NO son un conflicto: un contrato factura varios servicios', () => {
       const result = service.calculate({
         aiu: { taxable_basis: 'aiu' },
         items: [
@@ -1755,12 +1808,13 @@ describe('InvoiceCalculatorService', () => {
         ],
       });
 
-      const conflict = result.divergences.find(
-        (d) => d.scope === 'aiu_contrato_mutually_exclusive',
-      );
-      expect(conflict).toBeDefined();
-      // Señala la SEGUNDA línea 'contrato' (índice 1), la duplicada.
-      expect(conflict?.line_index).toBe(1);
+      expect(
+        result.divergences.filter(
+          (d) => d.scope === 'aiu_contrato_mutually_exclusive',
+        ),
+      ).toHaveLength(0);
+      // El AIU sigue teniendo UNA cifra: la Σ de las dos líneas.
+      expect(result.aiu?.aiu_value).toBe('8000000.00');
     });
 
     it('INVOICING_AIU_007 — "contrato" mezclado con líneas por componente (Modelo 2) es mutuamente excluyente', () => {
@@ -1790,6 +1844,49 @@ describe('InvoiceCalculatorService', () => {
       expect(conflict?.line_index).toBe(1);
     });
 
+    /**
+     * El caso que la regla derogada TAPABA. Mientras el conteo de líneas
+     * `'contrato'` se evaluaba primero y hacía `return`, un documento con dos
+     * `'contrato'` más una línea por componente salía por el conteo y nunca
+     * llegaba a evaluar la mezcla — la regla vigente quedaba silenciada justo
+     * en el documento que más la necesita. Al quitar el conteo, la mezcla se
+     * detecta sola, y este caso lo fija para que quitarla no la reintroduzca.
+     */
+    it('INVOICING_AIU_007 — dos "contrato" MÁS una línea por componente sigue siendo mezcla', () => {
+      const result = service.calculate({
+        aiu: { taxable_basis: 'aiu' },
+        items: [
+          {
+            description: 'Contrato A',
+            quantity: 1,
+            unit_price: 5_000_000,
+            aiu_component: 'contrato',
+          },
+          {
+            description: 'Contrato B',
+            quantity: 1,
+            unit_price: 3_000_000,
+            aiu_component: 'contrato',
+          },
+          {
+            description: 'Utilidad suelta (Modelo 2)',
+            quantity: 1,
+            unit_price: 1_000_000,
+            aiu_component: 'utilidad',
+          },
+        ],
+      });
+
+      const conflict = result.divergences.find(
+        (d) => d.scope === 'aiu_contrato_mutually_exclusive',
+      );
+      expect(conflict).toBeDefined();
+      // Señala la línea por componente (índice 2), que es la que sobra: las
+      // dos `'contrato'` son legítimas entre sí.
+      expect(conflict?.line_index).toBe(2);
+      expect(conflict?.received).toBe('1.00');
+    });
+
     it('una línea "contrato" sola junto al costo reembolsable (sin componente) NO es un conflicto', () => {
       const result = service.calculate({
         aiu: { taxable_basis: 'aiu' },
@@ -1815,6 +1912,336 @@ describe('InvoiceCalculatorService', () => {
       ).toHaveLength(0);
       expect(result.aiu?.contract_value).toBe('100000000.00');
       expect(result.aiu?.aiu_value).toBe('10000000.00');
+    });
+
+    /**
+     * Modelo «no sumada»: la línea `'contrato'` vale el CONTRATO y el AIU va
+     * contenido dentro, en vez de valer el AIU y sumarse al total.
+     *
+     * El caso es el que reportó el dueño del producto: un contrato de
+     * $2.328.800 con AIU del 10 % repartido 5/2/3. Bajo el modelo «sumada»
+     * aplicar la base creaba tres renglones y subía el documento a
+     * $2.587.556 — $258.756 facturados de más. Aquí el importe de la línea no
+     * se mueve: lo único que cambia es cuánto de ese importe declara base.
+     */
+    describe('modelo «no sumada» — components_basis: "contract"', () => {
+      /** $2.328.800 con AIU del 10 %: A 5 %, I 2 %, U 3 %, costo 90 %. */
+      const NO_SUMADA_AMOUNT = '2328800';
+      const NO_SUMADA_COMPONENTS = {
+        administracion: '5',
+        imprevistos: '2',
+        utilidad: '3',
+      };
+
+      const noSumada = (
+        taxable_basis: NonNullable<InvoiceCalculatorInput['aiu']>['taxable_basis'],
+        taxes?: InvoiceCalculatorInput['items'][number]['taxes'],
+      ): InvoiceCalculatorInput => ({
+        aiu: {
+          taxable_basis,
+          components_basis: 'contract',
+          components: NO_SUMADA_COMPONENTS,
+        },
+        items: [
+          {
+            description: 'Servicio de aseo — contrato AIU (no sumada)',
+            quantity: 1,
+            unit_price: NO_SUMADA_AMOUNT,
+            aiu_component: 'contrato',
+            taxes,
+          },
+        ],
+      });
+
+      /**
+       * Las CUATRO porciones sólo son observables desde fuera de a tres
+       * (`'aiu'`, `'utilidad'` y `'subtotal'` dejan ver A+I+U, U y el total,
+       * de donde el costo se deduce por resta pero Administración e
+       * Imprevistos no se separan). Se llama al método directamente para
+       * fijar las cuatro, que es el contrato que el resto del régimen
+       * consume. Tipado explícito, no `any`: si la firma cambia, este acceso
+       * deja de compilar en vez de degradarse en silencio.
+       */
+      type ExplodeContratoLine = (
+        line_amount: Prisma.Decimal,
+        components: Readonly<Record<string, string>> | undefined,
+        components_basis: 'contract' | 'aiu',
+      ) => Readonly<Record<string, string>>;
+
+      const explode = (
+        line_amount: string,
+        components: Readonly<Record<string, string>> | undefined,
+        components_basis: 'contract' | 'aiu',
+      ): Readonly<Record<string, string>> =>
+        (
+          service as unknown as {
+            explodeAiuContratoLine: ExplodeContratoLine;
+          }
+        ).explodeAiuContratoLine.call(
+          service,
+          new Prisma.Decimal(line_amount),
+          components,
+          components_basis,
+        );
+
+      it('reparte cada porcentaje sobre el importe de la línea y deja el remanente como costo', () => {
+        const split = explode(
+          '2328800.00',
+          NO_SUMADA_COMPONENTS,
+          'contract',
+        );
+
+        expect(split.administracion).toBe('116440.00');
+        expect(split.imprevistos).toBe('46576.00');
+        expect(split.utilidad).toBe('69864.00');
+        // El 90 % que ni el contrato ni la ley llaman AIU: costo reembolsable
+        // embebido en la misma línea, no un renglón aparte.
+        expect(split.costo).toBe('2095920.00');
+      });
+
+      it('las cuatro porciones cierran EXACTAMENTE contra el importe de la línea', () => {
+        // Importe deliberadamente no divisible: los tres truncamientos
+        // independientes (A, I y costo) dejan un residuo que Utilidad tiene
+        // que absorber, o el documento pierde un centavo y la DIAN lo rechaza
+        // por FAU06.
+        const split = explode('1000000.07', NO_SUMADA_COMPONENTS, 'contract');
+
+        expect(split.administracion).toBe('50000.00');
+        expect(split.imprevistos).toBe('20000.00');
+        expect(split.costo).toBe('900000.06'); // 900.000,063 truncado
+        // 30.000,0021 truncaría a 30.000,00 y la suma daría 1.000.000,06.
+        expect(split.utilidad).toBe('30000.01');
+
+        const closed = [
+          split.administracion,
+          split.imprevistos,
+          split.utilidad,
+          split.costo,
+        ].reduce(
+          (acc, part) => acc.plus(new Prisma.Decimal(part)),
+          new Prisma.Decimal(0),
+        );
+        expect(closed.toFixed(2)).toBe('1000000.07');
+      });
+
+      it('components_basis "aiu" conserva el reparto normalizado y no inventa costo', () => {
+        // La rama heredada, intacta: 17/29/54 sobre una línea que ES el AIU.
+        const split = explode(
+          '1000000.07',
+          { administracion: '17', imprevistos: '29', utilidad: '54' },
+          'aiu',
+        );
+
+        expect(split.administracion).toBe('170000.01');
+        expect(split.imprevistos).toBe('290000.02');
+        expect(split.utilidad).toBe('540000.04');
+        // No hay costo DENTRO de una línea que vale el AIU completo.
+        expect(split.costo).toBe('0.00');
+      });
+
+      it('sin porcentajes configurados no hay costo embebido: todo cae en Utilidad', () => {
+        const split = explode('2328800.00', undefined, 'contract');
+
+        expect(split.administracion).toBe('0.00');
+        expect(split.imprevistos).toBe('0.00');
+        expect(split.utilidad).toBe('2328800.00');
+        expect(split.costo).toBe('0.00');
+      });
+
+      // ─── Base gravable derivada de AIU_TAXABLE_BUCKETS_BY_BASIS ───────────
+
+      it('base "aiu": el taxable_amount es A+I+U (232.880,00), no el contrato', () => {
+        const result = service.calculate(noSumada('aiu'));
+
+        expect(result.lines[0].taxable_amount).toBe('232880.00');
+        // Lo que el plan entero existe para garantizar: el importe facturado
+        // no se mueve al declarar el AIU.
+        expect(result.lines[0].line_extension_amount).toBe('2328800.00');
+      });
+
+      it('base "utilidad": el taxable_amount es sólo Utilidad (69.864,00)', () => {
+        const result = service.calculate(noSumada('utilidad'));
+
+        expect(result.lines[0].taxable_amount).toBe('69864.00');
+        expect(result.lines[0].line_extension_amount).toBe('2328800.00');
+      });
+
+      it('base "subtotal": el taxable_amount es el contrato completo (2.328.800,00)', () => {
+        // `'subtotal'` declina el tratamiento AIU: las cuatro porciones —costo
+        // embebido incluido— entran a la base, que es exactamente lo que dice
+        // AIU_TAXABLE_BUCKETS_BY_BASIS.subtotal.
+        const result = service.calculate(noSumada('subtotal'));
+
+        expect(result.lines[0].taxable_amount).toBe('2328800.00');
+        expect(result.lines[0].line_extension_amount).toBe('2328800.00');
+      });
+
+      it('el IVA se calcula sobre la porción gravable, no sobre el contrato', () => {
+        const result = service.calculate(
+          noSumada('utilidad', [
+            { tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' },
+          ]),
+        );
+
+        expect(result.lines[0].taxes[0].taxable_amount).toBe('69864.00');
+        // 69.864,00 × 0,19 = 13.274,16 exacto.
+        expect(result.lines[0].taxes[0].tax_amount).toBe('13274.16');
+        // $2.328.800 + $13.274,16 — no los $2.587.556 que producía crear tres
+        // renglones de cobro.
+        expect(result.totals.total_amount).toBe('2342074.16');
+      });
+
+      /**
+       * LA BASE DE UNA LÍNEA MODELO 1 NO SE NEGOCIA CON EL CLIENTE.
+       *
+       * `taxable_amount` en el payload existe para las bases disímiles —una
+       * línea cuyo IVA se liquida sobre un importe que el servidor no puede
+       * derivar—, y en cualquier otra línea el servidor lo acepta tal cual. En
+       * una línea `'contrato'` no: el servidor YA explotó la línea en sus
+       * cuatro porciones y sabe cuáles grava la base declarada.
+       *
+       * Aceptarlo dejaría que el navegador fijara el `cbc:TaxableAmount` que la
+       * DIAN valida, y basta que su reparto trunque en otro orden para que el
+       * documento se contradiga a sí mismo: `aiu_taxable_matrix` y el piso del
+       * 10 % contarían una base y `invoice_taxes` otra. La divergencia
+       * `line_tax` sólo vigila la CUOTA, así que el desacuerdo en la BASE
+       * pasaría callado hasta el rechazo de la DIAN.
+       */
+      it('ignora el taxable_amount del cliente en una línea de contrato', () => {
+        const result = service.calculate(
+          noSumada('utilidad', [
+            {
+              tax_name: 'IVA',
+              tax_rate: 19,
+              tax_type: 'iva',
+              // El contrato entero, treinta y tres veces la porción gravable.
+              taxable_amount: NO_SUMADA_AMOUNT,
+            },
+          ]),
+        );
+
+        expect(result.lines[0].taxes[0].taxable_amount).toBe('69864.00');
+        expect(result.lines[0].taxes[0].tax_amount).toBe('13274.16');
+        expect(result.totals.total_amount).toBe('2342074.16');
+      });
+
+      /**
+       * La contrapartida: fuera del Modelo 1 el seam sigue intacto. Una línea
+       * corriente con base disímil declarada la conserva, que es para lo que
+       * el campo se creó.
+       */
+      it('fuera del Modelo 1 el taxable_amount declarado sigue mandando', () => {
+        const result = service.calculate({
+          items: [
+            {
+              description: 'Línea con base disímil declarada',
+              quantity: 1,
+              unit_price: 1000000,
+              taxes: [
+                {
+                  tax_name: 'IVA',
+                  tax_rate: 19,
+                  tax_type: 'iva',
+                  taxable_amount: 400000,
+                },
+              ],
+            },
+          ],
+        });
+
+        expect(result.lines[0].taxes[0].taxable_amount).toBe('400000.00');
+        expect(result.lines[0].taxes[0].tax_amount).toBe('76000.00');
+      });
+
+      // ─── Piso del 10 % y resumen sobre N líneas ───────────────────────────
+
+      it('el AIU declarado de una línea Modelo 1 es A+I+U, no su importe entero', () => {
+        const result = service.calculate(noSumada('aiu'));
+
+        expect(result.aiu?.contract_value).toBe('2328800.00');
+        // Si aportara su `line_extension_amount`, el AIU sería el 100 % del
+        // contrato y el piso del 10 % se cumpliría siempre, por construcción.
+        expect(result.aiu?.aiu_value).toBe('232880.00');
+        expect(result.aiu?.minimum_base).toBe('232880.00');
+        expect(
+          result.divergences.filter((d) => d.scope === 'aiu_base_below_minimum'),
+        ).toHaveLength(0);
+      });
+
+      it('el piso del 10 % rechaza nombrando cuánto falta cuando el AIU no llega', () => {
+        // AIU del 9 % (4/2/3) sobre el mismo contrato: por debajo del mínimo
+        // legal del art. 462-1 por $23.288.
+        const result = service.calculate({
+          aiu: {
+            taxable_basis: 'aiu',
+            components_basis: 'contract',
+            components: {
+              administracion: '4',
+              imprevistos: '2',
+              utilidad: '3',
+            },
+          },
+          items: [
+            {
+              description: 'Servicio de aseo — AIU insuficiente',
+              quantity: 1,
+              unit_price: NO_SUMADA_AMOUNT,
+              aiu_component: 'contrato',
+            },
+          ],
+        });
+
+        const floor = result.divergences.find(
+          (d) => d.scope === 'aiu_base_below_minimum',
+        );
+        expect(floor).toBeDefined();
+        expect(floor?.expected).toBe('232880.00');
+        expect(floor?.received).toBe('209592.00');
+        // Negativo porque nombra el FALTANTE, no un excedente.
+        expect(floor?.difference).toBe('-23288.00');
+        // El AIU se reporta corto, no se infla: el emisor tiene que enterarse.
+        expect(result.aiu?.aiu_value).toBe('209592.00');
+      });
+
+      it('agrega las porciones de N líneas Modelo 1, no sólo las de la primera', () => {
+        // Un contrato AIU puede facturar varios servicios. La compuerta
+        // estructural que hoy limita el documento a UNA línea 'contrato' vive
+        // en el flujo de emisión, no en la aritmética: el resumen tiene que
+        // saber sumar N desde antes de que aquella se abra.
+        const result = service.calculate({
+          aiu: {
+            taxable_basis: 'utilidad',
+            components_basis: 'contract',
+            components: NO_SUMADA_COMPONENTS,
+          },
+          items: [
+            {
+              description: 'Aseo — sede norte',
+              quantity: 1,
+              unit_price: NO_SUMADA_AMOUNT,
+              aiu_component: 'contrato',
+              taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+            },
+            {
+              description: 'Aseo — sede sur',
+              quantity: 1,
+              unit_price: '1000000',
+              aiu_component: 'contrato',
+              taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+            },
+          ],
+        });
+
+        expect(result.lines[0].taxable_amount).toBe('69864.00');
+        expect(result.lines[1].taxable_amount).toBe('30000.00');
+        expect(result.aiu?.contract_value).toBe('3328800.00');
+        // 232.880,00 + 100.000,00 — las dos líneas, no la primera.
+        expect(result.aiu?.aiu_value).toBe('332880.00');
+        expect(result.aiu?.taxable_base).toBe('99864.00');
+        // 13.274,16 + 5.700,00
+        expect(result.totals.tax_amount).toBe('18974.16');
+        expect(result.totals.total_before_tax).toBe('3328800.00');
+      });
     });
   });
 });

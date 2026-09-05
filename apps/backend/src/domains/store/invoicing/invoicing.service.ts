@@ -4544,23 +4544,51 @@ export class InvoicingService {
     }
 
     // D.4 — Modelo 1 (`'contrato'`) mezclado con Modelo 2 (líneas por
-    // componente), o dos líneas `'contrato'` en el mismo documento ⇒
-    // **bloquea**, ANTES del piso legal: ese chequeo necesita un AIU único y
-    // bien formado, y esta divergencia dice precisamente que no lo hay.
-    const contrato_conflict = result.divergences.find(
-      (divergence) => divergence.scope === 'aiu_contrato_mutually_exclusive',
+    // componente) ⇒ **bloquea**, ANTES del piso legal: ese chequeo necesita un
+    // AIU bien formado, y la mezcla dice precisamente que no lo hay.
+    //
+    // Lo que ya NO bloquea es que el documento traiga VARIAS líneas
+    // `'contrato'`. Un contrato AIU factura varios servicios, y exigir un solo
+    // renglón obligaba a consolidarlos en uno, borrando el detalle que el
+    // cliente firmó. El cuadre de totales no depende de cuántas líneas Modelo 1
+    // haya —cada una declara su propia base gravable y el piso legal se
+    // contrasta contra la suma—; lo que sí lo rompe es mezclar los dos modelos,
+    // porque una línea `'contrato'` lleva el AIU DENTRO de su importe mientras
+    // que las líneas por componente lo suman APARTE: el mismo AIU quedaría
+    // contado dos veces y el piso del 10 % sin saber contra qué contrato
+    // compararse.
+    //
+    // La mezcla se deriva de `items` y no de `result.divergences` para que la
+    // regla de negocio —qué documento se rechaza— viva en el flujo de emisión y
+    // no dependa de cómo el calculador decida reportar. El calculador ya no
+    // cuenta líneas `'contrato'` ni corta antes de evaluar la mezcla
+    // (`checkAiuContratoMutualExclusion`), así que su divergencia señala hoy el
+    // mismo índice que este escaneo; leerla funcionaría, pero ataría el
+    // rechazo a un detalle de reporte que puede cambiar sin que nadie mire
+    // aquí. El `logger.warn` de más abajo es el que vigila que las dos
+    // lecturas no se separen.
+    const contrato_line_index = items.findIndex(
+      (item) => item.aiu_component === 'contrato',
     );
-    if (contrato_conflict) {
+    const componente_line_index = items.findIndex(
+      (item) => item.aiu_component != null && item.aiu_component !== 'contrato',
+    );
+    if (contrato_line_index >= 0 && componente_line_index >= 0) {
       throw new VendixHttpException(
         ErrorCodes.INVOICING_AIU_007,
-        `La línea ${contrato_conflict.line_index + 1} mezcla el Modelo 1 (componente «contrato», que ` +
-          `declara el AIU completo del contrato) con el Modelo 2 (líneas por componente ` +
-          `administración/imprevistos/utilidad), o el documento declara más de una línea «contrato». ` +
-          `Las dos formas son mutuamente excluyentes: una línea «contrato» YA ES el AIU completo, así que ` +
-          `cualquiera de las dos combinaciones deja sin definir cuánto vale el AIU que el piso legal del ` +
-          `10% necesita comparar contra el contrato. Usa una sola línea «contrato» sola, o las tres líneas ` +
+        `La línea ${componente_line_index + 1} declara el componente ` +
+          `«${items[componente_line_index].aiu_component}» (Modelo 2: el AIU se factura en líneas ` +
+          `separadas de administración/imprevistos/utilidad que SUMAN al total) mientras que la línea ` +
+          `${contrato_line_index + 1} declara el componente «contrato» (Modelo 1: el AIU ya viene ` +
+          `contenido DENTRO del valor del contrato y no suma). Los dos modelos son mutuamente ` +
+          `excluyentes en un mismo documento: combinarlos contaría el mismo AIU dos veces y dejaría sin ` +
+          `definir cuánto vale el AIU que el piso legal del 10% necesita comparar contra el contrato. ` +
+          `Usa sólo líneas «contrato» —pueden ser varias, una por servicio del contrato— o sólo líneas ` +
           `por componente sin ninguna «contrato».`,
-        { line_index: contrato_conflict.line_index },
+        {
+          line_index: componente_line_index,
+          contrato_line_index,
+        },
       );
     }
 
