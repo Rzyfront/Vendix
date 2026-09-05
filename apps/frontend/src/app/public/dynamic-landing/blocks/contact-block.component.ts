@@ -4,54 +4,41 @@ import {
   input,
   output,
 } from '@angular/core';
-import { CrmBlock } from './landing-blocks.types';
+import { CommonModule } from '@angular/common';
+import { IconComponent } from '../../../shared/components/icon/icon.component';
 
 /**
- * Contacto. Props: title?, description?.
- * El formulario público (creación de cliente + notificación) se conecta en
- * la Fase 4; el CTA se delega al host igual que hero/footer_cta.
+ * Encabezado de la sección de contacto.
+ * Props: title?, description?.
  */
 @Component({
   selector: 'app-contact-block',
+  standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [CommonModule, IconComponent],
   template: `
-    <section class="contact">
-      @if (props()['title']) {
-        <h2>{{ props()['title'] }}</h2>
-      }
+    <section class="contact-header-section max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 pt-12 sm:pt-16 pb-6 text-center">
+      <div class="contact-badge inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-semibold mb-3">
+        <app-icon name="mail" [size]="13" [color]="'var(--crm-primary, #2563eb)'" />
+        <span>Estamos para ayudarte</span>
+      </div>
+
+      <h2 class="text-2xl sm:text-3xl md:text-4xl font-extrabold text-slate-900 tracking-tight mb-3">
+        {{ props()['title'] || 'Visítanos o contáctanos' }}
+      </h2>
+
       @if (props()['description']) {
-        <p class="contact-description">{{ props()['description'] }}</p>
+        <p class="text-base sm:text-lg text-slate-600 max-w-2xl mx-auto mb-6 leading-relaxed">
+          {{ props()['description'] }}
+        </p>
       }
-      <button type="button" class="contact-cta" (click)="ctaClick.emit()">
-        Quiero que me contacten
-      </button>
     </section>
   `,
   styles: [
     `
-      .contact {
-        text-align: center;
-        padding: 36px 16px;
-        background: rgba(59, 130, 246, 0.06);
-      }
-      h2 {
-        font-size: 1.4rem;
-        margin: 0 0 8px;
-      }
-      .contact-description {
-        color: #4b5563;
-        max-width: 520px;
-        margin: 0 auto 18px;
-        line-height: 1.6;
-      }
-      .contact-cta {
-        border: 0;
-        background: var(--crm-primary, #3b82f6);
-        color: #fff;
-        font-weight: 600;
-        padding: 12px 26px;
-        border-radius: 999px;
-        cursor: pointer;
+      .contact-badge {
+        background: rgba(37, 99, 235, 0.08);
+        color: var(--crm-primary, #2563eb);
       }
     `,
   ],

@@ -809,6 +809,12 @@ export class BreadcrumbService {
       icon: 'users',
     },
     {
+      path: '/admin/customers/crm',
+      title: 'CRM / Landing Inteligente',
+      parent: 'Clientes',
+      icon: 'sparkles',
+    },
+    {
       path: '/admin/customers/:id',
       title: 'Detalles del Cliente',
       parent: 'Clientes',

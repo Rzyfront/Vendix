@@ -1,116 +1,801 @@
-<div class="crm-editor">
-  <aside class="crm-blocks-panel">
-    <div class="crm-panel-head">
-      <span class="crm-panel-title">Secciones</span>
-      <button type="button" class="crm-icon-btn" (click)="toggleAdding()" aria-label="Agregar sección">
-        <app-icon [name]="adding() ? 'x' : 'plus'" [size]="16" />
-      </button>
+<div class="crm-studio-container w-full" [style.--crm-primary]="primaryColor()" [style.--crm-secondary]="secondaryColor()">
+  <!-- Layout Principal de 3 Columnas según 1.jpeg -->
+  <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+    
+    <!-- ==================== COLUMNA 1: ESTRUCTURA DE LA LANDING (5 Cols) ==================== -->
+    <div class="lg:col-span-5 flex flex-col gap-4">
+      @if (selectedBlock(); as block) {
+        <!-- Formulario de Edición de la Sección Seleccionada -->
+        <div class="rounded-2xl border border-border bg-surface p-5 shadow-xs flex flex-col gap-4 animate-fadeIn">
+          <div class="flex items-center justify-between border-b border-border pb-3">
+            <button
+              type="button"
+              class="flex items-center gap-2 text-xs font-bold text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
+              (click)="deselect()"
+            >
+              <app-icon name="arrow-left" [size]="14" />
+              <span>Volver a la lista</span>
+            </button>
+
+            <span class="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+              {{ labelFor(block.type) }}
+            </span>
+          </div>
+
+          <div class="flex flex-col gap-3.5 max-h-[600px] overflow-y-auto pr-1">
+            @for (field of fields(); track field.key) {
+              <div class="flex flex-col gap-1.5">
+                <label class="text-xs font-semibold text-text-primary flex items-center justify-between">
+                  <span>{{ field.label }}</span>
+                  @if (field.hint) {
+                    <span class="text-[10px] text-text-secondary font-normal">{{ field.hint }}</span>
+                  }
+                </label>
+
+                @if (field.multiline) {
+                  <textarea
+                    class="w-full rounded-xl border border-border bg-surface px-3.5 py-2.5 text-xs text-text-primary placeholder:text-text-secondary/50 focus:border-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all leading-relaxed"
+                    rows="4"
+                    [placeholder]="field.placeholder || ''"
+                    [value]="getFieldValue(block, field.key)"
+                    (input)="onPropChange(field.key, $any($event.target).value)"
+                  ></textarea>
+                } @else {
+                  <input
+                    class="w-full rounded-xl border border-border bg-surface px-3.5 py-2.5 text-xs text-text-primary placeholder:text-text-secondary/50 focus:border-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                    type="text"
+                    [placeholder]="field.placeholder || ''"
+                    [value]="getFieldValue(block, field.key)"
+                    (input)="onPropChange(field.key, $any($event.target).value)"
+                  />
+                }
+              </div>
+            }
+          </div>
+        </div>
+      } @else if (activeSubModal() === 'theme') {
+        <!-- Panel de Edición de Diseño y Colores -->
+        <div class="rounded-2xl border border-border bg-surface p-5 shadow-xs flex flex-col gap-5 animate-fadeIn">
+          <div class="flex items-center justify-between border-b border-border pb-3">
+            <button
+              type="button"
+              class="flex items-center gap-2 text-xs font-bold text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
+              (click)="closeSubModal()"
+            >
+              <app-icon name="arrow-left" [size]="14" />
+              <span>Volver a la lista</span>
+            </button>
+            <span class="text-xs font-bold text-text-primary">Diseño & Colores</span>
+          </div>
+
+          <!-- Presets de Paleta -->
+          <div class="flex flex-col gap-3">
+            <h3 class="text-xs font-bold text-text-primary">Paletas de Color por Industria</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              @for (preset of colorPresets; track preset.name) {
+                <div
+                  class="p-2.5 rounded-xl border transition-all cursor-pointer flex flex-col justify-between gap-1.5"
+                  [class]="primaryColor() === preset.primary ? 'border-emerald-600 bg-emerald-50/20 ring-1 ring-emerald-500/30' : 'border-border hover:border-border-hover bg-surface'"
+                  (click)="applyPreset(preset)"
+                >
+                  <div class="flex items-center justify-between">
+                    <span class="text-xs font-bold text-text-primary">{{ preset.name }}</span>
+                    <div class="flex items-center gap-1">
+                      <span class="w-3.5 h-3.5 rounded-full border border-black/10 shadow-2xs" [style.background-color]="preset.primary"></span>
+                      <span class="w-3 h-3 rounded-full border border-black/10 shadow-2xs" [style.background-color]="preset.secondary"></span>
+                    </div>
+                  </div>
+                  <span class="text-[10px] text-text-secondary">{{ preset.badge }}</span>
+                </div>
+              }
+            </div>
+          </div>
+
+          <!-- Selectores de color HEX -->
+          <div class="pt-3 border-t border-border grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[11px] font-semibold text-text-secondary mb-1">Color Primario</label>
+              <div class="flex items-center gap-2 border border-border rounded-xl px-2.5 py-1.5 bg-surface">
+                <input
+                  type="color"
+                  class="w-5 h-5 rounded-md border-0 cursor-pointer p-0 bg-transparent"
+                  [value]="primaryColor()"
+                  (input)="onThemeChange('primary_color', $any($event.target).value)"
+                />
+                <input
+                  type="text"
+                  class="w-full text-xs font-mono font-bold bg-transparent text-text-primary focus:outline-none"
+                  [value]="primaryColor()"
+                  (input)="onThemeChange('primary_color', $any($event.target).value)"
+                />
+              </div>
+            </div>
+            <div>
+              <label class="block text-[11px] font-semibold text-text-secondary mb-1">Color Secundario</label>
+              <div class="flex items-center gap-2 border border-border rounded-xl px-2.5 py-1.5 bg-surface">
+                <input
+                  type="color"
+                  class="w-5 h-5 rounded-md border-0 cursor-pointer p-0 bg-transparent"
+                  [value]="secondaryColor()"
+                  (input)="onThemeChange('secondary_color', $any($event.target).value)"
+                />
+                <input
+                  type="text"
+                  class="w-full text-xs font-mono font-bold bg-transparent text-text-primary focus:outline-none"
+                  [value]="secondaryColor()"
+                  (input)="onThemeChange('secondary_color', $any($event.target).value)"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      } @else if (activeSubModal() === 'ai') {
+        <!-- Panel de Asistente IA -->
+        <div class="rounded-2xl border border-border bg-surface p-5 shadow-xs flex flex-col gap-4 animate-fadeIn">
+          <div class="flex items-center justify-between border-b border-border pb-3">
+            <button
+              type="button"
+              class="flex items-center gap-2 text-xs font-bold text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
+              (click)="closeSubModal()"
+            >
+              <app-icon name="arrow-left" [size]="14" />
+              <span>Volver a la lista</span>
+            </button>
+            <span class="text-xs font-bold text-text-primary">Asistente IA</span>
+          </div>
+          <div class="space-y-3 text-xs text-text-secondary leading-relaxed">
+            <p>La IA de Vendix analiza automáticamente tu <strong>nombre de tienda</strong>, <strong>industria</strong>, <strong>ubicación</strong> e <strong>información fiscal</strong> para crear una landing vendedora y personalizada.</p>
+            <div class="p-3.5 rounded-xl bg-surface-hover border border-border flex items-start gap-2.5">
+              <app-icon name="shield-check" [size]="16" class="text-emerald-600 mt-0.5 shrink-0" />
+              <div class="text-text-primary text-xs">
+                <strong>Sincronización Continua:</strong> Las secciones generadas se adaptan en tiempo real a tus productos y configuración.
+              </div>
+            </div>
+          </div>
+        </div>
+      } @else {
+        <!-- Lista de Secciones (Estructura de la Landing) según 1.jpeg -->
+        <div class="rounded-2xl border border-border bg-surface p-5 shadow-xs flex flex-col gap-4">
+          <!-- Cabecera de la lista -->
+          <div class="flex items-center justify-between border-b border-border pb-4">
+            <div>
+              <h2 class="text-sm md:text-base font-bold text-text-primary">Estructura de la Landing</h2>
+              <p class="text-xs text-text-secondary">Haz clic en una sección para editar su contenido</p>
+            </div>
+
+            <button
+              type="button"
+              class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs transition-all cursor-pointer select-none"
+              (click)="openCatalog()"
+            >
+              <app-icon name="plus" [size]="14" color="white" />
+              <span>Añadir Nueva Sección</span>
+            </button>
+          </div>
+
+          <!-- Items de la lista -->
+          <ul class="flex flex-col gap-3">
+            @for (block of blocks(); track block.id; let i = $index) {
+              <li
+                class="group flex items-center justify-between p-3.5 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-surface hover:border-slate-300 dark:hover:border-zinc-700 transition-all shadow-2xs relative select-none"
+                [class.ring-2]="selectedIndex() === i"
+                [class.ring-emerald-500]="selectedIndex() === i"
+              >
+                <!-- Izquierda: Icono + Título + Subtítulo -->
+                <div class="flex items-center gap-3.5 min-w-0 cursor-pointer flex-grow" (click)="select(i)">
+                  <div class="w-11 h-11 rounded-xl bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-slate-700 dark:text-slate-200 shrink-0">
+                    <app-icon [name]="iconFor(block.type)" [size]="20" />
+                  </div>
+
+                  <div class="flex flex-col min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs md:text-sm font-bold text-text-primary truncate">
+                        {{ labelFor(block.type) }}
+                      </span>
+                    </div>
+                    <div class="flex items-center gap-1.5 mt-0.5">
+                      <span class="text-[11px] text-text-secondary truncate">
+                        #{{ i + 1 }} · {{ subtitleFor(block.type) }}
+                      </span>
+                      @if (block.type === 'testimonials') {
+                        <span class="px-2 py-0.5 rounded-full text-[9px] font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60">
+                          Asesoría
+                        </span>
+                      }
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Derecha: 3 Botones de Acción (Editar, Reordenar, Eliminar) -->
+                <div class="flex items-center gap-1.5 shrink-0 ml-2">
+                  <!-- Botón 1: Editar (Lápiz) -->
+                  <button
+                    type="button"
+                    class="p-2 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-700 text-slate-700 dark:text-slate-200 transition-colors cursor-pointer shadow-2xs"
+                    (click)="select(i)"
+                    title="Editar contenido"
+                  >
+                    <app-icon name="pencil" [size]="14" />
+                  </button>
+
+                  <!-- Botón 2: Reordenar (Flechas Arriba/Abajo) -->
+                  <div class="relative">
+                    <button
+                      type="button"
+                      class="p-2 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-700 text-slate-700 dark:text-slate-200 transition-colors cursor-pointer shadow-2xs"
+                      (click)="toggleReorder(i); $event.stopPropagation()"
+                      title="Reordenar sección"
+                    >
+                      <app-icon name="arrow-up-down" [size]="14" />
+                    </button>
+
+                    @if (reorderingIndex() === i) {
+                      <div 
+                        class="absolute right-0 top-full mt-1 z-30 bg-surface border border-border rounded-xl shadow-lg p-1 flex flex-col gap-1 min-w-[95px] animate-fadeIn"
+                        (click)="$event.stopPropagation()"
+                      >
+                        <button
+                          type="button"
+                          class="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold text-text-primary hover:bg-surface-hover disabled:opacity-30 disabled:cursor-not-allowed text-left cursor-pointer"
+                          [disabled]="i === 0"
+                          (click)="move(i, -1); toggleReorder(i)"
+                        >
+                          <app-icon name="chevron-up" [size]="13" />
+                          <span>Subir</span>
+                        </button>
+                        <button
+                          type="button"
+                          class="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold text-text-primary hover:bg-surface-hover disabled:opacity-30 disabled:cursor-not-allowed text-left cursor-pointer"
+                          [disabled]="i === blocks().length - 1"
+                          (click)="move(i, 1); toggleReorder(i)"
+                        >
+                          <app-icon name="chevron-down" [size]="13" />
+                          <span>Bajar</span>
+                        </button>
+                      </div>
+                    }
+                  </div>
+
+                  <!-- Botón 3: Eliminar (Papelera Roja) -->
+                  <button
+                    type="button"
+                    class="p-2 rounded-lg border border-rose-200 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/30 hover:bg-rose-100 dark:hover:bg-rose-900/50 text-rose-600 dark:text-rose-400 transition-colors cursor-pointer shadow-2xs"
+                    (click)="remove(i); $event.stopPropagation()"
+                    title="Eliminar sección"
+                  >
+                    <app-icon name="trash-2" [size]="14" />
+                  </button>
+                </div>
+              </li>
+            } @empty {
+              <li class="p-8 text-center border-2 border-dashed border-border rounded-2xl text-text-secondary flex flex-col items-center gap-2">
+                <app-icon name="layout" [size]="32" class="opacity-30 text-emerald-600" />
+                <p class="text-xs font-semibold">Aún no hay secciones en tu landing page</p>
+                <button
+                  type="button"
+                  class="mt-2 text-xs font-bold text-emerald-600 hover:underline cursor-pointer"
+                  (click)="openCatalog()"
+                >
+                  + Añadir tu primera sección
+                </button>
+              </li>
+            }
+          </ul>
+
+          <!-- Acceso secundario a Diseño y Asistente IA -->
+          <div class="mt-2 pt-3 border-t border-border flex items-center justify-between gap-2.5">
+            <button
+              type="button"
+              class="flex-1 py-2 px-3 rounded-xl border border-border bg-surface hover:bg-surface-hover text-text-secondary hover:text-text-primary text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+              (click)="openThemeModal()"
+            >
+              <app-icon name="palette" [size]="14" class="text-emerald-600" />
+              <span>Diseño & Colores</span>
+            </button>
+            <button
+              type="button"
+              class="flex-1 py-2 px-3 rounded-xl border border-border bg-surface hover:bg-surface-hover text-text-secondary hover:text-text-primary text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+              (click)="openAiModal()"
+            >
+              <app-icon name="sparkles" [size]="14" class="text-blue-600" />
+              <span>Asistente IA</span>
+            </button>
+          </div>
+        </div>
+      }
     </div>
 
-    @if (adding()) {
-      <ul class="crm-add-list">
-        @for (type of typesList(); track type) {
-          <li>
-            <button type="button" class="crm-add-option" (click)="addBlock(type)">
-              {{ labelFor(type) }}
-            </button>
-          </li>
-        }
-      </ul>
-    }
+    <!-- ==================== COLUMNA 2: MOCKUP DE SMARTPHONE / PREVIEW (4 Cols) ==================== -->
+    <div class="lg:col-span-4 flex flex-col items-center justify-start">
+      <!-- SMARTPHONE MOCKUP HIPER-REALISTA SEGÚN 1.JPEG -->
+      <div class="smartphone-chassis relative w-[315px] sm:w-[340px] bg-slate-950 rounded-[50px] p-3 shadow-2xl border-[4px] border-slate-700/90 ring-1 ring-slate-500/30 transition-all duration-300">
+        
+        <!-- Botones laterales simulados -->
+        <div class="absolute -left-[7px] top-24 w-[3px] h-10 bg-slate-600 rounded-l-sm"></div>
+        <div class="absolute -left-[7px] top-38 w-[3px] h-10 bg-slate-600 rounded-l-sm"></div>
+        <div class="absolute -right-[7px] top-32 w-[3px] h-14 bg-slate-600 rounded-r-sm"></div>
 
-    <ul class="crm-blocks-list">
-      @for (block of blocks(); track block.id; let i = $index) {
-        <li
-          class="crm-block-item"
-          [class.crm-block-active]="selectedIndex() === i"
-          (click)="select(i)"
+        <!-- Dynamic Island Notch -->
+        <div class="relative w-full z-20 pb-1.5">
+          <div class="w-24 h-5 bg-black rounded-full mx-auto flex items-center justify-between px-3">
+            <div class="w-2 h-2 rounded-full bg-slate-800"></div>
+            <div class="w-2 h-2 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center">
+              <div class="w-1 h-1 rounded-full bg-blue-950"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Barra de Estado del Smartphone -->
+        <div class="flex items-center justify-between px-5 pt-0.5 pb-2 text-[10px] font-bold text-white tracking-wider select-none">
+          <span>12:00</span>
+          <div class="flex items-center gap-1.5">
+            <span class="text-[9px]">5G</span>
+            <div class="w-4 h-2 rounded-xs border border-white p-0.5 flex items-center">
+              <div class="w-full h-full bg-emerald-400 rounded-2xs"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pantalla / Viewport con Scroll Suave -->
+        <div class="smartphone-screen bg-slate-50 rounded-[36px] overflow-hidden shadow-inner max-h-[640px] overflow-y-auto no-scrollbar relative flex flex-col">
+          <!-- Mini Barra Superior dentro del Móvil (Estilo 1.jpeg) -->
+          <div class="p-3 pb-1 flex items-center justify-between gap-2 bg-gradient-to-b from-blue-50/70 to-transparent shrink-0">
+            <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/95 border border-slate-200/80 shadow-2xs text-[10px] font-semibold text-slate-800">
+              <app-icon name="sparkles" [size]="11" class="text-blue-600" />
+              <span class="truncate max-w-[140px]">Tecnología de Vanguardia en Bogotá</span>
+            </div>
+            <button type="button" class="px-2.5 py-0.5 rounded-full bg-slate-900 text-white text-[10px] font-semibold shadow-xs">
+              Contactar
+            </button>
+          </div>
+
+          <!-- Contenedor de Bloques -->
+          <div class="flex flex-col mobile-blocks-flow">
+            @for (b of blocks(); track b.id; let i = $index) {
+              <div 
+                class="relative group transition-all"
+                [class.ring-2]="selectedIndex() === i"
+                [class.ring-emerald-500]="selectedIndex() === i"
+                (click)="select(i)"
+              >
+                <app-block-renderer
+                  [block]="b"
+                  (ctaClick)="ctaClicked()"
+                  (secondaryCtaClick)="ctaClicked()"
+                />
+
+                <!-- Tag flotante al hover -->
+                <div class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                  <span class="bg-slate-900 text-white text-[9px] font-bold px-2 py-0.5 rounded-full shadow-xs">
+                    {{ labelFor(b.type) }}
+                  </span>
+                </div>
+              </div>
+            } @empty {
+              <div class="py-24 px-4 text-center text-slate-400 flex flex-col items-center gap-2">
+                <app-icon name="sparkles" [size]="32" class="text-emerald-600/40" />
+                <p class="text-xs font-semibold text-slate-700">Sin secciones añadidas</p>
+                <p class="text-[10px]">Agrega secciones para ver la vista previa aquí</p>
+              </div>
+            }
+          </div>
+        </div>
+
+        <!-- Home Indicator Inferior -->
+        <div class="w-28 h-1 bg-slate-500/70 rounded-full mx-auto mt-2.5 mb-1"></div>
+      </div>
+    </div>
+
+    <!-- ==================== COLUMNA 3: CONTROLES & PREVISUALIZACIÓN AVANZADA (3 Cols) ==================== -->
+    <div class="lg:col-span-3 flex flex-col gap-5">
+      <!-- 1. Switcher de Dispositivo & Ver en Web (Pill Card) -->
+      <div class="bg-surface rounded-2xl border border-border p-2 shadow-xs flex items-center justify-between gap-2">
+        <div class="flex items-center gap-1 p-1 bg-surface-hover/80 rounded-xl border border-border">
+          <button
+            type="button"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+            [class]="!laptopModalOpen() ? 'bg-emerald-600 text-white shadow-xs' : 'text-text-secondary hover:text-text-primary'"
+            (click)="closeLaptopModal()"
+            title="Vista Móvil en Smartphone"
+          >
+            <app-icon name="phone" [size]="14" />
+            <span>Celular</span>
+          </button>
+          <button
+            type="button"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+            [class]="laptopModalOpen() ? 'bg-emerald-600 text-white shadow-xs' : 'text-text-secondary hover:text-text-primary'"
+            (click)="openLaptopModal()"
+            title="Abrir Previsualización en Portátil"
+          >
+            <app-icon name="monitor" [size]="14" />
+            <span>Escritorio</span>
+          </button>
+        </div>
+
+        <button
+          type="button"
+          class="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-text-primary hover:text-emerald-600 hover:bg-surface-hover transition-colors cursor-pointer"
+          (click)="openPublicLanding()"
+          title="Ver landing pública"
         >
-          <span class="crm-block-label">{{ labelFor(block.type) }}</span>
-          <span class="crm-block-actions">
-            <button
-              type="button"
-              class="crm-mini-btn"
-              (click)="move(i, -1); $event.stopPropagation()"
-              [disabled]="i === 0"
-              aria-label="Subir"
-            >
-              <app-icon name="chevron-up" [size]="14" />
-            </button>
-            <button
-              type="button"
-              class="crm-mini-btn"
-              (click)="move(i, 1); $event.stopPropagation()"
-              [disabled]="i === blocks().length - 1"
-              aria-label="Bajar"
-            >
-              <app-icon name="chevron-down" [size]="14" />
-            </button>
-            <button
-              type="button"
-              class="crm-mini-btn crm-mini-danger"
-              (click)="remove(i); $event.stopPropagation()"
-              aria-label="Quitar"
-            >
-              <app-icon name="trash-2" [size]="14" />
-            </button>
-          </span>
-        </li>
-      } @empty {
-        <li class="crm-empty">Sin secciones. Agrega la primera con +.</li>
-      }
-    </ul>
-  </aside>
-
-  <section class="crm-edit-area">
-    @if (selectedBlock(); as block) {
-      <div class="crm-form">
-        <h3 class="crm-form-title">{{ labelFor(block.type) }}</h3>
-        @for (field of fields(); track field.key) {
-          <label class="crm-field">
-            <span class="crm-field-label">{{ field.label }}</span>
-            @if (field.multiline) {
-              <textarea
-                class="crm-input"
-                rows="4"
-                [placeholder]="field.placeholder || ''"
-                [value]="block.props[field.key] || ''"
-                (input)="onPropChange(field.key, $any($event.target).value)"
-              ></textarea>
-            } @else {
-              <input
-                class="crm-input"
-                type="text"
-                [placeholder]="field.placeholder || ''"
-                [value]="block.props[field.key] || ''"
-                (input)="onPropChange(field.key, $any($event.target).value)"
-              />
-            }
-            @if (field.hint) {
-              <span class="crm-field-hint">{{ field.hint }}</span>
-            }
-          </label>
-        }
+          <app-icon name="globe" [size]="14" />
+          <span>Ver en web</span>
+          <app-icon name="arrow-right" [size]="12" />
+        </button>
       </div>
 
-      <div class="crm-preview">
-        <span class="crm-preview-title">Vista previa</span>
-        <div class="crm-preview-frame">
-          @for (b of blocks(); track b.id; let i = $index) {
-            <div
-              class="crm-preview-block"
-              [class.crm-preview-selected]="selectedIndex() === i"
-              (click)="select(i)"
-            >
-              <app-block-renderer [block]="b" (ctaClick)="ctaClicked()" />
+      <!-- 2. Card: Previsualización Avanzada (Mockup Dual según 1.jpeg) -->
+      <div class="rounded-2xl border border-border bg-surface p-4 shadow-xs flex flex-col gap-3">
+        <h3 class="text-sm font-bold text-text-primary">Previsualización Avanzada</h3>
+
+        <div class="advanced-preview-showcase bg-slate-50 dark:bg-zinc-950/80 border border-slate-200/70 dark:border-zinc-800 rounded-xl p-3 flex items-center justify-center relative min-h-[220px] overflow-hidden">
+          <!-- Mockup Monitor iMac de Escritorio (Clicable para abrir en portátil) -->
+          <div
+            class="desktop-mockup relative w-[205px] bg-white rounded-lg shadow-md border border-slate-200 overflow-hidden flex flex-col transform -translate-x-3 -translate-y-1 cursor-pointer hover:scale-105 hover:border-emerald-500 transition-all group select-none"
+            (click)="openLaptopModal()"
+            title="Clic para previsualizar en pantalla de portátil"
+          >
+            <!-- Overlay interactivo al hover -->
+            <div class="absolute inset-0 bg-slate-900/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-2xs z-20">
+              <span class="px-2 py-1 rounded-md bg-white text-slate-900 text-[9px] font-bold shadow-md flex items-center gap-1">
+                <app-icon name="monitor" [size]="10" />
+                Ver en Portátil
+              </span>
             </div>
-          }
+
+            <div class="px-2 py-1 bg-slate-100 border-b border-slate-200 flex items-center justify-between text-[7px] text-slate-500">
+              <div class="flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-slate-300"></span>
+                <span class="truncate max-w-[70px]">Tecnología en Bogotá</span>
+              </div>
+              <span class="px-1.5 py-0.5 rounded-xs bg-slate-900 text-white font-medium">Contactar</span>
+            </div>
+
+            <div class="p-2.5 flex items-center justify-between gap-1 bg-gradient-to-br from-blue-50/40 via-white to-slate-50 min-h-[105px]">
+              <div class="flex flex-col gap-1 max-w-[95px]">
+                <h4 class="text-[9px] font-black leading-tight text-slate-900 tracking-tight">
+                  Equipos de Cómputo de Alta Performance
+                </h4>
+                <p class="text-[6px] text-slate-500 leading-tight line-clamp-2">
+                  Lo último en portátiles y accesorios con garantía oficial en Bogotá.
+                </p>
+                <span class="inline-block mt-0.5 px-2 py-0.5 bg-slate-900 text-white rounded-xs text-[6px] font-bold w-max">
+                  Comprar
+                </span>
+              </div>
+              <div class="w-16 h-14 bg-slate-100 rounded-sm overflow-hidden flex items-center justify-center p-1 shrink-0 border border-slate-200/60">
+                <img
+                  src="https://images.unsplash.com/photo-1517336714731-489689fd1ca8?auto=format&fit=crop&w=300&q=80"
+                  alt="Laptop"
+                  class="w-full h-full object-contain"
+                />
+              </div>
+            </div>
+
+            <!-- Stand iMac -->
+            <div class="h-2.5 bg-slate-200 border-t border-slate-300 flex items-center justify-center">
+              <div class="w-1.5 h-1.5 rounded-full bg-slate-400"></div>
+            </div>
+            <div class="w-12 h-3.5 bg-slate-300 mx-auto rounded-b-xs shadow-xs"></div>
+            <div class="w-16 h-1 bg-slate-400 mx-auto rounded-full"></div>
+          </div>
+
+          <!-- Smartphone Overlapping Foreground Mockup -->
+          <div class="phone-mockup-mini absolute right-2.5 bottom-2.5 w-[98px] bg-slate-900 rounded-[18px] p-1 shadow-xl border border-slate-700 ring-1 ring-white/30 z-10">
+            <div class="w-6 h-1.5 bg-black rounded-full mx-auto mb-1"></div>
+            <div class="bg-white rounded-[14px] p-1.5 flex flex-col gap-1 overflow-hidden min-h-[120px]">
+              <div class="flex items-center justify-between text-[5px] text-slate-700">
+                <span class="truncate max-w-[45px] font-bold">Tecnología</span>
+                <span class="px-1 py-0.2 bg-slate-900 text-white rounded-2xs">Contactar</span>
+              </div>
+              <span class="text-[6.5px] font-black text-slate-900 leading-tight">
+                Equipos de Cómputo de Alta Performance
+              </span>
+              <div class="text-[5px] text-slate-400 font-bold">Catálogo de productos</div>
+              <div class="grid grid-cols-3 gap-0.5">
+                <div class="bg-slate-50 border border-slate-200 rounded-2xs p-0.5 flex flex-col items-center">
+                  <div class="w-full h-3.5 bg-slate-200/50 rounded-2xs"></div>
+                  <span class="text-[4px] text-slate-700 font-semibold truncate w-full mt-0.5">Slimline</span>
+                </div>
+                <div class="bg-slate-50 border border-slate-200 rounded-2xs p-0.5 flex flex-col items-center">
+                  <div class="w-full h-3.5 bg-slate-200/50 rounded-2xs"></div>
+                  <span class="text-[4px] text-slate-700 font-semibold truncate w-full mt-0.5">Nitro</span>
+                </div>
+                <div class="bg-slate-50 border border-slate-200 rounded-2xs p-0.5 flex flex-col items-center">
+                  <div class="w-full h-3.5 bg-slate-200/50 rounded-2xs"></div>
+                  <span class="text-[4px] text-slate-700 font-semibold truncate w-full mt-0.5">Pro Book</span>
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-0.5 mt-0.5">
+                <div class="bg-slate-100 rounded-2xs p-0.5 text-[4px] text-slate-700">
+                  <span class="font-bold block">Térmico 1</span>
+                  <span class="text-slate-400 block line-clamp-1">Garantía</span>
+                </div>
+                <div class="bg-slate-100 rounded-2xs p-0.5 text-[4px] text-slate-700">
+                  <span class="font-bold block">Térmico 2</span>
+                  <span class="text-slate-400 block line-clamp-1">Soporte</span>
+                </div>
+              </div>
+            </div>
+            <div class="w-6 h-0.5 bg-slate-500 rounded-full mx-auto mt-1"></div>
+          </div>
         </div>
       </div>
-    } @else {
-      <p class="crm-placeholder">
-        Selecciona una sección para editarla, o agrega una nueva.
-      </p>
-    }
-  </section>
+
+      <!-- 3. Botones de Acción (Descartar, Guardar Borrador, Publicar Landing) según 1.jpeg -->
+      <div class="flex items-center gap-2 justify-end pt-1">
+        <button
+          type="button"
+          class="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-700 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+          [disabled]="isBusy() || !hasPendingChanges()"
+          (click)="discard.emit()"
+          title="Descartar cambios no guardados"
+        >
+          <app-icon name="rotate-ccw" [size]="14" />
+          <span>Descartar</span>
+        </button>
+
+        <button
+          type="button"
+          class="px-3.5 py-2 rounded-xl border border-emerald-600 bg-white dark:bg-zinc-800 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+          [disabled]="isBusy()"
+          (click)="saveDraft.emit()"
+          title="Guardar borrador actual"
+        >
+          <app-icon name="save" [size]="14" class="text-emerald-600 dark:text-emerald-400" />
+          <span>Guardar Borrador</span>
+        </button>
+
+        <button
+          type="button"
+          class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+          [disabled]="isBusy()"
+          (click)="publish.emit()"
+          title="Publicar versión actual a la web"
+        >
+          <app-icon name="globe" [size]="14" color="white" />
+          <span>Publicar Landing</span>
+        </button>
+      </div>
+    </div>
+
+  </div>
 </div>
+
+<!-- ==================== MODAL: PREVISUALIZACIÓN EN PORTÁTIL (ESCRITORIO) ==================== -->
+@if (laptopModalOpen()) {
+  <div
+    class="fixed inset-0 z-50 flex flex-col items-center justify-center p-2 sm:p-4 md:p-6 bg-black/85 backdrop-blur-md animate-fadeIn"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Previsualización de escritorio en portátil"
+    (click)="closeLaptopModal()"
+  >
+    <!-- Barra superior de control del Modal -->
+    <div
+      class="w-full max-w-5xl mb-2 sm:mb-3 flex items-center justify-between px-2 text-white select-none shrink-0"
+      (click)="$event.stopPropagation()"
+    >
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center border border-white/15 shrink-0">
+          <app-icon name="monitor" [size]="16" color="white" />
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h2 class="text-xs sm:text-sm md:text-base font-bold text-white tracking-tight">
+              Previsualización en Portátil
+            </h2>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+              Escritorio · MacBook
+            </span>
+          </div>
+          <p class="text-[11px] text-slate-300 hidden sm:block">
+            Así es como tus clientes verán tu landing en computadores portátiles y pantallas de escritorio.
+          </p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-xs font-semibold text-white transition-all cursor-pointer"
+          (click)="openPublicLanding()"
+          title="Abrir en pestaña nueva del navegador"
+        >
+          <app-icon name="external-link" [size]="13" color="white" />
+          <span class="hidden sm:inline">Ver en web</span>
+        </button>
+
+        <button
+          type="button"
+          class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 border border-white/15 text-white flex items-center justify-center transition-colors cursor-pointer"
+          (click)="closeLaptopModal()"
+          title="Cerrar previsualización (Esc)"
+        >
+          <app-icon name="x" [size]="18" color="white" />
+        </button>
+      </div>
+    </div>
+
+    <!-- CHASSIS DEL PORTÁTIL (MACBOOK PRO) -->
+    <div
+      class="laptop-chassis w-full max-w-5xl flex flex-col items-center select-text"
+      (click)="$event.stopPropagation()"
+    >
+      <!-- TAPA Y PANTALLA (LID) -->
+      <div class="laptop-lid w-full bg-slate-900 rounded-t-[24px] sm:rounded-t-[28px] p-2.5 sm:p-3 pb-0 border-t-2 border-x-2 border-slate-700/80 shadow-2xl relative">
+        
+        <!-- Marco superior con cámara y sensor -->
+        <div class="w-full flex items-center justify-center pb-2 relative select-none">
+          <div class="flex items-center gap-1.5">
+            <div class="w-2.5 h-2.5 rounded-full bg-slate-950 border border-slate-800 flex items-center justify-center">
+              <div class="w-1 h-1 rounded-full bg-blue-950"></div>
+            </div>
+            <div class="w-1 h-1 rounded-full bg-emerald-500/80" title="Cámara web"></div>
+          </div>
+        </div>
+
+        <!-- PANTALLA DISPLAY CON NAVEGADOR SAFARI / CHROME -->
+        <div class="laptop-screen bg-white rounded-t-xl overflow-hidden shadow-inner flex flex-col">
+          
+          <!-- Barra de navegación del navegador web -->
+          <div class="browser-header px-4 py-2 sm:py-2.5 bg-slate-100 dark:bg-zinc-800 border-b border-slate-200 dark:border-zinc-700 flex items-center justify-between gap-3 select-none shrink-0">
+            <!-- Botones semáforo (Mac traffic lights) -->
+            <div class="flex items-center gap-1.5">
+              <div class="w-2.5 sm:w-3 h-2.5 sm:h-3 rounded-full bg-[#ff5f56] border border-[#e0443e]"></div>
+              <div class="w-2.5 sm:w-3 h-2.5 sm:h-3 rounded-full bg-[#ffbd2e] border border-[#dea123]"></div>
+              <div class="w-2.5 sm:w-3 h-2.5 sm:h-3 rounded-full bg-[#27c93f] border border-[#1aab29]"></div>
+            </div>
+
+            <!-- Flechas de navegación -->
+            <div class="hidden sm:flex items-center gap-1 text-slate-400">
+              <span class="p-1 rounded opacity-40">
+                <app-icon name="chevron-left" [size]="13" />
+              </span>
+              <span class="p-1 rounded opacity-40">
+                <app-icon name="chevron-right" [size]="13" />
+              </span>
+            </div>
+
+            <!-- Barra de URL con candado SSL -->
+            <div class="flex-grow max-w-sm sm:max-w-md mx-auto flex items-center justify-center gap-1.5 px-3 py-1 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-lg text-xs text-slate-600 dark:text-slate-300 shadow-2xs">
+              <app-icon name="lock" [size]="11" class="text-emerald-600 shrink-0" />
+              <span class="font-mono text-[10px] sm:text-[11px] truncate">
+                https://{{ storeDomainHostname() || 'mitienda.vendix.co' }}/landing
+              </span>
+            </div>
+
+            <!-- Acciones rápidas del navegador -->
+            <div class="flex items-center gap-2 text-slate-500">
+              <button
+                type="button"
+                class="p-1 rounded hover:bg-slate-200/60 dark:hover:bg-zinc-700 cursor-pointer text-slate-500"
+                (click)="openPublicLanding()"
+                title="Abrir en pestaña completa"
+              >
+                <app-icon name="external-link" [size]="13" />
+              </button>
+            </div>
+          </div>
+
+          <!-- VIEWPORT WEB A ESCALA REAL DE ESCRITORIO -->
+          <div class="laptop-viewport max-h-[58vh] sm:max-h-[64vh] overflow-y-auto crm-preview-scroll bg-white text-slate-900">
+            @for (b of blocks(); track b.id) {
+              <div class="relative">
+                <app-block-renderer
+                  [block]="b"
+                  (ctaClick)="ctaClicked()"
+                  (secondaryCtaClick)="ctaClicked()"
+                />
+              </div>
+            } @empty {
+              <div class="py-24 px-4 text-center text-slate-400 flex flex-col items-center gap-3">
+                <app-icon name="sparkles" [size]="36" class="text-emerald-600/40" />
+                <p class="text-sm font-semibold text-slate-700">Sin secciones en tu landing page</p>
+                <p class="text-xs text-slate-500">Agrega secciones en el panel izquierdo para visualizarlas aquí.</p>
+              </div>
+            }
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- BASE DEL PORTÁTIL (TECLADO / BISEL INFERIOR DE ALUMINIO) -->
+      <div class="laptop-base w-[102%] -mt-0.5 h-3.5 sm:h-5 bg-gradient-to-b from-slate-600 via-slate-700 to-slate-800 rounded-b-xl sm:rounded-b-2xl relative shadow-2xl flex items-start justify-center border-t border-slate-500/50">
+        <!-- Hendidura / notch para abrir la tapa -->
+        <div class="w-16 sm:w-24 h-1.5 bg-slate-900/90 rounded-b-md shadow-inner"></div>
+      </div>
+
+    </div>
+
+  </div>
+}
+
+<!-- ==================== MODAL: CATÁLOGO DE SECCIONES ==================== -->
+@if (catalogModalOpen()) {
+  <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
+    <div class="bg-surface rounded-3xl border border-border shadow-2xl max-w-2xl w-full p-6 sm:p-7 flex flex-col gap-5 max-h-[90vh] overflow-y-auto">
+      
+      <div class="flex items-center justify-between border-b border-border pb-4">
+        <div>
+          <h2 class="text-lg font-bold text-text-primary">Catálogo de Secciones</h2>
+          <p class="text-xs text-text-secondary">Selecciona la sección que deseas agregar a tu landing page</p>
+        </div>
+
+        <button
+          type="button"
+          class="p-2 rounded-xl text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer"
+          (click)="closeCatalog()"
+        >
+          <app-icon name="x" [size]="18" />
+        </button>
+      </div>
+
+      <!-- Filtro por Categorías -->
+      <div class="flex items-center gap-2 overflow-x-auto pb-1">
+        <button
+          type="button"
+          class="px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer shrink-0"
+          [class]="catalogCategory() === 'all' ? 'bg-emerald-600 text-white' : 'bg-surface-hover text-text-secondary hover:text-text-primary'"
+          (click)="catalogCategory.set('all')"
+        >
+          Todos
+        </button>
+        <button
+          type="button"
+          class="px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer shrink-0"
+          [class]="catalogCategory() === 'trust' ? 'bg-emerald-600 text-white' : 'bg-surface-hover text-text-secondary hover:text-text-primary'"
+          (click)="catalogCategory.set('trust')"
+        >
+          Confianza & Autoridad
+        </button>
+        <button
+          type="button"
+          class="px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer shrink-0"
+          [class]="catalogCategory() === 'commerce' ? 'bg-emerald-600 text-white' : 'bg-surface-hover text-text-secondary hover:text-text-primary'"
+          (click)="catalogCategory.set('commerce')"
+        >
+          Comercio & Catálogo
+        </button>
+        <button
+          type="button"
+          class="px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer shrink-0"
+          [class]="catalogCategory() === 'conversion' ? 'bg-emerald-600 text-white' : 'bg-surface-hover text-text-secondary hover:text-text-primary'"
+          (click)="catalogCategory.set('conversion')"
+        >
+          Conversión & Cierre
+        </button>
+      </div>
+
+      <!-- Grid de Secciones -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+        @for (item of filteredCatalog(); track item.type) {
+          <div
+            class="group p-4 rounded-2xl border border-border hover:border-emerald-500/60 bg-surface hover:bg-emerald-50/10 transition-all cursor-pointer flex items-start gap-3.5"
+            (click)="addBlock(item.type)"
+          >
+            <div class="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+              <app-icon [name]="item.icon" [size]="20" />
+            </div>
+
+            <div class="flex flex-col flex-grow">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-xs font-bold text-text-primary group-hover:text-emerald-600 transition-colors">
+                  {{ item.label }}
+                </span>
+                <span class="text-[10px] text-emerald-600 opacity-0 group-hover:opacity-100 font-bold transition-opacity">
+                  + Añadir
+                </span>
+              </div>
+              <p class="text-[11px] text-text-secondary leading-snug">
+                {{ item.description }}
+              </p>
+            </div>
+          </div>
+        }
+      </div>
+    </div>
+  </div>
+}
