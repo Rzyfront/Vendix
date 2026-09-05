@@ -1530,6 +1530,67 @@ export class InvoiceFlowService {
    * no decir algo falso— pero sí se registran: son la lista de lo que hoy se
    * emite a medias.
    */
+  /**
+   * Plazo, en horas, dentro del cual un documento ya rechazado se puede volver
+   * a transmitir con su fecha original.
+   *
+   * POR QUÉ 48: es el plazo de transmisión que fija la DIAN para la factura
+   * electrónica de venta (Res. 000042/2020, art. 22). Pasado ese punto el
+   * documento no se rechaza por la fecha de firma —hoy firma con la suya— sino
+   * por llegar fuera de término, y ese rechazo cuesta el consecutivo otra vez.
+   * Cortar acá es recuperable; que lo corte la DIAN no lo es.
+   */
+  private static readonly RESEND_WINDOW_HOURS = 48;
+
+  /**
+   * Compuerta de reenvío: el documento todavía está dentro del plazo.
+   *
+   * Se juzga contra el MISMO instante que va a viajar en el XML y que el
+   * firmante va a estampar —`cbc:IssueDate` + `cbc:IssueTime`, armados con los
+   * mismos dos helpers que alimentan `provider_data`—, no contra `created_at`
+   * ni contra la fecha suelta. Cualquier otro reloj volvería a abrir la grieta
+   * que este cambio cierra: dos partes del envío juzgando hechos distintos.
+   *
+   * NO aplica al primer envío. Ahí el documento nunca ha gastado el consecutivo
+   * ante la DIAN y bloquearlo cambiaría un flujo vivo; el reenvío, en cambio,
+   * ya viene de un rechazo y es el único camino donde un segundo fallo deja un
+   * hueco irrecuperable en la numeración autorizada.
+   */
+  private async assertResendWindowOpen(invoice: any): Promise<void> {
+    const timezone = await this.resolveTimezone(invoice);
+    const issue_day = this.formatIssueDate(invoice.issue_date, timezone);
+    const issue_time = this.formatIssueTime(
+      invoice.issue_date,
+      timezone,
+      invoice.created_at,
+    );
+    const instant = new Date(`${issue_day}T${issue_time}`);
+    // Fecha ilegible: no se inventa un bloqueo. La prevalidación que sigue —y
+    // el esquema del propio XML— tienen mejor información para decidir.
+    if (Number.isNaN(instant.getTime())) return;
+
+    const elapsed_hours = (Date.now() - instant.getTime()) / (60 * 60 * 1000);
+    if (elapsed_hours <= InvoiceFlowService.RESEND_WINDOW_HOURS) return;
+
+    throw new VendixHttpException(
+      ErrorCodes.INVOICING_PREVALIDATION_004,
+      `No se puede reenviar el documento: fue generado el ${issue_day} y ya ` +
+        `pasaron ${Math.floor(elapsed_hours)} horas, más de las ` +
+        `${InvoiceFlowService.RESEND_WINDOW_HOURS} que la DIAN da para ` +
+        `transmitirlo. Reenviarlo con esa fecha lo haría rechazar por llegar ` +
+        `fuera de término y gastaría el consecutivo una segunda vez. Anúlalo y ` +
+        `emite uno nuevo con la fecha de hoy.`,
+      {
+        invoice_id: invoice.id,
+        invoice_number: invoice.invoice_number,
+        issue_date: issue_day,
+        elapsed_hours: Math.floor(elapsed_hours),
+        window_hours: InvoiceFlowService.RESEND_WINDOW_HOURS,
+        timezone,
+      },
+    );
+  }
+
   private async assertFiscalDocumentEmittable(
     invoice: any,
     options?: {
@@ -3287,17 +3348,20 @@ export class InvoiceFlowService {
     // consecutivo ya está gastado una vez; un segundo rechazo lo deja como un
     // segundo hueco irrecuperable en la numeración autorizada.
     //
-    // Se revalida con la MISMA puerta que usa `validate()`, y esta vez SÍ con
-    // `signing_date: new Date()`: es el único punto de toda la cadena de
-    // emisión donde «ahora» no es una invención — el proveedor va a firmar el
-    // documento segundos después—, así que es también el único punto donde
-    // `FAD09e` (`cbc:IssueDate` == fecha de firma) se puede juzgar sin
-    // arriesgar un falso positivo. Un documento `rejected` que lleva días
-    // esperando corrección es precisamente el candidato más probable a violar
-    // esa regla.
+    // POR QUÉ YA NO SE PASA `signing_date`: antes se pasaba `new Date()` para
+    // juzgar `FAD09e` (`cbc:IssueDate` == fecha de firma), porque el firmante
+    // estampaba `xades:SigningTime` con el reloj de pared. Hoy el firmante toma
+    // el instante del propio documento (`DianDirectProvider.resolveSigningInstant`),
+    // así que las dos fechas coinciden POR CONSTRUCCIÓN y juzgarlas contra
+    // «ahora» bloquearía un reenvío que la DIAN sí aceptaría —exactamente lo que
+    // le pasó a FVJL11 y FVJL12: rechazadas el 5-sep por un documento del 4-sep
+    // que, firmado con su propia fecha, es válido—.
+    //
+    // Lo que SÍ sigue siendo un riesgo real es transmitir un documento viejo:
+    // por eso el plazo de la ventana reemplaza a la comparación de fechas.
     if (invoice.status === 'rejected') {
+      await this.assertResendWindowOpen(invoice);
       await this.assertFiscalDocumentEmittable(invoice, {
-        signing_date: new Date(),
         action_label: 'reenviar',
         is_resend: true,
       });
