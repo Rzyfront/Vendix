@@ -1144,3 +1144,119 @@
         position: static;
     }
 }
+
+// ========== ENTREGA delivery-first (CP-tienda-checkout-whatsapp) ==========
+.delivery-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+
+    @media (max-width: 576px) {
+        grid-template-columns: 1fr;
+    }
+}
+
+.delivery-subhead {
+    margin-top: 1.5rem;
+}
+
+// C.3: mapa 50% enmarcado 9:16 tipo teléfono + formulario 50%.
+.delivery-address-grid {
+    display: grid;
+    grid-template-columns: 5fr 6fr;
+    gap: 1rem;
+    align-items: start;
+    margin-top: 1rem;
+
+    @media (max-width: 992px) {
+        grid-template-columns: 1fr;
+    }
+}
+
+.map-phone-frame {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    aspect-ratio: 9 / 16;
+    max-height: 560px;
+    width: 100%;
+    background: var(--color-surface);
+
+    // El picker llena el marco; el mapa nunca empuja el formulario.
+    app-address-map-picker {
+        display: block;
+        height: 100%;
+    }
+
+    @media (max-width: 992px) {
+        aspect-ratio: 16 / 10;
+        max-height: 320px;
+    }
+}
+
+.delivery-address-grid .address-form {
+    margin-top: 0;
+}
+
+// C.7: tarjeta de la dirección de la tienda para "recoger".
+.store-pickup-card {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+    padding: 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    margin-top: 1rem;
+
+    @media (max-width: 576px) {
+        flex-direction: column;
+    }
+}
+
+.store-pickup-card__body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.store-pickup-card__line {
+    margin: 0;
+    color: var(--color-text-primary);
+    font-size: var(--fs-sm);
+}
+
+.store-pickup-card__actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+// C.4: resumen de la entrega elegida en el paso de pago (solo lectura).
+.delivery-summary {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    padding: 0.875rem 1rem;
+    border: 1px dashed var(--color-border);
+    border-radius: var(--radius-md);
+    margin-bottom: 1.5rem;
+}
+
+.delivery-summary__body {
+    flex: 1;
+}
+
+.delivery-summary__title {
+    margin: 0;
+    font-weight: var(--fw-medium);
+    color: var(--color-text-primary);
+}
+
+.delivery-summary__hint {
+    margin: 0;
+    font-size: var(--fs-sm);
+    color: var(--color-text-secondary);
+}

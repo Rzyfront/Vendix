@@ -158,16 +158,20 @@ describe('CheckoutService - promotions and coupons', () => {
         count: jest.fn().mockResolvedValue(0),
       },
       store_payment_methods: {
+        // CP-tienda-checkout-whatsapp: el fixture es bank_transfer porque
+        // `cash` está PROHIBIDO en ecommerce (el POST lo rechaza con
+        // ECOM_CHECKOUT_002 aunque esté habilitado en la tienda).
         findFirst: jest.fn().mockResolvedValue({
           id: 7,
           state: 'enabled',
           system_payment_method: {
-            id: 1,
-            display_name: 'Cash',
-            type: 'cash',
+            id: 2,
+            display_name: 'Transferencia',
+            type: 'bank_transfer',
             provider: 'manual',
           },
         }),
+        findMany: jest.fn().mockResolvedValue([]),
       },
       addresses: {
         create: jest.fn(),
@@ -189,6 +193,10 @@ describe('CheckoutService - promotions and coupons', () => {
     };
 
     storePrisma = {
+      shipping_methods: {
+        findMany: jest.fn().mockResolvedValue([]),
+        findFirst: jest.fn(),
+      },
       product_categories: {
         findMany: jest.fn(({ where }: any) => {
           const ids = where.product_id.in as number[];
@@ -201,7 +209,6 @@ describe('CheckoutService - promotions and coupons', () => {
       },
       orders: { count: jest.fn().mockResolvedValue(0) },
       shipping_rates: { findFirst: jest.fn() },
-      shipping_methods: { findFirst: jest.fn() },
       invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       invoice_resolutions: { findFirst: jest.fn().mockResolvedValue(null) },
       dian_configurations: { findFirst: jest.fn().mockResolvedValue(null) },
@@ -344,6 +351,8 @@ describe('CheckoutService - promotions and coupons', () => {
       const result: any = await service.checkout({
         payment_method_id: 7,
         items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        // CP-tienda-checkout-whatsapp: la venta guest exige nombre mínimo.
+        guest_customer: { first_name: 'Invitado' },
       } as any);
 
       expect(promotionEngine.quoteDiscounts).toHaveBeenCalledTimes(1);
@@ -677,6 +686,110 @@ describe('CheckoutService - promotions and coupons', () => {
       expect(response.total).toBe(8500);
       expect(response.discount_amount).toBe(1500);
       expect(response.promotion_discount).toBe(1500);
+    });
+  });
+
+  describe('CP-tienda-checkout-whatsapp — canal único, sin efectivo, guest mínimo', () => {
+    it("channel='whatsapp' recorre el mismo núcleo y marca la orden + respuesta", async () => {
+      mockOrderCreate(10000);
+
+      const result: any = await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        channel: 'whatsapp',
+      } as any);
+
+      const orderArgs = prisma.orders.create.mock.calls[0][0].data;
+      expect(orderArgs.channel).toBe('whatsapp');
+      expect(result.channel).toBe('whatsapp');
+      expect(result.items).toEqual([
+        expect.objectContaining({
+          name: 'Producto Base',
+          quantity: 1,
+          unit_price: 10000,
+          total_price: 10000,
+        }),
+      ]);
+    });
+
+    it('rechaza el pago en efectivo aunque esté habilitado en la tienda', async () => {
+      prisma.store_payment_methods.findFirst.mockResolvedValue({
+        id: 9,
+        state: 'enabled',
+        system_payment_method: {
+          id: 1,
+          display_name: 'Efectivo',
+          type: 'cash',
+          provider: 'manual',
+        },
+      });
+
+      const err = await service
+        .checkout({
+          payment_method_id: 9,
+          items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        } as any)
+        .then(
+          () => null,
+          (e) => e,
+        );
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err.errorCode).toBe('ECOM_CHECKOUT_002');
+      expect(prisma.orders.create).not.toHaveBeenCalled();
+      expect(prisma.payments.create).not.toHaveBeenCalled();
+    });
+
+    it('getPaymentMethods excluye cash por tipo en todo shipping_type', async () => {
+      prisma.store_payment_methods.findMany.mockResolvedValue([]);
+
+      for (const shippingType of [undefined, 'pickup', 'own_fleet']) {
+        jest.clearAllMocks();
+        await service.getPaymentMethods(shippingType);
+        expect(prisma.store_payment_methods.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            AND: expect.arrayContaining([
+              { system_payment_method: { type: { not: 'cash' } } },
+            ]),
+          }),
+        );
+      }
+    });
+
+    it('getDeliveryOptions devuelve un tipo de entrega por método activo', async () => {
+      storePrisma.shipping_methods.findMany.mockResolvedValue([
+        { id: 1, name: 'Retiro en tienda', type: 'pickup' },
+        { id: 2, name: 'Retiro sede norte', type: 'pickup' },
+        { id: 3, name: 'Domicilio propio', type: 'own_fleet' },
+      ]);
+
+      const options = await service.getDeliveryOptions();
+
+      expect(storePrisma.shipping_methods.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ store_id: STORE_ID }),
+        }),
+      );
+      expect(options).toEqual([
+        { method_id: 1, method_name: 'Retiro en tienda', delivery_type: 'pickup' },
+        { method_id: 3, method_name: 'Domicilio propio', delivery_type: 'home_delivery' },
+      ]);
+    });
+
+    it('la venta guest sin nombre se rechaza con ECOM_CHECKOUT_001', async () => {
+      jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(undefined);
+
+      const err = await service
+        .checkout({
+          payment_method_id: 7,
+          items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        } as any)
+        .then(
+          () => null,
+          (e) => e,
+        );
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err.errorCode).toBe('ECOM_CHECKOUT_001');
+      expect(prisma.orders.create).not.toHaveBeenCalled();
     });
   });
 });

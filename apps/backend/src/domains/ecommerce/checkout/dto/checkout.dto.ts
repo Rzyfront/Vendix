@@ -3,6 +3,7 @@ import {
   IsOptional,
   IsString,
   IsArray,
+  IsIn,
   ValidateNested,
   Min,
   Max,
@@ -179,6 +180,22 @@ export class CheckoutDto {
   @IsOptional()
   @IsString()
   coupon_code?: string;
+
+  /**
+   * Canal de la venta. El storefront envía `'whatsapp'` cuando la orden se
+   * finaliza con "Finalizar por WhatsApp": recorre EXACTAMENTE el mismo
+   * núcleo (validación, cálculo, persistencia) y solo cambia el post-éxito
+   * en el frontend (resumen + deep-link a `wa.me` con automensaje).
+   * Default `'ecommerce'`. Cualquier otro valor se rechaza por whitelist.
+   */
+  @ApiPropertyOptional({
+    description:
+      "Canal de la venta: 'ecommerce' (default) o 'whatsapp' (finalizada por WhatsApp).",
+    example: 'whatsapp',
+  })
+  @IsOptional()
+  @IsIn(['ecommerce', 'whatsapp'])
+  channel?: string;
 }
 
 class CheckoutBookingDto {

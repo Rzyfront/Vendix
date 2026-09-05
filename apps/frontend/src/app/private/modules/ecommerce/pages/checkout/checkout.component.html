@@ -40,7 +40,7 @@
             <app-icon name="map-pin" [size]="15"></app-icon>
           }
         </span>
-        <span class="step-label">Dirección</span>
+        <span class="step-label">Entrega</span>
       </div>
       <div class="step-line" [class.completed]="step() > 1"></div>
     }
@@ -94,10 +94,69 @@
   } @else {
     <div class="checkout-content">
       <div class="checkout-main">
-        <!-- Step 1: Address (hidden for service-only carts) -->
+        <!-- Step 1: Entrega delivery-first (hidden for service-only carts).
+             Primero el modo (domicilio/recoger según lo que la tienda
+             expone); la dirección solo se pide para domicilio (C.2). -->
         @if (step() === 1 && !cartHasOnlyServices) {
           <div class="checkout-section">
-            <h2>Direccion de Envio</h2>
+            <h2>¿Cómo quieres recibirlo?</h2>
+
+            @if (loading_delivery_options()) {
+              <div class="shipping-coverage-empty">
+                <app-icon name="loader-2" [size]="18" [spin]="true"></app-icon>
+                <p class="shipping-coverage-empty__title">
+                  Cargando opciones de entrega…
+                </p>
+              </div>
+            } @else {
+              <div class="delivery-cards">
+                @if (offersHomeDelivery()) {
+                  <div
+                    class="payment-card"
+                    [class.selected]="selected_delivery() === 'home'"
+                    (click)="selectDelivery('home')"
+                  >
+                    <div class="payment-radio">
+                      <span
+                        class="radio"
+                        [class.checked]="selected_delivery() === 'home'"
+                      ></span>
+                    </div>
+                    <app-icon name="home" [size]="20"></app-icon>
+                    <div class="payment-info" style="flex: 1">
+                      <span class="payment-name">Envío a domicilio</span>
+                      <span class="payment-type"
+                        >Lo llevamos a tu dirección</span
+                      >
+                    </div>
+                  </div>
+                }
+                @if (offersPickup()) {
+                  <div
+                    class="payment-card"
+                    [class.selected]="selected_delivery() === 'pickup'"
+                    (click)="selectDelivery('pickup')"
+                  >
+                    <div class="payment-radio">
+                      <span
+                        class="radio"
+                        [class.checked]="selected_delivery() === 'pickup'"
+                      ></span>
+                    </div>
+                    <app-icon name="store" [size]="20"></app-icon>
+                    <div class="payment-info" style="flex: 1">
+                      <span class="payment-name">Recoger en tienda</span>
+                      <span class="payment-type"
+                        >Retíralo en el local, sin costo de envío</span
+                      >
+                    </div>
+                  </div>
+                }
+              </div>
+            }
+
+            @if (selected_delivery() === 'home') {
+            <h2 class="delivery-subhead">Direccion de Envio</h2>
 
             <app-customer-address-picker
               [addresses]="addresses()"
@@ -111,10 +170,15 @@
             />
 
             @if (use_new_address()) {
+              <!-- C.3: mapa 50% enmarcado 9:16 tipo teléfono + formulario 50%.
+                   El teléfono va primero para que quede en el viewport inicial. -->
+              <div class="delivery-address-grid">
+              <div class="map-phone-frame">
               <app-address-map-picker
                 [center]="map_center()"
                 (located)="onMapLocated($event)"
               />
+              </div>
               <form [formGroup]="address_form" class="address-form">
                 <app-input
                   label="Direccion"
@@ -122,6 +186,16 @@
                   placeholder="Calle y numero"
                   [control]="address_form.get('address_line1')"
                   [error]="getFieldError('address_line1')"
+                  [required]="true"
+                ></app-input>
+
+                <app-input
+                  label="Telefono"
+                  formControlName="phone_number"
+                  type="tel"
+                  placeholder="Telefono de contacto"
+                  [control]="address_form.get('phone_number')"
+                  [error]="getFieldError('phone_number')"
                   [required]="true"
                 ></app-input>
 
@@ -200,16 +274,6 @@
                   ></app-input>
                 </div>
 
-                <app-input
-                  label="Telefono"
-                  formControlName="phone_number"
-                  type="tel"
-                  placeholder="Telefono de contacto"
-                  [control]="address_form.get('phone_number')"
-                  [error]="getFieldError('phone_number')"
-                  [required]="true"
-                ></app-input>
-
                 <!-- Save address checkbox -->
                 @if (is_authenticated()) {
                   <div class="save-address-option">
@@ -227,6 +291,150 @@
                   </div>
                 }
               </form>
+              </div>
+            }
+
+            <!-- Opciones de envío del domicilio: se eligen AQUÍ (paso 1), no
+                 en el paso de pago (C.4). La recotización de fondo las mantiene
+                 vigentes mientras la dirección no cambie. -->
+            @if (loading_shipping()) {
+              <div class="shipping-coverage-empty">
+                <app-icon name="loader-2" [size]="18" [spin]="true"></app-icon>
+                <p class="shipping-coverage-empty__title">
+                  Calculando opciones de envío para tu dirección…
+                </p>
+              </div>
+            } @else if (shipping_options().length > 0) {
+              <h2 class="delivery-subhead">Elige el envío</h2>
+              <div class="payment-list">
+                @for (option of shipping_options(); track option.id) {
+                  @if (option.method_type !== 'pickup') {
+                  <div
+                    class="payment-card"
+                    [class.selected]="selected_shipping_option_id === option.id"
+                    (click)="selectShippingMethod(option, option.cost)"
+                  >
+                    <div class="payment-radio">
+                      <span
+                        class="radio"
+                        [class.checked]="
+                          selected_shipping_option_id === option.id
+                        "
+                      ></span>
+                    </div>
+                    <div class="payment-info" style="flex: 1">
+                      <span class="payment-name">{{ option.method_name }}</span>
+                      <span class="payment-type">{{ option.description }}</span>
+                    </div>
+                    <div class="payment-price" style="font-weight: bold">
+                      {{
+                        option.cost === 0 ? "Gratis" : (option.cost | currency)
+                      }}
+                    </div>
+                  </div>
+                  }
+                }
+              </div>
+              @if (isPickupOnlyCoverage()) {
+                <div class="shipping-coverage-fallback">
+                  <app-icon
+                    name="alert-triangle"
+                    [size]="18"
+                    class="shipping-coverage-fallback__icon"
+                  ></app-icon>
+                  <div>
+                    <p class="shipping-coverage-fallback__title">
+                      No hay despacho a tu dirección
+                    </p>
+                    <p class="shipping-coverage-fallback__hint">
+                      Solo puedes retirar en la tienda. Vuelve arriba y elige
+                      "Recoger en tienda".
+                    </p>
+                  </div>
+                </div>
+              }
+            } @else if (hasNoShippingCoverage()) {
+              <div class="shipping-coverage-empty">
+                <app-icon
+                  name="alert-triangle"
+                  [size]="20"
+                  class="shipping-coverage-empty__icon"
+                ></app-icon>
+                <div class="shipping-coverage-empty__body">
+                  <p class="shipping-coverage-empty__title">
+                    No hay cobertura de envío para esta dirección
+                  </p>
+                  <p class="shipping-coverage-empty__hint">
+                    La tienda todavía no despacha a la ciudad que elegiste.
+                    Prueba con otra dirección o elige "Recoger en tienda".
+                  </p>
+                </div>
+              </div>
+            }
+            }
+
+            @if (selected_delivery() === 'pickup') {
+            <!-- C.7: tarjeta de la tienda + copiar + Google Maps en pestaña
+                 nueva, sin tocar el router ni el estado del checkout. -->
+            <h2 class="delivery-subhead">Recoge en la tienda</h2>
+            @if (loading_store_address()) {
+              <div class="shipping-coverage-empty">
+                <app-icon name="loader-2" [size]="18" [spin]="true"></app-icon>
+                <p class="shipping-coverage-empty__title">
+                  Cargando la dirección de la tienda…
+                </p>
+              </div>
+            } @else if (store_address(); as addr) {
+              <div class="store-pickup-card">
+                <app-icon name="store" [size]="22"></app-icon>
+                <div class="store-pickup-card__body">
+                  <p class="store-pickup-card__line">{{ addr.address_line1 }}</p>
+                  @if (addr.address_line2) {
+                    <p class="store-pickup-card__line">{{ addr.address_line2 }}</p>
+                  }
+                  <p class="store-pickup-card__line">
+                    {{ addr.city }}@if (addr.state_province) {, {{ addr.state_province }}}
+                  </p>
+                  @if (addr.phone_number) {
+                    <p class="store-pickup-card__line">Tel: {{ addr.phone_number }}</p>
+                  }
+                </div>
+                <div class="store-pickup-card__actions">
+                  <app-button variant="outline" (clicked)="copyStoreAddress()">
+                    <app-icon slot="icon" name="copy" [size]="16"></app-icon>
+                    Copiar
+                  </app-button>
+                  <app-button variant="outline" (clicked)="openStoreInMaps()">
+                    <app-icon slot="icon" name="map-pin" [size]="16"></app-icon>
+                    Abrir en Google Maps
+                  </app-button>
+                </div>
+              </div>
+              @if (loading_shipping()) {
+                <div class="shipping-coverage-empty">
+                  <app-icon name="loader-2" [size]="18" [spin]="true"></app-icon>
+                  <p class="shipping-coverage-empty__title">
+                    Preparando el retiro…
+                  </p>
+                </div>
+              }
+            } @else {
+              <div class="shipping-coverage-empty">
+                <app-icon
+                  name="alert-triangle"
+                  [size]="20"
+                  class="shipping-coverage-empty__icon"
+                ></app-icon>
+                <div class="shipping-coverage-empty__body">
+                  <p class="shipping-coverage-empty__title">
+                    La tienda aún no tiene dirección de retiro
+                  </p>
+                  <p class="shipping-coverage-empty__hint">
+                    Elige "Envío a domicilio" o comunícate con la tienda.
+                  </p>
+                </div>
+              </div>
+            }
             }
           </div>
         }
@@ -395,93 +603,38 @@
         <!-- Payment Step -->
         @if (step() === paymentStep) {
           <div class="checkout-section">
+            <!-- C.4: esta sección es SOLO método de pago. La entrega se eligió
+                 en el paso 1 (modo + tarifa); aquí solo se resume con opción
+                 de volver a cambiarla. -->
             @if (!cartHasOnlyServices) {
-              <h2>Opciones de Envio</h2>
-            }
-            <!-- La dirección no tiene despacho, pero la tienda opera en esa
-                 ciudad: lo único ofrecido es retiro. Hay que decirlo ANTES de
-                 que confirme, no después. -->
-            @if (!cartHasOnlyServices && isPickupOnlyCoverage()) {
-              <div class="shipping-coverage-fallback">
-                <app-icon
-                  name="alert-triangle"
-                  [size]="18"
-                  class="shipping-coverage-fallback__icon"
-                ></app-icon>
-                <div>
-                  <p class="shipping-coverage-fallback__title">
-                    No hay despacho a tu dirección
-                  </p>
-                  <p class="shipping-coverage-fallback__hint">
-                    Tu pedido queda para retirar en la tienda. Si prefieres que
-                    te lo envíen, prueba con otra dirección.
-                  </p>
-                </div>
-              </div>
-            }
-
-            @if (!cartHasOnlyServices && shipping_options().length > 0) {
-              <div class="payment-list" style="margin-bottom: 2rem">
-                @for (option of shipping_options(); track option.id) {
-                  <div
-                    class="payment-card"
-                    [class.selected]="selected_shipping_option_id === option.id"
-                    (click)="selectShippingMethod(option, option.cost)"
-                  >
-                    <div class="payment-radio">
-                      <span
-                        class="radio"
-                        [class.checked]="
-                          selected_shipping_option_id === option.id
-                        "
-                      ></span>
-                    </div>
-                    <div class="payment-info" style="flex: 1">
-                      <span class="payment-name">{{ option.method_name }}</span>
-                      <span class="payment-type">{{ option.description }}</span>
-                    </div>
-                    <div class="payment-price" style="font-weight: bold">
-                      {{
-                        option.cost === 0 ? "Gratis" : (option.cost | currency)
-                      }}
-                    </div>
+              <div class="delivery-summary">
+                @if (selected_delivery() === 'pickup') {
+                  <app-icon name="store" [size]="18"></app-icon>
+                  <div class="delivery-summary__body">
+                    <p class="delivery-summary__title">Recoges en tienda</p>
+                    @if (store_address(); as addr) {
+                      <p class="delivery-summary__hint">
+                        {{ addr.address_line1 }}, {{ addr.city }}
+                      </p>
+                    }
+                  </div>
+                } @else {
+                  <app-icon name="home" [size]="18"></app-icon>
+                  <div class="delivery-summary__body">
+                    <p class="delivery-summary__title">Envío a domicilio</p>
+                    <p class="delivery-summary__hint">
+                      {{ selectedShippingOptionName() }}
+                      @if (shippingCost() > 0) {
+                        — {{ shippingCost() | currency }}
+                      } @else {
+                        — Gratis
+                      }
+                    </p>
                   </div>
                 }
-              </div>
-            } @else if (!cartHasOnlyServices && loading_shipping()) {
-              <div class="shipping-coverage-empty" style="margin-bottom: 2rem">
-                <app-icon name="loader-2" [size]="18" [spin]="true"></app-icon>
-                <p class="shipping-coverage-empty__title">
-                  Calculando opciones de envío para tu dirección…
-                </p>
-              </div>
-            } @else if (!cartHasOnlyServices) {
-              <!-- Sin cobertura: antes esto era un cartel sin salida. Ahora el
-                   comprador tiene una acción concreta (volver a la dirección)
-                   en vez de un botón deshabilitado sin explicación. -->
-              <div class="shipping-coverage-empty" style="margin-bottom: 2rem">
-                <app-icon
-                  name="alert-triangle"
-                  [size]="20"
-                  class="shipping-coverage-empty__icon"
-                ></app-icon>
-                <div class="shipping-coverage-empty__body">
-                  <p class="shipping-coverage-empty__title">
-                    No hay cobertura de envío para esta dirección
-                  </p>
-                  <p class="shipping-coverage-empty__hint">
-                    La tienda todavía no despacha a la ciudad que elegiste.
-                    Puedes probar con otra dirección o comunicarte con la
-                    tienda para coordinar la entrega.
-                  </p>
-                </div>
-                <app-button variant="outline" (clicked)="goToAddressStep()">
-                  <app-icon
-                    slot="icon"
-                    name="map-pin"
-                    [size]="16"
-                  ></app-icon>
-                  Cambiar dirección
+                <app-button variant="outline" (clicked)="step.set(1)">
+                  <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
+                  Cambiar entrega
                 </app-button>
               </div>
             }
@@ -609,7 +762,16 @@
             <div class="confirm-details">
               @if (!cartHasOnlyServices) {
                 <div class="confirm-block">
-                  <h3>Direccion de Envio</h3>
+                  @if (selected_delivery() === 'pickup') {
+                    <h3>Retiras en tienda</h3>
+                    @if (store_address(); as addr) {
+                      <p>{{ addr.address_line1 }}</p>
+                      <p>{{ addr.city }}@if (addr.state_province) {, {{ addr.state_province }}}</p>
+                    }
+                  } @else {
+                    <h3>Direccion de Envio</h3>
+                  }
+                  @if (selected_delivery() !== 'pickup') {
                   @if (use_new_address()) {
                     <p>{{ address_form.value.address_line1 }}</p>
                     @if (address_form.value.address_line2) {
@@ -635,6 +797,7 @@
                         <p>Tel: {{ addr.phone_number }}</p>
                       }
                     }
+                  }
                   }
                 </div>
               }

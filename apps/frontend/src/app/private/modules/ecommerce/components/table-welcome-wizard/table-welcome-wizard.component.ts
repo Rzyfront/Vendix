@@ -268,6 +268,7 @@ import { parseApiError } from '../../../../../core/utils/parse-api-error';
     <app-guest-checkout-data-modal
       #guestModal
       [invoicingEnabled]="false"
+      [requireName]="false"
       (completed)="onGuestCompleted($event)"
     />
   `,

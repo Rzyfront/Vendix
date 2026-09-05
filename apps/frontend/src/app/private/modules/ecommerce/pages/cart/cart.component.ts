@@ -5,7 +5,6 @@ import {
   inject,
   signal,
   ChangeDetectionStrategy,
-  viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
@@ -13,11 +12,6 @@ import { RouterModule, Router } from '@angular/router';
 import { CartService, Cart, CartItem } from '../../services/cart.service';
 import { cartLineKey } from '../../utils/cart-line-key.util';
 import { TableContextService } from '../../services/table-context.service';
-import {
-  CheckoutService,
-  GuestCheckoutCustomer,
-  WhatsappCheckoutResponse,
-} from '../../services/checkout.service';
 import { AuthFacade } from '../../../../../core/store';
 import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 import { StoreUiService } from '../../services/store-ui.service';
@@ -39,10 +33,6 @@ import {
   CurrencyFormatService,
 } from '../../../../../shared/pipes/currency';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
-import {
-  GuestCheckoutData,
-  GuestCheckoutDataModalComponent,
-} from '../../components/guest-checkout-data-modal/guest-checkout-data-modal.component';
 
 @Component({
   selector: 'app-cart',
@@ -54,7 +44,6 @@ import {
     ButtonComponent,
     ProductCarouselComponent,
     ProductQuickViewModalComponent,
-    GuestCheckoutDataModalComponent,
     CartPromotionsComponent,
     CartItemCardComponent,
     CartMobileFooterComponent,
@@ -84,9 +73,8 @@ export class CartComponent implements OnInit {
   readonly quickViewOpen = signal(false);
   readonly selectedProductSlug = signal<string | null>(null);
 
-  readonly is_whatsapp_loading = signal(false);
-  private pending_guest_whatsapp_checkout = false;
-  readonly guestDataModal = viewChild(GuestCheckoutDataModalComponent);
+  // `is_whatsapp_loading` eliminado en CP-tienda-checkout-whatsapp: ya no hay
+  // POST directo a /whatsapp desde el cart (ver `finalizeViaWhatsApp`).
 
   whatsappEnabled(): boolean {
     const config = this.tenantFacade.getCurrentDomainConfig();
@@ -110,7 +98,6 @@ export class CartComponent implements OnInit {
   }
 
   private catalogService = inject(CatalogService);
-  private checkoutService = inject(CheckoutService);
   private tenantFacade = inject(TenantFacade);
   private destroyRef = inject(DestroyRef);
   // QR dine-in (Step 8): slider must NOT re-add in mesa-mode — the
@@ -324,147 +311,22 @@ export class CartComponent implements OnInit {
     this.router.navigate(['/catalog']);
   }
 
-  whatsappCheckout(): void {
+  /**
+   * CP-tienda-checkout-whatsapp (anotación 2): "Finalizar por WhatsApp" YA NO
+   * crea la orden aquí. Navega al checkout con `?channel=whatsapp`, que
+   * recorre EXACTAMENTE el mismo flujo que "Finalizar compra" (entrega,
+   * dirección, pago) y al finalizar muestra el resumen + abre el WhatsApp de
+   * la tienda con el automensaje. El endpoint legacy `POST /whatsapp` queda
+   * solo por compatibilidad y el storefront no lo llama.
+   */
+  finalizeViaWhatsApp(): void {
     if (this.requiresRegistration() && !this.is_authenticated()) {
       this.store_ui_service.openLoginModal();
       return;
     }
-
-    if (!this.is_authenticated()) {
-      this.pending_guest_whatsapp_checkout = true;
-      this.guestDataModal()?.open();
-      return;
-    }
-
-    this.startWhatsappCheckout(null);
-  }
-
-  onGuestDataCompleted(data: GuestCheckoutData | null): void {
-    if (!this.pending_guest_whatsapp_checkout) return;
-    this.pending_guest_whatsapp_checkout = false;
-    this.startWhatsappCheckout(data);
-  }
-
-  private startWhatsappCheckout(data: GuestCheckoutData | null): void {
-    this.is_whatsapp_loading.set(true);
-
-    // Always send items from frontend cart (localStorage) so the backend
-    // can fallback to them if the backend cart is empty (e.g. user logged
-    // in after adding items as guest and cart wasn't synced)
-    const items = this.cart()?.items.map((i) => ({
-      product_id: i.product_id,
-      product_variant_id: i.product_variant_id ?? undefined,
-      quantity: i.quantity,
-      // La presentación elegida viaja al backend: sin ella el pedido sale al
-      // precio de la presentación por defecto (típicamente la unitaria).
-      price_tier_id: i.price_tier?.id ?? undefined,
-    }));
-
-    this.checkoutService
-      .whatsappCheckout(
-        undefined,
-        items,
-        this.toGuestCustomer(data),
-        null,
-        // Cart page doesn't currently expose a coupon input — leave it
-        // null so the backend computes only automatic promotional
-        // discounts. Coupon entry lives on the checkout page.
-        null,
-      )
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (response) => {
-          this.is_whatsapp_loading.set(false);
-          // Clear local cart for guests
-          if (!this.is_authenticated()) {
-            this.cart_service.clearAllCart();
-          }
-          this.openWhatsApp(response.data);
-          if (!this.is_authenticated() && response.data.public_order_token) {
-            this.router.navigate(['/pedido', response.data.public_order_token]);
-          }
-        },
-        error: (err: any) => {
-          this.is_whatsapp_loading.set(false);
-          const msg = this.extractErrorMessage(err);
-          this.toast.error(msg, 'No se pudo procesar tu pedido');
-        },
-      });
-  }
-
-  private toGuestCustomer(
-    data: GuestCheckoutData | null,
-  ): GuestCheckoutCustomer | null {
-    if (!data) return null;
-    return {
-      first_name: data.first_name,
-      last_name: data.last_name,
-      email: data.email,
-      phone: data.phone,
-      document_type: data.document_type,
-      document_number: data.document_number,
-    };
-  }
-
-  private openWhatsApp(order: WhatsappCheckoutResponse): void {
-    const config = this.tenantFacade.getCurrentDomainConfig();
-    const phone = (
-      config?.customConfig?.ecommerce?.checkout?.whatsapp_number || ''
-    ).replace(/\D/g, '');
-    const storeName = config?.customConfig?.branding?.name || 'la tienda';
-    const fmt = (v: number) => this.currencyService.format(v);
-
-    const itemLines = order.items
-      .map(
-        (i) =>
-          `  - ${i.name}${i.variant_sku ? ' (' + i.variant_sku + ')' : ''} x${i.quantity} — ${fmt(i.total_price)}`,
-      )
-      .join('\n');
-
-    const customer = order.customer;
-    const customerName = customer
-      ? `${customer.first_name} ${customer.last_name}`.trim()
-      : '';
-
-    let message: string;
-
-    if (customerName) {
-      // Authenticated user with profile data
-      let contactLines = '';
-      if (customer!.phone) {
-        contactLines += `\n*Teléfono:* ${customer!.phone}`;
-      }
-      if (customer!.address) {
-        const addr = customer!.address;
-        const parts = [
-          addr.address_line1,
-          addr.address_line2,
-          addr.city,
-          addr.state_province,
-        ].filter(Boolean);
-        contactLines += `\n*Dirección de envío:* ${parts.join(', ')}`;
-      }
-
-      message = encodeURIComponent(
-        `Hola, soy *${customerName}*! Quiero confirmar mi pedido en *${storeName}* 🛒\n\n` +
-          `*Pedido:* ${order.order_number}\n\n` +
-          `*Productos:*\n${itemLines}\n\n` +
-          `*Total:* ${fmt(Number(order.total))}` +
-          (contactLines ? `\n${contactLines}` : '') +
-          `\n\nQuedo atento para coordinar!`,
-      );
-    } else {
-      // Guest or user without name — generic message
-      message = encodeURIComponent(
-        `Hola! Quiero confirmar mi pedido en *${storeName}* 🛒\n\n` +
-          `*Pedido:* ${order.order_number}\n\n` +
-          `*Productos:*\n${itemLines}\n\n` +
-          `*Total:* ${fmt(Number(order.total))}\n\n` +
-          `Quedo atento para coordinar el pago y la entrega!`,
-      );
-    }
-
-    window.open(`https://wa.me/${phone}?text=${message}`, '_blank');
+    this.router.navigate(['/checkout'], {
+      queryParams: { channel: 'whatsapp' },
+    });
   }
 
   onQuickView(product: EcommerceProduct): void {

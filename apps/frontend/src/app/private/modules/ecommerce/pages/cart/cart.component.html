@@ -91,14 +91,12 @@
             <app-button
               variant="primary"
               [fullWidth]="true"
-              [loading]="is_whatsapp_loading()"
-              [disabled]="is_whatsapp_loading()"
               customClasses="!bg-[#25D366] hover:!bg-[#1da851] !border-[#25D366]"
-              (clicked)="whatsappCheckout()"
+              (clicked)="finalizeViaWhatsApp()"
             >
               <div class="flex items-center justify-center gap-2">
                 <app-icon slot="icon" name="message-circle" [size]="18"></app-icon>
-                Comprar por WhatsApp
+                Finalizar por WhatsApp
               </div>
             </app-button>
           }
@@ -120,9 +118,8 @@
       [isAuthenticated]="is_authenticated()"
       [requiresRegistration]="requiresRegistration()"
       [whatsappEnabled]="whatsappEnabled()"
-      [whatsappLoading]="is_whatsapp_loading()"
       (checkout)="proceedToCheckout()"
-      (whatsapp)="whatsappCheckout()"
+      (whatsapp)="finalizeViaWhatsApp()"
     />
   }
 
@@ -142,5 +139,4 @@
     (addedToCart)="onAddToCartFromSlider($event)"
   />
 
-  <app-guest-checkout-data-modal (completed)="onGuestDataCompleted($event)" />
 </div>

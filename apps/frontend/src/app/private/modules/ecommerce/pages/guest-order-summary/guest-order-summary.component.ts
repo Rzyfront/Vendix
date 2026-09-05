@@ -445,7 +445,7 @@ interface GuestOrderSummary {
             @if (whatsappEnabled()) {
               <app-button variant="primary" (clicked)="sendToWhatsApp(data)">
                 <app-icon name="message-circle" [size]="16" slot="icon" />
-                Enviar por WhatsApp
+                Consultar por WhatsApp
               </app-button>
             }
           </div>
@@ -997,8 +997,20 @@ export class GuestOrderSummaryComponent implements OnInit {
 
     const storeName =
       config?.store_name || data.store?.name || 'la tienda';
+    // CP-tienda-checkout-whatsapp (anotación 7): mensaje de CONSULTA con los
+    // datos de la orden para que la tienda la identifique sin repreguntar.
+    const itemLines = (data.order.items ?? [])
+      .map(
+        (i) =>
+          `  - ${i.product_name}${i.variant_sku ? ' (' + i.variant_sku + ')' : ''} x${i.quantity}`,
+      )
+      .join('\n');
     const message = encodeURIComponent(
-      `¡Hola! 👋 Acabo de realizar el pedido #${data.order.order_number} en ${storeName}. Quisiera saber por favor en qué estado se encuentra mi orden. ¡Muchas gracias!`,
+      `¡Hola! 👋 Quisiera consultar el estado de mi pedido en ${storeName}.\n\n` +
+        `*Pedido:* #${data.order.order_number}\n` +
+        `*Estado:* ${this.getStateLabel(data.order.state)}\n` +
+        (itemLines ? `\n*Productos:*\n${itemLines}\n` : '') +
+        `\n*Total:* ${data.order.grand_total}\n\n¡Muchas gracias!`,
     );
     window.open(`https://wa.me/${phone}?text=${message}`, '_blank');
   }

@@ -42,6 +42,20 @@ export class CheckoutController {
     return { success: true, data };
   }
 
+  /**
+   * CP-tienda-checkout-whatsapp (C.2): tipos de entrega que la tienda expone
+   * para el paso 0 del checkout ("¿Cómo quieres recibirlo?"). Solo ids y
+   * nombres de métodos ACTIVOS — la misma información que el comprador ya ve
+   * al cotizar el envío. Público (`@OptionalAuth()`) como el resto del
+   * escaparate; el tenant lo resuelve `DomainResolverMiddleware`.
+   */
+  @Get('delivery-options')
+  @OptionalAuth()
+  async getDeliveryOptions() {
+    const data = await this.checkout_service.getDeliveryOptions();
+    return { success: true, data };
+  }
+
   @Get('payment-methods')
   @OptionalAuth()
   async getPaymentMethods(@Query('shipping_type') shippingType?: string) {
@@ -226,6 +240,13 @@ export class CheckoutController {
     return { success: true, data };
   }
 
+  /**
+   * LEGACY — se conserva por compatibilidad con clientes que crean la orden
+   * directa por WhatsApp sin pasar por el checkout. El storefront ya NO lo
+   * usa: "Finalizar por WhatsApp" recorre `POST /ecommerce/checkout` con
+   * `channel='whatsapp'` (mismo núcleo, mismo cálculo; ver
+   * CP-tienda-checkout-whatsapp ADR-1). No añadirle nuevas capacidades.
+   */
   @OptionalAuth()
   @Post('whatsapp')
   @UseGuards(StoreAvailabilityGuard)
