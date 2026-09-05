@@ -2000,6 +2000,7 @@
 @media (max-width: 1023px) {
   .table-banner {
     position: fixed;
+    top: auto; // anula el top:60px del sticky desktop; con bottom:0 se estiraría a toda la pantalla
     left: 0;
     right: 0;
     bottom: 0;
