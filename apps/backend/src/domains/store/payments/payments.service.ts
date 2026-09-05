@@ -1939,7 +1939,10 @@ export class PaymentsService {
               // accounting entries — that is exactly the point of a draft.
               has_customer: !!createPosPaymentDto.customer_id,
               requires_payment: false,
-              grand_total: result.order.total_amount,
+              // QUI-783 — same fix as the digital-payment site above: the
+              // `orders` table has no `total_amount` column, so that read was
+              // always undefined in the audit snapshot. Persisted order here.
+              grand_total: result.order.grand_total,
             },
             Number(result.order.id),
           );

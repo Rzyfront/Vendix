@@ -1280,4 +1280,120 @@ describe('PaymentsService', () => {
       expect(result.closedSessionId).toBeNull();
     });
   });
+
+  // QUI-783 — the `orders` table has `grand_total` but NO `total_amount`
+  // column, so `result.order.total_amount` is always undefined. Both
+  // post-commit `grand_total` reads must use the persisted
+  // `result.order.grand_total`, never the frontend's `dto.total_amount`
+  // estimate (which still carries the pre-coupon subtotal).
+  //
+  // `$transaction` is stubbed to resolve the canned post-commit result
+  // directly: the in-transaction sale is not what these cases assert, and
+  // running it would need hundreds of lines of unrelated mocks.
+  describe('processPosPayment post-commit grand_total (QUI-783)', () => {
+    const CONTEXT_STORE_ID = 1;
+    let contextSpy: jest.SpyInstance;
+
+    const posUser: any = {
+      id: 1,
+      email: 'cajero@example.com',
+      organization_id: 1,
+      roles: ['super_admin'],
+    };
+
+    // Persisted order shape, as Prisma returns it: HAS `grand_total`,
+    // NEVER `total_amount`. `total_amount` only exists on the DTO.
+    const PERSISTED_GRAND_TOTAL = 90;
+    const DTO_TOTAL_ESTIMATE = 100;
+
+    const arrange = () => {
+      contextSpy = jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({
+          store_id: CONTEXT_STORE_ID,
+          organization_id: 1,
+        } as any);
+    };
+
+    afterEach(() => {
+      contextSpy?.mockRestore();
+      jest.restoreAllMocks();
+    });
+
+    it('digital-payment site forwards the persisted grand_total, not the DTO estimate', async () => {
+      arrange();
+      (prisma as any).$transaction = jest.fn(async () => ({
+        success: true,
+        order: {
+          id: 55,
+          order_number: 'ORD Test 001',
+          grand_total: PERSISTED_GRAND_TOTAL,
+          currency: 'COP',
+        },
+        _digitalPaymentPending: true,
+      }));
+
+      const processTx = jest
+        .spyOn(service as any, 'processPosPaymentTransaction')
+        .mockResolvedValue({
+          id: 7,
+          amount: PERSISTED_GRAND_TOTAL,
+          store_payment_method: { display_name: 'Wompi' },
+          state: 'pending',
+          transaction_id: 'txn_123',
+          nextAction: { type: 'redirect', url: 'https://pay.test' },
+        });
+
+      const result = await service.processPosPayment(
+        {
+          store_id: CONTEXT_STORE_ID,
+          currency: 'COP',
+          customer_id: 77,
+          items: [],
+          payments: [],
+          total_amount: DTO_TOTAL_ESTIMATE,
+          requires_payment: true,
+        } as any,
+        posUser,
+      );
+
+      expect(processTx).toHaveBeenCalledTimes(1);
+      const orderArg = processTx.mock.calls[0][1] as any;
+      expect(orderArg.grand_total).toBe(PERSISTED_GRAND_TOTAL);
+      expect(orderArg.grand_total).not.toBe(DTO_TOTAL_ESTIMATE);
+      expect(result.payment).toMatchObject({ id: 7 });
+    });
+
+    it('draft audit site snapshots the persisted grand_total, not total_amount', async () => {
+      arrange();
+      (prisma as any).$transaction = jest.fn(async () => ({
+        success: true,
+        order: {
+          id: 56,
+          order_number: 'ORD Test 002',
+          grand_total: PERSISTED_GRAND_TOTAL,
+          currency: 'COP',
+        },
+      }));
+
+      const result = await service.processPosPayment(
+        {
+          store_id: CONTEXT_STORE_ID,
+          currency: 'COP',
+          items: [],
+          payments: [],
+          total_amount: DTO_TOTAL_ESTIMATE,
+          is_draft: true,
+        } as any,
+        posUser,
+      );
+
+      expect((result as any)._isDraft).toBe(true);
+      const audit = (service as any).auditService.logCustom as jest.Mock;
+      expect(audit).toHaveBeenCalledTimes(1);
+      const details = audit.mock.calls[0][3];
+      expect(details.grand_total).toBe(PERSISTED_GRAND_TOTAL);
+      expect(details.grand_total).not.toBe(DTO_TOTAL_ESTIMATE);
+    });
+  });
 });
