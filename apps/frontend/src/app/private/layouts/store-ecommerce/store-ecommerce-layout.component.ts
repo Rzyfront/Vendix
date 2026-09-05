@@ -991,16 +991,17 @@ export class StoreEcommerceLayoutComponent {
   }
 
   /**
-   * True when the diner MAY ring for a waiter — the same session-bearing modes
-   * that surface the "Llamar al mesero" button (open_tab / require_staff /
-   * mark_occupied). Gates the actionable table bell in the banner + sheet
-   * header; in `menu_only` the bell stays a decorative "utensils" glyph.
+   * True when the diner MAY ring for a waiter — every dine-in mode, including
+   * `menu_only` (modo carta): `call-waiter` is a pre-session escalation that
+   * only needs the table token. Gates the actionable table bell in the
+   * banner + sheet header and the "Llamar al mesero" buttons.
    */
   readonly canCallTableWaiter = computed(
     () =>
       this.table_context_service.isOpenTab() ||
       this.table_context_service.isRequireStaff() ||
-      this.table_context_service.isMarkOccupied(),
+      this.table_context_service.isMarkOccupied() ||
+      this.table_context_service.isMenuOnly(),
   );
 
   /**

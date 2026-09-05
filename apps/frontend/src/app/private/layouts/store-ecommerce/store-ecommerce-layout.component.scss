@@ -15,11 +15,16 @@
 .table-banner {
   background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.08);
   border-bottom: 1px solid rgba(var(--color-primary-rgb, 59, 130, 246), 0.18);
-  padding: 0.42rem 1.5rem;
+  padding: 0.55rem 1.5rem;
   display: flex;
   align-items: center;
   font-size: var(--fs-sm);
   color: var(--color-primary);
+  // Sticky bajo el header (60px, z-20): el banner acompaña al hacer scroll.
+  position: sticky;
+  top: 60px;
+  z-index: 19;
+  box-shadow: 0 6px 16px -10px rgba(0, 0, 0, 0.25);
 
   &--open-tab {
     background: rgba(var(--color-success-500-rgb), 0.08);
@@ -57,11 +62,17 @@
     flex-shrink: 0;
   }
 
+  // Estado como chip: pastilla legible con el color del modo.
   .table-banner-status {
     font-weight: var(--fw-medium);
-    opacity: 0.85;
+    font-size: var(--fs-xs);
+    padding: 0.12rem 0.6rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.6);
+    box-shadow: inset 0 0 0 1px currentColor;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .table-banner-order-status {
@@ -163,14 +174,19 @@
 
 // ── Timbre accionable (banner + header del sheet) ─────────────────────────────
 // Clase top-level (NO anidada en .table-banner) porque también viste el ícono
-// del header del bottom-sheet, que vive fuera de .table-banner. Decorativo por
-// defecto; interactivo sólo cuando `.is-actionable` (modos con sesión).
+// del header del bottom-sheet, que vive fuera de .table-banner. Chip circular
+// con el color del modo; interactivo cuando `.is-actionable` (todos los modos
+// de mesa, incluido carta).
 .table-banner-bell {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  width: 30px;
+  height: 30px;
   border-radius: var(--radius-pill, 999px);
+  background: rgba(255, 255, 255, 0.6);
+  box-shadow: inset 0 0 0 1px currentColor;
   color: inherit;
 
   &.is-actionable {
@@ -2022,6 +2038,12 @@
       min-width: 0;
       overflow: hidden;
       white-space: nowrap;
+    }
+
+    // Timbre con mayor área táctil en móvil.
+    .table-banner-bell {
+      width: 34px;
+      height: 34px;
     }
 
     .table-banner-name,
