@@ -10,6 +10,16 @@ import { ProfileCatalogCacheService } from './profile-catalog-cache.service';
 import { ProfileAccountHealthService } from './profile-account-health.service';
 import { ProfileAccountingValidator } from './profile-accounting.validator';
 import { ProfilePreviewService, PROFILE_READER } from './profile-preview.service';
+// Paso 6 del plan AIU: el preview compone su `html` con el COMPOSITOR PURO y
+// su compilador, importados como clases sueltas —JAMÁS el gateway ni el
+// módulo de print-formats—. `PrintFormatsModule` importa (transitivamente)
+// el riel de facturación; importar el gateway acá cerraría el ciclo
+// `print-formats → invoicing → print-formats` y Nest fallaría al arrancar.
+// Las clases son puras (sin Prisma, sin S3, sin estado), así que proveerlas
+// acá no duplica lógica: es el mismo archivo, otro objeto sin estado —igual
+// que ya se hace con `InvoiceCalculatorService` abajo.
+import { PrintLayoutComposerService } from '../../print-formats/services/print-layout-composer.service';
+import { PrintTemplateCompilerService } from '../../print-formats/services/print-template-compiler.service';
 
 // Re-export so the symbol survives `import { PROFILE_READER } from './profiles.module'`
 // in other modules. Without `export`, the symbol is module-private and TS
@@ -80,6 +90,10 @@ import { ProfilesService } from './profiles.service';
     ProfileAccountHealthService,
     ProfilePreviewService,
     InvoiceCalculatorService,
+    // Render gráfico del preview (`include_render`): el compositor trae como
+    // única dependencia al compilador, así que ambos se registran acá.
+    PrintTemplateCompilerService,
+    PrintLayoutComposerService,
     { provide: InvoiceNumberGenerator, useClass: PreviewNumberingGuard },
     // Token para el lector de perfiles del preview — resuelto a ProfilesService
     // (store-scoped) en el riel tienda, a PlatformProfilesService en el de plataforma.

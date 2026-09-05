@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { DOMParser } from '@xmldom/xmldom';
 
 import { ErrorCodes, VendixHttpException } from '@common/errors';
@@ -12,7 +12,10 @@ import {
   DIAN_DOCUMENT_TYPES,
   DIAN_INVOICE_OPERATION_TYPES,
 } from '../providers/dian-direct/constants/dian-document-types';
-import { DIAN_UNIT_CODES } from '../providers/dian-direct/constants/dian-unit-codes';
+import {
+  DIAN_UNIT_CODES,
+  isDianUnitCode,
+} from '../providers/dian-direct/constants/dian-unit-codes';
 import {
   DianCustomerData,
   DianInvoiceControl,
@@ -62,6 +65,10 @@ import {
 } from './preview-numbering.guard';
 import { PreviewProfileDto, PreviewProfileLineDto } from './dto/preview-profile.dto';
 import { ProfilesService } from './profiles.service';
+import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { PrintFormatDefinition } from '../../print-formats/interfaces/print-format.interface';
+import { mapFiscalDocumentToPrintData } from '../../print-formats/providers/fiscal-document-print.mapper';
+import { PrintLayoutComposerService } from '../../print-formats/services/print-layout-composer.service';
 
 /**
  * Emisor de MUESTRA del XML proyectado.
@@ -183,11 +190,6 @@ const TAX_TYPE_BY_DIAN_CODE: Readonly<Record<string, string>> = {
   [DIAN_TAX_CODES.INC]: 'inc',
   [DIAN_TAX_CODES.ICA]: 'ica',
 };
-
-/** Códigos de unidad UN/ECE conocidos, para la validación de la muestra. */
-const KNOWN_UNIT_CODES: ReadonlySet<string> = new Set(
-  Object.values(DIAN_UNIT_CODES),
-);
 
 /** Unidad por omisión de una línea de muestra: servicio, no pieza. */
 const PREVIEW_DEFAULT_UNIT_CODE = DIAN_UNIT_CODES.EACH;
@@ -353,6 +355,17 @@ export interface ProfilePreviewResult {
       })
     | null;
   validations: ProfilePreviewValidation[];
+  /**
+   * Representación gráfica del documento, SÓLO cuando el cuerpo pidió
+   * `include_render: true`.
+   *
+   * Con el flag ausente o en `false` esta clave NO viaja —la respuesta es byte
+   * a byte la de antes—. Con el flag en `true` viaja siempre: el HTML compuesto
+   * con los datos capturados, o `null` si no se pudo componer (sin plantilla,
+   * sin compositor, o cualquier fallo interno, que se registra y no se lanza:
+   * el XML sigue siendo la respuesta autoritativa).
+   */
+  html?: string | null;
 }
 
 /**
@@ -399,6 +412,13 @@ export const PROFILE_READER = Symbol('PROFILE_READER');
 export interface ProfileReader {
   findOne(id: number): Promise<{
     id: number;
+    // Alcance del perfil: riel tienda (`store_id` propio) o riel plataforma
+    // (`store_id: null`, `organization_id` de la organización plataforma). El
+    // render gráfico los necesita para resolver la plantilla efectiva y la
+    // identidad del emisor; ambas implementaciones ya los devuelven vía
+    // `PROFILE_SELECT`, acá sólo se declaran.
+    store_id: number | null;
+    organization_id: number;
     name: string;
     operation_type: string;
     current_version: number;
@@ -413,6 +433,14 @@ export class ProfilePreviewService {
   constructor(
     @Inject(PROFILE_READER) private readonly profileReader: ProfileReader,
     private readonly calculator: InvoiceCalculatorService,
+    // Opcionales a propósito: el render gráfico (`include_render`) es un
+    // añadido que no puede romper el preview existente. Sin ellos —como en los
+    // specs que construyen el servicio con dos argumentos— el flag se atiende
+    // devolviendo `html: null` en vez de fallar. En producción los provee
+    // `ProfilesModule` (compositor puro + compilador, jamás el gateway: ver el
+    // docblock del módulo).
+    @Optional() private readonly prisma?: StorePrismaService,
+    @Optional() private readonly composer?: PrintLayoutComposerService,
   ) {}
 
   /**
@@ -524,6 +552,23 @@ export class ProfilePreviewService {
       contract_object,
     });
 
+    // Paso 6 del plan AIU: representación gráfica compuesta con los datos
+    // CAPTURADOS —los mismos que alimentaron el cálculo y el XML—, no con la
+    // muestra del Hub. Sólo cuando el cuerpo la pidió (`include_render: true`):
+    // sin el flag ni siquiera viaja la clave `html` y la respuesta es byte a
+    // byte la de antes.
+    const html =
+      dto.include_render === true
+        ? await this.renderPreviewHtml({
+            profile,
+            config,
+            dto,
+            issue_date,
+            calculation,
+            sample_lines,
+          })
+        : undefined;
+
     return {
       profile: {
         id: profile.id,
@@ -555,6 +600,222 @@ export class ProfilePreviewService {
           }
         : null,
       validations,
+      // Sin el flag la clave no existe (contrato intacto); con el flag viaja
+      // siempre, aunque sea `null`.
+      ...(html !== undefined ? { html } : {}),
+    };
+  }
+
+  // ─── Representación gráfica (paso 6 del plan AIU) ───────────────────────
+
+  /**
+   * Compone el HTML del papel con los datos CAPTURADOS —los mismos que
+   * alimentaron el cálculo y el XML—, no con la muestra del Hub.
+   *
+   * Es pura composición sobre dos funciones puras (`mapFiscalDocumentToPrintData`
+   * y `PrintLayoutComposerService.compose`), con la definición efectiva de
+   * `resolveEffectiveConfig(storeId, 'fiscal_electronic_invoice')` en modo
+   * SÓLO LECTURA (sin la auto-siembra del gateway: sembrar sería escribir).
+   * Sin escrituras, sin consecutivo, sin firma, sin transmisión.
+   *
+   * Nunca lanza: cualquier fallo (sin plantilla, sin compositor, identidad
+   * incompleta, error interno) se registra y devuelve `null`. El XML sigue
+   * siendo la respuesta autoritativa y el preview nunca se rompe por el papel.
+   */
+  private async renderPreviewHtml(input: {
+    profile: { store_id: number | null; organization_id: number };
+    config: InvoiceProfileConfig;
+    dto: PreviewProfileDto;
+    issue_date: string;
+    calculation: InvoiceCalculatorResult;
+    sample_lines: SampleLine[];
+  }): Promise<string | null> {
+    try {
+      const prisma = this.prisma;
+      const composer = this.composer;
+      if (!prisma || !composer) return null;
+      const definition = await this.resolveRenderDefinition(
+        prisma,
+        input.profile.store_id ?? null,
+      );
+      // `compose` lee `definition.paper`: sin papel no hay papel que pintar.
+      if (!definition?.paper) return null;
+      const invoice = await this.toPrintInvoiceShape(prisma, input);
+      const data = mapFiscalDocumentToPrintData(invoice, {
+        pendingLabel: 'Pendiente',
+      });
+      return composer.compose(definition, data, 'dummy');
+    } catch (error) {
+      this.logger.warn(
+        'Representación gráfica del preview omitida: se devuelve sólo el XML.',
+        error as Error,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Definición efectiva de `fiscal_electronic_invoice`, SÓLO LECTURA.
+   *
+   * Espeja la cadena del gateway (`resolveEffectiveConfig`): plantilla activa
+   * de la tienda → plantilla del sistema. NO replica la auto-siembra: crear la
+   * fila de configuración sería una escritura dentro de un endpoint de lectura,
+   * y este servicio existe precisamente para no escribir nada.
+   *
+   * En el riel plataforma (`store_id: null`) no hay configuración de tienda
+   * que leer: se usa directo la plantilla del sistema.
+   */
+  private async resolveRenderDefinition(
+    prisma: StorePrismaService,
+    store_id: number | null,
+  ): Promise<PrintFormatDefinition | null> {
+    // Sin ámbito y con predicados explícitos: sirve igual al riel tienda y al
+    // de plataforma (donde no hay `store_id` en el contexto).
+    const db = prisma.withoutScope();
+    if (store_id != null) {
+      const store_config = await db.store_print_format_configs.findFirst({
+        where: { store_id, format_type: 'fiscal_electronic_invoice' },
+        include: { template: true },
+      });
+      const from_store = (store_config?.template as { definition?: unknown } | null)
+        ?.definition;
+      if (from_store) return from_store as PrintFormatDefinition;
+    }
+    const system_template = await db.print_templates.findFirst({
+      where: { is_system: true, format_type: 'fiscal_electronic_invoice' },
+    });
+    return (
+      (system_template?.definition as PrintFormatDefinition | undefined) ?? null
+    );
+  }
+
+  /**
+   * Documento con forma de factura para el mapeador de impresión.
+   *
+   * No es una factura persistida: es el cálculo ya hecho, vestido con la
+   * identidad real de la tienda/organización, el adquiriente del DTO, los
+   * importes por línea del calculador y una resolución ficticia «PREVIEW».
+   * `dian_status: 'not_applicable'` pone al resolvedor de identidad en modo
+   * permisivo (borrador): el preview tiene que funcionar en una tienda sin
+   * habilitación DIAN, igual que el XML.
+   */
+  private async toPrintInvoiceShape(
+    prisma: StorePrismaService,
+    input: {
+      profile: { store_id: number | null; organization_id: number };
+      config: InvoiceProfileConfig;
+      dto: PreviewProfileDto;
+      issue_date: string;
+      calculation: InvoiceCalculatorResult;
+      sample_lines: SampleLine[];
+    },
+  ): Promise<Record<string, unknown>> {
+    const { profile, config, dto, issue_date, calculation, sample_lines } = input;
+    const store_id = profile.store_id ?? null;
+    const db = prisma.withoutScope();
+    const [store, organization] = await Promise.all([
+      store_id != null
+        ? db.stores.findFirst({
+            where: { id: store_id },
+            select: {
+              name: true,
+              legal_name: true,
+              tax_id: true,
+              logo_url: true,
+              store_settings: { select: { settings: true } },
+              addresses: {
+                orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
+                take: 1,
+                select: {
+                  address_line1: true,
+                  city: true,
+                  state_province: true,
+                  municipality_code: true,
+                  postal_code: true,
+                  phone_number: true,
+                },
+              },
+            },
+          })
+        : Promise.resolve(null),
+      db.organizations.findFirst({
+        where: { id: profile.organization_id },
+        select: {
+          name: true,
+          legal_name: true,
+          tax_id: true,
+          phone: true,
+          email: true,
+          logo_url: true,
+          fiscal_scope: true,
+          document_type: true,
+          person_type: true,
+          organization_settings: { select: { settings: true } },
+          addresses: {
+            take: 1,
+            select: {
+              address_line1: true,
+              city: true,
+              state_province: true,
+              municipality_code: true,
+              postal_code: true,
+              phone_number: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    const customer = dto.customer ?? {};
+    return {
+      id: 0,
+      invoice_number: PREVIEW_INVOICE_NUMBER,
+      issue_date,
+      subtotal_amount: calculation.totals.total_before_tax,
+      discount_amount: calculation.totals.discount_amount,
+      tax_amount: calculation.totals.tax_amount,
+      withholding_amount: calculation.totals.withholding_amount,
+      total_amount: calculation.totals.total_amount,
+      payment_form: config.dian.payment_method_code ?? undefined,
+      payment_means_code: config.dian.payment_means_code ?? undefined,
+      notes: (config.dian.header_notes ?? []).join(' ') || undefined,
+      // Borrador a propósito: identidad permisiva y sello «Pendiente».
+      dian_status: 'not_applicable',
+      store: store ?? {},
+      organization: organization ?? {},
+      customer: {
+        first_name:
+          (customer.legal_name || '').trim() ||
+          'ADQUIRIENTE DE MUESTRA (PREVISUALIZACIÓN)',
+        last_name: '',
+        document_number: (customer.document_number || '').trim() || 'PREVIEW',
+      },
+      // Ficticia y marcada: el número visible del papel es «PREVIEW».
+      resolution: { resolution_number: 'PREVIEW' },
+      invoice_items: calculation.lines.map((line, index) => {
+        const source = sample_lines[index];
+        return {
+          description:
+            line.description || source?.description || `Ítem ${index + 1}`,
+          quantity: source?.quantity ?? 1,
+          unit_price: source?.unit_price ?? 0,
+          discount_amount: source?.discount_amount ?? 0,
+          tax_amount: line.tax_amount,
+          total_amount: line.total_amount,
+          invoice_taxes: line.taxes.map((tax) => ({
+            tax_name: tax.tax_name,
+            tax_rate: tax.tax_rate,
+            taxable_amount: tax.taxable_amount,
+            tax_amount: tax.tax_amount,
+          })),
+        };
+      }),
+      invoice_taxes: calculation.header_taxes.map((tax) => ({
+        tax_name: tax.tax_name,
+        tax_rate: tax.tax_rate,
+        taxable_amount: tax.taxable_amount,
+        tax_amount: tax.tax_amount,
+      })),
     };
   }
 
@@ -1624,11 +1885,19 @@ export class ProfilePreviewService {
     ];
   }
 
-  /** Las unidades de la muestra pertenecen al catálogo UN/ECE rec. 20. */
+  /**
+   * Las unidades de la muestra pertenecen al catálogo UN/ECE rec. 20.
+   *
+   * Se valida contra `DIAN_UNIT_CODES_RAW` (los 1089 códigos de
+   * `UnidadesMedida-2.1.gc`) vía `isDianUnitCode`, no contra el subconjunto
+   * curado `DIAN_UNIT_CODES`: códigos vigentes como `NIU` están en la lista
+   * oficial pero fuera del subconjunto, y marcarlos desconocidos sería un
+   * falso positivo.
+   */
   private checkUnitCodes(sample: SampleLine[]): ProfilePreviewValidation[] {
     const unknown = sample
       .map((line) => line.unit_code)
-      .filter((code) => !KNOWN_UNIT_CODES.has(code));
+      .filter((code) => !isDianUnitCode(code));
 
     return [
       {

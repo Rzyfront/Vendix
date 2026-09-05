@@ -70,6 +70,7 @@ import { TenantPickerComponent } from '../../components/tenant-picker/tenant-pic
 import { PlatformInvoicingStore } from '../../platform-invoicing.store';
 import { FiscalBillingAdminService } from '../../../../subscriptions/services/fiscal-billing-admin.service';
 import type {
+  PlatformProfilePreviewResult,
   PlatformResolution,
   PreviewPlatformProfilePayload,
 } from '../../../../subscriptions/interfaces/fiscal-billing.interface';
@@ -1273,7 +1274,10 @@ export class PlatformInvoiceCreateComponent implements OnInit {
   // ── Previsualizar & Emitir ──────────────────────────────────────
   readonly printPreviewOpen = signal(false);
   readonly printPreviewLoading = signal(false);
-  readonly printPreviewResult = signal<any | null>(null);
+  // Paso 7 del plan AIU: tipado fuerte —el `any` impedía que el compilador
+  // viera que el contrato nunca declaró `html`, que es justo lo que rompió
+  // este modal (iframe en blanco). El próximo desajuste falla al compilar.
+  readonly printPreviewResult = signal<PlatformProfilePreviewResult | null>(null);
   readonly printPreviewError = signal('');
   readonly printPreviewSrcdoc = computed(() => this.printPreviewResult()?.html || '');
 
@@ -1294,6 +1298,8 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     const items = (val['items'] || []) as any[];
 
     const payload: PreviewPlatformProfilePayload = {
+      // Paso 7 del plan AIU: pide el `html` que alimenta el `iframe`.
+      include_render: true,
       issue_date: val['issue_date'] || undefined,
       lines: items.map((i) => ({
         bucket: 'costo',

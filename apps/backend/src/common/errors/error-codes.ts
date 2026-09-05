@@ -2321,21 +2321,34 @@ export const ErrorCodes = {
    * omisión. Evidencia real: la factura 83 (`QA102`, régimen `et_462_1`)
    * declaró 190.000 donde correspondían 285.000 — 95.000 de IVA faltantes.
    *
-   * El perfil de facturación es lo que aporta el dato ausente: su matriz de
-   * impuestos declara la tarifa por componente AIU, y con ella el servidor sí
-   * puede imponer. De ahí la asimetría deliberada de estos códigos:
+   * La cadena real, de punta a punta (paso 10 del plan AIU):
    *
-   * - con perfil y tarifa declarada ⇒ el servidor IMPONE, no hay error;
-   * - sin perfil ⇒ `INVOICING_AIU_004`, porque emitir sub-declarando es peor
-   *   que parar: la DIAN acepta el documento y el faltante solo se corrige con
-   *   nota crédito, ya con la sanción corriendo;
+   * - la tarifa la resuelve el FRONTEND contra el catálogo de la tienda
+   *   (`resolveAiuBucketTaxes`): si la encuentra, la línea viaja con el
+   *   impuesto; si no la encuentra, la línea viaja SIN impuesto y el recuadro
+   *   lo nombra antes de gastar consecutivo (bloqueo del paso 8);
+   * - el calculador sólo multiplica lo que la línea trae
+   *   (`for (const tax of item.taxes ?? [])`): jamás impone una tarifa que no
+   *   vino declarada;
+   * - esta compuerta (`INVOICING_AIU_004`) es la última: rechaza la línea
+   *   gravable sin impuesto ANTES de tomar consecutivo, porque emitir
+   *   sub-declarando es peor que parar (la DIAN acepta el documento y el
+   *   faltante solo se corrige con nota crédito, ya con la sanción corriendo).
+   *
+   * De ahí la asimetría deliberada de estos códigos:
+   *
+   * - con perfil y tarifa resuelta en el catálogo ⇒ la línea trae el impuesto,
+   *   no hay error;
+   * - sin perfil ⇒ `INVOICING_AIU_004`, por lo dicho arriba;
    * - con perfil pero el cliente declara otra tarifa ⇒ `INVOICING_AIU_005`,
    *   porque contradecir la configuración congelada señala un bug de cliente o
    *   manipulación, y eso debe ser ruidoso y no resolverse en silencio.
    *
-   * No bloquean el flujo del panel: el formulario pone IVA en TODAS las líneas,
-   * que es el caso simétrico (`aiu_untaxable_line_declares_tax`) y ese sí se
-   * resuelve quitando el impuesto sin bloquear.
+   * No bloquean el flujo del panel: el formulario NO pone IVA en todas las
+   * líneas —`appendItem` nace con `taxes: []` y cada porción sólo lleva el
+   * impuesto que el catálogo resolvió—. El caso simétrico
+   * (`aiu_untaxable_line_declares_tax`) sí se resuelve quitando el impuesto
+   * sin bloquear.
    */
   INVOICING_AIU_004: {
     code: 'INVOICING_AIU_004',

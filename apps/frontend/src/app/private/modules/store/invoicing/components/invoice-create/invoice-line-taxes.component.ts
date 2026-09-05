@@ -176,11 +176,19 @@ import { TaxInclusiveChipComponent } from './tax-inclusive-chip.component';
       </div>
 
       @if (value().length === 0) {
-        <p class="mt-1 text-[11px] leading-snug text-warning">
-          Esta línea declara una operación excluida o exenta. Si no lo es, la
-          factura sub-declara impuesto y el faltante sólo aparece en una
-          fiscalización.
-        </p>
+        @if (aiuCostLine()) {
+          <p
+            class="mt-1 text-[11px] leading-snug text-[var(--color-text-secondary)]"
+          >
+            Costo reembolsable — fuera de la base gravable AIU.
+          </p>
+        } @else {
+          <p class="mt-1 text-[11px] leading-snug text-warning">
+            Esta línea declara una operación excluida o exenta. Si no lo es,
+            la factura sub-declara impuesto y el faltante sólo aparece en una
+            fiscalización.
+          </p>
+        }
       }
 
       @if (panelOpen()) {
@@ -262,6 +270,16 @@ export class InvoiceLineTaxesComponent implements ControlValueAccessor {
   /** Catálogo completo de la tienda. Lo carga el padre una sola vez. */
   readonly taxes = input<TaxOption[]>([]);
 
+  /**
+   * La línea es costo reembolsable de un contrato AIU: suma al valor del
+   * contrato y queda fuera de la base gravable, así que salir sin impuesto NO
+   * afirma nada fiscal — no es una operación excluida ni exenta. Con `true`,
+   * el aviso de «línea sin impuesto» y su mensaje espejo se sustituyen por la
+   * constancia neutra. En `false` (una factura que no es AIU, o una línea que
+   * sí lleva componente) la copia no cambia ni una coma.
+   */
+  readonly aiuCostLine = input(false);
+
   /** Valor del control: los impuestos declarados para esta línea. */
   readonly value = signal<TaxSelection[]>([]);
   readonly panelOpen = signal(false);
@@ -270,12 +288,20 @@ export class InvoiceLineTaxesComponent implements ControlValueAccessor {
 
   readonly catalogEmpty = computed(() => this.taxes().length === 0);
 
-  /** Qué significa el estado actual del campo, en el tooltip del disparador. */
-  readonly triggerHint = computed(() =>
-    this.value().length === 0
-      ? 'Esta línea no declara ningún impuesto: sale al XML como operación excluida o exenta. Sólo es correcto si realmente lo es.'
-      : 'Agregar otro impuesto a esta línea. Una línea colombiana puede llevar varios (IVA + INC).',
-  );
+  /**
+   * Qué significa el estado actual del campo, en el tooltip del disparador.
+   * Es el espejo del párrafo de abajo: con `aiuCostLine` la línea sin
+   * impuesto es un costo reembolsable fuera de base, no una operación excluida
+   * o exenta, y el tooltip lo dice igual.
+   */
+  readonly triggerHint = computed(() => {
+    if (this.value().length > 0) {
+      return 'Agregar otro impuesto a esta línea. Una línea colombiana puede llevar varios (IVA + INC).';
+    }
+    return this.aiuCostLine()
+      ? 'Costo reembolsable — fuera de la base gravable AIU.'
+      : 'Esta línea no declara ningún impuesto: sale al XML como operación excluida o exenta. Sólo es correcto si realmente lo es.';
+  });
 
   readonly visibleTaxes = computed<TaxOption[]>(() => {
     const term = this.query().trim().toLowerCase();

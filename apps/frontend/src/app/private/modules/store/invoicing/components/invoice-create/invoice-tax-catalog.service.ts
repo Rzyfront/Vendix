@@ -1,6 +1,6 @@
-import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
-import { Observable, map, of } from 'rxjs';
+import { Injectable, inject, signal } from '@angular/core';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { Observable, map, of, tap } from 'rxjs';
 import { catchError, shareReplay } from 'rxjs/operators';
 
 import { environment } from '../../../../../../../environments/environment';
@@ -63,6 +63,31 @@ interface TaxCategoryListResponse {
 /** Techo generoso: ninguna tienda real declara 200 impuestos distintos. */
 const CATALOG_PAGE_SIZE = 200;
 
+/**
+ * Paso 9 del plan AIU: cómo terminó la carga del catálogo.
+ *
+ * `ok` es lista real (quizá vacía de verdad); `forbidden` es 403 por el
+ * permiso `store:taxes:read` faltante; `error` es cualquier otro fallo. Los
+ * tres dejan la lista en `[]` —un catálogo vacío nunca rompe la pantalla—,
+ * pero la superficie tiene que decir cuál de los tres ve.
+ */
+export type TaxCatalogLoadState = 'ok' | 'forbidden' | 'error';
+
+export function taxCatalogLoadMessage(state: TaxCatalogLoadState): string {
+  if (state === 'forbidden') {
+    return (
+      'No se pudo cargar tu catálogo de impuestos: tu usuario no tiene el ' +
+      'permiso store:taxes:read. Pídelo a un administrador; sin catálogo, ' +
+      'las líneas AIU gravables viajarían sin impuesto y se rechazarían.'
+    );
+  }
+  return (
+    'No se pudo cargar tu catálogo de impuestos: el servidor no respondió. ' +
+    'Reintenta en un momento; sin catálogo, las líneas AIU gravables ' +
+    'viajarían sin impuesto y se rechazarían.'
+  );
+}
+
 /** Clasificaciones que RETIENEN valor en vez de sumarlo al total. */
 const WITHHOLDING_TYPES = new Set(['withholding', 'reteiva', 'reteica']);
 
@@ -78,6 +103,14 @@ export class InvoiceTaxCatalogService {
    */
   private catalog$: Observable<TaxOption[]> | null = null;
 
+  /**
+   * Paso 9: estado de la última carga, además de la lista. `tap`/`catchError`
+   * corren una sola vez por carga (el `shareReplay` los protege de los
+   * re-suscriptores), así que el estado siempre describe lo que pasó en la red.
+   */
+  private readonly loadState = signal<TaxCatalogLoadState>('ok');
+  readonly catalogState = this.loadState.asReadonly();
+
   load(): Observable<TaxOption[]> {
     if (!this.catalog$) {
       this.catalog$ = this.http
@@ -86,10 +119,17 @@ export class InvoiceTaxCatalogService {
         })
         .pipe(
           map((response) => this.toOptions(response?.data ?? [])),
+          tap(() => this.loadState.set('ok')),
           // Un catálogo que no carga NO puede tumbar el modal: el usuario
-          // todavía puede facturar sin impuestos, y el banner de error del
-          // formulario le dirá por qué la lista está vacía.
-          catchError(() => of([] as TaxOption[])),
+          // todavía puede facturar sin impuestos, y la lista sigue siendo
+          // `[]` —pero el estado dice POR QUÉ, para que la pantalla no lo
+          // presente como «catálogo vacío».
+          catchError((error: unknown) => {
+            const status =
+              error instanceof HttpErrorResponse ? error.status : 0;
+            this.loadState.set(status === 403 ? 'forbidden' : 'error');
+            return of([] as TaxOption[]);
+          }),
           shareReplay({ bufferSize: 1, refCount: false }),
         );
     }
@@ -99,6 +139,7 @@ export class InvoiceTaxCatalogService {
   /** Fuerza una recarga (p. ej. tras crear un impuesto desde otra pantalla). */
   invalidate(): void {
     this.catalog$ = null;
+    this.loadState.set('ok');
   }
 
   /** `true` si la clasificación fiscal retiene en vez de gravar. */
