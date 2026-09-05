@@ -182,6 +182,14 @@ export class EcommerceComponent {
     return settings?.branding?.name || this.storeName || 'Mi Tienda';
   });
 
+  /**
+   * Web de la tienda para el pitch: el dominio del QR de tienda
+   * (fallback: URL del ecommerce).
+   */
+  readonly pitchWebUrl = computed(
+    () => this.ecommerceQrTargetUrl() || this.ecommerceUrl() || '',
+  );
+
   /** Pitch por defecto con {tienda} y {web} ya resueltos. */
   readonly resolvedDefaultPitch = computed(() =>
     this.resolvePitchVars(this.defaultWhatsappPitch),
@@ -191,7 +199,7 @@ export class EcommerceComponent {
   private resolvePitchVars(template: string): string {
     return (template || '')
       .replaceAll('{tienda}', this.pitchStoreName())
-      .replaceAll('{web}', this.ecommerceUrl() || '');
+      .replaceAll('{web}', this.pitchWebUrl());
   }
 
   /** Copia el pitch actual (ya resuelto) al portapapeles. */
@@ -774,9 +782,16 @@ export class EcommerceComponent {
           }
           // Prefill the recommended pitch on first activation, already
           // resolved with the real store name + web so the store sees
-          // (and can tweak) the final text.
+          // (and can tweak) the final text. Sin dominio aún, {web} queda
+          // como plantilla y se resuelve al enviar.
           if (!this.whatsappPitchControl.value) {
-            this.whatsappPitchControl.setValue(this.resolvedDefaultPitch(), {
+            const prefill = this.pitchWebUrl()
+              ? this.resolvedDefaultPitch()
+              : this.defaultWhatsappPitch.replaceAll(
+                  '{tienda}',
+                  this.pitchStoreName(),
+                );
+            this.whatsappPitchControl.setValue(prefill, {
               emitEvent: false,
             });
           }
