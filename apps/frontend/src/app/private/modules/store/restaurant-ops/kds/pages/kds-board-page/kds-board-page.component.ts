@@ -40,6 +40,7 @@ import { KitchenConfirmModalComponent } from '../../components/kitchen-confirm-m
 import { KdsSessionStatusBarComponent } from '../../components/kds-session-status-bar/kds-session-status-bar.component';
 import {
   KdsConnectionState,
+  KdsDisplayService,
   KdsSseService,
   KdsStationsService,
   KitchenMutationError,
@@ -119,6 +120,13 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
 
   readonly columns = KDS_COLUMNS;
+  /**
+   * QA display: columnas visibles según la config (kds-manage-page →
+   * `KdsDisplayService`). Al ocultar Entregados/Cancelados las que quedan
+   * se reparten el ancho vía `flex-grow` en el SCSS.
+   */
+  readonly display = inject(KdsDisplayService);
+  readonly visibleColumns = computed(() => this.display.visibleColumns());
   /** Raw ticket set from the SSE/snapshot service (unfiltered by day). */
   readonly tickets = this.kdsSse.tickets;
   readonly connectionState = this.kdsSse.connectionState;
