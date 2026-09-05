@@ -16,6 +16,8 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
 import type { QuantityClampEvent } from '../../../../../shared/components/quantity-control/quantity-control.component';
 import { showStockCapToast } from '../cart/utils/stock-toast';
 import { TooltipComponent } from '../../../../../shared/components/tooltip/tooltip.component';
+import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
+import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { CartState, CartItem } from '../models/cart.model';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
@@ -40,6 +42,8 @@ import {
     IconComponent,
     QuantityControlComponent,
     TooltipComponent,
+    ModalComponent,
+    ButtonComponent,
     PriceTierSelectorComponent,
   ],
   template: `
@@ -125,7 +129,45 @@ import {
                   </div>
                   <!-- Item Info -->
                   <div class="item-info">
-                    <h4 class="item-name">{{ item.product.name }}</h4>
+                    <!--
+                      QUI-787 · fila del nombre con botón "Notas" a la derecha
+                      (paridad con el desktop, adyacente al producto en lugar
+                      de la indita calendar porque el mobile no monta scheduler).
+                    -->
+                    <div class="item-name-row">
+                      <h4 class="item-name">{{ item.product.name }}</h4>
+                      @if (
+                        item.product.product_type === 'service' ||
+                        item.product.product_type === 'prepared'
+                      ) {
+                        <button
+                          type="button"
+                          class="shrink-0 px-1.5 py-0.5 rounded flex items-center gap-1 border transition-colors text-[10px] font-semibold"
+                          [class]="item.notes
+                            ? 'text-green-700 bg-green-50 border-green-200 hover:bg-green-100'
+                            : 'text-text-secondary border-border/80 hover:text-text-primary hover:bg-muted/40'"
+                          [attr.aria-label]="(item.notes ? 'Editar nota de ' : 'Agregar nota a ') + item.product.name"
+                          [title]="(item.notes ? 'Editar nota' : 'Agregar nota para cocina') + ': ' + item.product.name"
+                          (click)="openItemNote(item)"
+                        >
+                          <app-icon name="notebook-pen" [size]="12"></app-icon>
+                          <span>Nota</span>
+                        </button>
+                      }
+                    </div>
+                    @if (item.notes) {
+                      <!--
+                        QUI-787 · chip amarillo de nota activa, paridad con
+                        .item-comanda-note de mesa.
+                      -->
+                      <p
+                        class="item-note-chip"
+                        [attr.title]="'Nota para cocina: ' + item.notes"
+                      >
+                        <app-icon name="message-square" [size]="10"></app-icon>
+                        <span class="truncate" style="max-width: 220px;">{{ item.notes }}</span>
+                      </p>
+                    }
                     @if (item.variant_display_name) {
                       <p style="font-size: 11px; color: var(--color-primary); font-weight: 500; margin: 0 0 2px 0;">
                         {{ item.variant_display_name }}
@@ -360,6 +402,70 @@ import {
             </button>
           }
         </div>
+
+        <!--
+          QUI-787 · editor de nota POR LÍNEA (paridad con desktop). Montado
+          localmente porque el mobile modal se renderiza en su propio
+          overlay y no comparte la jerarquía del app-pos-cart. Mismo
+          contrato: maxlength 200, trim al cerrar, persiste via
+          PosCartService.updateCartItem.
+
+          NOTA: usa [value] + (input) nativos en lugar de [ngModel] para
+          no importar FormsModule aquí — FormsModule hace que el type-checker
+          de Angular trate [class] como NgClass y se queje por el boolean
+          que ya usa este modal ([class.open]="isOpen()").
+        -->
+        <app-modal
+          [isOpen]="itemNoteModalOpen()"
+          [title]="'Nota para cocina: ' + (itemNoteTarget()?.product?.name ?? '')"
+          size="sm"
+          (closed)="closeItemNote()"
+        >
+          <div class="space-y-2">
+            <textarea
+              [value]="itemNoteDraft()"
+              (input)="onItemNoteDraftInput($event)"
+              maxlength="200"
+              rows="2"
+              placeholder="Notas para cocina (ej. sin cebolla, término medio). Opcional."
+              class="w-full px-3 py-2 text-sm border border-border bg-surface rounded-md text-text-primary placeholder:text-text-secondary/60 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary resize-none"
+            ></textarea>
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] text-text-secondary">
+                Opcional — se envía a cocina y a la comanda del KDS.
+              </span>
+              <span class="text-[11px] text-text-secondary">
+                {{ (itemNoteDraft() || '').length }}/200
+              </span>
+            </div>
+          </div>
+
+          <div
+            slot="footer"
+            class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"
+          >
+            @if (itemNoteTarget()?.notes) {
+              <app-button
+                class="w-full sm:w-auto"
+                variant="outline"
+                size="md"
+                customClasses="min-w-[120px]"
+                (clicked)="clearItemNote()"
+              >
+                Quitar nota
+              </app-button>
+            }
+            <app-button
+              class="w-full sm:w-auto"
+              variant="primary"
+              size="md"
+              customClasses="min-w-[120px]"
+              (clicked)="closeItemNote()"
+            >
+              Aceptar
+            </app-button>
+          </div>
+        </app-modal>
       </div>
     </div>
     `,
@@ -589,6 +695,35 @@ import {
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
         overflow: hidden;
+      }
+
+      /* QUI-787 · fila del nombre con el botón "Notas" a la derecha. */
+      .item-name-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
+
+      .item-name-row .item-name {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+
+      /* QUI-787 · chip amarillo de nota activa (paridad con mesa). */
+      .item-note-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        margin: 2px 0 0;
+        padding: 0.1rem 0.35rem;
+        border-radius: 4px;
+        background-color: var(--color-warning-100, #fef3c7);
+        color: var(--color-warning-700, #b45309);
+        font-size: 11px;
+        font-weight: 500;
+        width: fit-content;
+        max-width: 100%;
       }
 
       .item-meta {
@@ -995,6 +1130,11 @@ export class PosCartModalComponent {
   readonly itemQuantityChanged = output<{ itemId: string; quantity: number }>();
   readonly itemRemoved = output<string>();
   readonly clearCart = output<void>();
+
+  // ─── QUI-787 · editor de nota por línea (paridad con desktop) ─────────
+  readonly itemNoteModalOpen = signal(false);
+  readonly itemNoteTarget = signal<CartItem | null>(null);
+  readonly itemNoteDraft = signal<string>('');
   readonly create = output<void>();
   /**
    * CP-POS-CREAR-EDITAR-COBRAR-001 — direct save-draft (skip the
@@ -1261,5 +1401,59 @@ export class PosCartModalComponent {
 
   formatCurrency(amount: number): string {
     return this.currencyService.format(amount);
+  }
+
+  // ─── QUI-787 · handlers del editor de nota por línea ──────────────
+
+  openItemNote(item: CartItem): void {
+    this.itemNoteTarget.set(item);
+    this.itemNoteDraft.set(item.notes ?? '');
+    this.itemNoteModalOpen.set(true);
+  }
+
+  closeItemNote(): void {
+    const target = this.itemNoteTarget();
+    const draft = this.itemNoteDraft().trim();
+    if (!target) {
+      this.itemNoteModalOpen.set(false);
+      return;
+    }
+    const next = draft.length > 0 ? draft : undefined;
+    if ((target.notes ?? '') === (next ?? '')) {
+      this.itemNoteModalOpen.set(false);
+      return;
+    }
+    this.cartService
+      .updateCartItem({
+        itemId: target.id,
+        quantity: target.quantity,
+        notes: next,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success(next ? 'Nota guardada' : 'Nota eliminada');
+          this.itemNoteModalOpen.set(false);
+          this.itemNoteTarget.set(null);
+          this.itemNoteDraft.set('');
+        },
+        error: (err) =>
+          this.toastService.error(
+            typeof err === 'string' ? err : err?.message || 'Error al guardar la nota',
+          ),
+      });
+  }
+
+  clearItemNote(): void {
+    this.itemNoteDraft.set('');
+  }
+
+  /**
+   * Handler nativo del `<textarea>` del editor. Lee `.value` del DOM (no
+   * usamos `[ngModel]` para no importar FormsModule — ver nota en el modal).
+   */
+  onItemNoteDraftInput(event: Event): void {
+    const target = event.target as HTMLTextAreaElement;
+    this.itemNoteDraft.set(target.value);
   }
 }
