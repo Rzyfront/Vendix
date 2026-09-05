@@ -1,4 +1,4 @@
-import { IsObject, IsOptional } from 'class-validator';
+import { IsNotEmpty, IsObject, IsOptional, IsString } from 'class-validator';
 
 /**
  * Body de POST /store/crm/activate.
@@ -17,4 +17,23 @@ export class UpdateCrmLandingDto {
   @IsObject()
   @IsOptional()
   content_json?: Record<string, unknown>;
+}
+
+/**
+ * Body de POST /store/crm/ai-assist.
+ * Envía la instrucción en lenguaje natural junto con el documento actual
+ * y opcionalmente el identificador de la sección seleccionada con el mouse.
+ */
+export class CrmAiAssistDto {
+  @IsString()
+  @IsNotEmpty()
+  prompt: string;
+
+  @IsObject()
+  @IsNotEmpty()
+  current_document: Record<string, unknown>;
+
+  @IsString()
+  @IsOptional()
+  selected_block_id?: string;
 }

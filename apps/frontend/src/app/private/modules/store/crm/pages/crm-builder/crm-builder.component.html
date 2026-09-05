@@ -114,8 +114,10 @@
 
       <!-- MODO ESCRITORIO (Full-Width Responsive Canvas) -->
       @if (previewMode() === 'desktop') {
-        <div class="w-full h-full overflow-y-auto overflow-x-hidden bg-white dark:bg-zinc-950 text-slate-900 dark:text-slate-100 flex flex-col shadow-2xl relative custom-scroll">
-          
+        <div 
+          class="desktop-canvas-wrapper w-full h-full overflow-y-auto overflow-x-hidden bg-white dark:bg-zinc-950 text-slate-900 dark:text-slate-100 flex flex-col shadow-2xl relative custom-scroll"
+          (click)="onCanvasBackgroundClick($event)"
+        >
           <!-- Mini barra informativa superior de simulación web -->
           <div class="bg-slate-100 dark:bg-zinc-900 border-b border-slate-200 dark:border-zinc-800 px-4 py-2 flex items-center justify-between text-xs text-slate-600 dark:text-slate-300 select-none shrink-0">
             <div class="flex items-center gap-2">
@@ -126,42 +128,106 @@
                 https://{{ storeDomainHostname() || 'tutienda.com' }}/landing
               </span>
             </div>
-            <span class="text-[11px] font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-1">
-              <app-icon name="eye" [size]="12" />
-              Lienzo en Vivo (Escritorio)
-            </span>
+            <div class="flex items-center gap-3">
+              @if (selectedBlock()) {
+                <span class="text-[11px] text-blue-600 dark:text-blue-400 flex items-center gap-1 font-semibold">
+                  <span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+                  Sección seleccionada: {{ labelFor(selectedBlock()!.type) }}
+                </span>
+                <button
+                  type="button"
+                  (click)="clearSelection($event)"
+                  class="text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 underline cursor-pointer"
+                >
+                  Deseleccionar
+                </button>
+              } @else {
+                <span class="text-[11px] font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                  <app-icon name="mouse-pointer-click" [size]="12" class="text-blue-500" />
+                  Haz clic en cualquier sección para seleccionarla
+                </span>
+              }
+            </div>
           </div>
 
           <!-- Flujo de Bloques Renderizados -->
           <div class="flex flex-col flex-grow">
             @for (b of blocks(); track b.id; let i = $index) {
               <div
-                class="relative group transition-all"
-                [class.ring-2]="selectedIndex() === i"
+                class="relative group transition-all duration-150 cursor-pointer"
+                [class.ring-4]="selectedIndex() === i"
                 [class.ring-blue-500]="selectedIndex() === i"
+                [class.ring-offset-2]="selectedIndex() === i"
+                [class.z-20]="selectedIndex() === i"
+                (click)="selectBlock(i, $event)"
               >
                 <app-block-renderer [block]="b" />
 
-                <!-- Overlay interactivo para editar rápido el bloque -->
-                <div class="absolute top-2 right-4 opacity-0 group-hover:opacity-100 transition-opacity z-20 flex items-center gap-2 bg-slate-900/90 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-700 shadow-lg">
-                  <span class="text-xs font-bold text-white">{{ labelFor(b.type) }}</span>
-                  <button
-                    type="button"
-                    (click)="selectBlock(i)"
-                    class="p-1 rounded-md bg-blue-600 hover:bg-blue-500 text-white cursor-pointer"
-                    title="Editar propiedades de la sección"
-                  >
-                    <app-icon name="pencil" [size]="12" />
-                  </button>
-                  <button
-                    type="button"
-                    (click)="removeBlock(i)"
-                    class="p-1 rounded-md bg-red-600/80 hover:bg-red-600 text-white cursor-pointer"
-                    title="Eliminar sección"
-                  >
-                    <app-icon name="trash" [size]="12" />
-                  </button>
-                </div>
+                <!-- Toolbar Flotante Contextual cuando está seleccionado -->
+                @if (selectedIndex() === i) {
+                  <div class="absolute -top-4 right-6 z-30 flex items-center gap-2 bg-slate-900/95 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-blue-500 shadow-2xl animate-fade-in text-white">
+                    <span class="inline-flex items-center gap-1.5 text-xs font-bold pr-1 border-r border-slate-700">
+                      <span class="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
+                      {{ labelFor(b.type) }}
+                    </span>
+                    <button
+                      type="button"
+                      (click)="openAiForBlock(i, $event)"
+                      class="px-2.5 py-1 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-[11px] font-bold flex items-center gap-1.5 cursor-pointer shadow-sm transition-transform hover:scale-105"
+                      title="Mejorar esta sección con la IA de Vendix"
+                    >
+                      <app-icon name="sparkles" [size]="12" />
+                      <span>Mejorar con IA</span>
+                    </button>
+                    <button
+                      type="button"
+                      (click)="openEditForBlock(i, $event)"
+                      class="px-2.5 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+                      title="Editar propiedades y textos manualmente"
+                    >
+                      <app-icon name="pencil" [size]="11" />
+                      <span>Editar</span>
+                    </button>
+                    <button
+                      type="button"
+                      (click)="removeBlock(i, $event)"
+                      class="p-1 rounded-full bg-red-600/80 hover:bg-red-600 text-white cursor-pointer"
+                      title="Eliminar sección"
+                    >
+                      <app-icon name="trash" [size]="12" />
+                    </button>
+                    <button
+                      type="button"
+                      (click)="clearSelection($event)"
+                      class="p-1 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
+                      title="Deseleccionar sección"
+                    >
+                      <app-icon name="x" [size]="12" />
+                    </button>
+                  </div>
+                } @else {
+                  <!-- Overlay al hover cuando NO está seleccionado -->
+                  <div class="absolute top-3 right-4 opacity-0 group-hover:opacity-100 transition-opacity z-20 flex items-center gap-2 bg-slate-900/90 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-700 shadow-lg text-white">
+                    <span class="text-xs font-semibold">{{ labelFor(b.type) }}</span>
+                    <button
+                      type="button"
+                      (click)="selectBlock(i, $event)"
+                      class="px-2 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-medium flex items-center gap-1 cursor-pointer shadow-xs"
+                      title="Seleccionar sección"
+                    >
+                      <app-icon name="mouse-pointer-click" [size]="12" />
+                      <span>Seleccionar</span>
+                    </button>
+                    <button
+                      type="button"
+                      (click)="removeBlock(i, $event)"
+                      class="p-1 rounded-md bg-red-600/80 hover:bg-red-600 text-white cursor-pointer"
+                      title="Eliminar sección"
+                    >
+                      <app-icon name="trash" [size]="12" />
+                    </button>
+                  </div>
+                }
               </div>
             } @empty {
               <div class="py-32 px-4 text-center text-slate-400 flex flex-col items-center gap-3">
@@ -225,19 +291,57 @@
             <div class="flex flex-col mobile-blocks-flow">
               @for (b of blocks(); track b.id; let i = $index) {
                 <div 
-                  class="relative group transition-all"
+                  class="relative group transition-all duration-150 cursor-pointer"
                   [class.ring-2]="selectedIndex() === i"
                   [class.ring-blue-500]="selectedIndex() === i"
-                  (click)="selectBlock(i)"
+                  [class.z-20]="selectedIndex() === i"
+                  (click)="selectBlock(i, $event)"
                 >
                   <app-block-renderer [block]="b" />
 
-                  <!-- Badge flotante al hover -->
-                  <div class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                    <span class="bg-slate-900/90 text-white text-[9px] font-bold px-2 py-0.5 rounded-full shadow-xs">
-                      {{ labelFor(b.type) }}
-                    </span>
-                  </div>
+                  <!-- Pill flotante en Smartphone cuando está seleccionado -->
+                  @if (selectedIndex() === i) {
+                    <div class="sticky top-2 z-30 mx-2 my-1 flex items-center justify-between gap-1 bg-slate-900/95 backdrop-blur-md px-2.5 py-1.5 rounded-full border border-blue-500 shadow-lg animate-fade-in">
+                      <span class="text-[10px] font-bold text-white truncate max-w-[100px] flex items-center gap-1">
+                        <span class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span>
+                        {{ labelFor(b.type) }}
+                      </span>
+                      <div class="flex items-center gap-1">
+                        <button
+                          type="button"
+                          (click)="openAiForBlock(i, $event)"
+                          class="px-2 py-0.5 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-[9px] font-bold flex items-center gap-1 cursor-pointer"
+                          title="Mejorar con IA"
+                        >
+                          <app-icon name="sparkles" [size]="10" />
+                          <span>IA</span>
+                        </button>
+                        <button
+                          type="button"
+                          (click)="openEditForBlock(i, $event)"
+                          class="p-1 rounded-full bg-slate-800 text-slate-200 cursor-pointer"
+                          title="Editar"
+                        >
+                          <app-icon name="pencil" [size]="10" />
+                        </button>
+                        <button
+                          type="button"
+                          (click)="clearSelection($event)"
+                          class="p-1 rounded-full hover:bg-slate-800 text-slate-400 cursor-pointer"
+                          title="Deseleccionar"
+                        >
+                          <app-icon name="x" [size]="10" />
+                        </button>
+                      </div>
+                    </div>
+                  } @else {
+                    <!-- Badge flotante al hover -->
+                    <div class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                      <span class="bg-slate-900/90 text-white text-[9px] font-bold px-2 py-0.5 rounded-full shadow-xs">
+                        {{ labelFor(b.type) }}
+                      </span>
+                    </div>
+                  }
                 </div>
               } @empty {
                 <div class="py-24 px-4 text-center text-slate-400 flex flex-col items-center gap-2">
@@ -379,15 +483,58 @@
 
       <!-- Contenido Drawer -->
       <div class="flex-1 p-5 overflow-y-auto space-y-4 text-xs custom-scroll">
+        <!-- Banner de Alcance Contextual (Sección Seleccionada vs Toda la Página) -->
+        @if (selectedBlock(); as block) {
+          <div class="rounded-2xl border border-blue-500/50 bg-blue-950/40 p-3.5 flex items-start justify-between gap-3 shadow-sm animate-fade-in">
+            <div class="flex items-start gap-2.5">
+              <div class="w-7 h-7 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center shrink-0 mt-0.5">
+                <app-icon name="mouse-pointer-click" [size]="14" />
+              </div>
+              <div>
+                <div class="flex items-center gap-1.5">
+                  <span class="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
+                  <span class="text-xs font-bold text-white">
+                    Sección: {{ labelFor(block.type) }}
+                  </span>
+                </div>
+                <p class="text-[11px] text-blue-200/80 mt-0.5">
+                  La IA de Vendix mejorará específicamente esta sección seleccionada.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              (click)="clearSelection($event)"
+              class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[10px] font-medium shrink-0 cursor-pointer transition-colors"
+              title="Quitar foco de esta sección y editar toda la landing"
+            >
+              Editar Todo
+            </button>
+          </div>
+        } @else {
+          <div class="rounded-2xl border border-slate-800 bg-slate-950/50 p-3 flex items-center justify-between text-slate-400">
+            <div class="flex items-center gap-2">
+              <app-icon name="info" [size]="14" class="text-blue-400 shrink-0" />
+              <span class="text-[11px]">
+                Editando toda la landing page. <span class="text-slate-300">Haz clic en cualquier sección del lienzo para enfocar la IA en ella.</span>
+              </span>
+            </div>
+          </div>
+        }
+
         <!-- Input de Lenguaje Natural -->
         <div class="rounded-2xl border border-slate-700 bg-slate-950/70 p-4 space-y-3">
           <label class="block text-[11px] font-bold text-slate-300">
-            ¿Qué deseas cambiar en tu landing?
+            @if (selectedBlock(); as block) {
+              ¿Qué deseas cambiar o mejorar en la sección "{{ labelFor(block.type) }}"?
+            } @else {
+              ¿Qué deseas cambiar en tu landing page?
+            }
           </label>
           <textarea
             [(ngModel)]="naturalPrompt"
             rows="3"
-            placeholder="Ej: Destaca garantía de 1 año, agrega preguntas frecuentes y cambia los colores a tonos oscuros..."
+            [placeholder]="selectedBlock() ? 'Ej: Haz el título más persuasivo, incluye descuento del 10% y optimiza el botón...' : 'Ej: Destaca garantía de 1 año, agrega preguntas frecuentes y cambia los colores a tonos oscuros...'"
             class="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
           ></textarea>
 
@@ -399,19 +546,23 @@
           >
             @if (isProcessingAi()) {
               <span class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-              <span>Procesando instrucción con IA...</span>
+              <span>Consultando IA de Vendix...</span>
             } @else {
               <app-icon name="sparkles" [size]="14" />
-              <span>Aplicar al Lienzo</span>
+              <span>
+                {{ selectedBlock() ? 'Actualizar Sección con IA' : 'Actualizar Landing con IA' }}
+              </span>
             }
           </button>
         </div>
 
-        <!-- Sugerencias Rápidas -->
+        <!-- Sugerencias Rápidas Dinámicas -->
         <div>
-          <span class="text-[11px] font-bold text-slate-400 mb-2 block">Sugerencias rápidas en un clic:</span>
+          <span class="text-[11px] font-bold text-slate-400 mb-2 block">
+            {{ selectedBlock() ? 'Sugerencias para esta sección:' : 'Sugerencias rápidas en un clic:' }}
+          </span>
           <div class="flex flex-col gap-1.5">
-            @for (sp of quickPrompts; track sp) {
+            @for (sp of contextualQuickPrompts(); track sp) {
               <button
                 type="button"
                 (click)="setQuickPrompt(sp)"

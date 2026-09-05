@@ -18,6 +18,7 @@ import {
   CrmLandingJob,
   CrmLandingJobStatusResult,
 } from '../interfaces/crm-landing-job.interface';
+import { CrmAiAssistDto } from '../dto/crm.dto';
 import { VendixHttpException } from '@common/errors/vendix-http.exception';
 import { ErrorCodes } from '@common/errors/error-codes';
 
@@ -119,6 +120,140 @@ export class CrmGenerationService {
     }
     const status = (await job.getState()) as CrmLandingJobStatusResult['status'];
     return { status, error: job.failedReason || undefined };
+  }
+
+  /**
+   * Asiste al usuario en la edición de su landing page usando la IA configurada en Vendix.
+   * Soporta tanto mejoras globales como mejoras específicas sobre una sección
+   * seleccionada por el usuario con el mouse en el lienzo interactivo.
+   */
+  async assistWithAi(
+    storeId: number,
+    dto: CrmAiAssistDto,
+  ): Promise<{
+    document: CrmLandingDocument;
+    modified_block_id?: string;
+  }> {
+    const currentValidation = validateCrmLandingDocument(dto.current_document);
+    if (!currentValidation.valid) {
+      throw new VendixHttpException(
+        ErrorCodes.CRM_LANDING_003,
+        currentValidation.errors.join(' '),
+      );
+    }
+
+    const currentDoc = dto.current_document as unknown as CrmLandingDocument;
+    const bundle = await this.gatherBusinessBundle(storeId);
+
+    const variables: Record<string, string> = {
+      store_name: bundle.storeName,
+      industries: bundle.industries.join(', ') || 'retail',
+      store_type: bundle.storeType,
+      city_department: bundle.cityDepartment || 'Colombia',
+      timezone: bundle.timezone || 'America/Bogota',
+      fiscal_summary: bundle.fiscalSummary,
+      products_json: JSON.stringify(bundle.products),
+    };
+
+    const selectedBlock = dto.selected_block_id
+      ? currentDoc.blocks.find((b) => b.id === dto.selected_block_id)
+      : null;
+
+    let userInstruction = '';
+    if (selectedBlock) {
+      userInstruction = `El usuario seleccionó con el cursor la sección con id "${selectedBlock.id}" (tipo: "${selectedBlock.type}") para actualizarla o mejorarla.
+Props actuales de esta sección seleccionada:
+${JSON.stringify(selectedBlock.props, null, 2)}
+
+Instrucción del usuario: "${dto.prompt}".
+
+Instrucciones para la IA:
+1. Aplica la mejora directamente sobre la sección seleccionada "${selectedBlock.id}".
+2. Si la instrucción pide cambiar colores o estilos globales, ajusta también el objeto "theme" (primary_color, secondary_color).
+3. Mantén los demás bloques existentes intactos sin eliminarlos ni alterarlos innecesariamente.
+4. Devuelve ÚNICAMENTE el objeto JSON completo de la landing page con schema_version: 1, theme y todos los blocks actualizados. Sin bloques de markdown ni texto adicional.`;
+    } else {
+      userInstruction = `El usuario solicita la siguiente actualización general para la landing page: "${dto.prompt}".
+
+Instrucciones para la IA:
+1. Aplica las modificaciones solicitadas en los bloques correspondientes o en el "theme" según corresponda.
+2. Mantén la coherencia con el negocio y los bloques existentes.
+3. Devuelve ÚNICAMENTE el objeto JSON completo de la landing page con schema_version: 1, theme y blocks actualizados. Sin bloques de markdown ni texto adicional.`;
+    }
+
+    const extraMessages = [
+      {
+        role: 'assistant' as const,
+        content: JSON.stringify(currentDoc),
+      },
+      {
+        role: 'user' as const,
+        content: userInstruction,
+      },
+    ];
+
+    const response = await this.aiEngine.run(
+      CRM_LANDING_APP_KEY,
+      variables,
+      extraMessages,
+    );
+
+    if (!response.success || !response.content?.trim()) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_REQUEST_001,
+        response.error || 'No se pudo generar respuesta con la IA',
+      );
+    }
+
+    let parsed: any;
+    try {
+      parsed = parseAiJson(response.content);
+    } catch {
+      throw new VendixHttpException(
+        ErrorCodes.CRM_LANDING_003,
+        'La IA no devolvió un JSON válido. Intenta reformular la instrucción.',
+      );
+    }
+
+    let finalDoc: unknown = parsed;
+    // Resiliencia si el modelo retorna solo el bloque modificado en vez del documento entero
+    if (
+      selectedBlock &&
+      parsed &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed.blocks)
+    ) {
+      const newProps =
+        parsed.props ??
+        (parsed.title || parsed.subtitle || parsed.items || parsed.body
+          ? parsed
+          : null);
+      if (newProps && typeof newProps === 'object') {
+        const clonedDoc: CrmLandingDocument = JSON.parse(
+          JSON.stringify(currentDoc),
+        );
+        const blockToUpdate = clonedDoc.blocks.find(
+          (b) => b.id === selectedBlock.id,
+        );
+        if (blockToUpdate) {
+          blockToUpdate.props = { ...blockToUpdate.props, ...newProps };
+          finalDoc = clonedDoc;
+        }
+      }
+    }
+
+    const validation = validateCrmLandingDocument(finalDoc);
+    if (!validation.valid) {
+      throw new VendixHttpException(
+        ErrorCodes.CRM_LANDING_003,
+        `La actualización de la IA generó un documento inválido: ${validation.errors.join(' ')}`,
+      );
+    }
+
+    return {
+      document: finalDoc as CrmLandingDocument,
+      modified_block_id: dto.selected_block_id,
+    };
   }
 
   /**

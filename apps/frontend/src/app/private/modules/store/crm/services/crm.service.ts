@@ -9,6 +9,7 @@ import {
   CrmLeadStatus,
   CrmLeadsData,
 } from '../models/crm.model';
+import { CrmLandingDocument } from '../../../../../../public/dynamic-landing/blocks/landing-blocks.types';
 
 /**
  * HTTP service for the store CRM module.
@@ -44,6 +45,24 @@ export class CrmService {
       `${this.apiUrl}/landing`,
       { content_json },
     );
+  }
+
+  assistWithAi(payload: {
+    prompt: string;
+    current_document: unknown;
+    selected_block_id?: string;
+  }): Observable<
+    CrmApiResponse<{
+      document: CrmLandingDocument;
+      modified_block_id?: string;
+    }>
+  > {
+    return this.http.post<
+      CrmApiResponse<{
+        document: CrmLandingDocument;
+        modified_block_id?: string;
+      }>
+    >(`${this.apiUrl}/ai-assist`, payload);
   }
 
   publish(): Observable<CrmApiResponse<CrmLandingState>> {

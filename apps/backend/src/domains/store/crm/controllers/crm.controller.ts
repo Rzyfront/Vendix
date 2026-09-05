@@ -11,7 +11,11 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { CrmService } from '../services/crm.service';
-import { ActivateCrmDto, UpdateCrmLandingDto } from '../dto/crm.dto';
+import {
+  ActivateCrmDto,
+  CrmAiAssistDto,
+  UpdateCrmLandingDto,
+} from '../dto/crm.dto';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
@@ -43,6 +47,13 @@ export class CrmController {
   async deactivate() {
     const result = await this.crmService.deactivate();
     return this.responseService.success(result, 'CRM desactivado');
+  }
+
+  @Permissions('store:crm:manage')
+  @Post('ai-assist')
+  async assistWithAi(@Body() dto: CrmAiAssistDto) {
+    const result = await this.crmService.assistWithAi(dto);
+    return this.responseService.success(result, 'Landing actualizada con IA');
   }
 
   @Permissions('store:crm:manage')

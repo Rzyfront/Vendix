@@ -212,6 +212,58 @@ export class CrmBuilderComponent implements OnInit {
     return block ? CRM_BLOCK_FIELDS[block.type] || [] : [];
   });
 
+  readonly contextualQuickPrompts = computed<string[]>(() => {
+    const block = this.selectedBlock();
+    if (!block) {
+      return this.quickPrompts;
+    }
+    switch (block.type) {
+      case 'hero':
+        return [
+          'Hacer el título más persuasivo con oferta de bienvenida',
+          'Enfocar el subtítulo en confianza y calidad garantizada',
+          'Cambiar el botón de llamado a "Pedir por WhatsApp ahora"',
+        ];
+      case 'features':
+        return [
+          'Destacar 3 garantías: calidad, soporte 24/7 y envío seguro',
+          'Enfocar los beneficios en ahorro y satisfacción del cliente',
+          'Redactar títulos directos con descripciones breves',
+        ];
+      case 'about':
+        return [
+          'Contar una historia cercana de pasión y origen del negocio',
+          'Enfocar en la experiencia y trayectoria de la empresa',
+          'Añadir compromiso de atención personalizada',
+        ];
+      case 'contact':
+        return [
+          'Invitar a cotizar sin compromiso en minutos',
+          'Añadir mensaje de atención inmediata por asesores',
+        ];
+      case 'products_grid':
+        return [
+          'Escribir un título magnético para productos más vendidos',
+          'Invitar a descubrir las últimas novedades de la temporada',
+        ];
+      case 'testimonials':
+        return [
+          'Redactar 3 reseñas realistas de clientes satisfechos con 5 estrellas',
+          'Destacar puntualidad y calidad del servicio recibido',
+        ];
+      case 'faq':
+        return [
+          'Añadir preguntas sobre formas de pago, envíos y devoluciones',
+          'Responder con claridad sobre cobertura y tiempos de entrega',
+        ];
+      default:
+        return [
+          `Mejorar los textos y estilo de la sección ${this.labelFor(block.type)}`,
+          'Hacer el contenido más profesional y atractivo',
+        ];
+    }
+  });
+
   readonly blockCatalog = CRM_BLOCK_CATALOG;
 
   readonly filteredCatalog = computed(() => {
@@ -332,15 +384,54 @@ export class CrmBuilderComponent implements OnInit {
     this.activeDrawer.set('none');
   }
 
-  // --- Operaciones de Bloques ---
-  selectBlock(index: number): void {
+  // --- Operaciones de Bloques & Selección con Mouse ---
+  selectBlock(index: number, event?: Event): void {
+    if (event) {
+      event.stopPropagation();
+    }
+    this.selectedIndex.set(index);
+  }
+
+  openAiForBlock(index: number, event?: Event): void {
+    if (event) {
+      event.stopPropagation();
+    }
+    this.selectedIndex.set(index);
+    this.activeDrawer.set('ai');
+  }
+
+  openEditForBlock(index: number, event?: Event): void {
+    if (event) {
+      event.stopPropagation();
+    }
     this.selectedIndex.set(index);
     this.activeDrawer.set('edit-block');
   }
 
-  deselectBlock(): void {
+  clearSelection(event?: Event): void {
+    if (event) {
+      event.stopPropagation();
+    }
     this.selectedIndex.set(null);
-    this.activeDrawer.set('structure');
+    if (this.activeDrawer() === 'edit-block') {
+      this.activeDrawer.set('structure');
+    }
+  }
+
+  onCanvasBackgroundClick(event: MouseEvent): void {
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+    if (
+      target.classList.contains('canvas-background') ||
+      target.classList.contains('preview-stage') ||
+      target.classList.contains('desktop-canvas-wrapper')
+    ) {
+      this.selectedIndex.set(null);
+    }
+  }
+
+  deselectBlock(): void {
+    this.clearSelection();
   }
 
   moveBlock(index: number, direction: -1 | 1): void {
@@ -353,7 +444,10 @@ export class CrmBuilderComponent implements OnInit {
     this.hasChanges.set(true);
   }
 
-  removeBlock(index: number): void {
+  removeBlock(index: number, event?: Event): void {
+    if (event) {
+      event.stopPropagation();
+    }
     const updated = this.blocks().filter((_, i) => i !== index);
     this.blocks.set(updated);
     if (this.selectedIndex() === index) {
@@ -469,74 +563,55 @@ export class CrmBuilderComponent implements OnInit {
 
     this.isProcessingAi.set(true);
 
-    setTimeout(() => {
-      const lower = prompt.toLowerCase();
-      let modified = false;
+    const currentDoc: CrmLandingDocument = {
+      schema_version: 1,
+      theme: this.theme(),
+      blocks: this.blocks(),
+    };
 
-      if (lower.includes('oscuro') || lower.includes('lujo') || lower.includes('negro')) {
-        this.applyPreset(this.stylePresets[2]);
-        modified = true;
-      } else if (lower.includes('verde') || lower.includes('salud') || lower.includes('organico')) {
-        this.applyPreset(this.stylePresets[1]);
-        modified = true;
-      } else if (lower.includes('rojo') || lower.includes('oferta') || lower.includes('energia')) {
-        this.applyPreset(this.stylePresets[3]);
-        modified = true;
-      } else if (lower.includes('violeta') || lower.includes('creativo')) {
-        this.applyPreset(this.stylePresets[4]);
-        modified = true;
-      }
+    const targetBlock = this.selectedBlock();
+    const selectedBlockId = targetBlock?.id;
 
-      if (lower.includes('pregunta') || lower.includes('faq')) {
-        if (!this.blocks().some((b) => b.type === 'faq')) {
-          this.addBlockFromCatalog('faq');
-          modified = true;
-        }
-      }
-
-      if (lower.includes('testimonio') || lower.includes('opinion')) {
-        if (!this.blocks().some((b) => b.type === 'testimonials')) {
-          this.addBlockFromCatalog('testimonials');
-          modified = true;
-        }
-      }
-
-      if (lower.includes('garantia') || lower.includes('beneficio')) {
-        const featIdx = this.blocks().findIndex((b) => b.type === 'features');
-        if (featIdx >= 0) {
-          this.selectedIndex.set(featIdx);
-          this.updateProp('title', 'Garantía Total y Respaldo Oficial');
-          modified = true;
-        } else {
-          this.addBlockFromCatalog('features');
-          modified = true;
-        }
-      }
-
-      if (!modified) {
-        const heroIndex = this.blocks().findIndex((b) => b.type === 'hero');
-        if (heroIndex >= 0) {
-          const currentHero = this.blocks()[heroIndex];
-          const existingSubtitle = String(currentHero.props['subtitle'] || '');
-          this.blocks.update((currentBlocks) => {
-            const copy = [...currentBlocks];
-            copy[heroIndex] = {
-              ...currentHero,
-              props: {
-                ...currentHero.props,
-                subtitle: `${existingSubtitle} · ${prompt}`.trim(),
-              },
-            };
-            return copy;
-          });
-        }
-      }
-
-      this.hasChanges.set(true);
-      this.isProcessingAi.set(false);
-      this.naturalPrompt.set('');
-      this.toast.success('¡Instrucción aplicada al lienzo por la IA!');
-    }, 1100);
+    this.crmService
+      .assistWithAi({
+        prompt,
+        current_document: currentDoc,
+        selected_block_id: selectedBlockId,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          this.isProcessingAi.set(false);
+          if (res.data?.document) {
+            const doc = res.data.document;
+            if (doc.theme) {
+              this.theme.set({
+                ...this.theme(),
+                ...doc.theme,
+              });
+            }
+            if (Array.isArray(doc.blocks) && doc.blocks.length > 0) {
+              this.blocks.set(doc.blocks);
+            }
+            this.hasChanges.set(true);
+            this.naturalPrompt.set('');
+            this.toast.success(
+              selectedBlockId
+                ? `¡Sección "${this.labelFor(targetBlock!.type)}" actualizada con la IA de Vendix!`
+                : '¡Landing page actualizada con la IA de Vendix!',
+            );
+          } else {
+            this.toast.warning('La IA procesó la solicitud pero no devolvió cambios');
+          }
+        },
+        error: (err) => {
+          this.isProcessingAi.set(false);
+          const devMessage =
+            err?.error?.message ||
+            'Error al conectar con la IA de Vendix. Intenta nuevamente.';
+          this.toast.error(devMessage);
+        },
+      });
   }
 
   copyAgenticInstruction(): void {

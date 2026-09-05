@@ -3,7 +3,7 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors/vendix-http.exception';
 import { ErrorCodes } from '@common/errors/error-codes';
-import { UpdateCrmLandingDto } from '../dto/crm.dto';
+import { CrmAiAssistDto, UpdateCrmLandingDto } from '../dto/crm.dto';
 import { CrmGenerationService } from './crm-generation.service';
 import { validateCrmLandingDocument } from '../crm-blocks.contract';
 import { SettingsService } from '../../settings/settings.service';
@@ -104,6 +104,11 @@ export class CrmService {
 
   async getGenerationJobStatus(jobId: string) {
     return this.crmGenerationService.getGenerationJobStatus(jobId);
+  }
+
+  async assistWithAi(dto: CrmAiAssistDto) {
+    const storeId = this.requireStoreId();
+    return this.crmGenerationService.assistWithAi(storeId, dto);
   }
 
   async deactivate(): Promise<CrmLandingState> {
