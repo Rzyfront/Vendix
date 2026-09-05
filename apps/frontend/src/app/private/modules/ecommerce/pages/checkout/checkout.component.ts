@@ -2491,9 +2491,18 @@ export class CheckoutComponent implements OnInit {
       this.is_authenticated() || !guest
         ? ''
         : `${guest.first_name ?? ''} ${guest.last_name ?? ''}`.trim();
-    const header = customerName
-      ? `Hola, soy *${customerName}*! Acabo de comprar en *${storeName}* 🛒`
-      : `Hola! Acabo de comprar en *${storeName}* 🛒`;
+    // Pitch configurable por la tienda (admin ecommerce): reemplaza el
+    // saludo por defecto; `{tienda}` se sustituye por el nombre real.
+    const pitch = (
+      config?.customConfig?.ecommerce?.checkout?.whatsapp_pitch || ''
+    )
+      .trim()
+      .replaceAll('{tienda}', storeName);
+    const header = pitch
+      ? pitch
+      : customerName
+        ? `Hola, soy *${customerName}*! Acabo de comprar en *${storeName}* 🛒`
+        : `Hola! Acabo de comprar en *${storeName}* 🛒`;
     const message = encodeURIComponent(
       `${header}\n\n` +
         `*Pedido:* ${order.order_number}\n\n` +

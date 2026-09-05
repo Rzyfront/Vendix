@@ -43,6 +43,7 @@ import {
   SelectorComponent,
   SettingToggleComponent,
   StickyHeaderComponent,
+  TextareaComponent,
   StickyHeaderActionButton,
   ImageSourceModalComponent,
 } from '../../../../shared/components';
@@ -158,6 +159,7 @@ const HOME_SECTION_ITEMS: HomeSectionAdminItem[] = [
     SelectorComponent,
     SettingToggleComponent,
     StickyHeaderComponent,
+    TextareaComponent,
     FooterSettingsFormComponent,
     StoreShareModalComponent,
     TourModalComponent,
@@ -167,6 +169,13 @@ const HOME_SECTION_ITEMS: HomeSectionAdminItem[] = [
   styleUrls: ['./ecommerce.component.scss'],
 })
 export class EcommerceComponent {
+  /**
+   * Pitch recomendado que encabeza el mensaje de pedido por WhatsApp.
+   * `{tienda}` se reemplaza por el nombre de la tienda al enviar.
+   */
+  readonly defaultWhatsappPitch =
+    'Hola, bienvenido a {tienda} 🛍️✨ Aquí comprar es fácil, rápido y seguro: pide por nuestra web y recíbelo donde estés 🚀👇';
+
   private fb = inject(FormBuilder);
   private ecommerceService = inject(EcommerceService);
   private productService = inject(ProductService);
@@ -560,6 +569,7 @@ export class EcommerceComponent {
           '',
           [Validators.pattern(/^\+57[\d+#*\s()-]*$/)],
         ], // frontend-only, never sent to backend
+        whatsapp_pitch: ['', [Validators.maxLength(500)]],
         require_registration: [false],
       }),
     });
@@ -656,6 +666,9 @@ export class EcommerceComponent {
   get confirmWhatsappNumberControl() {
     return this.checkoutGroup.get('confirm_whatsapp_number') as any;
   }
+  get whatsappPitchControl() {
+    return this.checkoutGroup.get('whatsapp_pitch') as any;
+  }
   get requireRegistrationControl() {
     return this.checkoutGroup.get('require_registration') as any;
   }
@@ -696,6 +709,13 @@ export class EcommerceComponent {
           }
           if (!this.confirmWhatsappNumberControl.value) {
             this.confirmWhatsappNumberControl.setValue('+57', {
+              emitEvent: false,
+            });
+          }
+          // Prefill the recommended pitch on first activation so the store
+          // sees (and can tweak) the hooking default.
+          if (!this.whatsappPitchControl.value) {
+            this.whatsappPitchControl.setValue(this.defaultWhatsappPitch, {
               emitEvent: false,
             });
           }

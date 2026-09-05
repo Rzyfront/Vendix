@@ -457,6 +457,18 @@ export class EcommerceCheckoutDto {
       'El número de WhatsApp solo puede contener números y los símbolos + # * ( ) -',
   })
   whatsapp_number?: string;
+
+  @ApiPropertyOptional({
+    example: 'Hola, bienvenido a {tienda} 🛍️',
+    description:
+      'Pitch recomendado que encabeza el mensaje de pedido por WhatsApp. {tienda} se reemplaza por el nombre de la tienda.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500, {
+    message: 'El pitch de WhatsApp no puede superar los 500 caracteres',
+  })
+  whatsapp_pitch?: string;
 }
 
 /**

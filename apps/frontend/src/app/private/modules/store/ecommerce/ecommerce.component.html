@@ -780,6 +780,13 @@
                       "
                       size="sm"
                     ></app-input>
+                    <app-textarea
+                      label="Pitch recomendado"
+                      [formControl]="whatsappPitchControl"
+                      [placeholder]="defaultWhatsappPitch"
+                      helperText="Encabeza el mensaje de pedido por WhatsApp. Usa {tienda} para el nombre de tu tienda."
+                      [rows]="4"
+                    ></app-textarea>
                   </div>
                 </div>
               }
