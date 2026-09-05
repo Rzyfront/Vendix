@@ -252,6 +252,9 @@ export class AddItemsModalComponent {
     Array<{ component_product_id: number; name: string; quantity: string | number }>
   >([]);
   readonly loadingRecipe = signal(false);
+  /** QA pop: product id that just got +1 via row-body click (cleared after ~400ms). */
+  readonly justAddedId = signal<number | null>(null);
+  private justAddedTimer: number | null = null;
 
   /**
    * Abre el picker de insumos de un plato. Se carga la receta on-demand y no al
@@ -381,6 +384,14 @@ export class AddItemsModalComponent {
 
   increment(product: SellableProductOption): void {
     this.bumpQty(product, 1);
+  }
+
+  /** QA pop: clicking a product row body adds +1 and flags it for the visual pop. */
+  onRowBodyClick(product: SellableProductOption): void {
+    this.increment(product);
+    this.justAddedId.set(product.id);
+    if (this.justAddedTimer !== null) window.clearTimeout(this.justAddedTimer);
+    this.justAddedTimer = window.setTimeout(() => this.justAddedId.set(null), 400);
   }
 
   decrement(product: SellableProductOption): void {

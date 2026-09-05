@@ -50,6 +50,12 @@
           class="product-row"
           [class.has-picker]="hasVariants(row)"
           [class.has-extras]="quantityOf(row.id) > 0"
+          (click)="onRowBodyClick(row)"
+          [class.just-added]="justAddedId() === row.id"
+          role="button"
+          tabindex="0"
+          (keydown.enter)="onRowBodyClick(row)"
+          [attr.aria-label]="'Agregar uno de ' + row.name"
         >
           <div class="product-thumb">
             @if (row.image_url) {
@@ -74,9 +80,9 @@
               </span>
             </div>
           </div>
-          <div class="qty-controls">
+          <div class="qty-controls" (click)="$event.stopPropagation()">
             <app-button
-              variant="outline"
+              variant="outline-danger"
               size="md"
               [disabled]="quantityOf(row.id) <= 0"
               [attr.aria-label]="'Disminuir'"
@@ -103,7 +109,7 @@
             simetría con los platos sin variantes.
           -->
           @if (hasVariants(row)) {
-            <div class="variant-picker">
+            <div class="variant-picker" (click)="$event.stopPropagation()">
               <span class="variant-picker__label">Variante</span>
               <div class="variant-picker__options">
                 @for (variant of (row.product_variants ?? []); track variant.id) {
@@ -135,7 +141,7 @@
             por unidades marcadas es QUI-655, fuera de este ticket.
           -->
           @if (quantityOf(row.id) > 0) {
-            <div class="extras">
+            <div class="extras" (click)="$event.stopPropagation()">
               <button
                 type="button"
                 class="takeaway-toggle"
