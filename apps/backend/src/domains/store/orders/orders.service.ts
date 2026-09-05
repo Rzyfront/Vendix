@@ -1532,6 +1532,28 @@ export class OrdersService {
       throw new VendixHttpException(ErrorCodes.ORD_EDIT_NOT_ALLOWED_001);
     }
 
+    // 2.1) P0 revenue integrity (CP-POLLO-ARABE-727 / fix/table-close-order):
+    //     el editor rechaza mutaciones sobre órdenes cuya `table_session` ya
+    //     está cerrada. Hasta la fix, `closeSession` cambiaba `orders.state` a
+    //     `'finished'` como proxy y eso bloqueaba el editor por colateral —
+    //     pero contaminaba `COMPLETED_SALE_STATES` en analytics. Ahora el
+    //     estado de la orden sigue siendo dato de la operación (puede ser
+    //     draft/created/pending_payment después de cerrar mesa), y este guard
+    //     es el que cierra la compuerta de edición.
+    //
+    //     Sólo aplica a órdenes con sesión (POS abiertas en mesa). Órdenes
+    //     POS-only sin `table_sessions.order_id` se quedan sin guard y siguen
+    //     siendo editables vía el flujo normal. Idempotente: si el lookup
+    //     devuelve `null` la sesión no existe (caso POS-only), no es
+    //     error — se permite la edición.
+    const closedSession = await this.prisma.table_sessions.findFirst({
+      where: { order_id: orderId, closed_at: { not: null } },
+      select: { id: true, closed_at: true },
+    });
+    if (closedSession) {
+      throw new VendixHttpException(ErrorCodes.ORD_EDIT_NOT_ALLOWED_001);
+    }
+
     const isDraft = existingOrder.state === 'draft';
 
     // 2.5) CP-POS-CREAR-EDITAR-COBRAR-001 — Round 3.5 · idempotency short-circuit.

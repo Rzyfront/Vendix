@@ -38,6 +38,11 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         create: jest.fn(),
         update: jest.fn(),
         findFirst: jest.fn(),
+        // findUnique se usa para leer `state` antes de mutar (legado).
+        // El fix del P0 deja de consultarlo, pero el mock se mantiene para
+        // que los asserts `expect(prismaMock.orders.findUnique).not.toHaveBeenCalled()`
+        // tengan un spy válido con el cual comparar (jest exige mock o spy).
+        findUnique: jest.fn(),
       },
       order_items: {
         create: jest.fn(),
@@ -429,6 +434,185 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       // No NEW session created — create still at 1 call from the first open.
       expect(prismaMock.table_sessions.create).toHaveBeenCalledTimes(1);
       expect(prismaMock.orders.create).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('closeSession (FIX/ table-close-order — option 2)', () => {
+    // Helper para armar una session activa con `order_id` mockeado.
+    const mockSession = (overrides: Partial<{ closed_at: Date | null; order_id: number }> = {}) => ({
+      id: 77,
+      table_id: 5,
+      store_id: STORE_ID,
+      order_id: 10,
+      closed_at: null,
+      opened_at: new Date(),
+      opened_by: USER_ID,
+      ...overrides,
+    });
+
+    // ─── P0 revenue integrity (option 2) ─────────────────────────────────
+    //
+    // La versión previa de `closeSession` subía `orders.state` a `'finished'`
+    // cuando el bound order estaba en `draft` / `created` / `pending_payment`.
+    // Eso contaminaba `COMPLETED_SALE_STATES` (analytics-metrics.contract.ts:29
+    // = ['delivered', 'finished']) y sumaba la orden a los ingresos del período
+    // con `total_paid = 0` — overview-analytics / sales-analytics /
+    // financial-analytics / weekly-report.
+    //
+    // Opción 2 del review: `closeSession` NO toca `orders.state`. La orden
+    // queda en su estado editable y sigue siendo cobrable por el flujo de
+    // pagos. La edición la bloquea `OrdersService.updateOrderFromEditor`
+    // cuando la sesión está cerrada (síntoma QUI-726), no este método.
+
+    it('does NOT touch the order state when the order is in "draft" (option 2)', async () => {
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        mockSession(),
+      );
+      prismaMock.table_sessions.update.mockResolvedValue({});
+      prismaMock.tables.update.mockResolvedValue({});
+
+      await service.closeSession(77);
+
+      // orders.findUnique NO debe consultarse — no necesitamos leer state.
+      expect(prismaMock.orders.findUnique).not.toHaveBeenCalled();
+      // orders.update NO debe llamarse para cambio de estado.
+      expect(prismaMock.orders.update).not.toHaveBeenCalled();
+      // La sesión y la mesa sí deben haberse actualizado.
+      expect(prismaMock.table_sessions.update).toHaveBeenCalledTimes(1);
+      expect(prismaMock.tables.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT touch the order state when the order is in "created" (option 2)', async () => {
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        mockSession(),
+      );
+      prismaMock.table_sessions.update.mockResolvedValue({});
+      prismaMock.tables.update.mockResolvedValue({});
+
+      await service.closeSession(77);
+
+      expect(prismaMock.orders.findUnique).not.toHaveBeenCalled();
+      expect(prismaMock.orders.update).not.toHaveBeenCalled();
+    });
+
+    it('does NOT touch the order state when the order is in "pending_payment" (option 2)', async () => {
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        mockSession(),
+      );
+      prismaMock.table_sessions.update.mockResolvedValue({});
+      prismaMock.tables.update.mockResolvedValue({});
+
+      await service.closeSession(77);
+
+      expect(prismaMock.orders.findUnique).not.toHaveBeenCalled();
+      expect(prismaMock.orders.update).not.toHaveBeenCalled();
+    });
+
+    it('does NOT touch the order state when the order is in "processing" (KDS in flight)', async () => {
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        mockSession(),
+      );
+      prismaMock.table_sessions.update.mockResolvedValue({});
+      prismaMock.tables.update.mockResolvedValue({});
+
+      await service.closeSession(77);
+
+      expect(prismaMock.orders.update).not.toHaveBeenCalled();
+    });
+
+    it('does NOT touch the order state when it is already "finished" (idempotency)', async () => {
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        mockSession(),
+      );
+      prismaMock.table_sessions.update.mockResolvedValue({});
+      prismaMock.tables.update.mockResolvedValue({});
+
+      await service.closeSession(77);
+
+      expect(prismaMock.orders.update).not.toHaveBeenCalled();
+    });
+
+    it('does NOT fail when the session has no order_id', async () => {
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        mockSession({ order_id: undefined as any }),
+      );
+      prismaMock.table_sessions.update.mockResolvedValue({});
+      prismaMock.tables.update.mockResolvedValue({});
+
+      await expect(service.closeSession(77)).resolves.toBeDefined();
+
+      // orders.findUnique should NOT have been queried.
+      expect(prismaMock.orders.findUnique).not.toHaveBeenCalled();
+      // orders.update should NOT have been called.
+      expect(prismaMock.orders.update).not.toHaveBeenCalled();
+    });
+
+    it('the order remains payable AFTER closeSession (regression guard)', async () => {
+      // ─── Verifica el comentario del docblock ─────────────────────────
+      // "The order is left in draft — it is paid via the normal payments
+      // flow (which can happen with the session closed, e.g. someone pays
+      // the check after stepping out of the restaurant)."
+      //
+      // Después de closeSession la orden debe seguir siendo cobrable. Como
+      // aquí solo cerramos la sesión sin tocar la orden, una llamada
+      // posterior al flujo de pagos (PaymentsService.processPosPayment,
+      // OrderFlowService.transition, etc.) puede actuar sobre ella sin que
+      // este método la haya dejado en un estado terminal.
+      //
+      // Spy sobre el Logger interno del service: como `logger` es privado
+      // usamos bracket-access tipado a `any`. La aserción del log es
+      // secundaria — las fuertes (`orders.*` no se llaman) ya garantizan
+      // el invariante. Esto añade una capa de auditoría para grep post-mortem.
+      const logSpy = jest
+        .spyOn((service as any).logger, 'log')
+        .mockImplementation(() => undefined);
+
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        mockSession(),
+      );
+      prismaMock.table_sessions.update.mockResolvedValue({});
+      prismaMock.tables.update.mockResolvedValue({});
+
+      await service.closeSession(77);
+
+      // El contrato: no se escribió NADA en orders durante el close.
+      expect(prismaMock.orders.findUnique).not.toHaveBeenCalled();
+      expect(prismaMock.orders.update).not.toHaveBeenCalled();
+      // El log debe mencionar explícitamente que el estado NO cambió.
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('order state unchanged'),
+      );
+
+      logSpy.mockRestore();
+    });
+
+    it('is idempotent: a second close on the same session is a no-op', async () => {
+      // First close: `findOne` se llama DOS veces — al inicio (línea 1030) y
+      // al final antes de retornar (línea 1060). Ambas con la sesión abierta.
+      (prismaMock.table_sessions.findFirst as jest.Mock)
+        .mockResolvedValueOnce(mockSession())
+        .mockResolvedValueOnce(mockSession());
+      // Second close: `findOne` se llama UNA vez (la sesión ya viene cerrada
+      // → short-circuit antes de la segunda llamada del final).
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValueOnce(
+        mockSession({ closed_at: new Date() }),
+      );
+
+      prismaMock.table_sessions.update.mockResolvedValue({});
+      prismaMock.tables.update.mockResolvedValue({});
+
+      // First close — la transacción corre, ningún write a orders.
+      await service.closeSession(77);
+      expect(prismaMock.orders.update).toHaveBeenCalledTimes(0);
+      expect(prismaMock.table_sessions.update).toHaveBeenCalledTimes(1);
+      expect(prismaMock.tables.update).toHaveBeenCalledTimes(1);
+
+      // Second close — short-circuit en `if (session.closed_at)`. Ningún write.
+      await service.closeSession(77);
+      expect(prismaMock.orders.update).not.toHaveBeenCalled();
+      // Los counters siguen en los valores del primer close (no se duplican).
+      expect(prismaMock.table_sessions.update).toHaveBeenCalledTimes(1);
+      expect(prismaMock.tables.update).toHaveBeenCalledTimes(1);
     });
   });
 });
