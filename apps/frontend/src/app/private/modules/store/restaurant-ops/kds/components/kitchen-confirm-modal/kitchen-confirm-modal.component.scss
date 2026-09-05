@@ -26,6 +26,15 @@
   overflow-y: auto;
 }
 
+/* QA footer: Cancelar a la izquierda, Enviar a la derecha, en una sola fila
+   también en móvil (son solo dos botones y el primario manda a la derecha). */
+.kc-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
 .kc-item {
   padding: 0.6rem 0.7rem;
   border: 1px solid var(--color-border, #e5e7eb);

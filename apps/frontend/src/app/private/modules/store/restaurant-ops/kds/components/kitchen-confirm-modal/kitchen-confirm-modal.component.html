@@ -281,24 +281,29 @@
     }
   }
 
-  <app-button
-    slot="footer"
-    variant="secondary"
-    (clicked)="onCancel()"
-    [disabled]="isSubmitting()"
-  >
-    Cancelar
-  </app-button>
-  <app-button
-    slot="footer"
-    variant="primary"
-    [loading]="isSubmitting()"
-    [disabled]="!hasItems() || isLoading()"
-    (clicked)="onConfirm()"
-  >
-    <app-icon slot="icon" name="flame" [size]="14" />
-    <!-- Camino rápido: mientras nadie desmarque nada el botón dice "sin cambios",
-         para que el envío de hora pico sea un solo toque. -->
-    {{ confirmLabel() }}
-  </app-button>
+  <!--
+    QA footer: Cancelar a la izquierda en outline-danger, Enviar a la derecha
+    en primario. Un solo `slot="footer"` con `.kc-footer` (space-between):
+    dos slots sueltos los apila el contenedor del modal sin orden garantizado.
+  -->
+  <div slot="footer" class="kc-footer">
+    <app-button
+      variant="outline-danger"
+      (clicked)="onCancel()"
+      [disabled]="isSubmitting()"
+    >
+      Cancelar
+    </app-button>
+    <app-button
+      variant="primary"
+      [loading]="isSubmitting()"
+      [disabled]="!hasItems() || isLoading()"
+      (clicked)="onConfirm()"
+    >
+      <app-icon slot="icon" name="flame" [size]="14" />
+      <!-- Camino rápido: mientras nadie desmarque nada el botón dice "sin cambios",
+           para que el envío de hora pico sea un solo toque. -->
+      {{ confirmLabel() }}
+    </app-button>
+  </div>
 </app-modal>
