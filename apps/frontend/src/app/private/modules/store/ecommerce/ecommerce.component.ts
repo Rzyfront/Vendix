@@ -170,11 +170,71 @@ const HOME_SECTION_ITEMS: HomeSectionAdminItem[] = [
 })
 export class EcommerceComponent {
   /**
-   * Pitch recomendado que encabeza el mensaje de pedido por WhatsApp.
-   * `{tienda}` se reemplaza por el nombre de la tienda al enviar.
+   * Plantilla del pitch recomendado que encabeza el mensaje de pedido por
+   * WhatsApp. Al activar se guarda ya resuelta (nombre + web reales).
    */
   readonly defaultWhatsappPitch =
-    'Hola, bienvenido a {tienda} 🛍️✨ Aquí comprar es fácil, rápido y seguro: pide por nuestra web y recíbelo donde estés 🚀👇';
+    'Hola, bienvenido a {tienda} 🛍️✨ Aquí comprar es fácil, rápido y seguro: pide por nuestra web {web} y recíbelo donde estés 🚀';
+
+  /** Nombre visible de la tienda (branding, misma fuente del storefront). */
+  readonly pitchStoreName = computed(() => {
+    const settings: any = this.store.selectSignal(selectStoreSettings)();
+    return settings?.branding?.name || this.storeName || 'Mi Tienda';
+  });
+
+  /** Pitch por defecto con {tienda} y {web} ya resueltos. */
+  readonly resolvedDefaultPitch = computed(() =>
+    this.resolvePitchVars(this.defaultWhatsappPitch),
+  );
+
+  /** Resuelve {tienda}/{web} con los valores reales de la tienda. */
+  private resolvePitchVars(template: string): string {
+    return (template || '')
+      .replaceAll('{tienda}', this.pitchStoreName())
+      .replaceAll('{web}', this.ecommerceUrl() || '');
+  }
+
+  /** Copia el pitch actual (ya resuelto) al portapapeles. */
+  copyWhatsappPitch(): void {
+    const text = this.resolvePitchVars(
+      this.whatsappPitchControl?.value || this.defaultWhatsappPitch,
+    );
+    if (!text) return;
+
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      navigator.clipboard
+        .writeText(text)
+        .then(() => this.toastService.success('Pitch copiado'))
+        .catch(() => this.copyWhatsappPitchFallback(text));
+      return;
+    }
+
+    this.copyWhatsappPitchFallback(text);
+  }
+
+  private copyWhatsappPitchFallback(text: string): void {
+    if (typeof document === 'undefined') {
+      this.toastService.error('No se pudo copiar el pitch');
+      return;
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', 'true');
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+
+    try {
+      document.execCommand('copy');
+      this.toastService.success('Pitch copiado');
+    } catch {
+      this.toastService.error('No se pudo copiar el pitch');
+    }
+
+    document.body.removeChild(textarea);
+  }
 
   private fb = inject(FormBuilder);
   private ecommerceService = inject(EcommerceService);
@@ -712,10 +772,11 @@ export class EcommerceComponent {
               emitEvent: false,
             });
           }
-          // Prefill the recommended pitch on first activation so the store
-          // sees (and can tweak) the hooking default.
+          // Prefill the recommended pitch on first activation, already
+          // resolved with the real store name + web so the store sees
+          // (and can tweak) the final text.
           if (!this.whatsappPitchControl.value) {
-            this.whatsappPitchControl.setValue(this.defaultWhatsappPitch, {
+            this.whatsappPitchControl.setValue(this.resolvedDefaultPitch(), {
               emitEvent: false,
             });
           }

@@ -2492,12 +2492,16 @@ export class CheckoutComponent implements OnInit {
         ? ''
         : `${guest.first_name ?? ''} ${guest.last_name ?? ''}`.trim();
     // Pitch configurable por la tienda (admin ecommerce): reemplaza el
-    // saludo por defecto; `{tienda}` se sustituye por el nombre real.
+    // saludo por defecto. `{tienda}`/`{web}` se sustituyen (compat con
+    // plantillas guardadas; el admin ya prellena resuelto).
+    const shopUrl =
+      typeof window !== 'undefined' ? window.location.origin : '';
     const pitch = (
       config?.customConfig?.ecommerce?.checkout?.whatsapp_pitch || ''
     )
       .trim()
-      .replaceAll('{tienda}', storeName);
+      .replaceAll('{tienda}', storeName)
+      .replaceAll('{web}', shopUrl);
     const header = pitch
       ? pitch
       : customerName

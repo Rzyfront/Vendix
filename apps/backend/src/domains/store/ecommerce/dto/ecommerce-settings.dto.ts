@@ -461,7 +461,7 @@ export class EcommerceCheckoutDto {
   @ApiPropertyOptional({
     example: 'Hola, bienvenido a {tienda} 🛍️',
     description:
-      'Pitch recomendado que encabeza el mensaje de pedido por WhatsApp. {tienda} se reemplaza por el nombre de la tienda.',
+      'Pitch recomendado que encabeza el mensaje de pedido por WhatsApp. Acepta {tienda} y {web} como plantillas.',
   })
   @IsOptional()
   @IsString()
