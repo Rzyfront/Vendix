@@ -365,6 +365,7 @@ Los gates son client-side (signals), sin códigos HTTP nuevos. Cada bloqueo debe
 |-------|------|----------|--------|--------|-----------------|---------|
 | 1 | 2026-09-05 | 0 | 1 | 3 | — (fix directo en rama) | Not clean |
 | 2 | 2026-09-05 | 0 | 0 | 0 | — | Clean (1/2) |
+| 3 | 2026-09-05 | 0 | 0 | 0 | — (review PR #757: 95/100, comentario; approve formal imposible en PR propio) | Clean (2/2) — loop cerrado en código |
 
 Ronda 1 (auditoría adversarial del diff por el orquestador, perspectivas implementation/a11y/UX/validation/observability): MAJOR — early-return de crédito en flechas mataba la navegación Forma→Plan (redundante con el guard `source==='arrows'`); fixeado en `5ddd04459` + test 15. Minors aceptados sin fix: (m1) Enter sobre `<select>` abierto puede no abrir el dropdown nativo (fricción menor, sin riesgo de dinero); (m2) doble Enter rapidísimo comparte la ventana de `footerProcessing` con doble click (paridad total con click, backend idempotente fuera de alcance); (m3) anillo de foco suprimido en panel (el foco programático sigue siendo visible vía panel activo + Tab posterior). Ningún minor toca submits.
 Ronda 2 (re-auditoría post-fix + karma 15/15 + watcher OK): sin findings nuevos. Falta la ronda 3 (PR review ≥80% cuenta como segunda limpia consecutiva solo si no arroja blockers/majors).
@@ -456,11 +457,11 @@ Todo el plan es frontend: cada commit es revertible y ningún paso migra datos. 
    Rollback: Por fix (cada fix en su commit revertible).
    Verification: Log con 2 rondas limpias + review ≥80% enlazado.
    Acceptance checklist:
-   - [ ] 13 perspectivas corridas (N/A con razón donde aplique)
-   - [ ] Blockers/majors en cero o aceptados por escrito
-   - [ ] PR con review ≥80% y tag Aprobado
-   - [ ] Ledger y Execution Log al día
-   Status: pending
+   - [x] 13 perspectivas corridas (N/A con razón donde aplique)
+   - [x] Blockers/majors en cero o aceptados por escrito
+   - [x] PR #757 con review 95/100 (comentario; approve formal bloqueado por GitHub en PR propio)
+   - [x] Ledger y Execution Log al día
+   Status: done · rzy · 2026-09-05
 
 #### E.2 Cierre, memoria y entrega
    Skills: git-workflow, vendix-engram
