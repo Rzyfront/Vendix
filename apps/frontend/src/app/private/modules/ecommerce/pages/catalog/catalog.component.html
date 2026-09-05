@@ -1,11 +1,12 @@
 <div class="catalog-page">
   <!-- Store-wide active promotions banner (CP-ECOM-PROMO-UX-001 C.1).
+       Barra marquee de loop infinito con el primario de la tienda.
        Solo se renderiza cuando hay promociones activas. Fuera del modal de
        Quick View: vive en la página, no en el overlay. -->
   @if (promotionStackItems().length > 0) {
     <div class="catalog-promo-banner">
       <app-promotion-stack
-        mode="scroll-batch"
+        mode="marquee-bar"
         [items]="promotionStackItems()"
         ariaLabel="Promociones activas"
         data-testid="catalog-promo-banner"
