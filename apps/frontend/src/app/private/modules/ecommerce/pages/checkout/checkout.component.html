@@ -1019,23 +1019,26 @@
         <div class="checkout-actions checkout-actions--summary">
           @if (step() > 1) {
             <div class="checkout-actions__left">
-              <app-button variant="outline" (clicked)="prevStep()">
+              <app-button
+                variant="outline"
+                size="lg"
+                [fullWidth]="true"
+                (clicked)="prevStep()"
+              >
                 <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
                 Anterior
               </app-button>
             </div>
           } @else {
             <div class="checkout-actions__left">
-              <app-button variant="outline" (clicked)="goToCart()">
+              <app-button
+                variant="outline"
+                size="lg"
+                [fullWidth]="true"
+                (clicked)="goToCart()"
+              >
                 <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
                 Volver al carrito
-              </app-button>
-              <!-- Paso 1 con booking: permite volver al wizard /book/:id para
-                   modificar horario / profesional / modalidad sin tener que
-                   pasar por el carrito. -->
-              <app-button variant="outline" (clicked)="changeSchedule()">
-                <app-icon slot="icon" name="calendar-clock" [size]="16"></app-icon>
-                Modificar reserva
               </app-button>
             </div>
           }
@@ -1043,6 +1046,8 @@
           @if (step() < confirmStep) {
             <app-button
               variant="primary"
+              size="lg"
+              [fullWidth]="true"
               (clicked)="nextStep()"
               [disabled]="
                 (bookingStep !== null &&
@@ -1062,6 +1067,8 @@
           } @else if (step() >= confirmStep) {
             <app-button
               variant="primary"
+              size="lg"
+              [fullWidth]="true"
               (clicked)="placeOrder()"
               [loading]="is_submitting() || wompiWidgetLoading()"
               [disabled]="is_submitting() || wompiWidgetLoading() || !canConfirmOrder()"

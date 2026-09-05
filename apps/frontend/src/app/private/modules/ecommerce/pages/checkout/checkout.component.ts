@@ -2615,28 +2615,6 @@ export class CheckoutComponent implements OnInit {
     this.router.navigate(['/cart']);
   }
 
-  /**
-   * Navega al wizard de booking para que el cliente pueda modificar el
-   * horario, profesional o modalidad sin tener que pasar por el carrito.
-   * Prioridad: (1) el primer bookable item sin booking en el carrito,
-   * (2) si todos tienen booking, el primero del carrito. Esto evita
-   * que con múltiples items se sobreescriban las selecciones existentes
-   * al navegar al wizard.
-   */
-  changeSchedule(): void {
-    const firstMissing = this.bookableItems.find(
-      (i) => !this.preBookedSelectionFor(i),
-    );
-    const target = firstMissing ?? this.bookableItems[0];
-    if (!target) {
-      this.toast.warning(
-        'No hay servicios con reserva para modificar en el carrito.',
-      );
-      return;
-    }
-    this.router.navigate(['/book', target.product_id]);
-  }
-
   onQuickView(product: EcommerceProduct): void {
     this.selectedProductSlug.set(product.slug);
     this.quickViewOpen.set(true);
