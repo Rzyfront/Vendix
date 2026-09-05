@@ -363,6 +363,16 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     expect(confirm).toHaveBeenCalledTimes(1);
   });
 
+  it('flechas consumen el avance del sub-wizard sin llegar al submit (crédito)', () => {
+    payStub().mode.set('credito');
+    payStub().advanceRet = true; // hay sub-paso por avanzar (Forma→Plan)
+    component.currentStep.set(1);
+    fixture.detectChanges();
+    const confirm = spyOn(component, 'onPrimaryConfirm');
+    component.attemptNextStep({ source: 'arrows' });
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
   it('Enter sí cobra en modo crédito con gate válido', () => {
     payStub().mode.set('credito');
     component.currentStep.set(1);

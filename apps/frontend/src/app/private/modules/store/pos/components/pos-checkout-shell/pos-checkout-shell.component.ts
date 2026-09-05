@@ -1520,8 +1520,9 @@ export class PosCheckoutShellComponent {
       // En campos editables las flechas mueven el caret, no navegan.
       if (editable) return;
       event.preventDefault();
-      // En el CTA terminal las flechas no avanzan ni cobran (B.2).
-      if (this.currentStepKey() === 'cobro' && this.paymentStep()?.mode() === 'credito') return;
+      // En el CTA terminal las flechas no avanzan ni cobran (B.2). En modo
+      // crédito el guard vive en `attemptNextStep` (source arrows nunca hace
+      // submit), así Forma→Plan sí avanza con flechas.
       if (!this.isLastStep() || this.cobroNeedsAdvance()) {
         this.attemptNextStep({ source: 'arrows' });
         this.focusActiveStepSoon();
