@@ -45,6 +45,7 @@ import {
 } from '../../interfaces/order.interface';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { OrderPrintService } from '../../services/order-print.service';
+import { OrdersListSseService } from '../../services/orders-list-sse.service';
 
 @Component({
   selector: 'app-orders-list',
@@ -74,6 +75,12 @@ export class OrdersListComponent {
   private destroyRef = inject(DestroyRef);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
+  // QUI-777: SSE push para refrescar `state` en la lista sin F5 cuando el
+  // KDS marca todos los tickets de una orden como delivered (o revierte).
+  // El servicio es root-provided; lo abrimos en el constructor y lo
+  // cerramos en `destroyRef.onDestroy` para que el ciclo de vida siga al
+  // del componente (no del injector root).
+  private ordersListSse = inject(OrdersListSseService);
   // T10 B3 — predicado único de industria (canónica: AuthFacade.isRestaurant).
   // Antes este componente era "presentacional: no consulta AuthFacade"; ese
   // límite se rompe porque la columna Mesa debe responder a la industria del
@@ -573,6 +580,36 @@ export class OrdersListComponent {
         this.loadOrders();
       }
     });
+
+    // QUI-777: reconciliación SSE — actualizar UNA fila por id sin re-fetch.
+    // El patrón effect+clear garantiza que el effect corra una vez por
+    // cambio externo del signal, sin riesgo de loop infinito. Si la orden
+    // NO está en la página actual (filtro de status la excluye, o el
+    // id es de otra tienda por error), el `.map` la deja igual y el
+    // upsert es idempotente.
+    effect(() => {
+      const evt = this.ordersListSse.lastRelevantEvent();
+      if (!evt) return;
+      const { order_id, new_state } = evt.data;
+      // `new_state` ya viene tipado como `OrderState` desde el servicio SSE
+      // (validación runtime en `OrdersListSseService.handleMessage`). Si el
+      // backend pushea un estado desconocido, el servicio descarta el
+      // evento silencioso y este effect nunca lo ve.
+      this.orders.update((prev) =>
+        prev.map((o) =>
+          o.id === order_id ? { ...o, state: new_state } : o,
+        ),
+      );
+      // Limpiar el signal para que el próximo evento vuelva a disparar el effect.
+      this.ordersListSse.lastRelevantEvent.set(null);
+    });
+
+    // QUI-777: abrir/cerrar el stream al ciclo de vida del componente.
+    // root-provided + connect/disconnect manual: si el usuario navega a
+    // otra ruta, la suscripción se cierra limpiamente (el subject
+    // compartido por tienda decrementa su refcount vía `req.close`).
+    this.ordersListSse.connect();
+    this.destroyRef.onDestroy(() => this.ordersListSse.disconnect());
 
     this.loadSeen();
     // Carril B - B2: carga mesas de la tienda. Si falla, el filtro no se

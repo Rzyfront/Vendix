@@ -71,6 +71,22 @@ const CANCELABLE_STATES: OrderState[] = [
 const REFUNDABLE_STATES: OrderState[] = ['delivered', 'finished'];
 
 /**
+ * Resultado del puente de cocina (KDS → orden).
+ *
+ * Los listeners SSE deciden con `transitioned`, NO con el `state` devuelto:
+ * un no-op idempotente devuelve la fila tal cual (p.ej. una orden que ya
+ * estaba en `delivered`), y chequear solo `order.state` emitiría un
+ * `status_changed` fantasma con un `old_state` inventado. `previousState` es
+ * el estado real observado antes de intentar la transición — el listener lo
+ * usa como `old_state` sin literales hardcodeados.
+ */
+export interface KitchenBridgeResult {
+  order: any;
+  transitioned: boolean;
+  previousState: order_state_enum | null;
+}
+
+/**
  * Monotonic reconciliation ladder for `reconcileOrderFromDispatch`.
  *
  * The COD lifecycle advances a linked order only forward along this exact path:
@@ -1562,17 +1578,20 @@ export class OrderFlowService {
    * `processing` (e.g. it was already finished by the operator or auto-finish),
    * so duplicate / late events never throw.
    */
-  async markKitchenOrderDelivered(orderId: number) {
+  async markKitchenOrderDelivered(
+    orderId: number,
+  ): Promise<KitchenBridgeResult> {
     const order = await this.getOrder(orderId);
+    const previousState = order.state as order_state_enum;
 
-    if (order.state !== 'processing') {
+    if (previousState !== 'processing') {
       this.logger.debug(
         `Order #${orderId} not in 'processing' (is '${order.state}') — skipping KDS delivered bridge`,
       );
-      return order;
+      return { order, transitioned: false, previousState };
     }
 
-    this.validateTransition(order.state as OrderState, 'delivered');
+    this.validateTransition(previousState as OrderState, 'delivered');
     // T9 — paso 3: este `order.status_changed` viene del puente de cocina
     // (todos los tickets terminales y al menos uno entregado). El listener
     // de notificaciones silencia `source === 'kitchen_bridge'` porque
@@ -1592,7 +1611,7 @@ export class OrderFlowService {
     this.logger.log(
       `Order #${orderId} moved to 'delivered' (all kitchen tickets delivered)`,
     );
-    return updatedOrder;
+    return { order: updatedOrder, transitioned: true, previousState };
   }
 
   /**
@@ -1716,20 +1735,30 @@ export class OrderFlowService {
     return this.getOrder(orderId);
   }
 
-  async revertKitchenOrderDelivery(orderId: number) {
+  async revertKitchenOrderDelivery(
+    orderId: number,
+  ): Promise<KitchenBridgeResult> {
     const order = await this.prisma.orders.findFirst({
       where: { id: orderId },
       select: { id: true, state: true },
     });
 
     // No-op idempotente: orden inexistente o no entregada → nada que revertir.
+    // Se reporta `transitioned: false` con el pre-estado real para que el
+    // listener NO emita SSE (chequear `order.state` no basta: una orden que
+    // ya estaba en `processing` pasaría ese chequeo y emitiría un evento
+    // fantasma con `old_state` inventado).
     if (!order || order.state !== 'delivered') {
       this.logger.debug(
         `Order #${orderId} not in 'delivered' (is '${
           order?.state ?? 'missing'
         }') — skipping KDS delivery-reverted bridge`,
       );
-      return order;
+      return {
+        order,
+        transitioned: false,
+        previousState: (order?.state as order_state_enum) ?? null,
+      };
     }
 
     this.validateTransition(order.state as OrderState, 'processing');
@@ -1740,7 +1769,11 @@ export class OrderFlowService {
     this.logger.log(
       `Order #${orderId} reverted to 'processing' (kitchen ticket delivery reverted)`,
     );
-    return updatedOrder;
+    return {
+      order: updatedOrder,
+      transitioned: true,
+      previousState: order.state as order_state_enum,
+    };
   }
 
   /**

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { StoreContextRunner } from '@common/context/store-context-runner.service';
 import { OrderFlowService } from '../order-flow.service';
+import { OrderSseService } from '../../services/order-sse.service';
 
 /**
  * Payload emitido por `KitchenFireService.revertTicket` cuando un ticket
@@ -29,6 +30,13 @@ interface KitchenOrderDeliveryRevertedEvent {
  * eventos corren fuera del AsyncLocalStorage del request, así que
  * reestablecemos el contexto de tienda vía `StoreContextRunner.runInStoreContext`
  * antes de tocar los servicios Prisma scopeados dentro de `OrderFlowService`.
+ *
+ * Tras el commit, emite un `order.status_changed` por SSE al subject
+ * compartido por tienda — mismo `kind` que el delivered, pero con el
+ * pre-estado real como `old_state` y el estado resultante como `new_state`.
+ * Igual que el delivered, SOLO emite si la transición realmente ocurrió
+ * (`transitioned === true`); chequear `order.state` re-emitiría cuando la
+ * orden YA estaba en `processing` (no-op idempotente del service).
  */
 @Injectable()
 export class KitchenOrderDeliveryRevertedListener {
@@ -39,6 +47,7 @@ export class KitchenOrderDeliveryRevertedListener {
   constructor(
     private readonly orderFlowService: OrderFlowService,
     private readonly storeContextRunner: StoreContextRunner,
+    private readonly orderSseService: OrderSseService,
   ) {}
 
   @OnEvent('kitchen.order_delivery_reverted')
@@ -46,9 +55,32 @@ export class KitchenOrderDeliveryRevertedListener {
     event: KitchenOrderDeliveryRevertedEvent,
   ): Promise<void> {
     try {
-      await this.storeContextRunner.runInStoreContext(event.storeId, () =>
-        this.orderFlowService.revertKitchenOrderDelivery(event.orderId),
+      const result = await this.storeContextRunner.runInStoreContext(
+        event.storeId,
+        () => this.orderFlowService.revertKitchenOrderDelivery(event.orderId),
       );
+
+      // Solo emitir si la transición realmente ocurrió (`transitioned`).
+      // Idempotencia del service: si la orden no estaba en `delivered`,
+      // devuelve la fila tal cual con `transitioned: false` (u `order: null`
+      // si no existe) y NO publica. `old_state` es el pre-estado real
+      // reportado por el service, no un literal.
+      if (result?.transitioned === true && result?.order) {
+        const order = result.order as {
+          order_number?: string;
+          state: string;
+        };
+        this.orderSseService.pushOrderEvent(
+          event.storeId,
+          event.orderId,
+          'order.status_changed',
+          {
+            old_state: result.previousState,
+            new_state: order.state,
+            order_number: order.order_number ?? '',
+          },
+        );
+      }
     } catch (error) {
       // Best-effort: el ticket ya fue revertido; surfaceamos fallos vía logs /
       // monitoreo. revertKitchenOrderDelivery es idempotente, así que un
