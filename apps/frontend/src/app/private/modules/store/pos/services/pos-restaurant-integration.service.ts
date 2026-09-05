@@ -35,6 +35,16 @@ interface FireOrderItemsResponse {
   consumed_line_count: number;
 }
 
+/**
+ * QUI-787 — nota libre por línea capturada en el POS, propagada al KDS via
+ * `kitchen-fire.dto.ItemNoteDto`. Re-declarada acá (mismo shape) para evitar
+ * importar tipos del backend en el bundle del frontend.
+ */
+export interface PosFireItemNote {
+  order_item_id: number;
+  notes: string;
+}
+
 /** A single line to seed a counter (table-less) draft order before firing. */
 export interface CounterOrderLine {
   product_id: number;
@@ -243,6 +253,13 @@ export class PosRestaurantIntegrationService {
     notes?: string,
     /** QUI-655 — exclusiones confirmadas en el modal. Ausente = todo marcado. */
     exclusions?: FireItemExclusion[],
+    /**
+     * QUI-787 — notas por línea confirmadas en el modal de cocina
+     * (`KitchenConfirmModalComponent.onConfirm` ya emite este shape). Viaja
+     * al backend en `FireOrderItemsDto.item_notes` y de ahí a
+     * `kitchen_ticket_items.notes`. Ausente = no se envía el campo.
+     */
+    itemNotes?: PosFireItemNote[],
   ): Observable<FireOrderItemsResponse> {
     return this.http
       .post<ApiResponse<FireOrderItemsResponse>>(
@@ -252,6 +269,7 @@ export class PosRestaurantIntegrationService {
           order_item_ids: orderItemIds,
           notes,
           ...(exclusions && exclusions.length > 0 && { exclusions }),
+          ...(itemNotes && itemNotes.length > 0 && { item_notes: itemNotes }),
         },
       )
       .pipe(
@@ -296,6 +314,8 @@ export class PosRestaurantIntegrationService {
     orderId: number,
     orderItemIds: number[],
     notes?: string,
+    /** QUI-787 — notas por línea, ver `fireOrderItems`. */
+    itemNotes?: PosFireItemNote[],
   ): Observable<FireOrderItemsResponse | null> {
     if (!this.isRestaurantMode() || !orderItemIds?.length) {
       return of(null);
@@ -304,7 +324,7 @@ export class PosRestaurantIntegrationService {
       return of(null);
     }
     this._preparedFired.set(true);
-    return this.fireOrderItems(orderId, orderItemIds, notes).pipe(
+    return this.fireOrderItems(orderId, orderItemIds, notes, undefined, itemNotes).pipe(
       catchError((err) => {
         // Roll the guard back so the operator can retry from the UI.
         this._preparedFired.set(false);
