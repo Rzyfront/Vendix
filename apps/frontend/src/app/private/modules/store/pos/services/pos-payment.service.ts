@@ -166,7 +166,7 @@ export class PosPaymentService {
       category_id: isCustomItem ? undefined : categoryIds[0],
       category_ids: isCustomItem ? undefined : categoryIds,
       product_name: item.product.name,
-      description: item.description || notes || item.product.description || undefined,
+      description: item.description || item.product.description || undefined,
       notes: notes || undefined,
       product_sku: isCustomItem ? undefined : item.product.sku,
       quantity: item.quantity,
