@@ -1,6 +1,6 @@
 <!--
   `app-promotion-stack` — shared component for CP-ECOM-PROMO-UX-001.
-  Three modes: compact-pills, scroll-batch, expanded-cards.
+  Four modes: compact-pills, scroll-batch, expanded-cards, marquee-bar.
   Empty state: renderiza null (no wrapper) cuando items está vacío.
 -->
 @if (hasItems()) {
@@ -112,6 +112,37 @@
             [attr.aria-current]="i === activeIndex() ? 'true' : null"
             (click)="scrollTo(i)"
           ></button>
+        }
+      </div>
+    </div>
+
+    <!-- ── marquee-bar ─────────────────────────────────────────────── -->
+    <!-- Barra fina de loop infinito (banner de catálogo). Sin botones ni
+         dots: el track duplica el contenido y la animación CSS lo desplaza
+         0 → -50%. La segunda copia es aria-hidden y no repite data-testid
+         para no duplicar selectores. El texto es la frase con alcance
+         (producto / categoría / toda la compra) que ya trae `label`. -->
+    <div
+      *ngSwitchCase="'marquee-bar'"
+      class="promotion-stack__marquee"
+      role="region"
+      [attr.aria-label]="ariaLabel()"
+    >
+      <div class="promotion-stack__marquee-track">
+        @for (copy of marqueeCopies; track copy) {
+          <ul
+            class="promotion-stack__marquee-list"
+            [attr.aria-hidden]="copy === 1 ? 'true' : null"
+          >
+            @for (item of items(); track item.id; let i = $index) {
+              <li
+                class="promotion-stack__marquee-item"
+                [attr.data-testid]="copy === 0 ? 'promotion-stack-item-' + i : null"
+              >
+                {{ pillText(item) }}
+              </li>
+            }
+          </ul>
         }
       </div>
     </div>
